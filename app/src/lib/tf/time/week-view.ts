@@ -23,7 +23,7 @@
 import type { QueuedWrite } from "../../ipc/sources";
 import type { RunningTimer, TimerTarget, Week, WeekCell } from "../../ipc/time";
 import { minutesLabel } from "../../time/format";
-import { withdrawnWorklog } from "../../shell/write-queue.svelte";
+import { unconfirmedSend, withdrawnWorklog } from "../../shell/write-queue.svelte";
 import { targetReading } from "../../shell/timer";
 import { dayBounds, dayKey, dayLabel } from "../../time/day";
 import { isWeekend, minutesOf } from "../../time/week";
@@ -136,8 +136,11 @@ export function weekView(week: Week, running: RunningTimer | null, now: Date): W
 /** `"Thursday"`: the weekday `dayLabel` names, so there is one list of them. */
 const weekday = (key: string) => dayLabel(key).split(" ")[0]!;
 
-/** Why a worklog waits on a person: the source's own words, else the queue's state. */
+/** Why a worklog waits on a person: a send never answered first (#1966), then the source's own words, else the queue's state. */
 function reasonOf(write: QueuedWrite): string {
+  const unanswered = unconfirmedSend(write);
+  if (unanswered !== null)
+    return `${unanswered.source} did not answer, so it may have arrived. Check ${unanswered.source}, then send it again or discard it.`;
   const said = write.detail?.trim();
   if (said) return /[.!?]$/.test(said) ? said : `${said}.`;
   if (write.state === "refused") return "the source refused it.";

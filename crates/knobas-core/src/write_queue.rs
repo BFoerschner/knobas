@@ -252,6 +252,22 @@ pub struct QueuedWrite {
     pub source_enabled: bool,
 }
 
+impl QueuedWrite {
+    /// Whether the write is held as one its source may have taken
+    /// ([`unconfirmed`], #1125): sent once, never answered, and held so the
+    /// flush does not send it twice. A create held so counts as on its way
+    /// until the reader sends it again or discards it (Björn's ruling on
+    /// #1966), where a drift hold was never sent and offers the create again.
+    #[must_use]
+    pub fn may_have_landed(&self) -> bool {
+        self.state == WriteState::Held
+            && self
+                .held_snapshot
+                .as_ref()
+                .is_some_and(|held| held.get("unconfirmed").is_some())
+    }
+}
+
 /// Queue one write, returning the row that was written.
 ///
 /// `target_snapshot` is [`project`]'s reading of the target **now**; it is

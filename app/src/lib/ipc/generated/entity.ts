@@ -56,6 +56,14 @@ title: string,
  */
 state: WriteState, 
 /**
+ * Whether the create is held as one its source may have taken (#1125):
+ * sent once and never answered, so the ticket may exist. Such a create
+ * is on its way until the reader sends it again or discards it, and the
+ * tab offers no second *Create ticket* for it (Björn's ruling on #1966);
+ * `false` for every other state, a drift hold included.
+ */
+may_have_landed: boolean, 
+/**
  * The queue's or the source's sentence about the write. Untrusted text.
  */
 detail: string | null, 
@@ -2779,9 +2787,10 @@ publication: Publication | null,
  * The tickets this protocol's action items filed that it does not link
  * yet, oldest first (#1951): each create that still owes the note its
  * link, sent or not, and not withdrawn. A reload reads an item filed
- * here as on its way from this rather than offering *Create ticket*
- * again; the read links each one whose ticket the mirror now holds, and
- * names it no more.
+ * here as on its way from this (pending, sent, or held as unconfirmed:
+ * [`ActionItemTicket::may_have_landed`](crate::commands::entity::ActionItemTicket::may_have_landed),
+ * #1966) rather than offering *Create ticket* again; the read links
+ * each one whose ticket the mirror now holds, and names it no more.
  */
 owed_tickets: Array<ActionItemTicket>, };
 

@@ -419,7 +419,7 @@ test("a create the queue refuses gives Create monitor back and says why", async 
   expect(toasts.items.map((t) => t.text)).toContain("Monitor pg-main was refused: no Docker host");
 });
 
-test("after a reload, a pending create is followed: held, it gives Create monitor back", async () => {
+test("after a reload, a pending create is followed: held on drift, it gives Create monitor back", async () => {
   let going: QueuedWrite | null = onItsWay(7, "pending");
   await draw(["unmonitored"], null, ports(withCreate(() => going)));
   expect([...heard.keys()]).toEqual([7]);
@@ -428,6 +428,42 @@ test("after a reload, a pending create is followed: held, it gives Create monito
   await settle();
   expect(button(rows()[0]!, "Create monitor")).toBeDefined();
   expect(heard.size).toBe(0);
+});
+
+/** A create held as unconfirmed: sent to Kuma and never answered, so the monitor may be there (#1125). */
+const unconfirmed = (id: number) =>
+  ({
+    ...onItsWay(id, "held", "Uptime Kuma did not answer"),
+    source_id: "kuma",
+    held_snapshot: { op: "create_monitor", unconfirmed: { source: "Uptime Kuma", detail: "the connection closed" } },
+  }) as QueuedWrite;
+
+test("after a reload, a create held as unconfirmed draws Monitor queued, says what to check, and is followed until discarded (#1966)", async () => {
+  let going: QueuedWrite | null = unconfirmed(7);
+  await draw(["unmonitored"], null, ports(withCreate(() => going)));
+  const chip = rows()[0]!.querySelector<HTMLElement>(".tf-chip.tf-info");
+  expect(text(chip)).toBe("Monitor queued");
+  expect(chip?.title).toBe("Sent to Uptime Kuma, which did not answer, so it may be there. Check Uptime Kuma, then send it again or discard it in the write queue.");
+  expect(button(rows()[0]!, "Create monitor")).toBeUndefined();
+  expect([...heard.keys()]).toEqual([7]);
+
+  going = null;
+  heard.get(7)!(undefined);
+  await settle();
+  expect(button(rows()[0]!, "Create monitor")).toBeDefined();
+});
+
+test("a pending create the queue holds as unconfirmed stays Monitor queued and followed, with no Edit and resend (#1966)", async () => {
+  let going: QueuedWrite | null = onItsWay(7, "pending");
+  await draw(["unmonitored"], null, ports(withCreate(() => going)));
+  going = unconfirmed(7);
+  heard.get(7)!(unconfirmed(7));
+  await settle();
+  expect(lastCell(rows()[0]!)).toBe("Monitor queued");
+  expect(button(rows()[0]!, "Create monitor")).toBeUndefined();
+  expect([...heard.keys()]).toEqual([7]);
+  const told = toasts.items.find((t) => t.text.startsWith("Monitor pg-main may have arrived"));
+  expect(told?.more ?? []).toEqual([]);
 });
 
 test("a create withdrawn in the queue leaves the open rows, and the re-read gives Create monitor back", async () => {

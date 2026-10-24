@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { ActionItemTicket, DigestLine, LinkEnd, LinkEntry, Protocol, PublishTarget, StandupDigest } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
+import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import TfStandup from "./TfStandup.svelte";
 
@@ -209,16 +210,16 @@ function open(
         listProjects: async () => [{ source_id: "jira", key: "OPS", name: "Operations" }],
         createActionItemTicket: async (...args: unknown[]) => {
           calls.tickets.push(args);
-          return { write_id: 9, title: String(args[3]), state: "pending", detail: null, ticket_entity_id: null, linked: false };
+          return { write_id: 9, title: String(args[3]), state: "pending", may_have_landed: false, detail: null, ticket_entity_id: null, linked: false };
         },
         actionItemTicket: async (_note: string, writeId: number) => {
           calls.asked.push(writeId);
           const words = String(calls.tickets.at(-1)?.[3] ?? over.owed?.find((owed) => owed.write_id === writeId)?.title);
           // Sent, and the sync after it has not brought the ticket in.
-          if (!mirror.held) return { write_id: writeId, title: words, state: "sent", detail: null, ticket_entity_id: null, linked: false };
+          if (!mirror.held) return { write_id: writeId, title: words, state: "sent", may_have_landed: false, detail: null, ticket_entity_id: null, linked: false };
           // Landed: the backend draws the protocol's link to the ticket it found by the item's words.
           if (!links.some((entry) => entry.other.entity_id === "jira:OPS-131")) links.push(ticketLink("jira:OPS-131", words));
-          return { write_id: writeId, title: words, state: "sent", detail: null, ticket_entity_id: "jira:OPS-131", linked: true };
+          return { write_id: writeId, title: words, state: "sent", may_have_landed: false, detail: null, ticket_entity_id: "jira:OPS-131", linked: true };
         },
         listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
           const handlers = heard.get(event) ?? new Set();
@@ -410,7 +411,7 @@ test("after a create, leaving the tab and coming back shows the ticket's key, no
 
 /** A create the protocol's read names as owing its link: filed before the reload, its ticket not mirrored yet. */
 function owed(over: Partial<ActionItemTicket> = {}): ActionItemTicket {
-  return { write_id: 9, title: "Decide the manual-review SLA", state: "sent", detail: null, ticket_entity_id: null, linked: false, ...over };
+  return { write_id: 9, title: "Decide the manual-review SLA", state: "sent", may_have_landed: false, detail: null, ticket_entity_id: null, linked: false, ...over };
 }
 
 /** A sync of `source` ended, as `sync:state` says it. */
@@ -469,11 +470,54 @@ test("a create whose ticket the post-write read missed is named by a later sync,
   expect(target.querySelector(".tf-su-ai a")?.textContent).toBe("OPS-131");
 });
 
-test("after a reload, a create held or refused in the queue offers Create ticket, as the live tab does once told (#1951)", async () => {
+test("after a reload, a create held on drift or refused in the queue offers Create ticket, as the live tab does once told (#1951)", async () => {
   open({ owed: [owed({ state: "held" }), owed({ write_id: 10, state: "refused", title: "Update the on-call runbook (Tomasz Wójcik)" })], mirrored: false });
   await settle();
   const buttons = [...target.querySelectorAll(".tf-su-ai button")].map((found) => found.textContent?.trim());
   expect(buttons).toEqual(["Create ticket", "Create ticket"]);
+});
+
+test("after a reload, a create held as unconfirmed is on its way and followed, and one held on drift is offered again (#1966)", async () => {
+  const { hears } = open({
+    owed: [owed({ state: "held", may_have_landed: true }), owed({ write_id: 10, state: "held", title: "Update the on-call runbook (Tomasz Wójcik)" })],
+    mirrored: false,
+  });
+  await settle();
+  const rows = [...target.querySelectorAll(".tf-su-ai")];
+  expect(rows[0]!.querySelector("button")).toBeNull();
+  expect(rows[0]!.querySelector(".tf-chip")?.textContent).toBe("queued");
+  // Held on drift: never sent, so the item offers the create again.
+  expect(rows[1]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket");
+  // Followed, so the reader's discard in the queue is heard.
+  expect(hears.has(9)).toBe(true);
+});
+
+test("a filed ticket the queue holds as unconfirmed stays queued, told once, with no Edit and resend (#1966)", async () => {
+  const { hears } = open({ mirrored: false });
+  await settle();
+  button("Create ticket").click();
+  await settle();
+  const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
+  select.value = "jira:OPS";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find((found) => found.textContent?.trim() === "Create ticket")!.click();
+  await settle();
+  toasts.items = [];
+  const unconfirmed = {
+    id: 9,
+    state: "held",
+    detail: "Jira did not answer",
+    held_snapshot: { op: "create_ticket", unconfirmed: { source: "Jira", detail: "the connection closed" } },
+  } as unknown as QueuedWrite;
+  hears.get(9)!(unconfirmed);
+  hears.get(9)!(unconfirmed);
+  await settle();
+  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("queued");
+  expect(toasts.items.map((t) => [t.text, (t.more ?? []).length])).toEqual([
+    ["Ticket may have arrived: Jira did not answer. Check Jira, then send it again or discard it.", 0],
+  ]);
+  expect(hears.has(9)).toBe(true);
 });
 
 for (const [name, field] of [

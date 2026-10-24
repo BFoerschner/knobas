@@ -24,9 +24,10 @@
 
   **The retry is for a create that never queued** (#1959). Uptime Kuma takes a
   second monitor of a name it already has, so `submit_write` refuses a create
-  of a monitor whose create is still on its way to that source (pending, or
-  sent and not mirrored yet), and the refusal shows here in its words. Once
-  that create is held, refused or withdrawn, the retry goes.
+  of a monitor whose create is still on its way to that source (pending, held
+  as unconfirmed because Kuma never answered it, #1966, or sent and not
+  mirrored yet), and the refusal shows here in its words. Once that create is
+  held on drift, refused or withdrawn, the retry goes.
 
   ## What it does not do
 

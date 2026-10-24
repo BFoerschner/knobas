@@ -16,11 +16,13 @@
 
   The queued mark dies with a reload; the create's row does not (#1953). So
   each read of the links also asks `owed_tickets`, the tickets filed from the
-  run that it does not link yet, and one still on its way (`pending` or
-  `sent`) is marked queued as if filed this session, followed while it is
-  pending. A held or refused one offers *Create ticket*, as it does once a
-  live follow hears it was held or refused: it waits on the reader in the
-  queue.
+  run that it does not link yet, and one still on its way (`pending`, `sent`,
+  or held as unconfirmed: sent and never answered, so the ticket may exist,
+  #1966) is marked queued as if filed this session, followed while the queue
+  still holds it. A refused one, or one held on drift, offers *Create ticket*,
+  as it does once a live follow hears so: it waits on the reader in the
+  queue. One held as unconfirmed stays queued until the reader sends it
+  again or discards it.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -28,6 +30,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { LinkEntry, Project } from "../../ipc/entity";
   import type { QueuedWrite, SourceSummary } from "../../ipc/sources";
+  import { mayHaveLanded } from "../../shell/follow-write";
   import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { createTicketPayload, draftOfPayload, projectSource, type TicketDraft } from "../create-ticket";
@@ -95,7 +98,7 @@
 
   /** The newest ticket filed from the run before this page opened and still on its way, marked queued (#1953). */
   function markOwed(id: string, owed: readonly QueuedWrite[]) {
-    const going = owed.filter((write) => write.state === "pending" || write.state === "sent");
+    const going = owed.filter((write) => write.state === "pending" || write.state === "sent" || mayHaveLanded(write));
     const marked = queuedMarks(id, TICKET);
     if (going.some((write) => marked.some((mark) => mark.write === write.id))) return;
     const newest = going.at(-1);
@@ -103,11 +106,11 @@
     const filed = draftOfPayload(newest.payload);
     if (filed === null) return;
     // A sent one is past where the queue could hold or refuse it: nothing to follow.
-    const follow = newest.state === "pending" ? { following: following(id, filed), follower: ports.follower() } : {};
+    const follow = newest.state !== "sent" ? { following: following(id, filed), follower: ports.follower() } : {};
     markQueued(id, TICKET, filed.title, { write: newest, ...follow });
   }
 
-  /** What a held or refused create says, and *Edit and resend* back to the run with what was filed. */
+  /** What a held or refused create says, and *Edit and resend* back to the run with what was filed (not offered for an unconfirmed send, #1966). */
   function following(id: string, filed: TicketDraft) {
     const back = href;
     return {

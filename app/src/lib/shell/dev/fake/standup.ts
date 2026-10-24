@@ -179,7 +179,7 @@ export function handlers(): Handlers {
       const write_id = nextWrite++;
       asked.set(write_id, 0);
       titles.set(write_id, String(args["title"]).trim());
-      return { write_id, title: titles.get(write_id)!, state: "pending", detail: null, ticket_entity_id: null, linked: false };
+      return { write_id, title: titles.get(write_id)!, state: "pending", may_have_landed: false, detail: null, ticket_entity_id: null, linked: false };
     },
     action_item_ticket: (args): ActionItemTicket => {
       const write_id = Number(args["writeId"]);
@@ -187,8 +187,8 @@ export function handlers(): Handlers {
       asked.set(write_id, count);
       const title = titles.get(write_id) ?? "";
       return count < 2
-        ? { write_id, title, state: "pending", detail: null, ticket_entity_id: null, linked: false }
-        : { write_id, title, state: "sent", detail: null, ticket_entity_id: "mock:OPS-77", linked: true };
+        ? { write_id, title, state: "pending", may_have_landed: false, detail: null, ticket_entity_id: null, linked: false }
+        : { write_id, title, state: "sent", may_have_landed: false, detail: null, ticket_entity_id: "mock:OPS-77", linked: true };
     },
   };
 }

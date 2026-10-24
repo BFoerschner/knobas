@@ -179,8 +179,8 @@ pub async fn unlink<R: tauri::Runtime>(
 /// `invalid` if the payload is not a write op, if its target is not an entity
 /// id, or if the source does not offer that op; `not_found` if the target
 /// names a source that is not configured; `conflict` for a `CreateMonitor`
-/// whose name has a create on its way to that source, pending or sent and not
-/// mirrored yet (#1959);
+/// whose name has a create on its way to that source, pending, held as
+/// unconfirmed (#1966) or sent and not mirrored yet (#1959);
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
 ///
 /// **`link_to`** (#984, a ticket's entity id) asks for a link from what a
@@ -210,7 +210,8 @@ pub async fn submit_write<R: tauri::Runtime>(
 /// `CreateTicket` queued with `entity_id` as its `link_to` (a failed run's
 /// *Create ticket*, #1451) whose row still owes that link and that was not
 /// withdrawn, oldest first, as the queue holds it now. A held or refused one
-/// is named too, with its state; the page decides how it draws it.
+/// is named too, with its state and held side; the page decides how it draws
+/// it, and draws one held as unconfirmed as on its way (#1966).
 ///
 /// The read a page opens with to know which of its creates are on their way:
 /// the page's own marks die with a reload, the row does not, so a reload

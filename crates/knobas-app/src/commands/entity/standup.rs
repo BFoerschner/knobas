@@ -372,6 +372,12 @@ pub struct ActionItemTicket {
     /// while it is on its way, `sent` once it landed, `refused` or `held`
     /// when it will not go on its own, `discarded` once withdrawn.
     pub state: knobas_core::write_queue::WriteState,
+    /// Whether the create is held as one its source may have taken (#1125):
+    /// sent once and never answered, so the ticket may exist. Such a create
+    /// is on its way until the reader sends it again or discards it, and the
+    /// tab offers no second *Create ticket* for it (Björn's ruling on #1966);
+    /// `false` for every other state, a drift hold included.
+    pub may_have_landed: bool,
     /// The queue's or the source's sentence about the write. Untrusted text.
     pub detail: Option<String>,
     /// The ticket, as an entity id, once the mirror has it.
@@ -479,6 +485,7 @@ pub async fn create_action_item_ticket_in_background(
     Ok(ActionItemTicket {
         write_id: queued.id,
         title,
+        may_have_landed: queued.may_have_landed(),
         state: queued.state,
         detail: queued.detail,
         ticket_entity_id: None,
@@ -599,6 +606,7 @@ pub async fn action_item_ticket_inner(
     Ok(ActionItemTicket {
         write_id,
         title,
+        may_have_landed: write.may_have_landed(),
         state: write.state,
         detail: write.detail,
         ticket_entity_id,

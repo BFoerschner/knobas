@@ -18,7 +18,10 @@
  *   queue panel, which drops the mark quietly: `noteWithdrawn`, #1583): the mark goes, and a
  *   toast says why with *Edit and resend* (`shell/follow-write.ts`'s
  *   `followWrite`). The follow lives here, not on the page, so the toast
- *   comes and the echo goes wherever the reader is by then.
+ *   comes and the echo goes wherever the reader is by then. A write held as
+ *   unconfirmed (sent, never answered) may have arrived, so its mark stays
+ *   until the reader sends it again or discards it, and its toast offers no
+ *   *Edit and resend* (#1966).
  *
  * *Edit and resend* reopens a page that may have closed: the toast asks
  * (`askAgain`), navigates, and the page takes the request once it draws
@@ -48,7 +51,7 @@ export interface Marking {
   base?: string | null;
   /** Several of this kind live side by side (comments, pages); otherwise a new one replaces the old. */
   many?: boolean;
-  /** Follow the write: held or refused drops the mark and toasts in these words. */
+  /** Follow the write: held or refused drops the mark and toasts in these words (held as unconfirmed keeps it, #1966). */
   following?: Following;
   follower?: WriteFollower;
 }

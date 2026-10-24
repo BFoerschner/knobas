@@ -1380,6 +1380,63 @@ async fn the_protocol_read_names_a_pending_create_and_not_a_discarded_one() {
     assert_eq!(owed, [(ids[0], WriteState::Pending)]);
 }
 
+/// #1966: a create held as unconfirmed reached the tracker and got no answer,
+/// so its ticket may exist. The read says so (`may_have_landed`), and the tab
+/// draws it as on its way rather than offering *Create ticket* again; a drift
+/// hold was never sent, and says it was not.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_protocol_read_tells_a_create_held_as_unconfirmed_from_one_held_on_drift() {
+    let harness = Harness::new("protocol_action_item_unconfirmed").await;
+    harness.log().offline = true;
+    let opened = harness.open().await;
+    let mut ids = Vec::new();
+    for title in ["Ask Ines about the SEPA retry", "Book the retro room"] {
+        let filed = create_action_item_ticket_in_background(
+            &harness.state,
+            &opened.note_id,
+            &format!("{TRACKER}:PAY"),
+            "Task",
+            title,
+            "",
+        )
+        .await
+        .expect("the create is queued");
+        ids.push(filed.write_id);
+    }
+    let background = harness.state.scheduler.background();
+    until(|| async { background.running() }, |running| *running == 0).await;
+    knobas_core::write_queue::hold(
+        harness.pool(),
+        ids[0],
+        knobas_core::write_queue::unconfirmed(
+            "create_ticket",
+            serde_json::json!({}),
+            "Jira",
+            "the connection closed before an answer",
+        ),
+    )
+    .await
+    .expect("held as unconfirmed");
+    knobas_core::write_queue::hold(harness.pool(), ids[1], serde_json::json!({}))
+        .await
+        .expect("held on drift");
+
+    let owed: Vec<_> = harness
+        .open()
+        .await
+        .owed_tickets
+        .into_iter()
+        .map(|t| (t.write_id, t.state, t.may_have_landed))
+        .collect();
+    assert_eq!(
+        owed,
+        [
+            (ids[0], WriteState::Held, true),
+            (ids[1], WriteState::Held, false)
+        ]
+    );
+}
+
 /// A link the create's own read drew is owed no more (#1951): the reader who
 /// removes it does not find the next sync drawing it again, as a link drawn
 /// on arrival is not (#1050).

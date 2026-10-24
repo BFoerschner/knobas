@@ -37,7 +37,7 @@ const ports = {
   },
 };
 
-const { createFollower, followWrite } = await import("./follow-write");
+const { createFollower, followWrite, willNotGo } = await import("./follow-write");
 const { toasts } = await import("./toasts.svelte");
 
 function write(
@@ -138,6 +138,41 @@ test("a held write from a surface that cannot reopen offers only the queue", asy
     "Worklog was held: the ticket moved",
   ]);
   expect(toasts.items[0]!.more ?? []).toEqual([]);
+});
+
+test("a write held as unconfirmed is on its way: told once without Edit and resend, kept, and left on discard (#1966)", async () => {
+  const unconfirmed = {
+    ...write("held", "Jira did not answer"),
+    held_snapshot: { op: "comment", unconfirmed: { source: "Jira", detail: "the connection closed" } },
+  } as QueuedWrite;
+  expect(willNotGo(unconfirmed)).toBe(false);
+  expect(willNotGo(write("held", "moved"))).toBe(true);
+
+  open = [write("pending")];
+  const onstop = vi.fn();
+  const onleave = vi.fn();
+  const resend = vi.fn();
+  followWrite(write("pending"), { name: "Ticket", resend, onstop, onleave }, follower);
+  await settle();
+  open = [unconfirmed];
+  event();
+  await settle();
+  event();
+  await settle();
+  expect(toasts.items.map((t) => t.text)).toEqual([
+    "Ticket may have arrived: Jira did not answer. Check Jira, then send it again or discard it.",
+  ]);
+  expect(toasts.items[0]!.action?.label).toBe("Open write queue");
+  expect(toasts.items[0]!.more ?? []).toEqual([]);
+  expect(onstop).not.toHaveBeenCalled();
+  expect(stopped).toBe(0);
+
+  open = [];
+  event();
+  await settle();
+  expect(onleave).toHaveBeenCalledOnce();
+  expect(onstop).not.toHaveBeenCalled();
+  expect(stopped).toBe(1);
 });
 
 test("a write still pending keeps listening", async () => {
