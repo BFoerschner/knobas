@@ -76,6 +76,10 @@ runs it and when.
 - `testenv.yml` lints the test environment's scripts and compose file without
   starting containers. Run it after touching `testenv/`.
 
+Both are disabled since 2026-10-24 (Björn: the runner is too slow; the
+checks run on the Mac). `gh workflow enable <file>` brings one back
+(`docs/decisions/2026-10-24-bjorn-rulings.md`).
+
 ```bash
 gh workflow run check.yml --ref <branch>
 gh workflow run testenv.yml --ref <branch>

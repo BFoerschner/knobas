@@ -559,7 +559,6 @@ EPIC_LINK_FIELD=$(printf '%s' "$API_BODY" | jq -r '.[] | select(.name=="Epic Lin
 # discovery must name too, read here independently as its control.
 SPRINT_FIELD=$(printf '%s' "$API_BODY" | jq -r '.[] | select(.schema.custom? == "com.pyxis.greenhopper.jira:gh-sprint") | .id')
 [ -n "$SPRINT_FIELD" ] || die "the Sprint custom field is missing -- is this a Jira Software instance?"
-# shellcheck disable=SC2015  # `A && B || die`: dying when either test fails is the point; 0.9.0 (ubuntu-latest) flags it, 0.11.0 does not
 [ -n "$EPIC_NAME_FIELD" ] && [ -n "$EPIC_LINK_FIELD" ] \
   || die "the Epic Name / Epic Link custom fields are missing -- is this a Jira Software project?"
 

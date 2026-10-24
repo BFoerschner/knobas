@@ -1,7 +1,8 @@
 # Björn's rulings, 2026-10-24
 
-Two questions Björn ruled on 2026-10-24, each in a comment on its issue. They are his rulings, not
-an agent's, and they bind as such. Recorded here by the #1966 implementer, as its dispatch asked.
+Questions Björn ruled on 2026-10-24, each in a comment on its issue or in an agent's session.
+They are his rulings, not an agent's, and they bind as such. The first two were recorded here by
+the #1966 implementer, as its dispatch asked.
 
 ## #1966: a create held as unconfirmed counts as on its way
 
@@ -47,3 +48,20 @@ restore.
 **Reopen** if restore starts running unattended or often.
 
 **Reversing.** As B3 recorded: a scratch-and-swap restore, or a marker row that bring-up checks.
+
+## #2035: the checks run on the Mac, and `check.yml` and `testenv.yml` are disabled
+
+**Question.** Four dispatched `check.yml` runs on the #2035 branch took 30 to 45 minutes each on
+the two-core runner, and three were red on a timing budget or the job's own timeout. Keep
+dispatching them for the Linux opinion, or not?
+
+**Ruling** (Björn, in the #2035 implementer's session): "do the checks locally instead of on git,
+the checks take too long there. just disable the actions and run it on the machine." The
+implementer disabled `check.yml` and `testenv.yml` (`gh workflow disable`), and the PR's proof is
+the local gate. `release.yml` is untouched.
+
+**What it changes.** A ticket, brief or milestone step that says `gh workflow run check.yml` or
+`testenv.yml` (#2035's and #2036's criteria, #2027's "one `gh workflow run check.yml --ref main`")
+takes the local `just check` in its place until Björn enables them again.
+
+**Reversing.** `gh workflow enable check.yml` and `gh workflow enable testenv.yml`.

@@ -35,7 +35,13 @@ jobs:
     # *stuck* -- a test waiting on a server that never came up, an advisory
     # lock nobody releases -- which would otherwise sit on GitHub's own 6-hour
     # default, holding the queue and hiding the failure.
-    timeout-minutes: 30
+    #
+    # 60, not 30 (#2035): `just check`'s cargo half took 12 min on the last
+    # green run (39919488344), 26 min on a0a61c4b (40120926029), was still
+    # running when 30 cancelled 40124502573, and took 40 min on 40127451817.
+    # rust-cache saves only from a green run, so every red run since the last
+    # green one compiles more of the workspace cold.
+    timeout-minutes: 60
     steps:
       # The three `actions/*` pins below were bumped off `@v4` together, and
       # `@v4` is the only thing they had in common: the deprecation annotation

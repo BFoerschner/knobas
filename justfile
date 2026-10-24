@@ -475,18 +475,18 @@ _test-executables:
 
 # shellcheck over every tracked script in testenv/ and scripts/.
 #
-# It lives here because the workflow that used to own it does not run. The
-# `testenv` workflow is disabled along with `check` (billing, 2026-08-29), so
-# from then until it is re-enabled nothing linted these scripts at all -- which
-# is how a `# shellcheck disable=SC2016` came to sit one line above the wrong
-# command for a whole commit. A gate nobody runs is not a gate.
+# It lives here, in `just check`, because the `testenv` workflow that used to
+# own it was disabled along with `check` (billing, 2026-08-29), and from then
+# until both came back as manual dispatches nothing linted these scripts at
+# all -- which is how a `# shellcheck disable=SC2016` came to sit one line
+# above the wrong command for a whole commit. A gate nobody runs is not a gate.
 #
-# DISCOVERY IS BY SHEBANG, NOT BY GLOB, and the reasoning is the workflow's:
-# a glob cannot fail loudly when a new script stops matching it, it just
+# DISCOVERY IS BY SHEBANG, NOT BY GLOB. The plan's `shellcheck testenv/seed
+# testenv/seed-*.sh ...` list already missed two of the seven scripts then in
+# testenv/ (`check-ports.sh` and `specs/fetch.sh`): a glob cannot fail loudly when a new script stops matching it, it just
 # quietly checks less than you think. `git ls-files` rather than `find`, so a
-# seeded volume or a stray local script can never enter the set. Kept
-# deliberately parallel to `.github/workflows/testenv.yml`, which does the same
-# discovery and should keep agreeing with this.
+# seeded volume or a stray local script can never enter the set.
+# `.github/workflows/testenv.yml` runs this recipe rather than a copy of it.
 #
 # THE EMPTY GUARD IS THE POINT, not decoration. Bare `shellcheck` exits 3 with
 # "No files specified.", so a discovery that matched nothing would fail -- but
@@ -494,10 +494,17 @@ _test-executables:
 # discovery that stopped matching. It also keeps the recipe off the exit code
 # of a tool whose "no arguments is an error" is a behaviour, not a promise.
 #
-# The container is pinned; a local binary is preferred when there is one, so
-# `just check` does not start requiring Docker of everyone. The two can differ
-# in version -- 0.11.0 here against the 0.9.0 that ubuntu-latest ships -- and a
-# stricter local gate is the right way round while local *is* the gate.
+# ONE SHELLCHECK VERSION, named here and nowhere else (#2036). Two versions
+# disagree about what an info is: the 0.9.0 that ubuntu-latest ships raised
+# SC2317 and SC2119 on lines Homebrew's 0.11.0 passes, so a script clean on
+# the Mac went red on the runner, and #1713 had already fixed one such line
+# without the cause. A local binary is used only when it is this version, so
+# `just check` does not require Docker of everyone; any other version (the
+# runner's, or a Mac's after a `brew upgrade`) runs the pinned image instead,
+# and with neither the recipe stops and names both. A bump changes this line
+# and fixes what the new version reports, in one PR.
+shellcheck_version := "0.11.0"
+
 shell:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -515,15 +522,17 @@ shell:
         exit 1
     fi
 
-    echo "shellchecking ${#scripts[@]} scripts"
-    if command -v shellcheck >/dev/null; then
+    pinned={{ shellcheck_version }}
+    found=$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p' || true)
+    echo "shellchecking ${#scripts[@]} scripts with shellcheck $pinned"
+    if [ "$found" = "$pinned" ]; then
         shellcheck "${scripts[@]}"
     elif command -v docker >/dev/null; then
         docker run --rm -v "$PWD:/mnt" -w /mnt \
-            koalaman/shellcheck:v0.11.0 "${scripts[@]}"
+            "koalaman/shellcheck:v$pinned" "${scripts[@]}"
     else
-        echo "error: neither shellcheck nor docker is available." >&2
-        echo "  brew install shellcheck (or start Docker)." >&2
+        echo "error: shellcheck $pinned is pinned, and the local one is ${found:-missing} with no docker for the pinned image." >&2
+        echo "  Install shellcheck $pinned, or start Docker; to move the pin, change shellcheck_version in the justfile." >&2
         exit 1
     fi
 
