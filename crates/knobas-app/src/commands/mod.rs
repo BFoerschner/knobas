@@ -166,11 +166,11 @@ pub(crate) mod mirror {
             );
         }
 
-        /// A nested payload's fields are keys too, and the generic, the
+        /// A nested payload's fields are keys too, and the generic's, the
         /// command name and a call inside a value are not.
         #[test]
         fn the_keys_of_a_call_include_nested_fields_and_nothing_else() {
-            let call = r#"invoke<Pair<A, B>>("start_timer", {
+            let call = r#"invoke<Pair<{ a: A }, B>>("start_timer", {
     target: { kind: "entity", id },
     note: label(a, b),
     inRoom
