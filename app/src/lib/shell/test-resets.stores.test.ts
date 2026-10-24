@@ -36,6 +36,14 @@ import { waitFor } from "./test-wait";
 
 afterEach(() => vi.useRealTimers());
 
+// A page's session memory lives in its component's `<script module>`, out of a
+// test's reach without mounting it; these stand in so the case below can see
+// that the reset reaches each one's own door.
+const pages = vi.hoisted(() => ({ forgetFolds: vi.fn(), forgetBranches: vi.fn(), forgetTicketsSession: vi.fn() }));
+vi.mock("../tf/builds/TfBuilds.svelte", () => ({ forgetFolds: pages.forgetFolds }));
+vi.mock("../tf/repo/TfRepo.svelte", () => ({ forgetBranches: pages.forgetBranches }));
+vi.mock("../tf/tickets/TicketsPage.svelte", () => ({ forgetTicketsSession: pages.forgetTicketsSession }));
+
 /** A listener that records when it is torn down. */
 function listener() {
   const off = vi.fn();
@@ -63,6 +71,34 @@ test("resetStores reaches the reset of every singleton", async () => {
   for (const spy of spies) expect(spy).toHaveBeenCalledTimes(1);
   expect(writeFollower(), "the shared write follower survived").not.toBe(follower);
   for (const spy of spies) spy.mockRestore();
+});
+
+test("resetStores reaches the session memory of each page that keeps one", async () => {
+  for (const forget of Object.values(pages)) forget.mockClear();
+  await resetStores();
+  for (const forget of Object.values(pages)) expect(forget).toHaveBeenCalledTimes(1);
+});
+
+test("resetStores offers again every hint put away", async () => {
+  const { firstHint, notNow } = await import("../tf/sets/hints.svelte");
+  const hint = { set_id: "s", member: { entity_id: "e" } } as Parameters<typeof firstHint>[0][number];
+  notNow(hint);
+  expect(firstHint([hint])).toBeNull();
+  await resetStores();
+  expect(firstHint([hint])).toBe(hint);
+});
+
+test("viewMemory.clear drops a read ahead still in flight, so the next one reads again", async () => {
+  const { createViewMemory, readAhead } = await import("../detail/view-read");
+  const memory = createViewMemory();
+  const read = vi.fn(() => new Promise<never>(() => {}));
+  const readView = vi.fn(async () => null);
+  void readAhead("e", read, readView, memory);
+  void readAhead("e", read, readView, memory);
+  expect(read).toHaveBeenCalledTimes(1);
+  memory.clear();
+  void readAhead("e", read, readView, memory);
+  expect(read).toHaveBeenCalledTimes(2);
 });
 
 test("alerts.reset drops the list and unsubscribes", async () => {
@@ -346,4 +382,16 @@ test("a write follower's reset drops its subscribers and its listener", async ()
   follower.follow(2, () => {});
   await flush();
   expect(hear).not.toHaveBeenCalled();
+});
+
+// A pair, in this order: the second is the first's next test, and finds the
+// filter memory as a fresh session would (#1983).
+test("a filter typed in one test ...", async () => {
+  const { sessionFilter } = await import("../tf/filter/filter-state.svelte");
+  sessionFilter("probe-view").text = "left over";
+});
+
+test("... is gone in the next", async () => {
+  const { sessionFilter } = await import("../tf/filter/filter-state.svelte");
+  expect(sessionFilter("probe-view").text).toBe("");
 });

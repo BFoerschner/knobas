@@ -5,9 +5,11 @@
  * own teardown cannot hand its state to the next one (FE-14, #1674): it would
  * inherit `ready` from its predecessor and pass for the wrong reason.
  *
- * `test-resets.test.ts` reads the sources for module-level `$state` and
- * singleton stores and fails on one that is in neither {@link RESETS} nor
- * {@link NOT_YET_RESET}, so a new store has to pick a side.
+ * `test-resets.test.ts` reads the sources, store files and components'
+ * `<script module>` alike, for module-level `$state`, singletons, mutable
+ * built-ins (`Map`, `Set`, their Svelte versions) and `let`s, and fails on one
+ * that is in neither {@link RESETS} nor {@link NOT_YET_RESET}, so a new store
+ * has to pick a side.
  */
 
 // Every store is imported inside its reset, never at the top: `test-setup.ts`
@@ -20,13 +22,18 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // The detail's session memory (#693): each test is a fresh session, or a
   // test would open on the entity the previous one left drawn.
   "detail/view-read.ts#viewMemory": async () => (await import("../detail/view-read")).viewMemory.clear(),
+  // The memory's reads ahead still in flight go with it.
+  "detail/view-read.ts#flights": async () => (await import("../detail/view-read")).viewMemory.clear(),
   // The pending line comments (#709).
   "detail/view/pending-comments.svelte.ts#pendingComments": async () => (await import("../detail/view/pending-comments.svelte")).pendingComments.forget(),
   // The source list's role claims (#1196), held once per window.
   "tf/roles.svelte.ts#sourceRoles": async () => (await import("../tf/roles.svelte")).sourceRoles.forget(),
+  // The stack and its dismiss timers, in one reset.
   "shell/toasts.svelte.ts#toasts": async () => (await import("./toasts.svelte")).reset(),
-  // Also clears the write queue's withdrawal subscribers.
+  "shell/toasts.svelte.ts#timers": async () => (await import("./toasts.svelte")).reset(),
+  // The panel and the withdrawal subscribers, in one reset.
   "shell/write-queue.svelte.ts#writeQueuePanel": async () => (await import("./write-queue.svelte")).reset(),
+  "shell/write-queue.svelte.ts#withdrawals": async () => (await import("./write-queue.svelte")).reset(),
   "shell/health.svelte.ts#health": async () => (await import("./health.svelte")).health.reset(),
   "shell/kind-registry.svelte.ts#kindRegistry": async () => (await import("./kind-registry.svelte")).kindRegistry.reset(),
   // App.test.svelte.ts used to walk this one back by hand.
@@ -49,12 +56,20 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // `forgetQueued` also stops the follows a mark started.
   "tf/queued.svelte.ts#marks": async () => (await import("../tf/queued.svelte")).forgetQueued(),
   "tf/queued.svelte.ts#asked": async () => (await import("../tf/queued.svelte")).forgetQueued(),
+  "tf/queued.svelte.ts#follows": async () => (await import("../tf/queued.svelte")).forgetQueued(),
   "tf/repo/queued.svelte.ts#commits": async () => (await import("../tf/repo/queued.svelte")).forgetQueued(),
   "tf/repo/queued.svelte.ts#deleted": async () => (await import("../tf/repo/queued.svelte")).forgetQueued(),
   "tf/repo/queued.svelte.ts#made": async () => (await import("../tf/repo/queued.svelte")).forgetQueued(),
   "tf/review/decisions.svelte.ts#decisions": async () => (await import("../tf/review/decisions.svelte")).decisions.reset(),
   "tf/theme.svelte.ts#theme": async () => (await import("../tf/theme.svelte")).theme.reset(),
-  // Not `$state`, so the scan lists it by hand ({@link UNSCANNED}): the shell's
+  // Each view's filter, and the set hints *Not now* put away (#1983).
+  "tf/filter/filter-state.svelte.ts#kept": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),
+  "tf/sets/hints.svelte.ts#putAway": async () => (await import("../tf/sets/hints.svelte")).forgetHints(),
+  // A page's session memory, held in its component's `<script module>` (#1983).
+  "tf/builds/TfBuilds.svelte#remembered": async () => (await import("../tf/builds/TfBuilds.svelte")).forgetFolds(),
+  "tf/repo/TfRepo.svelte#chosen": async () => (await import("../tf/repo/TfRepo.svelte")).forgetBranches(),
+  "tf/tickets/TicketsPage.svelte#session": async () => (await import("../tf/tickets/TicketsPage.svelte")).forgetTicketsSession(),
+  // In a plain `.ts` file, so the scan lists it by hand ({@link UNSCANNED}): the shell's
   // one write follower, with the listener it registered.
   "shell/follow-write.ts#shared": async () => (await import("./follow-write")).resetWriteFollower(),
 };
@@ -66,8 +81,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
 export const NOT_YET_RESET: readonly string[] = [];
 
 /**
- * Stores the source scan cannot see, because they are neither `$state` nor a
- * `create…()` singleton. Each must still be a key of {@link RESETS}.
+ * Stores the source scan cannot see, because they live outside a store file
+ * or a component. Each must still be a key of {@link RESETS}.
  */
 export const UNSCANNED: readonly string[] = ["shell/follow-write.ts#shared"];
 
