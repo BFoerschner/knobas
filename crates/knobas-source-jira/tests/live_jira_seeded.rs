@@ -101,9 +101,9 @@
 //!
 //! One **user and one permission scheme** (#2052): the user minted with Jira
 //! Software access and no group but the default one, the scheme a copy of
-//! NARROW's with *Add Comments*, *Work On Issues* and *Create Issues* given to
-//! `jira-administrators` alone, and NARROW put on it for one test. [`Narrowed`]'s
-//! `Drop` puts NARROW back on its scheme, deletes the copy and the user, and
+//! OPS's with *Add Comments*, *Work On Issues* and *Create Issues* given to
+//! `jira-administrators` alone, and OPS put on it for one test. [`Narrowed`]'s
+//! `Drop` puts OPS back on its scheme, deletes the copy and the user, and
 //! checks each; the next run puts back a killed run's first.
 //!
 //! What a *killed* run left behind is put back by the next one, and by this
@@ -4227,7 +4227,7 @@ async fn the_board_listing_is_in_name_order_and_a_rename_moves_a_row() {
 /// The user [`a_user_the_permission_scheme_refuses_is_refused_those_writes_and_nothing_is_written`] mints.
 const MINTED: &str = "knobas-live-2052";
 const MINTED_PASSWORD: &str = "knobas-live-2052-Pw";
-/// The copy of NARROW's permission scheme it puts NARROW on.
+/// The copy of OPS's permission scheme it puts OPS on.
 const NARROWED_SCHEME: &str = "knobas live suite: narrowed (#2052)";
 /// The permissions the copy gives `jira-administrators` alone.
 const NARROWED: [&str; 3] = ["ADD_COMMENTS", "WORK_ON_ISSUES", "CREATE_ISSUES"];
@@ -4260,8 +4260,8 @@ async fn admin(
     ))
 }
 
-/// NARROW on its own scheme again, the copy and the minted user gone, each
-/// checked. `scheme` is NARROW's own scheme; `None` reads it off PAY, which
+/// OPS on its own scheme again, the copy and the minted user gone, each
+/// checked. `scheme` is OPS's own scheme; `None` reads it off PAY, which
 /// the seed made from the same template.
 async fn unnarrow(
     http: &reqwest::Client,
@@ -4287,7 +4287,7 @@ async fn unnarrow(
         http,
         login,
         reqwest::Method::GET,
-        "rest/api/2/project/NARROW/permissionscheme",
+        "rest/api/2/project/OPS/permissionscheme",
         None,
     )
     .await?;
@@ -4296,13 +4296,13 @@ async fn unnarrow(
             http,
             login,
             reqwest::Method::PUT,
-            "rest/api/2/project/NARROW/permissionscheme",
+            "rest/api/2/project/OPS/permissionscheme",
             Some(serde_json::json!({ "id": scheme })),
         )
         .await?;
         if status != 200 {
             return Err(format!(
-                "putting NARROW back on scheme {scheme} -> {status}: {body}"
+                "putting OPS back on scheme {scheme} -> {status}: {body}"
             ));
         }
     }
@@ -4349,12 +4349,12 @@ async fn unnarrow(
         http,
         login,
         reqwest::Method::GET,
-        "rest/api/2/project/NARROW/permissionscheme",
+        "rest/api/2/project/OPS/permissionscheme",
         None,
     )
     .await?;
     if id_of(&on) != Some(scheme) {
-        return Err(format!("NARROW is on {on}, not on scheme {scheme}"));
+        return Err(format!("OPS is on {on}, not on scheme {scheme}"));
     }
     let (_, schemes) = admin(
         http,
@@ -4374,7 +4374,7 @@ async fn unnarrow(
     Ok(())
 }
 
-/// NARROW on a copy of its scheme that refuses [`NARROWED`] to everyone but
+/// OPS on a copy of its scheme that refuses [`NARROWED`] to everyone but
 /// `jira-administrators`, and [`MINTED`] a user; both taken back by `Drop`.
 struct Narrowed {
     url: String,
@@ -4395,12 +4395,12 @@ impl Narrowed {
             .await
             .unwrap_or_else(|e| panic!("putting back a killed run's narrowing: {e}"));
         let (status, on) = seeded
-            .get("rest/api/2/project/NARROW/permissionscheme")
+            .get("rest/api/2/project/OPS/permissionscheme")
             .await;
         assert_eq!(status, 200, "{on}");
         let scheme = on["id"]
             .as_u64()
-            .unwrap_or_else(|| panic!("NARROW's scheme: {on}"));
+            .unwrap_or_else(|| panic!("OPS's scheme: {on}"));
         let guard = Narrowed {
             url: seeded.url.clone(),
             user: seeded.user.clone(),
@@ -4437,7 +4437,7 @@ impl Narrowed {
                 "rest/api/2/permissionscheme",
                 Some(serde_json::json!({
                     "name": NARROWED_SCHEME,
-                    "description": "knobas live suite (#2052): NARROW without comments, worklogs and creates",
+                    "description": "knobas live suite (#2052): OPS without comments, worklogs and creates",
                     "permissions": grants,
                 })),
             )
@@ -4449,11 +4449,11 @@ impl Narrowed {
         let (status, body) = seeded
             .request(
                 reqwest::Method::PUT,
-                "rest/api/2/project/NARROW/permissionscheme",
+                "rest/api/2/project/OPS/permissionscheme",
                 Some(serde_json::json!({ "id": copy })),
             )
             .await;
-        assert_eq!(status, 200, "putting NARROW on {copy}: {body}");
+        assert_eq!(status, 200, "putting OPS on {copy}: {body}");
         let (status, body) = seeded
             .request(
                 reqwest::Method::POST,
@@ -4501,7 +4501,7 @@ impl Drop for Narrowed {
             "the live suite did not take back the user and permission scheme it made, so the \
              server is no longer in the plain-seed state",
             format!(
-                "NARROW may still be on {NARROWED_SCHEME:?} and {MINTED} may still exist; the next \
+                "OPS may still be on {NARROWED_SCHEME:?} and {MINTED} may still exist; the next \
                  run of this test puts both back"
             ),
         )
@@ -4511,14 +4511,16 @@ impl Drop for Narrowed {
     }
 }
 
-/// What a write would leave on NARROW-1 and in NARROW: its `updated`, its
-/// comments and worklogs, and the project's issue count.
-async fn narrow_marks(seeded: &Seeded) -> serde_json::Value {
+/// What a write would leave on `ticket` and in OPS: its `updated`, its
+/// status, comments and worklogs, and the project's issue count.
+async fn narrow_marks(seeded: &Seeded, ticket: &str) -> serde_json::Value {
     let (status, issue) = seeded
-        .get("rest/api/2/issue/NARROW-1?fields=updated,status,comment,worklog")
+        .get(&format!(
+            "rest/api/2/issue/{ticket}?fields=updated,status,comment,worklog"
+        ))
         .await;
     assert_eq!(status, 200, "{issue}");
-    let issues = seeded.jql("project = NARROW", "key").await.len();
+    let issues = seeded.jql("project = OPS", "key").await.len();
     serde_json::json!({
         "updated": issue["fields"]["updated"],
         "status": issue["fields"]["status"]["name"],
@@ -4529,11 +4531,11 @@ async fn narrow_marks(seeded: &Seeded) -> serde_json::Value {
 }
 
 /// **What the credential may not write, read and never probed** (#2052,
-/// ADR-0013). A user minted with Jira Software access, on NARROW narrowed to
+/// ADR-0013). A user minted with Jira Software access, on OPS narrowed to
 /// refuse comments, worklogs and creates to all but administrators, is
 /// refused exactly those three there with the reasons, and refused nothing
-/// on PAY or on NARROW's moves. The seed's administrator, asked the same, is
-/// refused nothing. NARROW-1 and NARROW are as they were afterwards: nothing
+/// on PAY or on OPS's moves. The seed's administrator, asked the same, is
+/// refused nothing. OPS's seeded ticket and OPS are as they were afterwards: nothing
 /// was written to find out.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
@@ -4541,16 +4543,24 @@ async fn a_user_the_permission_scheme_refuses_is_refused_those_writes_and_nothin
     use knobas_source::grants::{RefusedWrite, WriteAsk};
     let seeded = seeded();
     let narrowed = Narrowed::new(&seeded).await;
-    let before = narrow_marks(&seeded).await;
+    let ticket = seeded
+        .seed
+        .issues
+        .iter()
+        .map(|issue| issue.key.clone())
+        .find(|key| key.starts_with("OPS-"))
+        .expect("the seed files a ticket in OPS");
+    let before = narrow_marks(&seeded, &ticket).await;
+    let on = format!("jira:{ticket}");
     let ask = |entity: &str, op: &str| WriteAsk {
         entity: entity.to_owned(),
         op: op.to_owned(),
     };
     let asks = [
-        ask("jira:NARROW-1", "comment"),
-        ask("jira:NARROW-1", "transition"),
-        ask("jira:NARROW-1", "log_work"),
-        ask("jira:NARROW", "create_ticket"),
+        ask(&on, "comment"),
+        ask(&on, "transition"),
+        ask(&on, "log_work"),
+        ask("jira:OPS", "create_ticket"),
         ask("jira:PAY-231", "comment"),
         ask("jira:PAY-231", "log_work"),
         ask("jira:PAY", "create_ticket"),
@@ -4570,19 +4580,19 @@ async fn a_user_the_permission_scheme_refuses_is_refused_those_writes_and_nothin
         minted,
         [
             refused(
-                "jira:NARROW-1",
+                &on,
                 "comment",
-                "This Jira user cannot comment in NARROW: it lacks the Add Comments permission"
+                "This Jira user cannot comment in OPS: it lacks the Add Comments permission"
             ),
             refused(
-                "jira:NARROW-1",
+                &on,
                 "log_work",
-                "This Jira user cannot log work in NARROW: it lacks the Work On Issues permission"
+                "This Jira user cannot log work in OPS: it lacks the Work On Issues permission"
             ),
             refused(
-                "jira:NARROW",
+                "jira:OPS",
                 "create_ticket",
-                "This Jira user cannot create tickets in NARROW: it lacks the Create Issues permission"
+                "This Jira user cannot create tickets in OPS: it lacks the Create Issues permission"
             ),
         ]
     );
@@ -4599,9 +4609,9 @@ async fn a_user_the_permission_scheme_refuses_is_refused_those_writes_and_nothin
     );
 
     assert_eq!(
-        narrow_marks(&seeded).await,
+        narrow_marks(&seeded, &ticket).await,
         before,
-        "asking wrote nothing to NARROW-1 or NARROW"
+        "asking wrote nothing to {ticket} or OPS"
     );
     println!("SEEDED mypermissions: {MINTED} refused {minted:?}; the administrator nothing");
     drop(narrowed);
