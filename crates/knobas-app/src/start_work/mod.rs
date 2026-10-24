@@ -72,6 +72,7 @@ pub use knobas_core::start_work::flow;
 use sqlx::PgPool;
 
 use crate::IpcError;
+use crate::sources::write_queue::Named;
 
 /// What the write queue did with a step's op.
 ///
@@ -231,10 +232,16 @@ pub trait Steps: Send + Sync {
         head: &str,
     ) -> Result<PullRequestOnHead, IpcError>;
 
+    /// The pull request write `write_id` opened, by the id its receipt named
+    /// (#1949): [`Named::Made`] with the entity once the mirror holds it, or
+    /// [`Named::Nothing`] where the source named none.
+    async fn pull_request_named(&self, write_id: i64) -> Result<Named, IpcError>;
+
     /// Re-read a source now, and wait for that run to end.
     ///
-    /// The only way the mirror learns a pull request's number: `Source::write`
-    /// answers nothing, so what was created is found by reading it back.
+    /// The only way the mirror learns of a pull request: the receipt names
+    /// it, but the link needs it mirrored, and a source whose receipt names
+    /// nothing leaves the head to find it by.
     async fn refresh(&self, source: &str);
 }
 
@@ -927,8 +934,12 @@ async fn dispatch(
 /// The link back to the ticket -- knobas-owned, local, and never written to
 /// either source.
 ///
-/// The pull request has to be *found* first: `Source::write` answers nothing,
-/// so knobas does not learn the number it created and reads it back out of the
+/// The pull request has to be *found* first, as the mirror holds it. Where
+/// the create step's write was answered with a receipt naming the pull
+/// request (#1949), that one is the flow's, and it is waited for: another
+/// pull request open on the same head (one into another base) is never stood
+/// in for it. Only where the source named nothing, or the step settled on a
+/// pull request already open and sent no write, is it read back out of the
 /// mirror by the head branch it opened from. A refresh is asked for once, and
 /// only once, before giving up: the step is retryable, and a flow that spun
 /// waiting for a sync would be the stuck step story 11 wants distinguishable.
@@ -959,6 +970,26 @@ async fn link_step(
         .await;
     }
     let (repo, head) = pull_request_of(pr_step)?;
+
+    if let Some(write_id) = pr_step.write_id
+        && let Named::Made(mut named) = steps.pull_request_named(write_id).await?
+    {
+        if named.is_none() {
+            steps.refresh(&repo.namespace).await;
+            if let Named::Made(again) = steps.pull_request_named(write_id).await? {
+                named = again;
+            }
+        }
+        let Some(pr) = named else {
+            return settle_failed(
+                pool,
+                step,
+                "the pull request this flow opened has not reached the mirror yet",
+            )
+            .await;
+        };
+        return link_to(pool, steps, step, &pr).await;
+    }
 
     let mut found = steps.pull_request(&repo, &head).await?;
     // Anything but an open one is a reason to look again, not only nothing at
@@ -999,13 +1030,22 @@ async fn link_step(
             .await;
         }
     };
+    link_to(pool, steps, step, &pr).await
+}
 
+/// Draw the link step's link from `pr` to the flow's ticket, and settle it.
+async fn link_to(
+    pool: &PgPool,
+    steps: &dyn Steps,
+    step: &FlowStep,
+    pr: &str,
+) -> Result<(), IpcError> {
     let relation = step
         .payload
         .get("relation")
         .and_then(serde_json::Value::as_str)
         .unwrap_or(plan::RELATION);
-    match steps.link(&pr, &step.ticket_id, relation).await {
+    match steps.link(pr, &step.ticket_id, relation).await {
         // Already linked is a success: the step's job is that the relationship
         // exists, not that this attempt is the one that made it. It is also
         // what makes the step idempotent under retry with no read of its own.

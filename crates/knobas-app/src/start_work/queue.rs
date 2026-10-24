@@ -27,7 +27,7 @@ use crate::{IpcError, IpcErrorCode};
 /// Every adapter that mirrors a repository's refs declares them under these
 /// names, which is what lets these two reads be written once.
 const KIND_BRANCH: &str = "branch";
-const KIND_PR: &str = "pr";
+pub(crate) const KIND_PR: &str = "pr";
 
 /// The flow's window onto the world.
 ///
@@ -116,15 +116,23 @@ impl<S: Borrow<SourcesState> + Send + Sync> Steps for Queue<S> {
         pull_request_on_head(&state.pool, &declarations, repo, head).await
     }
 
+    async fn pull_request_named(
+        &self,
+        write_id: i64,
+    ) -> Result<crate::sources::write_queue::Named, IpcError> {
+        crate::sources::write_queue::entity_named(&self.state.borrow().pool, write_id, KIND_PR)
+            .await
+    }
+
     async fn refresh(&self, source: &str) {
         // Wait for the run, rather than triggering and hoping: the very next
         // thing the caller does is look for the pull request this run is
         // fetching. One implementation of that wait, in
         // `crate::sources::write_queue::sync_after_write`, because #289's
-        // protocol publish needs the identical thing for the identical reason -- a
-        // create answers no address, so the mirror is the only way to name
-        // what was made, and reading it before the run has finished is reading
-        // it too early. **Or before a run that could have seen it has
+        // protocol publish needs the identical thing for the identical reason --
+        // what a create made has an entity only once a sync has seen it, and
+        // reading the mirror before the run has finished is reading it too
+        // early. **Or before a run that could have seen it has
         // finished** -- waiting out the one this flow's own branch write left
         // in flight is `Scheduler::sync_after_write`'s job and was the #358
         // flake.
@@ -165,8 +173,10 @@ pub async fn branch_named(
 /// what its own record says about whether it is still open.
 ///
 /// **A source-shaped read outside an adapter, and it is here because there is
-/// no other way.** `Source::write` answers nothing, so the pull request knobas
-/// has just created is found by reading it back; §4.1 guarantees `title`,
+/// no other way.** A pull request open on the head is what the create step
+/// looks for before it writes, and what a create whose receipt named nothing
+/// is found by afterwards (a receipt that names one is resolved by its id,
+/// `sources::write_queue::entity_named`, #1949); §4.1 guarantees `title`,
 /// `body_text`, `updated_at` and a verbatim `payload`, and neither the head
 /// branch nor the state lives anywhere but the last of those. That is the same
 /// seam #43 recorded for a ticket's status, met here in the read direction. It

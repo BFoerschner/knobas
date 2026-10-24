@@ -279,6 +279,114 @@ async fn a_new_pull_request_is_linked_once_it_is_mirrored_open_on_its_head() {
     assert_eq!(reached(&pool).await, vec![PR.to_owned()]);
 }
 
+/// The pull request the receipt named is linked (#1949), and not another one
+/// open on the same head into a different base, which the head alone cannot
+/// tell from it. Until the named one is mirrored nothing is linked: a named
+/// pull request is waited for, never looked for by its head.
+#[tokio::test]
+async fn a_new_pull_request_the_receipt_named_is_linked_and_not_another_open_on_its_head() {
+    let pool = corpus("arrival_pr_named").await;
+    let open_on_head = serde_json::json!({
+        "merged": false, "state": "open", "head": {"ref": "feature/PAY-231-backoff"}
+    });
+    // A colleague's pull request from the same head into a release branch.
+    item(
+        &pool,
+        "gitea:tidewater/payout-service#149",
+        "pr",
+        "PAY-231: backport to release/2026.08",
+        open_on_head.clone(),
+    )
+    .await;
+    let id = queued(&pool, new_pull_request()).await;
+    knobas_core::write_queue::sent(&pool, id, Some("tidewater/payout-service#150"))
+        .await
+        .unwrap();
+    assert_eq!(
+        link_on_arrival(&pool, &declarations(), id, TICKET)
+            .await
+            .unwrap(),
+        None,
+        "the pull request the receipt named is not mirrored yet, and #149 is not it"
+    );
+    assert!(reached(&pool).await.is_empty());
+
+    item(
+        &pool,
+        PR,
+        "pr",
+        "PAY-231: Retry failed SEPA payouts",
+        open_on_head,
+    )
+    .await;
+    assert_eq!(
+        link_on_arrival(&pool, &declarations(), id, TICKET)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some(PR),
+        "the named pull request, although #149 is open on the same head"
+    );
+    assert_eq!(reached(&pool).await, vec![PR.to_owned()]);
+}
+
+/// A named pull request already merged when the sync brings it in is linked
+/// all the same (#1949): the receipt says it is this write's own, so it is
+/// not the older one on a re-used head that the head read refuses (#359).
+#[tokio::test]
+async fn a_named_pull_request_merged_before_its_sync_is_linked() {
+    let pool = corpus("arrival_pr_named_merged").await;
+    item(
+        &pool,
+        PR,
+        "pr",
+        "PAY-231: Retry failed SEPA payouts",
+        serde_json::json!({
+            "merged": true, "state": "closed", "head": {"ref": "feature/PAY-231-backoff"}
+        }),
+    )
+    .await;
+    let id = queued(&pool, new_pull_request()).await;
+    knobas_core::write_queue::sent(&pool, id, Some("tidewater/payout-service#150"))
+        .await
+        .unwrap();
+    assert_eq!(
+        link_on_arrival(&pool, &declarations(), id, TICKET)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some(PR)
+    );
+    assert_eq!(reached(&pool).await, vec![PR.to_owned()]);
+}
+
+/// The id a receipt named is taken only as the kind the write makes: a mirror
+/// item of another kind under that id is not the pull request, and nothing is
+/// linked (#1949).
+#[tokio::test]
+async fn a_named_id_the_mirror_holds_as_another_kind_is_not_linked() {
+    let pool = corpus("arrival_pr_named_kind").await;
+    item(
+        &pool,
+        PR,
+        "ticket",
+        "PAY-231: Retry failed SEPA payouts",
+        serde_json::json!({}),
+    )
+    .await;
+    let id = queued(&pool, new_pull_request()).await;
+    knobas_core::write_queue::sent(&pool, id, Some("tidewater/payout-service#150"))
+        .await
+        .unwrap();
+    assert_eq!(
+        link_on_arrival(&pool, &declarations(), id, TICKET)
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(reached(&pool).await.is_empty());
+}
+
 /// A write that did not land links nothing, even with its entity mirrored:
 /// still waiting, refused (the branch already existed), or discarded.
 #[tokio::test]

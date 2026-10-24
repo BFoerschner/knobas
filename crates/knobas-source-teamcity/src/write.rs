@@ -30,7 +30,8 @@ use knobas_source::{BuildParameter, SourceError};
 
 use crate::client::HttpRest;
 
-/// Put `build_type_id`'s configuration on the queue.
+/// Put `build_type_id`'s configuration on the queue, and answer the queued
+/// build's id where TeamCity said it (#1949).
 ///
 /// # Errors
 ///
@@ -38,11 +39,15 @@ use crate::client::HttpRest;
 /// the message where it sent one. A 404 for a configuration that is gone is a
 /// **refusal** the queue does not retry; a 503 while the server restarts is
 /// not.
-pub(crate) async fn trigger(rest: &HttpRest, build_type_id: &str) -> Result<(), SourceError> {
+pub(crate) async fn trigger(
+    rest: &HttpRest,
+    build_type_id: &str,
+) -> Result<Option<i64>, SourceError> {
     rest.queue_build(build_type_id).await
 }
 
-/// Run again whatever configuration `build_id` belonged to.
+/// Run again whatever configuration `build_id` belonged to, and answer the
+/// queued build's id as [`trigger`] does.
 ///
 /// Two requests, and the first is not optional: the entity id of a build
 /// carries the build's own id and nothing else (`teamcity:build:1187`,
@@ -55,7 +60,7 @@ pub(crate) async fn trigger(rest: &HttpRest, build_type_id: &str) -> Result<(), 
 /// [`SourceError::Protocol`] when the build exists but names no configuration,
 /// which would otherwise queue nothing while reporting success; otherwise
 /// whatever the two requests map to.
-pub(crate) async fn rerun(rest: &HttpRest, build_id: i64) -> Result<(), SourceError> {
+pub(crate) async fn rerun(rest: &HttpRest, build_id: i64) -> Result<Option<i64>, SourceError> {
     let build_type_id = rest.build_type_of(build_id).await?;
     rest.queue_build(&build_type_id).await
 }

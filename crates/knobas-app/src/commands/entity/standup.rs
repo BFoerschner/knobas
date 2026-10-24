@@ -576,7 +576,7 @@ pub async fn action_item_ticket_inner(
         // the source named none.
         use crate::sources::write_queue::{Named, ticket_named};
         ticket_entity_id = match ticket_named(pool, write_id).await? {
-            Named::Ticket(named) => named,
+            Named::Made(named) => named,
             Named::Nothing => {
                 crate::protocol::ticket_titled(pool, &write.source_id, &title).await?
             }

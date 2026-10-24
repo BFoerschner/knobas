@@ -2988,11 +2988,7 @@ async fn a_run_with_an_override_is_built_on_its_branch_and_synced_next() {
         })
         .await
         .unwrap_or_else(|e| panic!("the run is queued: {e:?}"));
-    let id: i64 = receipt
-        .remote_id
-        .as_deref()
-        .and_then(|id| id.parse().ok())
-        .unwrap_or_else(|| panic!("the receipt names the queued build: {receipt:?}"));
+    let id = queued_id(&receipt);
     guard.adopt(id);
     assert!(
         !seeded.seeded_ids().contains(&id),
@@ -3220,11 +3216,7 @@ async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_
         })
         .await
         .unwrap_or_else(|e| panic!("the run is queued: {e:?}"));
-    let id: i64 = receipt
-        .remote_id
-        .as_deref()
-        .and_then(|id| id.parse().ok())
-        .unwrap_or_else(|| panic!("the receipt names the queued build: {receipt:?}"));
+    let id = queued_id(&receipt);
     ours.adopt(id);
 
     let (status, queue) = seeded
@@ -3341,6 +3333,17 @@ async fn restore_point(seeded: &Seeded, when: &str) -> Vec<i64> {
     ids
 }
 
+/// The build a queueing write's receipt names, by its key `build:<id>`
+/// (#1949), the local part of the entity id the build is mirrored under.
+fn queued_id(receipt: &knobas_source::WriteReceipt) -> i64 {
+    receipt
+        .remote_id
+        .as_deref()
+        .and_then(|key| key.strip_prefix("build:"))
+        .and_then(|id| id.parse().ok())
+        .unwrap_or_else(|| panic!("the receipt names the queued build: {receipt:?}"))
+}
+
 /// **Story 9 against the real server** (#1699, ADR-0013): the adapter's
 /// `TriggerBuild` puts exactly one build on TeamCity's queue, of the
 /// configuration the entity named; and a configuration the server does not
@@ -3400,6 +3403,11 @@ async fn a_trigger_through_the_adapter_queues_one_build_of_the_configuration_it_
     assert_eq!(
         build["buildType"]["id"], named,
         "the build is of the configuration the trigger named: {build}"
+    );
+    assert_eq!(
+        queued_id(&receipt),
+        id_of(build),
+        "the receipt names the build the trigger queued (#1949)"
     );
     assert_eq!(build["state"], "queued", "{build}");
     // A trigger names no branch (`write.rs`, *One endpoint, two operations*),
@@ -3470,6 +3478,11 @@ async fn a_rerun_through_the_adapter_queues_the_builds_own_configuration_and_a_g
     // configuration's default branch is built, as `write.rs` rules.
     assert_eq!(build["defaultBranch"], true, "{build}");
     assert_ne!(rerun, failed.real_id, "a re-run is a new build");
+    assert_eq!(
+        queued_id(&receipt),
+        rerun,
+        "the receipt names the build the re-run queued (#1949)"
+    );
     assert!(
         !seeded.seeded_ids().contains(&rerun),
         "a new build, not a seeded one: {build}"

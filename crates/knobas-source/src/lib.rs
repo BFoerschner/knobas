@@ -1554,7 +1554,8 @@ impl WriteOp {
                 ..conservative
             },
             // The head branch is the address, the source refuses the repeat,
-            // and the arrival is linked to its job (#984).
+            // and the arrival is linked to its job (#984): a pull request by
+            // the key its receipt names (#1949), a branch by its name.
             WriteOp::CreateBranch { .. } | WriteOp::CreatePullRequest { .. } => Delivery {
                 projection: Projection::Liveness,
                 resend_harmless: true,
@@ -1676,10 +1677,12 @@ impl WriteOp {
 pub struct WriteReceipt {
     /// The id the source gave what this write created, in the source's own
     /// spelling (Jira's worklog ids are decimal strings). For a create of
-    /// something the mirror holds -- a page, a ticket -- it is that entity's
-    /// local part, so `<source_id>:<remote_id>` is its entity id (#1121,
-    /// #1754). `None` when the op creates nothing addressable, or when the
-    /// source did not say.
+    /// something the mirror holds -- a page, a ticket, a pull request, a
+    /// commit, a queued build -- it is that entity's local part, so
+    /// `<source_id>:<remote_id>` is its entity id (#1121, #1754, #1949). A
+    /// create whose answer names what it made answers it here rather than
+    /// dropping it. `None` when the op creates nothing addressable, or when
+    /// the source did not say.
     pub remote_id: Option<String>,
 }
 

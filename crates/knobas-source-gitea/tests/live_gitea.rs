@@ -2353,7 +2353,7 @@ async fn the_adapter_creates_a_branch_a_pull_request_a_comment_and_an_approval()
         "the branch the adapter created is not in the server's own listing"
     );
 
-    source
+    let opened = source
         .write(knobas_source::WriteOp::CreatePullRequest {
             entity: repo_id.clone(),
             title: format!("knobas write-back check {stamp}"),
@@ -2372,6 +2372,31 @@ async fn the_adapter_creates_a_branch_a_pull_request_a_comment_and_an_approval()
         .expect("the pull request the adapter opened is not in the server's own listing");
 
     let pull_id = format!("gitea:{}#{number}", env.full_name());
+    println!("LIVE create_pull_request: {opened:?}");
+    // The receipt names the pull request the server listed, by its key (#1949).
+    assert_eq!(
+        opened.remote_id,
+        Some(format!("{}#{number}", env.full_name())),
+        "the receipt names the pull request the adapter opened"
+    );
+    // The same write sent again, as after a lost answer: Gitea's 409 for the
+    // pair is this write's own (#1129), and the receipt names the pull
+    // request found open for it, read off the server's real listing.
+    let resent = source
+        .write(knobas_source::WriteOp::CreatePullRequest {
+            entity: repo_id.clone(),
+            title: format!("knobas write-back check {stamp}"),
+            body: "Opened by the knobas Gitea adapter's write path.".to_owned(),
+            head: branch.clone(),
+            base: "main".to_owned(),
+        })
+        .await
+        .expect("a re-sent create of an open pull request is delivered");
+    println!("LIVE create_pull_request, re-sent: {resent:?}");
+    assert_eq!(
+        resent.remote_id, opened.remote_id,
+        "the re-sent create names the pull request the first one opened"
+    );
     let note = format!("a reply from the knobas write path, {stamp}");
     source
         .write(knobas_source::WriteOp::Comment {
@@ -4736,9 +4761,12 @@ async fn a_file_is_committed_onto_a_branch_a_new_branch_held_when_it_moved_and_r
         .json()
         .await
         .unwrap();
+    // By the commit's key, the local part of its entity id (#1949).
     assert_eq!(
-        receipt.remote_id.as_deref(),
-        tip["commit"]["id"].as_str(),
+        receipt.remote_id,
+        tip["commit"]["id"]
+            .as_str()
+            .map(|oid| format!("{}@{oid}", env.full_name())),
         "the receipt names the commit the branch is now at"
     );
 

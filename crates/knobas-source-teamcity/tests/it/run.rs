@@ -98,7 +98,7 @@ async fn a_run_queues_its_branch_and_only_its_overrides() {
             ] }
         })
     );
-    assert_eq!(receipt.remote_id.as_deref(), Some("2214"));
+    assert_eq!(receipt.remote_id.as_deref(), Some("build:2214"));
 }
 
 /// No branch and no override is the plain trigger's body: TeamCity builds the
@@ -116,6 +116,35 @@ async fn a_run_without_a_branch_or_overrides_sends_neither() {
         only_body(&server).await,
         json!({ "buildType": { "id": "Payout_IntegrationTests" } })
     );
+}
+
+/// A trigger and a re-run name the build they queued, as a custom run does
+/// (#1949): by its key `build:<id>`, the local part of its entity id. The
+/// re-run asks which configuration 1187 belongs to first, and queues that.
+#[tokio::test]
+async fn a_trigger_and_a_re_run_name_the_build_they_queued() {
+    let server = MockServer::builder().start().await;
+    queue_answers(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/app/rest/builds/id:1187"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({ "buildType": { "id": "Payout_IntegrationTests" } })),
+        )
+        .mount(&server)
+        .await;
+    for op in [
+        WriteOp::TriggerBuild {
+            entity: CONFIG.to_owned(),
+        },
+        WriteOp::RerunBuild {
+            entity: "teamcity:build:1187".to_owned(),
+        },
+    ] {
+        let label = format!("{op:?}");
+        let receipt = source(&server).write(op).await.expect("queued");
+        assert_eq!(receipt.remote_id.as_deref(), Some("build:2214"), "{label}");
+    }
 }
 
 /// The run options (#852, R-9.7): a clean checkout and first in the queue

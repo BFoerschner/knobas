@@ -1670,10 +1670,10 @@ impl Scheduler {
     ///
     /// A caller that is about to *look for what its write created* needs the
     /// other behaviour, and the reason is `start_work::queue::Queue::refresh`'s
-    /// in as many words: `Source::write` answers no address for a created page
-    /// or pull request, so the only way to name one is to read the mirror, and
-    /// reading it before the run that fetches it has finished is reading it too
-    /// early.
+    /// in as many words: what a create made has an entity only once a sync has
+    /// seen it (even where its receipt names it, #1949), so the only way to
+    /// link one is to read the mirror, and reading it before the run that
+    /// fetches it has finished is reading it too early.
     ///
     /// # Why waiting once is not enough (#358)
     ///

@@ -212,12 +212,12 @@ impl Source for TeamCitySource {
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         match &op {
             WriteOp::TriggerBuild { entity } => {
-                write::trigger(&self.rest, &self.build_config_id(entity)?).await?;
-                Ok(WriteReceipt::none())
+                let queued = write::trigger(&self.rest, &self.build_config_id(entity)?).await?;
+                Ok(queued_build(queued))
             }
             WriteOp::RerunBuild { entity } => {
-                write::rerun(&self.rest, self.build_id(entity)?).await?;
-                Ok(WriteReceipt::none())
+                let queued = write::rerun(&self.rest, self.build_id(entity)?).await?;
+                Ok(queued_build(queued))
             }
             WriteOp::SetParameter {
                 entity,
@@ -245,9 +245,7 @@ impl Source for TeamCitySource {
                 };
                 let queued =
                     write::run(&self.rest, config, branch.as_deref(), parameters, options).await?;
-                Ok(WriteReceipt {
-                    remote_id: queued.map(|id| id.to_string()),
-                })
+                Ok(queued_build(queued))
             }
             WriteOp::Comment { .. }
             | WriteOp::Transition { .. }
@@ -487,6 +485,17 @@ impl Source for TeamCitySource {
         self.rest.download(id, target, sink).await?;
         Ok(true)
     }
+}
+
+/// The receipt of a write that put a build on the queue: the queued build's
+/// key `build:<id>` (#1949), the local part of the entity id the build is
+/// mirrored under, as [`WriteReceipt::remote_id`] states. A trigger, a re-run
+/// and a custom run answer it alike; `None` where TeamCity's answer named no
+/// id.
+fn queued_build(queued: Option<i64>) -> WriteReceipt {
+    queued.map_or_else(WriteReceipt::none, |id| {
+        WriteReceipt::id(crate::map::build_key(id))
+    })
 }
 
 #[cfg(test)]

@@ -215,27 +215,32 @@ impl HttpRest {
     /// fake implement a write nothing in a sync run may call. The write path
     /// has one implementation and holds the real client, so it lives here.
     ///
-    /// The answer is dropped: TeamCity replies with the queued `Build`, and
-    /// nothing in M2 has anywhere to put it -- `Source::write` answers `()`.
-    /// What matters is that the request was accepted, which `knobas-http` has
-    /// already decided by the time this returns.
+    /// [`Self::queue_run`] with no branch, no override and no option, whose
+    /// body is the plain `{"buildType":{"id":…}}`, and which answers the
+    /// queued build's id as a custom run does (#1949). It was dropped until
+    /// then, so a trigger and a re-run left a build nothing named.
     ///
-    /// **Sent once, never retried by the transport** (#1122), as is
-    /// [`Self::queue_run`]: a POST that timed out may have queued its build,
-    /// and a resend queues a second one. TeamCity may merge two identical
-    /// queued builds, but only while the first still waits, so nothing on its
-    /// side makes the resend safe. A failure comes back as the write's error.
+    /// **Sent once, never retried by the transport** (#1122), as
+    /// [`Self::queue_run`] is: a POST that timed out may have queued its
+    /// build, and a resend queues a second one. TeamCity may merge two
+    /// identical queued builds, but only while the first still waits, so
+    /// nothing on its side makes the resend safe. A failure comes back as the
+    /// write's error.
     ///
     /// # Errors
     ///
     /// The [`SourceError`] the request maps to.
-    pub(crate) async fn queue_build(&self, build_type_id: &str) -> Result<(), SourceError> {
-        let request = self
-            .client
-            .request(knobas_http::Method::POST, "app/rest/buildQueue")
-            .json(&serde_json::json!({ "buildType": { "id": build_type_id } }))
-            .no_retry();
-        self.client.send(request).await.map(|_| ())
+    pub(crate) async fn queue_build(
+        &self,
+        build_type_id: &str,
+    ) -> Result<Option<i64>, SourceError> {
+        self.queue_run(
+            build_type_id,
+            None,
+            &[],
+            crate::write::RunOptions::default(),
+        )
+        .await
     }
 
     /// `POST /app/rest/buildQueue` for a custom run (issue #669): the

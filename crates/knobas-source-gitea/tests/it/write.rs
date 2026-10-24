@@ -165,6 +165,28 @@ async fn a_pull_request_carries_its_title_body_head_and_base() {
     );
 }
 
+/// The receipt names the pull request Gitea opened by its **key** (#1949),
+/// the local part of its entity id, so the app takes `gitea:<key>` as this
+/// write's pull request rather than whichever one is open on the head.
+#[tokio::test]
+async fn a_pull_request_opened_is_named_by_its_key() {
+    let server = accepting().await;
+    let receipt = source(&server)
+        .write(WriteOp::CreatePullRequest {
+            entity: "gitea:tidewater/payout-service".to_owned(),
+            title: "SEPA retry with exponential backoff".to_owned(),
+            body: "Retries transient PSP errors.".to_owned(),
+            head: "feature/PAY-231-sepa-retry".to_owned(),
+            base: "main".to_owned(),
+        })
+        .await
+        .expect("a declared op is performed");
+    assert_eq!(
+        receipt.remote_id.as_deref(),
+        Some("tidewater/payout-service#145")
+    );
+}
+
 /// Story 7: a reply goes on the pull request's discussion, which Gitea keeps on
 /// the **issue** of the same index -- the same place `client::issue_comments`
 /// reads it from.
@@ -1251,7 +1273,7 @@ async fn a_file_is_committed_through_the_contents_api_against_the_blob_it_was_re
         .expect("a declared op is performed");
     assert_eq!(
         receipt.remote_id.as_deref(),
-        Some("657b2a74a98aeb5f75bdb4fb47ba5cf8c25acb1d")
+        Some("tidewater/payout-service@657b2a74a98aeb5f75bdb4fb47ba5cf8c25acb1d")
     );
     assert_eq!(
         puts(&server).await,
@@ -1391,7 +1413,7 @@ async fn a_resent_commit_that_already_landed_is_delivered_not_held() {
             .unwrap_or_else(|e| panic!("{new_branch:?}: already landed, not {e:?}"));
         assert_eq!(
             receipt.remote_id.as_deref(),
-            Some("657b2a74a98aeb5f75bdb4fb47ba5cf8c25acb1d"),
+            Some("tidewater/payout-service@657b2a74a98aeb5f75bdb4fb47ba5cf8c25acb1d"),
             "{new_branch:?}"
         );
     }
