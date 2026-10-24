@@ -126,6 +126,17 @@ crate::closed_vocabulary! {
     }
 }
 
+/// How an `unreachable` write's `detail` starts when the keychain would not
+/// open (#1741), followed by one space and the store's own text.
+///
+/// A string contract across the bridge: the queue panel
+/// (`app/src/lib/shell/WriteQueue.svelte`) tells a keychain fault from a
+/// server that did not answer by this prefix alone. One constant on this
+/// side, and `knobas-sync`'s `the_panel_reads_the_keychain_prefix_the_queue_writes`
+/// reads the panel's copy, so a rename on either side is a red test rather
+/// than a panel that says "The server did not answer." again.
+pub const KEYCHAIN_DETAIL_PREFIX: &str = "keychain:";
+
 /// Every column of `knobas.write_queue` that leaves this module, in one place
 /// -- plus the one *derived* column, `source_enabled`, which is not a column
 /// of the table at all.

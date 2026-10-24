@@ -2725,6 +2725,22 @@ async fn a_write_flushed_while_the_store_refuses_access_waits_on_the_keychain() 
     assert_eq!(h.asked(), 0);
 }
 
+/// #1741: the panel tells a keychain wait from a silent server by the
+/// detail's prefix, a string contract across the bridge. The two tests above
+/// pin the detail the queue writes; this pins that the panel reads the same
+/// prefix, read off the file the component ships. A rename on either side is
+/// a red here, not a panel that says "The server did not answer." again.
+#[test]
+fn the_panel_reads_the_keychain_prefix_the_queue_writes() {
+    const PANEL: &str = include_str!("../../../../app/src/lib/shell/WriteQueue.svelte");
+    let reads = format!("startsWith(\"{}\")", store::KEYCHAIN_DETAIL_PREFIX);
+    assert!(
+        PANEL.contains(&reads),
+        "WriteQueue.svelte does not read the detail for {reads}, so a write waiting on \
+         the keychain reads as a server that did not answer"
+    );
+}
+
 /// #1628: *Flush now* is the reader saying "try it": it sends a
 /// write waiting on a rejected credential once per press, and leaves the wait in place when the source
 /// refuses again, so the tick after it sends nothing.
