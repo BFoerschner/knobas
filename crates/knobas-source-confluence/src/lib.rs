@@ -39,6 +39,7 @@ mod storage;
 mod sync;
 mod time;
 mod users;
+mod walk;
 mod write;
 
 /// The expansion set every page record is fetched with.

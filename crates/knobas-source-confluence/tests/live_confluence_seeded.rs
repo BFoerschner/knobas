@@ -51,9 +51,9 @@
 //!   licence to tombstone the mirror. The same question is asked here, at the
 //!   wire, and `the_search_that_could_read_as_an_empty_corpus_is_never_the_first_call`
 //!   is what stops the answer mattering.
-//! * **The `_links.next` walk**, driven with a page size of two over a corpus
-//!   of five, so the continuation link is followed for real and the
-//!   expansions are checked to survive it.
+//! * **The paged walk**, driven with a page size of two over a corpus of
+//!   five, so each result after the first is asked from the last page read
+//!   for real and the expansions are checked to survive it.
 //!
 //! # What this file writes, and what it takes away
 //!
@@ -397,17 +397,13 @@ impl Seeded {
             .with_timezone(&chrono::Utc)
     }
 
-    /// The corpus **in the search index's order**: the walk's own query, asked
-    /// for in one page and read for ids alone.
+    /// The corpus **in the search index's `lastmodified` order**, asked for
+    /// in one page and read for ids alone: the order this suite's own writes
+    /// move, which is what [`Seeded::settled_index_order`] waits on.
     ///
-    /// The CQL is the adapter's own `cql::build_cql` full-sync form for a
-    /// scoped source, written out here rather than borrowed: `build_cql` is
-    /// `pub(crate)`, and asking the server the ordering question through the
-    /// thing under test would be no witness anyway. **Nothing catches the two
-    /// drifting apart** -- a clause the adapter changes and this does not
-    /// would settle an order the walk does not use, and settle it green. The
-    /// `cql.rs` unit tests are where that string is pinned; this is a copy of
-    /// it and says so.
+    /// It was the walk's own query until #1976 moved the walk to `order by
+    /// created asc, id asc`, which no write moves. It is no longer a copy of
+    /// `cql::build_cql`; the full syncs below are what send that form.
     ///
     /// Sent through `query` rather than `Seeded::get`'s pre-built path,
     /// because a CQL string carries spaces, quotes and an `=`, and this is the
@@ -456,15 +452,13 @@ impl Seeded {
     /// by lastmodified asc` than its own record says it should, and that
     /// disagreement is what this polls out.
     ///
-    /// **Why the paged walk needs it and no other read here does.** A walk
-    /// asks the server for offsets, so a page that moves toward the end
-    /// between two of its requests drags the whole tail one place with it: one
-    /// id is served twice and one is never served at all. Every other read in
-    /// this suite takes its corpus in a single request, where a reorder is
-    /// invisible. The adapter says the same thing from its own side --
-    /// `cql::Order::Ascending`'s doc calls a page edited mid-walk "re-visited
-    /// or missed" and names the ceiling clamp as what brings the missed one
-    /// back *next run*, which is no help to a test asserting on this one.
+    /// **Why the paged walk waits for it.** A walk asks the server for
+    /// offsets, so while it was ordered by `lastmodified` a page that moved
+    /// toward the end between two of its requests dragged the whole tail one
+    /// place with it: one id served twice and one never served at all (#341).
+    /// The walk is ordered by `created` since #1976, which the index moves for
+    /// no write, so it no longer needs this to be right; it still waits, so a
+    /// failure there is the adapter's paging and not a write still landing.
     ///
     /// Not a sleep. A sleep long enough to be safe is a guess, and a guess
     /// that is too short is a race made rarer rather than a race removed. This
@@ -1274,19 +1268,18 @@ async fn the_space_and_the_ancestors_are_where_their_readers_look() {
     println!("SEEDED ancestor depths, by fixture id: {depths:?}");
 }
 
-/// **The `_links.next` walk, for real.**
+/// **The paged walk, for real.**
 ///
-/// A page size of two over a corpus of five means the continuation link is
-/// followed at least twice, and the expansions have to survive it: Confluence
-/// builds that link itself, and a walk that re-composed the query instead
-/// would be paging something subtly different. Without this the adapter would
-/// be certified only on corpora that fit in one page -- which every fixture
-/// does.
+/// A page size of two over a corpus of five means the walk asks at least
+/// three results, each after the first one row early, from the last page read
+/// (`order by created asc, id asc`, #1976), and the expansions have to
+/// survive it. Without this the adapter would be certified only on corpora
+/// that fit in one page -- which every fixture does.
 ///
 /// # The one precondition a paged walk has, and why it is waited for
 ///
-/// The walk's ordering key is the corpus's `lastmodified`, and this suite
-/// moves one page's twice: `a_renamed_page_keeps_its_id_and_moves_the_watermark_to_itself`
+/// The walk's ordering key was the corpus's `lastmodified` until #1976, and
+/// this suite moves one page's twice: `a_renamed_page_keeps_its_id_and_moves_the_watermark_to_itself`
 /// renames `sepa-design` and then puts the title back, each a version bump.
 /// It polls the index out to [`INDEX_BUDGET`] for the *rename*; the restore
 /// happens in [`Renamed`]'s `Drop`, which checks the record but cannot wait
@@ -1311,7 +1304,7 @@ async fn the_space_and_the_ancestors_are_where_their_readers_look() {
 /// write unwaited-for anyway.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
-async fn the_walk_follows_the_next_link_and_the_expansions_survive_it() {
+async fn a_walk_in_pages_of_two_returns_the_whole_corpus_and_the_expansions_survive_it() {
     let seeded = seeded();
     seeded.clear_leftovers().await;
     let settled = seeded.settled_index_order().await;
@@ -1334,32 +1327,67 @@ async fn the_walk_follows_the_next_link_and_the_expansions_survive_it() {
     );
     assert!(
         paged.len() > 2,
-        "the corpus fits in one page of two, so no continuation link was followed and this \
+        "the corpus fits in one page of two, so no second result was asked for and this \
          test asserted nothing: {:?}",
         ids(&paged)
     );
     for it in &paged {
         assert!(
             it.payload["body"]["storage"].get("value").is_some(),
-            "{}: the body expansion did not survive the continuation link: {}",
+            "{}: the body expansion did not survive the paged walk: {}",
             it.entity,
             it.payload["body"]
         );
         assert!(
             it.payload["space"].get("key").is_some(),
-            "{}: the space expansion did not survive the continuation link",
+            "{}: the space expansion did not survive the paged walk",
             it.entity
         );
         assert!(
             it.payload["children"]["comment"].get("results").is_some(),
-            "{}: the comment container did not survive the continuation link",
+            "{}: the comment container did not survive the paged walk",
             it.entity
         );
     }
-    println!(
-        "SEEDED next-link walk: {} page(s) in pages of two",
-        paged.len()
-    );
+    println!("SEEDED paged walk: {} page(s) in pages of two", paged.len());
+}
+
+/// **CQL offers no keyset on `id`** (#1976), which is why the walk anchors
+/// its offset results instead (`crate::walk`'s module docs in the adapter):
+/// a range on `id` is refused, and `order by created asc, id asc`, the walk's
+/// order, is accepted.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_cql_range_on_id_is_refused_and_the_walks_order_is_not() {
+    let seeded = seeded();
+    let ask = |cql: String| {
+        let seeded = &seeded;
+        async move {
+            let response = seeded
+                .http
+                .get(format!("{}/rest/api/content/search", seeded.url))
+                .header("Accept", "application/json")
+                .basic_auth(&seeded.user, Some(&seeded.password))
+                .query(&[("cql", cql.as_str()), ("limit", "1")])
+                .send()
+                .await
+                .unwrap_or_else(|e| panic!("{cql}: {e}"));
+            let status = response.status().as_u16();
+            (status, response.text().await.unwrap_or_default())
+        }
+    };
+    let space = &seeded.seed.space;
+    let (status, body) = ask(format!(
+        "type = page AND space in (\"{space}\") AND id > 1 order by id asc"
+    ))
+    .await;
+    println!("id > 1: {status} {body}");
+    assert_eq!(status, 400, "a range on id: {body}");
+    let (status, body) = ask(format!(
+        "type = page AND space in (\"{space}\") order by created asc, id asc"
+    ))
+    .await;
+    assert_eq!(status, 200, "the walk's order: {body}");
 }
 
 /// **Battery clause 2 against a real index, then a rename.**

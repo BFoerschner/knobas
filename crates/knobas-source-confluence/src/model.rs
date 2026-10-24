@@ -34,6 +34,13 @@ pub(crate) struct ContentPage {
     /// that does not report one.
     #[serde(default, rename = "totalSize")]
     pub total_size: Option<u64>,
+    /// The offset this result starts at and the page size the server
+    /// answered with, its clamp applied: where the next result starts
+    /// (`crate::walk`).
+    #[serde(default)]
+    pub start: Option<u32>,
+    #[serde(default)]
+    pub limit: Option<u32>,
     #[serde(default, rename = "_links")]
     pub links: PageLinks,
 }
