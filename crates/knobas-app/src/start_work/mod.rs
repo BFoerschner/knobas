@@ -470,17 +470,17 @@ pub async fn ready_retry(
     let ticket = EntityRef::parse(&step.ticket_id).map_err(IpcError::invalid)?;
     guard_position(pool, &ticket, step_id).await?;
 
-    // Rule 1: a write that is still open is the retry. Nothing is queued twice.
+    // Rule 1: a write that is still open is the retry, and a queued step's
+    // re-read reports the write however it stands. Nothing is queued twice.
     if let Some(write_id) = step.write_id {
         let landing = steps.landing_of(write_id).await?;
         let closed = matches!(landing, Landing::Refused { .. } | Landing::Withdrawn);
         // A queued step's button is *Check again* (#1998): it re-reads. A write
         // refused or discarded since settles the step as what it closed as, and
-        // sends nothing; the failed step's *Retry* is the retry (#2015). Only
-        // from queued, so a step another action moved on is not overwritten.
-        let reread = step.outcome == StepOutcome::Queued;
-        if !closed || reread {
-            let from = if closed { &[StepOutcome::Queued][..] } else { RETRIES };
+        // sends nothing; the failed step's *Retry* is the retry (#2015).
+        let queued = step.outcome == StepOutcome::Queued;
+        if !closed || queued {
+            let from = if closed { REREADS } else { RETRIES };
             let (outcome, detail) = outcome_of(&landing);
             if store::settle(pool, step_id, from, outcome, None, detail.as_deref())
                 .await?
@@ -512,6 +512,11 @@ const RETRIES: &[StepOutcome] = &[
     StepOutcome::Failed,
     StepOutcome::Queued,
 ];
+
+/// What a re-read that finds the write closed may leave: the `queued` it read
+/// (#2015). A step another action moved on since is that action's, and
+/// settling it failed would overwrite it.
+const REREADS: &[StepOutcome] = &[StepOutcome::Queued];
 
 /// The outcomes a skip may move a step out of: [`RETRIES`]'s, for the same
 /// reasons -- a succeeded step's effect exists, and a running one's send is out.

@@ -838,7 +838,11 @@ async fn checking_again_on_a_queued_step_whose_write_was_refused_settles_it_fail
         step_of(&flow, Step::CreateBranch).detail.as_deref(),
         Some("branch already exists")
     );
-    assert_eq!(fake.ops(), vec!["create_branch"], "checking again re-sent the branch");
+    assert_eq!(
+        fake.ops(),
+        vec!["create_branch"],
+        "checking again re-sent the branch"
+    );
     assert_eq!(
         *fake.looks.lock().unwrap(),
         looks,

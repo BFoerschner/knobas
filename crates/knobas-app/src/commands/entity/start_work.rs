@@ -84,7 +84,8 @@ async fn run_behind(
 }
 
 /// Retry one step, without redoing the ones that succeeded. The flow runs on
-/// from it behind the answer (#779).
+/// from it behind the answer (#779). A queued step's *Check again* lands here
+/// too: it re-reads the step's write and sends nothing (#1998, #2015).
 ///
 /// # Errors
 ///
