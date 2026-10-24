@@ -87,7 +87,7 @@
 //! It writes nothing to find out: the test asserts the build queue and the
 //! newest build are as they were. For its project-scoped case it turns the
 //! server's per-project permissions on and puts them back from `Drop`
-//! ([`PerProject`]).
+//! ([`PerProject`]), and puts them off first if a killed run left them on.
 //!
 //! **One owner at a time.** The leftover clearing cannot tell a sibling's
 //! build from a corpse, and clause 2 needs a server on which nothing is running:
@@ -4570,6 +4570,23 @@ struct PerProject {
 }
 
 impl PerProject {
+    /// Per-project permissions off, as the seed leaves them, where a killed
+    /// run left them on: a killed run's `Drop` never ran, and the seeded
+    /// server keeps its volume, so every later run would read them on as the
+    /// server's own setting and put them back on.
+    async fn off_if_left_on(seeded: &Seeded) {
+        let (status, mut settings) = seeded.get("app/rest/server/authSettings").await;
+        assert_eq!(status, 200, "the authentication settings: {settings}");
+        if settings["perProjectPermissions"] != serde_json::Value::Bool(true) {
+            return;
+        }
+        eprintln!("per-project permissions were left on, by a killed run: putting them off");
+        settings["perProjectPermissions"] = serde_json::Value::Bool(false);
+        put_auth_settings(&seeded.http, &seeded.url, &seeded.token, &settings)
+            .await
+            .unwrap_or_else(|e| panic!("putting a killed run's per-project permissions off: {e}"));
+    }
+
     async fn on(seeded: &Seeded) -> PerProject {
         let (status, was) = seeded.get("app/rest/server/authSettings").await;
         assert_eq!(status, 200, "the authentication settings: {was}");
@@ -4809,7 +4826,7 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
     let per_project = async || {
         seeded.get("app/rest/server/authSettings").await.1["perProjectPermissions"].clone()
     };
-    let per_project_before = per_project().await;
+    PerProject::off_if_left_on(&seeded).await;
 
     let editable = |view: &SourceView| -> Vec<bool> {
         view.sections
@@ -4979,7 +4996,7 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
     assert_eq!(status, 404, "{VIEWER} is removed again");
     assert_eq!(
         per_project().await,
-        per_project_before,
+        serde_json::Value::Bool(false),
         "per-project permissions are put back"
     );
 }
