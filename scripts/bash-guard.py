@@ -143,6 +143,9 @@ class Parser:
             if s.startswith("$(", i) or c == "`":
                 i = self.expansion(i, current())
                 continue
+            if s.startswith(("${", "$["), i):
+                i = self.braced(i, current())
+                continue
             if c == "#" and word is None:  # a comment runs to the end of the line
                 i = find_or_end(s, "\n", i)
                 continue
@@ -293,6 +296,35 @@ class Parser:
         word.expands = True
         word.subs += inner.subs
         return j
+
+    def braced(self, i, word):
+        """Read the `${...}` or `$[...]` at `i` into `word` as one expansion; the index past its close.
+
+        Its `<<` is pattern text or a shift, never a heredoc. Its quotes and
+        nested braces are read as the shell reads them, and a substitution in it runs.
+        """
+        s = self.s
+        opener, closer = s[i + 1], "}" if s[i + 1] == "{" else "]"
+        inner = Word()  # the substitutions inside, whose text is already in s[i:j]
+        j, depth = i + 2, 1
+        while j < len(s) and depth:
+            if s[j] == "\\":
+                j += 2
+            elif s[j] == "'":
+                j = find_or_end(s, "'", j + 1) + 1
+            elif s[j] == '"':
+                j = self.double_quoted(j + 1, inner)
+            elif s.startswith(("$(", "`"), j):
+                j = self.expansion(j, inner)
+            elif s.startswith(("${", "$["), j):
+                j = self.braced(j, inner)
+            else:
+                depth += {opener: 1, closer: -1}.get(s[j], 0)
+                j += 1
+        word.text += s[i:j]
+        word.expands = True
+        word.subs += inner.subs
+        return min(j, len(s))
 
     def substitution(self, i, word):
         """Parse the `$(...)` or backquote at `i` as commands of its own, kept on `word`."""

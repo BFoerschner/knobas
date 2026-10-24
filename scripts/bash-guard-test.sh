@@ -175,6 +175,15 @@ check pass 'exec >/dev/null 2>&1'
 check pass 'diff <(ls a) <(ls b) 2>&1'
 check pass "echo '>.git/x'"
 
+# a `<<` inside `$[...]` or `${...}` is a shift or pattern text, no heredoc, so the next line is read
+says "$cd_rule" $'echo $[1<<2]\ncd /tmp && ls'
+says "$cd_rule" $'echo ${x/<<EOF/y}\ncd /tmp && ls'
+says "$cd_rule" $'echo ${x:-"}<<EOF"}\ncd /tmp && ls'
+says "$cd_rule" 'echo ${x:-$(cd /tmp && ls)}'
+says "$rm_rule" 'rm -f ${T}/*.png'
+check pass 'echo ${x/<<EOF/y} $[1<<2]'
+check pass 'echo ${#x} # cd x && y'
+
 # shell configuration
 check refuse 'echo export X=1 >> ~/.bashrc'
 check refuse 'cp /tmp/zshrc ~/.zshrc'
