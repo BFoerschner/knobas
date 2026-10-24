@@ -5,7 +5,7 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { DocPage, DocsTree, Reached } from "../../ipc/entity";
+import type { DocPage, DocsTree, Reached, WriteAsk } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
@@ -477,6 +477,99 @@ test("New page asks for the space, the parent and the title, and queues the plai
   await settle();
   expect(io.docsCreatePage).toHaveBeenCalledWith({ parent: "confluence:2", title: "Rota", text: "## Who\n- Mara" }, null);
   expect(document.querySelector("[role='dialog']")).toBeNull();
+});
+
+test("the writes the page's credential cannot make are drawn disabled saying why, and queue nothing (#2053)", async () => {
+  const reason = (op: string) => `This Confluence user cannot ${op} in Operations`;
+  const asked: WriteAsk[][] = [];
+  const io = await draw(
+    ["confluence:2"],
+    ports({
+      docsPage: vi.fn(async () => RICH),
+      refusedWrites: vi.fn(async (asks: WriteAsk[]) => {
+        asked.push(asks);
+        return asks.map((ask) => ({ ...ask, reason: reason(ask.op) }));
+      }),
+    }),
+  );
+  expect(asked).toEqual([
+    ["comment", "update_page", "create_page"].map((op) => ({ entity: "confluence:2", op })),
+  ]);
+  const drawn = (label: string) => [...target.querySelectorAll("button")].filter((b) => b.textContent?.trim() === label);
+  const refused: [string, string, number][] = [
+    ["Comment", "comment", 2],
+    ["New page", "create_page", 1],
+    ["New page here", "create_page", 1],
+    ["Edit section", "update_page", 1],
+  ];
+  for (const [label, op, count] of refused) {
+    const buttons = drawn(label);
+    expect(buttons, label).toHaveLength(count);
+    for (const b of buttons) {
+      expect(b.getAttribute("aria-disabled"), label).toBe("true");
+      expect(b.title, label).toBe(reason(op));
+      b.click();
+    }
+  }
+  await settle();
+  expect(document.querySelector("[role='dialog']")).toBeNull();
+  expect(target.querySelector("textarea[aria-label='Section text']")).toBeNull();
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!;
+  box.value = "Done.";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")][0]!.click();
+  await settle();
+  expect(io.submitWrite).not.toHaveBeenCalled();
+});
+
+test("the page's writes stay enabled where the source refuses nothing, or cannot tell (#2053)", async () => {
+  await draw(
+    ["confluence:2"],
+    ports({
+      docsPage: vi.fn(async () => RICH),
+      refusedWrites: vi.fn(async () => {
+        throw { code: "not_ready", message: "no", source_id: null };
+      }),
+    }),
+  );
+  for (const label of ["Comment", "New page", "New page here", "Edit section"]) {
+    const b = button(label)!;
+    expect(b.getAttribute("aria-disabled"), label).toBeNull();
+    expect(b.title, label).toBe("");
+  }
+});
+
+test("New page refuses a parent the credential cannot add pages under, saying why (#2053)", async () => {
+  const reason = "This Confluence user cannot add pages to Engineering: it lacks the Add page permission";
+  const io = await draw(
+    ["confluence:2"],
+    ports({
+      docsPage: vi.fn(async () => RICH),
+      refusedWrites: vi.fn(async (asks: WriteAsk[]) =>
+        asks.filter((ask) => ask.entity === "confluence:9").map((ask) => ({ ...ask, reason })),
+      ),
+    }),
+  );
+  button("New page here")!.click();
+  await settle();
+  const dialog = document.querySelector("[role='dialog']")!;
+  const title = dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!;
+  title.value = "Rota";
+  title.dispatchEvent(new Event("input", { bubbles: true }));
+  const create = () => [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Create page")!;
+  await settle();
+  expect(create().getAttribute("aria-disabled")).toBeNull();
+  const space = dialog.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  space.value = "confluence/ENG";
+  space.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(dialog.querySelector<HTMLSelectElement>("select[aria-label='Under']")!.value).toBe("confluence:9");
+  expect(create().getAttribute("aria-disabled")).toBe("true");
+  expect(create().title).toBe(reason);
+  create().click();
+  await settle();
+  expect(io.docsCreatePage).not.toHaveBeenCalled();
 });
 
 test("For you lists the pages that mention me, with who asked", async () => {
