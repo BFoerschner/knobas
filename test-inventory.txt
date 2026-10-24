@@ -3036,6 +3036,7 @@ knobas-source-gitea	test/it	view_files::the_top_directory_lists_directories_firs
 knobas-source-gitea	test/it	view_pr::a_closed_pull_request_reads_closed_and_a_merged_one_merged
 knobas-source-gitea	test/it	view_pr::a_closed_pull_requests_diff_shows_its_comments_and_takes_none
 knobas-source-gitea	test/it	view_pr::a_comment_past_a_files_cut_is_not_called_outdated
+knobas-source-gitea	test/it	view_pr::a_discussion_gitea_fails_to_serve_fails_the_view
 knobas-source-gitea	test/it	view_pr::a_head_in_another_repository_is_named_with_it
 knobas-source-gitea	test/it	view_pr::a_merge_deletes_its_branch_by_default_only_where_it_can
 knobas-source-gitea	test/it	view_pr::a_merge_says_specifically_what_stands_in_its_way
@@ -3053,6 +3054,8 @@ knobas-source-gitea	test/it	view_pr::a_reviews_verdict_is_its_tone_in_the_conver
 knobas-source-gitea	test/it	view_pr::a_section_read_carries_no_toolbar
 knobas-source-gitea	test/it	view_pr::a_stale_approval_counts_unless_the_protection_ignores_it
 knobas-source-gitea	test/it	view_pr::a_standing_request_for_changes_blocks_where_the_protection_says_so
+knobas-source-gitea	test/it	view_pr::a_token_without_the_issue_scope_reads_the_view_but_its_comments
+knobas-source-gitea	test/it	view_pr::a_token_without_the_organisation_scope_is_told_on_add_label
 knobas-source-gitea	test/it	view_pr::a_view_whose_viewer_cannot_be_read_still_offers_the_review
 knobas-source-gitea	test/it	view_pr::add_label_offers_the_organisations_labels_too
 knobas-source-gitea	test/it	view_pr::add_label_offers_the_repositorys_labels_past_the_first_page
@@ -3173,6 +3176,7 @@ knobas-source-gitea	test/live_gitea	a_seeded_commits_view_carries_the_diff_the_s
 knobas-source-gitea	test/live_gitea	a_seeded_pull_requests_view_carries_its_files_commits_and_discussion
 knobas-source-gitea	test/live_gitea	a_synced_commit_carries_its_repo_and_is_found_by_under
 knobas-source-gitea	test/live_gitea	a_ticket_is_filed_moved_and_commented_on_through_its_writes
+knobas-source-gitea	test/live_gitea	a_token_that_may_not_read_issues_reads_every_view_but_the_discussion
 knobas-source-gitea	test/live_gitea	a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why
 knobas-source-gitea	test/live_gitea	an_op_gitea_does_not_declare_never_reaches_the_real_server
 knobas-source-gitea	test/live_gitea	approving_your_own_pull_request_is_refused_by_the_server
