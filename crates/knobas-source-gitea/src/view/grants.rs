@@ -22,6 +22,19 @@
 //! | `POST /repos/{o}/{r}/branches` | 403 `token does not have at least one of required scope(s), required=[write:repository], …` | 422 `[BranchName]: Required` |
 //! | `POST /repos/{o}/{r}/issues` | 403 `… required=[write:issue], …` | 422 `[Title]: Required` |
 //!
+//! **Why `{}` creates nothing**, read in the forges' source (Gitea 1.19,
+//! 1.21, 1.24 and `main`, Forgejo's `forgejo` branch, 2026-10-24): in
+//! `routers/api/v1/api.go` both routes bind the body
+//! (`bind(api.CreateBranchRepoOption{})`, `bind(api.CreateIssueOption{})`)
+//! ahead of `repo.CreateBranch` and `repo.CreateIssue`, and `bind` answers
+//! 422 and stops the chain when validation fails, before the handler runs.
+//! `new_branch_name` and `title` are `binding:"Required"` in
+//! `modules/structs` on every one of them. No webhook, notification or audit
+//! entry is made before the handler. Before 1.19 a token has no scopes, so
+//! the probe reads 422 or the account's 403.
+//! `live_gitea` counts both repositories' branches, issues and pull requests
+//! around its probes.
+//!
 //! The branch probe says one more thing. Gitea checks that the **account**
 //! may push before it reads the body, and refuses one that may not with a
 //! 403 (`user should have a permission to write to a repo`, measured with a
