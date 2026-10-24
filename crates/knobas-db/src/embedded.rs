@@ -145,8 +145,10 @@ pub enum DbError {
     ServerStart {
         data_dir: PathBuf,
         reason: String,
+        /// Boxed: beside the path and the reason, the upstream error would
+        /// make every `Result<_, DbError>` large (`clippy::result_large_err`).
         #[source]
-        source: postgresql_embedded::Error,
+        source: Box<postgresql_embedded::Error>,
     },
 
     #[error("postgres connection: {0}")]
@@ -1927,7 +1929,7 @@ async fn start_server(postgresql: &mut PostgreSQL) -> Result<(), DbError> {
     Err(DbError::ServerStart {
         data_dir,
         reason,
-        source,
+        source: Box::new(source),
     })
 }
 
