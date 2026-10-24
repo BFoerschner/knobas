@@ -322,6 +322,14 @@ note "pid $app_pid"
 step "waiting for a window (up to ${WINDOW_TIMEOUT} s)"
 "$ax" wait-window "$app_pid" "$WINDOW_TIMEOUT" | sed 's/^/desktop-witness:   window titled /'
 
+# And for its web view to draw (#1961): the window is up before the page in it,
+# and a keystroke a driver sends before the page has mounted goes nowhere --
+# no wait on the keystroke's effect brings it back. Seen on a loaded machine:
+# ⌘K pressed the moment the window appeared, and the launcher never opened.
+step "waiting for the web view to draw (up to ${WINDOW_TIMEOUT} s)"
+"$ax" wait-content "$app_pid" "$WINDOW_TIMEOUT" ||
+    fail "knobas' window stayed blank for ${WINDOW_TIMEOUT} s."
+
 # `|| true` because `set -o pipefail` turns pgrep's "found nothing" exit 1
 # into an aborted run, and "no instances" is a verdict this line has to be
 # allowed to reach rather than a reason to die without saying so.
