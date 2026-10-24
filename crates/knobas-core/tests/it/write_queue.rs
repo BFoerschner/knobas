@@ -635,9 +635,15 @@ async fn the_release_statement_releases_exactly_what_waits_on_credential_names()
     let source = ticket.namespace.clone();
     let cases: [(wq::WaitReason, Option<&str>); 11] = [
         (Unauthorized, Some("401 from jira")),
-        (Unauthorized, Some("keychain: User interaction is not allowed.")),
+        (
+            Unauthorized,
+            Some("keychain: User interaction is not allowed."),
+        ),
         (Unauthorized, None),
-        (Unreachable, Some("keychain: User interaction is not allowed.")),
+        (
+            Unreachable,
+            Some("keychain: User interaction is not allowed."),
+        ),
         (Unreachable, Some(wq::KEYCHAIN_DETAIL_PREFIX)),
         (Unreachable, Some("timed out")),
         (Unreachable, Some("the keychain: said nothing")),
