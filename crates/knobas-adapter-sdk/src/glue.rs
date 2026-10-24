@@ -78,7 +78,9 @@ impl<A: Adapter> GuestAdapter for Component<A> {
     fn run_chain(&self, run: String) -> Result<Option<Vec<wit::RunChainStep>>, wit::SourceError> {
         self.0
             .run_chain(&run)
-            .map(|steps| steps.map(|steps| steps.into_iter().map(convert::run_chain_step).collect()))
+            .map(|steps| {
+                steps.map(|steps| steps.into_iter().map(convert::run_chain_step).collect())
+            })
             .map_err(to_wit)
     }
 
@@ -103,7 +105,11 @@ impl<A: Adapter> GuestAdapter for Component<A> {
         json_option(self.0.test_history(&entity, &test))
     }
 
-    fn run_artifacts(&self, entity: String, path: String) -> Result<Option<String>, wit::SourceError> {
+    fn run_artifacts(
+        &self,
+        entity: String,
+        path: String,
+    ) -> Result<Option<String>, wit::SourceError> {
         json_option(self.0.run_artifacts(&entity, &path))
     }
 

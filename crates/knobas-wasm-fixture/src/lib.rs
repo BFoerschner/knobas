@@ -531,7 +531,11 @@ impl Adapter for Fixture {
     /// its one action (#1407). The run's is
     /// [`builds::view`]. `None` for the pipeline, and for an entity that is
     /// not the fixture's.
-    fn view(&self, entity: &str, section: Option<&str>) -> Result<Option<view::SourceView>, SourceError> {
+    fn view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+    ) -> Result<Option<view::SourceView>, SourceError> {
         if self.is_run(entity) {
             return builds::view(section)
                 .map(|view| Some(spi(view)))

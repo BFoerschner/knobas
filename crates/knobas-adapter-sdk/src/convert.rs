@@ -185,9 +185,7 @@ mod tests {
     /// payload as its JSON text.
     #[test]
     fn an_item_crosses_as_its_entity_id_its_rfc_3339_instant_and_its_payload_text() {
-        let at = chrono::Utc
-            .with_ymd_and_hms(2026, 10, 18, 9, 0, 0)
-            .unwrap()
+        let at = chrono::Utc.with_ymd_and_hms(2026, 10, 18, 9, 0, 0).unwrap()
             + chrono::Duration::milliseconds(250);
         let item = super::item(SyncItem {
             entity: EntityRef::new("surveys", "survey-1"),
