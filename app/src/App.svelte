@@ -31,7 +31,7 @@
   import TfShell from "./lib/tf/TfShell.svelte";
   import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
   import { createDraftFlow } from "./lib/tf/drafting.svelte";
-  import { offsetMinutes } from "./lib/time/draft";
+  import { readerDay } from "./lib/time/day";
   import { minutesLabel } from "./lib/time/format";
 
   /**
@@ -143,7 +143,7 @@
    * ticket and day. `null` is "nothing left to log there", which is told.
    */
   function draftFor(entityId: string, day: string) {
-    void worklogDraft(entityId, { day, offsetMinutes: offsetMinutes(new Date(`${day}T12:00:00`)) })
+    void worklogDraft(entityId, readerDay(day))
       .then((draft) => {
         if (draft === null) push({ text: "Nothing to log on that ticket that day." });
         else drafts.show(draft);

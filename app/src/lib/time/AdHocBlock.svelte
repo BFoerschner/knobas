@@ -39,7 +39,7 @@
   import { targetReading } from "../shell/timer";
   import { layers as sharedLayers, type Layers } from "../tf/layers.svelte";
   import TfDialog from "../tf/settings/TfDialog.svelte";
-  import { dayOffsetMinutes, minutesBetween } from "./day";
+  import { minutesBetween, readerDay } from "./day";
   import { localDay } from "./draft";
 
   let {
@@ -140,10 +140,7 @@
       entity_id: suggestion.entity_id,
     })
       .then(() =>
-        worklogDraft(suggestion.entity_id, {
-          day: localDay(new Date(block.started_at)),
-          offsetMinutes: dayOffsetMinutes(localDay(new Date(block.started_at))),
-        }),
+        worklogDraft(suggestion.entity_id, readerDay(localDay(new Date(block.started_at)))),
       )
       .then((draft) => {
         if (!draft) {

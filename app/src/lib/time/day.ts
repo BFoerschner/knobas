@@ -17,7 +17,7 @@
  * wrongly twice a year. {@link dayBounds} asks `Date` for that day's midnight
  * and the next day's, which is right by construction in every zone.
  */
-import type { DayBlock } from "../ipc/time";
+import type { DayBlock, ReaderDay } from "../ipc/time";
 
 import { offsetMinutes } from "./draft";
 
@@ -89,12 +89,22 @@ export function dayBounds(key: string): { from: Date; to: Date } {
 }
 
 /**
- * The UTC offset, in minutes, in force at `key`'s own local midnight. Every
- * caller that tells the backend "this day" sends this, never today's offset:
- * across a daylight-saving change the two differ by an hour.
+ * The UTC offset, in minutes, in force at `key`'s own local midnight, never
+ * today's or the one at another hour of that day: across a daylight-saving
+ * change they differ by an hour.
  */
 export function dayOffsetMinutes(key: string): number {
   return offsetMinutes(dayBounds(key).from);
+}
+
+/**
+ * `key` as every backend call that takes a reader's day is sent it: the day
+ * and the offset at its own midnight. A draft read with one offset and logged
+ * with another covers two windows an hour apart (#1978), so no caller builds
+ * the pair by hand.
+ */
+export function readerDay(key: string): ReaderDay {
+  return { day: key, offsetMinutes: dayOffsetMinutes(key) };
 }
 
 /** The day `days` away from `key`, month and year ends included. */

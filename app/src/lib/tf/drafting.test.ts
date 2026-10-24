@@ -52,6 +52,7 @@ interface Over {
 function rig(over: Over = {}) {
   const log: string[] = [];
   const asked: ReaderDay[] = [];
+  const adHocAsked: ReaderDay[] = [];
   const toasts: ToastSpec[] = [];
   const since = over.since ?? "2026-09-03T09:00:00Z";
   let running: RunningTimer | null =
@@ -63,7 +64,7 @@ function rig(over: Over = {}) {
       },
       stop: () => {
         log.push("stop");
-        const closed = running ? block(running.target) : null;
+        const closed = running ? { ...block(running.target), started_at: running.started_at } : null;
         running = null;
         return Promise.resolve(closed);
       },
@@ -73,8 +74,9 @@ function rig(over: Over = {}) {
         return Promise.resolve();
       },
     },
-    adHocBlock: (id) => {
+    adHocBlock: (id, when) => {
       log.push(`ad-hoc ${id}`);
+      adHocAsked.push(when);
       return Promise.resolve(over.offer ?? null);
     },
     worklogDraft: (entityId, when) => {
@@ -87,7 +89,7 @@ function rig(over: Over = {}) {
     complain: (error) => log.push(`complain ${String(error)}`),
     onday: () => log.push("open the day"),
   };
-  return { flow: createDraftFlow(ports), log, asked, toasts, running: () => running };
+  return { flow: createDraftFlow(ports), log, asked, adHocAsked, toasts, running: () => running };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -109,6 +111,32 @@ test("the draft is asked for the day the running stretch started on", async () =
   await settle();
   // The suite runs in Europe/Berlin: 21:30Z is 23:30 on the 2nd.
   expect(asked.map((when) => when.day)).toEqual(["2026-09-02"]);
+});
+
+/**
+ * A day's offset is the one at its own local midnight, the offset `log_work`
+ * is sent (#1978). The suite runs in Europe/Berlin: 2026-10-25 starts on +120
+ * and is on +60 by 03:00; 2026-03-29 starts on +60 and is on +120 by 03:00. A
+ * stretch started at 20:00Z on either day carries the midnight offset, not the
+ * one in force when it started.
+ */
+const CLOCK_CHANGES = [
+  { day: "2026-10-25", midnight: 120 },
+  { day: "2026-03-29", midnight: 60 },
+];
+
+test.each(CLOCK_CHANGES)("the draft for a stretch started on $day is asked with that day's midnight offset", async ({ day, midnight }) => {
+  const { flow, asked } = rig({ since: `${day}T20:00:00Z` });
+  flow.stop();
+  await settle();
+  expect(asked).toEqual([{ day, offsetMinutes: midnight }]);
+});
+
+test.each(CLOCK_CHANGES)("the ad-hoc check after a stop on $day is asked with that day's midnight offset", async ({ day, midnight }) => {
+  const { flow, adHocAsked } = rig({ draft: null, since: `${day}T20:00:00Z` });
+  flow.stop();
+  await settle();
+  expect(adHocAsked).toEqual([{ day, offsetMinutes: midnight }]);
 });
 
 test("Keep running closes the draft and leaves the clock alone", async () => {

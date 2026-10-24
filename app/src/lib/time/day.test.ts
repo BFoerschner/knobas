@@ -22,6 +22,7 @@ import {
   dayLabel,
   dayOffsetMinutes,
   horizonNote,
+  readerDay,
   segmentsOf,
   shiftDay,
 } from "./day";
@@ -234,4 +235,13 @@ test("a day's offset is the one at that day's own midnight, whatever today is", 
   } finally {
     vi.useRealTimers();
   }
+});
+
+/**
+ * What every backend call that takes a reader's day is sent (#1978): the day
+ * with its midnight offset, which on a clock-change day is not the one at noon.
+ */
+test("a reader's day carries the offset at that day's midnight on either clock change", () => {
+  expect(readerDay("2026-10-25")).toEqual({ day: "2026-10-25", offsetMinutes: 120 });
+  expect(readerDay("2026-03-29")).toEqual({ day: "2026-03-29", offsetMinutes: 60 });
 });

@@ -37,7 +37,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
-  import { dayOffsetMinutes } from "../../time/day";
+  import { readerDay } from "../../time/day";
   import { columnHeading, minutesOf } from "../../time/week";
   import type { Layers } from "../layers.svelte";
   
@@ -88,9 +88,6 @@
   const uid = `tf-logall-${Math.random().toString(36).slice(2, 9)}`;
   const id = (plan: Pick<PlannedWorklog, "day" | "entity_id">) => `${plan.day} ${plan.entity_id}`;
 
-  function when(day: string) {
-    return { day, offsetMinutes: dayOffsetMinutes(day) };
-  }
 
   onMount(() => {
     void (async () => {
@@ -99,7 +96,7 @@
         // The draft's comment per row; a draft that does not answer leaves it empty.
         const comments = await Promise.all(
           plan.map((entry) =>
-            io.worklogDraft(entry.entity_id, when(entry.day)).then(
+            io.worklogDraft(entry.entity_id, readerDay(entry.day)).then(
               (draft) => draft?.comment ?? "",
               () => "",
             ),
@@ -149,7 +146,7 @@
         if (seconds === 0) continue;
         try {
           made.push(
-            await io.logWork(now.entity_id, when(now.day), {
+            await io.logWork(now.entity_id, readerDay(now.day), {
               startedAt: now.started_at,
               seconds,
               comment: row.comment,

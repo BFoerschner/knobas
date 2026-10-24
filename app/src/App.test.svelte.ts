@@ -1001,6 +1001,43 @@ test("Log… on a day's block opens that ticket's draft for that day", async () 
 });
 
 /**
+ * The Day tab's *Log…* reads the draft with the offset `log_work` is sent
+ * (#1978): the one at the day's own local midnight. In Berlin 2026-10-25
+ * starts on +120 and is on +60 by noon; 2026-03-29 starts on +60 and is on
+ * +120 by noon.
+ */
+test.each([
+  { day: "2026-10-25", midnight: 120 },
+  { day: "2026-03-29", midnight: 60 },
+])("Log… on $day asks for the draft with that day's midnight offset", async ({ day, midnight }) => {
+  dbReady = true;
+  dayAnswer = [
+    {
+      block: {
+        id: 11,
+        started_at: new Date(`${day}T23:15:00`).toISOString(),
+        ended_at: new Date(`${day}T23:45:00`).toISOString(),
+        target: { kind: "entity", entity_id: "mock:PAY-231" },
+        kind: "manual",
+        ended_by_relaunch: false,
+        worklog_id: null,
+      },
+      title: "Retry failed SEPA payouts",
+    },
+  ];
+  location.hash = `#/time/${day}`;
+  app = mount(App, { target, props: {} });
+  const log = () =>
+    [...target.querySelectorAll<HTMLButtonElement>(".tf-tm-row button")].find(
+      (button) => button.textContent?.trim() === "Log…",
+    );
+  await until(() => log() !== undefined, "the Day tab never drew the block");
+  log()!.click();
+  await until(() => draftAsks.length > 0, "Log… never asked for a draft");
+  expect(draftAsks).toEqual([{ entityId: "mock:PAY-231", day, offsetMinutes: midnight }]);
+});
+
+/**
  * **The chip and ⌘T start on the job on screen** (#886, R-1.4): on
  * `#/job/<key>` with nothing running, ⌘T starts a timer on that ticket instead
  * of asking; on a page with no job it still asks.

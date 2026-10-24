@@ -8,7 +8,7 @@
  */
 import type { AdHocBlock, DayBlock, OpenStretch, RunningTimer } from "../../ipc/time";
 import { adHocBlock as realAdHocBlock, dayBlocks as realDayBlocks } from "../../ipc/time";
-import { dayBounds, dayKey, dayOffsetMinutes } from "../../time/day";
+import { dayBounds, dayKey, readerDay } from "../../time/day";
 import { dayFigures, dayRows, type DayFigures } from "./day-view";
 
 /** The two reads a day is made of. */
@@ -38,7 +38,7 @@ export async function readDay(io: DayReads, on: string): Promise<DayRecord> {
   const { from, to } = dayBounds(on);
   const record = await io.dayBlocks(from.toISOString(), to.toISOString());
   const offers: Record<number, AdHocBlock | null> = {};
-  const when = { day: on, offsetMinutes: dayOffsetMinutes(on) };
+  const when = readerDay(on);
   await Promise.all(
     record.blocks
       .filter((entry) => entry.block.worklog_id === null)
