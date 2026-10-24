@@ -265,7 +265,6 @@ async fn state_on(
             startup_delay: Duration::from_secs(3600),
             tick: Duration::from_secs(3600),
             shutdown_grace: Duration::from_secs(3600),
-            ..Default::default()
         },
         quit: knobas_sync::scheduler::Quit::default(),
     })

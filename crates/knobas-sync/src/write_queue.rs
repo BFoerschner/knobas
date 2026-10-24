@@ -371,8 +371,9 @@ async fn heads(
 /// record is stale: the 401 it holds was the answer to the credential just
 /// replaced, and the keychain fault it holds came before the save, so the
 /// write is left released rather than put back to wait -- which would have
-/// it wait for a change that has already happened. The two serialise on the source's count of releases (see
-/// [`gate`]); a flush never waits for this, nor this for a flush.
+/// it wait for a change that has already happened. The two serialise on the
+/// source's count of releases (see [`gate`]); a flush never waits for this,
+/// nor this for a flush.
 ///
 /// # Errors
 ///
@@ -417,7 +418,7 @@ pub async fn release_credential_waits(
 ///
 /// The gate also counts the source's releases (#1628), which
 /// [`release_credential_waits`] bumps and [`waited`] reads before it records a
-/// refusal. A lock of its own rather than the flush lock: a credential saved
+/// wait on the credential. A lock of its own rather than the flush lock: a credential saved
 /// while a flush is out must not wait for that flush's HTTP calls.
 ///
 /// Process-wide per source id, and the id alone: not per database or per
@@ -1163,8 +1164,8 @@ async fn announce_with(
 /// since the adapter was built: a refusal answered the credential that was
 /// replaced (#1628), and a keychain fault came before the save (#1944). The
 /// write [`release_credential_waits`] released stays released for the next
-/// flush to try with the new credential. The count is held across the statement, so a
-/// release lands wholly before it or wholly after.
+/// flush to try with the new credential. The count is held across the
+/// statement, so a release lands wholly before it or wholly after.
 async fn waited(
     deps: &SchedulerDeps,
     seen: &CredentialSeen<'_>,

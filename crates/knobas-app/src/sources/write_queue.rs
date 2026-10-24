@@ -726,12 +726,7 @@ pub(crate) async fn submittable(
         })?;
     let instance = match crate::sources::crud::instance_offers(secrets, registry, &source).await {
         crate::sources::crud::InstanceOffers::Ops(ops) => ops,
-        crate::sources::crud::InstanceOffers::KeychainSilent => template
-            .roles
-            .iter()
-            .filter_map(|claim| knobas_source::role::minimum(&claim.role))
-            .flat_map(|minimum| minimum.writes.iter().map(|&op| op.to_owned()))
-            .collect(),
+        crate::sources::crud::InstanceOffers::KeychainSilent => role_writes(&template),
     };
     let mut declared = template.write_ops;
     for offered in instance {
@@ -747,6 +742,18 @@ pub(crate) async fn submittable(
         )));
     }
     Ok((op, source.id))
+}
+
+/// Every write the roles `descriptor` claims say a source filling them may
+/// offer (`knobas_source::role`): what an instance of the kind can offer at
+/// most, for when the instance itself could not be asked (#1944).
+fn role_writes(descriptor: &knobas_source::SourceDescriptor) -> Vec<String> {
+    descriptor
+        .roles
+        .iter()
+        .filter_map(|claim| knobas_source::role::minimum(&claim.role))
+        .flat_map(|minimum| minimum.writes.iter().map(|&op| op.to_owned()))
+        .collect()
 }
 
 /// Did this write settle as *sent*?

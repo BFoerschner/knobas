@@ -4134,7 +4134,7 @@ pub async fn token_for(
     }
     let stored = knobas_secrets::spawn::get(secrets, &KeychainAccount::importer(producer_id))
         .await
-        .map_err(in_the_keychain)?;
+        .map_err(keychain_error)?;
     Ok(stored.map(|secret| Token {
         value: secret.value,
         typed: false,
@@ -4170,14 +4170,14 @@ pub async fn remember<T>(
             knobas_secrets::Secret::just(knobas_source::AuthMethod::ApiToken, token.value),
         )
         .await
-        .map_err(in_the_keychain)?;
+        .map_err(keychain_error)?;
     }
     Ok(produced)
 }
 
 /// A keychain fault as the importer answers it: the store's own words, said
 /// to be the keychain's (#1946).
-fn in_the_keychain(error: knobas_secrets::SecretError) -> IpcError {
+fn keychain_error(error: knobas_secrets::SecretError) -> IpcError {
     IpcError::internal(format!("keychain: {error}"))
 }
 
