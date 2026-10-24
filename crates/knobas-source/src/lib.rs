@@ -1503,7 +1503,8 @@ impl WriteOp {
             },
             // A ticket's title is no address to resend against (#336). The
             // arrival is linked to what it was filed from, a failed run
-            // (#1451), found by its title once a sync brings it in.
+            // (#1451), found by the key its receipt names once a sync brings
+            // it in (#1754).
             WriteOp::CreateTicket { .. } => Delivery {
                 projection: Projection::Liveness,
                 link: Some(ArrivalLink::Related),
@@ -1631,14 +1632,17 @@ impl WriteOp {
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WriteReceipt {
     /// The id the source gave what this write created, in the source's own
-    /// spelling (Jira's worklog ids are decimal strings). `None` when the op
-    /// creates nothing addressable, or when the source did not say.
+    /// spelling (Jira's worklog ids are decimal strings). For a create of
+    /// something the mirror holds -- a page, a ticket -- it is that entity's
+    /// local part, so `<source_id>:<remote_id>` is its entity id (#1121,
+    /// #1754). `None` when the op creates nothing addressable, or when the
+    /// source did not say.
     pub remote_id: Option<String>,
 }
 
 impl WriteReceipt {
-    /// The source had nothing to say -- the answer for every op but
-    /// `log_work`.
+    /// The source had nothing to say -- the answer for every op that creates
+    /// nothing addressable.
     #[must_use]
     pub fn none() -> Self {
         Self { remote_id: None }

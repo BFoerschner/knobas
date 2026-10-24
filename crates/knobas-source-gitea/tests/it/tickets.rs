@@ -255,7 +255,7 @@ async fn a_transition_patches_the_issues_state() {
 }
 
 #[tokio::test]
-async fn a_ticket_is_created_in_the_repository_and_named_by_its_number() {
+async fn a_ticket_is_created_in_the_repository_and_named_by_its_key() {
     let server = accepting().await;
     let receipt = source(server.uri(), json!({}))
         .write(WriteOp::CreateTicket {
@@ -266,7 +266,12 @@ async fn a_ticket_is_created_in_the_repository_and_named_by_its_number() {
         })
         .await
         .expect("Gitea takes the issue");
-    assert_eq!(receipt.remote_id.as_deref(), Some("151"));
+    // #1754: the issue's key, the local part of its entity id, so the app
+    // takes `gitea:<key>` as the ticket this write made.
+    assert_eq!(
+        receipt.remote_id.as_deref(),
+        Some(format!("{FULL}/issues/151").as_str())
+    );
     assert_eq!(
         sent(&server).await,
         (

@@ -1322,12 +1322,11 @@ async fn waited(
 /// where a missing one costs an artefact nobody knows about.
 ///
 /// `remote_id` rides along **only when the source named what it made**. That
-/// is `WriteReceipt`'s own rule and it splits the two ops this exists for:
-/// Confluence's `create_page` answers an id, so the line can point at the
-/// page; Jira's `create_ticket` answers `WriteReceipt::none()` on purpose --
-/// a created ticket is addressed by reading the mirror back -- so the line
-/// says a ticket was made and withdrawn and says nothing about which.
-/// Inventing an id here would be knobas naming an artefact it never saw.
+/// is `WriteReceipt`'s own rule: Confluence's `create_page` answers the page's
+/// id and Jira's and Gitea's `create_ticket` the ticket's key (#1754), so the
+/// line can point at it; a source whose receipt is empty leaves the line
+/// saying a ticket was made and withdrawn and nothing about which. Inventing
+/// an id here would be knobas naming an artefact it never saw.
 ///
 /// **The line does not copy the payload**, for the reason `discard` gives for
 /// keeping the row: the withdrawn write is still there, with what was asked

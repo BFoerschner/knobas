@@ -315,7 +315,7 @@ impl Source for JiraSource {
                 body,
                 ticket_type,
             } => {
-                let created = write::create_ticket(
+                let key = write::create_ticket(
                     &self.http,
                     &self.project_key(entity)?,
                     title,
@@ -323,20 +323,17 @@ impl Source for JiraSource {
                     ticket_type,
                 )
                 .await?;
-                // Dropped, and the value is in having asked for it: a Jira
-                // that accepted the create without naming what it made is a
-                // write reported as done with nothing to point at, which
-                // `create_ticket` refuses rather than reports as success.
-                //
-                // Still dropped now that `Source::write` can carry an id back
-                // (#280). A created ticket is a *mirrored entity*: the start-
-                // work flow already finds it by reading the mirror, which is
-                // the reading that survives a re-send, and putting the key in
-                // the receipt as well would be a second answer to a question
-                // that already has one. The receipt exists for what the
-                // mirror cannot name -- see `WriteReceipt`.
-                let _ = created;
-                Ok(WriteReceipt::none())
+                // **The key Jira gave the ticket, in the receipt** (#1754). It
+                // is the local part of the ticket's entity id, so the app
+                // takes the ticket this write made as `<source>:<key>` once a
+                // sync mirrors it. Without it the app could only find the
+                // ticket by its title, and a title matches a sibling: two
+                // action items worded alike, a project that already holds the
+                // summary, the same failure filed twice. (#280 dropped the key
+                // on the reading that the mirror alone answers which ticket a
+                // create made; the mirror can say which tickets carry a title,
+                // not which one this write filed.)
+                Ok(WriteReceipt::id(key))
             }
             WriteOp::LogWork {
                 entity,
@@ -352,8 +349,8 @@ impl Source for JiraSource {
                     comment,
                 )
                 .await?;
-                // **The one receipt in knobas.** A worklog is not a mirrored
-                // entity and two worklogs of the same length on the same day
+                // **A receipt the mirror can never stand in for.** A worklog
+                // is not a mirrored entity and two worklogs of the same length on the same day
                 // are indistinguishable from outside, so the id Jira just
                 // answered with is the only way the local copy can ever name
                 // the row it stands for (issue #280).

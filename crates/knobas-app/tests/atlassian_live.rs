@@ -1510,12 +1510,19 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     .await;
     assert_eq!(row.state, WriteState::Sent, "{:?}", row.detail);
 
-    // `Source::write` answers `()` -- widening it is a frozen-SPI change and no
-    // criterion asks for one -- so the new key is found the way a person would
-    // find it, and then **confirmed by a read of the issue itself**.
-    //
-    // Both halves are needed. JQL is an index read and Jira's index lags its
-    // own writes, so the key may not be there yet; and the index also lags
+    // The receipt names the key Jira gave the ticket (#1754), and the settle
+    // stamps it on the row. It is checked against the key found the way a
+    // person would find it, and **confirmed by a read of the issue itself**,
+    // so the receipt is witnessed by Jira's own answer rather than by itself.
+    let named: Option<String> =
+        sqlx::query_scalar("select remote_id from knobas.write_queue where id = $1")
+            .bind(row.id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("the queue row");
+
+    // Both halves of the search are needed. JQL is an index read and Jira's
+    // index lags its own writes, so the key may not be there yet; and the index also lags
     // *deletes*, so a key it hands back may be a ticket an earlier run's
     // cleanup already removed. Taking the newest key on trust would then read
     // back a 404. `GET /rest/api/2/issue/{key}` goes to the database, so a
@@ -1544,6 +1551,11 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
         tokio::time::sleep(Duration::from_secs(1)).await;
     };
     litter.created = Some(created.clone());
+    assert_eq!(
+        named.as_deref(),
+        Some(created.as_str()),
+        "the receipt names the ticket the create made (#1754)"
+    );
     // Labelled as soon as it exists, so a run that is *killed* after this line
     // still leaves something the next run's leftover clearing can find.
     let (status, labelled) = env
