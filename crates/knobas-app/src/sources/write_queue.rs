@@ -331,8 +331,8 @@ pub async fn arrival_linkable(
 
 /// Link what write `write_id` made to `ticket`, once it has: the branch a
 /// sent `CreateBranch` named, or the pull request a sent `CreatePullRequest`'s
-/// receipt named ([`entity_named`], #1949; the one open on its head where the source
-/// named none), as the mirror holds them (#984), or the page a
+/// receipt named ([`entity_named`], #1949; the one open from its head into its
+/// base where the source named none, #1952), as the mirror holds them (#984), or the page a
 /// sent `CreatePage` made, by the id its settle stamped
 /// (`docs::created_page`, #1121), or the ticket a sent `CreateTicket` filed
 /// ([`ticket_filed`], #1451), drawn as the relation its op's `delivery()` states. Answers
@@ -340,9 +340,9 @@ pub async fn arrival_linkable(
 /// is not mirrored yet.
 ///
 /// The look-ups are start work's own (`start_work::queue`): the branch by its
-/// name in the repository, the pull request open on the head (a merged or
-/// closed one there is not this write's). The link is the `related` one the
-/// key in a branch's name proposes (`branch_name_key`), so a proposal already
+/// name in the repository, the pull request open from the head into the base
+/// (a merged or closed one there is not this write's). The link is the
+/// `related` one the key in a branch's name proposes (`branch_name_key`), so a proposal already
 /// raised is confirmed rather than doubled; one already drawn is drawn.
 ///
 /// # Errors
@@ -376,22 +376,23 @@ pub async fn link_on_arrival(
         WriteOp::CreateTicket { title, .. } => {
             ticket_filed(pool, write_id, &write.source_id, title, write.queued_at).await?
         }
-        WriteOp::CreatePullRequest { entity, head, .. } => {
-            match entity_named(pool, write_id, crate::start_work::queue::KIND_PR).await? {
-                Named::Made(named) => named,
-                Named::Nothing => match crate::start_work::queue::pull_request_on_head(
-                    pool,
-                    declarations,
-                    &repo_of(entity)?,
-                    head,
-                )
-                .await?
-                {
-                    crate::start_work::PullRequestOnHead::Open(id) => Some(id),
-                    _ => None,
-                },
-            }
-        }
+        WriteOp::CreatePullRequest {
+            entity, head, base, ..
+        } => match entity_named(pool, write_id, crate::start_work::queue::KIND_PR).await? {
+            Named::Made(named) => named,
+            Named::Nothing => match crate::start_work::queue::pull_request_on_head(
+                pool,
+                declarations,
+                &repo_of(entity)?,
+                head,
+                base,
+            )
+            .await?
+            {
+                crate::start_work::PullRequestOnHead::Open(id) => Some(id),
+                _ => None,
+            },
+        },
         _ => None,
     };
     let Some(made) = made else {
@@ -415,7 +416,17 @@ const CLOCK_SLACK: &str = "5 minutes";
 /// is empty). A ticket of the same title the source last changed before the
 /// write was queued is somebody else's -- a title the reader made generic,
 /// filed before -- never this one.
-async fn ticket_filed(
+///
+/// **What the title cannot do.** It matches free prose: two creates of one
+/// title queued within the window, or somebody filing the same summary by hand
+/// in it, can answer the other's ticket. That is why it is only the fallback.
+///
+/// **The one title rule** (#1958). A run's *Create ticket* is resolved here by
+/// [`link_on_arrival`], and an action item's by
+/// `commands::entity::action_item_ticket_inner`, and since #1951 both resolve
+/// the same row: two rules would give two answers, and which one won would
+/// depend on which reader asked first.
+pub(crate) async fn ticket_filed(
     pool: &sqlx::PgPool,
     write_id: i64,
     source_id: &str,

@@ -545,7 +545,9 @@ async fn action_item_payload(
 /// ticket of the same title in the project is somebody else's, never this one.
 /// It is the one the create's receipt named (`sources::write_queue::ticket_named`,
 /// #1754); only a create the source answered without a key is looked for by its
-/// title (`protocol::ticket_titled`).
+/// title, and only among tickets changed since the create was queued: the one
+/// rule `link_arrivals` resolves the same row by
+/// (`sources::write_queue::ticket_filed`, #1958).
 ///
 /// # Errors
 ///
@@ -573,14 +575,15 @@ pub async fn action_item_ticket_inner(
     let mut linked = false;
     if write.state == knobas_core::write_queue::WriteState::Sent {
         // The key the create's receipt named (#1754); the title only where
-        // the source named none.
-        use crate::sources::write_queue::{Named, ticket_named};
-        ticket_entity_id = match ticket_named(pool, write_id).await? {
-            Named::Made(named) => named,
-            Named::Nothing => {
-                crate::protocol::ticket_titled(pool, &write.source_id, &title).await?
-            }
-        };
+        // the source named none, by the rule the end of a sync uses (#1958).
+        ticket_entity_id = crate::sources::write_queue::ticket_filed(
+            pool,
+            write_id,
+            &write.source_id,
+            &title,
+            write.queued_at,
+        )
+        .await?;
         if let Some(ticket) = ticket_entity_id.as_deref() {
             crate::protocol::draw_link(
                 pool,

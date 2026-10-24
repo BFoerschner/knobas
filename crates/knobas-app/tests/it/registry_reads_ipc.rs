@@ -404,9 +404,9 @@ async fn run_ends(pool: &PgPool, registry: Arc<dyn AdapterRegistry>, ticket: &st
 }
 
 /// The write queue's post-write read takes the registry it is given: a pull
-/// request open on the write's head, which the probe declares merged, is not
-/// the write's and is not linked; the process's registry, which declares no
-/// merged flag for the kind, links it.
+/// request open from the write's head into its base, which the probe declares
+/// merged, is not the write's and is not linked; the process's registry, which
+/// declares no merged flag for the kind, links it.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_post_write_read_takes_the_registry_it_is_given() {
     let pool = database("registry_reads_write_queue").await;
@@ -443,7 +443,10 @@ async fn the_post_write_read_takes_the_registry_it_is_given() {
         &pr,
         "pr",
         "PAY-4",
-        json!({"state": "open", "merged": true, "head": {"ref": "feature/PAY-4-backoff"}}),
+        json!({
+            "state": "open", "merged": true,
+            "head": {"ref": "feature/PAY-4-backoff"}, "base": {"ref": "main"}
+        }),
     )
     .await;
     item(&pool, &branch, "branch", "feature/PAY-4", json!({})).await;

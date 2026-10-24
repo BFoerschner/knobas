@@ -105,8 +105,13 @@ pub enum Linked {
     Already,
 }
 
-/// What the mirror holds from one head branch, as far as knobas can tell
-/// (issue #359).
+/// What the mirror holds from one head branch into one base branch, as far as
+/// knobas can tell (issue #359; the base since #1952).
+///
+/// **A pull request is the pair, head and base**: a forge refuses a second
+/// open one for the same pair and opens one from the same head into another
+/// base, so a colleague's pull request from this head into `release/x` is
+/// not this flow's and is never read as it.
 ///
 /// **A head branch is re-usable, so "the pull request from this head" is not a
 /// single thing.** The mirror deliberately holds closed and merged pull
@@ -135,7 +140,7 @@ pub enum Linked {
 /// pull request closed without merging carries `merged: false`, so a rule
 /// built on the declared flag alone calls it open and commits the whole bug
 /// one state over. So `state` decides, read at
-/// [`queue::PULL_REQUEST_BY_HEAD`](crate::start_work::queue), inside the one
+/// [`queue::PULL_REQUEST_BY_HEAD_AND_BASE`](crate::start_work::queue), inside the one
 /// named statement that already reads this record's head branch the same
 /// interim way.
 ///
@@ -149,7 +154,7 @@ pub enum Linked {
 /// and still have pull requests knobas must be able to link, and `state` is
 /// what answers for one. (The mock is an argument about shape and not a
 /// corpus: its pull requests carry `from`/`to` and no `head` object, so
-/// `queue::PULL_REQUEST_BY_HEAD` never reaches them either way. Gitea is the
+/// `queue::PULL_REQUEST_BY_HEAD_AND_BASE` never reaches them either way. Gitea is the
 /// only source this read reaches today.)
 ///
 /// The **declared** route for open-ness would be `status_name` on the `pr`
@@ -184,16 +189,17 @@ pub enum Linked {
 /// The direction pinned the other way costs the bug it was reported as.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PullRequestOnHead {
-    /// A pull request from this head that knobas read as open, and that
-    /// nothing it read calls merged.
+    /// A pull request from this head into this base that knobas read as
+    /// open, and that nothing it read calls merged.
     Open(String),
-    /// The mirror holds pull requests from this head and knobas can tell that
-    /// none of them is open. Names one, and says whether it was merged, so the
-    /// step that refuses can say which word.
+    /// The mirror holds pull requests from this head into this base and
+    /// knobas can tell that none of them is open. Names one, and says whether
+    /// it was merged, so the step that refuses can say which word.
     Closed { id: String, merged: bool },
-    /// Nothing from this head has reached the mirror, or nothing whose state
-    /// knobas could read -- one answer on purpose: in both, knobas has no open
-    /// pull request it can name, and it may not act as though it has.
+    /// Nothing from this head into this base has reached the mirror, or
+    /// nothing whose state knobas could read -- one answer on purpose: in
+    /// both, knobas has no open pull request it can name, and it may not act
+    /// as though it has.
     Unknown,
 }
 
@@ -220,8 +226,10 @@ pub trait Steps: Send + Sync {
     /// The branch `name` of `repo`, as an entity id, if the mirror holds it.
     async fn branch(&self, repo: &EntityRef, name: &str) -> Result<Option<String>, IpcError>;
 
-    /// What the mirror holds from head branch `head` in `repo`, and whether
-    /// any of it is a pull request that is still open.
+    /// What the mirror holds from head branch `head` into base branch `base`
+    /// in `repo`, and whether any of it is a pull request that is still open.
+    /// The pair, because that is how the forge tells one pull request from
+    /// another (#1952).
     ///
     /// Not "the pull request from this head": a head branch can be re-used, so
     /// there may be several, and which of them is open is the whole question.
@@ -230,6 +238,7 @@ pub trait Steps: Send + Sync {
         &self,
         repo: &EntityRef,
         head: &str,
+        base: &str,
     ) -> Result<PullRequestOnHead, IpcError>;
 
     /// The pull request write `write_id` opened, by the id its receipt named
@@ -829,11 +838,12 @@ async fn perform(
             dispatch(pool, steps, step, &step.payload).await
         }
         Step::CreatePullRequest => {
-            let (repo, head) = pull_request_of(step)?;
-            match steps.pull_request(&repo, &head).await? {
+            let (repo, head, base) = pull_request_of(step)?;
+            match steps.pull_request(&repo, &head, &base).await? {
                 // Rule 2 again, and it asks the *right* question now (#359): a
-                // pull request that is open from this head is this step's
-                // effect, whoever made it.
+                // pull request that is open from this head into this base is
+                // this step's effect, whoever made it. One from this head into
+                // another base is not (#1952): the forge opens ours beside it.
                 PullRequestOnHead::Open(existing) => {
                     settle_ok(pool, step, &format!("{existing} is already open")).await
                 }
@@ -940,7 +950,8 @@ async fn dispatch(
 /// pull request open on the same head (one into another base) is never stood
 /// in for it. Only where the source named nothing, or the step settled on a
 /// pull request already open and sent no write, is it read back out of the
-/// mirror by the head branch it opened from. A refresh is asked for once, and
+/// mirror by the head branch it opened from and the base it opened into
+/// (#1952). A refresh is asked for once, and
 /// only once, before giving up: the step is retryable, and a flow that spun
 /// waiting for a sync would be the stuck step story 11 wants distinguishable.
 ///
@@ -969,7 +980,7 @@ async fn link_step(
         )
         .await;
     }
-    let (repo, head) = pull_request_of(pr_step)?;
+    let (repo, head, base) = pull_request_of(pr_step)?;
 
     if let Some(write_id) = pr_step.write_id
         && let Named::Made(mut named) = steps.pull_request_named(write_id).await?
@@ -991,14 +1002,14 @@ async fn link_step(
         return link_to(pool, steps, step, &pr).await;
     }
 
-    let mut found = steps.pull_request(&repo, &head).await?;
+    let mut found = steps.pull_request(&repo, &head, &base).await?;
     // Anything but an open one is a reason to look again, not only nothing at
     // all (#359): where the head was re-used, the merged pull request is
     // precisely what the mirror already holds, and the one this flow just made
     // is the one the refresh fetches.
     if !matches!(found, PullRequestOnHead::Open(_)) {
         steps.refresh(&repo.namespace).await;
-        found = steps.pull_request(&repo, &head).await?;
+        found = steps.pull_request(&repo, &head, &base).await?;
     }
     let pr = match found {
         PullRequestOnHead::Open(pr) => pr,
@@ -1015,7 +1026,7 @@ async fn link_step(
                 pool,
                 step,
                 &format!(
-                    "no pull request from {head} is open -- {id} is {word}, and linking to it \
+                    "no pull request from {head} into {base} is open -- {id} is {word}, and linking to it \
                      would claim work this flow did not do"
                 ),
             )
@@ -1025,7 +1036,7 @@ async fn link_step(
             return settle_failed(
                 pool,
                 step,
-                &format!("no open pull request from {head} has reached the mirror yet"),
+                &format!("no open pull request from {head} into {base} has reached the mirror yet"),
             )
             .await;
         }
@@ -1066,13 +1077,15 @@ fn branch_of(step: &FlowStep) -> Result<(EntityRef, String), IpcError> {
     ))
 }
 
-/// The repository and head branch a `create_pull_request` step will use.
-fn pull_request_of(step: &FlowStep) -> Result<(EntityRef, String), IpcError> {
+/// The repository, head branch and base branch a `create_pull_request` step
+/// will use: the pair a forge tells one pull request from another by (#1952).
+fn pull_request_of(step: &FlowStep) -> Result<(EntityRef, String, String), IpcError> {
     let op = &step.payload["CreatePullRequest"];
     let entity = field(op, "entity")?;
     Ok((
         EntityRef::parse(&entity).map_err(IpcError::invalid)?,
         field(op, "head")?,
+        field(op, "base")?,
     ))
 }
 

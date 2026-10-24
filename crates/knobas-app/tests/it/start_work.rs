@@ -47,6 +47,11 @@ const PR: &str = "gitea:tidewater/payout-service#142";
 /// be the open one.
 const PR_MERGED: &str = "gitea:tidewater/payout-service#7";
 const PR_REOPENED: &str = "gitea:tidewater/payout-service#8";
+/// The branch every flow below proposes its pull request into: the
+/// repository's default branch, as [`corpus`] mirrors it.
+const BASE: &str = "main";
+/// A colleague's pull request from the flow's head into another base (#1952).
+const PR_BACKPORT: &str = "gitea:tidewater/payout-service#149";
 
 /// What the fake will answer for one op identifier.
 #[derive(Clone, Debug)]
@@ -58,13 +63,14 @@ enum Answer {
 }
 
 /// One pull request the fake's mirror holds: the repository, the head branch,
-/// and the row `start_work::queue`'s statement would answer for it.
+/// the base branch, and the row `start_work::queue`'s statement would answer
+/// for it.
 ///
 /// The row's `merged` and `state` are both optional because the real reads
 /// **miss** rather than guess -- an undeclared flag, an absent state -- and a
 /// fixture has to be able to put the mirror in that state: it is the direction
 /// #359 pinned.
-type MirroredPull = (String, String, queue::OnHead);
+type MirroredPull = (String, String, String, queue::OnHead);
 
 /// The row the mirror would answer for one pull request.
 fn on_head(id: &str, merged: Option<bool>, state: Option<&str>) -> queue::OnHead {
@@ -158,10 +164,18 @@ impl Fake {
 
     /// A refresh also brings this pull request into the mirror.
     fn revealing_on_refresh_too(self, head: &str, row: queue::OnHead) -> Self {
-        self.on_refresh
-            .lock()
-            .unwrap()
-            .push((REPO.to_owned(), head.to_owned(), row));
+        self.revealing_on_refresh_into(head, BASE, row)
+    }
+
+    /// A refresh brings this pull request from `head` into `base` into the
+    /// mirror.
+    fn revealing_on_refresh_into(self, head: &str, base: &str, row: queue::OnHead) -> Self {
+        self.on_refresh.lock().unwrap().push((
+            REPO.to_owned(),
+            head.to_owned(),
+            base.to_owned(),
+            row,
+        ));
         self
     }
 
@@ -171,12 +185,18 @@ impl Fake {
         self
     }
 
-    /// Put one pull request into the mirror this fake stands for.
+    /// Put one pull request from `head` into the flow's base into the mirror
+    /// this fake stands for.
     fn holding(self, head: &str, row: queue::OnHead) -> Self {
+        self.holding_into(head, BASE, row)
+    }
+
+    /// Put one pull request from `head` into `base` into the mirror.
+    fn holding_into(self, head: &str, base: &str, row: queue::OnHead) -> Self {
         self.pulls
             .lock()
             .unwrap()
-            .push((REPO.to_owned(), head.to_owned(), row));
+            .push((REPO.to_owned(), head.to_owned(), base.to_owned(), row));
         self
     }
 
@@ -305,6 +325,7 @@ impl Steps for Fake {
         &self,
         repo: &EntityRef,
         head: &str,
+        base: &str,
     ) -> Result<PullRequestOnHead, knobas_app::IpcError> {
         // **Classified by the real rule, not by a second one.** A fake that
         // decided for itself which of a head's pull requests counts as open
@@ -316,8 +337,8 @@ impl Steps for Fake {
             .lock()
             .unwrap()
             .iter()
-            .filter(|(r, h, _)| r == &repo.to_string() && h == head)
-            .map(|(_, _, row)| row.clone())
+            .filter(|(r, h, b, _)| r == &repo.to_string() && h == head && b == base)
+            .map(|(_, _, _, row)| row.clone())
             .collect();
         Ok(queue::pick_open(&rows))
     }
@@ -332,7 +353,7 @@ impl Steps for Fake {
             .lock()
             .unwrap()
             .iter()
-            .any(|(_, _, row)| row.entity_id == named);
+            .any(|(_, _, _, row)| row.entity_id == named);
         Ok(Named::Made(held.then_some(named)))
     }
 
@@ -577,6 +598,7 @@ async fn a_retry_whose_effect_already_landed_sends_nothing() {
     fake.pulls.lock().unwrap().push((
         REPO.to_owned(),
         head,
+        BASE.to_owned(),
         on_head(PR, Some(false), Some("open")),
     ));
 
@@ -1129,7 +1151,7 @@ async fn a_merged_pull_request_on_a_re_used_head_is_not_the_open_one() {
         PR_MERGED,
         "pr",
         "payout dashboard latency",
-        serde_json::json!({"merged": true, "state": "closed", "head": {"ref": head}}),
+        serde_json::json!({"merged": true, "state": "closed", "head": {"ref": head}, "base": {"ref": BASE}}),
     )
     .await;
     item(
@@ -1137,11 +1159,11 @@ async fn a_merged_pull_request_on_a_re_used_head_is_not_the_open_one() {
         PR_REOPENED,
         "pr",
         "payout dashboard latency, part two",
-        serde_json::json!({"merged": false, "state": "open", "head": {"ref": head}}),
+        serde_json::json!({"merged": false, "state": "open", "head": {"ref": head}, "base": {"ref": BASE}}),
     )
     .await;
 
-    let found = queue::pull_request_on_head(&pool, &declarations(), &repo(), head)
+    let found = queue::pull_request_on_head(&pool, &declarations(), &repo(), head, BASE)
         .await
         .unwrap();
 
@@ -1152,6 +1174,53 @@ async fn a_merged_pull_request_on_a_re_used_head_is_not_the_open_one() {
          settles the create step \"already open\" against a merge and then links \
          the ticket to it"
     );
+}
+
+/// **A pull request is the pair, head and base (#1952).** A colleague's open
+/// pull request from the flow's head into a release branch is not the one the
+/// flow would open into `main`: Gitea opens both side by side, and refuses a
+/// second one only for the same head *and* base. So the read does not find it,
+/// nor a record whose base it cannot read, and the create step goes on to open
+/// the flow's own.
+#[tokio::test]
+async fn an_open_pull_request_from_the_head_into_another_base_is_not_found() {
+    let pool = corpus("sw_head_other_base").await;
+    let head = "feature/PAY-231";
+    item(
+        &pool,
+        PR_BACKPORT,
+        "pr",
+        "PAY-231: backport to release/2026.08",
+        serde_json::json!({
+            "merged": false, "state": "open",
+            "head": {"ref": head}, "base": {"ref": "release/2026.08"}
+        }),
+    )
+    .await;
+    // ADR-0007's miss: a record that carries no base is not one into `main`.
+    item(
+        &pool,
+        PR_REOPENED,
+        "pr",
+        "payout dashboard latency, part two",
+        serde_json::json!({"merged": false, "state": "open", "head": {"ref": head}}),
+    )
+    .await;
+
+    let found = queue::pull_request_on_head(&pool, &declarations(), &repo(), head, BASE)
+        .await
+        .unwrap();
+    assert_eq!(
+        found,
+        PullRequestOnHead::Unknown,
+        "a pull request into another base settled the create step \"already open\""
+    );
+
+    let found =
+        queue::pull_request_on_head(&pool, &declarations(), &repo(), head, "release/2026.08")
+            .await
+            .unwrap();
+    assert_eq!(found, PullRequestOnHead::Open(PR_BACKPORT.to_owned()));
 }
 
 /// A head whose only pull request is merged offers no open one, and names it
@@ -1165,11 +1234,11 @@ async fn a_head_whose_only_pull_request_is_merged_offers_no_open_one() {
         PR_MERGED,
         "pr",
         "payout dashboard latency",
-        serde_json::json!({"merged": true, "state": "closed", "head": {"ref": head}}),
+        serde_json::json!({"merged": true, "state": "closed", "head": {"ref": head}, "base": {"ref": BASE}}),
     )
     .await;
 
-    let found = queue::pull_request_on_head(&pool, &declarations(), &repo(), head)
+    let found = queue::pull_request_on_head(&pool, &declarations(), &repo(), head, BASE)
         .await
         .unwrap();
 
@@ -1195,11 +1264,11 @@ async fn a_pull_request_closed_without_merging_is_not_an_open_one() {
         PR_MERGED,
         "pr",
         "payout dashboard latency, abandoned",
-        serde_json::json!({"merged": false, "state": "closed", "head": {"ref": head}}),
+        serde_json::json!({"merged": false, "state": "closed", "head": {"ref": head}, "base": {"ref": BASE}}),
     )
     .await;
 
-    let found = queue::pull_request_on_head(&pool, &declarations(), &repo(), head)
+    let found = queue::pull_request_on_head(&pool, &declarations(), &repo(), head, BASE)
         .await
         .unwrap();
 
@@ -1227,11 +1296,11 @@ async fn a_pull_request_whose_state_cannot_be_read_is_not_an_open_one() {
         "pr",
         "payout dashboard latency, part two",
         // Every hint short of the fact: not merged, not closed, just no state.
-        serde_json::json!({"merged": false, "head": {"ref": head}}),
+        serde_json::json!({"merged": false, "head": {"ref": head}, "base": {"ref": BASE}}),
     )
     .await;
 
-    let found = queue::pull_request_on_head(&pool, &declarations(), &repo(), head)
+    let found = queue::pull_request_on_head(&pool, &declarations(), &repo(), head, BASE)
         .await
         .unwrap();
 
@@ -1261,7 +1330,7 @@ async fn a_source_that_declares_no_merged_flag_still_reads_the_state() {
         PR_REOPENED,
         "pr",
         "payout dashboard latency, part two",
-        serde_json::json!({"merged": false, "state": "open", "head": {"ref": head}}),
+        serde_json::json!({"merged": false, "state": "open", "head": {"ref": head}, "base": {"ref": BASE}}),
     )
     .await;
 
@@ -1270,6 +1339,7 @@ async fn a_source_that_declares_no_merged_flag_still_reads_the_state() {
         &knobas_core::payload::Declarations::empty(),
         &repo(),
         head,
+        BASE,
     )
     .await
     .unwrap();
@@ -1305,6 +1375,84 @@ async fn a_re_used_head_links_the_open_pull_request_and_not_the_merged_one() {
     assert_eq!(
         step_of(&flow, Step::CreatePullRequest).detail.as_deref(),
         Some(&format!("{PR_REOPENED} is already open")[..])
+    );
+}
+
+/// **The seam, for the pair (#1952).** A colleague's pull request open from
+/// the flow's head into a release branch does not settle the create step:
+/// the flow opens its own into `main`, which Gitea allows beside it, and the
+/// link goes to that one, read back by head and base where the receipt named
+/// nothing -- never to the colleague's.
+#[tokio::test]
+async fn an_open_pull_request_from_the_head_into_another_base_gets_the_flow_its_own() {
+    let pool = corpus("sw_other_base_flow").await;
+    let flow = planned(&pool).await;
+    let head = proposed_branch(&flow);
+    let fake = Fake::new()
+        .holding_into(
+            &head,
+            "release/2026.08",
+            on_head(PR_BACKPORT, Some(false), Some("open")),
+        )
+        .revealing_on_refresh(&head);
+
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+
+    assert_eq!(
+        fake.ops(),
+        vec!["create_branch", "create_pull_request", "transition"],
+        "a pull request into another base settled the create step \"already open\""
+    );
+    assert_eq!(
+        fake.links(),
+        vec![(PR.to_owned(), TICKET.to_owned())],
+        "the ticket was linked to a pull request into another base"
+    );
+    assert_eq!(
+        outcome(&flow, Step::LinkPullRequest),
+        StepOutcome::Succeeded
+    );
+}
+
+/// The base is **the step's**, the one the reader chose in the review step, not
+/// the repository's default (#1952): with the flow pointed at a release branch,
+/// a pull request open from its head into `main` does not settle the create
+/// step, and the one the refresh brings in from the head into the release
+/// branch is the one linked.
+#[tokio::test]
+async fn the_pull_request_is_looked_for_into_the_base_the_reader_chose() {
+    let pool = corpus("sw_reproposed_base").await;
+    let flow = planned(&pool).await;
+    let head = proposed_branch(&flow);
+    let step = step_of(&flow, Step::CreatePullRequest);
+    let mut payload = step.payload.clone();
+    payload["CreatePullRequest"]["base"] = serde_json::json!("release/2026.08");
+    start_work::repropose(&pool, step.id, payload)
+        .await
+        .expect("the proposal is the reader's to change");
+    let fake = Fake::new()
+        .holding(&head, on_head(PR_REOPENED, Some(false), Some("open")))
+        .revealing_on_refresh_into(
+            &head,
+            "release/2026.08",
+            on_head(PR_BACKPORT, Some(false), Some("open")),
+        );
+
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+
+    assert_eq!(
+        fake.ops(),
+        vec!["create_branch", "create_pull_request", "transition"],
+        "a pull request into main settled a step the reader pointed at a release branch"
+    );
+    assert_eq!(
+        fake.links(),
+        vec![(PR_BACKPORT.to_owned(), TICKET.to_owned())],
+        "the ticket was linked to a pull request into a base the reader did not choose"
+    );
+    assert_eq!(
+        outcome(&flow, Step::LinkPullRequest),
+        StepOutcome::Succeeded
     );
 }
 
@@ -1970,6 +2118,7 @@ async fn a_retry_of_an_interrupted_step_whose_branch_exists_adopts_it() {
     fake.pulls.lock().unwrap().push((
         REPO.to_owned(),
         head,
+        BASE.to_owned(),
         on_head(PR, Some(false), Some("open")),
     ));
     let flow = start_work::retry(&pool, &fake, branch).await.unwrap();

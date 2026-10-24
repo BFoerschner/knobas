@@ -3,7 +3,7 @@
 //! queued write makes has no id until the source mints one and a sync brings
 //! it in (#707), so the link is drawn after the write has been sent and the
 //! source re-read, against what the mirror then holds: the branch by its name
-//! in the repository, the open pull request on the head.
+//! in the repository, the open pull request from the head into the base.
 //!
 //! Over a real mirror, with the queue rows written the way the flush writes
 //! them (`knobas_core::write_queue`); what Gitea does with the write is
@@ -232,8 +232,8 @@ async fn the_proposal_the_branch_name_raised_is_confirmed_not_doubled() {
     assert_eq!(reached(&pool).await, vec![BRANCH.to_owned()]);
 }
 
-/// A sent `CreatePullRequest` links the pull request open on its head; one
-/// on the head that is already merged is not this write's, and is not
+/// A sent `CreatePullRequest` links the pull request open from its head into
+/// its base; one there that is already merged is not this write's, and is not
 /// linked.
 #[tokio::test]
 async fn a_new_pull_request_is_linked_once_it_is_mirrored_open_on_its_head() {
@@ -243,7 +243,7 @@ async fn a_new_pull_request_is_linked_once_it_is_mirrored_open_on_its_head() {
         "gitea:tidewater/payout-service#7",
         "pr",
         "an older one",
-        serde_json::json!({"merged": true, "state": "closed", "head": {"ref": "feature/PAY-231-backoff"}}),
+        serde_json::json!({"merged": true, "state": "closed", "head": {"ref": "feature/PAY-231-backoff"}, "base": {"ref": "main"}}),
     )
     .await;
     let id = queued(&pool, new_pull_request()).await;
@@ -266,7 +266,59 @@ async fn a_new_pull_request_is_linked_once_it_is_mirrored_open_on_its_head() {
         PR,
         "pr",
         "PAY-231: Retry failed SEPA payouts",
-        serde_json::json!({"merged": false, "state": "open", "head": {"ref": "feature/PAY-231-backoff"}}),
+        serde_json::json!({"merged": false, "state": "open", "head": {"ref": "feature/PAY-231-backoff"}, "base": {"ref": "main"}}),
+    )
+    .await;
+    assert_eq!(
+        link_on_arrival(&pool, &declarations(), id, TICKET)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some(PR)
+    );
+    assert_eq!(reached(&pool).await, vec![PR.to_owned()]);
+}
+
+/// A sent `CreatePullRequest` whose receipt named nothing is found by its head
+/// **and base** (#1952): a colleague's pull request open from the same head
+/// into a release branch is not this write's, and is not linked; the one into
+/// the write's own base is.
+#[tokio::test]
+async fn a_new_pull_request_the_receipt_did_not_name_is_not_one_into_another_base() {
+    let pool = corpus("arrival_pr_other_base").await;
+    item(
+        &pool,
+        "gitea:tidewater/payout-service#149",
+        "pr",
+        "PAY-231: backport to release/2026.08",
+        serde_json::json!({
+            "merged": false, "state": "open",
+            "head": {"ref": "feature/PAY-231-backoff"}, "base": {"ref": "release/2026.08"}
+        }),
+    )
+    .await;
+    let id = queued(&pool, new_pull_request()).await;
+    knobas_core::write_queue::sent(&pool, id, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        link_on_arrival(&pool, &declarations(), id, TICKET)
+            .await
+            .unwrap(),
+        None,
+        "a pull request into another base was linked as this write's"
+    );
+    assert!(reached(&pool).await.is_empty());
+
+    item(
+        &pool,
+        PR,
+        "pr",
+        "PAY-231: Retry failed SEPA payouts",
+        serde_json::json!({
+            "merged": false, "state": "open",
+            "head": {"ref": "feature/PAY-231-backoff"}, "base": {"ref": "main"}
+        }),
     )
     .await;
     assert_eq!(

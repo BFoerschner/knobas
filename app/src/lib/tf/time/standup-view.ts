@@ -156,8 +156,9 @@ function noteOf(text: string, attendees: readonly string[]): [string, string] | 
  * The tickets a protocol's links already name for its action items (#1433):
  * a link whose other end is a ticket, not withdrawn, titled exactly as the
  * item's words. That is the match the backend made when it drew the link
- * (`standup.rs`' `ticket_titled`): the create titles the ticket with the
- * item's words, trimmed, and the link is drawn to the ticket so titled.
+ * (`sources::write_queue::ticket_filed`, where the source named no key): the
+ * create titles the ticket with the item's words, trimmed, and the link is
+ * drawn to the ticket so titled.
  */
 export function itemTickets(
   links: readonly LinkEntry[],

@@ -1180,6 +1180,66 @@ async fn an_action_item_whose_create_named_no_key_is_found_by_its_title() {
     assert!(filed.linked);
 }
 
+/// **#1958: a create that named no key is found by one title rule**, the one
+/// a run's *Create ticket* is found by (`sources::write_queue::ticket_filed`):
+/// a ticket of its title the source last changed before the create was queued
+/// is somebody else's. So an older sibling of the same summary is neither
+/// named nor linked while the create's own ticket is on its way, whichever of
+/// the protocol's read and the end of a sync asks first; the ticket the create
+/// filed is, once a sync brings it in.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_action_item_whose_create_named_no_key_is_not_linked_to_an_older_ticket_of_its_title() {
+    let harness = Harness::new("protocol_action_item_unnamed_sibling").await;
+    let mut sibling = ticket_item("PAY-1000", "Ask Ines about the SEPA retry");
+    sibling.updated_at = Some(chrono::Utc::now() - chrono::Duration::days(1));
+    harness.mirror(sibling);
+    harness.sync(TRACKER).await;
+    {
+        let mut log = harness.log();
+        log.receiptless = true;
+        log.late = true;
+    }
+    let opened = harness.open().await;
+
+    let filed = create_action_item_ticket_inner(
+        &harness.state,
+        &opened.note_id,
+        &format!("{TRACKER}:PAY"),
+        "Task",
+        "Ask Ines about the SEPA retry",
+        "",
+    )
+    .await
+    .expect("the ticket is filed");
+    assert_eq!(
+        (filed.state, filed.ticket_entity_id.as_deref(), filed.linked),
+        (WriteState::Sent, None, false),
+        "the create's answer named PAY-1000, a ticket filed the day before"
+    );
+    let asked = action_item_ticket_inner(harness.pool(), &opened.note_id, filed.write_id)
+        .await
+        .expect("the ticket read answers");
+    assert_eq!(
+        asked.ticket_entity_id, None,
+        "the read named PAY-1000, a ticket filed the day before"
+    );
+    assert!(
+        harness.related_tickets(&opened.note_id).await.is_empty(),
+        "the protocol was linked to an older ticket of its title"
+    );
+
+    harness.mirror(ticket_item("PAY-999", "Ask Ines about the SEPA retry"));
+    harness.sync(TRACKER).await;
+    let asked = action_item_ticket_inner(harness.pool(), &opened.note_id, filed.write_id)
+        .await
+        .expect("the ticket read answers");
+    assert_eq!(asked.ticket_entity_id.as_deref(), Some("tracker:PAY-999"));
+    assert_eq!(
+        harness.related_tickets(&opened.note_id).await,
+        ["tracker:PAY-999"]
+    );
+}
+
 /// **#1951: a ticket the post-write sync does not bring in is linked by the
 /// sync that does**, with no panel open and no read of the protocol: the
 /// create holds the note as the link it owes, and the end of every sync of
