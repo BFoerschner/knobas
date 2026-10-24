@@ -46,15 +46,27 @@ if (op === "add" && !url) die("add needs a url");
 // websocket-only client outright.
 const socket = io(KUMA_URL, { reconnection: false, timeout: 20000 });
 
+// The guard on every callback and push below (#1961): KUMA_WAIT_S, whole
+// seconds, 120 by default. A loaded machine answers slowly, and the old 30 s
+// per event (5 s for the login's dockerHostList) failed seeds with nothing
+// wrong in Kuma. A socket Kuma drops fails the wait at once, so the guard
+// costs a real fault nothing.
+const WAIT_S = process.env.KUMA_WAIT_S || "120";
+if (!/^[1-9][0-9]*$/.test(WAIT_S)) {
+  console.error(`kuma-monitor: FAILED: KUMA_WAIT_S must be a whole number of seconds, got '${WAIT_S}'`);
+  process.exit(2);
+}
+const WAIT_MS = Number(WAIT_S) * 1000;
+
 const call = (event, ...args) =>
-  new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`${event}: no callback within 30s`)), 30000);
+  new Promise((resolve) => {
+    const t = setTimeout(() => die(`${event}: no callback within ${WAIT_S} s (KUMA_WAIT_S)`), WAIT_MS);
     socket.emit(event, ...args, (res) => { clearTimeout(t); resolve(res); });
   });
 
 const listen = (event, trigger) =>
   new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`${event}: not pushed within 30s`)), 30000);
+    const t = setTimeout(() => die(`${event}: not pushed within ${WAIT_S} s (KUMA_WAIT_S)`), WAIT_MS);
     socket.once(event, (payload) => { clearTimeout(t); resolve(payload); });
     trigger().catch(reject);
   });
@@ -69,6 +81,11 @@ await new Promise((resolve, reject) => {
   socket.once("connect_error", (e) => reject(new Error(`cannot reach ${KUMA_URL}: ${e.message}`)));
 }).catch((e) => die(e.message));
 log("connected to", KUMA_URL);
+// Every wait below ends here if Kuma drops the socket; only this script's own
+// `socket.disconnect()` at the end is not a failure.
+socket.on("disconnect", (reason) => {
+  if (reason !== "io client disconnect") die(`Kuma closed the connection (${reason})`);
+});
 
 if (await call("needSetup")) die("this Kuma has no admin account yet -- run ./seed-kuma.sh first");
 // Kuma 2.5.3 allows twenty logins a minute across every client

@@ -81,9 +81,13 @@ fi
 # name, and an unset variable reads there as "did not authenticate", so a
 # rename on this side alone re-mints on every run and still passes a single
 # `just kuma-live` (issue #554). Rename both halves or neither.
+#
+# KUMA_WAIT_S is the guard on each of the seed's socket waits (kuma-seed.mjs,
+# #1961); unset here, it goes in empty and the seed takes its own default.
 out=$(docker compose --env-file images.env --profile seed run --rm -T \
         -e KNOBAS_KEY_AUTHENTICATED="$KEY_AUTHENTICATED" \
         -e KNOBAS_KEY_NAME="$KEY_NAME" \
+        -e KUMA_WAIT_S="${KUMA_WAIT_S:-}" \
         kuma-seed)
 
 case "$out" in

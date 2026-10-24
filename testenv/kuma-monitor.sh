@@ -27,7 +27,9 @@ case "${1:-}" in
     echo "usage: ./kuma-monitor.sh add <name> <url> | delete <name>" >&2; exit 2 ;;
 esac
 
-docker compose --env-file images.env --profile seed run --rm -T kuma-seed sh -c '
+# KUMA_WAIT_S is the guard on each socket wait (kuma-monitor.mjs, #1961);
+# unset here, it goes in empty and the helper takes its own default.
+docker compose --env-file images.env --profile seed run --rm -T -e KUMA_WAIT_S="${KUMA_WAIT_S:-}" kuma-seed sh -c '
   mkdir -p /tmp/k &&
   cp /seed/kuma-monitor.mjs /tmp/k/ &&
   npm --prefix /tmp/k i --no-save --silent socket.io-client@4 &&
