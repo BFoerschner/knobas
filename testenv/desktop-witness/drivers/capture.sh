@@ -113,11 +113,12 @@ wait_until() {
     local what=$1
     shift
     local polled=0
+    seen=
     witness_poll "$pid" "$SETTLE_SECONDS" "$@" || polled=$?
     case $polled in
     0) return 0 ;;
-    3) die "$what: knobas (pid $pid) exited while this waited" ;;
-    *) die "$what (waited ${SETTLE_SECONDS} s, KNOBAS_WITNESS_WAIT_S)" ;;
+    3) die "$what: knobas (pid $pid) exited while this waited${seen:+; last seen: $seen}" ;;
+    *) die "$what (waited ${SETTLE_SECONDS} s, KNOBAS_WITNESS_WAIT_S)${seen:+; last seen: $seen}" ;;
     esac
 }
 
@@ -131,10 +132,16 @@ count_of() {
 }
 present() { local n; n=$(count_of "$1"); [ "$n" != x ] && [ "$n" -gt 0 ]; }
 absent() { [ "$(count_of "$1")" = 0 ]; }
-exactly_one() { [ "$(count_of "$1")" = 1 ]; }
+# Keeps the count it read in `seen`, which `wait_until` names when it runs out.
+exactly_one() {
+    local n
+    n=$(count_of "$1")
+    seen="'$1' counted $n"
+    [ "$n" = 1 ]
+}
 
 press_when() {
-    wait_until "no single '$1' (count: $(count_of "$1"))" exactly_one "$1"
+    wait_until "no single '$1'" exactly_one "$1"
     "$ax" press "$pid" "$1" || die "could not press '$1'"
 }
 

@@ -89,9 +89,12 @@ listens() { # listens <pid>
   command -v lsof >/dev/null || return 0
   lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | grep -qx "$1"
 }
+# One request, printing curl's complaint when it fails: `up` names it when the
+# responder never answers.
+probe() { curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:$PORT/" 2>&1; }
 # Quiet on failure: "not answering" is the normal, expected answer here (it is
 # how `down` confirms the release), not something to print a curl error about.
-answers() { curl -fs -o /dev/null --max-time 3 "http://127.0.0.1:$PORT/" 2>/dev/null; }
+answers() { probe >/dev/null; }
 
 up() {
   if alive && answers; then say "up (pid $(cat "$PIDFILE"), 127.0.0.1:$PORT)"; return 0; fi
@@ -121,7 +124,7 @@ up() {
   # somebody else's" -- so `up` would then refuse the port and `down` would
   # call it already down, and nothing here could ever release it again.
   from=$SECONDS
-  until last=$(curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:$PORT/" 2>&1); do
+  until last=$(probe); do
     kill -0 "$(cat "$PIDFILE")" 2>/dev/null || { rm -f "$PIDFILE"; die "responder exited before it answered (is $PORT taken?); last seen: ${last:-no answer}"; }
     [ $((SECONDS - from)) -lt "$WAIT_S" ] || { kill "$(cat "$PIDFILE")" 2>/dev/null || true; rm -f "$PIDFILE"; die "did not answer on 127.0.0.1:$PORT within $WAIT_S s (KNOBAS_CANARY_WAIT_S); last seen: ${last:-no answer}"; }
     sleep 0.5

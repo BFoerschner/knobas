@@ -60,7 +60,7 @@ if [ "$mode" = "--demo-beside" ]; then
   "$bin" --demo >"$tmp/second.log" 2>&1 & second_pid=$!
   # The demo profile ignores KNOBAS_DB_URL and would provision its own scratch
   # postgres; it is killed on the cleanup trap right after it reaches setup.
-  poll "the demo launch did not reach its own bring-up (stopped by the guard?)" "$second_pid" demo_up
+  poll "the demo launch did not reach its own bring-up (refused as a second instance?)" "$second_pid" demo_up
   kill -0 "$second_pid" 2>/dev/null || fail "demo launch exited"
   echo "PASS: --demo ran beside the normal instance (reached its own bring-up, still running)"
   exit 0

@@ -411,7 +411,8 @@ rm -rf "$records"
 #
 # Every wait on the app polls for the state it needs under one guard sized past
 # a loaded machine, and fails at once when the app has exited. The drivers,
-# the harness's launch and live-shot's steps all wait through these two.
+# and live-shot's steps wait through both; the harness reads the guard for its
+# own wait on the app's process.
 
 check "the guard defaults to 60 s" 60 "$(env -u KNOBAS_WITNESS_WAIT_S bash -c '. ./desktop-witness-lib.sh; witness_guard')"
 check "the guard takes whole seconds from KNOBAS_WITNESS_WAIT_S" 7 \

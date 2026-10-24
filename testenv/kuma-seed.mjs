@@ -82,16 +82,10 @@ const die = (msg) => { log("FAILED:", msg); process.exit(1); };
 // from a gitignored hosts.env; the servers are gone and so is the expansion.)
 const monitors = JSON.parse(readFileSync(new URL("monitors.json", import.meta.url), "utf8"));
 
-// Transports are left to negotiation (polling, then an upgrade) rather than
-// pinned to "websocket". Kuma 2.5.3 refuses a websocket-only client outright
-// -- `connect_error: websocket error` -- while the default order connects and
-// upgrades cleanly. This is the seed's only connection, so the upgrade costs
-// nothing worth pinning for.
-const socket = io(KUMA_URL, { reconnection: false, timeout: 20000 });
-
-// The guard on every callback and push below (#1961): KUMA_WAIT_S, whole
-// seconds, 120 by default. A loaded machine answers slowly, and the old 30 s
-// per event (5 s for the login's dockerHostList) failed seeds with nothing
+// The guard on the connection and on every callback and push below (#1961):
+// KUMA_WAIT_S, whole seconds, 120 by default. A loaded machine answers slowly,
+// and the old fixed 20 s to connect, 30 s per event and 5 s for the login's
+// dockerHostList failed seeds with nothing
 // wrong in Kuma. A socket Kuma drops fails the wait at once, so the guard
 // costs a real fault nothing.
 const WAIT_S = process.env.KUMA_WAIT_S || "120";
@@ -100,6 +94,13 @@ if (!/^[1-9][0-9]*$/.test(WAIT_S)) {
   process.exit(2);
 }
 const WAIT_MS = Number(WAIT_S) * 1000;
+
+// Transports are left to negotiation (polling, then an upgrade) rather than
+// pinned to "websocket". Kuma 2.5.3 refuses a websocket-only client outright
+// -- `connect_error: websocket error` -- while the default order connects and
+// upgrades cleanly. This is the seed's only connection, so the upgrade costs
+// nothing worth pinning for.
+const socket = io(KUMA_URL, { reconnection: false, timeout: WAIT_MS });
 
 /** Emit an event and resolve with its callback argument. */
 const call = (event, ...args) =>
@@ -129,7 +130,7 @@ socket.on("dockerHostList", (list) => { dockerHosts = list; });
 
 await new Promise((resolve, reject) => {
   socket.once("connect", resolve);
-  socket.once("connect_error", (e) => reject(new Error(`cannot reach ${KUMA_URL}: ${e.message}`)));
+  socket.once("connect_error", (e) => reject(new Error(`cannot reach ${KUMA_URL}: ${e.message} (KUMA_WAIT_S is ${WAIT_S} s)`)));
 }).catch((e) => die(e.message));
 log("connected to", KUMA_URL);
 // Every wait below ends here if Kuma drops the socket; only this script's own

@@ -113,11 +113,12 @@ wait_until() {
     local what=$1
     shift
     local polled=0
+    seen=
     witness_poll "$pid" "$SETTLE_SECONDS" "$@" || polled=$?
     case $polled in
     0) return 0 ;;
-    3) die "$what: knobas (pid $pid) exited while this waited" ;;
-    *) die "$what (waited ${SETTLE_SECONDS} s, KNOBAS_WITNESS_WAIT_S)" ;;
+    3) die "$what: knobas (pid $pid) exited while this waited${seen:+; last seen: $seen}" ;;
+    *) die "$what (waited ${SETTLE_SECONDS} s, KNOBAS_WITNESS_WAIT_S)${seen:+; last seen: $seen}" ;;
     esac
 }
 

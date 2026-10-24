@@ -340,9 +340,11 @@ wait_for_record() {
 # witness_guard
 #
 # The seconds a wait on the app runs before it fails: KNOBAS_WITNESS_WAIT_S,
-# 60 by default (#1961). One guard for every wait the harness, its drivers and
-# live-shot make on the app: its launch, a screen settling after a keystroke,
-# an element a step reaches for. A loaded machine (gates and other agents'
+# 60 by default (#1961). The guard on the harness's wait for the app's process
+# after `open`, on `ax activate`, and on every wait its drivers and live-shot
+# make on the app: a screen settling after a keystroke, an element a step
+# reaches for. (The harness's window and first draw keep WINDOW_TIMEOUT, 180 s,
+# which covers a first-run PostgreSQL provision.) A loaded machine (gates and other agents'
 # builds) draws a screen slowly, and the old fixed budgets of 5 to 10 s failed
 # runs with nothing wrong in the app; the guard is sized past that, and an app
 # that has exited fails a wait at once (`witness_poll`), so the guard costs a
