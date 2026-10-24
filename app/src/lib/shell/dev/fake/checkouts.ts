@@ -405,7 +405,6 @@ export function attach(installed: FakeBridge): void {
   bridge = installed;
 }
 
-// Back to the seed after every test (#2004, `dev/fake-seed.ts`).
 const apps = seedOf(fakeApps);
 onFakeReset(() => {
   for (const timer of fakeCloning.values()) clearInterval(timer);

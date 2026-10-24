@@ -97,7 +97,6 @@ export function seed(params: URLSearchParams): void {
   seedCaptureShortcut(params);
 }
 
-// Back to the seed after every test (#2004, `dev/fake-seed.ts`).
 onFakeReset(() => {
   fakeShortcutStored = null;
   fakeShortcutRefused = false;

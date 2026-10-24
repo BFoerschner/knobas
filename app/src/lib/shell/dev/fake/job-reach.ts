@@ -274,7 +274,6 @@ export function handlers(): Handlers {
   };
 }
 
-// Back to the seed after every test (#2004, `dev/fake-seed.ts`).
 onFakeReset(() => {
   parentLinks = true;
 });
