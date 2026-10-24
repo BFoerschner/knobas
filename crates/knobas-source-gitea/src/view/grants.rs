@@ -126,8 +126,15 @@ pub(super) const READ_ORGANIZATION: &str = "read:organization";
 /// reads (#2042). A view draws what it could read and says this where the
 /// rest would be.
 pub(super) fn unread(error: &SourceError, what: &str, scope: &str) -> Option<String> {
-    matches!(error, SourceError::Unauthorized { status: Some(403) })
+    is_scope_refusal(error)
         .then(|| format!("This token cannot read {what}: it lacks the {scope} scope"))
+}
+
+/// Gitea's refusal of a request for the token's scope: `knobas-http` reads
+/// Gitea's scope sentence as `Unauthorized` with its 403
+/// (`client::forbidden_refusal`, #722).
+fn is_scope_refusal(error: &SourceError) -> bool {
+    matches!(error, SourceError::Unauthorized { status: Some(403) })
 }
 
 /// What one probe learned.
@@ -202,12 +209,12 @@ async fn probe(
     refusal_of(category, answer.err().as_ref())
 }
 
-/// What a probe's failure says. `knobas-http` reads Gitea's scope sentence as
-/// `Unauthorized` with its 403 (`client::forbidden_refusal`, #722) and any
-/// other 403 as a refusal carrying Gitea's sentence.
+/// What a probe's failure says: the scope refusal ([`is_scope_refusal`]), or
+/// any other 403, which `knobas-http` reads as a refusal carrying Gitea's
+/// sentence.
 fn refusal_of(category: Category, failure: Option<&SourceError>) -> Option<Refusal> {
     match failure? {
-        SourceError::Unauthorized { status: Some(403) } => Some(Refusal::Scope),
+        scope if is_scope_refusal(scope) => Some(Refusal::Scope),
         other if other.status() == Some(403) && category == Category::Repository => {
             Some(Refusal::Account)
         }

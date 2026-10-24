@@ -7,10 +7,11 @@
 //! [`repo`]'s (#663).
 //!
 //! Every read here is live and nothing is stored (rule 1). A refusal is the
-//! error it maps to, so the detail says *Showing the mirror* and why, except
-//! where Gitea refuses one part of a view for the token's scope and serves
-//! the rest: that part says so and names the scope ([`grants::unread`],
-//! #2042).
+//! error it maps to, so the detail says *Showing the mirror* and why. A few
+//! parts of a view are drawn without what they could not read, saying so: a
+//! pull request's checks (#710) and labels (#1194) on any failure, and its
+//! comments where Gitea refuses the token's scope for them, naming it
+//! ([`grants::unread`], #2042).
 
 use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
@@ -247,23 +248,6 @@ fn fact(label: &str, value: String) -> Fact {
         label: label.to_owned(),
         value,
         tone: None,
-    }
-}
-
-/// One muted line standing where something could not be read, saying why:
-/// a pull request's checks (#710) or its comments (#2042).
-fn muted_line(title: String) -> Block {
-    Block::Entities {
-        title: None,
-        rows: vec![ViewRow {
-            entity_id: None,
-            title,
-            meta: None,
-            tone: Some(knobas_source::view::Tone::Muted),
-            chip: None,
-            url: None,
-            commit: None,
-        }],
     }
 }
 

@@ -336,7 +336,7 @@ fn conversation(reviews: &[Review], comments: &Result<Vec<PullComment>, String>)
         (instant.is_none(), instant)
     });
     let mut blocks = Vec::with_capacity(said.len() * 2 + 1);
-    blocks.extend(unread.map(|reason| super::muted_line(reason.clone())));
+    blocks.extend(unread.map(|reason| super::rows::muted_line(reason.clone())));
     for entry in &said {
         let who = login(entry.user).unwrap_or_else(|| "someone".to_owned());
         let when = entry.at.map(when_of).unwrap_or_default();

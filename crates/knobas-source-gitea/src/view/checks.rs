@@ -64,7 +64,7 @@ pub(super) fn block_of(read: &Result<Vec<Status>, SourceError>) -> Option<Block>
 /// untitled list of one muted row, the shape a list's own muted note has
 /// (#678), so nothing new crosses to the shell.
 fn unread(error: &SourceError) -> Block {
-    super::muted_line(format!("Checks could not be read: {error}"))
+    super::rows::muted_line(format!("Checks could not be read: {error}"))
 }
 
 /// The statuses as rows, failing first; `None` for none.
