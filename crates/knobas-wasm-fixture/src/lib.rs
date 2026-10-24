@@ -60,6 +60,10 @@
 //!   host's clock before it answers: a component slow to describe itself,
 //!   for the callers that build one off the runtime (#1705). The descriptor
 //!   read at load is of an empty config, so it never waits.
+//! * **`"performs_undeclared": true`** is a guest that declares fewer
+//!   writes than it implements: `write` performs every op it is handed,
+//!   declared or not, and answers a receipt naming it. What the host's own
+//!   refusal of an undeclared op is witnessed with (#1950).
 //! * **`translate-query`** (#1208) reads a payload's `"survey_query"`
 //!   string as one `label` condition and leaves nothing out; a payload
 //!   without one it does not translate (`none`).
@@ -178,6 +182,8 @@ pub struct Adapter {
     log_flood: u64,
     /// How long `descriptor` waits before it answers, in milliseconds.
     descriptor_dwell_ms: u64,
+    /// Whether `write` performs every op, declared or not (#1950).
+    performs_undeclared: bool,
 }
 
 /// The size of one message of a log flood.
@@ -218,6 +224,7 @@ fn read_fault(config: &str) -> Result<Fault, String> {
             "download_mib",
             "log_flood",
             "descriptor_dwell_ms",
+            "performs_undeclared",
             "mirror",
             "username",
         ]
@@ -399,6 +406,10 @@ impl GuestAdapter for Adapter {
             download_mib: read("download_mib").unwrap_or(1),
             log_flood: read("log_flood").unwrap_or(0),
             descriptor_dwell_ms: read("descriptor_dwell_ms").unwrap_or(0),
+            performs_undeclared: config
+                .as_ref()
+                .and_then(|c| c.get("performs_undeclared")?.as_bool())
+                .unwrap_or(false),
             received: serde_json::json!({
                 "id": instance.id,
                 "kind": instance.kind,
@@ -455,6 +466,7 @@ impl GuestAdapter for Adapter {
                     "download_mib": { "type": "integer" },
                     "log_flood": { "type": "integer" },
                     "descriptor_dwell_ms": { "type": "integer" },
+                    "performs_undeclared": { "type": "boolean" },
                     "mirror": { "type": "string" },
                     "username": { "type": "string" },
                 },
@@ -539,7 +551,8 @@ impl GuestAdapter for Adapter {
     }
 
     /// [`BOOK_REPAIR`] on a survey answers a receipt and changes nothing;
-    /// every other write is refused with a protocol error naming it.
+    /// every other write is refused with a protocol error naming it, unless
+    /// `"performs_undeclared"` makes it perform them all.
     fn write(&self, op: String) -> Result<WriteReceipt, SourceError> {
         let refuse = || {
             protocol(format!(
@@ -547,6 +560,11 @@ impl GuestAdapter for Adapter {
             ))
         };
         let parsed: WriteOp = serde_json::from_str(&op).map_err(|_| refuse())?;
+        if self.performs_undeclared {
+            return Ok(WriteReceipt {
+                remote_id: Some(format!("performed {}", parsed.identifier())),
+            });
+        }
         match parsed {
             WriteOp::SourceAction { entity, id, .. }
                 if id == BOOK_REPAIR
