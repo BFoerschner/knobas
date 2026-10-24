@@ -7,9 +7,11 @@
 //! first: once [`Background::close`] has begun, nothing new is spawned, and a
 //! write queued after that stays pending for the next start's tick. Then the
 //! ones running are awaited for a grace period, and only then is the pool
-//! closed. A send that outlives the grace is aborted: that is ADR-0012's
-//! window, a write the source may have received while its row still says
-//! pending.
+//! closed. A send that outlives the grace is aborted, and held as one the
+//! source may have received (#1932): the quit cut it before an answer came,
+//! so the reader checks the source rather than the next start sending it
+//! again. A command that waits on a flush runs it here too, for the same
+//! wait.
 
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -139,6 +141,10 @@ impl Background {
                     "a background task did not finish within the grace period: aborting it"
                 );
                 tasks.abort_all();
+                // Until each is gone: an aborted task's future is dropped on
+                // its own worker, and a send it cut is kept as it drops
+                // (#1932), which the quit reads next.
+                while tasks.join_next().await.is_some() {}
             }
         }
     }

@@ -1076,3 +1076,74 @@ async fn next_start(
     .await
     .expect("the next start's scheduler")
 }
+
+/// #1932's ruling on a command made once the quit has begun: it answers as it
+/// did before the flushes moved into the background set. The set takes
+/// nothing then, so the flush runs where the command is, and it sends nothing
+/// (#1924): an *Edit and send* keeps the reader's edit on a pending row for
+/// the next start, and a *Flush now* answers that nothing went wrong.
+///
+/// The quit is held open by a background send at the source, on an hour's
+/// grace. A command that sent would have reached the source before it
+/// answered, so the count read after both answers says neither did.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_made_during_the_quit_changes_its_row_and_sends_nothing() {
+    let connector = knobas_db::test_util::scratch_database("background_write_during_quit").await;
+    let Fixture {
+        state, wrote, gate, ..
+    } = fixture_on(connector.clone(), HELD_OFF_PATIENT_QUIT).await;
+    let app = app_for(&state);
+    let first = at_the_source(Path::InBackground, &state, app.handle(), &wrote).await;
+
+    let other = "gitea:knobas/app#8";
+    let op: WriteOp = serde_json::from_value(json!({
+        "Comment": { "entity": other, "body": "as queued" }
+    }))
+    .unwrap();
+    let held = knobas_sync::write_queue::queue(state.scheduler.deps(), SOURCE, op)
+        .await
+        .expect("the second write is queued");
+    knobas_core::write_queue::hold(&state.pool, held.id, held.target_snapshot.clone())
+        .await
+        .expect("the hold is written")
+        .expect("the write was pending");
+
+    let (quitting, quit_over) = quit(&app);
+    quit_begun(&state).await;
+    knobas_app::commands::sources::amend_write(
+        app.handle().clone(),
+        held.id,
+        json!({ "Comment": { "entity": other, "body": "as edited" } }),
+    )
+    .await
+    .expect("an edit during the quit is kept");
+    knobas_app::commands::sources::flush_writes(app.handle().clone(), None)
+        .await
+        .expect("a flush during the quit answers");
+    assert_eq!(
+        *wrote.entered.lock().unwrap(),
+        1,
+        "a command made during the quit sent a write"
+    );
+
+    gate.add_permits(1);
+    quit_over
+        .recv_timeout(PATIENCE)
+        .expect("the quit waited out its grace");
+    quitting.join().expect("the quit finishes");
+
+    let reader = connector.pool(1).await.unwrap();
+    let row = |id: i64| {
+        let reader = reader.clone();
+        async move {
+            knobas_core::write_queue::get(&reader, id)
+                .await
+                .unwrap()
+                .expect("the row is there")
+        }
+    };
+    assert_eq!(row(first).await.state, WriteState::Sent);
+    let edited = row(held.id).await;
+    assert_eq!(edited.state, WriteState::Pending, "waits for the next start");
+    assert_eq!(edited.payload["Comment"]["body"], json!("as edited"));
+}
