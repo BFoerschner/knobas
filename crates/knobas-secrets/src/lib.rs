@@ -197,7 +197,14 @@ pub enum SecretError {
     /// A sync and a queued write both read it as passing on its own: the sync
     /// backs off, and the write waits `unreachable` on the same ladder rather
     /// than for a person (#1741).
-    #[error("keychain: {0}")]
+    ///
+    /// **Prints the store's own words and nothing else**, as
+    /// [`Unavailable`](SecretError::Unavailable) and
+    /// [`NotFound`](SecretError::NotFound) do. Saying it was the keychain is
+    /// the wrapper's job (`SourcesError::Secret`, the sync's `RunFailure`, the
+    /// importer's `IpcError`): one owner for the `keychain:` prefix, or a
+    /// reader sees it twice (#1946).
+    #[error("{0}")]
     Backend(String),
     /// The store is there but refused access to it.
     ///

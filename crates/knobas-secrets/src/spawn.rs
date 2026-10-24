@@ -15,7 +15,7 @@ fn joined<T>(
     match result {
         Ok(inner) => inner,
         Err(join) => Err(SecretError::Backend(format!(
-            "keychain task failed: {join}"
+            "the store's blocking task failed: {join}"
         ))),
     }
 }

@@ -4134,7 +4134,7 @@ pub async fn token_for(
     }
     let stored = knobas_secrets::spawn::get(secrets, &KeychainAccount::importer(producer_id))
         .await
-        .map_err(IpcError::internal)?;
+        .map_err(in_the_keychain)?;
     Ok(stored.map(|secret| Token {
         value: secret.value,
         typed: false,
@@ -4170,9 +4170,15 @@ pub async fn remember<T>(
             knobas_secrets::Secret::just(knobas_source::AuthMethod::ApiToken, token.value),
         )
         .await
-        .map_err(IpcError::internal)?;
+        .map_err(in_the_keychain)?;
     }
     Ok(produced)
+}
+
+/// A keychain fault as the importer answers it: the store's own words, said
+/// to be the keychain's (#1946).
+fn in_the_keychain(error: knobas_secrets::SecretError) -> IpcError {
+    IpcError::internal(format!("keychain: {error}"))
 }
 
 impl Token {
@@ -6508,6 +6514,52 @@ mod tests {
 
     fn under(store: &Arc<dyn SecretStore>, account: &KeychainAccount) -> Option<String> {
         store.get(account).unwrap().map(|secret| secret.value)
+    }
+
+    /// A keychain that will not open, as a locked macOS keychain answers.
+    struct Locked;
+
+    impl SecretStore for Locked {
+        fn get(
+            &self,
+            _account: &KeychainAccount,
+        ) -> Result<Option<knobas_secrets::Secret>, knobas_secrets::SecretError> {
+            Err(knobas_secrets::SecretError::Backend(
+                "User interaction is not allowed.".to_owned(),
+            ))
+        }
+        fn put(
+            &self,
+            _account: &KeychainAccount,
+            _secret: &knobas_secrets::Secret,
+        ) -> Result<(), knobas_secrets::SecretError> {
+            Err(knobas_secrets::SecretError::Backend(
+                "User interaction is not allowed.".to_owned(),
+            ))
+        }
+        fn delete(&self, _account: &KeychainAccount) -> Result<(), knobas_secrets::SecretError> {
+            Ok(())
+        }
+    }
+
+    /// #1946: a locked keychain reads as the keychain's, once, whether the
+    /// importer was reading its token or keeping a typed one.
+    #[tokio::test]
+    async fn a_locked_keychain_names_the_keychain_once() {
+        let locked: Arc<dyn SecretStore> = Arc::new(Locked);
+        let read = token_for(&locked, HCLOUD_PRODUCER, None)
+            .await
+            .expect_err("the keychain would not open");
+        assert_eq!(read.message, "keychain: User interaction is not allowed.");
+
+        let typed = token_for(&locked, HCLOUD_PRODUCER, Some("typed".to_owned()))
+            .await
+            .unwrap()
+            .expect("a typed token needs no keychain");
+        let kept = remember(&locked, HCLOUD_PRODUCER, typed, Ok(()))
+            .await
+            .expect_err("the keychain would not keep it");
+        assert_eq!(kept.message, "keychain: User interaction is not allowed.");
     }
 
     /// **A token is asked for only when there is none**, and a stored one is
