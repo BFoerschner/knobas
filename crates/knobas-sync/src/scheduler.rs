@@ -212,7 +212,7 @@ impl Quit {
     }
 
     /// Keep `write` as one the quit cut on the wire.
-    pub(crate) fn cut(&self, write: knobas_core::write_queue::QueuedWrite) {
+    pub(crate) fn keep_cut(&self, write: knobas_core::write_queue::QueuedWrite) {
         self.cut
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

@@ -541,8 +541,7 @@ pub async fn flush_now(
     state: &crate::sources::SourcesState,
     source_id: Option<String>,
 ) -> Result<(), IpcError> {
-    let scheduler = state.scheduler.clone();
-    awaited(&state.scheduler, async move {
+    in_the_set(&state.scheduler, |scheduler| async move {
         knobas_sync::write_queue::flush_now(scheduler.deps(), source_id.as_deref())
             .await
             .map_err(|error| match source_id {
@@ -559,6 +558,7 @@ pub async fn flush_now(
 /// pool closes, and a write still at the source when the grace ends is cut
 /// and held as one the source may have. Outside the set the quit did not
 /// wait, the pool closed under the write, and the next start sent it again.
+/// `flush` is handed a copy of the scheduler to run on.
 ///
 /// **Once the quit has begun** the set takes nothing, and `flush` runs here
 /// instead, outside it. That is safe for a flush and nothing else: every
@@ -569,14 +569,16 @@ pub async fn flush_now(
 ///
 /// # Errors
 ///
-/// What `flush` answers, or `not_ready` if the quit's grace ran out while it
-/// was still sending.
-async fn awaited<T, F>(scheduler: &Scheduler, flush: F) -> Result<T, IpcError>
+/// What `flush` answers; `not_ready` if the quit's grace ran out while it was
+/// still sending; `internal` if it ended without an answer otherwise (a
+/// panic).
+async fn in_the_set<F, Fut>(scheduler: &Scheduler, flush: F) -> Result<(), IpcError>
 where
-    F: std::future::Future<Output = Result<T, IpcError>> + Send + 'static,
-    T: Send + 'static,
+    F: FnOnce(Scheduler) -> Fut,
+    Fut: std::future::Future<Output = Result<(), IpcError>> + Send + 'static,
 {
     let (tell, answer) = tokio::sync::oneshot::channel();
+    let flush = flush(scheduler.clone());
     let task = async move {
         let _ = tell.send(flush.await);
     };
@@ -584,15 +586,19 @@ where
         task.await;
     }
     answer.await.unwrap_or_else(|_| {
-        Err(IpcError::not_ready(
-            "knobas quit while the write was at the source; it is held until \
-             you have checked the source",
-        ))
+        Err(if scheduler.is_shutting_down() {
+            IpcError::not_ready(
+                "knobas quit while the write was at the source; it is held until \
+                 you have checked the source",
+            )
+        } else {
+            IpcError::internal("the write's send ended without an answer")
+        })
     })
 }
 
 /// [`submit`]'s second half, and the worklog's awaited delivery's: [`deliver`]
-/// in the scheduler's background set, waited for there ([`awaited`], #1932).
+/// in the scheduler's background set, waited for there ([`in_the_set`], #1932).
 ///
 /// # Errors
 ///
@@ -604,7 +610,7 @@ pub(crate) async fn flush(
     write_id: i64,
 ) -> Result<(), IpcError> {
     let (task, source_id) = (state.clone(), source_id.to_owned());
-    awaited(&state.scheduler, async move {
+    in_the_set(&state.scheduler, move |_| async move {
         deliver(&task, &source_id, write_id).await
     })
     .await
@@ -612,8 +618,9 @@ pub(crate) async fn flush(
 
 /// Send the write's entity in queue order
 /// (`knobas_sync::write_queue::flush_entity_of`, #1797), and re-read the mirror
-/// if the write landed. Run in the background set by both callers: [`flush`],
-/// which waits for it, and [`spawn_send`], which does not.
+/// if the write landed. Both callers run it in the background set: [`flush`],
+/// which waits for it (and, once the quit has begun, runs it where it is),
+/// and [`spawn_send`], which does not wait.
 ///
 /// # Errors
 ///
@@ -782,9 +789,8 @@ pub async fn amend(
 
     // The amendment and its send, in the background set (#1932): the send is
     // one a person waits on, as *Send mine anyway*'s is.
-    let task = scheduler.clone();
-    awaited(scheduler, async move {
-        knobas_sync::write_queue::amend(task.deps(), id, op)
+    in_the_set(scheduler, |scheduler| async move {
+        knobas_sync::write_queue::amend(scheduler.deps(), id, op)
             .await
             .map_err(IpcError::internal)?
             .map(|_| ())
@@ -794,7 +800,7 @@ pub async fn amend(
 }
 
 /// *Send mine anyway* (story 13): release held write `id` and send it, in
-/// the scheduler's background set, waited for there ([`awaited`], #1932).
+/// the scheduler's background set, waited for there ([`in_the_set`], #1932).
 ///
 /// # Errors
 ///
@@ -802,9 +808,8 @@ pub async fn amend(
 /// or writes fail; `not_ready` if the quit's grace ran out while the write
 /// was at the source.
 pub async fn apply_anyway(scheduler: &Scheduler, id: i64) -> Result<(), IpcError> {
-    let task = scheduler.clone();
-    awaited(scheduler, async move {
-        knobas_sync::write_queue::apply_anyway(task.deps(), id)
+    in_the_set(scheduler, |scheduler| async move {
+        knobas_sync::write_queue::apply_anyway(scheduler.deps(), id)
             .await
             .map_err(IpcError::internal)?
             .map(|_| ())

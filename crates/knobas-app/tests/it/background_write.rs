@@ -835,9 +835,9 @@ async fn at_the_source(
         .expect("the block is written");
     }
 
-    let (state_, handle) = (state.clone(), handle.clone());
+    let (task_state, handle) = (state.clone(), handle.clone());
     tokio::spawn(async move {
-        let state = &state_;
+        let state = &task_state;
         // What each answers is not this test's: the quit may cut it short.
         let _ = match path {
             Path::FlushNow => knobas_app::commands::sources::flush_writes(handle, None).await,
@@ -901,6 +901,7 @@ fn quit(
     (quitting, quit_over)
 }
 
+/// Wait until the quit [`quit`] began has cancelled the scheduler.
 async fn quit_begun(state: &SourcesState) {
     tokio::time::timeout(PATIENCE, async {
         while !state.scheduler.is_shutting_down() {

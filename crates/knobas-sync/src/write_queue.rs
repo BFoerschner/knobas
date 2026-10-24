@@ -952,6 +952,12 @@ async fn unanswered(
 ///
 /// `write` is `None` for a write a second arrival changes nothing for
 /// (`resend_harmless`): pending is the right reading for it.
+///
+/// It is armed from before the call, so it cannot tell a request that left
+/// from one still waiting on knobas' own rate limit (#1729) or on its
+/// connection, nor a refusal whose record failed from a send with no answer.
+/// Each of those is held too: a check of the source finds nothing, and *Send
+/// again* sends it. Holding errs on the side ADR-0012 cannot.
 struct OnTheWire<'w> {
     quit: &'w crate::scheduler::Quit,
     write: Option<&'w QueuedWrite>,
@@ -969,13 +975,13 @@ impl Drop for OnTheWire<'_> {
         if let Some(write) = self.write.take()
             && self.quit.has_begun()
         {
-            self.quit.cut(write.clone());
+            self.quit.keep_cut(write.clone());
         }
     }
 }
 
 /// What a write the quit cut is held with, for the reader.
-const CUT: &str = "knobas quit while the write was at the source, before it answered";
+const CUT_DETAIL: &str = "knobas quit while the write was at the source, before it answered";
 
 /// Hold every write the quit cut on the wire (#1932), as one its source may
 /// have, so the next start does not send it again blind: what a send that got
@@ -984,7 +990,7 @@ const CUT: &str = "knobas quit while the write was at the source, before it answ
 /// row is then pending, and the next start sends it again.
 pub(crate) async fn hold_cut(deps: &SchedulerDeps) {
     for write in deps.quit.take_cut() {
-        if let Err(error) = unanswered(deps, &write, CUT).await {
+        if let Err(error) = unanswered(deps, &write, CUT_DETAIL).await {
             tracing::warn!(
                 write_id = write.id,
                 %error,
