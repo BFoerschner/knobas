@@ -233,6 +233,8 @@ interface FixtureRoute {
   url: string;
   visibility: "internal" | "public";
   properties: AssetProperty[];
+  /** The monitor names a create recorded on the route (#976), which the Monitors tab reads its create on its way by (#1959). */
+  monitors?: string[];
 }
 
 /**
@@ -943,8 +945,15 @@ function editRoute(args: Record<string, unknown>) {
       } else if (at === -1) route.properties.push({ key, label: key, value: edit.value as PropertyValue, custom: true });
       else route.properties[at]!.value = edit.value as PropertyValue;
     }
-    // `monitors` (#976) names a monitor the poll will attach; the fixture
-    // mirrors no monitor, so there is nothing to record.
+    // `monitors` (#976) names a monitor the poll will attach. The fixture
+    // mirrors no monitor, so the name only says which create is on its way
+    // to the route (#1959), duplicates dropped as on an asset.
+    else if (edit.field === "monitors") {
+      const known = (route.monitors ??= []);
+      for (const name of ((edit.added ?? []) as string[]).map((added) => added.trim())) {
+        if (name !== "" && !known.includes(name)) known.push(name);
+      }
+    }
   }
   return routeRow(route);
 }

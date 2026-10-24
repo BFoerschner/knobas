@@ -8,7 +8,9 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { AssetDetail, AssetEdit, MonitorRow, OpenAlert, RouteDetail, RouteEdit, UnmonitoredAsset } from "../../ipc/assets";
 import type { Reached } from "../../ipc/entity";
+import { EVENTS } from "../../ipc";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+import type { Hear } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import type { MonitorPorts } from "./TfMonitors.svelte";
@@ -55,6 +57,7 @@ const gap = (id: string, type_id: string, type_label: string, name: string): Unm
   environment: "prod",
   owner: "ops",
   url: null,
+  monitor_on_its_way: null,
 });
 const UNWATCHED = [
   gap("asset:site", "site", "Site", "hel1"),
@@ -85,6 +88,10 @@ let writes: WriteOpPayload[];
 let edits: [string, AssetEdit[]][];
 let routeEdits: [string, RouteEdit[]][];
 let acks: string[];
+/** The write follows the page holds, by write id: a test tells each what the queue says. */
+let heard: Map<number, Hear>;
+/** The page's `sync:state` listeners. */
+let synced: Set<(event: { payload: unknown }) => void>;
 
 beforeEach(() => {
   forgetFilters();
@@ -93,6 +100,8 @@ beforeEach(() => {
   edits = [];
   routeEdits = [];
   acks = [];
+  heard = new Map();
+  synced = new Set();
   target = document.createElement("div");
   document.body.appendChild(target);
 });
@@ -136,6 +145,17 @@ function ports(over: Partial<MonitorPorts> = {}): MonitorPorts {
     },
     jobReach: async (id): Promise<Reached[]> =>
       id === "jira:PAY-231" ? [{ entity_id: "asset:f", kind: "asset", step: "asset:f", origin: { kind: "own" } as never }] : [],
+    listen: async (event, handler) => {
+      if (event !== EVENTS.syncState) return () => {};
+      synced.add(handler);
+      return () => synced.delete(handler);
+    },
+    follower: () => ({
+      follow(id, hear) {
+        heard.set(id, hear);
+        return () => heard.delete(id);
+      },
+    }),
     ...over,
   };
 }
@@ -318,4 +338,123 @@ test("Monitors draws the roster as read and keeps no rows by source: the read na
 
   expect(rows()).toHaveLength(ROSTER.length + 1);
   expect(text(target.querySelector(".tf-tabs a"))).toBe(`Monitors ${ROSTER.length + 1}`);
+});
+
+// -- a create on its way (#1959) ----------------------------------------------
+
+const onItsWay = (id: number, state: QueuedWrite["state"], detail: string | null = null) =>
+  ({ id, state, detail, op: "create_monitor" }) as QueuedWrite;
+
+/** The unwatched list as the backend reads it, with `going` on pg-main's row: the create the queue holds for its name. */
+function withCreate(going: () => QueuedWrite | null): Pick<MonitorPorts, "unmonitoredAssets"> {
+  return {
+    unmonitoredAssets: async () => UNWATCHED.map((row) => (row.id === "asset:pg" ? { ...row, monitor_on_its_way: going() } : row)),
+  };
+}
+
+const lastCell = (tr: Element) => text([...tr.querySelectorAll("td")].at(-1)!);
+
+function syncEnds(source_id = "kuma") {
+  for (const handler of synced) handler({ payload: { source_id, running: false } });
+}
+
+test("after a reload, a create on its way draws Monitor queued on its row and offers no Create monitor there", async () => {
+  await draw(["unmonitored"], null, ports(withCreate(() => onItsWay(7, "pending"))));
+  const [pg, route] = rows();
+  expect(lastCell(pg!)).toBe("Monitor queued");
+  expect(button(pg!, "Create monitor")).toBeUndefined();
+  expect(button(route!, "Create monitor")).toBeDefined();
+});
+
+test("a create pressed now draws Monitor queued at once, before the re-read answers, and the re-read keeps it", async () => {
+  let going: QueuedWrite | null = null;
+  let reads = 0;
+  let answer: () => void = () => {};
+  const stand = ports({
+    unmonitoredAssets: async () => {
+      reads += 1;
+      if (reads > 1) await new Promise<void>((resolve) => (answer = resolve));
+      return UNWATCHED.map((row) => (row.id === "asset:pg" ? { ...row, monitor_on_its_way: going } : row));
+    },
+    submitWrite: async (payload) => {
+      writes.push(payload);
+      going = onItsWay(writes.length, "pending");
+      return going;
+    },
+  });
+  await draw(["unmonitored"], null, stand);
+  button(rows()[0]!, "Create monitor")!.click();
+  await settle();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => text(b) === "Create monitor")!.click();
+  await settle();
+  expect(reads).toBe(2);
+  expect(lastCell(rows()[0]!)).toBe("Monitor queued");
+  answer();
+  await settle();
+  expect(lastCell(rows()[0]!)).toBe("Monitor queued");
+  expect(button(rows()[0]!, "Create monitor")).toBeUndefined();
+});
+
+test("a create the queue refuses gives Create monitor back and says why", async () => {
+  let going: QueuedWrite | null = null;
+  const stand = ports({
+    ...withCreate(() => going),
+    submitWrite: async (payload) => {
+      writes.push(payload);
+      going = onItsWay(writes.length, "pending");
+      return going;
+    },
+  });
+  await draw(["unmonitored"], null, stand);
+  button(rows()[0]!, "Create monitor")!.click();
+  await settle();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => text(b) === "Create monitor")!.click();
+  await settle();
+  expect(lastCell(rows()[0]!)).toBe("Monitor queued");
+
+  going = null;
+  heard.get(1)!(onItsWay(1, "refused", "no Docker host"));
+  await settle();
+  expect(button(rows()[0]!, "Create monitor")).toBeDefined();
+  expect(toasts.items.map((t) => t.text)).toContain("Monitor pg-main was refused: no Docker host");
+});
+
+test("after a reload, a pending create is followed: held, it gives Create monitor back", async () => {
+  let going: QueuedWrite | null = onItsWay(7, "pending");
+  await draw(["unmonitored"], null, ports(withCreate(() => going)));
+  expect([...heard.keys()]).toEqual([7]);
+  going = null;
+  heard.get(7)!(onItsWay(7, "held"));
+  await settle();
+  expect(button(rows()[0]!, "Create monitor")).toBeDefined();
+  expect(heard.size).toBe(0);
+});
+
+test("a create withdrawn in the queue leaves the open rows, and the re-read gives Create monitor back", async () => {
+  let going: QueuedWrite | null = onItsWay(7, "pending");
+  await draw(["unmonitored"], null, ports(withCreate(() => going)));
+  going = null;
+  heard.get(7)!(undefined);
+  await settle();
+  expect(button(rows()[0]!, "Create monitor")).toBeDefined();
+});
+
+test("a sent create stays queued until the end of the sync that brings its monitor in, and is not followed", async () => {
+  let watched = false;
+  const stand = ports({
+    unmonitoredAssets: async () =>
+      watched ? UNWATCHED.filter((row) => row.id !== "asset:pg") : withCreate(() => onItsWay(7, "sent")).unmonitoredAssets(),
+  });
+  await draw(["unmonitored"], null, stand);
+  expect(lastCell(rows()[0]!)).toBe("Monitor queued");
+  expect(heard.size).toBe(0);
+  syncEnds();
+  await settle();
+  expect(lastCell(rows()[0]!)).toBe("Monitor queued");
+
+  watched = true;
+  syncEnds();
+  await settle();
+  expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["Gitea"]);
+  expect(synced.size).toBe(0);
 });

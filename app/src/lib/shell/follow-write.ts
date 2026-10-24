@@ -161,6 +161,8 @@ export interface Following {
   resend?: () => void;
   /** What the surface takes back as the write is told held or refused, before the toast: its echo (#1424). */
   onstop?: () => void;
+  /** The write left the queue's open rows: sent, or withdrawn in the queue. For a surface that asks which (#1959). */
+  onleave?: () => void;
 }
 
 /** Whether an open row is one that will not go on its own: held or refused. */
@@ -196,7 +198,11 @@ export function followWrite(
   };
   stop = follower.follow(write.id, (row) => {
     if (done) return;
-    if (row === undefined) return leave();
+    if (row === undefined) {
+      leave();
+      following.onleave?.();
+      return;
+    }
     if (!willNotGo(row)) return;
     leave();
     following.onstop?.();

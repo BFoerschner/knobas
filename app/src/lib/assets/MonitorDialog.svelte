@@ -22,6 +22,12 @@
   estate file written before its monitors existed has been in since #439, so it
   is a state the pane already draws and a reader already has a word for.
 
+  **The retry is for a create that never queued** (#1959). Uptime Kuma takes a
+  second monitor of a name it already has, so `submit_write` refuses a create
+  of a monitor whose create is still on its way to that source (pending, or
+  sent and not mirrored yet), and the refusal shows here in its words. Once
+  that create is held, refused or withdrawn, the retry goes.
+
   ## What it does not do
 
   **No optimistic monitor.** The roster the pane draws is the mirror's, and the

@@ -11,6 +11,13 @@
     it.
   - **Assets nothing watches**: containers, services, routes, databases and VMs
     no monitor watches, each with *Create monitor* (`TfCreateMonitor.svelte`).
+    A row whose create is on its way draws *Monitor queued* instead (#1959):
+    the row stays listed until the poll mirrors the monitor and attaches it,
+    and Uptime Kuma takes a second monitor of the same name. The read names
+    the create (`monitor_on_its_way`), so a reload draws it too. A pending one
+    is followed: held or refused, it gives *Create monitor* back; sent or
+    withdrawn, the list is read again. While any row is on its way, the end of
+    every sync reads it again, which is when a sent one's monitor arrives.
 
   Over `monitor_roster`, `open_alerts` (only for each down row's `acked_at`, so
   an ack outlives the visit; the tab draws no alert of its own, #1296), `ack_alert`, `submit_write` (`PauseMonitor`,
@@ -32,6 +39,7 @@
     UnmonitoredAsset,
   } from "../../ipc/assets";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+  import type { WriteFollower } from "../../shell/follow-write";
   import { counted } from "../counted";
   import type { OpenJobPorts } from "../job/open-jobs";
 
@@ -46,17 +54,22 @@
     editAsset: (assetId: string, edits: AssetEdit[]) => Promise<AssetRow>;
     getRoute: (routeId: string) => Promise<RouteDetail>;
     editRoute: (routeId: string, edits: RouteEdit[]) => Promise<RouteRow>;
+    /** The bridge's events, for the end of a sync while a create is on its way. */
+    listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
+    /** What follows a pending create in the queue. */
+    follower: () => WriteFollower;
   }
 </script>
 
 <script lang="ts">
+  import { listen as tauriListen } from "@tauri-apps/api/event";
   import { onDestroy } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import { ackAlert, editAsset, editRoute, getAsset, getRoute, monitorRoster, openAlerts, unmonitoredAssets } from "../../ipc/assets";
   import { getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
-  import { followWrite } from "../../shell/follow-write";
+  import { followWrite, writeFollower } from "../../shell/follow-write";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { ago } from "../../shell/time";
   import { push } from "../../shell/toasts.svelte";
@@ -64,6 +77,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { listenSynced } from "../builds/pipeline-ports";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import {
     stateChip,
@@ -101,6 +115,8 @@
       listContexts: () => listContexts(),
       getEntity: (entityId) => getEntity(entityId),
       jobReach: (entityId) => jobReach(entityId),
+      listen: (event, handler) => tauriListen(event, handler),
+      follower: () => writeFollower(),
     },
     now: fixedNow,
   }: {
@@ -185,9 +201,70 @@
   });
 
   const following: (() => void)[] = [];
+  /** The pending creates followed, by write id: one follow each, however often the list is read. */
+  const creates = new Map<number, () => void>();
   onDestroy(() => {
     for (const stop of following.splice(0)) stop();
+    for (const stop of creates.values()) stop();
+    creates.clear();
   });
+
+  // -- a create on its way (#1959) -------------------------------------------
+
+  $effect(() => {
+    const pending = new Map<number, UnmonitoredAsset>();
+    for (const row of unwatched ?? []) {
+      const write = row.monitor_on_its_way;
+      if (write?.state === "pending" && !pending.has(write.id)) pending.set(write.id, row);
+    }
+    for (const [id, stop] of creates) {
+      if (pending.has(id)) continue;
+      stop();
+      creates.delete(id);
+    }
+    for (const [id, row] of pending) if (!creates.has(id)) creates.set(id, followCreate(id, row));
+  });
+
+  /** Follow one pending create: held or refused, the row offers the create again; sent or withdrawn, the list says which. */
+  function followCreate(id: number, row: UnmonitoredAsset): () => void {
+    const payload = row.monitor_on_its_way?.payload as { CreateMonitor?: { name?: string } } | undefined;
+    return followWrite(
+      { id },
+      {
+        name: `Monitor ${payload?.CreateMonitor?.name ?? row.name}`,
+        onstop: () => {
+          creates.delete(id);
+          markOnItsWay((write) => write?.id === id, null);
+          revision += 1;
+        },
+        onleave: () => {
+          creates.delete(id);
+          revision += 1;
+        },
+      },
+      ports.follower(),
+    );
+  }
+
+  /** Set the create on its way of every row `which` picks, as the page knows it before the next read. */
+  function markOnItsWay(which: (write: QueuedWrite | null, row: UnmonitoredAsset) => boolean, write: QueuedWrite | null) {
+    if (unwatched === null) return;
+    unwatched = unwatched.map((row) => (which(row.monitor_on_its_way, row) ? { ...row, monitor_on_its_way: write } : row));
+  }
+
+  const waiting = $derived((unwatched ?? []).some((row) => row.monitor_on_its_way !== null));
+  $effect(() => {
+    if (!waiting) return;
+    return listenSynced(ports, null, () => {}, () => (revision += 1));
+  });
+
+  /** What *Monitor queued* says on hover: where the create is. */
+  function queuedTitle(write: QueuedWrite): string {
+    const source = sourceNames[write.source_id] ?? "the monitoring source";
+    return write.state === "sent"
+      ? `Created in ${source}. The next poll attaches it here.`
+      : `Queued for ${source}. Open the write queue to see it.`;
+  }
 
   // -- the filter bar --------------------------------------------------------
 
@@ -299,10 +376,12 @@
   }
 
   function created(what: { name: string; write: QueuedWrite; source: WriteSource }) {
-    const asset = creating?.name ?? what.name;
+    const subject = creating;
     creating = null;
-    toastQueued(`create monitor for ${asset}`, what.source);
-    following.push(followWrite(what.write, { name: `Monitor ${what.name}` }));
+    toastQueued(`create monitor for ${subject?.name ?? what.name}`, what.source);
+    // Drawn at once, and followed by the effect above as the read will name it.
+    // The re-read starts after the row was queued, and drops any read before it.
+    markOnItsWay((_, row) => row.id === subject?.id, what.write);
     revision += 1;
   }
 
@@ -354,9 +433,13 @@
               <td>{asset.environment ?? ""}</td>
               <td>{asset.owner ?? ""}</td>
               <td class="tf-mon-acts">
-                <button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
-                  >Create monitor</button
-                >
+                {#if asset.monitor_on_its_way !== null}
+                  <span class="tf-chip tf-info" title={queuedTitle(asset.monitor_on_its_way)}>Monitor queued</span>
+                {:else}
+                  <button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
+                    >Create monitor</button
+                  >
+                {/if}
               </td>
             </tr>
           {/each}

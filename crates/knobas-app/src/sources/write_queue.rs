@@ -50,13 +50,17 @@ use crate::IpcError;
 ///   never have been offered (story 13), and saying so at the call is the
 ///   difference between an interface that lies and one that does not.
 ///   A keychain that will not open says nothing about what the instance
-///   offers, so an op the kind's roles allow is queued then (#1944).
+///   offers, so an op the kind's roles allow is queued then (#1944);
+/// * a `CreateMonitor` whose name has a create on its way to the same source
+///   (#1959, `assets::newest_create_on_its_way`): Uptime Kuma takes a second
+///   monitor of a name it has.
 ///
 /// # Errors
 ///
 /// [`IpcError`] with `invalid` for a payload that is not a write op or names
 /// an op the source does not declare, `not_found` for a source that is not
-/// configured, `internal` if the queue's own writes fail, and `not_ready` if
+/// configured, `conflict` for a `CreateMonitor` whose monitor is already on
+/// its way (#1959), `internal` if the queue's own writes fail, and `not_ready` if
 /// the quit's grace ran out while the write was at the source (#1932).
 pub async fn submit(
     state: &crate::sources::SourcesState,
@@ -162,7 +166,7 @@ pub async fn hold_arrival_link(
 
 /// How long after a write was sent its link is still looked for. A branch of
 /// that name turning up later than this is not taken for what the write made.
-const ARRIVAL_PATIENCE: &str = "7 days";
+pub(crate) const ARRIVAL_PATIENCE: &str = "7 days";
 
 /// Resolve the links `source_id`'s sent writes still owe (#1050): each one
 /// whose branch or pull request the mirror now holds is linked to its ticket
@@ -819,6 +823,20 @@ pub(crate) async fn submittable(
             op.identifier()
         )));
     }
+    // **A monitor already on its way is not created twice** (#1959). Uptime
+    // Kuma takes a second monitor of a name it has, and the row a create
+    // leaves on *Assets nothing watches* stays until the poll mirrors the
+    // monitor, so a second press, or the asset pane's retry, would make two.
+    // Held and refused creates are not on their way: the reader's retry goes.
+    if let WriteOp::CreateMonitor { name, .. } = &op
+        && let Some(write) = crate::assets::newest_create_on_its_way(pool, &source.id, name).await?
+    {
+        return Err(IpcError::conflict(format!(
+            "a monitor named {name:?} is already on its way to {} (write {write}); \
+             it attaches once the next poll mirrors it",
+            source.display_name
+        )));
+    }
     Ok((op, source.id))
 }
 
@@ -1239,6 +1257,67 @@ mod tests {
         ) -> Result<(), knobas_secrets::SecretError> {
             unreachable!("submittable deletes no credential")
         }
+    }
+
+    /// #1959: Uptime Kuma takes a second monitor of a name it already has,
+    /// so a *Create monitor* for a name whose create is on its way to that
+    /// source is refused before a row exists: the asset pane's retry and a
+    /// second press anywhere send no duplicate. Another name goes, and so
+    /// does the same name once the first create was refused.
+    #[tokio::test]
+    async fn a_second_create_of_a_monitor_on_its_way_is_refused_before_it_is_queued() {
+        let pool = pool().await;
+        let kuma = unique("kuma-twice-submit");
+        configured_with(
+            &pool,
+            &kuma,
+            knobas_source_kuma::ADAPTER_KIND,
+            knobas_source::AuthMethod::ApiToken,
+        )
+        .await;
+        let locked: std::sync::Arc<dyn knobas_secrets::SecretStore> = std::sync::Arc::new(Locked);
+        let target = format!("{kuma}:monitors");
+        // Serialized from the op, as the queue stores it, so the read's path
+        // over `WriteOp`'s serde shape is pinned here too (ADR-0007).
+        let payload = |name: &str| {
+            serde_json::to_value(WriteOp::CreateMonitor {
+                entity: target.clone(),
+                name: name.to_owned(),
+                url: "https://gitea.test/".to_owned(),
+                kind: knobas_source::MonitorKind::Http,
+            })
+            .unwrap()
+        };
+        let first = knobas_core::write_queue::queue(
+            &pool,
+            &kuma,
+            &knobas_core::entity::EntityRef::parse(&target).unwrap(),
+            "create_monitor",
+            payload("gitea"),
+            serde_json::json!({}),
+        )
+        .await
+        .expect("the first create, queued");
+
+        let error = submittable(&pool, &locked, &registry(), payload("gitea"))
+            .await
+            .expect_err("the first is on its way");
+        assert_eq!(error.code, crate::IpcErrorCode::Conflict);
+        assert!(
+            error.message.contains("\"gitea\"") && error.message.contains("on its way"),
+            "{}",
+            error.message
+        );
+        submittable(&pool, &locked, &registry(), payload("redis"))
+            .await
+            .expect("another name goes");
+
+        knobas_core::write_queue::refuse(&pool, first.id, "no Docker host")
+            .await
+            .unwrap();
+        submittable(&pool, &locked, &registry(), payload("gitea"))
+            .await
+            .expect("refused, the first waits on the reader: the retry goes");
     }
 
     /// #1944: a locked keychain is this machine learning nothing about the

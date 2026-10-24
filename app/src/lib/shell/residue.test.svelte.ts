@@ -1592,6 +1592,8 @@ const CASES: Case[] = [
             listContexts: () => deferred([]),
             getEntity: () => deferred({ row: { entity_id: "jira:PAY-231", kind: "ticket" } } as never),
             jobReach: () => deferred([]),
+            listen: () => deferred(() => {}),
+            follower: () => ({ follow: () => () => {} }),
           },
         },
       }),

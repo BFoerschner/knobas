@@ -2252,7 +2252,9 @@ pub const CREATE_MONITOR: &str = "create_monitor";
 /// the **path**, which `AssetRow` does not, because that is what tells two
 /// containers called `postgres` apart -- and it is the field the criterion
 /// asks for by name.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+// Not `PartialEq`: `monitor_on_its_way` is the queue's own row, which does
+// not derive it.
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "assets.ts")]
 pub struct UnmonitoredAsset {
     /// `asset:<uuid>` -- the `#/asset/<id>` address the name opens.
@@ -2281,6 +2283,13 @@ pub struct UnmonitoredAsset {
     /// exposing asset sits (the asset's own name last) and whose environment and
     /// owner are that asset's, in force.
     pub url: Option<String>,
+    /// The newest *Create monitor* on its way for a name this asset or route
+    /// records (#1959), as the queue holds it; `null` where none is. So a
+    /// reload before the poll draws *Monitor queued* rather than offering the
+    /// create again, which Uptime Kuma would take as a second monitor. On
+    /// its way is `pending`, or `sent` and not mirrored yet; a held, refused
+    /// or withdrawn create is not.
+    pub monitor_on_its_way: Option<knobas_core::write_queue::QueuedWrite>,
 }
 
 /// What a type is called: the label of [`knobas_core::asset::TYPES`], or the
@@ -2332,7 +2341,7 @@ const UNMONITORED: &str = "with recursive in_force (id, environment, owner) as (
      )
 select a.id, a.type_id, a.name,
                                   nullif(a.path_text, '') as path,
-                                  f.environment, f.owner
+                                  f.environment, f.owner, a.monitors
   from knobas.asset a
   left join in_force f on f.id = a.id
  where not exists (select 1
@@ -2357,7 +2366,7 @@ const UNMONITORED_ROUTES: &str = "with recursive in_force (id, environment, owne
      )
 select r.id, r.name, r.url,
        concat_ws(' / ', nullif(ea.path_text, ''), ea.name) as path,
-       f.environment, f.owner
+       f.environment, f.owner, r.monitors
   from knobas.route r
   join knobas.asset ea on ea.id = r.asset_id
   left join in_force f on f.id = ea.id
@@ -2369,6 +2378,122 @@ select r.id, r.name, r.url,
                       and r.id in (l.from_id, l.to_id)
                       and m.kind = $2)
  order by ea.path_text asc, ea.name asc, r.name asc, r.id asc";
+
+/// The *Create monitor* writes on their way (#1959): `(id, name)` of each
+/// `create_monitor` row that is `pending`, or `sent` within the patience
+/// (`sources::write_queue::ARRIVAL_PATIENCE`) and not mirrored yet, oldest
+/// first.
+///
+/// **Not mirrored yet** is the receipt's monitor (`<source_id>:<remote_id>`,
+/// Kuma's minted id, #453 and #1949) absent from the mirror, tombstoned rows
+/// included, since a monitor that arrived and left has arrived; and no live
+/// monitor of the create's name in its source, which is how one with no
+/// receipt is found, and the name is what attaches it (`knobas_sync::attach`).
+/// Held and refused rows wait on the reader in the queue, and a withdrawn one
+/// will not go, so none of them is on its way: #1951's ruling for a ticket.
+///
+/// A **payload read of a knobas-owned shape** (ADR-0007): the name is read at
+/// `payload->'CreateMonitor'->>'name'`, `WriteOp`'s serde shape, as
+/// `protocol::publication_of` reads a page's title, in this one statement. It
+/// **fails open**: a drifted path names no create, so the tab offers *Create
+/// monitor* and `submit_write` refuses no second one, which is the behaviour
+/// before #1959 and never a wrong refusal. Pinned by
+/// `tests/it/monitor_on_its_way_ipc.rs` and `submittable`'s
+/// `a_second_create_of_a_monitor_on_its_way_is_refused_before_it_is_queued`,
+/// which queue the op serialized rather than a spelled-out payload. `$1` the
+/// op, `$2` the patience, `$3` the monitor kind; `$4` and `$5` narrow it to one
+/// source and one name, or not where `null`.
+const ON_ITS_WAY: &str = "select w.id, w.payload->'CreateMonitor'->>'name' as name
+  from knobas.write_queue w
+ where w.op = $1
+   and ($4::text is null or w.source_id = $4)
+   and ($5::text is null or w.payload->'CreateMonitor'->>'name' = $5)
+   and (w.state = 'pending'
+        or (w.state = 'sent'
+            and w.settled_at > now() - $2::interval
+            and not exists (select 1 from sync.item i
+                             where w.remote_id is not null
+                               and i.entity_id = w.source_id || ':' || w.remote_id)
+            and not exists (select 1 from sync.live_item m
+                             where m.source_id = w.source_id
+                               and m.kind = $3
+                               and m.title = w.payload->'CreateMonitor'->>'name')))
+ order by w.id";
+
+/// [`ON_ITS_WAY`], narrowed or not.
+async fn creates_on_their_way(
+    pool: &PgPool,
+    source_id: Option<&str>,
+    name: Option<&str>,
+) -> Result<Vec<(i64, String)>, IpcError> {
+    Ok(sqlx::query_as(ON_ITS_WAY)
+        .bind(CREATE_MONITOR)
+        .bind(crate::sources::write_queue::ARRIVAL_PATIENCE)
+        .bind(MONITOR_KIND)
+        .bind(source_id)
+        .bind(name)
+        .fetch_all(pool)
+        .await?)
+}
+
+/// The newest *Create monitor* on its way to `source_id` for a monitor called
+/// `name` ([`ON_ITS_WAY`]), by write id: what `submit_write` refuses a second
+/// create of (#1959), so the asset pane's retry (`MonitorDialog.svelte`) and a
+/// second press anywhere send Uptime Kuma no duplicate.
+///
+/// # Errors
+///
+/// [`IpcError`] if the read fails.
+pub async fn newest_create_on_its_way(
+    pool: &PgPool,
+    source_id: &str,
+    name: &str,
+) -> Result<Option<i64>, IpcError> {
+    Ok(creates_on_their_way(pool, Some(source_id), Some(name))
+        .await?
+        .into_iter()
+        .map(|(id, _)| id)
+        .max())
+}
+
+/// Each row's [`UnmonitoredAsset::monitor_on_its_way`]: the newest create on
+/// its way whose name the row records (the names beside it), as the queue
+/// holds it now.
+async fn with_creates_on_their_way(
+    pool: &PgPool,
+    rows: Vec<(UnmonitoredAsset, Vec<String>)>,
+) -> Result<Vec<UnmonitoredAsset>, IpcError> {
+    let mut newest: HashMap<String, i64> = HashMap::new();
+    for (id, name) in creates_on_their_way(pool, None, None).await? {
+        newest.insert(name, id);
+    }
+    let mut writes: HashMap<i64, Option<knobas_core::write_queue::QueuedWrite>> = HashMap::new();
+    let mut out = Vec::with_capacity(rows.len());
+    for (row, names) in rows {
+        let Some(id) = names
+            .iter()
+            .filter_map(|name| newest.get(name))
+            .max()
+            .copied()
+        else {
+            out.push(row);
+            continue;
+        };
+        let write = match writes.get(&id) {
+            Some(write) => write.clone(),
+            None => {
+                let write = knobas_core::write_queue::get(pool, id).await?;
+                writes.insert(id, write.clone());
+                write
+            }
+        };
+        out.push(UnmonitoredAsset {
+            monitor_on_its_way: write,
+            ..row
+        });
+    }
+    Ok(out)
+}
 
 /// The assets nothing is watching -- the Monitors tab's second list (spec #427
 /// story 68, issue #449).
@@ -2408,11 +2533,21 @@ select r.id, r.name, r.url,
 /// gaps it had decided did not count. The tab's type filter is where that
 /// judgement belongs, and it is why the filter exists.
 ///
+/// # A create on its way rides on the row (#1959)
+///
+/// Each row carries the newest *Create monitor* on its way for a name it
+/// records ([`ON_ITS_WAY`]). The row stays listed until the poll mirrors the
+/// monitor and attaches it, and Uptime Kuma takes a second monitor of the
+/// same name, so the tab draws *Monitor queued* there rather than the create
+/// again, after a reload too. Read after the rows, so a monitor that arrives
+/// between the two reads leaves the row with no create on its way rather
+/// than the reverse.
+///
 /// # Errors
 ///
-/// [`IpcError`] if the read fails.
+/// [`IpcError`] if a read fails.
 pub async fn unmonitored_assets(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>, IpcError> {
-    let mut out = unmonitored_assets_only(pool).await?;
+    let mut rows = unmonitored_assets_only(pool).await?;
     // The routes follow the assets (#976): a route is a thing an asset exposes,
     // so the list reads assets first and then what they expose.
     for row in sqlx::query(UNMONITORED_ROUTES)
@@ -2421,7 +2556,7 @@ pub async fn unmonitored_assets(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>, 
         .fetch_all(pool)
         .await?
     {
-        out.push(UnmonitoredAsset {
+        let route = UnmonitoredAsset {
             id: row.try_get("id")?,
             type_id: ROUTE_NAMESPACE.to_owned(),
             type_label: "Route".to_owned(),
@@ -2431,13 +2566,18 @@ pub async fn unmonitored_assets(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>, 
             environment: row.try_get("environment")?,
             owner: row.try_get("owner")?,
             url: Some(row.try_get("url")?),
-        });
+            monitor_on_its_way: None,
+        };
+        rows.push((route, row.try_get("monitors")?));
     }
-    Ok(out)
+    with_creates_on_their_way(pool, rows).await
 }
 
-/// The assets half of [`unmonitored_assets`].
-async fn unmonitored_assets_only(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>, IpcError> {
+/// The assets half of [`unmonitored_assets`], each with the monitor names it
+/// records.
+async fn unmonitored_assets_only(
+    pool: &PgPool,
+) -> Result<Vec<(UnmonitoredAsset, Vec<String>)>, IpcError> {
     sqlx::query(UNMONITORED)
         .bind(MONITORED_BY)
         .bind(MONITOR_KIND)
@@ -2447,7 +2587,7 @@ async fn unmonitored_assets_only(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>,
         .map(|row| {
             let type_id: String = row.try_get("type_id")?;
             let declared = asset::find(&type_id);
-            Ok(UnmonitoredAsset {
+            let asset = UnmonitoredAsset {
                 id: row.try_get("id")?,
                 type_label: type_label_of(&type_id),
                 // `??` for a type this build has lost, `row_of`'s rule and for
@@ -2460,7 +2600,9 @@ async fn unmonitored_assets_only(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>,
                 environment: row.try_get("environment")?,
                 owner: row.try_get("owner")?,
                 url: None,
-            })
+                monitor_on_its_way: None,
+            };
+            Ok((asset, row.try_get("monitors")?))
         })
         .collect()
 }

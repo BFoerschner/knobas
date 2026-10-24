@@ -184,6 +184,7 @@ describe("Assets nothing watches", () => {
     environment: null,
     owner: null,
     url: null,
+    monitor_on_its_way: null,
   });
 
   test("lists containers, services, routes, databases and VMs, nothing else", () => {

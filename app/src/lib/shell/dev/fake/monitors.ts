@@ -113,6 +113,32 @@ export function fakeOpenAlerts(): OpenAlert[] {
  * would look like.
  */
 function fakeQueuedWrite(args: Record<string, unknown>): QueuedWrite {
+  const row = queuedRow(args);
+  if (row.op === "create_monitor") FIXTURE_CREATES.push(row);
+  return row;
+}
+
+/**
+ * The creates of monitors this fixture took, oldest first (#1959). Each is
+ * `sent` and never arrives, since no Kuma is behind the fixture, so the row
+ * that records its name draws *Monitor queued* until a reload, which is what
+ * the real read says of a create the poll has not mirrored yet.
+ */
+const FIXTURE_CREATES: QueuedWrite[] = [];
+
+/** The newest create this fixture took for a name in `names`: `monitor_on_its_way`. */
+function onItsWayFor(names: readonly string[]): QueuedWrite | null {
+  const named = FIXTURE_CREATES.filter((write) => {
+    const create = (write.payload as { CreateMonitor?: { name?: string } }).CreateMonitor;
+    return create?.name !== undefined && names.includes(create.name);
+  });
+  return named.at(-1) ?? null;
+}
+
+/** The seeded Kuma's monitor names: a name among them is one the mirror holds. */
+const SEEDED_NAMES = new Set(SEEDED_MONITORS.map((monitor) => monitor.name));
+
+function queuedRow(args: Record<string, unknown>): QueuedWrite {
   const payload = (args.payload ?? {}) as Record<string, { entity?: string; repo?: string }>;
   const [tag, body] = Object.entries(payload)[0] ?? ["PauseMonitor", {}];
   // `CommitFile` names its repository as `repo` (#822), every other op `entity`.
@@ -185,7 +211,9 @@ function fakeAck(args: Record<string, unknown>) {
  * it.
  */
 export function fakeUnmonitored() {
-  const assets = FIXTURE_ESTATE.filter((asset) => asset.monitors.length === 0)
+  // A name the seeded Kuma holds attaches its monitor; one a create recorded
+  // does not, so the asset stays listed with its create on its way (#1959).
+  const assets = FIXTURE_ESTATE.filter((asset) => !asset.monitors.some((name) => SEEDED_NAMES.has(name)))
     .map((asset) => ({
       id: asset.id,
       type_id: asset.type_id,
@@ -198,6 +226,7 @@ export function fakeUnmonitored() {
       environment: inForce(asset, (row) => row.environment),
       owner: inForce(asset, (row) => row.owner),
       url: null as string | null,
+      monitor_on_its_way: onItsWayFor(asset.monitors),
     }))
     .sort(
       (left, right) =>
@@ -223,6 +252,7 @@ export function fakeUnmonitored() {
         environment: inForce(exposer, (row) => row.environment),
         owner: inForce(exposer, (row) => row.owner),
         url: route.url as string | null,
+        monitor_on_its_way: onItsWayFor(route.monitors ?? []),
       },
     ];
   }).sort(
