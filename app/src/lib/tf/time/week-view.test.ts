@@ -204,6 +204,11 @@ test("without the source's words, the reason is the queue's state", () => {
   expect(heldNotes([queued({ started: thursday, seconds: 1800, state: "refused" })], DAYS)).toEqual([
     "30m of PAY-228 on Thursday is held: the source refused it.",
   ]);
+  // Sent and never answered (#1125): not a ticket that changed, and it may be in Jira already (#1966).
+  const unanswered = { op: "log_work", unconfirmed: { source: "Jira", detail: "the connection closed" } };
+  expect(heldNotes([queued({ started: thursday, seconds: 1800, held_snapshot: unanswered })], DAYS)).toEqual([
+    "30m of PAY-228 on Thursday is held: Jira did not answer, so it may have arrived. Check Jira, then send it again or discard it.",
+  ]);
 });
 
 test("a pending worklog, another op, or another week's worklog says nothing here", () => {
