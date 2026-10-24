@@ -1843,7 +1843,10 @@ async fn call_as(
         .unwrap_or_else(|e| panic!("{method} {path}: {e}"));
     let status = response.status().as_u16();
     let text = response.text().await.unwrap_or_default();
-    (status, serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+    (
+        status,
+        serde_json::from_str(&text).unwrap_or(serde_json::Value::Null),
+    )
 }
 
 /// The viewer and its space, taken away again from `Drop` and checked gone.
@@ -1885,7 +1888,10 @@ impl Minted {
             })),
         )
         .await;
-        assert!(matches!(status, 200 | 201), "minting {VIEWER}: {status} {made}");
+        assert!(
+            matches!(status, 200 | 201),
+            "minting {VIEWER}: {status} {made}"
+        );
         // From here on `Drop` takes the user away again, and the space if
         // it was made.
         let minted = Minted(mint);
@@ -1912,7 +1918,10 @@ impl Minted {
             Some(serde_json::json!([{ "targetType": "space", "operationKey": "read" }])),
         )
         .await;
-        assert_eq!(status, 204, "granting {VIEWER} View on {VIEWER_SPACE}: {granted}");
+        assert_eq!(
+            status, 204,
+            "granting {VIEWER} View on {VIEWER_SPACE}: {granted}"
+        );
         (minted, home)
     }
 
@@ -1952,11 +1961,16 @@ impl Mint {
         let admin = (user.clone(), password.clone());
         let viewer = (VIEWER.to_owned(), VIEWER_PASSWORD.to_owned());
         if let Some(id) = self.token {
-            let (status, body) =
-                send(reqwest::Method::DELETE, format!("rest/pat/latest/tokens/{id}"), viewer.clone())
-                    .await?;
+            let (status, body) = send(
+                reqwest::Method::DELETE,
+                format!("rest/pat/latest/tokens/{id}"),
+                viewer.clone(),
+            )
+            .await?;
             if status != 204 {
-                return Err(format!("the viewer's token {id} answered {status} to its delete: {body}"));
+                return Err(format!(
+                    "the viewer's token {id} answered {status} to its delete: {body}"
+                ));
             }
         }
         let gone = |path: String| {
@@ -1964,7 +1978,11 @@ impl Mint {
             let admin = admin.clone();
             async move {
                 for _ in 0..60 {
-                    if send(reqwest::Method::GET, path.clone(), admin.clone()).await?.0 == 404 {
+                    if send(reqwest::Method::GET, path.clone(), admin.clone())
+                        .await?
+                        .0
+                        == 404
+                    {
                         return Ok(());
                     }
                     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -1973,12 +1991,20 @@ impl Mint {
             }
         };
         let space = format!("rest/api/space/{VIEWER_SPACE}");
-        if send(reqwest::Method::GET, space.clone(), admin.clone()).await?.0 != 404 {
+        if send(reqwest::Method::GET, space.clone(), admin.clone())
+            .await?
+            .0
+            != 404
+        {
             send(reqwest::Method::DELETE, space.clone(), admin.clone()).await?;
             gone(space).await?;
         }
         let user_path = format!("rest/api/user?username={VIEWER}");
-        if send(reqwest::Method::GET, user_path.clone(), admin.clone()).await?.0 != 404 {
+        if send(reqwest::Method::GET, user_path.clone(), admin.clone())
+            .await?
+            .0
+            != 404
+        {
             send(
                 reqwest::Method::DELETE,
                 format!("rest/api/admin/user/{VIEWER}"),
@@ -2044,7 +2070,10 @@ async fn a_viewer_is_refused_the_writes_of_a_space_it_may_only_view() {
             )
             .await;
             assert_eq!(status, 200, "reading {id}: {page}");
-            (page["version"]["number"].clone(), page["children"]["comment"]["size"].clone())
+            (
+                page["version"]["number"].clone(),
+                page["children"]["comment"]["size"].clone(),
+            )
         }
     };
     let before = (state(home.clone()).await, state(eng.clone()).await);
@@ -2078,7 +2107,11 @@ async fn a_viewer_is_refused_the_writes_of_a_space_it_may_only_view() {
         ],
         "{refused:?}"
     );
-    assert!(refused.iter().all(|r| r.entity == format!("confluence:{home}")));
+    assert!(
+        refused
+            .iter()
+            .all(|r| r.entity == format!("confluence:{home}"))
+    );
     assert_eq!(
         viewer.refused_writes(&asks(&eng)).await.expect("an answer"),
         vec![],

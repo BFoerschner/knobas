@@ -82,12 +82,7 @@ pub(crate) async fn refused(
 ) -> Vec<RefusedWrite> {
     let governed: Vec<_> = asks
         .iter()
-        .filter(|(a, _)| {
-            matches!(
-                a.op.as_str(),
-                OP_COMMENT | OP_CREATE_PAGE | OP_UPDATE_PAGE
-            )
-        })
+        .filter(|(a, _)| matches!(a.op.as_str(), OP_COMMENT | OP_CREATE_PAGE | OP_UPDATE_PAGE))
         .collect();
     let mut pages: HashMap<&str, Option<Page>> = HashMap::new();
     let mut spaces: HashMap<String, Option<Vec<String>>> = HashMap::new();
@@ -222,8 +217,10 @@ mod tests {
         }
 
         fn space(mut self, key: &str, held: &[&str]) -> Self {
-            self.spaces
-                .insert(key.to_owned(), held.iter().map(|p| (*p).to_owned()).collect());
+            self.spaces.insert(
+                key.to_owned(),
+                held.iter().map(|p| (*p).to_owned()).collect(),
+            );
             self
         }
 
@@ -274,7 +271,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_user_who_may_only_view_the_space_is_refused_every_write_saying_why() {
-        let fake = Fake::default().page("7", "KRO", false).space("KRO", &["view"]);
+        let fake = Fake::default()
+            .page("7", "KRO", false)
+            .space("KRO", &["view"]);
         let asks: Vec<_> = ALL.iter().map(|op| ask("7", op)).collect();
         assert_eq!(
             judged(&fake, &asks).await,
@@ -333,15 +332,14 @@ mod tests {
 
     #[tokio::test]
     async fn comment_and_add_page_are_told_apart() {
-        let fake = Fake::default().page("7", "ENG", false).space("ENG", &["view", "comment"]);
-        let ops: Vec<_> = judged(
-            &fake,
-            &[ask("7", "comment"), ask("7", "create_page")],
-        )
-        .await
-        .into_iter()
-        .map(|(_, op, _)| op)
-        .collect();
+        let fake = Fake::default()
+            .page("7", "ENG", false)
+            .space("ENG", &["view", "comment"]);
+        let ops: Vec<_> = judged(&fake, &[ask("7", "comment"), ask("7", "create_page")])
+            .await
+            .into_iter()
+            .map(|(_, op, _)| op)
+            .collect();
         assert_eq!(ops, ["create_page"]);
     }
 
