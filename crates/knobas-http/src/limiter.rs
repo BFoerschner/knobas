@@ -39,6 +39,13 @@
 //!
 //! [`InstanceLimiter`] is public so a sender outside [`HttpClient`] -- the
 //! wasm host's network policy (#1631) -- can wait on the same quota.
+//!
+//! **The clock is tokio's** (#1925): every limiter reads
+//! [`tokio::time::Instant`] and waits with [`tokio::time::sleep`], as the
+//! send budget and every timeout around it do. Outside a test that is the
+//! monotonic clock, as before. A test that pauses tokio's clock moves the
+//! quota with the budget, so it can assert what a quota lets through exactly,
+//! where governor's own clock and timer would have kept wall time under it.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -46,14 +53,52 @@ use std::collections::hash_map::Entry;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use governor::clock::DefaultClock;
+use governor::clock::{Clock, Reference};
+use governor::middleware::NoOpMiddleware;
+use governor::nanos::Nanos;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::{Quota, RateLimiter};
 use knobas_source::SourceError;
+use tokio::time::Instant;
 
-type DirectLimiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
+type DirectLimiter = RateLimiter<NotKeyed, InMemoryState, TokioClock, NoOpMiddleware<Tick>>;
+
+/// Governor's clock, read from tokio's ([`tokio::time::Instant`]): the
+/// monotonic clock, unless a test paused tokio's (#1925).
+#[derive(Debug, Clone, Copy, Default)]
+struct TokioClock;
+
+impl Clock for TokioClock {
+    type Instant = Tick;
+
+    fn now(&self) -> Tick {
+        Tick(Instant::now())
+    }
+}
+
+/// One reading of [`TokioClock`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Tick(Instant);
+
+impl std::ops::Add<Nanos> for Tick {
+    type Output = Self;
+
+    fn add(self, other: Nanos) -> Self {
+        Self(self.0 + Duration::from(other))
+    }
+}
+
+impl Reference for Tick {
+    fn duration_since(&self, earlier: Self) -> Nanos {
+        self.0.saturating_duration_since(earlier.0).into()
+    }
+
+    fn saturating_sub(&self, duration: Nanos) -> Self {
+        Self(self.0.checked_sub(duration.into()).unwrap_or(self.0))
+    }
+}
 
 /// One instance origin's share of the process-wide rate limit.
 ///
@@ -134,7 +179,7 @@ impl InstanceLimiter {
     /// is knobas' own, and the instance has not been asked anything.
     pub async fn until_ready_within(&self, within: Duration) -> Result<(), LocalQuota> {
         let paced = self.slot.current();
-        match tokio::time::timeout(within, paced.limiter.until_ready()).await {
+        match tokio::time::timeout(within, paced.until_ready()).await {
             Ok(()) => {
                 self.slot.granted();
                 Ok(())
@@ -374,9 +419,19 @@ impl Paced {
     fn new(rate: Rate) -> Self {
         Self {
             rate,
-            limiter: RateLimiter::direct(
+            limiter: RateLimiter::direct_with_clock(
                 Quota::per_second(rate.per_second).allow_burst(rate.burst),
+                TokioClock,
             ),
+        }
+    }
+
+    /// Wait until the limiter lets one request through: governor's
+    /// `until_ready`, sleeping on tokio's timer rather than its own, so the
+    /// wait keeps the clock the limiter reads (#1925).
+    async fn until_ready(&self) {
+        while let Err(not_until) = self.limiter.check() {
+            tokio::time::sleep(not_until.wait_time_from(TokioClock.now())).await;
         }
     }
 
@@ -497,24 +552,15 @@ fn nonzero(value: u32) -> NonZeroU32 {
 
 #[cfg(test)]
 mod tests {
+    //! The quiet a quota change is credited with is a duration, so the tests
+    //! that time one run on tokio's paused clock, which the limiter reads
+    //! (#1925): a sleep there is exactly as long as it says, and what a quiet
+    //! refilled is a literal, not a bound read from the wall clock (#1802).
+
     use std::sync::Arc;
-    use std::time::Instant;
+    use std::time::Duration;
 
     use super::{InstanceLimiter, Paced, PoisonError, Rate};
-
-    /// The most a limiter at `rate` can hand out for a quiet that began at
-    /// `since`, read once its requests are counted: what `rate` refilled in
-    /// the time gone since, and one more for a refill the two clocks round
-    /// differently (#1802). An upper bound read from the
-    /// clock, not a literal: a test the machine stalls is held to what the
-    /// stall refilled, and an unstalled one to the single request it always
-    /// was. Counted here rather than by [`Rate::refilled_in`], which the
-    /// tests are checking.
-    fn refill_bound_since(rate: Rate, since: Instant) -> u32 {
-        let per_second = u128::from(rate.per_second.get());
-        let refilled = since.elapsed().as_nanos() * per_second / 1_000_000_000;
-        u32::try_from(refilled + 1).unwrap_or(u32::MAX)
-    }
 
     /// One entry per origin, however its quota moves, and a dropped holder
     /// does not stay on the books: building a limiter prunes the dead.
@@ -621,11 +667,11 @@ mod tests {
     /// burst of four in 40 ms, so its four unspent requests are 0.04 s, none
     /// at all at ten a second; ten a second for 0.5 s is five, so the
     /// stricter quota starts with its whole burst of four.
-    #[test]
-    fn a_tightening_after_a_quiet_starts_with_what_the_quiet_refilled() {
+    #[tokio::test(start_paused = true)]
+    async fn a_tightening_after_a_quiet_starts_with_what_the_quiet_refilled() {
         let url = url::Url::parse("http://quiet.invalid:1764").expect("url");
         let _loose = InstanceLimiter::for_origin(&url, Rate::new(100, 4));
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        tokio::time::sleep(Duration::from_millis(500)).await;
         let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
 
         assert_eq!(strict.slot.current().rate, Rate::new(10, 4), "it tightened");
@@ -637,11 +683,11 @@ mod tests {
     /// one a second, and the loose limiter's four are none at one a second
     /// either. Short of a second's quiet, the stricter quota starts with
     /// nothing.
-    #[test]
-    fn a_quiet_is_counted_at_the_stricter_rate() {
+    #[tokio::test(start_paused = true)]
+    async fn a_quiet_is_counted_at_the_stricter_rate() {
         let url = url::Url::parse("http://slow.invalid:1764").expect("url");
         let _loose = InstanceLimiter::for_origin(&url, Rate::new(100, 4));
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        tokio::time::sleep(Duration::from_millis(100)).await;
         let strict = InstanceLimiter::for_origin(&url, Rate::new(1, 4));
 
         assert_eq!(strict.slot.current().take_left(), 0);
@@ -651,32 +697,30 @@ mod tests {
     /// the limiter was built (#1764): the same half second as above, ended by
     /// a request, leaves the stricter quota what the loose one had left in
     /// seconds -- none -- and what ten a second refills from that request to
-    /// the count. Counted from the build it would have all four.
-    #[tokio::test]
+    /// the count, which on a clock that has not moved is none either.
+    /// Counted from the build it would have all four.
+    #[tokio::test(start_paused = true)]
     async fn a_request_ends_the_quiet() {
         let url = url::Url::parse("http://ended.invalid:1764").expect("url");
         let loose = InstanceLimiter::for_origin(&url, Rate::new(100, 4));
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let asked = Instant::now();
+        tokio::time::sleep(Duration::from_millis(500)).await;
         loose
-            .until_ready_within(std::time::Duration::from_secs(1))
+            .until_ready_within(Duration::from_secs(1))
             .await
             .expect("a full limiter lets one through");
         let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
 
-        let left = strict.slot.current().take_left();
-        let bound = refill_bound_since(Rate::new(10, 4), asked);
-        assert!(left <= bound, "{left} left, at most {bound} refilled");
+        assert_eq!(strict.slot.current().take_left(), 0);
     }
 
     /// A loosening does not end the quiet (#1764): a new limiter was built,
     /// but nothing was sent, so the stricter quota coming back half a second
     /// later has refilled its whole burst all the same.
-    #[test]
-    fn a_loosening_does_not_end_the_quiet() {
+    #[tokio::test(start_paused = true)]
+    async fn a_loosening_does_not_end_the_quiet() {
         let url = url::Url::parse("http://loosened.invalid:1764").expect("url");
         drop(InstanceLimiter::for_origin(&url, Rate::new(10, 4)));
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        tokio::time::sleep(Duration::from_millis(500)).await;
         let loose = InstanceLimiter::for_origin(&url, Rate::new(100, 4));
         assert_eq!(loose.slot.current().rate, Rate::new(100, 4), "it loosened");
         let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
@@ -687,11 +731,11 @@ mod tests {
     /// A loosening after a quiet starts with what the looser quota refilled
     /// in it (#1771): its burst of four takes 0.4 s at ten a second, and
     /// nothing was sent for half a second, so it starts with all four.
-    #[test]
-    fn a_loosening_after_a_quiet_starts_with_what_the_quiet_refilled() {
+    #[tokio::test(start_paused = true)]
+    async fn a_loosening_after_a_quiet_starts_with_what_the_quiet_refilled() {
         let url = url::Url::parse("http://quiet.invalid:1771").expect("url");
         drop(InstanceLimiter::for_origin(&url, Rate::new(1, 1)));
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        tokio::time::sleep(Duration::from_millis(500)).await;
         let loose = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
 
         assert_eq!(loose.slot.current().rate, Rate::new(10, 4), "it loosened");
@@ -700,21 +744,20 @@ mod tests {
 
     /// A loosening after a short quiet is credited in proportion to it, not
     /// with its whole burst (#1771): 150 ms at ten a second is one request of
-    /// fifty, and the bound leaves the sleep almost a second to run long.
-    /// Counted in the wrong unit either way, the credit would be none or all
-    /// fifty.
-    #[test]
-    fn a_short_quiet_credits_a_loosening_in_proportion() {
+    /// fifty. Counted in the wrong unit either way, the credit would be none
+    /// or all fifty.
+    #[tokio::test(start_paused = true)]
+    async fn a_short_quiet_credits_a_loosening_in_proportion() {
         let url = url::Url::parse("http://short.invalid:1771").expect("url");
         drop(InstanceLimiter::for_origin(&url, Rate::new(1, 1)));
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        tokio::time::sleep(Duration::from_millis(150)).await;
         let loose = InstanceLimiter::for_origin(&url, Rate::new(10, 50));
 
         assert_eq!(loose.slot.current().rate, Rate::new(10, 50), "it loosened");
-        let left = loose.slot.current().take_left();
-        assert!(
-            (1..=10).contains(&left),
-            "{left} of fifty after 150 ms at ten a second"
+        assert_eq!(
+            loose.slot.current().take_left(),
+            1,
+            "of fifty, after 150 ms at ten a second"
         );
     }
 
@@ -723,46 +766,36 @@ mod tests {
     /// ten seconds at one a second, a thousand at a hundred a second, and
     /// crediting them would be the fresh burst on every alternation. What a
     /// hundred a second refills from the slot's build to the count is all it
-    /// may have: one request when nothing stalls the test.
-    #[test]
-    fn a_loosening_right_away_takes_nothing_from_a_full_limiter() {
+    /// may have, and on a clock that has not moved that is nothing.
+    #[tokio::test(start_paused = true)]
+    async fn a_loosening_right_away_takes_nothing_from_a_full_limiter() {
         let url = url::Url::parse("http://full.invalid:1771").expect("url");
         drop(InstanceLimiter::for_origin(&url, Rate::new(1, 10)));
         let loose = InstanceLimiter::for_origin(&url, Rate::new(100, 20));
 
         assert_eq!(loose.slot.current().rate, Rate::new(100, 20), "it loosened");
-        let left = loose.slot.current().take_left();
-        let bound = refill_bound_since(Rate::new(100, 20), loose.slot.born);
-        assert!(
-            left <= bound,
-            "{left} of twenty left, at most {bound} refilled"
-        );
+        assert_eq!(loose.slot.current().take_left(), 0, "of twenty");
     }
 
     /// The quiet a loosening is credited with ends at the last request let
     /// through (#1771): half a second, then a request, then the loosening,
-    /// leaves what twenty a second refills from that request to the count.
-    /// Counted from the slot's build it would have all eight.
-    #[tokio::test]
+    /// leaves what twenty a second refills from that request to the count:
+    /// nothing, on a clock that has not moved. Counted from the slot's build
+    /// it would have all eight.
+    #[tokio::test(start_paused = true)]
     async fn a_request_ends_the_quiet_before_a_loosening() {
         let url = url::Url::parse("http://ended.invalid:1771").expect("url");
         let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let asked = Instant::now();
+        tokio::time::sleep(Duration::from_millis(500)).await;
         strict
-            .until_ready_within(std::time::Duration::from_secs(1))
+            .until_ready_within(Duration::from_secs(1))
             .await
             .expect("a full limiter lets one through");
         drop(strict);
         let loose = InstanceLimiter::for_origin(&url, Rate::new(20, 8));
 
         assert_eq!(loose.slot.current().rate, Rate::new(20, 8), "it loosened");
-        let left = loose.slot.current().take_left();
-        let bound = refill_bound_since(Rate::new(20, 8), asked);
-        assert!(
-            left <= bound,
-            "{left} of eight left, at most {bound} refilled"
-        );
+        assert_eq!(loose.slot.current().take_left(), 0, "of eight");
     }
 
     /// A zero reads as one, as it always has: `0/s` means "one", not "never".

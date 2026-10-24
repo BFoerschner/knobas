@@ -50,4 +50,6 @@ serde_json.workspace = true
 # `net` for the counting socket the retry-budget tests answer from. Named here
 # rather than inherited: reqwest happens to turn it on, and a test relying on
 # another crate's feature is a test that breaks when that crate changes.
-tokio = { workspace = true, features = ["net", "io-util"] }
+# `test-util` for the paused clock the quota and budget tests run on, and
+# `sync` for the watch that says an exchange is over (#1925).
+tokio = { workspace = true, features = ["net", "io-util", "sync", "test-util"] }
