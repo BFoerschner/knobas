@@ -79,8 +79,9 @@ readonly KEY_A=0
 readonly KEY_K=40
 readonly KEY_RETURN=36
 readonly KEY_UP=126
-readonly SETTLE_SECONDS=8
-readonly SPAWN_SECONDS=20
+# The guard on every wait below: KNOBAS_WITNESS_WAIT_S (`witness_guard`, #1961).
+SETTLE_SECONDS=$(witness_guard) || exit 2
+readonly SETTLE_SECONDS
 
 say() { printf 'open-in-editor: %s\n' "$*"; }
 die() {
@@ -102,12 +103,13 @@ die() {
 wait_until() {
     local what=$1
     shift
-    local deadline=$((SECONDS + SETTLE_SECONDS))
-    while [ "$SECONDS" -lt "$deadline" ]; do
-        if "$@"; then return 0; fi
-        sleep 0.2
-    done
-    die "$what"
+    local polled=0
+    witness_poll "$pid" "$SETTLE_SECONDS" "$@" || polled=$?
+    case $polled in
+    0) return 0 ;;
+    3) die "$what: knobas (pid $pid) exited while this waited" ;;
+    *) die "$what (waited ${SETTLE_SECONDS} s, KNOBAS_WITNESS_WAIT_S)" ;;
+    esac
 }
 
 # How many elements carry a name, as a number or `x` -- never "whatever `ax`
@@ -131,14 +133,14 @@ reads() { has_reading "$(screen)" "$1"; }
 
 # press_when <label> -- wait for exactly one element called <label>, press it.
 press_when() {
-    wait_until "no single '$1' within ${SETTLE_SECONDS} s (count: $(count_of "$1"))" exactly_one "$1"
+    wait_until "no single '$1' (count: $(count_of "$1"))" exactly_one "$1"
     "$ax" press "$pid" "$1" || die "could not press '$1'"
 }
 
 # fill <label> <text> -- put <text> in the field called <label>, replacing
 # whatever is in it (⌘A first: a field may arrive with a value).
 fill() {
-    wait_until "no field called '$1' appeared within ${SETTLE_SECONDS} s" exactly_one "$1"
+    wait_until "no field called '$1' appeared" exactly_one "$1"
     "$ax" focus "$pid" "$1" || die "could not put the keyboard in '$1'"
     "$ax" key "$KEY_A" command
     "$ax" type "$2"
@@ -209,9 +211,9 @@ say "'$APP_NAME' is stored, and runs the stub"
 
 say "opening the launcher and asking for '$REPO_NAME'"
 "$ax" key "$KEY_K" command
-wait_until "⌘K did not open the launcher within ${SETTLE_SECONDS} s" present "$QUERY_BOX"
+wait_until "⌘K did not open the launcher" present "$QUERY_BOX"
 "$ax" type "$REPO_NAME"
-wait_until "the launcher never answered '$REPO_NAME' within ${SETTLE_SECONDS} s" launcher_answered
+wait_until "the launcher never answered '$REPO_NAME'" launcher_answered
 
 # The page's *Cloned at* line carries the clone's path as a value of its own.
 # Read before Return and after (#547): Settings, behind the launcher, reads the
@@ -221,12 +223,14 @@ before=$(reading_verdict "$(screen)" "$checkout")
 say "the launcher has answered; '$checkout' on screen: $before"
 "$ax" key "$KEY_RETURN"
 go=Return
-after=$(reading_verdict "$(screen)" "$checkout")
-deadline=$((SECONDS + SETTLE_SECONDS))
-while [ "$after" != yes ] && [ "$SECONDS" -lt "$deadline" ]; do
-    sleep 0.2
+# Polled under the guard; the predicate leaves what it last read in `after`.
+after_names_the_clone() {
     after=$(reading_verdict "$(screen)" "$checkout")
-done
+    [ "$after" = yes ]
+}
+polled=0
+witness_poll "$pid" "$SETTLE_SECONDS" after_names_the_clone || polled=$?
+[ "$polled" != 3 ] || die "knobas (pid $pid) exited after '$go'"
 say "after '$go'; '$checkout' on screen: $after"
 
 case $(waypoint_verdict "$before" "$after") in
@@ -272,11 +276,11 @@ say "picking '$APP_NAME' from the menu"
 
 # `open_checkout` answers when the program has *started*; what is polled for is
 # the stub's own record, finished (`record_is_complete`).
-if ! wait_for_record "$record" "$SPAWN_SECONDS"; then
+if ! wait_for_record "$record" "$SETTLE_SECONDS"; then
     printf 'open-in-editor: what is at %s now:\n' "$record" >&2
     { cat "$record" 2>/dev/null || printf '(nothing at that path)\n'; } |
         sed 's/^/open-in-editor:   /' >&2
-    die "the stub never finished writing a record after ${SPAWN_SECONDS} s." \
+    die "the stub never finished writing a record after ${SETTLE_SECONDS} s (KNOBAS_WITNESS_WAIT_S)." \
         "A finished record ends in a newline -- the condition recorded()" \
         "waits for in crates/knobas-app/tests/it/checkout_ipc.rs."
 fi

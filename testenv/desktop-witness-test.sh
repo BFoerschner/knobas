@@ -407,6 +407,55 @@ wait "$writer"
 
 rm -rf "$records"
 
+# --- witness_guard, witness_poll (#1961) ---------------------------------------
+#
+# Every wait on the app polls for the state it needs under one guard sized past
+# a loaded machine, and fails at once when the app has exited. The drivers,
+# the harness's launch and live-shot's steps all wait through these two.
+
+check "the guard defaults to 60 s" 60 "$(env -u KNOBAS_WITNESS_WAIT_S bash -c '. ./desktop-witness-lib.sh; witness_guard')"
+check "the guard takes whole seconds from KNOBAS_WITNESS_WAIT_S" 7 \
+    "$(KNOBAS_WITNESS_WAIT_S=7 bash -c '. ./desktop-witness-lib.sh; witness_guard')"
+for bad in 0 1.5 10s -3 07; do
+    said=$(KNOBAS_WITNESS_WAIT_S=$bad bash -c '. ./desktop-witness-lib.sh; witness_guard' 2>&1 && echo "status 0" || echo "status $?")
+    check_contains "the guard refuses '$bad', naming the variable" "KNOBAS_WITNESS_WAIT_S must be a whole number of seconds, got '$bad'" "$said"
+    check_contains "and exits 2 for '$bad'" "status 2" "$said"
+done
+
+# A state that arrives late is waited for: the guard, not a count of tries,
+# is what runs out (the old fixed budgets were 5 s and 8 s in the drivers and
+# 10 s in live-shot's reach and the harness's launch).
+poll_tmp=$(mktemp -d "${TMPDIR:-/tmp}/knobas-witness-poll.XXXXXX")
+sleep 600 &
+alive=$!
+(sleep 2; : >"$poll_tmp/drawn") &
+drawer=$!
+status=0
+witness_poll "$alive" 30 test -e "$poll_tmp/drawn" || status=$?
+check "a state 2 s late is waited for" 0 "$status"
+wait "$drawer"
+# One that never comes runs out on the guard, and says so (1).
+status=0
+witness_poll "$alive" 2 test -e "$poll_tmp/never" || status=$?
+check "a state that never comes runs out on the guard" 1 "$status"
+kill "$alive" 2>/dev/null || true
+wait "$alive" 2>/dev/null || true
+# An app that has exited fails the wait at once (3), not at the guard.
+sleep 1 &
+gone=$!
+wait "$gone" || true
+from=$SECONDS status=0
+witness_poll "$gone" 30 test -e "$poll_tmp/never" || status=$?
+check "an exited app fails the wait" 3 "$status"
+check "and fails it at once" yes "$([ $((SECONDS - from)) -lt 5 ] && echo yes || echo "no ($((SECONDS - from)) s)")"
+# A state already there answers even when the app has just gone: what was
+# waited for happened.
+: >"$poll_tmp/drawn"
+status=0
+witness_poll "$gone" 30 test -e "$poll_tmp/drawn" || status=$?
+check "a state already reached answers whatever the app does next" 0 "$status"
+rm -rf "$poll_tmp"
+
 # The twin, pinned in the direction #531's divergence ran: two files writing
 # and waiting on one stub's record, and only a reader of both can see them
 # disagree. What makes a record whole on both sides is the rename (#583), so
@@ -865,6 +914,10 @@ if [ "$(uname -s)" = Darwin ]; then
     check_contains "live-shot: a missing steps file is refused" "no steps file at" "$said"
     said=$(refusal LIVE_SHOT_AEROSPACE=yes -- "$shot_tmp/out" "$shot_tmp/steps.sh")
     check_contains "live-shot: LIVE_SHOT_AEROSPACE takes 1 only" "must be 1 or unset" "$said"
+    said=$(refusal KNOBAS_WITNESS_WAIT_S=10s -- "$shot_tmp/out" "$shot_tmp/steps.sh")
+    check_contains "live-shot: the step guard takes whole seconds only" \
+        "KNOBAS_WITNESS_WAIT_S must be a whole number of seconds, got '10s'" "$said"
+    check_contains "live-shot: and a bad one exits 2" "status 2" "$said"
     # Another run holds the witness's lock: refused, and that run's lock is
     # still there after (the refusal's exit must not clean up what it never took).
     mkdir "$shot_tmp/knobas-desktop-witness.lock"

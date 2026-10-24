@@ -46,6 +46,11 @@ readonly PROFILE_FLAG=--demo
 # Generous, because it covers a first-run PostgreSQL provision, not a window
 # being drawn.
 readonly WINDOW_TIMEOUT=180
+# The guard on the launch and on every wait the driver makes on the app
+# (KNOBAS_WITNESS_WAIT_S, `witness_guard`, #1961), read here so a bad value is
+# refused before the build rather than after it.
+WAIT_S=$(witness_guard) || exit 2
+readonly WAIT_S
 
 step() { printf '\ndesktop-witness: %s\n' "$*"; }
 note() { printf 'desktop-witness:   %s\n' "$*"; }
@@ -301,13 +306,17 @@ check_readiness
 # ---------------------------------------------------------------------------
 step "launching $registered $PROFILE_FLAG"
 open -a "$registered" --args "$PROFILE_FLAG"
+# Polled until the process is there, under the guard (#1961): `open` returns
+# once Launch Services has the request, and a loaded machine can take far
+# longer than the old 10 s to exec the binary.
 app_pid=
-for _ in $(seq 1 40); do
-    app_pid=$(pgrep -x "$APP_EXECUTABLE" | head -1 || true)
-    [ -n "$app_pid" ] && break
+launched_at=$SECONDS
+until app_pid=$(pgrep -x "$APP_EXECUTABLE" | head -1) && [ -n "$app_pid" ]; do
+    [ $((SECONDS - launched_at)) -lt "$WAIT_S" ] ||
+        fail "nothing started: no $APP_EXECUTABLE process appeared within $WAIT_S s of 'open' (KNOBAS_WITNESS_WAIT_S)." \
+            "last seen: pgrep -x $APP_EXECUTABLE found none."
     sleep 0.25
 done
-[ -n "$app_pid" ] || fail "nothing started: no knobas process appeared within 10 s of 'open'."
 note "pid $app_pid"
 
 step "waiting for a window (up to ${WINDOW_TIMEOUT} s)"

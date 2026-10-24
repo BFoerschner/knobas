@@ -39,7 +39,9 @@ pid=${KNOBAS_WITNESS_PID:?the harness passes this}
 readonly QUERY_BOX_LABEL='Search or act'
 readonly KEY_K=40
 readonly KEY_ESCAPE=53
-readonly SETTLE_SECONDS=5
+# The guard on every wait below: KNOBAS_WITNESS_WAIT_S (`witness_guard`, #1961).
+SETTLE_SECONDS=$(witness_guard) || exit 2
+readonly SETTLE_SECONDS
 
 say() { printf 'launcher-hotkey: %s\n' "$*"; }
 die() {
@@ -110,12 +112,13 @@ launcher_is_closed() {
 wait_until() {
     local what=$1
     shift
-    local deadline=$((SECONDS + SETTLE_SECONDS))
-    while [ "$SECONDS" -lt "$deadline" ]; do
-        if "$@"; then return 0; fi
-        sleep 0.2
-    done
-    die "$what"
+    local polled=0
+    witness_poll "$pid" "$SETTLE_SECONDS" "$@" || polled=$?
+    case $polled in
+    0) return 0 ;;
+    3) die "$what: knobas (pid $pid) exited while this waited" ;;
+    *) die "$what (waited ${SETTLE_SECONDS} s, KNOBAS_WITNESS_WAIT_S)" ;;
+    esac
 }
 
 say "bringing pid $pid to the front"
@@ -131,7 +134,7 @@ say "the query box does not have focus yet"
 
 say "pressing ⌘K"
 "$ax" key "$KEY_K" command
-wait_until "⌘K did not put focus in the launcher's query box within ${SETTLE_SECONDS} s" \
+wait_until "⌘K did not put focus in the launcher's query box" \
     focus_is_query_box
 say "the launcher's query box has focus: role $(field role), labelled '$QUERY_BOX_LABEL'"
 
@@ -145,7 +148,7 @@ boxes=$("$ax" find "$pid" "$QUERY_BOX_LABEL")
 
 say "pressing Escape"
 "$ax" key "$KEY_ESCAPE"
-wait_until "Escape did not take focus out of the launcher's query box within ${SETTLE_SECONDS} s" \
+wait_until "Escape did not take focus out of the launcher's query box" \
     focus_left_query_box
 wait_until "Escape left the launcher's query box in the accessibility tree, so the overlay is still up" \
     launcher_is_closed

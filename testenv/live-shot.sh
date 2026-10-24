@@ -27,8 +27,10 @@
 #                          modifiers command, shift, option, control
 #   settle [seconds]       wait for the app (default 1)
 #
-# `press`, `focus` and `click-at` retry for up to 10 s, as `just shot`'s
-# `click:` does; the steps start once the web view has drawn something.
+# `press`, `focus` and `click-at` retry until they land, under the guard
+# KNOBAS_WITNESS_WAIT_S (60 s by default; at once when knobas has exited), as
+# `just shot`'s `click:` does; the steps start once the web view has drawn
+# something.
 # Every command first checks that the screen is not locked, and `type`, `key`
 # and `click-at` that knobas is frontmost (activating it once): keystrokes sent
 # to another app are a person's work typed over. A failing command writes
@@ -43,6 +45,8 @@
 #       LIVE_SHOT_AEROSPACE=1  fullscreen the window in AeroSpace, so a tiling
 #         window manager does not resize it between shots. Off by default;
 #         refused when `aerospace` is not on PATH.
+#       KNOBAS_WITNESS_WAIT_S=60  the guard on `press`, `focus` and
+#         `click-at`, whole seconds (testenv/desktop-witness-lib.sh).
 #
 # It takes the screen, as the desktop witness does, and holds the witness's
 # lock: one of the two runs on this machine at a time. NOT part of any gate.
@@ -86,6 +90,8 @@ aerospace=${LIVE_SHOT_AEROSPACE:-}
 case $aerospace in '' | 1) ;; *) die "LIVE_SHOT_AEROSPACE must be 1 or unset, got '$aerospace'" ;; esac
 [ -z "$aerospace" ] || command -v aerospace >/dev/null \
     || die "LIVE_SHOT_AEROSPACE=1 but aerospace is not on PATH"
+# The guard on `press`, `focus` and `click-at` (#1961).
+wait_s=$(witness_guard) || exit 2
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 
@@ -163,18 +169,23 @@ shot() {
     sips --resampleWidth "$width" "$file" >/dev/null
     say "shot: $file"
 }
-# reach <verb> <ax subcommand> <label> [n]: the subcommand, retried for up to
-# 10 s as `just shot`'s click: waits, since a view draws after the step that
-# asked for it; the last attempt's complaint is the one printed.
+# reach <verb> <ax subcommand> <label> [n]: the subcommand, retried until it
+# lands, as `just shot`'s click: waits, since a view draws after the step that
+# asked for it. Under the guard (KNOBAS_WITNESS_WAIT_S, #1961), and at once
+# when knobas has exited; the last attempt's complaint is the one printed.
+reach_once() {
+    local sub=$1
+    shift
+    "$ax" "$sub" "$app_pid" "$@" 2>"$scratch/reach.err"
+}
 reach() {
-    local verb=$1 sub=$2
+    local verb=$1 sub=$2 polled=0
     shift 2
-    for _ in $(seq 1 20); do
-        "$ax" "$sub" "$app_pid" "$@" 2>"$scratch/reach.err" && return 0
-        sleep 0.5
-    done
+    witness_poll "$app_pid" "$wait_s" reach_once "$sub" "$@" || polled=$?
+    [ "$polled" != 0 ] || return 0
     cat "$scratch/reach.err" >&2
-    die "$verb $*"
+    [ "$polled" != 3 ] || die "$verb $*: knobas (pid $app_pid) exited while this waited"
+    die "$verb $* (waited $wait_s s, KNOBAS_WITNESS_WAIT_S)"
 }
 press() { ready; reach press press-visible "$@"; }
 focus() { ready; reach focus focus-visible "$@"; }
