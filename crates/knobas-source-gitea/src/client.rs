@@ -251,10 +251,13 @@ impl GiteaClient {
     /// read moved it onto a page already read: the run walked another one
     /// twice, this one not at all, returned `Ok`, and handed the sweep a
     /// corpus without it. An id never changes and a new repository takes a
-    /// higher one, so what is left to move a row across a page boundary is a
-    /// repository appearing below the walk (shared with the token, say),
-    /// which repeats a row rather than hiding one -- and `sync::select_repos`
-    /// walks a repeated row once. Gitea 1.27.3 offers `id`
+    /// higher one, so a push moves nothing. Two things still move a row
+    /// across a page boundary. A repository appearing below the walk (shared
+    /// with the token, say) repeats a row, and `sync::select_repos` walks a
+    /// repeated row once. A repository deleted, or unshared, from a page
+    /// already read hides the first row of the next page (#1979), and
+    /// `sync::select_repos` lists twice on a full sync for it, since this
+    /// endpoint offers no keyset. Gitea 1.27.3 offers `id`
     /// (`swagger.v1.json`, `repoSearch`; spec #1618 ruling A1 asked for it
     /// where offered), and `live_gitea` asserts the order it answers.
     pub(crate) async fn search_repos(&self, page: u32) -> Result<Vec<Value>, SourceError> {
