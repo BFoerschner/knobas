@@ -1576,8 +1576,9 @@ url: string | null,
  * The newest *Create monitor* on its way for a name this asset or route
  * records (#1959), as the queue holds it; `null` where none is. So a
  * reload before the poll draws *Monitor queued* rather than offering the
- * create again, which Uptime Kuma would take as a second monitor.
- * [`ON_ITS_WAY`] says which creates are on their way.
+ * create again, which Uptime Kuma would take as a second monitor. On
+ * its way is `pending`, or `sent` and not mirrored yet; a held, refused
+ * or withdrawn create is not.
  */
 monitor_on_its_way: QueuedWrite | null, };
 

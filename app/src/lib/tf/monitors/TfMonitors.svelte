@@ -234,7 +234,7 @@
         name: `Monitor ${payload?.CreateMonitor?.name ?? row.name}`,
         onstop: () => {
           creates.delete(id);
-          onItsWay((write) => write?.id === id, null);
+          markOnItsWay((write) => write?.id === id, null);
           revision += 1;
         },
         onleave: () => {
@@ -247,7 +247,7 @@
   }
 
   /** Set the create on its way of every row `which` picks, as the page knows it before the next read. */
-  function onItsWay(which: (write: QueuedWrite | null, row: UnmonitoredAsset) => boolean, write: QueuedWrite | null) {
+  function markOnItsWay(which: (write: QueuedWrite | null, row: UnmonitoredAsset) => boolean, write: QueuedWrite | null) {
     if (unwatched === null) return;
     unwatched = unwatched.map((row) => (which(row.monitor_on_its_way, row) ? { ...row, monitor_on_its_way: write } : row));
   }
@@ -381,7 +381,7 @@
     toastQueued(`create monitor for ${subject?.name ?? what.name}`, what.source);
     // Drawn at once, and followed by the effect above as the read will name it.
     // The re-read starts after the row was queued, and drops any read before it.
-    onItsWay((_, row) => row.id === subject?.id, what.write);
+    markOnItsWay((_, row) => row.id === subject?.id, what.write);
     revision += 1;
   }
 

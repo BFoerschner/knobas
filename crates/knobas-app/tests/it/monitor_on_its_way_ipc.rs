@@ -41,16 +41,24 @@ async fn recording(pool: &PgPool, name: &str, monitor: &str) -> String {
     id
 }
 
-/// A `CreateMonitor` for `name` in source `kuma`, as `submit_write` queues it.
+/// A `CreateMonitor` for `name` in source `kuma`, as `submit_write` queues it:
+/// the payload is the op serialized, as `knobas_sync::write_queue::queue`
+/// stores it, so a renamed variant or field fails these tests rather than
+/// leaving the read's `payload->'CreateMonitor'->>'name'` naming nothing
+/// (ADR-0007, requirement 3: the read fails open).
 async fn create(pool: &PgPool, name: &str) -> i64 {
+    let op = knobas_source::WriteOp::CreateMonitor {
+        entity: "kuma:monitors".to_owned(),
+        name: name.to_owned(),
+        url: "db.internal:5432".to_owned(),
+        kind: knobas_source::MonitorKind::Tcp,
+    };
     knobas_core::write_queue::queue(
         pool,
         "kuma",
         &EntityRef::parse("kuma:monitors").unwrap(),
-        "create_monitor",
-        serde_json::json!({ "CreateMonitor": {
-            "entity": "kuma:monitors", "name": name, "url": "db.internal:5432", "kind": "tcp"
-        }}),
+        op.identifier(),
+        serde_json::to_value(&op).unwrap(),
         serde_json::json!({}),
     )
     .await
@@ -169,11 +177,13 @@ async fn a_held_refused_withdrawn_or_long_lost_create_is_not_on_its_way() {
     knobas_core::write_queue::sent(&pool, lost, Some("40"))
         .await
         .unwrap();
-    sqlx::query("update knobas.write_queue set settled_at = now() - interval '8 days' where id = $1")
-        .bind(lost)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "update knobas.write_queue set settled_at = now() - interval '8 days' where id = $1",
+    )
+    .bind(lost)
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(on_its_way(&pool).await, [("pg-main".to_owned(), None)]);
 
     let again = create(&pool, "pg-main").await;

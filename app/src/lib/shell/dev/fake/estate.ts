@@ -950,7 +950,9 @@ function editRoute(args: Record<string, unknown>) {
     // to the route (#1959), duplicates dropped as on an asset.
     else if (edit.field === "monitors") {
       const known = (route.monitors ??= []);
-      for (const name of (edit.added ?? []) as string[]) if (name.trim() !== "" && !known.includes(name.trim())) known.push(name.trim());
+      for (const name of ((edit.added ?? []) as string[]).map((added) => added.trim())) {
+        if (name !== "" && !known.includes(name)) known.push(name);
+      }
     }
   }
   return routeRow(route);

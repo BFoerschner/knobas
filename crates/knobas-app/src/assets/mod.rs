@@ -2286,8 +2286,9 @@ pub struct UnmonitoredAsset {
     /// The newest *Create monitor* on its way for a name this asset or route
     /// records (#1959), as the queue holds it; `null` where none is. So a
     /// reload before the poll draws *Monitor queued* rather than offering the
-    /// create again, which Uptime Kuma would take as a second monitor.
-    /// [`ON_ITS_WAY`] says which creates are on their way.
+    /// create again, which Uptime Kuma would take as a second monitor. On
+    /// its way is `pending`, or `sent` and not mirrored yet; a held, refused
+    /// or withdrawn create is not.
     pub monitor_on_its_way: Option<knobas_core::write_queue::QueuedWrite>,
 }
 
@@ -2391,10 +2392,17 @@ select r.id, r.name, r.url,
 /// Held and refused rows wait on the reader in the queue, and a withdrawn one
 /// will not go, so none of them is on its way: #1951's ruling for a ticket.
 ///
-/// The name is read at `payload->'CreateMonitor'->>'name'`, `WriteOp`'s serde
-/// shape, as `protocol::publication_of` reads a page's title. `$1` the op, `$2`
-/// the patience, `$3` the monitor kind; `$4` and `$5` narrow it to one source
-/// and one name, or not where `null`.
+/// A **payload read of a knobas-owned shape** (ADR-0007): the name is read at
+/// `payload->'CreateMonitor'->>'name'`, `WriteOp`'s serde shape, as
+/// `protocol::publication_of` reads a page's title, in this one statement. It
+/// **fails open**: a drifted path names no create, so the tab offers *Create
+/// monitor* and `submit_write` refuses no second one, which is the behaviour
+/// before #1959 and never a wrong refusal. Pinned by
+/// `tests/it/monitor_on_its_way_ipc.rs` and `submittable`'s
+/// `a_second_create_of_a_monitor_on_its_way_is_refused_before_it_is_queued`,
+/// which queue the op serialized rather than a spelled-out payload. `$1` the
+/// op, `$2` the patience, `$3` the monitor kind; `$4` and `$5` narrow it to one
+/// source and one name, or not where `null`.
 const ON_ITS_WAY: &str = "select w.id, w.payload->'CreateMonitor'->>'name' as name
   from knobas.write_queue w
  where w.op = $1
@@ -2436,7 +2444,7 @@ async fn creates_on_their_way(
 /// # Errors
 ///
 /// [`IpcError`] if the read fails.
-pub async fn monitor_on_its_way(
+pub async fn newest_create_on_its_way(
     pool: &PgPool,
     source_id: &str,
     name: &str,
@@ -2449,27 +2457,40 @@ pub async fn monitor_on_its_way(
 }
 
 /// Each row's [`UnmonitoredAsset::monitor_on_its_way`]: the newest create on
-/// its way whose name the row records (`recorded`, in the rows' order), as the
-/// queue holds it now.
-async fn on_their_way(
+/// its way whose name the row records (the names beside it), as the queue
+/// holds it now.
+async fn with_creates_on_their_way(
     pool: &PgPool,
-    recorded: &[Vec<String>],
-) -> Result<Vec<Option<knobas_core::write_queue::QueuedWrite>>, IpcError> {
+    rows: Vec<(UnmonitoredAsset, Vec<String>)>,
+) -> Result<Vec<UnmonitoredAsset>, IpcError> {
     let mut newest: HashMap<String, i64> = HashMap::new();
     for (id, name) in creates_on_their_way(pool, None, None).await? {
         newest.insert(name, id);
     }
-    let mut rows: HashMap<i64, Option<knobas_core::write_queue::QueuedWrite>> = HashMap::new();
-    let mut out = Vec::with_capacity(recorded.len());
-    for names in recorded {
-        let Some(id) = names.iter().filter_map(|name| newest.get(name)).max().copied() else {
-            out.push(None);
+    let mut writes: HashMap<i64, Option<knobas_core::write_queue::QueuedWrite>> = HashMap::new();
+    let mut out = Vec::with_capacity(rows.len());
+    for (row, names) in rows {
+        let Some(id) = names
+            .iter()
+            .filter_map(|name| newest.get(name))
+            .max()
+            .copied()
+        else {
+            out.push(row);
             continue;
         };
-        if !rows.contains_key(&id) {
-            rows.insert(id, knobas_core::write_queue::get(pool, id).await?);
-        }
-        out.push(rows[&id].clone());
+        let write = match writes.get(&id) {
+            Some(write) => write.clone(),
+            None => {
+                let write = knobas_core::write_queue::get(pool, id).await?;
+                writes.insert(id, write.clone());
+                write
+            }
+        };
+        out.push(UnmonitoredAsset {
+            monitor_on_its_way: write,
+            ..row
+        });
     }
     Ok(out)
 }
@@ -2549,16 +2570,7 @@ pub async fn unmonitored_assets(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>, 
         };
         rows.push((route, row.try_get("monitors")?));
     }
-    let recorded: Vec<Vec<String>> = rows.iter().map(|(_, names)| names.clone()).collect();
-    let going = on_their_way(pool, &recorded).await?;
-    Ok(rows
-        .into_iter()
-        .zip(going)
-        .map(|((row, _), write)| UnmonitoredAsset {
-            monitor_on_its_way: write,
-            ..row
-        })
-        .collect())
+    with_creates_on_their_way(pool, rows).await
 }
 
 /// The assets half of [`unmonitored_assets`], each with the monitor names it

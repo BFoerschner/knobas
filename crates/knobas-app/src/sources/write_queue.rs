@@ -825,7 +825,7 @@ pub(crate) async fn submittable(
     // monitor, so a second press, or the asset pane's retry, would make two.
     // Held and refused creates are not on their way: the reader's retry goes.
     if let WriteOp::CreateMonitor { name, .. } = &op
-        && let Some(write) = crate::assets::monitor_on_its_way(pool, &source.id, name).await?
+        && let Some(write) = crate::assets::newest_create_on_its_way(pool, &source.id, name).await?
     {
         return Err(IpcError::conflict(format!(
             "a monitor named {name:?} is already on its way to {} (write {write}); \
@@ -1273,10 +1273,16 @@ mod tests {
         .await;
         let locked: std::sync::Arc<dyn knobas_secrets::SecretStore> = std::sync::Arc::new(Locked);
         let target = format!("{kuma}:monitors");
+        // Serialized from the op, as the queue stores it, so the read's path
+        // over `WriteOp`'s serde shape is pinned here too (ADR-0007).
         let payload = |name: &str| {
-            serde_json::json!({ "CreateMonitor": {
-                "entity": target, "name": name, "url": "https://gitea.test/", "kind": "http"
-            }})
+            serde_json::to_value(WriteOp::CreateMonitor {
+                entity: target.clone(),
+                name: name.to_owned(),
+                url: "https://gitea.test/".to_owned(),
+                kind: knobas_source::MonitorKind::Http,
+            })
+            .unwrap()
         };
         let first = knobas_core::write_queue::queue(
             &pool,
