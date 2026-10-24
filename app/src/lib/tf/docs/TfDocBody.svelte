@@ -9,7 +9,8 @@
   (`DocSection.refusal`), and a refused one draws the button disabled with the
   reason. Saving goes through the write queue (`onsave`). A page its
   source's credential may not edit (`refusal`, #2053) draws every *Edit
-  section* disabled with that reason.
+  section*, and the *Save section* of an editor already open, disabled with
+  that reason.
 
   A saved section draws its queued text in place of the old, muted and marked
   *queued* (#1424), until a read of the page has a newer version; *Edit
@@ -85,7 +86,9 @@
   }
 
   async function save(number: number) {
-    if (saving) return;
+    // An editor can be open when the refusal lands: opened before the answer,
+    // or reopened by *Edit and resend*.
+    if (saving || refusal !== null) return;
     saving = true;
     try {
       if (await onsave(number, draft)) editing = null;
@@ -126,8 +129,12 @@
           <div class="tf-acts">
             <span class="tf-dim">Text, lists and panels. Saved to {sourceName} through the write queue.</span>
             <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editing = null)}>Cancel</button>
-            <button type="button" class="tf-btn tf-sm tf-primary" disabled={saving} onclick={() => save(section.number)}
-              >Save section</button>
+            <button
+              type="button"
+              class="tf-btn tf-sm tf-primary"
+              disabled={saving}
+              {...refusedAttrs(refusal)}
+              onclick={() => save(section.number)}>Save section</button>
           </div>
         </div>
       {:else if queued !== null}

@@ -572,6 +572,29 @@ test("New page refuses a parent the credential cannot add pages under, saying wh
   expect(io.docsCreatePage).not.toHaveBeenCalled();
 });
 
+test("an editor open before the refusal lands saves nothing, its Save section drawn refused (#2053)", async () => {
+  const reason = "This Confluence user cannot edit On-call handbook: the page's restrictions leave it out";
+  let answer: (refused: { entity: string; op: string; reason: string }[]) => void = () => {};
+  const io = await draw(
+    ["confluence:2"],
+    ports({
+      docsPage: vi.fn(async () => RICH),
+      refusedWrites: vi.fn(() => new Promise((resolve) => (answer = resolve))),
+    }),
+  );
+  button("Edit section")!.click();
+  await settle();
+  expect(target.querySelector("textarea[aria-label='Section text']")).not.toBeNull();
+  answer([{ entity: "confluence:2", op: "update_page", reason }]);
+  await settle();
+  const save = button("Save section")!;
+  expect(save.getAttribute("aria-disabled")).toBe("true");
+  expect(save.title).toBe(reason);
+  save.click();
+  await settle();
+  expect(io.docsEditSection).not.toHaveBeenCalled();
+});
+
 test("For you lists the pages that mention me, with who asked", async () => {
   await draw(
     ["confluence:2"],
