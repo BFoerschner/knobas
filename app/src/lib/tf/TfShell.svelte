@@ -277,6 +277,37 @@
   let sources = $state<Pick<SourceSummary, "id" | "display_name">[] | null>(null);
   let sync = $state<SourceSyncStatus[]>([]);
   let now = $state(new Date());
+  /** Bumped by an event that asks for the source list again. */
+  let sourcesAsked = $state(0);
+  const askSources = () => (sourcesAsked += 1);
+  /**
+   * Which sources the health store holds, and when it changes the bar's list
+   * is stale (#2059). Removing a source sends no event: Settings re-lists the
+   * sources and hands the store the sources there are now (`Health.replace`) on
+   * Remove, Uninstall, Add source and restore alike. A `source:health` for a
+   * source the store did not hold changes it too.
+   */
+  const heldSources = $derived(health.all.map((row) => row.source_id).join("\n"));
+
+  $effect(() => {
+    if (!lifecycle.ready) return;
+    void heldSources;
+    void sourcesAsked;
+    // A read this one overtakes lands nothing: the newer answer stands.
+    let dead = false;
+    void ports
+      .listSources()
+      .then((rows) => {
+        if (dead) return;
+        sources = rows;
+        // Which sources answer an optional read of a role (#1208); the mirror narrows the rows (#1300).
+        sourceRoles.take(rows);
+      })
+      .catch(() => {});
+    return () => {
+      dead = true;
+    };
+  });
 
   $effect(() => {
     if (!lifecycle.ready) return;
@@ -285,17 +316,6 @@
     const hold = (pending: Promise<() => void>) =>
       void pending.then((off) => (dead ? off() : offs.push(off))).catch(() => {});
 
-    const readSources = () =>
-      void ports
-        .listSources()
-        .then((rows) => {
-          if (dead) return;
-          sources = rows;
-          // Which sources answer an optional read of a role (#1208); the mirror narrows the rows (#1300).
-          sourceRoles.take(rows);
-        })
-        .catch(() => {});
-    readSources();
     void ports
       .syncStatus()
       .then((rows) => {
@@ -313,12 +333,10 @@
         sync = [...sync.filter((other) => other.source_id !== row.source_id), row];
         // A finished run may have judged the source's roles (#1199): a role its
         // records missed, or filled again, changes what the surfaces draw.
-        if (was?.running === true && !row.running) readSources();
+        if (was?.running === true && !row.running) askSources();
       }),
     );
-    // A source added or removed changes its health reading first.
-    hold(ports.listen(EVENTS.sourceHealth, readSources));
-    // Every queue transition writes an activity line (`StatusBar.svelte`).
+    // Every queue transition writes an activity line.
     hold(ports.listen(EVENTS.activityNew, () => void queue.refresh()));
     const stopBadges = badges.start();
     const tick = setInterval(() => (now = new Date()), 30_000);

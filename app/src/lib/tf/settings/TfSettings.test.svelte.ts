@@ -20,6 +20,7 @@ import type {
   SyncRunRow,
   UpdatePreview,
 } from "../../ipc/sources";
+import { createHealth, type Health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { GITEA_SCHEMA, JIRA_SCHEMA } from "../../sources/fixtures";
 import { createLayers } from "../layers.svelte";
@@ -1550,6 +1551,88 @@ test("an uninstall that fails part-way reloads the sources it may have removed (
   await settle();
   expect(p.listInstalledAdapters).toHaveBeenCalledTimes(2);
   expect(p.listSources).toHaveBeenCalledTimes(2);
+});
+
+// ---- Every removal reaches the status bar (#2059) ----
+
+/**
+ * Settings over a real health store: its membership is what the shell's
+ * status bar re-reads its source list on, since no event says a source went.
+ */
+async function openLive(rest: string[], p: SettingsPorts) {
+  const store = createHealth({ credentialHealth: () => Promise.resolve([]), listen: () => Promise.resolve(() => {}) });
+  view = mount(TfSettings, {
+    target,
+    props: { rest, job: null, ready: true, ports: p, health: store, layers: createLayers(), now: () => NOW },
+  });
+  await settle();
+  return store;
+}
+
+const members = (store: Health) => store.all.map((row) => row.source_id);
+
+test("Remove, keeping or deleting what it synced, takes the source out of the health store (#2059)", async () => {
+  for (const purge of [false, true]) {
+    let listed = SOURCES;
+    const p = ports({
+      listSources: vi.fn(() => Promise.resolve(listed)),
+      deleteSource: vi.fn(() => {
+        listed = SOURCES.filter((source) => source.id !== "jira");
+        return Promise.resolve();
+      }),
+    });
+    const store = await openLive(["source", "jira"], p);
+    expect(members(store)).toEqual(["jira", "teamcity"]);
+    button("Remove…").click();
+    flushSync();
+    if (purge) target.querySelectorAll<HTMLInputElement>('[role="dialog"] input[type="radio"]')[1]!.click();
+    flushSync();
+    button("Remove").click();
+    await settle();
+    expect(p.deleteSource).toHaveBeenLastCalledWith("jira", purge);
+    expect(members(store)).toEqual(["teamcity"]);
+    unmount(view!);
+    view = null;
+    location.hash = "";
+  }
+});
+
+/** An adapter with Quay A and Quay B, listed beside Jira and TeamCity until `uninstall` takes `takes` of them. */
+function quayPorts(takes: string[], uninstall: () => Promise<void> = () => Promise.resolve()) {
+  const quay = [summary("quay-a", "Quay A", "ok"), summary("quay-b", "Quay B", "ok")];
+  let listed = [...SOURCES, ...quay];
+  return ports({
+    listSources: vi.fn(() => Promise.resolve(listed)),
+    listInstalledAdapters: vi.fn(() =>
+      Promise.resolve([adapterRow({ sources: quay.map(({ id, display_name }) => ({ id, display_name })) })]),
+    ),
+    uninstallAdapter: vi.fn(() => {
+      listed = listed.filter((source) => !takes.includes(source.id));
+      return uninstall();
+    }),
+  });
+}
+
+test("Uninstall, keeping one source's records and deleting the other's, takes both out of the health store (#2059)", async () => {
+  const store = await openLive([], quayPorts(["quay-a", "quay-b"]));
+  expect(members(store)).toEqual(["jira", "quay-a", "quay-b", "teamcity"]);
+  button("Uninstall…").click();
+  flushSync();
+  const groups = [...dialog().querySelectorAll('[role="radiogroup"]')];
+  groups[1]!.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1]!.click();
+  flushSync();
+  dialogButton("Uninstall").click();
+  await settle();
+  expect(members(store)).toEqual(["jira", "teamcity"]);
+});
+
+test("an uninstall that fails part-way takes the sources it removed out of the health store (#2059)", async () => {
+  const store = await openLive([], quayPorts(["quay-a"], () => Promise.reject({ kind: "internal", message: "cannot remove quay-b" })));
+  button("Uninstall…").click();
+  flushSync();
+  dialogButton("Uninstall").click();
+  await settle();
+  expect(members(store)).toEqual(["jira", "quay-b", "teamcity"]);
 });
 
 // ---- The run in flight on a source's page (#1384) ----

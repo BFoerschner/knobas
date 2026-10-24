@@ -34,6 +34,7 @@
     ports,
     layers,
     now,
+    onrestored = () => {},
   }: {
     ports: Pick<
       SectionPorts,
@@ -49,6 +50,8 @@
     >;
     layers: Layers;
     now: Date;
+    /** A restore brought the archive's sources: the source list is read again (#2059). */
+    onrestored?: () => void;
   } = $props();
 
   let status = $state<BackupStatus | null>(null);
@@ -179,6 +182,7 @@
     try {
       await ports.restoreBackup(archive.file);
       choosing = null;
+      onrestored();
       push({ text: `Restored from ${archive.file}. Restart knobas so every view reads the restored database.`, ms: 30_000 });
     } catch (cause) {
       // The dialog stays: the refusal ("already holds knobas data") is the answer.
