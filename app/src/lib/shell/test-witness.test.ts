@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { carriesName, drawsReading, landingOf, missingFrom } from "./test-witness";
+import { carriesName, drawsReading, driverLandingOf, missingFrom } from "./test-witness";
 
 /** A driver in the shape the real ones take: constants, comments, a wait. */
 const DRIVER = `readonly NOTE_LINE='A note, read-only in this release.'  # note/TfNote.svelte
@@ -11,30 +11,30 @@ lands open-in-knobas "$NOTE_LINE" "$CAPTURED_FROM"
 lands open-in-knobas "$NOTE_LINE" "$CAPTURED_FROM"
 `;
 
-describe("landingOf (#1968)", () => {
+describe("driverLandingOf (#1968)", () => {
   it("resolves each argument to the driver's constant, by kind", () => {
-    expect(landingOf(DRIVER, "open-in-knobas")).toEqual({
+    expect(driverLandingOf(DRIVER, "open-in-knobas")).toEqual({
       reads: ["A note, read-only in this release.", "Captured from"],
       names: [],
     });
-    expect(landingOf(DRIVER, "job-link")).toEqual({ reads: [], names: ["Open Code view"] });
+    expect(driverLandingOf(DRIVER, "job-link")).toEqual({ reads: [], names: ["Open Code view"] });
   });
 
   it("refuses a landing the driver never names", () => {
-    expect(() => landingOf(DRIVER, "settings-notes")).toThrow("never lands on settings-notes");
+    expect(() => driverLandingOf(DRIVER, "settings-notes")).toThrow("never lands on settings-notes");
   });
 
   it("refuses an argument that is not a quoted constant", () => {
-    expect(() => landingOf(`readonly A='a'\nlands here "$A" "$title"\n`, "here")).toThrow("not a quoted constant");
-    expect(() => landingOf(`lands here 'Your notes'\n`, "here")).toThrow("not a quoted constant");
+    expect(() => driverLandingOf(`readonly A='a'\nlands here "$A" "$title"\n`, "here")).toThrow("not a quoted constant");
+    expect(() => driverLandingOf(`lands here 'Your notes'\n`, "here")).toThrow("not a quoted constant");
   });
 
   it("refuses a constant the driver lacks", () => {
-    expect(() => landingOf(`lands here "$GONE"\n`, "here")).toThrow("no readonly GONE");
+    expect(() => driverLandingOf(`lands here "$GONE"\n`, "here")).toThrow("no readonly GONE");
   });
 
   it("refuses two calls of one landing that wait on different lines", () => {
-    expect(() => landingOf(`readonly A='a'\nreadonly B='b'\nlands here "$A"\nlands here "$B"\n`, "here")).toThrow(
+    expect(() => driverLandingOf(`readonly A='a'\nreadonly B='b'\nlands here "$A"\nlands here "$B"\n`, "here")).toThrow(
       "disagree",
     );
   });
@@ -47,12 +47,14 @@ describe("the DOM readings (#1968)", () => {
     return root;
   }
 
-  it("reads a whole line an element draws itself, not a longer one or a child's", () => {
-    const root = page(`<span>Captured from here</span><div>Cloned at <span>/tmp/x</span></div>`);
+  it("reads one run of text whole, not a longer one or two runs joined", () => {
+    const root = page(`<span>Captured from here</span><div>Cloned at <span>/tmp/x</span></div><p>A <b>b</b> C</p>`);
     expect(drawsReading(root, "Captured from")).toBe(false);
     expect(drawsReading(root, "Cloned at")).toBe(true);
     expect(drawsReading(root, "/tmp/x")).toBe(true);
     expect(drawsReading(root, "Cloned at /tmp/x")).toBe(false);
+    expect(drawsReading(root, "C")).toBe(true);
+    expect(drawsReading(root, "A  C")).toBe(false);
   });
 
   it("names an element by its aria-label, its placeholder, or a button's or link's text", () => {

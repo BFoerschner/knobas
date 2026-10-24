@@ -824,6 +824,15 @@ for driver_path in desktop-witness/drivers/*.sh; do
         check "$driver_name.sh waits on its landings through lands or lands_named" yes no
         printf '  %s calls neither, so no gate holds its landing pages to the app.\n' "$driver_path" >&2
     fi
+    # `lands` runs the driver's own `wait_until`, so a driver that lands defines one.
+    if [ -n "$driver_landings" ]; then
+        if grep -q '^wait_until() {' "$driver_path"; then
+            check "$driver_name.sh defines the wait_until lands calls" yes yes
+        else
+            check "$driver_name.sh defines the wait_until lands calls" yes no
+            printf '  %s calls lands with no wait_until() of its own.\n' "$driver_path" >&2
+        fi
+    fi
     while IFS= read -r driver_landing; do
         [ -n "$driver_landing" ] || continue
         replay="landing(\"$driver_name\", \"$driver_landing\")"

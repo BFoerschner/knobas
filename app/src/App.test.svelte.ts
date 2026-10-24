@@ -38,7 +38,7 @@ import type {
 } from "./lib/ipc/entity";
 import type { CredentialHealth } from "./lib/ipc/sources";
 import { until, waitFor } from "./lib/shell/test-wait";
-import { landing, missingFrom, type Landing } from "./lib/shell/test-witness";
+import { landing, missingFrom, type DriverLanding } from "./lib/shell/test-witness";
 
 /** Readings `credential_health` hands back, and how many times it was asked. */
 let healthRows: CredentialHealth[] = [];
@@ -1080,8 +1080,9 @@ test.each(["#/inbox", "#/settings"])("⌘T on %s after a job asks with the picke
  * What it cannot say: whether WebKit's accessibility tree reads the DOM the
  * way `test-witness.ts` does. That is the on-screen run's.
  */
-async function landsOn(expected: Landing): Promise<void> {
-  await waitFor(() => expect(missingFrom(target, expected), "the page lacks what the driver waits on").toEqual([]));
+async function landsOn(expected: DriverLanding): Promise<void> {
+  const wanted = [...expected.reads, ...expected.names].map((value) => `'${value}'`).join(", ");
+  await until(() => missingFrom(target, expected).length === 0, `the page never drew all the driver waits on: ${wanted}`);
 }
 
 test("capture: Open in knobas lands on the captured note's page, as capture.sh waits for it", async () => {
@@ -1137,14 +1138,18 @@ function follow(name: string): void {
   flushSync();
 }
 
-test("capture: Settings › Notes and capture lands on the section capture.sh counts notes on", async () => {
+/** The top bar's Settings, then the section called `section`, as the drivers press them. */
+async function openSettingsSection(section: string): Promise<void> {
   dbReady = true;
   app = mount(App, { target, props: {} });
   await until(() => target.querySelector("a[aria-label='Settings']") !== null, "the top bar never drew Settings");
-
   follow("Settings");
   await until(() => location.hash.startsWith("#/settings"), "Settings never opened");
-  await waitFor(() => follow("Notes and capture"));
+  await waitFor(() => follow(section));
+}
+
+test("capture: Settings › Notes and capture lands on the section capture.sh counts notes on", async () => {
+  await openSettingsSection("Notes and capture");
   await landsOn(landing("capture", "settings-notes"));
 });
 
@@ -1178,12 +1183,6 @@ test("open-in-editor: ⌘K lands on the launcher's query box", async () => {
 });
 
 test("open-in-editor: Settings › Checkouts and Open in… lands on the section open-in-editor.sh sets the root in", async () => {
-  dbReady = true;
-  app = mount(App, { target, props: {} });
-  await until(() => target.querySelector("a[aria-label='Settings']") !== null, "the top bar never drew Settings");
-
-  follow("Settings");
-  await until(() => location.hash.startsWith("#/settings"), "Settings never opened");
-  await waitFor(() => follow("Checkouts and Open in…"));
+  await openSettingsSection("Checkouts and Open in…");
   await landsOn(landing("open-in-editor", "settings-checkouts"));
 });

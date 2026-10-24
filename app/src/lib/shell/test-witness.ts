@@ -15,7 +15,7 @@ import { join } from "node:path";
  * constants. A test replays the step in the DOM and asserts what this returns;
  * `desktop-witness-test.sh` refuses a landing no test replays.
  */
-export interface Landing {
+export interface DriverLanding {
   /** Whole lines of text the page draws (`lands`). */
   reads: string[];
   /** Accessible names the page carries (`lands_named`). */
@@ -44,7 +44,7 @@ function constantsOf(source: string): Map<string, string> {
  * argument that is not a quoted constant, a constant the driver lacks), on two
  * calls of one kind that disagree, and on a landing the driver never names.
  */
-export function landingOf(source: string, landing: string): Landing {
+export function driverLandingOf(source: string, landing: string): DriverLanding {
   const constants = constantsOf(source);
   const found: { reads: string[] | null; names: string[] | null } = { reads: null, names: null };
   for (const line of source.split("\n")) {
@@ -72,21 +72,27 @@ export function landingOf(source: string, landing: string): Landing {
   return { reads: found.reads ?? [], names: found.names ?? [] };
 }
 
-/** `landingOf` the driver named `driver`. */
-export function landing(driver: string, name: string): Landing {
-  return landingOf(driverSource(driver), name);
+/**
+ * `driverLandingOf` the driver named `driver`. Called as
+ * `landing("<driver>", "<landing>")`, the text `desktop-witness-test.sh`
+ * looks for to know a landing is replayed.
+ */
+export function landing(driver: string, landingName: string): DriverLanding {
+  return driverLandingOf(driverSource(driver), landingName);
 }
 
-/** The text an element draws itself, its children's elements left out: what one AXStaticText reads. */
-function ownText(element: Element): string {
-  let text = "";
-  for (const node of element.childNodes) if (node.nodeType === Node.TEXT_NODE) text += node.textContent;
-  return text.trim();
-}
-
-/** Whether a line of text under `root` reads exactly `reading`, as `has_reading` compares. */
+/**
+ * Whether a run of text under `root` reads exactly `reading`, trimmed, as
+ * `has_reading` compares a line. A run is one text node: WebKit draws each as
+ * an AXStaticText of its own, so `Cloned at <span>path</span>` reads
+ * `Cloned at` and the path, never the two joined.
+ */
 export function drawsReading(root: Element, reading: string): boolean {
-  return [root, ...root.querySelectorAll("*")].some((element) => ownText(element) === reading);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if (node.textContent?.trim() === reading) return true;
+  }
+  return false;
 }
 
 /**
@@ -104,7 +110,7 @@ export function carriesName(root: Element, name: string): boolean {
 }
 
 /** What of a landing `root` does not draw, `[]` when it lands. */
-export function missingFrom(root: Element, expected: Landing): string[] {
+export function missingFrom(root: Element, expected: DriverLanding): string[] {
   return [
     ...expected.reads.filter((reading) => !drawsReading(root, reading)).map((reading) => `the line '${reading}'`),
     ...expected.names.filter((name) => !carriesName(root, name)).map((name) => `the name '${name}'`),
