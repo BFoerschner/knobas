@@ -51,11 +51,19 @@ const NULLISH =
   ts.TypeFlags.Void |
   ts.TypeFlags.TypeParameter;
 
+/** A test or a fixture: no part of the app. */
+const TEST_ONLY = /\.test\.|\.fixture\./;
+
 /** Every `a ?? b` outside the tests whose left operand cannot be nullish, as `file :: expression`. */
 function impossibleFallbacks(): string[] {
   const config = ts.readConfigFile(join(APP, "tsconfig.json"), ts.sys.readFile);
   const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, APP);
-  const files = ts.sys.readDirectory(join(APP, "src"), [".ts"]).filter((file) => !file.endsWith(".d.ts"));
+  // The tests are left out of the roots, not only out of the walk: half the
+  // tree's text and the test libraries' types, for no `??` this reads (#2035).
+  // What a source file imports is still in the program.
+  const files = ts.sys
+    .readDirectory(join(APP, "src"), [".ts"])
+    .filter((file) => !file.endsWith(".d.ts") && !TEST_ONLY.test(file));
   const virtual = new Map<string, string>();
   for (const file of ts.sys.readDirectory(join(APP, "src"), [".svelte"])) {
     const out = svelte2tsx(readFileSync(file, "utf8"), { filename: file, isTsFile: true, mode: "ts", version: svelteVersion });
@@ -82,7 +90,7 @@ function impossibleFallbacks(): string[] {
   const found: string[] = [];
   for (const source of program.getSourceFiles()) {
     const name = relative(APP, source.fileName).split(sep).join("/").replace(/\.svelte\.tsx$/, ".svelte");
-    if (!name.startsWith("src/") || /\.test\.|\.fixture\./.test(name)) continue;
+    if (!name.startsWith("src/") || TEST_ONLY.test(name)) continue;
     const visit = (node: ts.Node) => {
       if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
         const type = checker.getTypeAtLocation(node.left);

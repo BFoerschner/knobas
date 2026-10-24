@@ -46,28 +46,80 @@ function codeOf(path: string, text: string): string {
   return [...text.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).join("\n");
 }
 
+/** A name that is a *member* of something, or a key: it binds nothing here. */
+function isMember(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  return (
+    (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+    (ts.isQualifiedName(parent) && parent.right === node) ||
+    (ts.isPropertyAssignment(parent) && parent.name === node) ||
+    (ts.isPropertySignature(parent) && parent.name === node) ||
+    (ts.isMethodSignature(parent) && parent.name === node) ||
+    (ts.isMethodDeclaration(parent) && parent.name === node) ||
+    (ts.isPropertyDeclaration(parent) && parent.name === node) ||
+    (ts.isGetAccessor(parent) && parent.name === node) ||
+    (ts.isSetAccessor(parent) && parent.name === node) ||
+    (ts.isBindingElement(parent) && parent.propertyName === node) ||
+    (ts.isImportSpecifier(parent) && parent.propertyName === node) ||
+    (ts.isExportSpecifier(parent) && parent.propertyName === node) ||
+    (ts.isJsxAttribute(parent) && parent.name === node) ||
+    ts.isTypeReferenceNode(parent)
+  );
+}
+
+/** The identifiers in `source` that may be a bare confusing global: each confusing name that is not a member or a key. */
+function candidates(source: ts.SourceFile): ts.Identifier[] {
+  const found: ts.Identifier[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isIdentifier(node) && CONFUSING.has(node.text) && !isMember(node)) found.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+const OPTIONS: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ES2022,
+  lib: ["lib.es2022.d.ts", "lib.dom.d.ts", "lib.dom.iterable.d.ts"],
+  types: [],
+  noResolve: true,
+  skipLibCheck: true,
+};
+
+/**
+ * The lib files, parsed once for every program in this file. `lib.dom` is
+ * most of a program's parse and bind, and it never changes (#2035).
+ */
+const LIBS = new Map<string, ts.SourceFile | undefined>();
+
 /**
  * Every bare use of a confusing browser global in `files` (path to code),
  * as `path:line name`.
+ *
+ * Only the files with a candidate go to the checker, and in each only the
+ * candidates are looked up (#2035): a member lookup made the checker type the
+ * object it hangs off, which was most of the scan's time on the runner. With
+ * `noResolve` every file is checked against `lib` alone, so a file left out
+ * changes no other file's answer.
  */
 function bareGlobalUses(files: Map<string, string>): string[] {
-  const options: ts.CompilerOptions = {
-    target: ts.ScriptTarget.ES2022,
-    lib: ["lib.es2022.d.ts", "lib.dom.d.ts", "lib.dom.iterable.d.ts"],
-    types: [],
-    noResolve: true,
-    skipLibCheck: true,
-  };
-  const host = ts.createCompilerHost(options);
+  const roots = new Map<string, { source: ts.SourceFile; names: ts.Identifier[] }>();
+  for (const [path, text] of files) {
+    const source = ts.createSourceFile(path, text, ts.ScriptTarget.ES2022, true);
+    const names = candidates(source);
+    if (names.length > 0) roots.set(path, { source, names });
+  }
+  if (roots.size === 0) return [];
+  const host = ts.createCompilerHost(OPTIONS);
   const read = host.getSourceFile.bind(host);
   host.getSourceFile = (name, lang, ...rest) => {
-    const text = files.get(name);
-    return text === undefined ? read(name, lang, ...rest) : ts.createSourceFile(name, text, lang, true);
+    const root = roots.get(name)?.source;
+    if (root) return root;
+    if (!LIBS.has(name)) LIBS.set(name, read(name, lang, ...rest));
+    return LIBS.get(name);
   };
-  const roots = [...files.keys()].map((p) => p);
-  const program = ts.createProgram(roots, options, host);
+  const program = ts.createProgram([...roots.keys()], OPTIONS, host);
   const checker = program.getTypeChecker();
-  const hits: string[] = [];
 
   const fromLibDom = (symbol: ts.Symbol | undefined): boolean =>
     !!symbol?.declarations?.length &&
@@ -77,39 +129,17 @@ function bareGlobalUses(files: Map<string, string>): string[] {
         (ts.isVariableDeclaration(d) || ts.isFunctionDeclaration(d)),
     );
 
-  for (const root of roots) {
-    const source = program.getSourceFile(root);
-    if (!source) continue;
-    const visit = (node: ts.Node) => {
-      if (ts.isIdentifier(node) && CONFUSING.has(node.text)) {
-        const parent = node.parent;
-        // A name that is a *member* of something, or a key, binds nothing here.
-        const isMember =
-          (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
-          (ts.isQualifiedName(parent) && parent.right === node) ||
-          (ts.isPropertyAssignment(parent) && parent.name === node) ||
-          (ts.isPropertySignature(parent) && parent.name === node) ||
-          (ts.isMethodSignature(parent) && parent.name === node) ||
-          (ts.isMethodDeclaration(parent) && parent.name === node) ||
-          (ts.isPropertyDeclaration(parent) && parent.name === node) ||
-          (ts.isGetAccessor(parent) && parent.name === node) ||
-          (ts.isSetAccessor(parent) && parent.name === node) ||
-          (ts.isBindingElement(parent) && parent.propertyName === node) ||
-          (ts.isImportSpecifier(parent) && parent.propertyName === node) ||
-          (ts.isExportSpecifier(parent) && parent.propertyName === node) ||
-          (ts.isJsxAttribute(parent) && parent.name === node) ||
-          ts.isTypeReferenceNode(parent);
-        const symbol = ts.isShorthandPropertyAssignment(parent)
-          ? checker.getShorthandAssignmentValueSymbol(parent)
-          : checker.getSymbolAtLocation(node);
-        if (!isMember && fromLibDom(symbol)) {
-          const { line } = source.getLineAndCharacterOfPosition(node.getStart());
-          hits.push(`${root}:${line + 1} ${node.text}`);
-        }
+  const hits: string[] = [];
+  for (const [path, { source, names }] of roots) {
+    for (const node of names) {
+      const symbol = ts.isShorthandPropertyAssignment(node.parent)
+        ? checker.getShorthandAssignmentValueSymbol(node.parent)
+        : checker.getSymbolAtLocation(node);
+      if (fromLibDom(symbol)) {
+        const { line } = source.getLineAndCharacterOfPosition(node.getStart());
+        hits.push(`${path}:${line + 1} ${node.text}`);
       }
-      ts.forEachChild(node, visit);
-    };
-    visit(source);
+    }
   }
   return hits;
 }
