@@ -1061,6 +1061,9 @@ mod tests {
         /// A server that never sends `nextHref` at all -- see
         /// [`FakeRest::silent`].
         silent: bool,
+        /// A server whose ceiling probe misses `sinceBuild` -- see
+        /// [`FakeRest::probe_misses_since_build`].
+        probe_misses_since_build: bool,
         calls: Mutex<Vec<String>>,
     }
 
@@ -1096,6 +1099,7 @@ mod tests {
                 paged_build_types: false,
                 projects: None,
                 silent: false,
+                probe_misses_since_build: false,
                 calls: Mutex::new(Vec::new()),
             }
         }
@@ -1150,6 +1154,15 @@ mod tests {
         /// that older rule and still reaches the end.
         fn silent(mut self) -> Self {
             self.silent = true;
+            self
+        }
+
+        /// A server whose opening probe ignores `sinceBuild` and answers the
+        /// unfiltered page, as no measured TeamCity does (#2016). The one way
+        /// to reach the by-id check's "found" branch, which
+        /// `refuse_a_replaced_server` keeps for exactly such a server.
+        fn probe_misses_since_build(mut self) -> Self {
+            self.probe_misses_since_build = true;
             self
         }
 
@@ -1319,7 +1332,10 @@ mod tests {
                         .as_deref()
                         .is_none_or(|id| r.rec.build_type_id.as_deref() == Some(id))
                 })
-                .filter(|r| locator.since_build_id.is_none_or(|since| r.rec.id > since))
+                .filter(|r| {
+                    (self.probe_misses_since_build && is_ceiling_probe(locator))
+                        || locator.since_build_id.is_none_or(|since| r.rec.id > since)
+                })
                 .collect();
             match self.order {
                 PageOrder::NewestFirst => out.sort_by_key(|r| std::cmp::Reverse(r.rec.id)),
@@ -3016,6 +3032,40 @@ mod tests {
         assert!(
             !rest.calls().iter().any(|c| c.starts_with("builds/id:")),
             "the probe witnessed build 5000, so nothing is asked by id: {:?}",
+            rest.calls()
+        );
+    }
+
+    /// ...and the by-id check's "found" branch, on a server whose probe page
+    /// misses `sinceBuild` (#2016): the one place a ceiling below the
+    /// watermark still arises.
+    ///
+    /// The probe serves the hundred old builds, so nothing the run witnessed
+    /// reaches the watermark; `/app/rest/builds/id:5000` finds the build and
+    /// the run carries on. Build 5 001 finished and is emitted, and the
+    /// ceiling (100) holds the watermark where it stands rather than letting
+    /// it pass a build queued after the run opened: the cost is the same
+    /// build on the next poll, which shows, where a lost build would not.
+    #[tokio::test]
+    async fn a_probe_that_misses_the_watermark_is_confirmed_by_id_and_holds_it_where_it_stands() {
+        let mut builds: Vec<serde_json::Value> = (1..=100)
+            .map(|n| build(n, "Payout_Build", "Payout", "finished"))
+            .collect();
+        builds.push(build(5_000, "Payout_Build", "Payout", "finished"));
+        builds.push(build(5_001, "Payout_Build", "Payout", "finished"));
+        let rest = FakeRest::new(vec![build_type("Payout_Build", "Payout")], builds)
+            .fixture_order()
+            .probe_misses_since_build();
+        let cursor_in = r#"{"v":2,"since_build_id":5000}"#.to_owned();
+        let (items, cursor) = run(&rest, &TeamCityConfig::default(), Some(cursor_in.clone())).await;
+        assert_eq!(keys(&items), ["buildType:Payout_Build", "build:5001"]);
+        assert_eq!(
+            cursor, cursor_in,
+            "a ceiling below the watermark holds it there, not past the build just emitted"
+        );
+        assert!(
+            rest.calls().contains(&"builds/id:5000".to_owned()),
+            "nothing the run witnessed reached the watermark, so it asked: {:?}",
             rest.calls()
         );
     }
