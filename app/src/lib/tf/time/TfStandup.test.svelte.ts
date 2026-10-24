@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { ActionItemTicket, DigestLine, LinkEnd, LinkEntry, Protocol, PublishTarget, StandupDigest } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
+import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import TfStandup from "./TfStandup.svelte";
 
@@ -474,6 +475,49 @@ test("after a reload, a create held or refused in the queue offers Create ticket
   await settle();
   const buttons = [...target.querySelectorAll(".tf-su-ai button")].map((found) => found.textContent?.trim());
   expect(buttons).toEqual(["Create ticket", "Create ticket"]);
+});
+
+test("after a reload, a create held as unconfirmed is on its way and followed, and one held on drift is offered again (#1966)", async () => {
+  const { hears } = open({
+    owed: [owed({ state: "held", may_have_landed: true }), owed({ write_id: 10, state: "held", title: "Update the on-call runbook (Tomasz Wójcik)" })],
+    mirrored: false,
+  });
+  await settle();
+  const rows = [...target.querySelectorAll(".tf-su-ai")];
+  expect(rows[0]!.querySelector("button")).toBeNull();
+  expect(rows[0]!.querySelector(".tf-chip")?.textContent).toBe("queued");
+  // Held on drift: never sent, so the item offers the create again.
+  expect(rows[1]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket");
+  // Followed, so the reader's discard in the queue is heard.
+  expect(hears.has(9)).toBe(true);
+});
+
+test("a filed ticket the queue holds as unconfirmed stays queued, told once, with no Edit and resend (#1966)", async () => {
+  const { hears } = open({ mirrored: false });
+  await settle();
+  button("Create ticket").click();
+  await settle();
+  const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
+  select.value = "jira:OPS";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find((found) => found.textContent?.trim() === "Create ticket")!.click();
+  await settle();
+  toasts.items = [];
+  const unconfirmed = {
+    id: 9,
+    state: "held",
+    detail: "Jira did not answer",
+    held_snapshot: { op: "create_ticket", unconfirmed: { source: "Jira", detail: "the connection closed" } },
+  } as unknown as QueuedWrite;
+  hears.get(9)!(unconfirmed);
+  hears.get(9)!(unconfirmed);
+  await settle();
+  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("queued");
+  expect(toasts.items.map((t) => [t.text, (t.more ?? []).length])).toEqual([
+    ["Ticket may have arrived: Jira did not answer. Check Jira, then send it again or discard it.", 0],
+  ]);
+  expect(hears.has(9)).toBe(true);
 });
 
 for (const [name, field] of [

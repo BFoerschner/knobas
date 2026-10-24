@@ -52,7 +52,14 @@
   } from "../../ipc/entity";
   import { search as realSearch } from "../../ipc/search";
   import { listAdapters as realListAdapters, listSources as realListSources } from "../../ipc/sources";
-  import { toastStopped, willNotGo, writeFollower, type WriteFollower } from "../../shell/follow-write";
+  import {
+    mayHaveLanded,
+    toastStopped,
+    toastUnconfirmed,
+    willNotGo,
+    writeFollower,
+    type WriteFollower,
+  } from "../../shell/follow-write";
   import { push } from "../../shell/toasts.svelte";
   import PublishTargetPicker from "../../standup/PublishTargetPicker.svelte";
   import { publishableSources } from "../../standup/protocol";
@@ -392,6 +399,10 @@
         if (willNotGo(row) && !told) {
           told = true;
           toastStopped(row, { name: "Publish", resend: () => void openDialog() });
+        } else if (mayHaveLanded(row) && !told) {
+          // Sent and never answered (#1966): the page may be there, so no publish again.
+          told = true;
+          toastUnconfirmed(row!, { name: "Publish" });
         }
         void reread(id);
       }),
@@ -419,16 +430,17 @@
 
   /**
    * The creates filed before this tab opened that the protocol does not link
-   * yet (#1951), drawn as this session's own are. Only those on their way:
-   * a held or refused one waits on the reader in the queue, and the item
-   * offers *Create ticket* as it does once a live follow is told so.
+   * yet (#1951), drawn as this session's own are. Only those on their way,
+   * pending, sent, or held as unconfirmed, whose ticket may exist (#1966): a
+   * refused one or one held on drift waits on the reader in the queue, and
+   * the item offers *Create ticket* as it does once a live follow is told so.
    */
   function readOwed(opened: Protocol) {
     for (const owed of opened.owed_tickets) {
-      if (owed.state !== "pending" && owed.state !== "sent") continue;
+      if (owed.state !== "pending" && owed.state !== "sent" && !owed.may_have_landed) continue;
       if (filed.some((made) => made.writeId === owed.write_id)) continue;
       filed = [...filed, { writeId: owed.write_id, text: owed.title, project: null, type: "Task", ticket: null, status: null }];
-      if (owed.state === "pending") followTicket(owed.write_id);
+      if (owed.state !== "sent") followTicket(owed.write_id);
     }
   }
 
@@ -479,11 +491,19 @@
   }
 
   function followTicket(writeId: number) {
+    let toldUnconfirmed = false;
     following.set(
       writeId,
       io.follower.follow(writeId, (row) => {
         const echo = filed.find((made) => made.writeId === writeId);
         if (!echo) return unfollow(writeId);
+        // Sent and never answered (#1966): on its way until sent again or discarded.
+        if (mayHaveLanded(row)) {
+          if (!toldUnconfirmed) toastUnconfirmed(row!, { name: "Ticket" });
+          toldUnconfirmed = true;
+          return;
+        }
+        toldUnconfirmed = false;
         if (willNotGo(row)) {
           unfollow(writeId);
           filed = filed.filter((made) => made.writeId !== writeId);

@@ -23,13 +23,22 @@
  * A subscriber leaves when its write settles (sent, withdrawn in the queue,
  * or told as held or refused) or when its surface stops it -- `followWrite`
  * answers the stop. The last one out stops the listener.
+ *
+ * ## A write that may have arrived (#1966)
+ *
+ * A write held as unconfirmed (#1125) went to its source and got no answer,
+ * so it may be there. It is on its way, not stopped: the surface keeps what
+ * it draws of it (*Ticket queued*, *Monitor queued*, the echo) until the
+ * reader sends it again or discards it, the toast says what to check, and it
+ * offers no *Edit and resend*, which would file a second one beside the
+ * first (Björn's ruling on #1966). A drift hold was never sent, and stops.
  */
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
 import { EVENTS } from "../ipc";
 import { pendingWrites as realPendingWrites, type QueuedWrite } from "../ipc/sources";
 import { push } from "./toasts.svelte";
-import { openWriteQueue } from "./write-queue.svelte";
+import { openWriteQueue, unconfirmedSend } from "./write-queue.svelte";
 
 export interface FollowPorts {
   listen: (event: string, handler: () => void) => Promise<() => void>;
@@ -165,9 +174,30 @@ export interface Following {
   onleave?: () => void;
 }
 
-/** Whether an open row is one that will not go on its own: held or refused. */
+/**
+ * Whether an open row is one that will not go on its own and was not sent:
+ * refused, or held for any reason but an unconfirmed send ({@link mayHaveLanded}),
+ * which is on its way until the reader sends it again or discards it (#1966).
+ */
 export function willNotGo(row: QueuedWrite | undefined): row is QueuedWrite {
-  return row?.state === "held" || row?.state === "refused";
+  if (row === undefined) return false;
+  return row.state === "refused" || (row.state === "held" && !mayHaveLanded(row));
+}
+
+/** Whether an open row is held as a send its source never answered (#1125): it may have arrived, so it is on its way (#1966). */
+export function mayHaveLanded(row: Pick<QueuedWrite, "state" | "held_snapshot"> | undefined): boolean {
+  return row !== undefined && unconfirmedSend(row) !== null;
+}
+
+/** The toast for a write held as unconfirmed: what to check, the way to the queue, and no *Edit and resend* (#1966). */
+export function toastUnconfirmed(row: QueuedWrite, following: Pick<Following, "name">): void {
+  const source = unconfirmedSend(row)?.source ?? "the source";
+  push({
+    text: `${following.name} may have arrived: ${source} did not answer. Check ${source}, then send it again or discard it.`,
+    tone: "err",
+    ms: 20_000,
+    action: { label: "Open write queue", run: openWriteQueue },
+  });
 }
 
 /** The toast for a write that will not go on its own. */
@@ -183,6 +213,7 @@ export function toastStopped(row: QueuedWrite, following: Following): void {
 
 /**
  * Watch `write` until it settles; say so only if it is held or refused.
+ * Held as unconfirmed, it is told once and still followed (#1966).
  * Answers the stop, for a surface that unmounts first.
  */
 export function followWrite(
@@ -192,6 +223,7 @@ export function followWrite(
 ): () => void {
   let stop: () => void = () => {};
   let done = false;
+  let toldUnconfirmed = false;
   const leave = () => {
     done = true;
     stop();
@@ -203,6 +235,12 @@ export function followWrite(
       following.onleave?.();
       return;
     }
+    if (mayHaveLanded(row)) {
+      if (!toldUnconfirmed) toastUnconfirmed(row, following);
+      toldUnconfirmed = true;
+      return;
+    }
+    toldUnconfirmed = false;
     if (!willNotGo(row)) return;
     leave();
     following.onstop?.();
