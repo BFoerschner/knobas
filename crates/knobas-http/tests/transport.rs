@@ -536,10 +536,13 @@ async fn queued_behind_one_a_second(server: &CountingServer, count: usize) -> Ve
     let clock = HeldClock::hold();
     let client = Arc::new(paced_client(server, 1).with_send_budget(SHORT_BUDGET));
     let sends = start_sends(vec![client], count).await;
+    // Past the token at 1 s and short of the budget, off both instants, so
+    // neither timer fires on the one the other does.
+    const SECOND_GOES: Duration = Duration::from_millis(1200);
     server.exchanges_over(1).await;
-    tokio::time::advance(Duration::from_millis(1200)).await;
+    tokio::time::advance(SECOND_GOES).await;
     server.exchanges_over(2).await;
-    tokio::time::advance(SHORT_BUDGET - Duration::from_millis(1200)).await;
+    tokio::time::advance(SHORT_BUDGET - SECOND_GOES).await;
     ended(clock, sends).await
 }
 
@@ -804,12 +807,16 @@ async fn a_quota_loosens_once_the_stricter_client_is_gone() {
     let server = CountingServer::always(200, "");
     let clock = HeldClock::hold();
     drop(client_at(&server, 1, 1));
-    let loose = Arc::new(client_at(&server, 20, 20).with_send_budget(Duration::from_secs(1)));
+    const BUDGET: Duration = Duration::from_secs(1);
+    // Ten refills of 50 ms and half of the eleventh, off every refill
+    // instant.
+    const TEN_REFILLED: Duration = Duration::from_millis(525);
+    let loose = Arc::new(client_at(&server, 20, 20).with_send_budget(BUDGET));
 
     let sends = start_sends(vec![loose], 20).await;
-    tokio::time::advance(Duration::from_millis(525)).await;
+    tokio::time::advance(TEN_REFILLED).await;
     server.exchanges_over(10).await;
-    tokio::time::advance(Duration::from_millis(475)).await;
+    tokio::time::advance(BUDGET - TEN_REFILLED).await;
     let outcomes = ended(clock, sends).await;
 
     assert_eq!(
@@ -819,6 +826,14 @@ async fn a_quota_loosens_once_the_stricter_client_is_gone() {
     );
     the_rest_stopped_on_the_quota(&outcomes, "20 requests a second");
 }
+
+/// The budget the two-a-second tests run on: past the one refill at 500 ms,
+/// short of the second at 1 s.
+const TWO_A_SECOND_WINDOW: Duration = Duration::from_millis(900);
+
+/// Where those tests move the clock first: past the refill at 500 ms and
+/// short of the budget, off both instants.
+const ONE_REFILLED: Duration = Duration::from_millis(700);
 
 /// **A loosening hands out no fresh burst** (#1728).
 ///
@@ -832,15 +847,16 @@ async fn a_quota_loosens_once_the_stricter_client_is_gone() {
 /// that the loosening sent no burst.
 #[tokio::test(start_paused = true)]
 async fn a_loosening_right_away_starts_drained() {
+    const BUDGET: Duration = TWO_A_SECOND_WINDOW;
     let server = CountingServer::always(200, "");
     let clock = HeldClock::hold();
     drop(client_at(&server, 1, 1));
-    let loose = Arc::new(client_at(&server, 2, 20).with_send_budget(Duration::from_millis(900)));
+    let loose = Arc::new(client_at(&server, 2, 20).with_send_budget(BUDGET));
 
     let sends = start_sends(vec![loose], 20).await;
-    tokio::time::advance(Duration::from_millis(700)).await;
+    tokio::time::advance(ONE_REFILLED).await;
     server.exchanges_over(1).await;
-    tokio::time::advance(Duration::from_millis(200)).await;
+    tokio::time::advance(BUDGET - ONE_REFILLED).await;
     let outcomes = ended(clock, sends).await;
 
     assert_eq!(
@@ -863,6 +879,7 @@ async fn a_loosening_right_away_starts_drained() {
 /// Built with its own burst, the strict limiter sends six more.
 #[tokio::test(start_paused = true)]
 async fn a_tightening_after_a_loosening_starts_with_what_was_left() {
+    const BUDGET: Duration = TWO_A_SECOND_WINDOW;
     let server = CountingServer::always(200, "");
     let clock = HeldClock::hold();
     let strict = client_at(&server, 2, 6);
@@ -874,12 +891,11 @@ async fn a_tightening_after_a_loosening_starts_with_what_was_left() {
     let spent = server.hits();
     server.exchanges_over(spent).await;
 
-    let strict_again =
-        Arc::new(client_at(&server, 2, 6).with_send_budget(Duration::from_millis(900)));
+    let strict_again = Arc::new(client_at(&server, 2, 6).with_send_budget(BUDGET));
     let sends = start_sends(vec![strict_again], 6).await;
-    tokio::time::advance(Duration::from_millis(700)).await;
+    tokio::time::advance(ONE_REFILLED).await;
     server.exchanges_over(spent + 1).await;
-    tokio::time::advance(Duration::from_millis(200)).await;
+    tokio::time::advance(BUDGET - ONE_REFILLED).await;
     let outcomes = ended(clock, sends).await;
 
     assert_eq!(spent, 6, "the strict burst went out before the alternation");

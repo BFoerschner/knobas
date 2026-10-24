@@ -95,6 +95,9 @@ impl Reference for Tick {
         self.0.saturating_duration_since(earlier.0).into()
     }
 
+    /// `duration` before this reading, or this reading itself where that
+    /// would fall before the clock's start: what governor's trait asks for,
+    /// and what its own clocks do.
     fn saturating_sub(&self, duration: Nanos) -> Self {
         Self(self.0.checked_sub(duration.into()).unwrap_or(self.0))
     }

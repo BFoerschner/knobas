@@ -1138,14 +1138,20 @@ mod tests {
     ///
     /// The **real-time** backstop is twenty seconds of wall time, so the
     /// code *without* its deadline -- [`Session::read_until`] loops for ever,
-    /// moved on by this loop -- fails here rather than hanging `just check`.
-    /// It is a hang backstop and nothing more: the run itself takes no wall
-    /// time worth naming.
+    /// moved on by this loop -- or a call that stops reading to wait on a
+    /// timer the held clock never fires fails here rather than hanging `just
+    /// check`. It is a hang backstop and nothing more: the run itself takes no
+    /// wall time worth naming.
     async fn until_it_gives_up(budget: Duration, hold: Duration) -> (Duration, usize, SourceError) {
         let kuma = PingingKuma::start(hold).await;
         let clock = HeldClock::hold();
         let socket = socket_to(&kuma.base_url(), budget);
-        let backstop = std::time::Instant::now();
+        let (fired, backstop) = tokio::sync::oneshot::channel::<()>();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(20));
+            let _ = fired.send(());
+        });
+        tokio::pin!(backstop);
 
         let started = tokio::time::Instant::now();
         let monitor = serde_json::json!(8);
@@ -1158,17 +1164,19 @@ mod tests {
                 answered = &mut call => {
                     break answered.expect_err("a session that never acknowledges cannot answer a write");
                 }
+                _ = &mut backstop => {
+                    panic!(
+                        "still running after {} reads, twenty seconds of real time on: the call \
+                         has no deadline",
+                        kuma.polls()
+                    );
+                }
                 () = kuma.held_after(seen) => {
                     seen = kuma.polls();
-                    assert!(
-                        backstop.elapsed() < Duration::from_secs(20),
-                        "still reading after {seen} polls: the call has no deadline"
-                    );
                     // The deadline, if it falls inside this hold: the call
                     // ends there, or it has failed to fire and the rest of
                     // the hold answers the read. Past the budget, the
-                    // session is moved on by whole holds until the backstop
-                    // above.
+                    // session is moved on by whole holds until the backstop.
                     let left = budget.saturating_sub(started.elapsed());
                     if !left.is_zero() && left < hold {
                         tokio::time::advance(left).await;
@@ -1209,6 +1217,9 @@ mod tests {
     /// that waits the production minute, or this.
     #[tokio::test(start_paused = true)]
     async fn a_session_that_only_pings_is_given_up_on_when_the_time_is_gone() {
+        // Not a divisor of either budget, so the deadline never falls on the
+        // instant a hold ends, where which of the two fires first would
+        // decide the count.
         const HOLD: Duration = Duration::from_millis(120);
         const SHORT: Duration = Duration::from_millis(500);
         const LONG: Duration = Duration::from_millis(2_000);
