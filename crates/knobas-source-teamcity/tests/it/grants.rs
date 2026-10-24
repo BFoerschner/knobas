@@ -5,13 +5,16 @@
 //! /app/rest/buildQueue` with a build type queues a build. Every test here
 //! checks that nothing but `GET`s reached the server.
 //!
-//! The permission shape is the one the seeded 2026.1.3 server answered on
-//! 2026-10-24 for a user holding only `PROJECT_VIEWER` at global scope
-//! (#2040's measurements): one assignment per permission and scope, each
-//! `isGlobalScope` or naming a `project`. Whether the real server still
-//! answers so is `tests/live_teamcity_seeded.rs`'s to say
-//! (`a_viewer_may_run_builds_and_may_not_change_parameters`); on disagreement
-//! this fake is what is wrong.
+//! The permission shapes are the ones the seeded 2026.1.3 server answered on
+//! 2026-10-24: one assignment per permission and scope, `{"isGlobalScope":
+//! true, "permission": {...}}` for a role at global scope, and
+//! `{"isGlobalScope": false, "permission": {...}, "project": {"id": ...}}`
+//! for one given on a project, which names the project it was given on and
+//! not its subprojects. A server with per-project permissions off answers
+//! every assignment `isGlobalScope`, since every role is global there.
+//! Whether the real server still answers so is `tests/live_teamcity_seeded.rs`'s
+//! to say (`a_viewer_may_run_builds_and_may_not_change_parameters`); on
+//! disagreement this fake is what is wrong.
 
 use knobas_source::grants::{RefusedWrite, WriteAsk};
 use knobas_source::instance::SourceInstance;
@@ -57,6 +60,7 @@ fn assignment(permission: &str, project: Option<&str>) -> serde_json::Value {
             "isGlobalScope": true
         }),
         Some(project) => json!({
+            "isGlobalScope": false,
             "permission": { "id": permission, "name": permission, "global": false },
             "project": { "id": project, "name": project }
         }),

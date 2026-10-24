@@ -515,8 +515,9 @@ pub(crate) struct BuildType {
 }
 
 /// `GET /app/rest/users/current/permissions` (#2040): the user's permission
-/// assignments, one per permission and scope. Measured on 2026.1.3 for a
-/// `PROJECT_VIEWER`: 21 of them, each `isGlobalScope` or naming a `project`.
+/// assignments, one per permission and scope, each `isGlobalScope` or naming
+/// the `project` it was given on. Measured on 2026.1.3: 21 of them for a
+/// `PROJECT_VIEWER` at global scope.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PermissionAssignments {

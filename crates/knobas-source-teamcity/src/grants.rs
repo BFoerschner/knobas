@@ -10,10 +10,13 @@
 //! a build type it queues a build (measured on 2026.1.3, #2040). So the
 //! adapter reads `GET /app/rest/users/current/permissions`: one assignment
 //! per permission and scope, each `isGlobalScope` or naming the `project` it
-//! was given on. A role given on a project holds in every project below it,
-//! so an assignment holds for a configuration when it is global, or names the
-//! configuration's project or one of its ancestors. The project tree is
-//! `/app/rest/projects`, read as the sync reads it ([`ProjectTree`]).
+//! was given on (measured on 2026.1.3, 2026-10-24). A role given on a project
+//! holds in every project below it, so an assignment holds for a
+//! configuration when it is global, or names the configuration's project or
+//! one of its ancestors. The project tree is `/app/rest/projects`, read as
+//! the sync reads it ([`ProjectTree`]). A server with per-project
+//! permissions off makes every role global, and answers every assignment
+//! `isGlobalScope`, which this reads as it is.
 //!
 //! | op | permission |
 //! |---|---|

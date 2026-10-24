@@ -84,8 +84,10 @@
 //! **One user is minted, and deleted again** (#2040): [`MintedViewer`], a
 //! `PROJECT_VIEWER` at global scope with one token, removed from `Drop`
 //! passing or panicking alike, and removed first if a killed run left it.
-//! It writes nothing: the test asserts the build queue and the newest build
-//! are as they were.
+//! It writes nothing to find out: the test asserts the build queue and the
+//! newest build are as they were. For its project-scoped case it turns the
+//! server's per-project permissions on and puts them back from `Drop`
+//! ([`PerProject`]).
 //!
 //! **One owner at a time.** The leftover clearing cannot tell a sibling's
 //! build from a corpse, and clause 2 needs a server on which nothing is running:
@@ -4559,6 +4561,67 @@ async fn a_run_reports_its_walk_over_the_real_configurations_and_listed_builds()
 
 // --- What the user may write (#2040) -----------------------------------------
 
+/// The server's authentication settings as they were, put back from `Drop`
+/// after [`PerProject::on`] turned per-project permissions on.
+struct PerProject {
+    url: String,
+    admin: String,
+    was: serde_json::Value,
+}
+
+impl PerProject {
+    async fn on(seeded: &Seeded) -> PerProject {
+        let (status, was) = seeded.get("app/rest/server/authSettings").await;
+        assert_eq!(status, 200, "the authentication settings: {was}");
+        let guard = PerProject {
+            url: seeded.url.clone(),
+            admin: seeded.token.clone(),
+            was: was.clone(),
+        };
+        let mut on = was;
+        on["perProjectPermissions"] = serde_json::Value::Bool(true);
+        put_auth_settings(&seeded.http, &seeded.url, &seeded.token, &on)
+            .await
+            .unwrap_or_else(|e| panic!("turning per-project permissions on: {e}"));
+        guard
+    }
+}
+
+impl Drop for PerProject {
+    fn drop(&mut self) {
+        let (url, admin, was) = (self.url.clone(), self.admin.clone(), self.was.clone());
+        Cleanup::new(
+            "the live suite did not put the server's authentication settings back",
+            "per-project permissions may still be on; `PUT /app/rest/server/authSettings` with \
+             `perProjectPermissions: false` puts them back",
+        )
+        .within(CLEANUP_BUDGET)
+        .run(move || async move { put_auth_settings(&client(), &url, &admin, &was).await });
+    }
+}
+
+async fn put_auth_settings(
+    http: &reqwest::Client,
+    url: &str,
+    token: &str,
+    settings: &serde_json::Value,
+) -> Result<(), String> {
+    let put = http
+        .put(format!("{url}/app/rest/server/authSettings"))
+        .header("Accept", "application/json")
+        .bearer_auth(token)
+        .json(settings)
+        .send()
+        .await
+        .map_err(|e| format!("PUT authSettings: {e}"))?;
+    let status = put.status();
+    let body: serde_json::Value = put.json().await.unwrap_or_default();
+    if !status.is_success() || body["perProjectPermissions"] != settings["perProjectPermissions"] {
+        return Err(format!("PUT authSettings answered {status}: {body}"));
+    }
+    Ok(())
+}
+
 /// The user [`a_viewer_may_run_builds_and_may_not_change_parameters`] mints.
 const VIEWER: &str = "knobas-viewer-2040";
 
@@ -4731,6 +4794,8 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
     let queue = async || seeded.get("app/rest/buildQueue?fields=count").await.1["count"].clone();
     let newest = async || seeded.build_ids("defaultFilter:false,branch:default:any,count:1").await;
     let (queued_before, newest_before) = (queue().await, newest().await);
+    let per_project = async || seeded.get("app/rest/server/authSettings").await.1["perProjectPermissions"].clone();
+    let per_project_before = per_project().await;
 
     let editable = |view: &SourceView| -> Vec<bool> {
         view.sections
@@ -4784,6 +4849,11 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
         // A role given on one project holds there and nowhere else: the
         // viewer made the configuration's project administrator may change
         // its parameters, and still not those of a configuration elsewhere.
+        // Only with per-project permissions on: the seeded server has them
+        // off, and then every role is global and every assignment answers
+        // `isGlobalScope` (measured 2026-10-24). They are turned on for this
+        // and put back by `PerProject`'s `Drop`.
+        let _per_project = PerProject::on(&seeded).await;
         let project_of = async |id: &str| {
             seeded.build_type(id).await["projectId"]
                 .as_str()
@@ -4850,4 +4920,5 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
     assert_eq!(newest().await, newest_before, "no build was made to find out");
     let (status, _) = seeded.get(&format!("app/rest/users/username:{VIEWER}")).await;
     assert_eq!(status, 404, "{VIEWER} is removed again");
+    assert_eq!(per_project().await, per_project_before, "per-project permissions are put back");
 }
