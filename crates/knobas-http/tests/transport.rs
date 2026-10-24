@@ -966,7 +966,7 @@ async fn a_write_that_opted_out_of_retries_is_sent_once_when_it_times_out() {
             request
         };
         let error = client.send(request).await.expect_err("nothing answers");
-        (error, server.hits())
+        (error, server.hits().await)
     }
 
     // Unconfirmed, not Unreachable (#1125): the request reached the source,
@@ -1116,10 +1116,11 @@ async fn a_write_that_opted_out_of_retries_is_retried_after_a_refused_connection
     assert_eq!(hits.load(Ordering::SeqCst), 1);
 }
 
-/// A server that accepts connections and never replies, counting them.
+/// A server that accepts connections and never replies, reporting each one's
+/// peer in the order it accepted them.
 struct SilentServer {
     port: u16,
-    accepted: Arc<AtomicUsize>,
+    accepted: tokio::sync::watch::Receiver<Vec<std::net::SocketAddr>>,
     _keep: tokio::task::JoinHandle<()>,
 }
 
@@ -1129,12 +1130,11 @@ impl SilentServer {
         let port = listener.local_addr().expect("addr").port();
         listener.set_nonblocking(true).expect("nonblocking");
         let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
-        let accepted = Arc::new(AtomicUsize::new(0));
-        let counter = Arc::clone(&accepted);
+        let (report, accepted) = tokio::sync::watch::channel(Vec::new());
         let keep = tokio::spawn(async move {
             let mut held = Vec::new();
-            while let Ok((socket, _)) = listener.accept().await {
-                counter.fetch_add(1, Ordering::SeqCst);
+            while let Ok((socket, peer)) = listener.accept().await {
+                report.send_modify(|peers| peers.push(peer));
                 // Held, never answered, never closed.
                 held.push(socket);
             }
@@ -1150,10 +1150,32 @@ impl SilentServer {
         format!("http://127.0.0.1:{}", self.port)
     }
 
-    /// Connections accepted. A timed-out request's connection is never
-    /// reused, so this is the number of attempts.
-    fn hits(&self) -> usize {
-        self.accepted.load(Ordering::SeqCst)
+    /// Connections opened before this call, counted once the server has
+    /// accepted every one of them (#1939). A timed-out request's connection
+    /// is never reused, so this is the number of attempts.
+    ///
+    /// The client's connections wait in the listen queue until the accept
+    /// loop takes them, which can be after the client has timed out and
+    /// returned. A probe opened now joins that queue behind them, and the
+    /// queue hands connections out in arrival order: once the server
+    /// reports the probe accepted, it has accepted everything before it,
+    /// and the probe's place in the order is the count.
+    async fn hits(&self) -> usize {
+        let probe_stream = tokio::net::TcpStream::connect(("127.0.0.1", self.port))
+            .await
+            .expect("the probe connects");
+        let probe = probe_stream.local_addr().expect("probe address");
+        let mut accepted = self.accepted.clone();
+        let peers = real_backstop(
+            "the server's accept of the probe",
+            accepted.wait_for(|peers| peers.contains(&probe)),
+        )
+        .await
+        .expect("the server outlives its handle");
+        peers
+            .iter()
+            .position(|peer| *peer == probe)
+            .expect("waited for the probe")
     }
 }
 
