@@ -14,12 +14,15 @@
   mirrored status moves or the queue holds or refuses the move; then it shows
   where the source last said. *Edit and resend* on a held move focuses it.
   A workflow that cannot be read leaves the select showing the current status
-  and nothing else.
+  and nothing else. A move the source's credential cannot make (`refused`,
+  #2052) draws the select the same way, `aria-disabled` with the reason as
+  its title, so nothing can be picked.
 -->
 <script lang="ts">
   import type { EntityDetail } from "../../ipc/entity";
   import type { Timer } from "../../shell/timer.svelte";
   import { clockReading } from "../../time/day";
+  import { refusedAttrs } from "../../shell/refused-writes";
   import { takeAgain } from "../queued.svelte";
   import { jobHash } from "../route";
   import { commentCount, firstName, mentionCount, since, stamp, type Summary } from "./conversation";
@@ -36,6 +39,7 @@
     now = new Date(),
     timer,
     queued = null,
+    refused = null,
     onmove,
     onstop,
     onstart,
@@ -56,6 +60,8 @@
     timer: Pick<Timer, "current" | "elapsed">;
     /** The status a queued move picked, drawn muted until the mirror moves (#1424). */
     queued?: string | null;
+    /** Why the source's credential cannot move this ticket (#2052), or `null`. */
+    refused?: string | null;
     onmove: (status: string) => void;
     onstop: () => void;
     onstart: () => void;
@@ -69,7 +75,7 @@
       ? timer.current
       : null,
   );
-  const options = $derived((offered ?? []).filter((status) => status !== detail.status));
+  const options = $derived(refused !== null ? [] : (offered ?? []).filter((status) => status !== detail.status));
   /** The tallest weekday, never under 4.5 hours, so a short day stays short. */
   const peak = $derived(Math.max(4.5 * 3600, ...(week?.days ?? []).map((day) => day.logged + day.unlogged)));
 
@@ -80,7 +86,7 @@
     const select = event.currentTarget as HTMLSelectElement;
     const status = select.value;
     select.value = shown ?? "";
-    if (status && status !== shown) onmove(status);
+    if (status && status !== shown && refused === null) onmove(status);
   }
 
   let select = $state<HTMLSelectElement | null>(null);
@@ -109,7 +115,8 @@
       class:tf-queued={queued !== null}
       value={shown ?? ""}
       onchange={pick}
-      disabled={options.length === 0 && queued === null}
+      {...refusedAttrs(refused)}
+      disabled={options.length === 0 && queued === null && refused === null}
     >
       {#if detail.status === null}
         <option value="" disabled>No status</option>

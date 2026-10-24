@@ -19,6 +19,9 @@
 
   A refused worklog does not stop the rest: each worklog is its own write,
   and the copies of the ones that went stay (ADR-0012).
+
+  A row whose source's credential cannot log work (`refused_writes`, #2052)
+  is drawn unticked, its box disabled, with the reason; it is never sent.
 -->
 <script lang="ts">
   import { minutesLabel } from "../../time/format";
@@ -34,6 +37,7 @@
     type PlannedWorklog,
     type Worklog,
   } from "../../ipc/time";
+  import { askRefused, refusalOf, type RefusedWrite, type RefusedWritesPort } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
@@ -46,6 +50,8 @@
     worklogDraft: typeof realWorklogDraft;
     logWork: typeof realLogWork;
     listSources: () => Promise<Pick<SourceSummary, "id" | "display_name">[]>;
+    /** What the sources' credentials cannot write (#2052); the bridge's when left out. */
+    refusedWrites?: RefusedWritesPort;
   }
 
   let {
@@ -84,6 +90,9 @@
   let failure = $state<string | null>(null);
   let sending = $state(false);
   let names = $state<Record<string, string>>({});
+  /** The worklogs the sources' credentials cannot make (#2052). */
+  let refused = $state<RefusedWrite[]>([]);
+  const cannot = (plan: PlannedWorklog) => refusalOf(refused, plan.entity_id, "log_work");
 
   const uid = `tf-logall-${Math.random().toString(36).slice(2, 9)}`;
   const id = (plan: Pick<PlannedWorklog, "day" | "entity_id">) => `${plan.day} ${plan.entity_id}`;
@@ -103,6 +112,9 @@
           ),
         );
         rows = plan.map((entry, index) => ({ plan: entry, ticked: true, comment: comments[index] ?? "" }));
+        const tickets = [...new Set(plan.map((entry) => entry.entity_id))];
+        refused = await askRefused(tickets.map((entity) => ({ entity, op: "log_work" })), io.refusedWrites);
+        for (const row of rows) if (cannot(row.plan) !== null) row.ticked = false;
       } catch (error) {
         failure = ipcErrorMessage(error);
         rows = [];
@@ -115,7 +127,7 @@
     return layers.add({ kind: "dialog", close: onclose });
   });
 
-  const ticked = $derived(rows?.filter((row) => row.ticked) ?? []);
+  const ticked = $derived(rows?.filter((row) => row.ticked && cannot(row.plan) === null) ?? []);
   const running = $derived(timer.current);
 
   const dayHeading = (day: string) => {
@@ -196,10 +208,21 @@
           <tbody>
             {#each rows as row (id(row.plan))}
               {@const ticket = targetReading({ kind: "entity", entity_id: row.plan.entity_id })}
+              {@const reason = cannot(row.plan)}
               <tr>
-                <td><input type="checkbox" aria-label="Log this" bind:checked={row.ticked} /></td>
+                <td
+                  ><input
+                    type="checkbox"
+                    aria-label="Log this"
+                    disabled={reason !== null}
+                    title={reason ?? undefined}
+                    bind:checked={row.ticked}
+                  /></td
+                >
                 <td class="tf-nowrap">{dayHeading(row.plan.day)}</td>
-                <td class="tf-mono tf-nowrap">{ticket}</td>
+                <td class="tf-nowrap"
+                  ><span class="tf-mono">{ticket}</span>{#if reason !== null}<br /><small class="tf-dim">{reason}</small>{/if}</td
+                >
                 <td class="tf-nowrap tf-tm-num">{minutesLabel(minutesOf(row.plan.seconds))}</td>
                 <td class="tf-tm-comment">
                   <textarea

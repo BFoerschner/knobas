@@ -105,7 +105,7 @@
     listen: PipelinePorts["listen"];
     /** *Copy as text*'s clipboard. */
     copy: (text: string) => Promise<void>;
-    /** What the target's source refuses its credential (#2053); the IPC read when omitted. */
+    /** What the sources' credentials cannot write: the target's page (#2053), the projects' tickets (#2052); the IPC read when omitted. */
     refusedWrites?: RefusedWritesPort;
   }
 
@@ -751,6 +751,7 @@
     draft={{ project: ticketFor.project, type: ticketFor.type, title: ticketFor.text, body: "" }}
     {projects}
     {layers}
+    refusedWrites={io.refusedWrites}
     onclose={() => (ticketFor = null)}
     onfile={(draft) => void fileTicket({ text: ticketFor!.text, project: draft.project, type: draft.type })}
   />

@@ -123,7 +123,7 @@ function open(
     owed?: ActionItemTicket[];
     /** Whether the mirror holds the filed ticket yet; flip `mirror.held` to bring it in (#1951). */
     mirrored?: boolean;
-    /** What `refused_writes` answers (#2053); nothing refused when omitted. */
+    /** What `refused_writes` answers (#2053, #2052); nothing refused when omitted. */
     refused?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
   } = {},
 ) {
@@ -329,6 +329,24 @@ test("Create ticket files the action item, shows it queued, then its key and sta
   await settle();
   expect(target.querySelector(".tf-su-ai a")?.getAttribute("href")).toBe("#/job/jira%3AOPS-131");
   expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("To Do");
+});
+
+test("Create ticket in a project the source's credential cannot file in is drawn disabled saying why, and files nothing (#2052)", async () => {
+  const reason = "This Jira user cannot create tickets in OPS: it lacks the Create Issues permission";
+  const { calls } = open({ refused: () => Promise.resolve([{ entity: "jira:OPS", op: "create_ticket", reason }]) });
+  await settle();
+  button("Create ticket").click();
+  await settle();
+  const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
+  select.value = "jira:OPS";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  const create = [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find((found) => found.textContent?.trim() === "Create ticket")!;
+  expect(create.getAttribute("aria-disabled")).toBe("true");
+  expect(create.title).toBe(reason);
+  create.click();
+  await settle();
+  expect(calls.tickets).toEqual([]);
 });
 
 test("Publish goes to the stored page without asking, after saving", async () => {

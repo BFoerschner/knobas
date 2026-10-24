@@ -18,6 +18,9 @@
   `Esc` and the backdrop are the quiet answer: a stop's draft stops the clock
   (*Stop, log later*), any other is discarded.
 
+  A worklog the ticket's source's credential cannot make (`refused_writes`,
+  #2052) draws *Log* disabled with the reason, and stops no clock for it.
+
   ADR-0012's sentence is here as it is in the rooms UI's draft, because this
   is where a person reaches for the one write whose duplicate costs money.
 -->
@@ -33,6 +36,7 @@
     type Draft,
     type Worklog,
   } from "../ipc/time";
+  import { askRefused, refusalOf, refusedAttrs, type RefusedWritesPort } from "../shell/refused-writes";
   import { clockReading, dayBounds, dayKey, dayLabel, readerDay } from "../time/day";
   import { DraftForm } from "../time/draft-form.svelte";
   import type { DraftOutcome } from "./drafting.svelte";
@@ -42,6 +46,8 @@
     logWork: typeof realLogWork;
     dayBlocks: (from: string, to: string) => Promise<{ blocks: DayBlock[] }>;
     listSources: () => Promise<Pick<SourceSummary, "id" | "display_name">[]>;
+    /** What the source's credential cannot write (#2052); the bridge's when left out. */
+    refusedWrites?: RefusedWritesPort;
   }
 
   let {
@@ -79,6 +85,8 @@
 
   let sending = $state(false);
   let failed = $state<string | null>(null);
+  /** Why the source's credential cannot take this worklog (#2052), or `null`. */
+  let refused = $state<string | null>(null);
 
   /** The draft's own blocks, oldest first, once `day_blocks` answers. */
   let blocks = $state<DayBlock[] | null>(null);
@@ -123,7 +131,7 @@
   }
 
   function send() {
-    if (sending) return;
+    if (sending || refused !== null) return;
     sending = true;
     failed = null;
     // The clock first: `log_work` covers only closed blocks.
@@ -164,6 +172,9 @@
       })
       // The names are a nicety too: without them a source reads as its id.
       .catch(() => {});
+    void askRefused([{ entity: draft.entity_id, op: "log_work" }], ports.refusedWrites).then(
+      (answer) => (refused = refusalOf(answer, draft.entity_id, "log_work")),
+    );
     return layers.add({ kind: "dialog", close: leave });
   });
 </script>
@@ -218,6 +229,7 @@
       </p>
       <!-- prettier-ignore -->
       <p class="tf-dim tf-fine">A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than guess; it never merges or drops what you wrote.</p>
+      {#if refused !== null}<p class="tf-fail">{refused}</p>{/if}
       {#if failed}<p class="tf-fail" role="alert">{failed}</p>{/if}
     </div>
     <footer>
@@ -230,7 +242,7 @@
         </button>
       {/if}
       <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("discard")}>Discard</button>
-      <button class="tf-btn tf-primary" type="button" disabled={sending || form.seconds <= 0} onclick={send}>
+      <button class="tf-btn tf-primary" type="button" {...refusedAttrs(refused)} disabled={sending || form.seconds <= 0} onclick={send}>
         Log {form.reading} to {form.key}
       </button>
     </footer>

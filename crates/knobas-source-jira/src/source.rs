@@ -401,6 +401,28 @@ impl Source for JiraSource {
         Ok(offered.into_iter().map(|t| t.status).collect())
     }
 
+    /// The asks this user's project permissions refuse (#2052), read from
+    /// `mypermissions` and never probed: see [`crate::grants`]. A ticket's
+    /// asks are answered in its project, a create's in the project it names;
+    /// an entity of another source, or one that is neither, is not answered.
+    async fn refused_writes(
+        &self,
+        asks: &[knobas_source::grants::WriteAsk],
+    ) -> Result<Vec<knobas_source::grants::RefusedWrite>, SourceError> {
+        let keyed: Vec<_> = asks
+            .iter()
+            .filter_map(|ask| {
+                let project = if ask.op == crate::WRITE_OP_CREATE_TICKET {
+                    self.project_key(&ask.entity).ok()?
+                } else {
+                    issue_project(&self.issue_key(&ask.entity).ok()?).to_owned()
+                };
+                Some((ask, project))
+            })
+            .collect();
+        crate::grants::refused(&self.http, &keyed).await
+    }
+
     /// No source view yet (ADR-0020): a Jira ticket's detail is the mirror's
     /// generic projection, as it was before views existed (spec #660 keeps
     /// Jira's details unchanged).
@@ -433,6 +455,12 @@ fn is_issue_key(key: &str) -> bool {
         && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
         && !number.is_empty()
         && number.chars().all(|c| c.is_ascii_digit())
+}
+
+/// The project an issue key is in (`PAY-231` is in `PAY`): what its writes'
+/// permissions are read in (#2052). The key is one [`is_issue_key`] passed.
+fn issue_project(key: &str) -> &str {
+    key.rsplit_once('-').map_or(key, |(project, _)| project)
 }
 
 #[cfg(test)]

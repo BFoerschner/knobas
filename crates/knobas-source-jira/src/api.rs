@@ -20,6 +20,7 @@
 //! | [`search`](JiraApi::search) | `api/2/search` | `jql`, `startAt`, `maxResults`, `validateQuery`, `fields`, `expand` | `jql`, `startAt`, `maxResults`, `fields`, `expand=changelog` (#929) |
 //! | [`comments`](JiraApi::comments) | `api/2/issue/{key}/comment` | `startAt`, `maxResults`, `orderBy`, `expand` | `startAt`, `maxResults` |
 //! | [`worklogs`](JiraApi::worklogs) | `api/2/issue/{key}/worklog` | **none at all** | *(none)* |
+//! | [`my_permissions`](JiraApi::my_permissions) | `api/2/mypermissions` | `projectKey`, `projectId`, `issueKey`, `issueId` | `projectKey` (#2052) |
 //! | — | `api/2/issue/{key}` | `fields`, `expand`, `properties`, `updateHistory` | **unused in M1** |
 //!
 //! Two consequences worth naming:
@@ -143,6 +144,16 @@ pub(crate) trait JiraApi: Send + Sync {
     /// columns hold by id.
     async fn statuses(&self) -> Result<Vec<crate::views::Status>, SourceError> {
         Err(no_agile())
+    }
+
+    /// `GET rest/api/2/mypermissions?projectKey=..`: every permission, with
+    /// whether this user holds it in the project (#2052, [`crate::grants`]).
+    /// A sync run's fakes model no permissions, so the default is no answer.
+    async fn my_permissions(
+        &self,
+        _project: &str,
+    ) -> Result<crate::grants::MyPermissions, SourceError> {
+        Err(SourceError::protocol("this Jira answers no permissions"))
     }
 }
 
@@ -289,6 +300,18 @@ impl JiraApi for crate::http::HttpClient {
         get_json(self, "rest/api/2/status", &[]).await
     }
 
+    async fn my_permissions(
+        &self,
+        project: &str,
+    ) -> Result<crate::grants::MyPermissions, SourceError> {
+        get_json(
+            self,
+            "rest/api/2/mypermissions",
+            &[("projectKey", project.to_owned())],
+        )
+        .await
+    }
+
     async fn search_keys(
         &self,
         jql: &str,
@@ -428,6 +451,21 @@ mod tests {
             query.is_empty(),
             "the WADL declares no query parameter on api/2/field, and the adapter sends \
              none: {query:?}"
+        );
+    }
+
+    /// The permission read's path and the one parameter it sends (#2052),
+    /// against the WADL tables: mockd serves no handler for it either.
+    #[test]
+    fn the_permission_read_is_a_path_the_wadl_declares() {
+        let knobas_mockd::allowlist::Lookup::Allowed { query } =
+            knobas_mockd::allowlist::lookup("GET", "api/2/mypermissions")
+        else {
+            panic!("GET api/2/mypermissions is not in testenv/specs/jira-dc-rest.wadl")
+        };
+        assert!(
+            query.contains(&"projectKey"),
+            "the read sends projectKey, which the WADL must declare: {query:?}"
         );
     }
 }

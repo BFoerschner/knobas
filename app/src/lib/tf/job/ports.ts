@@ -47,6 +47,7 @@ import {
 } from "../../ipc/sources";
 import { weekTimesheet, type DayWindow, type Week } from "../../ipc/time";
 import { BRIDGE as startWorkBridge, type StartWorkApi } from "../../start-work/start-work.svelte";
+import type { RefusedWritesPort } from "../../shell/refused-writes";
 import type { SetPorts } from "../sets/ports";
 import type { SourceFacts } from "./job";
 
@@ -81,6 +82,8 @@ export interface JobPorts {
   syncStatus: () => Promise<SourceSyncStatus[]>;
   /** The start-work flow's five commands (#44), the job's stepper's (#818). */
   startWork: StartWorkApi;
+  /** What the ticket's source's credential cannot write (#2052); the bridge's when left out. */
+  refusedWrites?: RefusedWritesPort;
 }
 
 /**

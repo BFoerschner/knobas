@@ -55,7 +55,7 @@
     draft: TicketDraft;
     /** The configured sources, to name the ticket's in the toast. */
     sources: readonly SourceSummary[];
-    ports: Pick<RunPorts, "projects" | "links" | "owedTickets" | "submitWrite" | "listen" | "follower">;
+    ports: Pick<RunPorts, "projects" | "links" | "owedTickets" | "submitWrite" | "listen" | "follower" | "refusedWrites">;
     /** Bumped when the page reads the run again (#1450): the links are read again. */
     rereads?: number;
   } = $props();
@@ -182,5 +182,12 @@
 {/each}
 
 {#if asking !== null}
-  <TfCreateTicket draft={asking} {projects} words onclose={() => (asking = null)} onfile={(filed) => void file(filed)} />
+  <TfCreateTicket
+    draft={asking}
+    {projects}
+    words
+    refusedWrites={ports.refusedWrites}
+    onclose={() => (asking = null)}
+    onfile={(filed) => void file(filed)}
+  />
 {/if}

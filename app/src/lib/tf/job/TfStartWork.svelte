@@ -16,6 +16,10 @@
   one: proposing dispatches nothing, and it is what puts real names in the
   fields. Picking another repository amends the two steps that name it.
 
+  A move the source's credential cannot make (`moveRefused`, #2052) is drawn
+  with the reason, and *Run all steps* skips it, which runs the flow on past
+  it as *Skip* does: it is never queued, and the skipped row keeps the reason.
+
   Step 5 is the shell's *Start timer*, which opens the worklog draft for a
   timer already running on another ticket before it starts this one (R-4.9,
   story 62).
@@ -26,6 +30,7 @@
   import type { EntityDetail, StartWorkStep } from "../../ipc/entity";
   import type { Timer } from "../../shell/timer.svelte";
   import { toastStarted } from "../../shell/queued-toast";
+  import { refusedAttrs } from "../../shell/refused-writes";
   import { createStartWork, demandOf, editable, edited, type StartWorkApi } from "../../start-work/start-work.svelte";
   import { keyOf } from "./job";
 
@@ -36,6 +41,7 @@
     timer,
     api,
     onstarttimer,
+    moveRefused = null,
   }: {
     detail: EntityDetail;
     /** Every repository, `null` while read: the dropdown's options. */
@@ -45,6 +51,8 @@
     timer: Pick<Timer, "current">;
     api: StartWorkApi;
     onstarttimer: (entityId: string, title: string) => void;
+    /** Why the source's credential cannot move this ticket (#2052), or `null`. */
+    moveRefused?: string | null;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -132,7 +140,9 @@
   }
 
   async function runAll() {
-    await flow.run();
+    // A move the credential cannot make is skipped, never queued; the skip runs the flow on past it.
+    if (moveRefused !== null && move !== null && editable(move.outcome)) await flow.skip(move.id);
+    else await flow.run();
     if (flow.error === null) {
       toastStarted(key, flow.steps.filter((each) => each.outcome === "queued").length, detail.source);
     }
@@ -184,7 +194,7 @@
           <input aria-label={row.label} value="{text((of?.payload as Record<string, unknown> | undefined)?.['relation']) || 'implements'} {key}" readonly />
           <span class="tf-dim tf-small">stays in knobas</span>
         {:else if row.id === "status"}
-          <input aria-label={row.label} value="{detail.status ?? 'To Do'} to {text(op(of)['status']) || 'In Progress'}" readonly />
+          <input aria-label={row.label} value="{detail.status ?? 'To Do'} to {text(op(of)['status']) || 'In Progress'}" readonly {...refusedAttrs(moveRefused)} />
           <span class="tf-dim tf-small">{detail.source.display_name} transition</span>
         {:else}
           <input aria-label={row.label} value={key} readonly />
@@ -205,6 +215,8 @@
         {/if}
       </div>
       {#if of?.detail}<p class="tf-swdetail tf-small">{of.detail}</p>{/if}
+      <!-- A skipped refused move keeps its reason: *Run all steps* skipped it, not the reader. -->
+      {#if row.id === "status" && moveRefused !== null && of?.outcome !== "succeeded"}<p class="tf-swdetail tf-small">{moveRefused}</p>{/if}
     </div>
   {/each}
   <footer>

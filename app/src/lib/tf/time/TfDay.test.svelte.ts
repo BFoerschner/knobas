@@ -17,6 +17,7 @@ import type { AdHocBlock, Block, DayBlock, OpenStretch, RunningTimer, TimerTarge
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import TfDay from "./TfDay.svelte";
+import type { RefusedWritesPort, WriteAsk } from "../../shell/refused-writes";
 
 const DAY = "2026-08-22";
 const NOW = new Date(2026, 7, 22, 14, 42, 0, 0);
@@ -106,6 +107,7 @@ function render(
     stripWidth?: number;
     plainPx?: number;
     refuseDelete?: boolean;
+    refusedWrites?: RefusedWritesPort;
   } = {},
 ) {
   const offers = over.offers ?? OFFERS;
@@ -139,6 +141,7 @@ function render(
           return Promise.resolve(found());
         },
         launcherHome: () => Promise.resolve({ recent: RECENT, smart_lists: [], stale_sources: [] } as never),
+        ...(over.refusedWrites ? { refusedWrites: over.refusedWrites } : {}),
         dayBlocks: () => Promise.resolve({ blocks: listed, past_horizon: over.pastHorizon ?? false, open }),
         adHocBlock: (id: number) => Promise.resolve(offers[id] ?? null),
         updateBlock: (id: number, from: string, to: string, on: TimerTarget) => {
@@ -299,6 +302,24 @@ test("Log… opens the draft for that ticket and day; Stop and log… is the tim
   button(row("running"), "Stop and log…").click();
   expect(sent.logs).toEqual([["jira:PAY-231", DAY]]);
   expect(sent.stops()).toBe(1);
+});
+
+test("Log… on a ticket whose source's credential cannot log work is drawn disabled saying why, and opens nothing (#2052)", async () => {
+  const asked: WriteAsk[][] = [];
+  const reason = "This Jira user cannot log work in PAY: it lacks the Work On Issues permission";
+  const sent = render({
+    refusedWrites: (asks) => {
+      asked.push(asks);
+      return Promise.resolve([{ entity: "jira:PAY-231", op: "log_work", reason }]);
+    },
+  });
+  await settle();
+  expect(asked).toEqual([[{ entity: "jira:PAY-231", op: "log_work" }]]);
+  const log = button(row("unlogged"), "Log…");
+  expect(log.getAttribute("aria-disabled")).toBe("true");
+  expect(log.title).toBe(reason);
+  log.click();
+  expect(sent.logs).toEqual([]);
 });
 
 test("Edit moves a block and keeps its target, and the dialog sits on the shell's layers", async () => {

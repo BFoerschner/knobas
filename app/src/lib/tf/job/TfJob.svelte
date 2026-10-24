@@ -29,6 +29,11 @@
   work* stepper (R-4.9) in place of Code and Builds, as prototype-6 draws it.
   The Map tab (#874) hides the card and draws Dependencies from the ticket
   (`deps/TfDeps.svelte` with `ticket` set): only what the ticket reaches.
+
+  **What the credential cannot write (#2052).** Once per job opened,
+  `refused_writes` is asked about the ticket's *Comment* and its move; a
+  refused one is drawn disabled with the reason (the status select, Start
+  work's move, the comment box's *Comment*) and queues nothing.
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
@@ -41,6 +46,7 @@
   } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
   import { writeFollower, type WriteFollower } from "../../shell/follow-write";
+  import { askInto, refusalOf, type RefusedWrite, type WriteAsk } from "../../shell/refused-writes";
   import { inTextField } from "../../shell/keys";
   import { toastQueued } from "../../shell/queued-toast";
   import type { Timer } from "../../shell/timer.svelte";
@@ -163,6 +169,17 @@
   const health = $derived(reader.health);
   const sync = $derived(reader.sync);
   const repos = $derived(reader.repos);
+
+  /** The ticket's writes its source's credential cannot make (#2052), asked once per job opened. */
+  let refused = $state<RefusedWrite[]>([]);
+  /** As a string, so a re-read of the same ticket asks nothing again. */
+  const asks = $derived.by(() => {
+    const entity = detail?.row.entity_id;
+    return JSON.stringify(entity === undefined ? [] : ["comment", "transition"].map((op) => ({ entity, op })));
+  });
+  $effect(() => askInto(JSON.parse(asks) as WriteAsk[], ports.refusedWrites, (answer) => (refused = answer)));
+  const commentRefused = $derived(refusalOf(refused, detail?.row.entity_id ?? null, "comment"));
+  const moveRefused = $derived(refusalOf(refused, detail?.row.entity_id ?? null, "transition"));
 
   // The job on screen is what the timer chip and ⌘T start on (R-1.4).
   $effect(() => currentJob.set(detail?.row.entity_id ?? null));
@@ -301,7 +318,7 @@
   });
 
   async function comment(body: string): Promise<boolean> {
-    if (!detail) return false;
+    if (!detail || commentRefused !== null) return false;
     const id = detail.row.entity_id;
     const key = keyOf(id);
     const source = detail.source;
@@ -341,7 +358,7 @@
    * read again: nothing else it reaches changed.
    */
   async function move(status: string) {
-    if (!detail) return;
+    if (!detail || moveRefused !== null) return;
     const id = detail.row.entity_id;
     const key = keyOf(id);
     const source = detail.source;
@@ -468,6 +485,7 @@
       now={today()}
       {timer}
       queued={queuedStatus}
+      refused={moveRefused}
       onmove={move}
       onstop={() => ontimer?.()}
       onstart={() => onstarttimer(detail!.row.entity_id, detail!.row.title)}
@@ -514,7 +532,7 @@
             </div>
           {/each}
           {#if starting}
-            <TfStartWork {detail} {repos} suggested={suggestedRepo} {timer} api={ports.startWork} {onstarttimer} />
+            <TfStartWork {detail} {repos} suggested={suggestedRepo} {timer} api={ports.startWork} {onstarttimer} {moveRefused} />
           {/if}
           <div class="tf-grid">
             {#if !starting}
@@ -543,6 +561,7 @@
             {lastVisit}
             failure={threadFailure}
             now={today()}
+            refused={commentRefused}
             oncomment={comment}
           />
         {:else}
