@@ -16,9 +16,9 @@ name: testenv
 # **Manual only** (Björn, 2026-09-05), the same rule as check.yml and for the
 # same reason. This one used to fire on any `testenv/**` change; dispatch it by
 # hand after touching a compose file or a seed script. It is the cheap half of
-# the pair -- no containers, no images -- but it is still a billed runner, and
-# "manual only" is now the rule for every workflow in this directory rather than
-# a judgement call per file.
+# the pair -- no product containers, one small image -- but it is still a
+# billed runner, and "manual only" is now the rule for every workflow in this
+# directory rather than a judgement call per file.
 #
 # The `concurrency:` block went with the triggers: it made a PR's later push
 # supersede its earlier one, and a hand-started run has nothing to supersede.

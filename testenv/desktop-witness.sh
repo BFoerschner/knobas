@@ -327,7 +327,7 @@ check_readiness
 # 5. Launch it, and wait for a window.
 # ---------------------------------------------------------------------------
 step "launching $registered $PROFILE_FLAG"
-pg_data=$(demo_data_dir "$HOME")
+pg_data=$(demo_data_dir)
 pg_before=$(profile_postmaster "$pg_data")
 open -a "$registered" --args "$PROFILE_FLAG"
 # Polled until the process is there, under the guard (#1961): `open` returns

@@ -20,7 +20,7 @@ import { join } from "node:path";
 const BASE_MS = 15_000;
 const MS_PER_FILE = 100;
 
-/** The timeout for a test that reads every `.ts` and `.svelte` file under `app/src`. */
+/** The timeout for a test that scans `app/src`, counted over every `.ts` and `.svelte` file there, tests included. */
 export function wholeTreeBudget(): number {
   const files = readdirSync(join(process.cwd(), "src"), { recursive: true, encoding: "utf8" }).filter((name) =>
     /\.(svelte|ts)$/.test(name),

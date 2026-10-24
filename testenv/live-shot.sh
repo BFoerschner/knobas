@@ -231,7 +231,7 @@ key() {
 settle() { sleep "${1:-1}"; }
 
 say "starting 'just demo' with KNOBAS_SECRET_STORE=memory (log: $out/demo.log)"
-pg_data=$(demo_data_dir "$HOME")
+pg_data=$(demo_data_dir)
 pg_before=$(profile_postmaster "$pg_data")
 # Its own process group, so the dev server and cargo go with it at the end.
 set -m
