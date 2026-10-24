@@ -5970,3 +5970,212 @@ async fn the_branch_refs_name_every_branch_in_one_answer() {
         .and_then(|v| v.parse::<usize>().ok());
     assert_eq!(total, Some(listed.len()), "X-Total-Count on page 1");
 }
+
+// -- what the token may write (issue #2030) ----------------------------------
+
+/// Every toolbar action of `view`, and every action in its blocks, with the
+/// reason it is drawn disabled.
+fn offered(view: &knobas_source::view::SourceView) -> Vec<(String, Option<String>)> {
+    use knobas_source::view::Block;
+    let blocks = view
+        .sections
+        .iter()
+        .flat_map(|s| &s.blocks)
+        .filter_map(|b| match b {
+            Block::Actions { actions } => Some(actions),
+            _ => None,
+        })
+        .flatten();
+    view.actions
+        .iter()
+        .chain(blocks)
+        .map(|a| (a.label.clone(), a.disabled.clone()))
+        .collect()
+}
+
+/// What a view reads, every block but its writes: the read-only token must
+/// read what a token that may write reads.
+fn read_of(view: &knobas_source::view::SourceView) -> Vec<(String, Option<u64>, usize)> {
+    view.sections
+        .iter()
+        .map(|s| (s.title.clone(), s.count, s.blocks.len()))
+        .collect()
+}
+
+/// Issue #2030, spec #1192 story 10, against the real server: a token minted
+/// with `read:repository` reads the repository, a branch, a commit, a pull
+/// request and a file as a token that may write does, and is offered every
+/// write there disabled, saying which scope it lacks; the token that may
+/// write is offered none for its scope. An account that may not push to a
+/// repository (a seeded person on the admin's mirror) is told so on
+/// *New branch…*. The answers `view::grants` reads are measured here: the
+/// empty-bodied branch and issue writes, refused for the scope or for the
+/// body.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() {
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let api = format!("{}/api/v1", env.url);
+    let auth = format!("token {}", env.token);
+    let (admin, password) = TESTENV_ADMIN;
+    let (reader, reader_password) = ("jonas.becker", "tidewater-dev");
+    let names = [
+        (admin, password, "knobas-live-2030-read"),
+        (admin, password, "knobas-live-2030-write"),
+        (reader, reader_password, "knobas-live-2030-reader"),
+    ];
+    let remove = async || {
+        for (user, pass, name) in names {
+            let _ = http
+                .delete(format!("{api}/users/{user}/tokens/{name}"))
+                .basic_auth(user, Some(pass))
+                .send()
+                .await;
+        }
+    };
+    remove().await;
+    let mint = async |(user, pass, name): (&str, &str, &str), scopes: &[&str]| -> String {
+        let minted: serde_json::Value = http
+            .post(format!("{api}/users/{user}/tokens"))
+            .basic_auth(user, Some(pass))
+            .json(&serde_json::json!({ "name": name, "scopes": scopes }))
+            .send()
+            .await
+            .expect("mint a token")
+            .json()
+            .await
+            .expect("the token record");
+        minted["sha1"].as_str().unwrap_or_default().to_owned()
+    };
+    // Every read scope the adapter reads with: a pull request's view reads
+    // its discussion off the issue (`read:issue`) and the organisation's
+    // labels (`read:organization`).
+    let read_only = mint(
+        names[0],
+        &["read:repository", "read:issue", "read:organization", "read:user"],
+    )
+    .await;
+    let writes = mint(
+        names[1],
+        &["write:repository", "write:issue", "read:organization", "read:user"],
+    )
+    .await;
+    let account = mint(
+        names[2],
+        &["write:repository", "write:issue", "read:organization", "read:user"],
+    )
+    .await;
+
+    // The entities: the seeded open pull request, its head branch and commit,
+    // the repository, and its README.
+    let full = env.full_name();
+    let pulls: serde_json::Value = http
+        .get(format!("{api}/repos/{full}/pulls?state=open&limit=50"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET the open pull requests")
+        .json()
+        .await
+        .expect("a pull request listing");
+    let sepa = pulls
+        .as_array()
+        .and_then(|p| {
+            p.iter()
+                .find(|p| p["title"] == "SEPA retry with exponential backoff")
+        })
+        .expect("the seed opens the SEPA retry pull request");
+    let number = sepa["number"].as_u64().expect("a number");
+    let head = sepa["head"]["ref"].as_str().expect("a head").to_owned();
+    let sha = sepa["head"]["sha"].as_str().expect("a head sha").to_owned();
+    let (owner, repo) = (env.owner.as_str(), env.repo.as_str());
+    let id = |key: String| format!("gitea:{key}");
+    let entities = [
+        id(knobas_source_gitea::keys::repo_key(owner, repo)),
+        id(knobas_source_gitea::keys::branch_key(owner, repo, &head)),
+        id(knobas_source_gitea::keys::commit_key(owner, repo, &sha)),
+        id(knobas_source_gitea::keys::pr_key(owner, repo, number)),
+    ];
+    let config = serde_json::json!({ "repos": [full] });
+    let narrow = env.source_with(&read_only, config.clone());
+    let wide = env.source_with(&writes, config);
+    let mut seen = Vec::new();
+    for entity in &entities {
+        let (a, b) = tokio::join!(narrow.view(entity, None), wide.view(entity, None));
+        seen.push((
+            entity.clone(),
+            a.unwrap_or_else(|e| panic!("the read-only token reads {entity}: {e:?}"))
+                .expect("drawn"),
+            b.unwrap_or_else(|e| panic!("the token that may write reads {entity}: {e:?}"))
+                .expect("drawn"),
+        ));
+    }
+    // The README, where *Commit change…* is offered (the Files tab's file).
+    let file = "file:README.md";
+    let (a, b) = tokio::join!(
+        narrow.view(&entities[0], Some(file)),
+        wide.view(&entities[0], Some(file))
+    );
+    seen.push((
+        format!("{} {file}", entities[0]),
+        a.expect("the README reads").expect("drawn"),
+        b.expect("the README reads").expect("drawn"),
+    ));
+
+    let mirror = format!("{admin}/ops-runbooks-mirror");
+    let tip: serde_json::Value = http
+        .get(format!("{api}/repos/{mirror}/commits?limit=1"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET the mirror's commits")
+        .json()
+        .await
+        .expect("a commit listing");
+    let mirror_sha = tip[0]["sha"].as_str().expect("a commit").to_owned();
+    let outsider = env.source_with(&account, serde_json::json!({ "repos": [mirror] }));
+    let pushless = outsider
+        .view(&format!("gitea:{mirror}@{mirror_sha}"), None)
+        .await;
+
+    remove().await;
+
+    assert!(
+        !read_only.is_empty() && !writes.is_empty() && !account.is_empty(),
+        "three tokens were minted"
+    );
+    for (entity, narrow, wide) in &seen {
+        println!("LIVE {entity}: read-only {:?}", offered(narrow));
+        println!("LIVE {entity}: may write {:?}", offered(wide));
+        assert_eq!(read_of(narrow), read_of(wide), "{entity}: the reads are unchanged");
+        let drawn = offered(narrow);
+        assert!(!drawn.is_empty(), "{entity} offers writes to draw disabled");
+        for (label, why) in &drawn {
+            assert!(
+                why.as_deref().is_some_and(|w| w.starts_with("This token cannot write: it lacks the write:")),
+                "{entity}: {label} is drawn disabled, saying which scope: {why:?}"
+            );
+        }
+        let labels = |v| offered(v).into_iter().map(|(l, _)| l).collect::<Vec<_>>();
+        assert_eq!(labels(narrow), labels(wide), "{entity}: the same writes are drawn");
+        for (label, why) in offered(wide) {
+            assert!(
+                !why.as_deref().is_some_and(|w| w.starts_with("This token cannot write")),
+                "{entity}: {label} is not refused a token that may write: {why:?}"
+            );
+        }
+    }
+    let pushless = pushless.expect("a reader reads the mirror's commit").expect("drawn");
+    assert_eq!(
+        offered(&pushless),
+        [(
+            "New branch…".to_owned(),
+            Some("This account cannot push to this repository".to_owned())
+        )],
+        "an account without push is told so"
+    );
+}
