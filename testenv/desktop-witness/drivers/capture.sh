@@ -343,7 +343,7 @@ wait_until "knobas never came forward after '$OPEN_IN_MAIN'" is_frontmost dev.kn
 wait_until "the capture window is still open after '$OPEN_IN_MAIN'" capture_window_gone
 say "knobas is frontmost again and the capture window has gone"
 
-wait_until "'$OPEN_IN_MAIN' did not land on Settings › $NOTES_SECTION" reads "$YOUR_NOTES"
+lands open-in-knobas "$YOUR_NOTES"
 landed=$(waypoint_verdict "$landed_before" yes)
 [ "$landed" = witnessed ] || die "'$YOUR_NOTES' was $landed_before before '$OPEN_IN_MAIN', so landing on it witnesses nothing."
 

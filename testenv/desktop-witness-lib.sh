@@ -462,6 +462,55 @@ has_reading() {
     '
 }
 
+# lands <landing> <reading...>
+# lands_named <landing> <name...>
+#
+# Wait until the page a step lands on reads every <reading> as a whole line
+# (`ax values`), or carries every <name> (`ax find`). Run from a driver: it
+# uses the driver's `$ax`, `$pid` and `wait_until`.
+#
+# **Each call is held to the app by a DOM test** (#1968). No gate runs a
+# driver, so when an app change moved where a step lands, the driver kept
+# waiting for the old page and the next run went red on a correct app
+# (`capture.sh` after #1504). So a driver waits on a landing only through
+# these two, with `readonly` constants for arguments: `app/src/lib/shell/
+# test-witness.ts` reads the call out of the driver, a test in
+# `app/src/App.test.svelte.ts` replays the step and asserts the page draws
+# it, and `desktop-witness-test.sh` refuses a landing that test lacks.
+lands() {
+    local landing=$1 reading
+    shift
+    for reading in "$@"; do
+        wait_until "the step did not land on $landing: the screen does not read '$reading'" \
+            lands_reading "$reading"
+    done
+}
+lands_named() {
+    local landing=$1 name
+    shift
+    for name in "$@"; do
+        wait_until "the step did not land on $landing: nothing on screen is called '$name'" \
+            lands_name "$name"
+    done
+}
+lands_reading() { has_reading "$("$ax" values "$pid" 2>/dev/null || true)" "$1"; }
+lands_name() {
+    local n
+    n=$("$ax" find "$pid" "$1" 2>/dev/null || true)
+    case $n in '' | *[!0-9]*) return 1 ;; esac
+    [ "$n" -gt 0 ]
+}
+
+# landings_of <driver source>
+#
+# The landings a driver waits on, one per line, each once: the first word
+# after every `lands` or `lands_named` call that opens a line.
+landings_of() {
+    printf '%s\n' "$1" | awk '
+        $1 == "lands" || $1 == "lands_named" { if (!seen[$2]++) print $2 }
+    '
+}
+
 # frontmost_bundle <ax frontmost output>
 #
 # The bundle identifier of whatever has the screen, or nothing.

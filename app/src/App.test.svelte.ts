@@ -33,10 +33,12 @@ import type {
   EntityDetail,
   InboxCategory,
   InboxEntry,
+  NoteDetail,
   NotificationDraft,
 } from "./lib/ipc/entity";
 import type { CredentialHealth } from "./lib/ipc/sources";
-import { until } from "./lib/shell/test-wait";
+import { until, waitFor } from "./lib/shell/test-wait";
+import { landing, missingFrom, type Landing } from "./lib/shell/test-witness";
 
 /** Readings `credential_health` hands back, and how many times it was asked. */
 let healthRows: CredentialHealth[] = [];
@@ -120,7 +122,9 @@ vi.mock("./lib/ipc/entity", () => ({
   // short of an export throws at the call rather than failing as a missing
   // feature, so each answers empty or refuses.
   getNote: (noteId: string) =>
-    noteShownHere && noteId === "note:0f2c1a"
+    noteShownHere && noteAnswer?.note.id === noteId
+      ? Promise.resolve(noteAnswer)
+      : noteShownHere && noteId === "note:0f2c1a"
       ? Promise.resolve({
           note: { id: noteId, title: "Retry backoff, thinking aloud", body_md: "Jitter it.", created_at: "", updated_at: "" },
           refs: [],
@@ -204,6 +208,8 @@ let timerRunning: unknown = null;
 let entityAnswer: EntityDetail | null = null;
 /** *Show notes and quick capture* (D10), and with it the one note `get_note` answers (#1504). */
 let noteShownHere = false;
+/** A note `get_note` answers for its own id while notes are shown, besides the one above. */
+let noteAnswer: NoteDetail | null = null;
 /** The block `stopTimer` closes. */
 let timerClosed: unknown = null;
 /** Every `worklog_draft` the shell asked for, in order (#280). */
@@ -331,6 +337,7 @@ beforeEach(() => {
   timerStarts = [];
   entityAnswer = null;
   noteShownHere = false;
+  noteAnswer = null;
   timerRooms = [];
   timerStops = 0;
   captureRecords = [];
@@ -1051,4 +1058,68 @@ test.each(["#/inbox", "#/settings"])("⌘T on %s after a job asks with the picke
   pressTimerKey();
   await until(() => pickerTitle() !== null, `⌘T on ${hash} never asked`);
   expect(timerStarts).toEqual([]);
+});
+
+// --- where the desktop-witness drivers land (#1968) ------------------------
+
+/**
+ * **Each page a desktop-witness driver lands on, in the gate.** A driver
+ * takes the screen, so no gate runs one, and an app change that moves where a
+ * step lands leaves the driver waiting for the old page: `capture.sh` waited
+ * for Settings › Notes and capture after *Open in knobas* for months after
+ * #1504 sent the note to its own page. A driver waits on a landing with
+ * `lands`/`lands_named` (`desktop-witness-lib.sh`); each test here replays one
+ * such step in the state the driver has made by then, and asserts the page
+ * draws what the driver's call names, read out of the driver
+ * (`test-witness.ts`). `desktop-witness-test.sh` refuses a call with no
+ * `landing("<driver>", "<landing>")` here.
+ *
+ * What it cannot say: whether WebKit's accessibility tree reads the DOM the
+ * way `test-witness.ts` does. That is the on-screen run's.
+ */
+async function landsOn(expected: Landing): Promise<void> {
+  await waitFor(() => expect(missingFrom(target, expected), "the page lacks what the driver waits on").toEqual([]));
+}
+
+test("capture: Open in knobas lands on the captured note's page, as capture.sh waits for it", async () => {
+  // capture.sh's state by then: notes shown (step 1), PAY-231's job open
+  // (step 2), and a capture stored with its captured-from link to it.
+  dbReady = true;
+  noteShownHere = true;
+  entityAnswer = jobTicket();
+  noteAnswer = {
+    note: {
+      id: "note:witness",
+      title: "Retry storm from the capture witness",
+      body_md: "Retry storm from the capture witness\nthe queue backs up at 09:00",
+      created_at: "",
+      updated_at: "",
+    },
+    refs: [],
+    links: [
+      {
+        link: {
+          id: "link:captured",
+          from_id: "note:witness",
+          to_id: "mock:PAY-231",
+          relation: "captured-from",
+          origin: "manual",
+          note: null,
+          created_by: "user",
+          created_at: "",
+          confirmed_at: "",
+          rule: null,
+          rule_class: null,
+          reason: null,
+        },
+        other: { entity_id: "mock:PAY-231", kind: "ticket", title: "Retry failed SEPA payouts", deleted_at: null },
+      },
+    ],
+  };
+  location.hash = "#/job/mock:PAY-231";
+  app = mount(App, { target, props: {} });
+  await until(() => (listeners.get("capture:open-note") ?? []).length > 0, "the shell never subscribed to capture:open-note");
+
+  emit("capture:open-note", "note:witness");
+  await landsOn(landing("capture", "open-in-knobas"));
 });

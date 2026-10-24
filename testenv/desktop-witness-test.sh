@@ -802,8 +802,74 @@ pin_label $tf/tickets/TicketPreview.svelte 'href={address}>{action.label}</a>' \
     "the ticket preview's button is still a link to the job"
 pin_label ../fixtures/tidewater/work.json '"summary": "Retry failed SEPA payouts"' \
     "the demo's PAY-231 still has the summary the capture driver waits for"
-pin_label $tf/note/TfNote.svelte 'const NOTES_SETTINGS = "#/settings/notes"' \
-    "a note still opens Settings › Notes and capture, which is where the driver looks for it"
+
+# --- where the drivers land (#1968) -----------------------------------------
+#
+# A pin above measures that a name is still spelled where a driver presses it;
+# it cannot say a step still lands where the driver waits. The pin that stood
+# here (`TfNote.svelte` still says `#/settings/notes`) stayed green for months
+# while *Open in knobas* had moved to the note's own page (#1504), because the
+# string survived as the hidden-notes branch. So a driver waits on a landing
+# through `lands`/`lands_named`, and `app/src/App.test.svelte.ts` replays each
+# in the DOM against the driver's own constants. Checked here: every driver
+# declares a landing, and every landing has its replay.
+
+landings_app_test=../app/src/App.test.svelte.ts
+for driver_path in desktop-witness/drivers/*.sh; do
+    driver_name=$(basename "$driver_path" .sh)
+    driver_landings=$(landings_of "$(cat "$driver_path")")
+    if [ -n "$driver_landings" ]; then
+        check "$driver_name.sh waits on its landings through lands or lands_named" yes yes
+    else
+        check "$driver_name.sh waits on its landings through lands or lands_named" yes no
+        printf '  %s calls neither, so no gate holds its landing pages to the app.\n' "$driver_path" >&2
+    fi
+    while IFS= read -r driver_landing; do
+        [ -n "$driver_landing" ] || continue
+        replay="landing(\"$driver_name\", \"$driver_landing\")"
+        if grep -qF "$replay" "$landings_app_test"; then
+            check "$driver_name.sh's landing $driver_landing is replayed in the DOM" yes yes
+        else
+            check "$driver_name.sh's landing $driver_landing is replayed in the DOM" yes no
+            printf '  %s has no %s.\n' "$landings_app_test" "$replay" >&2
+        fi
+    done <<<"$driver_landings"
+done
+
+# `landings_of` itself: the first word after the verb, each landing once, and
+# neither a comment nor a longer word that starts with the verb.
+check "landings_of reads each landing once, in order" "$(printf 'note\njob')" \
+    "$(landings_of "$(printf 'lands note "$A"\n    lands_named job "$B"\nlands note "$A"\n# lands gone "$C"\nlandsfoo x\n')")"
+check "landings_of reads nothing from a driver without one" "" "$(landings_of 'wait_until "x" reads "$A"')"
+
+# `lands` and `lands_named` against a stub helper: they pass on a screen that
+# draws every reading and name, and stop at the first one missing, naming it.
+lands_tmp=$(mktemp -d "${TMPDIR:-/tmp}/knobas-witness-lands.XXXXXX")
+cat >"$lands_tmp/ax" <<'STUB'
+#!/bin/sh
+case $1 in
+values) printf '  Retry storm  \nCaptured from here\n' ;;
+find) [ "$3" = "Open Code view" ] && echo 1 || echo 0 ;;
+esac
+STUB
+chmod +x "$lands_tmp/ax"
+lands_outcome() { # <lands|lands_named> <landing> <value...>: ok, or what wait_until was told
+    (
+        ax=$lands_tmp/ax pid=$$
+        wait_until() { "${@:2}" || { echo "$1"; exit 0; }; }
+        "$@"
+        echo ok
+    )
+}
+check "lands passes on a whole line the screen reads" ok "$(lands_outcome lands note 'Retry storm')"
+check "lands stops at a line the screen reads only inside a longer one" \
+    "the step did not land on note: the screen does not read 'Captured from'" \
+    "$(lands_outcome lands note 'Retry storm' 'Captured from')"
+check "lands_named passes on a name the screen carries" ok "$(lands_outcome lands_named job 'Open Code view')"
+check "lands_named stops at a name nothing carries" \
+    "the step did not land on job: nothing on screen is called 'Your notes'" \
+    "$(lands_outcome lands_named job 'Your notes')"
+rm -rf "$lands_tmp"
 
 # --- the helper's own two answers -------------------------------------------
 #
