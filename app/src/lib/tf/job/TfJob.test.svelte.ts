@@ -1109,13 +1109,14 @@ test("Run all steps starts the timer as step 5, through the shell's start, which
 test("Start work's move the source's credential cannot make is drawn saying why, and Run all steps skips it (#2052)", async () => {
   const reason = "This Jira user cannot move tickets in PAY: it lacks the Transition Issues permission";
   const ran: string[] = [];
+  let now: StartWorkStep["outcome"][] = ["pending", "pending", "pending", "pending"];
   open("PAY-231", {
     ports: ports({
       listSources: MARA,
       getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
       refusedWrites: () => Promise.resolve([{ entity: ID, op: "transition", reason }]),
       startWork: {
-        flow: () => Promise.resolve(flow(["pending", "pending", "pending", "pending"])),
+        flow: () => Promise.resolve(flow(now)),
         run: () => {
           ran.push("run");
           return Promise.resolve(flow(["queued", "queued", "queued", "pending"]));
@@ -1123,7 +1124,8 @@ test("Start work's move the source's credential cannot make is drawn saying why,
         retry: () => Promise.resolve([]),
         skip: (stepId) => {
           ran.push(`skip ${stepId}`);
-          return Promise.resolve(flow(["queued", "queued", "queued", "skipped"]));
+          now = ["queued", "queued", "queued", "skipped"];
+          return Promise.resolve(flow(now));
         },
         amend: () => Promise.resolve([]),
       },
@@ -1139,6 +1141,10 @@ test("Start work's move the source's credential cannot make is drawn saying why,
   await settle();
   // The move is skipped, which runs the flow on past it; it is never run.
   expect(ran).toEqual(["skip 4"]);
+  // Skipped, the row still says why: the reader did not choose the skip.
+  const skipped = target.querySelector(".tf-step[data-step='status']")!;
+  expect(skipped.querySelector(".tf-state")!.textContent).toBe("skipped");
+  expect(skipped.textContent).toContain(reason);
 });
 
 /** Run all steps on PAY-231 with a flow that ends as `after`; the toasts it raised. */

@@ -18,7 +18,7 @@
 
   A move the source's credential cannot make (`moveRefused`, #2052) is drawn
   with the reason, and *Run all steps* skips it, which runs the flow on past
-  it as *Skip* does: it is never queued.
+  it as *Skip* does: it is never queued, and the skipped row keeps the reason.
 
   Step 5 is the shell's *Start timer*, which opens the worklog draft for a
   timer already running on another ticket before it starts this one (R-4.9,
@@ -215,7 +215,8 @@
         {/if}
       </div>
       {#if of?.detail}<p class="tf-swdetail tf-small">{of.detail}</p>{/if}
-      {#if row.id === "status" && moveRefused !== null && !(of && demandOf(of.outcome) === "done")}<p class="tf-swdetail tf-small">{moveRefused}</p>{/if}
+      <!-- A skipped refused move keeps its reason: *Run all steps* skipped it, not the reader. -->
+      {#if row.id === "status" && moveRefused !== null && of?.outcome !== "succeeded"}<p class="tf-swdetail tf-small">{moveRefused}</p>{/if}
     </div>
   {/each}
   <footer>
