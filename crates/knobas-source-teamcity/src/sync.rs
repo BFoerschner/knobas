@@ -2534,9 +2534,9 @@ mod tests {
         );
     }
 
-    /// A [`Rest`] whose builds change **once**, between the run's two build
-    /// queries: it serves `before` at t0 and `after` from t1 on. The race in
-    /// the middle of a run, made deterministic.
+    /// A [`Rest`] whose builds change between the run's build queries: it
+    /// serves `before` at t0 and `after` from t1 on. The race in the middle
+    /// of a run, made deterministic.
     ///
     /// [`then`](MidRun::then) adds a further instant, for a run with more than
     /// two clock-advancing queries: a source scoped to a configuration list
@@ -2564,8 +2564,7 @@ mod tests {
     struct MidRun {
         build_types: Vec<serde_json::Value>,
         instants: Vec<Vec<serde_json::Value>>,
-        /// Serve each page in fixture order ([`FakeRest::fixture_order`]).
-        as_given: bool,
+        order: PageOrder,
         elapsed: Mutex<usize>,
     }
 
@@ -2599,7 +2598,7 @@ mod tests {
             Self {
                 build_types,
                 instants: vec![before, after],
-                as_given: false,
+                order: PageOrder::NewestFirst,
                 elapsed: Mutex::new(0),
             }
         }
@@ -2612,18 +2611,16 @@ mod tests {
 
         /// Pages come back in fixture order, however unordered that is.
         fn fixture_order(mut self) -> Self {
-            self.as_given = true;
+            self.order = PageOrder::AsGiven;
             self
         }
 
         /// The server as it stood at instant `at`, or at the last one.
         fn snapshot(&self, at: usize) -> FakeRest {
             let builds = &self.instants[at.min(self.instants.len() - 1)];
-            let rest = FakeRest::new(self.build_types.clone(), builds.clone());
-            if self.as_given {
-                rest.fixture_order()
-            } else {
-                rest
+            FakeRest {
+                order: self.order,
+                ..FakeRest::new(self.build_types.clone(), builds.clone())
             }
         }
 
@@ -2633,7 +2630,8 @@ mod tests {
         }
 
         /// How many clock-advancing queries the run made. Exactly two on a
-        /// correct run: the in-flight poll and the finished query.
+        /// correct unscoped incremental run: the in-flight poll and the
+        /// finished query.
         fn elapsed(&self) -> usize {
             *self.elapsed.lock().expect("not poisoned")
         }
@@ -3022,18 +3020,20 @@ mod tests {
         );
     }
 
-    /// **A ceiling below the watermark does not pin it under builds the run
-    /// just emitted** (#1626).
+    /// **An unordered page does not hold the watermark under builds the run
+    /// just emitted** (#1626, #2016).
     ///
-    /// The opening page holds builds 401 to 500 and nothing newer, so the
-    /// ceiling is 500 while the watermark stands at 1187 -- the routine
-    /// picture on a server whose pages are unordered. Twelve builds, 1188 to
-    /// 1199, finished above the watermark and the incremental query returns
-    /// them. They are emitted, so the watermark moves to the newest of them:
+    /// The server lists builds 401 to 500 first, so an unfiltered page of a
+    /// hundred holds nothing newer and its ceiling would be 500 while the
+    /// watermark stands at 1187 -- the routine picture on a server whose
+    /// pages are unordered. Twelve builds, 1188 to 1199, finished above the
+    /// watermark and the incremental query returns them. The probe asks from
+    /// the watermark on, so it holds 1187 to 1199 and the ceiling is 1199.
+    /// The builds are emitted, so the watermark moves to the newest of them:
     /// held at 1187, every later poll would re-fetch and re-emit the same
     /// twelve, an upsert and an activity line each time.
     #[tokio::test]
-    async fn a_ceiling_below_the_watermark_does_not_hold_it_under_builds_just_emitted() {
+    async fn an_unordered_page_does_not_hold_the_watermark_under_builds_just_emitted() {
         let mut builds: Vec<serde_json::Value> = (401..=500)
             .map(|n| build(n, "Payout_Build", "Payout", "finished"))
             .collect();
@@ -3228,8 +3228,7 @@ mod tests {
     /// The next run is the price and the end of it: it emits R again, once,
     /// with Q, and the watermark moves past both.
     #[tokio::test]
-    async fn a_run_whose_opening_pages_missed_the_watermark_still_clamps_under_a_build_queued_mid_run()
-     {
+    async fn a_scoped_run_clamps_under_a_build_queued_mid_run_behind_an_unordered_page() {
         let types = vec![
             build_type("Payout_Build", "Payout"),
             build_type("Ledger_Deploy", "Ledger"),

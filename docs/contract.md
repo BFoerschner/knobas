@@ -2424,7 +2424,7 @@ configuration, a running one included, `count: 0` above the newest, and reads an
 build as a number, never a 404. **§5 mockd** already serves this locator, so nothing changes there.
 
 Witnessed by `sync::tests`'
-`a_run_whose_opening_pages_missed_the_watermark_still_clamps_under_a_build_queued_mid_run` and by
+`a_scoped_run_clamps_under_a_build_queued_mid_run_behind_an_unordered_page` and by
 `live_teamcity_seeded`'s `the_opening_probe_from_the_watermark_holds_its_build_and_every_newer_one`.
 
 ---
