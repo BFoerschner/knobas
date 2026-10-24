@@ -1662,9 +1662,30 @@ fn recover_or_mark(data_dir: &Path) -> Result<(), DbError> {
                 "this data directory holds no database, as an interrupted initdb leaves \
                  it: removing it so initdb runs again"
             );
-            std::fs::remove_dir_all(data_dir).map_err(|source| DbError::io(data_dir, source))
+            remove_unfinished(data_dir)
         }
     }
+}
+
+/// Remove an unfinished `data_dir`, `PG_VERSION` first (#2007).
+/// `remove_dir_all` removes entries in `readdir` order, so a launch killed
+/// partway through could leave `PG_VERSION` with `base/` gone, which
+/// [`shape`] reads as a database on a volume not mounted. Without
+/// `PG_VERSION`, whatever the removal leaves reads as unfinished. A data
+/// directory that is a symlink loses the link alone, `PG_VERSION` in what it
+/// points at included.
+fn remove_unfinished(data_dir: &Path) -> Result<(), DbError> {
+    let linked = std::fs::symlink_metadata(data_dir).is_ok_and(|meta| meta.is_symlink());
+    if !linked {
+        let version = data_dir.join("PG_VERSION");
+        match std::fs::remove_file(&version) {
+            Err(source) if source.kind() != io::ErrorKind::NotFound => {
+                return Err(DbError::io(&version, source));
+            }
+            _ => {}
+        }
+    }
+    std::fs::remove_dir_all(data_dir).map_err(|source| DbError::io(data_dir, source))
 }
 
 /// What [`recover_or_mark`] found in a data directory.
@@ -3062,6 +3083,45 @@ mod tests {
             data.join("postgresql.conf").is_file(),
             "with a database in it, kept"
         );
+
+        // #2007: `PG_VERSION` is removed first, but never through the link.
+        std::fs::remove_dir_all(&target).unwrap();
+        unfinished(&target);
+        recover_or_mark(&data).unwrap();
+        assert!(
+            std::fs::symlink_metadata(&data).is_err(),
+            "the link is gone"
+        );
+        assert!(target.join("PG_VERSION").is_file(), "its target is kept");
+    }
+
+    /// #2007: removing an unfinished directory removes `PG_VERSION` first,
+    /// so a removal cut short leaves what still reads as unfinished.
+    /// `remove_dir_all` removes entries in `readdir` order. On a filesystem
+    /// that lists `base/` before `PG_VERSION`, a launch killed between the
+    /// two left `PG_VERSION` without `base/`, which reads as a database on a
+    /// volume not mounted. Here a `pg_wal/` that cannot be emptied cuts the
+    /// removal short, and APFS lists it before `PG_VERSION`.
+    #[cfg(unix)]
+    #[test]
+    fn a_removal_cut_short_leaves_no_pg_version() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        unfinished(&data);
+        let wal = data.join("pg_wal");
+        std::fs::create_dir_all(&wal).unwrap();
+        write(&wal, "000000010000000000000001", "");
+        std::fs::set_permissions(&wal, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let removed = recover_or_mark(&data);
+        std::fs::set_permissions(&wal, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(removed.is_err(), "the removal was cut short");
+        assert!(!data.join("PG_VERSION").exists(), "PG_VERSION went first");
+        assert_eq!(shape(&data), Shape::Unfinished);
+        recover_or_mark(&data).unwrap();
+        assert!(!data.exists(), "and the next launch removes the rest");
     }
 
     /// #1637: dropping the future that runs `initdb` kills it, rather than
