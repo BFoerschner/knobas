@@ -83,8 +83,8 @@ async fn a_restart_on_a_cluster_that_lost_pg_hba_conf_names_the_directory_and_th
 /// An adopted handle's restart, which starts a `PostgreSQL` of its own
 /// (`restart`, the adopted arm).
 #[tokio::test]
-async fn an_adopted_servers_restart_on_a_cluster_that_lost_pg_hba_conf_names_the_directory_and_the_reason()
- {
+async fn an_adopted_restart_on_a_cluster_that_lost_pg_hba_conf_names_the_directory_and_the_reason()
+{
     let dir = tempfile::tempdir().unwrap();
     let data_dir = dir.path().join("data");
     EmbeddedDb::start(config(dir.path()))
