@@ -4394,9 +4394,7 @@ impl Narrowed {
         unnarrow(&client(), login, None)
             .await
             .unwrap_or_else(|e| panic!("putting back a killed run's narrowing: {e}"));
-        let (status, on) = seeded
-            .get("rest/api/2/project/OPS/permissionscheme")
-            .await;
+        let (status, on) = seeded.get("rest/api/2/project/OPS/permissionscheme").await;
         assert_eq!(status, 200, "{on}");
         let scheme = on["id"]
             .as_u64()
