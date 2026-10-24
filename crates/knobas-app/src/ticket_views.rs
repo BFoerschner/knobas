@@ -246,6 +246,12 @@ pub struct SavedViewSource {
     /// `board` or `filter`.
     #[ts(as = "SavedViewKind", inline)]
     pub kind: String,
+    /// The ticket system it comes from, as its group names it (`Jira`, #2032):
+    /// the kind's declared `system_name`, else the adapter's name, by
+    /// `knobas_sync::saved_views::declared`; the source's display name when its
+    /// adapter is not compiled in or declares no saved views. What the shell's
+    /// words about the view name: *Open in Jira*, *Jira decides which tickets*.
+    pub system: String,
     /// `scrum`, `kanban` or `simple` for a board; `None` for a filter.
     pub board_type: Option<String>,
     /// The saved view's query in the source's own language, as the source
@@ -348,7 +354,7 @@ pub async fn list(
     .fetch_all(pool)
     .await?;
     let views = rows.iter().map(view_of).collect::<Result<Vec<_>, _>>()?;
-    let mut sources = saved_view_sources(pool, &views).await?;
+    let mut sources = saved_view_sources(pool, registry, &views).await?;
     let texts: Vec<&str> = views.iter().map(|view| view.query.as_str()).collect();
     let readings = crate::commands::search::searcher(pool, registry)
         .await?
@@ -391,6 +397,7 @@ pub async fn list(
 /// any other.
 async fn saved_view_sources(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     views: &[TicketView],
 ) -> Result<std::collections::HashMap<String, (u64, SavedViewSource)>, IpcError> {
     let refs: Vec<&str> = views
@@ -406,7 +413,8 @@ async fn saved_view_sources(
     // guess, and is left out of the count.
     let rows = sqlx::query(
         "select v.entity_id, v.ref_kind, v.board_type, v.source_query, v.sub_query, v.sprint,
-                v.last_read, i.web_url, tv.hidden, tv.is_new,
+                v.last_read, i.web_url, tv.hidden, tv.is_new, c.kind as adapter_kind,
+                coalesce(nullif(btrim(c.display_name), ''), v.source_id) as source_name,
                 (select count(*) from sync.saved_view_member m
                    join sync.live_item t on t.entity_id = m.entity_id and t.kind = 'ticket'
                   where m.view_id = v.entity_id) as n,
@@ -447,16 +455,27 @@ async fn saved_view_sources(
            from sync.saved_view v
            join sync.item i on i.entity_id = v.entity_id
            join knobas.ticket_view tv on tv.saved_view = v.entity_id
+           left join knobas.source_config c on c.id = v.source_id
           where v.entity_id = any($1)",
     )
     .bind(&refs)
     .fetch_all(pool)
     .await?;
+    // Once, not once per row: `descriptors()` builds every template.
+    let templates = registry.descriptors();
+    let system = |adapter_kind: Option<String>, source_name: String| {
+        templates
+            .iter()
+            .find(|t| Some(&t.adapter_kind) == adapter_kind.as_ref())
+            .and_then(knobas_sync::saved_views::declared)
+            .map_or(source_name, |declared| declared.source_name().to_owned())
+    };
     rows.iter()
         .map(|row| {
             let n: i64 = row.get("n");
             let source = SavedViewSource {
                 kind: row.get("ref_kind"),
+                system: system(row.get("adapter_kind"), row.get("source_name")),
                 board_type: row.get("board_type"),
                 source_query: row.get("source_query"),
                 sub_query: row.get("sub_query"),

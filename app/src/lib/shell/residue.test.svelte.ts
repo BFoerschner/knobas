@@ -1766,6 +1766,7 @@ const CASES: Case[] = [
         target,
         props: {
           source: sourcePageProps().source,
+          system: "Jira",
           ports: settingsPorts(),
           saving: false,
           finished: 0,

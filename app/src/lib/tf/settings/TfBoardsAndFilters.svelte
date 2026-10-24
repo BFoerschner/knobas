@@ -1,12 +1,13 @@
 <!--
   Sources › Jira › *Boards and filters* (#878, R-3.20, R-13a.2, D17):
-  prototype-6's `#boards` section of `stgSource`.
+  prototype-6's `#boards` section of `stgSource`, naming the adapter's ticket
+  system (`system`, #2032) where prototype-6 says Jira.
 
   - Which boards come in, and whether the favourite filters do: two keys of
     the adapter's config (`boards.ts`), each saved as it changes through the
     page's own save, so a sync recorded field id is kept. Read at the next
     sync.
-  - Every Jira view the source keeps: its ticket count, the tickets on it
+  - Every saved view the source keeps: its ticket count, the tickets on it
     knobas does not mirror, and *Hide* / *Show* (`hide_saved_view`).
 -->
 <script lang="ts">
@@ -29,12 +30,15 @@
 
   let {
     source,
+    system,
     ports,
     saving,
     finished,
     onsave,
   }: {
     source: SourceSummary;
+    /** The ticket system its views come from (`savedViewSystem`, #2032): *Jira*. */
+    system: string;
     ports: SettingsPorts;
     saving: boolean;
     /** Moves on every finished run, so the views are read again. */
@@ -45,7 +49,7 @@
 
   const scope = $derived(boardScope(source.config));
   const filtersOn = $derived(favouriteFilters(source.config));
-  const DONE = "Saved. The next Jira sync reads the boards again.";
+  const DONE = $derived(`Saved. The next ${system} sync reads the boards again.`);
 
   let all = $state<TicketViewRow[] | null>(null);
   const views = $derived(savedViewsOf(all ?? [], source.id));
@@ -85,7 +89,7 @@
 
 <section class="tf-stg-sec" id="boards">
   <h2>Boards and filters</h2>
-  <p class="tf-stg-p">Each one is a ticket view in Tickets, kept at every sync. Jira decides which tickets it holds.</p>
+  <p class="tf-stg-p">Each one is a ticket view in Tickets, kept at every sync. {system} decides which tickets it holds.</p>
   <div class="tf-radio" role="radiogroup" aria-label="Boards">
     {#each BOARD_SCOPES as [key, label] (key)}
       <label>

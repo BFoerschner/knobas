@@ -65,6 +65,15 @@ pub struct SavedViewKinds {
     source_name: String,
 }
 
+impl SavedViewKinds {
+    /// The ticket system the views are listed under (`Jira`): what their
+    /// group is made from, and what the shell's words about them name (#2032).
+    #[must_use]
+    pub fn source_name(&self) -> &str {
+        &self.source_name
+    }
+}
+
 /// The saved-view kinds `descriptor` emits: each declares
 /// [`Frame::SavedView`] and is one of its `entity_kinds`. Their groups take
 /// the first one's declared `system_name`, else the descriptor's `name`: one

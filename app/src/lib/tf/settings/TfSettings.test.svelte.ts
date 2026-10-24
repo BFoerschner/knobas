@@ -13,6 +13,7 @@ import type {
   AdapterPreview,
   AdapterStatus,
   CredentialHealth,
+  KindPaths,
   SourceSummary,
   SourceSyncStatus,
   SyncProgress,
@@ -189,6 +190,7 @@ const JIRA_VIEWS: TicketViewRow[] = [
   unreadable: null,
   saved_view_source: {
     kind: kind as "board" | "filter",
+    system: "Jira",
     board_type: type as string | null,
     source_query: "",
     sub_query: null,
@@ -202,8 +204,21 @@ const JIRA_VIEWS: TicketViewRow[] = [
 }));
 
 test("Boards and filters: the choice and the favourite filters saved into the config, and each view with Hide or Show (#878)", async () => {
-  const { p } = await open(["source", "jira"]);
+  const p = ports();
+  // Its saved views' ticket system, which the section names (#2032): not the adapter's name.
+  const [jira] = await p.listAdapters();
+  p.listAdapters = vi.fn(() =>
+    Promise.resolve([
+      {
+        ...jira!,
+        entity_kinds: [...jira!.entity_kinds, { id: "jira_view", label: "Jira view", plural: "Jira views", monogram: "JV", full_sync_exhaustive: false }],
+        payload_paths: [{ kind: "jira_view", frame: "saved_view", system_name: "Jira" } as KindPaths],
+      },
+    ]),
+  );
+  await open(["source", "jira"], p);
   const boards = section("Boards and filters");
+  expect(boards.querySelector("p")!.textContent).toBe("Each one is a ticket view in Tickets, kept at every sync. Jira decides which tickets it holds.");
   const radios = [...boards.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
   expect(radios.map((radio) => radio.parentElement!.textContent!.replace(/\s+/g, " ").trim())).toEqual([
     "Boards on the projects this source syncs1 board",
@@ -220,6 +235,7 @@ test("Boards and filters: the choice and the favourite filters saved into the co
   expect(p.updateSource).toHaveBeenLastCalledWith("jira", {
     config: { username: "mara", projects: ["TW", "OPS"], boards: "all" },
   });
+  expect(toasts.items.at(-1)?.text).toBe("Saved. The next Jira sync reads the boards again.");
   boards.querySelector<HTMLButtonElement>('button[aria-label="Favourite filters"]')!.click();
   await settle();
   expect(p.updateSource).toHaveBeenLastCalledWith("jira", {

@@ -21,15 +21,12 @@ import { DEFAULT_SORT, type LaneField, type ListSort } from "./tickets";
 
 /** The groups that come first, in this order (R-3.2); typed groups follow. */
 export const OWN_GROUPS = ["Mine", "Team", "Epics", "Projects"] as const;
-/** The Jira views' groups, last (#877, R-3.20): what the Jira source brings in at every sync. */
-export const JIRA_GROUPS = ["Jira boards", "Jira filters"] as const;
-
 /**
- * A Jira view's own columns as the board read draws them (#877): the read
- * has already gathered Jira's columns, each under its own name, so each
+ * A saved view's own columns as the board read draws them (#877): the read
+ * has already gathered its source's columns, each under its own name, so each
  * holds just that name, keeping its limit.
  */
-export function drawnJiraColumns(own: ViewColumn[]): ViewColumn[] {
+export function drawnSavedViewColumns(own: ViewColumn[]): ViewColumn[] {
   return own.map((column) => ({ ...column, statuses: [column.name] }));
 }
 
@@ -67,29 +64,74 @@ export const LIST_COLUMN_ORDER: readonly (readonly [ListColumn, string])[] = [
   ["labels", "Labels"],
 ];
 
-/** One group of the views pane: its name and its views in list order. */
+/** One group of the views pane: its name, its views in list order, and the ticket system a synced group's views come from. */
 export interface ViewGroup {
   name: string;
   views: TicketViewRow[];
+  /** The ticket system a group of saved views comes from (*Jira*, #2032); `null` for a group of your own. */
+  system: string | null;
 }
 
 /**
  * The views pane's groups (R-3.2): *Mine*, *Team*, *Epics* and *Projects*
  * first, then every group somebody typed in the order its first view sits,
- * each holding its views in list order. Only views `find` admits (by name
- * and by query, every word somewhere); a group left empty is not drawn.
+ * each holding its views in list order, then the groups of saved views their
+ * sources bring in at every sync (#877, R-3.20): per ticket system in the
+ * order its first view sits, boards before filters. A group is a synced one
+ * when a view in it has a `saved_view_source`, whatever it is called (#2032).
+ * Only views `find` admits (by name and by query, every word somewhere); a
+ * group left empty is not drawn.
  */
 export function groupViews(views: TicketViewRow[], find: string): ViewGroup[] {
   const found = views
     .filter((view) => view.saved_view_source?.hidden !== true)
     .filter((view) => find.trim() === "" || matchesAll(`${view.name} ${view.saved_view_source?.source_query ?? view.query}`, find))
-    .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
-  const typed = [...new Set(found.map((view) => view.group))].filter(
-    (group) => !([...OWN_GROUPS, ...JIRA_GROUPS] as readonly string[]).includes(group),
-  );
-  return [...OWN_GROUPS, ...typed, ...JIRA_GROUPS]
-    .map((name) => ({ name, views: found.filter((view) => view.group === name) }))
-    .filter((group) => group.views.length > 0);
+    .sort(listOrder);
+  const groups = [...new Set([...OWN_GROUPS, ...found.map((view) => view.group)])].map((name) => {
+    const held = found.filter((view) => view.group === name);
+    return { name, views: held, system: held.find((view) => view.saved_view_source !== null)?.saved_view_source?.system ?? null };
+  });
+  const systems = savedViewSystems(found);
+  /** Your own groups first (-1), then each ticket system's, in the order its first view sits. */
+  const systemRank = (group: ViewGroup) => (group.system === null ? -1 : systems.indexOf(group.system));
+  /** Within a system, its boards (0) before its filters (1). */
+  const filterRank = (group: ViewGroup) => Number(group.views.some((view) => view.saved_view_source?.kind === "filter"));
+  return groups
+    .filter((group) => group.views.length > 0)
+    .sort((a, b) => systemRank(a) - systemRank(b) || (a.system === null ? 0 : filterRank(a) - filterRank(b)));
+}
+
+function listOrder(a: TicketViewRow, b: TicketViewRow): number {
+  return a.position - b.position || a.id.localeCompare(b.id);
+}
+
+/** The ticket systems `views`' saved views come from (#2032), each once, in the order its first view sits. */
+export function savedViewSystems(views: TicketViewRow[]): string[] {
+  return [
+    ...new Set(
+      [...views]
+        .sort(listOrder)
+        .flatMap((view) => (view.saved_view_source ? [view.saved_view_source.system] : [])),
+    ),
+  ];
+}
+
+/** The views pane's last line (#2032): prototype-6's, naming the ticket systems the saved views come from. */
+export function savedViewsFoot(systems: readonly string[]): string {
+  if (systems.length === 0) return "A ticket system's boards and favourite filters come in at every sync.";
+  const sources = systems.length > 1 ? "sources" : "source";
+  return `Boards and favourite filters come in with the ${systemsWords(systems)} ${sources} at every sync.`;
+}
+
+/** Where a view of your own is kept (#2032): prototype-6's *Kept in knobas. Jira never sees it.*, naming the systems there are. */
+export function ownViewKept(systems: readonly string[]): string {
+  if (systems.length === 0) return "Kept in knobas. No source sees it.";
+  return `Kept in knobas. ${systemsWords(systems)} ${systems.length > 1 ? "never see" : "never sees"} it.`;
+}
+
+/** Ticket systems as a sentence names them (#2032): *Jira*, *Jira and Kestrel*, *Jira, Kestrel and Plover*. */
+export function systemsWords(systems: readonly string[]): string {
+  return systems.length < 2 ? (systems[0] ?? "") : `${systems.slice(0, -1).join(", ")} and ${systems.at(-1)!}`;
 }
 
 /**
@@ -159,9 +201,11 @@ export function draftCopy(view: TicketView): TicketViewDraft {
   return { ...draftOf(view), name: `Copy of ${view.name}` };
 }
 
-/** Where a copy of a Jira view came from, for the editor's line about it (#880). */
+/** Where a copy of a saved view came from, for the editor's line about it (#880). */
 export interface CopiedFrom {
   kind: SavedViewSource["kind"];
+  /** The ticket system it came from (#2032). */
+  system: string;
   name: string;
   /** The parts of the query it left out, and why. */
   left: LeftOut[];
@@ -209,7 +253,7 @@ export function draftSavedViewCopy(
       list_sort: sameSort(showing.sort, DEFAULT_SORT) ? null : showing.sort,
     });
   }
-  return { draft, from: { kind: savedViewSource.kind, name: view.name, left: copy.left_out } };
+  return { draft, from: { kind: savedViewSource.kind, system: savedViewSource.system, name: view.name, left: copy.left_out } };
 }
 
 /** What *+ New view* starts from (R-3.12): no conditions, one column per status, the defaults. */
@@ -240,7 +284,7 @@ function draftOf(view: TicketView | null): TicketViewDraft {
     card_fields: [...(view?.card_fields ?? DEFAULT_CARD_FIELDS)],
     list_columns: [...(view?.list_columns ?? DEFAULT_LIST_COLUMNS)],
     list_sort: view?.list_sort ?? null,
-    // A copy is your own view: Jira decides nothing about it.
+    // A copy is your own view: its source decides nothing about it.
     saved_view: null,
   };
 }

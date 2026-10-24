@@ -971,7 +971,7 @@ test("Save as a view saves the view's text plus the chips, dropdowns and words, 
   await settle();
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(dialog()!.querySelector("code")!.textContent).toBe("project:PAY issuetype:Story r");
-  expect(dialog()!.textContent).toContain("Kept in knobas. Jira never sees it.");
+  expect(dialog()!.textContent).toContain("Kept in knobas. No source sees it.");
   const create = [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Create view")!;
   expect(create.disabled).toBe(true);
   const name = dialog()!.querySelector<HTMLInputElement>("input")!;
@@ -1087,7 +1087,7 @@ test("+ New view opens the editor: conditions write the search line, the preview
   [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
   await previewed();
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
-  expect(dialog()!.textContent).toContain("Kept in knobas. Jira never sees it.");
+  expect(dialog()!.textContent).toContain("Kept in knobas. No source sees it.");
   expect(dialog()!.textContent).toContain("No conditions yet, so it holds every synced ticket.");
   expect(searchLine().textContent).toBe("every synced ticket");
   // Every ticket, one column per status of the board.
@@ -1252,6 +1252,7 @@ function jiraHarness(over: Partial<NonNullable<TicketViewRow["saved_view_source"
       count: 18,
       saved_view_source: {
         kind: "board",
+        system: "Jira",
         board_type: "kanban",
         source_query: "project in (PAY, OPS) ORDER BY Rank ASC",
         sub_query: "fixVersion is EMPTY",
@@ -1642,6 +1643,91 @@ test("a view somebody made has no source line", async () => {
   const { h } = jiraHarness();
   await open(h, null, "my-work");
   expect(srcLines()).toEqual([]);
+});
+
+// ---- A second ticket system's saved views (#2032) ----
+
+/** {@link jiraHarness} with its board coming from a ticket system that is not Jira: Kestrel, whose source is `kestrel`. */
+function kestrelHarness(): Harness {
+  const { h } = jiraHarness();
+  const jira = h.views[1]!;
+  h.views[1] = {
+    ...jira,
+    id: "kestrel-board-7",
+    name: "Customs flow",
+    group: "Kestrel boards",
+    saved_view: "kestrel:board-7",
+    saved_view_source: {
+      ...jira.saved_view_source!,
+      system: "Kestrel",
+      board_type: "scrum",
+      source_query: "project = CUS",
+      sub_query: null,
+      sprint: { id: 3, name: "Sprint 9", end_date: null },
+      last_read: new Date(Date.now() - 4 * 60_000).toISOString(),
+      web_url: "https://kestrel.example/boards/7",
+      unsynced: [{ project: "WEB", count: 2 }],
+    },
+  };
+  sourceRoles.take([{ id: "kestrel", display_name: "Tidewater Kestrel", roles: [{ role: "ticket-system", reads: ["translate_query"] }], role_misses: [] }]);
+  return h;
+}
+
+const noJira = (text: string | null | undefined) => expect(text ?? "").not.toMatch(/jira/i);
+
+test("a second ticket system's views are listed after your own, from its source, and the list ends naming it", async () => {
+  const h = kestrelHarness();
+  await open(h);
+  expect(pane()).toEqual(["# Mine", "My work 2", "# Kestrel boards from the Kestrel source", "Customs flow 18"]);
+  const foot = target.querySelector(".tf-vw-foot")!;
+  expect(foot.textContent!.replace(/\s+/g, " ").trim()).toBe(
+    "Boards and favourite filters come in with the Kestrel source at every sync. Choose which",
+  );
+  expect(foot.querySelector("a")!.getAttribute("href")).toBe("#/settings/source/kestrel");
+  noJira(target.querySelector(".tf-views")!.textContent);
+});
+
+test("a second ticket system's view says where it comes from, what decides it, and where a copy came from, never Jira", async () => {
+  const h = kestrelHarness();
+  await open(h, null, "kestrel-board-7");
+  expect(srcLines()).toEqual([
+    "Kestrel decides which tickets, from the Scrum board Customs flow, active sprint Sprint 9: project = CUS. Read again at every sync, last 4 min ago. Open in Kestrel",
+    "2 tickets on it are in WEB, which the Kestrel source does not sync, so they are missing here. Sync WEB too",
+  ]);
+  // The tickets are the corpus's, mirrored from `jira`; the words about the view are what may not say so.
+  noJira(target.querySelector(".tf-board-head")!.textContent);
+  noJira(srcLines().join(" "));
+
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  await settle();
+  const settings = dialog()!.textContent!.replace(/\s+/g, " ");
+  expect(settings).toContain(
+    "Kestrel decides, from the Scrum board Customs flow. knobas runs its query at every sync and keeps Kestrel's order. Like the board in Kestrel, it shows the active sprint, now Sprint 9,",
+  );
+  expect(settings).toContain("To change which tickets it holds, change it in Kestrel, or make your own copy.");
+  expect(settings).toContain("The columns come from the board in Kestrel and change when someone changes them there.");
+  expect(settings).toContain("Only how it looks here. Kestrel still decides which tickets.");
+  noJira(settings);
+
+  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy")!.click();
+  await settle();
+  expect(fromLine()).toBe(
+    "Copied from the Kestrel board Customs flow. It no longer follows Kestrel. Left out, because knobas cannot test it: fixVersion is EMPTY (knobas does not sync fix versions).",
+  );
+  expect(dialog()!.textContent).toContain("Kept in knobas. Kestrel never sees it.");
+  noJira(dialog()!.textContent);
+});
+
+test("with two ticket systems the list's foot and a view of your own name both", async () => {
+  const { h } = jiraHarness();
+  h.views.push({ ...kestrelHarness().views[1]!, position: 2 });
+  await open(h);
+  expect(target.querySelector(".tf-vw-foot")!.textContent!.replace(/\s+/g, " ").trim()).toBe(
+    "Boards and favourite filters come in with the Jira and Kestrel sources at every sync. Choose which",
+  );
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  await settle();
+  expect(dialog()!.textContent).toContain("Kept in knobas. Jira and Kestrel never see it.");
 });
 
 test("a count of one reads in the singular: the filter bar's ticket and the editor's lane (#1097)", async () => {

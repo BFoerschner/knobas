@@ -2,11 +2,13 @@
 import { expect, test } from "vitest";
 
 import type { SavedViewSource, TicketViewRow } from "../../ipc/search";
-import { boardScope, favouriteFilters, savedViewsOf, unsyncedWords, viewType } from "./boards";
+import type { KindPaths, SourceDescriptor } from "../../ipc/sources";
+import { boardScope, favouriteFilters, savedViewsOf, savedViewSystem, unsyncedWords, viewType } from "./boards";
 
 function savedViewSource(extra: Partial<SavedViewSource> = {}): SavedViewSource {
   return {
     kind: "board",
+    system: "Jira",
     board_type: "kanban",
     source_query: "",
     sub_query: null,
@@ -73,4 +75,15 @@ test("a view's type and the tickets on it knobas does not mirror, in words", () 
       { project: "MOB", count: 1 },
     ]),
   ).toBe("and 3 in WEB, 1 in MOB, not synced");
+});
+
+test("the ticket system a source's views come from is its saved-view kind's declared name, else the adapter's (#2032)", () => {
+  const kind = (id: string) => ({ id, label: id, plural: id, monogram: "JV", full_sync_exhaustive: false });
+  const adapter = (paths: Partial<KindPaths>[], kinds = ["ticket", "jira_view"]) =>
+    ({ name: "Jira Data Center", entity_kinds: kinds.map(kind), payload_paths: paths as KindPaths[] }) as unknown as SourceDescriptor;
+  expect(savedViewSystem(adapter([{ kind: "ticket", frame: null }, { kind: "jira_view", frame: "saved_view", system_name: "Jira" }]))).toBe("Jira");
+  expect(savedViewSystem(adapter([{ kind: "jira_view", frame: "saved_view", system_name: null }]))).toBe("Jira Data Center");
+  // A declaration on a kind the adapter does not emit is no declaration, as the sync reads it.
+  expect(savedViewSystem(adapter([{ kind: "jira_view", frame: "saved_view", system_name: "Jira" }], ["ticket"]))).toBe("Jira Data Center");
+  expect(savedViewSystem(adapter([]))).toBe("Jira Data Center");
 });
