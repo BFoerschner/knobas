@@ -84,9 +84,10 @@ async fn a_data_directory_an_interrupted_initdb_left_is_initialised_again() {
 ///
 /// Before, it read as "not initialised", `initdb` refused a directory that
 /// was not empty, and every launch failed. `initdb` makes its subdirectories,
-/// `base/1` among them, before `PG_VERSION`. Its cleanup removes entries in
-/// the order the directory lists them, which on APFS is `PG_VERSION`, then
-/// `postgresql.conf`, with `global/` and `base/` last: 40 of 40 runs that
+/// `base/1` among them, before `PG_VERSION`. Its cleanup removes the top
+/// level's files in the order the directory lists them, which on APFS is
+/// `PG_VERSION`, then `postgresql.conf`, and the directories after every
+/// file (PostgreSQL's `rmtree` defers them, #2007): 40 of 40 runs that
 /// sent `SIGTERM` and then `SIGKILL` once `postgresql.conf` was gone left the
 /// second and third fixture (evidence under #1985 in
 /// `docs/decisions/2026-10-unattended-rulings.md`).
@@ -134,8 +135,8 @@ async fn a_data_directory_an_initdb_killed_before_pg_version_left_is_initialised
 /// failed every launch: `initdb` refused it as not empty, or, with
 /// `postgresql.conf` still there, the server could not start. The cleanup
 /// removes the top level's files in `readdir` order before any directory.
-/// On ext4, which lists by name hash, five Linux filesystems of seven left
-/// these fixtures (evidence under #2007 in
+/// Every ext4 tried, which lists by name hash, and tmpfs left these
+/// fixtures, six Linux filesystems of seven (evidence under #2007 in
 /// `docs/decisions/2026-10-unattended-rulings.md`).
 #[tokio::test]
 async fn a_data_directory_an_initdb_cleanup_cut_short_after_pg_version_left_is_initialised_again()
