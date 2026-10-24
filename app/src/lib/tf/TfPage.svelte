@@ -18,6 +18,7 @@
     blank pane and never a page pretending to be another.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
   import type { TfPageContext } from "./page-entry";
   import { pageFor } from "./pages";
   import { SECTION_NAME } from "./route";
@@ -31,17 +32,38 @@
   const jobAt = $derived(ctx.jobAt);
 
   const page = $derived(pageFor(route));
+
+  /**
+   * The page's props, each its own signal (#1987). A spread of `page.props(ctx)`
+   * is one object, new on every change to `ctx`, and every prop read hangs on
+   * it: a tab switch would re-run a page's read keyed on a prop that stayed,
+   * as the job's `segment`. Here a prop tells its readers only when its own
+   * value changed (`===`: an array such as `rest`, new per route, still tells
+   * them). The keys are read once per page; `props` returns a fixed set.
+   */
+  function propSignals(read: () => Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(untrack(read))) {
+      const value = $derived(read()[key]);
+      Object.defineProperty(out, key, { get: () => value, enumerable: true });
+    }
+    return out;
+  }
+  const pageProps = $derived.by((): Record<string, unknown> => {
+    const entry = page;
+    return entry ? propSignals(() => entry.props(ctx)) : {};
+  });
 </script>
 
 {#if page && page.crumbs && route.view === "full"}
   {@const Page = page.component}
   <div class="tf-full">
     <TfCrumbs {job} {jobAt} name={SECTION_NAME[route.section]} />
-    <Page {...page.props(ctx)} />
+    <Page {...pageProps} />
   </div>
 {:else if page}
   {@const Page = page.component}
-  <Page {...page.props(ctx)} />
+  <Page {...pageProps} />
 {:else if route.view === "job"}
   <div class="tf-full">
     <header class="tf-fhead">

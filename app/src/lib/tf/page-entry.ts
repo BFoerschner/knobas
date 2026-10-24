@@ -60,7 +60,11 @@ export interface TfPageEntry {
    * full view. A page that draws its own, like Settings, leaves it unset.
    */
   crumbs?: boolean;
-  /** The component's props, read off the shell's context for a matched route. */
+  /**
+   * The component's props, read off the shell's context for a matched route.
+   * Always the same keys: `TfPage` reads them once per page and hands each
+   * as its own signal (#1987), so a key left out on one call is never seen.
+   */
   props: (ctx: TfPageContext) => Record<string, unknown>;
 }
 

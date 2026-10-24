@@ -33,7 +33,7 @@
 
 <script lang="ts">
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { onMount, type Snippet } from "svelte";
+  import { onMount, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
   import { listSources, syncStatus, type SourceSummary, type SourceSyncStatus } from "../ipc/sources";
@@ -182,13 +182,16 @@
    * `key` is what the chip and the tab name (R-1.2); `segment` is the address
    * it was opened at, a bare key or an entity id (#1476), which every way
    * back to it uses, so a key two sources hold returns to the one the
-   * reader was on (#1525).
+   * reader was on (#1525). Kept, not replaced, while the segment stays: a tab
+   * switch is a new route, and a new object would re-run every read keyed on
+   * it, the nav job's among them (#1987).
    */
   let lastJob = $state<{ key: string; segment: string } | null>(null);
   $effect(() => {
-    if (route.view === "job" && route.key !== null) {
-      lastJob = { key: isEntityId(route.key) ? keyOf(route.key) : route.key, segment: route.key };
-    }
+    if (route.view !== "job" || route.key === null) return;
+    const segment = route.key;
+    if (untrack(() => lastJob?.segment) === segment) return;
+    lastJob = { key: isEntityId(segment) ? keyOf(segment) : segment, segment };
   });
 
   /** What the timer runs on, as a ticket key; an asset or a label is no job. */
