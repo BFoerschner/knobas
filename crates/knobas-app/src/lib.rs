@@ -1141,11 +1141,24 @@ mod tests {
 
     /// The event names are one list in two languages. A rename on one side is
     /// a listener that silently never fires -- the failure mode this test
-    /// exists to make loud.
+    /// exists to make loud. Read off the code lines of `EVENTS` alone, so a
+    /// doc comment quoting a name is no entry (#1984), and compared whole, so
+    /// an entry on one side only fails too.
     #[test]
     fn the_event_names_match_their_typescript_mirror() {
         let mirror = include_str!("../../../app/src/lib/ipc/index.ts");
-        for name in [
+        let at = mirror
+            .find("export const EVENTS = {")
+            .expect("index.ts declares EVENTS");
+        let block = &mirror[at..at + mirror[at..].find("} as const;").expect("EVENTS closes")];
+        let mut declared: Vec<&str> = block
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with('/') && !line.starts_with('*'))
+            .filter_map(|line| line.split_once(": \"")?.1.split_once('"'))
+            .map(|(name, _)| name)
+            .collect();
+        let mut names = [
             super::events::DB_STATE,
             super::events::SYNC_STATE,
             super::events::SOURCE_HEALTH,
@@ -1154,12 +1167,10 @@ mod tests {
             super::events::NOTIFICATION_CLICKED,
             super::events::CAPTURE_OPEN_NOTE,
             super::events::CLONE_PROGRESS,
-        ] {
-            assert!(
-                mirror.contains(&format!("\"{name}\"")),
-                "{name:?} is missing from app/src/lib/ipc/index.ts"
-            );
-        }
+        ];
+        names.sort_unstable();
+        declared.sort_unstable();
+        assert_eq!(declared, names, "app/src/lib/ipc/index.ts's EVENTS");
     }
 
     /// Every emit hops to the main thread through `events::emit`, because one

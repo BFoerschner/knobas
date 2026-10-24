@@ -1176,10 +1176,7 @@ mod tests {
             ("set_monitoring_settings", "settings"),
             ("ack_alert", "monitorId"),
         ] {
-            let at = MIRROR
-                .find(&format!("\"{call}\""))
-                .unwrap_or_else(|| panic!("{call} is not invoked from the mirror"));
-            let body = &MIRROR[at..MIRROR[at..].find(");").map_or(MIRROR.len(), |end| at + end)];
+            let body = crate::commands::mirror::invocation(MIRROR, call);
             assert!(
                 body.contains(argument),
                 "{call} does not send {argument}: {body}"
