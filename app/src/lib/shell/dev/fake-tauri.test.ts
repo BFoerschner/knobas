@@ -1192,6 +1192,28 @@ test("the fixture's ticket_views carries a saved view's facts under saved_view_s
   expect(rows.every((row) => !("jira" in row))).toBe(true);
 });
 
+// #2050: the projection reads a view's query, board type, sub-query and sprint at the paths its kind declares and
+// nowhere else, so a fake view carrying one its adapter declares no path for is an answer the backend cannot give.
+test("every fixture saved view carries only what its source's saved-view kind declares a path for (#2050)", () => {
+  const handlers = demoHandlers();
+  type Source = { kind: string; source_query: string; board_type: string | null; sub_query: string | null; sprint: unknown };
+  const rows = handlers["ticket_views"]!({}) as { saved_view: string | null; saved_view_source: Source | null }[];
+  const adapters = handlers["list_adapters"]!({}) as { adapter_kind: string; payload_paths: Record<string, unknown>[] }[];
+  const saved = rows.filter((row) => row.saved_view_source !== null);
+  expect(new Set(saved.map((row) => row.saved_view!.split(":")[0]))).toEqual(new Set(["jira", "kestrel"]));
+  for (const row of saved) {
+    const sourceId = row.saved_view!.split(":")[0]!;
+    const kind = FIXTURE_SOURCES.find((source) => source.id === sourceId)!.adapter_kind;
+    const paths = adapters.find((adapter) => adapter.adapter_kind === kind)!.payload_paths.find((p) => p.frame === "saved_view")!;
+    const declares = (field: string) => Array.isArray(paths[field]) && (paths[field] as unknown[]).length > 0;
+    const { source_query, board_type, sub_query, sprint } = row.saved_view_source!;
+    const carried = { source_query: source_query !== "", board_type: board_type !== null, sub_query: sub_query !== null, sprint: sprint !== null };
+    for (const [field, has] of Object.entries(carried)) {
+      if (has) expect(declares(field), `${row.saved_view} carries ${field}`).toBe(true);
+    }
+  }
+});
+
 test("the fixture has a token source whose credential needs the reader: Uptime Kuma, no token stored (#1405)", () => {
   const handlers = demoHandlers();
   type Source = { id: string; auth_kind: string | null; health: { state: string } };

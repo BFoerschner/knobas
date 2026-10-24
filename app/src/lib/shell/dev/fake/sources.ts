@@ -225,7 +225,10 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     entity_kinds: [...KIND_INFO, { id: "jira_view", label: "Jira view", plural: "Jira views", monogram: "JV", full_sync_exhaustive: false }],
     // Its boards and filters are the ticket system's saved views, named *Jira*
     // and not the adapter's name, as the real descriptor declares (#1207, #2032).
-    payload_paths: [{ kind: "jira_view", frame: "saved_view", system_name: "Jira" } as KindPaths],
+    // Where the real adapter keeps a view's query, board type, sub-query and sprint (#2050).
+    payload_paths: [
+      { kind: "jira_view", frame: "saved_view", system_name: "Jira", source_query: [["jql"]], board_type: [["type"]], sub_query: [["sub_query"]], sprint: [["sprint"]] } as KindPaths,
+    ],
     // The generated-form case: a select with a default, two lists, two texts.
     // The *same* transcription the form tests render, not a second copy of it.
     // A fixture that drifted from the corpus under test would leave browser QA
@@ -287,7 +290,10 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     roles: [{ role: "ticket-system", reads: [] }],
     write_ops: [],
     entity_kinds: [...KIND_INFO, { id: "kestrel_view", label: "Saved board", plural: "Saved boards", monogram: "SB", full_sync_exhaustive: false }],
-    payload_paths: [{ kind: "kestrel_view", frame: "saved_view", system_name: "Kestrel" } as KindPaths],
+    // A saved-view kind must say where its query is (#2050): Kestrel's are at `filter.text`, its layout at `layout`.
+    payload_paths: [
+      { kind: "kestrel_view", frame: "saved_view", system_name: "Kestrel", source_query: [["filter", "text"]], board_type: [["layout"]] } as KindPaths,
+    ],
     config_schema: { type: "object", properties: {} },
   }),
 ];
