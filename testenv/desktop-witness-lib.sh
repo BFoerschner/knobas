@@ -835,6 +835,7 @@ witness_window_size() {
     local ax=$1 pid=$2 settle=${3:-3} id width height
     read -r id width height < <("$ax" window-id "$pid" 2>/dev/null) \
         || { printf 'knobas has no window on screen to size\n'; return 1; }
+    printf 'window %s: %sx%s points as the window manager placed it\n' "$id" "$width" "$height"
     if command -v aerospace >/dev/null && aerospace list-workspaces --focused >/dev/null 2>&1; then
         aerospace fullscreen on --window-id "$id" --no-outer-gaps >/dev/null 2>&1 \
             || { printf 'AeroSpace refused to fullscreen window %s\n' "$id"; return 1; }

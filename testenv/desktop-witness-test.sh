@@ -1247,6 +1247,7 @@ sized() {
 said=$(sized 860 1084 aerospace-up fullscreens)
 check_contains "AeroSpace: the tiled window is fullscreened by its window id" \
     "aerospace fullscreen on --window-id 4242 --no-outer-gaps" "$said"
+check_contains "AeroSpace: the log shows the size the window manager gave" "window 4242: 860x1084 points as the window manager placed it" "$said"
 check_contains "AeroSpace: the log shows the size the driver runs at" "window: 1728x1084" "$said"
 check_contains "AeroSpace: and the step passes" "status 0" "$said"
 said=$(sized 1280 820 aerospace-up fullscreens)
