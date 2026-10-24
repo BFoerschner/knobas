@@ -246,8 +246,8 @@ fn cut_cleanup(data: &std::path::Path, files: &[&str]) {
 /// `initdb` runs and refuses a directory that is not empty. The second's
 /// `base/5` counts as a database because a server ran there
 /// (`postmaster.opts`). Without one, it is what a cut-short cleanup leaves
-/// (#2007). The third has no `postmaster.opts`, as a `pg_basebackup` copy
-/// has none: its `knobas` database keeps it.
+/// (#2007). The third has no `postmaster.opts`, as a finished
+/// `pg_basebackup` copy has none: its `knobas` database keeps it.
 #[tokio::test]
 async fn a_data_directory_that_holds_a_database_is_never_removed() {
     for (with_conf, database) in [
