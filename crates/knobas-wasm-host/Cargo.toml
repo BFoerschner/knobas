@@ -70,7 +70,9 @@ knobas-wasm-host = { path = ".", features = ["test-util"] }
 # The engine's progress decorator, so the walk a component reports is
 # witnessed where the engine reads it (#1380).
 knobas-sync = { path = "../knobas-sync" }
-tokio.workspace = true
+# `test-util` for the paused clock the deadline-on-the-limiter test runs on
+# (#1925).
+tokio = { workspace = true, features = ["test-util"] }
 # Catches the host's log lines for a component that floods its log (#1641).
 # The release `knobas-app` already pulls.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry"] }

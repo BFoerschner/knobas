@@ -88,10 +88,11 @@ mod redirect;
 pub mod retry;
 mod walk;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use knobas_source::SourceError;
 use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
+use tokio::time::Instant;
 
 pub use classify::{BodyMessage, ForbiddenReading, reqwest_error, response_error, status_error};
 pub use credential::{CredentialRules, TokenSpelling, credential};
@@ -573,6 +574,8 @@ impl HttpClient {
         request: Request,
         deadline: Deadline,
     ) -> Result<reqwest::Response, SourceError> {
+        // tokio's clock, which the limiter and every timeout here read too
+        // (#1925): the monotonic clock, unless a test paused it.
         let started = Instant::now();
         // A request that may not be repeated ([`Request::no_retry`]) is
         // retried only after a connect error: the connection never opened, so

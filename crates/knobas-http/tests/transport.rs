@@ -160,6 +160,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 struct CountingServer {
     port: u16,
     hits: Arc<AtomicUsize>,
+    /// How many exchanges are over: answered, and the connection closed by
+    /// the client once it had read the answer ([`Self::exchanges_over`]).
+    over: tokio::sync::watch::Receiver<usize>,
 }
 
 impl CountingServer {
@@ -182,12 +185,15 @@ impl CountingServer {
 
         let hits = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&hits);
+        let (ended, over) = tokio::sync::watch::channel(0);
+        let ended = Arc::new(ended);
         tauri_free_spawn(async move {
             loop {
                 let Ok((mut socket, _)) = listener.accept().await else {
                     return;
                 };
                 let counter = Arc::clone(&counter);
+                let ended = Arc::clone(&ended);
                 tokio::spawn(async move {
                     use tokio::io::{AsyncReadExt, AsyncWriteExt};
                     // Read the request head; the body is never used.
@@ -201,10 +207,15 @@ impl CountingServer {
                     );
                     let _ = socket.write_all(response.as_bytes()).await;
                     let _ = socket.shutdown().await;
+                    // The client hangs up once it has read the answer (it
+                    // was told `connection: close`): only then is nothing of
+                    // the exchange left on the wire.
+                    while socket.read(&mut buffer).await.is_ok_and(|read| read > 0) {}
+                    ended.send_modify(|over| *over += 1);
                 });
             }
         });
-        Self { port, hits }
+        Self { port, hits, over }
     }
 
     fn url(&self) -> String {
@@ -213,6 +224,67 @@ impl CountingServer {
 
     fn hits(&self) -> usize {
         self.hits.load(Ordering::SeqCst)
+    }
+
+    /// Wait until `count` exchanges are over: each answered, and its
+    /// connection closed by the client after reading the answer. Then
+    /// nothing those requests started is still on the wire, and the
+    /// [`HeldClock`] can be moved or let go without a timer firing under a
+    /// request still in flight.
+    async fn exchanges_over(&self, count: usize) {
+        let mut over = self.over.clone();
+        real_backstop(&format!("{count} exchanges with the server"), async {
+            over.wait_for(|over| *over >= count)
+                .await
+                .expect("the server outlives its handle");
+        })
+        .await;
+    }
+}
+
+/// tokio's paused clock, held still until this is dropped (#1925).
+///
+/// A quota or a budget is a duration, so a test of one asserts on a clock,
+/// and the wall clock moves under load. These tests run on tokio's paused
+/// clock instead, which the limiter, the budget and every timeout read
+/// alike. Left to itself a paused clock jumps to the next timer whenever the
+/// runtime is idle, and a runtime waiting on a socket is idle: a request in
+/// flight would see its own timeout fire. A running blocking task stops the
+/// jumps (`tokio::time::pause`, *Preventing auto-advance*), so while this is
+/// held the clock moves only by `tokio::time::advance`, and a request on the
+/// loopback takes no time at all on it.
+///
+/// Dropped, the clock jumps from timer to timer again: what a test does once
+/// nothing is left on the wire ([`CountingServer::exchanges_over`]).
+struct HeldClock {
+    _release: std::sync::mpsc::Sender<()>,
+}
+
+impl HeldClock {
+    fn hold() -> Self {
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        tokio::task::spawn_blocking(move || {
+            // Returns once the sender is dropped: that is the release.
+            let _ = held.recv();
+        });
+        Self { _release: release }
+    }
+}
+
+/// `wait`, or a panic naming `what` once twenty seconds of *real* time have
+/// gone by. A held clock never fires a timer on its own, so a wait for
+/// something a broken quota never lets happen would hang the run instead of
+/// failing it. A hang backstop, not a bound: nothing a correct quota does
+/// takes real time worth naming.
+async fn real_backstop<F: std::future::Future>(what: &str, wait: F) -> F::Output {
+    let (fired, backstop) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(20));
+        let _ = fired.send(());
+    });
+    tokio::select! {
+        output = wait => output,
+        _ = backstop => panic!("{what} never came, twenty seconds of real time on"),
     }
 }
 
@@ -391,27 +463,87 @@ async fn a_retry_after_longer_than_the_budget_ends_the_call() {
 /// The budget the limiter tests run on: long enough for the second of a
 /// 1-a-second queue to go (at t=1 s), short enough that the third (t=2 s)
 /// cannot, and far short of the real 45 s.
-const SHORT_BUDGET: std::time::Duration = std::time::Duration::from_millis(1500);
+const SHORT_BUDGET: Duration = Duration::from_millis(1500);
 
-/// `count` sends of `GET /x` started at once on `client`: what each ended in,
-/// and how long it took.
-async fn queued_sends(
-    client: &Arc<HttpClient>,
-    count: usize,
-) -> Vec<(Result<u16, SourceError>, std::time::Duration)> {
+/// What one send ended in, and when on the [`HeldClock`].
+type Ended = (Result<u16, SourceError>, Duration);
+
+/// `per_client` sends of `GET /x` started at once on each of `clients`, on
+/// the held clock. Every one of them has been polled once it returns, so each
+/// started at the same instant: what the quota hands out at once has gone to
+/// the wire, and the rest wait on the limiter.
+async fn start_sends(
+    clients: Vec<Arc<HttpClient>>,
+    per_client: usize,
+) -> tokio::task::JoinSet<Ended> {
     let mut sends = tokio::task::JoinSet::new();
-    for _ in 0..count {
-        let client = Arc::clone(client);
-        sends.spawn(async move {
-            let started = std::time::Instant::now();
-            let outcome = client
-                .send(client.request(Method::GET, "/x"))
-                .await
-                .map(|response| response.status().as_u16());
-            (outcome, started.elapsed())
-        });
+    for client in clients {
+        for _ in 0..per_client {
+            let client = Arc::clone(&client);
+            sends.spawn(async move {
+                let started = tokio::time::Instant::now();
+                let outcome = client
+                    .send(client.request(Method::GET, "/x"))
+                    .await
+                    .map(|response| response.status().as_u16());
+                (outcome, started.elapsed())
+            });
+        }
     }
-    sends.join_all().await
+    tokio::task::yield_now().await;
+    sends
+}
+
+/// What every send ended in, once `clock` is let go. Called once nothing is
+/// left on the wire, so the clock jumps only between timers no request is
+/// under.
+async fn ended(clock: HeldClock, sends: tokio::task::JoinSet<Ended>) -> Vec<Ended> {
+    drop(clock);
+    real_backstop("the end of every send", sends.join_all()).await
+}
+
+/// How many of `outcomes` went: answered `200`.
+fn went(outcomes: &[Ended]) -> usize {
+    outcomes
+        .iter()
+        .filter(|(outcome, _)| matches!(outcome, Ok(200)))
+        .count()
+}
+
+/// Every one of `outcomes` that did not go stopped on the local quota: a
+/// status-less `Protocol` naming it, which no request that reached the
+/// instance ends in.
+fn the_rest_stopped_on_the_quota(outcomes: &[Ended], quota: &str) {
+    for (outcome, _) in outcomes.iter().filter(|(outcome, _)| outcome.is_err()) {
+        let Err(SourceError::Protocol {
+            status: None,
+            message,
+        }) = outcome
+        else {
+            panic!("a wait on the local quota must be Protocol, never Unreachable: {outcome:?}");
+        };
+        assert!(
+            message.contains("local rate limit") && message.contains(quota),
+            "the message names the quota it waited on: {message}"
+        );
+    }
+}
+
+/// `count` sends queued at once on a client for `server` at one a second
+/// with a burst of one and [`SHORT_BUDGET`], on the held clock: the first
+/// goes at t=0, the second at t=1 s, and the budget runs out at 1.5 s.
+async fn queued_behind_one_a_second(server: &CountingServer, count: usize) -> Vec<Ended> {
+    let clock = HeldClock::hold();
+    let client = Arc::new(paced_client(server, 1).with_send_budget(SHORT_BUDGET));
+    let sends = start_sends(vec![client], count).await;
+    // Past the token at 1 s and short of the budget, off both instants, so
+    // neither timer fires on the one the other does.
+    const SECOND_GOES: Duration = Duration::from_millis(1200);
+    server.exchanges_over(1).await;
+    tokio::time::advance(SECOND_GOES).await;
+    server.exchanges_over(2).await;
+    tokio::time::advance(SHORT_BUDGET - SECOND_GOES).await;
+    ended(clock, sends).await
 }
 
 /// **A limiter wait that outlasts the budget is the local quota, not the
@@ -423,36 +555,23 @@ async fn queued_sends(
 /// instance, so `Unreachable` -- the class the scheduler backs a source off
 /// on -- would blame it for a wait knobas imposed. Each is `Protocol`, naming
 /// the quota it waited on.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn a_limiter_wait_that_outlasts_the_budget_is_the_local_quota() {
     let server = CountingServer::always(200, "");
-    let client = Arc::new(paced_client(&server, 1).with_send_budget(SHORT_BUDGET));
 
-    let outcomes = queued_sends(&client, 5).await;
+    let outcomes = queued_behind_one_a_second(&server, 5).await;
 
-    let sent = outcomes
-        .iter()
-        .filter(|(outcome, _)| outcome.is_ok())
-        .count();
-    assert_eq!(sent, 2, "t=0 and t=1s fit the budget: {outcomes:?}");
+    assert_eq!(
+        went(&outcomes),
+        2,
+        "t=0 and t=1s fit the budget: {outcomes:?}"
+    );
     assert_eq!(
         server.hits(),
         2,
         "nothing past the budget reached the server"
     );
-    for (outcome, _) in outcomes.iter().filter(|(outcome, _)| outcome.is_err()) {
-        let Err(SourceError::Protocol {
-            status: None,
-            message,
-        }) = outcome
-        else {
-            panic!("a wait on the local quota must be Protocol, never Unreachable: {outcome:?}");
-        };
-        assert!(
-            message.contains("local rate limit") && message.contains("1 request a second"),
-            "the message names the quota it waited on: {message}"
-        );
-    }
+    the_rest_stopped_on_the_quota(&outcomes, "1 request a second");
 }
 
 /// **The limiter wait never outlasts what is left of the budget** -- the
@@ -462,39 +581,34 @@ async fn a_limiter_wait_that_outlasts_the_budget_is_the_local_quota() {
 ///
 /// Twelve sends queued at once behind one a second. Unbounded, they end at
 /// t=0, 1, 2, ... 11 s; bounded, none ends later than the 1.5 s budget. The
-/// subject is a duration, so the witness is the clock, and the bound is sized
-/// so that load cannot reach it (#1920): five seconds of slack on top of the
-/// budget, where the old five sends and 400 ms of slack left a loaded gate
-/// room to overrun a correct limiter. An unbounded wait still overruns it by
-/// up to five seconds.
+/// subject is a duration, and the clock is tokio's, held (#1925): the bound
+/// is the budget itself, with no slack, because load cannot move that clock.
 ///
 /// The retry half: a `503` at t=0 asks for a second attempt, which cannot
 /// pass the limiter before the budget runs out, so the call ends with the
 /// `503` it had -- what the source said -- and not with the quota, which only
 /// kept it from asking again. It is not timed: an unbounded wait there ends
-/// at t=1 s, 200 ms past its 800 ms budget, which no slack a loaded machine
-/// needs can tell from a bounded one. The bound on that wait is the first
-/// half's, since every attempt waits through the same call with what is left
-/// of its budget.
-#[tokio::test(flavor = "multi_thread")]
+/// at t=1 s and then finds no budget left to send in, which ends the call
+/// with the same `503`. The bound on that wait is the first half's, since
+/// every attempt waits through the same call with what is left of its budget.
+#[tokio::test(start_paused = true)]
 async fn a_limiter_wait_never_outlasts_the_budget() {
-    let slack = std::time::Duration::from_secs(5);
-
     let server = CountingServer::always(200, "");
-    let client = Arc::new(paced_client(&server, 1).with_send_budget(SHORT_BUDGET));
-    for (outcome, took) in queued_sends(&client, 12).await {
+    for (outcome, took) in queued_behind_one_a_second(&server, 12).await {
         assert!(
-            took <= SHORT_BUDGET + slack,
+            took <= SHORT_BUDGET,
             "a send ended {took:?} in, past the {SHORT_BUDGET:?} budget: {outcome:?}"
         );
     }
 
     let busy = CountingServer::always(503, "");
-    let client = paced_client(&busy, 1).with_send_budget(std::time::Duration::from_millis(800));
-    let error = client
-        .send(client.request(Method::GET, "/x"))
-        .await
-        .expect_err("503, then no room for a second attempt");
+    let clock = HeldClock::hold();
+    let client = paced_client(&busy, 1).with_send_budget(Duration::from_millis(800));
+    let (error, ()) = tokio::join!(client.send(client.request(Method::GET, "/x")), async {
+        busy.exchanges_over(1).await;
+        drop(clock);
+    });
+    let error = error.expect_err("503, then no room for a second attempt");
     assert!(
         matches!(
             error,
@@ -521,15 +635,19 @@ async fn a_limiter_wait_never_outlasts_the_budget() {
 /// the first send goes, the second cannot pass the limiter within its
 /// budget and is marked. A call that went is not marked, and a fresh watch
 /// does not see the last one's mark.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn a_watched_call_the_quota_stopped_is_marked() {
     let server = CountingServer::always(200, "");
-    let client = paced_client(&server, 1).with_send_budget(std::time::Duration::from_millis(300));
+    let clock = HeldClock::hold();
+    let client = paced_client(&server, 1).with_send_budget(Duration::from_millis(300));
 
     let (went, quota) =
         knobas_http::watch_local_quota(client.send(client.request(Method::GET, "/x"))).await;
     assert!(went.is_ok(), "the burst lets the first through: {went:?}");
     assert_eq!(quota, None, "a call that went is not marked");
+    drop(went);
+    server.exchanges_over(1).await;
+    drop(clock);
 
     let (stopped, quota) =
         knobas_http::watch_local_quota(client.send(client.request(Method::GET, "/x"))).await;
@@ -553,13 +671,19 @@ async fn a_watched_call_the_quota_stopped_is_marked() {
 /// what the source said on the attempt before, a `503` here, and that answer
 /// is what the write queue reads. Only a call that never reached the source
 /// carries the mark.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn a_retry_the_quota_stopped_is_not_marked() {
     let busy = CountingServer::always(503, "");
-    let client = paced_client(&busy, 1).with_send_budget(std::time::Duration::from_millis(800));
+    let clock = HeldClock::hold();
+    let client = paced_client(&busy, 1).with_send_budget(Duration::from_millis(800));
 
-    let (answered, quota) =
-        knobas_http::watch_local_quota(client.send(client.request(Method::GET, "/x"))).await;
+    let ((answered, quota), ()) = tokio::join!(
+        knobas_http::watch_local_quota(client.send(client.request(Method::GET, "/x"))),
+        async {
+            busy.exchanges_over(1).await;
+            drop(clock);
+        }
+    );
 
     assert!(
         matches!(
@@ -574,30 +698,10 @@ async fn a_retry_the_quota_stopped_is_not_marked() {
     assert_eq!(quota, None, "the source was asked, so this is its answer");
 }
 
-/// What reaches `server` within the first 900 ms of `per_client` sends started
-/// at once on each of `clients` -- under the second at which a one-a-second
-/// quota adds a token, so the burst is all that can pass. The sends still
-/// queued are abandoned.
-async fn hits_within_the_burst(
-    server: &CountingServer,
-    clients: Vec<HttpClient>,
-    per_client: usize,
-) -> usize {
-    let mut sends = tokio::task::JoinSet::new();
-    for client in clients {
-        let client = Arc::new(client);
-        for _ in 0..per_client {
-            let client = Arc::clone(&client);
-            sends.spawn(async move {
-                let _ = client.send(client.request(Method::GET, "/x")).await;
-            });
-        }
-    }
-    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
-    let hits = server.hits();
-    sends.abort_all();
-    hits
-}
+/// The budget the burst tests run on: shorter than the second in which a
+/// one-a-second quota adds a token, so what goes is the burst and nothing
+/// the refill adds.
+const UNDER_A_REFILL: Duration = Duration::from_millis(500);
 
 /// A client for `server` at one request a second and the given burst.
 fn paced_client(server: &CountingServer, burst: u32) -> HttpClient {
@@ -607,58 +711,77 @@ fn paced_client(server: &CountingServer, burst: u32) -> HttpClient {
 /// **Every client built for one instance shares its quota** (SPI-2, #1630).
 ///
 /// A sync run, a live read and a flush each build their own client, and they
-/// run at once. Two clients for one origin at a burst of ten, ten sends each:
-/// the instance sees ten in the first second, not twenty.
-#[tokio::test(flavor = "multi_thread")]
+/// run at once. Two clients for one origin at a burst of ten, ten sends each,
+/// inside a budget shorter than one refill: the instance sees ten, not
+/// twenty, and the other ten stop on the quota.
+#[tokio::test(start_paused = true)]
 async fn two_clients_for_one_instance_share_one_burst() {
     let server = CountingServer::always(200, "");
-    let clients = vec![paced_client(&server, 10), paced_client(&server, 10)];
+    let clock = HeldClock::hold();
+    let clients = [paced_client(&server, 10), paced_client(&server, 10)]
+        .map(|client| Arc::new(client.with_send_budget(UNDER_A_REFILL)));
 
-    let hits = hits_within_the_burst(&server, clients, 10).await;
+    let sends = start_sends(clients.into(), 10).await;
+    server.exchanges_over(10).await;
+    let outcomes = ended(clock, sends).await;
 
-    assert!(
-        hits <= 10,
-        "{hits} requests reached the instance within its burst of 10: each client \
-         had a limiter of its own"
+    assert_eq!(
+        went(&outcomes),
+        10,
+        "{outcomes:?}: each client had a limiter of its own"
     );
-    assert!(hits >= 1, "the shared burst let nothing through");
+    assert_eq!(server.hits(), 10, "the instance saw only the shared burst");
+    the_rest_stopped_on_the_quota(&outcomes, "burst 10");
+}
+
+/// Ten sends on `loose` at once, inside a budget shorter than one refill:
+/// what went, once the `burst` that governs has gone to `server`.
+async fn ten_on_the_loose_client(
+    server: &CountingServer,
+    loose: HttpClient,
+    burst: usize,
+    clock: HeldClock,
+) -> Vec<Ended> {
+    let sends = start_sends(vec![Arc::new(loose.with_send_budget(UNDER_A_REFILL))], 10).await;
+    server.exchanges_over(burst).await;
+    ended(clock, sends).await
 }
 
 /// **Where two configurations name different quotas for one instance, the
 /// stricter governs**, in either order (#1630).
 ///
-/// A burst of ten and a burst of two at one origin: the instance sees two in
-/// the first second, whichever client the sends go through and whichever was
-/// built first. Built loose-first, the stricter one tightens the quota under
-/// the client that already holds it -- which is why the sends go through the
-/// loose client in both halves.
-#[tokio::test(flavor = "multi_thread")]
+/// A burst of ten and a burst of two at one origin: the instance sees two
+/// within a budget shorter than one refill, whichever client the sends go
+/// through and whichever was built first. Built loose-first, the stricter one
+/// tightens the quota under the client that already holds it -- which is why
+/// the sends go through the loose client in both halves.
+#[tokio::test(start_paused = true)]
 async fn the_stricter_of_two_quotas_for_one_instance_governs() {
     let strict_first = CountingServer::always(200, "");
+    let clock = HeldClock::hold();
     let _strict = paced_client(&strict_first, 2);
     let loose = paced_client(&strict_first, 10);
-    let hits = hits_within_the_burst(&strict_first, vec![loose], 10).await;
-    assert!(
-        hits <= 2,
-        "strict first: {hits} reached the instance; the looser burst of 10 won"
+    let outcomes = ten_on_the_loose_client(&strict_first, loose, 2, clock).await;
+    assert_eq!(
+        went(&outcomes),
+        2,
+        "strict first: {outcomes:?}; the looser burst of 10 won"
     );
-    assert!(
-        hits >= 1,
-        "strict first: the burst of 2 let nothing through"
-    );
+    assert_eq!(strict_first.hits(), 2, "strict first");
+    the_rest_stopped_on_the_quota(&outcomes, "burst 2");
 
     let loose_first = CountingServer::always(200, "");
+    let clock = HeldClock::hold();
     let loose = paced_client(&loose_first, 10);
     let _strict = paced_client(&loose_first, 2);
-    let hits = hits_within_the_burst(&loose_first, vec![loose], 10).await;
-    assert!(
-        hits <= 2,
-        "loose first: {hits} reached the instance; the stricter burst of 2 was ignored"
+    let outcomes = ten_on_the_loose_client(&loose_first, loose, 2, clock).await;
+    assert_eq!(
+        went(&outcomes),
+        2,
+        "loose first: {outcomes:?}; the stricter burst of 2 was ignored"
     );
-    assert!(
-        hits >= 1,
-        "loose first: the tightened quota let nothing through"
-    );
+    assert_eq!(loose_first.hits(), 2, "loose first");
+    the_rest_stopped_on_the_quota(&outcomes, "burst 2");
 }
 
 /// A client for `server` at `per_second` and `burst`.
@@ -676,22 +799,41 @@ fn client_at(server: &CountingServer, per_second: u32, burst: u32) -> HttpClient
 ///
 /// A source edited from one a second to twenty: the run that built its
 /// client at the old quota has ended, so the next client is paced by the new
-/// one. Held to the old quota, one request would reach the instance in the
-/// first 900 ms; at twenty a second, started drained, about seventeen do.
-#[tokio::test(flavor = "multi_thread")]
+/// one. Built right after the strict client, the loose limiter starts
+/// drained (the test below), so 525 ms in it has refilled ten at twenty a
+/// second. Held to the old quota, one request a second would go.
+#[tokio::test(start_paused = true)]
 async fn a_quota_loosens_once_the_stricter_client_is_gone() {
     let server = CountingServer::always(200, "");
+    let clock = HeldClock::hold();
     drop(client_at(&server, 1, 1));
-    let loose = client_at(&server, 20, 20);
+    const BUDGET: Duration = Duration::from_secs(1);
+    // Ten refills of 50 ms and half of the eleventh, off every refill
+    // instant.
+    const TEN_REFILLED: Duration = Duration::from_millis(525);
+    let loose = Arc::new(client_at(&server, 20, 20).with_send_budget(BUDGET));
 
-    let hits = hits_within_the_burst(&server, vec![loose], 20).await;
+    let sends = start_sends(vec![loose], 20).await;
+    tokio::time::advance(TEN_REFILLED).await;
+    server.exchanges_over(10).await;
+    tokio::time::advance(BUDGET - TEN_REFILLED).await;
+    let outcomes = ended(clock, sends).await;
 
-    assert!(
-        hits >= 5,
-        "{hits} reached the instance in 900 ms at twenty a second: the dropped \
-         client's one a second still governs"
+    assert_eq!(
+        went(&outcomes),
+        10,
+        "{outcomes:?}: the dropped client's one a second still governs"
     );
+    the_rest_stopped_on_the_quota(&outcomes, "20 requests a second");
 }
+
+/// The budget the two-a-second tests run on: past the one refill at 500 ms,
+/// short of the second at 1 s.
+const TWO_A_SECOND_WINDOW: Duration = Duration::from_millis(900);
+
+/// Where those tests move the clock first: past the refill at 500 ms and
+/// short of the budget, off both instants.
+const ONE_REFILLED: Duration = Duration::from_millis(700);
 
 /// **A loosening hands out no fresh burst** (#1728).
 ///
@@ -703,20 +845,27 @@ async fn a_quota_loosens_once_the_stricter_client_is_gone() {
 /// in the first 900 ms is the one request the refill allows at 500 ms, not
 /// twenty. That the quota loosened at all is the test above's; this one is
 /// that the loosening sent no burst.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn a_loosening_right_away_starts_drained() {
+    const BUDGET: Duration = TWO_A_SECOND_WINDOW;
     let server = CountingServer::always(200, "");
+    let clock = HeldClock::hold();
     drop(client_at(&server, 1, 1));
-    let loose = client_at(&server, 2, 20);
+    let loose = Arc::new(client_at(&server, 2, 20).with_send_budget(BUDGET));
 
-    let hits = hits_within_the_burst(&server, vec![loose], 20).await;
+    let sends = start_sends(vec![loose], 20).await;
+    tokio::time::advance(ONE_REFILLED).await;
+    server.exchanges_over(1).await;
+    tokio::time::advance(BUDGET - ONE_REFILLED).await;
+    let outcomes = ended(clock, sends).await;
 
-    assert!(
-        hits <= 2,
-        "{hits} reached the instance in 900 ms right after a loosening: the new \
-         limiter handed out its burst"
+    assert_eq!(
+        went(&outcomes),
+        1,
+        "{outcomes:?} right after a loosening: the new limiter handed out its burst"
     );
-    assert!(hits >= 1, "the drained limiter never refilled");
+    assert_eq!(server.hits(), 1);
+    the_rest_stopped_on_the_quota(&outcomes, "2 requests a second");
 }
 
 /// **A tightening after a loosening hands out no fresh burst either**
@@ -726,11 +875,13 @@ async fn a_loosening_right_away_starts_drained() {
 /// (burst twelve), their clients never alive at once: the strict one spends
 /// its burst, the loose one is built and dropped, and the strict one is
 /// built again. Had the strict quota governed throughout, the 900 ms after
-/// that would see what two a second refills, one or two requests. Built
-/// with its own burst, the strict limiter sends six more.
-#[tokio::test(flavor = "multi_thread")]
+/// that would see what two a second refills, the one request at 500 ms.
+/// Built with its own burst, the strict limiter sends six more.
+#[tokio::test(start_paused = true)]
 async fn a_tightening_after_a_loosening_starts_with_what_was_left() {
+    const BUDGET: Duration = TWO_A_SECOND_WINDOW;
     let server = CountingServer::always(200, "");
+    let clock = HeldClock::hold();
     let strict = client_at(&server, 2, 6);
     for _ in 0..6 {
         let _ = strict.send(strict.request(Method::GET, "/x")).await;
@@ -738,17 +889,24 @@ async fn a_tightening_after_a_loosening_starts_with_what_was_left() {
     drop(strict);
     drop(client_at(&server, 4, 12));
     let spent = server.hits();
+    server.exchanges_over(spent).await;
 
-    let strict_again = client_at(&server, 2, 6);
-    let hits = hits_within_the_burst(&server, vec![strict_again], 6).await - spent;
+    let strict_again = Arc::new(client_at(&server, 2, 6).with_send_budget(BUDGET));
+    let sends = start_sends(vec![strict_again], 6).await;
+    tokio::time::advance(ONE_REFILLED).await;
+    server.exchanges_over(spent + 1).await;
+    tokio::time::advance(BUDGET - ONE_REFILLED).await;
+    let outcomes = ended(clock, sends).await;
 
     assert_eq!(spent, 6, "the strict burst went out before the alternation");
-    assert!(
-        hits <= 2,
-        "{hits} reached the instance in 900 ms after the strict quota came back: \
-         the tightening handed out a fresh burst"
+    assert_eq!(
+        went(&outcomes),
+        1,
+        "{outcomes:?} after the strict quota came back: the tightening handed out a \
+         fresh burst"
     );
-    assert!(hits >= 1, "the strict limiter never refilled");
+    assert_eq!(server.hits() - spent, 1);
+    the_rest_stopped_on_the_quota(&outcomes, "2 requests a second");
 }
 
 /// A server that accepts the connection and then says nothing is
@@ -2638,16 +2796,25 @@ mod hung_up {
     /// The second sending fits in [`knobas_http::SEND_BUDGET`] or is not
     /// made: a call whose budget is shorter than the backoff ends with the
     /// hang-up rather than outliving the caller's patience.
-    #[tokio::test(flavor = "multi_thread")]
+    ///
+    /// The budget is a duration, so the clock is tokio's, held for the whole
+    /// test (#1925): nothing here waits on a timer, and the 200 ms budget is
+    /// spent on no request however long the loopback takes. A call that
+    /// waited out the backoff anyway would wait for ever on a held clock, so
+    /// the real-time backstop fails it instead.
+    #[tokio::test(start_paused = true)]
     async fn a_read_sent_again_stays_inside_the_send_budget() {
+        let _clock = super::HeldClock::hold();
         let server = HangUpServer::new(HangUp::OnReuse);
         let client = client(&server).with_send_budget(Duration::from_millis(200));
         pool_a_connection(&client).await;
 
-        let error = client
-            .get_json::<serde_json::Value>("/second", &[])
-            .await
-            .expect_err("no room to send it again");
+        let error = super::real_backstop(
+            "the end of a call with no room to send again",
+            client.get_json::<serde_json::Value>("/second", &[]),
+        )
+        .await
+        .expect_err("no room to send it again");
 
         assert!(
             matches!(error, SourceError::Protocol { status: None, .. }),
