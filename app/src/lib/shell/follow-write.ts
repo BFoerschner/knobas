@@ -189,6 +189,24 @@ export function mayHaveLanded(row: Pick<QueuedWrite, "state" | "held_snapshot"> 
   return row !== undefined && unconfirmedSend(row) !== null;
 }
 
+/**
+ * Tell each unconfirmed hold of one write once ({@link toastUnconfirmed}):
+ * a *Send again* held so again is told again. Answers, per row heard,
+ * whether it is held so, for the follow to keep following (#1966).
+ */
+export function unconfirmedTeller(following: Pick<Following, "name">): (row: QueuedWrite | undefined) => boolean {
+  let told = false;
+  return (row) => {
+    if (row === undefined || !mayHaveLanded(row)) {
+      told = false;
+      return false;
+    }
+    if (!told) toastUnconfirmed(row, following);
+    told = true;
+    return true;
+  };
+}
+
 /** The toast for a write held as unconfirmed: what to check, the way to the queue, and no *Edit and resend* (#1966). */
 export function toastUnconfirmed(row: QueuedWrite, following: Pick<Following, "name">): void {
   const source = unconfirmedSend(row)?.source ?? "the source";
@@ -223,7 +241,7 @@ export function followWrite(
 ): () => void {
   let stop: () => void = () => {};
   let done = false;
-  let toldUnconfirmed = false;
+  const unconfirmed = unconfirmedTeller(following);
   const leave = () => {
     done = true;
     stop();
@@ -235,13 +253,7 @@ export function followWrite(
       following.onleave?.();
       return;
     }
-    if (mayHaveLanded(row)) {
-      if (!toldUnconfirmed) toastUnconfirmed(row, following);
-      toldUnconfirmed = true;
-      return;
-    }
-    toldUnconfirmed = false;
-    if (!willNotGo(row)) return;
+    if (unconfirmed(row) || !willNotGo(row)) return;
     leave();
     following.onstop?.();
     toastStopped(row, following);

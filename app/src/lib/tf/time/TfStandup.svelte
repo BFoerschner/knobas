@@ -52,14 +52,7 @@
   } from "../../ipc/entity";
   import { search as realSearch } from "../../ipc/search";
   import { listAdapters as realListAdapters, listSources as realListSources } from "../../ipc/sources";
-  import {
-    mayHaveLanded,
-    toastStopped,
-    toastUnconfirmed,
-    willNotGo,
-    writeFollower,
-    type WriteFollower,
-  } from "../../shell/follow-write";
+  import { toastStopped, unconfirmedTeller, willNotGo, writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { push } from "../../shell/toasts.svelte";
   import PublishTargetPicker from "../../standup/PublishTargetPicker.svelte";
   import { publishableSources } from "../../standup/protocol";
@@ -393,16 +386,14 @@
     if (!current || current.linked || following.has(current.write_id)) return;
     const id = current.write_id;
     let told = false;
+    // Sent and never answered (#1966): the page may be there, so no publish again.
+    const unconfirmed = unconfirmedTeller({ name: "Publish" });
     following.set(
       id,
       io.follower.follow(id, (row) => {
-        if (willNotGo(row) && !told) {
+        if (!unconfirmed(row) && willNotGo(row) && !told) {
           told = true;
           toastStopped(row, { name: "Publish", resend: () => void openDialog() });
-        } else if (mayHaveLanded(row) && !told) {
-          // Sent and never answered (#1966): the page may be there, so no publish again.
-          told = true;
-          toastUnconfirmed(row!, { name: "Publish" });
         }
         void reread(id);
       }),
@@ -491,19 +482,14 @@
   }
 
   function followTicket(writeId: number) {
-    let toldUnconfirmed = false;
+    const unconfirmed = unconfirmedTeller({ name: "Ticket" });
     following.set(
       writeId,
       io.follower.follow(writeId, (row) => {
         const echo = filed.find((made) => made.writeId === writeId);
         if (!echo) return unfollow(writeId);
         // Sent and never answered (#1966): on its way until sent again or discarded.
-        if (mayHaveLanded(row)) {
-          if (!toldUnconfirmed) toastUnconfirmed(row!, { name: "Ticket" });
-          toldUnconfirmed = true;
-          return;
-        }
-        toldUnconfirmed = false;
+        if (unconfirmed(row)) return;
         if (willNotGo(row)) {
           unfollow(writeId);
           filed = filed.filter((made) => made.writeId !== writeId);

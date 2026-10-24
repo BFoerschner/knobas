@@ -264,8 +264,9 @@
   /** What *Monitor queued* says on hover: where the create is. */
   function queuedTitle(write: QueuedWrite): string {
     const source = sourceNames[write.source_id] ?? "the monitoring source";
-    if (mayHaveLanded(write))
+    if (mayHaveLanded(write)) {
       return `Sent to ${source}, which did not answer, so it may be there. Check ${source}, then send it again or discard it in the write queue.`;
+    }
     return write.state === "sent"
       ? `Created in ${source}. The next poll attaches it here.`
       : `Queued for ${source}. Open the write queue to see it.`;

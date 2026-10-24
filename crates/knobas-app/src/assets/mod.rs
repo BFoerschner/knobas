@@ -2404,9 +2404,16 @@ select r.id, r.name, r.url,
 /// before #1959 and never a wrong refusal. Pinned by
 /// `tests/it/monitor_on_its_way_ipc.rs` and `submittable`'s
 /// `a_second_create_of_a_monitor_on_its_way_is_refused_before_it_is_queued`,
-/// which queue the op serialized rather than a spelled-out payload. `$1` the
-/// op, `$2` the patience, `$3` the monitor kind; `$4` and `$5` narrow it to one
-/// source and one name, or not where `null`.
+/// which queue the op serialized rather than a spelled-out payload. The held
+/// side's `unconfirmed` key (`held_snapshot ? 'unconfirmed'`, written by
+/// `knobas_core::write_queue::unconfirmed`, read the same way by its
+/// `apply_anyway`) is knobas' own shape too and **fails open** the same way: a
+/// renamed key counts no held create on its way, so the tab offers *Create
+/// monitor* again, #1959's behaviour for every hold. Pinned by
+/// `a_create_held_as_unconfirmed_is_on_its_way_until_the_reader_discards_it`,
+/// which holds the row through `unconfirmed`. `$1` the op, `$2` the patience,
+/// `$3` the monitor kind; `$4` and `$5` narrow it to one source and one name,
+/// or not where `null`.
 const ON_ITS_WAY: &str = "select w.id, w.payload->'CreateMonitor'->>'name' as name
   from knobas.write_queue w
  where w.op = $1

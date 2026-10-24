@@ -157,10 +157,10 @@ async fn a_sent_create_with_no_receipt_has_arrived_once_a_monitor_of_its_name_is
 
 /// Held on drift (never sent), refused and withdrawn creates wait on the
 /// reader in the queue, or will not go at all, so the row offers *Create
-/// monitor*. A sent create the
-/// mirror has not brought in within the patience is not taken for on its way.
+/// monitor*. A sent create the mirror has not brought in within the patience
+/// is not taken for on its way.
 #[tokio::test]
-async fn a_held_refused_withdrawn_or_long_lost_create_is_not_on_its_way() {
+async fn a_create_held_on_drift_refused_withdrawn_or_long_lost_is_not_on_its_way() {
     let pool = pool("monitor-on-its-way-stopped").await;
     recording(&pool, "pg-main", "pg-main").await;
     let held = create(&pool, "pg-main").await;

@@ -204,8 +204,8 @@ pub struct Protocol {
     /// link, sent or not, and not withdrawn. A reload reads an item filed
     /// here as on its way from this (pending, sent, or held as unconfirmed:
     /// [`ActionItemTicket::may_have_landed`](crate::commands::entity::ActionItemTicket::may_have_landed),
-    /// #1966) rather than offering *Create ticket* again; the read links each one whose ticket the mirror now holds, and
-    /// names it no more.
+    /// #1966) rather than offering *Create ticket* again; the read links
+    /// each one whose ticket the mirror now holds, and names it no more.
     pub owed_tickets: Vec<crate::commands::entity::ActionItemTicket>,
 }
 
