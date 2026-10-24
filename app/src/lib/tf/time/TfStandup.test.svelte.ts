@@ -6,7 +6,7 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { DigestLine, LinkEnd, LinkEntry, Protocol, PublishTarget, StandupDigest } from "../../ipc/entity";
+import type { ActionItemTicket, DigestLine, LinkEnd, LinkEntry, Protocol, PublishTarget, StandupDigest } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
 import { createLayers } from "../layers.svelte";
 import TfStandup from "./TfStandup.svelte";
@@ -118,6 +118,10 @@ function open(
     slowFirstWrite?: boolean;
     /** The first write is refused. */
     failFirstWrite?: boolean;
+    /** The creates the protocol's read names as still owing their link (#1951): filed before a reload. */
+    owed?: ActionItemTicket[];
+    /** Whether the mirror holds the filed ticket yet; flip `mirror.held` to bring it in (#1951). */
+    mirrored?: boolean;
   } = {},
 ) {
   const calls: {
@@ -125,6 +129,8 @@ function open(
     published: (PublishTarget | undefined)[];
     copied: string[];
     tickets: unknown[][];
+    /** Every `action_item_ticket` asked, by write id. */
+    asked: number[];
     days: string[];
     digests: string[];
     reads: number;
@@ -136,11 +142,18 @@ function open(
     published: [],
     copied: [],
     tickets: [],
+    asked: [],
     days: [],
     digests: [],
   };
   const links = over.links ?? [];
   const hears = new Map<number, (row: QueuedWrite | undefined) => void>();
+  const mirror = { held: over.mirrored ?? true };
+  const heard = new Map<string, Set<(event: { payload: unknown }) => void>>();
+  /** Send an event to the tab, as the backend would: `sync:state` with `running: false` is a sync that ended. */
+  const emit = (event: string, payload: unknown) => {
+    for (const handler of heard.get(event) ?? []) handler({ payload });
+  };
   let body = BODY;
   let release = () => {};
   const stalled = new Promise<void>((done) => (release = done));
@@ -149,6 +162,7 @@ function open(
     note_id: "note:p",
     page_title: DAY,
     publication,
+    owed_tickets: mirror.held ? [] : (over.owed ?? []),
   });
   view = mount(TfStandup, {
     target,
@@ -195,13 +209,22 @@ function open(
         listProjects: async () => [{ source_id: "jira", key: "OPS", name: "Operations" }],
         createActionItemTicket: async (...args: unknown[]) => {
           calls.tickets.push(args);
-          return { write_id: 9, state: "pending", detail: null, ticket_entity_id: null, linked: false };
+          return { write_id: 9, title: String(args[3]), state: "pending", detail: null, ticket_entity_id: null, linked: false };
         },
-        actionItemTicket: async () => {
+        actionItemTicket: async (_note: string, writeId: number) => {
+          calls.asked.push(writeId);
+          const words = String(calls.tickets.at(-1)?.[3] ?? over.owed?.find((owed) => owed.write_id === writeId)?.title);
+          // Sent, and the sync after it has not brought the ticket in.
+          if (!mirror.held) return { write_id: writeId, title: words, state: "sent", detail: null, ticket_entity_id: null, linked: false };
           // Landed: the backend draws the protocol's link to the ticket it found by the item's words.
-          const made = calls.tickets.at(-1)!;
-          if (!links.some((entry) => entry.other.entity_id === "jira:OPS-131")) links.push(ticketLink("jira:OPS-131", String(made[3])));
-          return { write_id: 9, state: "sent", detail: null, ticket_entity_id: "jira:OPS-131", linked: true };
+          if (!links.some((entry) => entry.other.entity_id === "jira:OPS-131")) links.push(ticketLink("jira:OPS-131", words));
+          return { write_id: writeId, title: words, state: "sent", detail: null, ticket_entity_id: "jira:OPS-131", linked: true };
+        },
+        listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
+          const handlers = heard.get(event) ?? new Set();
+          handlers.add(handler);
+          heard.set(event, handlers);
+          return () => handlers.delete(handler);
         },
         follower: { follow: (id: number, hear: (row: QueuedWrite | undefined) => void) => (hears.set(id, hear), () => hears.delete(id)) },
         copy: async (text: string) => {
@@ -210,7 +233,7 @@ function open(
       } as never,
     },
   });
-  return { calls, hears, release: () => release(), stored: () => body };
+  return { calls, hears, mirror, emit, release: () => release(), stored: () => body };
 }
 
 const text = () => target.textContent?.replace(/\s+/g, " ") ?? "";
@@ -383,6 +406,74 @@ test("after a create, leaving the tab and coming back shows the ticket's key, no
   expect(first.querySelector("button")).toBeNull();
   expect(first.querySelector("a")?.textContent).toBe("OPS-131");
   expect(first.querySelector(".tf-chip")?.textContent).toBe("To Do");
+});
+
+/** A create the protocol's read names as owing its link: filed before the reload, its ticket not mirrored yet. */
+function owed(over: Partial<ActionItemTicket> = {}): ActionItemTicket {
+  return { write_id: 9, title: "Decide the manual-review SLA", state: "sent", detail: null, ticket_entity_id: null, linked: false, ...over };
+}
+
+/** A sync of `source` ended, as `sync:state` says it. */
+function synced(emit: (event: string, payload: unknown) => void, source = "jira") {
+  emit("sync:state", { source_id: source, running: false });
+}
+
+test("a reload before the sync shows a filed item queued, not Create ticket (#1951)", async () => {
+  open({ owed: [owed()], mirrored: false });
+  await settle();
+  const rows = [...target.querySelectorAll(".tf-su-ai")];
+  expect(rows[0]!.querySelector("button")).toBeNull();
+  expect(rows[0]!.querySelector(".tf-chip")?.textContent).toBe("queued");
+  // The other item filed nothing and keeps its button.
+  expect(rows[1]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket");
+});
+
+test("after a reload, the sync that brings the ticket in replaces queued with its key (#1951)", async () => {
+  const { mirror, emit, calls } = open({ owed: [owed()], mirrored: false });
+  await settle();
+  synced(emit);
+  await settle();
+  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("queued");
+  mirror.held = true;
+  synced(emit);
+  await settle();
+  const first = target.querySelector(".tf-su-ai")!;
+  expect(first.querySelector("button")).toBeNull();
+  expect(first.querySelector("a")?.textContent).toBe("OPS-131");
+  expect(first.querySelector(".tf-chip")?.textContent).toBe("To Do");
+  // Named, so the next sync asks nothing more.
+  const asked = calls.asked.length;
+  synced(emit);
+  await settle();
+  expect(calls.asked).toHaveLength(asked);
+});
+
+test("a create whose ticket the post-write read missed is named by a later sync, not left queued (#1951)", async () => {
+  const { hears, mirror, emit } = open({ mirrored: false });
+  await settle();
+  button("Create ticket").click();
+  await settle();
+  const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
+  select.value = "jira:OPS";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find((found) => found.textContent?.trim() === "Create ticket")!.click();
+  await settle();
+  // The row left the queue before any sync mirrored the ticket.
+  hears.get(9)!(undefined);
+  await settle();
+  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("queued");
+  mirror.held = true;
+  synced(emit);
+  await settle();
+  expect(target.querySelector(".tf-su-ai a")?.textContent).toBe("OPS-131");
+});
+
+test("after a reload, a create held or refused in the queue offers Create ticket, as the live tab does once told (#1951)", async () => {
+  open({ owed: [owed({ state: "held" }), owed({ write_id: 10, state: "refused", title: "Update the on-call runbook (Tomasz Wójcik)" })], mirrored: false });
+  await settle();
+  const buttons = [...target.querySelectorAll(".tf-su-ai button")].map((found) => found.textContent?.trim());
+  expect(buttons).toEqual(["Create ticket", "Create ticket"]);
 });
 
 for (const [name, field] of [

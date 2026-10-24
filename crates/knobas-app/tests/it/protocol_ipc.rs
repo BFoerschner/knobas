@@ -110,6 +110,10 @@ struct Log {
     /// While true, a ticket's create answers no key, as Jira's did before
     /// #1754 and as a source whose receipt is empty still does.
     receiptless: bool,
+    /// While true, a created ticket is not pushed by the next sync: the test
+    /// hands it over later ([`Harness::mirror`]), as Jira's search index lags
+    /// its own write (#1951).
+    late: bool,
 }
 
 /// A source that behaves like the Confluence adapter at the trait.
@@ -188,7 +192,9 @@ impl Source for Wiki {
             // ticket reaches the mirror at the next sync, as a page does.
             WriteOp::CreateTicket { title, .. } => {
                 let mut log = self.log();
-                log.pending.push(ticket_item("PAY-999", &title));
+                if !log.late {
+                    log.pending.push(ticket_item("PAY-999", &title));
+                }
                 if log.receiptless {
                     return Ok(WriteReceipt::none());
                 }
@@ -481,6 +487,34 @@ impl Harness {
         .fetch_all(self.pool())
         .await
         .expect("the links read")
+    }
+
+    /// The tickets the note is linked to as `related`, whichever end drew
+    /// it: a link reads the same from both ends (`link::entries_of`).
+    async fn related_tickets(&self, note_id: &str) -> Vec<String> {
+        sqlx::query_scalar::<_, String>(
+            "select case when from_id = $1 then to_id else from_id end
+               from knobas.confirmed_link
+              where (from_id = $1 or to_id = $1) and relation = $2
+              order by id",
+        )
+        .bind(note_id)
+        .bind(protocol::ACTION_ITEM_RELATION)
+        .fetch_all(self.pool())
+        .await
+        .expect("the links read")
+    }
+
+    /// What the end of a sync of `source` resolves (`ArrivalLinks`, #1050):
+    /// the entities the source's sent writes were owed and are now linked.
+    async fn resolve(&self, source: &str) -> Vec<String> {
+        knobas_app::sources::write_queue::link_arrivals(
+            self.pool(),
+            &knobas_core::payload::Declarations::empty(),
+            source,
+        )
+        .await
+        .expect("the owed links resolve")
     }
 
     /// How many notes carry this date's title -- the get-or-create's whole
@@ -1146,6 +1180,180 @@ async fn an_action_item_whose_create_named_no_key_is_found_by_its_title() {
     assert!(filed.linked);
 }
 
+/// **#1951: a ticket the post-write sync does not bring in is linked by the
+/// sync that does**, with no panel open and no read of the protocol: the
+/// create holds the note as the link it owes, and the end of every sync of
+/// the source resolves it, as a run's *Create ticket* is (#1451).
+#[tokio::test(flavor = "multi_thread")]
+async fn an_action_items_ticket_that_arrives_on_a_later_sync_is_linked_by_that_sync() {
+    let harness = Harness::new("protocol_action_item_late").await;
+    harness.log().late = true;
+    let opened = harness.open().await;
+    let filed = create_action_item_ticket_inner(
+        &harness.state,
+        &opened.note_id,
+        &format!("{TRACKER}:PAY"),
+        "Task",
+        "Ask Ines about the SEPA retry",
+        "",
+    )
+    .await
+    .expect("the ticket is filed");
+    assert_eq!(
+        (filed.state, filed.ticket_entity_id.as_deref(), filed.linked),
+        (WriteState::Sent, None, false),
+        "sent, and the sync after it did not bring the ticket in"
+    );
+    assert!(
+        harness.resolve(TRACKER).await.is_empty(),
+        "nothing is linked before the ticket is mirrored"
+    );
+
+    harness.mirror(ticket_item("PAY-999", "Ask Ines about the SEPA retry"));
+    harness.sync(TRACKER).await;
+    assert_eq!(harness.resolve(TRACKER).await, ["tracker:PAY-999"]);
+    assert_eq!(
+        harness.related_tickets(&opened.note_id).await,
+        ["tracker:PAY-999"]
+    );
+    assert!(
+        harness.resolve(TRACKER).await.is_empty(),
+        "and once drawn, owed no more"
+    );
+}
+
+/// **#1951: a reload before the sync finds the create on its way**, not an
+/// item with no ticket to offer *Create ticket* for again. The protocol's
+/// read names each create its action items still owe a link, with the words
+/// it filed; once the ticket is mirrored, the read draws the link itself and
+/// names it no more.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_protocol_read_names_a_create_whose_ticket_is_not_mirrored_yet() {
+    let harness = Harness::new("protocol_action_item_reload").await;
+    harness.log().late = true;
+    let opened = harness.open().await;
+    assert!(opened.owed_tickets.is_empty(), "nothing filed yet");
+    let filed = create_action_item_ticket_inner(
+        &harness.state,
+        &opened.note_id,
+        &format!("{TRACKER}:PAY"),
+        "Task",
+        "  Ask Ines about the SEPA retry ",
+        "",
+    )
+    .await
+    .expect("the ticket is filed");
+
+    let reloaded = harness.open().await;
+    let owed: Vec<_> = reloaded
+        .owed_tickets
+        .iter()
+        .map(|t| {
+            (
+                t.write_id,
+                t.title.as_str(),
+                t.state,
+                t.ticket_entity_id.clone(),
+                t.linked,
+            )
+        })
+        .collect();
+    assert_eq!(
+        owed,
+        [(
+            filed.write_id,
+            "Ask Ines about the SEPA retry",
+            WriteState::Sent,
+            None,
+            false
+        )],
+        "sent, its ticket not mirrored, and named by the words it filed"
+    );
+
+    // The ticket arrives; this read is the first to look, before any
+    // resolution of the sync's.
+    harness.mirror(ticket_item("PAY-999", "Ask Ines about the SEPA retry"));
+    harness.sync(TRACKER).await;
+    let after = harness.open().await;
+    assert!(after.owed_tickets.is_empty(), "linked, so owed no more");
+    assert_eq!(
+        harness.related_tickets(&opened.note_id).await,
+        ["tracker:PAY-999"],
+        "the read drew the link"
+    );
+}
+
+/// A create still pending is on its way too, and one the reader withdrew in
+/// the queue is not (#1951).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_protocol_read_names_a_pending_create_and_not_a_discarded_one() {
+    let harness = Harness::new("protocol_action_item_owed_states").await;
+    harness.log().offline = true;
+    let opened = harness.open().await;
+    let mut ids = Vec::new();
+    for title in ["Ask Ines about the SEPA retry", "Book the retro room"] {
+        let filed = create_action_item_ticket_in_background(
+            &harness.state,
+            &opened.note_id,
+            &format!("{TRACKER}:PAY"),
+            "Task",
+            title,
+            "",
+        )
+        .await
+        .expect("the create is queued");
+        ids.push(filed.write_id);
+    }
+    let background = harness.state.scheduler.background();
+    until(|| async { background.running() }, |running| *running == 0).await;
+    knobas_core::write_queue::discard(harness.pool(), ids[1])
+        .await
+        .expect("the reader withdraws the second");
+
+    let owed: Vec<_> = harness
+        .open()
+        .await
+        .owed_tickets
+        .into_iter()
+        .map(|t| (t.write_id, t.state))
+        .collect();
+    assert_eq!(owed, [(ids[0], WriteState::Pending)]);
+}
+
+/// A link the create's own read drew is owed no more (#1951): the reader who
+/// removes it does not find the next sync drawing it again, as a link drawn
+/// on arrival is not (#1050).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ticket_link_the_reader_removes_is_not_drawn_again_by_the_next_sync() {
+    let harness = Harness::new("protocol_action_item_unlinked").await;
+    let opened = harness.open().await;
+    let filed = create_action_item_ticket_inner(
+        &harness.state,
+        &opened.note_id,
+        &format!("{TRACKER}:PAY"),
+        "Task",
+        "Ask Ines about the SEPA retry",
+        "",
+    )
+    .await
+    .expect("the ticket is filed");
+    assert!(filed.linked);
+    let link: String = sqlx::query_scalar(
+        "select id::text from knobas.confirmed_link where from_id = $1 or to_id = $1",
+    )
+    .bind(&opened.note_id)
+    .fetch_one(harness.pool())
+    .await
+    .expect("the one link");
+    knobas_app::commands::entity::unlink_inner(harness.pool(), &link)
+        .await
+        .expect("the reader unlinks it");
+
+    harness.sync(TRACKER).await;
+    assert!(harness.resolve(TRACKER).await.is_empty());
+    assert!(harness.related_tickets(&opened.note_id).await.is_empty());
+}
+
 /// An action item with no words is not a ticket, and the refusal comes before
 /// anything is queued -- a ticket called nothing is not undoable from knobas.
 #[tokio::test(flavor = "multi_thread")]
@@ -1297,6 +1505,53 @@ async fn an_action_item_answers_once_queued_and_its_ticket_is_named_and_linked_b
             "tracker:PAY-999".to_owned(),
             protocol::ACTION_ITEM_RELATION.to_owned()
         )]
+    );
+}
+
+/// **#1951: a create the background send could not deliver is linked once a
+/// later tick delivers it.** The send's own read never runs for it (the send
+/// failed), so the link is the row's to owe, resolved by the sync that brings
+/// the ticket in.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_action_item_created_while_its_source_is_down_is_linked_after_a_later_tick() {
+    let harness = Harness::new("protocol_action_item_later_tick").await;
+    harness.log().offline = true;
+    let opened = harness.open().await;
+    let filed = create_action_item_ticket_in_background(
+        &harness.state,
+        &opened.note_id,
+        &format!("{TRACKER}:PAY"),
+        "Task",
+        "Ask Ines about the SEPA retry",
+        "",
+    )
+    .await
+    .expect("the create is queued");
+    let background = harness.state.scheduler.background();
+    until(|| async { background.running() }, |running| *running == 0).await;
+    let asked = action_item_ticket_inner(harness.pool(), &opened.note_id, filed.write_id)
+        .await
+        .expect("the read answers");
+    assert_eq!(
+        (asked.state, asked.linked),
+        (WriteState::Pending, false),
+        "the send failed and the write waits for the tick"
+    );
+
+    harness.log().offline = false;
+    knobas_app::sources::write_queue::flush_now(&harness.state, Some(TRACKER.to_owned()))
+        .await
+        .expect("the tick flushes");
+    harness.sync(TRACKER).await;
+    assert_eq!(harness.resolve(TRACKER).await, ["tracker:PAY-999"]);
+    assert_eq!(
+        harness.related_tickets(&opened.note_id).await,
+        ["tracker:PAY-999"]
+    );
+    assert_eq!(
+        harness.log().written,
+        ["create_ticket", "create_ticket"],
+        "the failed try and the tick's"
     );
 }
 

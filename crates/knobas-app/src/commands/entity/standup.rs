@@ -118,12 +118,36 @@ pub async fn standup_protocol_inner(
             }
         }
     };
+    let owed_tickets = owed_tickets(pool, &note.id).await?;
     Ok(crate::protocol::Protocol {
         day,
         note_id: note.id,
         page_title: crate::protocol::page_title_of(day),
         publication,
+        owed_tickets,
     })
+}
+
+/// The tickets `note_id`'s action items filed that it does not link yet
+/// (#1951): every create whose row still names the note as the link it owes
+/// ([`owe_the_note`]) and not withdrawn, each asked
+/// [`action_item_ticket_inner`], which links one whose ticket the mirror now
+/// holds. The rest are what [`Protocol::owed_tickets`](crate::protocol::Protocol::owed_tickets)
+/// names.
+///
+/// The read is the publication's `reconcile` for action items: the end of a
+/// sync resolves the same links (`link_arrivals`), and this makes the
+/// protocol's answer true whichever runs first.
+async fn owed_tickets(pool: &PgPool, note_id: &str) -> Result<Vec<ActionItemTicket>, IpcError> {
+    let owed = crate::protocol::creates_owing(pool, note_id).await?;
+    let mut tickets = Vec::with_capacity(owed.len());
+    for write_id in owed {
+        let ticket = action_item_ticket_inner(pool, note_id, write_id).await?;
+        if !ticket.linked {
+            tickets.push(ticket);
+        }
+    }
+    Ok(tickets)
 }
 
 /// [`standup_protocol_inner`] behind the lifecycle.
@@ -335,11 +359,15 @@ pub async fn set_standup_publish_target(
 }
 
 /// What became of filing a ticket from an action item.
-#[derive(Debug, serde::Serialize, ts_rs::TS)]
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct ActionItemTicket {
     /// The write queue row carrying the create.
     pub write_id: i64,
+    /// The ticket's title as filed: the action item's words, trimmed. What
+    /// the tab matches an item by when it reads a protocol's
+    /// [`owed_tickets`](crate::protocol::Protocol::owed_tickets) (#1951).
+    pub title: String,
     /// The queue's own word for where that write stands (#779): `pending`
     /// while it is on its way, `sent` once it landed, `refused` or `held`
     /// when it will not go on its own, `discarded` once withdrawn.
@@ -370,9 +398,11 @@ pub struct ActionItemTicket {
 ///
 /// A ticket that is **not** there yet is not an error and files nothing twice:
 /// the write is queued, the caller is told the id is not known, and the link is
-/// the one thing left undone. Pressing *Create ticket* again would file a
-/// second ticket, which is why the answer says plainly that the create is on
-/// the queue.
+/// the one thing left undone. It stays owed on the row (`owe_the_note`):
+/// the end of every later sync of the source draws it once the ticket is
+/// mirrored, and the protocol's read names the create until then (#1951).
+/// Pressing *Create ticket* again would file a second ticket, which is why
+/// the answer says plainly that the create is on the queue.
 ///
 /// `project` is the project's entity id (`jira:PAY`), which is what
 /// `WriteOp::CreateTicket` calls its `entity` and what `list_projects` hands
@@ -395,7 +425,9 @@ pub async fn create_action_item_ticket_inner(
     let pool = &state.pool;
     let (project_ref, payload) =
         action_item_payload(pool, note_id, project, ticket_type, title, body).await?;
-    let queued = crate::sources::write_queue::submit(state, payload).await?;
+    let (queued, source_id) = crate::sources::write_queue::queue(state, payload).await?;
+    owe_the_note(pool, queued.id, note_id).await?;
+    crate::sources::write_queue::flush(state, &source_id, queued.id).await?;
     // The same wait, for the same reason: a created ticket has no address
     // until the mirror has it, and this is the call that goes looking.
     crate::sources::write_queue::sync_after_write(state, &project_ref.namespace).await;
@@ -409,7 +441,10 @@ pub async fn create_action_item_ticket_inner(
 /// is the queued write with no ticket yet; the send, the sync that brings the
 /// ticket into the mirror and the link follow in a spawned task, and
 /// [`action_item_ticket_inner`] -- which the panel asks when the write settles
-/// -- names the ticket and draws the link as well, whichever comes first.
+/// and after every sync -- names the ticket and draws the link as well,
+/// whichever comes first. A send that fails or never starts runs no read of
+/// its own: the link it owes is the row's (`owe_the_note`, #1951), drawn by
+/// the sync after the tick that delivers it.
 ///
 /// The awaited path stays for the battery.
 ///
@@ -427,7 +462,9 @@ pub async fn create_action_item_ticket_in_background(
     let (project_ref, payload) =
         action_item_payload(&state.pool, note_id, project, ticket_type, title, body).await?;
     let (queued, source_id) = crate::sources::write_queue::queue(state, payload).await?;
+    owe_the_note(&state.pool, queued.id, note_id).await?;
     let (note, id) = (note_id.to_owned(), queued.id);
+    let title = title.trim().to_owned();
     crate::sources::write_queue::send_in_background_then(
         state,
         source_id,
@@ -441,11 +478,23 @@ pub async fn create_action_item_ticket_in_background(
     );
     Ok(ActionItemTicket {
         write_id: queued.id,
+        title,
         state: queued.state,
         detail: queued.detail,
         ticket_entity_id: None,
         linked: false,
     })
+}
+
+/// Keep the note on the create's row as the link it owes (#1951): the row's
+/// `link_to`, which the end of every sync of the source resolves
+/// (`sources::write_queue::link_arrivals`) until the ticket the receipt named
+/// is mirrored, as a run's *Create ticket* is (#1451). So a create that goes
+/// on a later tick, or whose ticket the post-write sync missed, is still
+/// linked, and the protocol's read can say which creates are on their way
+/// ([`owed_tickets`]).
+async fn owe_the_note(pool: &PgPool, write_id: i64, note_id: &str) -> Result<(), IpcError> {
+    crate::sources::write_queue::hold_arrival_link(pool, write_id, note_id).await
 }
 
 /// The checks and the `CreateTicket` payload both paths share.
@@ -485,9 +534,12 @@ async fn action_item_payload(
 /// the ticket -- the ticket, linked to the note.
 ///
 /// **Idempotent, like `protocol::reconcile`**: the panel asks it each time the
-/// queue moves until the ticket is named, and the background task behind
-/// [`create_action_item_ticket_in_background`] asks it once after its sync.
-/// Whichever finds the ticket first draws the link; the other finds it drawn.
+/// queue moves and each time a sync ends until the ticket is named, the
+/// background task behind [`create_action_item_ticket_in_background`] asks it
+/// once after its sync, and the protocol's read asks it of every create still
+/// owed (`owed_tickets`, #1951). The end of every sync of the source
+/// resolves the same link (`link_arrivals`). Whichever finds the ticket first
+/// draws the link and drops what the row owes; the others find it drawn.
 ///
 /// The ticket is looked for **only once the write was sent**: before that, a
 /// ticket of the same title in the project is somebody else's, never this one.
@@ -517,7 +569,6 @@ pub async fn action_item_ticket_inner(
         Ok(knobas_source::WriteOp::CreateTicket { title, .. }) => title,
         _ => return Err(not_a_ticket()),
     };
-    let title = title.as_str();
     let mut ticket_entity_id = None;
     let mut linked = false;
     if write.state == knobas_core::write_queue::WriteState::Sent {
@@ -526,7 +577,9 @@ pub async fn action_item_ticket_inner(
         use crate::sources::write_queue::{Named, ticket_named};
         ticket_entity_id = match ticket_named(pool, write_id).await? {
             Named::Ticket(named) => named,
-            Named::Nothing => crate::protocol::ticket_titled(pool, &write.source_id, title).await?,
+            Named::Nothing => {
+                crate::protocol::ticket_titled(pool, &write.source_id, &title).await?
+            }
         };
         if let Some(ticket) = ticket_entity_id.as_deref() {
             crate::protocol::draw_link(
@@ -536,11 +589,13 @@ pub async fn action_item_ticket_inner(
                 crate::protocol::ACTION_ITEM_RELATION,
             )
             .await?;
+            crate::protocol::owed_no_more(pool, write_id).await?;
             linked = true;
         }
     }
     Ok(ActionItemTicket {
         write_id,
+        title,
         state: write.state,
         detail: write.detail,
         ticket_entity_id,

@@ -174,6 +174,7 @@ vi.mock("../ipc/entity", () => ({
       note_id: "note:1",
       page_title: "2026-09-03",
       publication: null,
+      owed_tickets: [],
     }),
   standupPublishTarget: () => deferred(null),
   setStandupPublishTarget: () => deferred(null),
@@ -1894,7 +1895,7 @@ const CASES: Case[] = [
         props: {
           ports: {
             standupDigest: () => deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [], infrastructure: [] }),
-            standupProtocol: () => deferred({ day: "2026-08-22", note_id: "note:p", page_title: "2026-08-22", publication: null }),
+            standupProtocol: () => deferred({ day: "2026-08-22", note_id: "note:p", page_title: "2026-08-22", publication: null, owed_tickets: [] }),
             getNote: () => deferred({ note: { id: "note:p", title: "", body_md: "", created_at: "", updated_at: "" }, refs: [], links: [] }),
             standupPublishTarget: () => deferred(null),
             follower: { follow: () => () => {} },

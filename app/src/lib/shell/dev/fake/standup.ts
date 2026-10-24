@@ -107,6 +107,8 @@ export function handlers(): Handlers {
   let nextWrite = 801;
   /** Writes by id, and how many times each was asked about. */
   const asked = new Map<number, number>();
+  /** Each create's title, as the backend answers it back (#1951). */
+  const titles = new Map<number, string>();
 
   const protocol = (day: string): Protocol => {
     // The backend's `related` link from the protocol to the ticket it filed.
@@ -118,6 +120,7 @@ export function handlers(): Handlers {
     note_id: `note:standup-${day}`,
     page_title: day,
     publication: published.get(day) ?? null,
+    owed_tickets: [],
   });
   /** A re-read of a pending publication finds it sent, as the queue would. */
   const settle = (day: string): Protocol => {
@@ -172,18 +175,20 @@ export function handlers(): Handlers {
       target = args["target"] as PublishTarget;
       return target;
     },
-    create_action_item_ticket: (): ActionItemTicket => {
+    create_action_item_ticket: (args): ActionItemTicket => {
       const write_id = nextWrite++;
       asked.set(write_id, 0);
-      return { write_id, state: "pending", detail: null, ticket_entity_id: null, linked: false };
+      titles.set(write_id, String(args["title"]).trim());
+      return { write_id, title: titles.get(write_id)!, state: "pending", detail: null, ticket_entity_id: null, linked: false };
     },
     action_item_ticket: (args): ActionItemTicket => {
       const write_id = Number(args["writeId"]);
       const count = (asked.get(write_id) ?? 0) + 1;
       asked.set(write_id, count);
+      const title = titles.get(write_id) ?? "";
       return count < 2
-        ? { write_id, state: "pending", detail: null, ticket_entity_id: null, linked: false }
-        : { write_id, state: "sent", detail: null, ticket_entity_id: "mock:OPS-77", linked: true };
+        ? { write_id, title, state: "pending", detail: null, ticket_entity_id: null, linked: false }
+        : { write_id, title, state: "sent", detail: null, ticket_entity_id: "mock:OPS-77", linked: true };
     },
   };
 }

@@ -492,8 +492,12 @@ pub(crate) fn send_in_background(state: &crate::sources::SourcesState, source_id
 ///
 /// For the callers that go looking for what their write made: the standup
 /// protocol's page and an action item's ticket have an address only once a
-/// sync has seen them, so the link they owe is drawn after that read rather
-/// than by the command, which has already answered.
+/// sync has seen them, so the link they owe is looked for after that read
+/// rather than by the command, which has already answered. `then` is only
+/// the first look: the page's link is reconciled on every read of the
+/// protocol, and the ticket's is owed on the row (`link_to`), drawn by
+/// [`link_arrivals`] or the protocol's read once the ticket is mirrored
+/// (#1951).
 ///
 /// Not spawned once the quit has begun, as [`send_in_background`] is not;
 /// `then` is then not run either, as after a send that fails.
