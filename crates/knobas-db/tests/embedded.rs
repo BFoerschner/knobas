@@ -1332,7 +1332,27 @@ async fn stopping_does_not_wait_out_a_long_running_query() {
     let hog = tokio::spawn(async move {
         let _ = sqlx::query("select pg_sleep(30)").execute(&pool).await;
     });
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    // The hog's statement is running on the server, so its connection is
+    // checked out of the pool when the stop comes (#1927). Before, a 300 ms
+    // margin stood for this, and a hog slower to start let the stop find an
+    // idle pool.
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let running: i64 = sqlx::query_scalar(
+                "select count(*) from pg_stat_activity
+                  where query = 'select pg_sleep(30)' and state = 'active'",
+            )
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            if running > 0 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the hog's statement never ran");
 
     let started = std::time::Instant::now();
     db.stop().await.unwrap();
