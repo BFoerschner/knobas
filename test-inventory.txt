@@ -2579,6 +2579,7 @@ knobas-source	lib/knobas_source	url_forms::tests::a_segment_is_form_decoded
 knobas-source	lib/knobas_source	url_forms::tests::another_shape_reads_as_nothing
 knobas-source	lib/knobas_source	url_forms::tests::more_query_a_fragment_or_a_trailing_slash_still_read
 knobas-source	lib/knobas_source	url_forms::tests::the_rest_is_compared_as_written
+knobas-source	lib/knobas_source	view::tests::a_refused_write_is_disabled_wherever_the_view_offers_it
 knobas-source	lib/knobas_source	view::tests::a_tree_and_a_file_have_the_wire_shape_the_shell_reads
 knobas-source	lib/knobas_source	view::tests::every_block_round_trips
 knobas-source	lib/knobas_source	view::tests::the_wire_shape_is_a_union_on_type
@@ -2857,6 +2858,7 @@ knobas-source-gitea	lib/knobas_source_gitea	view::act::tests::a_branch_name_read
 knobas-source-gitea	lib/knobas_source_gitea	view::act::tests::a_proposal_is_titled_by_its_one_commit_and_lists_what_it_carries
 knobas-source-gitea	lib/knobas_source_gitea	view::files::tests::a_file_is_cut_at_whole_lines
 knobas-source-gitea	lib/knobas_source_gitea	view::files::tests::languages_are_named_by_extension_or_name
+knobas-source-gitea	lib/knobas_source_gitea	view::grants::tests::a_probe_answer_reads_as_the_measured_table_says
 knobas-source-gitea	lib/knobas_source_gitea	view::pr::land::tests::a_required_context_pattern_is_matched_whole
 knobas-source-gitea	lib/knobas_source_gitea	view::repo::tests::a_long_text_is_cut_at_a_line_within_the_cap
 knobas-source-gitea	lib/knobas_source_gitea	view::repo::tests::sizes_read_in_the_unit_that_fits
@@ -2985,6 +2987,8 @@ knobas-source-gitea	test/it	view::a_commits_statuses_are_its_checks_failing_firs
 knobas-source-gitea	test/it	view::a_diff_gitea_refuses_is_an_error_and_not_an_empty_diff
 knobas-source-gitea	test/it	view::a_foreign_id_is_refused
 knobas-source-gitea	test/it	view::a_mirrors_commit_offers_a_new_branch_disabled
+knobas-source-gitea	test/it	view::a_read_only_token_offers_a_new_branch_disabled_saying_why
+knobas-source-gitea	test/it	view::a_view_without_writes_does_not_ask_what_the_token_may_write
 knobas-source-gitea	test/it	view::one_section_is_read_on_its_own
 knobas-source-gitea	test/it	view_branch::a_branch_ahead_with_no_pull_request_offers_one_prefilled_from_its_commits
 knobas-source-gitea	test/it	view_branch::a_branch_gitea_does_not_have_is_an_error
@@ -3070,6 +3074,7 @@ knobas-source-gitea	test/it	view_pr::the_overview_read_alone_says_the_same_merge
 knobas-source-gitea	test/it	view_pr::the_reviews_line_comments_are_read_at_the_same_time
 knobas-source-gitea	test/it	view_pr::update_branch_is_offered_where_the_head_is_behind
 knobas-source-gitea	test/it	view_pr::what_does_not_stand_in_the_way_leaves_the_merge_enabled
+knobas-source-gitea	test/it	view_pr::what_the_token_may_not_write_is_drawn_disabled_saying_why
 knobas-source-gitea	test/it	view_pr::who_the_token_is_is_asked_again_after_a_failed_read
 knobas-source-gitea	test/it	view_pr::who_the_token_is_is_asked_once_per_token_and_server
 knobas-source-gitea	test/it	view_repo::a_branch_gone_since_the_listing_is_not_offered_and_the_view_opens
@@ -3167,6 +3172,7 @@ knobas-source-gitea	test/live_gitea	a_seeded_commits_view_carries_the_diff_the_s
 knobas-source-gitea	test/live_gitea	a_seeded_pull_requests_view_carries_its_files_commits_and_discussion
 knobas-source-gitea	test/live_gitea	a_synced_commit_carries_its_repo_and_is_found_by_under
 knobas-source-gitea	test/live_gitea	a_ticket_is_filed_moved_and_commented_on_through_its_writes
+knobas-source-gitea	test/live_gitea	a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why
 knobas-source-gitea	test/live_gitea	an_op_gitea_does_not_declare_never_reaches_the_real_server
 knobas-source-gitea	test/live_gitea	approving_your_own_pull_request_is_refused_by_the_server
 knobas-source-gitea	test/live_gitea	etag_support_probe
