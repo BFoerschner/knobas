@@ -13,6 +13,7 @@ import {
   listEntities,
   listProjects,
   olderPipelineRuns,
+  owedTickets,
   pipelineSettings,
   runArtifacts,
   runLog,
@@ -168,6 +169,8 @@ export interface RunPorts extends PipelinePorts {
   projects: () => Promise<Project[]>;
   /** The run's confirmed links, either direction (`get_entity`'s `links`): the tickets filed from it (#1451). */
   links: (runId: string) => Promise<LinkEntry[]>;
+  /** The tickets filed from the run that it does not link yet (`owed_tickets`, #1953): on their way after a reload. */
+  owedTickets: (runId: string) => Promise<QueuedWrite[]>;
 }
 
 export const RUN_BRIDGE: RunPorts = {
@@ -181,6 +184,7 @@ export const RUN_BRIDGE: RunPorts = {
   download: (runId, target) => downloadRunFile(runId, target),
   projects: () => listProjects(),
   links: (runId) => getEntity(runId).then((detail) => detail.links),
+  owedTickets: (runId) => owedTickets(runId),
 };
 
 /**
