@@ -31,6 +31,12 @@
 //! payload names. Whatever cannot be read is no verdict: a page that does not
 //! answer refuses none of its writes, and a space whose permissions do not
 //! answer refuses no comment or page in it.
+//!
+//! **The remote API is deprecated.** Atlassian deprecates the JSON-RPC
+//! service `getPermissions` belongs to. Where it is turned off, or a later
+//! Confluence drops it, that read fails, so no comment or create is refused
+//! (both drawn as before) and an edit is still judged from the page's
+//! operations, with the shorter reason that names no permission.
 
 use std::collections::HashMap;
 

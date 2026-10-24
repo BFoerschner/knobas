@@ -1781,9 +1781,10 @@ pub trait Source: Send + Sync {
     /// The default answers nothing: the right answer for an adapter whose
     /// credential cannot be narrower than the adapter (a mock, Uptime Kuma,
     /// whose account holds every right), and what every WASM guest answers.
-    /// TeamCity overrides it; Jira, Confluence and Gitea answer nothing until
-    /// they do (#2052, #2053, #2054). A failed read is an error, and the
-    /// caller reads it as no verdict, as it reads nothing.
+    /// An adapter whose credential can be narrower overrides it with a read of
+    /// its own grants; an adapter that does not override it answers nothing.
+    /// A failed read is an error, and the caller reads it as no verdict, as it
+    /// reads nothing.
     async fn refused_writes(
         &self,
         asks: &[grants::WriteAsk],
