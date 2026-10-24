@@ -32,7 +32,7 @@
   import { inbox as sharedInbox, pickedMorning, snoozePresets, tomorrowValue, type Inbox } from "../../inbox/inbox.svelte";
   import { followWrite } from "../../shell/follow-write";
   import { toastQueued } from "../../shell/queued-toast";
-  import { askRefused, refusalOf, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -144,16 +144,7 @@
       ),
     ),
   );
-  $effect(() => {
-    const asks = JSON.parse(asked) as WriteAsk[];
-    let live = true;
-    void askRefused(asks, ports.refusedWrites).then((answer) => {
-      if (live) refused = answer;
-    });
-    return () => {
-      live = false;
-    };
-  });
+  $effect(() => askInto(JSON.parse(asked) as WriteAsk[], ports.refusedWrites, (answer) => (refused = answer)));
   const refusal = (entry: InboxEntry, action: string) => refusalOf(refused, entry.item.entity_id, action);
 
   $effect(() => {
@@ -257,13 +248,11 @@
             <a class="tf-btn tf-sm" href={open.href}>{open.label}</a>
           {/if}
           {#each rowActions(entry) as action (action)}
-            {@const refusedWhy = refusal(entry, action)}
             <button
               type="button"
               class="tf-btn tf-sm"
               class:tf-ghost={action === "done"}
-              aria-disabled={refusedWhy !== null ? "true" : undefined}
-              title={refusedWhy ?? undefined}
+              {...refusedAttrs(refusal(entry, action))}
               aria-expanded={action === "snooze" ? snoozing === item.key : undefined}
               onclick={() => press(entry, action)}>{labelOf(action)}</button
             >

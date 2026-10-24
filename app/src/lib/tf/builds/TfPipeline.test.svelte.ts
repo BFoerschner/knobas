@@ -1031,3 +1031,16 @@ test("a parameter the credential cannot change offers Change… disabled saying 
   expect(target.querySelector('input[aria-label^="New default"], select[aria-label^="New default"]')).toBeNull();
   expect(button("Run…")!.getAttribute("aria-disabled")).toBeNull();
 });
+
+test("a pipeline whose settings name no parameter op is asked about its runs alone (#2040)", async () => {
+  const asked: string[] = [];
+  draw([PIPELINE.entity_id], "PAY-231", {
+    settings: () => Promise.resolve({ ...SETTINGS, parameter_write_op: null }),
+    refusedWrites: (asks) => {
+      asked.push(JSON.stringify(asks));
+      return Promise.resolve([]);
+    },
+  });
+  await settle();
+  expect(asked).toEqual([JSON.stringify([{ entity: PIPELINE.entity_id, op: "run_build" }])]);
+});

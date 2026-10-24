@@ -33,7 +33,7 @@
   import type { PipelineRow, PipelineSettings, RunRow, Setting } from "../../ipc/entity";
   import type { SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
-  import { askRefused, refusalOf, type RefusedWrite } from "../../shell/refused-writes";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import { settingPayload } from "../../detail/view/settings";
   import FilterBar from "../filter/FilterBar.svelte";
@@ -71,6 +71,7 @@
     pipelineWord,
     pipelineSource,
     QUEUED_RUN,
+    RUN_OP,
     queuedRunRows,
     queuedRunWhat,
     resultWord,
@@ -130,27 +131,20 @@
     untrack(() => open(wanted));
   });
 
-  /** What the source's credential cannot write on this pipeline (#2040), asked once per pipeline. */
+  /**
+   * What the source's credential cannot write on this pipeline (#2040): a run, and the op its
+   * settings name for a parameter. Asked once the settings are read, so once per pipeline.
+   */
   let refused = $state<RefusedWrite[]>([]);
+  const parameterOp = $derived(settings?.parameter_write_op ?? null);
   $effect(() => {
-    const wanted = id;
-    let live = true;
     refused = [];
-    void askRefused(
-      [
-        { entity: wanted, op: "run_build" },
-        { entity: wanted, op: "set_parameter" },
-      ],
-      ports.refusedWrites,
-    ).then((answer) => {
-      if (live) refused = answer;
-    });
-    return () => {
-      live = false;
-    };
+    if (!settingsRead) return;
+    const asks = [{ entity: id, op: RUN_OP }, ...(parameterOp !== null ? [{ entity: id, op: parameterOp }] : [])];
+    return askInto(asks, ports.refusedWrites, (answer) => (refused = answer));
   });
-  const cannotRun = $derived(refusalOf(refused, id, "run_build"));
-  const cannotChange = $derived(refusalOf(refused, id, "set_parameter"));
+  const cannotRun = $derived(refusalOf(refused, id, RUN_OP));
+  const cannotChange = $derived(parameterOp === null ? null : refusalOf(refused, id, parameterOp));
 
   function open(wanted: string) {
     const mine = ++token;
@@ -448,24 +442,21 @@
     <button
       type="button"
       class="tf-btn tf-primary"
-      aria-disabled={cannotRun !== null ? "true" : undefined}
-      title={cannotRun ?? undefined}
+      {...refusedAttrs(cannotRun)}
       onclick={() => runDialog(null)}>Run…</button
     >
     {#if jobBranch !== null}
       <button
         type="button"
         class="tf-btn"
-        aria-disabled={cannotRun !== null ? "true" : undefined}
-        title={cannotRun ?? undefined}
+        {...refusedAttrs(cannotRun)}
         onclick={() => runOn(jobBranch)}>Run on <span class="tf-mono">{jobBranch}</span></button
       >
     {:else}
       <button
         type="button"
         class="tf-btn"
-        aria-disabled={cannotRun !== null ? "true" : undefined}
-        title={cannotRun ?? undefined}
+        {...refusedAttrs(cannotRun)}
         onclick={() => runOn(null)}
         >Run on {#if fallback !== null}<span class="tf-mono">{fallback}</span>{:else}the default branch{/if}</button
       >
@@ -598,8 +589,7 @@
                     <button
                       type="button"
                       class="tf-btn tf-sm tf-ghost"
-                      aria-disabled={cannotRun !== null ? "true" : undefined}
-                      title={cannotRun ?? undefined}
+                      {...refusedAttrs(cannotRun)}
                       onclick={() => runDialog(run)}>Run again…</button
                     >
                   {/if}
@@ -684,8 +674,7 @@
                   <button
                     type="button"
                     class="tf-btn tf-sm"
-                    aria-disabled={cannotChange !== null ? "true" : undefined}
-                    title={cannotChange ?? undefined}
+                    {...refusedAttrs(cannotChange)}
                     onclick={() => change(setting)}>Change…</button
                   >
                 {/if}

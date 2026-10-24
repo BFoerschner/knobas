@@ -831,7 +831,7 @@ pub async fn reachable_transitions(
 
 /// The writes among `asks` their sources' credentials cannot make, each with
 /// its reason (#2040): what a surface that draws a write from the template
-/// `write_ops` asks before drawing it enabled.
+/// `write_ops` asks after drawing it, to draw the refused ones disabled.
 ///
 /// Each ask goes to its entity's own source, built once for all of its asks
 /// as [`reachable_transitions`] builds it, and the sources are asked side by

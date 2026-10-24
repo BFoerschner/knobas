@@ -39,3 +39,27 @@ export function refusalOf(answer: readonly RefusedWrite[], entity: string | null
   if (entity === null) return null;
   return answer.find((refused) => refused.entity === entity && refused.op === op)?.reason ?? null;
 }
+
+/**
+ * {@link askRefused} for an `$effect`: hands the answer to `land` unless the
+ * effect ran again or its component went first, and returns the cleanup that
+ * says so: `$effect(() => askInto(asks, port, (answer) => (refused = answer)))`.
+ */
+export function askInto(
+  asks: readonly WriteAsk[],
+  read: RefusedWritesPort | undefined,
+  land: (answer: RefusedWrite[]) => void,
+): () => void {
+  let live = true;
+  void askRefused(asks, read).then((answer) => {
+    if (live) land(answer);
+  });
+  return () => {
+    live = false;
+  };
+}
+
+/** A refused write's button attributes: `aria-disabled` and the reason as its title; none where `reason` is `null`. */
+export function refusedAttrs(reason: string | null): { "aria-disabled"?: "true"; title?: string } {
+  return reason === null ? {} : { "aria-disabled": "true", title: reason };
+}

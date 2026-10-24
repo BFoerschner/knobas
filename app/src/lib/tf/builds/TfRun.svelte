@@ -39,7 +39,7 @@
   import type { PipelineRow, PipelineSettings, RunLog, RunRow, SourceView } from "../../ipc/entity";
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
-  import { askRefused, refusalOf, type RefusedWrite } from "../../shell/refused-writes";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import { settleQueued } from "../queued.svelte";
   import { commitHash, fileHash } from "../repo/repo";
@@ -57,6 +57,7 @@
     staleLine,
     syncWith,
     triggerLabel,
+    RUN_OP,
   } from "./pipeline";
   import { RUN_BRIDGE, listenSynced, type RunPorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
@@ -142,17 +143,10 @@
   /** What the source's credential cannot write on the run's pipeline (#2040), asked once per pipeline. */
   let refused = $state<RefusedWrite[]>([]);
   $effect(() => {
-    const wanted = pipelineId;
-    let live = true;
     refused = [];
-    void askRefused([{ entity: wanted, op: "run_build" }], ports.refusedWrites).then((answer) => {
-      if (live) refused = answer;
-    });
-    return () => {
-      live = false;
-    };
+    return askInto([{ entity: pipelineId, op: RUN_OP }], ports.refusedWrites, (answer) => (refused = answer));
   });
-  const cannotRun = $derived(refusalOf(refused, pipelineId, "run_build"));
+  const cannotRun = $derived(refusalOf(refused, pipelineId, RUN_OP));
   function runAgain() {
     if (cannotRun === null) dialog = true;
   }
@@ -426,8 +420,7 @@
         <button
           type="button"
           class="tf-btn"
-          aria-disabled={cannotRun !== null ? "true" : undefined}
-          title={cannotRun ?? undefined}
+          {...refusedAttrs(cannotRun)}
           onclick={runAgain}>Run again with changes…</button
         >
       {:else}
@@ -597,8 +590,7 @@
           <button
             type="button"
             class="tf-btn tf-runagain"
-            aria-disabled={cannotRun !== null ? "true" : undefined}
-            title={cannotRun ?? undefined}
+            {...refusedAttrs(cannotRun)}
             onclick={runAgain}>Run again with these…</button
           >
         {/if}
