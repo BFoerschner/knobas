@@ -38,10 +38,11 @@
    * is one object, new on every change to `ctx`, and every prop read hangs on
    * it: a tab switch would re-run a page's read keyed on a prop that stayed,
    * as the job's `segment`. Here a prop tells its readers only when its own
-   * value changed. The keys are read once per page; `props` returns a fixed set.
+   * value changed (`===`: an array such as `rest`, new per route, still tells
+   * them). The keys are read once per page; `props` returns a fixed set.
    */
-  function apart<T extends Record<string, unknown>>(read: () => T): T {
-    const out = {} as T;
+  function propSignals(read: () => Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
     for (const key of Object.keys(untrack(read))) {
       const value = $derived(read()[key]);
       Object.defineProperty(out, key, { get: () => value, enumerable: true });
@@ -50,7 +51,7 @@
   }
   const pageProps = $derived.by((): Record<string, unknown> => {
     const entry = page;
-    return entry ? apart(() => entry.props(ctx)) : {};
+    return entry ? propSignals(() => entry.props(ctx)) : {};
   });
 </script>
 

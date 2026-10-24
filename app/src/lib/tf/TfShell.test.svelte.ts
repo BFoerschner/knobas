@@ -866,7 +866,8 @@ test("the Day tab's open rows offer Add to the job last opened, found by its key
   expect(addToButton()?.textContent?.trim()).toBe("Add to PAY-231");
 });
 
-test("a timer start and stop with a job last opened re-reads no ticket for the nav job (#1687)", async () => {
+/** The job ports, counting the ticket reads the nav job and the job page make (#1687). */
+function countingPorts(): { reads: { listSources: number; getEntity: number }; jobPorts: JobPorts } {
   const reads = { listSources: 0, getEntity: 0 };
   const jobPorts: JobPorts = {
     ...JOB_PORTS,
@@ -879,6 +880,11 @@ test("a timer start and stop with a job last opened re-reads no ticket for the n
       return JOB_PORTS.getEntity(id);
     },
   };
+  return { reads, jobPorts };
+}
+
+test("a timer start and stop with a job last opened re-reads no ticket for the nav job (#1687)", async () => {
+  const { reads, jobPorts } = countingPorts();
   const timer = $state<{ current: RunningTimer | null; elapsed: string | null }>({ current: null, elapsed: null });
   start({ jobPorts, timer });
   await at("#/job/PAY-231");
@@ -894,18 +900,7 @@ test("a timer start and stop with a job last opened re-reads no ticket for the n
 });
 
 test("a tab switch on a job page re-reads no ticket for the nav job; another job reads once (#1987)", async () => {
-  const reads = { listSources: 0, getEntity: 0 };
-  const jobPorts: JobPorts = {
-    ...JOB_PORTS,
-    listSources: () => {
-      reads.listSources += 1;
-      return JOB_PORTS.listSources();
-    },
-    getEntity: (id) => {
-      reads.getEntity += 1;
-      return JOB_PORTS.getEntity(id);
-    },
-  };
+  const { reads, jobPorts } = countingPorts();
   start({ jobPorts });
   await at("#/job/PAY-231");
   const opened = { ...reads };
@@ -913,7 +908,7 @@ test("a tab switch on a job page re-reads no ticket for the nav job; another job
 
   await at("#/job/PAY-231/conversation");
   await at("#/job/PAY-231");
-  expect(reads, "a tab switch on the same job costs no IPC").toEqual(opened);
+  expect(reads, "a tab switch on the same job reads no ticket").toEqual(opened);
 
   await at("#/job/PAY-232");
   await at("#/job/PAY-232/conversation");
