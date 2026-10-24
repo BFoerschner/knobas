@@ -551,7 +551,7 @@
    */
   function addressOf(row: LauncherRow): string | null {
     switch (row.kind) {
-      // A ticket whose key another source's row holds opens by its source (#1476).
+      // A ticket opens by its entity id, which names its source (#1476, #1977).
       case "hit":
         return entityAddress(row.hit.kind, row.hit.entity_id, row.hit.title);
       case "recent":
