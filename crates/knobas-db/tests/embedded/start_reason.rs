@@ -4,7 +4,7 @@
 //! `pg_ctl start` prints only *waiting for server to start.... stopped
 //! waiting*; the server writes why it stopped to `<data_dir>/start.log`.
 //! Each test removes `pg_hba.conf`, which the server refuses to start without
-//! (*could not load pg_hba.conf*) while `pg_ctl` has nothing to say about it,
+//! (*could not load …/pg_hba.conf*) while `pg_ctl` has nothing to say about it,
 //! and drives one of the paths that start a server.
 
 use knobas_db::{DbConfig, EmbeddedDb};
