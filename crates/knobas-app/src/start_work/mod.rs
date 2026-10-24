@@ -90,6 +90,18 @@ pub enum Landing {
     /// nowhere until the user chooses, in the queue's own panel, where both
     /// versions are shown side by side.
     Held { detail: Option<String> },
+    /// A **held write** knobas sent and `source` (its display name) never
+    /// answered (#1125): it may already be there, so it is on its way until
+    /// the user, having checked the source, sends it again or discards it in
+    /// the queue's panel (Björn's #1966 ruling; #1973). `detail` is what the
+    /// transport said.
+    Unconfirmed {
+        source: String,
+        detail: Option<String>,
+    },
+    /// A **held write** whose source the user turned off (#204): the remedy is
+    /// re-enabling the source, not a choice between versions.
+    SourceOff,
     /// The source refused this write, in its own words.
     Refused { detail: String },
     /// The row is gone: discarded, or never readable.
@@ -265,6 +277,14 @@ pub trait Steps: Send + Sync {
 ///   terminal until the user acts, in the write queue's own panel, which is
 ///   where both versions are shown side by side. Reporting it as merely waiting
 ///   would leave the user watching a step that is not going to move.
+/// * **Except a send never answered.** It may already be at the source, so it
+///   is *on its way* (Björn's #1966 ruling) and the step is `queued`: a failed
+///   step's wording invites a retry of a transition that may have landed
+///   (#1973). Its retry re-reads the write and sends nothing while the write
+///   is open, so once the user sends it again from the queue, the retry is what
+///   moves the step on.
+/// * **Each hold says which it is** (CONTEXT.md, *Held write*): a target that
+///   changed, a source turned off, a send never answered. Never collapsed.
 /// * **Refused carries the source's own sentence**, so a permanent failure is
 ///   reportable rather than merely counted.
 #[must_use]
@@ -282,6 +302,27 @@ pub fn outcome_of(landing: &Landing) -> (StepOutcome, Option<String>) {
                          -- decide it in the write queue"
                     .to_owned(),
             }),
+        ),
+        Landing::Unconfirmed { source, detail } => {
+            let check = format!(
+                "sent, but {source} did not answer, so it may have arrived -- check {source}, \
+                 then send it again or discard it in the write queue"
+            );
+            (
+                StepOutcome::Queued,
+                Some(match detail {
+                    Some(said) => format!("{check}: {said}"),
+                    None => check,
+                }),
+            )
+        }
+        Landing::SourceOff => (
+            StepOutcome::Failed,
+            Some(
+                "its source is turned off, so the write is held -- re-enable it in Sources \
+                 to send it, or discard it in the write queue"
+                    .to_owned(),
+            ),
         ),
         Landing::Refused { detail } => (StepOutcome::Failed, Some(detail.clone())),
         Landing::Withdrawn => (
@@ -1179,6 +1220,38 @@ mod tests {
         );
     }
 
+    /// A send its source never answered may already be there (#1125), so it is
+    /// **on its way** (Björn's #1966 ruling), not stopped: the step is queued,
+    /// which offers no second send, and says to check the source, then send it
+    /// again or discard it. Never "the target changed" (#1973).
+    #[test]
+    fn a_send_never_answered_leaves_the_step_queued_and_says_to_check_the_source() {
+        let (outcome, detail) = outcome_of(&Landing::Unconfirmed {
+            source: "Jira".to_owned(),
+            detail: Some("timed out after 30s".to_owned()),
+        });
+        assert_eq!(outcome, StepOutcome::Queued);
+        let detail = detail.expect("a reason");
+        assert_eq!(
+            detail,
+            "sent, but Jira did not answer, so it may have arrived -- check Jira, \
+             then send it again or discard it in the write queue: timed out after 30s"
+        );
+        assert!(!detail.contains("changed"), "{detail}");
+    }
+
+    /// A hold because the user turned the source off is not a target that
+    /// changed either (#204): the remedy is the source toggle, and the step
+    /// says so. It still stops the step, as every other hold does.
+    #[test]
+    fn a_hold_for_a_source_turned_off_says_so_and_stops_the_step() {
+        let (outcome, detail) = outcome_of(&Landing::SourceOff);
+        assert_eq!(outcome, StepOutcome::Failed);
+        let detail = detail.expect("a reason");
+        assert!(detail.contains("turned off"), "{detail}");
+        assert!(!detail.contains("changed"), "{detail}");
+    }
+
     /// A refusal carries the source's own sentence up to the stepper, so a
     /// permanent failure is reportable rather than merely counted.
     #[test]
@@ -1197,6 +1270,11 @@ mod tests {
             Landing::Sent,
             Landing::Waiting { detail: None },
             Landing::Held { detail: None },
+            Landing::Unconfirmed {
+                source: String::new(),
+                detail: None,
+            },
+            Landing::SourceOff,
             Landing::Refused {
                 detail: String::new(),
             },

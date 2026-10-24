@@ -260,12 +260,43 @@ impl QueuedWrite {
     /// #1966), where a drift hold was never sent and offers the create again.
     #[must_use]
     pub fn may_have_landed(&self) -> bool {
-        self.state == WriteState::Held
-            && self
-                .held_snapshot
-                .as_ref()
-                .is_some_and(|held| held.get("unconfirmed").is_some())
+        self.unconfirmed_send().is_some()
     }
+
+    /// What a write held as unconfirmed names, read back from the held side
+    /// [`unconfirmed`] wrote: the source to check, by its display name, and
+    /// what the transport said. `None` for any other row.
+    ///
+    /// A read of knobas' own shape, so ADR-0007 binds it, and here is its one
+    /// place. It **misses**: a field absent or not a string is `None`, never a
+    /// guess. A held side without the `unconfirmed` key reads as no unconfirmed
+    /// send, so a drifted key would draw the hold as a drift and stop its
+    /// start-work step -- visible, and never a second send, since a retry
+    /// re-reads the write and sends nothing while it is open (#1973).
+    /// `start_work::queue`'s `each_reason_a_write_is_held_is_its_own_landing`
+    /// pins the round trip through [`unconfirmed`].
+    #[must_use]
+    pub fn unconfirmed_send(&self) -> Option<UnconfirmedSend<'_>> {
+        if self.state != WriteState::Held {
+            return None;
+        }
+        let named = self.held_snapshot.as_ref()?.get("unconfirmed")?;
+        let text = |key: &str| named.get(key).and_then(serde_json::Value::as_str);
+        Some(UnconfirmedSend {
+            source: text("source"),
+            detail: text("detail"),
+        })
+    }
+}
+
+/// [`QueuedWrite::unconfirmed_send`]'s answer: what the held side of a send
+/// never answered (#1125) names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnconfirmedSend<'a> {
+    /// The source a person should check, by its display name.
+    pub source: Option<&'a str>,
+    /// What the transport said.
+    pub detail: Option<&'a str>,
 }
 
 /// Queue one write, returning the row that was written.

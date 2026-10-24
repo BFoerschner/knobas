@@ -152,8 +152,10 @@ pub async fn follow_merges(
         let payload = super::plan::transition(&ticket, status);
         match steps.dispatch(&payload).await {
             // Queued or delivered are both "knobas has followed this merge".
-            // The queue is what makes the second one eventually true.
-            Ok((_, Landing::Sent | Landing::Waiting { .. })) => {
+            // The queue is what makes the second one eventually true. A send
+            // never answered may have landed, so it is on its way too (#1966,
+            // #1973) until the user sends it again or discards it.
+            Ok((_, Landing::Sent | Landing::Waiting { .. } | Landing::Unconfirmed { .. })) => {
                 moved += 1;
                 // The queue's own line says a transition was queued; this one
                 // says *why* -- the merged pull request -- which is the half

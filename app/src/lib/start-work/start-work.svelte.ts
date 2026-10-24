@@ -16,10 +16,13 @@
  *
  * ## What `queued` means on screen, and why it is neither of the other two
  *
- * A queued step's write is with the source's queue and will go. Drawn as a
- * failure it invites a retry of something already on its way; drawn as a
- * success it tells the reader work happened that has not. It gets its own
- * word, which is what {@link demandOf} is for.
+ * A queued step's write is with the source's queue and will go, or it was sent
+ * and never answered, so it may already be there and waits for the reader to
+ * check the source, then send it again or discard it in the write queue
+ * (#1973). Either way it is on its way: drawn as a failure it invites a retry of
+ * something that may have landed; drawn as a success it tells the reader work
+ * happened that has not been confirmed. It gets its own word, which is what
+ * {@link demandOf} is for.
  */
 import { ipcErrorMessage, isIpcError } from "../ipc";
 import {
