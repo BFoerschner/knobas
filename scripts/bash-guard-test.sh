@@ -184,6 +184,21 @@ says "$rm_rule" 'rm -f ${T}/*.png'
 check pass 'echo ${x/<<EOF/y} $[1<<2]'
 check pass 'echo ${#x} # cd x && y'
 
+# a script a shell reads on stdin, a command `find -exec` runs, and a `case` in a substitution are read
+says "$cd_rule" $'bash <<\'EOF\'\ncd /tmp && ls\nEOF'
+says "$cd_rule" $'sh -s x <<EOF\ncd /tmp\nls\nEOF'
+says "$cd_rule" "bash <<<'cd /tmp && ls'"
+says "$write_rule" 'bash <<< "echo x > .git/info/exclude"'
+says "$cd_rule" "find . -exec sh -c 'cd /tmp && ls' _ {} \\;"
+says "$rm_rule" 'find . -type d -execdir rm -f *.png +'
+says "$cd_rule" 'echo $(case a in a) cd /tmp && ls;; esac)'
+says "$cd_rule" 'echo $(case a in (a|b) ls;; c) cd /tmp && ls;; esac)'
+check pass $'bash scripts/x.sh <<\'EOF\'\ncd /tmp && ls\nEOF'
+check pass $'cat <<\'EOF\' | grep x\ncd /tmp && ls\nEOF'
+check pass "bash <<<'ls; pwd'"
+check pass 'find . -name "*.png" -exec ls {} + -print'
+check pass 'echo $(case $x in a) echo a;; esac) && ls'
+
 # shell configuration
 check refuse 'echo export X=1 >> ~/.bashrc'
 check refuse 'cp /tmp/zshrc ~/.zshrc'
