@@ -277,6 +277,9 @@ test("Code asks every read for the code host role with its own kinds, and draws 
   expect([...target.querySelectorAll(".tf-tabs a")].map(text)[0]).toBe(`Repositories ${REPOS.length + 1}`);
 });
 
+// Its own budget: drawing past the 1000-row page is the point, and 1,200 rows
+// in jsdom took 1.6 s on a Mac but 10 s and 17 s on the `check.yml` runner,
+// where vitest shares two cores with cargo (#2035).
 test("a mirror of more than 1000 repositories is read on to its total, not cut at 1000 (#1825)", async () => {
   const many = Array.from({ length: 1200 }, (_, n) => row(`gitea:o/r${n}`, "repo", `o/r${n}`));
   const offsets: number[] = [];
@@ -293,4 +296,4 @@ test("a mirror of more than 1000 repositories is read on to its total, not cut a
   );
   expect(offsets).toEqual([0, 1000]);
   expect(target.querySelectorAll("tbody tr").length).toBeGreaterThan(1000);
-});
+}, 60_000);
