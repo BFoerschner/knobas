@@ -20,6 +20,7 @@ mod proposal_evidence;
 mod reach;
 mod similar_text_incremental;
 mod similar_text_perf;
+mod start_work;
 mod stores;
 mod suggest_plans;
 mod suggestions;

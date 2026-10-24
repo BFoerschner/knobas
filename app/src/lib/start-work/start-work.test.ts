@@ -16,6 +16,7 @@ import type { StartWorkStep } from "../ipc/entity";
 let peeked: StartWorkStep[] = [];
 let peeks = 0;
 let releaseRun: (steps: StartWorkStep[]) => void = () => {};
+let retried: () => Promise<StartWorkStep[]> = () => Promise.resolve([]);
 
 vi.mock("../ipc/entity", () => ({
   startWorkFlow: () => {
@@ -26,12 +27,12 @@ vi.mock("../ipc/entity", () => ({
     new Promise<StartWorkStep[]>((resolve) => {
       releaseRun = resolve;
     }),
-  startWorkRetry: () => Promise.resolve([]),
+  startWorkRetry: () => retried(),
   startWorkSkip: () => Promise.resolve([]),
   startWorkAmend: () => Promise.resolve([]),
 }));
 
-const { createStartWork, edited } = await import("./start-work.svelte");
+const { createStartWork, editable, edited } = await import("./start-work.svelte");
 
 function one(id: number, outcome: StartWorkStep["outcome"]): StartWorkStep {
   return {
@@ -51,6 +52,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   peeked = [];
   peeks = 0;
+  retried = () => Promise.resolve([]);
 });
 
 afterEach(() => {
@@ -120,4 +122,23 @@ test("edited replaces one key of the op, so the repository picker's amendment ca
   const [tag] = Object.keys(amended);
   expect(amended[tag!]!.entity).toBe("gitea:other");
   expect(Object.keys(amended)).toHaveLength(1);
+});
+
+test("only a pending or a failed step is the reader's to edit, as the backend edits no other (#1707)", () => {
+  const outcomes = ["pending", "running", "succeeded", "queued", "failed", "skipped"] as const;
+  expect(outcomes.filter(editable)).toEqual(["pending", "failed"]);
+});
+
+test("a refusal of a step that moved on re-reads the flow, so the stale row is redrawn with the refusal (#1707)", async () => {
+  const sw = createStartWork("jira:PAY-231");
+  peeked = [one(1, "failed")];
+  await sw.load(null);
+  // The step landed underneath the stepper, which still draws it failed.
+  peeked = [one(1, "succeeded")];
+  retried = () =>
+    Promise.reject({ code: "conflict", message: "the create_branch step is succeeded now, so it cannot be retried", source_id: null });
+  await sw.retry(1);
+  expect(sw.error).toBe("the create_branch step is succeeded now, so it cannot be retried");
+  expect(sw.steps.map((step) => step.outcome)).toEqual(["succeeded"]);
+  expect(sw.following).toBe(false);
 });

@@ -299,13 +299,25 @@ pub async fn get(pool: &PgPool, id: i64) -> Result<Option<FlowStep>, CoreError> 
     Ok(row)
 }
 
-/// Record what became of a step.
+/// Record what became of a step, if it is still in one of the outcomes `from`
+/// names.
+///
+/// **`from` is the guard** (#1707), the write queue's transition discipline
+/// carried over: each caller names the outcomes its move may leave, and a step
+/// that moved on between the caller's read and this write is left as it landed.
+/// Without it a stale caller -- a retry from a stepper still drawing the step
+/// failed -- returned a succeeded step to pending, and the next advance ran it
+/// again at the source.
+///
+/// `None` if no step carries `id` or the step is in none of the outcomes in
+/// `from`.
 ///
 /// `write_id` is the `knobas.write_queue` row the step dispatched. It is
 /// **written once and never cleared**: `coalesce` keeps the id a later
 /// settlement does not carry, because the write a step made is a fact about
 /// that step whatever its outcome ends up being, and it is what a retry reads
-/// to decide whether a second write is needed at all.
+/// to decide whether a second write is needed at all. A settlement the guard
+/// refuses records no write; [`record_write`] is how its caller keeps it.
 ///
 /// # Errors
 ///
@@ -313,15 +325,17 @@ pub async fn get(pool: &PgPool, id: i64) -> Result<Option<FlowStep>, CoreError> 
 pub async fn settle(
     pool: &PgPool,
     id: i64,
+    from: &[StepOutcome],
     outcome: StepOutcome,
     write_id: Option<i64>,
     detail: Option<&str>,
 ) -> Result<Option<FlowStep>, CoreError> {
+    let from: Vec<&str> = from.iter().map(|outcome| outcome.as_str()).collect();
     let row = sqlx::query_as::<_, FlowStep>(concat!(
         "update knobas.start_work_step
             set outcome = $2, write_id = coalesce($3, write_id),
                 detail = $4, updated_at = now()
-          where id = $1
+          where id = $1 and outcome = any($5)
          returning ",
         step_columns!()
     ))
@@ -329,9 +343,31 @@ pub async fn settle(
     .bind(outcome.as_str())
     .bind(write_id)
     .bind(detail)
+    .bind(from)
     .fetch_optional(pool)
     .await?;
     Ok(row)
+}
+
+/// Keep the write a step dispatched, whatever outcome the step is in now.
+///
+/// For a landing [`settle`] refused because the step moved on while the write
+/// was out -- interrupted underneath a send. The outcome is the other writer's;
+/// the write is still this step's, and forgetting it is how a retry comes to
+/// send a second one.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the statement fails.
+pub async fn record_write(pool: &PgPool, id: i64, write_id: i64) -> Result<(), CoreError> {
+    sqlx::query(
+        "update knobas.start_work_step set write_id = $2, updated_at = now() where id = $1",
+    )
+    .bind(id)
+    .bind(write_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// Every step stored as [`Running`](StepOutcome::Running), across all tickets.
@@ -383,7 +419,13 @@ pub async fn interrupt(pool: &PgPool, id: i64, detail: &str) -> Result<bool, Cor
 /// happened, and forgetting it is how a retry comes to make a second object at
 /// the source.
 ///
-/// `None` if no step carries `id`.
+/// Only a [`Pending`](StepOutcome::Pending) or [`Failed`](StepOutcome::Failed)
+/// step is re-proposed (#1707). Every other outcome has a write that landed or
+/// is still open, or is a decision already made, and returning it to pending
+/// would have the next advance run it at the source a second time.
+///
+/// `None` if no step carries `id`, or the step is in any other outcome -- the
+/// answer a caller whose read went stale is given.
 ///
 /// # Errors
 ///
@@ -396,7 +438,7 @@ pub async fn repropose(
     let row = sqlx::query_as::<_, FlowStep>(concat!(
         "update knobas.start_work_step
             set payload = $2, outcome = 'pending', detail = null, updated_at = now()
-          where id = $1
+          where id = $1 and outcome in ('pending', 'failed')
          returning ",
         step_columns!()
     ))
