@@ -2676,7 +2676,7 @@ async fn add_label_offers_the_organisations_labels_too() {
     let action = labelled(&view, "Add label…");
     let disabled = action.disabled.clone().unwrap_or_default();
     assert!(
-        disabled.starts_with("Could not read this repository's labels"),
+        disabled.starts_with("Could not read its organisation's labels"),
         "{action:#?}"
     );
 }

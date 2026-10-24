@@ -41,20 +41,20 @@ pub(super) async fn read(
     repo: &str,
 ) -> Result<Vec<Label>, String> {
     let client = &source.client;
-    let refused = |error: SourceError, what, scope| {
+    let reason = |error: SourceError, what, scope| {
         grants::unread(&error, what, scope)
-            .unwrap_or_else(|| format!("Could not read this repository's labels: {error}"))
+            .unwrap_or_else(|| format!("Could not read {what}: {error}"))
     };
     let own = async {
         all_pages(|page| client.labels_as(owner, repo, page))
             .await
-            .map_err(|error| refused(error, "this repository's labels", grants::READ_ISSUE))
+            .map_err(|error| reason(error, "this repository's labels", grants::READ_ISSUE))
     };
     let org = async {
         match all_pages(|page| client.org_labels_as(owner, page)).await {
             Err(error) if error.status() == Some(404) => Ok(Vec::new()),
             labels => labels.map_err(|error| {
-                refused(
+                reason(
                     error,
                     "its organisation's labels",
                     grants::READ_ORGANIZATION,
