@@ -81,8 +81,9 @@ export const RESETS: Record<string, () => Promise<void>> = {
 export const NOT_YET_RESET: readonly string[] = [];
 
 /**
- * Stores the source scan cannot see, because they live outside a store file
- * or a component. Each must still be a key of {@link RESETS}.
+ * Stores the source scan cannot see: it reads store files (`.svelte.ts`, and
+ * `view-read.ts`) and components, not other plain `.ts` files. Each must still
+ * be a key of {@link RESETS}.
  */
 export const UNSCANNED: readonly string[] = ["shell/follow-write.ts#shared"];
 
