@@ -21,8 +21,8 @@
   release that passes opens *Install <name>?*, which names its version, the
   roles it claims, every host it may reach (#1203: a fixed host as written, a
   template by the setting it is read from, since no source exists yet) and
-  the limits it asks for. Only its *Install* installs, held to the artifact
-  that was shown; *Cancel* leaves nothing behind. An installed adapter joins
+  the limits it asks for. Only its *Install* installs, held to the release
+  that was shown (its artifact, hosts and limits); *Cancel* leaves nothing behind. An installed adapter joins
   the radios, chosen, so its generated form is there to fill.
 
   The rooms dialog's five steps are one page here, as prototype-6 draws it.
@@ -172,7 +172,7 @@
     confirming = null;
     installing = "installing";
     try {
-      const answer = await ports.installAdapter(asked.input, asked.preview.artifact_sha256);
+      const answer = await ports.installAdapter(asked.input, asked.preview.confirm_sha256);
       const rows = await ports.listAdapters();
       adapters = rows;
       const row = rows.find((adapter) => adapter.adapter_kind === answer.adapter_kind);

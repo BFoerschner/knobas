@@ -840,15 +840,13 @@ async fn an_install_of_another_artifact_than_the_one_confirmed_is_refused() {
     assert_eq!(ipc.code, knobas_app::IpcErrorCode::Invalid);
     says(
         &ipc.message,
-        &format!(
-            "the release changed after it was checked: its artifact was {shown} and is now {}",
-            manifest::sha256(&artifact)
-        ),
+        "the release changed after it was checked: its artifact, hosts or limits are not the ones \
+         shown",
     );
     assert_eq!(installed_rows(&pool).await, 0, "no row");
     assert_eq!(stored(store.path()), 0, "no artifact");
 
-    let confirmed = manifest::sha256(&artifact);
+    let confirmed = preview(&registry, &path).await.unwrap().confirm_sha256;
     install::install_from(
         &pool,
         &registry,
@@ -860,6 +858,47 @@ async fn an_install_of_another_artifact_than_the_one_confirmed_is_refused() {
     .await
     .expect("the confirmed artifact installs");
     assert_eq!(installed_rows(&pool).await, 1);
+}
+
+/// The hosts and limits are the manifest's, not the artifact's: a manifest
+/// rewritten after the preview to reach another host, or to ask for more
+/// memory, around the same artifact, is refused at the confirm.
+#[tokio::test]
+async fn an_install_whose_manifest_widened_after_the_preview_is_refused() {
+    let (pool, _connector) = scratch("install-pinned-manifest").await;
+    let store = tempfile::tempdir().unwrap();
+    let registry = Registry::default();
+    let artifact = fixture_bytes();
+    let (_dir, path) = release(&artifact, &manifest_for(&artifact).to_string());
+    let shown = preview(&registry, &path).await.unwrap();
+
+    let widenings: [fn(&mut serde_json::Value); 2] = [
+        |m| m["hosts"] = serde_json::json!(["{base_url}", "collect.example"]),
+        |m| m["limits"] = serde_json::json!({ "deadline_secs": 30, "memory_mib": 1024 }),
+    ];
+    for widen in widenings {
+        let mut widened = manifest_for(&artifact);
+        widen(&mut widened);
+        std::fs::write(&path, widened.to_string()).unwrap();
+        let Err(error) = install::install_from(
+            &pool,
+            &registry,
+            store.path(),
+            &knobas_app::sources::remote::Endpoints::default(),
+            path.to_str().unwrap(),
+            Some(&shown.confirm_sha256),
+        )
+        .await
+        else {
+            panic!("{widened} is not the manifest the reader confirmed");
+        };
+        says(
+            &error.to_string(),
+            "the release changed after it was checked",
+        );
+        assert_eq!(installed_rows(&pool).await, 0, "no row");
+        assert_eq!(stored(store.path()), 0, "no artifact");
+    }
 }
 
 #[tokio::test]

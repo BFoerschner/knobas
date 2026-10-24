@@ -110,7 +110,7 @@ export interface SettingsPorts {
   addSource: (input: NewSource) => Promise<SourceSummary>;
   /** *Install an adapter* in Add a source (#1202): what it would install, shown before the confirm (#2031). */
   previewInstallAdapter: (manifest: string) => Promise<AdapterPreview>;
-  /** The install once confirmed, held to the artifact hash its preview showed. */
+  /** The install once confirmed, held to its preview's `confirm_sha256`. */
   installAdapter: (manifest: string, sha256: string) => Promise<InstalledAdapter>;
   /** *Installed adapters* under Sources (#1209, #1210). */
   listInstalledAdapters: () => Promise<AdapterStatus[]>;

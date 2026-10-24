@@ -600,6 +600,7 @@ function previewAnswer(): AdapterPreview {
     source_url: "/releases/knobas-adapter.json",
     tag: null,
     artifact_sha256: "a".repeat(64),
+    confirm_sha256: "c".repeat(64),
     hosts: ["{base_url}", "api.example.com", "{mirror}"],
     roles: [
       { role: "wasm-fixture:survey-desk", reads: [] },
@@ -799,7 +800,7 @@ test("Add a source installs an adapter from a manifest, and it joins the radios 
   await settle();
 
   // Held to the artifact the preview showed (#2031).
-  expect(p.installAdapter).toHaveBeenCalledWith("/releases/knobas-adapter.json", "a".repeat(64));
+  expect(p.installAdapter).toHaveBeenCalledWith("/releases/knobas-adapter.json", "c".repeat(64));
   expect(target.querySelectorAll('.tf-dialog[role="dialog"]')).toHaveLength(1);
   expect(dialog().querySelector('[role="status"]#tf-add-manifest-note')?.textContent?.trim()).toBe(
     "Installed Harbour surveys 0.1.0. It may reach this source's address, api.example.com and the host in its mirror setting, and no other host.",
@@ -1357,11 +1358,19 @@ function updatePreview(release: Partial<AdapterPreview> = {}): UpdatePreview {
     source_url: "https://github.test/harbour/surveys",
     tag: "v0.1.0",
     artifact_sha256: "5".repeat(64),
+    confirm_sha256: "7".repeat(64),
     hosts: ["{base_url}"],
   };
   return {
     installed,
-    release: { ...installed, tag: "v0.2.0", adapter_version: "0.2.0", artifact_sha256: "6".repeat(64), ...release },
+    release: {
+      ...installed,
+      tag: "v0.2.0",
+      adapter_version: "0.2.0",
+      artifact_sha256: "6".repeat(64),
+      confirm_sha256: "8".repeat(64),
+      ...release,
+    },
   };
 }
 
@@ -1394,7 +1403,7 @@ test("an update available is said, and nothing updates until Update is pressed (
   await settle();
   // The same hosts, roles and limits: nothing to ask, and the switch is held to what was checked (#2031).
   expect(target.querySelector('.tf-dialog[role="dialog"]')).toBeNull();
-  expect(p.updateAdapter).toHaveBeenCalledWith("wasm-fixture", "6".repeat(64));
+  expect(p.updateAdapter).toHaveBeenCalledWith("wasm-fixture", "8".repeat(64));
   expect(adaptersSection().textContent).toContain("Harbour surveys 0.2.0");
   expect(adaptersSection().textContent).not.toContain("Update available");
 });
@@ -1437,7 +1446,7 @@ test("an update that may reach more hosts or claims more roles says what changed
   await settle();
   dialogButton("Update").click();
   await settle();
-  expect(p.updateAdapter).toHaveBeenCalledExactlyOnceWith("wasm-fixture", "6".repeat(64));
+  expect(p.updateAdapter).toHaveBeenCalledExactlyOnceWith("wasm-fixture", "8".repeat(64));
   expect(adaptersSection().textContent).toContain("Harbour surveys 0.2.0");
 });
 

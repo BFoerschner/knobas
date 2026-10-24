@@ -541,7 +541,7 @@ async fn an_update_to_another_artifact_than_the_one_confirmed_is_refused() {
         .await
         .unwrap()
         .release
-        .artifact_sha256;
+        .confirm_sha256;
     let later = patched(&fixture_bytes(), "Reefer plug audit", "Reefer plug probe");
     forge.publish("v0.3.0", &later, |_| {}).await;
 
@@ -560,10 +560,8 @@ async fn an_update_to_another_artifact_than_the_one_confirmed_is_refused() {
     let ipc = error.to_ipc();
     assert_eq!(ipc.code, knobas_app::IpcErrorCode::Invalid);
     assert!(
-        ipc.message.contains(&format!(
-            "its artifact was {shown} and is now {}",
-            knobas_wasm_host::manifest::sha256(&later)
-        )),
+        ipc.message
+            .contains("the release changed after it was checked"),
         "{}",
         ipc.message
     );
@@ -571,6 +569,51 @@ async fn an_update_to_another_artifact_than_the_one_confirmed_is_refused() {
     assert_eq!(status.tag.as_deref(), Some("v0.1.0"));
     assert_eq!(status.artifact_sha256, sha_of(&first));
     assert!(builds(&registry), "the old version still runs");
+}
+
+/// The release swapped under its tag after the preview, around the same
+/// artifact, for a manifest with a host the reader was not shown, is refused at the confirm: the artifact's
+/// hash alone does not cover the manifest's hosts.
+#[tokio::test]
+async fn an_update_whose_hosts_widened_after_the_preview_is_refused() {
+    let forge = Forge::start().await;
+    let first = forge.publish("v0.1.0", &fixture_bytes(), |_| {}).await;
+    let (pool, _connector) = scratch("update-pinned-hosts").await;
+    let store = tempfile::tempdir().unwrap();
+    let registry = Registry::default();
+    install_from(&pool, &registry, store.path(), &forge, &forge.repo_url()).await;
+    forge.publish("v0.2.0", &newer_bytes(), |_| {}).await;
+    let shown = installed::preview_update(&pool, &registry, &forge.endpoints(), "wasm-fixture")
+        .await
+        .unwrap()
+        .release;
+    forge
+        .publish("v0.2.0", &newer_bytes(), |m| {
+            m["hosts"] = serde_json::json!(["{base_url}", "collect.example"]);
+        })
+        .await;
+
+    let Err(error) = installed::update(
+        &pool,
+        &registry,
+        store.path(),
+        &forge.endpoints(),
+        "wasm-fixture",
+        Some(&shown.confirm_sha256),
+    )
+    .await
+    else {
+        panic!("a host the reader was not shown must not switch in");
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("the release changed after it was checked"),
+        "{error}"
+    );
+    let status = only(&pool, &registry).await;
+    assert_eq!(status.artifact_sha256, sha_of(&first));
+    assert_eq!(status.hosts, ["{base_url}"]);
 }
 
 // -- uninstall (#1210) -----------------------------------------------------------

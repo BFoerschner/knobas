@@ -372,6 +372,11 @@ const FIXTURE_EXTERNAL: SourceDescriptor = descriptor({
 const FIXTURE_SHA = "5".repeat(64);
 const NEWER_SHA = "6".repeat(64);
 
+/** What a confirm sends back for a release (`confirm_sha256`): its artifact, hosts and limits as one string. */
+function confirmOf(artifact: string, hosts: string[]): string {
+  return `${artifact}|${hosts.join(",")}`;
+}
+
 /** What the fixture's manifest declares: its address, and a deadline it asks for. */
 const FIXTURE_HOSTS = ["{base_url}"];
 const FIXTURE_LIMITS = { deadline_secs: 60, deadline_asked: true, memory_mib: 256, memory_asked: false };
@@ -391,25 +396,29 @@ function previewFor(manifest: string): AdapterPreview {
     source_url: manifest,
     tag: manifest.startsWith("https://") ? "v0.1.0" : null,
     artifact_sha256: FIXTURE_SHA,
+    confirm_sha256: confirmOf(FIXTURE_SHA, FIXTURE_HOSTS),
     hosts: FIXTURE_HOSTS,
     roles: FIXTURE_EXTERNAL.roles,
     limits: FIXTURE_LIMITS,
   };
 }
 
+/** The backend's refusal of a confirm the release no longer matches. */
+const RELEASE_CHANGED = "the release changed after it was checked: its artifact, hosts or limits are not the ones shown";
+
 function installAdapter(args: Record<string, unknown>) {
   const preview = previewFor(String(args["manifest"] ?? ""));
   const shown = String(args["sha256"] ?? "");
-  if (shown !== preview.artifact_sha256) {
+  if (shown !== preview.confirm_sha256) {
     throw {
       code: "invalid",
-      message: `the release changed after it was checked: its artifact was ${shown} and is now ${preview.artifact_sha256}`,
+      message: RELEASE_CHANGED,
       source_id: null,
     };
   }
   // Widened: the fixture rows are literal types, and this one is not among them.
   (FIXTURE_ADAPTERS as unknown[]).push(FIXTURE_EXTERNAL);
-  const { roles: _roles, limits: _limits, name: _name, ...pin } = preview;
+  const { roles: _roles, limits: _limits, name: _name, confirm_sha256: _confirm, ...pin } = preview;
   INSTALLED.push({ ...pin, name: preview.name, sources: [], refused: null, update: null });
   return { ...pin, template: FIXTURE_EXTERNAL };
 }
@@ -446,6 +455,7 @@ function previewUpdate(args: Record<string, unknown>) {
   const row = installed(args["kind"]);
   const now: AdapterPreview = {
     ...row,
+    confirm_sha256: confirmOf(row.artifact_sha256, row.hosts),
     roles: FIXTURE_EXTERNAL.roles,
     limits: FIXTURE_LIMITS,
   };
@@ -456,6 +466,7 @@ function previewUpdate(args: Record<string, unknown>) {
         tag: available.tag,
         adapter_version: available.adapter_version,
         artifact_sha256: NEWER_SHA,
+        confirm_sha256: confirmOf(NEWER_SHA, [...FIXTURE_HOSTS, "archive.harbour.example"]),
         hosts: [...FIXTURE_HOSTS, "archive.harbour.example"],
       }
     : now;
@@ -465,10 +476,10 @@ function previewUpdate(args: Record<string, unknown>) {
 function updateOne(args: Record<string, unknown>): AdapterStatus {
   const { release } = previewUpdate(args);
   const row = installed(args["kind"]);
-  if (String(args["sha256"] ?? "") !== release.artifact_sha256) {
+  if (String(args["sha256"] ?? "") !== release.confirm_sha256) {
     throw {
       code: "invalid",
-      message: `the release changed after it was checked: its artifact was ${String(args["sha256"] ?? "")} and is now ${release.artifact_sha256}`,
+      message: RELEASE_CHANGED,
       source_id: null,
     };
   }

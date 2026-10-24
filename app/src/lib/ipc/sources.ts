@@ -131,9 +131,9 @@ export function previewInstallAdapter(manifest: string): Promise<AdapterPreview>
 
 /**
  * Install an external adapter (#1202, #1209) once the reader confirmed its
- * preview: `sha256` is the artifact hash the preview showed, and a release
- * whose artifact is another rejects with `invalid`. Refuses as the preview
- * refuses.
+ * preview: `sha256` is the preview's `confirm_sha256`, over the artifact,
+ * hosts and limits it showed, and a release it does not match rejects with
+ * `invalid`. Refuses as the preview refuses.
  */
 export function installAdapter(manifest: string, sha256: string): Promise<InstalledAdapter> {
   return invoke<InstalledAdapter>("install_adapter", { manifest, sha256 });
@@ -159,7 +159,7 @@ export function previewUpdateAdapter(kind: string): Promise<UpdatePreview> {
 
 /**
  * Update to the latest release after every static check, held to the
- * artifact hash its preview showed (`sha256`). A refusal rejects with
+ * release its preview showed (`sha256`, the release's `confirm_sha256`). A refusal rejects with
  * `invalid` and its reason, and the installed version stays.
  */
 export function updateAdapter(kind: string, sha256: string): Promise<AdapterStatus> {

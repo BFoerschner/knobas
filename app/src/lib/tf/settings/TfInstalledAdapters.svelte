@@ -11,7 +11,7 @@
   its hosts, roles or limits differ from the installed release's, *Update
   <name> to <release>?* says what changed and waits for its *Update*; when
   they are the same it switches at once. Either way the switch is held to
-  the artifact that was checked.
+  the release that was checked: its artifact, hosts and limits.
 
   An adapter refused at load or restore says why on its row (a restore whose
   release changed hash is one), and can still be uninstalled.
@@ -138,7 +138,7 @@
   async function switchTo(row: AdapterStatus, preview: UpdatePreview) {
     updating = row.adapter_kind;
     try {
-      const next = await ports.updateAdapter(row.adapter_kind, preview.release.artifact_sha256);
+      const next = await ports.updateAdapter(row.adapter_kind, preview.release.confirm_sha256);
       rows = rows.map((r) => (r.adapter_kind === next.adapter_kind ? next : r));
       onchanged();
       push({ text: `Updated ${next.name} to ${release(next)}` });

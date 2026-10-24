@@ -25,7 +25,7 @@ memory_asked: boolean, };
 
 /**
  * What the reader is shown before an install or an update (#2031): every
- * check has passed and nothing is written. `artifact_sha256` is what the
+ * check has passed and nothing is written. `confirm_sha256` is what the
  * confirm sends back, so what installs is what was shown.
  */
 export type AdapterPreview = { adapter_kind: string, 
@@ -37,6 +37,10 @@ name: string, adapter_version: string, interface_version: string, source_url: st
  * The release's tag; `None` for a local manifest, which is no release.
  */
 tag: string | null, artifact_sha256: string, 
+/**
+ * What the confirm sends back: [`confirm_sha256`] of this release.
+ */
+confirm_sha256: string, 
 /**
  * The hosts it may reach, as the manifest writes them (`{base_url}`).
  */

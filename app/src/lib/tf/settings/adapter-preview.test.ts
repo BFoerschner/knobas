@@ -12,6 +12,7 @@ function release(over: Partial<AdapterPreview> = {}): AdapterPreview {
     source_url: "https://github.test/harbour/surveys",
     tag: "v0.1.0",
     artifact_sha256: "5".repeat(64),
+    confirm_sha256: "7".repeat(64),
     hosts: ["{base_url}", "api.example.com"],
     roles: [{ role: "ci", reads: ["run_log"] }],
     limits: { deadline_secs: 600, deadline_asked: false, memory_mib: 256, memory_asked: false },
@@ -20,7 +21,7 @@ function release(over: Partial<AdapterPreview> = {}): AdapterPreview {
 }
 
 test("a release that asks for what is installed changes nothing", () => {
-  expect(updateChanges(release(), release({ tag: "v0.2.0", artifact_sha256: "6".repeat(64) }))).toEqual([]);
+  expect(updateChanges(release(), release({ tag: "v0.2.0", artifact_sha256: "6".repeat(64), confirm_sha256: "8".repeat(64) }))).toEqual([]);
 });
 
 test("an update that narrows says what it no longer reaches or claims, and a deadline that moves", () => {

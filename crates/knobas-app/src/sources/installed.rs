@@ -12,7 +12,8 @@
 //! **Shown, then confirmed** (#2031). [`preview_update`] fetches and checks
 //! the latest release as [`update`] does, and answers it beside what is
 //! installed, so the reader sees what an update changes before it switches;
-//! [`update`] is then held to the artifact hash the reader was shown.
+//! [`update`] is then held to the release the reader was shown
+//! ([`install::confirm_sha256`]).
 //!
 //! **Uninstall** takes one answer per source of the adapter, *purge* or
 //! *keep*, and removes each source through the source-removal path
@@ -343,6 +344,11 @@ pub async fn preview_update(
         interface_version: installed.interface_version,
         source_url: installed.source_url,
         tag: installed.tag,
+        confirm_sha256: install::confirm_sha256(
+            &installed.artifact_sha256,
+            &installed.hosts,
+            &installed.limits,
+        ),
         artifact_sha256: installed.artifact_sha256,
         hosts: installed.hosts,
     };
@@ -352,15 +358,15 @@ pub async fn preview_update(
 /// Update the adapter of `kind` to its origin's latest release: every
 /// static check first, then the artifact stored, the row moved and the
 /// registry's adapter replaced. A refusal changes nothing installed, and is
-/// recorded beside the update check. `confirmed` is the artifact hash the
-/// reader was shown ([`preview_update`]); a release whose artifact is
-/// another is refused.
+/// recorded beside the update check. `confirmed` is the release's
+/// `confirm_sha256` the reader was shown ([`preview_update`]); a release it
+/// does not match is refused.
 ///
 /// # Errors
 ///
 /// [`InstallError::NotInstalled`], the refusal of the check that failed,
 /// [`InstallError::KindChanged`] when the release is another adapter,
-/// [`InstallError::ArtifactChanged`] when its artifact is not the confirmed one, or
+/// [`InstallError::ReleaseChanged`] when it is not the confirmed one, or
 /// what could not be fetched or stored.
 pub async fn update(
     pool: &PgPool,

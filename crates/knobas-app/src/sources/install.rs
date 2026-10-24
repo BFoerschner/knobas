@@ -18,9 +18,11 @@
 //!
 //! **Shown, then confirmed** (#2031). [`preview_install`] runs every check
 //! install runs and writes nothing: it answers what the reader decides on,
-//! the adapter's name, version, roles, hosts and limits, and the artifact's
-//! hash. The install that follows the confirm is held to that hash, so a
-//! release that moved in between is refused rather than installed unseen.
+//! the adapter's name, version, roles, hosts and limits, and the hash the
+//! confirm sends back ([`confirm_sha256`]). The install that follows is held
+//! to that hash, which covers the artifact and the manifest's hosts and
+//! limits, so a release that moved in between is refused rather than
+//! installed unseen.
 //!
 //! **From a release** (#1209): what the reader pastes may be a GitHub
 //! repository URL or a manifest URL as well as a local path
@@ -66,7 +68,7 @@ pub struct InstalledAdapter {
 }
 
 /// What the reader is shown before an install or an update (#2031): every
-/// check has passed and nothing is written. `artifact_sha256` is what the
+/// check has passed and nothing is written. `confirm_sha256` is what the
 /// confirm sends back, so what installs is what was shown.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "sources.ts")]
@@ -80,6 +82,8 @@ pub struct AdapterPreview {
     /// The release's tag; `None` for a local manifest, which is no release.
     pub tag: Option<String>,
     pub artifact_sha256: String,
+    /// What the confirm sends back: [`confirm_sha256`] of this release.
+    pub confirm_sha256: String,
     /// The hosts it may reach, as the manifest writes them (`{base_url}`).
     pub hosts: Vec<String>,
     /// The roles its descriptor claims; empty for an installed adapter
@@ -133,6 +137,7 @@ impl AdapterPreview {
             source_url,
             tag: fetched.tag.clone(),
             artifact_sha256: m.artifact.sha256.clone(),
+            confirm_sha256: confirm_sha256(&m.artifact.sha256, &m.hosts, &m.limits),
             hosts: m.hosts.clone(),
             roles: template.roles,
             limits: AdapterLimits::of(&m.limits),
@@ -163,10 +168,10 @@ pub enum InstallError {
     )]
     KindChanged { installed: String, release: String },
     #[error(
-        "the release changed after it was checked: its artifact was {confirmed} and is now \
-         {release}"
+        "the release changed after it was checked: its artifact, hosts or limits are not the ones \
+         shown"
     )]
-    ArtifactChanged { confirmed: String, release: String },
+    ReleaseChanged,
     #[error("uninstall asks about every source of {kind:?}; no answer for {missing}")]
     Unanswered { kind: String, missing: String },
     #[error("cannot remove the source {id}: {error}")]
@@ -188,7 +193,7 @@ impl InstallError {
             Self::ManifestUnreadable { .. }
             | Self::Refused(_)
             | Self::KindChanged { .. }
-            | Self::ArtifactChanged { .. }
+            | Self::ReleaseChanged
             | Self::Unanswered { .. } => crate::IpcError::invalid(self),
             Self::Fetch(remote::FetchError::Unreachable { .. }) => {
                 crate::IpcError::new(crate::IpcErrorCode::Unreachable, self)
@@ -236,13 +241,13 @@ pub async fn install(
 /// Install from what the reader pasted (#1209): a GitHub repository URL
 /// (its latest release), a manifest URL, or a local manifest's path.
 ///
-/// `confirmed` is the artifact hash the reader was shown
-/// ([`preview_install`]); a release whose artifact is another is refused.
+/// `confirmed` is the [`AdapterPreview::confirm_sha256`] the reader was
+/// shown ([`preview_install`]); a release it does not match is refused.
 ///
 /// # Errors
 ///
 /// As [`install`], [`InstallError::Fetch`] when the release cannot be
-/// found or read, and [`InstallError::ArtifactChanged`] when its artifact is not the
+/// found or read, and [`InstallError::ReleaseChanged`] when it is not the
 /// confirmed one.
 pub async fn install_from(
     pool: &PgPool,
@@ -273,14 +278,28 @@ pub async fn preview_install(
     Ok(AdapterPreview::of(origin.record(endpoints), &fetched))
 }
 
-/// [`InstallError::ArtifactChanged`] unless the fetched artifact is the `confirmed` one.
+/// The hash a confirm is held to (#2031): over the artifact's hash and the
+/// hosts and limits the manifest asks for, which the artifact's hash does not
+/// cover. The kind, the versions and the roles are the artifact's own: the
+/// static checks hold the manifest's to its descriptor.
+#[must_use]
+pub fn confirm_sha256(
+    artifact_sha256: &str,
+    hosts: &[String],
+    limits: &manifest::Limits,
+) -> String {
+    let shown = serde_json::to_vec(&(artifact_sha256, hosts, limits))
+        .expect("a hash, strings and numbers serialize");
+    manifest::sha256(&shown)
+}
+
+/// [`InstallError::ReleaseChanged`] unless the fetched release is the `confirmed` one.
 pub(crate) fn held_to(fetched: &Fetched, confirmed: Option<&str>) -> Result<(), InstallError> {
-    let release = &fetched.checked.manifest.artifact.sha256;
+    let m = &fetched.checked.manifest;
     match confirmed {
-        Some(confirmed) if confirmed != release => Err(InstallError::ArtifactChanged {
-            confirmed: confirmed.to_owned(),
-            release: release.clone(),
-        }),
+        Some(confirmed) if confirmed != confirm_sha256(&m.artifact.sha256, &m.hosts, &m.limits) => {
+            Err(InstallError::ReleaseChanged)
+        }
         _ => Ok(()),
     }
 }

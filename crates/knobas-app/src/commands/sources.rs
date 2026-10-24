@@ -104,9 +104,9 @@ fn not_installable() -> IpcError {
 /// ADR-0028): every static check, then the artifact stored under its hash,
 /// the install recorded, and the adapter in `list_adapters` from then on.
 /// A refusal is `invalid` with the check's reason; a kind already taken is
-/// `conflict`. `sha256` is the artifact hash `preview_install_adapter`
-/// showed the reader (#2031); a release whose artifact is another is
-/// `invalid` and installs nothing.
+/// `conflict`. `sha256` is the `confirm_sha256` `preview_install_adapter`
+/// answered (#2031): over the artifact, the hosts and the limits the reader
+/// was shown. A release it does not match is `invalid` and installs nothing.
 #[tauri::command]
 pub async fn install_adapter<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -175,8 +175,8 @@ pub async fn check_adapter_updates<R: tauri::Runtime>(
 
 /// Update an installed adapter to its latest release (#1209), after every
 /// static check; a refusal is `invalid` and leaves the old version running.
-/// `sha256` is the artifact hash `preview_update_adapter` showed the reader
-/// (#2031); a release whose artifact is another is `invalid`.
+/// `sha256` is the release's `confirm_sha256` `preview_update_adapter`
+/// answered (#2031); a release it does not match is `invalid`.
 #[tauri::command]
 pub async fn update_adapter<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
