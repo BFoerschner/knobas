@@ -39,19 +39,25 @@
 //! somebody made that already holds that id is left alone, and the Jira view
 //! does not show: a name collision costs a view, never somebody's own.
 //!
-//! **Payload reads outside the adapter (ADR-0007).** The paths read are the
-//! saved-view frame's payload, which a saved-view kind writes (Jira's is
-//! `crate::views` in `knobas-source-jira`): `kind` (`board` or `filter`),
-//! `id`, `columns` (`[{"name", "statuses", "limit"}]`), `keys` (the tickets'
-//! keys in the source's order), and Jira's own `type`, `jql`, `sub_query`,
-//! `query` and `sprint`, which another source leaves out. Read in these
-//! statements and nowhere else. **A miss is an empty answer, never a
-//! guess**: a payload whose `columns` is not an array has no columns (one per
+//! **Payload reads outside the adapter (ADR-0007).** A view's query, board
+//! type, sub-query and sprint are read at the paths its kind declares
+//! (`source_query`, `board_type`, `sub_query`, `sprint` on
+//! [`KindPaths`](knobas_core::payload::KindPaths), #2050), the ticket-system
+//! minimum's saved-view paths (`knobas_source::role`), and at no key named
+//! after any source: Jira declares its `jql`, `type`, `sub_query` and
+//! `sprint`, which `crate::views` in `knobas-source-jira` writes. The rest is
+//! the frame's own shape, which every saved-view kind writes: `kind` (`board`
+//! or `filter`), `id`, `columns` (`[{"name", "statuses", "limit"}]`), `keys`
+//! (the tickets' keys in the source's order) and `query` (the query the keys
+//! were read with). Read in these statements and nowhere else. **A miss is an
+//! empty answer, never a guess**: no query at the declared path is the empty
+//! query, a payload whose `columns` is not an array has no columns (one per
 //! status on the board), one whose `keys` is not an array holds no tickets, a
-//! missing `sprint` is none, and a `kind` that is missing or not `filter` is a
-//! board. Pinned by `tests/it/jira_views.rs`'s
-//! `a_view_whose_payload_says_nothing_holds_nothing` and
-//! `a_saved_view_of_a_ticket_system_that_is_not_jira_shows_as_a_ticket_view`.
+//! sprint that is no object is none, and a `kind` that is missing or not
+//! `filter` is a board. Pinned by `tests/it/jira_views.rs`'s
+//! `a_view_whose_payload_says_nothing_holds_nothing`,
+//! `a_saved_view_of_a_ticket_system_that_is_not_jira_shows_as_a_ticket_view`
+//! and `a_saved_view_keeps_the_query_its_kind_declares_and_no_key_named_after_jira`.
 
 use knobas_core::payload::Frame;
 use knobas_source::SourceDescriptor;
@@ -62,6 +68,9 @@ use sqlx::{Postgres, Transaction};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedViewKinds {
     kinds: Vec<String>,
+    /// Each kind's declaration: where its views' query, board type,
+    /// sub-query and sprint are (#2050).
+    paths: Vec<knobas_core::payload::KindPaths>,
     source_name: String,
 }
 
@@ -89,6 +98,7 @@ pub fn declared(descriptor: &SourceDescriptor) -> Option<SavedViewKinds> {
     let first = saved.first()?;
     Some(SavedViewKinds {
         kinds: saved.iter().map(|p| p.kind.clone()).collect(),
+        paths: saved.iter().map(|p| (*p).clone()).collect(),
         source_name: first
             .system_name
             .clone()
@@ -106,7 +116,8 @@ pub fn declared(descriptor: &SourceDescriptor) -> Option<SavedViewKinds> {
 /// projected; and the lock it leaves, the one the foreign key takes anyway,
 /// keeps the item until the run commits (the purge's `skip locked` passes it
 /// by, as it does every row a run holds).
-const UPSERT_VIEWS: &str = "
+const UPSERT_VIEWS: &str = concat!(
+    "
 with held as (
   select entity_id from sync.item
    where source_id = $1 and kind = any($2)
@@ -118,12 +129,19 @@ insert into sync.saved_view
 select i.entity_id, i.source_id,
        case i.payload->>'kind' when 'filter' then 'filter' else 'board' end,
        coalesce(i.payload->>'id', ''),
-       i.payload->>'type', i.title, coalesce(i.payload->>'jql', ''),
-       i.payload->>'sub_query', coalesce(i.payload->>'query', ''),
+       ",
+    knobas_core::declared_string!("$3", "board_type"),
+    ", i.title, coalesce(",
+    knobas_core::declared_string!("$3", "source_query"),
+    ", ''),
+       ",
+    knobas_core::declared_string!("$3", "sub_query"),
+    ", coalesce(i.payload->>'query', ''),
        case when jsonb_typeof(i.payload->'columns') = 'array'
             then i.payload->'columns' else '[]'::jsonb end,
-       case when jsonb_typeof(i.payload->'sprint') = 'object'
-            then i.payload->'sprint' end,
+       (select i.payload #> c.segs from ",
+    knobas_core::declared_candidates!("$3", "sprint"),
+    " c where jsonb_typeof(i.payload #> c.segs) = 'object' order by c.ord limit 1),
        now()
   from sync.live_item i
   join held h on h.entity_id = i.entity_id
@@ -132,7 +150,8 @@ select i.entity_id, i.source_id,
        ref_kind = excluded.ref_kind, ref_id = excluded.ref_id,
        board_type = excluded.board_type, name = excluded.name, source_query = excluded.source_query,
        sub_query = excluded.sub_query, query = excluded.query, columns = excluded.columns,
-       sprint = excluded.sprint, last_read = excluded.last_read";
+       sprint = excluded.sprint, last_read = excluded.last_read"
+);
 
 const DROP_GONE_VIEWS: &str = "
 delete from sync.saved_view v
@@ -197,13 +216,20 @@ pub async fn project(
     source_id: &str,
     declared: &SavedViewKinds,
 ) -> Result<(), sqlx::Error> {
-    for statement in [UPSERT_VIEWS, DROP_GONE_VIEWS] {
-        sqlx::query(statement)
-            .bind(source_id)
-            .bind(&declared.kinds)
-            .execute(&mut **tx)
-            .await?;
-    }
+    let paths = knobas_core::payload::Declarations::empty()
+        .with(source_id, declared.paths.clone())
+        .as_param();
+    sqlx::query(UPSERT_VIEWS)
+        .bind(source_id)
+        .bind(&declared.kinds)
+        .bind(paths)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query(DROP_GONE_VIEWS)
+        .bind(source_id)
+        .bind(&declared.kinds)
+        .execute(&mut **tx)
+        .await?;
     for statement in [DROP_MEMBERS, INSERT_MEMBERS] {
         sqlx::query(statement)
             .bind(source_id)

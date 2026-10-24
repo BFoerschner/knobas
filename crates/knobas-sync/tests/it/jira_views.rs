@@ -29,6 +29,22 @@ struct Adapter {
     /// The ticket system its views are listed under, as the Jira adapter
     /// declares `Jira`; `None` lists them under the source's `name`.
     system: Option<&'static str>,
+    /// Where its views' query, board type, sub-query and sprint are (#2050):
+    /// what the saved-view frame reads, and all it reads them at.
+    paths: fn() -> knobas_source::KindPaths,
+}
+
+/// What the Jira adapter declares of its views since #2050: the saved
+/// filter's `jql`, the board's `type`, `sub_query` and `sprint`.
+fn jira_paths() -> knobas_source::KindPaths {
+    let at = |key: &str| vec![knobas_core::payload::PayloadPath::of([key])];
+    knobas_source::KindPaths {
+        source_query: at("jql"),
+        board_type: at("type"),
+        sub_query: at("sub_query"),
+        sprint: at("sprint"),
+        ..knobas_source::KindPaths::default()
+    }
 }
 
 const JIRA: Adapter = Adapter {
@@ -37,6 +53,7 @@ const JIRA: Adapter = Adapter {
     kind: "jira_view",
     saved_view: true,
     system: Some("Jira"),
+    paths: jira_paths,
 };
 
 struct Boards {
@@ -71,6 +88,7 @@ impl Source for Boards {
             kind: views,
             saved_view,
             system,
+            paths,
         } = self.adapter;
         SourceDescriptor {
             id: id.into(),
@@ -94,7 +112,7 @@ impl Source for Boards {
                 kind: views.into(),
                 frame: saved_view.then_some(knobas_core::payload::Frame::SavedView),
                 system_name: system.map(str::to_owned),
-                ..knobas_source::KindPaths::default()
+                ..paths()
             }],
         }
     }
@@ -565,13 +583,7 @@ async fn a_saved_view_of_a_ticket_system_that_is_not_jira_shows_as_a_ticket_view
     .execute(&pool)
     .await
     .expect("the source row");
-    let forge = Adapter {
-        id: "forge",
-        name: "Forge",
-        kind: "project_view",
-        saved_view: true,
-        system: None,
-    };
+    let forge = FORGE;
     let (src, _) = source_of(
         forge,
         vec![
@@ -616,6 +628,97 @@ async fn a_saved_view_of_a_ticket_system_that_is_not_jira_shows_as_a_ticket_view
             .await
             .unwrap();
     assert_eq!(group, "Forge filters");
+}
+
+/// A ticket system knobas has no adapter for, whose views keep their query
+/// at `search.text`, their layout at `layout` and their current iteration at
+/// `iteration` (#2050).
+fn forge_paths() -> knobas_source::KindPaths {
+    let at = |path: &[&str]| vec![knobas_core::payload::PayloadPath::of(path.iter().copied())];
+    knobas_source::KindPaths {
+        source_query: at(&["search", "text"]),
+        board_type: at(&["layout"]),
+        sprint: at(&["iteration"]),
+        ..knobas_source::KindPaths::default()
+    }
+}
+
+const FORGE: Adapter = Adapter {
+    id: "forge",
+    name: "Forge",
+    kind: "project_view",
+    saved_view: true,
+    system: None,
+    paths: forge_paths,
+};
+
+/// #2050: the projection reads a view's query, board type, sub-query and
+/// sprint at the paths its kind declares, and at no key named after Jira. A
+/// view of a second ticket system keeps its own query; Jira's spellings beside
+/// it are not read; a view whose record carries no query keeps none.
+#[tokio::test]
+async fn a_saved_view_keeps_the_query_its_kind_declares_and_no_key_named_after_jira() {
+    let pool = pool("saved_views_declared_query").await;
+    let (src, _) = source_of(
+        FORGE,
+        vec![
+            (
+                "view-7".into(),
+                "Release train".into(),
+                json!({
+                    "kind": "project", "keys": ["REL-2"],
+                    "search": { "text": "is:open milestone:train" },
+                    "layout": "kanban",
+                    "iteration": { "id": 4, "name": "Train 12", "end_date": "2026-11-02" },
+                    "jql": "project = REL", "type": "scrum", "sub_query": "fixVersion is EMPTY",
+                    "sprint": { "id": 9, "name": "Not this one", "end_date": null },
+                }),
+                false,
+            ),
+            (
+                "query-3".into(),
+                "Mine".into(),
+                json!({ "kind": "filter", "keys": ["REL-1"], "jql": "assignee = currentUser()" }),
+                false,
+            ),
+        ],
+    );
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    let read = |id: &'static str| {
+        let pool = pool.clone();
+        async move {
+            let row = sqlx::query(
+                "select source_query, board_type, sub_query, sprint from sync.saved_view
+                  where entity_id = $1",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("the view is kept");
+            (
+                row.get::<String, _>("source_query"),
+                row.get::<Option<String>, _>("board_type"),
+                row.get::<Option<String>, _>("sub_query"),
+                row.get::<Option<Value>, _>("sprint"),
+            )
+        }
+    };
+    assert_eq!(
+        read("forge:view-7").await,
+        (
+            "is:open milestone:train".to_owned(),
+            Some("kanban".to_owned()),
+            None,
+            Some(json!({ "id": 4, "name": "Train 12", "end_date": "2026-11-02" })),
+        ),
+        "its own query, layout and iteration; no sub-query declared, so none"
+    );
+    assert_eq!(
+        read("forge:query-3").await,
+        (String::new(), None, None, None),
+        "a record with no query at the declared path has none, whatever its `jql` says"
+    );
 }
 
 /// The other direction: a kind named `jira_view` that does not declare the
