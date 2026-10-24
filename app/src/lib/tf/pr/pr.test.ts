@@ -202,6 +202,11 @@ test("the review's choices are the verdicts the source offers; Comment only with
   expect(reviewChoices([submit], 1).map((c) => c.verdict)).toEqual(["comment"]);
   expect(reviewChoices([submit], 0).map((c) => c.action)).toEqual([null]);
   expect(reviewChoices([], 3)).toEqual([]);
+  // A verdict the source draws disabled (#2030) cannot be sent, and says why.
+  const refused = reviewChoices([{ ...approve, disabled: "This token cannot write" }], 2);
+  expect(refused.map((c) => [c.action, c.why])).toEqual([[null, "This token cannot write"]]);
+  expect(reviewChoices([submit], 0).map((c) => c.why)).toEqual(["Add a line comment first"]);
+  expect(reviewChoices(all, 2).map((c) => c.why)).toEqual([null, null, null]);
   // The approval's meaning names the base its protection is on.
   expect(reviewChoices(all, 0, "main").find((c) => c.verdict === "approve")?.meaning).toBe("Counts toward the approvals main needs");
 });

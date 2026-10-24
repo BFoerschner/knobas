@@ -513,6 +513,18 @@ impl Source for GiteaSource {
             .collect())
     }
 
+    /// The asks the token cannot make (#2054), from the empty-bodied probes a
+    /// view sends (#2030), one per repository and scope category asked
+    /// about: see [`crate::grants`]. An entity of another source is not
+    /// answered, and a probe without a verdict refuses nothing, so this never
+    /// fails.
+    async fn refused_writes(
+        &self,
+        asks: &[knobas_source::grants::WriteAsk],
+    ) -> Result<Vec<knobas_source::grants::RefusedWrite>, SourceError> {
+        Ok(crate::grants::refused(self, asks).await)
+    }
+
     /// A commit's overview and diff; `None` for the kinds whose views are
     /// later tickets' (ADR-0020, #661). See [`crate::view`].
     async fn view(

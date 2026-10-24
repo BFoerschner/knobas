@@ -1774,17 +1774,19 @@ pub trait Source: Send + Sync {
     /// draw the refused ones disabled. An ask it does not answer is no
     /// verdict, and stays as drawn.
     ///
-    /// Read, never probed: an adapter answers from a read of what its
-    /// credential may do, and sends no write to find out. It answers only
-    /// about asks it was given, and only for ops it declares.
+    /// Never found out by a write that could change anything: an adapter
+    /// answers from a read of what its credential may do, or, where its
+    /// system has no such read, from a write the system refuses before it
+    /// changes anything (Gitea's empty-bodied creates, #2030, #2054). It
+    /// answers only about asks it was given, and only for ops it declares.
     ///
     /// The default answers nothing: the right answer for an adapter whose
     /// credential cannot be narrower than the adapter (a mock, Uptime Kuma,
     /// whose account holds every right), and what every WASM guest answers.
-    /// An adapter whose credential can be narrower overrides it with a read of
-    /// its own grants; an adapter that does not override it answers nothing.
-    /// A failed read is an error, and the caller reads it as no verdict, as it
-    /// reads nothing.
+    /// An adapter whose credential can be narrower overrides it, finding out
+    /// as the paragraph above allows; an adapter that does not override it
+    /// answers nothing. A failed read or probe is an error, and the caller
+    /// reads it as no verdict, as it reads nothing.
     async fn refused_writes(
         &self,
         asks: &[grants::WriteAsk],

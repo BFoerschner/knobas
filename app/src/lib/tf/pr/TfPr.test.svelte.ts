@@ -544,6 +544,34 @@ test("Request changes waits for its words; Comment waits for a line comment", as
   expect(writes).toEqual([{ SubmitReview: { entity: PR, verdict: "request_changes", body: "Bound the jitter.", comments: [] } }]);
 });
 
+test("a token that may not comment or review draws Comment and each verdict disabled saying why, and queues nothing (#2030)", async () => {
+  const issue = "This token cannot write: it lacks the write:issue scope";
+  const repository = "This token cannot write: it lacks the write:repository scope";
+  const refused = (one: ViewAction, why: string) => ({ ...one, disabled: why });
+  await draw(
+    [PR, "conversation"],
+    ports({ author: "jonas", pr: prView([refused(SUBMIT, repository), refused(COMMENT, issue), refused(APPROVE_SENDS, repository), refused(CHANGES, repository), EDIT]) }),
+  );
+  type(target.querySelector<HTMLTextAreaElement>(".tf-compose textarea")!, "Thanks, looks good.");
+  const send = [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => b.textContent?.trim() === "Comment")!;
+  expect(send.getAttribute("aria-disabled")).toBe("true");
+  expect(send.title).toBe(issue);
+  send.click();
+  await settle();
+  expect(target.querySelector<HTMLTextAreaElement>(".tf-compose textarea")!.value).toBe("Thanks, looks good.");
+
+  button("Review…")!.click();
+  flushSync();
+  const dialog = document.querySelector(".tf-dialog")!;
+  for (const verdict of ["comment", "approve", "request_changes"]) {
+    const radio = dialog.querySelector<HTMLInputElement>(`input[value=${verdict}]`)!;
+    expect(radio.disabled).toBe(true);
+    expect(radio.closest("label")!.title).toBe(repository);
+  }
+  expect(dialogButton("Submit review").disabled).toBe(true);
+  expect(writes).toEqual([]);
+});
+
 test("one's own pull request: no Review…, but Submit review once a line comment waits, Comment its only verdict", async () => {
   await draw([PR], ports({ pr: prView([SUBMIT, COMMENT, EDIT, MERGE]) }));
   expect(buttons()).toEqual(["Edit", "Merge…"]);

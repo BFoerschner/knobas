@@ -12,6 +12,7 @@ mod support;
 
 mod client;
 mod contract;
+mod grants;
 mod source_action;
 mod sync;
 mod sync_moving;

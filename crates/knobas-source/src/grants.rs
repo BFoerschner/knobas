@@ -15,11 +15,14 @@
 //! given the right, so the reader can still reach the state where the write
 //! is enabled).
 //!
-//! **An adapter answers from what it reads, never from a write sent to find
-//! out.** TeamCity has no write that is safe as a probe (a `POST
+//! **An adapter never finds out with a write that could change anything.**
+//! TeamCity has no write that is safe as a probe (a `POST
 //! /app/rest/buildQueue` with a build type queues a build), so it reads the
-//! user's permissions. An adapter that cannot tell answers nothing, which is
-//! no verdict and draws every write as before.
+//! user's permissions. Gitea has no read of a token's scopes, and checks the
+//! scope before the body, so it sends its creates with an empty body, which
+//! are refused for the scope or for the body and make nothing (#2030,
+//! #2054). An adapter that cannot tell answers nothing, which is no verdict
+//! and draws every write as before.
 //!
 //! Plain serde data, like everything else crossing the SPI.
 

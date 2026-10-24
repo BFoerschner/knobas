@@ -32,3 +32,9 @@
   (`knobas-app`'s `it`), TeamCity's `grants::*` (`knobas-source-teamcity`'s `it`), and
   `live_teamcity_seeded.rs`'s `a_viewer_may_run_builds_and_may_not_change_parameters` against the
   real server.
+
+  **Amendment (#2054, 2026-10-25): an adapter may find out with a write that changes nothing.**
+  "Never sends a write to find out" now reads: never with a write that could change anything.
+  Gitea answers `refused_writes` from its empty-bodied branch and issue creates, which Gitea
+  refuses for the scope or for the body before anything is made (#2030); see
+  `2054-gitea-refused-writes.md`.
