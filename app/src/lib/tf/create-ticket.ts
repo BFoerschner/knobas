@@ -36,3 +36,14 @@ export function createTicketPayload(draft: TicketDraft & { project: string }): W
     CreateTicket: { entity: draft.project, title: draft.title.trim(), body: draft.body, ticket_type: draft.type.trim() },
   };
 }
+
+/**
+ * The draft a queued `CreateTicket` filed (#1953): what *Edit and resend*
+ * reopens for a create read back from the queue after a reload, when the
+ * dialog's own draft is gone. `null` for any other op.
+ */
+export function draftOfPayload(payload: WriteOpPayload): (TicketDraft & { project: string }) | null {
+  if (!("CreateTicket" in payload)) return null;
+  const { entity, title, body, ticket_type } = payload.CreateTicket;
+  return { project: entity, type: ticket_type, title, body };
+}

@@ -602,6 +602,10 @@ pub fn run() {
             // #1384's join of the run in flight for a source's settings page,
             // appended at the foot: the list is append-only (§10.8).
             commands::sources::watch_sync,
+            // #1953's read of the tickets filed from an entity that it does
+            // not link yet, appended at the foot: the list is append-only
+            // (§10.8).
+            commands::entity::owed_tickets,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

@@ -928,9 +928,9 @@ const CASES: Case[] = [
   },
   {
     /**
-     * *Create ticket* on a failed run (#1451): its links and projects reads
-     * answering late, and the sync listen it holds while a ticket filed from
-     * the run is queued.
+     * *Create ticket* on a failed run (#1451): its links, owed tickets
+     * (#1953) and projects reads answering late, and the sync listen it
+     * holds while a ticket filed from the run is queued.
      */
     name: "TfRunTicket",
     source: "lib/tf/builds/TfRunTicket.svelte",
@@ -947,6 +947,7 @@ const CASES: Case[] = [
             ports: {
               projects: () => deferred([]),
               links: () => deferred([]),
+              owedTickets: () => deferred([]),
               submitWrite: () => deferred({ id: 1 } as QueuedWrite),
               listen: (event, handler) => mockedListen(event, handler),
               follower: () => ({ follow: () => () => {} }),

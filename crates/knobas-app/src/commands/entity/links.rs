@@ -204,6 +204,48 @@ pub async fn submit_write<R: tauri::Runtime>(
     }
 }
 
+/// The tickets filed from `entity_id` that it does not link yet (#1953): each
+/// `CreateTicket` queued with `entity_id` as its `link_to` (a failed run's
+/// *Create ticket*, #1451) whose row still owes that link and that was not
+/// withdrawn, oldest first, as the queue holds it now. A held or refused one
+/// is named too, with its state; the page decides how it draws it.
+///
+/// The read a page opens with to know which of its creates are on their way:
+/// the page's own marks die with a reload, the row does not, so a reload
+/// before the sync that mirrors the ticket draws *Ticket queued* rather than
+/// offering *Create ticket* again.
+///
+/// **It resolves before it answers** ([`crate::protocol::tickets_owing`]): a
+/// sent create whose ticket the mirror now holds is linked and owed no more.
+///
+/// # Errors
+///
+/// `internal` if a read or a write fails.
+pub async fn owed_tickets_inner(
+    pool: &PgPool,
+    declarations: &knobas_core::payload::Declarations,
+    entity_id: &str,
+) -> Result<Vec<knobas_core::write_queue::QueuedWrite>, IpcError> {
+    crate::protocol::tickets_owing(pool, declarations, entity_id).await
+}
+
+/// [`owed_tickets_inner`] behind the sync engine, over its declarations.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up, else as
+/// [`owed_tickets_inner`].
+#[tauri::command]
+pub async fn owed_tickets<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+) -> Result<Vec<knobas_core::write_queue::QueuedWrite>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let declarations =
+        crate::sources::paths::declared_paths(&state.pool, state.registry.as_ref()).await?;
+    owed_tickets_inner(&state.pool, &declarations, &entity_id).await
+}
+
 /// The statuses this ticket's workflow offers from where it stands **right
 /// now** (#498, spec #491's stream 3).
 ///

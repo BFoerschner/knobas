@@ -263,6 +263,7 @@ function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<Ru
     follower: () => ({ follow: () => () => {} }),
     projects: () => Promise.resolve(PROJECTS),
     links: () => Promise.resolve([]),
+    owedTickets: () => Promise.resolve([]),
     ...overrides,
   };
   const crumbs = createRawSnippet((parts: () => { name: string }[]) => ({
@@ -881,4 +882,149 @@ test("a run a ticket is already linked to draws the ticket and no Create ticket"
   expect(ticket?.getAttribute("href")).toBe("#/job/PAY-300");
   expect(ticket?.title).toBe("Flaky SEPA retry");
   expect(button("Create ticket")).toBeUndefined();
+});
+
+// -- A reload before the ticket's sync (#1953) ---------------------------------
+
+/** A `CreateTicket` filed from the run, as `owed_tickets` names it. */
+function owedWrite(id: number, state: QueuedWrite["state"]): QueuedWrite {
+  return {
+    id,
+    state,
+    payload: { CreateTicket: { entity: "jira:PAY", title: FILED_TITLE, body: "assertion failed", ticket_type: "Bug" } },
+  } as QueuedWrite;
+}
+
+test("after a reload, a ticket filed from the run and still queued draws Ticket queued and no Create ticket", async () => {
+  const asked: string[] = [];
+  draw("teamcity:build:1187", undefined, {
+    owedTickets: (runId) => {
+      asked.push(runId);
+      return Promise.resolve([owedWrite(41, "pending")]);
+    },
+  });
+  await settle();
+  expect(asked).toEqual(["teamcity:build:1187"]);
+  expect(button("Create ticket")).toBeUndefined();
+  const chip = target.querySelector<HTMLElement>(".tf-problem .tf-acts .tf-chip");
+  expect(chip?.textContent).toBe("Ticket queued");
+  expect(chip?.title).toBe(FILED_TITLE);
+  expect(queuedMarks("teamcity:build:1187", "ticket")).toEqual([{ write: 41, kind: "ticket", text: FILED_TITLE, base: null }]);
+});
+
+test("after a reload, a ticket sent and not mirrored yet stays queued until the sync that brings it in draws it", async () => {
+  let owed = [owedWrite(41, "sent")];
+  let links: LinkEntry[] = [];
+  const drawn = draw("teamcity:build:1187", undefined, {
+    owedTickets: () => Promise.resolve(owed),
+    links: () => Promise.resolve(links),
+  });
+  await settle();
+  expect(button("Create ticket")).toBeUndefined();
+  expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket queued");
+  // The ticket's listen for the sync that brings it in, beside the page's own.
+  const listening = drawn.listening();
+
+  // A sync that does not bring it in: still on its way.
+  drawn.sync({ source_id: "teamcity", running: false });
+  await settle();
+  expect(button("Create ticket")).toBeUndefined();
+  expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket queued");
+
+  // Jira's sync brings it in: the read links it and names it no more.
+  owed = [];
+  links = [ticketLink("PAY-342", FILED_TITLE)];
+  drawn.sync({ source_id: "jira", running: false });
+  await settle();
+  const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-342"));
+  expect(ticket?.getAttribute("href")).toBe("#/job/PAY-342");
+  expect(queuedMarks("teamcity:build:1187", "ticket")).toEqual([]);
+  expect(button("Create ticket")).toBeUndefined();
+  expect(drawn.listening()).toBe(listening - 1);
+});
+
+test("after a reload, a held or refused ticket offers Create ticket: it waits on the reader in the queue", async () => {
+  draw("teamcity:build:1187", undefined, { owedTickets: () => Promise.resolve([owedWrite(41, "refused"), owedWrite(42, "held")]) });
+  await settle();
+  expect(button("Create ticket")).toBeDefined();
+  expect(target.querySelector(".tf-problem .tf-acts")?.textContent).not.toContain("Ticket queued");
+});
+
+test("after a reload, a queued ticket is followed: refused, it gives Create ticket back and Edit and resend reopens what was filed", async () => {
+  const hearing: ((row: QueuedWrite | undefined) => void)[] = [];
+  draw("teamcity:build:1187", undefined, {
+    owedTickets: () => Promise.resolve([owedWrite(41, "pending")]),
+    follower: () => ({
+      follow: (id, hear) => {
+        if (id === 41) hearing.push(hear);
+        return () => {};
+      },
+    }),
+  });
+  await settle();
+  expect(hearing).toHaveLength(1);
+  hearing[0]!({ ...owedWrite(41, "refused"), detail: "Summary is required" });
+  await settle();
+  expect(button("Create ticket")).toBeDefined();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("Ticket was refused: Summary is required");
+  toast.more!.find((a) => a.label === "Edit and resend")!.run();
+  await settle();
+  const title = document.querySelector<HTMLInputElement>(".tf-dialog input[aria-label='Ticket title']")!;
+  expect(title.value).toBe(FILED_TITLE);
+});
+
+test("after a reload, a ticket the owed read links as it answers is drawn, and Create ticket is not offered", async () => {
+  // Mirrored, not linked yet: the end of the sync has not resolved it, and the owed read does.
+  let links: LinkEntry[] = [];
+  draw("teamcity:build:1187", undefined, {
+    // The link is drawn as the read answers, not as it is asked.
+    owedTickets: () =>
+      Promise.resolve().then(() => {
+        links = [ticketLink("PAY-342", FILED_TITLE)];
+        return [];
+      }),
+    links: () => Promise.resolve(links),
+  });
+  await settle();
+  const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-342"));
+  expect(ticket?.getAttribute("href")).toBe("#/job/PAY-342");
+  expect(button("Create ticket")).toBeUndefined();
+});
+
+test("an owed read that answers before the create's own answer marks it once, and a refusal toasts once", async () => {
+  let answer: (write: QueuedWrite) => void = () => {};
+  let owed: QueuedWrite[] = [];
+  const hearing: ((row: QueuedWrite | undefined) => void)[] = [];
+  const drawn = draw("teamcity:build:1187", undefined, {
+    submitWrite: () => new Promise((resolve) => (answer = resolve)),
+    owedTickets: () => Promise.resolve(owed),
+    follower: () => ({
+      follow: (id, hear) => {
+        if (id === 41) hearing.push(hear);
+        return () => {};
+      },
+    }),
+  });
+  await settle();
+  button("Create ticket")!.click();
+  await settle();
+  const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
+  select.value = "jira:PAY";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  dialogButton("Create ticket")!.click();
+  await settle();
+  // The row is in the queue, and the run's sync ends before `submit_write`'s answer is back.
+  owed = [owedWrite(41, "pending")];
+  drawn.sync(synced("teamcity"));
+  await settle();
+  answer({ id: 41, state: "pending" } as QueuedWrite);
+  await settle();
+  expect(queuedMarks("teamcity:build:1187", "ticket").map((mark) => mark.write)).toEqual([41]);
+  expect(hearing, "one follow of the create").toHaveLength(1);
+  const before = toasts.items.length;
+  for (const hear of hearing) hear({ ...owedWrite(41, "refused"), detail: "Summary is required" });
+  await settle();
+  expect(toasts.items.slice(before).map((toast) => toast.text)).toEqual(["Ticket was refused: Summary is required"]);
 });

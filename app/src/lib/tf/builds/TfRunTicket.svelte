@@ -13,18 +13,26 @@
   module, kind `ticket`), and a sync of any source ending reads the links
   again until one holds a ticket of the queued title. A run with a ticket
   linked draws the ticket, and no *Create ticket*.
+
+  The queued mark dies with a reload; the create's row does not (#1953). So
+  each read of the links also asks `owed_tickets`, the tickets filed from the
+  run that it does not link yet, and one still on its way (`pending` or
+  `sent`) is marked queued as if filed this session, followed while it is
+  pending. A held or refused one offers *Create ticket*, as it does once a
+  live follow hears it was held or refused: it waits on the reader in the
+  queue.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { LinkEntry, Project } from "../../ipc/entity";
-  import type { SourceSummary } from "../../ipc/sources";
+  import type { QueuedWrite, SourceSummary } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
-  import { createTicketPayload, projectSource, type TicketDraft } from "../create-ticket";
+  import { createTicketPayload, draftOfPayload, projectSource, type TicketDraft } from "../create-ticket";
   import { itemHash, keyOf } from "../job/job";
-  import { askAgain, markQueued, queuedMark, sameWords, settleQueued, takeAgain } from "../queued.svelte";
+  import { askAgain, markQueued, queuedMark, queuedMarks, sameWords, settleQueued, takeAgain } from "../queued.svelte";
   import TfCreateTicket from "../TfCreateTicket.svelte";
   import { listenSynced, type RunPorts } from "./pipeline-ports";
   import { linkedTickets } from "./run";
@@ -44,7 +52,7 @@
     draft: TicketDraft;
     /** The configured sources, to name the ticket's in the toast. */
     sources: readonly SourceSummary[];
-    ports: Pick<RunPorts, "projects" | "links" | "submitWrite" | "listen" | "follower">;
+    ports: Pick<RunPorts, "projects" | "links" | "owedTickets" | "submitWrite" | "listen" | "follower">;
     /** Bumped when the page reads the run again (#1450): the links are read again. */
     rereads?: number;
   } = $props();
@@ -59,16 +67,56 @@
   const tickets = $derived(linkedTickets(links));
   const queued = $derived(queuedMark(runId, TICKET));
 
+  /**
+   * The owed tickets first, then the links: the owed read links a ticket the
+   * mirror holds before it answers, so the links read after it draws that
+   * ticket rather than offering *Create ticket* beside nothing queued.
+   */
   function readLinks(id: string) {
-    ports.links(id).then(
-      (answer) => {
-        if (id !== runId) return;
-        links = answer;
-        const held = linkedTickets(answer);
-        settleQueued(id, (mark) => mark.kind === TICKET && held.some((ticket) => sameWords(ticket.title, mark.text)));
+    ports
+      .owedTickets(id)
+      .then(
+        (owed) => {
+          if (id === runId) markOwed(id, owed);
+        },
+        () => {},
+      )
+      .then(() => ports.links(id))
+      .then(
+        (answer) => {
+          if (id !== runId) return;
+          links = answer;
+          const held = linkedTickets(answer);
+          settleQueued(id, (mark) => mark.kind === TICKET && held.some((ticket) => sameWords(ticket.title, mark.text)));
+        },
+        () => {},
+      );
+  }
+
+  /** The newest ticket filed from the run before this page opened and still on its way, marked queued (#1953). */
+  function markOwed(id: string, owed: readonly QueuedWrite[]) {
+    const going = owed.filter((write) => write.state === "pending" || write.state === "sent");
+    const marked = queuedMarks(id, TICKET);
+    if (going.some((write) => marked.some((mark) => mark.write === write.id))) return;
+    const newest = going.at(-1);
+    if (newest === undefined) return;
+    const filed = draftOfPayload(newest.payload);
+    if (filed === null) return;
+    // A sent one is past where the queue could hold or refuse it: nothing to follow.
+    const follow = newest.state === "pending" ? { following: following(id, filed), follower: ports.follower() } : {};
+    markQueued(id, TICKET, filed.title, { write: newest, ...follow });
+  }
+
+  /** What a held or refused create says, and *Edit and resend* back to the run with what was filed. */
+  function following(id: string, filed: TicketDraft) {
+    const back = href;
+    return {
+      name: "Ticket",
+      resend: () => {
+        askAgain(id, TICKET, filed);
+        location.hash = back;
       },
-      () => {},
-    );
+    };
   }
 
   $effect(() => {
@@ -102,22 +150,14 @@
   async function file(filed: TicketDraft & { project: string }) {
     asking = null;
     const id = runId;
-    const back = href;
     const title = filed.title.trim();
     const source = projectSource(filed.project);
     try {
       const write = await ports.submitWrite(createTicketPayload(filed), id);
-      markQueued(id, TICKET, title, {
-        write,
-        following: {
-          name: "Ticket",
-          resend: () => {
-            askAgain(id, TICKET, filed);
-            location.hash = back;
-          },
-        },
-        follower: ports.follower(),
-      });
+      // An owed read that answered before this did has marked and followed it already: one follow, one toast.
+      if (!queuedMarks(id, TICKET).some((mark) => mark.write === write.id)) {
+        markQueued(id, TICKET, title, { write, following: following(id, filed), follower: ports.follower() });
+      }
       const summary = sources.find((s) => s.id === source);
       toastQueued(`ticket ${title}`, { id: source, display_name: summary?.display_name ?? source });
     } catch (cause) {
