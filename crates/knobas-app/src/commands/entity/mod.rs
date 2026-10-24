@@ -102,7 +102,7 @@ mod tests {
             crate::commands::ROW_CEILING
         );
         assert!(
-            MIRROR.contains(&declared),
+            MIRROR.lines().any(|line| line.trim() == declared),
             "entity.ts does not declare `{declared}`"
         );
     }
