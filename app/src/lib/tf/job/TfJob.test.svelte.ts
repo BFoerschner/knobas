@@ -20,6 +20,7 @@ import type {
   StateChip,
 } from "../../ipc/entity";
 import type { CredentialHealth, SourceSyncStatus, SourceDescriptor, WriteOpPayload } from "../../ipc/sources";
+import type { WriteAsk } from "../../shell/refused-writes";
 import type { RunningTimer, Week } from "../../ipc/time";
 import { health } from "../../shell/health.svelte";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
@@ -444,6 +445,38 @@ test("a workflow that cannot be read offers nothing to move to", async () => {
   const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
   expect([...select.options].map((option) => option.value)).toEqual(["In Progress"]);
   expect(select.disabled).toBe(true);
+});
+
+test("a move the source's credential cannot make draws the status select disabled saying why, and queues nothing (#2052)", async () => {
+  const asked: WriteAsk[][] = [];
+  const reason = "This Jira user cannot move tickets in PAY: it lacks the Transition Issues permission";
+  open("PAY-231", {
+    ports: ports({
+      refusedWrites: (asks) => {
+        asked.push(asks);
+        return Promise.resolve([{ entity: ID, op: "transition", reason }]);
+      },
+    }),
+  });
+  await settle();
+  expect(asked).toEqual([[{ entity: ID, op: "comment" }, { entity: ID, op: "transition" }]]);
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
+  expect(select.getAttribute("aria-disabled")).toBe("true");
+  expect(select.title).toBe(reason);
+  // Nothing to pick: the status it stands at, and no move.
+  expect([...select.options].map((option) => option.value)).toEqual(["In Progress"]);
+  select.value = "In Review";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(calls.writes).toEqual([]);
+});
+
+test("a move the source refuses nothing of, or cannot tell, stays as drawn (#2052)", async () => {
+  open("PAY-231", { ports: ports({ refusedWrites: () => Promise.reject(new Error("no bridge")) }) });
+  await settle();
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
+  expect(select.hasAttribute("aria-disabled")).toBe(false);
+  expect([...select.options].map((option) => option.value)).toEqual(["In Progress", "In Review", "To Do"]);
 });
 
 test("the clock offers Start timer, and Stop and log while the timer runs on this ticket", async () => {
@@ -1071,6 +1104,41 @@ test("Run all steps starts the timer as step 5, through the shell's start, which
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Run all steps")!.click();
   await settle();
   expect(order).toEqual([`start ${ID} after run: true`]);
+});
+
+test("Start work's move the source's credential cannot make is drawn saying why, and Run all steps skips it (#2052)", async () => {
+  const reason = "This Jira user cannot move tickets in PAY: it lacks the Transition Issues permission";
+  const ran: string[] = [];
+  open("PAY-231", {
+    ports: ports({
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
+      refusedWrites: () => Promise.resolve([{ entity: ID, op: "transition", reason }]),
+      startWork: {
+        flow: () => Promise.resolve(flow(["pending", "pending", "pending", "pending"])),
+        run: () => {
+          ran.push("run");
+          return Promise.resolve(flow(["queued", "queued", "queued", "pending"]));
+        },
+        retry: () => Promise.resolve([]),
+        skip: (stepId) => {
+          ran.push(`skip ${stepId}`);
+          return Promise.resolve(flow(["queued", "queued", "queued", "skipped"]));
+        },
+        amend: () => Promise.resolve([]),
+      },
+    }),
+  });
+  await settle();
+  const move = target.querySelector(".tf-step[data-step='status']")!;
+  const field = move.querySelector<HTMLInputElement>("input[aria-label='Move ticket']")!;
+  expect(field.getAttribute("aria-disabled")).toBe("true");
+  expect(field.title).toBe(reason);
+  expect(move.textContent).toContain(reason);
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Run all steps")!.click();
+  await settle();
+  // The move is skipped, which runs the flow on past it; it is never run.
+  expect(ran).toEqual(["skip 4"]);
 });
 
 /** Run all steps on PAY-231 with a flow that ends as `after`; the toasts it raised. */

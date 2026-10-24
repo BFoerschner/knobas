@@ -380,6 +380,24 @@ test("Comment queues a Comment write and clears the box; a refused one keeps the
   expect(again.value).toBe("kept");
 });
 
+test("a comment the source's credential cannot make draws Comment disabled saying why, and queues nothing (#2052)", async () => {
+  const reason = "This Jira user cannot comment in PAY: it lacks the Add Comments permission";
+  open("conversation", { ports: ports({ refusedWrites: () => Promise.resolve([{ entity: ID, op: "comment", reason }]) }) });
+  await settle();
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
+  box.value = "Priya, can you decide the SLA?";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  const send = [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!;
+  expect(send.getAttribute("aria-disabled")).toBe("true");
+  expect(send.title).toBe(reason);
+  expect(squash(target.querySelector(".tf-compose"))).toContain(reason);
+  send.click();
+  await settle();
+  expect(calls.writes).toEqual([]);
+  expect(box.value).toBe("Priya, can you decide the SLA?");
+});
+
 // ---- a queued comment is drawn at once (#1424) ----
 
 /** The queued comments at the end of the thread, as read. */

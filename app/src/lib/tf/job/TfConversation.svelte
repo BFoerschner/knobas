@@ -12,6 +12,8 @@
   on queue, and the comment is drawn at the end of the thread at once, muted
   and marked *queued* (#1424), until a read of the thread holds its words.
   *Edit and resend* on a held or refused one puts its words back in the box.
+  A comment the source's credential cannot make (`refused`, #2052) draws
+  *Comment* disabled with the reason under the box, and queues nothing.
 -->
 <script lang="ts">
   import type { Thread } from "../../ipc/entity";
@@ -19,6 +21,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { refusedAttrs } from "../../shell/refused-writes";
   import { takeAgain } from "../queued.svelte";
   import { initials } from "../tickets/tickets";
   import { CHANGES, MENTIONS, NEW, changeLine, drawThread, firstName, mentionRuns, since, stamp } from "./conversation";
@@ -31,6 +34,7 @@
     lastVisit,
     failure,
     now,
+    refused = null,
     oncomment,
   }: {
     jobKey: string;
@@ -45,6 +49,8 @@
     /** What the thread's read failed with, if it did. */
     failure: string | null;
     now: Date;
+    /** Why the source's credential cannot comment here (#2052), or `null`. */
+    refused?: string | null;
     /** Queue a comment; resolves whether it was queued, so the box keeps a refused text. */
     oncomment: (body: string) => Promise<boolean>;
   } = $props();
@@ -94,7 +100,7 @@
 
   async function send() {
     const body = draft.trim();
-    if (body === "" || sending) return;
+    if (body === "" || sending || refused !== null) return;
     sending = true;
     try {
       if (await oncomment(body)) draft = "";
@@ -156,7 +162,8 @@
   <div class="tf-compose">
     <textarea bind:this={box} bind:value={draft} placeholder="Comment on {jobKey}" aria-label="Comment on {jobKey}"></textarea>
     <div class="tf-acts">
-      <button type="button" class="tf-btn tf-primary" disabled={draft.trim() === "" || sending} onclick={() => void send()}>Comment</button>
+      {#if refused !== null}<span class="tf-dim tf-small">{refused}</span>{/if}
+      <button type="button" class="tf-btn tf-primary" {...refusedAttrs(refused)} disabled={draft.trim() === "" || sending} onclick={() => void send()}>Comment</button>
     </div>
   </div>
 </div>
