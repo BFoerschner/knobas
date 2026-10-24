@@ -501,3 +501,52 @@ async fn a_share_export_holding_a_link_to_a_missing_entity_is_refused() {
     .await;
     a_refused_restore_of(&archive, "orphan-link-into", "link", "link_to_id_fkey").await;
 }
+
+/// A refusal whose emptying fails (#1930): the restore must not say "nothing
+/// was restored" while the archive's rows are still in. A rule the target
+/// applies `always`, whatever `session_replication_role` says, refuses every
+/// delete from `knobas.note`, so taking the orphan note back out fails. A
+/// rule and not a trigger: the load's `--disable-triggers` re-enables every
+/// trigger as `origin` after it, and `replica` then skips it. The
+/// error is that delete's and not [`backup::BackupError::BrokenKey`], and the
+/// bookkeeping rows are put back all the same.
+#[tokio::test]
+async fn a_refusal_whose_emptying_fails_says_so() {
+    let (_dir, archive) = an_archive_seeded(
+        "orphan-note-stuck",
+        "alter table knobas.note drop constraint note_entity_fk;
+         insert into knobas.note (id, title, body_md) values ('note:orphan', 'orphan', 'body');",
+        None,
+    )
+    .await;
+    let into = knobas_db::test_util::scratch_database("orphan-note-stuck-into").await;
+    let target = into.pool(2).await.expect("a pool on the target");
+    sqlx::raw_sql(
+        "insert into knobas.setting (key, value) values ('this-machine', '\"kept\"'::jsonb);
+         create function public.this_note_stays() returns void language plpgsql
+           as $$ begin raise exception 'this note stays'; end $$;
+         create rule this_note_stays as on delete to knobas.note
+           do instead select public.this_note_stays();
+         alter table knobas.note enable always rule this_note_stays;",
+    )
+    .execute(&target)
+    .await
+    .unwrap();
+    let mut before = Vec::new();
+    for table in BOOKKEEPING {
+        before.push(rows_of(&target, table).await);
+    }
+
+    match backup::restore(&into, &archive).await {
+        Err(backup::BackupError::Sqlx(error)) if error.to_string().contains("this note stays") => {}
+        other => panic!("a refusal that could not take its rows out must say so: {other:?}"),
+    }
+
+    for (table, held) in BOOKKEEPING.iter().zip(&before) {
+        assert_eq!(
+            &rows_of(&target, table).await,
+            held,
+            "knobas.{table} lost or changed rows in a restore that did not happen"
+        );
+    }
+}

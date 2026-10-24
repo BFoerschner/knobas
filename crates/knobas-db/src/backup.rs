@@ -674,6 +674,10 @@ select c.relname::text as table_name,
 /// before it returns, so a restore that fails leaves the target as a failed
 /// load does: its bookkeeping rows are put back by the caller, and every
 /// other table is empty, as it was proved to be before the load.
+///
+/// When taking the rows out fails, its error is returned instead of the
+/// refusal, so the restore never reports "nothing was restored" while the
+/// archive's rows are still in (`a_refusal_whose_emptying_fails_says_so`).
 async fn hold_to_keys(conn: &mut sqlx::PgConnection) -> Result<(), BackupError> {
     let checked = delete_orphans_then_check_keys(conn).await;
     if checked.is_err() {

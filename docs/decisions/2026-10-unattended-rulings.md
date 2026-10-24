@@ -15813,3 +15813,40 @@ Measured on the seeded Jira Data Center 10.3 (`just jira-live`'s container): wit
   `dump_tables` wrote off a scratch database with the key dropped (or wound back to `0059`).
   *Reasoning:* the claim is about what a restored database holds, and only a real load can
   witness it. *Reversing:* n/a.
+The merge-manager's review (Opus, 2026-10-24):
+
+- **Reserved for Björn, ruled by the merge-manager on Opus: the implementer's two reserved rulings.**
+  *Ruling:* both confirmed: check the keys (option 1), and refuse or delete by the key's
+  migration. *Reasoning:* I read every `references` and `add constraint` in the 60 migrations.
+  Three keys were added to a table that already existed: `note_entity_fk` (`0006`) and
+  `block_worklog_fk` (`0014`) came with no orphan rule, and `context_entity_fk` (`0060`) deletes
+  its orphans with the same statement `ORPHANS_A_RESTORE_DELETES` holds. Every other key came
+  with its table. No `knobas` table has a delete trigger, so the orphan delete fires nothing
+  that `0060`'s delete does not. *Reversing:* as the implementer's.
+- **The share-export claim.** *Ruling:* confirmed. *Reasoning:* I checked `ShareParts::tables`
+  against each key. `links`, `assets`, `contexts` and `notes` take `entity`. `route`'s two keys
+  to `asset` travel with `asset`, `block_worklog_fk` travels with `time`, and `link_set_member`
+  and `link_set_rule` travel with `link_set`. `monitor_*`, `checkout_override`,
+  `dep_layer_kind` and `sync.role_check` are in no part.
+- **`session_replication_role = replica` needs a superuser.** *Ruling:* no new requirement.
+  *Reasoning:* the embedded server's connection is its `initdb` superuser. Under `KNOBAS_DB_URL`
+  with a role that is not a superuser, the load's `--disable-triggers` already fails on the
+  system key triggers before `empty_owned_tables` is reached. *Reversing:* n/a.
+- **The window between the load's commit and the emptying.** *Fork:* close it in this PR, or
+  file it. *Ruling:* file it, as #1934 (`backlog`), the class rather than this instance.
+  *Reasoning:* a death in that window leaves what every restore left before #1930, so it is no
+  regression. The next start does not notice. One transaction is not available: `pg_restore`
+  commits on its own connection, no `psql` ships to feed it a script, and loading with triggers
+  on would check the keys in archive order and fire `0055`'s trigger. The same window sits
+  between every two steps of a restore, which spec #1619 ruling B3 accepted when it chose
+  snapshot and re-insert over scratch-and-swap. *Reversing:* #1934 decides.
+- **The untested path, emptying that fails after a refusal.** *Ruling:* tested:
+  `a_refusal_whose_emptying_fails_says_so`. *Reasoning:* a rule the target applies `always`
+  makes the delete of `knobas.note` fail under `replica`. A trigger can't be used, because the
+  load's `--disable-triggers` re-enables each trigger as `origin`. The test pins that the
+  restore returns the delete's error and not `BrokenKey`, so it never says "nothing was
+  restored" while the archive's rows are in, and that the bookkeeping is put back. The mutant
+  that swallows the emptying's error dies on it. *Reversing:* one test.
+- **The §10.8 amendment line.** *Ruling:* in form. *Reasoning:* it starts `Amendment (#1930,
+  2026-10-24):` in bold, the form four other entries use, and the touch is an `M` on 1708's
+  own entry. *Reversing:* n/a.
