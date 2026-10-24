@@ -5,8 +5,9 @@
 # interfaces doc §5 table that six streams read. This workflow covers exactly
 # that gap, and nothing else.
 #
-# It starts no containers and pulls no images -- roadmap §3: CI runs only the
-# docker-free layers. `docker compose config` resolves ${...} from testenv/images.env
+# It starts no product containers and pulls no product images -- roadmap §3:
+# CI runs only the docker-free layers. (The one image it runs is the pinned
+# shellcheck, below.) `docker compose config` resolves ${...} from testenv/images.env
 # and validates the schema locally; it never contacts a registry. That matters
 # beyond speed: the TeamCity, Jira and Confluence images this file references
 # are ~13 GB and are deliberately never pulled anywhere, CI included.
@@ -36,55 +37,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The scripts are discovered by their shebang, not by a glob.
-      #
-      # The plan's `shellcheck testenv/seed testenv/seed-*.sh ...` list was a
-      # pattern standing in for the set it meant to cover, and it already
-      # missed two of the seven scripts in this directory (`check-ports.sh`
-      # and `specs/fetch.sh`). A glob cannot fail loudly when a new script does
-      # not match it -- it just quietly checks less than you think.
-      #
-      # `git ls-files` rather than `find`: only tracked files, so a seeded
-      # volume or a stray local script can never enter or skew the set.
-      #
-      # The empty guard is the point of the step, not decoration -- but not for
-      # the reason this comment used to give. It claimed a discovery matching
-      # nothing "would make `shellcheck` exit 0 having examined no files at
-      # all". Measured: bare `shellcheck` prints "No files specified." and
-      # exits **3** -- on 0.9.0, 0.10.0 and 0.11.0 alike. 0.9.0 is the version
-      # that decides this job *today*: it runs on `ubuntu-latest`, which
-      # currently resolves to `ubuntu-24.04`, whose image manifest ships
-      # shellcheck 0.9.0-1. The job fails either way and was never at risk of
-      # reporting green over nothing.
-      #
-      # What the guard actually buys is what that failure *says*. Without it
-      # the step has already printed "shellchecking 0 scripts:" and then dies
-      # in a usage dump, which reads as a broken workflow rather than as a
-      # discovery that stopped matching -- and on the runner's bash it really
-      # does reach that line, because `"${scripts[@]}"` on an empty array
-      # expands to no arguments at all under `set -u` from bash 4.4 on.
-      # It also keeps the step off the exit code of a tool nothing here pins:
-      # the runner image upgrades shellcheck without asking, and "no arguments
-      # is an error" is a behaviour, not a promise.
+      # The scripts are linted by `just shell`, the recipe `just check` runs,
+      # and not by a copy of it (#2036). This step used to repeat the
+      # recipe's shebang discovery and call whatever shellcheck the runner
+      # image ships: 0.9.0 on ubuntu-24.04, against the 0.11.0 the recipe
+      # pins, so the two gates disagreed about what an info is. The recipe
+      # runs the pinned version, as the `koalaman/shellcheck` image when the
+      # runner's own binary is another version; that small image is the one
+      # this workflow pulls. The discovery and its empty guard are the
+      # recipe's, with the reasoning beside them in the justfile.
+      - uses: taiki-e/install-action@40895b01b2f2cea6a044171e57070a91013b8dd3 # just (the tool tag; no release tag shares this commit)
       - name: shellcheck every script in testenv/ and scripts/
-        run: |
-          set -euo pipefail
-          scripts=()
-          while IFS= read -r f; do
-            [ -f "$f" ] || continue
-            if head -n 1 -- "$f" | grep -qE '^#!.*\b(ba)?sh\b'; then
-              scripts+=("$f")
-            fi
-          done < <(git ls-files -z -- 'testenv/**' 'scripts/**' | tr '\0' '\n')
-
-          if [ ${#scripts[@]} -eq 0 ]; then
-            echo "::error::shebang discovery matched no scripts under testenv/ or scripts/ -- nothing was linted. Fix the discovery, do not delete this guard."
-            exit 1
-          fi
-
-          echo "shellchecking ${#scripts[@]} scripts:"
-          printf '  %s\n' "${scripts[@]}"
-          shellcheck "${scripts[@]}"
+        run: just shell
 
       # Schema validation of the compose file, for the default profile and for
       # each opt-in one. A profile is only resolved when it is selected, so a
