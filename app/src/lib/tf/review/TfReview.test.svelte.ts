@@ -9,7 +9,6 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { LinkEnd, LinkRow, ProposalEvidence, SuggestionEntry } from "../../ipc/entity";
 import { toasts } from "../../shell/toasts.svelte";
-import { forgetFilters } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
 import { createDecisions, type Decisions } from "./decisions.svelte";
 import TfReview from "./TfReview.svelte";
@@ -95,7 +94,6 @@ let writes: string[];
 
 beforeEach(() => {
   toasts.items.length = 0;
-  forgetFilters();
   writes = [];
   evidenceReads = [];
   target = document.createElement("div");

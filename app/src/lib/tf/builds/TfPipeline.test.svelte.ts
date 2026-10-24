@@ -12,7 +12,6 @@ import type { PipelineRow, PipelineSettings, RunRow } from "../../ipc/entity";
 import type { QueuedWrite, SourceDescriptor, SourceSummary, WriteOpPayload } from "../../ipc/sources";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
-import { forgetFilters } from "../filter/filter-state.svelte";
 import { forgetQueued, markQueued, queuedMarks } from "../queued.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
@@ -31,7 +30,6 @@ afterEach(() => {
   if (page) unmount(page);
   page = null;
   target.remove();
-  forgetFilters();
   forgetQueued();
 });
 

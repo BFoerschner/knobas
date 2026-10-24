@@ -7,9 +7,8 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
-import { forgetFilters } from "../filter/filter-state.svelte";
 import * as entityIpc from "../../ipc/entity";
-import TfBuilds, { forgetFolds, type BuildsPorts } from "./TfBuilds.svelte";
+import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
 
 // Only the default *This job* read (#1537) reaches these; the other tests pass `ports.jobPipelines`.
 vi.mock("../../ipc/sources", async (original) => ({
@@ -34,8 +33,6 @@ afterEach(() => {
   if (page) unmount(page);
   page = null;
   target.remove();
-  forgetFilters();
-  forgetFolds();
 });
 
 async function settle() {

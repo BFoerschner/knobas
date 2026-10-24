@@ -9,9 +9,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { LinkSetDetail, LinkSetDraft, LinkSetHint, LinkSetRow, LinkSetRule, RuleTicket } from "../../ipc/entity";
 import { toasts } from "../../shell/toasts.svelte";
-import { forgetFilters } from "../filter/filter-state.svelte";
 import type { Candidate, SetPorts } from "./ports";
-import { forgetHints } from "./hints.svelte";
 import TfSets from "./TfSets.svelte";
 
 const STACK: LinkSetDetail = {
@@ -153,7 +151,6 @@ const button = (name: string) =>
   [...target.ownerDocument.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name)!;
 
 beforeEach(() => {
-  forgetFilters();
   toasts.items.splice(0);
   saved = [];
   deleted = [];
@@ -162,7 +159,6 @@ beforeEach(() => {
   inherit = [];
   stored = structuredClone(STACK);
   hints = [];
-  forgetHints();
   target = document.createElement("div");
   document.body.appendChild(target);
   location.hash = "#/sets";

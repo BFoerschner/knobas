@@ -22,8 +22,7 @@ import type {
   ViewBlock,
   ViewRow,
 } from "../../ipc/entity";
-import { forgetFilters } from "../filter/filter-state.svelte";
-import TfRepo, { forgetBranches, type RepoPorts } from "./TfRepo.svelte";
+import TfRepo, { type RepoPorts } from "./TfRepo.svelte";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
 const REPO = "gitea:tidewater/payout-service";
@@ -133,8 +132,6 @@ let view: ReturnType<typeof mount> | null = null;
 let viewReads: [string, string | null][];
 
 beforeEach(() => {
-  forgetFilters();
-  forgetBranches();
   viewReads = [];
   target = document.createElement("div");
   document.body.appendChild(target);

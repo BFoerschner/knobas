@@ -27,7 +27,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import { page as codeRowPage } from "../code-row/page";
 import { writeQueuePanel } from "../../shell/write-queue.svelte";
 import { forgetQueued } from "../queued.svelte";
-import { forgetFilters, sessionFilter } from "../filter/filter-state.svelte";
+import { sessionFilter } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
 import { createApps } from "../openin/apps.svelte";
 import { pageFor } from "../pages";
@@ -774,7 +774,6 @@ test("Open Docs view opens Docs with This job on (R-2.5); the other sections' li
   sessionFilter("docs").scope = "all";
   section("pages").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
   expect(sessionFilter("docs").scope).toBe("job");
-  forgetFilters();
 });
 
 test("Open Code view opens Repositories with This job on (R-2.5), and the pick after that is kept (R-2.6)", async () => {
@@ -788,7 +787,6 @@ test("Open Code view opens Repositories with This job on (R-2.5), and the pick a
   expect(sessionFilter("code-repos").scope).toBe("job");
   sessionFilter("code-repos").scope = "mine";
   expect(sessionFilter("code-repos").scope).toBe("mine");
-  forgetFilters();
 });
 
 test("Open Monitors opens Monitors with This job on (R-2.5), and the pick after that is kept (R-2.6)", async () => {
@@ -802,7 +800,6 @@ test("Open Monitors opens Monitors with This job on (R-2.5), and the pick after 
   expect(sessionFilter("monitors").scope).toBe("job");
   sessionFilter("monitors").scope = "mine";
   expect(sessionFilter("monitors").scope).toBe("mine");
-  forgetFilters();
 });
 
 test("a section with nothing in it says so", async () => {

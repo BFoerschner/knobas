@@ -19,7 +19,6 @@ import type {
 } from "../../ipc/entity";
 import type { QueryTranslation, TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
 import { toasts } from "../../shell/toasts.svelte";
-import { forgetFilters } from "../filter/filter-state.svelte";
 import TicketsPage, { forgetTicketsSession, type TicketsPorts } from "./TicketsPage.svelte";
 import { sourceRoles } from "../roles.svelte";
 import { LANE_FIELDS, laneOf } from "./tickets";
@@ -50,8 +49,6 @@ afterEach(() => {
   if (page) unmount(page);
   page = null;
   target.remove();
-  forgetFilters();
-  forgetTicketsSession();
 });
 
 async function settle() {

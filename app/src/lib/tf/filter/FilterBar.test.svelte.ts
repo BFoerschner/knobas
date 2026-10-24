@@ -9,7 +9,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { FilterConfig, FilterState } from "./filter";
 import { toQuery } from "./filter";
 import FilterBar from "./FilterBar.svelte";
-import { forgetFilters, sessionFilter } from "./filter-state.svelte";
+import { sessionFilter } from "./filter-state.svelte";
 
 let target: HTMLElement;
 let bar: ReturnType<typeof mount> | null = null;
@@ -23,7 +23,6 @@ afterEach(() => {
   if (bar) unmount(bar);
   bar = null;
   target.remove();
-  forgetFilters();
 });
 
 const config: FilterConfig = {

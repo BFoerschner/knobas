@@ -12,7 +12,6 @@ import { EVENTS } from "../../ipc";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import type { Hear } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
-import { forgetFilters } from "../filter/filter-state.svelte";
 import type { MonitorPorts } from "./TfMonitors.svelte";
 import TfMonitors from "./TfMonitors.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
@@ -94,7 +93,6 @@ let heard: Map<number, Hear>;
 let synced: Set<(event: { payload: unknown }) => void>;
 
 beforeEach(() => {
-  forgetFilters();
   toasts.items.splice(0);
   writes = [];
   edits = [];

@@ -14,10 +14,9 @@ import type { EntityDetail, EntityRow, SourceView, ViewAction, ViewBlock, ViewRo
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
-import { forgetFilters } from "../filter/filter-state.svelte";
 import { forgetQueued } from "./queued.svelte";
 import { sourceName } from "./repo";
-import TfRepo, { forgetBranches, type RepoPorts } from "./TfRepo.svelte";
+import TfRepo, { type RepoPorts } from "./TfRepo.svelte";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
 const REPO = "gitea:tidewater/payout-service";
@@ -151,8 +150,6 @@ let links: (string | null)[];
 let reads: [string, string | null][];
 
 beforeEach(() => {
-  forgetFilters();
-  forgetBranches();
   forgetQueued();
   toasts.items = [];
   writes = [];

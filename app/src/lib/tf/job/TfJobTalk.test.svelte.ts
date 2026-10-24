@@ -13,7 +13,6 @@ import type { WriteOpPayload } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetQueued } from "../queued.svelte";
-import { forgetFilters } from "../filter/filter-state.svelte";
 import { page as codeRowPage } from "../code-row/page";
 import { createLayers, type Layers } from "../layers.svelte";
 import { pageFor } from "../pages";
@@ -40,7 +39,6 @@ beforeEach(() => {
   calls.links.length = 0;
   calls.reads = 0;
   toasts.items.length = 0;
-  forgetFilters();
   target = document.createElement("div");
   document.body.appendChild(target);
 });
