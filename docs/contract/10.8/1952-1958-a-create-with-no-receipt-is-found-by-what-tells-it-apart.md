@@ -21,6 +21,10 @@
      - A mirrored record whose base is absent or another string matches nothing: the create step
        sends and the forge refuses a duplicate in its own words, and the link step settles
        failed. The receipt-named path (`entity_named`, #1949) is unchanged.
+     - The link step's two failed details name the pair: "no pull request from `<head>` into
+       `<base>` is open -- ..." and "no open pull request from `<head>` into `<base>` has
+       reached the mirror yet", so a pull request open from the head into another base is not
+       contradicted by the step's own words.
   2. **One title rule for a receiptless ticket create** (#1958). **`action_item_ticket`** (and
      `create_action_item_ticket`'s answer, and the protocol read's `owed_tickets` resolution, all
      `action_item_ticket_inner`) resolves a sent `CreateTicket` by
