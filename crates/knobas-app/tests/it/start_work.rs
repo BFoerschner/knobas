@@ -853,6 +853,117 @@ async fn the_repository_of_a_branch_and_a_pull_request_step_can_be_amended() {
     }
 }
 
+// -- a step only leaves the outcomes it may leave (#1707) ------------------
+
+/// A queued step's write is still open in the queue. Returning the step to
+/// pending would have the next run dispatch a second branch beside the first,
+/// so the edit is refused; the write is amended in the write queue instead.
+#[tokio::test]
+async fn an_edit_of_a_queued_step_is_refused_and_queues_nothing_new() {
+    let pool = corpus("sw_edit_queued").await;
+    planned(&pool).await;
+    let fake = Fake::new().answering(
+        "create_branch",
+        Answer::Landed(Landing::Waiting {
+            detail: Some("the server did not answer".to_owned()),
+        }),
+    );
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+    let branch = step_of(&flow, Step::CreateBranch);
+    assert_eq!(branch.outcome, StepOutcome::Queued);
+    let mut edited = branch.payload.clone();
+    edited["CreateBranch"]["name"] = serde_json::json!("knobas-PAY-231");
+
+    let refusal = start_work::repropose(&pool, branch.id, edited)
+        .await
+        .expect_err("a queued step's write is still open");
+    start_work::run(&pool, &fake, &ticket()).await.unwrap();
+
+    assert_eq!(refusal.code, IpcErrorCode::Conflict);
+    assert_eq!(
+        fake.ops(),
+        vec!["create_branch"],
+        "the edit queued a second branch beside the open one"
+    );
+}
+
+/// A stale stepper's *Retry* on a step that has since succeeded changes
+/// nothing, whatever its write's row now says: the effect exists, and running
+/// the step again is how a second branch gets made.
+#[tokio::test]
+async fn a_retry_of_a_step_that_already_succeeded_is_refused_and_sends_nothing() {
+    let pool = corpus("sw_retry_done").await;
+    let flow = planned(&pool).await;
+    let fake = Fake::new().revealing_on_refresh(&proposed_branch(&flow));
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+    let branch = step_of(&flow, Step::CreateBranch);
+    assert_eq!(branch.outcome, StepOutcome::Succeeded);
+    // The delivered write's row is no longer readable.
+    fake.set_landing(branch.write_id.expect("the branch was dispatched"), Landing::Withdrawn);
+
+    let refusal = start_work::retry(&pool, &fake, branch.id)
+        .await
+        .expect_err("a succeeded step is not retried");
+
+    assert_eq!(refusal.code, IpcErrorCode::Conflict);
+    assert_eq!(
+        fake.ops(),
+        ["create_branch", "create_pull_request", "transition"],
+        "the stale retry ran the branch step a second time"
+    );
+    let flow = start_work::flow(&pool, &ticket()).await.unwrap();
+    assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Succeeded);
+}
+
+/// **The door.** A send is held open, the step is interrupted underneath it,
+/// then the send lands. The landing may not leave a step that is no longer
+/// running, so the interruption stands -- but the write it made is kept on the
+/// step, and the retry adopts that write rather than sending a second.
+#[tokio::test]
+async fn a_landing_that_loses_to_an_interrupt_keeps_its_write_for_the_retry() {
+    let pool = corpus("sw_land_after_intr").await;
+    let flow = planned(&pool).await;
+    let branch = step_of(&flow, Step::CreateBranch).id;
+    let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let fake = std::sync::Arc::new(
+        Fake::new()
+            .held_by(&gate)
+            .revealing_on_refresh(&proposed_branch(&flow)),
+    );
+
+    let run = tokio::spawn({
+        let (pool, fake) = (pool.clone(), std::sync::Arc::clone(&fake));
+        async move { start_work::run(&pool, &*fake, &ticket()).await }
+    });
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while fake.ops().is_empty() {
+        assert!(tokio::time::Instant::now() < deadline, "the run never sent");
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        knobas_core::start_work::interrupt(&pool, branch, start_work::INTERRUPTED)
+            .await
+            .unwrap(),
+        "the send is out, so the step is running"
+    );
+    gate.add_permits(10);
+    let flow = run.await.unwrap().unwrap();
+
+    let step = step_of(&flow, Step::CreateBranch);
+    assert_eq!(step.outcome, StepOutcome::Failed, "the landing overwrote the interruption");
+    assert_eq!(step.detail.as_deref(), Some(start_work::INTERRUPTED));
+    assert_eq!(step.write_id, Some(1), "the write the send made was lost");
+    assert_eq!(fake.ops(), ["create_branch"]);
+
+    let flow = start_work::retry(&pool, &*fake, branch).await.unwrap();
+    assert_eq!(
+        fake.ops(),
+        ["create_branch", "create_pull_request", "transition"],
+        "the retry sent the branch a second time instead of adopting its write"
+    );
+    assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Succeeded);
+}
+
 // -- a re-used head branch (#359) ------------------------------------------
 
 /// **The read, against a real mirror.** A head branch used twice leaves two
@@ -1617,7 +1728,7 @@ async fn a_step_left_running_by_a_quit_reads_as_interrupted_and_can_be_retried_o
         .await;
         let flow = planned(&pool).await;
         let branch = step_of(&flow, Step::CreateBranch).id;
-        knobas_core::start_work::settle(&pool, branch, StepOutcome::Running, None, None)
+        knobas_core::start_work::settle(&pool, branch, &[StepOutcome::Pending], StepOutcome::Running, None, None)
             .await
             .unwrap();
 
@@ -1649,7 +1760,7 @@ async fn the_start_up_pass_leaves_settled_steps_alone() {
     let pool = corpus("sw_intr_settled").await;
     let flow = planned(&pool).await;
     let branch = step_of(&flow, Step::CreateBranch).id;
-    knobas_core::start_work::settle(&pool, branch, StepOutcome::Succeeded, None, None)
+    knobas_core::start_work::settle(&pool, branch, &[StepOutcome::Pending], StepOutcome::Succeeded, None, None)
         .await
         .unwrap();
     assert_eq!(start_work::interrupt_stranded(&pool).await.unwrap(), 0);
@@ -1665,7 +1776,7 @@ async fn a_retry_of_an_interrupted_step_whose_branch_exists_adopts_it() {
     let flow = planned(&pool).await;
     let head = proposed_branch(&flow);
     let branch = step_of(&flow, Step::CreateBranch).id;
-    knobas_core::start_work::settle(&pool, branch, StepOutcome::Running, None, None)
+    knobas_core::start_work::settle(&pool, branch, &[StepOutcome::Pending], StepOutcome::Running, None, None)
         .await
         .unwrap();
     start_work::interrupt_stranded(&pool).await.unwrap();

@@ -415,15 +415,53 @@ pub async fn ready_retry(
         let landing = steps.landing_of(write_id).await?;
         if !matches!(landing, Landing::Refused { .. } | Landing::Withdrawn) {
             let (outcome, detail) = outcome_of(&landing);
-            store::settle(pool, step_id, outcome, None, detail.as_deref()).await?;
+            if store::settle(pool, step_id, RETRIES, outcome, None, detail.as_deref())
+                .await?
+                .is_none()
+            {
+                return Err(moved_on(pool, step_id, "retried").await);
+            }
             return Ok(ticket);
         }
     }
 
     // Rules 2 and 3 are `perform`'s: it reads before it writes, and dispatches
     // only what the mirror could not already account for.
-    store::settle(pool, step_id, StepOutcome::Pending, None, None).await?;
+    if store::settle(pool, step_id, RETRIES, StepOutcome::Pending, None, None)
+        .await?
+        .is_none()
+    {
+        return Err(moved_on(pool, step_id, "retried").await);
+    }
     Ok(ticket)
+}
+
+/// The outcomes a retry may move a step out of (#1707): where a run stopped,
+/// or a step nothing has started. Not a succeeded or skipped step -- a stale
+/// stepper's *Retry* would run it at the source again -- and not a running
+/// one, whose send is out and whose landing is the sender's to record.
+const RETRIES: &[StepOutcome] = &[
+    StepOutcome::Pending,
+    StepOutcome::Failed,
+    StepOutcome::Queued,
+];
+
+/// The outcomes a skip may move a step out of: [`RETRIES`]'s, for the same
+/// reasons -- a succeeded step's effect exists, and a running one's send is out.
+const SKIPS: &[StepOutcome] = RETRIES;
+
+/// The refusal for a step that is not in an outcome the command may leave --
+/// most often because it moved on between the stepper's read and this write
+/// (#1707). Names the outcome it is in now.
+async fn moved_on(pool: &PgPool, step_id: i64, done: &str) -> IpcError {
+    match store::get(pool, step_id).await {
+        Ok(Some(step)) => IpcError::conflict(format!(
+            "the {} step is {} now, so it cannot be {done}",
+            step.step, step.outcome
+        )),
+        Ok(None) => IpcError::not_found(format!("no start-work step with id {step_id}")),
+        Err(error) => error.into(),
+    }
 }
 
 /// Skip a step (story 14), so a ticket that needs no branch can still get its
@@ -463,7 +501,19 @@ pub async fn ready_skip(pool: &PgPool, step_id: i64) -> Result<EntityRef, IpcErr
     }
     let ticket = EntityRef::parse(&step.ticket_id).map_err(IpcError::invalid)?;
     refuse_while_behind(pool, &ticket, &step, "skipping")?;
-    store::settle(pool, step_id, StepOutcome::Skipped, None, Some("skipped")).await?;
+    if store::settle(
+        pool,
+        step_id,
+        SKIPS,
+        StepOutcome::Skipped,
+        None,
+        Some("skipped"),
+    )
+    .await?
+    .is_none()
+    {
+        return Err(moved_on(pool, step_id, "skipped").await);
+    }
     note(pool, &step, "skipped", "the user chose not to run it").await;
     Ok(ticket)
 }
@@ -624,7 +674,10 @@ async fn stop_where_it_was(pool: &PgPool, ticket: &EntityRef, why: &str) {
         }
         _ => return,
     };
-    if let Err(error) = store::settle(pool, id, StepOutcome::Failed, None, Some(why)).await {
+    // Pending or running: the step the run was on, unless something settled it
+    // since.
+    let on = [StepOutcome::Pending, StepOutcome::Running];
+    if let Err(error) = store::settle(pool, id, &on, StepOutcome::Failed, None, Some(why)).await {
         tracing::warn!(%ticket, %error, "a failed start-work run could not mark its step");
     }
 }
@@ -688,7 +741,11 @@ pub async fn repropose(
     }
     let ticket = EntityRef::parse(&step.ticket_id).map_err(IpcError::invalid)?;
     refuse_while_behind(pool, &ticket, &step, "editing")?;
-    store::repropose(pool, step_id, payload).await?;
+    // The store edits only a pending or failed step (#1707): a queued step's
+    // write is still open, and is amended in the write queue instead.
+    if store::repropose(pool, step_id, payload).await?.is_none() {
+        return Err(moved_on(pool, step_id, "edited").await);
+    }
     Ok(store::flow(pool, &ticket).await?)
 }
 
@@ -807,11 +864,33 @@ async fn dispatch(
     step: &FlowStep,
     payload: &serde_json::Value,
 ) -> Result<(), IpcError> {
-    store::settle(pool, step.id, StepOutcome::Running, None, None).await?;
+    // A step that is no longer pending was taken since the run read it, and is
+    // not sent (#1707).
+    let pending = [StepOutcome::Pending];
+    if store::settle(pool, step.id, &pending, StepOutcome::Running, None, None)
+        .await?
+        .is_none()
+    {
+        return Ok(());
+    }
+    let running = [StepOutcome::Running];
     match steps.dispatch(payload).await {
         Ok((write_id, landing)) => {
             let (outcome, detail) = outcome_of(&landing);
-            store::settle(pool, step.id, outcome, Some(write_id), detail.as_deref()).await?;
+            let landed = store::settle(
+                pool,
+                step.id,
+                &running,
+                outcome,
+                Some(write_id),
+                detail.as_deref(),
+            )
+            .await?;
+            // Interrupted while the send was out: the interruption stands, and
+            // the write stays the step's, for a retry to act on.
+            if landed.is_none() {
+                store::record_write(pool, step.id, write_id).await?;
+            }
             Ok(())
         }
         Err(error) => {
@@ -819,9 +898,10 @@ async fn dispatch(
             // declare, a target that is not an entity id, a source that is not
             // configured. That is a failed step carrying the reason, not a
             // failed command: the rest of the flow is still the user's to run.
-            store::settle(
+            let failed = store::settle(
                 pool,
                 step.id,
+                &running,
                 StepOutcome::Failed,
                 None,
                 Some(&error.message),
@@ -829,7 +909,9 @@ async fn dispatch(
             .await?;
             // The queue never saw this write, so nothing else logs it
             // (story 20).
-            note(pool, step, "failed", &error.message).await;
+            if failed.is_some() {
+                note(pool, step, "failed", &error.message).await;
+            }
             Ok(())
         }
     }
@@ -958,16 +1040,30 @@ fn field(op: &serde_json::Value, name: &str) -> Result<String, IpcError> {
         .ok_or_else(|| IpcError::invalid(format!("this step's proposal has no {name:?}")))
 }
 
-async fn settle_ok(pool: &PgPool, step: &FlowStep, detail: &str) -> Result<(), IpcError> {
-    store::settle(pool, step.id, StepOutcome::Succeeded, None, Some(detail)).await?;
-    note(pool, step, "succeeded", detail).await;
+/// Settle the pending step `perform` was handed, from what it read rather than
+/// from a write; logged only if it was still pending to settle (#1707).
+async fn settle_read(
+    pool: &PgPool,
+    step: &FlowStep,
+    outcome: StepOutcome,
+    detail: &str,
+) -> Result<(), IpcError> {
+    let pending = [StepOutcome::Pending];
+    if store::settle(pool, step.id, &pending, outcome, None, Some(detail))
+        .await?
+        .is_some()
+    {
+        note(pool, step, outcome.as_str(), detail).await;
+    }
     Ok(())
 }
 
+async fn settle_ok(pool: &PgPool, step: &FlowStep, detail: &str) -> Result<(), IpcError> {
+    settle_read(pool, step, StepOutcome::Succeeded, detail).await
+}
+
 async fn settle_failed(pool: &PgPool, step: &FlowStep, detail: &str) -> Result<(), IpcError> {
-    store::settle(pool, step.id, StepOutcome::Failed, None, Some(detail)).await?;
-    note(pool, step, "failed", detail).await;
-    Ok(())
+    settle_read(pool, step, StepOutcome::Failed, detail).await
 }
 
 /// Put a step's settlement in the activity log (story 20).
