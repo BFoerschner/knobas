@@ -446,16 +446,20 @@ async fn an_update_preview_shows_the_release_beside_what_is_installed_and_switch
         })
         .await;
 
-    let preview =
-        installed::preview_update(&pool, &registry, &forge.endpoints(), "wasm-fixture")
-            .await
-            .expect("the newer release passes every check");
+    let preview = installed::preview_update(&pool, &registry, &forge.endpoints(), "wasm-fixture")
+        .await
+        .expect("the newer release passes every check");
     assert_eq!(preview.installed.tag.as_deref(), Some("v0.1.0"));
     assert_eq!(preview.installed.artifact_sha256, sha_of(&first));
     assert_eq!(preview.installed.hosts, ["{base_url}"]);
     assert_eq!(preview.installed.name, "wasm-fixture");
     assert_eq!(
-        preview.installed.roles.iter().map(|r| r.role.as_str()).collect::<Vec<_>>(),
+        preview
+            .installed
+            .roles
+            .iter()
+            .map(|r| r.role.as_str())
+            .collect::<Vec<_>>(),
         ["wasm-fixture:survey-desk", "ci"],
         "the fixture's custom role and CI"
     );

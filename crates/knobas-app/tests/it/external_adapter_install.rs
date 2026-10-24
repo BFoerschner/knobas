@@ -786,7 +786,11 @@ async fn a_preview_shows_name_version_roles_hosts_and_limits_and_writes_nothing(
     assert_eq!(preview.artifact_sha256, manifest::sha256(&artifact));
     assert_eq!(preview.hosts, ["{base_url}"]);
     assert_eq!(
-        preview.roles.iter().map(|r| r.role.as_str()).collect::<Vec<_>>(),
+        preview
+            .roles
+            .iter()
+            .map(|r| r.role.as_str())
+            .collect::<Vec<_>>(),
         ["wasm-fixture:survey-desk", "ci"],
         "the fixture's custom role and CI"
     );
