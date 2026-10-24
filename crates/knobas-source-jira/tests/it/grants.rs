@@ -58,7 +58,9 @@ async fn stub(route: Route) -> (String, Arc<Mutex<Vec<String>>>) {
             let mut line = request.split_whitespace();
             let method = line.next().unwrap_or_default().to_owned();
             let target = line.next().unwrap_or_default().to_owned();
-            kept.lock().expect("the record").push(format!("{method} {target}"));
+            kept.lock()
+                .expect("the record")
+                .push(format!("{method} {target}"));
             let (status, body) = route(&target);
             let response = format!(
                 "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n\
@@ -107,7 +109,10 @@ fn permissions(target: &str) -> (u16, &'static str) {
     match target {
         "/rest/api/2/mypermissions?projectKey=PAY" => (200, PAY),
         "/rest/api/2/mypermissions?projectKey=LEDG" => (200, LEDG),
-        _ => (404, r#"{"errorMessages":["No project could be found with key 'X'."]}"#),
+        _ => (
+            404,
+            r#"{"errorMessages":["No project could be found with key 'X'."]}"#,
+        ),
     }
 }
 
@@ -183,7 +188,10 @@ async fn a_failed_read_refuses_nothing_in_that_project_alone() {
     .await;
 
     let answer = source(&url)
-        .refused_writes(&[ask("jira:LEDG-12", "comment"), ask("jira:PAY-231", "comment")])
+        .refused_writes(&[
+            ask("jira:LEDG-12", "comment"),
+            ask("jira:PAY-231", "comment"),
+        ])
         .await
         .expect("a read is an answer");
 
@@ -202,7 +210,10 @@ async fn a_failed_read_refuses_nothing_in_that_project_alone() {
 async fn nothing_to_answer_reads_nothing() {
     let (url, seen) = stub(permissions).await;
     let answer = source(&url)
-        .refused_writes(&[ask("jira:PAY-231", "rerun_build"), ask("gitea:a/b#1", "comment")])
+        .refused_writes(&[
+            ask("jira:PAY-231", "rerun_build"),
+            ask("gitea:a/b#1", "comment"),
+        ])
         .await
         .expect("no ask is an answer");
     assert!(answer.is_empty());

@@ -154,8 +154,18 @@ mod tests {
     #[test]
     fn a_permission_the_answer_leaves_out_refuses_nothing() {
         let held = answer(r#"{"permissions":{"BROWSE_PROJECTS":{"havePermission":false}}}"#);
-        for op in ["comment", "transition", "log_work", "create_ticket", "rerun_build"] {
-            assert_eq!(refusal(&held, "PAY", &ask("jira:PAY-231", op)), None, "{op}");
+        for op in [
+            "comment",
+            "transition",
+            "log_work",
+            "create_ticket",
+            "rerun_build",
+        ] {
+            assert_eq!(
+                refusal(&held, "PAY", &ask("jira:PAY-231", op)),
+                None,
+                "{op}"
+            );
         }
     }
 }

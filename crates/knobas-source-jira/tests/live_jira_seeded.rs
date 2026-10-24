@@ -99,6 +99,13 @@
 //! boards with the filters they stand on (a filter whose board was never
 //! made is not a favourite, and nothing reads it).
 //!
+//! One **user and one permission scheme** (#2052): the user minted with Jira
+//! Software access and no group but the default one, the scheme a copy of
+//! NARROW's with *Add Comments*, *Work On Issues* and *Create Issues* given to
+//! `jira-administrators` alone, and NARROW put on it for one test. [`Narrowed`]'s
+//! `Drop` puts NARROW back on its scheme, deletes the copy and the user, and
+//! checks each; the next run puts back a killed run's first.
+//!
 //! What a *killed* run left behind is put back by the next one, and by this
 //! suite for **both** of them: [`Seeded::clear_leftovers`] restores the corpus
 //! from `seed-state.json` -- a stray issue deleted, a stray comment deleted, a
@@ -4213,4 +4220,389 @@ async fn the_board_listing_is_in_name_order_and_a_rename_moves_a_row() {
          listed A, m, z, and A renamed zz listed last",
         listed.len()
     );
+}
+
+// ---- what the credential may not write (#2052) ----
+
+/// The user [`a_user_the_permission_scheme_refuses_is_refused_those_writes_and_nothing_is_written`] mints.
+const MINTED: &str = "knobas-live-2052";
+const MINTED_PASSWORD: &str = "knobas-live-2052-Pw";
+/// The copy of NARROW's permission scheme it puts NARROW on.
+const NARROWED_SCHEME: &str = "knobas live suite: narrowed (#2052)";
+/// The permissions the copy gives `jira-administrators` alone.
+const NARROWED: [&str; 3] = ["ADD_COMMENTS", "WORK_ON_ISSUES", "CREATE_ISSUES"];
+
+/// One admin request for [`Narrowed`]'s cleanup, which runs outside the test's
+/// runtime: the status and the body, or what failed.
+async fn admin(
+    http: &reqwest::Client,
+    (url, user, password): (&str, &str, &str),
+    method: reqwest::Method,
+    path: &str,
+    body: Option<serde_json::Value>,
+) -> Result<(u16, serde_json::Value), String> {
+    let mut request = http
+        .request(method.clone(), format!("{url}/{path}"))
+        .header("Accept", "application/json")
+        .basic_auth(user, Some(password));
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|e| format!("{method} {path}: {e}"))?;
+    let status = response.status().as_u16();
+    let text = response.text().await.unwrap_or_default();
+    Ok((
+        status,
+        serde_json::from_str(&text).unwrap_or(serde_json::Value::String(text)),
+    ))
+}
+
+/// NARROW on its own scheme again, the copy and the minted user gone, each
+/// checked. `scheme` is NARROW's own scheme; `None` reads it off PAY, which
+/// the seed made from the same template.
+async fn unnarrow(
+    http: &reqwest::Client,
+    login: (&str, &str, &str),
+    scheme: Option<u64>,
+) -> Result<(), String> {
+    let id_of = |body: &serde_json::Value| body["id"].as_u64();
+    let scheme = match scheme {
+        Some(id) => id,
+        None => {
+            let (_, pay) = admin(
+                http,
+                login,
+                reqwest::Method::GET,
+                "rest/api/2/project/PAY/permissionscheme",
+                None,
+            )
+            .await?;
+            id_of(&pay).ok_or_else(|| format!("PAY names no permission scheme: {pay}"))?
+        }
+    };
+    let (_, on) = admin(
+        http,
+        login,
+        reqwest::Method::GET,
+        "rest/api/2/project/NARROW/permissionscheme",
+        None,
+    )
+    .await?;
+    if id_of(&on) != Some(scheme) {
+        let (status, body) = admin(
+            http,
+            login,
+            reqwest::Method::PUT,
+            "rest/api/2/project/NARROW/permissionscheme",
+            Some(serde_json::json!({ "id": scheme })),
+        )
+        .await?;
+        if status != 200 {
+            return Err(format!(
+                "putting NARROW back on scheme {scheme} -> {status}: {body}"
+            ));
+        }
+    }
+    let (_, schemes) = admin(
+        http,
+        login,
+        reqwest::Method::GET,
+        "rest/api/2/permissionscheme",
+        None,
+    )
+    .await?;
+    for copy in schemes["permissionSchemes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|each| each["name"] == NARROWED_SCHEME)
+    {
+        let id = id_of(copy).ok_or_else(|| format!("a scheme without an id: {copy}"))?;
+        let (status, body) = admin(
+            http,
+            login,
+            reqwest::Method::DELETE,
+            &format!("rest/api/2/permissionscheme/{id}"),
+            None,
+        )
+        .await?;
+        if status != 204 {
+            return Err(format!("deleting scheme {id} -> {status}: {body}"));
+        }
+    }
+    let user = format!("rest/api/2/user?username={MINTED}");
+    if admin(http, login, reqwest::Method::GET, &user, None)
+        .await?
+        .0
+        == 200
+    {
+        let (status, body) = admin(http, login, reqwest::Method::DELETE, &user, None).await?;
+        if status != 204 {
+            return Err(format!("deleting {MINTED} -> {status}: {body}"));
+        }
+    }
+    // Checked, not assumed.
+    let (_, on) = admin(
+        http,
+        login,
+        reqwest::Method::GET,
+        "rest/api/2/project/NARROW/permissionscheme",
+        None,
+    )
+    .await?;
+    if id_of(&on) != Some(scheme) {
+        return Err(format!("NARROW is on {on}, not on scheme {scheme}"));
+    }
+    let (_, schemes) = admin(
+        http,
+        login,
+        reqwest::Method::GET,
+        "rest/api/2/permissionscheme",
+        None,
+    )
+    .await?;
+    if schemes.to_string().contains(NARROWED_SCHEME) {
+        return Err(format!("{NARROWED_SCHEME:?} is still there"));
+    }
+    let (status, _) = admin(http, login, reqwest::Method::GET, &user, None).await?;
+    if status != 404 {
+        return Err(format!("{MINTED} answers {status}, not 404"));
+    }
+    Ok(())
+}
+
+/// NARROW on a copy of its scheme that refuses [`NARROWED`] to everyone but
+/// `jira-administrators`, and [`MINTED`] a user; both taken back by `Drop`.
+struct Narrowed {
+    url: String,
+    user: String,
+    password: String,
+    scheme: u64,
+}
+
+impl Narrowed {
+    async fn new(seeded: &Seeded) -> Narrowed {
+        let login = (
+            seeded.url.as_str(),
+            seeded.user.as_str(),
+            seeded.password.as_str(),
+        );
+        // A killed run's leftovers first.
+        unnarrow(&client(), login, None)
+            .await
+            .unwrap_or_else(|e| panic!("putting back a killed run's narrowing: {e}"));
+        let (status, on) = seeded
+            .get("rest/api/2/project/NARROW/permissionscheme")
+            .await;
+        assert_eq!(status, 200, "{on}");
+        let scheme = on["id"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("NARROW's scheme: {on}"));
+        let guard = Narrowed {
+            url: seeded.url.clone(),
+            user: seeded.user.clone(),
+            password: seeded.password.clone(),
+            scheme,
+        };
+        let (status, own) = seeded
+            .get(&format!(
+                "rest/api/2/permissionscheme/{scheme}?expand=permissions"
+            ))
+            .await;
+        assert_eq!(status, 200, "{own}");
+        let admins = serde_json::json!({ "type": "group", "parameter": "jira-administrators" });
+        let mut grants: Vec<serde_json::Value> = Vec::new();
+        for grant in own["permissions"].as_array().expect("a scheme's grants") {
+            let permission = grant["permission"].as_str().expect("a grant's permission");
+            let holder = if NARROWED.contains(&permission) {
+                admins.clone()
+            } else {
+                let mut holder = serde_json::json!({ "type": grant["holder"]["type"] });
+                if let Some(parameter) = grant["holder"]["parameter"].as_str() {
+                    holder["parameter"] = parameter.into();
+                }
+                holder
+            };
+            let entry = serde_json::json!({ "holder": holder, "permission": permission });
+            if !grants.contains(&entry) {
+                grants.push(entry);
+            }
+        }
+        let (status, copy) = seeded
+            .request(
+                reqwest::Method::POST,
+                "rest/api/2/permissionscheme",
+                Some(serde_json::json!({
+                    "name": NARROWED_SCHEME,
+                    "description": "knobas live suite (#2052): NARROW without comments, worklogs and creates",
+                    "permissions": grants,
+                })),
+            )
+            .await;
+        assert_eq!(status, 201, "creating {NARROWED_SCHEME:?}: {copy}");
+        let copy = copy["id"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("a created scheme's id: {copy}"));
+        let (status, body) = seeded
+            .request(
+                reqwest::Method::PUT,
+                "rest/api/2/project/NARROW/permissionscheme",
+                Some(serde_json::json!({ "id": copy })),
+            )
+            .await;
+        assert_eq!(status, 200, "putting NARROW on {copy}: {body}");
+        let (status, body) = seeded
+            .request(
+                reqwest::Method::POST,
+                "rest/api/2/user",
+                Some(serde_json::json!({
+                    "name": MINTED,
+                    "password": MINTED_PASSWORD,
+                    "emailAddress": format!("{MINTED}@tidewater.test"),
+                    "displayName": "knobas live suite (#2052)",
+                    "applicationKeys": ["jira-software"],
+                })),
+            )
+            .await;
+        assert_eq!(status, 201, "minting {MINTED}: {body}");
+        guard
+    }
+
+    /// The adapter as [`MINTED`], with its password.
+    fn source(&self) -> Box<dyn Source> {
+        match knobas_source_jira::build(SourceInstance {
+            id: "jira".to_owned(),
+            kind: knobas_source_jira::ADAPTER_KIND.to_owned(),
+            display_name: "Tidewater Jira (minted)".to_owned(),
+            base_url: self.url.clone(),
+            auth: Some(AuthMethod::UserPassword),
+            secret: Some(MINTED_PASSWORD.to_owned()),
+            account: None,
+            config: serde_json::json!({ "username": MINTED, "favourite_filters": false }),
+        }) {
+            Ok(s) => s,
+            Err(e) => panic!("the adapter must build for {MINTED}: {e:?}"),
+        }
+    }
+}
+
+impl Drop for Narrowed {
+    fn drop(&mut self) {
+        let (url, user, password, scheme) = (
+            self.url.clone(),
+            self.user.clone(),
+            self.password.clone(),
+            self.scheme,
+        );
+        Cleanup::new(
+            "the live suite did not take back the user and permission scheme it made, so the \
+             server is no longer in the plain-seed state",
+            format!(
+                "NARROW may still be on {NARROWED_SCHEME:?} and {MINTED} may still exist; the next \
+                 run of this test puts both back"
+            ),
+        )
+        .run(move || async move {
+            unnarrow(&client(), (&url, &user, &password), Some(scheme)).await
+        });
+    }
+}
+
+/// What a write would leave on NARROW-1 and in NARROW: its `updated`, its
+/// comments and worklogs, and the project's issue count.
+async fn narrow_marks(seeded: &Seeded) -> serde_json::Value {
+    let (status, issue) = seeded
+        .get("rest/api/2/issue/NARROW-1?fields=updated,status,comment,worklog")
+        .await;
+    assert_eq!(status, 200, "{issue}");
+    let issues = seeded.jql("project = NARROW", "key").await.len();
+    serde_json::json!({
+        "updated": issue["fields"]["updated"],
+        "status": issue["fields"]["status"]["name"],
+        "comments": issue["fields"]["comment"]["total"],
+        "worklogs": issue["fields"]["worklog"]["total"],
+        "issues": issues,
+    })
+}
+
+/// **What the credential may not write, read and never probed** (#2052,
+/// ADR-0013). A user minted with Jira Software access, on NARROW narrowed to
+/// refuse comments, worklogs and creates to all but administrators, is
+/// refused exactly those three there with the reasons, and refused nothing
+/// on PAY or on NARROW's moves. The seed's administrator, asked the same, is
+/// refused nothing. NARROW-1 and NARROW are as they were afterwards: nothing
+/// was written to find out.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn a_user_the_permission_scheme_refuses_is_refused_those_writes_and_nothing_is_written() {
+    use knobas_source::grants::{RefusedWrite, WriteAsk};
+    let seeded = seeded();
+    let narrowed = Narrowed::new(&seeded).await;
+    let before = narrow_marks(&seeded).await;
+    let ask = |entity: &str, op: &str| WriteAsk {
+        entity: entity.to_owned(),
+        op: op.to_owned(),
+    };
+    let asks = [
+        ask("jira:NARROW-1", "comment"),
+        ask("jira:NARROW-1", "transition"),
+        ask("jira:NARROW-1", "log_work"),
+        ask("jira:NARROW", "create_ticket"),
+        ask("jira:PAY-231", "comment"),
+        ask("jira:PAY-231", "log_work"),
+        ask("jira:PAY", "create_ticket"),
+    ];
+    let refused = |entity: &str, op: &str, reason: &str| RefusedWrite {
+        entity: entity.to_owned(),
+        op: op.to_owned(),
+        reason: reason.to_owned(),
+    };
+
+    let minted = narrowed
+        .source()
+        .refused_writes(&asks)
+        .await
+        .expect("the minted user's permissions are an answer");
+    assert_eq!(
+        minted,
+        [
+            refused(
+                "jira:NARROW-1",
+                "comment",
+                "This Jira user cannot comment in NARROW: it lacks the Add Comments permission"
+            ),
+            refused(
+                "jira:NARROW-1",
+                "log_work",
+                "This Jira user cannot log work in NARROW: it lacks the Work On Issues permission"
+            ),
+            refused(
+                "jira:NARROW",
+                "create_ticket",
+                "This Jira user cannot create tickets in NARROW: it lacks the Create Issues permission"
+            ),
+        ]
+    );
+
+    let administrator = seeded
+        .source(serde_json::json!({}))
+        .refused_writes(&asks)
+        .await
+        .expect("the administrator's permissions are an answer");
+    assert_eq!(
+        administrator,
+        [],
+        "the seed's administrator may write all of it"
+    );
+
+    assert_eq!(
+        narrow_marks(&seeded).await,
+        before,
+        "asking wrote nothing to NARROW-1 or NARROW"
+    );
+    println!("SEEDED mypermissions: {MINTED} refused {minted:?}; the administrator nothing");
+    drop(narrowed);
 }
