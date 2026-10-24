@@ -222,3 +222,21 @@ async fn a_create_is_on_its_way_on_every_asset_and_route_that_records_its_name()
         ]
     );
 }
+
+/// Two creates of one name on their way at once, as a second press queued
+/// them before `submit_write` refused it: the row names the newer, the one a
+/// reader pressed last.
+#[tokio::test]
+async fn of_two_creates_of_one_name_on_their_way_the_row_names_the_newer() {
+    let pool = pool("monitor-on-its-way-two").await;
+    recording(&pool, "pg-main", "pg-main").await;
+    let older = create(&pool, "pg-main").await;
+    knobas_core::write_queue::sent(&pool, older, Some("31"))
+        .await
+        .unwrap();
+    let newer = create(&pool, "pg-main").await;
+    assert_eq!(
+        on_its_way(&pool).await,
+        [("pg-main".to_owned(), Some((newer, WriteState::Pending)))]
+    );
+}
