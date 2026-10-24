@@ -2681,10 +2681,10 @@ async fn a_write_flushed_while_the_keychain_is_locked_climbs_the_ladder() {
     let waiting = h.reload(write.id).await;
     assert_eq!(waiting.state, WriteState::Pending);
     assert_eq!(waiting.wait_reason, Some(WaitReason::Unreachable));
-    let detail = waiting.detail.unwrap_or_default();
-    assert!(
-        detail.starts_with("keychain:"),
-        "the panel reads the detail for the keychain: {detail:?}"
+    // The panel reads the detail for `keychain:`, and prints it: once.
+    assert_eq!(
+        waiting.detail.as_deref(),
+        Some("keychain: User interaction is not allowed.")
     );
     assert_eq!(h.asked(), 0, "the source is not asked without a credential");
 

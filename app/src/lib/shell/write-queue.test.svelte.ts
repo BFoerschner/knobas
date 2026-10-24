@@ -304,7 +304,7 @@ test("a write behind a held one names the held write, and an unblocked neighbour
 // and climbs the ladder; the detail the queue records starts `keychain:`.
 test("a write waiting on a keychain that would not open says so, not that the server did not answer", async () => {
   rows = [
-    write({ id: 4, detail: "keychain: keychain: User interaction is not allowed." }),
+    write({ id: 4, detail: "keychain: User interaction is not allowed." }),
     write({ id: 5, entity_id: "jira:PAY-300" }),
   ];
   counts = { pending: 2, held: 0, refused: 0 };
