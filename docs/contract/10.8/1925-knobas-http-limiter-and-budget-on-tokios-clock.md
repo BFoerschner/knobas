@@ -4,8 +4,14 @@
   so no test could move a quota or a budget: each read the wall clock with sub-second slack and
   went red under load. No change to the SPI, the commands, `HttpConfig`, any adapter, any public
   signature, how any failure maps to a `SourceError`, #1729's `watch_local_quota` mark, or what a
-  quota lets through; outside a test that pauses tokio's clock, `tokio::time::Instant` is the
-  monotonic clock, as before.
+  quota lets through while the machine is awake; outside a test that pauses tokio's clock,
+  `tokio::time::Instant` is `std::time::Instant`, which the send budget's timeouts and the quiet a
+  quota change is credited with read already. One difference, across a system sleep on macOS:
+  std's clock (`CLOCK_UPTIME_RAW`) stops while the machine sleeps, and governor's quanta clock
+  read the raw counter (`cntvct_el0` on Apple silicon), which runs on, so a quota no longer
+  refills while the machine sleeps. The limiter wakes as it slept: a drained quota hands out its
+  next request at most one refill interval later than before, never sooner. Stricter, never
+  looser.
 
   **`crates/knobas-http/src/limiter.rs` — private, behind the public `InstanceLimiter`:** a
   private governor clock, `TokioClock`, reads `tokio::time::Instant` through a private `Tick`

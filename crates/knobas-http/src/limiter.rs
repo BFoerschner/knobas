@@ -42,8 +42,13 @@
 //!
 //! **The clock is tokio's** (#1925): every limiter reads
 //! [`tokio::time::Instant`] and waits with [`tokio::time::sleep`], as the
-//! send budget and every timeout around it do. Outside a test that is the
-//! monotonic clock, as before. A test that pauses tokio's clock moves the
+//! send budget and every timeout around it do. Outside a test that is
+//! `std::time::Instant`, which the quiet a quota change is credited with
+//! read already. On macOS it stops while the machine sleeps, where
+//! governor's quanta clock read the raw counter, which runs on: a quota no
+//! longer refills across a suspend, so the limiter wakes as it slept, and a
+//! drained one hands out its next request at most one refill interval later
+//! than before, never sooner. A test that pauses tokio's clock moves the
 //! quota with the budget, so it can assert what a quota lets through exactly,
 //! where governor's own clock and timer would have kept wall time under it.
 
