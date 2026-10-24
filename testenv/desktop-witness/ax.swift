@@ -604,6 +604,12 @@ func waitContent(pid: pid_t, seconds: Double) -> Int32 {
     return fail("pid \(pid)'s web view drew nothing within \(Int(seconds)) s")
 }
 
+/// The largest of several framed things, by area: the window `window-id`
+/// measures and the one `resize` sizes are picked the same way.
+func largest<T>(_ framed: [(T, CGRect)]) -> (T, CGRect)? {
+    framed.max(by: { $0.1.width * $0.1.height < $1.1.width * $1.1.height })
+}
+
 /// The app's largest on-screen window, as the window server knows it:
 /// `<window id>\t<width>\t<height>` in points, for `screencapture -l`.
 func windowID(pid: pid_t) -> Int32 {
@@ -618,7 +624,7 @@ func windowID(pid: pid_t) -> Int32 {
         else { return nil }
         return (id, bounds)
     }
-    guard let (id, bounds) = mine.max(by: { $0.1.width * $0.1.height < $1.1.width * $1.1.height }) else {
+    guard let (id, bounds) = largest(mine) else {
         return fail("pid \(pid) has no on-screen window (none, another Space, or the screen is locked)")
     }
     print("\(id)\t\(Int(bounds.width))\t\(Int(bounds.height))")
@@ -630,7 +636,7 @@ func windowID(pid: pid_t) -> Int32 {
 /// window manager may refuse or undo it, so the caller reads the size again.
 func resize(pid: pid_t, width: Int, height: Int) -> Int32 {
     let framed = windows(of: pid).compactMap { window in frame(window).map { (window, $0) } }
-    guard let (window, _) = framed.max(by: { $0.1.width * $0.1.height < $1.1.width * $1.1.height }) else {
+    guard let (window, _) = largest(framed) else {
         return fail("pid \(pid) has no window to resize")
     }
     var size = CGSize(width: width, height: height)
@@ -707,7 +713,7 @@ case "window-id" where arguments.count == 2 && integer(1) != nil:
     status = windowID(pid: pid_t(integer(1)!))
 case "wait-content" where arguments.count == 3 && integer(1) != nil && seconds(2) != nil:
     status = waitContent(pid: pid_t(integer(1)!), seconds: seconds(2)!)
-case "resize" where arguments.count == 4 && integer(1) != nil && integer(2) != nil && integer(3) != nil:
+case "resize" where arguments.count == 4 && integer(1) != nil && (integer(2) ?? 0) > 0 && (integer(3) ?? 0) > 0:
     status = resize(pid: pid_t(integer(1)!), width: integer(2)!, height: integer(3)!)
 default:
     FileHandle.standardError.write(

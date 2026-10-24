@@ -369,7 +369,7 @@ note "one instance"
 # refused naming the size, before the driver's first step.
 step "giving the window a known size (at least $WITNESS_MIN_WIDTH points wide)"
 witness_window_size "$ax" "$app_pid" | sed 's/^/desktop-witness:   /' ||
-    fail "driver '$driver_name' not run: the window is too narrow for it (above)."
+    fail "driver '$driver_name' not run: the window could not be given a size it runs at (above)."
 
 # ---------------------------------------------------------------------------
 # 6. The driver.

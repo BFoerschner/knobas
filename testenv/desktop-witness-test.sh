@@ -1126,6 +1126,8 @@ if [ "$(uname -s)" = Darwin ] && command -v swiftc >/dev/null; then
     check "resize refuses a process with no window" 1 "$answer"
     "$helper/ax" resize $$ wide 800 >/dev/null 2>&1 && answer=0 || answer=$?
     check "a resize width that is no number is a usage error" 2 "$answer"
+    "$helper/ax" resize $$ 0 800 >/dev/null 2>&1 && answer=0 || answer=$?
+    check "a resize width of zero is a usage error" 2 "$answer"
 else
     printf 'desktop-witness-test: skipping the helper checks (needs macOS and swiftc)\n'
 fi
@@ -1261,7 +1263,7 @@ said=$(sized 1280 820 fullscreens)
 check_contains "no AeroSpace running: a wide window runs as it is" "window: 1280x820" "$said"
 check_contains "no AeroSpace running: and passes" "status 0" "$said"
 check "no AeroSpace running: nothing is fullscreened or resized" no \
-    "$(case $said in *aerospace\ fullscreen* | *resize*) echo yes ;; *) echo no ;; esac)"
+    "$(case $said in (*aerospace\ fullscreen* | *resize*) echo yes ;; (*) echo no ;; esac)"
 said=$(sized 900 700 resizable)
 check_contains "no AeroSpace: a narrow window is widened to the minimum" "resize $$ 1241 700" "$said"
 check_contains "no AeroSpace: and runs at that size" "window: 1241x700" "$said"

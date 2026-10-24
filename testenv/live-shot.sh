@@ -248,7 +248,7 @@ say "knobas is pid $app_pid; waiting for its window"
 # tiling window manager does not resize it between shots, and refused below
 # WITNESS_MIN_WIDTH.
 witness_window_size "$ax" "$app_pid" | sed 's/^/live-shot: /' \
-    || die "the window is too narrow for the steps (above)"
+    || die "the window could not be given a size the steps run at (above)"
 settle 3
 
 say "running $steps"
