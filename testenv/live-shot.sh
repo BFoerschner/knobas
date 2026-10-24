@@ -110,6 +110,10 @@ mkdir "$LOCK" 2>/dev/null \
     || die "a desktop witness or another live-shot holds $LOCK; one at a time (a killed run left it behind if nothing runs: rmdir it)"
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/knobas-live-shot.XXXXXX")
 demo_pid=
+# The demo profile's data directory, and the postmaster serving it before
+# `just demo` (#1967): set at the start, read by `cleanup`.
+pg_data=
+pg_before=
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
@@ -120,12 +124,34 @@ cleanup() {
         if "$ax" activate "$app_pid" 2>/dev/null; then "$ax" key 12 command 2>/dev/null || true; fi
         for _ in $(seq 1 40); do kill -0 "$app_pid" 2>/dev/null || break; sleep 0.5; done
         kill -TERM "$app_pid" 2>/dev/null || true
+        # A SIGTERM ends it at once; one still up after the guard is hung, and
+        # is killed outright so its server can be stopped below (#1967).
+        local polled=0
+        witness_poll "$app_pid" "$wait_s" false || polled=$?
+        if [ "$polled" = 1 ]; then
+            say "knobas outlived SIGTERM by $wait_s s (KNOBAS_WITNESS_WAIT_S); sending SIGKILL"
+            kill -KILL "$app_pid" 2>/dev/null || true
+            witness_poll "$app_pid" "$wait_s" false || true
+        fi
     fi
     if [ -n "$demo_pid" ]; then
         for _ in $(seq 1 20); do kill -0 "$demo_pid" 2>/dev/null || break; sleep 0.5; done
         # Started under `set -m`, so its group is its pid; the group outlives a
-        # leader that has exited (the dev server on :1420 is in it).
+        # leader that has exited (the dev server on :1420 is in it). The stop
+        # below runs once the group is gone, SIGKILLed past the guard.
         pkill -TERM -g "$demo_pid" 2>/dev/null || true
+        local deadline=$((SECONDS + wait_s))
+        while pgrep -g "$demo_pid" >/dev/null 2>&1 && [ "$SECONDS" -lt "$deadline" ]; do sleep 0.5; done
+        pkill -KILL -g "$demo_pid" 2>/dev/null || true
+    fi
+    # Either kill leaves the app's embedded PostgreSQL up on the demo profile,
+    # the one the person's own `--demo` app uses: a killed app runs no exit
+    # handler (#1967). After a ⌘Q that worked there is nothing here.
+    if [ -n "$pg_data" ]; then
+        local said stopped=0
+        said=$(stop_left_postgres "$pg_data" "$pg_before" "$wait_s" 2>&1) || stopped=$?
+        [ -z "$said" ] || say "$said"
+        if [ "$stopped" -ne 0 ] && [ "$status" -eq 0 ]; then status=1; fi
     fi
     # What live_session's own EXIT trap runs, which this trap replaced.
     [ -z "$product" ] || { _live_restore; live_lock_release; }
@@ -205,6 +231,8 @@ key() {
 settle() { sleep "${1:-1}"; }
 
 say "starting 'just demo' with KNOBAS_SECRET_STORE=memory (log: $out/demo.log)"
+pg_data=$(demo_data_dir)
+pg_before=$(profile_postmaster "$pg_data")
 # Its own process group, so the dev server and cargo go with it at the end.
 set -m
 env -C "$repo" KNOBAS_SECRET_STORE=memory just demo >"$out/demo.log" 2>&1 &

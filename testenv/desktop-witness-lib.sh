@@ -380,6 +380,116 @@ witness_poll() {
     done
 }
 
+# --- the PostgreSQL a killed app leaves (#1967) -----------------------------
+#
+# The scripts that launch knobas quit it politely when they can (⌘Q, which
+# stops the embedded PostgreSQL on the way out) and kill it when they cannot.
+# A killed knobas runs no exit handler, so its server stays up on the profile's
+# data directory, parented to pid 1, until something stops it; the app's next
+# launch adopts it (`knobas_db::EmbeddedDb::start`), which is the product's
+# answer to a crash and not a script's to rely on. These are what each script
+# runs after the app has gone, killed or not. Unlike the rest of this file,
+# `stop_left_postgres` acts (it signals and waits); the test drives it against
+# stand-in postmasters. Sourced by `scripts/single-instance-witness.sh` too.
+
+# demo_data_dir [home]
+#
+# The demo profile's PostgreSQL data directory under <home> ($HOME by
+# default): `app_data_dir` for `dev.knobas.desktop`, then `Profile::new`'s
+# `demo`, `db_root`'s `db` and `postgresql_embedded`'s `data`.
+# `desktop-witness-test.sh` pins the three files that say so.
+demo_data_dir() {
+    printf '%s/Library/Application Support/dev.knobas.desktop/demo/db/data\n' "${1:-$HOME}"
+}
+
+# pg_path <data dir>
+#
+# <data dir> spelled as `pg_ctl` hands it to the postmaster, which is what its
+# command line shows: repeated slashes collapsed, `/./` dropped, no trailing
+# slash (`canonicalize_path`; symlinks are not resolved). A `$TMPDIR` that ends
+# in `/` gives `.../T//x`, and the postmaster on it says `.../T/x`.
+pg_path() {
+    printf '%s\n' "$1" | sed -e 's|//*|/|g' -e 's|/\./|/|g' -e 's|\(.\)/$|\1|'
+}
+
+# profile_postmaster <data dir>
+#
+# The pid of the PostgreSQL serving <data dir>, or nothing: the pid on the
+# first line of its `postmaster.pid`, when that process is alive and its
+# command line is a `postgres -D <data dir>`. A lock naming a dead pid is
+# stale, and a live pid that is anything else (one recycled after a reboot,
+# another cluster's server) is not this directory's to stop.
+profile_postmaster() {
+    local data pid args
+    data=$(pg_path "$1")
+    [ -r "$data/postmaster.pid" ] || return 0
+    pid=$(head -n 1 "$data/postmaster.pid" 2>/dev/null) || return 0
+    case $pid in '' | *[!0-9]*) return 0 ;; esac
+    args=$(ps -o args= -p "$pid" 2>/dev/null) || return 0
+    case "$args " in
+    *"postgres -D $data "*) printf '%s\n' "$pid" ;;
+    esac
+}
+
+# starts_in_flight <data dir> <postmaster pid>
+#
+# The pids of the PostgreSQL tools still working on <data dir> other than its
+# postmaster: an `initdb` or `pg_ctl` the app started, which a kill does not
+# stop, or a postmaster `pg_ctl start` has not yet recorded. The directory is
+# matched as a literal string (ENVIRON, not `awk -v`, so this `awk` is not in
+# its own answer).
+starts_in_flight() {
+    ps -A -o pid= -o args= 2>/dev/null | DATA=$(pg_path "$1") SKIP=$2 awk '
+        index($0, ENVIRON["DATA"]) && $1 != ENVIRON["SKIP"] && /initdb|pg_ctl|postgres/ { print $1 }'
+}
+
+# stop_left_postgres <data dir> <pid before launch> <seconds>
+#
+# Stop the PostgreSQL the app left on <data dir>. Run once the app is gone.
+# First the starts it left in flight are waited out (up to <seconds>), so a
+# server coming up behind a kill mid bring-up is stopped rather than missed.
+# Then the postmaster `profile_postmaster` finds gets a fast shutdown (SIGINT,
+# what `pg_ctl stop -m fast` sends) and, if it is still up after <seconds>, an
+# immediate one (SIGQUIT, the app's own fallback). A postmaster that was
+# serving <data dir> before the launch (<pid before launch>, from
+# `profile_postmaster` then) is not this run's and is left as it was.
+#
+# 0 when nothing of this run's is left; 1, naming the pids and the hand stop
+# on stderr, when a start outlived the guard or the postmaster both signals. Says what it stopped on stdout,
+# and nothing at all when there was nothing.
+stop_left_postgres() {
+    local data before=$2 seconds=$3 deadline pid starting
+    data=$(pg_path "$1")
+    deadline=$((SECONDS + seconds))
+    while starting=$(starts_in_flight "$data" "$(profile_postmaster "$data")") && [ -n "$starting" ]; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            printf 'a PostgreSQL is still starting on %s after %s s (pids %s): stop them, then pg_ctl -D "%s" stop\n' \
+                "$data" "$seconds" "$(printf '%s' "$starting" | tr '\n' ' ')" "$data" >&2
+            return 1
+        fi
+        sleep 0.2
+    done
+    pid=$(profile_postmaster "$data")
+    [ -n "$pid" ] || return 0
+    if [ "$pid" = "$before" ]; then
+        printf 'left alone: pid %s was serving %s before this run\n' "$pid" "$data"
+        return 0
+    fi
+    local signal
+    for signal in INT QUIT; do
+        kill -"$signal" "$pid" 2>/dev/null || true
+        deadline=$((SECONDS + seconds))
+        while kill -0 "$pid" 2>/dev/null && [ "$SECONDS" -lt "$deadline" ]; do sleep 0.2; done
+        if ! kill -0 "$pid" 2>/dev/null; then
+            printf 'stopped the PostgreSQL the app left on %s (pid %s, SIG%s)\n' "$data" "$pid" "$signal"
+            return 0
+        fi
+    done
+    printf 'the PostgreSQL the app left is still running on %s (pid %s): pg_ctl -D "%s" stop -m immediate\n' \
+        "$data" "$pid" "$data" >&2
+    return 1
+}
+
 # sole_argument <recorded text>
 #
 # The one argument the stub recorded, or nothing at all.

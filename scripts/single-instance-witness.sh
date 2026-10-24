@@ -32,7 +32,22 @@ mode=${1:-second}
 export HOME="$tmp" KNOBAS_DB_URL="postgres://x:x@127.0.0.1:1/x"
 marker="using an externally managed postgres"
 first_pid="" ; second_pid=""
-cleanup() { [ -n "$second_pid" ] && kill "$second_pid" 2>/dev/null; [ -n "$first_pid" ] && kill "$first_pid" 2>/dev/null; wait 2>/dev/null; rm -rf "$tmp"; rm -f "$sock"; }
+# The --demo launch starts an embedded PostgreSQL on its own profile under the
+# temp HOME, and the kill below leaves it up: a killed app runs no exit
+# handler (#1967). It is stopped before the HOME it lives in is deleted.
+# shellcheck source=testenv/desktop-witness-lib.sh disable=SC1091
+. "$root/testenv/desktop-witness-lib.sh"
+pg_data=""
+cleanup() {
+  local status=$? said
+  [ -n "$second_pid" ] && kill "$second_pid" 2>/dev/null; [ -n "$first_pid" ] && kill "$first_pid" 2>/dev/null; wait 2>/dev/null
+  if [ -n "$pg_data" ]; then
+    said=$(stop_left_postgres "$pg_data" "" "$wait_s" 2>&1) || status=1
+    [ -z "$said" ] || echo "$said"
+  fi
+  rm -rf "$tmp"; rm -f "$sock"
+  exit "$status"
+}
 trap cleanup EXIT
 fail() { echo "FAIL: $*"; echo "--- $sock: $([ -S "$sock" ] && echo a socket || echo absent)"; echo "--- first"; cat "$tmp/first.log"; echo "--- second"; cat "$tmp/second.log" 2>/dev/null; exit 1; }
 # poll <what> <pid> <predicate...>: until the predicate holds. Fails at once
@@ -57,6 +72,7 @@ demo_up() { grep -q "provisioning postgres\|starting the embedded" "$tmp/second.
 poll "the first instance did not reach bring-up and hold its socket" "$first_pid" first_up
 
 if [ "$mode" = "--demo-beside" ]; then
+  pg_data=$(demo_data_dir "$tmp")
   "$bin" --demo >"$tmp/second.log" 2>&1 & second_pid=$!
   # The demo profile ignores KNOBAS_DB_URL and would provision its own scratch
   # postgres; it is killed on the cleanup trap right after it reaches setup.

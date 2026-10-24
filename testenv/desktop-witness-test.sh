@@ -457,6 +457,165 @@ witness_poll "$gone" 30 test -e "$poll_tmp/drawn" || status=$?
 check "a state already reached answers whatever the app does next" 0 "$status"
 rm -rf "$poll_tmp"
 
+# --- profile_postmaster, stop_left_postgres (#1967) ----------------------------
+#
+# A run that cannot quit the app it launched kills it, and a killed knobas runs
+# no exit handler: its embedded PostgreSQL stays up on the profile's data
+# directory. Every script that launches the app stops what it left. The
+# stand-ins are the shapes checked against the real 18.6 binaries on
+# 2026-10-24: `pg_ctl start` leaves a postmaster whose parent is pid 1, whose
+# command line is `<bin>/postgres -D <data dir> ...`, which writes its pid on
+# the first line of `<data dir>/postmaster.pid` and removes the file on a fast
+# shutdown (SIGINT, what `pg_ctl stop -m fast` sends).
+# Canonical, as `pg_ctl` would hand it on (a `$TMPDIR` ending in `/` doubles it).
+pg_tmp=$(pg_path "$(mktemp -d "${TMPDIR:-/tmp}/knobas-witness-pg.XXXXXX")")
+mkdir -p "$pg_tmp/bin" "$pg_tmp/other"
+pg_data="$pg_tmp/Application Support/db/data"
+mkdir -p "$pg_data"
+# postgres -D <data dir>: a postmaster. PG_STANDIN=fast (the default) stops on
+# SIGINT, deaf only on SIGQUIT (immediate), stuck on neither.
+cat >"$pg_tmp/bin/postgres" <<'EOF'
+#!/usr/bin/env bash
+data=$2
+case ${PG_STANDIN:-fast} in
+fast) trap 'rm -f "$data/postmaster.pid"; exit 0' INT ;;
+deaf) trap '' INT; trap 'rm -f "$data/postmaster.pid"; exit 0' QUIT ;;
+stuck) trap '' INT QUIT ;;
+esac
+printf '%s\n%s\n' "$$" "$data" >"$data/postmaster.pid"
+while :; do sleep 0.1; done
+EOF
+# initdb --pgdata <data dir>: what a killed app leaves in flight, which goes
+# on to start a postmaster 2 s later (a `pg_ctl start` the app had begun).
+cat >"$pg_tmp/bin/initdb" <<'EOF'
+#!/usr/bin/env bash
+[ "${PG_INITDB:-}" != hang ] || while :; do sleep 0.1; done
+sleep 2
+set -m
+"$(dirname "$0")/postgres" -D "$2" >/dev/null 2>&1 &
+echo $! >"$2/../started"
+until [ -s "$2/postmaster.pid" ]; do sleep 0.1; done
+EOF
+chmod +x "$pg_tmp/bin/postgres" "$pg_tmp/bin/initdb"
+# A background job of a script starts with SIGINT ignored, which no trap can
+# undo; job control gives the stand-in the default a real postmaster sets.
+postmaster_standin() { # <data dir> [mode]: starts one, prints its pid
+    set -m
+    PG_STANDIN=${2:-fast} "$pg_tmp/bin/postgres" -D "$1" >/dev/null 2>&1 &
+    set +m
+    local pid=$!
+    until [ -s "$1/postmaster.pid" ]; do sleep 0.1; done
+    printf '%s\n' "$pid"
+}
+alive() { kill -0 "$1" 2>/dev/null && echo alive || echo gone; }
+
+check "no postmaster.pid: no postmaster" "" "$(profile_postmaster "$pg_data")"
+said=$(stop_left_postgres "$pg_data" "" 5 2>&1) && status=0 || status=$?
+check "no postmaster.pid: nothing to stop" 0 "$status"
+check "and nothing said" "" "$said"
+
+pid=$(postmaster_standin "$pg_data")
+check "a live postmaster on the data dir is found" "$pid" "$(profile_postmaster "$pg_data")"
+# `pg_ctl` canonicalises the directory before the postmaster gets it (checked
+# against 18.6: `-D .../T//x` runs as `postgres -D .../T/x`), so a caller's
+# spelling with a doubled or trailing slash finds the same server.
+check "under a doubled and a trailing slash too" "$pid" "$(profile_postmaster "${pg_tmp}//Application Support/./db/data/")"
+check "pg_path spells a path as pg_ctl does" "/a/b/c" "$(pg_path "/a//b/./c/")"
+check "pg_path leaves the root alone" "/" "$(pg_path "/")"
+from=$SECONDS
+said=$(stop_left_postgres "$pg_data" "" 10 2>&1) && status=0 || status=$?
+check "the postmaster the app left is stopped" 0 "$status"
+# With nothing in flight the stop does not wait for the guard: the postmaster
+# itself is not a start in flight (the real one stops in a quarter second).
+check "at once" yes "$([ $((SECONDS - from)) -lt 5 ] && echo yes || echo "no ($((SECONDS - from)) s)")"
+check "it is gone" gone "$(alive "$pid")"
+check "its lock is gone" no "$([ -e "$pg_data/postmaster.pid" ] && echo yes || echo no)"
+check_contains "and the stop says which" "stopped the PostgreSQL the app left on $pg_data (pid $pid, SIGINT)" "$said"
+
+# Running before the launch: not this run's, so it is left as it was, even
+# though the app adopted it.
+pid=$(postmaster_standin "$pg_data")
+said=$(stop_left_postgres "$pg_data" "$pid" 5 2>&1) && status=0 || status=$?
+check "a postmaster running before the launch is not stopped" "0 alive" "$status $(alive "$pid")"
+check_contains "and the run says it left it" "left alone: pid $pid was serving $pg_data before this run" "$said"
+kill -INT "$pid"; wait "$pid" 2>/dev/null || true
+
+# A postmaster.pid whose pid is gone, or now names another process (a pid
+# recycled after a reboot, another cluster's postgres): nothing to stop.
+printf '999999\n%s\n' "$pg_data" >"$pg_data/postmaster.pid"
+check "a dead pid is no postmaster" "" "$(profile_postmaster "$pg_data")"
+sleep 600 &
+stranger=$!
+printf '%s\n%s\n' "$stranger" "$pg_data" >"$pg_data/postmaster.pid"
+check "a recycled pid is no postmaster" "" "$(profile_postmaster "$pg_data")"
+stop_left_postgres "$pg_data" "" 5 >/dev/null 2>&1 && status=0 || status=$?
+check "and is not signalled" "0 alive" "$status $(alive "$stranger")"
+kill "$stranger"; wait "$stranger" 2>/dev/null || true
+other=$(postmaster_standin "$pg_tmp/other")
+cp "$pg_tmp/other/postmaster.pid" "$pg_data/postmaster.pid"
+check "another data dir's postmaster is no postmaster of this one" "" "$(profile_postmaster "$pg_data")"
+check "nor a start in flight on it" "" "$(starts_in_flight "$pg_data" "")"
+check "while it is one on its own" "$other" "$(starts_in_flight "$pg_tmp/other" "")"
+stop_left_postgres "$pg_data" "" 5 >/dev/null 2>&1 || true
+check "and is not signalled" alive "$(alive "$other")"
+kill -INT "$other"; wait "$other" 2>/dev/null || true
+rm -f "$pg_data/postmaster.pid"
+
+# One that ignores the fast shutdown gets the immediate one.
+pid=$(postmaster_standin "$pg_data" deaf)
+said=$(stop_left_postgres "$pg_data" "" 2 2>&1) && status=0 || status=$?
+check "a postmaster deaf to SIGINT is stopped" "0 gone" "$status $(alive "$pid")"
+check_contains "with SIGQUIT" "(pid $pid, SIGQUIT)" "$said"
+# One that stops for neither is a failure that names it, not a silent pass.
+pid=$(postmaster_standin "$pg_data" stuck)
+said=$(stop_left_postgres "$pg_data" "" 1 2>&1) && status=0 || status=$?
+check "a postmaster that will not stop fails the step" 1 "$status"
+check_contains "naming it and the hand stop" "still running on $pg_data (pid $pid): pg_ctl -D" "$said"
+kill -KILL "$pid"; wait "$pid" 2>/dev/null || true
+rm -f "$pg_data/postmaster.pid"
+
+# The app killed mid bring-up: what it started goes on without it, and the
+# postmaster it brings up is waited for and stopped, not missed.
+set -m
+"$pg_tmp/bin/initdb" --pgdata "$pg_data" >/dev/null 2>&1 &
+set +m
+starter=$!
+from=$SECONDS
+said=$(stop_left_postgres "$pg_data" "" 20 2>&1) && status=0 || status=$?
+check "a start in flight is waited out" yes "$([ $((SECONDS - from)) -ge 2 ] && echo yes || echo "no ($((SECONDS - from)) s)")"
+check "and the postmaster it started is stopped" "0 gone gone" \
+    "$status $(alive "$starter") $(alive "$(cat "$pg_data/../started")")"
+check "its lock is gone too" no "$([ -e "$pg_data/postmaster.pid" ] && echo yes || echo no)"
+check_contains "and the stop says which" "stopped the PostgreSQL the app left" "$said"
+# A start that never finishes outlasts the guard: a failure that names it,
+# since the server it may still bring up would be left running.
+set -m
+PG_INITDB=hang "$pg_tmp/bin/initdb" --pgdata "$pg_data" >/dev/null 2>&1 &
+set +m
+starter=$!
+until [ -n "$(starts_in_flight "$pg_data" "")" ]; do sleep 0.1; done
+said=$(stop_left_postgres "$pg_data" "" 1 2>&1) && status=0 || status=$?
+check "a start that outlasts the guard fails the step" 1 "$status"
+check_contains "naming what is still starting" "still starting on $pg_data" "$said"
+kill -KILL "$starter" 2>/dev/null || true
+wait "$starter" 2>/dev/null || true
+
+check "the demo profile's data dir" \
+    "/Users/mara/Library/Application Support/dev.knobas.desktop/demo/db/data" "$(demo_data_dir /Users/mara)"
+# That path is three files' layout; a drift would make every stop look in an
+# empty directory and pass.
+if grep -q '"identifier": "dev.knobas.desktop"' ../crates/knobas-app/tauri.conf.json &&
+    grep -q 'app_data_dir.join("demo")' ../crates/knobas-app/src/profile.rs &&
+    grep -q 'self.dir.join("db")' ../crates/knobas-app/src/profile.rs &&
+    grep -q 'settings.data_dir = root_dir.join("data");' ../crates/knobas-db/src/embedded.rs; then
+    check "the app still keeps the demo database where demo_data_dir looks" yes yes
+else
+    check "the app still keeps the demo database where demo_data_dir looks" yes no
+fi
+# Whatever a failing check above left running: only this test's stand-ins.
+pkill -KILL -f -- "$pg_tmp/bin/" 2>/dev/null || true
+rm -rf "$pg_tmp"
+
 # The twin, pinned in the direction #531's divergence ran: two files writing
 # and waiting on one stub's record, and only a reader of both can see them
 # disagree. What makes a record whole on both sides is the rename (#583), so
