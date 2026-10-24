@@ -191,9 +191,10 @@
           <span class="tf-dim tf-small">{otherTimer ? `stops the timer on ${otherTimer} first` : ""}</span>
         {/if}
         {#if of && current?.id === of.id && (of.outcome === "failed" || of.outcome === "queued")}
-          <!-- A queued step's write is still open: the button re-reads it and
+          <!-- While a queued step's write is open, the button re-reads it and
                sends it nothing more (`ready_retry`'s rule 1), so it is not
-               *Retry* (#1998). -->
+               *Retry* (#1998). A write discarded or refused since still runs
+               the step again here (#2015). -->
           <button class="tf-btn tf-sm" disabled={flow.busy} onclick={() => void flow.retry(of.id)}>{of.outcome === "queued" ? "Check again" : "Retry"}</button>
         {/if}
         {#if of && current?.id === of.id && of.outcome !== "running"}
