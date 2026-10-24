@@ -1697,6 +1697,7 @@ knobas-db	lib/knobas_db	backup::tests::the_header_and_the_comments_are_not_entri
 knobas-db	lib/knobas_db	embedded::tests::a_directory_a_finished_initdb_made_is_never_removed
 knobas-db	lib/knobas_db	embedded::tests::a_directory_whose_databases_are_on_a_missing_volume_is_kept
 knobas-db	lib/knobas_db	embedded::tests::a_directory_whose_databases_cannot_be_listed_is_kept
+knobas-db	lib/knobas_db	embedded::tests::a_directory_without_pg_version_that_may_hold_a_database_is_kept
 knobas-db	lib/knobas_db	embedded::tests::a_dropped_initdb_is_killed_with_its_future
 knobas-db	lib/knobas_db	embedded::tests::a_half_written_symlinked_data_directory_loses_the_link_alone
 knobas-db	lib/knobas_db	embedded::tests::a_launch_that_started_cold_authenticates_with_the_recorded_password
@@ -1754,6 +1755,7 @@ knobas-db	test/backup	an_archive_from_before_the_saved_view_rename_restores
 knobas-db	test/backup	the_archive_carries_the_owned_schema_and_leaves_the_mirror_out
 knobas-db	test/embedded	a_connector_does_not_print_its_password
 knobas-db	test/embedded	a_connector_hands_out_connections_outside_every_pool
+knobas-db	test/embedded	a_data_directory_an_initdb_killed_before_pg_version_left_is_initialised_again
 knobas-db	test/embedded	a_data_directory_an_interrupted_initdb_left_is_initialised_again
 knobas-db	test/embedded	a_data_directory_that_holds_a_database_is_never_removed
 knobas-db	test/embedded	a_failed_retry_never_stops_the_server_that_appeared_in_the_window
