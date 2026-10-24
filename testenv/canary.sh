@@ -6,6 +6,8 @@
 #   ./canary.sh down     release it (idempotent)
 #   ./canary.sh status   one line, exit 0 when it is bound
 #
+#   KNOBAS_CANARY_WAIT_S=120  how long `up` waits for the responder to answer
+#
 # WHY IT EXISTS. M4.1's alert chain has to be proven end to end against the
 # real Kuma: a monitor goes down, an alert opens, it is acked, the thing
 # recovers, the alert closes. The only honest way to knock a monitor down is to
@@ -38,6 +40,9 @@ cd "$(dirname "$0")"
 
 PORT=8299
 PIDFILE="$HOME/.knobas-canary-$PORT.pid"
+# The guard on `up`'s wait for the responder to answer (#1961), whole seconds.
+WAIT_S=${KNOBAS_CANARY_WAIT_S:-120}
+case $WAIT_S in ''|0*|*[!0-9]*) echo "canary: KNOBAS_CANARY_WAIT_S must be a whole number of seconds, got '$WAIT_S'" >&2; exit 2 ;; esac
 
 # Not in testenv/: `./reset` would have to learn to kill the process before
 # removing the file, and a stale pidfile in the repo is one more thing a
@@ -100,23 +105,25 @@ up() {
   # backgrounded pipeline is the LAST command's pid, and the pidfile has to
   # name the process that holds the socket. `nohup` execs python3, so the pid
   # it reports is python3's.
-  local src i=0
+  local src from last
   src=$(responder)
   nohup python3 -c "$src" "$PORT" >/dev/null 2>&1 &
   echo $! > "$PIDFILE"
-  # 40 tries, not "20 seconds": `answers` carries `--max-time 3`, so a socket
-  # that accepts and then hangs makes each turn ~3.5 s rather than 0.5 s and
-  # the wall clock is nothing like 40 x 0.5. Saying "40 tries" is the thing
-  # this loop actually counts.
+  # Polled until it answers, under a guard in seconds (#1961): a loaded
+  # machine starts python3 slowly, and the old 40 tries of 0.5 s failed a run
+  # with nothing wrong. A responder that exits fails at once, so the guard
+  # costs a real fault nothing; one that never answers runs it out, and each
+  # probe is cut off at 3 s, so a socket that accepts and hangs overshoots
+  # the guard by at most that.
   # Both failure paths KILL before removing the pidfile. Removing it first
   # would disown a responder that is still holding the socket, and this
   # script's whole ownership rule is "a port that answers with no pidfile is
   # somebody else's" -- so `up` would then refuse the port and `down` would
   # call it already down, and nothing here could ever release it again.
-  until answers; do
-    i=$((i + 1))
-    [ "$i" -lt 40 ] || { kill "$(cat "$PIDFILE")" 2>/dev/null || true; rm -f "$PIDFILE"; die "did not answer on 127.0.0.1:$PORT after 40 tries"; }
-    kill -0 "$(cat "$PIDFILE")" 2>/dev/null || { rm -f "$PIDFILE"; die "responder exited at once (is $PORT taken?)"; }
+  from=$SECONDS
+  until last=$(curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:$PORT/" 2>&1); do
+    kill -0 "$(cat "$PIDFILE")" 2>/dev/null || { rm -f "$PIDFILE"; die "responder exited before it answered (is $PORT taken?); last seen: ${last:-no answer}"; }
+    [ $((SECONDS - from)) -lt "$WAIT_S" ] || { kill "$(cat "$PIDFILE")" 2>/dev/null || true; rm -f "$PIDFILE"; die "did not answer on 127.0.0.1:$PORT within $WAIT_S s (KNOBAS_CANARY_WAIT_S); last seen: ${last:-no answer}"; }
     sleep 0.5
   done
   say "up (pid $(cat "$PIDFILE"), 127.0.0.1:$PORT)"
