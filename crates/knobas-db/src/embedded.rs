@@ -1802,8 +1802,8 @@ const INITDB_GRACE: Duration = Duration::from_secs(10);
 /// `kill_on_drop`, so a timed-out `initdb` kept running after knobas had given
 /// up (#1637). This runs the crate's command, plus a fixed locale (#2013,
 /// [`LIBC_LOCALE`]), and the `setup()` that follows finds `postgresql.conf`
-/// and skips its own. A finished `initdb` is marked ([`INITDB_FINISHED`]), so no later launch
-/// removes the directory.
+/// and skips its own. A finished `initdb` is marked ([`INITDB_FINISHED`]), so
+/// no later launch removes the directory.
 ///
 /// The password file is created here, as the crate would, but readable by
 /// its owner alone from the first byte (#1642).
