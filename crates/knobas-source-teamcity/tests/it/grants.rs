@@ -246,7 +246,10 @@ async fn an_ask_it_does_not_govern_sends_nothing() {
 async fn an_entity_whose_project_cannot_be_read_is_no_verdict() {
     let server = teamcity(Vec::new()).await;
     let refused = source(&server)
-        .refused_writes(&[ask("teamcity:build:404", "rerun_build"), ask(CONFIG, "run_build")])
+        .refused_writes(&[
+            ask("teamcity:build:404", "rerun_build"),
+            ask(CONFIG, "run_build"),
+        ])
         .await
         .expect("the permissions read");
     assert_eq!(

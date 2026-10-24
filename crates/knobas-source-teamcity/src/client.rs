@@ -14,9 +14,8 @@ use crate::rest::{
     ARTIFACT_FIELDS, BUILD_CHANGE_FIELDS, BUILD_CONFIG_VIEW_FIELDS, BUILD_FIELDS, BUILD_ID_FIELDS,
     BUILD_TYPE_FIELDS, BUILD_VIEW_FIELDS, Build, BuildRecord, BuildType, Changes, ConfigRecord,
     CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, PARAMETER_FIELDS,
-    PermissionAssignments,
-    PROJECT_FIELDS, Project, Property, RECENT_BUILD_FIELDS, SERVER_FIELDS, Server, TestOccurrences,
-    USER_FIELDS,
+    PROJECT_FIELDS, PermissionAssignments, Project, Property, RECENT_BUILD_FIELDS, SERVER_FIELDS,
+    Server, TestOccurrences, USER_FIELDS,
 };
 
 /// One record, kept both as parsed fields and as the JSON it arrived as --
@@ -405,7 +404,10 @@ impl HttpRest {
     /// Whatever the request maps to, and an answer naming no project.
     pub(crate) async fn config_project(&self, id: &str) -> Result<String, SourceError> {
         let body = self
-            .get_raw(&format!("app/rest/buildTypes/id:{id}"), &[("fields", "projectId")])
+            .get_raw(
+                &format!("app/rest/buildTypes/id:{id}"),
+                &[("fields", "projectId")],
+            )
             .await?;
         project_named(body.get("projectId"), id)
     }

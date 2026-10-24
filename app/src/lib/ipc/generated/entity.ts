@@ -2902,7 +2902,8 @@ step: string, origin: ReachOrigin, };
 
 /**
  * A write the source's credential cannot make, and why, in words a person
- * can act on: *This TeamCity user may not run builds in Payout*.
+ * can act on: *This TeamCity user cannot run builds in Payout: it lacks the
+ * Run build permission*.
  */
 export type RefusedWrite = { entity: string, op: string, reason: string, };
 

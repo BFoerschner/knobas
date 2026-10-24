@@ -4659,7 +4659,10 @@ impl MintedViewer {
             .expect("POST /app/rest/users");
         let status = created.status();
         let body = created.text().await.unwrap_or_default();
-        assert!(status.is_success(), "creating {VIEWER} answered {status}: {body}");
+        assert!(
+            status.is_success(),
+            "creating {VIEWER} answered {status}: {body}"
+        );
         // Guarded from here on, so a failing token request still removes it.
         let mut viewer = MintedViewer {
             url: seeded.url.clone(),
@@ -4672,7 +4675,10 @@ impl MintedViewer {
         // for this user", 403, measured on 2026.1.3).
         let minted = seeded
             .http
-            .post(format!("{}/app/rest/users/current/tokens/knobas-2040", seeded.url))
+            .post(format!(
+                "{}/app/rest/users/current/tokens/knobas-2040",
+                seeded.url
+            ))
             .header("Accept", "application/json")
             .basic_auth(VIEWER, Some(&password))
             .send()
@@ -4682,7 +4688,9 @@ impl MintedViewer {
         let body: serde_json::Value = minted.json().await.unwrap_or_default();
         viewer.token = body["value"].as_str().map(str::to_owned);
         if viewer.token.is_none() {
-            eprintln!("{VIEWER} signs in with its password: minting its token answered {status}: {body}");
+            eprintln!(
+                "{VIEWER} signs in with its password: minting its token answered {status}: {body}"
+            );
         }
         viewer
     }
@@ -4792,9 +4800,15 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
     })
     .collect();
     let queue = async || seeded.get("app/rest/buildQueue?fields=count").await.1["count"].clone();
-    let newest = async || seeded.build_ids("defaultFilter:false,branch:default:any,count:1").await;
+    let newest = async || {
+        seeded
+            .build_ids("defaultFilter:false,branch:default:any,count:1")
+            .await
+    };
     let (queued_before, newest_before) = (queue().await, newest().await);
-    let per_project = async || seeded.get("app/rest/server/authSettings").await.1["perProjectPermissions"].clone();
+    let per_project = async || {
+        seeded.get("app/rest/server/authSettings").await.1["perProjectPermissions"].clone()
+    };
     let per_project_before = per_project().await;
 
     let editable = |view: &SourceView| -> Vec<bool> {
@@ -4825,11 +4839,22 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
             .refused_writes(&asks)
             .await
             .unwrap_or_else(|e| panic!("the viewer's permissions read: {e:?}"));
-        let ops: Vec<_> = refused.iter().map(|r| (r.entity.as_str(), r.op.as_str())).collect();
-        assert_eq!(ops, [(config_entity.as_str(), "set_parameter")], "{refused:#?}");
+        let ops: Vec<_> = refused
+            .iter()
+            .map(|r| (r.entity.as_str(), r.op.as_str()))
+            .collect();
+        assert_eq!(
+            ops,
+            [(config_entity.as_str(), "set_parameter")],
+            "{refused:#?}"
+        );
         assert!(
-            refused[0].reason.starts_with("This TeamCity user cannot change the settings of ")
-                && refused[0].reason.ends_with("it lacks the Edit project permission"),
+            refused[0]
+                .reason
+                .starts_with("This TeamCity user cannot change the settings of ")
+                && refused[0]
+                    .reason
+                    .ends_with("it lacks the Edit project permission"),
             "{refused:#?}"
         );
         let view = source
@@ -4844,7 +4869,10 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
             .expect("Run… is offered");
         assert_eq!(run.disabled, None, "a viewer may run builds");
         let values = editable(&view);
-        assert!(!values.is_empty() && values.iter().all(|e| !e), "{values:?}");
+        assert!(
+            !values.is_empty() && values.iter().all(|e| !e),
+            "{values:?}"
+        );
 
         // A role given on one project holds there and nowhere else: the
         // viewer made the configuration's project administrator may change
@@ -4860,7 +4888,10 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
                 .unwrap_or_else(|| panic!("{id} names its project"))
                 .to_owned()
         };
-        let (project, elsewhere) = (project_of(config).await, project_of(QUICK_CONFIGURATION).await);
+        let (project, elsewhere) = (
+            project_of(config).await,
+            project_of(QUICK_CONFIGURATION).await,
+        );
         assert_ne!(project, elsewhere, "the two configurations live apart");
         let granted = seeded
             .http
@@ -4875,9 +4906,15 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
             .expect("PUT .../roles");
         let status = granted.status();
         let body = granted.text().await.unwrap_or_default();
-        assert!(status.is_success(), "making {VIEWER} {project}'s administrator answered {status}: {body}");
+        assert!(
+            status.is_success(),
+            "making {VIEWER} {project}'s administrator answered {status}: {body}"
+        );
         let permissions = viewer
-            .get(&seeded, "app/rest/users/current/permissions?locator=permission:edit_project")
+            .get(
+                &seeded,
+                "app/rest/users/current/permissions?locator=permission:edit_project",
+            )
             .send()
             .await
             .expect("GET permissions")
@@ -4899,8 +4936,15 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
             ])
             .await
             .unwrap_or_else(|e| panic!("the project administrator's permissions read: {e:?}"));
-        let ops: Vec<_> = refused.iter().map(|r| (r.entity.as_str(), r.op.as_str())).collect();
-        assert_eq!(ops, [(other_entity.as_str(), "set_parameter")], "{refused:#?}");
+        let ops: Vec<_> = refused
+            .iter()
+            .map(|r| (r.entity.as_str(), r.op.as_str()))
+            .collect();
+        assert_eq!(
+            ops,
+            [(other_entity.as_str(), "set_parameter")],
+            "{refused:#?}"
+        );
     }
 
     let admin = seeded.source(serde_json::json!({}));
@@ -4914,11 +4958,28 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
         .await
         .expect("the seed reads the view")
         .expect("drawn");
-    assert!(editable(&view).iter().any(|e| *e), "the seed may change parameters");
+    assert!(
+        editable(&view).iter().any(|e| *e),
+        "the seed may change parameters"
+    );
 
-    assert_eq!(queue().await, queued_before, "nothing was queued to find out");
-    assert_eq!(newest().await, newest_before, "no build was made to find out");
-    let (status, _) = seeded.get(&format!("app/rest/users/username:{VIEWER}")).await;
+    assert_eq!(
+        queue().await,
+        queued_before,
+        "nothing was queued to find out"
+    );
+    assert_eq!(
+        newest().await,
+        newest_before,
+        "no build was made to find out"
+    );
+    let (status, _) = seeded
+        .get(&format!("app/rest/users/username:{VIEWER}"))
+        .await;
     assert_eq!(status, 404, "{VIEWER} is removed again");
-    assert_eq!(per_project().await, per_project_before, "per-project permissions are put back");
+    assert_eq!(
+        per_project().await,
+        per_project_before,
+        "per-project permissions are put back"
+    );
 }

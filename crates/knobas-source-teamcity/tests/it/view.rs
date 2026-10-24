@@ -215,7 +215,11 @@ async fn a_build_configuration_opens_on_its_overview_with_one_tab_per_part() {
     let paths: Vec<_> = asked.iter().map(|r| r.url.path()).collect();
     assert_eq!(
         paths,
-        [CONFIG_PATH, "/app/rest/builds", "/app/rest/users/current/permissions"]
+        [
+            CONFIG_PATH,
+            "/app/rest/builds",
+            "/app/rest/users/current/permissions"
+        ]
     );
 }
 

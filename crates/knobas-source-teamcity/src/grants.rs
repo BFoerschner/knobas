@@ -145,7 +145,10 @@ pub(crate) async fn refused(
     rest: &HttpRest,
     asks: &[(&WriteAsk, String)],
 ) -> Result<Vec<RefusedWrite>, SourceError> {
-    let governed: Vec<_> = asks.iter().filter(|(a, _)| needs(&a.op).is_some()).collect();
+    let governed: Vec<_> = asks
+        .iter()
+        .filter(|(a, _)| needs(&a.op).is_some())
+        .collect();
     if governed.is_empty() {
         return Ok(Vec::new());
     }
@@ -170,7 +173,10 @@ pub(crate) async fn refused(
 /// configuration (`build:<id>`), or `None` where it cannot be read.
 async fn project_of(rest: &HttpRest, key: &str) -> Option<String> {
     if let Some(id) = key.strip_prefix("buildType:") {
-        return rest.config_project(crate::ids::config_id(key, id).ok()?).await.ok();
+        return rest
+            .config_project(crate::ids::config_id(key, id).ok()?)
+            .await
+            .ok();
     }
     let id = key.strip_prefix("build:")?;
     let id: i64 = id.parse().ok().filter(|n| *n > 0)?;

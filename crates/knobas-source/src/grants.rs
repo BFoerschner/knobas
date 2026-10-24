@@ -29,9 +29,7 @@
 /// string form, the address every [`WriteOp`](crate::WriteOp) carries. For a
 /// create it is the container the write acts in (a project, a space), the
 /// entity the create's own payload names.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, ts_rs::TS,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct WriteAsk {
     pub entity: String,
