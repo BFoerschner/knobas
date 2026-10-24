@@ -39,6 +39,7 @@ import type {
 } from "../../../ipc/entity";
 import { keyOf } from "../../../time/format";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 import { fakePipelines } from "./builds";
 import { CORPUS } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
@@ -434,3 +435,10 @@ export function handlers(): Handlers {
     },
   };
 }
+
+// Back to the seed after every test (#2004, `dev/fake-seed.ts`).
+const seededSets = seedOf(SETS);
+onFakeReset(() => {
+  SETS = seededSets();
+});
+keepSeed(HIDDEN);

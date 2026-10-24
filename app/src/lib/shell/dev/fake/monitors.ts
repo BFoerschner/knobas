@@ -8,6 +8,7 @@ import SEEDED_MONITORS from "../../../../../../testenv/monitors.json";
 import type { OpenAlert } from "../../../ipc/assets";
 import type { QueuedWrite, WriteOpPayload } from "../../../ipc/sources";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed } from "../fake-seed";
 import { fakeRoleScope } from "./corpus";
 import { FIXTURE_ESTATE, FIXTURE_ROUTES, assetPathText } from "./estate";
 
@@ -383,3 +384,6 @@ export function handlers(): Handlers {
     unmonitored_assets: () => fakeUnmonitored(),
   };
 }
+
+// Back to the seed after every test (#2004, `dev/fake-seed.ts`).
+keepSeed(FIXTURE_CREATES, FIXTURE_ACKED);

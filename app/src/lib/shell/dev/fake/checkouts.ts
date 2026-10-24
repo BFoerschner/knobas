@@ -5,6 +5,7 @@
  */
 import type { CheckoutSettings, CheckoutView, CloneAnswer, DiffRead } from "../../../ipc/entity";
 import type { FakeBridge, Handlers } from "../fake-tauri";
+import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 import { CORPUS } from "./corpus";
 
 /**
@@ -403,3 +404,17 @@ export function seed(params: URLSearchParams): void {
 export function attach(installed: FakeBridge): void {
   bridge = installed;
 }
+
+// Back to the seed after every test (#2004, `dev/fake-seed.ts`).
+const apps = seedOf(fakeApps);
+onFakeReset(() => {
+  for (const timer of fakeCloning.values()) clearInterval(timer);
+  fakeClonesRoot = DEFAULT_CLONES_ROOT;
+  fakeApps = apps();
+  fakeDefault = "vscode";
+  fakeOpenFails = null;
+  fakeNoGit = false;
+  fakeClonePercent = null;
+  bridge = null;
+});
+keepSeed(fakeOverrides, fakeCloning, fakeCloned);

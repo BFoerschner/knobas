@@ -5,6 +5,7 @@
  */
 import type { AttentionGroup, CodeFacts, ContextKind, ContextRow, LaneField, Signal, StateChip } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed } from "../fake-seed";
 import { wordAlternatives } from "../../../tf/tickets/needles";
 import { JOB_ROWS, fakeReach } from "./job-reach";
 import { fakeJiraBoard, fakeLanes } from "./ticket-views";
@@ -984,3 +985,6 @@ export function handlers(): Handlers {
     list_projects: () => listProjects(),
   };
 }
+
+// Back to the seed after every test (#2004, `dev/fake-seed.ts`).
+keepSeed(FAKE_CONTEXTS);

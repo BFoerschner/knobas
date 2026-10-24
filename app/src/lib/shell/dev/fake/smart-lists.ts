@@ -9,6 +9,7 @@
  */
 import type { SearchResponse } from "../../../ipc/search";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed } from "../fake-seed";
 import { FAKE_CONTEXTS, FAKE_CONTEXT_ASSETS, SYNCED_AT } from "./corpus";
 import { FIXTURE_ESTATE, assetPathText } from "./estate";
 import { fakeMonitorRoster, fakeOpenAlerts, fakeUnmonitored } from "./monitors";
@@ -357,3 +358,6 @@ export function handlers(): Handlers {
     delete_smart_list: (args) => fakeDeleteSmartList(args),
   };
 }
+
+// Back to the seed after every test (#2004, `dev/fake-seed.ts`).
+keepSeed(FIXTURE_SAVED);

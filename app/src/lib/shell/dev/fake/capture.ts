@@ -4,6 +4,7 @@
  */
 import { keyCaps } from "../../../tf/settings/notes";
 import type { Handlers } from "../fake-tauri";
+import { onFakeReset } from "../fake-seed";
 
 /**
  * The pair the capture window reads its two born links from (#503).
@@ -95,3 +96,10 @@ export function handlers(): Handlers {
 export function seed(params: URLSearchParams): void {
   seedCaptureShortcut(params);
 }
+
+// Back to the seed after every test (#2004, `dev/fake-seed.ts`).
+onFakeReset(() => {
+  fakeShortcutStored = null;
+  fakeShortcutRefused = false;
+  fakeNotesShown = false;
+});

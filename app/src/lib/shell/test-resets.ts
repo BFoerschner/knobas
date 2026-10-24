@@ -74,7 +74,10 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "shell/follow-write.ts#shared": async () => (await import("./follow-write")).resetWriteFollower(),
   // The `?fake-ipc` backend's state, which each `fake/` module registers as it
   // loads (#2004). Plain `.ts` too; `dev/fake-seed.test.ts` scans `fake/` itself.
-  "shell/dev/fake-seed.ts#restores": async () => (await import("./dev/fake-seed")).resetFake(),
+  // Behind the guard `house-rules.test.ts` asks of every door into `shell/dev/`.
+  "shell/dev/fake-seed.ts#restores": async () => {
+    if (import.meta.env.DEV) (await import("./dev/fake-seed")).resetFake();
+  },
 };
 
 /**

@@ -21,9 +21,15 @@ const restores: (() => void)[] = [];
  */
 export function keepSeed(...values: object[]): void {
   for (const value of values) {
-    const seed = structuredClone(value);
-    restores.push(() => refill(value, structuredClone(seed)));
+    const seed = seedOf(value);
+    restores.push(() => refill(value, seed()));
   }
+}
+
+/** A fresh copy of `value` as it is now, each time it is called: a `let`'s seed. */
+export function seedOf<T>(value: T): () => T {
+  const seed = copy(value);
+  return () => copy(seed);
 }
 
 /** Run `reset` with the others: for a `let`, which only its own module can reassign. */
@@ -48,4 +54,15 @@ function refill(value: object, seed: object): void {
     for (const key of Object.keys(value)) delete (value as Record<string, unknown>)[key];
     Object.assign(value, seed);
   }
+}
+
+/** A deep copy of arrays, maps, sets and plain objects; a function (a fixture's matcher) is shared. */
+function copy<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(copy) as T;
+  if (value instanceof Map) return new Map([...value].map(([key, entry]) => [key, copy(entry)])) as T;
+  if (value instanceof Set) return new Set([...value].map(copy)) as T;
+  if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, copy(entry)])) as T;
+  }
+  return value;
 }

@@ -4,6 +4,7 @@
  */
 import type { Produced } from "../../../ipc/assets";
 import type { Handlers } from "../fake-tauri";
+import { onFakeReset } from "../fake-seed";
 import {
   type EstateFileAsset,
   type EstateFileRoute,
@@ -308,3 +309,9 @@ export function handlers(): Handlers {
     produce_estate_file: (args) => estateProduce(args),
   };
 }
+
+// Back to the seed after every test (#2004, `dev/fake-seed.ts`).
+onFakeReset(() => {
+  IMPORTER_TOKEN = null;
+  PRODUCED_FILE = null;
+});
