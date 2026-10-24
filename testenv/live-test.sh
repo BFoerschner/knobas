@@ -196,15 +196,23 @@ for a in "$@"; do
 done
 STUB
 chmod +x "$shared/bin/docker"
-# The host's view of Gitea (#722): answers unless $STUB_CURL_DEAD holds a
-# count of probes still to fail, which each failing probe counts down.
+# The host's view of Gitea (#722), by state rather than by a count of probes
+# (#1961), since the session polls under a guard in seconds: $STUB_CURL_DEAD
+# holds `dead` (never answers), `until-stop` (answers once Gitea was stopped,
+# the forward a stop + up heals) or `late <seconds>` (answers that long after
+# the first probe, a Gitea that comes up late). Absent, it answers. A miss says
+# what curl says.
 cat >"$shared/bin/curl" <<'STUB'
 #!/usr/bin/env bash
-dead=$(cat "${STUB_CURL_DEAD:-/nonexistent}" 2>/dev/null || echo 0)
-if [ "${dead:-0}" -gt 0 ]; then
-  echo $((dead - 1)) >"$STUB_CURL_DEAD"
-  exit 7
-fi
+read -r mode at <"${STUB_CURL_DEAD:-/nonexistent}" 2>/dev/null || mode=
+miss() { echo "curl: (7) Failed to connect to 127.0.0.1 port 3000 after 0 ms: Couldn't connect to server" >&2; exit 7; }
+case $mode in
+  dead) miss ;;
+  until-stop) grep -q ' stop .*gitea' "$STUB_LOG" 2>/dev/null || miss ;;
+  late)
+    [ -s "$STUB_CURL_DEAD.first" ] || date +%s >"$STUB_CURL_DEAD.first"
+    [ "$(date +%s)" -ge $(($(cat "$STUB_CURL_DEAD.first") + at)) ] || miss ;;
+esac
 exit 0
 STUB
 chmod +x "$shared/bin/curl"
@@ -298,12 +306,12 @@ fi
 # all that is stubbed, and they answer only once Gitea was stopped and upped.
 : >"$shared/state"
 : >"$shared/docker.log"
-echo 3 >"$shared/curl.dead"
+echo until-stop >"$shared/curl.dead"
 rc=0
 # shellcheck disable=SC2030,SC2031  # likewise its own subshell
 (
   export PATH="$shared/bin:$PATH" STUB_STATE="$shared/state" STUB_LOG="$shared/docker.log"
-  export STUB_CURL_DEAD="$shared/curl.dead" KNOBAS_LIVE_GITEA_PROBES=3 KNOBAS_LIVE_GITEA_PROBE_POLL=0
+  export STUB_CURL_DEAD="$shared/curl.dead" KNOBAS_LIVE_GITEA_WAIT_S=1 KNOBAS_LIVE_GITEA_PROBE_POLL=0.1
   # shellcheck source=testenv/live-lib.sh disable=SC1091
   . "$here/live-lib.sh"
   LIVE_TESTENV=$shared/testenv
@@ -319,12 +327,12 @@ check_eq "Gitea is up after the heal" "knobas-gitea" "$(cat "$shared/state")"
 # And one that stays dead is a failed session, not a suite run against nothing.
 : >"$shared/state"
 : >"$shared/docker.log"
-echo 99 >"$shared/curl.dead"
+echo dead >"$shared/curl.dead"
 rc=0
 # shellcheck disable=SC2030,SC2031  # likewise its own subshell
 (
   export PATH="$shared/bin:$PATH" STUB_STATE="$shared/state" STUB_LOG="$shared/docker.log"
-  export STUB_CURL_DEAD="$shared/curl.dead" KNOBAS_LIVE_GITEA_PROBES=3 KNOBAS_LIVE_GITEA_PROBE_POLL=0
+  export STUB_CURL_DEAD="$shared/curl.dead" KNOBAS_LIVE_GITEA_WAIT_S=1 KNOBAS_LIVE_GITEA_PROBE_POLL=0.1
   # shellcheck source=testenv/live-lib.sh disable=SC1091
   . "$here/live-lib.sh"
   LIVE_TESTENV=$shared/testenv
@@ -333,18 +341,62 @@ rc=0
 checks=$((checks + 1))
 [ "$rc" != 0 ] || fail "a Gitea the host cannot reach after stop + up fails the session" "$(cat "$shared/dead.out")"
 check_contains "and says so" "$(cat "$shared/dead.out")" "still does not answer after stop + up"
+check_contains "and names the guard and what it last saw" "$(cat "$shared/dead.out")" \
+  "did not answer within 1 s (KNOBAS_LIVE_GITEA_WAIT_S); last seen: curl: (7) Failed to connect"
+
+# A Gitea that answers late is waited for, not healed (#1961): the probe polls
+# under a guard in seconds rather than counting tries. Three seconds after the
+# first probe under a ten-second guard, polled every 0.1 s, which ten counted
+# tries ran out on.
+: >"$shared/state"
+: >"$shared/docker.log"
+echo "late 3" >"$shared/curl.dead"
+rm -f "$shared/curl.dead.first"
+rc=0
+# shellcheck disable=SC2030,SC2031  # likewise its own subshell
+(
+  export PATH="$shared/bin:$PATH" STUB_STATE="$shared/state" STUB_LOG="$shared/docker.log"
+  export STUB_CURL_DEAD="$shared/curl.dead" KNOBAS_LIVE_GITEA_WAIT_S=10 KNOBAS_LIVE_GITEA_PROBE_POLL=0.1
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  LIVE_TESTENV=$shared/testenv
+  live_session gitea gitea-late
+) >"$shared/late.out" 2>&1 || rc=$?
+check_eq "a Gitea that answers late runs" "0" "$rc"
+check_eq "and is not stopped to heal it" "up" \
+  "$(grep -oE ' (up|stop|restart|--force-recreate)( |$)' "$shared/docker.log" | tr -d ' ' | tr '\n' ' ' | sed 's/ $//')"
+
+# A guard that is not whole seconds is refused, naming the variable.
+: >"$shared/state"
+: >"$shared/docker.log"
+rm -f "$shared/curl.dead"
+rc=0
+# shellcheck disable=SC2030,SC2031  # likewise its own subshell
+(
+  export PATH="$shared/bin:$PATH" STUB_STATE="$shared/state" STUB_LOG="$shared/docker.log"
+  export STUB_CURL_DEAD="$shared/curl.dead" KNOBAS_LIVE_GITEA_WAIT_S=1.5
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  LIVE_TESTENV=$shared/testenv
+  live_session gitea gitea-badguard
+) >"$shared/badguard.out" 2>&1 || rc=$?
+checks=$((checks + 1))
+[ "$rc" != 0 ] || fail "a guard that is not whole seconds fails the session" "$(cat "$shared/badguard.out")"
+check_contains "and names the variable" "$(cat "$shared/badguard.out")" \
+  "KNOBAS_LIVE_GITEA_WAIT_S must be a whole number of seconds, got '1.5'"
+check_eq "and starts nothing" "" "$(grep -oE ' (up|stop)( |$)' "$shared/docker.log" || true)"
 
 # Without the Gitea lock -- `just live-up gitea`, a TeamCity run's Gitea -- a
 # dead forward is a failure that names the healing recipe, and Gitea is not
 # stopped: another worktree's Gitea run may hold the lock (#699, #724).
 : >"$shared/state"
 : >"$shared/docker.log"
-echo 99 >"$shared/curl.dead"
+echo dead >"$shared/curl.dead"
 rc=0
 # shellcheck disable=SC2030,SC2031  # likewise its own subshell
 (
   export PATH="$shared/bin:$PATH" STUB_STATE="$shared/state" STUB_LOG="$shared/docker.log"
-  export STUB_CURL_DEAD="$shared/curl.dead" KNOBAS_LIVE_GITEA_PROBES=3 KNOBAS_LIVE_GITEA_PROBE_POLL=0
+  export STUB_CURL_DEAD="$shared/curl.dead" KNOBAS_LIVE_GITEA_WAIT_S=1 KNOBAS_LIVE_GITEA_PROBE_POLL=0.1
   unset KNOBAS_LIVE_GITEA_LOCK_HOLDER
   # shellcheck source=testenv/live-lib.sh disable=SC1091
   . "$here/live-lib.sh"

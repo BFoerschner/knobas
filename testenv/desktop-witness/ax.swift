@@ -137,13 +137,18 @@ func activate(pid: pid_t) -> Int32 {
     }
     app.activate()
     // Frontmost is asynchronous: the driver's keystroke goes to whatever is
-    // front when it is posted, so waiting here is not a politeness.
-    let deadline = Date().addingTimeInterval(5)
+    // front when it is posted, so waiting here is not a politeness. Under the
+    // harness's guard, KNOBAS_WITNESS_WAIT_S (60 s; `witness_guard` refuses a
+    // value that is not whole seconds before this runs), not a fixed 5 s: a
+    // loaded machine brings a window forward slowly (#1961).
+    let guardSeconds = Double(ProcessInfo.processInfo.environment["KNOBAS_WITNESS_WAIT_S"] ?? "") ?? 60
+    let deadline = Date().addingTimeInterval(guardSeconds)
     while Date() < deadline {
         if app.isActive { return 0 }
         Thread.sleep(forTimeInterval: 0.1)
     }
-    FileHandle.standardError.write(Data("ax: pid \(pid) did not become frontmost\n".utf8))
+    FileHandle.standardError.write(
+        Data("ax: pid \(pid) did not become frontmost within \(Int(guardSeconds)) s (KNOBAS_WITNESS_WAIT_S)\n".utf8))
     return 1
 }
 

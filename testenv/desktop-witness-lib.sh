@@ -337,6 +337,49 @@ wait_for_record() {
     record_is_complete "$path"
 }
 
+# witness_guard
+#
+# The seconds a wait on the app runs before it fails: KNOBAS_WITNESS_WAIT_S,
+# 60 by default (#1961). The guard on the harness's wait for the app's process
+# after `open`, on `ax activate`, and on every wait its drivers and live-shot
+# make on the app: a screen settling after a keystroke, an element a step
+# reaches for. (The harness's window and first draw keep WINDOW_TIMEOUT, 180 s,
+# which covers a first-run PostgreSQL provision.) A loaded machine (gates and other agents'
+# builds) draws a screen slowly, and the old fixed budgets of 5 to 10 s failed
+# runs with nothing wrong in the app; the guard is sized past that, and an app
+# that has exited fails a wait at once (`witness_poll`), so the guard costs a
+# real fault nothing. Whole seconds only: anything else is refused, exit 2,
+# naming the variable, rather than read as some other number.
+witness_guard() {
+    local s=${KNOBAS_WITNESS_WAIT_S:-60}
+    case $s in
+    '' | 0* | *[!0-9]*)
+        printf "KNOBAS_WITNESS_WAIT_S must be a whole number of seconds, got '%s'\n" "$s" >&2
+        return 2
+        ;;
+    esac
+    printf '%s\n' "$s"
+}
+
+# witness_poll <pid> <seconds> <predicate...>
+#
+# Run the predicate until it holds (0), the process <pid> has exited (3), or
+# <seconds> have passed (1). The predicate runs in this shell, so one that
+# keeps what it last saw in a variable leaves it for the caller's message. It
+# is asked before each check of the process and the guard, so a state reached
+# during the last sleep counts as reached.
+witness_poll() {
+    local pid=$1 seconds=$2
+    shift 2
+    local deadline=$((SECONDS + seconds))
+    while :; do
+        "$@" && return 0
+        kill -0 "$pid" 2>/dev/null || return 3
+        [ "$SECONDS" -lt "$deadline" ] || return 1
+        sleep 0.2
+    done
+}
+
 # sole_argument <recorded text>
 #
 # The one argument the stub recorded, or nothing at all.

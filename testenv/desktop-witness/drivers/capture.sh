@@ -85,7 +85,9 @@ readonly JOB_QUERY='PAY-231'
 readonly JOB_SUMMARY='Retry failed SEPA payouts'          # fixtures/tidewater/work.json
 readonly OTHER_APP=Finder
 readonly OTHER_BUNDLE=com.apple.finder
-readonly SETTLE_SECONDS=8
+# The guard on every wait below: KNOBAS_WITNESS_WAIT_S (`witness_guard`, #1961).
+SETTLE_SECONDS=$(witness_guard) || exit 2
+readonly SETTLE_SECONDS
 
 say() { printf 'capture: %s\n' "$*"; }
 die() {
@@ -110,12 +112,14 @@ die() {
 wait_until() {
     local what=$1
     shift
-    local deadline=$((SECONDS + SETTLE_SECONDS))
-    while [ "$SECONDS" -lt "$deadline" ]; do
-        if "$@"; then return 0; fi
-        sleep 0.2
-    done
-    die "$what"
+    local polled=0
+    seen=
+    witness_poll "$pid" "$SETTLE_SECONDS" "$@" || polled=$?
+    case $polled in
+    0) return 0 ;;
+    3) die "$what: knobas (pid $pid) exited while this waited${seen:+; last seen: $seen}" ;;
+    *) die "$what (waited ${SETTLE_SECONDS} s, KNOBAS_WITNESS_WAIT_S)${seen:+; last seen: $seen}" ;;
+    esac
 }
 
 count_of() {
@@ -128,15 +132,21 @@ count_of() {
 }
 present() { local n; n=$(count_of "$1"); [ "$n" != x ] && [ "$n" -gt 0 ]; }
 absent() { [ "$(count_of "$1")" = 0 ]; }
-exactly_one() { [ "$(count_of "$1")" = 1 ]; }
+# Keeps the count it read in `seen`, which `wait_until` names when it runs out.
+exactly_one() {
+    local n
+    n=$(count_of "$1")
+    seen="'$1' counted $n"
+    [ "$n" = 1 ]
+}
 
 press_when() {
-    wait_until "no single '$1' within ${SETTLE_SECONDS} s (count: $(count_of "$1"))" exactly_one "$1"
+    wait_until "no single '$1'" exactly_one "$1"
     "$ax" press "$pid" "$1" || die "could not press '$1'"
 }
 
 fill() {
-    wait_until "no field called '$1' appeared within ${SETTLE_SECONDS} s" exactly_one "$1"
+    wait_until "no field called '$1' appeared" exactly_one "$1"
     "$ax" focus "$pid" "$1" || die "could not put the keyboard in '$1'"
     "$ax" key "$KEY_A" command
     "$ax" type "$2"
@@ -279,14 +289,16 @@ say "pressing $ACCELERATOR"
 before=$(count_verdict "$(capture_windows)")
 say "before the keystroke, windows titled '$CAPTURE_WINDOW': $before"
 "$ax" key "$KEY_K" command option shift
-count=$(capture_windows)
-after=$(count_verdict "$count")
-deadline=$((SECONDS + SETTLE_SECONDS))
-while [ "$after" != yes ] && [ "$SECONDS" -lt "$deadline" ]; do
-    sleep 0.2
+# Polled under the guard; the predicate leaves what it last counted in
+# `count` and `after`.
+a_capture_window_is_open() {
     count=$(capture_windows)
     after=$(count_verdict "$count")
-done
+    [ "$after" = yes ]
+}
+polled=0
+witness_poll "$pid" "$SETTLE_SECONDS" a_capture_window_is_open || polled=$?
+[ "$polled" != 3 ] || die "knobas (pid $pid) exited after $ACCELERATOR"
 say "after the keystroke, windows titled '$CAPTURE_WINDOW': $after ($count)"
 
 case $(waypoint_verdict "$before" "$after") in

@@ -46,6 +46,11 @@ readonly PROFILE_FLAG=--demo
 # Generous, because it covers a first-run PostgreSQL provision, not a window
 # being drawn.
 readonly WINDOW_TIMEOUT=180
+# The guard on the launch and on every wait the driver makes on the app
+# (KNOBAS_WITNESS_WAIT_S, `witness_guard`, #1961), read here so a bad value is
+# refused before the build rather than after it.
+WAIT_S=$(witness_guard) || exit 2
+readonly WAIT_S
 
 step() { printf '\ndesktop-witness: %s\n' "$*"; }
 note() { printf 'desktop-witness:   %s\n' "$*"; }
@@ -301,17 +306,29 @@ check_readiness
 # ---------------------------------------------------------------------------
 step "launching $registered $PROFILE_FLAG"
 open -a "$registered" --args "$PROFILE_FLAG"
+# Polled until the process is there, under the guard (#1961): `open` returns
+# once Launch Services has the request, and a loaded machine can take far
+# longer than the old 10 s to exec the binary.
 app_pid=
-for _ in $(seq 1 40); do
-    app_pid=$(pgrep -x "$APP_EXECUTABLE" | head -1 || true)
-    [ -n "$app_pid" ] && break
+launched_at=$SECONDS
+until app_pid=$(pgrep -x "$APP_EXECUTABLE" | head -1) && [ -n "$app_pid" ]; do
+    [ $((SECONDS - launched_at)) -lt "$WAIT_S" ] ||
+        fail "nothing started: no $APP_EXECUTABLE process appeared within $WAIT_S s of 'open' (KNOBAS_WITNESS_WAIT_S)." \
+            "last seen: pgrep -x $APP_EXECUTABLE found none."
     sleep 0.25
 done
-[ -n "$app_pid" ] || fail "nothing started: no knobas process appeared within 10 s of 'open'."
 note "pid $app_pid"
 
 step "waiting for a window (up to ${WINDOW_TIMEOUT} s)"
 "$ax" wait-window "$app_pid" "$WINDOW_TIMEOUT" | sed 's/^/desktop-witness:   window titled /'
+
+# And for its web view to draw (#1961): the window is up before the page in it,
+# and a keystroke a driver sends before the page has mounted goes nowhere --
+# no wait on the keystroke's effect brings it back. Seen on a loaded machine:
+# ⌘K pressed the moment the window appeared, and the launcher never opened.
+step "waiting for the web view to draw (up to ${WINDOW_TIMEOUT} s)"
+"$ax" wait-content "$app_pid" "$WINDOW_TIMEOUT" ||
+    fail "knobas' window stayed blank for ${WINDOW_TIMEOUT} s."
 
 # `|| true` because `set -o pipefail` turns pgrep's "found nothing" exit 1
 # into an aborted run, and "no instances" is a verdict this line has to be
@@ -337,8 +354,14 @@ KNOBAS_WITNESS_AX=$ax \
 #    the way out, and a SIGTERM'd Rust process runs no exit handler at all.
 # ---------------------------------------------------------------------------
 step "quitting"
-"$ax" activate "$app_pid" || true
-"$ax" key 12 command || true
+# ⌘Q only once knobas is in front: a keystroke goes to whatever is, and on a
+# Mac somebody is using that is their terminal or browser (seen on #1961's
+# runs: `activate` refused while the person typed elsewhere).
+if "$ax" activate "$app_pid"; then
+    "$ax" key 12 command || true
+else
+    note "knobas would not come forward, so no ⌘Q: it would quit whatever is in front"
+fi
 for _ in $(seq 1 40); do
     kill -0 "$app_pid" 2>/dev/null || break
     sleep 0.5
