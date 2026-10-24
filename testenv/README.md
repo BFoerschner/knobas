@@ -1670,9 +1670,10 @@ job link) so the capture has a foreground, brings
 **Finder** to the front and asserts it is there, sends the combination,
 asserts the capture window is up with the caret in its box, types a line,
 presses *Open in knobas*, and asserts that knobas is frontmost again, the
-capture window is gone, and Settings › *Notes and capture* is on screen
-counting one note more. The note's *captured from* link is no longer read off
-a window: a note has no view while notes hide (D10, #1085).
+capture window is gone, and the note's own page is on screen (#1504: notes are
+shown, so the page does not send the reader to Settings) with its title and
+its *Captured from* row. Then it opens Settings › *Notes and capture* again
+and asserts one note more than it counted.
 
 **The capture window is counted as a window, on both sides of the keystroke**
 (#548). `ax windows` lists what knobas has open, one line per window with its
@@ -1683,6 +1684,20 @@ the word `Capture` is on the window's title, its web area and its text area at
 once, all three correct, so `exactly_one` counted 3 and refused a window that
 was open. The closing assertion is the same count going back to zero, and an
 answer that could not be read is never zero.
+
+**Every page a step lands on is held to the app in the gate** (#1968). A pin
+says a name is still spelled in some file, not that a step still lands where
+the driver waits: `capture`'s pin of `TfNote.svelte`'s `#/settings/notes` was
+green for months after *Open in knobas* moved to the note's own page, and the
+first run after that went red on a correct app. So a driver waits on a landing
+only through `lands <landing> "$READING"...` or `lands_named <landing>
+"$NAME"...` (`desktop-witness-lib.sh`), its arguments the driver's own
+`readonly` constants. `app/src/App.test.svelte.ts` replays each landing in the
+DOM, in the state the driver has made by then, and asserts what the driver's
+call names (`app/src/lib/shell/test-witness.ts` reads it out of the driver);
+`witness-unit` refuses a driver with no landing and a landing with no replay.
+What the replay cannot say is how WebKit's accessibility tree reads that DOM,
+which is still the on-screen run's.
 
 Every accessible name any driver acts on is pinned against the file that
 carries it by `just witness-unit`, so an edit to one reads as a stale driver
@@ -2142,7 +2157,7 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
 | `./check-ports.sh` | Assert the compose file against the §5 port table, default profile, opt-in profiles and the capped overlay. Starts nothing. |
 | `./desktop-witness.sh` | The desktop witness (#500): builds and signs the debug bundle, launches the copy Launch Services registered, runs one driver from `desktop-witness/drivers/` against the real accessibility tree, quits. Takes the screen; one at a time; not part of `just check`. See *The desktop witness (macOS)*. |
 | `./live-shot.sh` | Screenshots of the real app against live products (#1483): `just demo` with in-memory secrets, a steps file of `shot`/`press`/`focus`/`click-at`/`type`/`key`, the knobas window only. Takes the screen and the witness's lock; not part of `just check`. See *Screenshots of the real app*. |
-| `./desktop-witness-test.sh` | The witness's own unit tests, over `desktop-witness-lib.sh` -- the Launch Services path comparison, the accessibility probe's reading, and the pure halves of the `open-in-editor` and `capture` drivers. No screen, no bundle, no macOS. `just witness-unit`, and part of `just check`. |
+| `./desktop-witness-test.sh` | The witness's own unit tests, over `desktop-witness-lib.sh` -- the Launch Services path comparison, the accessibility probe's reading, and the pure halves of the `open-in-editor` and `capture` drivers, and that every driver's landing has its DOM replay in `App.test.svelte.ts` (#1968). No screen, no bundle, no macOS. `just witness-unit`, and part of `just check`. |
 | `./reset` | `down -v` every profile, and delete the seed's outputs. |
 
 ## mockd's documented deviations

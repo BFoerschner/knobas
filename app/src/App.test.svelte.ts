@@ -33,10 +33,12 @@ import type {
   EntityDetail,
   InboxCategory,
   InboxEntry,
+  NoteDetail,
   NotificationDraft,
 } from "./lib/ipc/entity";
 import type { CredentialHealth } from "./lib/ipc/sources";
-import { until } from "./lib/shell/test-wait";
+import { until, waitFor } from "./lib/shell/test-wait";
+import { landing, missingFrom, type DriverLanding } from "./lib/shell/test-witness";
 
 /** Readings `credential_health` hands back, and how many times it was asked. */
 let healthRows: CredentialHealth[] = [];
@@ -120,7 +122,9 @@ vi.mock("./lib/ipc/entity", () => ({
   // short of an export throws at the call rather than failing as a missing
   // feature, so each answers empty or refuses.
   getNote: (noteId: string) =>
-    noteShownHere && noteId === "note:0f2c1a"
+    noteShownHere && noteAnswer?.note.id === noteId
+      ? Promise.resolve(noteAnswer)
+      : noteShownHere && noteId === "note:0f2c1a"
       ? Promise.resolve({
           note: { id: noteId, title: "Retry backoff, thinking aloud", body_md: "Jitter it.", created_at: "", updated_at: "" },
           refs: [],
@@ -128,6 +132,9 @@ vi.mock("./lib/ipc/entity", () => ({
         })
       : Promise.reject(new Error("no note in this test")),
   saveNote: () => Promise.reject(new Error("no note is saved in this test")),
+  // Settings › Checkouts and Open in… on a fresh install: no root, no applications (#1968).
+  checkoutSettings: () =>
+    Promise.resolve({ clones_root: null, git: { status: "no_git" }, default_application: null, applications: [] }),
   captureShortcut: () =>
     Promise.resolve({ accelerator: null, refusal: null, shown: noteShownHere, note_count: 0, last_note_at: null }),
   setCaptureShortcut: () => Promise.reject(new Error("no shortcut is set in this test")),
@@ -204,6 +211,8 @@ let timerRunning: unknown = null;
 let entityAnswer: EntityDetail | null = null;
 /** *Show notes and quick capture* (D10), and with it the one note `get_note` answers (#1504). */
 let noteShownHere = false;
+/** A note `get_note` answers for its own id while notes are shown, besides the one above. */
+let noteAnswer: NoteDetail | null = null;
 /** The block `stopTimer` closes. */
 let timerClosed: unknown = null;
 /** Every `worklog_draft` the shell asked for, in order (#280). */
@@ -331,6 +340,7 @@ beforeEach(() => {
   timerStarts = [];
   entityAnswer = null;
   noteShownHere = false;
+  noteAnswer = null;
   timerRooms = [];
   timerStops = 0;
   captureRecords = [];
@@ -1051,4 +1061,128 @@ test.each(["#/inbox", "#/settings"])("⌘T on %s after a job asks with the picke
   pressTimerKey();
   await until(() => pickerTitle() !== null, `⌘T on ${hash} never asked`);
   expect(timerStarts).toEqual([]);
+});
+
+// --- where the desktop-witness drivers land (#1968) ------------------------
+
+/**
+ * **Each page a desktop-witness driver lands on, in the gate.** A driver
+ * takes the screen, so no gate runs one, and an app change that moves where a
+ * step lands leaves the driver waiting for the old page: `capture.sh` waited
+ * for Settings › Notes and capture after *Open in knobas* for months after
+ * #1504 sent the note to its own page. A driver waits on a landing with
+ * `lands`/`lands_named` (`desktop-witness-lib.sh`); each test here replays one
+ * such step in the state the driver has made by then, and asserts the page
+ * draws what the driver's call names, read out of the driver
+ * (`test-witness.ts`). `desktop-witness-test.sh` refuses a call with no
+ * `landing("<driver>", "<landing>")` here.
+ *
+ * What it cannot say: whether WebKit's accessibility tree reads the DOM the
+ * way `test-witness.ts` does. That is the on-screen run's.
+ */
+async function landsOn(expected: DriverLanding): Promise<void> {
+  const wanted = [...expected.reads, ...expected.names].map((value) => `'${value}'`).join(", ");
+  await until(() => missingFrom(target, expected).length === 0, `the page never drew all the driver waits on: ${wanted}`);
+}
+
+test("capture: Open in knobas lands on the captured note's page, as capture.sh waits for it", async () => {
+  // capture.sh's state by then: notes shown (step 1), PAY-231's job open
+  // (step 2), and a capture stored with its captured-from link to it.
+  dbReady = true;
+  noteShownHere = true;
+  entityAnswer = jobTicket();
+  noteAnswer = {
+    note: {
+      id: "note:witness",
+      title: "Retry storm from the capture witness",
+      body_md: "Retry storm from the capture witness\nthe queue backs up at 09:00",
+      created_at: "",
+      updated_at: "",
+    },
+    refs: [],
+    links: [
+      {
+        link: {
+          id: "link:captured",
+          from_id: "note:witness",
+          to_id: "mock:PAY-231",
+          relation: "captured-from",
+          origin: "manual",
+          note: null,
+          created_by: "user",
+          created_at: "",
+          confirmed_at: "",
+          rule: null,
+          rule_class: null,
+          reason: null,
+        },
+        other: { entity_id: "mock:PAY-231", kind: "ticket", title: "Retry failed SEPA payouts", deleted_at: null },
+      },
+    ],
+  };
+  location.hash = "#/job/mock:PAY-231";
+  app = mount(App, { target, props: {} });
+  await until(() => (listeners.get("capture:open-note") ?? []).length > 0, "the shell never subscribed to capture:open-note");
+
+  emit("capture:open-note", "note:witness");
+  await landsOn(landing("capture", "open-in-knobas"));
+});
+
+/** The link under the window whose own text, or `aria-label`, is `name`; pressed as a driver presses it. */
+function follow(name: string): void {
+  const link = [...target.querySelectorAll("a")].find(
+    (candidate) => candidate.getAttribute("aria-label") === name || candidate.textContent?.trim() === name,
+  );
+  if (!link) throw new Error(`no link called ${name}`);
+  link.click();
+  flushSync();
+}
+
+/** The top bar's Settings, then the section called `section`, as the drivers press them. */
+async function openSettingsSection(section: string): Promise<void> {
+  dbReady = true;
+  app = mount(App, { target, props: {} });
+  await until(() => target.querySelector("a[aria-label='Settings']") !== null, "the top bar never drew Settings");
+  follow("Settings");
+  await until(() => location.hash.startsWith("#/settings"), "Settings never opened");
+  await waitFor(() => follow(section));
+}
+
+test("capture: Settings › Notes and capture lands on the section capture.sh counts notes on", async () => {
+  await openSettingsSection("Notes and capture");
+  await landsOn(landing("capture", "settings-notes"));
+});
+
+test("capture: the ticket preview's job link lands on the job page capture.sh knows by its Code section", async () => {
+  // The preview's link is the job's address (`TicketPreview.svelte`); this
+  // opens that address rather than the Tickets search that offers it.
+  dbReady = true;
+  entityAnswer = jobTicket();
+  location.hash = "#/job/mock:PAY-231";
+  app = mount(App, { target, props: {} });
+  await landsOn(landing("capture", "job-link"));
+});
+
+/** ⌘K on the window, once the shell is up, for a driver's `cmd-k` landing. */
+async function pressLauncherKey(): Promise<void> {
+  dbReady = true;
+  app = mount(App, { target, props: {} });
+  await until(() => target.querySelector("a[aria-label='Settings']") !== null, "the top bar never drew");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }));
+  flushSync();
+}
+
+test("launcher-hotkey: ⌘K lands on the launcher's query box", async () => {
+  await pressLauncherKey();
+  await landsOn(landing("launcher-hotkey", "cmd-k"));
+});
+
+test("open-in-editor: ⌘K lands on the launcher's query box", async () => {
+  await pressLauncherKey();
+  await landsOn(landing("open-in-editor", "cmd-k"));
+});
+
+test("open-in-editor: Settings › Checkouts and Open in… lands on the section open-in-editor.sh sets the root in", async () => {
+  await openSettingsSection("Checkouts and Open in…");
+  await landsOn(landing("open-in-editor", "settings-checkouts"));
 });

@@ -23,16 +23,19 @@
 #      that was not there one keystroke earlier** (#548) -- with the caret in
 #      its box;
 #   5. a line typed, *Saved as a note.*, and *Open in knobas* pressed;
-#   6. knobas frontmost again, the capture window gone, and Settings › Notes
-#      and capture on screen -- where a note opens while notes hide (#1085) --
-#      counting **one note more** than step 1 did.
+#   6. knobas frontmost again, the capture window gone, and the note's own
+#      page on screen (#1504; notes are shown, so it does not send the reader
+#      to Settings): its title and its *Captured from* row;
+#   7. Settings › Notes and capture counting **one note more** than step 1 did.
+#
+# Every page a step lands on is waited for with `lands`/`lands_named`, which
+# `App.test.svelte.ts` replays in the gate against these constants (#1968).
 #
 # What it does **not** assert: Escape closing the window
 # (`CaptureWindow.test.svelte.ts`), a combination the system refuses (needs an
-# application holding one), and the note's *captured from* link -- a note has
-# no view while notes hide, so no window draws its links; the link is pinned at
-# `capture_ipc.rs` and `capture.test.svelte.ts`, which is where spec #491's
-# stream map puts it.
+# application holding one), and which entity the *Captured from* row names --
+# the row's end is pinned at `capture_ipc.rs` and `capture.test.svelte.ts`,
+# which is where spec #491's stream map puts it.
 #
 # What it leaves behind on the demo profile: notes shown, this shortcut stored,
 # and one note per run. A run that finds the shortcut already stored clears it
@@ -64,6 +67,10 @@ readonly HIDDEN_LINE='Inactive while notes are hidden.'
 readonly REGISTERED_LINE='Opens a small window over whatever you are doing.'
 readonly NOT_SET='Not set'
 readonly YOUR_NOTES='Your notes'
+# The note's own page, where *Open in knobas* lands while notes are shown.
+readonly NOTE_TITLE='Retry storm from the capture witness'  # the typed capture's first line
+readonly NOTE_PAGE_LINE='A note, read-only in this release.'  # note/TfNote.svelte
+readonly CAPTURED_FROM='Captured from'                    # detail/relations.ts, capitalised by TfNote.svelte
 readonly OPEN_CODE_VIEW='Open Code view'                  # job/TfCodeSection.svelte
 readonly TICKETS_LINK='Tickets'                           # TfTopBar.svelte's nav
 readonly TICKETS_FILTER='Filter by key, summary, epic or person'  # tickets/TicketsPage.svelte
@@ -130,7 +137,6 @@ count_of() {
     *) printf '%s\n' "$answer" ;;
     esac
 }
-present() { local n; n=$(count_of "$1"); [ "$n" != x ] && [ "$n" -gt 0 ]; }
 absent() { [ "$(count_of "$1")" = 0 ]; }
 # Keeps the count it read in `seen`, which `wait_until` names when it runs out.
 exactly_one() {
@@ -190,6 +196,7 @@ say "opening Settings › $NOTES_SECTION"
 press_when "$SETTINGS_BUTTON"
 press_when "$NOTES_SECTION"
 wait_until "the section never drew its '$SHOW_NOTES' switch" exactly_one "$SHOW_NOTES"
+lands settings-notes "$YOUR_NOTES"
 
 # The switch's state is read from the help line under the shortcut, which is
 # the section's own word for it: hidden, it says so.
@@ -253,8 +260,8 @@ fill "$TICKETS_FILTER" "$JOB_QUERY"
 wait_until "Tickets never previewed '$JOB_QUERY' ($JOB_SUMMARY)" previews_the_job
 go=$(job_link) || die "the preview offers none of: ${JOB_LINKS[*]}"
 "$ax" press "$pid" "$go" || die "could not press '$go'"
-job_is_open() { absent "$TICKETS_FILTER" && present "$OPEN_CODE_VIEW"; }
-wait_until "no job page for '$JOB_QUERY' opened" job_is_open
+wait_until "Tickets is still up after '$go'" absent "$TICKETS_FILTER"
+lands_named job-link "$OPEN_CODE_VIEW"
 say "the job is open, so something is in front of the reader"
 
 # --- 3. somebody else's screen -----------------------------------------------
@@ -324,16 +331,17 @@ say "the capture window is up, with the caret in it"
 
 # --- 5. the thought ----------------------------------------------------------
 
-typed='Retry storm from the capture witness
-the queue backs up at 09:00'
-say "typing a capture whose title will be '$(capture_title "$typed")'"
+typed="$NOTE_TITLE"$'\n''the queue backs up at 09:00'
+[ "$(capture_title "$typed")" = "$NOTE_TITLE" ] || die "the capture typed below would not be titled '$NOTE_TITLE'"
+say "typing a capture whose title will be '$NOTE_TITLE'"
 "$ax" type "$typed"
 wait_until "the capture never became a note: the window still says nothing is kept" \
     reads "Saved as a note."
 
 # The page *Open in knobas* lands on, read before the press and after it: the
-# job is in the main window now, so '$YOUR_NOTES' is not on screen yet.
-landed_before=$(reading_verdict "$(screen)" "$YOUR_NOTES")
+# job is in the main window now, so the note page's '$NOTE_PAGE_LINE' is not
+# on screen yet. Not the title: the capture window's box holds it.
+landed_before=$(reading_verdict "$(screen)" "$NOTE_PAGE_LINE")
 say "pressing '$OPEN_IN_MAIN'"
 "$ax" press "$pid" "$OPEN_IN_MAIN" || die "could not press '$OPEN_IN_MAIN'"
 
@@ -343,10 +351,17 @@ wait_until "knobas never came forward after '$OPEN_IN_MAIN'" is_frontmost dev.kn
 wait_until "the capture window is still open after '$OPEN_IN_MAIN'" capture_window_gone
 say "knobas is frontmost again and the capture window has gone"
 
-wait_until "'$OPEN_IN_MAIN' did not land on Settings › $NOTES_SECTION" reads "$YOUR_NOTES"
+lands open-in-knobas "$NOTE_TITLE" "$NOTE_PAGE_LINE" "$CAPTURED_FROM"
 landed=$(waypoint_verdict "$landed_before" yes)
-[ "$landed" = witnessed ] || die "'$YOUR_NOTES' was $landed_before before '$OPEN_IN_MAIN', so landing on it witnesses nothing."
+[ "$landed" = witnessed ] || die "'$NOTE_PAGE_LINE' was $landed_before before '$OPEN_IN_MAIN', so landing on it witnesses nothing."
+say "the note's own page is open, captured from where the reader was"
 
+# --- 7. the count ------------------------------------------------------------
+
+say "opening Settings › $NOTES_SECTION to count the notes"
+press_when "$SETTINGS_BUTTON"
+press_when "$NOTES_SECTION"
+lands settings-notes "$YOUR_NOTES"
 one_more() { [ "$(notes_total "$(screen)")" = $((notes_before + 1)) ]; }
 wait_until "the section does not count one note more than $notes_before (it reads $(notes_total "$(screen)"))" one_more
 say "Settings › $NOTES_SECTION is open and counts $((notes_before + 1)) notes: the capture is stored"
