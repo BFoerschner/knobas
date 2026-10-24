@@ -68,9 +68,7 @@ pub(crate) mod mirror {
     pub(crate) fn invoked(mirror: &'static str) -> Vec<&'static str> {
         let mut names = Vec::new();
         for (at, _) in mirror.match_indices("invoke<") {
-            let line_start = mirror[..at].rfind('\n').map_or(0, |i| i + 1);
-            let lead = mirror[line_start..at].trim_start();
-            if lead.starts_with("//") || lead.starts_with('*') || lead.starts_with("/*") {
+            if in_comment(mirror, at) {
                 continue;
             }
             // The name follows the `>(` that closes the type argument. A site
@@ -92,6 +90,30 @@ pub(crate) mod mirror {
             names.push(name);
         }
         names
+    }
+
+    /// Whether the line holding byte `at` is a comment line.
+    fn in_comment(mirror: &str, at: usize) -> bool {
+        let line_start = mirror[..at].rfind('\n').map_or(0, |i| i + 1);
+        let lead = mirror[line_start..at].trim_start();
+        lead.starts_with("//") || lead.starts_with('*') || lead.starts_with("/*")
+    }
+
+    /// The `invoke<..>("name", ..)` call site, from `invoke<` to its `);`,
+    /// comment lines skipped as in [`invoked`]: a doc comment that names the
+    /// command, or shows a call, is not the call (#1984).
+    pub(crate) fn invocation(mirror: &'static str, name: &str) -> &'static str {
+        let quoted = format!("\"{name}\"");
+        mirror
+            .match_indices("invoke<")
+            .filter(|&(at, _)| !in_comment(mirror, at))
+            .map(|(at, _)| &mirror[at..])
+            .find(|rest| {
+                rest.split_once(">(")
+                    .is_some_and(|(_, after)| after.trim_start().starts_with(&quoted))
+            })
+            .map(|rest| &rest[..rest.find(");").unwrap_or(rest.len())])
+            .unwrap_or_else(|| panic!("{name} is not invoked from the mirror"))
     }
 
     /// Both directions: every registered command is invoked, every invoked

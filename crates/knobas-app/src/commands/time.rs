@@ -551,13 +551,7 @@ mod tests {
             ("week_timesheet", "days"),
             ("log_all_preview", "days"),
         ] {
-            // The `invoke<..>(` call site, not the first quoted name: a doc
-            // comment naming the command may come before it (#1984).
-            let at = MIRROR
-                .find(&format!(">(\"{call}\""))
-                .unwrap_or_else(|| panic!("{call} is not invoked from the mirror"));
-            let tail = &MIRROR[at..];
-            let invocation = &tail[..tail.find(");").unwrap_or(tail.len())];
+            let invocation = crate::commands::mirror::invocation(MIRROR, call);
             assert!(
                 invocation.contains(argument),
                 "the mirror calls {call} without passing {argument}, so the \
