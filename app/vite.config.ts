@@ -1,7 +1,7 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vitest/config";
 
-import { TEST_TIMEOUT_MS } from "./src/lib/shell/test-budget";
+import { HOOK_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./src/lib/shell/test-budget";
 
 // Tauri owns this dev server: `tauri.conf.json`'s `devUrl` points at the port
 // below, so it is fixed and `strictPort` makes a clash a hard error rather
@@ -112,6 +112,8 @@ export default defineConfig(({ mode }) => ({
     // each finished in well under a second idle, so a 5 s budget measured the
     // neighbours.
     testTimeout: TEST_TIMEOUT_MS,
+    // Vitest's 10 s, scaled the same way (#2044).
+    hookTimeout: HOOK_TIMEOUT_MS,
   },
   // Vitest must resolve Svelte's *browser* build, or `mount` runs the SSR
   // entry point and produces no DOM.
