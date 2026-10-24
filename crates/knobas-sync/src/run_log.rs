@@ -264,8 +264,9 @@ pub const CANCELLED_MESSAGE: &str = "cancelled: knobas is shutting down";
 /// Written only by the scheduler, and only when
 /// [`knobas_http::watch_local_quota`] says a send inside the sync stopped on
 /// the quota: never read off the failure's message, which an adapter writes.
-/// A message for [`CANCELLED_MESSAGE`]'s reason: what it changes is the
-/// ladder, not how the diagnostics view names the run.
+/// A prefix rather than an outcome of its own, for the reason
+/// [`CANCELLED_MESSAGE`] is a message: what it changes is the ladder, not
+/// how the diagnostics view names the run.
 pub const LOCAL_QUOTA_PREFIX: &str = "stopped on knobas' own rate limit, not the source: ";
 
 impl RunResult {

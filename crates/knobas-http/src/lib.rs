@@ -607,10 +607,9 @@ impl HttpClient {
             // source said the attempt before; a first attempt has only the
             // wait to report, and it is knobas' own quota -- `Protocol`,
             // never `Unreachable`, since the source was never asked. The
-            // error alone does not keep a sync's backoff off: a sync that
-            // fails `Protocol` backs off like any error. The mark below does,
-            // for a call run under `watch_local_quota`, as the scheduler runs
-            // a sync and the write queue a write (#1980, #1729).
+            // error alone does not keep a backoff off, since a caller backs
+            // off on a `Protocol` too; a caller tells a quota stop apart by
+            // the mark below, under `watch_local_quota` (#1729, #1980).
             let attempt_timeout = match (ready, self.attempt_timeout(started)) {
                 (Ok(()), Some(timeout)) => timeout,
                 (ready, _) => {
