@@ -7,6 +7,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { BackupStatus } from "../../ipc/backup";
 import type { InboxCategory } from "../../ipc/entity";
+import type { SourceSummary } from "../../ipc/sources";
+import { createHealth } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import { createTheme, type Theme } from "../theme.svelte";
@@ -369,6 +371,56 @@ test("Restore from a file… lists the backups and Import… the share exports, 
   button("Import").click();
   await settle();
   expect(p.restoreBackup).toHaveBeenLastCalledWith("knobas-share-20261012-101500.knobas");
+});
+
+test("a restore puts the sources it brought in the health store the status bar follows (#2059)", async () => {
+  // A restore lands only in a knobas holding no data, so no source before it.
+  let listed: SourceSummary[] = [];
+  const brought: SourceSummary = {
+    id: "jira",
+    adapter_kind: "jira",
+    display_name: "Jira",
+    base_url: "https://jira.tidewater.example",
+    enabled: true,
+    sync_interval_secs: 300,
+    config: {},
+    health: { source_id: "jira", state: "unknown", checked_at: null, detail: null, secret_expires_at: null },
+    last_run: null,
+    next_run_at: null,
+    item_count: 0,
+    auth_kind: "UserPassword",
+    kinds: [],
+    roles: [],
+    role_misses: [],
+  };
+  const store = createHealth({ credentialHealth: () => Promise.resolve([]), listen: () => Promise.resolve(() => {}) });
+  const p = sectionPorts({
+    restoreBackup: vi.fn(() => {
+      listed = [brought];
+      return Promise.resolve();
+    }),
+  });
+  view = mount(TfSettings, {
+    target,
+    props: {
+      rest: ["backup"],
+      job: null,
+      ready: true,
+      ports: { ...sourcePorts, listSources: () => Promise.resolve(listed) },
+      sectionPorts: p,
+      health: store,
+      layers: createLayers(),
+      now: () => NOW,
+      theme: createTheme(),
+    },
+  });
+  await settle();
+  expect(store.all).toEqual([]);
+  button("Restore from a file…").click();
+  await settle();
+  button("Restore").click();
+  await settle();
+  expect(store.all.map((row) => row.source_id)).toEqual(["jira"]);
 });
 
 test("a restore into a knobas that holds data is refused: the dialog stays and says why", async () => {

@@ -231,7 +231,7 @@
       {:else if place.section === "monitoring"}
         <TfMonitoringSection ports={sectionPorts} />
       {:else if place.section === "backup"}
-        <TfBackupSection ports={sectionPorts} {layers} now={clock} />
+        <TfBackupSection ports={sectionPorts} {layers} now={clock} onrestored={() => void load()} />
       {:else if place.section === "appearance"}
         <TfAppearanceSection {theme} />
       {:else if place.section === "keyboard"}
