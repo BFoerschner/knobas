@@ -324,15 +324,36 @@ _live_licences() {
 # suite, the seed and Björn's own app talk to.
 LIVE_GITEA_URL=${KNOBAS_GITEA_URL:-http://127.0.0.1:3000}
 
-# _live_gitea_answers -- whether the host reaches Gitea, asked a few times:
-# a container that is healthy inside can still be unreachable from the host.
+# _live_gitea_wait_s -- the guard below, refused unless whole seconds; read by
+# the caller before it starts anything.
+_live_gitea_wait_s() {
+  local wait_s=${KNOBAS_LIVE_GITEA_WAIT_S:-60}
+  case $wait_s in
+    '' | 0* | *[!0-9]*)
+      echo "live: gitea: KNOBAS_LIVE_GITEA_WAIT_S must be a whole number of seconds, got '$wait_s'" >&2
+      return 1 ;;
+  esac
+  echo "$wait_s"
+}
+
+# _live_gitea_answers <guard seconds> -- whether the host reaches Gitea: a
+# container that is healthy inside can still be unreachable from the host.
+# Polled until it answers, under a guard in seconds (#1961):
+# KNOBAS_LIVE_GITEA_WAIT_S, 60 by default, whole seconds only. Under load the
+# first answer through the port forward comes late, and ten counted tries ran
+# out on a Gitea with nothing wrong with it. `up --wait` has already seen the
+# container healthy, so a miss here is the dead forward the caller heals, and
+# the guard is what a heal costs. A miss names the guard and curl's last
+# complaint.
 _live_gitea_answers() {
-  local i
-  for ((i = 0; i < ${KNOBAS_LIVE_GITEA_PROBES:-10}; i++)); do
-    curl -fsS -m 3 -o /dev/null "$LIVE_GITEA_URL/api/healthz" 2>/dev/null && return 0
+  local wait_s=$1 from=$SECONDS last
+  until last=$(curl -fsS -m 3 -o /dev/null "$LIVE_GITEA_URL/api/healthz" 2>&1); do
+    if [ $((SECONDS - from)) -ge "$wait_s" ]; then
+      echo "live: gitea: $LIVE_GITEA_URL did not answer within $wait_s s (KNOBAS_LIVE_GITEA_WAIT_S); last seen: ${last:-no answer}" >&2
+      return 1
+    fi
     sleep "${KNOBAS_LIVE_GITEA_PROBE_POLL:-1}"
   done
-  return 1
 }
 
 # _live_gitea_lock_held -- whether this process tree holds the Gitea lock: the
@@ -357,8 +378,10 @@ _live_gitea_lock_held() {
 # TeamCity run's Gitea, `just live-up gitea` -- fails instead and says how to
 # heal: no live run stops Gitea behind a Gitea run's back (#699).
 _live_gitea_up() {
+  local wait_s
+  wait_s=$(_live_gitea_wait_s) || return 1
   _live_compose up -d --wait gitea
-  _live_gitea_answers && return 0
+  _live_gitea_answers "$wait_s" && return 0
   if ! _live_gitea_lock_held; then
     echo "live: gitea: the container is up but $LIVE_GITEA_URL does not answer (the OrbStack port forward a recreate kills); not holding the Gitea lock, so not stopping it -- 'just gitea-live' heals it under the lock" >&2
     return 1
@@ -366,7 +389,7 @@ _live_gitea_up() {
   echo "live: gitea: the container is up but $LIVE_GITEA_URL does not answer (the OrbStack port forward a recreate kills); stop + up" >&2
   _live_compose stop gitea
   _live_compose up -d --wait gitea
-  _live_gitea_answers || {
+  _live_gitea_answers "$wait_s" || {
     echo "live: gitea: $LIVE_GITEA_URL still does not answer after stop + up" >&2
     return 1
   }
