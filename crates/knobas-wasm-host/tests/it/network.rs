@@ -39,6 +39,9 @@ impl Seen {
 struct Server {
     url: String,
     seen: Arc<Mutex<Vec<Seen>>>,
+    /// How many exchanges are over: answered, and the connection closed by
+    /// the client once it had read the answer ([`Self::exchanges_over`]).
+    over: tokio::sync::watch::Receiver<usize>,
 }
 
 impl Server {
@@ -53,12 +56,15 @@ impl Server {
         let listener = tokio::net::TcpListener::from_std(listener).unwrap();
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&seen);
+        let (ended, over) = tokio::sync::watch::channel(0);
+        let ended = Arc::new(ended);
         tokio::spawn(async move {
             loop {
                 let Ok((mut socket, _)) = listener.accept().await else {
                     return;
                 };
                 let log = Arc::clone(&log);
+                let ended = Arc::clone(&ended);
                 let redirect_to = redirect_to.clone();
                 tokio::spawn(async move {
                     let mut buf = Vec::new();
@@ -109,10 +115,28 @@ impl Server {
                     };
                     let _ = socket.write_all(response.as_bytes()).await;
                     let _ = socket.shutdown().await;
+                    // The client hangs up once it has read the answer (it
+                    // was told `connection: close`): only then is nothing of
+                    // the exchange left on the wire.
+                    while socket.read(&mut chunk).await.is_ok_and(|read| read > 0) {}
+                    ended.send_modify(|over| *over += 1);
                 });
             }
         });
-        Self { url, seen }
+        Self { url, seen, over }
+    }
+
+    /// Wait until `count` exchanges are over: each answered, and its
+    /// connection closed by the client after reading the answer, so nothing
+    /// of them is left on the wire under a [`HeldClock`] let go.
+    async fn exchanges_over(&self, count: usize) {
+        let mut over = self.over.clone();
+        real_backstop(&format!("{count} exchanges with the server"), async {
+            over.wait_for(|over| *over >= count)
+                .await
+                .expect("the server outlives its handle");
+        })
+        .await;
     }
 
     fn seen(&self) -> Vec<Seen> {
@@ -781,35 +805,85 @@ async fn an_adapter_waits_on_the_burst_a_built_in_client_spent() {
     );
 }
 
+/// tokio's paused clock, held still until this is dropped (#1925).
+///
+/// The deadline and the limiter both read tokio's clock, so a test of one
+/// runs on it paused, where load cannot move it. Left to itself a paused
+/// clock jumps to the next timer whenever the runtime is idle, and a runtime
+/// waiting on a socket is idle: the call's deadline would fire under a
+/// request still in flight. A running blocking task stops the jumps
+/// (`tokio::time::pause`, *Preventing auto-advance*), so while this is held
+/// a request on the loopback takes no time on the clock. Dropped once
+/// nothing is left on the wire ([`Server::exchanges_over`]), the clock jumps
+/// from timer to timer again.
+struct HeldClock {
+    _release: std::sync::mpsc::Sender<()>,
+}
+
+impl HeldClock {
+    fn hold() -> Self {
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        tokio::task::spawn_blocking(move || {
+            // Returns once the sender is dropped: that is the release.
+            let _ = held.recv();
+        });
+        Self { _release: release }
+    }
+}
+
+/// `wait`, or a panic naming `what` once twenty seconds of *real* time have
+/// gone by: a held clock fires no timer, so a wait for something a broken
+/// host never does would hang the run instead of failing it. A hang
+/// backstop, not a bound.
+async fn real_backstop<F: std::future::Future>(what: &str, wait: F) -> F::Output {
+    let (fired, backstop) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(20));
+        let _ = fired.send(());
+    });
+    tokio::select! {
+        output = wait => output,
+        _ = backstop => panic!("{what} never came, twenty seconds of real time on"),
+    }
+}
+
 /// **The call's deadline still bounds a send waiting on the limiter**
 /// (#1631).
 ///
 /// A built-in client for the instance at one a second, alive beside the
 /// adapter, holds the shared quota to it; five requests would take four
-/// seconds, and the call is stopped at its deadline of one.
-#[tokio::test(flavor = "multi_thread")]
+/// seconds, and the call is stopped at its deadline of one. The first
+/// request goes on the burst while the clock is held; once it is over, the
+/// second waits on the limiter, and the clock runs on to the deadline. On
+/// tokio's paused clock (#1925) the call ends at the deadline exactly: one
+/// that stopped only once the limiter let the adapter finish would end at
+/// four seconds.
+#[tokio::test(start_paused = true)]
 async fn the_deadline_stops_a_call_waiting_on_the_limiter() {
+    const DEADLINE: Duration = Duration::from_secs(1);
+
     let server = Server::start(None).await;
+    let clock = HeldClock::hold();
     let _strict = built_in(&server, 1, 1);
     let source = hammering(
         &server,
         "/slow",
         5,
         Limits {
-            deadline: Duration::from_secs(1),
+            deadline: DEADLINE,
             ..Limits::default()
         },
     );
 
-    let started = std::time::Instant::now();
-    let (ok, text) = answer(&*source).await;
+    let started = tokio::time::Instant::now();
+    let ((ok, text), ()) = tokio::join!(answer(&*source), async {
+        server.exchanges_over(1).await;
+        drop(clock);
+    });
     let took = started.elapsed();
 
     assert!(!ok && text.contains("deadline of 1 s"), "{text}");
-    assert!(
-        took < Duration::from_secs(3),
-        "stopped at the deadline: {took:?}"
-    );
+    assert_eq!(took, DEADLINE, "stopped at the deadline");
     assert!(
         server.arrivals("/slow").len() <= 2,
         "{:?}",
