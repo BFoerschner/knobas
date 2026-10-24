@@ -193,6 +193,7 @@ knobas-app	lib/knobas_app	sources::registry::tests::a_clone_made_before_an_insta
 knobas-app	lib/knobas_app	sources::registry::tests::a_source_of_an_adapter_refused_at_load_fails_with_the_reason
 knobas-app	lib/knobas_app	sources::registry::tests::an_external_adapter_joins_the_templates_once
 knobas-app	lib/knobas_app	sources::registry::tests::only_bring_up_and_the_lifecycles_default_call_for_process
+knobas-app	lib/knobas_app	sources::registry::tests::refusing_a_loaded_kind_unloads_it
 knobas-app	lib/knobas_app	sources::registry::tests::the_trait_object_answers_the_docs_projection_and_writes
 knobas-app	lib/knobas_app	sources::remote::tests::a_body_over_the_reads_cap_is_too_large
 knobas-app	lib/knobas_app	sources::remote::tests::a_component_over_the_default_body_cap_is_fetched_whole
@@ -505,6 +506,7 @@ knobas-app	test/it	backup_ipc::the_nightly_job_exports_once_and_then_leaves_it_a
 knobas-app	test/it	bring_up::a_failed_migration_stops_the_server_without_holding_the_runtime
 knobas-app	test/it	bring_up::a_quit_during_a_restart_stops_the_server_the_restart_started
 knobas-app	test/it	bring_up::a_quit_while_migrating_stops_the_server
+knobas-app	test/it	bring_up::a_retried_bring_up_that_refuses_a_loaded_adapter_unloads_it
 knobas-app	test/it	bring_up::a_second_bring_up_over_one_registry_refuses_no_installed_adapter
 knobas-app	test/it	bring_up::a_second_demo_launch_on_a_live_owner_is_refused_naming_the_profile_and_the_owner
 knobas-app	test/it	bring_up::a_server_that_dies_after_ready_fails_the_window_and_retry_restarts_it
