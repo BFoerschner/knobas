@@ -221,6 +221,7 @@ async fn fixture_on(
         // a send the tick made would pass these tests with no background send
         // at all. So whatever delivers below is `submit_in_background`'s.
         timing,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .expect("a scheduler");
@@ -455,21 +456,18 @@ async fn a_new_page_with_link_it_to_holds_its_ticket_on_the_row_before_the_send(
 ///
 /// Before, the quit neither waited for the send nor stopped new ones: the
 /// pool closed under the send, `sent` failed, the row stayed pending and the
-/// next start sent the comment again.
+/// next start sent the comment again. And until #1924 the first comment's
+/// flush, once it landed, took its entity's next head and sent the comment
+/// submitted after the quit began: its stop never fired. On an hour's grace
+/// that send holds the quit at the gate, and the hang guard below fails.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_next_start() {
     use tauri::Manager as _;
 
     let connector = knobas_db::test_util::scratch_database("background_write_quit").await;
-    // On the default grace, not `HELD_OFF_PATIENT_QUIT`, and on purpose: this
-    // pins today's behaviour, which is wrong (#1924). The background send's
-    // entity flush has no stop, so once the first comment lands it sends the
-    // one submitted after the quit began. The look below comes before that,
-    // and the 3 s grace then aborts it at the gate. With an hour's grace the
-    // quit never ends. #1924 moves this test to the long grace with its fix.
     let Fixture {
         state, wrote, gate, ..
-    } = fixture_on(connector.clone(), HELD_OFF).await;
+    } = fixture_on(connector.clone(), HELD_OFF_PATIENT_QUIT).await;
     let app = tauri::test::mock_builder()
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("a mock app");
@@ -487,9 +485,13 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
     .await
     .expect("the first comment reaches the source");
 
+    let (over, quit_over) = std::sync::mpsc::channel();
     let quitting = std::thread::spawn({
         let handle = app.handle().clone();
-        move || knobas_app::shutdown(&handle)
+        move || {
+            knobas_app::shutdown(&handle);
+            let _ = over.send(());
+        }
     });
     tokio::time::timeout(PATIENCE, async {
         while !state.scheduler.is_shutting_down() {
@@ -504,13 +506,17 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
     )
     .await
     .expect("a submit during the quit is still queued");
-    // Give a send that was spawned for it the time to reach the source. A
-    // negative window (#1927): the send #1924 names arrives after this look,
-    // once the gate lets the first comment land.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    let entered_during_quit = *wrote.entered.lock().unwrap();
+    // One permit, for the first comment. A send of the second, by a task
+    // spawned for it or by the first comment's flush taking its entity's
+    // next head (#1924), waits at the gate inside the background set, and
+    // the grace is an hour: a quit over inside the patience started no
+    // write after it began.
     gate.add_permits(1);
+    quit_over
+        .recv_timeout(PATIENCE)
+        .expect("the quit waited out its grace: a write started after it began");
     quitting.join().expect("the quit finishes");
+    let entered = *wrote.entered.lock().unwrap();
 
     let reader = connector.pool(1).await.unwrap();
     let state_of = async |id: i64| {
@@ -520,10 +526,7 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
             .expect("the row is there")
             .state
     };
-    assert_eq!(
-        entered_during_quit, 1,
-        "the submit made after the quit began was sent"
-    );
+    assert_eq!(entered, 1, "the submit made after the quit began was sent");
     assert_eq!(
         state_of(first.id).await,
         WriteState::Sent,
@@ -554,6 +557,7 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
             tick: Duration::from_millis(50),
             ..Default::default()
         },
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .expect("the next start's scheduler");

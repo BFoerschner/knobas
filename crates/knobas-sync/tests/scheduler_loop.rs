@@ -462,6 +462,7 @@ async fn slow_deps(
             secrets: Arc::new(MemoryStore::new()),
             events: Arc::new(Silent),
             timing: FAST,
+            quit: knobas_sync::scheduler::Quit::default(),
         },
         peak,
         inside,
@@ -1012,6 +1013,7 @@ async fn a_trigger_says_running_before_it_returns() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::clone(&events) as Arc<dyn SyncEvents>,
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -1069,6 +1071,7 @@ async fn a_running_state_names_its_own_run_not_another_open_one() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::clone(&events) as Arc<dyn SyncEvents>,
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -1222,6 +1225,7 @@ async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<Stri
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -1686,6 +1690,7 @@ async fn a_failure_reads_the_same_live_or_joined_and_retry_still_runs() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -1801,6 +1806,7 @@ async fn the_wizards_retry_after_watching_its_own_run_fail_starts_a_run() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -1864,6 +1870,7 @@ async fn a_wizard_that_joined_the_wakes_run_still_gets_a_run_when_it_retries() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -2065,6 +2072,7 @@ async fn a_run_whose_task_panics_still_gives_its_watchers_an_ending() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -2131,6 +2139,7 @@ async fn a_run_whose_adapter_panics_is_recorded_and_stops_running() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::clone(&events) as Arc<dyn SyncEvents>,
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -3080,6 +3089,7 @@ async fn writer_deps(
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     };
     (deps, started, finished)
 }
@@ -3285,6 +3295,133 @@ async fn a_quit_during_a_flush_stops_it_between_writes() {
         states.iter().filter(|s| **s == WriteState::Pending).count(),
         2,
         "the writes behind the quit stay owed: {states:?}"
+    );
+    drop_owed(&pool, &writing).await;
+    retire(&pool, &writing).await;
+}
+
+/// #1924: a submit's flush stops between writes once the quit has begun,
+/// as the flush task does. Its first write, on the wire at the quit, lands;
+/// the entity's next head, which the flush would take once that one lands,
+/// is not started.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_quit_stops_a_submits_flush_between_writes() {
+    a_quit_stops_a_flush_from_outside_the_task(Caller::Submit).await;
+}
+
+/// #1924: as a submit's, *Flush now*'s: it ignores what a write waits on,
+/// not the quit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_quit_stops_flush_now_between_writes() {
+    a_quit_stops_a_flush_from_outside_the_task(Caller::FlushNow).await;
+}
+
+/// Which flush [`a_quit_stops_a_flush_from_outside_the_task`] sends with.
+#[derive(Clone, Copy, Debug)]
+enum Caller {
+    /// `flush_entity_of`, on two writes to one entity: a submit, a worklog,
+    /// a background send, and through `flush_entity` *Send mine anyway* and
+    /// *Edit and send*.
+    Submit,
+    /// `flush_now` on the source, two writes on two entities.
+    FlushNow,
+}
+
+/// Two writes owed, sent by `caller` rather than the flush task, which the
+/// held-off tick never wakes. The flush runs in the scheduler's background
+/// set, so the quit waits for it as it waits for a background send; the first
+/// write is held at its door until the quit has begun, and only then let
+/// through. A flush that started the second write after the quit sends it
+/// through the open door, and the count says so.
+///
+/// Then a submit made once the quit has begun, on a third entity: its flush
+/// returns without sending, and its write stays owed for the next start. It
+/// does not wait for the source's lock, which the first flush holds until
+/// the door opens.
+async fn a_quit_stops_a_flush_from_outside_the_task(caller: Caller) {
+    use knobas_core::write_queue::{self as store, WriteState};
+    use knobas_sync::write_queue as flusher;
+
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let writing = seed_quiet(&pool, 1).await;
+    let door = Door::shut();
+    let (mut deps, started, finished) = writer_deps(sched_pool, &door, &writing[0]).await;
+    deps.timing = SchedulerTiming {
+        startup_delay: PATIENT_GRACE,
+        tick: PATIENT_GRACE,
+        shutdown_grace: PATIENT_GRACE,
+    };
+
+    let scheduler = Scheduler::start(deps).await.unwrap();
+    let keys = match caller {
+        Caller::Submit => ["E-1", "E-1"],
+        Caller::FlushNow => ["N-1", "N-2"],
+    };
+    let mut owed = Vec::new();
+    for key in keys {
+        owed.push(owe_a_comment(scheduler.deps(), &writing[0], key).await);
+    }
+    let spawned = scheduler.background().spawn({
+        let scheduler = scheduler.clone();
+        let source = writing[0].clone();
+        let first = owed[0].id;
+        async move {
+            match caller {
+                Caller::Submit => flusher::flush_entity_of(scheduler.deps(), first).await,
+                Caller::FlushNow => flusher::flush_now(scheduler.deps(), Some(&source)).await,
+            }
+            .expect("the flush reads and writes the queue");
+        }
+    });
+    assert!(spawned, "the flush joins the background set");
+    await_count(&started, 1).await;
+
+    let quitting = tokio::spawn({
+        let scheduler = scheduler.clone();
+        async move { scheduler.shutdown().await }
+    });
+    tokio::time::timeout(HANG_GUARD, async {
+        while !scheduler.is_shutting_down() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the quit begins");
+
+    let late = owe_a_comment(scheduler.deps(), &writing[0], "L-1").await;
+    tokio::time::timeout(
+        HANG_GUARD,
+        flusher::flush_entity_of(scheduler.deps(), late.id),
+    )
+    .await
+    .expect("a submit made during the quit waited for the source's lock")
+    .expect("the flush reads the queue");
+
+    door.open();
+    tokio::time::timeout(HANG_GUARD, quitting)
+        .await
+        .expect("the quit waited for something other than the write on the wire")
+        .unwrap();
+
+    assert_eq!(
+        started.load(Ordering::SeqCst),
+        1,
+        "{caller:?} started a write after the quit began"
+    );
+    assert_eq!(
+        finished.load(Ordering::SeqCst),
+        1,
+        "the write on the wire was aborted rather than let finish"
+    );
+    let mut states = Vec::new();
+    for write in owed.iter().chain([&late]) {
+        states.push(store::get(&pool, write.id).await.unwrap().unwrap().state);
+    }
+    assert_eq!(
+        states,
+        [WriteState::Sent, WriteState::Pending, WriteState::Pending],
+        "the write the source took is marked sent, and the ones behind the quit stay owed"
     );
     drop_owed(&pool, &writing).await;
     retire(&pool, &writing).await;

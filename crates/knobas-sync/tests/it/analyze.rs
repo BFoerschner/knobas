@@ -276,6 +276,7 @@ async fn a_scheduled_run_that_commits_has_the_tables_it_grew_analyzed() {
             secrets: Arc::new(knobas_secrets::MemoryStore::new()),
             events: Arc::new(Silent),
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
+            quit: knobas_sync::scheduler::Quit::default(),
         })
         .await
         .unwrap();

@@ -45,7 +45,6 @@ use knobas_core::payload::StatePath;
 use knobas_core::write_queue::{self as store, QueuedWrite, WaitReason, WriteState};
 use knobas_http::LocalQuota;
 use knobas_source::{Source, SourceError, WriteOp, WriteReceipt};
-use tokio_util::sync::CancellationToken;
 
 use crate::config;
 use crate::scheduler::{RunFailure, SchedulerDeps};
@@ -216,8 +215,8 @@ pub async fn queue(
     Ok(queued)
 }
 
-/// Flush every source that owes something, as the scheduler's flush task does
-/// on every tick ([`flush_all_until`]), with nothing to stop it.
+/// Flush every source that owes something: the scheduler's flush task, on
+/// every tick.
 ///
 /// One source's failure never stops another's: each is flushed on its own and
 /// its errors are logged rather than raised, which is what story 21 asks for
@@ -232,19 +231,15 @@ pub async fn queue(
 /// write can be refused while its sync is healthy (the account is a second
 /// credential), so what keeps a refused write from going again is
 /// [`owed`], read per row.
-pub async fn flush_all(deps: &SchedulerDeps) {
-    flush_all_until(deps, &never()).await;
-}
-
-/// [`flush_all`], stopping between writes once `stop` is cancelled: the
-/// scheduler's flush task, which a quit cancels (#1629, spec #1618 ruling A7).
 ///
+/// It stops between writes once the quit has begun (#1629, spec #1618 ruling
+/// A7), as every flush does ([`Quit`](crate::scheduler::Quit), #1924).
 /// Between writes and not inside one. A write already on the wire is let
 /// finish, so its `sent` lands; `Scheduler::shutdown`'s grace is what bounds
 /// it, and its abort is what leaves that one request at risk, the window
 /// ADR-0012 discloses. No later write is started.
-pub(crate) async fn flush_all_until(deps: &SchedulerDeps, stop: &CancellationToken) {
-    flush_every(deps, Pass::Owed, stop).await;
+pub async fn flush_all(deps: &SchedulerDeps) {
+    flush_every(deps, Pass::Owed).await;
 }
 
 /// *Flush now* from the queue panel (#1628): one source, or every source when
@@ -263,17 +258,12 @@ pub(crate) async fn flush_all_until(deps: &SchedulerDeps, stop: &CancellationTok
 /// [`flush_all`]'s are.
 pub async fn flush_now(deps: &SchedulerDeps, source_id: Option<&str>) -> Result<(), FlushError> {
     match source_id {
-        Some(id) => flush(deps, id, Pass::Now, Reach::Source, &never()).await,
+        Some(id) => flush(deps, id, Pass::Now, Reach::Source).await,
         None => {
-            flush_every(deps, Pass::Now, &never()).await;
+            flush_every(deps, Pass::Now).await;
             Ok(())
         }
     }
-}
-
-/// The stop a flush nobody quits is handed: a submit's, a press's, a test's.
-fn never() -> CancellationToken {
-    CancellationToken::new()
 }
 
 /// Which head writes a pass sends.
@@ -305,7 +295,7 @@ enum Reach<'w> {
     Entity(&'w str),
 }
 
-async fn flush_every(deps: &SchedulerDeps, pass: Pass, stop: &CancellationToken) {
+async fn flush_every(deps: &SchedulerDeps, pass: Pass) {
     let sources = match config::list(&deps.pool).await {
         Ok(sources) => sources,
         Err(error) => {
@@ -314,13 +304,13 @@ async fn flush_every(deps: &SchedulerDeps, pass: Pass, stop: &CancellationToken)
         }
     };
     for source in sources {
-        if stop.is_cancelled() {
+        if deps.quit.has_begun() {
             return;
         }
         if pass == Pass::Owed && source.health.state.needs_human() {
             continue;
         }
-        if let Err(error) = flush(deps, &source.id, pass, Reach::Source, stop).await {
+        if let Err(error) = flush(deps, &source.id, pass, Reach::Source).await {
             tracing::warn!(source = %source.id, %error, "write queue flush failed");
         }
     }
@@ -479,7 +469,7 @@ struct CredentialSeen<'a> {
 /// credential -- is **not** an error: its writes wait, with the reason
 /// recorded, which is the whole point of the queue.
 pub async fn flush_source(deps: &SchedulerDeps, source_id: &str) -> Result<(), FlushError> {
-    flush(deps, source_id, Pass::Owed, Reach::Source, &never()).await
+    flush(deps, source_id, Pass::Owed, Reach::Source).await
 }
 
 /// Flush the entity write `id` is for: its head writes, as [`flush_source`]
@@ -505,15 +495,17 @@ pub async fn flush_entity_of(deps: &SchedulerDeps, id: i64) -> Result<(), FlushE
 /// [`flush_entity_of`] with the row in hand.
 async fn flush_entity(deps: &SchedulerDeps, write: &QueuedWrite) -> Result<(), FlushError> {
     let reach = Reach::Entity(&write.entity_id);
-    flush(deps, &write.source_id, Pass::Owed, reach, &never()).await
+    flush(deps, &write.source_id, Pass::Owed, reach).await
 }
 
+/// Every flush ends here, and every one stops between writes once the quit
+/// has begun ([`turn`] selects against [`SchedulerDeps::quit`], #1924): no
+/// caller hands it a stop, so none can hand it one that never fires.
 async fn flush(
     deps: &SchedulerDeps,
     source_id: &str,
     pass: Pass,
     reach: Reach<'_>,
-    stop: &CancellationToken,
 ) -> Result<(), FlushError> {
     let gate = gate(source_id);
 
@@ -537,7 +529,7 @@ async fn flush(
             // owes waits for the same reason, rather than one of them failing
             // and the rest silently not being tried.
             for write in due {
-                match turn(deps, &gate, &write, pass, stop).await? {
+                match turn(deps, &gate, &write, pass).await? {
                     Turn::Go(_sending, write) => {
                         waited(deps, &seen, &write, reason.0, &reason.1).await?;
                     }
@@ -552,7 +544,7 @@ async fn flush(
     loop {
         let mut progressed = false;
         for write in due {
-            match turn(deps, &gate, &write, pass, stop).await? {
+            match turn(deps, &gate, &write, pass).await? {
                 Turn::Go(_sending, write) => {
                     if attempt(deps, &seen, source.as_ref(), &write).await? {
                         progressed = true;
@@ -612,11 +604,10 @@ async fn turn<'g>(
     gate: &'g Gate,
     read: &QueuedWrite,
     pass: Pass,
-    stop: &CancellationToken,
 ) -> Result<Turn<'g>, FlushError> {
     let sending = tokio::select! {
         biased;
-        () = stop.cancelled() => return Ok(Turn::Stopped),
+        () = deps.quit.token().cancelled() => return Ok(Turn::Stopped),
         sending = gate.flush.lock() => sending,
     };
     let Some(now) = store::get(&deps.pool, read.id).await? else {

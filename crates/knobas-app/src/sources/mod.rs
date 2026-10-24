@@ -609,6 +609,7 @@ pub async fn bring_up<R: tauri::Runtime>(
                 deps.suggestions,
             )),
             timing: SchedulerTiming::default(),
+            quit: knobas_sync::scheduler::Quit::default(),
         },
         background,
     )
@@ -692,6 +693,7 @@ pub async fn test_scheduler<R: tauri::Runtime>(
                 background.clone(),
             )),
             timing: SchedulerTiming::default(),
+            quit: knobas_sync::scheduler::Quit::default(),
         },
         background,
     )

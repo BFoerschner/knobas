@@ -860,6 +860,7 @@ async fn harness() -> Harness {
             secrets: Arc::new(secrets),
             events: Arc::clone(&events) as Arc<dyn SyncEvents>,
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
+            quit: knobas_sync::scheduler::Quit::default(),
         },
         events,
         answer,
@@ -931,6 +932,7 @@ async fn a_flush_whose_adapter_is_slow_to_build_holds_no_worker() {
         secrets: Arc::clone(&h.deps.secrets),
         events: Arc::clone(&h.deps.events),
         timing: h.deps.timing,
+        quit: knobas_sync::scheduler::Quit::default(),
     });
     let write = flusher::queue(
         &deps,

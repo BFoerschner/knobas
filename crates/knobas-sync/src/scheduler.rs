@@ -168,6 +168,40 @@ pub struct SchedulerDeps {
     /// user runs this; the scheduler-loop suite hands in milliseconds so it
     /// does not wait out the production clock (#412).
     pub timing: SchedulerTiming,
+    /// The quit (#1924). [`Scheduler::start`] makes it the scheduler's
+    /// cancel, so [`Scheduler::shutdown`] is what begins it, and every flush
+    /// handed these deps stops between writes from then on.
+    pub quit: Quit,
+}
+
+/// Whether the quit has begun, carried on [`SchedulerDeps`] (#1924).
+///
+/// Every write queue flush takes the deps, so every flush reads this:
+/// the scheduler's flush task, a submit, a worklog, *Flush now*, *Send mine
+/// anyway*, *Edit and send*. One that took a stop of its own could be handed
+/// one that never fires, and the background send, *Flush now* and the
+/// foreground submits were: each went on starting writes after the quit's
+/// cancel. A comment submitted once the quit had begun was sent during it,
+/// and one still on the wire at the grace's end was aborted with its row
+/// pending, so the next start sent it again (ADR-0012's window).
+///
+/// Nothing outside this crate can begin it: a caller that wants the quit
+/// calls [`Scheduler::shutdown`]. Deps no scheduler was started with keep a
+/// quit that never begins, which is right, since nothing quits them.
+#[derive(Debug, Default)]
+pub struct Quit(CancellationToken);
+
+impl Quit {
+    /// Whether [`Scheduler::shutdown`] has begun.
+    pub(crate) fn has_begun(&self) -> bool {
+        self.0.is_cancelled()
+    }
+
+    /// The token itself: cancelled by [`Scheduler::shutdown`], selected
+    /// against between writes.
+    pub(crate) fn token(&self) -> &CancellationToken {
+        &self.0
+    }
 }
 
 /// The ticker's clock: how long it waits before its first look for due
@@ -1449,6 +1483,9 @@ struct Inner {
     /// way leaves one permit, so the flush runs once more after it, not once
     /// per tick it missed.
     flush_due: Notify,
+    /// [`SchedulerDeps::quit`]'s token, the one [`Scheduler::shutdown`]
+    /// cancels: a clone, so a flush handed `deps` and this scheduler stop on
+    /// the same cancel (#1924).
     cancel: CancellationToken,
     /// Handles to join (or abort) at shutdown.
     ///
@@ -1505,6 +1542,7 @@ impl Scheduler {
         }
 
         let analyzer = crate::analyze::Analyzer::new(Arc::clone(&deps.connections));
+        let cancel = deps.quit.token().clone();
         let inner = Arc::new(Inner {
             deps,
             analyzer,
@@ -1515,7 +1553,7 @@ impl Scheduler {
             }),
             wake: Notify::new(),
             flush_due: Notify::new(),
-            cancel: CancellationToken::new(),
+            cancel,
             tasks: Mutex::new(Vec::new()),
             background,
             door: RwLock::new(()),
@@ -2455,7 +2493,7 @@ async fn flush_loop(inner: Arc<Inner>) {
             () = inner.cancel.cancelled() => return,
             () = inner.flush_due.notified() => {}
         }
-        crate::write_queue::flush_all_until(&inner.deps, &inner.cancel).await;
+        crate::write_queue::flush_all(&inner.deps).await;
     }
 }
 

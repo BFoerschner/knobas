@@ -245,6 +245,7 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
             secrets: Arc::new(store),
             events: events.clone(),
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
+            quit: knobas_sync::scheduler::Quit::default(),
         },
         events,
         registry,
@@ -1004,6 +1005,7 @@ async fn a_run_whose_adapter_is_slow_to_build_holds_no_worker() {
         secrets: Arc::clone(&h.deps.secrets),
         events: Arc::clone(&h.deps.events),
         timing: h.deps.timing,
+        quit: knobas_sync::scheduler::Quit::default(),
     });
     let run_id = run_log::start(&deps.pool, &h.id, SyncTrigger::Manual)
         .await

@@ -297,6 +297,7 @@ async fn harness() -> Harness {
             secrets: Arc::new(secrets),
             events: Arc::clone(&events) as Arc<dyn SyncEvents>,
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
+            quit: knobas_sync::scheduler::Quit::default(),
         },
         events,
         answer,

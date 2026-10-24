@@ -1032,6 +1032,7 @@ async fn app_with(
         secrets: secrets.clone(),
         events: events.clone(),
         timing: knobas_sync::scheduler::SchedulerTiming::default(),
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .expect("a scheduler over the scratch database");
@@ -3506,6 +3507,7 @@ async fn wiki_app(
         secrets: secrets.clone(),
         events: events.clone(),
         timing: knobas_sync::scheduler::SchedulerTiming::default(),
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .expect("a scheduler over the scratch database");

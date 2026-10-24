@@ -337,6 +337,7 @@ async fn app_with(env: &Env, account: &str, gitea: Option<&GiteaEnv>) -> Sources
         secrets: secrets.clone(),
         events: Arc::new(Quiet),
         timing: knobas_sync::scheduler::SchedulerTiming::default(),
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .expect("a scheduler over the scratch database");
