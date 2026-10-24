@@ -32,9 +32,11 @@
   host's hold on 1.0.0 components (#1205) is still tested with that build.
 
   **The fixture is its first user.** `crates/knobas-wasm-fixture` implements `Adapter` and holds
-  no bindings, no `wit_bindgen` dependency and no WIT conversion. Nothing in
-  `crates/knobas-wasm-host/tests/it/` changed. For everything a knobas host sends, what crosses
-  is the same. Only input a host never sends answers differently: a config that is not JSON reads
+  no bindings, no `wit_bindgen` dependency and no WIT conversion. No test in
+  `crates/knobas-wasm-host/tests/it/` changed; the merge-manager added two (#2037), which read the
+  `warn` line the fixture now logs for each refusal a sink answers, so that the SDK handing the
+  host's error to the adapter is witnessed. Beside that line, for everything a knobas host sends,
+  what crosses is the same. Only input a host never sends answers differently: a config that is not JSON reads
   as `null`, and a write op, saved view or download target that does not decode is refused by the
   SDK (`the host's <what> does not decode: …`) before the fixture sees it. Timestamps are written
   with their fraction (`AutoSi`), which for the fixture's whole-second instants is the same text

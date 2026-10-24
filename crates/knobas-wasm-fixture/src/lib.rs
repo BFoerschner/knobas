@@ -41,7 +41,9 @@
 //!   build reports nothing.
 //! * **`"fault": "swallow_sink"`** is a misbehaving adapter: it ignores what
 //!   `sink.item` answers and returns its cursor anyway, so the host's own
-//!   hold on a refused item is witnessed.
+//!   hold on a refused item is witnessed. Every refusal a sink answers,
+//!   an item's or a download's, is logged at `warn` first, so a test sees
+//!   that the SDK handed it to the adapter (#2037).
 //! * **`"fault": "spin"` and `"fault": "hog"`** are adapters that pass a
 //!   limit (#1204): `sync` spins forever, or allocates a MiB at a time and
 //!   never lets go, so the host's deadline and memory cap are witnessed.
@@ -167,6 +169,14 @@ fn flood(times: u64) {
     for _ in 0..times {
         log(Level::Info, &message);
     }
+}
+
+/// A sink's refusal, handed back as it came and logged first: the host
+/// fails the call on a refusal whatever the component answers, so the log
+/// is where a test sees that the SDK told the adapter (#2037).
+fn refused(error: SourceError) -> SourceError {
+    log(Level::Warn, &format!("the sink refused: {error}"));
+    error
 }
 
 /// One of the fixture's reads, written as its JSON, as the SPI type it is.
@@ -483,7 +493,7 @@ impl Adapter for Fixture {
         let of = (total - from) as u64;
         for (done, item) in (0u64..).zip(corpus.into_iter().skip(from)) {
             sink.walked(done, Some(of), "items");
-            match sink.item(item) {
+            match sink.item(item).map_err(refused) {
                 Err(_) if swallow => {}
                 answer => answer?,
             }
@@ -721,9 +731,9 @@ impl Adapter for Fixture {
                 )
             }
         };
-        sink.start(&name)?;
+        sink.start(&name).map_err(refused)?;
         for chunk in bytes {
-            sink.write(&chunk)?;
+            sink.write(&chunk).map_err(refused)?;
         }
         Ok(true)
     }

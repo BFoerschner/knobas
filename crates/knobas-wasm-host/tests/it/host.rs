@@ -186,6 +186,28 @@ async fn a_sink_error_the_component_swallows_still_fails_the_sync() {
     assert_eq!(sink.0, 2);
 }
 
+/// The SDK's `Sink::item` hands the sink's error to the adapter (#2037).
+/// The host fails the sync whatever the component answers, so the
+/// fixture's log line is what shows the error reached it.
+#[tokio::test]
+async fn the_component_hears_the_sink_s_refusal_of_an_item() {
+    const ID: &str = "item-refused-2037";
+    let lines = crate::limits::logged();
+    let source = load_fixture()
+        .build(instance(ID, serde_json::json!({})))
+        .expect("the fixture builds");
+    let answer = source.sync(None, &mut RefusesTheSecond(0)).await;
+    assert!(matches!(answer, Err(SourceError::Sink(_))), "{answer:?}");
+    let ours: Vec<String> = lines
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(source, _)| source == ID)
+        .map(|(_, m)| m.clone())
+        .collect();
+    assert_eq!(ours, ["the sink refused: sink: the mirror is full"]);
+}
+
 #[test]
 fn the_descriptor_template_is_the_component_s_own() {
     let adapter = load_fixture();

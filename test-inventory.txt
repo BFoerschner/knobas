@@ -4211,6 +4211,7 @@ knobas-wasm-host	test/it	host::a_saved_view_s_query_crosses_to_the_component_and
 knobas-wasm-host	test/it	host::a_sink_error_the_component_swallows_still_fails_the_sync
 knobas-wasm-host	test/it	host::a_sync_emits_the_fixed_corpus_and_resumes_from_its_cursor
 knobas-wasm-host	test/it	host::an_instance_of_another_kind_is_refused
+knobas-wasm-host	test/it	host::the_component_hears_the_sink_s_refusal_of_an_item
 knobas-wasm-host	test/it	host::the_descriptor_template_is_the_component_s_own
 knobas-wasm-host	test/it	host::the_fixture_claims_its_custom_role_and_ci_with_every_optional_read
 knobas-wasm-host	test/it	host::the_host_wrapping_the_fixture_passes_the_contract_battery
@@ -4251,6 +4252,7 @@ knobas-wasm-host	test/it	reads::a_large_download_streams_without_the_component_h
 knobas-wasm-host	test/it	reads::a_run_s_log_and_one_artifact_download_through_the_host_s_sink
 knobas-wasm-host	test/it	reads::a_survey_s_view_offers_its_declared_source_action_and_the_fixture_performs_it
 knobas-wasm-host	test/it	reads::every_run_and_pipeline_read_answers_across_the_boundary
+knobas-wasm-host	test/it	reads::the_component_hears_the_sink_s_refusal_of_a_download
 knobas-wasm-host	test/it	reads::the_run_s_deferred_sections_carry_the_diff_and_the_tree
 knobas-wasm-host	test/it	walk::a_1_0_0_component_still_installs_syncs_and_reports_no_walk
 knobas-wasm-host	test/it	walk::a_1_3_0_component_s_walk_reaches_the_engine_s_progress_sink

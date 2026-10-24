@@ -258,6 +258,38 @@ async fn a_download_the_sink_refuses_fails_with_the_sink_s_error() {
     assert_eq!(sink.writes, 2, "nothing more was written after the refusal");
 }
 
+/// The SDK's `DownloadSink::write` hands the sink's error to the adapter
+/// (#2037), which the host's own hold on a refusal would otherwise mask.
+#[tokio::test]
+async fn the_component_hears_the_sink_s_refusal_of_a_download() {
+    const ID: &str = "download-refused-2037";
+    let lines = crate::limits::logged();
+    let source = load_fixture()
+        .build(knobas_source::instance::SourceInstance {
+            id: ID.to_owned(),
+            ..instance(serde_json::json!({}))
+        })
+        .expect("the fixture builds");
+    let mut sink = Counting {
+        refuse_after: Some(2),
+        ..Counting::default()
+    };
+    let run = format!("{ID}:run-1");
+    let answer = source.download(&run, &DownloadTarget::All, &mut sink).await;
+    assert!(
+        matches!(&answer, Err(SourceError::Protocol { message, .. }) if message == "the disk is full"),
+        "{answer:?}"
+    );
+    let ours: Vec<String> = lines
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(source, _)| source == ID)
+        .map(|(_, m)| m.clone())
+        .collect();
+    assert_eq!(ours, ["the sink refused: protocol: the disk is full"]);
+}
+
 /// A component built against 1.0.0 still links and syncs, keeps no runs to
 /// download and translates no query: what 1.1.0 and 1.2.0 added is optional
 /// to it. That it reports no walk (1.3.0) is `walk.rs`'s.
