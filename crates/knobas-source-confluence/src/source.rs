@@ -261,6 +261,20 @@ impl Source for ConfluenceSource {
         )))
     }
 
+    /// The writes this user's space permissions and page operations refuse
+    /// (#2053, [`crate::grants`]). An ask about another source's entity, or
+    /// one whose page cannot be read, is no verdict.
+    async fn refused_writes(
+        &self,
+        asks: &[knobas_source::grants::WriteAsk],
+    ) -> Result<Vec<knobas_source::grants::RefusedWrite>, SourceError> {
+        let keyed: Vec<_> = asks
+            .iter()
+            .filter_map(|a| self.content_id(&a.entity).ok().map(|id| (a, id)))
+            .collect();
+        Ok(crate::grants::refused(&self.http, &keyed).await)
+    }
+
     /// No source view yet (ADR-0020): a page draws its own storage body from
     /// the mirror, and spec #660 keeps Confluence's details unchanged.
     async fn view(

@@ -6,9 +6,14 @@
 
   *Under* has no *Top of the space*: `CreatePage` writes under a mirrored
   page, so the space's first page is the default when no page is given.
+
+  *Under* is asked `refused_writes` as it changes (#2053): a parent whose
+  space the source's credential may not add pages to draws *Create page*
+  disabled with the reason.
 -->
 <script lang="ts">
   import type { DocsTree, NewPage } from "../../ipc/entity";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort } from "../../shell/refused-writes";
   import type { Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { firstPage, spaceId } from "./docs";
@@ -24,6 +29,7 @@
     layers,
     onclose,
     oncreate,
+    refusedWrites,
   }: {
     tree: DocsTree;
     /** The space it opens on (`spaceId`). */
@@ -39,6 +45,8 @@
     onclose: () => void;
     /** Queue it; `true` once queued, which closes the dialog. */
     oncreate: (page: NewPage, linkToJob: boolean) => Promise<boolean>;
+    /** What the source refuses its credential; the IPC read when omitted. */
+    refusedWrites?: RefusedWritesPort | undefined;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -73,8 +81,12 @@
     return names.join(" › ");
   }
 
+  let refused = $state<RefusedWrite[]>([]);
+  $effect(() => askInto(under === "" ? [] : [{ entity: under, op: "create_page" }], refusedWrites, (answer) => (refused = answer)));
+  const refusal = $derived(refusalOf(refused, under === "" ? null : under, "create_page"));
+
   async function create() {
-    if (sending || under === "") return;
+    if (sending || under === "" || refusal !== null) return;
     sending = true;
     try {
       if (await oncreate({ parent: under, title, text }, job !== null && link)) onclose();
@@ -117,7 +129,11 @@
   {/snippet}
   {#snippet footer()}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button type="button" class="tf-btn tf-primary" disabled={sending || title.trim() === "" || under === ""} onclick={create}
-      >Create page</button>
+    <button
+      type="button"
+      class="tf-btn tf-primary"
+      disabled={sending || title.trim() === "" || under === ""}
+      {...refusedAttrs(refusal)}
+      onclick={create}>Create page</button>
   {/snippet}
 </TfDialog>

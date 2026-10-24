@@ -253,7 +253,7 @@
     {#snippet body()}
       <p class="tf-dsub">Each note becomes a page under the one you pick. Your notes stay in knobas.</p>
       <div class="tf-stg-pick">
-        <PublishTargetPicker {sources} search={ports.search} onchange={(target) => (chosen = target)} />
+        <PublishTargetPicker {sources} search={ports.search} refusedWrites={ports.refusedWrites} onchange={(target) => (chosen = target)} />
       </div>
     {/snippet}
     {#snippet footer()}

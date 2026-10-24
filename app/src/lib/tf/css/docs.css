@@ -55,7 +55,7 @@
   border: 1px solid var(--rule); background: var(--sheet); border-radius: 3px; padding: 1px 7px;
   color: var(--ink-2); text-decoration: none; font: inherit; cursor: pointer;
 }
-.tf-doc h2 .tf-tools button:disabled { cursor: not-allowed; opacity: .55; }
+.tf-doc h2 .tf-tools button:disabled, .tf-doc h2 .tf-tools button[aria-disabled="true"] { cursor: not-allowed; opacity: .55; }
 .tf-doc p { margin: 0 0 15px; }
 .tf-doc ul, .tf-doc ol { margin: 0 0 15px; padding-left: 24px; }
 .tf-doc li { margin: 4px 0; }

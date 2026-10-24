@@ -62,6 +62,7 @@
   import { drawn } from "../../detail/relations";
   import { writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -119,6 +120,8 @@
     jobReach: typeof realJobReach;
     openExternal: (url: string) => Promise<void>;
     copy: (text: string) => Promise<void>;
+    /** What the page's source refuses its credential (#2053); the IPC read when omitted. */
+    refusedWrites?: RefusedWritesPort;
   }
 
   type LinkPorts = Pick<JobPorts, "listSources" | "getEntity" | "createLink" | "search" | "launcherHome">;
@@ -441,6 +444,22 @@
   let newPage = $state<{ space: string | null; parent: string | null; title?: string; text?: string } | null>(null);
   let comment = $state("");
   let commenting = $state(false);
+
+  /** The page's writes its source's credential cannot make, asked once the page is drawn (#2053). */
+  let refused = $state<RefusedWrite[]>([]);
+  /** As a string, so a read of the same page asks nothing again. */
+  const writeAsks = $derived(JSON.stringify(page === null ? [] : page.writes.map((op) => ({ entity: page!.entity_id, op }))));
+  $effect(() => askInto(JSON.parse(writeAsks) as WriteAsk[], io.refusedWrites, (answer) => (refused = answer)));
+  /** Why the open page's `op` cannot be made, or `null`. */
+  const refusal = (op: string) => refusalOf(refused, page?.entity_id ?? null, op);
+  /**
+   * The tree's *New page* opens on the space the tree shows. The open page's
+   * answer speaks for it only where that is the page's own space; elsewhere
+   * the dialog asks about its own *Under*.
+   */
+  const treeNewPageRefusal = $derived(
+    shownSpace === undefined || shownSpace === pageSpace ? refusal("create_page") : null,
+  );
   let composer = $state<HTMLTextAreaElement | null>(null);
 
   async function open(url: string): Promise<void> {
@@ -582,7 +601,7 @@
   }
 
   async function sendComment(p: DocPage): Promise<void> {
-    if (comment.trim() === "" || commenting) return;
+    if (comment.trim() === "" || commenting || refusal("comment") !== null) return;
     commenting = true;
     try {
       const body = comment;
@@ -749,7 +768,9 @@
         <button
           type="button"
           class="tf-btn tf-sm"
+          {...refusedAttrs(treeNewPageRefusal)}
           onclick={() => {
+            if (treeNewPageRefusal !== null) return;
             const space = shownSpace ?? pageSpace;
             newPage = { space: space ? spaceId(space) : null, parent: p.entity_id };
           }}
@@ -802,7 +823,8 @@
         </div>
         <div class="tf-rd-acts">
           {#if p.writes.includes("comment")}
-            <button type="button" class="tf-btn tf-sm" onclick={() => composer?.focus()}>Comment</button>
+            <button type="button" class="tf-btn tf-sm" {...refusedAttrs(refusal("comment"))} onclick={() => composer?.focus()}
+              >Comment</button>
           {/if}
           {#if job !== null && linkPorts}
             {@const key = job}
@@ -815,7 +837,10 @@
             <button
               type="button"
               class="tf-btn tf-sm"
-              onclick={() => (newPage = { space: pageSpace ? spaceId(pageSpace) : null, parent: p.entity_id })}
+              {...refusedAttrs(refusal("create_page"))}
+              onclick={() => {
+                if (refusal("create_page") === null) newPage = { space: pageSpace ? spaceId(pageSpace) : null, parent: p.entity_id };
+              }}
               >New page here</button>
           {/if}
           {#if p.readable}
@@ -838,6 +863,7 @@
               webUrl={p.web_url}
               sections={p.sections}
               editable={p.writes.includes("update_page") && p.version !== null}
+              refusal={refusal("update_page")}
               {stems}
               onopen={open}
               oncopy={copy}
@@ -890,6 +916,7 @@
                     type="button"
                     class="tf-btn tf-primary"
                     disabled={commenting || comment.trim() === ""}
+                    {...refusedAttrs(refusal("comment"))}
                     onclick={() => sendComment(p)}>Comment</button>
                 </div>
               </div>
@@ -935,5 +962,6 @@
     {layers}
     onclose={() => (newPage = null)}
     oncreate={createPage}
+    refusedWrites={io.refusedWrites}
   />
 {/if}

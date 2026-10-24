@@ -24,7 +24,13 @@
   }: {
     ports: Pick<
       SectionPorts,
-      "standupPublishTarget" | "setStandupPublishTarget" | "getEntity" | "search" | "listSources" | "listAdapters"
+      | "standupPublishTarget"
+      | "setStandupPublishTarget"
+      | "getEntity"
+      | "search"
+      | "listSources"
+      | "listAdapters"
+      | "refusedWrites"
     >;
     layers: Layers;
   } = $props();
@@ -107,7 +113,13 @@
     {#snippet body()}
       <p class="tf-dsub">Changing this moves where the next page lands. Pages already published stay where they are.</p>
       <div class="tf-stg-pick">
-        <PublishTargetPicker {sources} value={stored ?? null} search={ports.search} onchange={(target) => (chosen = target)} />
+        <PublishTargetPicker
+          {sources}
+          value={stored ?? null}
+          search={ports.search}
+          refusedWrites={ports.refusedWrites}
+          onchange={(target) => (chosen = target)}
+        />
       </div>
     {/snippet}
     {#snippet footer()}

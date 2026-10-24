@@ -179,6 +179,40 @@ impl ConfluenceHttp {
         self.client.send(request).await
     }
 
+    /// `POST <base>/rpc/json-rpc/confluenceservice-v2/<method>` with
+    /// `params`, a **read** of Confluence's remote API, decoded as `T`
+    /// (#2053: `getPermissions` is the one way an ordinary user can read its
+    /// own space permissions on Data Center).
+    ///
+    /// Retried like a `GET`, so **only a method that changes nothing** may
+    /// be called through it; a write would be sent again on a retry.
+    /// The service answers a failure as `{"error":{"message":…}}`, which
+    /// comes back as [`SourceError::Protocol`] carrying that message.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::get_json`], and that error answer.
+    pub(crate) async fn rpc<T: serde::de::DeserializeOwned>(
+        &self,
+        method: &str,
+        params: &serde_json::Value,
+    ) -> Result<T, SourceError> {
+        let path = format!("rpc/json-rpc/confluenceservice-v2/{method}");
+        let request = self.client.request(Method::POST, &path).json(params);
+        let response = self.client.send(request).await?;
+        let answer: serde_json::Value = response.json().await.map_err(|error| {
+            SourceError::protocol(format!("{path} did not answer JSON: {error}"))
+        })?;
+        if let Some(message) = answer.pointer("/error/message").and_then(|m| m.as_str()) {
+            return Err(SourceError::protocol(format!("{path}: {message}")));
+        }
+        serde_json::from_value(answer).map_err(|error| {
+            SourceError::protocol(format!(
+                "{path} did not answer with the shape Confluence's remote API documents: {error}"
+            ))
+        })
+    }
+
     /// `PUT <base>/<path>` with `body` as JSON, keeping the response.
     ///
     /// A separate verb rather than a parameter on [`Self::post_json`] because

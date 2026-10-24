@@ -18,6 +18,7 @@ import {
 } from "../../ipc/entity";
 import { search } from "../../ipc/search";
 import { listAdapters, listSources, type QueuedWrite, type SourceDescriptor, type SourceSummary } from "../../ipc/sources";
+import type { RefusedWritesPort } from "../../shell/refused-writes";
 
 export interface NotesPorts {
   captureShortcut: () => Promise<CaptureShortcut>;
@@ -29,6 +30,8 @@ export interface NotesPorts {
   listSources: () => Promise<SourceSummary[]>;
   listAdapters: () => Promise<SourceDescriptor[]>;
   search: typeof search;
+  /** Which picked pages the source's credential cannot add pages under (#2053); the IPC read when omitted. */
+  refusedWrites?: RefusedWritesPort;
 }
 
 export const realNotesPorts: NotesPorts = {

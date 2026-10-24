@@ -31,6 +31,7 @@ mod config;
 mod cql;
 mod cursor;
 mod descriptor;
+mod grants;
 mod http;
 mod map;
 mod model;

@@ -6,7 +6,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { BackupStatus } from "../../ipc/backup";
-import type { InboxCategory } from "../../ipc/entity";
+import type { InboxCategory, WriteAsk } from "../../ipc/entity";
 import type { SourceSummary } from "../../ipc/sources";
 import { createHealth } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
@@ -258,6 +258,24 @@ test("Standup: the target named by its page, and Change… asks with the publish
   await settle();
   expect(target.querySelector('[role="dialog"] h2')?.textContent).toBe("Publish standups under");
   expect(p.listAdapters).toHaveBeenCalled();
+});
+
+test("Standup: a stored page the credential cannot add pages under says why in Change…, and Save waits for another (#2053)", async () => {
+  const reason = "This Confluence user cannot add pages to Payments: it lacks the Add page permission";
+  const p = sectionPorts({
+    listSources: vi.fn(() =>
+      Promise.resolve([{ id: "confluence", display_name: "Confluence", adapter_kind: "confluence", enabled: true }] as never),
+    ),
+    listAdapters: vi.fn(() => Promise.resolve([{ adapter_kind: "confluence", write_ops: ["create_page"] }] as never)),
+    refusedWrites: vi.fn(async (asks: WriteAsk[]) => asks.map((ask) => ({ ...ask, reason }))),
+  });
+  await open("standup", p);
+  button("Change…").click();
+  await settle();
+  const dialog = target.querySelector('[role="dialog"]')!;
+  expect(p.refusedWrites).toHaveBeenCalledWith([{ entity: "confluence:98400", op: "create_page" }]);
+  expect(dialog.querySelector('[role="alert"]')?.textContent).toBe(reason);
+  expect([...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Save")?.disabled).toBe(true);
 });
 
 test("Monitoring: a field left with a new value saves both settings", async () => {

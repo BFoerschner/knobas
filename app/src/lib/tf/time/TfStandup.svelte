@@ -25,6 +25,11 @@
   any filed ticket is unnamed, the end of every sync asks for it again, so
   the ticket the post-write read missed is named by the sync that brings it.
 
+  *Publish to Confluence* asks `refused_writes` about the stored target's
+  page (#2053): a page whose space the source's credential may not add pages
+  to draws it disabled with the reason. The first publish's picker asks
+  about every page it offers.
+
   `date` is the day the address names (`#/time/standup/<date>`, #1504), today
   without one.
 -->
@@ -53,6 +58,7 @@
   import { search as realSearch } from "../../ipc/search";
   import { listAdapters as realListAdapters, listSources as realListSources } from "../../ipc/sources";
   import { toastStopped, unconfirmedTeller, willNotGo, writeFollower, type WriteFollower } from "../../shell/follow-write";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import PublishTargetPicker from "../../standup/PublishTargetPicker.svelte";
   import { publishableSources } from "../../standup/protocol";
@@ -99,6 +105,8 @@
     listen: PipelinePorts["listen"];
     /** *Copy as text*'s clipboard. */
     copy: (text: string) => Promise<void>;
+    /** What the target's source refuses its credential (#2053); the IPC read when omitted. */
+    refusedWrites?: RefusedWritesPort;
   }
 
   let {
@@ -324,7 +332,16 @@
   /** The first publish asks where; every later one goes where the first said. */
   let dialog = $state<{ sources: { id: string; name: string }[]; chosen: PublishTarget | null } | null>(null);
 
+  /** Whether the stored target's source refuses its credential a page under it (#2053), asked once it is read. */
+  let refused = $state<RefusedWrite[]>([]);
+  const storedParent = $derived(target?.stored.parent ?? null);
+  $effect(() =>
+    askInto(storedParent === null ? [] : [{ entity: storedParent, op: "create_page" }], io.refusedWrites, (answer) => (refused = answer)),
+  );
+  const publishRefusal = $derived(refusalOf(refused, storedParent, "create_page"));
+
   async function publish() {
+    if (publishRefusal !== null) return;
     let stored: PublishTarget | null;
     try {
       stored = await io.standupPublishTarget();
@@ -613,6 +630,7 @@
         <button
           class="tf-btn tf-sm tf-primary tf-open"
           disabled={!loaded || publishing || protocol === null}
+          {...refusedAttrs(publishRefusal)}
           onclick={() => void publish()}
         >
           Publish to Confluence
@@ -708,7 +726,12 @@
 {#if dialog}
   <TfDialog title="Where do standup protocols go?" {layers} onclose={() => (dialog = null)}>
     {#snippet body()}
-      <PublishTargetPicker sources={dialog!.sources} search={io.search} onchange={(chosen) => (dialog!.chosen = chosen)} />
+      <PublishTargetPicker
+        sources={dialog!.sources}
+        search={io.search}
+        refusedWrites={io.refusedWrites}
+        onchange={(chosen) => (dialog!.chosen = chosen)}
+      />
     {/snippet}
     {#snippet footer()}
       <button class="tf-btn tf-ghost" onclick={() => (dialog = null)}>Cancel</button>

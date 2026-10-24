@@ -1,7 +1,9 @@
 /**
  * What a source's credential cannot write (#2040, ADR-0020 rule 4), for a
  * surface that draws a write from what the adapter declares: the inbox's
- * *Re-run*, the Builds frame's *Run…*, *Re-run* and parameters.
+ * *Re-run*, the Builds frame's *Run…*, *Re-run* and parameters, and
+ * Confluence's writes (#2053): the Docs reader's *Comment*, *Edit section*
+ * and *New page*, and stand-up's publish and its target picker.
  *
  * A surface draws its writes as before, then asks `refused_writes` about
  * them and draws each refused one disabled with the reason (`aria-disabled`
