@@ -2407,7 +2407,9 @@ and by `live_jira_seeded`'s `a_walk_in_pages_of_two_returns_the_whole_corpus_onc
 Spec #1618's follow-up, ruled by the Opus implementer (`docs/decisions/2026-10-unattended-rulings.md`,
 "#2016"). The change is in `crates/knobas-source-teamcity/**` and its tests, none of which §10.8
 freezes, so **no §10.8 entry is owed**; the cursor version stays `2`. The #91 ceiling bullets above
-are *narrowed*, not wrong.
+are *narrowed*, not wrong. It supersedes spec #1618's Solution sentence "The cursor advance ignores
+a ceiling below the previous watermark" (#1626): ticket #2016 asks that the ceiling never be
+ignored, and the ticket is the more specific source.
 
 **§4.2 TeamCity: an incremental run's opening probe reads
 `sinceBuild:(id:<watermark − 1>),defaultFilter:false,count:100`**: the watermark's own build and
