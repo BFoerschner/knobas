@@ -7,4 +7,5 @@
 //! `just atlassian-live` runs it by name (`test-layout-exceptions.txt`).
 
 mod field_discovery;
+mod grants;
 mod mockd;

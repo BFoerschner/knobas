@@ -401,6 +401,29 @@ impl Source for JiraSource {
         Ok(offered.into_iter().map(|t| t.status).collect())
     }
 
+    /// The asks this user's project permissions refuse (#2052), read from
+    /// `mypermissions` and never probed: see [`crate::grants`]. A ticket's
+    /// asks are answered in its project, a create's in the project it names;
+    /// an entity of another source, or one that is neither, is not answered.
+    async fn refused_writes(
+        &self,
+        asks: &[knobas_source::grants::WriteAsk],
+    ) -> Result<Vec<knobas_source::grants::RefusedWrite>, SourceError> {
+        let keyed: Vec<_> = asks
+            .iter()
+            .filter_map(|ask| {
+                let project = if ask.op == "create_ticket" {
+                    self.project_key(&ask.entity).ok()?
+                } else {
+                    let key = self.issue_key(&ask.entity).ok()?;
+                    key[..key.rfind('-')?].to_owned()
+                };
+                Some((ask, project))
+            })
+            .collect();
+        crate::grants::refused(&self.http, &keyed).await
+    }
+
     /// No source view yet (ADR-0020): a Jira ticket's detail is the mirror's
     /// generic projection, as it was before views existed (spec #660 keeps
     /// Jira's details unchanged).
