@@ -406,9 +406,11 @@ pub struct ActionItemTicket {
 ///
 /// A ticket that is **not** there yet is not an error and files nothing twice:
 /// the write is queued, the caller is told the id is not known, and the link is
-/// the one thing left undone. Pressing *Create ticket* again would file a
-/// second ticket, which is why the answer says plainly that the create is on
-/// the queue.
+/// the one thing left undone. It stays owed on the row (`owe_the_note`):
+/// the end of every later sync of the source draws it once the ticket is
+/// mirrored, and the protocol's read names the create until then (#1951).
+/// Pressing *Create ticket* again would file a second ticket, which is why
+/// the answer says plainly that the create is on the queue.
 ///
 /// `project` is the project's entity id (`jira:PAY`), which is what
 /// `WriteOp::CreateTicket` calls its `entity` and what `list_projects` hands
@@ -447,7 +449,10 @@ pub async fn create_action_item_ticket_inner(
 /// is the queued write with no ticket yet; the send, the sync that brings the
 /// ticket into the mirror and the link follow in a spawned task, and
 /// [`action_item_ticket_inner`] -- which the panel asks when the write settles
-/// -- names the ticket and draws the link as well, whichever comes first.
+/// and after every sync -- names the ticket and draws the link as well,
+/// whichever comes first. A send that fails or never starts runs no read of
+/// its own: the link it owes is the row's (`owe_the_note`, #1951), drawn by
+/// the sync after the tick that delivers it.
 ///
 /// The awaited path stays for the battery.
 ///
@@ -549,9 +554,12 @@ async fn action_item_payload(
 /// the ticket -- the ticket, linked to the note.
 ///
 /// **Idempotent, like `protocol::reconcile`**: the panel asks it each time the
-/// queue moves until the ticket is named, and the background task behind
-/// [`create_action_item_ticket_in_background`] asks it once after its sync.
-/// Whichever finds the ticket first draws the link; the other finds it drawn.
+/// queue moves and each time a sync ends until the ticket is named, the
+/// background task behind [`create_action_item_ticket_in_background`] asks it
+/// once after its sync, and the protocol's read asks it of every create still
+/// owed (`owed_tickets`, #1951). The end of every sync of the source
+/// resolves the same link (`link_arrivals`). Whichever finds the ticket first
+/// draws the link and drops what the row owes; the others find it drawn.
 ///
 /// The ticket is looked for **only once the write was sent**: before that, a
 /// ticket of the same title in the project is somebody else's, never this one.
