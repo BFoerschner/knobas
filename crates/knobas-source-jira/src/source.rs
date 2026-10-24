@@ -412,11 +412,10 @@ impl Source for JiraSource {
         let keyed: Vec<_> = asks
             .iter()
             .filter_map(|ask| {
-                let project = if ask.op == "create_ticket" {
+                let project = if ask.op == crate::WRITE_OP_CREATE_TICKET {
                     self.project_key(&ask.entity).ok()?
                 } else {
-                    let key = self.issue_key(&ask.entity).ok()?;
-                    key[..key.rfind('-')?].to_owned()
+                    issue_project(&self.issue_key(&ask.entity).ok()?).to_owned()
                 };
                 Some((ask, project))
             })
@@ -456,6 +455,12 @@ fn is_issue_key(key: &str) -> bool {
         && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
         && !number.is_empty()
         && number.chars().all(|c| c.is_ascii_digit())
+}
+
+/// The project an issue key is in (`PAY-231` is in `PAY`): what its writes'
+/// permissions are read in (#2052). The key is one [`is_issue_key`] passed.
+fn issue_project(key: &str) -> &str {
+    key.rsplit_once('-').map_or(key, |(project, _)| project)
 }
 
 #[cfg(test)]

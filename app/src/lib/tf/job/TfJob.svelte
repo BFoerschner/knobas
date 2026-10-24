@@ -532,7 +532,7 @@
             </div>
           {/each}
           {#if starting}
-            <TfStartWork {detail} {repos} suggested={suggestedRepo} {timer} api={ports.startWork} {onstarttimer} moveRefused={moveRefused} />
+            <TfStartWork {detail} {repos} suggested={suggestedRepo} {timer} api={ports.startWork} {onstarttimer} {moveRefused} />
           {/if}
           <div class="tf-grid">
             {#if !starting}

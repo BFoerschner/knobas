@@ -1,11 +1,13 @@
 //! `refused_writes` against a stub that answers `mypermissions` (#2052).
 //!
 //! `knobas-mockd` serves no `GET /rest/api/2/mypermissions` and is frozen
-//! (ADR-0013), so this is the offline witness of the read, in the shape of
+//! (ADR-0013), so this is a transport test in the shape of
 //! `field_discovery.rs`: canned bytes on a socket, plus a record of every
 //! request line, so the tests can say what was sent and that nothing was
-//! written to find out. The bodies are cut from what the seeded Jira answered
-//! (`live_jira_seeded::a_user_without_jira_access_is_refused_every_write`).
+//! written to find out. The answers' shape is what the seeded Jira 10.3.24
+//! answered (#2052); which permissions are lacking is the test's own. The
+//! real product is asked in
+//! `live_jira_seeded::a_user_the_permission_scheme_refuses_is_refused_those_writes_and_nothing_is_written`.
 
 use std::sync::{Arc, Mutex};
 

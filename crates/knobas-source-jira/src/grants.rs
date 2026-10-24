@@ -34,24 +34,45 @@ use knobas_source::grants::{RefusedWrite, WriteAsk};
 
 use crate::api::JiraApi;
 
-/// The permission each op needs: the op, the key `mypermissions` answers it
-/// under, its name in Jira's permission scheme, and what the reason says the
-/// user cannot do.
-const NEEDS: [(&str, &str, &str, &str); 4] = [
-    ("comment", "ADD_COMMENTS", "Add Comments", "comment"),
-    (
-        "transition",
-        "TRANSITION_ISSUES",
-        "Transition Issues",
-        "move tickets",
-    ),
-    ("log_work", "WORK_ON_ISSUES", "Work On Issues", "log work"),
-    (
-        "create_ticket",
-        "CREATE_ISSUES",
-        "Create Issues",
-        "create tickets",
-    ),
+/// The permission one op needs.
+struct Need {
+    /// The op, as `write_ops` spells it.
+    op: &'static str,
+    /// The key `mypermissions` answers the permission under.
+    key: &'static str,
+    /// The permission's name in Jira's permission scheme.
+    name: &'static str,
+    /// What the reason says the user cannot do.
+    verb: &'static str,
+}
+
+/// Each op this adapter declares, and the permission it needs (measured on
+/// Jira 10.3.24, #2052).
+const NEEDS: [Need; 4] = [
+    Need {
+        op: crate::WRITE_OP_COMMENT,
+        key: "ADD_COMMENTS",
+        name: "Add Comments",
+        verb: "comment",
+    },
+    Need {
+        op: crate::WRITE_OP_TRANSITION,
+        key: "TRANSITION_ISSUES",
+        name: "Transition Issues",
+        verb: "move tickets",
+    },
+    Need {
+        op: crate::WRITE_OP_LOG_WORK,
+        key: "WORK_ON_ISSUES",
+        name: "Work On Issues",
+        verb: "log work",
+    },
+    Need {
+        op: crate::WRITE_OP_CREATE_TICKET,
+        key: "CREATE_ISSUES",
+        name: "Create Issues",
+        verb: "create tickets",
+    },
 ];
 
 /// `mypermissions`' answer: every permission, keyed, with whether this user
@@ -71,13 +92,16 @@ pub(crate) struct Held {
 
 /// Why `ask` cannot be made in `project`, by `answer`, or `None`.
 fn refusal(answer: &MyPermissions, project: &str, ask: &WriteAsk) -> Option<RefusedWrite> {
-    let (_, key, name, verb) = NEEDS.iter().find(|(op, ..)| *op == ask.op)?;
-    if answer.permissions.get(*key)?.have_permission {
+    let need = NEEDS.iter().find(|need| need.op == ask.op)?;
+    if answer.permissions.get(need.key)?.have_permission {
         return None;
     }
     Some(RefusedWrite::of(
         ask,
-        format!("This Jira user cannot {verb} in {project}: it lacks the {name} permission"),
+        format!(
+            "This Jira user cannot {} in {project}: it lacks the {} permission",
+            need.verb, need.name
+        ),
     ))
 }
 
@@ -90,7 +114,7 @@ pub(crate) async fn refused(
 ) -> Result<Vec<RefusedWrite>, SourceError> {
     let mut projects: Vec<&str> = Vec::new();
     for (ask, project) in asks {
-        if NEEDS.iter().any(|(op, ..)| *op == ask.op) && !projects.contains(&project.as_str()) {
+        if NEEDS.iter().any(|need| need.op == ask.op) && !projects.contains(&project.as_str()) {
             projects.push(project);
         }
     }

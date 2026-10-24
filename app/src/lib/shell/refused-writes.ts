@@ -1,9 +1,11 @@
 /**
  * What a source's credential cannot write (#2040, ADR-0020 rule 4), for a
  * surface that draws a write from what the adapter declares: the inbox's
- * *Re-run*, the Builds frame's *Run…*, *Re-run* and parameters, and
+ * *Re-run*, the Builds frame's *Run…*, *Re-run* and parameters,
  * Confluence's writes (#2053): the Docs reader's *Comment*, *Edit section*
- * and *New page*, and stand-up's publish and its target picker.
+ * and *New page*, and stand-up's publish and its target picker, and Jira's
+ * writes (#2052): the job's move and *Comment*, the worklog draft, the Day's
+ * *Log…*, *Log all* and the create-ticket dialog.
  *
  * A surface draws its writes as before, then asks `refused_writes` about
  * them and draws each refused one disabled with the reason (`aria-disabled`
@@ -61,7 +63,7 @@ export function askInto(
   };
 }
 
-/** A refused write's button attributes: `aria-disabled` and the reason as its title; none where `reason` is `null`. */
+/** A refused write's control's attributes (a button, a select): `aria-disabled` and the reason as its title; none where `reason` is `null`. */
 export function refusedAttrs(reason: string | null): { "aria-disabled"?: "true"; title?: string } {
   return reason === null ? {} : { "aria-disabled": "true", title: reason };
 }
