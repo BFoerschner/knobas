@@ -378,23 +378,21 @@ pub async fn link_on_arrival(
         }
         WriteOp::CreatePullRequest {
             entity, head, base, ..
-        } => {
-            match entity_named(pool, write_id, crate::start_work::queue::KIND_PR).await? {
-                Named::Made(named) => named,
-                Named::Nothing => match crate::start_work::queue::pull_request_on_head(
-                    pool,
-                    declarations,
-                    &repo_of(entity)?,
-                    head,
-                    base,
-                )
-                .await?
-                {
-                    crate::start_work::PullRequestOnHead::Open(id) => Some(id),
-                    _ => None,
-                },
-            }
-        }
+        } => match entity_named(pool, write_id, crate::start_work::queue::KIND_PR).await? {
+            Named::Made(named) => named,
+            Named::Nothing => match crate::start_work::queue::pull_request_on_head(
+                pool,
+                declarations,
+                &repo_of(entity)?,
+                head,
+                base,
+            )
+            .await?
+            {
+                crate::start_work::PullRequestOnHead::Open(id) => Some(id),
+                _ => None,
+            },
+        },
         _ => None,
     };
     let Some(made) = made else {

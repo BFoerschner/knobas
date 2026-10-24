@@ -164,10 +164,12 @@ impl Fake {
 
     /// A refresh also brings this pull request into the mirror.
     fn revealing_on_refresh_too(self, head: &str, row: queue::OnHead) -> Self {
-        self.on_refresh
-            .lock()
-            .unwrap()
-            .push((REPO.to_owned(), head.to_owned(), BASE.to_owned(), row));
+        self.on_refresh.lock().unwrap().push((
+            REPO.to_owned(),
+            head.to_owned(),
+            BASE.to_owned(),
+            row,
+        ));
         self
     }
 
@@ -1198,15 +1200,10 @@ async fn an_open_pull_request_from_the_head_into_another_base_is_not_found() {
         "a pull request into another base settled the create step \"already open\""
     );
 
-    let found = queue::pull_request_on_head(
-        &pool,
-        &declarations(),
-        &repo(),
-        head,
-        "release/2026.08",
-    )
-    .await
-    .unwrap();
+    let found =
+        queue::pull_request_on_head(&pool, &declarations(), &repo(), head, "release/2026.08")
+            .await
+            .unwrap();
     assert_eq!(found, PullRequestOnHead::Open(PR_BACKPORT.to_owned()));
 }
 

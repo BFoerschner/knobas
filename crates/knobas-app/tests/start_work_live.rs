@@ -900,6 +900,28 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
     //    `Litter::opened`.
     litter.opened(number);
 
+    //    **The mirror finds it by the pair** (#1952): the head and the base
+    //    the reader chose, at the paths Gitea's own record carries them. The
+    //    seam tests write that record by hand; this is the one place the read
+    //    meets the record Gitea sends. Into `main` it is not found, which is
+    //    the pull request a colleague's from the same head would be.
+    let pr = format!("{repo}#{number}");
+    let declarations = declared_paths(&state).await;
+    assert_eq!(
+        start_work::queue::pull_request_on_head(&state.pool, &declarations, &repo, &branch, &base)
+            .await
+            .expect("the read answers"),
+        start_work::PullRequestOnHead::Open(pr),
+        "the pull request the flow opened is not found by its head and base"
+    );
+    assert_eq!(
+        start_work::queue::pull_request_on_head(&state.pool, &declarations, &repo, &branch, "main")
+            .await
+            .expect("the read answers"),
+        start_work::PullRequestOnHead::Unknown,
+        "a pull request into the scratch base was found as one into main"
+    );
+
     //    **And it is a draft**, in Gitea's own copy of the title. Story 8 is
     //    met by `plan::DRAFT_PREFIX` rather than by a `draft` flag, because
     //    `WriteOp::CreatePullRequest` has no such field and adding one would
