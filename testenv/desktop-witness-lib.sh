@@ -388,8 +388,9 @@ witness_poll() {
 # data directory, parented to pid 1, until something stops it; the app's next
 # launch adopts it (`knobas_db::EmbeddedDb::start`), which is the product's
 # answer to a crash and not a script's to rely on. These are what each script
-# runs after the app has gone, killed or not. Sourced by
-# `scripts/single-instance-witness.sh` too.
+# runs after the app has gone, killed or not. Unlike the rest of this file,
+# `stop_left_postgres` acts (it signals and waits); the test drives it against
+# stand-in postmasters. Sourced by `scripts/single-instance-witness.sh` too.
 
 # demo_data_dir [home]
 #
@@ -401,6 +402,16 @@ demo_data_dir() {
     printf '%s/Library/Application Support/dev.knobas.desktop/demo/db/data\n' "${1:-$HOME}"
 }
 
+# pg_path <data dir>
+#
+# <data dir> spelled as `pg_ctl` hands it to the postmaster, which is what its
+# command line shows: repeated slashes collapsed, `/./` dropped, no trailing
+# slash (`canonicalize_path`; symlinks are not resolved). A `$TMPDIR` that ends
+# in `/` gives `.../T//x`, and the postmaster on it says `.../T/x`.
+pg_path() {
+    printf '%s\n' "$1" | sed -e 's|//*|/|g' -e 's|/\./|/|g' -e 's|\(.\)/$|\1|'
+}
+
 # profile_postmaster <data dir>
 #
 # The pid of the PostgreSQL serving <data dir>, or nothing: the pid on the
@@ -409,7 +420,8 @@ demo_data_dir() {
 # stale, and a live pid that is anything else (one recycled after a reboot,
 # another cluster's server) is not this directory's to stop.
 profile_postmaster() {
-    local data=$1 pid args
+    local data pid args
+    data=$(pg_path "$1")
     [ -r "$data/postmaster.pid" ] || return 0
     pid=$(head -n 1 "$data/postmaster.pid" 2>/dev/null) || return 0
     case $pid in '' | *[!0-9]*) return 0 ;; esac
@@ -427,7 +439,7 @@ profile_postmaster() {
 # matched as a literal string (ENVIRON, not `awk -v`, so this `awk` is not in
 # its own answer).
 starts_in_flight() {
-    ps -A -o pid= -o args= 2>/dev/null | DATA=$1 SKIP=$2 awk '
+    ps -A -o pid= -o args= 2>/dev/null | DATA=$(pg_path "$1") SKIP=$2 awk '
         index($0, ENVIRON["DATA"]) && $1 != ENVIRON["SKIP"] && /initdb|pg_ctl|postgres/ { print $1 }'
 }
 
@@ -442,14 +454,19 @@ starts_in_flight() {
 # serving <data dir> before the launch (<pid before launch>, from
 # `profile_postmaster` then) is not this run's and is left as it was.
 #
-# 0 when nothing of this run's is left; 1, naming the pid and the hand stop
-# on stderr, when the postmaster outlived both. Says what it stopped on stdout,
+# 0 when nothing of this run's is left; 1, naming the pids and the hand stop
+# on stderr, when a start outlived the guard or the postmaster both signals. Says what it stopped on stdout,
 # and nothing at all when there was nothing.
 stop_left_postgres() {
-    local data=$1 before=$2 seconds=$3 deadline pid
+    local data before=$2 seconds=$3 deadline pid starting
+    data=$(pg_path "$1")
     deadline=$((SECONDS + seconds))
-    while [ -n "$(starts_in_flight "$data" "$(profile_postmaster "$data")")" ] &&
-        [ "$SECONDS" -lt "$deadline" ]; do
+    while starting=$(starts_in_flight "$data" "$(profile_postmaster "$data")") && [ -n "$starting" ]; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            printf 'a PostgreSQL is still starting on %s after %s s (pids %s): stop them, then pg_ctl -D "%s" stop\n' \
+                "$data" "$seconds" "$(printf '%s' "$starting" | tr '\n' ' ')" "$data" >&2
+            return 1
+        fi
         sleep 0.2
     done
     pid=$(profile_postmaster "$data")

@@ -467,7 +467,8 @@ rm -rf "$poll_tmp"
 # command line is `<bin>/postgres -D <data dir> ...`, which writes its pid on
 # the first line of `<data dir>/postmaster.pid` and removes the file on a fast
 # shutdown (SIGINT, what `pg_ctl stop -m fast` sends).
-pg_tmp=$(mktemp -d "${TMPDIR:-/tmp}/knobas-witness-pg.XXXXXX")
+# Canonical, as `pg_ctl` would hand it on (a `$TMPDIR` ending in `/` doubles it).
+pg_tmp=$(pg_path "$(mktemp -d "${TMPDIR:-/tmp}/knobas-witness-pg.XXXXXX")")
 mkdir -p "$pg_tmp/bin" "$pg_tmp/other"
 pg_data="$pg_tmp/Application Support/db/data"
 mkdir -p "$pg_data"
@@ -488,6 +489,7 @@ EOF
 # on to start a postmaster 2 s later (a `pg_ctl start` the app had begun).
 cat >"$pg_tmp/bin/initdb" <<'EOF'
 #!/usr/bin/env bash
+[ "${PG_INITDB:-}" != hang ] || while :; do sleep 0.1; done
 sleep 2
 set -m
 "$(dirname "$0")/postgres" -D "$2" >/dev/null 2>&1 &
@@ -514,6 +516,12 @@ check "and nothing said" "" "$said"
 
 pid=$(postmaster_standin "$pg_data")
 check "a live postmaster on the data dir is found" "$pid" "$(profile_postmaster "$pg_data")"
+# `pg_ctl` canonicalises the directory before the postmaster gets it (checked
+# against 18.6: `-D .../T//x` runs as `postgres -D .../T/x`), so a caller's
+# spelling with a doubled or trailing slash finds the same server.
+check "under a doubled and a trailing slash too" "$pid" "$(profile_postmaster "${pg_tmp}//Application Support/./db/data/")"
+check "pg_path spells a path as pg_ctl does" "/a/b/c" "$(pg_path "/a//b/./c/")"
+check "pg_path leaves the root alone" "/" "$(pg_path "/")"
 from=$SECONDS
 said=$(stop_left_postgres "$pg_data" "" 10 2>&1) && status=0 || status=$?
 check "the postmaster the app left is stopped" 0 "$status"
@@ -579,6 +587,18 @@ check "and the postmaster it started is stopped" "0 gone gone" \
     "$status $(alive "$starter") $(alive "$(cat "$pg_data/../started")")"
 check "its lock is gone too" no "$([ -e "$pg_data/postmaster.pid" ] && echo yes || echo no)"
 check_contains "and the stop says which" "stopped the PostgreSQL the app left" "$said"
+# A start that never finishes outlasts the guard: a failure that names it,
+# since the server it may still bring up would be left running.
+set -m
+PG_INITDB=hang "$pg_tmp/bin/initdb" --pgdata "$pg_data" >/dev/null 2>&1 &
+set +m
+starter=$!
+until [ -n "$(starts_in_flight "$pg_data" "")" ]; do sleep 0.1; done
+said=$(stop_left_postgres "$pg_data" "" 1 2>&1) && status=0 || status=$?
+check "a start that outlasts the guard fails the step" 1 "$status"
+check_contains "naming what is still starting" "still starting on $pg_data" "$said"
+kill -KILL "$starter" 2>/dev/null || true
+wait "$starter" 2>/dev/null || true
 
 check "the demo profile's data dir" \
     "/Users/mara/Library/Application Support/dev.knobas.desktop/demo/db/data" "$(demo_data_dir /Users/mara)"

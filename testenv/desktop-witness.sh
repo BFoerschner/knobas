@@ -141,17 +141,22 @@ cleanup() {
     if [ -n "$app_pid" ] && kill -0 "$app_pid" 2>/dev/null; then
         note "quitting the app that is still running (pid $app_pid)"
         kill -TERM "$app_pid" 2>/dev/null || true
-        for _ in $(seq 1 20); do
-            kill -0 "$app_pid" 2>/dev/null || break
-            sleep 0.5
-        done
+        # A SIGTERM ends it at once; one still up after the guard is hung, and
+        # is killed outright so its server can be stopped below (#1967).
+        local polled=0
+        witness_poll "$app_pid" "$WAIT_S" false || polled=$?
+        if [ "$polled" = 1 ]; then
+            note "it outlived SIGTERM by $WAIT_S s (KNOBAS_WITNESS_WAIT_S); sending SIGKILL"
+            kill -KILL "$app_pid" 2>/dev/null || true
+            witness_poll "$app_pid" "$WAIT_S" false || true
+        fi
     fi
     # A killed app runs no exit handler and leaves its embedded PostgreSQL up
     # on the demo profile, the one the person's own `--demo` app uses (#1967).
     # After a ⌘Q that worked there is nothing here, and this says nothing.
     if [ -n "$pg_data" ]; then
         local said stopped=0
-        said=$(stop_left_postgres "$pg_data" "$pg_before" 30 2>&1) || stopped=$?
+        said=$(stop_left_postgres "$pg_data" "$pg_before" "$WAIT_S" 2>&1) || stopped=$?
         [ -z "$said" ] || note "$said"
         if [ "$stopped" -ne 0 ] && [ "$status" -eq 0 ]; then status=1; fi
     fi
