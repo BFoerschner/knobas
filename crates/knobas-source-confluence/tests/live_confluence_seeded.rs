@@ -65,6 +65,11 @@
 //! touching no field the fixture's *content* describes, and it is the one
 //! edit that makes the id-not-title criterion visible.
 //!
+//! One **user**, its token and a private **space** it may only view, minted
+//! for the refused-writes test (#2053) and deleted again from [`Minted`]'s
+//! `Drop`, each checked gone; a killed run's are deleted by the next run's
+//! [`Minted::new`] before it mints its own.
+//!
 //! What a *killed* run left behind is put back by the next one:
 //! [`Seeded::clear_leftovers`] restores every seeded page's title from
 //! `seed-state.json`, which is the union of what this suite writes. Every test
@@ -1804,4 +1809,287 @@ async fn a_run_reports_its_walk_over_the_real_pages() {
         "one step at a time"
     );
     assert!(idle.readings.iter().all(|r| r.2 == "pages"));
+}
+
+// -- What the credential may not write (#2053) ------------------------------
+
+/// The user [`a_viewer_is_refused_the_writes_of_a_space_it_may_only_view`]
+/// mints, and the private space only it and the seed's admin can see.
+const VIEWER: &str = "knobas-live-viewer";
+const VIEWER_PASSWORD: &str = "knobas-live-viewer-2053";
+const VIEWER_SPACE: &str = "KNOBASRO";
+
+/// One request as `user`, answering the status and the JSON body (`Null`
+/// for none).
+async fn call_as(
+    seeded: &Seeded,
+    (user, password): (&str, &str),
+    method: reqwest::Method,
+    path: &str,
+    body: Option<serde_json::Value>,
+) -> (u16, serde_json::Value) {
+    let mut request = seeded
+        .http
+        .request(method.clone(), format!("{}/{path}", seeded.url))
+        .basic_auth(user, Some(password))
+        .header("Accept", "application/json");
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+    let response = request
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{method} {path}: {e}"));
+    let status = response.status().as_u16();
+    let text = response.text().await.unwrap_or_default();
+    (status, serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+}
+
+/// The viewer and its space, taken away again from `Drop` and checked gone.
+struct Minted {
+    url: String,
+    admin: (String, String),
+    /// The viewer's token id, once it minted one.
+    token: Option<u64>,
+}
+
+impl Minted {
+    /// Clears what a killed run left, then mints the viewer and the space,
+    /// and gives the viewer *View* there and nothing else.
+    async fn new(seeded: &Seeded) -> (Minted, String) {
+        let minted = Minted {
+            url: seeded.url.clone(),
+            admin: (seeded.user.clone(), seeded.password.clone()),
+            token: None,
+        };
+        if let Err(left) = minted.take_away(&seeded.http).await {
+            panic!("an earlier run's viewer could not be taken away: {left}");
+        }
+        let admin = (seeded.user.as_str(), seeded.password.as_str());
+        let (status, made) = call_as(
+            seeded,
+            admin,
+            reqwest::Method::POST,
+            "rest/api/admin/user",
+            Some(serde_json::json!({
+                "userName": VIEWER,
+                "fullName": "Live viewer",
+                "email": "viewer@example.com",
+                "password": VIEWER_PASSWORD,
+                "notifyViaEmail": false,
+            })),
+        )
+        .await;
+        assert!(matches!(status, 200 | 201), "minting {VIEWER}: {status} {made}");
+        let viewer_key = made["userKey"].as_str().expect("a user key").to_owned();
+        // A private space: only its creator holds anything in it.
+        let (status, space) = call_as(
+            seeded,
+            admin,
+            reqwest::Method::POST,
+            "rest/api/space/_private",
+            Some(serde_json::json!({ "key": VIEWER_SPACE, "name": "Read only" })),
+        )
+        .await;
+        assert_eq!(status, 200, "creating {VIEWER_SPACE}: {space}");
+        let home = space["homepage"]["id"]
+            .as_str()
+            .expect("the space has a home page")
+            .to_owned();
+        let (status, granted) = call_as(
+            seeded,
+            admin,
+            reqwest::Method::PUT,
+            &format!("rest/api/space/{VIEWER_SPACE}/permissions/user/{viewer_key}/grant"),
+            Some(serde_json::json!([{ "targetType": "space", "operationKey": "read" }])),
+        )
+        .await;
+        assert_eq!(status, 204, "granting {VIEWER} View on {VIEWER_SPACE}: {granted}");
+        (minted, home)
+    }
+
+    /// The viewer's personal access token, minted by the viewer.
+    async fn token(&mut self, seeded: &Seeded) -> String {
+        let (status, made) = call_as(
+            seeded,
+            (VIEWER, VIEWER_PASSWORD),
+            reqwest::Method::POST,
+            "rest/pat/latest/tokens",
+            Some(serde_json::json!({ "name": "knobas-live-2053", "expirationDuration": 1 })),
+        )
+        .await;
+        assert_eq!(status, 201, "minting the viewer's token: {made}");
+        self.token = made["id"].as_u64();
+        made["rawToken"].as_str().expect("a raw token").to_owned()
+    }
+
+    /// The token, the space and the user deleted, each checked gone.
+    async fn take_away(&self, http: &reqwest::Client) -> Result<(), String> {
+        let (url, (user, password)) = (&self.url, &self.admin);
+        let send = |method: reqwest::Method, path: String, auth: (String, String)| {
+            let request = http
+                .request(method, format!("{url}/{path}"))
+                .basic_auth(auth.0, Some(auth.1))
+                .header("Accept", "application/json");
+            async move {
+                let response = request.send().await.map_err(|e| format!("{path}: {e}"))?;
+                let status = response.status().as_u16();
+                let body = response.text().await.unwrap_or_default();
+                Ok::<_, String>((status, body))
+            }
+        };
+        let admin = (user.clone(), password.clone());
+        let viewer = (VIEWER.to_owned(), VIEWER_PASSWORD.to_owned());
+        if let Some(id) = self.token {
+            let (status, body) =
+                send(reqwest::Method::DELETE, format!("rest/pat/latest/tokens/{id}"), viewer.clone())
+                    .await?;
+            if status != 204 {
+                return Err(format!("the viewer's token {id} answered {status} to its delete: {body}"));
+            }
+        }
+        let gone = |path: String| {
+            let send = &send;
+            let admin = admin.clone();
+            async move {
+                for _ in 0..60 {
+                    if send(reqwest::Method::GET, path.clone(), admin.clone()).await?.0 == 404 {
+                        return Ok(());
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                Err(format!("{path} is still there"))
+            }
+        };
+        let space = format!("rest/api/space/{VIEWER_SPACE}");
+        if send(reqwest::Method::GET, space.clone(), admin.clone()).await?.0 != 404 {
+            send(reqwest::Method::DELETE, space.clone(), admin.clone()).await?;
+            gone(space).await?;
+        }
+        let user_path = format!("rest/api/user?username={VIEWER}");
+        if send(reqwest::Method::GET, user_path.clone(), admin.clone()).await?.0 != 404 {
+            send(
+                reqwest::Method::DELETE,
+                format!("rest/api/admin/user/{VIEWER}"),
+                admin.clone(),
+            )
+            .await?;
+            gone(user_path).await?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Minted {
+    fn drop(&mut self) {
+        let minted = Minted {
+            url: self.url.clone(),
+            admin: self.admin.clone(),
+            token: self.token.take(),
+        };
+        Cleanup::new(
+            "the live suite did not take away the viewer it minted, so the server is no longer \
+             in the plain-seed state",
+            format!("{VIEWER} and space {VIEWER_SPACE} may still exist; the next run clears them"),
+        )
+        .run(move || async move { minted.take_away(&client()).await });
+    }
+}
+
+/// **A user who may only view a space is refused its writes, saying why, and
+/// the same user may write the seeded space** (#2053). The viewer is minted
+/// for the case (ADR-0013) with *View* on a private space and nothing else,
+/// and asks through its own personal access token. The seeded space grants
+/// `confluence-users`, which the viewer is in, so its writes there stay
+/// enabled, and so do the seed admin's in the viewer's space.
+///
+/// No write is sent to find out: the pages asked about keep their version
+/// and their comments.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_viewer_is_refused_the_writes_of_a_space_it_may_only_view() {
+    use knobas_source::grants::WriteAsk;
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let (mut minted, home) = Minted::new(&seeded).await;
+    let token = minted.token(&seeded).await;
+    let viewer = seeded.build_source(&seeded.url, AuthMethod::Pat, &token, seeded.scoped());
+    let eng = seeded.seeded_page("sepa-design").id.clone();
+    let asks = |id: &str| -> Vec<WriteAsk> {
+        ["comment", "update_page", "create_page"]
+            .into_iter()
+            .map(|op| WriteAsk {
+                entity: format!("confluence:{id}"),
+                op: op.to_owned(),
+            })
+            .collect()
+    };
+    let state = |id: String| {
+        let seeded = &seeded;
+        async move {
+            let (status, page) = call_as(
+                seeded,
+                (&seeded.user, &seeded.password),
+                reqwest::Method::GET,
+                &format!("rest/api/content/{id}?expand=version,children.comment"),
+                None,
+            )
+            .await;
+            assert_eq!(status, 200, "reading {id}: {page}");
+            (page["version"]["number"].clone(), page["children"]["comment"]["size"].clone())
+        }
+    };
+    let before = (state(home.clone()).await, state(eng.clone()).await);
+
+    let refused = viewer
+        .refused_writes(&asks(&home))
+        .await
+        .expect("the viewer's answer");
+    let said: Vec<(&str, &str)> = refused
+        .iter()
+        .map(|r| (r.op.as_str(), r.reason.as_str()))
+        .collect();
+    assert_eq!(
+        said,
+        [
+            (
+                "comment",
+                "This Confluence user cannot comment in Read only: it lacks the Add comment \
+                 permission"
+            ),
+            (
+                "update_page",
+                "This Confluence user cannot edit pages in Read only: it lacks the Add page \
+                 permission"
+            ),
+            (
+                "create_page",
+                "This Confluence user cannot add pages to Read only: it lacks the Add page \
+                 permission"
+            ),
+        ],
+        "{refused:?}"
+    );
+    assert!(refused.iter().all(|r| r.entity == format!("confluence:{home}")));
+    assert_eq!(
+        viewer.refused_writes(&asks(&eng)).await.expect("an answer"),
+        vec![],
+        "confluence-users may write the seeded space"
+    );
+    assert_eq!(
+        seeded
+            .source(seeded.scoped())
+            .refused_writes(&asks(&home))
+            .await
+            .expect("an answer"),
+        vec![],
+        "the space's creator may write it"
+    );
+    assert_eq!(
+        (state(home).await, state(eng).await),
+        before,
+        "nothing was written to find out"
+    );
+    drop(minted);
 }
