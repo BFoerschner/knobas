@@ -395,7 +395,9 @@ pub async fn create_action_item_ticket_inner(
     let pool = &state.pool;
     let (project_ref, payload) =
         action_item_payload(pool, note_id, project, ticket_type, title, body).await?;
-    let queued = crate::sources::write_queue::submit(state, payload).await?;
+    let (queued, source_id) = crate::sources::write_queue::queue(state, payload).await?;
+    owe_the_note(pool, queued.id, note_id).await?;
+    crate::sources::write_queue::flush(state, &source_id, queued.id).await?;
     // The same wait, for the same reason: a created ticket has no address
     // until the mirror has it, and this is the call that goes looking.
     crate::sources::write_queue::sync_after_write(state, &project_ref.namespace).await;
@@ -427,6 +429,7 @@ pub async fn create_action_item_ticket_in_background(
     let (project_ref, payload) =
         action_item_payload(&state.pool, note_id, project, ticket_type, title, body).await?;
     let (queued, source_id) = crate::sources::write_queue::queue(state, payload).await?;
+    owe_the_note(&state.pool, queued.id, note_id).await?;
     let (note, id) = (note_id.to_owned(), queued.id);
     crate::sources::write_queue::send_in_background_then(
         state,
@@ -446,6 +449,17 @@ pub async fn create_action_item_ticket_in_background(
         ticket_entity_id: None,
         linked: false,
     })
+}
+
+/// Hold the note on the create as the link it owes (#1951): the row's
+/// `link_to`, which the end of every sync of the source resolves
+/// (`sources::write_queue::link_arrivals`) until the ticket the receipt named
+/// is mirrored, as a run's *Create ticket* is (#1451). So a create that goes
+/// on a later tick, or whose ticket the post-write sync missed, is still
+/// linked, and the protocol's read can say which creates are on their way
+/// ([`owed_tickets`]).
+async fn owe_the_note(pool: &PgPool, write_id: i64, note_id: &str) -> Result<(), IpcError> {
+    crate::sources::write_queue::hold_arrival_link(pool, write_id, note_id).await
 }
 
 /// The checks and the `CreateTicket` payload both paths share.

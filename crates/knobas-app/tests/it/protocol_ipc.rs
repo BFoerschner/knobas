@@ -110,6 +110,10 @@ struct Log {
     /// While true, a ticket's create answers no key, as Jira's did before
     /// #1754 and as a source whose receipt is empty still does.
     receiptless: bool,
+    /// While true, a created ticket is not pushed by the next sync: the test
+    /// hands it over later ([`Harness::mirror`]), as Jira's search index lags
+    /// its own write (#1951).
+    late: bool,
 }
 
 /// A source that behaves like the Confluence adapter at the trait.
@@ -188,7 +192,9 @@ impl Source for Wiki {
             // ticket reaches the mirror at the next sync, as a page does.
             WriteOp::CreateTicket { title, .. } => {
                 let mut log = self.log();
-                log.pending.push(ticket_item("PAY-999", &title));
+                if !log.late {
+                    log.pending.push(ticket_item("PAY-999", &title));
+                }
                 if log.receiptless {
                     return Ok(WriteReceipt::none());
                 }
@@ -481,6 +487,34 @@ impl Harness {
         .fetch_all(self.pool())
         .await
         .expect("the links read")
+    }
+
+    /// The tickets the note is linked to as `related`, whichever end drew
+    /// it: a link reads the same from both ends (`link::entries_of`).
+    async fn related_tickets(&self, note_id: &str) -> Vec<String> {
+        sqlx::query_scalar::<_, String>(
+            "select case when from_id = $1 then to_id else from_id end
+               from knobas.confirmed_link
+              where (from_id = $1 or to_id = $1) and relation = $2
+              order by id",
+        )
+        .bind(note_id)
+        .bind(protocol::ACTION_ITEM_RELATION)
+        .fetch_all(self.pool())
+        .await
+        .expect("the links read")
+    }
+
+    /// What the end of a sync of `source` resolves (`ArrivalLinks`, #1050):
+    /// the entities the source's sent writes were owed and are now linked.
+    async fn resolve(&self, source: &str) -> Vec<String> {
+        knobas_app::sources::write_queue::link_arrivals(
+            self.pool(),
+            &knobas_core::payload::Declarations::empty(),
+            source,
+        )
+        .await
+        .expect("the owed links resolve")
     }
 
     /// How many notes carry this date's title -- the get-or-create's whole
@@ -1144,6 +1178,48 @@ async fn an_action_item_whose_create_named_no_key_is_found_by_its_title() {
     .expect("the ticket is filed");
     assert_eq!(filed.ticket_entity_id.as_deref(), Some("tracker:PAY-999"));
     assert!(filed.linked);
+}
+
+/// **#1951: a ticket the post-write sync does not bring in is linked by the
+/// sync that does**, with no panel open and no read of the protocol: the
+/// create holds the note as the link it owes, and the end of every sync of
+/// the source resolves it, as a run's *Create ticket* is (#1451).
+#[tokio::test(flavor = "multi_thread")]
+async fn an_action_items_ticket_that_arrives_on_a_later_sync_is_linked_by_that_sync() {
+    let harness = Harness::new("protocol_action_item_late").await;
+    harness.log().late = true;
+    let opened = harness.open().await;
+    let filed = create_action_item_ticket_inner(
+        &harness.state,
+        &opened.note_id,
+        &format!("{TRACKER}:PAY"),
+        "Task",
+        "Ask Ines about the SEPA retry",
+        "",
+    )
+    .await
+    .expect("the ticket is filed");
+    assert_eq!(
+        (filed.state, filed.ticket_entity_id.as_deref(), filed.linked),
+        (WriteState::Sent, None, false),
+        "sent, and the sync after it did not bring the ticket in"
+    );
+    assert!(
+        harness.resolve(TRACKER).await.is_empty(),
+        "nothing is linked before the ticket is mirrored"
+    );
+
+    harness.mirror(ticket_item("PAY-999", "Ask Ines about the SEPA retry"));
+    harness.sync(TRACKER).await;
+    assert_eq!(harness.resolve(TRACKER).await, ["tracker:PAY-999"]);
+    assert_eq!(
+        harness.related_tickets(&opened.note_id).await,
+        ["tracker:PAY-999"]
+    );
+    assert!(
+        harness.resolve(TRACKER).await.is_empty(),
+        "and once drawn, owed no more"
+    );
 }
 
 /// An action item with no words is not a ticket, and the refusal comes before
