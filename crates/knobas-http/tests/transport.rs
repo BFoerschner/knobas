@@ -1374,9 +1374,27 @@ async fn a_request_with_a_body_is_retried_like_any_other() {
 /// write a body slowly: a fixture that answered late but whole would let a
 /// total timeout and a stall timeout look the same, and this pair of tests
 /// is about telling them apart (issue #1012).
+///
+/// Its gaps and its stall are `tokio::time::sleep`s on the test's runtime, so
+/// they pass on the same paused clock as the timeouts they are measured
+/// against (#1935), and it says what it is doing ([`Dribbled`]): the test
+/// moves the clock only while the server holds a byte back and every byte
+/// it wrote has been read ([`DribblingServer::quiet_after`]).
 struct DribblingServer {
     port: u16,
+    dribbled: tokio::sync::watch::Receiver<Dribbled>,
     _keep: tokio::task::JoinHandle<()>,
+}
+
+/// What the [`DribblingServer`] has done so far.
+#[derive(Clone, Copy, Default)]
+struct Dribbled {
+    /// The holds it began: a gap before each piece, and the stall.
+    holds: usize,
+    /// When the current hold ends, on tokio's clock.
+    until: Option<tokio::time::Instant>,
+    /// Body bytes written.
+    written: usize,
 }
 
 impl DribblingServer {
@@ -1385,10 +1403,21 @@ impl DribblingServer {
         let port = listener.local_addr().expect("addr").port();
         listener.set_nonblocking(true).expect("nonblocking");
         let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+        let (said, dribbled) = tokio::sync::watch::channel(Dribbled::default());
+        let said = Arc::new(said);
         let keep = tokio::spawn(async move {
             while let Ok((mut socket, _)) = listener.accept().await {
+                let said = Arc::clone(&said);
                 tokio::spawn(async move {
                     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let hold = |length: Duration| {
+                        let until = tokio::time::Instant::now() + length;
+                        said.send_modify(|dribbled| {
+                            dribbled.holds += 1;
+                            dribbled.until = Some(until);
+                        });
+                        tokio::time::sleep_until(until)
+                    };
                     let mut buffer = [0u8; 2048];
                     let _ = socket.read(&mut buffer).await;
                     // One byte more than the dribble when it stalls: the byte
@@ -1400,42 +1429,135 @@ impl DribblingServer {
                     if socket.write_all(head.as_bytes()).await.is_err() {
                         return;
                     }
-                    for _ in 0..pieces {
-                        tokio::time::sleep(gap).await;
-                        if socket.write_all(b"x").await.is_err() {
+                    let last = stall.map(|stall| (stall, b"y"));
+                    for (wait, byte) in std::iter::repeat_n((gap, b"x"), pieces).chain(last) {
+                        hold(wait).await;
+                        if socket.write_all(byte).await.is_err() {
                             return;
                         }
-                    }
-                    if let Some(stall) = stall {
-                        tokio::time::sleep(stall).await;
-                        let _ = socket.write_all(b"y").await;
+                        said.send_modify(|dribbled| dribbled.written += 1);
                     }
                     let _ = socket.shutdown().await;
                 });
             }
         });
-        Self { port, _keep: keep }
+        Self {
+            port,
+            dribbled,
+            _keep: keep,
+        }
     }
 
     fn url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
     }
+
+    /// Wait for a hold past the first `seen`, with every byte written before
+    /// it already `received` by the client: then the server is holding the
+    /// next byte back, nothing is on the wire, and the clock can be moved.
+    /// Answers how many holds have begun and when this one ends.
+    async fn quiet_after(
+        &self,
+        seen: usize,
+        received: &tokio::sync::watch::Receiver<usize>,
+    ) -> (usize, tokio::time::Instant) {
+        let now = *self
+            .dribbled
+            .clone()
+            .wait_for(|dribbled| dribbled.holds > seen)
+            .await
+            .expect("the server outlives its handle");
+        // A reader that ended dropped its sender: the caller sees it end.
+        let _ = received
+            .clone()
+            .wait_for(|received| *received >= now.written)
+            .await;
+        (now.holds, now.until.expect("a hold has an end"))
+    }
 }
 
+/// Read a body off the [`DribblingServer`] on the held clock, and how long
+/// that took on it since `started`.
+///
+/// The clock is moved one hold at a time, each time the server holds a byte
+/// back and the client has read every byte before it: so no timer fires with
+/// a byte on the wire, and the only order left is the one the code
+/// produces. A hold the `deadline` falls inside is moved in two steps, the
+/// first to the deadline, and `read` is polled there: a timeout that fires
+/// on time ends the read at the deadline exactly, one that fires early ends
+/// it at an earlier hold, and one that fires late does not end it there.
+async fn on_the_held_clock<T>(
+    server: &DribblingServer,
+    started: tokio::time::Instant,
+    deadline: Duration,
+    received: tokio::sync::watch::Receiver<usize>,
+    read: impl std::future::Future<Output = T>,
+) -> (T, Duration) {
+    tokio::pin!(read);
+    let at = started + deadline;
+    let mut seen = 0;
+    let read = real_backstop("the end of the body", async {
+        loop {
+            tokio::select! {
+                biased;
+                read = &mut read => break read,
+                (holds, until) = server.quiet_after(seen, &received) => {
+                    seen = holds;
+                    let now = tokio::time::Instant::now();
+                    if now < at && at < until {
+                        tokio::time::advance(at - now).await;
+                        let at_the_deadline =
+                            std::future::poll_fn(|cx| Poll::Ready(read.as_mut().poll(cx))).await;
+                        if let Poll::Ready(read) = at_the_deadline {
+                            break read;
+                        }
+                    }
+                    tokio::time::advance(until - tokio::time::Instant::now()).await;
+                }
+            }
+        }
+    })
+    .await;
+    (read, started.elapsed())
+}
+
+/// Every chunk of `body` until it ends or breaks off, with the bytes kept so
+/// far published to `received` as they arrive.
+async fn read_streamed(
+    mut body: knobas_http::StreamedBody,
+    received: tokio::sync::watch::Sender<usize>,
+) -> Result<Vec<u8>, (knobas_http::BodyBrokeOff, Vec<u8>)> {
+    let mut kept = Vec::new();
+    loop {
+        match body.chunk().await {
+            Ok(Some(chunk)) => {
+                kept.extend_from_slice(&chunk);
+                received.send_replace(kept.len());
+            }
+            Ok(None) => return Ok(kept),
+            Err(broke_off) => return Err((broke_off, kept)),
+        }
+    }
+}
+
+use std::task::Poll;
 use std::time::Duration;
 
 /// A client whose request timeout is 300 ms.
 fn quick_client(url: String) -> HttpClient {
     HttpClient::new(HttpConfig {
-        request_timeout: Duration::from_millis(300),
+        request_timeout: REQUEST_TIMEOUT,
         connect_timeout: Duration::from_millis(300),
         ..config(url)
     })
     .expect("client")
 }
 
+const REQUEST_TIMEOUT: Duration = Duration::from_millis(300);
+
 /// Ten bytes 80 ms apart: 800 ms in all, well past the 300 ms request
-/// timeout, and never 80 ms without a byte.
+/// timeout, and never 80 ms without a byte. None of the three falls on
+/// another's multiple, so no two timers are ever due at one instant.
 const PIECES: usize = 10;
 const GAP: Duration = Duration::from_millis(80);
 const STALL: Duration = Duration::from_millis(250);
@@ -1443,69 +1565,109 @@ const STALL: Duration = Duration::from_millis(250);
 /// The fixture's own premise, checked: the plain `send` breaks this body off.
 /// Without it, the test below would stay green against a server that is not
 /// actually slow (the lesson of a stub that is wrong about the tool).
-#[tokio::test(flavor = "multi_thread")]
+///
+/// On the held clock (#1935) it breaks off at the request timeout exactly,
+/// in the fourth gap, after the three bytes before it.
+#[tokio::test(start_paused = true)]
 async fn a_dribbled_body_outlasts_the_request_timeout() {
     let server = DribblingServer::new(PIECES, GAP, None);
     let client = quick_client(server.url());
+    let clock = HeldClock::hold();
 
-    let response = client
+    let started = tokio::time::Instant::now();
+    let mut response = client
         .send(client.request(Method::GET, "/big.zip"))
         .await
         .expect("the headers arrive at once");
-    let error = response
-        .bytes()
-        .await
-        .expect_err("the total timeout cuts the body");
+    let (count, received) = tokio::sync::watch::channel(0);
+    let read = async move {
+        let mut kept = Vec::new();
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    kept.extend_from_slice(&chunk);
+                    count.send_replace(kept.len());
+                }
+                Ok(None) => return Ok(kept),
+                Err(error) => return Err((error, kept)),
+            }
+        }
+    };
+    let (read, took) =
+        on_the_held_clock(&server, started, REQUEST_TIMEOUT, received, read).await;
+    drop(clock);
+
+    let (error, kept) = read.expect_err("the total timeout cuts the body");
     assert!(error.is_timeout(), "{error:?}");
+    assert_eq!(took, REQUEST_TIMEOUT, "cut off the request timeout");
+    assert_eq!(kept, b"xxx", "the bytes before the timeout arrived");
 }
 
 /// Issue #1012: a body slower in total than the request timeout, but never
 /// stalling, arrives whole through the streamed send.
-#[tokio::test(flavor = "multi_thread")]
+///
+/// On the held clock (#1935) it takes the ten gaps exactly, the request
+/// timeout passing in the fourth.
+#[tokio::test(start_paused = true)]
 async fn a_streamed_body_slower_than_the_request_timeout_arrives_whole() {
     let server = DribblingServer::new(PIECES, GAP, None);
     let client = quick_client(server.url());
+    let clock = HeldClock::hold();
 
-    let started = std::time::Instant::now();
-    let mut body = client
+    let started = tokio::time::Instant::now();
+    let body = client
         .send_streaming(client.request(Method::GET, "/big.zip"), STALL)
         .await
         .expect("the headers arrive at once");
-    let mut kept = Vec::new();
-    while let Some(chunk) = body.chunk().await.expect("never stalls") {
-        kept.extend_from_slice(&chunk);
-    }
+    let (count, received) = tokio::sync::watch::channel(0);
+    let (read, took) = on_the_held_clock(
+        &server,
+        started,
+        REQUEST_TIMEOUT,
+        received,
+        read_streamed(body, count),
+    )
+    .await;
+    drop(clock);
+
+    let kept = read.unwrap_or_else(|(broke_off, kept)| panic!("{broke_off} after {kept:?}"));
     assert_eq!(kept, b"x".repeat(PIECES));
-    assert!(
-        started.elapsed() > Duration::from_millis(300),
-        "the body took longer than the request timeout: {:?}",
-        started.elapsed()
-    );
+    assert_eq!(took, GAP * 10, "the body took its ten gaps");
 }
 
 /// Issue #1012: a body that goes silent for longer than the stall timeout is
 /// given up on, even though it would have finished. The adapter reports it as
 /// `unreachable` ("… broke off: no bytes for 30s").
-#[tokio::test(flavor = "multi_thread")]
+///
+/// On the held clock (#1935) it breaks off one stall timeout after the third
+/// byte, exactly, and the last byte never comes.
+#[tokio::test(start_paused = true)]
 async fn a_streamed_body_that_stalls_breaks_off_as_unreachable() {
     // Three bytes, then twice the stall timeout of silence, then the last.
     let server = DribblingServer::new(3, GAP, Some(STALL * 2));
     let client = quick_client(server.url());
+    let clock = HeldClock::hold();
 
-    let mut body = client
+    let started = tokio::time::Instant::now();
+    let body = client
         .send_streaming(client.request(Method::GET, "/big.zip"), STALL)
         .await
         .expect("the headers arrive at once");
-    let mut kept = Vec::new();
-    let broke_off = loop {
-        match body.chunk().await {
-            Ok(Some(chunk)) => kept.extend_from_slice(&chunk),
-            Ok(None) => panic!("the stalled body read as whole: {kept:?}"),
-            Err(broke_off) => break broke_off,
-        }
-    };
+    let (count, received) = tokio::sync::watch::channel(0);
+    let (read, took) = on_the_held_clock(
+        &server,
+        started,
+        GAP * 3 + STALL,
+        received,
+        read_streamed(body, count),
+    )
+    .await;
+    drop(clock);
+
+    let (broke_off, kept) = read.expect_err("the stalled body read as whole");
     assert_eq!(broke_off, knobas_http::BodyBrokeOff::Stalled(STALL));
     assert_eq!(kept, b"xxx", "what came before the stall did arrive");
+    assert_eq!(took, GAP * 3 + STALL, "one stall timeout after the third byte");
 }
 
 /// The streamed send still bounds the wait for the headers: a server that
