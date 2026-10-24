@@ -104,7 +104,11 @@ async fn a_stale_retry_leaves_a_step_that_succeeded_as_it_landed() {
     let retried = store::settle(
         &pool,
         id,
-        &[StepOutcome::Pending, StepOutcome::Failed, StepOutcome::Queued],
+        &[
+            StepOutcome::Pending,
+            StepOutcome::Failed,
+            StepOutcome::Queued,
+        ],
         StepOutcome::Pending,
         None,
         None,
@@ -178,10 +182,17 @@ async fn an_edit_of_a_failed_step_returns_it_to_pending_with_its_write() {
 async fn a_write_is_recorded_on_a_step_whatever_its_outcome() {
     let (pool, flow) = planned().await;
     let id = branch(&flow);
-    store::settle(&pool, id, &[StepOutcome::Pending], StepOutcome::Running, None, None)
-        .await
-        .unwrap()
-        .unwrap();
+    store::settle(
+        &pool,
+        id,
+        &[StepOutcome::Pending],
+        StepOutcome::Running,
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert!(store::interrupt(&pool, id, "stopped").await.unwrap());
     let landing = store::settle(
         &pool,
@@ -193,7 +204,10 @@ async fn a_write_is_recorded_on_a_step_whatever_its_outcome() {
     )
     .await
     .unwrap();
-    assert_eq!(landing, None, "the landing took a step that was interrupted");
+    assert_eq!(
+        landing, None,
+        "the landing took a step that was interrupted"
+    );
 
     store::record_write(&pool, id, 11).await.unwrap();
 

@@ -899,7 +899,10 @@ async fn a_retry_of_a_step_that_already_succeeded_is_refused_and_sends_nothing()
     let branch = step_of(&flow, Step::CreateBranch);
     assert_eq!(branch.outcome, StepOutcome::Succeeded);
     // The delivered write's row is no longer readable.
-    fake.set_landing(branch.write_id.expect("the branch was dispatched"), Landing::Withdrawn);
+    fake.set_landing(
+        branch.write_id.expect("the branch was dispatched"),
+        Landing::Withdrawn,
+    );
 
     let refusal = start_work::retry(&pool, &fake, branch.id)
         .await
@@ -937,7 +940,10 @@ async fn a_step_skipped_while_the_run_looks_is_not_sent() {
     });
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     while *fake.looks.lock().unwrap() == 0 {
-        assert!(tokio::time::Instant::now() < deadline, "the run never looked");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the run never looked"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     knobas_core::start_work::settle(
@@ -997,7 +1003,11 @@ async fn a_landing_that_loses_to_an_interrupt_keeps_its_write_for_the_retry() {
     let flow = run.await.unwrap().unwrap();
 
     let step = step_of(&flow, Step::CreateBranch);
-    assert_eq!(step.outcome, StepOutcome::Failed, "the landing overwrote the interruption");
+    assert_eq!(
+        step.outcome,
+        StepOutcome::Failed,
+        "the landing overwrote the interruption"
+    );
     assert_eq!(step.detail.as_deref(), Some(start_work::INTERRUPTED));
     assert_eq!(step.write_id, Some(1), "the write the send made was lost");
     assert_eq!(fake.ops(), ["create_branch"]);
@@ -1775,9 +1785,16 @@ async fn a_step_left_running_by_a_quit_reads_as_interrupted_and_can_be_retried_o
         .await;
         let flow = planned(&pool).await;
         let branch = step_of(&flow, Step::CreateBranch).id;
-        knobas_core::start_work::settle(&pool, branch, &[StepOutcome::Pending], StepOutcome::Running, None, None)
-            .await
-            .unwrap();
+        knobas_core::start_work::settle(
+            &pool,
+            branch,
+            &[StepOutcome::Pending],
+            StepOutcome::Running,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
         let count = start_work::interrupt_stranded(&pool).await.unwrap();
         assert_eq!(count, 1);
@@ -1807,9 +1824,16 @@ async fn the_start_up_pass_leaves_settled_steps_alone() {
     let pool = corpus("sw_intr_settled").await;
     let flow = planned(&pool).await;
     let branch = step_of(&flow, Step::CreateBranch).id;
-    knobas_core::start_work::settle(&pool, branch, &[StepOutcome::Pending], StepOutcome::Succeeded, None, None)
-        .await
-        .unwrap();
+    knobas_core::start_work::settle(
+        &pool,
+        branch,
+        &[StepOutcome::Pending],
+        StepOutcome::Succeeded,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     assert_eq!(start_work::interrupt_stranded(&pool).await.unwrap(), 0);
     let flow = start_work::flow(&pool, &ticket()).await.unwrap();
     assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Succeeded);
@@ -1823,9 +1847,16 @@ async fn a_retry_of_an_interrupted_step_whose_branch_exists_adopts_it() {
     let flow = planned(&pool).await;
     let head = proposed_branch(&flow);
     let branch = step_of(&flow, Step::CreateBranch).id;
-    knobas_core::start_work::settle(&pool, branch, &[StepOutcome::Pending], StepOutcome::Running, None, None)
-        .await
-        .unwrap();
+    knobas_core::start_work::settle(
+        &pool,
+        branch,
+        &[StepOutcome::Pending],
+        StepOutcome::Running,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     start_work::interrupt_stranded(&pool).await.unwrap();
 
     let fake = Fake::new();
