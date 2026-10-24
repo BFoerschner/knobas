@@ -969,6 +969,7 @@ async fn attempt(
     if let (Ok(_), Some(found)) = (&report, &discovered) {
         record_discovered(deps, source_id, found).await;
     }
+    // The same test as `write_queue::retryable`'s: change the two together.
     report.map_err(|error| match error {
         SyncError::Source(SourceError::Protocol { status: None, .. }) if held_on.is_some() => {
             RunFailure::LocalQuota(error)
