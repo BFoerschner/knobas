@@ -1,7 +1,8 @@
 //! One sync run.
 //!
 //! Every run **opens** by witnessing as much of the build id space as two
-//! queries can see -- one page of builds in any state, then one unconditional
+//! queries can see -- one page of builds in any state (on an incremental run,
+//! from the watermark's own build on), then one unconditional
 //! `state:(queued:true,running:true)` poll. The highest id across those two
 //! pages is the run's [`ceiling`], which the watermark may not pass, and that
 //! is what keeps a build queued *during* the run from being skipped. The
@@ -84,7 +85,8 @@ const MAX_BUILDS_PER_QUERY: u32 = 1_000;
 ///
 /// Deliberately one page, and deliberately not widened by [`all_of`]: this is
 /// evidence, not a corpus. An id the probe misses costs a re-fetch on a later
-/// run, never a build -- see [`ceiling`].
+/// run, never a build -- see [`ceiling`]. On an incremental run the page starts
+/// at the watermark ([`probe`]), so any row on it is at or above the watermark.
 const CEILING_PROBE: u32 = PAGE;
 
 /// The unit of a full sync's walk reading: the UI prints "3 of 40 build
@@ -117,7 +119,8 @@ pub(crate) async fn execute(
     // Whether `configs` already holds this run's listing of the scope.
     let mut listed = false;
 
-    // 1. The opening probe: one page of builds, whatever their state.
+    // 1. The opening probe: one page of builds, whatever their state, and on
+    //    an incremental run none older than the watermark's own build.
     //
     //    Taken before anything else, because a ceiling only means anything if
     //    it is read at the *start* of the run. Steps 2 and 4 below can only
@@ -578,6 +581,30 @@ fn capped_short(served: usize, asked: u32) -> Option<String> {
 /// No `state:` dimension: `state:` names a set of builds to fetch, and the
 /// question here is one number about *every* build whatever its state.
 ///
+/// # From the watermark on (#2016)
+///
+/// An incremental run asks `sinceBuild:(id:W-1)` for watermark `W`: the
+/// watermark's own build and every build above it. Unfiltered, the page was
+/// whatever slice of the id space the server listed first, and on a server
+/// whose pages are unordered (#91) that routinely held nothing as new as the
+/// watermark. Such a ceiling was ignored (#1626), and the run then had no
+/// clamp for a build queued after its in-flight poll: for a source scoped to
+/// a configuration list, a window running to the last configuration's query
+/// (#1989). From the watermark on, every row the page holds is at or above
+/// it, so the ceiling never falls below the watermark, and a run whose
+/// builds were all queued after it opened re-emits them once, on the next
+/// run, whose probe sees them.
+///
+/// `W-1` and not `W`, because `sinceBuild` is exclusive: the watermark's own
+/// build on the page is what keeps an idle poll from asking about it by id
+/// ([`refuse_a_replaced_server`]). Measured on the seeded TeamCity 2026.1.3
+/// (build 222742) on 2026-10-24: `sinceBuild:(id:N),defaultFilter:false` with
+/// no `state:` answered exactly the builds above `N` across every
+/// configuration, a running one included, `count: 0` above the newest, and
+/// read an `N` that names no build (a gap, a deleted build, one past the top)
+/// as a number rather than answering 404. A watermark of 1 or less asks no
+/// `sinceBuild` at all, which is the same page.
+///
 /// The page's own `nextHref` is dropped rather than acted on, and this is the
 /// one place in the run where that is right: there is always more of the id
 /// space than one page of it, and this asks for evidence rather than for a
@@ -585,6 +612,7 @@ fn capped_short(served: usize, asked: u32) -> Option<String> {
 /// the ceiling lower, which [`ceiling`] already records as the safe direction
 /// -- a re-fetch on a later run, never a build.
 async fn probe(rest: &dyn Rest, watermark: i64) -> Result<Vec<Rec<Build>>, SourceError> {
+    // `sinceBuild` is exclusive; one below takes the watermark's own build in.
     Ok(rest
         .builds(&Locator {
             since_build_id: (watermark > 1).then(|| watermark - 1),
@@ -665,7 +693,9 @@ async fn probe(rest: &dyn Rest, watermark: i64) -> Result<Vec<Rec<Build>>, Sourc
 /// known -- and that sentence is deliberately narrower than the one it
 /// replaces, which said the same of a page that is newest-first and still
 /// wrong about the newest build. That case is issue #91, and it was the
-/// default behaviour of a current TeamCity.
+/// default behaviour of a current TeamCity. Since #2016 only a full sync's
+/// page can hold such builds: an incremental run's starts at the watermark
+/// ([`probe`]), so its ceiling climbs from there on every run.
 fn ceiling(probe: &[Rec<Build>], in_flight: &[Rec<Build>]) -> Option<i64> {
     probe.iter().chain(in_flight).map(|b| b.rec.id).max()
 }
@@ -709,12 +739,13 @@ fn ceiling(probe: &[Rec<Build>], in_flight: &[Rec<Build>]) -> Option<i64> {
 /// that one build. `GET /app/rest/builds/id:{id}` is in interfaces §4.2's
 /// endpoint list, and it answers 404 exactly when the build is not there.
 ///
-/// * **Found** -- the watermark stands and the run carries on. The opening
-///   pages simply did not happen to show it, which is the ordinary case on a
-///   server whose pages are not ordered. The ceiling is then below the
-///   watermark, which [`cursor::advance`] ignores (#1626): it clamps
-///   nothing, drags nothing back, and does not hold the watermark under the
-///   builds this run emits.
+/// * **Found** -- the watermark stands and the run carries on. Until #2016
+///   this was the ordinary case on a server whose pages are not ordered.
+///   The probe now asks from the watermark's own build on ([`probe`]), so
+///   on a server that answers `sinceBuild` a build that is there is on the
+///   page, and this fires only when it is not. Found anyway, the ceiling is
+///   below the watermark, which holds it where it stands
+///   ([`cursor::advance`]).
 /// * **Not found** -- a replacement or a deleted newest build, refused. And
 ///   the remedy works now: after a backfill the ceiling comes from ids this
 ///   run witnessed rather than from a stale row 0, so the loop cannot restart.
@@ -3252,9 +3283,16 @@ mod tests {
         );
 
         let mut sink = VecSink(Vec::new());
-        let next = execute("teamcity", TEST_BASE_URL, &cfg, &rest, Some(cursor), &mut sink)
-            .await
-            .expect("the next run");
+        let next = execute(
+            "teamcity",
+            TEST_BASE_URL,
+            &cfg,
+            &rest,
+            Some(cursor),
+            &mut sink,
+        )
+        .await
+        .expect("the next run");
         assert_eq!(
             keys(&sink.0),
             [

@@ -92,8 +92,7 @@ pub(crate) struct Seen {
 /// Ids are assigned at queue time and are monotonic, so **every** build queued
 /// after the run started has an id above every build that existed when it
 /// started. One number therefore covers all of them at once: any id known to
-/// have existed at that instant, which the watermark may not pass -- unless it
-/// lies below `previous`, which the last paragraph here covers. The cost is
+/// have existed at that instant, which the watermark may not pass. The cost is
 /// re-fetching the builds that finished inside this run on the next one, and
 /// upserts are idempotent -- the same trade the clamp above already makes.
 ///
@@ -101,29 +100,24 @@ pub(crate) struct Seen {
 /// matters here because it decides which direction is dangerous. `sync`
 /// supplies the highest id it witnessed across the two pages that open a run;
 /// see `sync::ceiling` for why the pages it does *not* use are the finished
-/// ones. A ceiling lower than the true top of the id space, and not below
-/// `previous`, costs a re-fetch; one above it loses a build.
+/// ones. A ceiling lower than the true top of the id space costs a re-fetch;
+/// one above it loses a build.
 ///
 /// `None` means the run witnessed nothing (a server with no builds at all),
 /// which is the same server on which `max_finished` is `None` too.
 ///
-/// **A ceiling below `previous` is ignored** (#1626). It means the opening
-/// pages showed nothing as new as the watermark -- routine on a server whose
-/// pages are unordered (issue #91). Applied, `min(ceiling)` lands below
-/// `previous` and the floor lifts it back to exactly `previous`, so a run that
-/// emitted finished builds above the watermark leaves it where it was, and
-/// every later poll re-fetches and re-emits the same builds for as long as the
-/// opening pages keep missing them. What ignoring it gives up is the clamp's
-/// protection for that one run: a build queued after the in-flight poll, still
-/// running while a build queued after it finished before the finished query
-/// went out. How wide that window is depends on the source (#1989). Unscoped
-/// or scoped by project, it is the few requests between the two queries. Scoped
-/// to a configuration list, it runs to the last configuration's `sinceBuild`
-/// query: `/projects`, `/buildTypes`, then one query per configuration, so
-/// `C + 2` requests or more for `C` configurations. At the default 5 req/s
-/// that is about `C / 5` seconds once the burst is spent, 40 s for two
-/// hundred. Against it stands a re-emission on every poll. A ceiling at or
-/// above `previous` clamps as before.
+/// **A ceiling below `previous` holds the watermark where it stands**, through
+/// the floor below. Until #2016 it was ignored instead (#1626): the
+/// opening page was unfiltered, so on a server whose pages are unordered
+/// (#91) it routinely showed nothing as new as the watermark, and applying
+/// that ceiling held the watermark under the builds the run had just emitted,
+/// for every poll the page kept missing them. Ignoring it left a build queued
+/// mid-run unprotected for that run, and for a source scoped to a
+/// configuration list that window ran to the last configuration's query
+/// (#1989). An incremental run's probe now asks from the watermark on, the
+/// watermark's own build included (`sync::probe`), so a ceiling below
+/// `previous` does not arise on a server that answers `sinceBuild`, and the
+/// clamp holds on every run.
 pub(crate) fn advance(previous: i64, seen: Seen) -> i64 {
     let Seen {
         max_finished,
@@ -131,7 +125,7 @@ pub(crate) fn advance(previous: i64, seen: Seen) -> i64 {
         ceiling,
     } = seen;
     let mut next = max_finished.map_or(previous, |newest| previous.max(newest));
-    if let Some(highest_at_start) = ceiling.filter(|&c| c >= previous) {
+    if let Some(highest_at_start) = ceiling {
         next = next.min(highest_at_start);
     }
     if let Some(oldest_in_flight) = min_unfinished {
@@ -271,26 +265,24 @@ mod tests {
         assert_eq!(advance(1187, Some(400), None, Some(500)), 1187);
     }
 
-    /// A ceiling below where the watermark already stands is ignored, not
-    /// applied and then floored (#1626).
+    /// A ceiling below where the watermark already stands holds it there
+    /// (#2016): applied, then floored, never ignored.
     ///
-    /// It reaches here whenever the two opening pages happen not to show a
-    /// build as new as the watermark -- routine on a server whose pages are
-    /// unordered, which is what issue #91 measured. `sync` asks the server
-    /// about the watermark's own build before believing anything worse of it
-    /// (`sync::refuse_a_replaced_server`); when the build is there the run
-    /// carries on and lands here. Applying the ceiling would leave the
-    /// watermark at 1187 under the builds up to 1200 the run just emitted, and
-    /// the next run would emit them again. The in-flight clamp still holds.
+    /// 1200 finished inside the run, but the run witnessed nothing above 500
+    /// when it opened, so 1200 may have been queued after it, behind a build
+    /// still running. Ignoring the ceiling (#1626) moved the watermark to
+    /// 1200 and lost that build. `sync`'s probe now asks from the watermark
+    /// on, so on a server that answers `sinceBuild` the case does not arise;
+    /// where it does, the cost is a re-fetch.
     #[test]
-    fn a_ceiling_below_the_watermark_is_ignored() {
+    fn a_ceiling_below_the_watermark_holds_it_where_it_stands() {
         assert_eq!(
             advance(1187, Some(1200), None, Some(500)),
-            1200,
-            "a ceiling under the watermark holds nothing back"
+            1187,
+            "a ceiling under the watermark is still a ceiling"
         );
-        assert_eq!(advance(1187, Some(1200), Some(1195), Some(500)), 1194);
-        // At the watermark it is still a witness and still clamps.
+        assert_eq!(advance(1187, Some(1200), Some(1195), Some(500)), 1187);
+        // At the watermark it clamps the same way.
         assert_eq!(advance(1187, Some(1200), None, Some(1187)), 1187);
     }
 

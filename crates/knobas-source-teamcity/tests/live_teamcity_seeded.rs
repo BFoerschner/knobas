@@ -53,6 +53,10 @@
 //!   exactly that build and moves the position to it; the run after that is
 //!   idle again; and once the build is deleted, a cursor pointing at it is
 //!   refused as issue #91's replaced-server case, on a real 404.
+//! * **The opening probe from the watermark** (#2016): an incremental run's
+//!   `sinceBuild:(id:W-1),defaultFilter:false` page holds the watermark's own
+//!   build and every newer one and nothing older, and reads a `W-1` that
+//!   names no build as a number.
 //!
 //! # What this file writes, and what it takes away
 //!
@@ -2104,6 +2108,53 @@ async fn passes_the_contract_battery_against_the_seeded_server() {
         seeded.source_with(&base, &token, scope.clone())
     })
     .await;
+}
+
+/// **An incremental run's opening probe, as `sync::probe` sends it** (#2016):
+/// `sinceBuild:(id:W-1),defaultFilter:false` with no `state:`, for watermark
+/// `W`.
+///
+/// The probe's ceiling may not fall below the watermark, and that rests on
+/// three things this server says, all read-only: the page holds the
+/// watermark's own build and every build above it and nothing older; a
+/// `W-1` that names no build is read as a number rather than refused (a
+/// watermark's predecessor is usually some other configuration's build, or
+/// none); and above the newest build the page is empty, so a watermark whose
+/// build was deleted leaves nothing on it and the by-id check still runs.
+/// The `Rest` stand-in in `sync.rs` assumes all three.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn the_opening_probe_from_the_watermark_holds_its_build_and_every_newer_one() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let ids = seeded.seeded_ids();
+    let newest = *ids.last().expect("a seeded build");
+    // A watermark whose predecessor id names no build, from the middle up, so
+    // the page has older builds to leave out and newer ones to hold.
+    let watermark = *ids[ids.len() / 2..]
+        .iter()
+        .find(|&&id| !ids.contains(&(id - 1)))
+        .unwrap_or_else(|| panic!("a seeded id whose predecessor is not seeded: {ids:?}"));
+    let (status, _) = seeded
+        .get(&format!("app/rest/builds/id:{}?fields=id", watermark - 1))
+        .await;
+    assert_eq!(status, 404, "build {} is not on the server", watermark - 1);
+
+    let probe = |w: i64| format!("sinceBuild:(id:{}),defaultFilter:false,count:100", w - 1);
+    let mut page = seeded.build_ids(&probe(watermark)).await;
+    page.sort_unstable();
+    let expected: Vec<i64> = ids.iter().copied().filter(|&id| id >= watermark).collect();
+    assert_eq!(
+        page, expected,
+        "the probe from watermark {watermark} holds it and every newer build, across every \
+         configuration, and nothing older (seeded {ids:?})"
+    );
+    assert_eq!(
+        seeded.build_ids(&probe(newest + 1)).await,
+        Vec::<i64>::new(),
+        "above the newest build the probe page is empty"
+    );
+    println!("SEEDED probe from {watermark}: {page:?}");
 }
 
 /// **The `sinceBuild` watermark on a build this suite queued**, and what the
