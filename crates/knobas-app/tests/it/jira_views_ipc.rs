@@ -595,3 +595,58 @@ async fn make_an_editable_copy_asks_the_saved_views_source_to_translate_its_quer
     .unwrap_err();
     assert_eq!(missing.code, IpcErrorCode::NotFound, "{missing:?}");
 }
+
+/// #2032: a saved view names its ticket system as its group does, from the
+/// kind's declared `system_name`, never the source's display name, so the
+/// shell's words about it read *Jira* whatever a person called the source.
+#[tokio::test]
+async fn a_saved_view_names_its_ticket_system_not_its_source() {
+    let pool = pool().await;
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ('jira-eu', 'jira', 'Tidewater Jira EU', 'http://x', 'pat', '{}')
+         on conflict (id) do update set kind = excluded.kind, enabled = true,
+                                         display_name = excluded.display_name",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let p = project();
+    let entity = format!("jira-eu:board-{}", p.to_lowercase());
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'jira_view', $2)")
+        .bind(&entity)
+        .bind(format!("{p} flow"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+         values ($1, 'jira-eu', 'jira_view', $2, $2, $3, now())",
+    )
+    .bind(&entity)
+    .bind(format!("{p} flow"))
+    .bind(json!({
+        "kind": "board", "id": 23, "type": "kanban", "jql": format!("project = {p}"),
+        "query": format!("(project = {p})"), "sprint": null, "keys": [], "columns": [],
+    }))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    let declared = knobas_sync::saved_views::declared(&knobas_source_jira::descriptor_template())
+        .expect("Jira declares saved views");
+    knobas_sync::saved_views::project(&mut tx, "jira-eu", &declared)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    let row = listed(&pool, &format!("jira-eu-board-{}", p.to_lowercase()))
+        .await
+        .expect("the view is listed");
+    assert_eq!(row.view.group, "Jira boards");
+    assert_eq!(
+        row.saved_view_source.expect("where it comes from").system,
+        "Jira",
+        "the ticket system, not the source's name"
+    );
+}

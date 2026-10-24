@@ -342,6 +342,14 @@ export type SavedViewSource = {
  */
 kind: "board" | "filter", 
 /**
+ * The ticket system it comes from, as its group names it (`Jira`, #2032):
+ * the kind's declared `system_name`, else the adapter's name, by
+ * `knobas_sync::saved_views::declared`; the source's display name when its
+ * adapter is not compiled in or declares no saved views. What the shell's
+ * words about the view name: *Open in Jira*, *Jira decides which tickets*.
+ */
+system: string, 
+/**
  * `scrum`, `kanban` or `simple` for a board; `None` for a filter.
  */
 board_type: string | null, 
