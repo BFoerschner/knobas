@@ -5,6 +5,8 @@ mod elsewhere;
 mod locale;
 #[path = "embedded/slow_answer.rs"]
 mod slow_answer;
+#[path = "embedded/start_reason.rs"]
+mod start_reason;
 
 use knobas_db::{DbConfig, EmbeddedDb};
 

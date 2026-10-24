@@ -137,6 +137,20 @@ pub enum DbError {
     #[error("embedded postgres: {0}")]
     Embedded(#[from] postgresql_embedded::Error),
 
+    /// The server on `data_dir` did not start (#2025). `reason` is what the
+    /// server wrote to `start.log` during this start ([`start_reason`]), or
+    /// `pg_ctl`'s own output when the log gave nothing. `pg_ctl` alone says
+    /// *stopped waiting*, and the boot screen shows this one line.
+    #[error("embedded postgres at {data_dir} did not start: {reason}")]
+    ServerStart {
+        data_dir: PathBuf,
+        reason: String,
+        /// Boxed: beside the path and the reason, the upstream error would
+        /// make every `Result<_, DbError>` large (`clippy::result_large_err`).
+        #[source]
+        source: Box<postgresql_embedded::Error>,
+    },
+
     #[error("postgres connection: {0}")]
     Sqlx(#[from] sqlx::Error),
 
@@ -600,10 +614,11 @@ impl EmbeddedDb {
     ///
     /// # Errors
     ///
-    /// [`DbError::Embedded`] if the start fails. A port something else took
-    /// in the meantime is one cause: the server listens on `127.0.0.1` alone,
-    /// and a stranger there ends its start. [`DbError::Sqlx`] if the server
-    /// does not answer the pool afterwards.
+    /// [`DbError::ServerStart`] if the start fails, naming the data directory
+    /// and the server's reason. A port something else took in the meantime
+    /// is one cause: the server listens on `127.0.0.1` alone, and a stranger
+    /// there ends its start. [`DbError::Sqlx`] if the server does not answer
+    /// the pool afterwards.
     pub async fn restart(&mut self) -> Result<(), DbError> {
         if self.owner_lock.is_some()
             && let Some(settings) = self.server_settings().cloned()
@@ -619,17 +634,17 @@ impl EmbeddedDb {
             if !self.server_is_running() {
                 tracing::warn!(port = settings.port, "restarting the embedded postgres");
                 match self.postgresql.as_mut() {
-                    Some(postgresql) => postgresql.start().await?,
+                    Some(postgresql) => start_server(postgresql).await?,
                     // Adopted: a handle of our own over the settings `stop`
                     // would have used, which from now on is how it stops.
                     None => {
                         let mut postgresql = PostgreSQL::new(settings);
-                        if let Err(error) = postgresql.start().await {
+                        if let Err(error) = start_server(&mut postgresql).await {
                             // As in `start_managed`: a handle whose start
                             // failed is never dropped, since its `Drop`
                             // stops whatever `postmaster.pid` names.
                             std::mem::forget(postgresql);
-                            return Err(error.into());
+                            return Err(error);
                         }
                         self.postgresql = Some(postgresql);
                         self.stop_settings = None;
@@ -1100,7 +1115,7 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
     let owned = adoption.clone();
     off_runtime(&data_dir, move || keep_to_owner(&owned)).await?;
 
-    if let Err(error) = postgresql.start().await {
+    if let Err(error) = start_server(&mut postgresql).await {
         // `PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever
         // `postmaster.pid` merely *exists* -- it has no idea whether this
         // handle is the one that started that server. So every arm below that
@@ -1117,19 +1132,19 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
             Lock::Cleared => {
                 #[cfg(feature = "test-util")]
                 seam::stale_lock_cleared();
-                if let Err(retry) = postgresql.start().await {
+                if let Err(retry) = start_server(&mut postgresql).await {
                     // The lock file this handle would stop on is no longer
                     // the one it cleared: a sibling that lost the same race
                     // may have started its server in between, and `pg_ctl
                     // stop` against *that* pid file kills a database this
                     // process never started.
                     std::mem::forget(postgresql);
-                    return Err(retry.into());
+                    return Err(retry);
                 }
             }
             // No lock at all: the start failed for some other reason, and
             // that reason is the one worth reporting.
-            Lock::Absent => return Err(error.into()),
+            Lock::Absent => return Err(error),
             Lock::Live { port } => {
                 std::mem::forget(postgresql);
                 return adopt(adoption, port, owner_lock).await;
@@ -1428,11 +1443,11 @@ async fn restart_durable(settings: &Settings) -> Result<Option<PostgreSQL>, DbEr
     }
     drop(orphan);
     let mut postgresql = PostgreSQL::new(settings.clone());
-    if let Err(error) = postgresql.start().await {
+    if let Err(error) = start_server(&mut postgresql).await {
         // As in `start_managed`: a handle whose start failed is never
         // dropped, since its `Drop` stops whatever `postmaster.pid` names.
         std::mem::forget(postgresql);
-        return Err(error.into());
+        return Err(error);
     }
     Ok(Some(postgresql))
 }
@@ -1883,6 +1898,68 @@ async fn initialise(root_dir: &Path, settings: &Settings) -> Result<(), DbError>
     let data_dir = settings.data_dir.clone();
     off_runtime(&settings.data_dir, move || mark_finished(&data_dir)).await?;
     Ok(())
+}
+
+/// The file `pg_ctl start -l` appends the server's output to, in the data
+/// directory (`postgresql_embedded`'s `start`).
+const START_LOG: &str = "start.log";
+
+/// How many lines of a start's log stand for the reason when none of them is
+/// a `FATAL` one: all of a short log, the end of a long one.
+const REASON_LINES: usize = 5;
+
+/// The severity label of the line that says why a server stopped.
+const FATAL: &str = "FATAL:";
+
+/// Start `postgresql`'s server. A failed start is a [`DbError::ServerStart`]
+/// naming the data directory and the reason the server gave (#2025).
+///
+/// Every server start goes through here. The handle is the caller's to forget
+/// on a failure: `PostgreSQL::drop` stops whatever `postmaster.pid` names.
+async fn start_server(postgresql: &mut PostgreSQL) -> Result<(), DbError> {
+    let data_dir = postgresql.settings().data_dir.clone();
+    let log = data_dir.join(START_LOG);
+    // `pg_ctl` appends, so the log holds every earlier start's lines too.
+    let since = tokio::fs::metadata(&log).await.map_or(0, |meta| meta.len());
+    let Err(source) = postgresql.start().await else {
+        return Ok(());
+    };
+    let written = tokio::fs::read(&log).await.unwrap_or_default();
+    let reason = start_reason(&written, since).unwrap_or_else(|| source.to_string());
+    Err(DbError::ServerStart {
+        data_dir,
+        reason,
+        source: Box::new(source),
+    })
+}
+
+/// What a start's log says went wrong: the last `FATAL` line the start wrote
+/// from that line's `FATAL:` on, or else its last [`REASON_LINES`] lines
+/// joined. `None` when the start wrote nothing.
+///
+/// `log` is the whole file and `since` its length before the start, so an
+/// earlier start's `FATAL` is never this one's reason. A log shorter than
+/// `since` was replaced in between and is read whole.
+fn start_reason(log: &[u8], since: u64) -> Option<String> {
+    let from = usize::try_from(since).unwrap_or(usize::MAX);
+    let written = String::from_utf8_lossy(log.get(from..).unwrap_or(log));
+    let one_line = |line: &str| line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if let Some(fatal) = written.lines().rev().find_map(|line| {
+        line.find(FATAL)
+            .map(|at| &line[at + FATAL.len()..])
+            .filter(|reason| !reason.trim().is_empty())
+    }) {
+        return Some(one_line(fatal));
+    }
+    let lines: Vec<String> = written
+        .lines()
+        .map(one_line)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let tail = &lines[lines.len().saturating_sub(REASON_LINES)..];
+    // A line ending in a comma is a sentence the postmaster wrapped, so it
+    // reads on into the next line rather than being cut off with `; `.
+    (!tail.is_empty()).then(|| tail.join("; ").replace(",; ", ", "))
 }
 
 /// Run `work` on a blocking thread and return its answer. A dropped caller
@@ -2410,6 +2487,63 @@ fn port_answers(port: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2025: the reason is this start's last `FATAL`, from `FATAL:` on and
+    /// on one line, never an earlier start's.
+    #[test]
+    fn a_starts_reason_is_its_own_last_fatal_line() {
+        let earlier = "2026-10-24 10:00:00.000 CEST [1] FATAL:  lock file \"postmaster.pid\" already exists\n";
+        let log = format!(
+            "{earlier}2026-10-24 10:00:01.000 CEST [2] LOG:  could not open configuration file\n\
+             2026-10-24 10:00:01.000 CEST [2] FATAL:  could not load pg_hba.conf\n\
+             2026-10-24 10:00:01.000 CEST [2] LOG:  database system is shut down\n"
+        );
+        assert_eq!(
+            start_reason(log.as_bytes(), earlier.len() as u64).as_deref(),
+            Some("could not load pg_hba.conf")
+        );
+    }
+
+    /// #2025: a start that wrote no `FATAL` is reported by its own lines: all
+    /// of a short log, the last five of a long one, an earlier start's
+    /// `FATAL` left out. One that wrote nothing has no reason.
+    #[test]
+    fn a_start_without_a_fatal_line_is_reported_by_its_own_last_lines() {
+        let earlier = "FATAL:  an earlier start's reason\n";
+        let short = format!("{earlier}LOG:  one\n\n  LOG:   two\n");
+        assert_eq!(
+            start_reason(short.as_bytes(), earlier.len() as u64).as_deref(),
+            Some("LOG: one; LOG: two")
+        );
+        let long = format!("{earlier}1\n2\n3\n4\n5\n6\n7\n");
+        assert_eq!(
+            start_reason(long.as_bytes(), earlier.len() as u64).as_deref(),
+            Some("3; 4; 5; 6; 7")
+        );
+        assert_eq!(start_reason(earlier.as_bytes(), earlier.len() as u64), None);
+        // The postmaster's own stderr wraps one sentence over lines that end
+        // in a comma, which reads on as the sentence, not as `,;`.
+        let wrapped = "postgres: could not find the database system\n\
+                       Expected to find it in the directory \"/d\",\n\
+                       but could not open file \"/d/global/pg_control\"\n";
+        assert_eq!(
+            start_reason(wrapped.as_bytes(), 0).as_deref(),
+            Some(
+                "postgres: could not find the database system; Expected to find it in the \
+                 directory \"/d\", but could not open file \"/d/global/pg_control\""
+            )
+        );
+    }
+
+    /// #2025: a log shorter than it was before the start was replaced in
+    /// between, and is read whole.
+    #[test]
+    fn a_log_shorter_than_before_the_start_is_read_whole() {
+        assert_eq!(
+            start_reason(b"FATAL:  could not load pg_hba.conf\n", 4096).as_deref(),
+            Some("could not load pg_hba.conf")
+        );
+    }
 
     fn write(dir: &Path, name: &str, contents: &str) -> PathBuf {
         let path = dir.join(name);
