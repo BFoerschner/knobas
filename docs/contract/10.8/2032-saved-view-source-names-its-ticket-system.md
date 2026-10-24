@@ -17,6 +17,7 @@
 
   Answered by the fake IPC (`fake/ticket-views.ts`): `Jira` on each Jira view, and `Kestrel` on
   the one saved view of the fixture-only second ticket system (`fake/sources.ts`). Called by the
-  Tickets screen (`TicketsPage.svelte`, `SavedViewSourceLine.svelte`, `ViewEditor.svelte`), which
-  names the view's source with it where prototype-6 says Jira. Witnessed by
+  Tickets screen (`TicketsPage.svelte`, `SavedViewSourceLine.svelte`, `ViewEditor.svelte`, and
+  `tf/tickets/views.ts`'s `groupViews`, `savedViewSystems` and `draftSavedViewCopy`), which names the
+  view's source with it where prototype-6 says Jira. Witnessed by
   `tests/it/jira_views_ipc.rs::a_saved_view_names_its_ticket_system_not_its_source`.

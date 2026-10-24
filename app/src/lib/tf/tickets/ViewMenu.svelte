@@ -1,8 +1,8 @@
 <!--
   A ticket view's ⋯ menu (#812, R-3.12), on its row in the views pane and in
-  its header: *Edit view* (#814), *Duplicate* and *Delete*; on a Jira view
+  its header: *Edit view* (#814), *Duplicate* and *Delete*; on a saved view
   (#877), *View settings*, *Make an editable copy* (#880), which is what
-  *Duplicate* is for a Jira view, and *Hide from the list* (#878).
+  *Duplicate* is for a saved view, and *Hide from the list* (#878).
 
   Opens under its button; `Esc`, a pick or a click anywhere else closes it,
   and focus goes back to the button.
@@ -26,15 +26,15 @@
     className?: string;
     /**
      * A saved view's kind (#877): *View settings* and *Make an editable copy*
-     * (`onduplicate`, #880) only; Jira decides the rest.
+     * (`onduplicate`, #880) only; its source decides the rest.
      */
     savedViewKind?: SavedViewSource["kind"] | null;
-    /** Whether a Jira view's source translates its query (#1208): no *Make an editable copy* where it does not. */
+    /** Whether a saved view's source translates its query (#1208): no *Make an editable copy* where it does not. */
     copies?: boolean;
     onedit: () => void;
     onduplicate: () => void;
     ondelete: () => void;
-    /** *Hide from the list* on a Jira view (#878, R-3.25). */
+    /** *Hide from the list* on a saved view (#878, R-3.25). */
     onhide?: () => void;
   } = $props();
 

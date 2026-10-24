@@ -54,7 +54,7 @@
   } from "./editor";
   import { columnName, LANE_FIELDS, splitLanes } from "./tickets";
   import { counted } from "../counted";
-  import { copyKeeps, drawnSavedViewColumns, LIST_COLUMN_ORDER, savedViewKindWords, systemsWords, type CopiedFrom } from "./views";
+  import { copyKeeps, drawnSavedViewColumns, LIST_COLUMN_ORDER, ownViewKept, savedViewKindWords, type CopiedFrom } from "./views";
 
   let {
     draft,
@@ -80,12 +80,12 @@
      * keeps …*; `null` until it answers, and for a source that does not.
      */
     copy?: QueryTranslation | null;
-    /** A copy of a Jira view (#880): where it came from and the JQL parts it left out. */
+    /** A copy of a saved view (#880): where it came from and the query parts it left out. */
     copiedFrom?: CopiedFrom | null;
-    /** *Make an editable copy*, offered in a Jira view's settings (#880). */
+    /** *Make an editable copy*, offered in a saved view's settings (#880). */
     oncopy?: (() => void) | undefined;
     /**
-     * *View settings* on a Jira view (#877, R-3.24): where it comes from. Jira
+     * *View settings* on a saved view (#877, R-3.24): where it comes from. Its source
      * decides its name, which tickets and its columns, so those are shown and
      * not edited; layout, lanes, card fields and list columns are the reader's.
      */
@@ -134,12 +134,12 @@
   /** Fixed for the dialog's life: a saved view stays one. */
   const fixedSource = untrack(() => savedViewSource);
   const title = $derived(fixedSource ? `Settings for ${start.name}` : editing ? `Edit ${start.name}` : "New view");
-  /** *Which tickets* on a Jira view: where Jira's answer comes from, in prototype-6's words. */
+  /** *Which tickets* on a saved view: where its source's answer comes from, in prototype-6's words with the source's name. */
   const decidesLine = $derived.by(() => {
     if (fixedSource === null) return "";
     return `${fixedSource.system} decides, from the ${savedViewKindWords(fixedSource)}`;
   });
-  /** How much of a Jira view's query a copy would keep (#880). */
+  /** How much of a saved view's query a copy would keep (#880). */
   const keepsLine = $derived.by(() => {
     if (fixedSource === null || copy === null) return "";
     return copyKeeps(copy);
@@ -267,7 +267,7 @@
   // The board's statuses, once, unfiltered: what a column can hold.
   $effect(() => {
     untrack(() => {
-      // A Jira view's statuses are the ones on Jira's columns, as Jira holds them.
+      // A saved view's statuses are the ones on its source's columns, as the source holds them.
       if (fixedSource !== null) {
         statuses = [...new Set((columns ?? []).flatMap((column) => column.statuses))];
         return;
@@ -303,7 +303,7 @@
     return () => clearTimeout(timer);
   });
 
-  // A Jira view's board comes back under Jira's columns already, each by its name.
+  // A saved view's board comes back under its source's columns already, each by its name.
   const shown = $derived(
     answer === null
       ? null
@@ -694,9 +694,7 @@
     <span class="tf-first tf-dim tf-vw-store"
       >{fixedSource !== null
         ? `Only how it looks here. ${fixedSource.system} still decides which tickets.`
-        : systems.length === 0
-          ? "Kept in knobas. No source sees it."
-          : `Kept in knobas. ${systemsWords(systems)} ${systems.length > 1 ? "never see" : "never sees"} it.`}</span
+        : ownViewKept(systems)}</span
     >
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-vw-form-{uid}" disabled={!named || saving}>{saveLabel}</button>

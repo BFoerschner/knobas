@@ -92,11 +92,13 @@ export function groupViews(views: TicketViewRow[], find: string): ViewGroup[] {
     return { name, views: held, system: held.find((view) => view.saved_view_source !== null)?.saved_view_source?.system ?? null };
   });
   const systems = savedViewSystems(found);
-  const synced = (group: ViewGroup) => (group.system === null ? -1 : systems.indexOf(group.system));
-  const filters = (group: ViewGroup) => Number(group.views.some((view) => view.saved_view_source?.kind === "filter"));
+  /** Your own groups first (-1), then each ticket system's, in the order its first view sits. */
+  const systemRank = (group: ViewGroup) => (group.system === null ? -1 : systems.indexOf(group.system));
+  /** Within a system, its boards (0) before its filters (1). */
+  const filterRank = (group: ViewGroup) => Number(group.views.some((view) => view.saved_view_source?.kind === "filter"));
   return groups
     .filter((group) => group.views.length > 0)
-    .sort((a, b) => synced(a) - synced(b) || (a.system === null ? 0 : filters(a) - filters(b)));
+    .sort((a, b) => systemRank(a) - systemRank(b) || (a.system === null ? 0 : filterRank(a) - filterRank(b)));
 }
 
 function listOrder(a: TicketViewRow, b: TicketViewRow): number {
@@ -112,6 +114,19 @@ export function savedViewSystems(views: TicketViewRow[]): string[] {
         .flatMap((view) => (view.saved_view_source ? [view.saved_view_source.system] : [])),
     ),
   ];
+}
+
+/** The views pane's last line (#2032): prototype-6's, naming the ticket systems the saved views come from. */
+export function savedViewsFoot(systems: readonly string[]): string {
+  if (systems.length === 0) return "A ticket system's boards and favourite filters come in at every sync.";
+  const sources = systems.length > 1 ? "sources" : "source";
+  return `Boards and favourite filters come in with the ${systemsWords(systems)} ${sources} at every sync.`;
+}
+
+/** Where a view of your own is kept (#2032): prototype-6's *Kept in knobas. Jira never sees it.*, naming the systems there are. */
+export function ownViewKept(systems: readonly string[]): string {
+  if (systems.length === 0) return "Kept in knobas. No source sees it.";
+  return `Kept in knobas. ${systemsWords(systems)} ${systems.length > 1 ? "never see" : "never sees"} it.`;
 }
 
 /** Ticket systems as a sentence names them (#2032): *Jira*, *Jira and Kestrel*, *Jira, Kestrel and Plover*. */

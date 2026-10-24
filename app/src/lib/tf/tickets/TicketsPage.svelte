@@ -132,8 +132,8 @@
     groupViews,
     hiddenViews,
     savedViewSourceId,
+    savedViewsFoot,
     savedViewSystems,
-    systemsWords,
     LIST_COLUMN_ORDER,
     OWN_GROUPS,
     savedShowing,
@@ -601,10 +601,7 @@
         {/if}
       {/if}
       <p class="tf-vw-foot">
-        {#if systems.length === 0}A ticket system's boards and favourite filters come in at every sync.{:else}Boards and favourite
-          filters come in with the {systemsWords(systems)}
-          {systems.length > 1 ? "sources" : "source"} at every sync.{/if}
-        <a href={savedViewSettingsHref}>Choose which</a>
+        {savedViewsFoot(systems)} <a href={savedViewSettingsHref}>Choose which</a>
       </p>
     </div>
   </nav>

@@ -125,7 +125,7 @@ const VIEWS: View[] = [
  * where it comes from. `member` stands in for the keys Jira's query returns;
  * Jira's order here is the key's number.
  */
-interface FakeJira {
+interface FakeSavedView {
   ref: string;
   member: (key: string) => boolean;
   /** `translate_ticket_view` (#1208): the Jira adapter's reading of its query, written out as it answers. */
@@ -135,7 +135,7 @@ interface FakeJira {
 }
 const READ = "2026-10-17T09:56:00Z";
 const col = (name: string, statuses: string[], limit: number | null = null) => ({ name, statuses, limit });
-const JIRA: FakeJira[] = [];
+const SAVED: FakeSavedView[] = [];
 function jiraBoard(
   id: number,
   name: string,
@@ -148,7 +148,7 @@ function jiraBoard(
   extra: { sub?: string; sprint?: string; outside?: { project: string; count: number } } = {},
 ) {
   const ref = `jira:board-${id}`;
-  JIRA.push({
+  SAVED.push({
     ref,
     member,
     copy,
@@ -174,7 +174,7 @@ function jiraBoard(
 /** prototype-6's favourite filters (its `JF`, #878): a list each under *Jira filters*. */
 function jiraFilter(id: number, name: string, jql: string, member: (key: string) => boolean, copy: QueryTranslation) {
   const ref = `jira:filter-${id}`;
-  JIRA.push({
+  SAVED.push({
     ref,
     member,
     copy,
@@ -236,7 +236,7 @@ jiraFilter(10251, "Resolved this week", "project in (PAY, OPS) AND resolved >= -
   copied([is("project", "PAY", "OPS")], 1, ["resolved >= -7d", "knobas has no condition for resolved"]));
 // A second ticket system's one saved view (#2032): Kestrel, fixture-only (`fake/sources.ts`),
 // under *Kestrel boards* as the sync names a group, so Tickets draws a source that is not Jira.
-JIRA.push({
+SAVED.push({
   ref: "kestrel:board-7",
   member: (key) => key.startsWith("OPS-"),
   copy: copied([is("project", "OPS")], 1),
@@ -261,7 +261,7 @@ VIEWS.push({
 });
 VIEWS.forEach((view, position) => (view.position = position));
 
-const fixtureOf = (ref: string | null) => JIRA.find((jira) => jira.ref === ref) ?? null;
+const fixtureOf = (ref: string | null) => SAVED.find((saved) => saved.ref === ref) ?? null;
 const keyNumber = (key: string) => Number.parseInt(key.split("-")[1] ?? "0", 10);
 
 interface BoardCard {
@@ -384,4 +384,4 @@ export function handlers(): Handlers {
   };
 }
 
-keepSeed(VIEWS, JIRA);
+keepSeed(VIEWS, SAVED);
