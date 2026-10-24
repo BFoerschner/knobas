@@ -1,6 +1,8 @@
 // A crate root resolves `mod` beside itself, so the path is spelled out.
 #[path = "embedded/elsewhere.rs"]
 mod elsewhere;
+#[path = "embedded/locale.rs"]
+mod locale;
 #[path = "embedded/slow_answer.rs"]
 mod slow_answer;
 
