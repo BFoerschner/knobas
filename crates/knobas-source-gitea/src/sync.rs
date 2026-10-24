@@ -1759,7 +1759,7 @@ async fn walk_commits(
         let mut skip = 0;
         let mut walk = from(skip);
         // The commits above the window met on this leg, and whether the last
-        // page read lay wholly above it and was new to the leg (#2034).
+        // page read held any this leg had not met before (#2034).
         let mut above: HashSet<String> = HashSet::new();
         let mut overhead = false;
         loop {
@@ -1879,7 +1879,7 @@ async fn walk_commits(
             if fresh == 0 {
                 break;
             }
-            overhead = on_leg.is_empty() && new_above > 0;
+            overhead = new_above > 0;
         }
     }
     Ok(out)
