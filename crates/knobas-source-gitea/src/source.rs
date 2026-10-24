@@ -447,8 +447,11 @@ impl Source for GiteaSource {
             } => {
                 let (owner, repo) = self.repo_of(entity)?;
                 let made = write::create_ticket(&self.client, &owner, &repo, title, body).await?;
+                // The issue's **key**, not its bare number (#1754): a create's
+                // receipt is the local part of what it made, so the app takes
+                // `gitea:<key>` as this write's ticket, as it takes Jira's.
                 Ok(made.map_or_else(WriteReceipt::none, |number| {
-                    WriteReceipt::id(number.to_string())
+                    WriteReceipt::id(crate::keys::issue_key(&owner, &repo, number))
                 }))
             }
             WriteOp::TriggerBuild { .. }

@@ -1063,9 +1063,10 @@ pub async fn hold(
 /// The source accepted the write. Terminal.
 ///
 /// `remote_id` is what the source said it made -- `WriteReceipt::remote_id`,
-/// which is `None` for every op but `log_work`. When it is present it is
-/// written **in the same statement as the settle**, to two places: the queue
-/// row itself, and the `knobas.worklog` row that names this write. That is the
+/// which is `None` for an op that creates nothing addressable. When it is
+/// present it is written **in the same statement as the settle**, to two
+/// places: the queue row itself, and the `knobas.worklog` row that names this
+/// write. That is the
 /// whole of how a worklog's local copy comes to carry Jira's id (issue #280).
 ///
 /// # Why both

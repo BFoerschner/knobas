@@ -1291,10 +1291,9 @@ async fn waited(
 /// all, since any number of them can carry the same one -- which is exactly
 /// why `create_ticket`, whose row carries a title and no address, needs the
 /// line. The tree already draws that same line, in the read direction:
-/// `knobas_app::protocol::ticket_titled` is the read-back for a
-/// created ticket, and its own doc says why it is the weaker one --
-/// "`start_work`'s precedent matched a head branch, and this matches free
-/// prose".
+/// `knobas_app::protocol::ticket_titled`, the read-back for a created ticket
+/// whose source named no key, says why it is only the fallback -- it matches
+/// free prose (#1754 reads the key the receipt names first).
 ///
 /// **The property is the address, not "the server named nothing".** Gitea
 /// answers `WriteReceipt::none()` for both ops on the *success* path too, so a
@@ -1322,12 +1321,11 @@ async fn waited(
 /// where a missing one costs an artefact nobody knows about.
 ///
 /// `remote_id` rides along **only when the source named what it made**. That
-/// is `WriteReceipt`'s own rule and it splits the two ops this exists for:
-/// Confluence's `create_page` answers an id, so the line can point at the
-/// page; Jira's `create_ticket` answers `WriteReceipt::none()` on purpose --
-/// a created ticket is addressed by reading the mirror back -- so the line
-/// says a ticket was made and withdrawn and says nothing about which.
-/// Inventing an id here would be knobas naming an artefact it never saw.
+/// is `WriteReceipt`'s own rule: Confluence's `create_page` answers the page's
+/// id and Jira's and Gitea's `create_ticket` the ticket's key (#1754), so the
+/// line can point at it; a source whose receipt is empty leaves the line
+/// saying a ticket was made and withdrawn and nothing about which. Inventing
+/// an id here would be knobas naming an artefact it never saw.
 ///
 /// **The line does not copy the payload**, for the reason `discard` gives for
 /// keeping the row: the withdrawn write is still there, with what was asked
@@ -1336,9 +1334,9 @@ async fn waited(
 /// belongs.
 ///
 /// **This is a disclosure, not a repair.** Nothing reconciles the artefact:
-/// knobas has no key on it, the next sync cannot tell a ticket it made from
-/// one a colleague made, and `create_page`'s id names a page that is not in
-/// the mirror until that sync. What the user gets is the record that it
+/// the withdrawn row links nothing, and the id the line carries (a page's,
+/// a ticket's key) names something that is not in the mirror until the next
+/// sync, which does not adopt it either. What the user gets is the record that it
 /// happened, on the container it happened under, which is where a person
 /// looking for it would look.
 ///

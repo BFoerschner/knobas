@@ -373,7 +373,7 @@ pub async fn link_on_arrival(
         }
         WriteOp::CreatePage { .. } => crate::docs::created_page(pool, write_id).await?,
         WriteOp::CreateTicket { title, .. } => {
-            ticket_filed(pool, &write.source_id, title, write.queued_at).await?
+            ticket_filed(pool, write_id, &write.source_id, title, write.queued_at).await?
         }
         WriteOp::CreatePullRequest { entity, head, .. } => {
             match crate::start_work::queue::pull_request_on_head(
@@ -401,23 +401,26 @@ pub async fn link_on_arrival(
 /// it made: the machine's clock and the source's do not agree to the second.
 const CLOCK_SLACK: &str = "5 minutes";
 
-/// The ticket a sent `CreateTicket` made (#1451): the newest ticket in
-/// `source_id` titled `title` that the source changed after the write was
-/// queued at `queued`, within [`CLOCK_SLACK`].
+/// The ticket a sent `CreateTicket` made (#1451): the one its receipt named
+/// ([`ticket_named`], #1754), or, where the source named none, the newest
+/// ticket in `source_id` titled `title` that the source changed after the
+/// write was queued at `queued`, within [`CLOCK_SLACK`].
 ///
-/// Jira's receipt names no key: Jira answers one, and the adapter drops it,
-/// a created ticket being a mirrored entity (#1754 resolves the ticket from
-/// the receipt instead). So the arrival is looked up by its title, as an
-/// action item's ticket is (`commands::entity::standup`). A ticket of the
-/// same title the source last changed before the write was queued is
-/// somebody else's -- a title the reader made generic, filed before --
-/// never this one.
+/// The title is the fallback only, for a write the source answered without a
+/// key (one sent before Jira's receipt named it, or an adapter whose receipt
+/// is empty). A ticket of the same title the source last changed before the
+/// write was queued is somebody else's -- a title the reader made generic,
+/// filed before -- never this one.
 async fn ticket_filed(
     pool: &sqlx::PgPool,
+    write_id: i64,
     source_id: &str,
     title: &str,
     queued: chrono::DateTime<chrono::Utc>,
 ) -> Result<Option<String>, IpcError> {
+    if let Named::Ticket(named) = ticket_named(pool, write_id).await? {
+        return Ok(named);
+    }
     sqlx::query_scalar(
         "select entity_id from sync.live_item
           where source_id = $1 and kind = 'ticket' and title = $2
@@ -432,6 +435,44 @@ async fn ticket_filed(
     .fetch_optional(pool)
     .await
     .map_err(IpcError::internal)
+}
+
+/// What a sent `CreateTicket`'s receipt said about the ticket it made.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Named {
+    /// The source named the ticket: its entity id once the mirror holds it,
+    /// `None` until a sync brings it in. A named ticket is waited for, never
+    /// looked for by its title.
+    Ticket(Option<String>),
+    /// The source named nothing, so only the title can find the ticket.
+    Nothing,
+}
+
+/// The ticket write `write_id` made, by the key its receipt named (#1754).
+///
+/// The settle stamps a receipt's id on `knobas.write_queue.remote_id`, and a
+/// create's id is its entity's local part: Jira answers the key (`PAY-342`),
+/// Gitea `owner/repo/issues/<n>`. So the ticket is `<source_id>:<remote_id>`
+/// as `docs::created_page` resolves a page, and it is taken only while the
+/// mirror holds it as a live ticket.
+pub(crate) async fn ticket_named(pool: &sqlx::PgPool, write_id: i64) -> Result<Named, IpcError> {
+    let stamped: Option<(String, Option<String>)> =
+        sqlx::query_as("select source_id, remote_id from knobas.write_queue where id = $1")
+            .bind(write_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(IpcError::internal)?;
+    let Some((source_id, Some(remote))) = stamped else {
+        return Ok(Named::Nothing);
+    };
+    let mirrored = sqlx::query_scalar(
+        "select entity_id from sync.live_item where entity_id = $1 and kind = 'ticket'",
+    )
+    .bind(format!("{source_id}:{remote}"))
+    .fetch_optional(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    Ok(Named::Ticket(mirrored))
 }
 
 /// [`deliver`] spawned onto the scheduler's background set with a copy of the

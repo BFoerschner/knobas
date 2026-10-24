@@ -5492,7 +5492,7 @@ async fn a_ticket_is_filed_moved_and_commented_on_through_its_writes() {
         .as_nanos();
     let title = format!("{TEST_ISSUE}{stamp}");
 
-    // 1. Filed, and named by its number.
+    // 1. Filed, and named by its key (#1754).
     let made = source
         .write(WriteOp::CreateTicket {
             entity: format!("gitea:{}", env.full_name()),
@@ -5502,8 +5502,12 @@ async fn a_ticket_is_filed_moved_and_commented_on_through_its_writes() {
         })
         .await
         .expect("Gitea takes the issue");
-    let number = made.remote_id.expect("the receipt names the issue");
-    let id = format!("gitea:{}/issues/{number}", env.full_name());
+    let key = made.remote_id.expect("the receipt names the issue");
+    let id = format!("gitea:{key}");
+    let number = key
+        .strip_prefix(&format!("{}/issues/", env.full_name()))
+        .unwrap_or_else(|| panic!("the receipt is the issue's key, not its bare number: {key}"))
+        .to_owned();
 
     let incremental = |cursor: String| {
         let source = &source;

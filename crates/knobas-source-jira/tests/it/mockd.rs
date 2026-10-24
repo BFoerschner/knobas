@@ -552,7 +552,7 @@ async fn a_create_files_a_new_ticket_in_the_project() {
     let source = source(&jira.base_url(), serde_json::json!({}));
     let before = jira.state().issues().len();
 
-    source
+    let receipt = source
         .write(WriteOp::CreateTicket {
             entity: "jira:PAY".to_owned(),
             title: "SEPA retries need a dead-letter queue".to_owned(),
@@ -565,6 +565,14 @@ async fn a_create_files_a_new_ticket_in_the_project() {
     let issues = jira.state().issues();
     assert_eq!(issues.len(), before + 1);
     let created = issues.last().expect("the ticket just created");
+    // #1754: the receipt names the key Jira gave the ticket, which is the
+    // ticket's entity id's local part, so the app links the ticket it made
+    // rather than the newest one of its title.
+    assert_eq!(
+        receipt.remote_id.as_deref(),
+        Some(created.key.as_str()),
+        "the key Jira answered with, in the receipt"
+    );
     assert_eq!(created.project, "PAY");
     assert_eq!(created.summary, "SEPA retries need a dead-letter queue");
     assert_eq!(

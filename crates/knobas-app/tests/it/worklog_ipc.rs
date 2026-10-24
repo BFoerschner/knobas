@@ -125,8 +125,8 @@ impl Source for Recording {
             });
         }
         self.state.ops.lock().unwrap().push(op);
-        // The one receipt in knobas: a worklog is not a mirrored entity, so
-        // the id the source answers with is the only way the copy can name it.
+        // A worklog is not a mirrored entity, so the id the source answers
+        // with is the only way the copy can name it.
         Ok(WriteReceipt::id(WORKLOG_ID))
     }
 

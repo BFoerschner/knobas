@@ -155,8 +155,8 @@ struct Fake {
     /// needs a write held on the wire uses a door instead ([`Doors`], #1926).
     dwell: Arc<Mutex<std::time::Duration>>,
     /// What the source says it made. `None` is `WriteReceipt::none()`, which
-    /// is what every op but `create_page` and `log_work` really answers; a
-    /// test that needs an id sets one.
+    /// is what an op that creates nothing addressable answers; a test that
+    /// needs an id sets one.
     receipt: Arc<Mutex<Option<String>>>,
     /// What settles the row from *inside* the write, once.
     ///
@@ -2270,9 +2270,9 @@ async fn a_page_created_after_the_user_withdrew_it_is_recorded_with_its_id() {
     assert_eq!(line.entity_id.as_deref(), Some(parent.to_string().as_str()));
 }
 
-/// The other half, and the one the copy must not overclaim: Jira's
-/// `create_ticket` answers `WriteReceipt::none()` -- the adapter drops the key
-/// on purpose, because a created ticket is found by reading the mirror back.
+/// The other half, and the one the copy must not overclaim: a source whose
+/// `create_ticket` answers `WriteReceipt::none()` (an adapter whose receipt is
+/// empty; Jira's named nothing until #1754).
 ///
 /// So the line still says a ticket was made and withdrawn, and says **nothing**
 /// about which ticket, because knobas does not know. A `remote_id` invented
