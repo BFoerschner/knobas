@@ -694,14 +694,8 @@ async fn a_short_component_timeout_does_not_cut_the_lookup_before_the_proxy() {
     assert!(local.seen().is_empty(), "{:?}", local.seen());
 }
 
-/// How many of `arrivals` came within `window` of `from`.
-fn within(arrivals: &[std::time::Instant], from: std::time::Instant, window: Duration) -> usize {
-    arrivals.iter().filter(|at| **at - from <= window).count()
-}
-
-/// Shorter than one refill of the http crate's default quota (five a
-/// second, one every 200 ms), so what arrives inside it is the burst alone.
-const BURST_WINDOW: Duration = Duration::from_millis(150);
+/// One refill of the http crate's default quota: five a second.
+const REFILL: Duration = Duration::from_millis(200);
 
 /// A source of the fixture at `server`, running its fetch of `path`
 /// `times` times in a row.
@@ -743,26 +737,34 @@ fn built_in(server: &Server, per_second: u32, burst: u32) -> Arc<knobas_http::Ht
 /// crate's defaults (a burst of ten, five a second) ten reach the instance
 /// at once and the other twenty one every 200 ms. Unpaced, all thirty
 /// arrive within milliseconds.
+///
+/// Measured from before the call, never from the first arrival (#1925): no
+/// request can be let through before the call starts, so the eleventh
+/// arrives at least one refill after it and the thirtieth at least twenty,
+/// however late a loaded machine runs any of them. Counted from the first
+/// arrival instead, a burst that reached the server late left the eleventh
+/// inside a window shorter than a refill, and a correct limiter went red.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_adapter_firing_thirty_requests_reaches_its_instance_at_the_burst() {
     let server = Server::start(None).await;
     let source = hammering(&server, "/page", 30, Limits::default());
 
+    let started = std::time::Instant::now();
     let (ok, text) = answer(&*source).await;
     assert!(ok, "{text}");
 
     let arrivals = server.arrivals("/page");
     assert_eq!(arrivals.len(), 30, "every request went, in time");
-    let first = arrivals[0];
-    let burst = within(&arrivals, first, BURST_WINDOW);
+    let eleventh = arrivals[10] - started;
     assert!(
-        burst <= 10,
-        "{burst} requests reached the instance within {BURST_WINDOW:?} at a burst of 10"
+        eleventh >= REFILL,
+        "the eleventh request reached the instance {eleventh:?} in: more than the burst of \
+         10 went at once"
     );
-    let spread = arrivals[29] - first;
+    let thirtieth = arrivals[29] - started;
     assert!(
-        spread >= Duration::from_millis(3_500),
-        "twenty past the burst at five a second take about four seconds, not {spread:?}"
+        thirtieth >= REFILL * 20,
+        "twenty past the burst at five a second take four seconds, not {thirtieth:?}"
     );
 }
 
