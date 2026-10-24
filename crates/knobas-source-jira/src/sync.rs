@@ -1917,6 +1917,28 @@ mod tests {
         );
     }
 
+    /// **Why the order matters and not only the anchored pages** (#1979).
+    /// Three issues; both read on the first page are edited after it. Over
+    /// `updated` they move to the end, behind PAY-3, and the next page, asked
+    /// from the last issue read, opens on PAY-1: an issue the walk has read,
+    /// which is where an anchored page says nothing unread is before it. That
+    /// is wrong only because an edit moved the row, which `created` rules out.
+    #[tokio::test]
+    async fn issues_read_and_edited_behind_the_walk_hide_no_unread_one() {
+        let api = LiveIndex::new(
+            five_filed().into_iter().take(3).collect(),
+            [(
+                1,
+                Box::new(|issues: &mut Vec<serde_json::Value>| {
+                    edit_to("PAY-1", "2026-08-22T11:50:00.000+0000")(issues);
+                    edit_to("PAY-2", "2026-08-22T11:51:00.000+0000")(issues);
+                }) as Upstream,
+            )],
+        );
+        let (keys, _) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3"]);
+    }
+
     /// **An edit cannot move a row out of a tie group either** (#1720). Five
     /// issues filed in one import share one `created` stamp, so `created`
     /// leaves the whole group to Jira's own tiebreak, the index order. Between
