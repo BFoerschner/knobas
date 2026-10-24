@@ -34,7 +34,7 @@
   That gap belongs to every key a restore loads, and #1930 tracks it. A share export's
   `contexts` part always carries `entity` (`knobas_app::backup::share`).
 
-  *Amended 2026-10-24 (#1930): the gap is closed.* After the load, `restore` checks every foreign
+  **Amendment (#1930, 2026-10-24): the gap is closed.** After the load, `restore` checks every foreign
   key of the `knobas` schema, read off the catalog. It deletes the context rows `0060`'s orphan
   rule deletes (`knobas_db::backup::ORPHANS_A_RESTORE_DELETES`), so a pre-`0060` backup restores
   without its orphan context, exactly as an upgrade in place leaves it. Any other broken key refuses

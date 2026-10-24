@@ -675,7 +675,7 @@ select c.relname::text as table_name,
 /// load does: its bookkeeping rows are put back by the caller, and every
 /// other table is empty, as it was proved to be before the load.
 async fn hold_to_keys(conn: &mut sqlx::PgConnection) -> Result<(), BackupError> {
-    let checked = check_keys(conn).await;
+    let checked = delete_orphans_then_check_keys(conn).await;
     if checked.is_err() {
         empty_owned_tables(conn).await?;
     }
@@ -684,10 +684,13 @@ async fn hold_to_keys(conn: &mut sqlx::PgConnection) -> Result<(), BackupError> 
 
 /// The check half of [`hold_to_keys`], in one transaction: the orphan deletes
 /// are committed only when no key is left broken.
-async fn check_keys(conn: &mut sqlx::PgConnection) -> Result<(), BackupError> {
+async fn delete_orphans_then_check_keys(conn: &mut sqlx::PgConnection) -> Result<(), BackupError> {
     let mut tx = conn.begin().await?;
     for (key, delete) in ORPHANS_A_RESTORE_DELETES {
-        let deleted = sqlx::query(*delete).execute(&mut *tx).await?.rows_affected();
+        let deleted = sqlx::query(*delete)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
         if deleted > 0 {
             tracing::warn!(
                 key,
@@ -733,6 +736,8 @@ async fn empty_owned_tables(conn: &mut sqlx::PgConnection) -> Result<(), sqlx::E
     .fetch_all(&mut *tx)
     .await?;
     for table in tables {
+        // Quoted by `format('%I.%I')` above, and read off the catalog: nothing
+        // from a caller or an archive reaches this string.
         sqlx::query(sqlx::AssertSqlSafe(format!("delete from {table}")))
             .execute(&mut *tx)
             .await?;
