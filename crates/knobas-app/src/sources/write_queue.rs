@@ -331,8 +331,8 @@ pub async fn arrival_linkable(
 
 /// Link what write `write_id` made to `ticket`, once it has: the branch a
 /// sent `CreateBranch` named, or the pull request a sent `CreatePullRequest`'s
-/// receipt named ([`entity_named`], #1949; the one open on its head where the source
-/// named none), as the mirror holds them (#984), or the page a
+/// receipt named ([`entity_named`], #1949; the one open from its head into its
+/// base where the source named none, #1952), as the mirror holds them (#984), or the page a
 /// sent `CreatePage` made, by the id its settle stamped
 /// (`docs::created_page`, #1121), or the ticket a sent `CreateTicket` filed
 /// ([`ticket_filed`], #1451), drawn as the relation its op's `delivery()` states. Answers
@@ -340,9 +340,9 @@ pub async fn arrival_linkable(
 /// is not mirrored yet.
 ///
 /// The look-ups are start work's own (`start_work::queue`): the branch by its
-/// name in the repository, the pull request open on the head (a merged or
-/// closed one there is not this write's). The link is the `related` one the
-/// key in a branch's name proposes (`branch_name_key`), so a proposal already
+/// name in the repository, the pull request open from the head into the base
+/// (a merged or closed one there is not this write's). The link is the
+/// `related` one the key in a branch's name proposes (`branch_name_key`), so a proposal already
 /// raised is confirmed rather than doubled; one already drawn is drawn.
 ///
 /// # Errors
@@ -376,7 +376,9 @@ pub async fn link_on_arrival(
         WriteOp::CreateTicket { title, .. } => {
             ticket_filed(pool, write_id, &write.source_id, title, write.queued_at).await?
         }
-        WriteOp::CreatePullRequest { entity, head, .. } => {
+        WriteOp::CreatePullRequest {
+            entity, head, base, ..
+        } => {
             match entity_named(pool, write_id, crate::start_work::queue::KIND_PR).await? {
                 Named::Made(named) => named,
                 Named::Nothing => match crate::start_work::queue::pull_request_on_head(
@@ -384,6 +386,7 @@ pub async fn link_on_arrival(
                     declarations,
                     &repo_of(entity)?,
                     head,
+                    base,
                 )
                 .await?
                 {

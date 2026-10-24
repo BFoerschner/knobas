@@ -1271,13 +1271,14 @@ async fn waited(
 /// sync mirrors an artefact the withdrawn row can still be matched to -- and
 /// knobas already owns both reads and already depends on them:
 /// `knobas_app::start_work::queue`'s `BRANCH_BY_NAME` and
-/// `PULL_REQUEST_BY_HEAD` are how the start-work flow looks before it writes,
-/// and how its link step finds a pull request at all. Retrying a
+/// `PULL_REQUEST_BY_HEAD_AND_BASE` are how the start-work flow looks before it
+/// writes, and how its link step finds a pull request at all. Retrying a
 /// `create_pull_request` step whose write was withdrawn in flight reads
-/// *every* pull request the mirror holds from that head, settles the step
-/// "already open" against the one it read as open, and the link step then
-/// draws the edge back to the ticket that asked for it. The Gitea guarantee
-/// above is what makes the head an address at all, and what it promises is
+/// *every* pull request the mirror holds from that head into that base (the
+/// pair, since #1952), settles the step "already open" against the one it read
+/// as open, and the link step then draws the edge back to the ticket that
+/// asked for it. The Gitea guarantee above is what makes the head and base an
+/// address at all, and what it promises is
 /// **at most one open** pull request per `head`/`base` pair rather than one
 /// per head. That is why `queue::pick_open` reads a record's state instead of
 /// taking a head's word for it (#359), and why the withdrawn row's address and that
@@ -1293,8 +1294,8 @@ async fn waited(
 /// caller that has one, which is the caller this op exists for (#44).
 ///
 /// **The address is not a perfect key, and it does not have to be.**
-/// `PULL_REQUEST_BY_HEAD` reads `sync.live_item`, which holds closed and
-/// merged pull requests as deliberately as open ones, so a repository that
+/// `PULL_REQUEST_BY_HEAD_AND_BASE` reads `sync.live_item`, which holds closed
+/// and merged pull requests as deliberately as open ones, so a repository that
 /// re-used a head branch matches more than one. That ambiguity belongs to the
 /// look-before-write and the withdrawal adds nothing to it -- and since #359
 /// the look-before-write resolves it rather than taking whichever sorted
@@ -1303,13 +1304,13 @@ async fn waited(
 /// the source to refuse. Neither reading changes what this answer needs from the
 /// row, which is narrower still: name one repository's pull requests from one
 /// named branch, which is a set a person can look at.
-/// `base` narrows it further; a `title` does not narrow to one artefact at
-/// all, since any number of them can carry the same one -- which is exactly
+/// `base` narrows it further, and the read matches it (#1952); a `title` does
+/// not narrow to one artefact at all, since any number of them can carry the same one -- which is exactly
 /// why `create_ticket`, whose row carries a title and no address, needs the
 /// line. The tree already draws that same line, in the read direction:
-/// `knobas_app::protocol::ticket_titled`, the read-back for a created ticket
-/// whose source named no key, says why it is only the fallback -- it matches
-/// free prose (#1754 reads the key the receipt names first).
+/// `knobas_app::sources::write_queue::ticket_filed`, the read-back for a
+/// created ticket whose source named no key, says why it is only the fallback
+/// -- it matches free prose (#1754 reads the key the receipt names first).
 ///
 /// **The property is the address, not "the server named nothing".** Gitea
 /// answers `WriteReceipt::none()` for both ops on the *success* path too, so a

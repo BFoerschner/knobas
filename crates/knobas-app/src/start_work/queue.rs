@@ -100,6 +100,7 @@ impl<S: Borrow<SourcesState> + Send + Sync> Steps for Queue<S> {
         &self,
         repo: &EntityRef,
         head: &str,
+        base: &str,
     ) -> Result<PullRequestOnHead, IpcError> {
         // The declaration is resolved here rather than threaded through
         // `Steps`: it is a property of the running binary's registry, which
@@ -113,7 +114,7 @@ impl<S: Borrow<SourcesState> + Send + Sync> Steps for Queue<S> {
         let state: &SourcesState = self.state.borrow();
         let declarations =
             crate::sources::paths::declared_paths(&state.pool, state.registry.as_ref()).await?;
-        pull_request_on_head(&state.pool, &declarations, repo, head).await
+        pull_request_on_head(&state.pool, &declarations, repo, head, base).await
     }
 
     async fn pull_request_named(
@@ -169,8 +170,25 @@ pub async fn branch_named(
     found(pool, BRANCH_BY_NAME, &like_prefix(repo), KIND_BRANCH, name).await
 }
 
-/// Every pull request of a repository opened from head branch `$3`, each with
-/// what its own record says about whether it is still open.
+/// Every pull request of a repository opened from head branch `$3` into base
+/// branch `$5`, each with what its own record says about whether it is still
+/// open.
+///
+/// # A pull request is the pair, head and base (#1952)
+///
+/// That is the forge's own identity for a duplicate: Gitea refuses a second
+/// open pull request for the same head *and* base ("pull request already
+/// exists for these targets") and opens one from the same head into another
+/// base without complaint. Matched on the head alone, a colleague's open pull
+/// request from the flow's head into `release/x` settled the create step
+/// "already open", so the flow's own into `main` was never opened, and the
+/// link then went to the colleague's. Both halves sit at the literal path
+/// Gitea mirrors (`head.ref`, `base.ref`), the pair it declares as
+/// `KindPaths::head` and `KindPaths::base` (#1227). A record whose base is
+/// absent or not that string matches nothing: the create step then dispatches
+/// and the forge refuses a duplicate in its own words, and the link step finds
+/// nothing and settles failed -- the direction [`super::PullRequestOnHead`]
+/// pins.
 ///
 /// **A source-shaped read outside an adapter, and it is here because there is
 /// no other way.** A pull request open on the head is what the create step
@@ -218,12 +236,12 @@ pub async fn branch_named(
 /// the pull-request story cannot disagree about what merged means.
 ///
 /// `order by i.entity_id` survives as the tie-break among rows the caller
-/// cannot otherwise tell apart, so a head that somehow carries two open pull
-/// requests -- two bases, which a forge does allow -- answers the same one on
-/// every call rather than whichever the planner reached first.
+/// cannot otherwise tell apart, so two open rows on one head and base -- which
+/// the forge refuses to make, but a mirror is not the forge -- answer the same
+/// one on every call rather than whichever the planner reached first.
 ///
 /// [`KindPaths`]: knobas_core::payload::KindPaths
-const PULL_REQUEST_BY_HEAD: &str = concat!(
+const PULL_REQUEST_BY_HEAD_AND_BASE: &str = concat!(
     "select i.entity_id, ",
     knobas_core::declared_flag!("$4", "merged"),
     " as merged,
@@ -232,6 +250,7 @@ const PULL_REQUEST_BY_HEAD: &str = concat!(
        from sync.live_item i
       where i.entity_id like $1 and i.kind = $2
         and i.payload->'head'->>'ref' = $3
+        and i.payload->'base'->>'ref' = $5
       order by i.entity_id"
 );
 
@@ -245,7 +264,7 @@ const PULL_REQUEST_BY_HEAD: &str = concat!(
 /// `state` verbatim: `open` or `closed`, exactly the two words, so both
 /// classifications below are literal for it. `knobas_source_mock` spells its
 /// own state `open | merged` but never gets here at all --
-/// [`PULL_REQUEST_BY_HEAD`] finds a record by `payload->'head'->>'ref'` and
+/// [`PULL_REQUEST_BY_HEAD_AND_BASE`] finds a record by `payload->'head'->>'ref'` and
 /// the mock's pull request carries `from`/`to` and no `head` object. That is
 /// worth knowing in both directions: it is why the mock is an argument about
 /// *shape* below and not a corpus, and it is why the word
@@ -324,8 +343,9 @@ pub struct OnHead {
     pub state: Option<String>,
 }
 
-/// What the mirror holds from one head branch, resolved through the
-/// declarations `declarations` carries.
+/// What the mirror holds from head branch `head` into base branch `base`
+/// ([`PULL_REQUEST_BY_HEAD_AND_BASE`], #1952), resolved through the declarations
+/// `declarations` carries.
 ///
 /// Public, and taking a pool rather than a [`Queue`], because this is the half
 /// of the look-before-write that a test can drive against a real mirror: the
@@ -341,12 +361,14 @@ pub async fn pull_request_on_head(
     declarations: &Declarations,
     repo: &EntityRef,
     head: &str,
+    base: &str,
 ) -> Result<PullRequestOnHead, IpcError> {
-    let rows: Vec<OnHead> = sqlx::query_as(PULL_REQUEST_BY_HEAD)
+    let rows: Vec<OnHead> = sqlx::query_as(PULL_REQUEST_BY_HEAD_AND_BASE)
         .bind(like_prefix(repo))
         .bind(KIND_PR)
         .bind(head)
         .bind(declarations.as_param())
+        .bind(base)
         .fetch_all(pool)
         .await
         .map_err(IpcError::internal)?;
@@ -356,7 +378,7 @@ pub async fn pull_request_on_head(
 /// Which of a head's pull requests the flow may act on.
 ///
 /// **The rule, written once**, because it has two callers: this module, over
-/// what [`PULL_REQUEST_BY_HEAD`] answered, and the [`Steps`] fake in
+/// what [`PULL_REQUEST_BY_HEAD_AND_BASE`] answered, and the [`Steps`] fake in
 /// `tests/it/start_work.rs`, over the mirror a test dictated. A fake that
 /// classified for itself would be a second opinion about what "open" means,
 /// and the seam tests would then pass against a rule the real read does not
