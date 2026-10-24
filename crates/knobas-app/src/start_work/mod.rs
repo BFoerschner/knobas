@@ -37,7 +37,10 @@
 //!    by making a second one.** The queue row is the record of what was asked
 //!    for; #42 already owns its exits (it flushes, it holds, it is amended, it
 //!    is discarded). A retry reads the row's state and reports it. This is the
-//!    whole of the transient case, and it cannot duplicate anything.
+//!    whole of the transient case, and it cannot duplicate anything. A step
+//!    still reading *queued* whose write was refused or discarded since is
+//!    reported too, as failed, and nothing is sent: its button promised a
+//!    re-read (#2015). Only a failed step's retry goes on to rules 2 and 3.
 //! 2. **Otherwise, look before writing.** A refused write is a definite answer
 //!    from the source -- and the definite answer a lost `POST` produces is
 //!    "that already exists". So the retry asks the mirror whether the effect is
@@ -467,12 +470,19 @@ pub async fn ready_retry(
     let ticket = EntityRef::parse(&step.ticket_id).map_err(IpcError::invalid)?;
     guard_position(pool, &ticket, step_id).await?;
 
-    // Rule 1: a write that is still open is the retry. Nothing is queued twice.
+    // Rule 1: a write that is still open is the retry, and a queued step's
+    // re-read reports the write however it stands. Nothing is queued twice.
     if let Some(write_id) = step.write_id {
         let landing = steps.landing_of(write_id).await?;
-        if !matches!(landing, Landing::Refused { .. } | Landing::Withdrawn) {
+        let closed = matches!(landing, Landing::Refused { .. } | Landing::Withdrawn);
+        // A queued step's button is *Check again* (#1998): it re-reads. A write
+        // refused or discarded since settles the step as what it closed as, and
+        // sends nothing; the failed step's *Retry* is the retry (#2015).
+        let queued = step.outcome == StepOutcome::Queued;
+        if !closed || queued {
+            let from = if closed { REREADS } else { RETRIES };
             let (outcome, detail) = outcome_of(&landing);
-            if store::settle(pool, step_id, RETRIES, outcome, None, detail.as_deref())
+            if store::settle(pool, step_id, from, outcome, None, detail.as_deref())
                 .await?
                 .is_none()
             {
@@ -502,6 +512,11 @@ const RETRIES: &[StepOutcome] = &[
     StepOutcome::Failed,
     StepOutcome::Queued,
 ];
+
+/// What a re-read that finds the write closed may leave: the `queued` it read
+/// (#2015). A step another action moved on since is that action's, and
+/// settling it failed would overwrite it.
+const REREADS: &[StepOutcome] = &[StepOutcome::Queued];
 
 /// The outcomes a skip may move a step out of: [`RETRIES`]'s, for the same
 /// reasons -- a succeeded step's effect exists, and a running one's send is out.
