@@ -125,7 +125,9 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tokio::time::Instant;
 
 use knobas_http::{Auth, HttpClient, HttpConfig, Method};
 use knobas_source::SourceError;
@@ -240,7 +242,9 @@ struct LoggedIn {
     next_ack: u32,
     /// What the login pushed, kept current by every read since.
     pushed: Pushed,
-    /// When the last write on it finished.
+    /// When the last write on it finished. On tokio's clock, like the
+    /// deadline (#1935): outside a paused test that is the monotonic clock,
+    /// and in one the idle window moves with the clock the test moves.
     idle_since: Instant,
 }
 
@@ -981,10 +985,7 @@ mod tests {
         /// `hold` stands in for the ping interval, scaled down so a test can
         /// watch several polls go by inside a sub-second deadline.
         async fn start(hold: Duration) -> Self {
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-                .await
-                .expect("bind");
-            let port = listener.local_addr().expect("addr").port();
+            let (listener, port) = bind_for_good();
             let (arrived, polls) = tokio::sync::watch::channel(0);
             let arrived = Arc::new(arrived);
             tokio::spawn(async move {
@@ -1002,33 +1003,9 @@ mod tests {
             hold: Duration,
             arrived: Arc<tokio::sync::watch::Sender<usize>>,
         ) {
-            use tokio::io::{AsyncReadExt, AsyncWriteExt};
-            let mut request = Vec::new();
-            let mut chunk = [0u8; 4096];
-            let head_end = loop {
-                if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
-                    break end + 4;
-                }
-                match socket.read(&mut chunk).await {
-                    Ok(0) | Err(_) => return,
-                    Ok(read) => request.extend_from_slice(&chunk[..read]),
-                }
+            let Some((head, _)) = read_request(&mut socket).await else {
+                return;
             };
-            let head = String::from_utf8_lossy(&request[..head_end]).into_owned();
-            // The body is read whole before answering, so closing the
-            // connection never resets it under an unread POST.
-            let length = head
-                .lines()
-                .filter_map(|line| line.split_once(':'))
-                .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-                .and_then(|(_, value)| value.trim().parse::<usize>().ok())
-                .unwrap_or(0);
-            while request.len() < head_end + length {
-                match socket.read(&mut chunk).await {
-                    Ok(0) | Err(_) => return,
-                    Ok(read) => request.extend_from_slice(&chunk[..read]),
-                }
-            }
             let target = head.split(' ').nth(1).unwrap_or_default();
             let body = if head.starts_with("POST ") {
                 // `40`, the emits and the pongs: engine.io answers `ok`.
@@ -1058,8 +1035,7 @@ mod tests {
                  connection: close\r\n\r\n{body}",
                 body.len()
             );
-            let _ = socket.write_all(response.as_bytes()).await;
-            let _ = socket.shutdown().await;
+            answer_with(&mut socket, &response).await;
         }
 
         fn base_url(&self) -> String {
@@ -1079,6 +1055,77 @@ mod tests {
                 .wait_for(|polls| *polls > seen)
                 .await
                 .expect("the fake outlives its handle");
+        }
+    }
+
+    /// A loopback listener on a port no later fake in this binary is handed:
+    /// the rate limit is process-wide and keyed by origin (#1630), and a
+    /// fake on a reused port would inherit a slot an earlier test's clients
+    /// paced -- on another test's paused clock (#1935).
+    pub(super) fn bind_for_good() -> (tokio::net::TcpListener, u16) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        std::mem::forget(listener.try_clone().expect("hold the port"));
+        listener.set_nonblocking(true).expect("nonblocking");
+        let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+        (listener, port)
+    }
+
+    /// One HTTP/1.1 request off `socket`: its head, and its body read whole,
+    /// so closing the connection never resets it under an unread POST.
+    /// `None` when the client hung up first.
+    pub(super) async fn read_request(
+        socket: &mut tokio::net::TcpStream,
+    ) -> Option<(String, Vec<u8>)> {
+        use tokio::io::AsyncReadExt;
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let head_end = loop {
+            if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                break end + 4;
+            }
+            match socket.read(&mut chunk).await {
+                Ok(0) | Err(_) => return None,
+                Ok(read) => request.extend_from_slice(&chunk[..read]),
+            }
+        };
+        let head = String::from_utf8_lossy(&request[..head_end]).into_owned();
+        let length = head
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        while request.len() < head_end + length {
+            match socket.read(&mut chunk).await {
+                Ok(0) | Err(_) => return None,
+                Ok(read) => request.extend_from_slice(&chunk[..read]),
+            }
+        }
+        let body = request.split_off(head_end);
+        Some((head, body))
+    }
+
+    /// Write `response` and close the connection.
+    pub(super) async fn answer_with(socket: &mut tokio::net::TcpStream, response: &str) {
+        use tokio::io::AsyncWriteExt;
+        let _ = socket.write_all(response.as_bytes()).await;
+        let _ = socket.shutdown().await;
+    }
+
+    /// `wait`, or a panic naming `what` once twenty seconds of *real* time
+    /// have gone by (#1925). A held clock fires no timer on its own, so a
+    /// wait for something a broken deadline never lets happen would hang
+    /// the run instead of failing it. A hang backstop, not a bound.
+    pub(super) async fn real_backstop<F: std::future::Future>(what: &str, wait: F) -> F::Output {
+        let (fired, backstop) = tokio::sync::oneshot::channel::<()>();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(20));
+            let _ = fired.send(());
+        });
+        tokio::select! {
+            output = wait => output,
+            _ = backstop => panic!("{what} never came, twenty seconds of real time on"),
         }
     }
 
@@ -1108,12 +1155,12 @@ mod tests {
     /// runtime waits on a socket (`tokio::time::pause`, *Preventing
     /// auto-advance*), so it moves only by `tokio::time::advance`, and a
     /// request on the loopback takes no time on it.
-    struct HeldClock {
+    pub(super) struct HeldClock {
         _release: std::sync::mpsc::Sender<()>,
     }
 
     impl HeldClock {
-        fn hold() -> Self {
+        pub(super) fn hold() -> Self {
             let (release, held) = std::sync::mpsc::channel::<()>();
             tokio::task::spawn_blocking(move || {
                 // Returns once the sender is dropped: that is the release.
