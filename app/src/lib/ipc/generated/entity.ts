@@ -2787,8 +2787,9 @@ publication: Publication | null,
  * The tickets this protocol's action items filed that it does not link
  * yet, oldest first (#1951): each create that still owes the note its
  * link, sent or not, and not withdrawn. A reload reads an item filed
- * here as on its way from this rather than offering *Create ticket*
- * again; the read links each one whose ticket the mirror now holds, and
+ * here as on its way from this (pending, sent, or held as unconfirmed:
+ * [`ActionItemTicket::may_have_landed`](crate::commands::entity::ActionItemTicket::may_have_landed),
+ * #1966) rather than offering *Create ticket* again; the read links each one whose ticket the mirror now holds, and
  * names it no more.
  */
 owed_tickets: Array<ActionItemTicket>, };

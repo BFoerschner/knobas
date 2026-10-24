@@ -14,9 +14,11 @@
     A row whose create is on its way draws *Monitor queued* instead (#1959):
     the row stays listed until the poll mirrors the monitor and attaches it,
     and Uptime Kuma takes a second monitor of the same name. The read names
-    the create (`monitor_on_its_way`), so a reload draws it too. A pending one
-    is followed: held or refused, it gives *Create monitor* back; sent or
-    withdrawn, the list is read again. While any row is on its way, the end of
+    the create (`monitor_on_its_way`), so a reload draws it too. One held as
+    unconfirmed (sent, never answered, so the monitor may be in Kuma) is on
+    its way too, until the reader sends it again or discards it (#1966). A
+    pending or unconfirmed one is followed: refused or held on drift, it gives
+    *Create monitor* back; sent or withdrawn, the list is read again. While any row is on its way, the end of
     every sync reads it again, which is when a sent one's monitor arrives.
 
   Over `monitor_roster`, `open_alerts` (only for each down row's `acked_at`, so
@@ -69,7 +71,7 @@
   import { ackAlert, editAsset, editRoute, getAsset, getRoute, monitorRoster, openAlerts, unmonitoredAssets } from "../../ipc/assets";
   import { getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
-  import { followWrite, writeFollower } from "../../shell/follow-write";
+  import { followWrite, mayHaveLanded, writeFollower } from "../../shell/follow-write";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { ago } from "../../shell/time";
   import { push } from "../../shell/toasts.svelte";
@@ -215,7 +217,8 @@
     const pending = new Map<number, UnmonitoredAsset>();
     for (const row of unwatched ?? []) {
       const write = row.monitor_on_its_way;
-      if (write?.state === "pending" && !pending.has(write.id)) pending.set(write.id, row);
+      if (write === null || pending.has(write.id)) continue;
+      if (write.state === "pending" || mayHaveLanded(write)) pending.set(write.id, row);
     }
     for (const [id, stop] of creates) {
       if (pending.has(id)) continue;
@@ -225,7 +228,7 @@
     for (const [id, row] of pending) if (!creates.has(id)) creates.set(id, followCreate(id, row));
   });
 
-  /** Follow one pending create: held or refused, the row offers the create again; sent or withdrawn, the list says which. */
+  /** Follow one pending or unconfirmed create: refused or held on drift, the row offers the create again; sent or withdrawn, the list says which. */
   function followCreate(id: number, row: UnmonitoredAsset): () => void {
     const payload = row.monitor_on_its_way?.payload as { CreateMonitor?: { name?: string } } | undefined;
     return followWrite(
@@ -261,6 +264,8 @@
   /** What *Monitor queued* says on hover: where the create is. */
   function queuedTitle(write: QueuedWrite): string {
     const source = sourceNames[write.source_id] ?? "the monitoring source";
+    if (mayHaveLanded(write))
+      return `Sent to ${source}, which did not answer, so it may be there. Check ${source}, then send it again or discard it in the write queue.`;
     return write.state === "sent"
       ? `Created in ${source}. The next poll attaches it here.`
       : `Queued for ${source}. Open the write queue to see it.`;
