@@ -926,7 +926,7 @@ test("a To Do ticket of mine shows Start work, proposed in the suggested reposit
   expect(section("assets")).not.toBeNull();
 });
 
-test("each step's state follows the flow as its writes move through the queue, and the step it stopped at can be retried or skipped", async () => {
+test("each step's state follows the flow as its writes move through the queue, and the step it stopped at can be checked again or skipped", async () => {
   let answer = flow(["pending", "pending", "pending", "pending"]);
   const acted: string[] = [];
   open("PAY-231", {
@@ -963,7 +963,10 @@ test("each step's state follows the flow as its writes move through the queue, a
   // not here (#1707). A step that landed is not edited either.
   expect(queued.querySelector<HTMLInputElement>("input")?.disabled).toBe(true);
   expect(target.querySelector<HTMLInputElement>(".tf-step[data-step='branch'] input")?.disabled).toBe(true);
-  [...queued.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Retry")!.click();
+  // A queued step's button re-reads its write and sends nothing, so it says
+  // so: *Retry* beside it would read as a second send (#1998).
+  expect([...queued.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Check again", "Skip"]);
+  [...queued.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Check again")!.click();
   await settle();
   expect(acted).toEqual(["run", "retry 2"]);
   [...queued.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Skip")!.click();
@@ -973,6 +976,34 @@ test("each step's state follows the flow as its writes move through the queue, a
   // A step that already landed offers neither.
   const done = target.querySelector(".tf-step[data-step='branch']")!;
   expect([...done.querySelectorAll("button")].map((b) => b.textContent)).toEqual([]);
+});
+
+test("a failed step keeps Retry, which runs it again (#1998)", async () => {
+  const acted: string[] = [];
+  const answer = flow(["succeeded", "failed", "pending", "pending"]);
+  open("PAY-231", {
+    ports: ports({
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
+      startWork: {
+        flow: () => Promise.resolve(answer),
+        run: () => Promise.resolve(answer),
+        retry: (id) => {
+          acted.push(`retry ${id}`);
+          return Promise.resolve(answer);
+        },
+        skip: () => Promise.resolve(answer),
+        amend: () => Promise.resolve(answer),
+      },
+    }),
+  });
+  await settle();
+  const failed = target.querySelector(".tf-step[data-step='pr']")!;
+  expect(failed.querySelector(".tf-state")?.textContent).toBe("failed");
+  expect([...failed.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Retry", "Skip"]);
+  [...failed.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Retry")!.click();
+  await settle();
+  expect(acted).toEqual(["retry 2"]);
 });
 
 test("Run all steps starts the timer as step 5, through the shell's start, which opens a running timer's draft first", async () => {
