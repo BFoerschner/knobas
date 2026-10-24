@@ -652,8 +652,9 @@ export function proposalEvidence(linkId: string): Promise<ProposalEvidence> {
  * Rejects with `invalid` for a payload that is not a write op, a target that
  * is not an entity id, or an op the source does not offer — which the action
  * bar should never have rendered, since it is drawn from that source's
- * `write_ops` — and `not_found` when the target names a source that is not
- * configured.
+ * `write_ops` — `not_found` when the target names a source that is not
+ * configured, and `conflict` for a `CreateMonitor` whose name has a create on
+ * its way to that source, pending or sent and not mirrored yet (#1959).
  *
  * `linkTo` (#984, a ticket's entity id) links the branch a `CreateBranch`
  * makes, the pull request a `CreatePullRequest` opens or the page a

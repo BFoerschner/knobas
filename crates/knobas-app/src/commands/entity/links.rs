@@ -178,7 +178,9 @@ pub async fn unlink<R: tauri::Runtime>(
 ///
 /// `invalid` if the payload is not a write op, if its target is not an entity
 /// id, or if the source does not offer that op; `not_found` if the target
-/// names a source that is not configured;
+/// names a source that is not configured; `conflict` for a `CreateMonitor`
+/// whose name has a create on its way to that source, pending or sent and not
+/// mirrored yet (#1959);
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
 ///
 /// **`link_to`** (#984, a ticket's entity id) asks for a link from what a

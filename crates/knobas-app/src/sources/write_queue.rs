@@ -50,13 +50,17 @@ use crate::IpcError;
 ///   never have been offered (story 13), and saying so at the call is the
 ///   difference between an interface that lies and one that does not.
 ///   A keychain that will not open says nothing about what the instance
-///   offers, so an op the kind's roles allow is queued then (#1944).
+///   offers, so an op the kind's roles allow is queued then (#1944);
+/// * a `CreateMonitor` whose name has a create on its way to the same source
+///   (#1959, `assets::newest_create_on_its_way`): Uptime Kuma takes a second
+///   monitor of a name it has.
 ///
 /// # Errors
 ///
 /// [`IpcError`] with `invalid` for a payload that is not a write op or names
 /// an op the source does not declare, `not_found` for a source that is not
-/// configured, `internal` if the queue's own writes fail, and `not_ready` if
+/// configured, `conflict` for a `CreateMonitor` whose monitor is already on
+/// its way (#1959), `internal` if the queue's own writes fail, and `not_ready` if
 /// the quit's grace ran out while the write was at the source (#1932).
 pub async fn submit(
     state: &crate::sources::SourcesState,
