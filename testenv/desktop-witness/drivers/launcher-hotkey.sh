@@ -137,6 +137,8 @@ say "pressing ⌘K"
 "$ax" key "$KEY_K" command
 wait_until "⌘K did not put focus in the launcher's query box" \
     focus_is_query_box
+# The overlay ⌘K lands on, held to the app's DOM by `App.test.svelte.ts` (#1968).
+lands_named cmd-k "$QUERY_BOX_LABEL"
 say "the launcher's query box has focus: role $(field role), labelled '$QUERY_BOX_LABEL'"
 
 # The box is in the tree exactly once. Two would mean something else under this

@@ -132,6 +132,9 @@ vi.mock("./lib/ipc/entity", () => ({
         })
       : Promise.reject(new Error("no note in this test")),
   saveNote: () => Promise.reject(new Error("no note is saved in this test")),
+  // Settings › Checkouts and Open in… on a fresh install: no root, no applications (#1968).
+  checkoutSettings: () =>
+    Promise.resolve({ clones_root: null, git: { status: "no_git" }, default_application: null, applications: [] }),
   captureShortcut: () =>
     Promise.resolve({ accelerator: null, refusal: null, shown: noteShownHere, note_count: 0, last_note_at: null }),
   setCaptureShortcut: () => Promise.reject(new Error("no shortcut is set in this test")),
@@ -1122,4 +1125,65 @@ test("capture: Open in knobas lands on the captured note's page, as capture.sh w
 
   emit("capture:open-note", "note:witness");
   await landsOn(landing("capture", "open-in-knobas"));
+});
+
+/** The link under the window whose own text, or `aria-label`, is `name`; pressed as a driver presses it. */
+function follow(name: string): void {
+  const link = [...target.querySelectorAll("a")].find(
+    (candidate) => candidate.getAttribute("aria-label") === name || candidate.textContent?.trim() === name,
+  );
+  if (!link) throw new Error(`no link called ${name}`);
+  link.click();
+  flushSync();
+}
+
+test("capture: Settings › Notes and capture lands on the section capture.sh counts notes on", async () => {
+  dbReady = true;
+  app = mount(App, { target, props: {} });
+  await until(() => target.querySelector("a[aria-label='Settings']") !== null, "the top bar never drew Settings");
+
+  follow("Settings");
+  await until(() => location.hash.startsWith("#/settings"), "Settings never opened");
+  await waitFor(() => follow("Notes and capture"));
+  await landsOn(landing("capture", "settings-notes"));
+});
+
+test("capture: the ticket preview's job link lands on the job page capture.sh knows by its Code section", async () => {
+  // The preview's link is the job's address (`TicketPreview.svelte`); this
+  // opens that address rather than the Tickets search that offers it.
+  dbReady = true;
+  entityAnswer = jobTicket();
+  location.hash = "#/job/mock:PAY-231";
+  app = mount(App, { target, props: {} });
+  await landsOn(landing("capture", "job-link"));
+});
+
+/** ⌘K on the window, once the shell is up, for a driver's `cmd-k` landing. */
+async function pressLauncherKey(): Promise<void> {
+  dbReady = true;
+  app = mount(App, { target, props: {} });
+  await until(() => target.querySelector("a[aria-label='Settings']") !== null, "the top bar never drew");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }));
+  flushSync();
+}
+
+test("launcher-hotkey: ⌘K lands on the launcher's query box", async () => {
+  await pressLauncherKey();
+  await landsOn(landing("launcher-hotkey", "cmd-k"));
+});
+
+test("open-in-editor: ⌘K lands on the launcher's query box", async () => {
+  await pressLauncherKey();
+  await landsOn(landing("open-in-editor", "cmd-k"));
+});
+
+test("open-in-editor: Settings › Checkouts and Open in… lands on the section open-in-editor.sh sets the root in", async () => {
+  dbReady = true;
+  app = mount(App, { target, props: {} });
+  await until(() => target.querySelector("a[aria-label='Settings']") !== null, "the top bar never drew Settings");
+
+  follow("Settings");
+  await until(() => location.hash.startsWith("#/settings"), "Settings never opened");
+  await waitFor(() => follow("Checkouts and Open in…"));
+  await landsOn(landing("open-in-editor", "settings-checkouts"));
 });

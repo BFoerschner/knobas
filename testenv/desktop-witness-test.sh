@@ -838,8 +838,10 @@ done
 
 # `landings_of` itself: the first word after the verb, each landing once, and
 # neither a comment nor a longer word that starts with the verb.
+# shellcheck disable=SC2016 # driver source, quoted as a driver spells it
 check "landings_of reads each landing once, in order" "$(printf 'note\njob')" \
     "$(landings_of "$(printf 'lands note "$A"\n    lands_named job "$B"\nlands note "$A"\n# lands gone "$C"\nlandsfoo x\n')")"
+# shellcheck disable=SC2016 # driver source, quoted as a driver spells it
 check "landings_of reads nothing from a driver without one" "" "$(landings_of 'wait_until "x" reads "$A"')"
 
 # `lands` and `lands_named` against a stub helper: they pass on a screen that
@@ -855,7 +857,9 @@ STUB
 chmod +x "$lands_tmp/ax"
 lands_outcome() { # <lands|lands_named> <landing> <value...>: ok, or what wait_until was told
     (
+        # shellcheck disable=SC2034 # read by lands_reading and lands_name
         ax=$lands_tmp/ax pid=$$
+        # shellcheck disable=SC2329 # called by lands and lands_named
         wait_until() { "${@:2}" || { echo "$1"; exit 0; }; }
         "$@"
         echo ok

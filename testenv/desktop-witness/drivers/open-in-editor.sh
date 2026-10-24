@@ -123,7 +123,6 @@ count_of() {
     *) printf '%s\n' "$answer" ;;
     esac
 }
-present() { local n; n=$(count_of "$1"); [ "$n" != x ] && [ "$n" -gt 0 ]; }
 absent() { [ "$(count_of "$1")" = 0 ]; }
 # Keeps the count it read in `seen`, which `wait_until` names when it runs out.
 exactly_one() {
@@ -193,6 +192,8 @@ say "opening Settings › $CHECKOUTS_SECTION"
 # Waited for: the shell finishes booting after its window appears.
 press_when "$SETTINGS_BUTTON"
 press_when "$CHECKOUTS_SECTION"
+# The section the press lands on, held to the app's DOM by `App.test.svelte.ts` (#1968).
+lands_named settings-checkouts "$CHANGE_ROOT" "$EDIT_APPS"
 
 press_when "$CHANGE_ROOT"
 fill "$CLONES_ROOT_FIELD" "$clones"
@@ -218,7 +219,7 @@ say "'$APP_NAME' is stored, and runs the stub"
 
 say "opening the launcher and asking for '$REPO_NAME'"
 "$ax" key "$KEY_K" command
-wait_until "⌘K did not open the launcher" present "$QUERY_BOX"
+lands_named cmd-k "$QUERY_BOX"
 "$ax" type "$REPO_NAME"
 wait_until "the launcher never answered '$REPO_NAME'" launcher_answered
 

@@ -493,9 +493,11 @@ lands_named() {
             lands_name "$name"
     done
 }
+# shellcheck disable=SC2154 # $ax and $pid are the driver's
 lands_reading() { has_reading "$("$ax" values "$pid" 2>/dev/null || true)" "$1"; }
 lands_name() {
     local n
+    # shellcheck disable=SC2154 # $ax and $pid are the driver's
     n=$("$ax" find "$pid" "$1" 2>/dev/null || true)
     case $n in '' | *[!0-9]*) return 1 ;; esac
     [ "$n" -gt 0 ]
