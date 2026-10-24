@@ -7,7 +7,8 @@
   Each step shows its value, editable where the flow lets it be, and its
   state, which is the flow's: *ready* until it runs, *queued* while its write
   waits in the queue, *done* once it landed. The step the flow stopped at can
-  be retried or skipped. The backend decides what runs next
+  be skipped, and retried when it failed; a queued one is checked again, which
+  re-reads its write and sends nothing (#1998). The backend decides what runs next
   (`start-work.svelte.ts`'s rule); nothing here walks the steps itself.
 
   The proposal is made as soon as the repositories are read, in the suggested
@@ -189,7 +190,9 @@
           <span class="tf-dim tf-small">{otherTimer ? `stops the timer on ${otherTimer} first` : ""}</span>
         {/if}
         {#if of && current?.id === of.id && (of.outcome === "failed" || of.outcome === "queued")}
-          <button class="tf-btn tf-sm" disabled={flow.busy} onclick={() => void flow.retry(of.id)}>Retry</button>
+          <!-- A queued step's write is still open: the button re-reads it and
+               sends nothing (`ready_retry`'s rule 1), so it is not *Retry* (#1998). -->
+          <button class="tf-btn tf-sm" disabled={flow.busy} onclick={() => void flow.retry(of.id)}>{of.outcome === "queued" ? "Check again" : "Retry"}</button>
         {/if}
         {#if of && current?.id === of.id && of.outcome !== "running"}
           <button class="tf-btn tf-sm tf-ghost" disabled={flow.busy} onclick={() => void flow.skip(of.id)}>Skip</button>

@@ -96,6 +96,8 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - The pages share one queued module, `tf/queued.svelte.ts` (the repository page keeps its own), keyed by entity and the write's id: the job's picked status and comment, a Docs section's text, comment and new page, a pull request's chips and comment, a run queued on a pipeline from its page or a run page (#1449). A mark goes when a read shows the write landed (a status, state or page version that moved from where the write found it, a thread holding the comment's words, a tree holding the page's title) and stays gone if the read moves back; what no read shows (an edit, a review) keeps the session. A mark is followed: held or refused, it goes and the toast says why with *Edit and resend*, which reopens the editor with what was typed. (#1424, #1542)
 - While its mark is drawn, a queued write holds back the writes it makes stale: drawn `aria-disabled` with the mark as its title, opening nothing (a branch's queued delete drops its row's actions; a pull request's queued merge holds *Merge…*, *Update branch*, *Edit* and *Close*, a queued close or reopen *Merge…* and the state change). A source's own actions are never held. (#839, #1441)
 
+- A button that re-reads an open write and sends nothing never says *Retry*: a queued start-work step's says *Check again*, and a failed step's keeps *Retry*. *Retry* is for repeating what failed. Beside a write that may already have landed, it reads as an invitation to send twice. (#1998)
+
 - Deleting a note is the one irreversible write sent at once: a confirm dialog asks first, and the toast "Deleted <title>" offers no *Undo*, because the `deleted` activity line is final (#1464's ruling, #1504).
 
 ## Checkouts
