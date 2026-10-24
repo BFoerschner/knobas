@@ -369,8 +369,7 @@
           <section class="tf-vw-sec">
             <h3>Which tickets</h3>
             <p>
-              {decidesLine} <b>{start.name}</b>. knobas runs its query at every sync and keeps {fixedSource.system}'s order.{#if fixedSource.sprint}
-                Like the board in {fixedSource.system}, it shows the active sprint, now {fixedSource.sprint.name}, and moves on to the next
+              {decidesLine} <b>{start.name}</b>. knobas runs its query at every sync and keeps {fixedSource.system}'s order.{#if fixedSource.sprint}{" "}Like the board in {fixedSource.system}, it shows the active sprint, now {fixedSource.sprint.name}, and moves on to the next
                 sprint when this one closes.{/if}
             </p>
             <pre class="tf-vw-source-query">{fixedSource.source_query}{#if fixedSource.sub_query}{"\n"}{fixedSource.sub_query}{/if}</pre>
