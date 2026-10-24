@@ -51,8 +51,8 @@
 //!
 //! The walk is a few thousand key probes when `has:` asks at 22,000 items,
 //! and each one compared ids through the database's collation: `en_US.UTF-8`
-//! wherever `initdb` ran, the app's own database included, so `strcoll` at
-//! every step down a btree. About 4.7 µs a probe, against 0.75 µs on an index
+//! on every cluster measured then, the app's own database included, so
+//! `strcoll` at every step down a btree. About 4.7 µs a probe, against 0.75 µs on an index
 //! ordered `collate "C"` (#1163). Since migration `0050` (#1172) every column
 //! that holds an entity id is `collate "C"` itself, so each probe below is a
 //! plain `=` on the key's own index, and the sets the walk deduplicates sort
