@@ -923,7 +923,8 @@ TeamCity locator table.
   request. `count` is an independent locator dimension, so this adds no grammar the mock contract
   does not already allow. `defaultFilter:false` stays and its reason is unchanged: the highest id
   on the live instance belonged to a *personal* build configuration, and a canceled build is the
-  other class the default filter removes.
+  other class the default filter removes. *Narrowed by #2016 ("Amendments from the TeamCity probe
+  from the watermark" below): an incremental run's probe asks from the watermark on.*
 - **§4.2 the ceiling's inputs are the probe page and the global in-flight page, and explicitly
   **not** the finished pages.** The ceiling only has to be an id known to have existed when the
   in-flight poll completed; every build queued later has a higher id. Finished-page ids can
@@ -2400,6 +2401,33 @@ and by `live_jira_seeded`'s `a_walk_in_pages_of_two_returns_the_whole_corpus_onc
 `a_jql_id_range_stays_inside_one_project`, and `live_confluence_seeded`'s
 `a_walk_in_pages_of_two_returns_the_whole_corpus_and_the_expansions_survive_it` and
 `a_cql_range_on_id_is_refused_and_the_walks_order_is_not`.
+
+### Amendments from the TeamCity probe from the watermark (2026-10-24, binding) — issue #2016
+
+Spec #1618's follow-up, ruled by the Opus implementer (`docs/decisions/2026-10-unattended-rulings.md`,
+"#2016"). The change is in `crates/knobas-source-teamcity/**` and its tests, none of which §10.8
+freezes, so **no §10.8 entry is owed**; the cursor version stays `2`. The #91 ceiling bullets above
+are *narrowed*, not wrong. It supersedes spec #1618's Solution sentence "The cursor advance ignores
+a ceiling below the previous watermark" (#1626): ticket #2016 asks that the ceiling never be
+ignored, and the ticket is the more specific source.
+
+**§4.2 TeamCity: an incremental run's opening probe reads
+`sinceBuild:(id:<watermark − 1>),defaultFilter:false,count:100`**: the watermark's own build and
+every build above it, in any state. A full sync's probe, and an incremental run's whose watermark
+is 1 or less, stays `defaultFilter:false,count:100`. On an unordered server (#91) the unfiltered page
+routinely held nothing as new as the watermark. That ceiling was ignored (#1626), which left a build
+queued after the in-flight poll unclamped up to the last configuration's query on a scoped source
+(#1989). From the watermark on, every row is at or above the watermark, so **the ceiling is always
+applied**, and a ceiling below the watermark holds it where it stands. One below the watermark,
+because `sinceBuild` is exclusive. With the watermark's own build on the page, the replaced-server
+check's trigger is unchanged and an idle poll asks nothing by id. Measured on the seeded TeamCity
+2026.1.3 on 2026-10-24: the locator answers exactly the builds above `N` across every
+configuration, a running one included, `count: 0` above the newest, and reads an `N` that names no
+build as a number, never a 404. **§5 mockd** already serves this locator, so nothing changes there.
+
+Witnessed by `sync::tests`'
+`a_scoped_run_clamps_under_a_build_queued_mid_run_behind_an_unordered_page` and by
+`live_teamcity_seeded`'s `the_opening_probe_from_the_watermark_holds_its_build_and_every_newer_one`.
 
 ---
 
