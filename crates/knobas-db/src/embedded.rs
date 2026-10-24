@@ -1955,7 +1955,9 @@ fn start_reason(log: &[u8], since: u64) -> Option<String> {
         .filter(|line| !line.is_empty())
         .collect();
     let tail = &lines[lines.len().saturating_sub(REASON_LINES)..];
-    (!tail.is_empty()).then(|| tail.join("; "))
+    // A line ending in a comma is a sentence the postmaster wrapped, so it
+    // reads on into the next line rather than being cut off with `; `.
+    (!tail.is_empty()).then(|| tail.join("; ").replace(",; ", ", "))
 }
 
 /// Run `work` on a blocking thread and return its answer. A dropped caller
@@ -2517,6 +2519,18 @@ mod tests {
             Some("3; 4; 5; 6; 7")
         );
         assert_eq!(start_reason(earlier.as_bytes(), earlier.len() as u64), None);
+        // The postmaster's own stderr wraps one sentence over lines that end
+        // in a comma, which reads on as the sentence, not as `,;`.
+        let wrapped = "postgres: could not find the database system\n\
+                       Expected to find it in the directory \"/d\",\n\
+                       but could not open file \"/d/global/pg_control\"\n";
+        assert_eq!(
+            start_reason(wrapped.as_bytes(), 0).as_deref(),
+            Some(
+                "postgres: could not find the database system; Expected to find it in the \
+                 directory \"/d\", but could not open file \"/d/global/pg_control\""
+            )
+        );
     }
 
     /// #2025: a log shorter than it was before the start was replaced in
