@@ -10,7 +10,6 @@ import type { QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetQueued } from "../queued.svelte";
-import { forgetFilters } from "../filter/filter-state.svelte";
 import { parseTfHash } from "../route";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
@@ -108,7 +107,6 @@ afterEach(() => {
   if (view) unmount(view);
   view = null;
   target.remove();
-  forgetFilters();
 });
 
 function ports(over: Partial<DocsPorts> = {}): DocsPorts {

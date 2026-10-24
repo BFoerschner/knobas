@@ -66,7 +66,7 @@ export interface ViewMemory {
   lend(entityId: string, loan: Loan): void;
   /** Take the reads made ahead for this entity, if they are fresh; once. */
   borrow(entityId: string): Loan | null;
-  /** Clear every memory. Tests start from an empty session. */
+  /** Clear every memory, and the reads ahead still in flight. Tests start from an empty session. */
   clear(): void;
 }
 
@@ -75,7 +75,7 @@ export function createViewMemory(limit = REMEMBERED): ViewMemory {
   const nothing = new Set<string>();
   const loans = new Map<string, Loan>();
   const pair = (sourceId: string, kind: string) => `${sourceId}\u0000${kind}`;
-  return {
+  const memory: ViewMemory = {
     recall(entityId) {
       const held = seen.get(entityId);
       if (held === undefined) return null;
@@ -107,8 +107,10 @@ export function createViewMemory(limit = REMEMBERED): ViewMemory {
       seen.clear();
       nothing.clear();
       loans.clear();
+      flights.delete(memory);
     },
   };
+  return memory;
 }
 
 /** The one the window uses. */

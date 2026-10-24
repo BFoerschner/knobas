@@ -13,7 +13,6 @@ import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { writeQueuePanel } from "../../shell/write-queue.svelte";
-import { forgetFilters } from "../filter/filter-state.svelte";
 import TfInbox from "./TfInbox.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
 
@@ -59,7 +58,6 @@ let calls: string[];
 
 beforeEach(() => {
   toasts.items.length = 0;
-  forgetFilters();
   calls = [];
   target = document.createElement("div");
   document.body.appendChild(target);

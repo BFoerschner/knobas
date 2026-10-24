@@ -9,7 +9,6 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { CheckoutView, CodeFacts, EntityFilter, EntityPage, EntityRow, GroupTally, Reached } from "../../ipc/entity";
-import { forgetFilters } from "../filter/filter-state.svelte";
 import type { CodePorts } from "./TfCode.svelte";
 import TfCode from "./TfCode.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
@@ -100,7 +99,6 @@ let view: ReturnType<typeof mount> | null = null;
 let reads: EntityFilter[];
 
 beforeEach(() => {
-  forgetFilters();
   reads = [];
   target = document.createElement("div");
   document.body.appendChild(target);

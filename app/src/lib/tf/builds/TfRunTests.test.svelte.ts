@@ -7,7 +7,6 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { RunTest, TestOutcome } from "../../ipc/entity";
-import { forgetFilters } from "../filter/filter-state.svelte";
 import TfRunTests from "./TfRunTests.svelte";
 
 let target: HTMLElement;
@@ -16,7 +15,6 @@ let page: ReturnType<typeof mount> | null = null;
 beforeEach(() => {
   target = document.createElement("div");
   document.body.appendChild(target);
-  forgetFilters();
 });
 
 afterEach(() => {

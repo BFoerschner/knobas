@@ -3,8 +3,10 @@
  *
  * `test-setup.ts` resets the stores in `test-resets.ts` after every test. This
  * lists the sources the way `residue.test` lists components: any module-level
- * `$state`, and any exported singleton made by a `create…()` factory, has to
- * be a key of `RESETS` or be named in `NOT_YET_RESET`.
+ * `$state`, exported singleton made by a `create…()` factory, `Map`, `Set` or
+ * other mutable built-in (Svelte's reactive ones too), or `let` that is not a
+ * counter, in a store file or a component's `<script module>`, has to be a key
+ * of `RESETS` or be named in `NOT_YET_RESET`.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -19,19 +21,32 @@ function sources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return sources(path);
-    return /(?<!\.test)\.svelte\.ts$|^view-read\.ts$/.test(entry.name) && !entry.name.includes(".test.") ? [path] : [];
+    return /\.svelte\.ts$|\.svelte$|^view-read\.ts$/.test(entry.name) && !entry.name.includes(".test.") ? [path] : [];
   });
 }
 
-/** Column-0 declarations: module-level `$state`, or an exported `create…()` singleton. */
-const DECLARATION = /^(?:export )?(?:const|let) (\w+)\b[^=\n]*= (?:\$state\b|create\w+\()/gm;
+/**
+ * Column-0 declarations of what a test can leave changed: `$state`, a
+ * `create…()` singleton, a mutable built-in, or a `let`. A `let` holding a
+ * number is an id counter, which runs on across tests on purpose (#1762).
+ */
+const DECLARATION =
+  /^(?:export )?(?:(?:const|let) (\w+)\b[^=\n]*= (?:\$state\b|create\w+\(|new (?:Svelte)?(?:Map|Set|WeakMap|WeakSet|Date|URL|URLSearchParams)\b)|let (\w+)\b[^=\n]*(?:= (?!\d)|;$))/gm;
 
 export function moduleStores(text: string): string[] {
-  return [...text.matchAll(DECLARATION)].map((match) => match[1]!);
+  return [...text.matchAll(DECLARATION)].map((match) => (match[1] ?? match[2])!);
+}
+
+/** The stores in a component's `<script module>`, read at its own indent; the instance script holds none. */
+export function componentStores(text: string): string[] {
+  const body = /<script\b[^>]*\bmodule\b[^>]*>([\s\S]*?)<\/script>/.exec(text)?.[1];
+  if (body === undefined) return [];
+  const indent = /^[ \t]*(?=\S)/m.exec(body)?.[0] ?? "";
+  return moduleStores(body.replaceAll(new RegExp(`^${indent}`, "gm"), ""));
 }
 
 function found(): string[] {
-  return sources(LIB).flatMap((path) => moduleStores(readFileSync(path, "utf8")).map((name) => `${relative(LIB, path)}#${name}`));
+  return sources(LIB).flatMap((path) => (path.endsWith(".svelte") ? componentStores : moduleStores)(readFileSync(path, "utf8")).map((name) => `${relative(LIB, path)}#${name}`));
 }
 
 test("every module-level store has a reset or a named debt", () => {
@@ -52,7 +67,39 @@ test("no store is left on the debt list", () => {
 });
 
 test("the scan sees what it is meant to", () => {
-  expect(moduleStores("export const a = $state({});\nlet b = $state<X>(null);\nexport const c = createC();\n  const inner = $state(1);\nconst d = new Set();")).toEqual(["a", "b", "c"]);
+  const source = [
+    "export const a = $state({});",
+    "let b = $state<X>(null);",
+    "export const c = createC();",
+    "  const inner = $state(1);",
+    "const d = new Map<string, FilterState>();",
+    "const e = new SvelteSet<string>();",
+    "const f = new WeakMap<object, number>();",
+    "export const g = new SvelteMap();",
+    "let h: Follower | null = null;",
+    "let nextId = 0;",
+    "const LIMIT = 40;",
+    "const g2 = newThing();",
+  ].join("\n");
+  expect(moduleStores(source)).toEqual(["a", "b", "c", "d", "e", "f", "g", "h"]);
+});
+
+test("the scan reads a component's module script and nothing else in it", () => {
+  const component = [
+    '<script lang="ts" module>',
+    "  const remembered = new SvelteMap<string, boolean>();",
+    "  const LIMIT = 1000;",
+    "  export function forget(): void {",
+    "    const inner = new Map();",
+    "  }",
+    "</script>",
+    "",
+    '<script lang="ts">',
+    "  const perInstance = $state(0);",
+    "</script>",
+  ].join("\n");
+  expect(componentStores(component)).toEqual(["remembered"]);
+  expect(componentStores('<script lang="ts">\n  let x = $state(1);\n</script>')).toEqual([]);
 });
 
 // ---------------------------------------------------------------------------
