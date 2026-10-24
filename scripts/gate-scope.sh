@@ -21,6 +21,11 @@
 # over adding `witness-unit` to `check-front` because that changes what
 # `just check-front` runs; this changes only which head earns the full gate.
 #
+# Under `.claude/` only Markdown is prose (#1982): `settings.json` wires the
+# Bash guard's `PreToolUse` hook, which `bash-guard-test.sh` tests under the
+# full `check`'s `witness-unit`, and `loop/stages.sh` is a script. The loop's
+# docs-only self-merge (`.claude/commands/ticket-loop.md`) draws the same line.
+#
 # Usage: scripts/gate-scope.sh [BASE]   (default origin/main)
 set -euo pipefail
 base=${1:-origin/main}
@@ -74,7 +79,7 @@ while IFS= read -r f; do
           echo "gate-scope: full: testenv/ pins $f (via $pin)" >&2; echo full; exit 0
         fi
       done <<< "$pinned" ;;
-    docs/*|mockups/*|.claude/*|*.md) ;;
+    docs/*|mockups/*|*.md) ;;
     *) echo "gate-scope: full: $f is outside app/ and the prose dirs" >&2; echo full; exit 0 ;;
   esac
 done <<< "$changed"
