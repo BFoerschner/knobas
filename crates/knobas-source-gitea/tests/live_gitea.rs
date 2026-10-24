@@ -6252,6 +6252,182 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
     );
 }
 
+/// Issue #2054, spec #1192 story 10, against the real server: the writes a
+/// shell surface draws outside a view -- a ticket's comment and move, *Create
+/// ticket* in the repository, a pull request's comment, approval and merge
+/// -- answered by `Source::refused_writes` from the same empty-bodied probes
+/// a view sends. A token minted with read scopes only is refused each,
+/// naming the scope it lacks; a token that may write is refused none; and
+/// the probes leave the repository's branches, issues and pull requests as
+/// they were.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_read_only_token_is_refused_the_writes_drawn_outside_a_view_saying_why() {
+    use knobas_source::grants::WriteAsk;
+
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let api = format!("{}/api/v1", env.url);
+    let auth = format!("token {}", env.token);
+    let (admin, password) = TESTENV_ADMIN;
+    let names = ["knobas-live-2054-read", "knobas-live-2054-write"];
+    let remove = async || {
+        for name in names {
+            let _ = http
+                .delete(format!("{api}/users/{admin}/tokens/{name}"))
+                .basic_auth(admin, Some(password))
+                .send()
+                .await;
+        }
+    };
+    let full = env.full_name();
+    let footprint = async || -> Vec<Option<usize>> {
+        let mut counts = Vec::new();
+        for listing in [
+            "branches?",
+            "issues?state=all&type=issues&",
+            "pulls?state=all&",
+        ] {
+            let answer = http
+                .get(format!("{api}/repos/{full}/{listing}limit=1"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .expect("GET a listing's count");
+            counts.push(
+                answer
+                    .headers()
+                    .get("x-total-count")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<usize>().ok()),
+            );
+        }
+        counts
+    };
+    let before = footprint().await;
+    assert!(
+        before.iter().all(Option::is_some),
+        "the seeded repository counts its branches, issues and pull requests: {before:?}"
+    );
+    remove().await;
+    let mint = async |name: &str, scopes: &[&str]| -> String {
+        let minted: serde_json::Value = http
+            .post(format!("{api}/users/{admin}/tokens"))
+            .basic_auth(admin, Some(password))
+            .json(&serde_json::json!({ "name": name, "scopes": scopes }))
+            .send()
+            .await
+            .expect("mint a token")
+            .json()
+            .await
+            .expect("the token record");
+        // A failed mint panics here, naming it; the next run's `remove`
+        // clears what this one minted.
+        minted["sha1"]
+            .as_str()
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| panic!("{admin} minted no token {name}: {minted}"))
+            .to_owned()
+    };
+    let read_only = mint(
+        names[0],
+        &[
+            "read:repository",
+            "read:issue",
+            "read:organization",
+            "read:user",
+        ],
+    )
+    .await;
+    let writes = mint(
+        names[1],
+        &[
+            "write:repository",
+            "write:issue",
+            "read:organization",
+            "read:user",
+        ],
+    )
+    .await;
+
+    // A seeded issue and the seeded open pull request.
+    let issues: serde_json::Value = http
+        .get(format!("{api}/repos/{full}/issues?state=all&type=issues&limit=1"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET an issue")
+        .json()
+        .await
+        .expect("an issue listing");
+    let issue = issues[0]["number"].as_u64().expect("the seed files issues");
+    let pulls: serde_json::Value = http
+        .get(format!("{api}/repos/{full}/pulls?state=open&limit=1"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET a pull request")
+        .json()
+        .await
+        .expect("a pull request listing");
+    let pull = pulls[0]["number"].as_u64().expect("the seed opens a pull request");
+    let (owner, repo) = (env.owner.as_str(), env.repo.as_str());
+    let id = |key: String| format!("gitea:{key}");
+    let issue = id(knobas_source_gitea::keys::issue_key(owner, repo, issue));
+    let pull = id(knobas_source_gitea::keys::pr_key(owner, repo, pull));
+    let repository = id(knobas_source_gitea::keys::repo_key(owner, repo));
+    let ask = |entity: &str, op: &str| WriteAsk {
+        entity: entity.to_owned(),
+        op: op.to_owned(),
+    };
+    let asks = [
+        (ask(&issue, "comment"), "write:issue"),
+        (ask(&issue, "transition"), "write:issue"),
+        (ask(&repository, "create_ticket"), "write:issue"),
+        (ask(&pull, "comment"), "write:issue"),
+        (ask(&pull, "approve"), "write:repository"),
+        (ask(&pull, "merge_pull_request"), "write:repository"),
+    ];
+    let of: Vec<WriteAsk> = asks.iter().map(|(a, _)| a.clone()).collect();
+    let config = serde_json::json!({ "repos": [full] });
+    let narrow = env.source_with(&read_only, config.clone());
+    let wide = env.source_with(&writes, config);
+    let (refused, allowed) = tokio::join!(narrow.refused_writes(&of), wide.refused_writes(&of));
+
+    remove().await;
+    assert_eq!(
+        footprint().await,
+        before,
+        "the empty-bodied probes created no branch, issue or pull request"
+    );
+
+    let refused = refused.expect("the read-only token is answered");
+    println!("LIVE refused_writes, read-only: {refused:?}");
+    assert_eq!(
+        refused
+            .iter()
+            .map(|r| (r.entity.as_str(), r.op.as_str(), r.reason.as_str()))
+            .collect::<Vec<_>>(),
+        asks.iter()
+            .map(|(a, scope)| (
+                a.entity.as_str(),
+                a.op.as_str(),
+                if *scope == "write:issue" {
+                    "This token cannot write: it lacks the write:issue scope"
+                } else {
+                    "This token cannot write: it lacks the write:repository scope"
+                }
+            ))
+            .collect::<Vec<_>>(),
+        "each write is refused a token that may only read, naming the scope"
+    );
+    let allowed = allowed.expect("the token that may write is answered");
+    assert_eq!(allowed, [], "a token that may write is refused nothing");
+}
+
 // -- what the token may not read (issue #2042) --------------------------------
 
 /// Issue #2042, spec #1192 story 10, against the real server: a token minted
