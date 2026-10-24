@@ -1704,13 +1704,25 @@ async fn a_second_run_while_one_is_behind_starts_no_second_loop() {
     .await
     .expect("a second ask answers at once")
     .expect("a second ask reads the flow");
-    // Let a second loop, if one was started, reach the same read.
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    // The second ask found the flow's claim held and spawned nothing: the set
+    // holds the first run alone (#1927). A loop is in the set from the ask
+    // that spawns it, so one started now would be counted here, however late
+    // it reached the look. Before, a 200 ms wait for it to reach the look
+    // stood for this.
+    assert_eq!(
+        background.running(),
+        1,
+        "a second ask started a second loop"
+    );
     look.add_permits(10);
     read_until(&pool, |f| {
         f.iter().all(|step| step.outcome == StepOutcome::Succeeded)
     })
     .await;
+    // And nothing is left running to dispatch anything after the look below.
+    background
+        .close(tokio::time::Instant::now() + std::time::Duration::from_secs(20))
+        .await;
     assert_eq!(
         fake.ops(),
         ["create_branch", "create_pull_request", "transition"],

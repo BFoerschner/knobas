@@ -731,14 +731,26 @@ test("a pull request page puts the pull request in front, for the heartbeat and 
 
   // A tab of the same pull request is the same foreground: one run, no new record.
   const records = captureRecords.length;
+  const changed = new Promise((resolve) => window.addEventListener("hashchange", resolve, { once: true }));
   location.hash = `#/pr/${encodeURIComponent(pr)}/files`;
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  // The shell's own listener was added at mount, so it has read the new hash
+  // by the time this one hears it, and `flushSync` runs the effects it set
+  // off (#1927). Before, a 20 ms wait stood for this, and a change handled
+  // later than the look went unseen.
+  await changed;
+  flushSync();
   expect(timer.foreground).toEqual({ kind: "entity", entity_id: pr });
   expect(captureRecords.length, "a tab of the same pull request recorded the capture again").toBe(records);
 
   location.hash = "#/job/mock:PAY-231";
   await until(() => captureRecords.at(-1)?.foreground === "mock:PAY-231", "back on the job, its ticket never returned");
   expect(timer.foreground).toEqual({ kind: "entity", entity_id: "mock:PAY-231" });
+  // In order: the tab's change was handled before the job's, so a record it
+  // made would come before the job's.
+  expect(
+    captureRecords.slice(records).filter((record) => record.foreground === pr),
+    "a tab of the same pull request recorded the capture again",
+  ).toEqual([]);
 });
 
 /**

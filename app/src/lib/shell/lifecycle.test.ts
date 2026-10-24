@@ -6,7 +6,7 @@
  * that never reached its `emit` all end in the same place — a poll that keeps
  * asking until the answer is `ready` or `failed`.
  */
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 vi.mock("../ipc/app", () => ({
   appStatus: vi.fn(),
@@ -49,11 +49,18 @@ beforeEach(() => {
   delivered.length = 0;
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 test("registers its listener before arming the replay, then polls to ready", async () => {
   vi.mocked(appStatus)
     .mockResolvedValueOnce(status({ state: "starting", detail: "downloading postgres" }))
     .mockResolvedValueOnce(status({ state: "migrating" }))
     .mockResolvedValue(status({ state: "ready" }, { source_count: 1 }));
+  // The poll's own timer is faked, so the test can see that none is left
+  // (#1927); `vi.waitFor` moves the fake clock on as it polls.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
   const life = createLifecycle({ pollMs: 1 });
   await life.start();
@@ -70,16 +77,18 @@ test("registers its listener before arming the replay, then polls to ready", asy
   expect(life.status?.source_count).toBe(1);
 
   // ...and it stops asking. A poll that keeps running once the answer is
-  // final is a query per tick for the life of the window.
-  const atReady = vi.mocked(appStatus).mock.calls.length;
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(vi.mocked(appStatus).mock.calls.length).toBe(atReady);
+  // final is a query per tick for the life of the window. The poll that read
+  // `ready` decided, before the read was visible, to set no timer for the
+  // next one, so none is pending however far out it would have been (#1927).
+  // Before, a 20 ms look at the call count stood for this.
+  expect(vi.getTimerCount(), "the poll goes on after ready").toBe(0);
 
   life.stop();
 });
 
 test("a failed bring-up is surfaced, not swallowed, and stops the poll", async () => {
   vi.mocked(appStatus).mockResolvedValue(status({ state: "failed", message: "port 5432 in use" }));
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
   const life = createLifecycle({ pollMs: 1 });
   await life.start();
@@ -87,9 +96,8 @@ test("a failed bring-up is surfaced, not swallowed, and stops the poll", async (
   await waitFor(() => expect(life.error).toBe("port 5432 in use"));
   expect(life.ready).toBe(false);
 
-  const atFailure = vi.mocked(appStatus).mock.calls.length;
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(vi.mocked(appStatus).mock.calls.length).toBe(atFailure);
+  // No timer is left for a next poll, as for `ready` above (#1927).
+  expect(vi.getTimerCount(), "the poll goes on after the failure").toBe(0);
 
   life.stop();
 });

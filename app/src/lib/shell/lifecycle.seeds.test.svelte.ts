@@ -3,7 +3,7 @@
  * what a retry does to a state the backend already advanced (FE-10).
  */
 import { flushSync } from "svelte";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 vi.mock("../ipc/app", () => ({
   appStatus: vi.fn(),
@@ -43,6 +43,10 @@ beforeEach(() => {
   delivered.length = 0;
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 test("the three ready writes of a real boot seed once", async () => {
   const ready: DbState = { state: "ready" };
   // Replay (event), the poll the event triggers, and start()'s own poll.
@@ -51,6 +55,8 @@ test("the three ready writes of a real boot seed once", async () => {
   });
   vi.mocked(appStatus).mockImplementation(async () => status({ state: "ready" }));
 
+  // Faked, so the test can run out the timers the boot leaves (#1927).
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const life = createLifecycle({ pollMs: 1 });
   let seeds = 0;
   const stop = $effect.root(() => {
@@ -62,7 +68,11 @@ test("the three ready writes of a real boot seed once", async () => {
 
   await life.start();
   await waitFor(() => expect(life.db).toEqual(ready));
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  // Run out every timer the boot left, and the promises between them: with
+  // none left, every write it was going to make is in (#1927). Before, a
+  // 10 ms wait stood for this, and a write later than that went unseen.
+  await vi.runAllTimersAsync();
+  expect(vi.getTimerCount(), "the poll goes on after ready").toBe(0);
   flushSync();
 
   expect(vi.mocked(appStatus).mock.calls.length).toBeGreaterThanOrEqual(2);

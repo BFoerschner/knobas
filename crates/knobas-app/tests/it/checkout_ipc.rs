@@ -1067,8 +1067,32 @@ async fn a_file_outside_the_checkout_is_refused_and_nothing_runs() {
             error.message
         );
     }
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    // `open` starts its program before it answers and does not wait for it,
+    // so a program started for a refused file is running now or has
+    // recorded and exited. Read in that order, the process table and then
+    // the record leave it nowhere to hide however slowly it runs (#1927).
+    // Before, a 200 ms look at the record stood for this.
+    let started = running(&stub);
+    assert!(started.is_empty(), "a refused file started {started:?}");
     assert!(!record.exists(), "nothing may have run");
+}
+
+/// The processes running `stub`, by `ps`'s command column. A program `open`
+/// started is listed from the moment `open` returned, its `exec` done, until
+/// it exits, and the stub has written its record before it exits.
+#[cfg(unix)]
+fn running(stub: &Path) -> Vec<String> {
+    let listed = std::process::Command::new("ps")
+        .args(["-axww", "-o", "command="])
+        .output()
+        .expect("ps lists the processes");
+    assert!(listed.status.success(), "ps failed: {listed:?}");
+    let stub = stub.to_string_lossy();
+    String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .filter(|command| command.contains(stub.as_ref()))
+        .map(str::to_owned)
+        .collect()
 }
 
 /// A repo with no clone on this machine refuses, and the refusal names the

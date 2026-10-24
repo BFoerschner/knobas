@@ -8,6 +8,7 @@
 //! what the protocol rule keeps out.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -253,7 +254,25 @@ async fn an_existing_clone_of_the_repository_is_adopted() {
             path: target.to_string_lossy().into_owned()
         }
     );
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Adopted, so no run holds the repository: a second start adopts it
+    // again rather than answering that a clone is running (#1927). The clone
+    // runner is spawned only on the path that answers `Cloning` and is what
+    // sends every event, so with no run nothing can send one later. Before, a
+    // 200 ms look at the events stood for this.
+    assert_eq!(
+        start_admitting(
+            &pool,
+            &Registry::for_process(),
+            &Clones::global(),
+            seen.clone(),
+            &id,
+            &["file"],
+        )
+        .await
+        .unwrap(),
+        answer,
+        "a run holds the adopted repository"
+    );
     assert!(seen.all().is_empty(), "nothing ran: {:?}", seen.all());
 }
 
@@ -614,21 +633,47 @@ async fn a_failed_clone_says_gits_last_line_and_leaves_nothing() {
 /// A server that accepts the connection and never answers, so the clone runs
 /// until it is stopped.
 async fn silent_server() -> (String, tokio::task::JoinHandle<()>) {
+    let (base, task, _reached) = silent_server_counting().await;
+    (base, task)
+}
+
+/// [`silent_server`], and how many connections it has accepted: git has
+/// reached it, so the clone is under way at the source and not still
+/// starting.
+async fn silent_server_counting() -> (String, tokio::task::JoinHandle<()>, Arc<AtomicUsize>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let task = tokio::spawn(async move {
-        let mut held = Vec::new();
-        while let Ok((socket, _)) = listener.accept().await {
-            held.push(socket);
+    let reached = Arc::new(AtomicUsize::new(0));
+    let task = tokio::spawn({
+        let reached = Arc::clone(&reached);
+        async move {
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                held.push(socket);
+                reached.fetch_add(1, Ordering::SeqCst);
+            }
         }
     });
-    (format!("http://{address}"), task)
+    (format!("http://{address}"), task, reached)
+}
+
+/// Wait for git to reach `server`: the clone is under way (#1927), where a
+/// fixed margin stood for that and a slow start of git was stopped before it
+/// began.
+async fn await_git_at(reached: &AtomicUsize) {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while reached.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("git never reached the server");
 }
 
 #[tokio::test]
 async fn stopping_kills_git_and_removes_the_half_made_folder() {
     let pool = pool().await;
-    let (base, server) = silent_server().await;
+    let (base, server, reached) = silent_server_counting().await;
     let id = repo(&pool, "gitea", &base, "tidewater/slow").await;
     let (_dir, root) = root(&pool).await;
     let seen = Arc::new(Seen::default());
@@ -662,7 +707,7 @@ async fn stopping_kills_git_and_removes_the_half_made_folder() {
             path: target.to_string_lossy().into_owned()
         }
     );
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    await_git_at(&reached).await;
 
     let answer = stop(&pool, &clones, &id).await.unwrap();
 
@@ -699,7 +744,7 @@ async fn a_quit_during_a_clone_removes_its_folder_and_the_next_clone_starts() {
     use tauri::Manager as _;
 
     let pool = pool().await;
-    let (base, server) = silent_server().await;
+    let (base, server, reached) = silent_server_counting().await;
     let id = repo(&pool, "gitea", &base, "tidewater/quit").await;
     let (_dir, root) = root(&pool).await;
     let seen = Arc::new(Seen::default());
@@ -721,7 +766,7 @@ async fn a_quit_during_a_clone_removes_its_folder_and_the_next_clone_starts() {
     .unwrap();
     let target = root.join("quit");
     assert!(target.is_dir(), "the folder is made before git starts");
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    await_git_at(&reached).await;
 
     tokio::task::block_in_place(|| knobas_app::shutdown(app.handle()));
     let left = target.exists();

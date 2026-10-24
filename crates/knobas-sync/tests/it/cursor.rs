@@ -21,6 +21,8 @@ use sqlx::PgPool;
 struct Recorder {
     id: String,
     seen: Arc<Mutex<Vec<Option<Cursor>>>>,
+    /// Where `sync` waits, after recording, until the test lets it through.
+    hold: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 #[async_trait]
@@ -73,9 +75,9 @@ impl Source for Recorder {
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
         self.seen.lock().unwrap().push(cursor.clone());
-        // Long enough that the second run is certainly waiting on the advisory
-        // lock while this one still holds it.
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        if let Some(hold) = &self.hold {
+            hold.acquire().await.unwrap().forget();
+        }
         sink.item(SyncItem {
             entity: knobas_core::entity::EntityRef::new(&self.id, "ONE"),
             kind: "ticket".into(),
@@ -145,20 +147,56 @@ async fn two_overlapping_runs_of_one_source_do_not_both_start_from_scratch() {
     let id = unique();
     configure(&pool, &id).await;
 
+    // The first run in is held in `sync`, its lock held, until the second is
+    // waiting on that lock (#1927). Before, a 300 ms dwell stood for this,
+    // and a second run slower to get there than the dwell found the first
+    // one over and read its cursor, which passes without the overlap.
+    let hold = Arc::new(tokio::sync::Semaphore::new(0));
     let seen = Arc::new(Mutex::new(Vec::new()));
     let a = Recorder {
         id: id.clone(),
         seen: Arc::clone(&seen),
+        hold: Some(Arc::clone(&hold)),
     };
     let b = Recorder {
         id: id.clone(),
         seen: Arc::clone(&seen),
+        hold: Some(Arc::clone(&hold)),
     };
 
     let (mut ca, mut cb) = (dedicated().await, dedicated().await);
-    let (ra, rb) = tokio::join!(
+    let mut pids = Vec::new();
+    for conn in [&mut ca, &mut cb] {
+        let pid: i32 = sqlx::query_scalar("select pg_backend_pid()")
+            .fetch_one(conn)
+            .await
+            .unwrap();
+        pids.push(pid);
+    }
+    let overlapped = async {
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                let waiting: i64 = sqlx::query_scalar(
+                    "select count(*) from pg_locks where pid = any($1) and not granted",
+                )
+                .bind(&pids)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+                if waiting > 0 {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("neither run waited on the other's lock");
+        hold.add_permits(2);
+    };
+    let (ra, rb, ()) = tokio::join!(
         knobas_sync::run_from_stored_cursor(&mut ca, &pool, &a),
         knobas_sync::run_from_stored_cursor(&mut cb, &pool, &b),
+        overlapped,
     );
     ra.unwrap();
     rb.unwrap();
@@ -191,6 +229,7 @@ async fn a_later_run_resumes_from_the_cursor_the_previous_one_stored() {
     let source = Recorder {
         id: id.clone(),
         seen: Arc::clone(&seen),
+        hold: None,
     };
 
     let mut conn = dedicated().await;
@@ -220,6 +259,7 @@ async fn a_source_with_no_configuration_row_is_refused_rather_than_syncing_into_
     let source = Recorder {
         id: id.clone(),
         seen: Arc::new(Mutex::new(Vec::new())),
+        hold: None,
     };
 
     let mut conn = dedicated().await;
@@ -249,6 +289,7 @@ async fn run_once_still_obeys_the_cursor_it_was_handed() {
     let source = Recorder {
         id: id.clone(),
         seen: Arc::clone(&seen),
+        hold: None,
     };
 
     // Store a cursor by running once…

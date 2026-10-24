@@ -61,3 +61,33 @@ pub async fn role_miss(
     .await
     .expect("the role_check miss");
 }
+
+/// Wait until a session is waiting on a lock of `relation` in this database:
+/// the server lists its request, not granted (#1927). Asked on `conn`, which
+/// may be the very connection holding the lock. A hang guard of a minute, not
+/// a measurement.
+pub async fn await_lock_waiter(conn: &mut sqlx::PgConnection, relation: &str) {
+    let waited = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            let waiting: i64 = sqlx::query_scalar(
+                "select count(*) from pg_locks l join pg_class c on c.oid = l.relation
+                  where c.relname = $1 and not l.granted
+                    and l.database = (select oid from pg_database
+                                       where datname = current_database())",
+            )
+            .bind(relation)
+            .fetch_one(&mut *conn)
+            .await
+            .expect("the locks read");
+            if waiting > 0 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    assert!(
+        waited.is_ok(),
+        "nothing waited on a lock of {relation} in a minute"
+    );
+}

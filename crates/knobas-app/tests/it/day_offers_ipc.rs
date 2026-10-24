@@ -131,10 +131,8 @@ async fn a_dismissed_offer_is_gone_and_the_next_reads_do_not_offer_it_again() {
 ///
 /// The dismissal is held open in a transaction of the test's own (the
 /// statement `passive::dismiss` runs, written out, since the seam has no way
-/// to pause it), the read starts beside it, and the dismissal commits while
-/// the read waits. If the read has not reached the wait by the commit, the
-/// test passes for the plain reason that the dismissal came first: the race
-/// can only be missed, never invented.
+/// to pause it), the read starts beside it, and the dismissal commits once
+/// the read waits on it.
 #[tokio::test]
 async fn a_dismissal_committing_beside_a_read_is_not_offered_back() {
     let pool = scratch("day-dismiss-race").await;
@@ -160,7 +158,11 @@ async fn a_dismissal_committing_beside_a_read_is_not_offered_back() {
         let pool = pool.clone();
         async move { read(&pool).await }
     });
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    // The read waits on the dismissal: the server lists its lock request on
+    // the dismissals, not granted (#1927). Before, a 500 ms margin stood for
+    // this, and a read slower to get there came after the commit and passed
+    // without meeting the race.
+    crate::support::await_lock_waiter(&mut dismissing, "passive_dismissal").await;
     dismissing.commit().await.expect("the dismissal commits");
 
     let beside = reader.await.expect("the read finished");

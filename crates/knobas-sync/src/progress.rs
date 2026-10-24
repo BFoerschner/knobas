@@ -234,6 +234,15 @@ impl Watchers {
         }
     }
 
+    /// How many sinks are enrolled: `0` once the run has ended.
+    #[must_use]
+    pub fn enrolled(&self) -> usize {
+        match &*self.lock() {
+            State::Open(sinks) => sinks.len(),
+            State::Closed => 0,
+        }
+    }
+
     /// Send the run's ending to everyone enrolled, and enrol nobody after.
     ///
     /// Idempotent, and the first call wins: the run closes its own watchers
