@@ -60,7 +60,7 @@ RESERVED = {"{", "}", "!", "if", "then", "else", "elif", "fi", "do", "done", "wh
 # Words after which a `((` is arithmetic, as at a command's start: `if ((x))`, `for ((i=0; ...))`, `time -p ((x))`.
 ARITHMETIC_LEADS = RESERVED | {"for", "time", "-p", "coproc"}
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
-MAX_DEPTH = 8  # eval and `sh -c` nested deeper than this are not read
+MAX_DEPTH = 8  # eval, `sh -c`, shell stdin and `find -exec` scripts nested deeper than this are not read
 SHELL_CONFIG = (".bashrc", ".bash_profile", ".profile", ".zshrc", ".zprofile", ".zshenv", ".zlogin")
 
 
@@ -177,7 +177,7 @@ class Parser:
             if c == "\n":
                 new_command()
                 i = self.heredoc_bodies(i + 1)
-                new_command()  # a body's substitutions may have filled a command of only `<<EOF`
+                new_command()  # a body's word may have filled a command of only `<<EOF`
                 continue
             if s.startswith("((", i) and word is None and all(w.text in ARITHMETIC_LEADS for w in commands[-1]):
                 expression = Word()
@@ -189,7 +189,7 @@ class Parser:
             if s.startswith("<<<", i):  # a here-string: the next word is its text
                 end_word()
                 word = self.redirection("<<<")
-                i = self.blanks(i + 3)
+                i = self.skip_blanks(i + 3)
                 continue
             if s.startswith("<<", i):
                 end_word()
@@ -208,7 +208,7 @@ class Parser:
                 while j < len(s) and s[j] in ">&|":
                     j += 1
                 word = self.redirection(">" if writes else "<")
-                i = self.blanks(j)
+                i = self.skip_blanks(j)
                 continue
             if c in ";|&()":
                 if c == "(":
@@ -239,7 +239,7 @@ class Parser:
         word.redirect, word.text = True, text
         return word
 
-    def blanks(self, i):
+    def skip_blanks(self, i):
         """The index past the blanks at `i`."""
         while i < len(self.s) and self.s[i] in " \t":
             i += 1
@@ -365,13 +365,11 @@ class Parser:
     def heredoc(self, i, command):
         """Read the delimiter of a heredoc whose `<<` ends before `i`; its body starts at the next unquoted newline.
 
-        `command` is the list of words the heredoc belongs to, which its body's substitutions join.
+        `command` is the list of words the heredoc belongs to, which its body's word joins.
         """
         s = self.s
         strip_tabs = s.startswith("-", i)
-        i += strip_tabs
-        while i < len(s) and s[i] in " \t":
-            i += 1
+        i = self.skip_blanks(i + strip_tabs)
         delimiter, quoted = "", False
         while i < len(s) and s[i] not in " \t\n;|&<>()":
             quoted = quoted or s[i] in "'\"\\"
@@ -391,8 +389,10 @@ class Parser:
     def heredoc_bodies(self, i):
         """Read the bodies of the heredocs opened on the line that ended before `i`; the index past the last.
 
-        A body is data, but when its delimiter is unquoted the shell runs its
-        `$(...)` and backquotes: they join the heredoc's command as one more word.
+        Each body joins the heredoc's command as one more word, a redirection
+        holding its text for a shell that reads its script from stdin. A body is
+        data, but when its delimiter is unquoted the shell runs its `$(...)` and
+        backquotes: that word holds their commands.
         """
         s = self.s
         pending, self.pending = self.pending, []
@@ -484,14 +484,14 @@ def script_of(name, args, words):
             if re.match(r"^-[a-zA-Z]*c[a-zA-Z]*$", a.text):
                 operands = [b.text for b in args[k + 1:] if not b.text.startswith(("-", "+"))]
                 return operands[0] if operands else None
-        if any(re.match(r"^-[a-zA-Z]*s", a.text) for a in args) or not [a for a in args if a.text[:1] not in "-+"]:
-            fed = [w.body if w.body is not None else w.text[3:] for w in words
+        if any(re.match(r"^-[a-zA-Z]*s", a.text) for a in args) or all(a.text.startswith(("-", "+")) for a in args):
+            fed = [w.body if w.body is not None else w.text[len("<<<"):] for w in words
                    if w.body is not None or (w.redirect and w.text.startswith("<<<"))]
             return fed[-1] if fed else None  # the last one is what the shell reads
     return None
 
 
-def executed(name, args):
+def exec_commands(name, args):
     """The commands a `find -exec`, `-execdir`, `-ok` or `-okdir` runs, each up to its `;` or `+`."""
     out, run = [], None
     for a in args if name == "find" else []:
@@ -515,11 +515,11 @@ class Simple(NamedTuple):
     counts: bool = True  # False for an `eval` or `sh -c`, which its string's commands stand in for
 
 
-def simple_commands(commands, depth=0):  # depth: substitutions, eval and `sh -c` strings around these
-    """Every simple command, those inside substitutions, `eval` and `sh -c` strings included.
+def simple_commands(commands, depth=0):  # depth: the substitutions and scripts (`script_of`, `find -exec`) around these
+    """Every simple command, those inside substitutions, `script_of` scripts and `find -exec` included.
 
-    An `eval` or `sh -c` stands for the commands of its string: it is kept for
-    its redirections, but does not count as a command of its own.
+    An `eval`, `sh -c` or shell reading stdin stands for the commands of its
+    script: it is kept for its redirections, but does not count as a command of its own.
     """
     out = []
     for words in commands:
@@ -530,7 +530,7 @@ def simple_commands(commands, depth=0):  # depth: substitutions, eval and `sh -c
             out += simple_commands(commands_of(script), depth + 1)
             continue
         nested = [x for w in words for sub in w.subs for x in simple_commands(sub, depth + 1)]
-        nested += simple_commands(executed(name, args), depth + 1)
+        nested += simple_commands(exec_commands(name, args), depth + 1)
         out.append(Simple(words, name, args, sum(x.counts for x in nested)))
         out += nested
     return out
