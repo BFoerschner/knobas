@@ -452,6 +452,14 @@
   $effect(() => askInto(JSON.parse(writeAsks) as WriteAsk[], io.refusedWrites, (answer) => (refused = answer)));
   /** Why the open page's `op` cannot be made, or `null`. */
   const refusal = (op: string) => refusalOf(refused, page?.entity_id ?? null, op);
+  /**
+   * The tree's *New page* opens on the space the tree shows. The open page's
+   * answer speaks for it only where that is the page's own space; elsewhere
+   * the dialog asks about its own *Under*.
+   */
+  const treeNewPageRefusal = $derived(
+    shownSpace === undefined || shownSpace === pageSpace ? refusal("create_page") : null,
+  );
   let composer = $state<HTMLTextAreaElement | null>(null);
 
   async function open(url: string): Promise<void> {
@@ -760,9 +768,9 @@
         <button
           type="button"
           class="tf-btn tf-sm"
-          {...refusedAttrs(refusal("create_page"))}
+          {...refusedAttrs(treeNewPageRefusal)}
           onclick={() => {
-            if (refusal("create_page") !== null) return;
+            if (treeNewPageRefusal !== null) return;
             const space = shownSpace ?? pageSpace;
             newPage = { space: space ? spaceId(space) : null, parent: p.entity_id };
           }}

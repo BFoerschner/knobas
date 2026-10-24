@@ -572,6 +572,33 @@ test("New page refuses a parent the credential cannot add pages under, saying wh
   expect(io.docsCreatePage).not.toHaveBeenCalled();
 });
 
+test("the tree's New page on another space than the open page's is not refused by the open page's answer (#2053)", async () => {
+  const reason = "This Confluence user cannot add pages to Engineering: it lacks the Add page permission";
+  const io = await draw(
+    ["confluence:9"],
+    ports({
+      docsPage: vi.fn(async () => ({ ...RICH, entity_id: "confluence:9", space: { key: "ENG", name: "Engineering" }, ancestors: [] })),
+      refusedWrites: vi.fn(async (asks: WriteAsk[]) =>
+        asks.filter((ask) => ask.entity === "confluence:9").map((ask) => ({ ...ask, reason })),
+      ),
+    }),
+  );
+  const tree = () => target.querySelector<HTMLButtonElement>(".tf-dl-foot button")!;
+  expect(tree().title, "on the page's own space the answer holds").toBe(reason);
+  const space = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  space.value = "confluence/OPS";
+  space.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(tree().getAttribute("aria-disabled")).toBeNull();
+  tree().click();
+  await settle();
+  const dialog = document.querySelector("[role='dialog']")!;
+  expect(dialog.querySelector<HTMLSelectElement>("select[aria-label='Under']")!.value).toBe("confluence:1");
+  const create = [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Create page")!;
+  expect(create.getAttribute("aria-disabled")).toBeNull();
+  expect(io.refusedWrites).toHaveBeenLastCalledWith([{ entity: "confluence:1", op: "create_page" }]);
+});
+
 test("an editor open before the refusal lands saves nothing, its Save section drawn refused (#2053)", async () => {
   const reason = "This Confluence user cannot edit On-call handbook: the page's restrictions leave it out";
   let answer: (refused: { entity: string; op: string; reason: string }[]) => void = () => {};
