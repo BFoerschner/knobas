@@ -132,7 +132,10 @@ pub(super) fn unread(error: &SourceError, what: &str, scope: &str) -> Option<Str
 
 /// Gitea's refusal of a request for the token's scope: `knobas-http` reads
 /// Gitea's scope sentence as `Unauthorized` with its 403
-/// (`client::forbidden_refusal`, #722).
+/// (`client::forbidden_refusal`, #722). A 403 whose body is not Gitea's
+/// envelope (a proxy's page) reads the same way, since what it refuses is
+/// unknown and the token is the conservative guess, so it is taken for the
+/// scope refusal here too; any 403 carrying another Gitea sentence is not.
 fn is_scope_refusal(error: &SourceError) -> bool {
     matches!(error, SourceError::Unauthorized { status: Some(403) })
 }
