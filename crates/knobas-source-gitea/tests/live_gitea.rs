@@ -6042,6 +6042,39 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
                 .await;
         }
     };
+    // What the probes could have made: a branch, an issue, a pull request.
+    // Counted on both repositories before any token is minted and after the
+    // last is removed, so a forge that took `{}` for a create fails here. A
+    // listing the repository does not serve (a mirror's pull requests) is
+    // compared by its status.
+    let mirror = format!("{admin}/ops-runbooks-mirror");
+    let footprint = async |repository: &str| -> Vec<(u16, Option<usize>)> {
+        let mut counts = Vec::new();
+        for listing in [
+            "branches?",
+            "issues?state=all&type=issues&",
+            "pulls?state=all&",
+        ] {
+            let answer = http
+                .get(format!("{api}/repos/{repository}/{listing}limit=1"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .expect("GET a listing's count");
+            let count = answer
+                .headers()
+                .get("x-total-count")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<usize>().ok());
+            counts.push((answer.status().as_u16(), count));
+        }
+        counts
+    };
+    let before = (footprint(&env.full_name()).await, footprint(&mirror).await);
+    assert!(
+        before.0.iter().all(|(_, count)| count.is_some()),
+        "the seeded repository counts its branches, issues and pull requests: {before:?}"
+    );
     remove().await;
     let mint = async |(user, pass, name): (&str, &str, &str), scopes: &[&str]| -> String {
         let minted: serde_json::Value = http
@@ -6126,35 +6159,6 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
         id(knobas_source_gitea::keys::commit_key(owner, repo, &sha)),
         id(knobas_source_gitea::keys::pr_key(owner, repo, number)),
     ];
-    // What the probes could have made: a branch, an issue, a pull request.
-    // Counted on both repositories before any view is drawn and after the
-    // last, so a forge that took `{}` for a create would fail here.
-    let mirror = format!("{admin}/ops-runbooks-mirror");
-    let footprint = async |repository: &str| -> Vec<usize> {
-        let mut counts = Vec::new();
-        for listing in [
-            "branches?",
-            "issues?state=all&type=issues&",
-            "pulls?state=all&",
-        ] {
-            let answer = http
-                .get(format!("{api}/repos/{repository}/{listing}limit=1"))
-                .header("Authorization", &auth)
-                .send()
-                .await
-                .expect("GET a listing's count");
-            counts.push(
-                answer
-                    .headers()
-                    .get("x-total-count")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .unwrap_or_else(|| panic!("{repository} {listing}: no X-Total-Count")),
-            );
-        }
-        counts
-    };
-    let before = (footprint(&full).await, footprint(&mirror).await);
     let config = serde_json::json!({ "repos": [full] });
     let narrow = env.source_with(&read_only, config.clone());
     let wide = env.source_with(&writes, config);
@@ -6195,10 +6199,10 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
     let pushless = outsider
         .view(&format!("gitea:{mirror}@{mirror_sha}"), None)
         .await;
-    let after = (footprint(&full).await, footprint(&mirror).await);
 
     remove().await;
 
+    let after = (footprint(&full).await, footprint(&mirror).await);
     assert_eq!(
         after, before,
         "the empty-bodied probes created no branch, issue or pull request"
