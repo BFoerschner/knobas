@@ -149,6 +149,33 @@ mod tests {
         assert_eq!(reason("create_ticket", "jira:PAY"), None);
     }
 
+    /// One permission lacking refuses its own op and no other: each op reads
+    /// its own key, as `mypermissions` names it on Jira 10.3.24.
+    #[test]
+    fn one_permission_lacking_refuses_its_op_alone() {
+        for (lacking, op) in [
+            ("ADD_COMMENTS", "comment"),
+            ("TRANSITION_ISSUES", "transition"),
+            ("WORK_ON_ISSUES", "log_work"),
+            ("CREATE_ISSUES", "create_ticket"),
+        ] {
+            let held = answer(
+                &serde_json::json!({ "permissions": {
+                    "ADD_COMMENTS": { "havePermission": lacking != "ADD_COMMENTS" },
+                    "TRANSITION_ISSUES": { "havePermission": lacking != "TRANSITION_ISSUES" },
+                    "WORK_ON_ISSUES": { "havePermission": lacking != "WORK_ON_ISSUES" },
+                    "CREATE_ISSUES": { "havePermission": lacking != "CREATE_ISSUES" },
+                }})
+                .to_string(),
+            );
+            let refused: Vec<&str> = ["comment", "transition", "log_work", "create_ticket"]
+                .into_iter()
+                .filter(|each| refusal(&held, "PAY", &ask("jira:PAY-231", each)).is_some())
+                .collect();
+            assert_eq!(refused, [op], "lacking {lacking}");
+        }
+    }
+
     /// What the answer does not say, and an op no permission gates, are no
     /// verdict.
     #[test]
