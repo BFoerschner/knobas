@@ -75,6 +75,54 @@ async fn a_data_directory_an_interrupted_initdb_left_is_initialised_again() {
     again.stop().await.unwrap();
 }
 
+/// #1985: a data directory with neither `PG_VERSION` nor `postgresql.conf`,
+/// but not empty, is what an `initdb` killed before it wrote `PG_VERSION`
+/// leaves, or one killed during its own cleanup once that removed
+/// `postgresql.conf`. The launch initialises it again.
+///
+/// Before, it read as "not initialised", `initdb` refused a directory that
+/// was not empty, and every launch failed. `initdb` makes its subdirectories,
+/// `base/1` among them, before `PG_VERSION`. Its cleanup removes entries in
+/// the order the directory lists them, which on APFS is `PG_VERSION`, then
+/// `postgresql.conf`, with `global/` and `base/` last: 40 of 40 runs that
+/// sent `SIGTERM` and then `SIGKILL` once `postgresql.conf` was gone left the
+/// second and third fixture (evidence under #1985 in
+/// `docs/decisions/2026-10-unattended-rulings.md`).
+#[tokio::test]
+async fn a_data_directory_an_initdb_killed_before_pg_version_left_is_initialised_again() {
+    for subdirs in [
+        &["base", "global"][..],
+        &["base/1", "global", "pg_tblspc", "pg_xact"],
+        &["base/1", "base/4", "base/5", "global", "pg_tblspc"],
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        for sub in subdirs {
+            std::fs::create_dir_all(data.join(sub)).unwrap();
+        }
+        let cfg = DbConfig {
+            root_dir: dir.path().to_path_buf(),
+            existing_url: None,
+        };
+
+        let db = EmbeddedDb::start(cfg.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{subdirs:?}: the launch failed: {error}"));
+        let one: (i32,) = sqlx::query_as("select 1")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+        assert_eq!(one.0, 1, "{subdirs:?}");
+        assert!(data.join("PG_VERSION").is_file(), "{subdirs:?}: initdb ran");
+        db.stop().await.unwrap();
+
+        let again = EmbeddedDb::start(cfg)
+            .await
+            .unwrap_or_else(|error| panic!("{subdirs:?}: the next launch failed: {error}"));
+        again.stop().await.unwrap();
+    }
+}
+
 /// #1819: a data directory that holds a database is never removed, whatever
 /// else it lacks. Each one here fails to start, and every file in it is still
 /// there afterwards.

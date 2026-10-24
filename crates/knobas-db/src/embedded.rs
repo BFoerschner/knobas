@@ -1626,6 +1626,7 @@ fn read_password(password_file: &Path) -> Result<Option<String>, DbError> {
 /// - **Holds a database**, no marker: a finished `initdb` an older build ran.
 ///   Marked now and never removed.
 /// - **Unfinished**: removed, so `initdb` runs again.
+/// - **Unrecognised** or **not initialised**: left as it is.
 ///
 /// A data directory that is a symlink loses the link alone (`remove_dir_all`
 /// follows no symlink): what it points at is left as it was, and `initdb`
@@ -1634,6 +1635,14 @@ fn read_password(password_file: &Path) -> Result<Option<String>, DbError> {
 fn recover_or_mark(data_dir: &Path) -> Result<(), DbError> {
     match shape(data_dir) {
         Shape::Marked | Shape::NotInitialised => Ok(()),
+        Shape::Unrecognised => {
+            tracing::warn!(
+                data_dir = %data_dir.display(),
+                "this data directory has no PG_VERSION and no postgresql.conf, but may hold a \
+                 database: keeping it, and initdb will refuse it"
+            );
+            Ok(())
+        }
         Shape::HoldsDatabase => {
             mark_finished(data_dir);
             Ok(())
@@ -1662,8 +1671,11 @@ fn recover_or_mark(data_dir: &Path) -> Result<(), DbError> {
 enum Shape {
     /// Knobas's `initdb` finished here ([`INITDB_FINISHED`]).
     Marked,
-    /// Nothing an `initdb` left: no `PG_VERSION`, no `postgresql.conf`.
+    /// Nothing at all, or an empty directory.
     NotInitialised,
+    /// No `PG_VERSION`, no `postgresql.conf`, and a database in it or one
+    /// that may be: no `initdb` left it, and no launch removes it.
+    Unrecognised,
     /// No marker, and it holds a database or may: a finished `initdb` an
     /// older build ran, or one whose databases cannot be listed.
     HoldsDatabase,
@@ -1678,6 +1690,14 @@ enum Shape {
 ///
 /// Without `PG_VERSION` and with `postgresql.conf`, it is unfinished (#1637):
 /// `initdb` writes `PG_VERSION` first and its cleanup removes it first.
+///
+/// Without either, and not empty, it is unfinished when it holds no database
+/// (#1985): nothing under `base/` but `1`, `4` and `5`, and nothing under
+/// `pg_tblspc/`, either of which may be missing. An `initdb` killed before it
+/// wrote `PG_VERSION` leaves its subdirectories, and one killed during its
+/// cleanup once `postgresql.conf` was gone leaves what the cleanup had not
+/// reached, `base/5` included. A server never ran on either, so no `knobas`
+/// database is in it. Anything else is [`Shape::Unrecognised`].
 ///
 /// With `PG_VERSION`, it is unfinished when it **holds no database**: nothing
 /// under `base/` but the templates `1` and `4`, and nothing under
@@ -1695,14 +1715,10 @@ fn shape(data_dir: &Path) -> Shape {
     if present(INITDB_FINISHED) {
         return Shape::Marked;
     }
-    if !present("PG_VERSION") {
-        return if present("postgresql.conf") {
-            Shape::Unfinished
-        } else {
-            Shape::NotInitialised
-        };
-    }
-    let only = |dir: &str, allowed: &[&str]| match std::fs::read_dir(data_dir.join(dir)) {
+    // `missing` is what a directory that is not there counts as.
+    let only = |dir: &str, allowed: &[&str], missing: bool| match std::fs::read_dir(
+        data_dir.join(dir),
+    ) {
         Ok(entries) => entries.into_iter().all(|entry| {
             entry.is_ok_and(|entry| {
                 entry
@@ -1711,12 +1727,26 @@ fn shape(data_dir: &Path) -> Shape {
                     .is_some_and(|name| allowed.contains(&name))
             })
         }),
-        // Even "not found" is a doubt: `initdb` makes both before
-        // `PG_VERSION`, so a missing one is a link to a volume not mounted,
-        // or a directory being copied in, not a killed `initdb`.
+        Err(source) if source.kind() == io::ErrorKind::NotFound => missing,
         Err(_) => false,
     };
-    if only("base", &["1", "4"]) && only("pg_tblspc", &[]) {
+    if !present("PG_VERSION") {
+        return if present("postgresql.conf") {
+            Shape::Unfinished
+        } else if only("", &[], true) {
+            Shape::NotInitialised
+        } else if only("base", &["1", "4", "5"], true) && only("pg_tblspc", &[], true) {
+            // Killed before `PG_VERSION` made `base/` or `pg_tblspc/`, or in
+            // a cleanup that removed one; the cleanup may leave `base/5`.
+            Shape::Unfinished
+        } else {
+            Shape::Unrecognised
+        };
+    }
+    // Even "not found" is a doubt here: `initdb` makes both before
+    // `PG_VERSION`, so a missing one is a link to a volume not mounted, or a
+    // directory being copied in, not a killed `initdb`.
+    if only("base", &["1", "4"], false) && only("pg_tblspc", &[], false) {
         Shape::Unfinished
     } else {
         Shape::HoldsDatabase
