@@ -238,13 +238,13 @@ jiraFilter(10251, "Resolved this week", "project in (PAY, OPS) AND resolved >= -
 // under *Kestrel boards* as the sync names a group, so Tickets draws a source that is not Jira.
 JIRA.push({
   ref: "kestrel:board-7",
-  member: (key) => key.startsWith("CUS-"),
-  copy: copied([is("project", "CUS")], 1),
+  member: (key) => key.startsWith("OPS-"),
+  copy: copied([is("project", "OPS")], 1),
   source: {
     kind: "board",
     system: "Kestrel",
     board_type: "kanban",
-    source_query: "project: CUS, state: open",
+    source_query: "project: OPS, state: open",
     sub_query: null,
     sprint: null,
     last_read: READ,
@@ -255,7 +255,7 @@ JIRA.push({
   },
 });
 VIEWS.push({
-  ...seeded("kestrel-board-7", "Customs triage", "Kestrel boards", "", "board"),
+  ...seeded("kestrel-board-7", "Ops triage", "Kestrel boards", "", "board"),
   columns: [col("Open", ["To Do"]), col("Working", ["In Progress", "In Review"], 3), col("Closed", ["Done"])],
   saved_view: "kestrel:board-7",
 });
