@@ -500,8 +500,45 @@ impl SyncEvents for Recorder {
     }
 }
 
+/// A keychain that can be locked (#1741): what a locked macOS keychain
+/// answers a read with, `errSecInteractionNotAllowed`, arrives as
+/// [`SecretError::Backend`](knobas_secrets::SecretError::Backend), so that is
+/// what a locked one here answers. Open, it is the [`MemoryStore`] it wraps.
+struct Lockable {
+    inner: MemoryStore,
+    locked: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl SecretStore for Lockable {
+    fn get(
+        &self,
+        account: &knobas_secrets::KeychainAccount,
+    ) -> Result<Option<Secret>, knobas_secrets::SecretError> {
+        if self.locked.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(knobas_secrets::SecretError::Backend(
+                "User interaction is not allowed.".to_owned(),
+            ));
+        }
+        self.inner.get(account)
+    }
+    fn put(
+        &self,
+        account: &knobas_secrets::KeychainAccount,
+        secret: &Secret,
+    ) -> Result<(), knobas_secrets::SecretError> {
+        self.inner.put(account, secret)
+    }
+    fn delete(
+        &self,
+        account: &knobas_secrets::KeychainAccount,
+    ) -> Result<(), knobas_secrets::SecretError> {
+        self.inner.delete(account)
+    }
+}
+
 struct Harness {
     deps: SchedulerDeps,
+    locked: Arc<std::sync::atomic::AtomicBool>,
     events: Arc<Recorder>,
     answer: Arc<Mutex<Answer>>,
     asked: Arc<Mutex<usize>>,
@@ -521,6 +558,12 @@ impl Harness {
 
     fn answer(&self, answer: Answer) {
         *self.answer.lock().unwrap() = answer;
+    }
+
+    /// Lock or unlock the keychain the flushes read the credential from.
+    fn lock_keychain(&self, locked: bool) {
+        self.locked
+            .store(locked, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// What the fake actually accepted, in order, each write read back by the
@@ -914,6 +957,7 @@ async fn harness() -> Harness {
     let file_at = Arc::new(Mutex::new(None));
     let doors = Arc::new(Mutex::new(Doors::default()));
     let events = Arc::new(Recorder::default());
+    let locked = Arc::new(std::sync::atomic::AtomicBool::new(false));
     Harness {
         deps: SchedulerDeps {
             pool: pool.clone(),
@@ -929,11 +973,15 @@ async fn harness() -> Harness {
                 doors: Arc::clone(&doors),
                 pool,
             }),
-            secrets: Arc::new(secrets),
+            secrets: Arc::new(Lockable {
+                inner: secrets,
+                locked: Arc::clone(&locked),
+            }),
             events: Arc::clone(&events) as Arc<dyn SyncEvents>,
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
             quit: knobas_sync::scheduler::Quit::default(),
         },
+        locked,
         events,
         answer,
         asked,
@@ -2608,6 +2656,42 @@ async fn an_unreachable_write_is_tried_again_on_the_sync_ladder() {
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
     assert_eq!(h.asked(), 3);
     assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+}
+
+/// #1741: a keychain that would not open is not a refused credential. A
+/// write flushed while it is locked waits `unreachable` and climbs the same
+/// ladder the sync does, rather than waiting for a person, and goes once the
+/// keychain is open and the rung has passed. The source is never asked
+/// while the credential cannot be read.
+#[tokio::test]
+async fn a_write_flushed_while_the_keychain_is_locked_climbs_the_ladder() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-46", "a payout fails").await;
+
+    h.lock_keychain(true);
+    let write = h.comment(&ticket, "typed while the keychain was locked").await;
+    let waiting = h.reload(write.id).await;
+    assert_eq!(waiting.state, WriteState::Pending);
+    assert_eq!(waiting.wait_reason, Some(WaitReason::Unreachable));
+    let detail = waiting.detail.unwrap_or_default();
+    assert!(
+        detail.starts_with("keychain:"),
+        "the panel reads the detail for the keychain: {detail:?}"
+    );
+    assert_eq!(h.asked(), 0, "the source is not asked without a credential");
+
+    h.lock_keychain(false);
+    h.rewind(50).await;
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.asked(), 0, "not before the first rung, one minute");
+
+    h.rewind(10).await;
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+    assert_eq!(
+        h.delivered(),
+        vec!["typed while the keychain was locked".to_owned()]
+    );
 }
 
 /// #1628: *Flush now* is the reader saying "try it": it sends a

@@ -142,7 +142,11 @@
       case "unauthorized":
         return "The credential was rejected.";
       case "unreachable":
-        return "The server did not answer.";
+        // A keychain that would not open climbs the same ladder as a silent
+        // server, and the queue's detail is how the two are told apart (#1741).
+        return row.detail?.startsWith("keychain:")
+          ? "The keychain would not open. Unlock it and this is tried again on its own."
+          : "The server did not answer.";
       default:
         return "Waiting.";
     }
