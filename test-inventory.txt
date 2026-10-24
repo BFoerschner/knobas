@@ -991,6 +991,7 @@ knobas-app	test/it	search_ipc::the_wire_shape_is_the_contract
 knobas-app	test/it	search_ipc::under_reads_the_parent_the_compiled_in_gitea_adapter_declares
 knobas-app	test/it	signals_ipc::a_card_carries_its_labels_in_the_records_order
 knobas-app	test/it	signals_ipc::a_resolved_or_unconfirmed_fact_makes_no_signal
+knobas-app	test/it	signals_ipc::a_review_asked_of_a_dotted_capital_i_user_is_on_the_card_and_in_has
 knobas-app	test/it	signals_ipc::a_room_shares_no_build_and_a_withdrawn_blocker_blocks_nothing
 knobas-app	test/it	signals_ipc::an_unknown_has_value_is_reported
 knobas-app	test/it	signals_ipc::each_signal_is_drawn_on_its_card_and_has_admits_exactly_those_tickets
@@ -2181,6 +2182,7 @@ knobas-search	test/it	bare_name::the_full_name_still_puts_its_repo_first
 knobas-search	test/it	bare_name::the_owner_names_none_of_its_repos
 knobas-search	test/it	bare_name::the_repo_named_for_the_query_outranks_a_newer_one_that_mentions_it
 knobas-search	test/it	bare_name::the_repo_whose_last_segment_is_the_query_comes_first
+knobas-search	test/it	cased_identity::a_capital_in_the_configured_username_still_names_the_user
 knobas-search	test/it	corpus_seam::a_name_outranks_a_path_outranks_a_property
 knobas-search	test/it	corpus_seam::a_path_in_a_url_takes_its_port_and_its_segments_out_of_reach
 knobas-search	test/it	corpus_seam::a_second_corpus_adds_no_binds_and_still_executes
@@ -2286,6 +2288,7 @@ knobas-search	test/it	ticket_keys::a_mirror_row_whose_kind_declares_no_path_fail
 knobas-search	test/it	ticket_keys::a_saved_list_of_ticket_keys_counts_what_it_lists
 knobas-search	test/it	ticket_keys::a_ticket_key_alone_is_a_query_and_matches_no_note
 knobas-search	test/it	ticket_keys::a_value_with_a_dotted_capital_i_matches_under_the_servers_fold
+knobas-search	test/it	ticket_keys::a_word_with_a_dotted_capital_i_matches_under_the_servers_fold
 knobas-search	test/it	ticket_keys::assigned_is_mine_and_changed_within_the_window
 knobas-search	test/it	ticket_keys::each_scalar_key_matches_its_field_any_value_and_negates
 knobas-search	test/it	ticket_keys::filter_suggestions_offer_each_keys_values
