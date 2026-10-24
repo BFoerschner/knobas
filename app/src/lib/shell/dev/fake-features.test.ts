@@ -257,8 +257,6 @@ test("the applications are macOS's four, a saved list replaces them, and opening
   }) as Settings;
   expect(saved.applications.at(-1)?.id).toBe("my-git-viewer");
   expect(saved.default_application).toBe("my-git-viewer");
-  // Put the shipped list back for the tests after this one: the fixture is module state.
-  h["set_checkout_applications"]!({ applications: first.applications, defaultApplication: "vscode" });
 });
 
 // -- the job's reach and Start work (#817, #818) ------------------------------
