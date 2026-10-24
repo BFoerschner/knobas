@@ -7,7 +7,7 @@
 //     ` + click:<name>` after a route clicks the first button, link, tab or menu
 //     item whose accessible name or text is <name> (failing that, whose first child
 //     element's text is, so an item with a dim description matches); `click:testid=<id>` takes a
-//     data-testid. Waits up to 5 s; a miss exits 1 naming the step.
+//     data-testid. Waits up to SHOT_STEP_WAIT_S; a miss exits 1 naming the step.
 //   The other steps (#1396), for what a click cannot reach:
 //     `focus:<name>` focuses the first enabled input, textarea, select or contenteditable
 //       whose aria-label, placeholder or label text is <name>; `focus:testid=<id>`. Waits as click does.
@@ -31,6 +31,12 @@
 //       `scroll:testid=<id>` scrolls that element into view.
 //   SHOT_FULL=1 grows the viewport to the tallest scrolling element's content before the
 //   capture (at most 8000 px), so a long page is one image.
+//   The waits (#1957) poll for the state they need and run out only on a guard sized
+//   past a loaded machine's, each named in its failure: SHOT_START_WAIT_S (default 120)
+//   for Chrome's DevTools endpoint to offer a page and the first route to finish
+//   loading; SHOT_STEP_WAIT_S (default 60) for the element a step names. A Chrome that
+//   exits before it offers a page fails at once. SHOT_CHROME replaces the Chrome binary
+//   (scripts/shot-test.sh starts a late one and a dead one).
 //   Every uncaught exception and console.error in the page is printed as `shot: uncaught …`
 //   or `shot: console.error …`. An uncaught exception fails the shot (exit 1) after its image
 //   is written, so a screen that throws never passes as a picture; SHOT_ALLOW_ERRORS=1 lets
@@ -41,6 +47,24 @@ import { writeFileSync } from "node:fs";
 const [port, debug, profile, size, theme, file, spec, extra = ""] = process.argv.slice(2);
 const [width, height] = size.split(",").map(Number);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A guard in seconds from the environment, or its default.
+const guard = (name, fallback) => {
+  const s = Number(process.env[name] ?? fallback);
+  return Number.isFinite(s) && s > 0 ? s : fallback;
+};
+const START_WAIT_S = guard("SHOT_START_WAIT_S", 120);
+const STEP_WAIT_S = guard("SHOT_STEP_WAIT_S", 60);
+// Polls `probe` every 250 ms until it returns something truthy, or the guard runs
+// out (null). `stop` is asked between polls for a reason to give up at once.
+const poll = async (seconds, probe, stop = () => null) => {
+  const deadline = Date.now() + seconds * 1000;
+  for (;;) {
+    const got = await probe();
+    if (got) return got;
+    if (stop() || Date.now() >= deadline) return null;
+    await sleep(250);
+  }
+};
 // The keys a `key:` step can name beyond one character: [key, code, keyCode, text].
 const NAMED_KEYS = {
   Enter: ["Enter", "Enter", 13, "\r"],
@@ -98,7 +122,12 @@ const keyPress = (combo) => {
 const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, `--window-size=${size}`];
 if (theme === "dark") flags.push("--blink-settings=preferredColorScheme=0");
 if (theme === "light") flags.push("--blink-settings=preferredColorScheme=1");
-const chrome = spawn("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", [...flags, "about:blank"], { stdio: "ignore", detached: true });
+const chromePath = process.env.SHOT_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const chrome = spawn(chromePath, [...flags, "about:blank"], { stdio: "ignore", detached: true });
+// Why Chrome is gone, once it is: an exit before it offered a page is a fault, not a slow start.
+let chromeGone = null;
+chrome.on("error", (e) => (chromeGone ??= `Chrome did not start (${e.message})`));
+chrome.on("exit", (code, signal) => (chromeGone ??= `Chrome exited (${signal ? `signal ${signal}` : `code ${code}`})`));
 // Chrome leads its own process group, so one SIGKILL reaches its helpers too; a plain
 // SIGTERM to the main process left a browser running after a failing step (#1603).
 // Every exit path goes through here: done(), a signal, the process's own exit.
@@ -117,16 +146,30 @@ const done = (code, msg) => {
 for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => done(1, `shot: ${sig}`));
 process.on("exit", closeChrome);
 try {
-  let page = null;
-  for (let i = 0; i < 60 && !page; i++) {
-    try {
-      page = (await (await fetch(`http://localhost:${debug}/json`)).json()).find((t) => t.type === "page");
-    } catch {}
-    if (!page) await sleep(250);
-  }
-  if (!page) done(1, "shot: Chrome never offered a page");
+  // What the DevTools endpoint last answered, for the failure when none is a page.
+  let seen = `nothing yet on :${debug}`;
+  const page = await poll(
+    START_WAIT_S,
+    async () => {
+      try {
+        const targets = await (await fetch(`http://localhost:${debug}/json`)).json();
+        seen = `:${debug} listed ${targets.length} target(s)${targets.length ? `: ${targets.map((t) => t.type).join(", ")}` : ""}`;
+        return targets.find((t) => t.type === "page");
+      } catch (e) {
+        seen = `:${debug} did not answer (${e.cause?.code ?? e.message})`;
+      }
+    },
+    () => chromeGone,
+  );
+  if (!page && chromeGone) done(1, `shot: ${chromeGone} before it offered a page; last seen: ${seen}`);
+  if (!page) done(1, `shot: Chrome offered no page within ${START_WAIT_S} s (SHOT_START_WAIT_S); last seen: ${seen}`);
   const ws = new WebSocket(page.webSocketDebuggerUrl);
-  await new Promise((r) => (ws.onopen = r));
+  await new Promise((r, reject) => {
+    ws.onopen = r;
+    ws.onerror = () => reject(new Error(`the DevTools socket ${page.webSocketDebuggerUrl} would not open`));
+  });
+  // A connection lost mid-run leaves every pending command unanswered; fail naming it.
+  ws.onclose = () => done(1, `shot: Chrome closed the DevTools connection${chromeGone ? ` (${chromeGone})` : ""}`);
   let seq = 0;
   const waiting = new Map();
   const uncaught = [];
@@ -262,12 +305,18 @@ try {
       return true;
     })()`;
   };
+  const within = ` within ${STEP_WAIT_S} s (SHOT_STEP_WAIT_S)`;
   let first = true;
   for (const segment of spec.split(" > ")) {
     const [route, ...steps] = segment.split(" + ").map((s) => s.trim());
     const path = route.replace(/^#?\/?/, "");
     if (first) {
       await send("Page.navigate", { url: `${base}#/${path}` });
+      // A dev server compiles the app on its first request, so the load is waited
+      // for, not guessed; the pause after it is for the app's first render.
+      let state = "unread";
+      const loaded = await poll(START_WAIT_S, async () => (state = await evaluate("document.readyState")) === "complete");
+      if (!loaded) done(1, `shot: #/${path} did not finish loading within ${START_WAIT_S} s (SHOT_START_WAIT_S); readyState: ${state}`);
       await sleep(4000);
       first = false;
     } else {
@@ -279,27 +328,15 @@ try {
       const verb = colon < 0 ? step : step.slice(0, colon);
       const arg = step.slice(colon + 1);
       if (verb === "click" || verb === "focus") {
-        let hit = false;
-        for (let i = 0; i < 20 && !hit; i++) {
-          hit = await evaluate(verb === "click" ? clickJs(arg) : focusJs(arg));
-          if (!hit) await sleep(250);
-        }
-        if (!hit) done(1, `shot: step '${step}' found no enabled element on #/${path}`);
+        const hit = await poll(STEP_WAIT_S, () => evaluate(verb === "click" ? clickJs(arg) : focusJs(arg)));
+        if (!hit) done(1, `shot: step '${step}' found no enabled element on #/${path}${within}`);
       } else if (POINTER.has(verb)) {
-        let at = null;
-        for (let i = 0; i < 20 && !at; i++) {
-          at = await evaluate(pointJs(arg));
-          if (!at) await sleep(250);
-        }
-        if (!at) done(1, `shot: step '${step}' found no visible enabled element on #/${path}`);
+        const at = await poll(STEP_WAIT_S, () => evaluate(pointJs(arg)));
+        if (!at) done(1, `shot: step '${step}' found no visible enabled element on #/${path}${within}`);
         await pointer(verb, at);
       } else if (verb === "select" && arg.slice(arg.startsWith("testid=") ? 7 : 0).includes("=")) {
-        let hit = false;
-        for (let i = 0; i < 20 && !hit; i++) {
-          hit = await evaluate(selectJs(arg));
-          if (!hit) await sleep(250);
-        }
-        if (!hit) done(1, `shot: step '${step}' found no such select and option on #/${path}`);
+        const hit = await poll(STEP_WAIT_S, () => evaluate(selectJs(arg)));
+        if (!hit) done(1, `shot: step '${step}' found no such select and option on #/${path}${within}`);
       } else if (verb === "type") {
         await send("Input.insertText", { text: arg });
       } else if (verb === "key") {
