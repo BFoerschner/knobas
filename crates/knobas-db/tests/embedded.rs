@@ -125,6 +125,101 @@ async fn a_data_directory_an_initdb_killed_before_pg_version_left_is_initialised
     }
 }
 
+/// #2007: a data directory that keeps `PG_VERSION` but lost another file
+/// `initdb` writes is what a kill during `initdb`'s own cleanup leaves on a
+/// filesystem that lists `PG_VERSION` after that file. The launch
+/// initialises it again.
+///
+/// Before, `base/5` read as a database, so the directory was marked and
+/// failed every launch: `initdb` refused it as not empty, or, with
+/// `postgresql.conf` still there, the server could not start. The cleanup
+/// removes the top level's files in `readdir` order before any directory.
+/// On ext4, which lists by name hash, five Linux filesystems of seven left
+/// these fixtures (evidence under #2007 in
+/// `docs/decisions/2026-10-unattended-rulings.md`).
+#[tokio::test]
+async fn a_data_directory_an_initdb_cleanup_cut_short_after_pg_version_left_is_initialised_again()
+{
+    for files in [
+        &["PG_VERSION", "pg_hba.conf", "pg_ident.conf", "postgresql.auto.conf"][..],
+        &["PG_VERSION", "postgresql.auto.conf", "postgresql.conf"],
+        &["PG_VERSION"],
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        cut_cleanup(&data, files);
+        let cfg = DbConfig {
+            root_dir: dir.path().to_path_buf(),
+            existing_url: None,
+        };
+
+        let db = EmbeddedDb::start(cfg.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{files:?}: the launch failed: {error}"));
+        let one: (i32,) = sqlx::query_as("select 1")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+        assert_eq!(one.0, 1, "{files:?}");
+        assert!(data.join("pg_hba.conf").is_file(), "{files:?}: initdb ran");
+        db.stop().await.unwrap();
+
+        let again = EmbeddedDb::start(cfg)
+            .await
+            .unwrap_or_else(|error| panic!("{files:?}: the next launch failed: {error}"));
+        again.stop().await.unwrap();
+    }
+}
+
+/// #2007: the same directory with `postmaster.opts`, which every server
+/// start writes and `initdb` never does, is one a server ran on. It is kept,
+/// left unmarked, and the launch fails naming it.
+#[tokio::test]
+async fn a_data_directory_a_server_ran_on_that_lost_an_initdb_file_is_kept_unmarked() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    cut_cleanup(&data, &["PG_VERSION", "pg_hba.conf", "postgresql.auto.conf"]);
+    std::fs::write(data.join("postmaster.opts"), "postgres -D data\n").unwrap();
+
+    let refused = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await;
+
+    let error = match refused {
+        Ok(db) => {
+            db.stop().await.unwrap();
+            panic!("a directory with no pg_control started");
+        }
+        Err(error) => error.to_string(),
+    };
+    assert!(
+        error.contains(data.to_str().unwrap()),
+        "the error names the directory: {error}"
+    );
+    assert!(data.join("PG_VERSION").is_file(), "kept");
+    assert!(data.join("base/5").is_dir(), "kept");
+    assert!(
+        !data.join("knobas-initdb-finished").exists(),
+        "not marked finished"
+    );
+}
+
+/// What `initdb`'s cleanup leaves at `data` when a kill cuts it short after
+/// it removed some of the top level's files: `files`, and every directory a
+/// finished `initdb` makes, `base/1`, `4` and `5` among them.
+fn cut_cleanup(data: &std::path::Path, files: &[&str]) {
+    for sub in [
+        "base/1", "base/4", "base/5", "global", "pg_tblspc", "pg_wal", "pg_xact",
+    ] {
+        std::fs::create_dir_all(data.join(sub)).unwrap();
+    }
+    for file in files {
+        std::fs::write(data.join(file), "# written by initdb\n").unwrap();
+    }
+}
+
 /// #1819: a data directory that holds a database is never removed, whatever
 /// else it lacks. Each one here fails to start, and every file in it is still
 /// there afterwards.
@@ -134,7 +229,9 @@ async fn a_data_directory_an_initdb_killed_before_pg_version_left_is_initialised
 /// makes `base/5`, the `postgres` database, last. Each fixture here lacks
 /// `global/pg_control` and has no marker, so only the database keeps it. The
 /// second has no `postgresql.conf`, so `initdb` runs and refuses a directory
-/// that is not empty.
+/// that is not empty. Its `base/5` is a database because a server ran there
+/// (`postmaster.opts`): without one, it is what a cut-short cleanup leaves
+/// (#2007).
 #[tokio::test]
 async fn a_data_directory_that_holds_a_database_is_never_removed() {
     for (with_conf, database) in [
@@ -149,6 +246,9 @@ async fn a_data_directory_that_holds_a_database_is_never_removed() {
         std::fs::create_dir_all(data.join(database)).unwrap();
         std::fs::write(data.join("PG_VERSION"), "18\n").unwrap();
         std::fs::write(data.join("keep-me"), "a reader's file\n").unwrap();
+        if !with_conf {
+            std::fs::write(data.join("postmaster.opts"), "postgres -D data\n").unwrap();
+        }
         if with_conf {
             std::fs::write(data.join("postgresql.conf"), "# written by initdb\n").unwrap();
         }
