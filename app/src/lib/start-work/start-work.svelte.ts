@@ -21,7 +21,7 @@
  * success it tells the reader work happened that has not. It gets its own
  * word, which is what {@link demandOf} is for.
  */
-import { ipcErrorMessage } from "../ipc";
+import { ipcErrorMessage, isIpcError } from "../ipc";
 import {
   startWorkAmend,
   startWorkFlow,
@@ -238,6 +238,18 @@ export function createStartWork(entityId: string, api: StartWorkApi = BRIDGE): S
     } catch (error) {
       generation += 1;
       state.error = ipcErrorMessage(error);
+      // A conflict is most often the backend answering a read that went
+      // stale: the step moved on underneath the stepper (#1707). Re-read so
+      // the rows show where it is now, with the refusal still on screen, and
+      // follow a flow that is still moving.
+      if (isIpcError(error) && error.code === "conflict") {
+        try {
+          state.steps = await api.flow(entityId, null);
+          if (moving(state.steps)) follow();
+        } catch {
+          // The refusal already says why; the next read asks again.
+        }
+      }
     } finally {
       state.busy = false;
     }
