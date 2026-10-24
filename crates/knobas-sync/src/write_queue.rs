@@ -457,7 +457,7 @@ impl Gate {
     /// queues a waiter in the same poll it finds the lock taken. The one other
     /// `Pending` is tokio's cooperative budget running out, which would count a
     /// flusher that is not queued yet; `unconstrained` takes that one out, for
-    /// this one poll of the lock and nothing else (#1926).
+    /// the polls of this lock and nothing else in the turn (#1926).
     async fn queue(&self) -> tokio::sync::MutexGuard<'_, ()> {
         /// One flusher in the queue, counted for as long as this lives.
         struct Queued<'a>(&'a AtomicUsize);
@@ -481,8 +481,9 @@ impl Gate {
     }
 }
 
-/// How many flushers are queued for `source_id`'s lock behind the write on
-/// the wire, and do not hold it yet.
+/// How many flushers are queued for `source_id`'s lock behind whoever holds
+/// it -- the write on the wire -- and have not yet come out of that wait. A
+/// flusher the lock was just handed to is counted until its next poll.
 ///
 /// A read for tests (#1926), as [`Background::running`] is: the lock is fair,
 /// so a flusher counted here is served before any flusher that asks after it,

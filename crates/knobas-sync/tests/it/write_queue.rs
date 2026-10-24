@@ -2030,13 +2030,13 @@ async fn behind_a_head_on_the_wire(fate: Fate) {
         assert_eq!(target, mine.to_string(), "the head on `mine` goes first");
         let lands = async {
             h.queued_for_the_source(1).await;
-            // The head goes, and the submitted write after it has no door.
+            // The head goes, and the door stays open for the submitted write
+            // after it on the same entity.
             head_out.open();
         };
-        let (submitted, ()) = guarded(
-            "the submit waited for the other entity's write",
-            async { tokio::join!(h.comment(&mine, "mine"), lands) },
-        )
+        let (submitted, ()) = guarded("the submit waited for the other entity's write", async {
+            tokio::join!(h.comment(&mine, "mine"), lands)
+        })
         .await;
         let submitted = h.reload(submitted.id).await.state;
         slow_out.open();
