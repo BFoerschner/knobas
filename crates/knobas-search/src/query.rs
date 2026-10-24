@@ -1862,8 +1862,12 @@ mod tests {
     }
 
     /// The list of keys the minus is refused on is every key
-    /// `apply_key_value` reads: a key added there and not here would be
-    /// demoted again.
+    /// `apply_key_value` reads, both ways (#1649): a key added there and not
+    /// here would be demoted again, and one listed here and read nowhere
+    /// would refuse a minus on a word.
+    ///
+    /// The reverse direction reads the function's own match arms, because no
+    /// probe can name a key nobody has listed yet.
     #[test]
     fn the_refused_keys_are_the_keys_apply_key_value_reads() {
         let v = fixture();
@@ -1876,6 +1880,36 @@ mod tests {
         }
         let mut parsed = Parsed::empty(&v);
         assert!(!apply_key_value("jira", "x", "jira:x", &v, &mut parsed));
+
+        let source = include_str!("query.rs");
+        let body = &source[source
+            .find("\nfn apply_key_value(")
+            .expect("apply_key_value is in this file")..];
+        let body = &body[body.find("match key {").expect("it matches on the key")..];
+        let body = &body[..body
+            .find("_ => return false,")
+            .expect("its fallback arm")];
+        let mut read: Vec<&str> = body.lines().filter_map(arm_keys).flatten().collect();
+        read.sort_unstable();
+        let mut listed = NEGATION_UNSUPPORTED_KEYS.to_vec();
+        listed.sort_unstable();
+        assert_eq!(
+            read, listed,
+            "the keys apply_key_value's arms read, against NEGATION_UNSUPPORTED_KEYS"
+        );
+    }
+
+    /// The string literals a match arm's pattern names, when `line` opens
+    /// one (`"kind" | "type" => {`, or a `| "x"` continuation).
+    fn arm_keys(line: &str) -> Option<Vec<&str>> {
+        let head = line.trim().trim_start_matches('|').trim();
+        let head = head.split_once("=>").map_or(head, |(pattern, _)| pattern).trim();
+        if head.is_empty() {
+            return None;
+        }
+        head.split('|')
+            .map(|literal| literal.trim().strip_prefix('"')?.strip_suffix('"'))
+            .collect()
     }
 
     /// Repeated values of one key mean any of them; the same value twice is
