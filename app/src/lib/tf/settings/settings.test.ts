@@ -164,7 +164,10 @@ test("a sync run reads as started, took and what it did", () => {
     tone: "err",
   });
   expect(runRow({ ...run, finished_at: null, outcome: null }, JIRA, NOW)).toMatchObject({ result: "Running…", tone: "run" });
-  expect(runRow({ ...run, started_at: "2026-10-12T08:00:00Z" }, JIRA, NOW).started).toBe("12 Oct 10:00");
+  // CHANGED (#1986): an older run read "12 Oct 10:00" and yesterday's "14 Oct 10:00"; they read as the backup line does.
+  expect(runRow({ ...run, started_at: "2026-10-12T08:00:00Z" }, JIRA, NOW).started).toBe("2026-10-12 10:00");
+  expect(runRow({ ...run, started_at: "2026-10-14T08:00:00Z" }, JIRA, NOW).started).toBe("yesterday 10:00");
+  expect(runRow({ ...run, started_at: "not a date" }, JIRA, NOW).started).toBe("—");
 });
 
 test("a refused run tells the reader to re-enter the source's own credential (#1405)", () => {

@@ -34,7 +34,10 @@ test("the last backup reads as prototype-6's line", () => {
     `yesterday 02:05, 1 KB, in ${dir}`,
   );
   const older = new Date(2026, 9, 2, 23, 0).toISOString();
-  expect(lastBackupWords({ taken_at: older, file: "a.knobas", bytes: 1024 }, dir, NOW)).toBe(`2 Oct 23:00, 1 KB, in ${dir}`);
+  // CHANGED (#1986): an older backup read "2 Oct 23:00", the one date in the shell spelled with a month name.
+  expect(lastBackupWords({ taken_at: older, file: "a.knobas", bytes: 1024 }, dir, NOW)).toBe(
+    `2026-10-02 23:00, 1 KB, in ${dir}`,
+  );
   expect(lastBackupWords(null, dir, NOW)).toBe("None yet");
 });
 

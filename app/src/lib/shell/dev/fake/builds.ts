@@ -36,6 +36,7 @@ import type {
 } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
 import { fakeRoleScope } from "./corpus";
+import { keyOf } from "../../../time/format";
 
 /** The role `pipelines` is read for, as `knobas_source::role::CI` spells it. */
 const CI_ROLE = "ci";
@@ -313,7 +314,7 @@ export function fakePipelines(now: Date = new Date()): PipelineRow[] {
 
 /** `job_pipelines`: *your branch* first, then *PR check*, as the read orders them. */
 export function fakeJobPipelines(entityId: string, now: Date = new Date()): JobPipeline[] {
-  const job = JOBS[entityId.slice(entityId.indexOf(":") + 1)];
+  const job = JOBS[keyOf(entityId)];
   if (job === undefined) return [];
   const runs = history(now);
   return fakePipelines(now)

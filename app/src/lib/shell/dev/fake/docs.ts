@@ -53,6 +53,7 @@ import type {
 } from "../../../ipc/entity";
 import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
 import { CORPUS, fakeRoleScope } from "./corpus";
+import { keyOf } from "../../../time/format";
 
 /** The role `docs_tree` is read for, as `knobas_source::role::WIKI` spells it. */
 const WIKI_ROLE = "wiki";
@@ -482,7 +483,7 @@ function page(args: Record<string, unknown>): DocPage {
     editor: PEOPLE[by]?.[0] ?? null,
     editor_name: PEOPLE[by]?.[1] ?? null,
     updated_at: at(when),
-    web_url: `${HOST}/pages/viewpage.action?pageId=${found.id.slice(found.id.indexOf(":") + 1)}`,
+    web_url: `${HOST}/pages/viewpage.action?pageId=${keyOf(found.id)}`,
     readable: true,
     version: body.version,
     labels: body.labels,

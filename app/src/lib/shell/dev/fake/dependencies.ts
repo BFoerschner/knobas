@@ -28,6 +28,7 @@ import { CORPUS } from "./corpus";
 import { FIXTURE_ESTATE, FIXTURE_ROUTES } from "./estate";
 import { fakePipelines } from "./builds";
 import { fakeMonitorRoster } from "./monitors";
+import { keyOf } from "../../../time/format";
 
 const SEED: Dependencies["layers"] = [
   { id: "work", name: "Work", kinds: ["ticket", "pr", "page"] },
@@ -160,7 +161,7 @@ function fakeDependencies(): Dependencies {
       items.push({
         id: end,
         kind: "ticket",
-        name: String(ticket.payload["key"] ?? end.slice(end.indexOf(":") + 1)),
+        name: String(ticket.payload["key"] ?? keyOf(end)),
         health: null,
         state: typeof ticket.payload["status"] === "string" ? ticket.payload["status"] : null,
         monitors: 0,

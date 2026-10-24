@@ -569,3 +569,53 @@ test("no page under the ticket-first shell drops rows by source", () => {
     "lib/tf/job/job.ts",
   ]);
 });
+
+/**
+ * An entity id's key is `keyOf` (`lib/time/format.ts`), never a slice past
+ * its first colon written in place (#1986). Eight copies survived #1678's
+ * grep for `function keyOf`, written inline or under another name
+ * (`ticketKey`, `subjectOf`); this scans for the expression itself, and for
+ * the `split(":")` forms that truncate a key which holds a colon of its own
+ * (`confluence:ENG:SEPA design`).
+ *
+ * The `split(":")` forms count only on a receiver named as an id
+ * (`entity_id`, `ticketId`, `entity`): a clock's minutes
+ * (`clock.split(":")[1]`) or a filter token's value split the same way and
+ * are not keys.
+ *
+ * The `?fake-ipc` backend is in the scan: it builds the same keys a surface
+ * reads back. Tests are not: a fixture may spell an id however it likes.
+ */
+const KEY_SPLIT =
+  /\.slice\([^()]*\.indexOf\(":"\)\s*\+\s*1\s*\)|(?:_id|Id|\bid|entity|Entity)\??\.split\(":"\)(?:\[1\]|\.pop\(\))/;
+
+test("the key-split rule reads an id's split, not a clock's", () => {
+  for (const line of [
+    'key.slice(key.indexOf(":") + 1)',
+    'entry.entity_id.split(":")[1]',
+    'checkout?.repo_entity_id?.split(":").pop()',
+    'ticketId.split(":")[1]',
+  ]) {
+    expect(KEY_SPLIT.test(line), line).toBe(true);
+  }
+  for (const line of [
+    'clock.split(":")[1]',
+    '(timer.elapsed ?? "0:00").split(":").pop()',
+    'token.split(":")[1]',
+    'row.entity_id.split(":")[0]',
+    'const [hours, minutes] = clock.split(":").map(Number)',
+    'id.slice(0, id.indexOf(":"))',
+  ]) {
+    expect(KEY_SPLIT.test(line), line).toBe(false);
+  }
+});
+
+test("no module splits an entity id into its key in place", () => {
+  expect(
+    offenders(
+      (text, file) =>
+        !/\.test\.(svelte\.)?ts$/.test(file) && file !== join(ROOT, "lib", "time", "format.ts") && KEY_SPLIT.test(codeOf(text)),
+    ),
+    "an entity id's key is keyOf from lib/time/format.ts",
+  ).toEqual([]);
+});

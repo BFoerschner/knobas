@@ -8,6 +8,7 @@ import type { Handlers } from "../fake-tauri";
 import { wordAlternatives } from "../../../tf/tickets/needles";
 import { JOB_ROWS, fakeReach } from "./job-reach";
 import { fakeJiraBoard, fakeLanes } from "./ticket-views";
+import { keyOf } from "../../../time/format";
 
 // -- the demo corpus --------------------------------------------------------
 
@@ -332,7 +333,7 @@ function row(
     updated_at,
     author,
     body_text: String(payload["description"] ?? title),
-    web_url: `${FIXTURE_HOST}/browse/${entity_id.slice(entity_id.indexOf(":") + 1)}`,
+    web_url: `${FIXTURE_HOST}/browse/${keyOf(entity_id)}`,
     deleted_at: null as string | null,
     payload,
   };
@@ -549,7 +550,7 @@ function boardCard(entry: (typeof CORPUS)[number]) {
   return {
     entity_id: entry.entity_id,
     source_id: text(entry.payload["source"]) ?? "mock",
-    key: entry.entity_id.slice(entry.entity_id.indexOf(":") + 1),
+    key: keyOf(entry.entity_id),
     title: entry.title,
     // Its own status (#1423), whatever column a Jira view gathers it under.
     status: ticketStatus(entry),
@@ -617,7 +618,7 @@ function giteaCard(entry: (typeof CORPUS)[number]) {
   return {
     entity_id: entry.entity_id,
     source_id: "gitea",
-    key: entry.entity_id.slice(entry.entity_id.indexOf(":") + 1),
+    key: keyOf(entry.entity_id),
     title: entry.title,
     status: ticketStatus(entry),
     priority: payload.knobas.priority,
@@ -677,7 +678,7 @@ function fakeSignals(id: string) {
   }
   for (const [from, to, relation] of FAKE_SIGNAL_LINKS) {
     if (relation === "blocks" && to === id) {
-      signals.push({ kind: "blocker", text: `blocked by ${from.slice(from.indexOf(":") + 1)}`, tone: "err" });
+      signals.push({ kind: "blocker", text: `blocked by ${keyOf(from)}`, tone: "err" });
     }
   }
   for (const pr of prs) signals.push({ kind: "open-pr", text: `PR #${String(pr!.payload["num"])} open`, tone: "info" });
@@ -762,7 +763,7 @@ export function fakeTicketCount(query: string): number {
 /** Every live ticket's key: what a fake Jira view's members are picked from (#877). */
 export function fakeTicketKeys(): string[] {
   return CORPUS.filter((entry) => entry.kind === "ticket" && entry.deleted_at === null).map(
-    (entry) => entry.entity_id.split(":")[1] ?? entry.entity_id,
+    (entry) => keyOf(entry.entity_id),
   );
 }
 

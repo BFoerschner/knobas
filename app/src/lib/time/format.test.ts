@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from "vitest";
 
-import { clockLabel, keyOf, minutesLabel, secondsLabel } from "./format";
+import { ageLabel, clockLabel, keyOf, minutesLabel, secondsLabel, stampLabel } from "./format";
 import { minutesOf } from "./week";
 
 describe("minutesLabel: Day, Week, Log all, the launcher board, the draft button", () => {
@@ -70,6 +70,47 @@ describe("clockLabel: the ticket board, the inbox, builds", () => {
     expect(clockLabel(instant, now, true)).toBe("yesterday 16:30");
     expect(clockLabel(instant, now, true)).toBe(clockLabel(instant, now));
   });
+});
+
+describe("stampLabel: the conversation, the last backup, a source's sync runs (#1986)", () => {
+  const now = new Date(2026, 7, 22, 15, 0);
+  const at = (day: number, hour: number, minute: number) => new Date(2026, 7, day, hour, minute).toISOString();
+
+  test("an older day keeps its clock, in clockLabel's date", () => {
+    expect(stampLabel(at(22, 9, 35), now)).toBe("today 09:35");
+    expect(stampLabel(at(21, 17, 41), now)).toBe("yesterday 17:41");
+    expect(stampLabel(at(12, 9, 14), now)).toBe("2026-08-12 09:14");
+    expect(stampLabel(at(12, 9, 14), now).startsWith(clockLabel(at(12, 9, 14), now))).toBe(true);
+    expect(stampLabel("not a date", now)).toBe("");
+  });
+
+  test("bare drops the word on today only", () => {
+    expect(stampLabel(at(22, 9, 0), now, true)).toBe("09:00");
+    expect(stampLabel(at(21, 17, 41), now, true)).toBe("yesterday 17:41");
+    expect(stampLabel(at(12, 9, 14), now, true)).toBe("2026-08-12 09:14");
+  });
+
+  test("yesterday across a month's first day", () => {
+    const first = new Date(2026, 9, 1, 8, 0);
+    expect(stampLabel(new Date(2026, 8, 30, 23, 10).toISOString(), first)).toBe("yesterday 23:10");
+    expect(stampLabel(new Date(2026, 8, 29, 23, 10).toISOString(), first)).toBe("2026-09-29 23:10");
+  });
+});
+
+describe("ageLabel: how old a source's data is, the stale line and the status bar (#1986)", () => {
+  const now = new Date("2026-08-22T15:00:00Z");
+  const before = (minutes: number) => new Date(now.getTime() - minutes * 60_000).toISOString();
+
+  test.each([
+    [0, "1 min"],
+    [38, "38 min"],
+    [59, "59 min"],
+    [60, "1 h"],
+    [150, "3 h"],
+    [47 * 60, "47 h"],
+    [48 * 60, "2 days"],
+    [80 * 60, "3 days"],
+  ])("%i minutes -> %s", (minutes, text) => expect(ageLabel(before(minutes), now)).toBe(text));
 });
 
 test("keyOf is the key half of an entity id, and the whole string when there is no source", () => {

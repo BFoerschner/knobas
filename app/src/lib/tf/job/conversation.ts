@@ -11,6 +11,8 @@
  */
 import type { Thread, ThreadChange, ThreadComment } from "../../ipc/entity";
 import { isFiltering, matchesAll, type FilterState } from "../filter/filter";
+import { dayKey } from "../../time/day";
+import { stampLabel } from "../../time/format";
 
 /** How many entries an unfiltered thread keeps above its fold (R-5.3). */
 export const KEEP = 6;
@@ -53,27 +55,12 @@ export function mentionCount(n: number): string {
   return n === 1 ? "1 mentions you" : `${n} mention you`;
 }
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function day(at: Date): string {
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
-}
-
 /**
  * When an entry was written, as prototype-6 writes it: *today 09:35*,
- * *yesterday 17:41*, else *2026-08-12 09:14*. Empty for no time.
+ * *yesterday 17:41*, else *2026-08-12 09:14* (`stampLabel`). Empty for no time.
  */
 export function stamp(iso: string | null, now: Date): string {
-  if (iso === null) return "";
-  const at = new Date(iso);
-  const clock = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
-  if (day(at) === day(now)) return `today ${clock}`;
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (day(at) === day(yesterday)) return `yesterday ${clock}`;
-  return `${day(at)} ${clock}`;
+  return iso === null ? "" : stampLabel(iso, now);
 }
 
 /**
@@ -81,8 +68,7 @@ export function stamp(iso: string | null, now: Date): string {
  * *yesterday 17:41* or *2026-08-12 09:14*.
  */
 export function since(lastVisit: string, now: Date): string {
-  const said = stamp(lastVisit, now);
-  return said.startsWith("today ") ? said.slice("today ".length) : said;
+  return stampLabel(lastVisit, now, true);
 }
 
 /** The name a comment is signed with: the first word of a display name. */
@@ -178,7 +164,7 @@ export function drawThread(
     if (folded > 0) {
       const first = entries.find((entry) => !keep.includes(entry));
       const at = first?.kind === "comment" ? first.comment.at : (first?.change.at ?? null);
-      foldedFrom = at === null ? null : day(new Date(at));
+      foldedFrom = at === null ? null : dayKey(new Date(at));
     }
     entries = keep;
   }

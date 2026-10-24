@@ -10,6 +10,7 @@ import { FIXTURE_ESTATE, assetPathText } from "./estate";
 import { fakeSmartListItems, fakeSmartLists } from "./smart-lists";
 import { FIXTURE_SOURCES } from "./sources";
 import { FIXTURE_QUEUE } from "./write-queue";
+import { keyOf } from "../../../time/format";
 
 /**
  * `search` for a ticket key the corpus holds (#1476), `PAY-231`: every
@@ -21,7 +22,7 @@ function ticketsByKey(raw: string): SearchResponse | null {
   if (!/^[A-Za-z][A-Za-z0-9]*-\d+$/.test(raw)) return null;
   const key = raw.toUpperCase();
   const hits = CORPUS.filter(
-    (entry) => entry.kind === "ticket" && entry.deleted_at === null && entry.entity_id.slice(entry.entity_id.indexOf(":") + 1) === key,
+    (entry) => entry.kind === "ticket" && entry.deleted_at === null && keyOf(entry.entity_id) === key,
   ).map((entry, index) => ({ ...mirrorRow(entry), rank: 1 - index / 10, snippet: [] }));
   if (hits.length === 0) return null;
   return {

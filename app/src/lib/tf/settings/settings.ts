@@ -9,7 +9,7 @@
 import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import type { ExpiryNote } from "../../shell/health.svelte";
 import { ago } from "../../shell/time";
-import { secondsLabel } from "../../time/format";
+import { secondsLabel, stampLabel } from "../../time/format";
 import { CI, CODE_HOST, MONITORING, TICKET_SYSTEM, WIKI } from "../roles.svelte";
 import { IDENTITY_FIELD } from "../../sources/new-source";
 import type { Walk } from "../../sources/walk";
@@ -294,17 +294,9 @@ export interface RunRow {
   tone: "ok" | "err" | "run";
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-function hhmm(at: Date): string {
-  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
-}
-
-/** *14:28* today, *12 Oct 14:28* before. */
+/** *14:28* today, else *yesterday 14:28* or *2026-10-12 14:28* (`stampLabel`, #1986). */
 export function startedWords(iso: string, now: Date = new Date()): string {
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return "—";
-  return at.toDateString() === now.toDateString() ? hhmm(at) : `${at.getDate()} ${MONTHS[at.getMonth()]} ${hhmm(at)}`;
+  return stampLabel(iso, now, true) || "—";
 }
 
 /**

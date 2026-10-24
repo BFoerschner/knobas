@@ -8,6 +8,7 @@
  */
 import type { EntityRow } from "../ipc/entity";
 import type { TimerTarget } from "../ipc/time";
+import { keyOf } from "../time/format";
 
 /**
  * The one word this module refuses on — both the entity namespace stored
@@ -75,7 +76,7 @@ function namespaceOf(entityId: string): string | null {
  * label reads as itself: it is already what a person typed.
  */
 export function targetReading(target: TimerTarget): string {
-  return target.kind === "label" ? target.label : target.entity_id.slice(target.entity_id.indexOf(":") + 1);
+  return target.kind === "label" ? target.label : keyOf(target.entity_id);
 }
 
 /**

@@ -16,7 +16,7 @@ import type { SourceSummary } from "../../ipc/sources";
 import { signInFails } from "../../shell/health.svelte";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { protocolDayOf } from "../../standup/protocol";
-import { keyOf, minutesLabel } from "../../time/format";
+import { ageLabel, keyOf, minutesLabel } from "../../time/format";
 import { minutesOf } from "../../time/week";
 import { CI, claims } from "../roles.svelte";
 import { jobHash } from "../route";
@@ -436,15 +436,6 @@ export function assetsRollup(lines: readonly AssetLine[]): Rollup {
   };
 }
 
-/** A duration in prototype-6's words: "38 min", "2 h", "3 days". */
-export function age(iso: string, now: Date): string {
-  const minutes = Math.max(1, Math.round((now.getTime() - new Date(iso).getTime()) / 60_000));
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours} h`;
-  return `${Math.round(hours / 24)} days`;
-}
-
 /** One stale-data warning on the Builds section (R-4.7). */
 export interface Staleness {
   sourceId: string;
@@ -483,7 +474,7 @@ export function staleBuilds(
     const why = state.state === "missing_secret" ? `no ${secretNoun(source.auth_kind)} stored` : "sign-in failing";
     out.push({
       sourceId: source.id,
-      text: since ? `${name} data is ${age(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`,
+      text: since ? `${name} data is ${ageLabel(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`,
       fix: reenterWords(source.auth_kind),
     });
   }

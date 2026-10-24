@@ -30,7 +30,7 @@
   in words by `writeWords`, mono only for keys, paths and bodies.
 -->
 <script lang="ts">
-  import { minutesLabel } from "../time/format";
+  import { keyOf, minutesLabel } from "../time/format";
   import { getEntity } from "../ipc/entity";
   import type { QueuedWrite } from "../ipc/sources";
   import { clockReading, dayKey, dayLabel } from "../time/day";
@@ -184,11 +184,6 @@
     if (asked === null) return;
     withdrawing = null;
     void queue.discard(asked.id);
-  }
-
-  /** `PAY-231` -- the half after the first colon, as everywhere else. */
-  function ticketKey(entity: string): string {
-    return entity.slice(entity.indexOf(":") + 1);
   }
 
   /** `2 h 15 min` -- minute-granular and never rounded up (CONTEXT.md). */
@@ -456,7 +451,7 @@
   <TfDialog title="Withdraw this worklog?" {layers} onclose={() => (withdrawing = null)}>
     {#snippet body()}
       <p>
-        <b>{worked(log.seconds)}</b> logged to <b class="tf-mono">{ticketKey(log.entity)}</b>, starting
+        <b>{worked(log.seconds)}</b> logged to <b class="tf-mono">{keyOf(log.entity)}</b>, starting
         {dayLabel(dayKey(new Date(log.started)))} at {clockReading(log.started)} — {log.seconds}
         seconds.
       </p>
@@ -466,7 +461,7 @@
         write that arrived and was never marked sent from one that never left — not the state it
         is in, and not how many times it has been tried. Withdrawing it makes this time
         <b>unlogged</b> again and offers it back to <i>Log all</i>, so if Jira did take it,
-        logging it a second time puts the same {worked(log.seconds)} on {ticketKey(log.entity)}
+        logging it a second time puts the same {worked(log.seconds)} on {keyOf(log.entity)}
         twice.
       </p>
       {@render guarantee()}

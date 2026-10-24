@@ -39,6 +39,7 @@ import {
   type InboxShelf,
 } from "../ipc/entity";
 import { coalesce } from "../shell/coalesce";
+import { keyOf } from "../time/format";
 
 /** The IPC this store needs, injectable so a test needs no Tauri bridge. */
 export interface InboxPorts {
@@ -124,7 +125,7 @@ export interface Inbox {
  * Exported so its own test can read it; nothing outside this module needs it.
  */
 export function subjectOf(key: string): string {
-  return key.slice(key.indexOf(":") + 1);
+  return keyOf(key);
 }
 
 export function createInbox(ports?: InboxPorts): Inbox {

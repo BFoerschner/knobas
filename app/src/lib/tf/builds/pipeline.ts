@@ -10,13 +10,12 @@
  */
 import type { PipelineRow, PipelineSettings, PipelineTrigger, RunRow } from "../../ipc/entity";
 import type { QueuedWrite, SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
-import { secondsLabel } from "../../time/format";
+import { ageLabel, secondsLabel } from "../../time/format";
 import { signInFails } from "../../shell/health.svelte";
 import type { WriteSource } from "../../shell/queued-toast";
 import { matchesAll } from "../filter/filter";
 import type { WriteFollower } from "../../shell/follow-write";
 import { markQueued, type Mark } from "../queued.svelte";
-import { age } from "../job/job";
 import { reenterWords, secretNoun } from "../settings/settings";
 import { pipelineHash, runTone, shortTime } from "./builds";
 
@@ -423,7 +422,7 @@ export function staleLine(
     const secret = secretNoun(source.auth_kind);
     const since = run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
     const why = state.state === "missing_secret" ? `no ${secret} stored` : "sign-in failing";
-    const lead = since ? `${name} data is ${age(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`;
+    const lead = since ? `${name} data is ${ageLabel(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`;
     return {
       text: `${lead} Runs you start wait in the queue until it works again.`,
       fix: { href: `#/settings/source/${encodeURIComponent(pipeline.source_id)}`, words: reenterWords(source.auth_kind), secret },
@@ -433,7 +432,7 @@ export function staleLine(
     const why = run.last_outcome === "unreachable" ? `${name} cannot be reached` : "the last sync failed";
     // A failing sync retries on backoff, so its last finish is the last try,
     // not the last data: say when it was tried, never how old the data is.
-    const tried = run.last_finished_at ? `, last tried ${age(run.last_finished_at, now)} ago` : "";
+    const tried = run.last_finished_at ? `, last tried ${ageLabel(run.last_finished_at, now)} ago` : "";
     return { text: `${name} data may be out of date: ${why}${tried}.`, fix: null };
   }
   return null;

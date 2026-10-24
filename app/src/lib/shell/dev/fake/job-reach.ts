@@ -23,6 +23,7 @@
  */
 import type { Reached, StartWorkStep } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
+import { keyOf } from "../../../time/format";
 
 const HOST = "http://127.0.0.1:5399";
 
@@ -41,7 +42,7 @@ function row(
     updated_at,
     author: null as string | null,
     body_text: title,
-    web_url: `${HOST}/browse/${entity_id.slice(entity_id.indexOf(":") + 1)}`,
+    web_url: `${HOST}/browse/${keyOf(entity_id)}`,
     deleted_at: null as string | null,
     payload,
   };
@@ -196,7 +197,7 @@ const TODO_TITLES: Record<string, string> = {
 };
 
 function propose(ticketId: string, title: string, repo: string): StartWorkStep[] {
-  const key = ticketId.slice(ticketId.indexOf(":") + 1);
+  const key = keyOf(ticketId);
   const branch = `feature/${key}-${slug(title)}`;
   const payloads: [StartWorkStep["step"], unknown][] = [
     ["create_branch", { CreateBranch: { entity: repo, name: branch, from_ref: "main" } }],
@@ -247,7 +248,7 @@ export function handlers(): Handlers {
       const held = FLOWS.get(ticket);
       if (held) return held;
       if (repo === null) return [];
-      const steps = propose(ticket, TODO_TITLES[ticket] ?? ticket.slice(ticket.indexOf(":") + 1), repo);
+      const steps = propose(ticket, TODO_TITLES[ticket] ?? keyOf(ticket), repo);
       FLOWS.set(ticket, steps);
       return steps;
     },
