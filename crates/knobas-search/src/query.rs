@@ -127,11 +127,13 @@ impl FieldKey {
 pub(crate) const ME: &str = "@me";
 
 /// One ticket-key condition: the field, whether it is negated, and the values
-/// any of which it matches, lowercased.
+/// any of which it matches, ignoring case.
 ///
-/// In [`Parsed::fields`] the values are as typed (lowercased), `@me`
-/// included; in [`EffectiveFilters::fields`] `@me` has been resolved to the
-/// identity's usernames, and `assigned:`'s values are those usernames.
+/// In [`Parsed::fields`] a name key's values are as typed, `@me` included,
+/// and `sprint:`'s and `has:`'s folded; in [`EffectiveFilters::fields`] `@me`
+/// has been resolved to the identity's usernames as configured, and
+/// `assigned:`'s values are those usernames. The statement folds them with
+/// the server's `lower()` (#1843, #1975).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldFilter {
     pub key: FieldKey,
@@ -679,7 +681,7 @@ pub fn needles(text: &str) -> Vec<String> {
 
 /// One alternative of the Tickets view's word filter (#1889): a row it
 /// admits holds every word of `holds` and none of `lacks`. Each is a needle
-/// as [`needles`] cuts it, but as typed: the statement folds it with the
+/// as [`needles`] trims it, but as typed: the statement folds it with the
 /// server's `lower()`, as it folds the row (#1988). Once each, ignoring case.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct WordAlternative {
@@ -716,23 +718,24 @@ pub fn word_alternatives(text: &str) -> Vec<WordAlternative> {
 /// `token` as a needle -- its quotes and edge punctuation off, lowercased --
 /// onto `out`, unless it is empty or there already.
 fn push_needle(out: &mut Vec<String>, token: &str) {
-    let needle = cut(token).to_lowercase();
+    let needle = trim_edges(token).to_lowercase();
     if !needle.is_empty() && !out.contains(&needle) {
         out.push(needle);
     }
 }
 
-/// `token` as [`word_alternatives`] keeps it: cut as a needle, but as typed,
-/// and once each for [`same_value`]'s once-each rule.
+/// `token` as [`word_alternatives`] keeps it: trimmed as a needle, but as
+/// typed, and once each as [`same_value`] reads case, the once-each rule
+/// `under:` keeps too: the match itself is the server's `lower()`.
 fn push_word(out: &mut Vec<String>, token: &str) {
-    let word = cut(token);
+    let word = trim_edges(token);
     if !word.is_empty() && !out.iter().any(|seen| same_value(seen, word)) {
         out.push(word.to_owned());
     }
 }
 
 /// A token with its quotes and edge punctuation off.
-fn cut(token: &str) -> &str {
+fn trim_edges(token: &str) -> &str {
     token.trim_matches(|c: char| !c.is_alphanumeric())
 }
 
@@ -1906,7 +1909,7 @@ mod tests {
     }
 
     /// `assignee:@me` (and `assignee:me`) is the user, resolved by `merge`
-    /// to every username the identity holds, lowercased; anybody else is
+    /// to every username the identity holds, as configured; anybody else is
     /// matched by name. With no identity it resolves to nobody, which
     /// matches nothing, as `@me` does.
     #[test]

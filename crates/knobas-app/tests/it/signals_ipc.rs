@@ -18,7 +18,9 @@ async fn pool() -> sqlx::PgPool {
     knobas_db::migrate::run(&pool).await.unwrap();
     for (id, name, config) in [
         ("jira", "Jira", r#"{"username": "mara.lindqvist"}"#),
-        // A user the server and Rust fold differently (#1975): `İlker`.
+        // A user the server and Rust fold differently (#1975): `İlker`. Only
+        // `a_review_asked_of_a_dotted_capital_i_user_is_on_the_card_and_in_has`
+        // asks them for a review.
         ("gitea", "Gitea", r#"{"username": "İlker"}"#),
         ("teamcity", "TeamCity", "{}"),
     ] {
