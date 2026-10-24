@@ -345,8 +345,12 @@ A curated export — links, assets, contexts and [source](#source) configuration
 ## Surfaces
 
 **Launcher**:
-The ⌘K box; one search over everything, under 100 ms. Its text search, and every other full-text read of the [mirror](#mirror), runs under PostgreSQL's `english` configuration with no `unaccent`, over a German and English corpus, on purpose and with named gaps (ADR-0030).
+The ⌘K box; one search over everything, under 100 ms. Its text search, and every other full-text read of the [mirror](#mirror), runs under PostgreSQL's `english` configuration with no `unaccent`, over a German and English corpus, on purpose and with named gaps (ADR-0030). (Ruled 2026-10-24, the search-language grilling, not yet built: the search runs in every [search language](#search-language), finds a name typed with a typo below every exact match and marked as approximate, and counts a rare word for more than a common one, inside the title-over-body weighting stories 25 and 26 fix. ADR-0030 holds until that lands; ADR-0031.)
 _Avoid_: command palette, spotlight
+
+**Search language**:
+A language knobas indexes and searches the [mirror](#mirror), notes and the estate in, chosen in Settings from the languages knobas ships; English and German by default, at least one, and at most as many as the search still answers in under 100 ms (four, unless the perf gate says fewer). Every row is indexed in every search language, because one project holds tickets in more than one; a typed word may match in any of them, independently of the other words. A word that is a stop word in any search language is not searched for on its own (`die`, `will` in English and German), only inside a quoted phrase. A search language brings its stemming and its **folding**, the spellings it treats as one word (German: `ü` and `ue`, `ö` and `oe`, `ä` and `ae`, `ß` and `ss`); an accent no search language folds is dropped. Changing the set re-indexes everything. Text with no spaces between words (Chinese, Japanese, Korean) is not split into words, and that is a limitation, not a bug. (Ruled 2026-10-24, the search-language grilling; ADR-0031)
+_Avoid_: locale, text-search configuration (that is PostgreSQL's), extension, language pack
 
 **Coverage**:
 Per query, which sources could answer a filter and which have nothing it can match — measured on the [corpus](#mirror) each source contributed, never on what matched. A source that *answered* and found nobody is saying something different from one whose items never name a person, and coverage is the name for that difference. (#141)

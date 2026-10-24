@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, superseded by ADR-0031 (in force until ADR-0031's first ticket lands)
 ---
 
 # `english` is the only text-search configuration, with no `unaccent`, over a German and English mirror
