@@ -4691,7 +4691,10 @@ async fn remove_user(http: &reqwest::Client, url: &str, token: &str) -> Result<(
 /// The real server's answer to what #2040 reads (ADR-0013): a viewer may run
 /// a configuration's builds, trigger it and re-run a build of it, and may
 /// not change its parameters; the configuration's own view draws *Run…*
-/// enabled and no parameter editable. The seed's token, which may write,
+/// enabled and no parameter editable. Made administrator of the
+/// configuration's project, it may change that configuration's parameters
+/// and still not those of a configuration in another project. The seed's
+/// token, which may write,
 /// is refused nothing and its view's parameters are editable, as before.
 /// Nothing is written to find out: the queue and the newest build are as
 /// they were.
@@ -4777,6 +4780,57 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
         assert_eq!(run.disabled, None, "a viewer may run builds");
         let values = editable(&view);
         assert!(!values.is_empty() && values.iter().all(|e| !e), "{values:?}");
+
+        // A role given on one project holds there and nowhere else: the
+        // viewer made the configuration's project administrator may change
+        // its parameters, and still not those of a configuration elsewhere.
+        let project_of = async |id: &str| {
+            seeded.build_type(id).await["projectId"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{id} names its project"))
+                .to_owned()
+        };
+        let (project, elsewhere) = (project_of(config).await, project_of(QUICK_CONFIGURATION).await);
+        assert_ne!(project, elsewhere, "the two configurations live apart");
+        let granted = seeded
+            .http
+            .put(format!(
+                "{}/app/rest/users/username:{VIEWER}/roles/PROJECT_ADMIN/p:{project}",
+                seeded.url
+            ))
+            .header("Accept", "application/json")
+            .bearer_auth(&seeded.token)
+            .send()
+            .await
+            .expect("PUT .../roles");
+        let status = granted.status();
+        let body = granted.text().await.unwrap_or_default();
+        assert!(status.is_success(), "making {VIEWER} {project}'s administrator answered {status}: {body}");
+        let permissions = viewer
+            .get(&seeded, "app/rest/users/current/permissions?locator=permission:edit_project")
+            .send()
+            .await
+            .expect("GET permissions")
+            .text()
+            .await
+            .unwrap_or_default();
+        eprintln!("{VIEWER}'s edit_project once {project}'s administrator: {permissions}");
+        let other_entity = format!("teamcity:buildType:{QUICK_CONFIGURATION}");
+        let refused = source
+            .refused_writes(&[
+                WriteAsk {
+                    entity: config_entity.clone(),
+                    op: "set_parameter".to_owned(),
+                },
+                WriteAsk {
+                    entity: other_entity.clone(),
+                    op: "set_parameter".to_owned(),
+                },
+            ])
+            .await
+            .unwrap_or_else(|e| panic!("the project administrator's permissions read: {e:?}"));
+        let ops: Vec<_> = refused.iter().map(|r| (r.entity.as_str(), r.op.as_str())).collect();
+        assert_eq!(ops, [(other_entity.as_str(), "set_parameter")], "{refused:#?}");
     }
 
     let admin = seeded.source(serde_json::json!({}));
