@@ -885,6 +885,33 @@ test("a timer start and stop with a job last opened re-reads no ticket for the n
   expect(reads, "a timer start and stop costs the nav job no IPC").toEqual(before);
 });
 
+test("a tab switch on a job page re-reads no ticket for the nav job; another job reads once (#1987)", async () => {
+  const reads = { listSources: 0, getEntity: 0 };
+  const jobPorts: JobPorts = {
+    ...JOB_PORTS,
+    listSources: () => {
+      reads.listSources += 1;
+      return JOB_PORTS.listSources();
+    },
+    getEntity: (id) => {
+      reads.getEntity += 1;
+      return JOB_PORTS.getEntity(id);
+    },
+  };
+  start({ jobPorts });
+  await at("#/job/PAY-231");
+  const opened = { ...reads };
+  expect(opened.listSources, "the job was read").toBeGreaterThan(0);
+
+  await at("#/job/PAY-231/conversation");
+  await at("#/job/PAY-231");
+  expect(reads, "a tab switch on the same job costs no IPC").toEqual(opened);
+
+  await at("#/job/PAY-232");
+  await at("#/job/PAY-232/conversation");
+  expect(reads.listSources - opened.listSources, "another job is resolved once by the shell, once by its page").toBe(2);
+});
+
 test("a last job moved to another source's ticket under the same key is never answered with the old id (#1782)", async () => {
   let release: () => void = () => {};
   let hold: Promise<void> | null = null;
