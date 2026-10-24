@@ -5698,14 +5698,24 @@ async fn the_repository_listing_pages_in_ascending_id_order() {
     );
 }
 
-/// #1624: a commit catch-up bounds its window from above with `until=`, which
-/// the adapter takes to be server-side and inclusive like `since=`. Checked:
-/// every commit at or before a commit's own `created` comes back, it among
-/// them, and nothing after it.
+/// #1624, #2034: a commit walk bounds its window with `since=` and, on a
+/// catch-up, `until=`. Gitea 1.27.3 hands both to `git log --since/--until`,
+/// on the committer date its `created` carries, so both are server-side and
+/// inclusive: for a commit's own `created`, `until=` answers every commit at
+/// or before it, it among them, and nothing after, and `since=` the mirror
+/// image. Forgejo 17.0.0 declares neither parameter on this endpoint and lists
+/// the branch whole whatever they say, which is why the adapter holds both
+/// bounds client-side too (`sync::walk_commits`). Checked: which of the two the
+/// server under test does, so neither forge's answer can drift unseen.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
-async fn the_commit_listings_until_is_server_side_and_inclusive() {
+async fn the_commit_listings_bounds_are_server_side_on_gitea_and_ignored_on_forgejo() {
     let env = env();
+    // Forgejo names the Gitea it forked from in its version: measured
+    // `17.0.0+gitea-1.22.0`, against Gitea's bare `1.27.3`.
+    let version = api_json(&env, "version").await;
+    let version = version["version"].as_str().expect("a version").to_owned();
+    let forgejo = version.contains("+gitea-");
     let base = format!(
         "repos/{}/commits?sha=main&stat=false&verification=false&files=false&limit=50",
         env.full_name()
@@ -5715,6 +5725,7 @@ async fn the_commit_listings_until_is_server_side_and_inclusive() {
             .expect("RFC 3339")
             .with_timezone(&chrono::Utc)
     };
+    let sha = |c: &serde_json::Value| c["sha"].as_str().expect("sha").to_owned();
     let all = api_json(&env, &base).await;
     let all = all.as_array().expect("a commit list");
     let times: std::collections::BTreeSet<_> = all.iter().map(created).collect();
@@ -5722,25 +5733,31 @@ async fn the_commit_listings_until_is_server_side_and_inclusive() {
         times.len() >= 2,
         "the seed's main has commits on two seconds: {times:?}"
     );
-    // The older of the two newest seconds, so something lies after it.
+    // The older of the two newest seconds, so something lies on each side.
     let cut = *times.iter().rev().nth(1).expect("two seconds");
-    let until = cut.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let bounded = api_json(&env, &format!("{base}&until={until}")).await;
-    let bounded: Vec<String> = bounded
-        .as_array()
-        .expect("a commit list")
-        .iter()
-        .map(|c| c["sha"].as_str().expect("sha").to_owned())
-        .collect();
-    let expected: Vec<String> = all
-        .iter()
-        .filter(|c| created(c) <= cut)
-        .map(|c| c["sha"].as_str().expect("sha").to_owned())
-        .collect();
-    assert!(!expected.is_empty());
+    let at = cut.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let listed = async |bound: &str| -> Vec<String> {
+        let body = api_json(&env, &format!("{base}&{bound}={at}")).await;
+        body.as_array()
+            .expect("a commit list")
+            .iter()
+            .map(sha)
+            .collect()
+    };
+    let kept = |keep: &dyn Fn(&serde_json::Value) -> bool| -> Vec<String> {
+        all.iter().filter(|c| forgejo || keep(c)).map(sha).collect()
+    };
+    let (to_cut, from_cut) = (kept(&|c| created(c) <= cut), kept(&|c| created(c) >= cut));
+    assert!(!to_cut.is_empty() && !from_cut.is_empty());
     assert_eq!(
-        bounded, expected,
-        "until={until} is inclusive and nothing after it comes back"
+        listed("until").await,
+        to_cut,
+        "until={at} on {version}: inclusive and server-side on Gitea, ignored on Forgejo"
+    );
+    assert_eq!(
+        listed("since").await,
+        from_cut,
+        "since={at} on {version}: inclusive and server-side on Gitea, ignored on Forgejo"
     );
 }
 

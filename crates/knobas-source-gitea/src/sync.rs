@@ -1521,7 +1521,8 @@ async fn issue_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, number: u64
 /// New commits on the branches whose heads moved this run.
 ///
 /// Gitea's `since=` is inclusive and server-side, so the boundary commits come
-/// back on every run; `commits_at_watermark` is what keeps them from being
+/// back on every run (Forgejo 17 ignores it and `until=`, #2034, and the walk
+/// filters both bounds itself); `commits_at_watermark` is what keeps them from being
 /// re-delivered. Commits are immutable, so a delivered object id is delivered
 /// for good -- which is why this boundary, unlike the pull requests', needs no
 /// fingerprint (#764): nothing about a commit can change inside its second,

@@ -1589,7 +1589,9 @@ _require-live-env SOURCE +NAMES:
 # `forgejo`, port 3002, its own volume and seed state, `seed-forgejo.sh`)
 # instead of Gitea. Forgejo is stopped again at the end if the run started it;
 # Gitea is left alone. It takes the Gitea lock. `gitea-live-capped` and
-# `start-work-live` have no Forgejo form.
+# `start-work-live` have no Forgejo form. No gate runs this form, so a change to
+# a test this recipe runs is run here as well as against Gitea (#2034: a test
+# added after #1195 was green on Gitea and had never met Forgejo).
 #
 # That container is this adapter's contract source (interfaces §4.2). The
 # wiremock stand-in the rest of its suite runs against exists only so
@@ -1605,7 +1607,8 @@ _require-live-env SOURCE +NAMES:
 # certifies the *shapes* interfaces §4.2 fixes: the key forms, the `{ok,data}`
 # envelope on `/repos/search`, `state=all`, the discussion living on the issue
 # of the same index, `sort=recentupdate` really ordering newest-first, `since=`
-# being server-side and inclusive, and a revoked token's 401. It cannot certify
+# being server-side and inclusive (Gitea's; Forgejo 17 ignores `since=` and
+# `until=` on commits, #2034), and a revoked token's 401. It cannot certify
 # what happens when the server answers FEWER records than the adapter asked for
 # -- every corpus the seed creates fits in one page of 50 here -- and that is
 # what `gitea-live-capped` below is for.
