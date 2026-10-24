@@ -13,6 +13,7 @@ knobas-app	lib/knobas_app	assets::hcloud::tests::the_page_shape_carries_the_curs
 knobas-app	lib/knobas_app	assets::tests::a_blank_name_is_refused_and_a_padded_one_is_trimmed
 knobas-app	lib/knobas_app	assets::tests::a_custom_asset_lists_only_what_was_typed_on_it
 knobas-app	lib/knobas_app	assets::tests::a_file_value_that_is_not_the_kind_its_type_declares_is_refused
+knobas-app	lib/knobas_app	assets::tests::a_locked_keychain_names_the_keychain_once
 knobas-app	lib/knobas_app	assets::tests::a_property_value_is_vetted_for_the_kind_it_claims
 knobas-app	lib/knobas_app	assets::tests::a_route_url_needs_a_scheme_and_nothing_more
 knobas-app	lib/knobas_app	assets::tests::a_routes_properties_are_all_custom_in_key_order
@@ -208,9 +209,11 @@ knobas-app	lib/knobas_app	sources::remote::tests::a_remote_release_naming_an_ass
 knobas-app	lib/knobas_app	sources::remote::tests::a_url_of_any_other_shape_is_no_release
 knobas-app	lib/knobas_app	sources::remote::tests::any_other_url_is_a_manifest_and_anything_else_a_local_file
 knobas-app	lib/knobas_app	sources::remote::tests::plain_http_to_this_machine_is_allowed_only_when_the_reads_started_there
+knobas-app	lib/knobas_app	sources::tests::a_keychain_error_names_the_keychain_once
 knobas-app	lib/knobas_app	sources::tests::a_summary_that_claims_and_misses_nothing_still_sends_both_arrays
 knobas-app	lib/knobas_app	sources::tests::memory_in_any_case_is_the_memory_store_and_anything_else_the_keychain
 knobas-app	lib/knobas_app	sources::write_queue::tests::a_pause_is_queueable_exactly_when_the_source_has_an_account
+knobas-app	lib/knobas_app	sources::write_queue::tests::a_pause_pressed_while_the_keychain_is_locked_is_queued_not_refused
 knobas-app	lib/knobas_app	sources::write_queue::tests::a_payload_that_is_not_a_write_op_is_refused_before_anything_is_queued
 knobas-app	lib/knobas_app	sources::write_queue::tests::a_target_naming_no_configured_source_is_not_found_rather_than_queued
 knobas-app	lib/knobas_app	sources::write_queue::tests::a_target_that_is_not_an_entity_id_is_refused
@@ -845,6 +848,8 @@ knobas-app	test/it	job_lifecycle_ipc::opening_a_done_job_reads_its_archived_cont
 knobas-app	test/it	job_lifecycle_ipc::opening_a_job_leaves_archived_at_as_it_was
 knobas-app	test/it	job_pipelines_ipc::a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link
 knobas-app	test/it	job_pipelines_ipc::a_sub_task_shows_the_pipelines_its_parent_links
+knobas-app	test/it	keychain_write::a_pause_pressed_while_the_keychain_is_locked_goes_once_the_credential_is_saved
+knobas-app	test/it	keychain_write::a_pause_queued_while_the_keychain_is_locked_sends_nothing_at_quit_and_goes_next_start
 knobas-app	test/it	link_on_arrival_ipc::a_branch_that_lands_on_a_later_tick_is_linked_by_the_sync_that_brings_it_in
 knobas-app	test/it	link_on_arrival_ipc::a_discarded_refused_orphaned_or_stale_write_links_nothing
 knobas-app	test/it	link_on_arrival_ipc::a_new_branch_is_linked_to_the_job_once_it_is_mirrored
@@ -3992,8 +3997,10 @@ knobas-sync	test/it	write_queue::a_commit_into_a_repository_whose_record_moved_i
 knobas-sync	test/it	write_queue::a_commit_over_a_file_that_moved_is_held_with_both_versions
 knobas-sync	test/it	write_queue::a_create_that_landed_and_timed_out_is_held_and_not_sent_again
 knobas-sync	test/it	write_queue::a_create_the_server_hung_up_on_is_held_not_refused
+knobas-sync	test/it	write_queue::a_credential_save_releases_a_write_waiting_on_the_keychain
 knobas-sync	test/it	write_queue::a_flush_whose_adapter_is_slow_to_build_holds_no_worker
 knobas-sync	test/it	write_queue::a_head_withdrawn_while_the_task_waited_hands_on_only_to_an_owed_write
+knobas-sync	test/it	write_queue::a_keychain_fault_met_across_a_credential_save_does_not_put_the_write_back_to_wait
 knobas-sync	test/it	write_queue::a_monitor_create_whose_ack_was_lost_is_held_not_pending
 knobas-sync	test/it	write_queue::a_new_credential_releases_the_wait_on_its_own_source_only
 knobas-sync	test/it	write_queue::a_page_created_after_the_user_withdrew_it_is_recorded_with_its_id
