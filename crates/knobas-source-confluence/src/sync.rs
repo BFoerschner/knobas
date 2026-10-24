@@ -763,8 +763,8 @@ mod tests {
         /// Pages whose `version.when` moves forward the moment the walk asks
         /// for its second page -- the mid-run edit the ceiling exists for.
         edit_mid_walk: Mutex<Option<(String, String)>>,
-        /// A page deleted the moment the walk asks for its second page.
-        delete_mid_walk: Mutex<Option<String>>,
+        /// Pages deleted the moment the walk asks for its second page.
+        delete_mid_walk: Mutex<Option<Vec<&'static str>>>,
         /// Places among siblings that change the moment the mention walk is
         /// asked for: a drag made after the page walk has delivered the page
         /// (#1138).
@@ -824,8 +824,8 @@ mod tests {
                     }
                 }
             }
-            if let Some(id) = self.delete_mid_walk.lock().unwrap().take() {
-                pages.retain(|p| p["id"] != json!(id));
+            if let Some(ids) = self.delete_mid_walk.lock().unwrap().take() {
+                pages.retain(|p| !ids.iter().any(|id| p["id"] == json!(id)));
             }
         }
 
@@ -1602,7 +1602,21 @@ mod tests {
     #[tokio::test]
     async fn a_page_deleted_mid_walk_hides_no_other() {
         let fake = Fake::new(a_corpus());
-        *fake.delete_mid_walk.lock().unwrap() = Some("100".to_owned());
+        *fake.delete_mid_walk.lock().unwrap() = Some(vec!["100"]);
+        let (items, _) = run(&fake, &cfg(json!({ "page_size": 2 })), None)
+            .await
+            .unwrap();
+        assert_eq!(ids(&items), vec!["100", "101", "102", "103", "104"]);
+    }
+
+    /// **Two pages deleted mid-walk** shift the rows by two, past the one
+    /// row each request starts early by: offset 1 of the three left starts at
+    /// 103. The result does not open on a page the walk has read, so it is
+    /// asked again from the start, and 102 is on it.
+    #[tokio::test]
+    async fn two_pages_deleted_mid_walk_hide_no_other() {
+        let fake = Fake::new(a_corpus());
+        *fake.delete_mid_walk.lock().unwrap() = Some(vec!["100", "101"]);
         let (items, _) = run(&fake, &cfg(json!({ "page_size": 2 })), None)
             .await
             .unwrap();
