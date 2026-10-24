@@ -737,10 +737,11 @@ async fn changed(pool: &PgPool, id: &str, ago: &str) {
 }
 
 /// The issue's link criterion: a ticket filed from a failed run is linked to
-/// the run, `related`, by the first sync that brings the ticket in. Jira
-/// names no key in its receipt, so the ticket is found by its title in the
-/// write's source; one of the same title that the source last changed before
-/// the write was queued (the same failure filed last week) is not it.
+/// the run, `related`, by the first sync that brings the ticket in. Here the
+/// source named no key in its receipt (a write sent before #1754, or a source
+/// that answers none), so the ticket is found by its title in the write's
+/// source; one of the same title that the source last changed before the
+/// write was queued (the same failure filed last week) is not it.
 #[tokio::test]
 async fn a_new_ticket_is_linked_to_the_run_it_was_filed_from_once_it_is_mirrored() {
     let pool = corpus("arrival_ticket").await;
@@ -789,6 +790,77 @@ async fn a_new_ticket_is_linked_to_the_run_it_was_filed_from_once_it_is_mirrored
     assert_eq!(
         link_arrivals(&pool, &declarations(), "jira").await.unwrap(),
         vec![NEW_TICKET.to_owned()]
+    );
+    let drawn: Vec<(String, String, bool)> = sqlx::query_as(
+        "select from_id, relation, confirmed_at is not null from knobas.link
+          where to_id = $1 and deleted_at is null order by from_id",
+    )
+    .bind(RUN)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        drawn,
+        vec![(NEW_TICKET.to_owned(), "related".to_owned(), true)]
+    );
+    assert_eq!(owed(&pool, id).await, None, "drawn, so no longer owed");
+}
+
+/// #1754: a source that named the ticket it made is taken at its word. The
+/// receipt says `PAY-342`, so a ticket of the same title that the source
+/// changed later (the same failure filed twice, a project that already holds
+/// that summary) is not taken for it, and neither is the newest same-titled
+/// ticket while `PAY-342` is not mirrored yet: a named ticket waits for its
+/// sync and never falls back to the title.
+#[tokio::test]
+async fn a_new_ticket_the_receipt_named_is_linked_and_not_a_newer_one_of_the_same_title() {
+    let pool = corpus("arrival_ticket_named").await;
+    item(
+        &pool,
+        RUN,
+        "build",
+        "Payout_IntegrationTests #1187",
+        serde_json::json!({}),
+    )
+    .await;
+    let id = queued_ticket(&pool).await;
+    hold_arrival_link(&pool, id, RUN).await.unwrap();
+    knobas_core::write_queue::sent(&pool, id, Some("PAY-342"))
+        .await
+        .unwrap();
+
+    // Someone files the same failure a moment later, and it is mirrored first.
+    item(
+        &pool,
+        "jira:PAY-343",
+        "ticket",
+        FAILED_TITLE,
+        serde_json::json!({}),
+    )
+    .await;
+    changed(&pool, "jira:PAY-343", "0 seconds").await;
+    assert!(
+        link_arrivals(&pool, &declarations(), "jira")
+            .await
+            .unwrap()
+            .is_empty(),
+        "the ticket the receipt named is not mirrored yet, and a same-titled one is not it"
+    );
+    assert_eq!(owed(&pool, id).await.as_deref(), Some(RUN), "still owed");
+
+    item(
+        &pool,
+        NEW_TICKET,
+        "ticket",
+        FAILED_TITLE,
+        serde_json::json!({}),
+    )
+    .await;
+    changed(&pool, NEW_TICKET, "1 minute").await;
+    assert_eq!(
+        link_arrivals(&pool, &declarations(), "jira").await.unwrap(),
+        vec![NEW_TICKET.to_owned()],
+        "the named ticket, although PAY-343 is newer and titled the same"
     );
     let drawn: Vec<(String, String, bool)> = sqlx::query_as(
         "select from_id, relation, confirmed_at is not null from knobas.link

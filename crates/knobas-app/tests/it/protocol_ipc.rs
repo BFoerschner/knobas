@@ -107,6 +107,9 @@ struct Log {
     offline: bool,
     /// When set, every write waits for a permit first: a send held open (#779).
     gate: Option<Arc<tokio::sync::Semaphore>>,
+    /// While true, a ticket's create answers no key, as Jira's did before
+    /// #1754 and as a source whose receipt is empty still does.
+    receiptless: bool,
 }
 
 /// A source that behaves like the Confluence adapter at the trait.
@@ -181,12 +184,15 @@ impl Source for Wiki {
                 self.log().pending.push(page_item(CREATED_KEY, &title, ""));
                 Ok(WriteReceipt::id(CREATED_KEY))
             }
-            // The real Jira drops the key it was given, on `WriteReceipt`'s own
-            // reasoning: a created ticket is a mirrored entity and the mirror is
-            // the answer that survives a re-send. So does this.
+            // The real Jira answers the key it gave the ticket (#1754), and the
+            // ticket reaches the mirror at the next sync, as a page does.
             WriteOp::CreateTicket { title, .. } => {
-                self.log().pending.push(ticket_item("PAY-999", &title));
-                Ok(WriteReceipt::none())
+                let mut log = self.log();
+                log.pending.push(ticket_item("PAY-999", &title));
+                if log.receiptless {
+                    return Ok(WriteReceipt::none());
+                }
+                Ok(WriteReceipt::id("PAY-999"))
             }
             other => Err(SourceError::protocol(format!(
                 "this source does not do {}",
@@ -1069,7 +1075,7 @@ async fn an_action_item_becomes_a_ticket_linked_to_the_protocol() {
     assert_eq!(
         filed.ticket_entity_id.as_deref(),
         Some("tracker:PAY-999"),
-        "found by reading the mirror, which is the only answer a create gives"
+        "the ticket the create's receipt named, once the mirror holds it"
     );
     assert!(filed.linked);
     assert_eq!(
@@ -1080,6 +1086,64 @@ async fn an_action_item_becomes_a_ticket_linked_to_the_protocol() {
             protocol::ACTION_ITEM_RELATION.to_owned()
         )]
     );
+}
+
+/// #1754: the ticket is the one the create's receipt named, not the newest
+/// ticket of its title. Two action items worded alike, or a project that
+/// already holds that summary, would otherwise link the protocol to a sibling.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_action_item_is_linked_to_the_ticket_its_create_named_not_a_newer_one_of_its_title() {
+    let harness = Harness::new("protocol_action_item_named").await;
+    let opened = harness.open().await;
+    let mut sibling = ticket_item("PAY-1000", "Ask Ines about the SEPA retry");
+    sibling.updated_at = Some(chrono::Utc::now() + chrono::Duration::days(1));
+    harness.mirror(sibling);
+    harness.sync(TRACKER).await;
+
+    let filed = create_action_item_ticket_inner(
+        &harness.state,
+        &opened.note_id,
+        &format!("{TRACKER}:PAY"),
+        "Task",
+        "Ask Ines about the SEPA retry",
+        "",
+    )
+    .await
+    .expect("the ticket is filed");
+    assert_eq!(
+        filed.ticket_entity_id.as_deref(),
+        Some("tracker:PAY-999"),
+        "the named ticket, although PAY-1000 is newer and titled the same"
+    );
+    assert_eq!(
+        harness.links(&opened.note_id).await,
+        [(
+            opened.note_id.clone(),
+            "tracker:PAY-999".to_owned(),
+            protocol::ACTION_ITEM_RELATION.to_owned()
+        )]
+    );
+}
+
+/// A create whose source answered no key (a write sent before #1754, a source
+/// whose receipt is empty) is still found, by its title, as before.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_action_item_whose_create_named_no_key_is_found_by_its_title() {
+    let harness = Harness::new("protocol_action_item_unnamed").await;
+    harness.log().receiptless = true;
+    let opened = harness.open().await;
+    let filed = create_action_item_ticket_inner(
+        &harness.state,
+        &opened.note_id,
+        &format!("{TRACKER}:PAY"),
+        "Task",
+        "Ask Ines about the SEPA retry",
+        "",
+    )
+    .await
+    .expect("the ticket is filed");
+    assert_eq!(filed.ticket_entity_id.as_deref(), Some("tracker:PAY-999"));
+    assert!(filed.linked);
 }
 
 /// An action item with no words is not a ticket, and the refusal comes before
