@@ -322,7 +322,7 @@ async fn flush_every(deps: &SchedulerDeps, pass: Pass) {
 ///
 /// * Never tried, or released since -- due.
 /// * `unauthorized` -- **never** due on a clock. A refused credential stays
-///   refused; only a person acting on the source ([`release_unauthorized`])
+///   refused; only a person acting on the source ([`release_credential_waits`])
 ///   or *Flush now* sends it
 ///   again. This is `docs/development.md`'s rule for syncs, "a 401 never
 ///   retries", for the same reason: the lockout.
@@ -362,27 +362,29 @@ async fn heads(
 
 /// A person acted on what `source_id`'s writes wait for -- a new secret or,
 /// for Kuma, the account beside it; a new address or configuration -- so its
-/// writes waiting `unauthorized` are owed again, and the next flush sends them
-/// (#1628).
+/// writes waiting on its credential are owed again, and the next flush sends
+/// them: those waiting `unauthorized` (#1628), and those waiting on a
+/// keychain that would not open (#1944,
+/// [`waits_on_credential`](store::waits_on_credential)).
 ///
-/// Also what tells a flush already under way that a refusal it is about to
+/// Also what tells a flush already under way that a wait it is about to
 /// record is stale: the 401 it holds was the answer to the credential just
-/// replaced, so the write is left released rather than re-reasoned
-/// `unauthorized` -- which would have it wait for a change that has already
-/// happened. The two serialise on the source's count of releases (see
+/// replaced, and the keychain fault it holds came before the save, so the
+/// write is left released rather than put back to wait -- which would have
+/// it wait for a change that has already happened. The two serialise on the source's count of releases (see
 /// [`gate`]); a flush never waits for this, nor this for a flush.
 ///
 /// # Errors
 ///
 /// [`FlushError::Store`] if the release fails.
-pub async fn release_unauthorized(
+pub async fn release_credential_waits(
     pool: &sqlx::PgPool,
     source_id: &str,
 ) -> Result<Vec<QueuedWrite>, FlushError> {
     let gate = gate(source_id);
     let mut releases = gate.releases.lock().await;
     *releases += 1;
-    Ok(store::release_unauthorized(pool, source_id).await?)
+    Ok(store::release_credential_waits(pool, source_id).await?)
 }
 
 /// One write of a source at a time, process-wide.
@@ -414,7 +416,7 @@ pub async fn release_unauthorized(
 /// (story 21).
 ///
 /// The gate also counts the source's releases (#1628), which
-/// [`release_unauthorized`] bumps and [`waited`] reads before it records a
+/// [`release_credential_waits`] bumps and [`waited`] reads before it records a
 /// refusal. A lock of its own rather than the flush lock: a credential saved
 /// while a flush is out must not wait for that flush's HTTP calls.
 ///
@@ -443,7 +445,7 @@ struct Gate {
     /// How many flushers are in [`Gate::flush`]'s queue: read by
     /// [`waiting_on_source`], and by nothing that decides anything.
     waiting: AtomicUsize,
-    /// How many times [`release_unauthorized`] has run for the source in this
+    /// How many times [`release_credential_waits`] has run for the source in this
     /// process.
     releases: tokio::sync::Mutex<u64>,
 }
@@ -1157,10 +1159,11 @@ async fn announce_with(
 
 /// The write could not be delivered, but the fault will pass.
 ///
-/// A refusal is not recorded when the source was released since the adapter
-/// was built (#1628): it answered the credential that was replaced, and the
-/// write [`release_unauthorized`] released stays released for the next flush
-/// to try with the new one. The count is held across the statement, so a
+/// A wait on the credential is not recorded when the source was released
+/// since the adapter was built: a refusal answered the credential that was
+/// replaced (#1628), and a keychain fault came before the save (#1944). The
+/// write [`release_credential_waits`] released stays released for the next
+/// flush to try with the new credential. The count is held across the statement, so a
 /// release lands wholly before it or wholly after.
 async fn waited(
     deps: &SchedulerDeps,
@@ -1170,7 +1173,7 @@ async fn waited(
     detail: &str,
 ) -> Result<(), FlushError> {
     let releases = seen.gate.releases.lock().await;
-    if reason == WaitReason::Unauthorized && *releases != seen.releases {
+    if store::waits_on_credential(reason, Some(detail)) && *releases != seen.releases {
         return Ok(());
     }
     let waiting = store::wait(&deps.pool, write.id, reason, Some(detail)).await?;

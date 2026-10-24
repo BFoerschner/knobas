@@ -474,7 +474,7 @@ pub async fn update(
     .await?
     .ok_or_else(|| SourcesError::NotFound(id.to_owned()))?;
     if reaches_it_anew {
-        release_unauthorized_writes(pool, id).await;
+        release_credential_waits(pool, id).await;
     }
 
     let template = template_for(registry, &row.adapter_kind)?;
@@ -560,7 +560,7 @@ pub async fn set_secret(
         },
     )
     .await?;
-    release_unauthorized_writes(pool, id).await;
+    release_credential_waits(pool, id).await;
 
     let source = knobas_sync::scheduler::build_off_runtime(
         registry,
@@ -603,8 +603,10 @@ pub async fn set_secret(
 }
 
 /// A person acted on what source `id`'s writes wait for: the writes waiting
-/// on a refused credential are owed again, and the next flush sends them
-/// (#1628).
+/// on its credential are owed again, and the next flush sends them. That is a
+/// refused credential (#1628) and a keychain that would not open (#1944):
+/// a save is the person having unlocked it, and the write should not sit on
+/// its rung for up to an hour after.
 ///
 /// [`set_secret`] calls it for any credential saved -- the secret, the
 /// account beside it, or both -- whether or not the test that follows
@@ -618,9 +620,9 @@ pub async fn set_secret(
 /// A failure is logged, not raised: the credential is stored by now, and an
 /// error here would tell the reader their save failed. The writes stay
 /// waiting, and *Flush now* still sends them.
-async fn release_unauthorized_writes(pool: &PgPool, id: &str) {
-    if let Err(error) = knobas_sync::write_queue::release_unauthorized(pool, id).await {
-        tracing::warn!(source = %id, %error, "the write queue kept its unauthorized writes waiting");
+async fn release_credential_waits(pool: &PgPool, id: &str) {
+    if let Err(error) = knobas_sync::write_queue::release_credential_waits(pool, id).await {
+        tracing::warn!(source = %id, %error, "the write queue kept its credential's writes waiting");
     }
 }
 
