@@ -1623,23 +1623,24 @@ fn read_password(password_file: &Path) -> Result<Option<String>, DbError> {
 ///
 /// - **Marked**: knobas's `initdb` finished here ([`INITDB_FINISHED`]). Never
 ///   removed, whatever the directory lacks later.
-/// - **Holds a database**, no marker: a finished `initdb` an older build ran.
-///   Marked now and never removed.
+/// - **Holds a database**, no marker: a finished `initdb` an older build ran,
+///   every file it writes still there. Marked now and never removed.
 /// - **Unfinished**: removed, so `initdb` runs again.
 /// - **Unrecognised** or **not initialised**: left as it is.
 ///
 /// A data directory that is a symlink loses the link alone (`remove_dir_all`
 /// follows no symlink): what it points at is left as it was, and `initdb`
 /// makes a directory in its place. Evidence:
-/// `docs/decisions/2026-10-unattended-rulings.md`, #1637 and #1819.
+/// `docs/decisions/2026-10-unattended-rulings.md`, #1637, #1819, #1985 and
+/// #2007.
 fn recover_or_mark(data_dir: &Path) -> Result<(), DbError> {
     match shape(data_dir) {
         Shape::Marked | Shape::NotInitialised => Ok(()),
         Shape::Unrecognised => {
             tracing::warn!(
                 data_dir = %data_dir.display(),
-                "this data directory has no PG_VERSION and no postgresql.conf, but may hold a \
-                 database: keeping it, and initdb will refuse it"
+                "this data directory is not one a finished initdb made, but may hold a \
+                 database or a server ran on it: keeping it as it is"
             );
             Ok(())
         }
@@ -1661,9 +1662,30 @@ fn recover_or_mark(data_dir: &Path) -> Result<(), DbError> {
                 "this data directory holds no database, as an interrupted initdb leaves \
                  it: removing it so initdb runs again"
             );
-            std::fs::remove_dir_all(data_dir).map_err(|source| DbError::io(data_dir, source))
+            remove_unfinished(data_dir)
         }
     }
+}
+
+/// Remove an unfinished `data_dir`, `PG_VERSION` first (#2007).
+/// `remove_dir_all` removes entries in `readdir` order, so a launch killed
+/// partway through could leave `PG_VERSION` with `base/` gone, which
+/// [`shape`] reads as a database on a volume not mounted. Without
+/// `PG_VERSION`, whatever the removal leaves reads as unfinished. A data
+/// directory that is a symlink loses the link alone, and the `PG_VERSION`
+/// in what it points at stays.
+fn remove_unfinished(data_dir: &Path) -> Result<(), DbError> {
+    let linked = std::fs::symlink_metadata(data_dir).is_ok_and(|meta| meta.is_symlink());
+    if !linked {
+        let version = data_dir.join("PG_VERSION");
+        match std::fs::remove_file(&version) {
+            Err(source) if source.kind() != io::ErrorKind::NotFound => {
+                return Err(DbError::io(&version, source));
+            }
+            _ => {}
+        }
+    }
+    std::fs::remove_dir_all(data_dir).map_err(|source| DbError::io(data_dir, source))
 }
 
 /// What [`recover_or_mark`] found in a data directory.
@@ -1673,11 +1695,12 @@ enum Shape {
     Marked,
     /// Nothing at all, or an empty directory.
     NotInitialised,
-    /// No `PG_VERSION`, no `postgresql.conf`, and a database in it or one
-    /// that may be: no launch removes it or marks it.
+    /// Not what a finished `initdb` leaves, and a database in it or one
+    /// that may be, or a server ran on it: no launch removes it or marks it.
     Unrecognised,
-    /// No marker, and it holds a database or may: a finished `initdb` an
-    /// older build ran, or one whose databases cannot be listed.
+    /// No marker, every file `initdb` writes there, and it holds a database
+    /// or may: a finished `initdb` an older build ran, or one whose databases
+    /// cannot be listed.
     HoldsDatabase,
     /// What an interrupted `initdb` left: it holds no database.
     Unfinished,
@@ -1708,6 +1731,17 @@ enum Shape {
 /// PostgreSQL 18.6. On a version before 15, where `postgres` and `template0`
 /// had no fixed OIDs, a finished cluster still has a directory that is not
 /// `1` or `4`.
+///
+/// With `PG_VERSION` and without one of the other files `initdb` writes
+/// ([`INITDB_FILES`]), it is unfinished when it holds no database, `base/5`
+/// allowed, and no server ever ran on it: no `postmaster.opts`, which every
+/// server start writes and `initdb` never does (#2007). `initdb`'s cleanup
+/// removes the top level's files in `readdir` order before any directory, so
+/// on a filesystem that lists `PG_VERSION` after another of them (ext4 lists
+/// by name hash), a kill during it leaves this. With a server's
+/// `postmaster.opts` or a database, it is [`Shape::Unrecognised`]: marking it
+/// would keep it from ever being recovered, and `initdb` refuses it or the
+/// server cannot start on it either way.
 fn shape(data_dir: &Path) -> Shape {
     let present = |name: &str| {
         !std::fs::symlink_metadata(data_dir.join(name))
@@ -1746,16 +1780,33 @@ fn shape(data_dir: &Path) -> Shape {
         };
     }
     // Even "not found" is a doubt here: `initdb` makes both before
-    // `PG_VERSION`, so a missing one is a link to a volume not mounted, or a
-    // directory being copied in, not a killed `initdb`.
-    if holds_only("base", &["1", "4"]).unwrap_or(false)
-        && holds_only("pg_tblspc", &[]).unwrap_or(false)
+    // `PG_VERSION`, and its cleanup removes them after every file, so a
+    // missing one is a link to a volume not mounted, or a directory being
+    // copied in, not a killed `initdb`.
+    let empty_tablespaces = holds_only("pg_tblspc", &[]).unwrap_or(false);
+    if holds_only("base", &["1", "4"]).unwrap_or(false) && empty_tablespaces {
+        Shape::Unfinished
+    } else if INITDB_FILES.iter().all(|name| present(name)) {
+        Shape::HoldsDatabase
+    } else if !present("postmaster.opts")
+        && holds_only("base", &["1", "4", "5"]).unwrap_or(false)
+        && empty_tablespaces
     {
         Shape::Unfinished
     } else {
-        Shape::HoldsDatabase
+        Shape::Unrecognised
     }
 }
+
+/// The files `initdb` writes at the top of a data directory beside
+/// `PG_VERSION`, all of them before it bootstraps. Its cleanup removes them
+/// before any directory (#2007).
+const INITDB_FILES: [&str; 4] = [
+    "postgresql.conf",
+    "postgresql.auto.conf",
+    "pg_hba.conf",
+    "pg_ident.conf",
+];
 
 /// Whether `data_dir`'s `postmaster.pid` is a postmaster's whose port
 /// something answers on, or cannot be read. A server running on an
@@ -3033,6 +3084,47 @@ mod tests {
             data.join("postgresql.conf").is_file(),
             "with a database in it, kept"
         );
+
+        // #2007: `PG_VERSION` is removed first, but never through the link.
+        std::fs::remove_dir_all(&target).unwrap();
+        unfinished(&target);
+        recover_or_mark(&data).unwrap();
+        assert!(
+            std::fs::symlink_metadata(&data).is_err(),
+            "the link is gone"
+        );
+        assert!(target.join("PG_VERSION").is_file(), "its target is kept");
+    }
+
+    /// #2007: removing an unfinished directory removes `PG_VERSION` first,
+    /// so a removal cut short leaves what still reads as unfinished.
+    /// `remove_dir_all` removes entries in `readdir` order. On a filesystem
+    /// that lists `base/` before `PG_VERSION`, a launch killed between the
+    /// two left `PG_VERSION` without `base/`, which reads as a database on a
+    /// volume not mounted. Here a `pg_wal/` that cannot be emptied cuts the
+    /// removal short. APFS lists it before `PG_VERSION`, so on a Mac the test
+    /// fails without the fix; where `pg_wal/` is listed later it passes either
+    /// way.
+    #[cfg(unix)]
+    #[test]
+    fn a_removal_cut_short_leaves_no_pg_version() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        unfinished(&data);
+        let wal = data.join("pg_wal");
+        std::fs::create_dir_all(&wal).unwrap();
+        write(&wal, "000000010000000000000001", "");
+        std::fs::set_permissions(&wal, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let removed = recover_or_mark(&data);
+        std::fs::set_permissions(&wal, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(removed.is_err(), "the removal was cut short");
+        assert!(!data.join("PG_VERSION").exists(), "PG_VERSION went first");
+        assert_eq!(shape(&data), Shape::Unfinished);
+        recover_or_mark(&data).unwrap();
+        assert!(!data.exists(), "and the next launch removes the rest");
     }
 
     /// #1637: dropping the future that runs `initdb` kills it, rather than
@@ -3322,13 +3414,15 @@ esac
         }
     }
 
-    /// What a killed `initdb` leaves, at `data`: `PG_VERSION`,
-    /// `postgresql.conf`, `base/1` alone and an empty `pg_tblspc/`.
+    /// What a killed `initdb` leaves, at `data`: `PG_VERSION` and the other
+    /// files it writes, `base/1` alone and an empty `pg_tblspc/`.
     fn unfinished(data: &Path) {
         std::fs::create_dir_all(data.join("base/1")).unwrap();
         std::fs::create_dir_all(data.join("pg_tblspc")).unwrap();
         write(data, "PG_VERSION", "18\n");
-        write(data, "postgresql.conf", "");
+        for name in INITDB_FILES {
+            write(data, name, "");
+        }
     }
 
     /// #1824 review: a `base/` or `pg_tblspc/` that is a symlink to nothing,
@@ -3394,6 +3488,42 @@ esac
 
             assert_eq!(found, Shape::Unrecognised, "{fixture}");
             assert!(kept, "{fixture}: kept");
+            assert!(
+                !data.join(INITDB_FINISHED).exists(),
+                "{fixture}: not marked"
+            );
+        }
+    }
+
+    /// #2007: with `PG_VERSION` and without `postgresql.conf`, a directory
+    /// that holds a database, may hold one (its `base/` missing), or that a
+    /// server ran on is kept unmarked.
+    #[test]
+    fn a_directory_that_lost_an_initdb_file_and_may_hold_a_database_is_kept() {
+        for fixture in [
+            "base/16384",
+            "pg_tblspc/16385",
+            "no base",
+            "postmaster.opts",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let data = dir.path().join("data");
+            unfinished(&data);
+            std::fs::create_dir_all(data.join("base/5")).unwrap();
+            std::fs::remove_file(data.join("postgresql.conf")).unwrap();
+            match fixture {
+                "no base" => std::fs::remove_dir_all(data.join("base")).unwrap(),
+                "postmaster.opts" => {
+                    write(&data, fixture, "postgres -D data\n");
+                }
+                database => std::fs::create_dir_all(data.join(database)).unwrap(),
+            }
+
+            let found = shape(&data);
+            recover_or_mark(&data).unwrap();
+
+            assert_eq!(found, Shape::Unrecognised, "{fixture}");
+            assert!(data.join("PG_VERSION").is_file(), "{fixture}: kept");
             assert!(
                 !data.join(INITDB_FINISHED).exists(),
                 "{fixture}: not marked"
