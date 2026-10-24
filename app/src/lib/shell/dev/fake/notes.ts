@@ -4,6 +4,7 @@
  */
 import type { LinkEnd, NoteLinkInput } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed } from "../fake-seed";
 import { CORPUS, FAKE_CONTEXTS, SYNCED_AT } from "./corpus";
 
 /* ----------------------------------------------------------------- notes */
@@ -84,6 +85,7 @@ seedNote(
     { target_id: "confluence:sepa", relation: "related" },
   ],
 );
+keepSeed(NOTES);
 
 /** `delete_note`: the body goes; `false` when there was nothing left to delete, as the command answers. */
 function deleteNote(args: Record<string, unknown>) {
