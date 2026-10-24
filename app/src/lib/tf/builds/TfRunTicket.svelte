@@ -154,7 +154,10 @@
     const source = projectSource(filed.project);
     try {
       const write = await ports.submitWrite(createTicketPayload(filed), id);
-      markQueued(id, TICKET, title, { write, following: following(id, filed), follower: ports.follower() });
+      // An owed read that answered before this did has marked and followed it already: one follow, one toast.
+      if (!queuedMarks(id, TICKET).some((mark) => mark.write === write.id)) {
+        markQueued(id, TICKET, title, { write, following: following(id, filed), follower: ports.follower() });
+      }
       const summary = sources.find((s) => s.id === source);
       toastQueued(`ticket ${title}`, { id: source, display_name: summary?.display_name ?? source });
     } catch (cause) {
