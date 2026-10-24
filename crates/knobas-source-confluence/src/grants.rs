@@ -50,8 +50,9 @@ pub(crate) struct Page {
     pub(crate) space_key: String,
     /// The space's name, `None` where the record carries none.
     pub(crate) space_name: Option<String>,
-    /// Whether `update` is among the page's operations for this user.
-    pub(crate) may_update: bool,
+    /// Whether `update` is among the page's operations for this user, `None`
+    /// where the record carries no operations at all.
+    pub(crate) may_update: Option<bool>,
 }
 
 impl Page {
@@ -131,7 +132,7 @@ fn refusal(op: &str, page: &Page, held: Option<&Vec<String>>) -> Option<String> 
                  permission"
             )
         }),
-        OP_UPDATE_PAGE => (!page.may_update).then(|| match has(MODIFY) {
+        OP_UPDATE_PAGE => (page.may_update == Some(false)).then(|| match has(MODIFY) {
             Some(false) => format!(
                 "This Confluence user cannot edit pages in {space}: it lacks the Add page \
                  permission"
@@ -146,44 +147,56 @@ fn refusal(op: &str, page: &Page, held: Option<&Vec<String>>) -> Option<String> 
     }
 }
 
+/// `GET /rest/api/content/{id}?expand=space,operations`, as much as is read.
+#[derive(serde::Deserialize)]
+struct Record {
+    title: String,
+    space: RecordSpace,
+    /// Absent where the server did not expand them: then nothing says
+    /// whether this user may edit, which is no verdict, not a refusal.
+    #[serde(default)]
+    operations: Option<Vec<Operation>>,
+}
+
+#[derive(serde::Deserialize)]
+struct RecordSpace {
+    key: String,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct Operation {
+    operation: String,
+    #[serde(rename = "targetType")]
+    target_type: String,
+}
+
+impl From<Record> for Page {
+    fn from(record: Record) -> Self {
+        Self {
+            title: record.title,
+            space_key: record.space.key,
+            space_name: record.space.name.filter(|n| !n.trim().is_empty()),
+            may_update: record.operations.map(|ops| {
+                ops.iter()
+                    .any(|o| o.operation == "update" && o.target_type == "page")
+            }),
+        }
+    }
+}
+
 /// The real reads (measured on Data Center 9.2.21, see the module).
 #[async_trait::async_trait]
 impl GrantReads for crate::http::ConfluenceHttp {
     async fn page(&self, id: &str) -> Result<Page, SourceError> {
-        #[derive(serde::Deserialize)]
-        struct Space {
-            key: String,
-            #[serde(default)]
-            name: Option<String>,
-        }
-        #[derive(serde::Deserialize)]
-        struct Operation {
-            operation: String,
-            #[serde(rename = "targetType")]
-            target_type: String,
-        }
-        #[derive(serde::Deserialize)]
-        struct Record {
-            title: String,
-            space: Space,
-            #[serde(default)]
-            operations: Vec<Operation>,
-        }
         let record: Record = self
             .get_json(
                 &format!("rest/api/content/{id}"),
                 &[("expand", "space,operations".to_owned())],
             )
             .await?;
-        Ok(Page {
-            title: record.title,
-            space_key: record.space.key,
-            space_name: record.space.name.filter(|n| !n.trim().is_empty()),
-            may_update: record
-                .operations
-                .iter()
-                .any(|o| o.operation == "update" && o.target_type == "page"),
-        })
+        Ok(record.into())
     }
 
     async fn space_permissions(&self, key: &str) -> Result<Vec<String>, SourceError> {
@@ -216,7 +229,7 @@ mod tests {
                     title: format!("Page {id}"),
                     space_key: space.to_owned(),
                     space_name: Some(format!("Space {space}")),
-                    may_update,
+                    may_update: Some(may_update),
                 },
             );
             self
@@ -375,6 +388,36 @@ mod tests {
         let fake = Fake::default();
         assert_eq!(judged(&fake, &[ask("7", "transition")]).await, vec![]);
         assert_eq!(fake.reads(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_record_without_operations_says_nothing_of_an_edit() {
+        let decode = |json: serde_json::Value| -> Page {
+            serde_json::from_value::<Record>(json).unwrap().into()
+        };
+        let space = serde_json::json!({ "key": "ENG", "name": "Engineering" });
+        let bare = decode(serde_json::json!({ "title": "T", "space": space }));
+        assert_eq!(bare.may_update, None, "no operations is no verdict");
+        let read_only = decode(serde_json::json!({
+            "title": "T", "space": space,
+            "operations": [{ "operation": "read", "targetType": "page" }],
+        }));
+        assert_eq!(read_only.may_update, Some(false));
+        let editable = decode(serde_json::json!({
+            "title": "T", "space": space,
+            "operations": [{ "operation": "update", "targetType": "page" }],
+        }));
+        assert_eq!(editable.may_update, Some(true));
+    }
+
+    #[tokio::test]
+    async fn a_page_whose_operations_were_not_read_refuses_no_edit() {
+        let mut fake = Fake::default()
+            .page("7", "KRO", false)
+            .space("KRO", &["view"]);
+        fake.pages.get_mut("7").unwrap().may_update = None;
+        let refused = judged(&fake, &[ask("7", "update_page")]).await;
+        assert_eq!(refused, vec![], "{refused:?}");
     }
 
     #[tokio::test]
