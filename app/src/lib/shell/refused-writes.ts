@@ -21,13 +21,14 @@ export type RefusedWritesPort = (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
  * `asks` sent once each, and the answer; a rejection answers nothing. No
  * ask sends nothing.
  */
-export async function askRefused(asks: readonly WriteAsk[], read: RefusedWritesPort = refusedWrites): Promise<RefusedWrite[]> {
+export async function askRefused(asks: readonly WriteAsk[], read?: RefusedWritesPort): Promise<RefusedWrite[]> {
   const once = asks.filter(
     (ask, i) => asks.findIndex((other) => other.entity === ask.entity && other.op === ask.op) === i,
   );
   if (once.length === 0) return [];
   try {
-    return await read(once);
+    // The bridge is reached inside the `try`, so a shell without it answers nothing too.
+    return await (read ?? refusedWrites)(once);
   } catch {
     return [];
   }

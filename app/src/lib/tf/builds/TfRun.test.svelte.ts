@@ -265,6 +265,7 @@ function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<Ru
     projects: () => Promise.resolve(PROJECTS),
     links: () => Promise.resolve([]),
     owedTickets: () => Promise.resolve([]),
+    refusedWrites: () => Promise.resolve([]),
     ...overrides,
   };
   const crumbs = createRawSnippet((parts: () => { name: string }[]) => ({
@@ -333,6 +334,28 @@ test("Re-run queues the run's branch and values again, and says so", async () =>
     },
   ]);
   expect(toasts.items.at(-1)!.text).toBe("Queued: run Payout_IntegrationTests. Re-run of #1187, same settings.");
+});
+
+test("a run the source's credential cannot make draws Re-run and Run again… disabled saying why, and queues nothing (#2040)", async () => {
+  const reason = "This TeamCity user cannot run builds in Payouts: it lacks the Run build permission";
+  const asked: string[] = [];
+  const drawn = draw("teamcity:build:1187", "params", {
+    refusedWrites: (asks) => {
+      asked.push(JSON.stringify(asks));
+      return Promise.resolve(asks.map((ask) => ({ ...ask, reason })));
+    },
+  });
+  await settle();
+  expect(asked).toEqual([JSON.stringify([{ entity: PIPE, op: "run_build" }])]);
+  for (const words of ["Re-run", "Run again with changes…", "Run again with these…"]) {
+    const refused = button(words)!;
+    expect(refused.getAttribute("aria-disabled")).toBe("true");
+    expect(refused.title).toBe(reason);
+    refused.click();
+  }
+  await settle();
+  expect(target.querySelector(".tf-run-dialog")).toBeNull();
+  expect(drawn.writes).toEqual([]);
 });
 
 test("Run again with changes… opens the Run… dialog from this run's settings", async () => {
