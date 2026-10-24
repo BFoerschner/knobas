@@ -53,6 +53,8 @@ The three specs: **#1618** (walks and queues that assume the remote stays still)
 
 **If you disagree, the cost of reversing this is:** one line per adapter and the walk's comment; a keyset walk is a new paging protocol in `knobas-http` with its own §10.8 entry.
 
+*Amended by #1979 (2026-10-24): a deletion is no longer turned into a failed run.* The Jira and Confluence walks ask each page from the last record read, so a deletion hides nothing (A5's amendment below); Gitea's full sync lists twice.
+
 ### A2 — A 401-waiting write
 
 **The fork:** skip a write whose last attempt answered 401 until the credential changes, or put it on the sync side's backoff ladder.
@@ -90,6 +92,8 @@ The three specs: **#1618** (walks and queues that assume the remote stays still)
 **Reasoning:** a failed run costs one re-fetch on the next tick and keeps the sweep honest; a re-walk doubles the run on a busy instance and still ends somewhere.
 
 **If you disagree, the cost of reversing this is:** one branch.
+
+*Amended by #1979 (2026-10-24): a shrinking `total` no longer fails the walk.* The check missed an issue deleted and another filed between two pages (the total stays put and the hole is there), and it failed the run on a deletion that skipped nothing, which on a busy filtered source can be every attempt. The keyset that would have replaced it is not offered: JQL's `id > N` is an alias of `issuekey`, so it ranges inside issue N's project, and a deleted `N` is refused (measured on the seeded Jira 10.3). Instead every page after the first is asked one row early, from the last issue read, and accepted only when it opens on an issue the walk has read; otherwise the walk asks again from further back (`crates/knobas-source-jira/src/walk.rs`). A deletion costs a request or two and fails nothing. Confluence's page walk does the same (#1976). Do not copy the shrinking-total check.
 
 ### A6 — Gitea budgets on incremental runs
 

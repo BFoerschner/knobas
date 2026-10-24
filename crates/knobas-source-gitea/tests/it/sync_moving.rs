@@ -350,10 +350,39 @@ async fn a_push_during_the_repository_walk_hides_no_repository() {
     );
 }
 
+/// **A repository deleted during the listing hides no other** (#1979).
+/// `svc-003`, on page 1, is deleted once page 1 is read; `svc-011`, the
+/// first row of page 2, shifts onto page 1, which the walk has passed, and
+/// one listing over `sort=id` never returns it. A full sync lists twice and
+/// walks both: the second listing has it. (`svc-003` itself was listed by
+/// the first, and this fake answers its branch listing; a real Gitea answers
+/// 404 and the walk skips it as deleted since the listing.)
+#[tokio::test]
+async fn a_repository_deleted_during_the_listing_hides_no_other() {
+    let mut world = thirty();
+    world.after("repos/search", 1, |world| {
+        world
+            .repos
+            .retain(|r| r["full_name"] != "tidewater/svc-003");
+    });
+    let (server, _) = Moving::start(world).await;
+
+    let (items, _) = run(&*gitea(&server, json!({})), None).await;
+    let walked = emitted(&items, "repo");
+    assert!(walked.contains(&repo_entity(11)), "{walked:?}");
+    let expected: Vec<String> = {
+        let mut all: Vec<String> = (1..=30).map(repo_entity).collect();
+        all.sort();
+        all
+    };
+    assert_eq!(walked, expected, "every repository listed, once each");
+}
+
 /// A row the walk meets on two pages is walked once. Here a repository older
 /// than every other one (`id` 0) is shared with the token while page 1 is
 /// read: it lands ahead of the page already read and pushes `svc-010` onto
-/// page 2, where the walk meets it again.
+/// page 2, where the walk meets it again. The full sync's second listing
+/// (#1979) has the new one, so this run walks it too.
 #[tokio::test]
 async fn a_repository_met_on_two_pages_is_walked_once() {
     let mut world = thirty();
@@ -369,11 +398,12 @@ async fn a_repository_met_on_two_pages_is_walked_once() {
         1,
         "svc-010 is met on pages 1 and 2 and walked once"
     );
-    assert_eq!(walked.len(), 30, "{walked:?}");
+    assert_eq!(walked.len(), 31, "{walked:?}");
+    assert!(walked.contains(&repo_entity(0)), "{walked:?}");
 
-    // The one shared mid-walk is the next run's.
+    // Nothing is left for the next run.
     let (next, _) = run(&*gitea(&server, json!({})), Some(&cursor)).await;
-    assert_eq!(emitted(&next, "repo"), vec![repo_entity(0)]);
+    assert_eq!(emitted(&next, "repo"), Vec::<String>::new());
     assert!(
         moving.with(|w| w.served.iter().any(|s| s == "repos/search?page=4")),
         "the walk ends on the empty page past the last"

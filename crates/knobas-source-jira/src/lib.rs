@@ -34,6 +34,7 @@ mod sync;
 mod time;
 mod translate;
 mod views;
+mod walk;
 mod write;
 
 pub use config::{BoardScope, Flavor, JiraConfig};

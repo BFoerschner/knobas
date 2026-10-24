@@ -17,8 +17,9 @@
 //!    only): every page's place among its siblings (#1138). A reorder makes
 //!    no new version, so step 5 never sees it. Sent before the walk, so the
 //!    places the cursor records are never newer than what the mirror holds.
-//! 5. Query `lastmodified >= watermark − 2 minutes order by lastmodified asc`,
-//!    following `_links.next` until there is none.
+//! 5. Query `lastmodified >= watermark − 2 minutes order by created asc, id
+//!    asc`, each result asked from the last page read, until one offers no
+//!    `_links.next` ([`crate::walk`], #1976).
 //! 6. Drop what the overlap re-delivered, complete the comments the server did
 //!    not expand, look up the users their mentions name ([`crate::users`]),
 //!    push the rest into the sink.
@@ -69,18 +70,19 @@
 //! re-fetch; one too high loses work -- and `now()` is guaranteed too high the
 //! moment the instance's clock and knobas' disagree.
 //!
-//! # What the ceiling does not close
+//! # Why the walk is ordered by `created`
 //!
-//! Offset paging over the field being ordered by can *step over* a row: a page
-//! at the front of the order is edited, moves to the end, every row behind it
-//! shifts down by one, and the walk's next offset lands one past where it
-//! should. The stepped-over page keeps its old timestamp, so no incremental
-//! query reaches it either -- only the next full sync does. The Jira adapter
-//! accepted the same class with `startAt` and `ORDER BY updated ASC` until
-//! #1623 moved its walk to `ORDER BY created ASC` (contract, "Amendments from
-//! the Jira walk order"), and
-//! `a_page_edited_mid_walk_can_shift_a_row_past_the_offset` records it rather
-//! than leaving the next reader to believe the walk is airtight.
+//! The walk pages by offset, and offset paging over a field being edited can
+//! *step over* a row: under `order by lastmodified asc`, a page at the front
+//! of the order is edited, moves to the end, every row behind it shifts down
+//! by one, and the next offset lands one past where it should. The ceiling
+//! does not close that: the stepped-over page keeps its old timestamp, so no
+//! incremental query reaches it, and a full sync's sweep tombstoned it
+//! (#1976). `created`, then `id`, is an order no edit moves, the one the Jira
+//! walk moved to in #1623. A deletion still shifts rows;
+//! [`crate::walk`] asks each result from the last page read so it cannot
+//! hide one. The time bound stays on `lastmodified`, which is what an edit
+//! moves.
 //!
 //! # The two things the cursor layer is owed
 //!
@@ -109,17 +111,20 @@ use crate::map;
 use crate::model::RawContent;
 use crate::storage::Account;
 use crate::users::Directory;
+use crate::walk::ContentWalk;
 
 /// A stop so a server that keeps handing out `_links.next` cannot spin a run
-/// forever. At the default page size this is a quarter of a million pages.
+/// forever. It counts requests, the page walk's asks from further back
+/// included (`crate::walk`); at the default page size it is about a quarter
+/// of a million pages.
 ///
 /// Reaching it is a **failure**, never a quiet end to the walk. The one kind
 /// this adapter emits claims `full_sync_exhaustive: true`, which is the
 /// engine's licence to tombstone every row a `cursor: None` run did not
 /// return -- so a truncated walk reported as `Ok` authorises deleting whatever
-/// fell off the end. The query is `order by lastmodified asc`, so what falls
-/// off the end is the *most recently modified* work: the pages someone is
-/// reading today.
+/// fell off the end. The walk is `order by created asc`, so what falls off
+/// the end is the *most recently created* work: the pages someone is reading
+/// today.
 ///
 /// An incremental run gets the same refusal, and unconditionally: it is the
 /// only thing that terminates a loop whose other exit is the server's own
@@ -141,8 +146,8 @@ const SWEEP_PAGE_SIZE: u32 = 200;
 /// One search and every page `_links.next` leads on to, with the
 /// [`MAX_PAGES`] refusal in the one place it lives.
 ///
-/// Every walk in this module (the page walk, the mention walk, the positions
-/// sweep, the re-read of moved pages) is this one: the transport's
+/// Every walk in this module but the page walk (the mention walk, the
+/// positions sweep, the re-read of moved pages) is this one: the transport's
 /// [`PageWalk`] over the [`NextLink`] protocol, which follows the link,
 /// refuses one that is not rooted at the instance, and answers the cap. The
 /// caller owns the rows; this names what they are when the cap refuses.
@@ -179,7 +184,7 @@ impl<'a> Walk<'a> {
         let fetch: Fetch<'a> = Box::new(move |link| {
             Box::pin(async move {
                 match link {
-                    None => api.search(cql, limit, expand).await,
+                    None => api.search(cql, 0, limit, expand).await,
                     Some(link) => api.follow(&link).await,
                 }
             })
@@ -208,14 +213,18 @@ impl<'a> Walk<'a> {
         match self.walk.next().await? {
             Walked::Page(page) => Ok(Some(page)),
             Walked::End => Ok(None),
-            Walked::Capped => Err(SourceError::protocol(format!(
-                "Confluence kept offering another page of {} after {MAX_PAGES} requests of {}; \
-                 refusing to report a partial walk as a completed sync. Narrow this source \
-                 with a space list.",
-                self.noun, self.limit
-            ))),
+            Walked::Capped => Err(capped(self.noun, self.limit)),
         }
     }
+}
+
+/// The [`MAX_PAGES`] refusal, for the walk over `noun` in requests of `limit`.
+fn capped(noun: &str, limit: u32) -> SourceError {
+    SourceError::protocol(format!(
+        "Confluence kept offering another page of {noun} after {MAX_PAGES} requests of \
+         {limit}; refusing to report a partial walk as a completed sync. Narrow this source \
+         with a space list."
+    ))
 }
 
 /// The unit of the walk reading: the UI prints "120 of 300 pages".
@@ -323,7 +332,9 @@ impl SyncRun<'_> {
         // every page, so this is the whole map and it needs no sweep (#1138).
         let mut walked_positions = Positions::new();
 
-        let mut walk = Walk::new(self.api, &cql, self.cfg.page_size, EXPAND, "results");
+        // Paged so a page leaving the listing cannot hide another
+        // (`crate::walk`, #1976).
+        let mut walk = ContentWalk::new(self.api, &cql, EXPAND, self.cfg.page_size, MAX_PAGES);
         // The walk reading (#1381): pages got through, over the result's
         // `totalSize` where the API reports one and over nothing otherwise.
         // The latest page's figure wins, so a total that moved under the run
@@ -338,7 +349,12 @@ impl SyncRun<'_> {
         };
         let mut walked: u64 = 0;
         let mut of: Option<u64> = None;
-        while let Some(page) = walk.next_page().await? {
+        loop {
+            let page = match walk.next().await? {
+                Walked::Page(page) => page,
+                Walked::End => break,
+                Walked::Capped => return Err(capped("results", self.cfg.page_size)),
+            };
             of = page.total_size.or(of);
             for mut raw in page.results {
                 let (done, shown_of) = reading(walked, of);
@@ -632,7 +648,7 @@ impl SyncRun<'_> {
     /// and the moment a page exists, the probe answers.
     async fn run_start(&self) -> Result<RunStart, SourceError> {
         let probe = build_cql(self.cfg, None, 0, Order::Descending);
-        let page = self.api.search(&probe, 1, "version").await?;
+        let page = self.api.search(&probe, 0, 1, "version").await?;
         let when = page
             .results
             .first()
@@ -748,7 +764,9 @@ mod tests {
         identity_fault: Option<SourceError>,
         /// Pages whose `version.when` moves forward the moment the walk asks
         /// for its second page -- the mid-run edit the ceiling exists for.
-        edit_mid_walk: Mutex<Option<(String, String)>>,
+        edit_mid_walk: Mutex<Option<Vec<(&'static str, &'static str)>>>,
+        /// Pages deleted the moment the walk asks for its second page.
+        delete_mid_walk: Mutex<Option<Vec<&'static str>>>,
         /// Places among siblings that change the moment the mention walk is
         /// asked for: a drag made after the page walk has delivered the page
         /// (#1138).
@@ -773,6 +791,7 @@ mod tests {
                 fault: None,
                 identity_fault: None,
                 edit_mid_walk: Mutex::new(None),
+                delete_mid_walk: Mutex::new(None),
                 reorder_on_mention: Mutex::new(None),
                 users: std::collections::BTreeMap::new(),
                 user_fault: None,
@@ -792,6 +811,30 @@ mod tests {
                 page.total_size = Some(all as u64);
             }
             page
+        }
+
+        /// What changes the moment the walk asks for a second page: the
+        /// mid-run edit (the page jumps to the end of a `lastmodified` order)
+        /// and the mid-run deletion.
+        fn between_pages(&self) {
+            let mut pages = self.pages.lock().unwrap();
+            for (id, when) in self
+                .edit_mid_walk
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap_or_default()
+            {
+                for p in pages.iter_mut() {
+                    if p["id"] == json!(id) {
+                        p["version"]["when"] = json!(when);
+                        p["version"]["number"] = json!(99);
+                    }
+                }
+            }
+            if let Some(ids) = self.delete_mid_walk.lock().unwrap().take() {
+                pages.retain(|p| !ids.iter().any(|id| p["id"] == json!(id)));
+            }
         }
 
         /// The records `mention = currentUser()` will answer with.
@@ -852,7 +895,12 @@ mod tests {
                     None => true,
                 })
                 .collect();
-            rows.sort_by_key(when_of);
+            // By what the query orders by, as the server would.
+            if cql.contains("order by created") {
+                rows.sort_by_key(created_of);
+            } else {
+                rows.sort_by_key(when_of);
+            }
             if cql.contains("desc") {
                 rows.reverse();
             }
@@ -868,6 +916,21 @@ mod tests {
             let more = start + page.len() < total;
             (page, more)
         }
+    }
+
+    /// `order by created asc, id asc`: the creation stamp, then the id as
+    /// the number it is. A page with no `history` sorts on its id alone.
+    fn created_of(page: &Value) -> (String, u64) {
+        (
+            page["history"]["createdDate"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            page["id"]
+                .as_str()
+                .and_then(|id| id.parse().ok())
+                .unwrap_or_default(),
+        )
     }
 
     fn when_of(page: &Value) -> String {
@@ -914,10 +977,14 @@ mod tests {
         async fn search(
             &self,
             cql: &str,
+            start: u32,
             limit: u32,
             expand: &str,
         ) -> Result<crate::model::ContentPage, SourceError> {
             self.calls.lock().unwrap().push(format!("search {cql}"));
+            if start > 0 {
+                self.between_pages();
+            }
             if let Some(fault) = &self.fault {
                 return Err(clone_fault(fault));
             }
@@ -935,12 +1002,19 @@ mod tests {
                     }
                 }
             }
-            let (rows, more) = self.matching(cql, expand, 0, limit as usize);
-            Ok(self.envelope_with_reported_total(
-                envelope(rows, more.then(|| next_link(cql, expand, limit, limit))),
+            let (rows, more) = self.matching(cql, expand, start as usize, limit as usize);
+            let mut page = self.envelope_with_reported_total(
+                envelope(
+                    rows,
+                    more.then(|| next_link(cql, expand, start + limit, limit)),
+                ),
                 cql,
                 expand,
-            ))
+            );
+            // Where this result starts and how long it was asked to be, as
+            // the server echoes them.
+            (page.start, page.limit) = (Some(start), Some(limit));
+            Ok(page)
         }
 
         async fn follow(
@@ -951,17 +1025,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("follow {path_and_query}"));
-            // The mid-run edit: the moment the walk asks for a second page,
-            // one of the pages is modified and jumps to the end of the order.
-            if let Some((id, when)) = self.edit_mid_walk.lock().unwrap().take() {
-                let mut pages = self.pages.lock().unwrap();
-                for p in pages.iter_mut() {
-                    if p["id"] == json!(id.clone()) {
-                        p["version"]["when"] = json!(when.clone());
-                        p["version"]["number"] = json!(99);
-                    }
-                }
-            }
+            self.between_pages();
             let (cql, expand, start, limit) = parse_link(path_and_query);
             let (rows, more) = self.matching(&cql, &expand, start, limit);
             let (start, limit) = (
@@ -1212,6 +1276,7 @@ mod tests {
             async fn search(
                 &self,
                 _cql: &str,
+                _start: u32,
                 _limit: u32,
                 _expand: &str,
             ) -> Result<crate::model::ContentPage, SourceError> {
@@ -1256,19 +1321,21 @@ mod tests {
     /// once -- which is what the descriptor's `full_sync_exhaustive: true`
     /// claims, and what licenses the engine's sweep.
     #[tokio::test]
-    async fn a_full_sync_walks_every_page_following_the_next_link() {
+    async fn a_full_sync_walks_every_page_to_the_last_result() {
         let fake = Fake::new(a_corpus());
-        // Two per page, so the walk has to follow three continuation links.
+        // Two per page, each after the first asked from the last page read
+        // and one longer (`crate::walk`): `@0` 100-101, `@1` 101-103, `@3`
+        // 103-104, which offers no next link.
         let (items, cursor) = run(&fake, &cfg(json!({ "page_size": 2 })), None)
             .await
             .unwrap();
         assert_eq!(ids(&items), vec!["100", "101", "102", "103", "104"]);
-        let follows = fake
+        let walk = fake
             .calls()
             .iter()
-            .filter(|c| c.starts_with("follow "))
+            .filter(|c| c.ends_with("order by created asc, id asc"))
             .count();
-        assert_eq!(follows, 2, "{:?}", fake.calls());
+        assert_eq!(walk, 3, "{:?}", fake.calls());
         // The watermark is the newest page's own timestamp, never a clock
         // reading -- `CONTEXT.md`'s Watermark rule.
         assert_eq!(watermark(&cursor), "2026-08-22T10:40:00Z");
@@ -1427,7 +1494,10 @@ mod tests {
         let (items, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
         assert_eq!(items.len(), 5);
         assert!(
-            !fake.calls().iter().any(|c| c.contains("order by created")),
+            !fake
+                .calls()
+                .iter()
+                .any(|c| c.ends_with("order by created asc")),
             "{:?}",
             fake.calls()
         );
@@ -1460,8 +1530,8 @@ mod tests {
     /// run witnessed at its *start* (`CONTEXT.md`, *Watermark*).
     ///
     /// A run is not instantaneous. While the walk is paging, somebody edits a
-    /// page; the walk reaches it (an `asc` ordering moves it toward the end)
-    /// and its `version.when` is later than anything the run saw at its start.
+    /// page the walk has not reached yet; the walk reads it with a
+    /// `version.when` later than anything the run saw at its start.
     /// Advancing the watermark to *that* would put the whole run's own
     /// duration below the next query's lower bound -- so every other edit made
     /// during the run, by anyone, is never offered again. Clamping to the
@@ -1473,18 +1543,19 @@ mod tests {
     #[tokio::test]
     async fn the_watermark_never_passes_the_ceiling_the_run_witnessed() {
         let fake = Fake::new(a_corpus());
-        // 100 is edited the moment the walk asks for its second page, so it
-        // moves from the front of the order to well past the ceiling -- and
-        // the walk, which is still paging, reaches it at the end.
-        *fake.edit_mid_walk.lock().unwrap() =
-            Some(("100".to_owned(), "2026-08-22T11:59:00.000Z".to_owned()));
+        // 104, the last in the walk's order, is edited the moment the walk
+        // asks for its second page, to well past the ceiling -- and the walk,
+        // which is still paging, reads it so.
+        *fake.edit_mid_walk.lock().unwrap() = Some(vec![("104", "2026-08-22T11:59:00.000Z")]);
 
         let (items, cursor) = run(&fake, &cfg(json!({ "page_size": 2 })), None)
             .await
             .unwrap();
         assert!(
-            items.iter().any(|i| i.entity.key == "100"),
-            "the walk does reach the page that moved: {:?}",
+            items
+                .iter()
+                .any(|i| i.entity.key == "104" && i.payload["version"]["number"] == json!(99)),
+            "the walk reads the edit: {:?}",
             ids(&items)
         );
         assert_eq!(
@@ -1513,38 +1584,68 @@ mod tests {
         );
     }
 
-    /// The limitation the ceiling does **not** close, written down where the
-    /// next reader meets it: offset paging over a field that is being edited
-    /// can step over a row.
-    ///
-    /// A page at the front of an `asc` order is edited mid-walk and moves to
-    /// the end; every row behind it shifts down by one, and the walk's next
-    /// offset lands one past where it should. The stepped-over page keeps its
-    /// old timestamp, so no later incremental query reaches it either -- only
-    /// the next full sync does. The Jira adapter accepted the same class with
-    /// `startAt` and `ORDER BY updated ASC` until #1623 moved its walk to
-    /// `ORDER BY created ASC`, and it is recorded rather than hidden: a reader who believes the walk is
-    /// airtight would build a stronger guarantee on top of it.
+    /// **A page edited mid-walk shifts no row past the walk** (#1976). Over
+    /// `order by lastmodified asc` with offset pages, page 100 -- on the page
+    /// already read -- is edited, moves to the end, every row behind it shifts
+    /// down by one, and the next offset lands one past page 102. `page` is
+    /// `full_sync_exhaustive`, so the run's `Ok` let the sweep tombstone it.
+    /// The walk orders by `created`, then `id`, which an edit cannot move.
     #[tokio::test]
-    async fn a_page_edited_mid_walk_can_shift_a_row_past_the_offset() {
+    async fn a_page_edited_mid_walk_shifts_no_row_past_the_walk() {
         let fake = Fake::new(a_corpus());
-        *fake.edit_mid_walk.lock().unwrap() =
-            Some(("100".to_owned(), "2026-08-22T11:59:00.000Z".to_owned()));
+        *fake.edit_mid_walk.lock().unwrap() = Some(vec![("100", "2026-08-22T11:59:00.000Z")]);
         let (items, _) = run(&fake, &cfg(json!({ "page_size": 2 })), None)
             .await
             .unwrap();
-        assert!(
-            !items.iter().any(|i| i.entity.key == "102"),
-            "the row behind the moved one is stepped over -- the accepted limitation: {:?}",
-            ids(&items)
-        );
-        // And the same walk with nothing moving under it misses nothing, so
-        // the assertion above is about the edit and not about the paging.
-        let quiet = Fake::new(a_corpus());
-        let (all, _) = run(&quiet, &cfg(json!({ "page_size": 2 })), None)
+        assert_eq!(ids(&items), vec!["100", "101", "102", "103", "104"]);
+    }
+
+    /// **Why the order matters and not only the anchor.** Over three pages,
+    /// both pages already read are edited after the first result. Over
+    /// `lastmodified` they move to the end, behind 102, and the next request,
+    /// asked from the last page read, opens on 100: a page the walk has read,
+    /// which is where an anchored result says nothing unread is before it. It
+    /// is wrong only because an edit moved the row, which `created` rules out.
+    #[tokio::test]
+    async fn pages_read_and_edited_mid_walk_hide_no_unread_one() {
+        let fake = Fake::new(a_corpus().into_iter().take(3).collect());
+        *fake.edit_mid_walk.lock().unwrap() = Some(vec![
+            ("100", "2026-08-22T11:58:00.000Z"),
+            ("101", "2026-08-22T11:59:00.000Z"),
+        ]);
+        let (items, _) = run(&fake, &cfg(json!({ "page_size": 2 })), None)
             .await
             .unwrap();
-        assert_eq!(ids(&all), vec!["100", "101", "102", "103", "104"]);
+        assert_eq!(ids(&items), vec!["100", "101", "102"]);
+    }
+
+    /// **A page deleted mid-walk hides no other** (#1976). Page 100, already
+    /// read, is deleted after the first page, so offset 2 of the four left
+    /// starts at page 103 and an offset walk steps over 102. The walk asks
+    /// from the last page read, finds the answer opens on 102, which it has
+    /// not read, and asks again from further back.
+    #[tokio::test]
+    async fn a_page_deleted_mid_walk_hides_no_other() {
+        let fake = Fake::new(a_corpus());
+        *fake.delete_mid_walk.lock().unwrap() = Some(vec!["100"]);
+        let (items, _) = run(&fake, &cfg(json!({ "page_size": 2 })), None)
+            .await
+            .unwrap();
+        assert_eq!(ids(&items), vec!["100", "101", "102", "103", "104"]);
+    }
+
+    /// **Two pages deleted mid-walk** shift the rows by two, past the one
+    /// row each request starts early by: offset 1 of the three left starts at
+    /// 103. The result does not open on a page the walk has read, so it is
+    /// asked again from the start, and 102 is on it.
+    #[tokio::test]
+    async fn two_pages_deleted_mid_walk_hide_no_other() {
+        let fake = Fake::new(a_corpus());
+        *fake.delete_mid_walk.lock().unwrap() = Some(vec!["100", "101"]);
+        let (items, _) = run(&fake, &cfg(json!({ "page_size": 2 })), None)
+            .await
+            .unwrap();
+        assert_eq!(ids(&items), vec!["100", "101", "102", "103", "104"]);
     }
 
     /// **The clamp never drags the position backwards.**
@@ -2029,10 +2130,10 @@ mod tests {
 
         let (idle, _) = walk_of(&fake, Some(cursor)).await;
 
-        // The sweep's query is the only one ordered by creation.
+        // The sweep's query is the only one ordered by creation alone.
         let sweeps = fake.calls()[before..]
             .iter()
-            .filter(|c| c.contains("created"))
+            .filter(|c| c.contains("created") && !c.contains("id asc"))
             .count();
         assert_eq!(sweeps, 3, "the sweep reads 450 pages in three requests");
         assert!(idle.items.is_empty());

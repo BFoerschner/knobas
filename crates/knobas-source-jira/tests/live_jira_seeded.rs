@@ -3638,11 +3638,13 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
 }
 
 /// **A deletion under the walk shrinks the total the next page reports**
-/// (#1623, ruling A5), and that is the walk's only witness of it. A sub-task is
-/// filed, and the page at offset N (the seeded corpus's size) names it alone,
-/// at the end of the created order, with a total of N + 1. Once it is deleted
-/// the same page answers `200` with no issues and a total of N -- the empty
-/// last page the adapter reads the shrink off, not a refusal.
+/// (#1623) and shifts the rows behind it: the hole the walk's anchored pages
+/// close (#1979), which no longer read the total for it. A sub-task is filed,
+/// and the page at offset N (the seeded corpus's size) names it alone, at the
+/// end of the created order, with a total of N + 1. Once it is deleted the
+/// same page answers `200` with no issues and a total of N, not a refusal:
+/// past a deletion the walk meets an empty page where it expected rows, and
+/// asks again from further back.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just jira-live`"]
 async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {
@@ -3680,6 +3682,89 @@ async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {
     );
     assert_eq!(shrunk, seeded_total, "the deletion shrank the total");
     assert!(past_the_end.is_empty(), "{past_the_end:?}");
+}
+
+/// **A walk in pages of two returns the corpus a one-page walk does**
+/// (#1979). Every page after the first is asked one row early, from the last
+/// issue read, and one row longer (`crate::walk` in the adapter); this is the
+/// real `/search` answering those `startAt`s, over both seeded projects.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn a_walk_in_pages_of_two_returns_the_whole_corpus_once() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let tickets = |items: &[SyncItem]| -> Vec<String> {
+        let mut keys: Vec<String> = items
+            .iter()
+            .filter(|i| i.kind == knobas_source_jira::KIND_TICKET)
+            .map(|i| i.entity.key.clone())
+            .collect();
+        keys.sort();
+        keys
+    };
+    let (paged, _) = full(&*seeded.source(serde_json::json!({ "page_size": 2 }))).await;
+    let (whole, _) = full(&*seeded.source(serde_json::json!({}))).await;
+    println!("paged walk: {:?}", tickets(&paged));
+    assert!(
+        seeded.seeded_keys().len() > 2,
+        "the corpus spans more than one page of two"
+    );
+    assert_eq!(tickets(&paged), seeded.seeded_keys(), "each issue once");
+    assert_eq!(tickets(&paged), tickets(&whole));
+}
+
+/// **JQL's `id > N` is no keyset** (#1979), which is why the walk anchors its
+/// offset pages instead (`crate::walk`'s module docs). `id` is an alias of
+/// `issuekey`, so the range stays inside issue N's own project: asked from
+/// the seeded OPS issue, it answers no PAY issue, though every one was filed
+/// after it and carries a higher id. And an `N` that names no issue is
+/// refused, so a keyset on a deleted issue could not ask at all.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn a_jql_id_range_stays_inside_one_project() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let rows = seeded.jql("ORDER BY id ASC", "key").await;
+    let id_of = |row: &serde_json::Value| -> u64 {
+        row["id"]
+            .as_str()
+            .and_then(|id| id.parse().ok())
+            .expect("an issue has a numeric id")
+    };
+    let ops = rows
+        .iter()
+        .find(|r| r["key"].as_str().is_some_and(|k| k.starts_with("OPS-")))
+        .expect("the seed files an OPS issue");
+    let later_pay: Vec<&str> = rows
+        .iter()
+        .filter(|r| id_of(r) > id_of(ops))
+        .filter_map(|r| r["key"].as_str())
+        .filter(|k| k.starts_with("PAY-"))
+        .collect();
+    assert!(
+        !later_pay.is_empty(),
+        "the seed files PAY issues after the OPS one: {rows:?}"
+    );
+    let ranged = seeded
+        .jql(&format!("id > {} ORDER BY id ASC", id_of(ops)), "key")
+        .await;
+    let ranged: Vec<&str> = ranged.iter().filter_map(|r| r["key"].as_str()).collect();
+    println!(
+        "id > {}: {ranged:?}; PAY ids above it: {later_pay:?}",
+        ops["key"]
+    );
+    assert!(
+        ranged.iter().all(|k| k.starts_with("OPS-")),
+        "the range left OPS: {ranged:?}"
+    );
+    let (status, body) = seeded
+        .get(&format!(
+            "rest/api/2/search?jql={}&maxResults=1&fields=key",
+            url_encode("id > 1 ORDER BY id ASC")
+        ))
+        .await;
+    println!("id > 1: {status} {body}");
+    assert_eq!(status, 400, "an id that names no issue is refused: {body}");
 }
 
 /// The seeded Jira's database container (`testenv/docker-compose.yml`'s

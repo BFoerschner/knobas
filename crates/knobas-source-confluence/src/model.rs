@@ -20,10 +20,11 @@ use serde_json::Value;
 /// `GET /rest/api/content/{id}/child/comment` -- one envelope for both,
 /// because Confluence uses one.
 ///
-/// **The walk never counts up to a total.** A content search reports `size`
-/// (how many are in *this* page) and, when there are more, a `_links.next`. So
-/// the walk is "follow the link until there is none" -- and an adapter that
-/// invented a total from `size` would stop after one page. The result's
+/// **No walk counts up to a total.** A content search reports `size` (how
+/// many are in *this* page) and, when there are more, a `_links.next`. So a
+/// walk ends where there is no link -- and an adapter that invented a total
+/// from `size` would stop after one page. The page walk asks each result at
+/// its own `start` (`crate::walk`), the others follow the link. The result's
 /// `totalSize`, where the API reports one, is read for the progress reading
 /// alone (#1381) and ends nothing.
 #[derive(Debug, Default, Deserialize)]
@@ -34,6 +35,13 @@ pub(crate) struct ContentPage {
     /// that does not report one.
     #[serde(default, rename = "totalSize")]
     pub total_size: Option<u64>,
+    /// The offset this result starts at, as the server echoes it.
+    #[serde(default)]
+    pub start: Option<u32>,
+    /// The page size the server answered with, its clamp applied: `start`
+    /// plus this is where the next result starts (`crate::walk`).
+    #[serde(default)]
+    pub limit: Option<u32>,
     #[serde(default, rename = "_links")]
     pub links: PageLinks,
 }

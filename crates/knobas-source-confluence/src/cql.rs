@@ -13,17 +13,22 @@ use crate::ConfluenceConfig;
 /// Which direction a query walks, and therefore what it is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Order {
-    /// The sync walk. **Ascending is what makes offset paging safe**: a page
-    /// edited mid-walk moves toward the end, so it is re-visited or missed,
-    /// never duplicated ahead of the cursor -- and the ceiling clamp
-    /// ([`crate::cursor`]) is what brings a missed one back next run.
+    /// The sync walk: `order by created asc, id asc`, keys no edit can move
+    /// (#1976). It pages by offset, and over `lastmodified` a page edited
+    /// mid-walk moved to the end and shifted the row behind it past the next
+    /// offset; a full sync then returned `Ok` without that page, and the
+    /// sweep tombstoned it. `id` breaks ties on `created`, as it does for
+    /// Jira (#1720). A deletion can still shift a row; the walk's anchored
+    /// pages are what close that (`crate::walk`).
     Ascending,
     /// The run-start ceiling probe: one row, the newest thing in the corpus.
     Descending,
 }
 
-/// `type = page [AND space in (…)] [AND lastmodified >= "…"] ORDER BY
-/// lastmodified <asc|desc>`.
+/// `type = page [AND space in (…)] [AND lastmodified >= "…"] order by
+/// created asc, id asc` for the walk, `order by lastmodified desc` for the
+/// ceiling probe ([`Order`]). The time bound stays on `lastmodified`: it is
+/// what an edit moves, so it is what an incremental run is bounded by.
 ///
 /// Nothing here escapes anything, and nothing needs to:
 /// [`ConfluenceConfig::from_json`] has already refused a space key that is not
@@ -31,13 +36,9 @@ pub(crate) enum Order {
 /// [`knobas_source::watermark::Cql`]. A key that reached this function cannot
 /// contain a quote, a parenthesis or a comma.
 ///
-/// **A live suite hand-copies the scoped ascending form of this string.**
-/// `tests/live_confluence_seeded.rs`, `Seeded::index_order`, asks the server
-/// for the corpus in the search index's order before the paged walk starts,
-/// and writes `type = page AND space in ("...") order by lastmodified asc` out
-/// for itself -- a probe that borrowed this function would agree with the walk
-/// by construction and would witness nothing. Nothing catches the two drifting
-/// apart, so a change to this form belongs in that copy too;
+/// The live suite sends this form through the adapter's full syncs
+/// (`tests/live_confluence_seeded.rs`, in pages of two among them), which is
+/// where Data Center 9.2 accepts `order by created asc, id asc`;
 /// `a_space_list_becomes_a_quoted_in_clause` below is where the string is
 /// pinned.
 pub(crate) fn build_cql(
@@ -49,7 +50,11 @@ pub(crate) fn build_cql(
     // `type = page` is the scope, not a filter on top of one: this adapter
     // emits exactly one kind, and a blog post or an attachment arriving as a
     // `page` item would be a kind the descriptor never declared.
-    render_query("type = page", cfg, since, offset_secs, order)
+    let order_by = match order {
+        Order::Ascending => "created asc, id asc",
+        Order::Descending => "lastmodified desc",
+    };
+    render_query("type = page", cfg, since, offset_secs, order_by)
 }
 
 /// `mention = currentUser() AND type in (page, comment) [AND space in (…)]
@@ -83,7 +88,7 @@ pub(crate) fn build_mention_cql(
         cfg,
         since,
         offset_secs,
-        Order::Ascending,
+        "lastmodified asc",
     )
 }
 
@@ -141,7 +146,7 @@ fn render_query(
     cfg: &ConfluenceConfig,
     since: Option<DateTime<Utc>>,
     offset_secs: i32,
-    order: Order,
+    order_by: &str,
 ) -> String {
     let mut clauses = scoped(scope, cfg);
     if let Some(since) = since {
@@ -150,14 +155,7 @@ fn render_query(
             Cql::render(since, offset_secs)
         ));
     }
-    let direction = match order {
-        Order::Ascending => "asc",
-        Order::Descending => "desc",
-    };
-    format!(
-        "{} order by lastmodified {direction}",
-        clauses.join(" AND ")
-    )
+    format!("{} order by {order_by}", clauses.join(" AND "))
 }
 
 #[cfg(test)]
@@ -181,7 +179,7 @@ mod tests {
     fn a_full_sync_of_every_space_is_one_unbounded_clause() {
         assert_eq!(
             build_cql(&cfg(json!({})), None, 7200, Order::Ascending),
-            "type = page order by lastmodified asc"
+            "type = page order by created asc, id asc"
         );
     }
 
@@ -197,7 +195,7 @@ mod tests {
                 7200,
                 Order::Ascending
             ),
-            "type = page AND space in (\"ENG\", \"OPS\") order by lastmodified asc"
+            "type = page AND space in (\"ENG\", \"OPS\") order by created asc, id asc"
         );
     }
 
@@ -215,11 +213,11 @@ mod tests {
                 Order::Ascending
             ),
             "type = page AND space in (\"ENG\") AND lastmodified >= \"2026-08-22 12:38\" \
-             order by lastmodified asc"
+             order by created asc, id asc"
         );
         assert_eq!(
             build_cql(&cfg(json!({})), Some(since), 0, Order::Ascending),
-            "type = page AND lastmodified >= \"2026-08-22 10:38\" order by lastmodified asc"
+            "type = page AND lastmodified >= \"2026-08-22 10:38\" order by created asc, id asc"
         );
     }
 
@@ -310,11 +308,12 @@ mod tests {
         );
     }
 
-    /// Ascending, for the reason [`Order::Ascending`] gives: the mention walk
-    /// pages by offset too, and a descending walk over the field it orders by
-    /// would duplicate rows ahead of the cursor rather than behind it.
+    /// Ascending: the mention walk pages by offset too, and a descending walk
+    /// over the field it orders by would duplicate rows ahead of the cursor
+    /// rather than behind it. It stays on `lastmodified`: it delivers no
+    /// kind of its own, and the page walk is what a full sync's sweep reads.
     #[test]
-    fn the_mention_query_walks_the_same_direction_the_page_walk_does() {
+    fn the_mention_query_walks_ascending() {
         let q = build_mention_cql(&cfg(json!({})), None, 0);
         assert!(q.ends_with("order by lastmodified asc"), "{q}");
     }

@@ -116,8 +116,9 @@ mod tests {
     /// request returns it, `total` does not move, and the run ends `Ok` with
     /// a hole the sweep then tombstones. `created` never changes, so an edit
     /// moves nothing; an issue filed mid-walk joins the end, where the walk
-    /// still reads it. What is left is a deletion, which shrinks `total` and
-    /// fails the run (`sync::tests::a_total_that_shrank_between_pages_fails_the_run`).
+    /// still reads it. What is left is a deletion, which shifts rows up; the
+    /// walk asks each page from the last issue read so it hides nothing
+    /// (`crate::walk`, `sync::tests::an_issue_deleted_behind_the_walk_hides_no_unread_one`).
     ///
     /// **`id ASC` after it is load-bearing too** (#1720). Issues that share
     /// one `created` stamp -- an import at minute or day resolution files a

@@ -11,7 +11,7 @@
 //! | Call | Path | Parameters |
 //! |---|---|---|
 //! | [`current_user`](ConfluenceApi::current_user) | `rest/api/user/current` | *(none)* |
-//! | [`search`](ConfluenceApi::search) | `rest/api/content/search` | `cql`, `limit`, `expand` |
+//! | [`search`](ConfluenceApi::search) | `rest/api/content/search` | `cql`, `start`, `limit`, `expand` |
 //! | [`follow`](ConfluenceApi::follow) | whatever `_links.next` said | *(the server's own)* |
 //! | [`comments`](ConfluenceApi::comments) | `rest/api/content/{id}/child/comment` | `limit`, `start`, `expand` |
 //! | [`content`](ConfluenceApi::content) | `rest/api/content/{id}` | `expand` |
@@ -23,9 +23,11 @@
 //! real container the witness: the live suite calls every one of these against
 //! Confluence itself.
 //!
-//! **`start` is not sent on a search.** The walk follows `_links.next`, which
-//! carries the server's own offset -- see
-//! [`ConfluenceHttp::get_link`](crate::http::ConfluenceHttp::get_link).
+//! **`start` is sent by the page walk alone** (#1976): it asks each result
+//! from the last page it read (`crate::walk`). The other walks follow
+//! `_links.next`, which carries the server's own offset -- see
+//! [`ConfluenceHttp::get_link`](crate::http::ConfluenceHttp::get_link) -- and
+//! start at `0`.
 
 use knobas_source::SourceError;
 
@@ -102,9 +104,14 @@ pub(crate) trait ConfluenceApi: Send + Sync {
     /// licence to tombstone every page in the mirror. This call is the one
     /// that cannot answer emptily.
     async fn current_user(&self) -> Result<CurrentUser, SourceError>;
-    /// `GET /rest/api/content/search?cql=…&limit=…&expand=…`.
-    async fn search(&self, cql: &str, limit: u32, expand: &str)
-    -> Result<ContentPage, SourceError>;
+    /// `GET /rest/api/content/search?cql=…&start=…&limit=…&expand=…`.
+    async fn search(
+        &self,
+        cql: &str,
+        start: u32,
+        limit: u32,
+        expand: &str,
+    ) -> Result<ContentPage, SourceError>;
     /// The `_links.next` of a page this run already received.
     async fn follow(&self, path_and_query: &str) -> Result<ContentPage, SourceError>;
     /// `GET /rest/api/content/{id}/child/comment` -- the completion path, for
@@ -139,6 +146,7 @@ impl ConfluenceApi for crate::http::ConfluenceHttp {
     async fn search(
         &self,
         cql: &str,
+        start: u32,
         limit: u32,
         expand: &str,
     ) -> Result<ContentPage, SourceError> {
@@ -146,6 +154,7 @@ impl ConfluenceApi for crate::http::ConfluenceHttp {
             "rest/api/content/search",
             &[
                 ("cql", cql.to_owned()),
+                ("start", start.to_string()),
                 ("limit", limit.to_string()),
                 ("expand", expand.to_owned()),
             ],

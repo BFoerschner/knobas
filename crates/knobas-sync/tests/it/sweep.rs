@@ -37,7 +37,7 @@ struct Shrinking {
     /// alone**.
     kinds: Vec<(&'static str, bool)>,
     /// Fail the run after emitting, the way an adapter refuses a walk it
-    /// cannot vouch for (a reached page cap, a `total` that shrank: #1623).
+    /// cannot vouch for (a reached page cap, #1623).
     fails: bool,
 }
 
@@ -111,7 +111,7 @@ impl Source for Shrinking {
         }
         if self.fails {
             return Err(SourceError::protocol(
-                "the search's total shrank from 3 to 2 issues while the walk paged",
+                "the search did not reach its own reported total within the page cap",
             ));
         }
         // Battery clause 2: a run that emitted nothing returns the cursor it
@@ -281,8 +281,8 @@ async fn a_source_whose_full_sync_is_bounded_is_never_swept() {
 }
 
 /// **A failed full sync sweeps nothing** (#1623). The Jira walk fails a run
-/// whose `total` shrank, because the walk may have stepped over a live issue;
-/// that refusal only protects the mirror if the engine never reconciles on a
+/// that reached its page cap, because the walk may have left live issues
+/// unread; that refusal only protects the mirror if the engine never reconciles on a
 /// failed run's word. Here the run emits two of three and then fails: the one
 /// it did not return keeps its row, and the two it did are rolled back with
 /// the rest of the run.

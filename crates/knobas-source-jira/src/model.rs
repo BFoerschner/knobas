@@ -135,6 +135,11 @@ fn count(n: usize) -> u32 {
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Issue {
+    /// The numeric id, as a string the way Jira sends it: what the walk tells
+    /// two issues apart by (`crate::walk`), since a move to another project
+    /// changes the key and leaves the id.
+    #[serde(default)]
+    pub id: Option<String>,
     pub key: String,
     #[serde(default)]
     pub fields: Fields,
