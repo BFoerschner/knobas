@@ -1886,9 +1886,7 @@ mod tests {
             .find("\nfn apply_key_value(")
             .expect("apply_key_value is in this file")..];
         let body = &body[body.find("match key {").expect("it matches on the key")..];
-        let body = &body[..body
-            .find("_ => return false,")
-            .expect("its fallback arm")];
+        let body = &body[..body.find("_ => return false,").expect("its fallback arm")];
         let mut read: Vec<&str> = body.lines().filter_map(arm_keys).flatten().collect();
         read.sort_unstable();
         let mut listed = NEGATION_UNSUPPORTED_KEYS.to_vec();
@@ -1903,7 +1901,10 @@ mod tests {
     /// one (`"kind" | "type" => {`, or a `| "x"` continuation).
     fn arm_keys(line: &str) -> Option<Vec<&str>> {
         let head = line.trim().trim_start_matches('|').trim();
-        let head = head.split_once("=>").map_or(head, |(pattern, _)| pattern).trim();
+        let head = head
+            .split_once("=>")
+            .map_or(head, |(pattern, _)| pattern)
+            .trim();
         if head.is_empty() {
             return None;
         }

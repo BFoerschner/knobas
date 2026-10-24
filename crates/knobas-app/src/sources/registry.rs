@@ -449,7 +449,10 @@ mod tests {
         let Err(error) = registry.build(fixture_instance()) else {
             panic!("a refused adapter must not build");
         };
-        assert!(error.to_string().contains("its artifact is gone"), "{error}");
+        assert!(
+            error.to_string().contains("its artifact is gone"),
+            "{error}"
+        );
     }
 
     /// A read holding the registry as the trait object reaches the Docs
