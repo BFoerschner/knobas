@@ -54,7 +54,8 @@ use crate::IpcError;
 ///
 /// [`IpcError`] with `invalid` for a payload that is not a write op or names
 /// an op the source does not declare, `not_found` for a source that is not
-/// configured, and `internal` if the queue's own writes fail.
+/// configured, `internal` if the queue's own writes fail, and `not_ready` if
+/// the quit's grace ran out while the write was at the source (#1932).
 pub async fn submit(
     state: &crate::sources::SourcesState,
     payload: serde_json::Value,

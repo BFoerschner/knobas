@@ -149,18 +149,17 @@ and stops the embedded server, also while the boot screen is still up. Every
 step is bounded, so a quit does not wait out a slow remote call.
 
 A write knobas is sending when you quit gets up to three seconds to finish, so
-it is marked sent. This includes a write you wait on: *Flush now*, *Send mine
-anyway*, *Edit and send*, and a worklog or standup page that knobas sends
-before it answers. A write you make after the quit began is queued and not
-sent; the next start sends it. If a send is still going after three seconds,
-knobas abandons it and holds the write, because the source may already have
-it. You check the source, then choose *Send again* or *Discard*; the next
-start does not send it again on its own. A write that a second send cannot
-duplicate, such as pausing or resuming a monitor, stays pending and goes at
-the next start. A start-work flow works the same way: the step
-being sent gets the three seconds, the flow stops before its next step, and a
-*Run* pressed after the quit began starts nothing. *Run* at the next start
-carries the flow on.
+it is marked sent. This includes the write you wait on after *Flush now*, *Send
+mine anyway* or *Edit and send*. A write you make after the quit began is
+queued and not sent; the next start sends it. If a send is still going after
+three seconds, knobas abandons it and holds the write, because the source may
+already have it. You check the source, then choose *Send again* or *Discard*;
+the next start does not send it again on its own. A write that a second send
+cannot duplicate, such as pausing or resuming a monitor, stays pending and goes
+at the next start. A start-work flow works the same way: the step being sent
+gets the three seconds, the flow stops before its next step, and a *Run*
+pressed after the quit began starts nothing. *Run* at the next start carries
+the flow on.
 
 A signal or crash (Ctrl-C under `just dev`, `kill`, a reboot) leaves the
 postmaster running. Start knobas again. The next start adopts the running
