@@ -150,8 +150,8 @@ impl Fake {
     }
 
     /// A refresh is what brings this pull request into the mirror -- the real
-    /// shape, since `Source::write` answers nothing and the number is learned
-    /// by reading back.
+    /// shape for a source whose receipt names nothing, where the number is
+    /// learned by reading back.
     fn revealing_on_refresh(self, head: &str) -> Self {
         self.revealing_on_refresh_too(head, on_head(PR, Some(false), Some("open")))
     }
@@ -787,9 +787,9 @@ async fn skipping_the_pull_request_leaves_the_link_step_with_nothing_to_do() {
 /// The four steps, in order, with the link drawn between the pull request the
 /// mirror learned about and the ticket.
 ///
-/// The refresh is the interesting part: `Source::write` answers nothing, so the
-/// pull request's number is not something knobas is told -- it is read back
-/// after a sync, by the head branch the flow opened from.
+/// The refresh is the interesting part: this fake's receipt names nothing, so
+/// the pull request's number is not something knobas is told -- it is read
+/// back after a sync, by the head branch the flow opened from.
 #[tokio::test]
 async fn a_whole_flow_creates_a_branch_a_pull_request_a_link_and_a_transition() {
     let pool = corpus("sw_happy").await;

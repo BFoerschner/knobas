@@ -172,8 +172,10 @@ pub async fn branch_named(
 /// what its own record says about whether it is still open.
 ///
 /// **A source-shaped read outside an adapter, and it is here because there is
-/// no other way.** `Source::write` answers nothing, so the pull request knobas
-/// has just created is found by reading it back; §4.1 guarantees `title`,
+/// no other way.** A pull request open on the head is what the create step
+/// looks for before it writes, and what a create whose receipt named nothing
+/// is found by afterwards (a receipt that names one is resolved by its id,
+/// `sources::write_queue::named`, #1949); §4.1 guarantees `title`,
 /// `body_text`, `updated_at` and a verbatim `payload`, and neither the head
 /// branch nor the state lives anywhere but the last of those. That is the same
 /// seam #43 recorded for a ticket's status, met here in the read direction. It
