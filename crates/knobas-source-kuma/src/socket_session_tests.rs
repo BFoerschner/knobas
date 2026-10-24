@@ -101,7 +101,10 @@ fn ok(body: impl Into<String>) -> Answer {
 
 fn gone() -> Answer {
     // What engine.io answered for an unknown `sid`, read off the pinned image.
-    Answer::Now(400, r#"{"code":1,"message":"Session ID unknown"}"#.to_owned())
+    Answer::Now(
+        400,
+        r#"{"code":1,"message":"Session ID unknown"}"#.to_owned(),
+    )
 }
 
 impl Engine {
@@ -141,7 +144,11 @@ impl Engine {
                 queued.push_back(r#"42["loginRequired"]"#.to_owned());
             }
             let body = queued.drain(..).collect::<Vec<_>>().join("\u{1e}");
-            return ok(if body.is_empty() { "6".to_owned() } else { body });
+            return ok(if body.is_empty() {
+                "6".to_owned()
+            } else {
+                body
+            });
         }
         let delivered_before = self.delivered.len();
         if let Some(reply) = self.answer(&sid, packet) {
@@ -485,7 +492,11 @@ async fn a_session_idle_past_its_window_is_not_reused() {
     write("a write at the window's edge")
         .await
         .expect("a write at the window's edge");
-    assert_eq!(kuma.logins(), 2, "at the window's edge a fresh login is spent");
+    assert_eq!(
+        kuma.logins(),
+        2,
+        "at the window's edge a fresh login is spent"
+    );
 }
 
 /// A login Kuma refused for its rate limit is not a wrong password: it is
@@ -762,7 +773,11 @@ async fn a_deadline_on_the_login_after_a_reaped_session_keeps_its_class() {
     let socket = socket_to(&server).with_budget(DEADLINE);
     let (first, took) = on_the_paused_clock(&server, add(&socket)).await;
     first.expect("the first create");
-    assert_eq!(took, Duration::ZERO, "an answered exchange takes no time held");
+    assert_eq!(
+        took,
+        Duration::ZERO,
+        "an answered exchange takes no time held"
+    );
     kuma.reap();
     kuma.engine().hang_login = true;
     let (error, took) = on_the_paused_clock(&server, add(&socket)).await;

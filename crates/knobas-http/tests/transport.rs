@@ -1593,8 +1593,7 @@ async fn a_dribbled_body_outlasts_the_request_timeout() {
             }
         }
     };
-    let (read, took) =
-        on_the_held_clock(&server, started, REQUEST_TIMEOUT, received, read).await;
+    let (read, took) = on_the_held_clock(&server, started, REQUEST_TIMEOUT, received, read).await;
     drop(clock);
 
     let (error, kept) = read.expect_err("the total timeout cuts the body");
@@ -1667,7 +1666,11 @@ async fn a_streamed_body_that_stalls_breaks_off_as_unreachable() {
     let (broke_off, kept) = read.expect_err("the stalled body read as whole");
     assert_eq!(broke_off, knobas_http::BodyBrokeOff::Stalled(STALL));
     assert_eq!(kept, b"xxx", "what came before the stall did arrive");
-    assert_eq!(took, GAP * 3 + STALL, "one stall timeout after the third byte");
+    assert_eq!(
+        took,
+        GAP * 3 + STALL,
+        "one stall timeout after the third byte"
+    );
 }
 
 /// The streamed send still bounds the wait for the headers: a server that
