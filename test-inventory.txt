@@ -3247,9 +3247,11 @@ knobas-source-jira	lib/knobas_source_jira	sync::tests::a_changed_boards_setting_
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_changed_issue_is_the_only_thing_the_next_run_emits
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_deletion_that_empties_the_next_page_hides_no_unread_one
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_full_sync_walks_the_whole_total_not_just_the_first_page
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_listing_emptied_under_the_walk_ends_it
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_page_with_nothing_past_the_walk_ends_it_while_total_still_claims_more
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_run_that_emitted_an_issue_reads_the_boards
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_sink_failure_aborts_the_run
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_step_back_answered_short_of_the_walk_ends_nothing
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_total_that_grew_between_pages_is_read_to_its_end
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_walk_that_hits_the_page_cap_fails_instead_of_reporting_a_completed_sync
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_auth_failure_mid_sync_keeps_its_classification
