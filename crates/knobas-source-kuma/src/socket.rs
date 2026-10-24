@@ -943,6 +943,8 @@ mod session_tests;
 
 #[cfg(test)]
 mod tests {
+    use std::task::Poll;
+
     use super::*;
 
     /// **A Kuma that stays up and never acknowledges anything.**
@@ -1126,8 +1128,8 @@ mod tests {
     /// said.
     ///
     /// The clock is held, and moved by the run itself: each time the fake
-    /// holds a read, by `hold`, which answers it, or by what is left of
-    /// `budget` if that is less, which is where the deadline fires. Between
+    /// holds a read, by `hold`, which answers it -- in two steps if the
+    /// deadline falls inside it, the first to the deadline. Between
     /// two moves the client is waiting on the read the fake holds and nothing
     /// else -- every read and POST of a session goes one after the other --
     /// so no timer fires under a request in flight, and the run is the same
@@ -1162,12 +1164,24 @@ mod tests {
                         backstop.elapsed() < Duration::from_secs(20),
                         "still reading after {seen} polls: the call has no deadline"
                     );
-                    // Past the budget the deadline has failed to fire, and
-                    // the session is moved on by whole holds until the
-                    // backstop above.
+                    // The deadline, if it falls inside this hold: the call
+                    // ends there, or it has failed to fire and the rest of
+                    // the hold answers the read. Past the budget, the
+                    // session is moved on by whole holds until the backstop
+                    // above.
                     let left = budget.saturating_sub(started.elapsed());
-                    let step = if left.is_zero() { hold } else { hold.min(left) };
-                    tokio::time::advance(step).await;
+                    if !left.is_zero() && left < hold {
+                        tokio::time::advance(left).await;
+                        let at_the_deadline =
+                            std::future::poll_fn(|cx| Poll::Ready(call.as_mut().poll(cx))).await;
+                        if let Poll::Ready(answered) = at_the_deadline {
+                            break answered
+                                .expect_err("a session that never acknowledges cannot answer a write");
+                        }
+                        tokio::time::advance(hold - left).await;
+                    } else {
+                        tokio::time::advance(hold).await;
+                    }
                 }
             }
         };
