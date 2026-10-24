@@ -19,7 +19,19 @@
 use std::collections::HashSet;
 
 use chrono::{DateTime, Duration, Utc};
-use knobas_search::{KindCatalog, Prefix, SearchError, SearchFilters, SearchQuery, Searcher};
+use knobas_search::{
+    KindCatalog, Prefix, SearchError, SearchFilters, SearchQuery, SearchResponse, Searcher,
+};
+
+/// Every hit's entity id, in the order the groups and hits came back.
+fn ids(response: &SearchResponse) -> Vec<String> {
+    response
+        .groups
+        .iter()
+        .flat_map(|g| &g.hits)
+        .map(|h| h.row.entity_id.clone())
+        .collect()
+}
 
 /// A query object with the defaults the launcher sends.
 fn q(raw: &str) -> SearchQuery {
@@ -542,14 +554,6 @@ async fn a_named_person_filters_with_or_without_search_text() {
     )
     .await;
     let s = searcher(&pool);
-
-    let ids = |r: &knobas_search::SearchResponse| -> Vec<String> {
-        r.groups
-            .iter()
-            .flat_map(|g| &g.hits)
-            .map(|h| h.row.entity_id.clone())
-            .collect()
-    };
 
     // The control: without the author filter the text matches both rows, so
     // the filter has something to remove rather than an empty world to be
@@ -1090,13 +1094,6 @@ async fn a_half_typed_last_word_is_still_a_prefix() {
     )
     .await;
     let s = searcher(&pool);
-    let ids = |r: &knobas_search::SearchResponse| -> Vec<String> {
-        r.groups
-            .iter()
-            .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
-            .collect()
-    };
-
     let typing = s.search(q(&format!("{t} sepa retr"))).await.unwrap();
     assert_eq!(ids(&typing), vec![id.clone()], "{typing:?}");
     // The control: the same word finished is not a prefix and finds nothing,
