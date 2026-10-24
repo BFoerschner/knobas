@@ -115,7 +115,8 @@ pub struct SourceDescriptor {
     /// per-adapter table, which is why [`Capability::Write`] alone is not
     /// enough: once `WriteOp` grows, "supports writes" no longer says *which*
     /// actions to offer. An adapter must reject any op absent from this list
-    /// with [`SourceError::Protocol`].
+    /// with [`SourceError::Protocol`], and the write queue and the WASM host
+    /// refuse one before it is handed over ([`Self::declares`], #1950).
     ///
     /// This and [`Capability::Write`] are two signals for one fact and must
     /// agree: declaring `Write` with no ops leaves the UI nothing to offer,
@@ -1733,7 +1734,11 @@ pub trait Source: Send + Sync {
     ) -> Result<Cursor, SourceError>;
     /// Perform a write on the remote system. Ops absent from
     /// [`SourceDescriptor::write_ops`] must be refused with
-    /// [`SourceError::Protocol`] rather than attempted.
+    /// [`SourceError::Protocol`] rather than attempted. The write queue's
+    /// flush, the one caller, refuses one first by
+    /// [`SourceDescriptor::declares`] against this source's own descriptor
+    /// (#1950), so an adapter's refusal is the defence behind it, still held
+    /// by [`contract::battery`].
     ///
     /// The answer is a [`WriteReceipt`], which for almost every op is
     /// [`WriteReceipt::none`]: knobas addresses what it wrote by *reading it

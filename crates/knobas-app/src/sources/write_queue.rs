@@ -752,9 +752,10 @@ pub(crate) async fn submittable(
     // source filling them may offer (`knobas_source::role`), which for a Kuma
     // is its pause, resume and create. The write is queued, and the flush
     // waits the keychain out on the sync's ladder (#1741). If the instance
-    // turns out not to offer it, the adapter refuses it there (battery
-    // clause 5). An op no instance of the kind could offer is still refused
-    // here.
+    // turns out not to offer it, the flush refuses it there by name against
+    // the built source's own descriptor, before any adapter sees it (battery
+    // clause 5, held by the queue since #1950). An op no instance of the kind
+    // could offer is still refused here.
     let template = registry
         .descriptors()
         .into_iter()

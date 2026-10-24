@@ -107,19 +107,10 @@ impl Source for Fake {
         Ok(cursor.unwrap_or_default())
     }
 
-    /// Battery clause 5, as every adapter answers it: an op this instance
-    /// does not declare is refused by name and never sent.
+    /// Performs whatever it is handed, declared or not: the flush is what
+    /// refuses an op this instance does not declare, before it is sent
+    /// (#1950).
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
-        if !descriptor(self.account)
-            .write_ops
-            .iter()
-            .any(|declared| declared == op.identifier())
-        {
-            return Err(SourceError::protocol(format!(
-                "this instance does not offer {:?}",
-                op.identifier()
-            )));
-        }
         self.asked.lock().unwrap().push(op);
         Ok(WriteReceipt::none())
     }
@@ -490,7 +481,13 @@ async fn a_pause_queued_while_the_keychain_is_locked_is_refused_once_it_answers_
     assert_eq!(refused.state, WriteState::Refused);
     assert_eq!(
         refused.detail.as_deref(),
-        Some("protocol: this instance does not offer \"pause_monitor\"")
+        Some(
+            format!(
+                "protocol: source {KIND:?} does not declare the write \"pause_monitor\", so it \
+                 was not sent"
+            )
+            .as_str()
+        )
     );
     assert_eq!(f.asked(), 0, "nothing reached the source");
 
