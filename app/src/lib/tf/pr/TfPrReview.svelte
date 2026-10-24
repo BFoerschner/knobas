@@ -98,7 +98,7 @@
       <fieldset class="tf-radio">
         <legend class="tf-sr">Verdict</legend>
         {#each choices as choice (choice.verdict)}
-          <label title={choice.action === null ? "Add a line comment first" : undefined}
+          <label title={choice.why ?? undefined}
             ><input type="radio" name="tf-prr-{uid}-verdict" value={choice.verdict} disabled={choice.action === null} bind:group={verdict} />
             <span>{choice.label}<small>{choice.meaning}</small></span></label
           >

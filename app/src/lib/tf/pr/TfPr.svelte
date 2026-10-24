@@ -14,7 +14,8 @@
     (the source's *Approvals*, the checks and *Conflicts*, #994) and, when
     the repository is cloned, the local checkout.
   - **Conversation**: each comment and review in time order, and a comment
-    box that queues `Comment`.
+    box that queues `Comment`; *Comment* is drawn disabled with the source's
+    reason where the token may not comment (#2030), and a press queues nothing.
   - **Files changed**: `TfPrFiles` (#842), which reads the deferred *Files*
     section when the tab opens.
   - **Commits**: the pull request's commits; one the mirror holds opens its
@@ -78,6 +79,7 @@
   import { writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
+  import { refusedAttrs } from "../../shell/refused-writes";
   import { actionName } from "../../detail/view/actions";
   import { prNumber } from "../code/code";
   import { isMine, itemHash, keyOf, username } from "../job/job";
@@ -422,7 +424,7 @@
 
   async function send() {
     const body = draft.trim();
-    if (prId === null || body === "" || sending) return;
+    if (prId === null || body === "" || sending || (comment?.disabled ?? null) !== null) return;
     sending = true;
     const source = detail?.source ?? null;
     try {
@@ -603,7 +605,13 @@
                 <div class="tf-compose">
                   <textarea bind:value={draft} placeholder="Comment on {name}" aria-label="Comment on {name}"></textarea>
                   <div class="tf-acts">
-                    <button type="button" class="tf-btn" disabled={draft.trim() === "" || sending} onclick={() => void send()}>Comment</button>
+                    <button
+                      type="button"
+                      class="tf-btn"
+                      disabled={comment.disabled === null && (draft.trim() === "" || sending)}
+                      {...refusedAttrs(comment.disabled)}
+                      onclick={() => void send()}>Comment</button
+                    >
                   </div>
                 </div>
               {/if}

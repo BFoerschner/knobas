@@ -179,8 +179,10 @@ export interface ReviewChoice {
   label: string;
   /** Prototype-6's one-line meaning. */
   meaning: string;
-  /** The source's action for this verdict; `null` where it cannot be sent now (a comment with no line comments). */
+  /** The source's action for this verdict; `null` where it cannot be sent now (a comment with no line comments, a write the credential cannot make). */
   action: ViewAction | null;
+  /** Why it cannot be sent now, where `action` is `null`: the source's refusal (#2030), else the line comment it waits for. */
+  why: string | null;
 }
 
 const CHOICES: { verdict: Verdict; label: string; meaning: string }[] = [
@@ -194,7 +196,9 @@ const CHOICES: { verdict: Verdict; label: string; meaning: string }[] = [
  * actions (Gitea's `review.rs`): a verdict it does not offer is not drawn
  * (one's own pull request takes no approval), and its comment-only review
  * (`line_comments: requires`) is drawn without an action while no line
- * comment waits, since the source would refuse it.
+ * comment waits, since the source would refuse it. A verdict the source
+ * draws disabled (a token that may not write, #2030) is drawn without an
+ * action too, saying why.
  */
 export function reviewChoices(actions: readonly ViewAction[], pending: number, base: string | null = null): ReviewChoice[] {
   const reviews = actions.filter((action) => action.write_op === "submit_review");
@@ -202,9 +206,9 @@ export function reviewChoices(actions: readonly ViewAction[], pending: number, b
   for (const choice of CHOICES) {
     const action = reviews.find((candidate) => candidate.values["verdict"] === choice.verdict);
     if (action === undefined) continue;
-    const sendable = action.line_comments !== "requires" || pending > 0;
+    const why = action.disabled ?? (action.line_comments === "requires" && pending === 0 ? "Add a line comment first" : null);
     const meaning = choice.meaning.replace("{base}", base ?? "the base");
-    choices.push({ ...choice, meaning, action: sendable ? action : null });
+    choices.push({ ...choice, meaning, action: why === null ? action : null, why });
   }
   return choices;
 }
