@@ -46,7 +46,7 @@
     /** Queue it; `true` once queued, which closes the dialog. */
     oncreate: (page: NewPage, linkToJob: boolean) => Promise<boolean>;
     /** What the source refuses its credential; the IPC read when omitted. */
-    refusedWrites?: RefusedWritesPort;
+    refusedWrites?: RefusedWritesPort | undefined;
   } = $props();
 
   // svelte-ignore state_referenced_locally

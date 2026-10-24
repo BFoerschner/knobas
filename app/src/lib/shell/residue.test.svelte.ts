@@ -418,6 +418,7 @@ const TfStandup = (await import("../tf/time/TfStandup.svelte")).default;
 const TfDocs = (await import("../tf/docs/TfDocs.svelte")).default;
 const TfDocBody = (await import("../tf/docs/TfDocBody.svelte")).default;
 const TfNewPage = (await import("../tf/docs/TfNewPage.svelte")).default;
+const PublishTargetPicker = (await import("../standup/PublishTargetPicker.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
 const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
@@ -1953,6 +1954,26 @@ const CASES: Case[] = [
           layers: createLayers(),
           onclose: () => {},
           oncreate: () => new Promise<boolean>(() => {}),
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The publish target's picker (#289): its effect asks `refused_writes`
+     * about the chosen parent (#2053); an answer that lands after the
+     * unmount must announce nothing.
+     */
+    name: "PublishTargetPicker",
+    source: "lib/standup/PublishTargetPicker.svelte",
+    open: (target) => ({
+      app: mount(PublishTargetPicker, {
+        target,
+        props: {
+          sources: [{ id: "c", name: "Confluence" }],
+          value: { source_id: "c", parent: "c:1" },
+          refusedWrites: () => deferred([]),
+          onchange: () => {},
         },
       }),
     }),

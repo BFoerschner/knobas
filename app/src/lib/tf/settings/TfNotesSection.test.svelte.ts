@@ -310,3 +310,36 @@ test("with no notes there is nothing to move", async () => {
   await render(stub({ note_count: 0 }).ports);
   expect(button("Move to Confluence…").disabled).toBe(true);
 });
+
+test("a page the credential cannot add pages under is drawn disabled saying why, and moves nothing (#2053)", async () => {
+  const reason = "This Confluence user cannot add pages to Archive: it lacks the Add page permission";
+  const fake = stub();
+  const asked: string[] = [];
+  fake.ports.refusedWrites = async (asks) => {
+    asked.push(JSON.stringify(asks));
+    return asks.map((ask) => ({ ...ask, reason }));
+  };
+  await render(fake.ports);
+  button("Move to Confluence…").click();
+  await settle();
+  await pickAndMove();
+
+  expect(asked).toEqual([JSON.stringify([{ entity: "wiki:98500", op: "create_page" }])]);
+  const hit = button("Notes archive");
+  expect(hit.getAttribute("aria-disabled")).toBe("true");
+  expect(hit.title).toBe(reason);
+  expect(button("Move 37 notes").disabled).toBe(true);
+  expect(fake.moved).toEqual([]);
+});
+
+test("a page the source refuses nothing under, or cannot tell, is picked as before (#2053)", async () => {
+  const fake = stub();
+  fake.ports.refusedWrites = async () => {
+    throw { code: "not_ready", message: "no", source_id: null };
+  };
+  await render(fake.ports);
+  button("Move to Confluence…").click();
+  await settle();
+  await pickAndMove();
+  expect(fake.moved).toEqual(["wiki:98500"]);
+});

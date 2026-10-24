@@ -41,6 +41,7 @@ import {
   type TicketViewRow,
 } from "../../ipc/search";
 import { passiveAttribution, setPassiveAttribution } from "../../ipc/time";
+import type { RefusedWritesPort } from "../../shell/refused-writes";
 import {
   addSource,
   backfillSource,
@@ -186,6 +187,8 @@ export interface SectionPorts {
   search: typeof search;
   listSources: () => Promise<SourceSummary[]>;
   listAdapters: () => Promise<SourceDescriptor[]>;
+  /** Which pages the publish target's picker offers the source's credential cannot add pages under (#2053); the IPC read when omitted. */
+  refusedWrites?: RefusedWritesPort;
   monitoringSettings: () => Promise<MonitoringSettings>;
   setMonitoringSettings: (settings: MonitoringSettings) => Promise<MonitoringSettings>;
   backupStatus: () => Promise<BackupStatus>;

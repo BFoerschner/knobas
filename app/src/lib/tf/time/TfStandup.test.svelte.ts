@@ -6,7 +6,7 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { ActionItemTicket, DigestLine, LinkEnd, LinkEntry, Protocol, PublishTarget, StandupDigest } from "../../ipc/entity";
+import type { ActionItemTicket, DigestLine, LinkEnd, LinkEntry, Protocol, PublishTarget, RefusedWrite, StandupDigest, WriteAsk } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
@@ -123,6 +123,8 @@ function open(
     owed?: ActionItemTicket[];
     /** Whether the mirror holds the filed ticket yet; flip `mirror.held` to bring it in (#1951). */
     mirrored?: boolean;
+    /** What `refused_writes` answers (#2053); nothing refused when omitted. */
+    refused?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
   } = {},
 ) {
   const calls: {
@@ -231,6 +233,7 @@ function open(
         copy: async (text: string) => {
           calls.copied.push(text);
         },
+        refusedWrites: async (asks: WriteAsk[]) => (over.refused ? over.refused(asks) : []),
       } as never,
     },
   });
@@ -336,6 +339,34 @@ test("Publish goes to the stored page without asking, after saving", async () =>
   expect(calls.saved.length).toBe(1);
   expect(calls.published).toEqual([undefined]);
   expect(text()).toContain("publishing");
+});
+
+test("Publish under a page the credential cannot add pages to is drawn disabled saying why, and publishes nothing (#2053)", async () => {
+  const reason = "This Confluence user cannot add pages to Engineering: it lacks the Add page permission";
+  const asked: WriteAsk[][] = [];
+  const { calls } = open({
+    refused: async (asks) => {
+      asked.push(asks);
+      return asks.map((ask) => ({ ...ask, reason }));
+    },
+  });
+  await settle();
+  expect(asked).toEqual([[{ entity: "wiki:900", op: "create_page" }]]);
+  const publish = button("Publish to Confluence");
+  expect(publish.getAttribute("aria-disabled")).toBe("true");
+  expect(publish.title).toBe(reason);
+  publish.click();
+  await settle();
+  expect(calls.published).toEqual([]);
+  expect(calls.saved).toEqual([]);
+});
+
+test("Publish stays enabled where the source refuses nothing, or cannot tell (#2053)", async () => {
+  open({ refused: async () => Promise.reject({ code: "not_ready", message: "no", source_id: null }) });
+  await settle();
+  const publish = button("Publish to Confluence");
+  expect(publish.getAttribute("aria-disabled")).toBeNull();
+  expect(publish.title).toBe("");
 });
 
 test("the first Publish asks where protocols go", async () => {

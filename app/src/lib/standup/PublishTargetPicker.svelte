@@ -25,9 +25,18 @@
   search is narrowed to pages at the backend and to the chosen source here:
   a page's source is on the hit, while the launcher's own filter vocabulary is
   about what the *reader* typed.
+
+  ## A page the credential cannot add pages under is drawn refused
+
+  Every hit, and the parent already chosen, is asked `refused_writes` for
+  `create_page` (#2053): a page whose space the source's credential may not
+  add pages to is drawn disabled with the reason and cannot be picked, and a
+  chosen parent it refuses says why and announces no target. Nothing else
+  needs to know: each host disables its action on an incomplete target.
 -->
 <script lang="ts">
   import type { PublishTarget } from "../ipc/entity";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort } from "../shell/refused-writes";
   import { search as realSearch, type SearchHit } from "../ipc/search";
   import type { PublishableSource } from "./protocol";
   import { presumedSource } from "./protocol";
@@ -36,6 +45,7 @@
     sources,
     value = null,
     search = realSearch,
+    refusedWrites,
     onchange,
   }: {
     /** The Confluence sources whose adapters declare `create_page`. */
@@ -44,6 +54,8 @@
     value?: PublishTarget | null;
     /** The launcher's read, injectable so a test needs no Tauri. */
     search?: typeof realSearch;
+    /** What the source refuses its credential, injectable likewise; the IPC read when omitted. */
+    refusedWrites?: RefusedWritesPort | undefined;
     /** The target as it now stands, or `null` while it is incomplete. */
     onchange: (target: PublishTarget | null) => void;
   } = $props();
@@ -55,8 +67,22 @@
   let query = $state("");
   let hits = $state<SearchHit[]>([]);
 
+  let refused = $state<RefusedWrite[]>([]);
+  /** The chosen parent and every hit, as a string, so a search with the same hits asks nothing again. */
+  const asks = $derived(
+    JSON.stringify([...new Set([...(parent === null ? [] : [parent]), ...hits.map((hit) => hit.entity_id)])].map((entity) => ({ entity, op: "create_page" }))),
+  );
+  $effect(() =>
+    askInto(JSON.parse(asks), refusedWrites, (answer) => {
+      refused = answer;
+      announce();
+    }),
+  );
+  /** Why no page can be added under `page`, or `null`. */
+  const why = (page: string | null) => refusalOf(refused, page, "create_page");
+
   function announce() {
-    onchange(sourceId !== null && parent !== null ? { source_id: sourceId, parent } : null);
+    onchange(sourceId !== null && parent !== null && why(parent) === null ? { source_id: sourceId, parent } : null);
   }
 
   function chooseSource(id: string) {
@@ -134,6 +160,9 @@
   {#if parent !== null && hits.length === 0}
     <p class="sub">Publishing under {parent}.</p>
   {/if}
+  {#if why(parent) !== null}
+    <p class="sub" role="alert">{why(parent)}</p>
+  {/if}
 
   <ul class="hits">
     {#each hits as hit (hit.entity_id)}
@@ -141,7 +170,9 @@
         <button
           class="link"
           class:picked={parent === hit.entity_id}
+          {...refusedAttrs(why(hit.entity_id))}
           onclick={() => {
+            if (why(hit.entity_id) !== null) return;
             parent = hit.entity_id;
             announce();
           }}
@@ -184,6 +215,11 @@
 
   button.link.picked {
     text-decoration: underline;
+  }
+
+  button.link[aria-disabled="true"] {
+    color: var(--muted);
+    cursor: not-allowed;
   }
 
   .sub {
