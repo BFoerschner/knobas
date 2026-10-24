@@ -847,6 +847,14 @@ test("a job opened by its bare key keeps the bare key's address (#1525)", async 
   expect(target.querySelector(".tf-jobchip")?.getAttribute("href")).toBe("#/job/PAY-231");
 });
 
+test("a job left at its source's address for its bare key is held at the bare key (#1987)", async () => {
+  start({ jobPorts: TWO_SOURCE_PORTS });
+  await at("#/job/tide:PAY-231");
+  await at("#/job/PAY-231");
+  await at("#/settings");
+  expect(target.querySelector(".tf-jobchip")?.getAttribute("href"), "same key, another address: a new last job").toBe("#/job/PAY-231");
+});
+
 function addToButton(): HTMLButtonElement | undefined {
   return [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim().startsWith("Add to"));
 }
