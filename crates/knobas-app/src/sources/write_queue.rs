@@ -331,7 +331,7 @@ pub async fn arrival_linkable(
 
 /// Link what write `write_id` made to `ticket`, once it has: the branch a
 /// sent `CreateBranch` named, or the pull request a sent `CreatePullRequest`'s
-/// receipt named ([`named`], #1949; the one open on its head where the source
+/// receipt named ([`entity_named`], #1949; the one open on its head where the source
 /// named none), as the mirror holds them (#984), or the page a
 /// sent `CreatePage` made, by the id its settle stamped
 /// (`docs::created_page`, #1121), or the ticket a sent `CreateTicket` filed
@@ -377,7 +377,7 @@ pub async fn link_on_arrival(
             ticket_filed(pool, write_id, &write.source_id, title, write.queued_at).await?
         }
         WriteOp::CreatePullRequest { entity, head, .. } => {
-            match named(pool, write_id, crate::start_work::queue::KIND_PR).await? {
+            match entity_named(pool, write_id, crate::start_work::queue::KIND_PR).await? {
                 Named::Made(named) => named,
                 Named::Nothing => match crate::start_work::queue::pull_request_on_head(
                     pool,
@@ -453,9 +453,9 @@ pub enum Named {
 }
 
 /// The ticket write `write_id` made, by the key its receipt named (#1754):
-/// [`named`] for a `ticket`.
+/// [`entity_named`] for a `ticket`.
 pub(crate) async fn ticket_named(pool: &sqlx::PgPool, write_id: i64) -> Result<Named, IpcError> {
-    named(pool, write_id, "ticket").await
+    entity_named(pool, write_id, "ticket").await
 }
 
 /// The entity of kind `kind` write `write_id` made, by the id its receipt
@@ -471,7 +471,11 @@ pub(crate) async fn ticket_named(pool: &sqlx::PgPool, write_id: i64) -> Result<N
 /// # Errors
 ///
 /// `internal` if a read fails.
-pub async fn named(pool: &sqlx::PgPool, write_id: i64, kind: &str) -> Result<Named, IpcError> {
+pub(crate) async fn entity_named(
+    pool: &sqlx::PgPool,
+    write_id: i64,
+    kind: &str,
+) -> Result<Named, IpcError> {
     let stamped: Option<(String, Option<String>)> =
         sqlx::query_as("select source_id, remote_id from knobas.write_queue where id = $1")
             .bind(write_id)

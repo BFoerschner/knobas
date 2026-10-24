@@ -26,8 +26,8 @@
        ruled; `create_branch` is addressed by its name; Kuma's `create_monitor`, Confluence's
        `create_page` and Jira's and Gitea's `create_ticket` already answer the local part.
   2. **Which pull request a sent `CreatePullRequest` opened**
-     (`sources::write_queue::named(pool, write_id, kind)`, which `ticket_named` now calls with
-     `ticket`). Where the row's `remote_id` is set, the pull request is `<source_id>:<remote_id>`
+     (`sources::write_queue::entity_named(pool, write_id, kind)`, crate-private, which
+     `ticket_named` now calls with `ticket`). Where the row's `remote_id` is set, the pull request is `<source_id>:<remote_id>`
      once `sync.live_item` holds it as a `pr`, and nothing until then: a named pull request waits
      for its sync and **never falls back to the head**. Only a row with no `remote_id` is found
      by the open pull request on its head, as before. `Named`'s variants are `Made(Option<String>)`
@@ -35,11 +35,11 @@
   3. **What a caller sees.** `submit_write`'s arrival link for a created pull request (#984) names
      the pull request the receipt named, where it could name another open on the same head into a
      different base. Start work's link step (`start_work::Steps::pull_request_named`, a new trait
-     method; `Queue` answers it with `named`) links the pull request its create step's write
+     method; `Queue` answers it with `entity_named`) links the pull request its create step's write
      named, asks for one refresh where it is not mirrored yet, and otherwise fails the step,
      retryable, with *the pull request this flow opened has not reached the mirror yet*. A create
      step that settled on a pull request already open sent no write and keeps the head read. The
-     `unclaimed` activity line can carry none of these receipts (none of the three ops can leave
+     `unclaimed` activity line can carry none of these receipts (none of the five ops can leave
      an unclaimed artefact); the webview reads no `remote_id`.
 
   Witnessed by `knobas-source-gitea`'s `tests/it/write.rs` (`a_pull_request_opened_is_named_by_its_key`,
