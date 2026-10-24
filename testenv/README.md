@@ -1629,7 +1629,10 @@ section above, registers it with Launch Services, checks that this session can
 actually drive a desktop, launches the bundle **from the path Launch Services
 resolves `dev.knobas.desktop` to** on the demo profile, waits for its window,
 asserts that exactly one instance is running, runs the named driver, and quits
-the app with ⌘Q. Drivers live in `testenv/desktop-witness/drivers/`, and there
+the app with ⌘Q. When ⌘Q cannot be sent or leaves the app running, it sends
+SIGTERM, and then stops the embedded PostgreSQL the killed app left on the demo
+profile (`stop_left_postgres`, #1967). A server that was already up before the
+launch is left alone. Drivers live in `testenv/desktop-witness/drivers/`, and there
 are three.
 
 `launcher-hotkey` (#500) presses ⌘K, asserts through the accessibility tree
@@ -2133,6 +2136,8 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
   refused when `aerospace` is not on PATH.
 - **On a failed command** it writes `failed.png` and `failed-ax.txt` (the
   window's accessibility tree) beside the shots, then quits the app with ⌘Q.
+  If the app is still running after that, it is killed, and the embedded
+  PostgreSQL it left on the demo profile is stopped, as the witness does (#1967).
 - **The demo profile is shared.** A source a steps file adds stays in it, with
   its credentials gone at exit, so a steps file that adds one removes it again.
 

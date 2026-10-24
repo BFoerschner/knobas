@@ -514,8 +514,12 @@ check "and nothing said" "" "$said"
 
 pid=$(postmaster_standin "$pg_data")
 check "a live postmaster on the data dir is found" "$pid" "$(profile_postmaster "$pg_data")"
+from=$SECONDS
 said=$(stop_left_postgres "$pg_data" "" 10 2>&1) && status=0 || status=$?
 check "the postmaster the app left is stopped" 0 "$status"
+# With nothing in flight the stop does not wait for the guard: the postmaster
+# itself is not a start in flight (the real one stops in a quarter second).
+check "at once" yes "$([ $((SECONDS - from)) -lt 5 ] && echo yes || echo "no ($((SECONDS - from)) s)")"
 check "it is gone" gone "$(alive "$pid")"
 check "its lock is gone" no "$([ -e "$pg_data/postmaster.pid" ] && echo yes || echo no)"
 check_contains "and the stop says which" "stopped the PostgreSQL the app left on $pg_data (pid $pid, SIGINT)" "$said"
