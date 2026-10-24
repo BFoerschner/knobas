@@ -162,13 +162,13 @@ fn instance_from(
 ///
 /// **The keychain refusal is the one worth naming**, because swallowing it is
 /// a decision rather than an oversight. A locked keychain, `errSecAuthFailed`
-/// and a *Deny* on the prompt all arrive as `SecretError::Backend`, and both
-/// callers of this are surfaces that must survive one: the Monitors tab reads
-/// the roster out of the database and would otherwise refuse the whole tab
-/// over a credential it needs only to decide which two buttons to draw, and
-/// `submit_write` would refuse a Jira *comment* -- an op the adapter *kind*
-/// declares, needing no credential to be queueable at all -- because a
-/// keychain it never had to open would not open. `backup`'s
+/// and a *Deny* on the prompt all arrive as `SecretError::Backend`, and the
+/// Monitors tab must survive one: it reads the roster out of the database and
+/// would otherwise refuse the whole tab over a credential it needs only to
+/// decide which two buttons to draw. `submit_write` must survive one too, and
+/// it needs more than an empty list: [`instance_offers`] tells it the
+/// keychain gave no answer, so a pause pressed while it is locked is queued
+/// rather than refused (#1944). `backup`'s
 /// `a_keychain_that_refuses_one_source_still_settles_the_others` is the same
 /// failure met from the other side: a refusal is this machine learning
 /// nothing, and turning that into a per-machine verdict is the bug.
