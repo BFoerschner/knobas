@@ -149,14 +149,16 @@ fn code_only(source: &str) -> String {
 /// A file names the trait rather than merely calling it.
 ///
 /// `impl Source for` covers every adapter and the sync engine's progress
-/// decorator; `trait Source` covers the SPI's own declaration; `impl
-/// GuestAdapter for` covers an external adapter's guest, whose `write` the
-/// host's `impl Source` forwards to (ADR-0028, #1407). A guest is a WASM
-/// component and cannot reach a source but through that host.
+/// decorator; `trait Source` covers the SPI's own declaration; `trait
+/// Adapter` and `impl Adapter for` cover the adapter SDK's guest trait and an
+/// external adapter built on it (#2028), whose `write` the host's `impl
+/// Source` forwards to (ADR-0028, #1407). A guest is a WASM component and
+/// cannot reach a source but through that host.
 fn implements_the_trait(source: &str) -> bool {
     source.contains("impl Source for")
         || source.contains("trait Source")
-        || source.contains("impl GuestAdapter for")
+        || source.contains("trait Adapter")
+        || source.contains("impl Adapter for")
 }
 
 /// Whether `source`, living at `relative`, is a second write path.
@@ -262,7 +264,7 @@ fn the_rule_actually_rejects_a_second_call_site() {
     assert!(
         !offends(
             "knobas-wasm-fixture/src/lib.rs",
-            "impl GuestAdapter for Adapter { fn write(&self, op: String) { let _: WriteOp = parse(&op); } }",
+            "impl Adapter for Fixture { fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {} }",
             needle,
         ),
         "an external adapter's guest implementing write is the trait, through the host"

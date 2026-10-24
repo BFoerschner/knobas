@@ -35,7 +35,10 @@
   no bindings, no `wit_bindgen` dependency and no WIT conversion. No test in
   `crates/knobas-wasm-host/tests/it/` changed; the merge-manager added two (#2037), which read the
   `warn` line the fixture now logs for each refusal a sink answers, so that the SDK handing the
-  host's error to the adapter is witnessed. Beside that line, for everything a knobas host sends,
+  host's error to the adapter is witnessed. The write queue's choke-point guard
+  (`crates/knobas-sync/tests/it/write_choke_point.rs`, ADR-0006) counts `trait Adapter` and
+  `impl Adapter for` as implementing the trait, in place of `impl GuestAdapter for`: a guest still
+  reaches a source only through the host's `impl Source`. Beside that line, for everything a knobas host sends,
   what crosses is the same. Only input a host never sends answers differently: a config that is not JSON reads
   as `null`, and a write op, saved view or download target that does not decode is refused by the
   SDK (`the host's <what> does not decode: …`) before the fixture sees it. Timestamps are written
