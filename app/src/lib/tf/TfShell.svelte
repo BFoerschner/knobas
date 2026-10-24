@@ -279,19 +279,19 @@
   let now = $state(new Date());
   /** Bumped by an event that asks for the source list again. */
   let sourcesAsked = $state(0);
-  const readSources = () => (sourcesAsked += 1);
+  const askSources = () => (sourcesAsked += 1);
   /**
    * Which sources the health store holds, and when it changes the bar's list
    * is stale (#2059). Removing a source sends no event: Settings re-lists the
-   * sources and hands the store the new membership (`Health.replace`) on
+   * sources and hands the store the sources there are now (`Health.replace`) on
    * Remove, Uninstall, Add source and restore alike. A `source:health` for a
    * source the store did not hold changes it too.
    */
-  const membership = $derived(health.all.map((row) => row.source_id).join("\n"));
+  const heldSources = $derived(health.all.map((row) => row.source_id).join("\n"));
 
   $effect(() => {
     if (!lifecycle.ready) return;
-    void membership;
+    void heldSources;
     void sourcesAsked;
     // A read this one overtakes lands nothing: the newer answer stands.
     let dead = false;
@@ -333,7 +333,7 @@
         sync = [...sync.filter((other) => other.source_id !== row.source_id), row];
         // A finished run may have judged the source's roles (#1199): a role its
         // records missed, or filled again, changes what the surfaces draw.
-        if (was?.running === true && !row.running) readSources();
+        if (was?.running === true && !row.running) askSources();
       }),
     );
     // Every queue transition writes an activity line.
