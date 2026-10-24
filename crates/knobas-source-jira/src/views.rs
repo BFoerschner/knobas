@@ -369,8 +369,9 @@ async fn boards(
 /// page into a read one leaves the unread pages; either way one live board is
 /// on no page of that listing. The listing offers no keyset, and since a
 /// rename moves a row, no order the issue walk's anchoring (`walk.rs`) could
-/// stand on. Every board read is followed by [`gone`] for each view the run
-/// did not read, so a board missed here would be delivered as gone. Reading
+/// stand on. Every board read is followed by [`gone`] for each view the
+/// previous cursor held that this read did not, so a board missed here would
+/// be delivered as gone. Reading
 /// the listing a second time and keeping the union is what Gitea's
 /// repository listing does (#1979): a board one listing missed is in the
 /// other unless a second change lands on the same row in the second.
@@ -626,7 +627,7 @@ mod tests {
         key_pages: Mutex<Vec<u32>>,
         /// What Jira holds once the first board page has been answered: a
         /// board deleted or renamed while the listing is read.
-        then: Option<Vec<FakeBoard>>,
+        after_first_page: Option<Vec<FakeBoard>>,
         /// Board pages answered so far.
         board_pages: std::sync::atomic::AtomicU32,
     }
@@ -634,8 +635,8 @@ mod tests {
     impl Agile {
         /// The boards Jira holds now.
         fn held(&self) -> &[FakeBoard] {
-            match &self.then {
-                Some(then) if self.board_pages.load(Ordering::SeqCst) > 0 => then,
+            match &self.after_first_page {
+                Some(after) if self.board_pages.load(Ordering::SeqCst) > 0 => after,
                 _ => &self.boards,
             }
         }
@@ -1210,10 +1211,15 @@ mod tests {
             .collect()
     }
 
-    /// A run over `then` after a first run over `before`, an hour on, so the
-    /// second reads the boards: what it delivers, as `(key, gone)`. PAY
-    /// alone, so one listing: the fake lists every board on each project.
-    async fn read_again(before: Vec<FakeBoard>, then: Vec<FakeBoard>) -> Vec<(String, bool)> {
+    /// A first run over `before`, then a second an hour on (so it reads the
+    /// boards) over a Jira that holds `after_first_page` once the second
+    /// run's first board page is answered: what the second run delivers, as
+    /// `(key, title, gone)`. PAY alone, so one listing: the fake lists every
+    /// board on each project.
+    async fn second_run(
+        before: Vec<FakeBoard>,
+        after_first_page: Vec<FakeBoard>,
+    ) -> Vec<(String, String, bool)> {
         let pay = crate::JiraConfig::from_json(&json!({ "projects": ["PAY"] })).unwrap();
         let (_, first) = sync_with(
             &Agile {
@@ -1226,15 +1232,19 @@ mod tests {
         .await;
         let api = Agile {
             boards: before,
-            then: Some(then),
+            after_first_page: Some(after_first_page),
             clock_minutes: 120,
             ..Agile::default()
         };
         let (items, _) = sync_with(&api, &pay, Some(first)).await;
         items
             .iter()
-            .map(|i| (i.entity.key.clone(), i.deleted))
+            .map(|i| (i.entity.key.clone(), i.title.clone(), i.deleted))
             .collect()
+    }
+
+    fn delivered(key: &str, title: &str, gone: bool) -> (String, String, bool) {
+        (key.to_owned(), title.to_owned(), gone)
     }
 
     /// A board deleted from a page already read shifts the first board of
@@ -1243,11 +1253,11 @@ mod tests {
     #[tokio::test]
     async fn a_board_deleted_while_the_listing_is_read_hides_no_other() {
         let before = many();
-        let mut then = before.clone();
-        then.retain(|b| b.0 != 110);
+        let mut after = before.clone();
+        after.retain(|b| b.0 != 110);
         assert_eq!(
-            read_again(before, then).await,
-            [("board-110".to_owned(), true)],
+            second_run(before, after).await,
+            [delivered("board-110", "board-110", true)],
             "the deleted board goes, and every other board stays"
         );
     }
@@ -1257,18 +1267,13 @@ mod tests {
     #[tokio::test]
     async fn a_board_renamed_while_the_listing_is_read_hides_no_other() {
         let before = many();
-        let mut then = before.clone();
-        let renamed = then.iter_mut().find(|b| b.0 == 155).unwrap();
+        let mut after = before.clone();
+        let renamed = after.iter_mut().find(|b| b.0 == 155).unwrap();
         renamed.1 = "board 00";
-        let delivered = read_again(before, then).await;
-        assert!(
-            delivered.iter().all(|(_, gone)| !gone),
-            "nothing went: {delivered:?}"
-        );
         assert_eq!(
-            delivered,
-            [("board-155".to_owned(), false)],
-            "the renamed board, delivered under its new name"
+            second_run(before, after).await,
+            [delivered("board-155", "board 00", false)],
+            "nothing went, and the renamed board arrives under its new name"
         );
     }
 
@@ -1278,11 +1283,11 @@ mod tests {
     #[tokio::test]
     async fn a_board_renamed_between_the_two_listings_arrives_under_its_new_name() {
         let before = seeded().boards;
-        let mut then = before.clone();
-        then[0].1 = "PAY sprint board, renamed";
+        let mut after = before.clone();
+        after[0].1 = "PAY sprint board, renamed";
         assert_eq!(
-            read_again(before, then).await,
-            [("board-21".to_owned(), false)]
+            second_run(before, after).await,
+            [delivered("board-21", "PAY sprint board, renamed", false)]
         );
     }
 

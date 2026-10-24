@@ -90,13 +90,14 @@
 //! One **version on PAY**, a favourite filter naming it and a board on that
 //! filter, so that a query Jira refuses exists (#1893): the version is deleted
 //! by the test, and the board and the filter, or all three on a failure, by
-//! [`RefusedProbe`]'s `Drop`, which checks each is gone afterwards. A
+//! [`Probes`]' `Drop`, which checks each is gone afterwards. A
 //! killed run's probe is taken back by the next run before it starts.
 //!
 //! Three **boards on PAY**, each on a filter of its own, so that the board
-//! listing's order can be read (#2003); one is renamed. [`OrderProbe`]'s
-//! `Drop` takes them back and checks, and the next run takes back a killed
-//! run's boards with their filters.
+//! listing's order can be read (#2003); one is renamed. [`Probes`]' `Drop`
+//! takes them back and checks, and the next run takes back a killed run's
+//! boards with the filters they stand on (a filter whose board was never
+//! made is not a favourite, and nothing reads it).
 //!
 //! What a *killed* run left behind is put back by the next one, and by this
 //! suite for **both** of them: [`Seeded::clear_leftovers`] restores the corpus
@@ -3120,7 +3121,7 @@ async fn only_the_boards_built_on_my_favourite_filters_come_in_when_the_choice_i
 /// probe's name: the board listing's `name=` matches on a part of the name.
 const REFUSED_PROBE: &str = "knobas live refused-query probe";
 
-/// One thing the refused-query probe made on the seeded Jira, by its id.
+/// One thing a probe made on the seeded Jira, by its id.
 #[derive(Debug, Clone, PartialEq)]
 enum Probed {
     Board(u64),
@@ -3158,23 +3159,37 @@ impl Probed {
     }
 }
 
-/// What the refused-query probe made on the seeded Jira (#1893): a version
-/// on PAY, a favourite filter naming it, and a Kanban board on that filter.
+/// What one probe made on the seeded Jira: the refused-query probe's version
+/// on PAY, favourite filter naming it and Kanban board on that filter
+/// (#1893), or the board-order probe's boards and their filters (#2003).
 /// [`Drop`] takes back whatever of it is still there, passing or panicking
 /// alike, through `knobas_live_cleanup::Cleanup`, and checks each one is
 /// gone afterwards.
-struct RefusedProbe {
+struct Probes {
     url: String,
     user: String,
     password: String,
+    /// Which probe, for the cleanup's messages.
+    what: &'static str,
     /// In the order it was made.
     made: Vec<Probed>,
 }
 
-impl RefusedProbe {
-    /// Takes back what a killed run left first, so the views a test counts
-    /// hold no stale probe.
-    async fn new(seeded: &Seeded) -> RefusedProbe {
+impl Probes {
+    /// None made yet.
+    fn none(seeded: &Seeded, what: &'static str) -> Probes {
+        Probes {
+            url: seeded.url.clone(),
+            user: seeded.user.clone(),
+            password: seeded.password.clone(),
+            what,
+            made: Vec::new(),
+        }
+    }
+
+    /// The refused-query probe. Takes back what a killed run left first, so
+    /// the views a test counts hold no stale probe.
+    async fn refused(seeded: &Seeded) -> Probes {
         let mine = |rows: serde_json::Value| -> Vec<String> {
             rows.as_array()
                 .into_iter()
@@ -3237,12 +3252,7 @@ impl RefusedProbe {
         {
             panic!("a killed run's refused-query probe is still on the server: {failure}");
         }
-        RefusedProbe {
-            url: seeded.url.clone(),
-            user: seeded.user.clone(),
-            password: seeded.password.clone(),
-            made: Vec::new(),
-        }
+        Probes::none(seeded, "refused-query probe")
     }
 
     /// Own `thing`'s removal from this line on.
@@ -3265,7 +3275,7 @@ impl RefusedProbe {
     }
 }
 
-impl Drop for RefusedProbe {
+impl Drop for Probes {
     fn drop(&mut self) {
         // The last made first: a board holds its filter, and the filter
         // names the version.
@@ -3276,8 +3286,11 @@ impl Drop for RefusedProbe {
         left.reverse();
         let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
         Cleanup::new(
-            "the live suite did not take back its refused-query probe, so the server is no \
-             longer in the plain-seed state",
+            format!(
+                "the live suite did not take back its {}, so the server is no longer in the \
+                 plain-seed state",
+                self.what
+            ),
             "the probe may still be standing; the next run's sweep takes it back",
         )
         .run(move || async move { take_back(&client(), &url, &user, &password, &left).await });
@@ -3334,7 +3347,7 @@ async fn take_back(
 /// its configuration, and answers the query itself 400, which is the arm
 /// `views::read` and `views::boards` leave a view out on. The next full sync
 /// succeeds without the probe board and filter, and with the seed's boards
-/// and favourite filter (the control: the views were read). [`RefusedProbe`]
+/// and favourite filter (the control: the views were read). [`Probes`]
 /// takes the board, the filter and the version back, passing or failing.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just jira-live`"]
@@ -3349,7 +3362,7 @@ async fn a_board_and_a_favourite_filter_whose_version_was_deleted_are_left_out_a
         format!("board-{}", views.kanban.board_id),
         format!("filter-{}", views.favourite_filter.id),
     ];
-    let mut probe = RefusedProbe::new(&seeded).await;
+    let mut probe = Probes::refused(&seeded).await;
     let name = format!("{REFUSED_PROBE} {}", uuid_like());
 
     let (status, version) = seeded
@@ -4027,20 +4040,10 @@ async fn an_edit_reorders_issues_tied_on_created_and_id_holds_them_still() {
 /// on a part of the name.
 const ORDER_PROBE: &str = "knobas live board-order probe";
 
-/// The boards and filters the board-order probe made, taken back by
-/// [`Drop`] passing or panicking alike, and checked gone afterwards.
-struct OrderProbe {
-    url: String,
-    user: String,
-    password: String,
-    /// In the order it was made: a filter, then the board on it.
-    made: Vec<Probed>,
-}
-
-impl OrderProbe {
-    /// Takes back the boards a killed run left first, each with the filter
-    /// it stands on.
-    async fn new(seeded: &Seeded) -> OrderProbe {
+impl Probes {
+    /// The board-order probe. Takes back the boards a killed run left first,
+    /// each with the filter it stands on.
+    async fn board_order(seeded: &Seeded) -> Probes {
         let (status, listed) = seeded
             .get(&format!(
                 "rest/agile/1.0/board?name={}",
@@ -4051,9 +4054,11 @@ impl OrderProbe {
         let mut stale = Vec::new();
         for board in listed["values"].as_array().into_iter().flatten() {
             let id = board["id"].as_u64().expect("a board id");
-            let (_, config) = seeded
+            let (status, config) = seeded
                 .get(&format!("rest/agile/1.0/board/{id}/configuration"))
                 .await;
+            // A failed read would leave the filter behind without a word.
+            assert_eq!(status, 200, "a killed run's probe board {id}: {config}");
             stale.push(Probed::Board(id));
             if let Some(filter) = config["filter"]["id"].as_str() {
                 stale.push(Probed::Filter(filter.parse().expect("a filter id")));
@@ -4070,17 +4075,12 @@ impl OrderProbe {
         {
             panic!("a killed run's board-order probe is still on the server: {failure}");
         }
-        OrderProbe {
-            url: seeded.url.clone(),
-            user: seeded.user.clone(),
-            password: seeded.password.clone(),
-            made: Vec::new(),
-        }
+        Probes::none(seeded, "board-order probe")
     }
 
     /// A Kanban board on PAY named `<ORDER_PROBE> <suffix>`, on a filter of
     /// its own: its id.
-    async fn board(&mut self, seeded: &Seeded, suffix: &str) -> u64 {
+    async fn order_board(&mut self, seeded: &Seeded, suffix: &str) -> u64 {
         let (status, filter) = seeded
             .request(
                 reqwest::Method::POST,
@@ -4110,24 +4110,6 @@ impl OrderProbe {
         let id = board["id"].as_u64().expect("a board id");
         self.made.push(Probed::Board(id));
         id
-    }
-}
-
-impl Drop for OrderProbe {
-    fn drop(&mut self) {
-        // The last made first: a board holds its filter.
-        let mut left: Vec<Probed> = std::mem::take(&mut self.made);
-        if left.is_empty() {
-            return;
-        }
-        left.reverse();
-        let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
-        Cleanup::new(
-            "the live suite did not take back its board-order probe, so the server is no longer \
-             in the plain-seed state",
-            "the probe boards may still be standing; the next run takes them back",
-        )
-        .run(move || async move { take_back(&client(), &url, &user, &password, &left).await });
     }
 }
 
@@ -4162,17 +4144,17 @@ async fn pay_boards(seeded: &Seeded, extra: &str) -> Vec<(u64, String)> {
 /// `z`: by name, ignoring case, not by id, and `orderBy=id` changes nothing.
 /// A rename moves a row: `A` renamed `zz` is listed last. So no order an
 /// edit cannot move is on offer for the issue walk's anchoring (`walk.rs`).
-/// The source's views read, on the new double listing, brings every probe
-/// board in under its name as it stands.
+/// The source's views read, which lists twice for that reason, brings every
+/// probe board in under its name as it stands.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just jira-live`"]
 async fn the_board_listing_is_in_name_order_and_a_rename_moves_a_row() {
     let seeded = seeded();
     seeded.clear_leftovers().await;
-    let mut probe = OrderProbe::new(&seeded).await;
-    let m = probe.board(&seeded, "m").await;
-    let upper_a = probe.board(&seeded, "A").await;
-    let z = probe.board(&seeded, "z").await;
+    let mut probe = Probes::board_order(&seeded).await;
+    let m = probe.order_board(&seeded, "m").await;
+    let upper_a = probe.order_board(&seeded, "A").await;
+    let z = probe.order_board(&seeded, "z").await;
     assert!(m < upper_a && upper_a < z, "ids rise in the order made");
     let probes = |listed: &[(u64, String)]| -> Vec<u64> {
         listed
