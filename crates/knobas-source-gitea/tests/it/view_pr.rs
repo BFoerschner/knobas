@@ -2826,3 +2826,62 @@ async fn what_the_token_may_not_write_is_drawn_disabled_saying_why() {
         )
     );
 }
+
+// -- what the token may not read (issue #2042) --------------------------------
+
+/// Issue #2042, spec #1192 story 10: a token without `read:issue` reads a
+/// pull request's view whole but for what Gitea keeps on the issue of the
+/// same index. *Conversation* draws the reviews, which are the pull
+/// request's, under a line naming the scope its comments need; *Add label…*
+/// names it too. The tab read on its own says the same.
+#[tokio::test]
+async fn a_token_without_the_issue_scope_reads_the_view_but_its_comments() {
+    let server = gitea(open_pull(), reviews()).await;
+    let refused = json!({ "message": format!("{SCOPE_REFUSAL}, required=[read:issue]") });
+    answer(&server, format!("{REPO}/issues/142/comments"), 403, refused.clone()).await;
+    answer(&server, format!("{REPO}/labels"), 403, refused).await;
+    let note = "This token cannot read this pull request's comments: it lacks the read:issue scope";
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    let ids: Vec<&str> = view.sections.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["overview", "files", "commits", "conversation"]);
+    assert_eq!(
+        labelled(&view, "Add label…").disabled.as_deref(),
+        Some("This token cannot read this repository's labels: it lacks the read:issue scope")
+    );
+    let alone = source(&server)
+        .view(PR, Some("conversation"))
+        .await
+        .unwrap()
+        .unwrap();
+    for conversation in [section(&view, "conversation"), &alone.sections[0]] {
+        let Block::Entities { title: None, rows } = &conversation.blocks[0] else {
+            panic!("the tab opens on the line: {conversation:#?}");
+        };
+        let drawn: Vec<_> = rows.iter().map(|r| (r.title.as_str(), r.tone)).collect();
+        assert_eq!(drawn, [(note, Some(Tone::Muted))]);
+        // The eight reviews that are something someone said, and no comment.
+        assert_eq!(conversation.count, Some(8), "{conversation:#?}");
+        let Block::Facts { facts } = &conversation.blocks[1] else {
+            panic!("the reviews follow the line: {conversation:#?}");
+        };
+        assert_eq!(facts[0].label, "rae", "{conversation:#?}");
+    }
+}
+
+/// A token with `read:issue` and without `read:organization` reads the
+/// repository's labels and is refused its organisation's: *Add label…* names
+/// the scope it lacks, and the view draws.
+#[tokio::test]
+async fn a_token_without_the_organisation_scope_is_told_on_add_label() {
+    let server = gitea(open_pull(), reviews()).await;
+    let refused = json!({ "message": format!("{SCOPE_REFUSAL}, required=[read:organization]") });
+    answer(&server, ORG.to_owned(), 403, refused).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        labelled(&view, "Add label…").disabled.as_deref(),
+        Some(
+            "This token cannot read its organisation's labels: \
+             it lacks the read:organization scope"
+        )
+    );
+}

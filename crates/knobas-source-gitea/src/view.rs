@@ -247,6 +247,23 @@ fn fact(label: &str, value: String) -> Fact {
     }
 }
 
+/// One muted line standing where something could not be read, saying why:
+/// a pull request's checks (#710) or its comments (#2042).
+fn muted_line(title: String) -> Block {
+    Block::Entities {
+        title: None,
+        rows: vec![ViewRow {
+            entity_id: None,
+            title,
+            meta: None,
+            tone: Some(knobas_source::view::Tone::Muted),
+            chip: None,
+            url: None,
+            commit: None,
+        }],
+    }
+}
+
 fn short(sha: &str) -> String {
     sha.chars().take(SHORT_SHA).collect()
 }

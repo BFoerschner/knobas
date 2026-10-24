@@ -9,6 +9,7 @@ use knobas_source::view::{ActionField, ChoiceOption, FieldKind, ViewAction};
 
 use super::Pull;
 use crate::GiteaSource;
+use crate::view::grants;
 
 /// How many pages of fifty labels one listing is read to at most: a
 /// thousand labels, past which the rest is not offered.
@@ -30,21 +31,34 @@ pub(super) struct Label {
 /// The labels a pull request of `owner/repo` may carry (#1235): every page of
 /// the repository's own, then, where `owner` is an organisation, every page
 /// of the organisation's. Gitea's 404 for the organisation's is a user owner,
-/// which has none. Any other failure is the reason the action is disabled.
+/// which has none. Any other failure is the reason the action is disabled,
+/// naming the scope where Gitea refused the token for it (#2042): the
+/// repository's labels ask for `read:issue`, the organisation's for
+/// `read:organization`.
 pub(super) async fn read(
     source: &GiteaSource,
     owner: &str,
     repo: &str,
 ) -> Result<Vec<Label>, String> {
     let client = &source.client;
-    let own = all_pages(|page| client.labels_as(owner, repo, page));
+    let refused = |error: SourceError, what, scope| {
+        grants::unread(&error, what, scope)
+            .unwrap_or_else(|| format!("Could not read this repository's labels: {error}"))
+    };
+    let own = async {
+        all_pages(|page| client.labels_as(owner, repo, page))
+            .await
+            .map_err(|error| refused(error, "this repository's labels", grants::READ_ISSUE))
+    };
     let org = async {
         match all_pages(|page| client.org_labels_as(owner, page)).await {
             Err(error) if error.status() == Some(404) => Ok(Vec::new()),
-            labels => labels,
+            labels => labels.map_err(|error| {
+                refused(error, "its organisation's labels", grants::READ_ORGANIZATION)
+            }),
         }
     };
-    let (mut labels, org) = tokio::try_join!(own, org).map_err(|error| error.to_string())?;
+    let (mut labels, org) = tokio::try_join!(own, org)?;
     labels.extend(org.into_iter().map(|label| Label { org: true, ..label }));
     Ok(labels)
 }
@@ -92,7 +106,7 @@ pub(super) fn action(pull: &Pull, owner: &str, labels: &Result<Vec<Label>, Strin
     };
     let labels = match labels {
         Ok(labels) => labels,
-        Err(error) => return disabled(format!("Could not read this repository's labels: {error}")),
+        Err(reason) => return disabled(reason.clone()),
     };
     if labels.is_empty() {
         return disabled("This repository has no labels.".to_owned());

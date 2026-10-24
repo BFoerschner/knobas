@@ -64,18 +64,7 @@ pub(super) fn block_of(read: &Result<Vec<Status>, SourceError>) -> Option<Block>
 /// untitled list of one muted row, the shape a list's own muted note has
 /// (#678), so nothing new crosses to the shell.
 fn unread(error: &SourceError) -> Block {
-    Block::Entities {
-        title: None,
-        rows: vec![ViewRow {
-            entity_id: None,
-            title: format!("Checks could not be read: {error}"),
-            meta: None,
-            tone: Some(Tone::Muted),
-            chip: None,
-            url: None,
-            commit: None,
-        }],
-    }
+    super::muted_line(format!("Checks could not be read: {error}"))
 }
 
 /// The statuses as rows, failing first; `None` for none.

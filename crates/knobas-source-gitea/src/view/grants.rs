@@ -1,5 +1,7 @@
 //! What this source's credential may write in one repository, asked of Gitea
-//! itself after a view is drawn (issue #2030, spec #1192 story 10).
+//! itself after a view is drawn (issue #2030, spec #1192 story 10), and what
+//! a view says where the credential may not read a part of it ([`unread`],
+//! #2042).
 //!
 //! The descriptor's `write_ops` say what the adapter can do, never what the
 //! token it was given may: a token minted with `read:repository` reads every
@@ -104,6 +106,28 @@ fn pushes(op: &str) -> bool {
             | crate::WRITE_OP_COMMIT_FILE
             | crate::WRITE_OP_MERGE_PULL_REQUEST
     )
+}
+
+/// The read scope Gitea checks a read under `/repos/{o}/{r}/issues` or
+/// `/repos/{o}/{r}/labels` against: a pull request's discussion and its
+/// repository's labels (#2042).
+pub(super) const READ_ISSUE: &str = "read:issue";
+
+/// The read scope Gitea checks `/orgs/{org}/…` against: an organisation's
+/// labels.
+pub(super) const READ_ORGANIZATION: &str = "read:organization";
+
+/// Why a view cannot draw `what`, where Gitea refused its read for the
+/// token's scope (`scope` being the one the route asks for); `None` for any
+/// other failure. Gitea checks a read's scope by its route's category as it
+/// checks a write's (the module docs), and measured on Gitea 1.27.3 a token
+/// minted with `read:repository` alone is refused a pull request's comments
+/// and every label listing with that 403, and served everything else a view
+/// reads (#2042). A view draws what it could read and says this where the
+/// rest would be.
+pub(super) fn unread(error: &SourceError, what: &str, scope: &str) -> Option<String> {
+    matches!(error, SourceError::Unauthorized { status: Some(403) })
+        .then(|| format!("This token cannot read {what}: it lacks the {scope} scope"))
 }
 
 /// What one probe learned.

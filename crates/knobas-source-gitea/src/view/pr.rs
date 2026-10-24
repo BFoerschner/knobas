@@ -236,18 +236,31 @@ impl PullView<'_> {
     }
 
     /// The discussion Gitea keeps on the issue of the same index, oldest
-    /// first; a comment it cannot read is left out.
-    async fn comments(&self) -> Result<Vec<PullComment>, SourceError> {
-        let discussion = self
+    /// first; a comment it cannot read is left out. A token Gitea refuses the
+    /// issue's read for its scope reads the rest of the view, so that refusal
+    /// is kept as the reason *Conversation* gives (#2042); any other failure
+    /// is the view's.
+    async fn comments(&self) -> Result<Result<Vec<PullComment>, String>, SourceError> {
+        let discussion = match self
             .source
             .client
             .issue_comments(self.owner, self.repo, self.number)
-            .await?;
-        Ok(discussion
+            .await
+        {
+            Ok(discussion) => discussion,
+            Err(error) => {
+                let what = "this pull request's comments";
+                return match super::grants::unread(&error, what, super::grants::READ_ISSUE) {
+                    Some(reason) => Ok(Err(reason)),
+                    None => Err(error),
+                };
+            }
+        };
+        Ok(Ok(discussion
             .raw
             .into_iter()
             .filter_map(|c| serde_json::from_value(c).ok())
-            .collect())
+            .collect()))
     }
 
     /// The head commit's own statuses (#710), by the sha the record names;
@@ -287,7 +300,15 @@ impl PullView<'_> {
 /// and a tie keeps the order Gitea gave (reviews first). A draft (`PENDING`)
 /// is nobody's yet and a review request (`REQUEST_REVIEW`) is not something
 /// anyone said, so neither is drawn.
-fn conversation(reviews: &[Review], comments: &[PullComment]) -> ViewSection {
+///
+/// Comments the token may not read (`Err`, its reason) open the tab on a line
+/// saying so, and the reviews, which are the pull request's own read, follow
+/// (#2042).
+fn conversation(reviews: &[Review], comments: &Result<Vec<PullComment>, String>) -> ViewSection {
+    let (unread, comments) = match comments {
+        Ok(comments) => (None, comments.as_slice()),
+        Err(reason) => (Some(reason), &[][..]),
+    };
     let mut said: Vec<Said<'_>> = reviews
         .iter()
         .filter_map(|review| {
@@ -314,7 +335,8 @@ fn conversation(reviews: &[Review], comments: &[PullComment]) -> ViewSection {
             .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok());
         (instant.is_none(), instant)
     });
-    let mut blocks = Vec::with_capacity(said.len() * 2);
+    let mut blocks = Vec::with_capacity(said.len() * 2 + 1);
+    blocks.extend(unread.map(|reason| super::muted_line(reason.clone())));
     for entry in &said {
         let who = login(entry.user).unwrap_or_else(|| "someone".to_owned());
         let when = entry.at.map(when_of).unwrap_or_default();
