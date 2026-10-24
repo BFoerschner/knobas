@@ -2,8 +2,9 @@
   command semantics — issue #1754 (2026-10-24): a created ticket's receipt names its key, and the
   app takes the ticket a write filed from it.** No signature change, no new `WriteReceipt` field,
   no `WriteOp` change, no migration, no new command, DTO, event or module in `commands/` or
-  `ipc/`; the generated mirror does not change. Ruled by the implementer on Opus (`## #1754` in
-  `docs/decisions/2026-10-unattended-rulings.md`); the issue has no parent spec.
+  `ipc/`; the generated mirror does not change. Reserved for Björn, ruled by the implementer on Opus and confirmed by the merge-manager on
+  Opus (`## #1754` in `docs/decisions/2026-10-unattended-rulings.md`); the issue has no parent
+  spec.
 
   1. **The receipt's contents.** Jira's `create_ticket` answers `WriteReceipt::id(<key>)`
      (`PAY-342`), the key `POST /rest/api/2/issue` answers and the adapter already refused a
