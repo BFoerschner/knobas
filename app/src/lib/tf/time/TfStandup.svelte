@@ -58,7 +58,7 @@
   import { publishableSources } from "../../standup/protocol";
   import { digestWindows, LOOKBACK_DAYS } from "../../standup/standup";
   import { dayKey } from "../../time/day";
-  import { listenSynced } from "../builds/pipeline-ports";
+  import { listenSynced, type PipelinePorts } from "../builds/pipeline-ports";
   import { keyOf } from "../job/job";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
@@ -95,7 +95,7 @@
     /** Where the queue's movements are heard (#779). */
     follower: WriteFollower;
     /** Where a sync's end is heard, to ask again for a ticket not yet named (#1951). */
-    listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
+    listen: PipelinePorts["listen"];
     /** *Copy as text*'s clipboard. */
     copy: (text: string) => Promise<void>;
   }

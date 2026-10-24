@@ -45,7 +45,8 @@ export type ActionItemTicket = {
 write_id: number, 
 /**
  * The ticket's title as filed: the action item's words, trimmed. What
- * the tab matches an item by when it reads [`owed_tickets`] (#1951).
+ * the tab matches an item by when it reads a protocol's
+ * [`owed_tickets`](crate::protocol::Protocol::owed_tickets) (#1951).
  */
 title: string, 
 /**

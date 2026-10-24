@@ -129,7 +129,7 @@ pub async fn standup_protocol_inner(
 }
 
 /// The tickets `note_id`'s action items filed that it does not link yet
-/// (#1951): every create still holding the note as the link it owes
+/// (#1951): every create whose row still names the note as the link it owes
 /// ([`owe_the_note`]) and not withdrawn, each asked
 /// [`action_item_ticket_inner`], which links one whose ticket the mirror now
 /// holds. The rest are what [`Protocol::owed_tickets`](crate::protocol::Protocol::owed_tickets)
@@ -494,7 +494,7 @@ pub async fn create_action_item_ticket_in_background(
     })
 }
 
-/// Hold the note on the create as the link it owes (#1951): the row's
+/// Keep the note on the create's row as the link it owes (#1951): the row's
 /// `link_to`, which the end of every sync of the source resolves
 /// (`sources::write_queue::link_arrivals`) until the ticket the receipt named
 /// is mirrored, as a run's *Create ticket* is (#1451). So a create that goes
@@ -597,7 +597,9 @@ pub async fn action_item_ticket_inner(
         use crate::sources::write_queue::{Named, ticket_named};
         ticket_entity_id = match ticket_named(pool, write_id).await? {
             Named::Ticket(named) => named,
-            Named::Nothing => crate::protocol::ticket_titled(pool, &write.source_id, &title).await?,
+            Named::Nothing => {
+                crate::protocol::ticket_titled(pool, &write.source_id, &title).await?
+            }
         };
         if let Some(ticket) = ticket_entity_id.as_deref() {
             crate::protocol::draw_link(
