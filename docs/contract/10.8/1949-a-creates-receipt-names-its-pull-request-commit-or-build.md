@@ -4,8 +4,8 @@
   pull request a write opened from it.** No signature change on `Source`, no new `WriteReceipt`
   field, no `WriteOp` change, no migration, no new command, DTO, event or module in `commands/` or
   `ipc/`; the generated mirror does not change. Reserved for Björn, ruled by the implementer on
-  Opus (`## #1949` in `docs/decisions/2026-10-unattended-rulings.md`); the issue has no parent
-  spec. It extends #1754's rule to the creates that rule left out.
+  Opus and confirmed by the merge-manager on Opus (`## #1949` in
+  `docs/decisions/2026-10-unattended-rulings.md`); the issue has no parent spec. It extends #1754's rule to the creates that rule left out.
 
   1. **The receipt's contents.**
      - Gitea's `create_pull_request` answers `WriteReceipt::id(owner/repo#<n>)` (`keys::pr_key`),
@@ -25,6 +25,11 @@
      - Unchanged on purpose: comments (Jira, Gitea, Confluence) still answer `none()`, as #1754
        ruled; `create_branch` is addressed by its name; Kuma's `create_monitor`, Confluence's
        `create_page` and Jira's and Gitea's `create_ticket` already answer the local part.
+     - Rows stamped before this keep what they hold: a `run_build` row's bare `2214` and a
+       `commit_file` row's bare oid are read by nothing (`docs::created_page`, `protocol`'s
+       publication read, the worklog copy and `entity_named` read `create_page`, `log_work`,
+       `create_ticket` and `create_pull_request` rows only), and a `create_pull_request` row sent
+       before has no `remote_id`, so it keeps the head read below. No backfill.
   2. **Which pull request a sent `CreatePullRequest` opened**
      (`sources::write_queue::entity_named(pool, write_id, kind)`, crate-private, which
      `ticket_named` now calls with `ticket`). Where the row's `remote_id` is set, the pull request is `<source_id>:<remote_id>`
@@ -48,7 +53,9 @@
   (`a_pull_request_opened_whose_answer_was_lost_is_delivered`), `knobas-source-teamcity`'s
   `tests/it/run.rs` (`a_trigger_and_a_re_run_name_the_build_they_queued`,
   `a_run_queues_its_branch_and_only_its_overrides`), `knobas-app`'s `tests/it/link_on_arrival_ipc.rs`
-  (`a_new_pull_request_the_receipt_named_is_linked_and_not_another_open_on_its_head`) and
+  (`a_new_pull_request_the_receipt_named_is_linked_and_not_another_open_on_its_head`,
+  `a_named_pull_request_merged_before_its_sync_is_linked`,
+  `a_named_id_the_mirror_holds_as_another_kind_is_not_linked`) and
   `tests/it/start_work.rs`
   (`the_link_goes_to_the_pull_request_the_create_named_not_another_open_on_its_head`,
   `a_named_pull_request_not_yet_mirrored_is_not_stood_in_for_by_another_on_its_head`), and live
