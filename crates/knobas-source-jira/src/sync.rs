@@ -76,7 +76,7 @@ use crate::cursor::JiraCursor;
 use crate::jql::{build_ceiling_jql, build_jql};
 use crate::map;
 use crate::model::{RawIssue, SearchPage, ServerInfo};
-use crate::walk::{IssueWalk, Step};
+use crate::walk::IssueWalk;
 use crate::{JiraConfig, time::parse_jira_time};
 
 /// The fields `/search` is asked for.
@@ -198,9 +198,9 @@ impl SyncRun<'_> {
         let mut walked: u64 = 0;
         loop {
             let page: SearchPage = match walk.next().await? {
-                Step::Page(page) => page,
-                Step::End => break,
-                Step::Capped => {
+                Walked::Page(page) => page,
+                Walked::End => break,
+                Walked::Capped => {
                     // Not a `break`: see the note on MAX_PAGES. Leaving the
                     // loop here and returning `Ok` would hand the engine a
                     // partial walk wearing a completed one's clothes.

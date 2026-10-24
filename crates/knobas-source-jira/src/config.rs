@@ -8,6 +8,11 @@
 
 use knobas_source::SourceError;
 
+/// The most issues one `/search` asks for: `page_size`'s bound, which Jira DC
+/// clamps at anyway, and the most the walk asks when it reaches back
+/// (`crate::walk`).
+pub(crate) const MAX_PAGE_SIZE: u32 = 1_000;
+
 /// Which Jira product this instance is (roadmap §4 gotcha 4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -194,9 +199,9 @@ impl JiraConfig {
                  pasted into the fields= query parameter"
             ));
         }
-        if self.page_size == 0 || self.page_size > 1000 {
+        if self.page_size == 0 || self.page_size > MAX_PAGE_SIZE {
             return bad(format!(
-                "page_size {} is outside 1..=1000 (Jira DC clamps at its own \
+                "page_size {} is outside 1..={MAX_PAGE_SIZE} (Jira DC clamps at its own \
                  jira.search.views.default.max anyway)",
                 self.page_size
             ));

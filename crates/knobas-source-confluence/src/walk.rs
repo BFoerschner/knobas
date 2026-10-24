@@ -33,23 +33,12 @@
 
 use std::collections::HashSet;
 
+use knobas_http::Walked;
 use knobas_source::SourceError;
 
 use crate::api::ConfluenceApi;
 use crate::config::MAX_PAGE_SIZE;
 use crate::model::ContentPage;
-
-/// What [`ContentWalk::next`] answers.
-pub(crate) enum Step {
-    /// The pages on this result the walk had not handed out before. Never
-    /// empty.
-    Page(ContentPage),
-    /// The listing ended.
-    End,
-    /// The next request would pass the cap; whether that fails the run is
-    /// the caller's.
-    Capped,
-}
 
 /// One walk over a content search. See the module docs.
 pub(crate) struct ContentWalk<'a> {
@@ -57,8 +46,9 @@ pub(crate) struct ContentWalk<'a> {
     cql: &'a str,
     expand: &'a str,
     page_size: u32,
-    /// Requests sent, the asks from further back included.
+    /// The most requests the walk sends ([`Walked::Capped`] past it).
     cap: u32,
+    /// Requests sent, the asks from further back included.
     requests: u32,
     /// Where the next unread page sits in the listing, as of the last result.
     at: u32,
@@ -93,13 +83,13 @@ impl<'a> ContentWalk<'a> {
     /// # Errors
     ///
     /// The search's own.
-    pub(crate) async fn next(&mut self) -> Result<Step, SourceError> {
+    pub(crate) async fn next(&mut self) -> Result<Walked<ContentPage>, SourceError> {
         // How far behind `at` the request starts: the one row that anchors
         // it, or nothing on the first request, where there is nothing behind.
         let mut back = u32::from(self.at > 0);
         while !self.ended {
             if self.requests >= self.cap {
-                return Ok(Step::Capped);
+                return Ok(Walked::Capped);
             }
             self.requests += 1;
             let start = self.at - back;
@@ -125,12 +115,12 @@ impl<'a> ContentWalk<'a> {
             page.results
                 .retain(|row| self.read.insert(row.content.id.clone()));
             if !page.results.is_empty() {
-                return Ok(Step::Page(page));
+                return Ok(Walked::Page(page));
             }
             // Only rows met again, or an empty result the server says is not
             // the last: anchor on the new position and ask on.
             back = u32::from(self.at > 0);
         }
-        Ok(Step::End)
+        Ok(Walked::End)
     }
 }

@@ -466,13 +466,14 @@ async fn select_repos(
         // returns that row. `/repos/search` offers no keyset to page by
         // instead. A full sync's `Ok` licenses the sweep, which would retire
         // the repository and its branches, so it reads the listing again and
-        // walks the union: a repository missed by one listing is in the other
+        // walks the union of the two: a repository missed by one listing is in the other
         // unless a second deletion lands on the same row in the second. One
         // that is gone by then answers 404 when walked, and is skipped as
         // deleted since the listing. An incremental run licenses no sweep;
         // a repository its listing missed keeps no position this run, and
         // the next run reads it whole.
-        for _ in 0..if full_sync { 2 } else { 1 } {
+        let listings = if full_sync { 2 } else { 1 };
+        for _ in 0..listings {
             let mut walk = PageWalk::new(PageNumber, MAX_LIST_PAGES, |page| {
                 source.client.search_repos(page)
             });

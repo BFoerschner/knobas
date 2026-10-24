@@ -37,26 +37,12 @@
 
 use std::collections::HashSet;
 
+use knobas_http::Walked;
 use knobas_source::SourceError;
 
 use crate::api::JiraApi;
+use crate::config::MAX_PAGE_SIZE;
 use crate::model::{RawIssue, SearchPage};
-
-/// What one `/search` may ask for: the configuration's own limit
-/// ([`crate::JiraConfig::from_json`]), which Jira DC clamps at.
-const MAX_RESULTS: u32 = 1_000;
-
-/// What [`IssueWalk::next`] answers.
-pub(crate) enum Step {
-    /// The issues on this page the walk had not handed out before, and the
-    /// page's own `total`. Never empty.
-    Page(SearchPage),
-    /// The listing ended.
-    End,
-    /// The next request would pass the cap. Whether that fails the run is
-    /// the caller's.
-    Capped,
-}
 
 /// One walk over a `/search` listing. See the module docs.
 pub(crate) struct IssueWalk<'a> {
@@ -64,8 +50,9 @@ pub(crate) struct IssueWalk<'a> {
     jql: &'a str,
     fields: &'a str,
     page_size: u32,
-    /// Requests sent, the asks from further back included.
+    /// The most requests the walk sends ([`Walked::Capped`] past it).
     cap: u32,
+    /// Requests sent, the asks from further back included.
     requests: u32,
     /// Where the next unread issue sat in the listing, as of the last page.
     at: u32,
@@ -100,20 +87,20 @@ impl<'a> IssueWalk<'a> {
     /// # Errors
     ///
     /// The search's own.
-    pub(crate) async fn next(&mut self) -> Result<Step, SourceError> {
+    pub(crate) async fn next(&mut self) -> Result<Walked<SearchPage>, SourceError> {
         if self.ended {
-            return Ok(Step::End);
+            return Ok(Walked::End);
         }
         // How far behind `at` the request starts: the one row that anchors
         // it, or nothing on the first page, where there is nothing behind.
         let mut back = u32::from(self.at > 0);
         loop {
             if self.requests >= self.cap {
-                return Ok(Step::Capped);
+                return Ok(Walked::Capped);
             }
             self.requests += 1;
             let start = self.at - back;
-            let limit = self.page_size.saturating_add(back).min(MAX_RESULTS);
+            let limit = self.page_size.saturating_add(back).min(MAX_PAGE_SIZE);
             let mut page = self.api.search(self.jql, start, limit, self.fields).await?;
             let anchored = start == 0
                 || page
@@ -132,15 +119,15 @@ impl<'a> IssueWalk<'a> {
                 // Nothing past where the walk stood: the listing ended there,
                 // whatever its `total` claims.
                 self.ended = true;
-                return Ok(Step::End);
+                return Ok(Walked::End);
             }
             self.at = reached;
             self.ended = self.at >= page.total;
             if !page.issues.is_empty() {
-                return Ok(Step::Page(page));
+                return Ok(Walked::Page(page));
             }
             if self.ended {
-                return Ok(Step::End);
+                return Ok(Walked::End);
             }
             // Only rows met again, after an issue entered behind the cursor:
             // anchor on the new position and ask on.

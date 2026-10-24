@@ -3638,12 +3638,13 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
 }
 
 /// **A deletion under the walk shrinks the total the next page reports**
-/// (#1623): it shifts the rows behind it, which is the hole the walk's
-/// anchored pages close (#1979; it no longer reads the total for it). A sub-task is
-/// filed, and the page at offset N (the seeded corpus's size) names it alone,
-/// at the end of the created order, with a total of N + 1. Once it is deleted
-/// the same page answers `200` with no issues and a total of N -- the empty
-/// last page the adapter reads the shrink off, not a refusal.
+/// (#1623) and shifts the rows behind it: the hole the walk's anchored pages
+/// close (#1979), which no longer read the total for it. A sub-task is filed,
+/// and the page at offset N (the seeded corpus's size) names it alone, at the
+/// end of the created order, with a total of N + 1. Once it is deleted the
+/// same page answers `200` with no issues and a total of N, not a refusal:
+/// past a deletion the walk meets an empty page where it expected rows, and
+/// asks again from further back.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just jira-live`"]
 async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {

@@ -111,10 +111,12 @@ use crate::map;
 use crate::model::RawContent;
 use crate::storage::Account;
 use crate::users::Directory;
-use crate::walk::{ContentWalk, Step};
+use crate::walk::ContentWalk;
 
 /// A stop so a server that keeps handing out `_links.next` cannot spin a run
-/// forever. At the default page size this is a quarter of a million pages.
+/// forever. It counts requests, the page walk's asks from further back
+/// included (`crate::walk`); at the default page size it is about a quarter
+/// of a million pages.
 ///
 /// Reaching it is a **failure**, never a quiet end to the walk. The one kind
 /// this adapter emits claims `full_sync_exhaustive: true`, which is the
@@ -349,9 +351,9 @@ impl SyncRun<'_> {
         let mut of: Option<u64> = None;
         loop {
             let page = match walk.next().await? {
-                Step::Page(page) => page,
-                Step::End => break,
-                Step::Capped => return Err(capped("results", self.cfg.page_size)),
+                Walked::Page(page) => page,
+                Walked::End => break,
+                Walked::Capped => return Err(capped("results", self.cfg.page_size)),
             };
             of = page.total_size.or(of);
             for mut raw in page.results {
