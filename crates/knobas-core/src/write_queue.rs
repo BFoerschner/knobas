@@ -142,7 +142,9 @@ pub const KEYCHAIN_DETAIL_PREFIX: &str = "keychain:";
 /// Whether a write waiting for `reason`, told `detail`, waits on its
 /// source's credential: one the source refused, or a keychain that would not
 /// open (#1944). What [`release_credential_waits`] releases, in Rust; its
-/// statement says the same in SQL.
+/// statement says the same in SQL, and
+/// `the_release_statement_releases_exactly_what_waits_on_credential_names`
+/// (`tests/it/write_queue.rs`) holds the two to one answer.
 #[must_use]
 pub fn waits_on_credential(reason: WaitReason, detail: Option<&str>) -> bool {
     match reason {

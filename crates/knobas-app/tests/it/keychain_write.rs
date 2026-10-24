@@ -107,7 +107,19 @@ impl Source for Fake {
         Ok(cursor.unwrap_or_default())
     }
 
+    /// Battery clause 5, as every adapter answers it: an op this instance
+    /// does not declare is refused by name and never sent.
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
+        if !descriptor(self.account)
+            .write_ops
+            .iter()
+            .any(|declared| declared == op.identifier())
+        {
+            return Err(SourceError::protocol(format!(
+                "this instance does not offer {:?}",
+                op.identifier()
+            )));
+        }
         self.asked.lock().unwrap().push(op);
         Ok(WriteReceipt::none())
     }
@@ -281,6 +293,11 @@ async fn state_on(
 /// A Kuma with its key and the account beside it, and one of its monitors
 /// mirrored.
 async fn fixture(name: &str) -> Fixture {
+    fixture_with(name, true).await
+}
+
+/// [`fixture`], with the account beside the key or without it.
+async fn fixture_with(name: &str, account: bool) -> Fixture {
     let connector = knobas_db::test_util::scratch_database(name).await;
     let source = format!("kuma-{name}");
     let keychain = Keychain::default();
@@ -290,7 +307,7 @@ async fn fixture(name: &str) -> Fixture {
             &Secret {
                 kind: AuthMethod::Pat,
                 value: "an-api-key".to_owned(),
-                account: Some(knobas_source::instance::Account {
+                account: account.then(|| knobas_source::instance::Account {
                     username: "admin".to_owned(),
                     password: "a-password".to_owned(),
                 }),
@@ -445,4 +462,40 @@ async fn a_pause_queued_while_the_keychain_is_locked_sends_nothing_at_quit_and_g
     assert_eq!(f.asked(), 1, "the next start sends it once");
     assert_eq!(f.row(&reader, queued.id).await.state, WriteState::Sent);
     next.scheduler.shutdown().await;
+}
+
+/// #1944, the other direction: a write queued on the roles' word while the
+/// keychain is locked, for an instance that turns out not to offer it. A
+/// Kuma with no account offers no pause (#452), and once the keychain
+/// answers, the flush refuses the pause by name and sends nothing. The roles
+/// widen only what may wait; the instance still decides what is sent.
+#[tokio::test]
+async fn a_pause_queued_while_the_keychain_is_locked_is_refused_once_it_answers_with_no_account() {
+    let f = fixture_with("keychain_write_no_account", false).await;
+
+    f.keychain.lock();
+    let queued = knobas_app::sources::write_queue::submit(&f.state, f.pause())
+        .await
+        .expect("the pause is queued: the keychain said nothing about the instance");
+    assert_eq!(
+        f.row(&f.state.pool, queued.id).await.wait_reason,
+        Some(WaitReason::Unreachable)
+    );
+
+    f.keychain.unlock();
+    knobas_sync::write_queue::flush_now(f.state.scheduler.deps(), Some(&f.source))
+        .await
+        .expect("the flush runs");
+    let refused = f.row(&f.state.pool, queued.id).await;
+    assert_eq!(refused.state, WriteState::Refused);
+    assert_eq!(
+        refused.detail.as_deref(),
+        Some("protocol: this instance does not offer \"pause_monitor\"")
+    );
+    assert_eq!(f.asked(), 0, "nothing reached the source");
+
+    let unlocked = knobas_app::sources::write_queue::submit(&f.state, f.pause())
+        .await
+        .expect_err("with the keychain open, the instance answers for itself");
+    assert_eq!(unlocked.code, knobas_app::IpcErrorCode::Invalid);
 }

@@ -622,3 +622,52 @@ async fn an_unconfigured_sources_write_reads_enabled() {
         "the list read agrees with the insert"
     );
 }
+
+/// #1944: the release statement and `waits_on_credential` state one rule,
+/// one in SQL and one in Rust, and the flush's stale-release guard reads the
+/// Rust. They must agree on every wait: a write the statement releases is
+/// one the guard would not record over a save, and no other. Each case is
+/// its own write on its own ticket of one source, released in one statement.
+#[tokio::test]
+async fn the_release_statement_releases_exactly_what_waits_on_credential_names() {
+    use wq::WaitReason::{Unauthorized, Unreachable};
+    let (pool, ticket) = seeded_pool().await;
+    let source = ticket.namespace.clone();
+    let cases: [(wq::WaitReason, Option<&str>); 11] = [
+        (Unauthorized, Some("401 from jira")),
+        (Unauthorized, Some("keychain: User interaction is not allowed.")),
+        (Unauthorized, None),
+        (Unreachable, Some("keychain: User interaction is not allowed.")),
+        (Unreachable, Some(wq::KEYCHAIN_DETAIL_PREFIX)),
+        (Unreachable, Some("timed out")),
+        (Unreachable, Some("the keychain: said nothing")),
+        (Unreachable, Some(" keychain: leading space")),
+        (Unreachable, Some("Keychain: another case")),
+        (Unreachable, Some("keychain")),
+        (Unreachable, None),
+    ];
+
+    let mut expected = Vec::new();
+    for (n, (reason, detail)) in cases.iter().enumerate() {
+        let entity = EntityRef::new(&source, &format!("WQ-{}", n + 2));
+        mirror(&pool, &entity, "a payout fails", "it does").await;
+        let write = queue_comment(&pool, &entity, "hello").await;
+        wq::wait(&pool, write.id, *reason, *detail)
+            .await
+            .unwrap()
+            .unwrap();
+        if wq::waits_on_credential(*reason, *detail) {
+            expected.push(write.id);
+        }
+    }
+
+    let mut released: Vec<i64> = wq::release_credential_waits(&pool, &source)
+        .await
+        .unwrap()
+        .iter()
+        .map(|write| write.id)
+        .collect();
+    released.sort_unstable();
+    assert_eq!(released, expected, "{cases:?}");
+    assert_eq!(expected.len(), 5, "the cases cover both answers");
+}

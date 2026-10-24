@@ -34,8 +34,12 @@
   (`keychain: …`, as before for `Backend` and now for `Unavailable` too). A locked keychain
   in a sources command used to read `keychain: keychain: User interaction is not allowed.`
 
-  Witnessed by `crates/knobas-app/tests/it/keychain_write.rs` (the save and the quit),
-  `crates/knobas-sync/tests/it/write_queue.rs`
+  Witnessed by `crates/knobas-app/tests/it/keychain_write.rs` (the save, the quit and
+  `a_pause_queued_while_the_keychain_is_locked_is_refused_once_it_answers_with_no_account`, the
+  flush refusing an op queued on the roles' word that the instance does not offer),
+  `crates/knobas-core/tests/it/write_queue.rs`
+  (`the_release_statement_releases_exactly_what_waits_on_credential_names`, the SQL and
+  `waits_on_credential` held to one answer), `crates/knobas-sync/tests/it/write_queue.rs`
   (`a_credential_save_releases_a_write_waiting_on_the_keychain`,
   `a_keychain_fault_met_across_a_credential_save_does_not_put_the_write_back_to_wait`, and the
   two #1741 exact-detail tests), and the `knobas-app` unit tests
