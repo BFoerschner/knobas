@@ -470,7 +470,7 @@ test("a create whose ticket the post-write read missed is named by a later sync,
   expect(target.querySelector(".tf-su-ai a")?.textContent).toBe("OPS-131");
 });
 
-test("after a reload, a create held or refused in the queue offers Create ticket, as the live tab does once told (#1951)", async () => {
+test("after a reload, a create held on drift or refused in the queue offers Create ticket, as the live tab does once told (#1951)", async () => {
   open({ owed: [owed({ state: "held" }), owed({ write_id: 10, state: "refused", title: "Update the on-call runbook (Tomasz Wójcik)" })], mirrored: false });
   await settle();
   const buttons = [...target.querySelectorAll(".tf-su-ai button")].map((found) => found.textContent?.trim());

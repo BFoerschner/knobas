@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { DownloadTarget, LinkEntry, PipelineRow, Project, RunLog, PipelineSettings, RunRow, SourceView } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
+import { noteWithdrawn } from "../../shell/write-queue.svelte";
 import { forgetQueued, queuedMarks } from "../queued.svelte";
 import type { RunPorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
@@ -943,11 +944,40 @@ test("after a reload, a ticket sent and not mirrored yet stays queued until the 
   expect(drawn.listening()).toBe(listening - 1);
 });
 
-test("after a reload, a held or refused ticket offers Create ticket: it waits on the reader in the queue", async () => {
+test("after a reload, a ticket held on drift or refused offers Create ticket: it waits on the reader in the queue", async () => {
   draw("teamcity:build:1187", undefined, { owedTickets: () => Promise.resolve([owedWrite(41, "refused"), owedWrite(42, "held")]) });
   await settle();
   expect(button("Create ticket")).toBeDefined();
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).not.toContain("Ticket queued");
+});
+
+test("after a reload, a ticket held as unconfirmed draws Ticket queued and is followed: it may be in Jira already (#1966)", async () => {
+  const hearing: ((row: QueuedWrite | undefined) => void)[] = [];
+  const unconfirmed = {
+    ...owedWrite(41, "held"),
+    held_snapshot: { op: "create_ticket", unconfirmed: { source: "Jira", detail: "the connection closed" } },
+  } as QueuedWrite;
+  draw("teamcity:build:1187", undefined, {
+    owedTickets: () => Promise.resolve([unconfirmed]),
+    follower: () => ({
+      follow: (id, hear) => {
+        if (id === 41) hearing.push(hear);
+        return () => {};
+      },
+    }),
+  });
+  await settle();
+  expect(button("Create ticket")).toBeUndefined();
+  expect(target.querySelector(".tf-problem .tf-acts .tf-chip")?.textContent).toBe("Ticket queued");
+  expect(hearing).toHaveLength(1);
+  // Still held as unconfirmed on the next read: still on its way.
+  hearing[0]!(unconfirmed);
+  await settle();
+  expect(button("Create ticket")).toBeUndefined();
+  // The reader discards it in the queue: the create is offered again.
+  noteWithdrawn(41);
+  await settle();
+  expect(button("Create ticket")).toBeDefined();
 });
 
 test("after a reload, a queued ticket is followed: refused, it gives Create ticket back and Edit and resend reopens what was filed", async () => {
