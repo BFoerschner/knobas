@@ -236,7 +236,11 @@ lock release 1300 > /dev/null
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 g() { git -c user.name=test -c user.email=test@example.invalid -c commit.gpgsign=false "$@"; }
 wt=$scratch/wt
-git init -q --bare "$scratch/origin.git"
+# `-b main` on the bare one too: its HEAD is what `other` clones onto, and
+# git's own default is `master` (the Mac's Command Line Tools ship `main` in
+# their system gitconfig, ubuntu-latest does not), so without it `other`
+# started an unrelated history and its push was refused (#2035, Linux only).
+git init -q --bare -b main "$scratch/origin.git"
 git init -q -b main "$wt"
 g -C "$wt" commit -q --allow-empty -m base
 git -C "$wt" remote add origin "$scratch/origin.git"
