@@ -109,6 +109,7 @@ fn descriptor() -> SourceDescriptor {
             "create_branch".to_owned(),
             "create_pull_request".to_owned(),
             "create_page".to_owned(),
+            "log_work".to_owned(),
         ],
         entity_kinds: vec![KindInfo {
             id: "pull_request".to_owned(),
@@ -753,4 +754,325 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
         0,
         "the quit left a step running"
     );
+}
+
+/// The ways a write reaches the source with a command waiting on its send
+/// (#1932), and the send behind `submit_write`'s answer.
+#[derive(Clone, Copy, Debug)]
+enum Path {
+    /// *Flush now*: the `flush_writes` command.
+    FlushNow,
+    /// *Send mine anyway*: the `apply_held_write` command, on a held write.
+    SendMineAnyway,
+    /// *Edit and send*: the `amend_write` command, on a held write.
+    EditAndSend,
+    /// A submit that waits for its send: what the standup protocol's page and
+    /// an action item's ticket are written with.
+    Submit,
+    /// The worklog's delivery that waits for its send, `worklog::log`.
+    Worklog,
+    /// `submit_write`'s send behind its answer, in the background set since
+    /// #1633.
+    InBackground,
+}
+
+/// The five a command waits on, each its own code path into the queue.
+const FOREGROUND: [Path; 5] = [
+    Path::FlushNow,
+    Path::SendMineAnyway,
+    Path::EditAndSend,
+    Path::Submit,
+    Path::Worklog,
+];
+
+/// A mock app managing `state`, for the paths that are commands, and for the
+/// quit, which reads the state off the app.
+fn app_for(state: &SourcesState) -> tauri::App<tauri::test::MockRuntime> {
+    use tauri::Manager as _;
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("a mock app");
+    app.manage(state.clone());
+    app
+}
+
+/// Start `path`'s write, on its own task as the shell's call would be, and
+/// wait until the source has it. Answers the write's id: the only row in the
+/// queue.
+async fn at_the_source(
+    path: Path,
+    state: &SourcesState,
+    handle: &tauri::AppHandle<tauri::test::MockRuntime>,
+    wrote: &Wrote,
+) -> i64 {
+    // The three that act on a row already queued: held for the two that
+    // release one, on its own snapshot so the release sends it.
+    let mut queued = None;
+    if matches!(
+        path,
+        Path::FlushNow | Path::SendMineAnyway | Path::EditAndSend
+    ) {
+        let op: WriteOp = serde_json::from_value(comment("as queued")).unwrap();
+        let row = knobas_sync::write_queue::queue(state.scheduler.deps(), SOURCE, op)
+            .await
+            .expect("the write is queued");
+        if !matches!(path, Path::FlushNow) {
+            knobas_core::write_queue::hold(&state.pool, row.id, row.target_snapshot.clone())
+                .await
+                .expect("the hold is written")
+                .expect("the write was pending");
+        }
+        queued = Some(row.id);
+    }
+    if matches!(path, Path::Worklog) {
+        sqlx::query(
+            "insert into knobas.block (started_at, ended_at, entity_id, kind)
+             values ('2026-10-19T09:00:00Z', '2026-10-19T10:00:00Z', $1, 'manual')",
+        )
+        .bind(PR)
+        .execute(&state.pool)
+        .await
+        .expect("the block is written");
+    }
+
+    let (state_, handle) = (state.clone(), handle.clone());
+    tokio::spawn(async move {
+        let state = &state_;
+        // What each answers is not this test's: the quit may cut it short.
+        let _ = match path {
+            Path::FlushNow => knobas_app::commands::sources::flush_writes(handle, None).await,
+            Path::SendMineAnyway => {
+                knobas_app::commands::sources::apply_held_write(handle, queued.unwrap()).await
+            }
+            Path::EditAndSend => {
+                knobas_app::commands::sources::amend_write(
+                    handle,
+                    queued.unwrap(),
+                    comment("as edited"),
+                )
+                .await
+            }
+            Path::Submit => knobas_app::sources::write_queue::submit(state, comment("submitted"))
+                .await
+                .map(|_| ()),
+            Path::Worklog => knobas_app::time::worklog::log(
+                state,
+                PR,
+                chrono::NaiveDate::from_ymd_opt(2026, 10, 19).unwrap(),
+                0,
+                "2026-10-19T09:00:00Z".parse().unwrap(),
+                3_600,
+                "",
+            )
+            .await
+            .map(|_| ()),
+            Path::InBackground => {
+                knobas_app::sources::write_queue::submit_in_background(state, comment("behind"))
+                    .await
+                    .map(|_| ())
+            }
+        };
+    });
+
+    tokio::time::timeout(PATIENCE, async {
+        while *wrote.entered.lock().unwrap() == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{path:?}: the write never reached the source"));
+    sqlx::query_scalar("select id from knobas.write_queue")
+        .fetch_one(&state.pool)
+        .await
+        .expect("one write is queued")
+}
+
+/// Begin the quit on its own thread, as the exit handler does, and wait until
+/// it has begun. The receiver hears its end.
+fn quit(
+    app: &tauri::App<tauri::test::MockRuntime>,
+) -> (std::thread::JoinHandle<()>, std::sync::mpsc::Receiver<()>) {
+    let (over, quit_over) = std::sync::mpsc::channel();
+    let handle = app.handle().clone();
+    let quitting = std::thread::spawn(move || {
+        knobas_app::shutdown(&handle);
+        let _ = over.send(());
+    });
+    (quitting, quit_over)
+}
+
+async fn quit_begun(state: &SourcesState) {
+    tokio::time::timeout(PATIENCE, async {
+        while !state.scheduler.is_shutting_down() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the quit begins");
+}
+
+/// #1932: Cmd-Q while a write a command waits on is at the source. The quit
+/// waits for it under its grace as it waits for a background send, so its
+/// `sent` lands before the pool closes and the next start owes nothing.
+///
+/// One row per path, each its own code path into the queue's flush. The gate
+/// opens once the write's send is in the background set (the quit then waits
+/// for it whenever it opens) or once the pool has closed. Before the fix it
+/// was never in the set, so the gate opened on a closed pool: `sent` failed,
+/// the row stayed pending, and the next start's tick sent the write again.
+/// The grace is an hour, so a quit that ends inside the patience waited for
+/// nothing but the send.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_a_command_waits_on_at_quit_lands_and_is_not_sent_again() {
+    let mut failures = Vec::new();
+    for path in FOREGROUND {
+        let connector = knobas_db::test_util::scratch_database(&format!(
+            "background_write_quit_awaited_{}",
+            format!("{path:?}").to_lowercase()
+        ))
+        .await;
+        let Fixture {
+            state, wrote, gate, ..
+        } = fixture_on(connector.clone(), HELD_OFF_PATIENT_QUIT).await;
+        let app = app_for(&state);
+        let id = at_the_source(path, &state, app.handle(), &wrote).await;
+
+        let (quitting, quit_over) = quit(&app);
+        quit_begun(&state).await;
+        tokio::time::timeout(PATIENCE, async {
+            while state.scheduler.background().running() == 0 && !state.pool.is_closed() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{path:?}: the send is neither in the set nor cut off"));
+        gate.add_permits(1);
+        quit_over
+            .recv_timeout(PATIENCE)
+            .unwrap_or_else(|_| panic!("{path:?}: the quit waited out its grace"));
+        quitting.join().expect("the quit finishes");
+
+        // The next start: its tick sends whatever is still owed.
+        let reader = connector.pool(1).await.unwrap();
+        let next = next_start(&connector, &wrote, &gate).await;
+        gate.add_permits(10);
+        let settled = tokio::time::timeout(PATIENCE, async {
+            loop {
+                let row = knobas_core::write_queue::get(&reader, id)
+                    .await
+                    .unwrap()
+                    .expect("the row is there");
+                if row.state != WriteState::Pending {
+                    return row.state;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{path:?}: the write never settled"));
+        next.shutdown().await;
+        let sends = *wrote.entered.lock().unwrap();
+        if settled != WriteState::Sent || sends != 1 {
+            failures.push(format!(
+                "{path:?}: settled {settled:?} after {sends} sends; the write on the wire \
+                 at the quit was sent again at the next start"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// #1932's second half: a write still at the source when the grace runs out
+/// is cut, and is held as one the source may have, as a send that got no
+/// answer is (#1125). The next start does not send it again blind; the
+/// reader checks the source, then *Send again* or *Discard*.
+///
+/// The five a command waits on, and the background send: all six are in the
+/// set by now, so the abort at the grace's end is what cuts them. Before,
+/// the five were not in the set, and the background send was aborted with
+/// its row pending: each was left pending, and the next start sent it again.
+/// The gate never opens before the quit ends, so the grace's length decides
+/// nothing here.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_still_at_the_source_when_the_grace_ends_is_held_as_unconfirmed() {
+    const SHORT_QUIT: knobas_sync::scheduler::SchedulerTiming =
+        knobas_sync::scheduler::SchedulerTiming {
+            shutdown_grace: Duration::from_millis(100),
+            ..HELD_OFF
+        };
+    let mut failures = Vec::new();
+    for path in FOREGROUND.into_iter().chain([Path::InBackground]) {
+        let connector = knobas_db::test_util::scratch_database(&format!(
+            "background_write_quit_cut_{}",
+            format!("{path:?}").to_lowercase()
+        ))
+        .await;
+        let Fixture {
+            state, wrote, gate, ..
+        } = fixture_on(connector.clone(), SHORT_QUIT).await;
+        let app = app_for(&state);
+        let id = at_the_source(path, &state, app.handle(), &wrote).await;
+
+        let (quitting, quit_over) = quit(&app);
+        quit_over
+            .recv_timeout(PATIENCE)
+            .unwrap_or_else(|_| panic!("{path:?}: the quit did not end"));
+        quitting.join().expect("the quit finishes");
+
+        let reader = connector.pool(1).await.unwrap();
+        let row = knobas_core::write_queue::get(&reader, id)
+            .await
+            .unwrap()
+            .expect("the row is there");
+        let source = row
+            .held_snapshot
+            .as_ref()
+            .and_then(|held| held["unconfirmed"]["source"].as_str());
+        if row.state != WriteState::Held || source != Some("Gitea") {
+            failures.push(format!(
+                "{path:?}: the write cut at the grace's end is left {:?} ({:?}), not held \
+                 as one Gitea may have, so the next start sends it again",
+                row.state, row.held_snapshot
+            ));
+        }
+        // A send the quit left behind holds the source's lock, which every
+        // flush of the source id in this process takes (#1629): let it end.
+        gate.add_permits(10);
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A scheduler on `connector`'s database, as the next start builds one, with
+/// its tick running.
+async fn next_start(
+    connector: &knobas_db::embedded::Connector,
+    wrote: &Arc<Wrote>,
+    gate: &Arc<Semaphore>,
+) -> knobas_sync::scheduler::Scheduler {
+    let secrets = Arc::new(MemoryStore::new());
+    secrets
+        .put(
+            &knobas_secrets::KeychainAccount::source(SOURCE),
+            &Secret::just(AuthMethod::Pat, "a-token"),
+        )
+        .expect("the credential is stored");
+    let (tell, _heard) = mpsc::unbounded_channel();
+    knobas_sync::scheduler::Scheduler::start(SchedulerDeps {
+        pool: connector.pool(2).await.unwrap(),
+        connections: Arc::new(Connections(connector.clone())),
+        registry: Arc::new(Registry {
+            wrote: Arc::clone(wrote),
+            gate: Arc::clone(gate),
+        }),
+        secrets,
+        events: Arc::new(Heard(tell)),
+        timing: knobas_sync::scheduler::SchedulerTiming {
+            startup_delay: Duration::from_millis(10),
+            tick: Duration::from_millis(50),
+            ..Default::default()
+        },
+        quit: knobas_sync::scheduler::Quit::default(),
+    })
+    .await
+    .expect("the next start's scheduler")
 }
