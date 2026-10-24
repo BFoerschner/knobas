@@ -14,6 +14,7 @@ import type { Candidate, DayRecord, Draft, LoggedWork, ReaderDay, Worklog } from
 import { createLayers, type Layers } from "./layers.svelte";
 import TfWorklogDraft from "./TfWorklogDraft.svelte";
 import { waitFor } from "../shell/test-wait";
+import type { RefusedWritesPort, WriteAsk } from "../shell/refused-writes";
 
 const TICKET = "jira:PAY-231";
 
@@ -77,6 +78,7 @@ interface RenderOpts {
   logWork?: () => Promise<Worklog>;
   onbeforelog?: () => Promise<void>;
   layers?: Layers;
+  refusedWrites?: RefusedWritesPort;
 }
 
 function render(opts: RenderOpts = {}) {
@@ -104,6 +106,7 @@ function render(opts: RenderOpts = {}) {
           return (opts.logWork ?? (() => Promise.resolve(WORKLOG)))();
         },
         dayBlocks: () => Promise.resolve(DAY),
+        ...(opts.refusedWrites ? { refusedWrites: opts.refusedWrites } : {}),
         listSources: () =>
           Promise.resolve([
             { id: "jira", display_name: "Jira" },
@@ -310,4 +313,27 @@ test("leaving while the log is in flight does nothing: the log answers for itsel
   expect(button("Stop, log later")?.disabled).toBe(true);
   resolve(WORKLOG);
   await waitFor(() => expect(outcomes).toEqual(["logged"]));
+});
+
+test("a worklog the source's credential cannot make draws Log disabled saying why, and sends nothing (#2052)", async () => {
+  const asked: WriteAsk[][] = [];
+  const reason = "This Jira user cannot log work in PAY: it lacks the Work On Issues permission";
+  const { sent, order, outcomes } = render({
+    refusedWrites: (asks) => {
+      asked.push(asks);
+      return Promise.resolve([{ entity: TICKET, op: "log_work", reason }]);
+    },
+  });
+  await waitFor(() => expect(button("Log 2h 44m to PAY-231")?.getAttribute("aria-disabled")).toBe("true"));
+  expect(asked).toEqual([[{ entity: TICKET, op: "log_work" }]]);
+  expect(button("Log 2h 44m to PAY-231")?.title).toBe(reason);
+  expect(text()).toContain(reason);
+  button("Log 2h 44m to PAY-231")!.click();
+  await Promise.resolve();
+  flushSync();
+  // Neither the clock stopped for it nor a worklog sent; the other answers stay.
+  expect(order).toEqual([]);
+  expect(sent).toEqual([]);
+  button("Stop, log later")!.click();
+  expect(outcomes).toEqual(["later"]);
 });

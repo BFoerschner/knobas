@@ -11,6 +11,10 @@
   (`house-rules.test.ts`). SVG's `x` and `width` are attributes, not style, and
   take percentages.
 
+  **A worklog the source's credential cannot make** (`refused_writes`,
+  #2052): an unlogged row's *Log…* is drawn disabled with the reason, asked
+  once the rows are drawn, and opens no draft.
+
   **Yellow is the running timer's alone** (design system: yellow means "the
   ticket you are on"). Only the `running` row carries `tf-tm-run`.
 -->
@@ -30,6 +34,7 @@
   } from "../../ipc/time";
   import { launcherHome as realLauncherHome, search as realSearch } from "../../ipc/search";
   import type { SessionPorts } from "../../launcher/session.svelte";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
@@ -50,6 +55,8 @@
     /** The block dialog's ticket picker searches with the launcher's reads (#1429). */
     search: SessionPorts["search"];
     launcherHome: SessionPorts["launcherHome"];
+    /** What the sources' credentials cannot write (#2052); the bridge's when left out. */
+    refusedWrites?: RefusedWritesPort;
   }
 
   let {
@@ -166,6 +173,17 @@
         }),
   );
   const figures = $derived(dayFigures(rows));
+  /** The worklogs the sources' credentials cannot make (#2052), asked after the rows are drawn. */
+  let refused = $state<RefusedWrite[]>([]);
+  /** As a string, so a re-read that changes no unlogged ticket asks nothing again. */
+  const logAsks = $derived(
+    JSON.stringify(
+      [...new Set(rows.flatMap((row) => (row.state === "unlogged" && row.target?.kind === "entity" ? [row.target.entity_id] : [])))].map(
+        (entity) => ({ entity, op: "log_work" }),
+      ),
+    ),
+  );
+  $effect(() => askInto(JSON.parse(logAsks) as WriteAsk[], io.refusedWrites, (answer) => (refused = answer)));
   /** Each run of offered rows to one ticket, by its first row's key (#1108). */
   const runAt = $derived(new Map(offerRuns(rows).map((run) => [run.rows[0]!.key, run])));
   /**
@@ -617,7 +635,8 @@
               {#if row.block?.block.ended_by_relaunch}
                 <button class="tf-btn tf-sm" onclick={() => extendToNow(row)}>Extend to now</button>
               {/if}
-              <button class="tf-btn tf-sm" onclick={() => onlog?.(on, key)}>Log…</button>
+              {@const cannot = refusalOf(refused, on, "log_work")}
+              <button class="tf-btn tf-sm" {...refusedAttrs(cannot)} onclick={() => cannot === null && onlog?.(on, key)}>Log…</button>
               <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "edit", row })}>Edit</button>
             {:else if row.state === "running"}
               <button class="tf-btn tf-sm" onclick={() => ontimer?.()}>Stop and log…</button>
