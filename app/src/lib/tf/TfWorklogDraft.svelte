@@ -33,7 +33,7 @@
     type Draft,
     type Worklog,
   } from "../ipc/time";
-  import { clockReading, dayBounds, dayKey, dayLabel, dayOffsetMinutes } from "../time/day";
+  import { clockReading, dayBounds, dayKey, dayLabel, readerDay } from "../time/day";
   import { DraftForm } from "../time/draft-form.svelte";
   import type { DraftOutcome } from "./drafting.svelte";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
@@ -128,7 +128,7 @@
     failed = null;
     // The clock first: `log_work` covers only closed blocks.
     void onbeforelog()
-      .then(() => ports.logWork(draft.entity_id, { day: draft.day, offsetMinutes: dayOffsetMinutes(draft.day) }, form.work))
+      .then(() => ports.logWork(draft.entity_id, readerDay(draft.day), form.work))
       .then(
         (worklog) => {
           // Outside the rejection handler on purpose: the worklog exists now,

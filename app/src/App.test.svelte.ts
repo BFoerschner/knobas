@@ -1011,13 +1011,12 @@ test.each([
   { day: "2026-03-29", midnight: 60 },
 ])("Log… on $day asks for the draft with that day's midnight offset", async ({ day, midnight }) => {
   dbReady = true;
-  const [y, m, d] = day.split("-").map(Number);
   dayAnswer = [
     {
       block: {
         id: 11,
-        started_at: new Date(y, m - 1, d, 23, 15).toISOString(),
-        ended_at: new Date(y, m - 1, d, 23, 45).toISOString(),
+        started_at: new Date(`${day}T23:15:00`).toISOString(),
+        ended_at: new Date(`${day}T23:45:00`).toISOString(),
         target: { kind: "entity", entity_id: "mock:PAY-231" },
         kind: "manual",
         ended_by_relaunch: false,
