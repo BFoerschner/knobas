@@ -28,7 +28,7 @@ fn ran_in_a_c_locale_child(test: &str) -> bool {
         child.env(variable, "C");
     }
     let output = child.output().expect("re-run this binary as a child");
-    super::stdout_of_a_passed_child(test, &output);
+    print!("{}", super::stdout_of_a_passed_child(test, &output));
     true
 }
 
