@@ -2780,16 +2780,25 @@ mod hung_up {
     /// The second sending fits in [`knobas_http::SEND_BUDGET`] or is not
     /// made: a call whose budget is shorter than the backoff ends with the
     /// hang-up rather than outliving the caller's patience.
-    #[tokio::test(flavor = "multi_thread")]
+    ///
+    /// The budget is a duration, so the clock is tokio's, held for the whole
+    /// test (#1925): nothing here waits on a timer, and the 200 ms budget is
+    /// spent on no request however long the loopback takes. A call that
+    /// waited out the backoff anyway would wait for ever on a held clock, so
+    /// the real-time backstop fails it instead.
+    #[tokio::test(start_paused = true)]
     async fn a_read_sent_again_stays_inside_the_send_budget() {
+        let _clock = super::HeldClock::hold();
         let server = HangUpServer::new(HangUp::OnReuse);
         let client = client(&server).with_send_budget(Duration::from_millis(200));
         pool_a_connection(&client).await;
 
-        let error = client
-            .get_json::<serde_json::Value>("/second", &[])
-            .await
-            .expect_err("no room to send it again");
+        let error = super::real_backstop(
+            "the end of a call with no room to send again",
+            client.get_json::<serde_json::Value>("/second", &[]),
+        )
+        .await
+        .expect_err("no room to send it again");
 
         assert!(
             matches!(error, SourceError::Protocol { status: None, .. }),
