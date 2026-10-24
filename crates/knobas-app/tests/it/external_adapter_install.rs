@@ -81,6 +81,11 @@ async fn refusal(artifact: &[u8], manifest: &str) -> String {
     let (_dir, path) = release(artifact, manifest);
     let store = tempfile::tempdir().unwrap();
     let pool = shared_pool().await;
+    // The preview before the confirm refuses it with the same reason (#2031).
+    let previewed = match preview(&Registry::default(), &path).await {
+        Ok(preview) => panic!("previewed {preview:?}"),
+        Err(error) => error.to_ipc().message,
+    };
     match install::install(&pool, &Registry::default(), store.path(), &path).await {
         Ok(installed) => panic!("installed {installed:?}"),
         Err(error) => {
@@ -88,9 +93,24 @@ async fn refusal(artifact: &[u8], manifest: &str) -> String {
                 std::fs::read_dir(store.path()).unwrap().next().is_none(),
                 "a refused install stores nothing"
             );
-            error.to_ipc().message
+            let message = error.to_ipc().message;
+            assert_eq!(previewed, message, "the preview refuses as install does");
+            message
         }
     }
+}
+
+/// The preview of the manifest at `path`, as `preview_install_adapter` answers it.
+async fn preview(
+    registry: &Registry,
+    path: &Path,
+) -> Result<install::AdapterPreview, InstallError> {
+    install::preview_install(
+        registry,
+        &knobas_app::sources::remote::Endpoints::default(),
+        path.to_str().unwrap(),
+    )
+    .await
 }
 
 async fn refusal_of(edit: impl FnOnce(&mut serde_json::Value)) -> String {
@@ -730,4 +750,129 @@ async fn a_run_past_its_deadline_ends_failed_naming_it_and_its_neighbour_syncs()
         "the external adapter \"wasm-fixture\" was stopped at its deadline of 1 s",
     );
     assert!(synced.unwrap().upserted > 0, "the neighbour synced");
+}
+
+// -- the preview and the confirm (#2031) ---------------------------------------
+
+async fn installed_rows(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("select count(*) from knobas.external_adapter")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+fn stored(store: &Path) -> usize {
+    std::fs::read_dir(store).map_or(0, Iterator::count)
+}
+
+/// The preview names what the reader decides on, the adapter's name,
+/// version, roles, hosts and limits, and writes nothing: a *Cancel* after it
+/// leaves no row, no artifact and no adapter on offer.
+#[tokio::test]
+async fn a_preview_shows_name_version_roles_hosts_and_limits_and_writes_nothing() {
+    let (pool, _connector) = scratch("install-preview").await;
+    let store = tempfile::tempdir().unwrap();
+    let registry = Registry::default();
+    let artifact = fixture_bytes();
+    let (_dir, path) = release(&artifact, &manifest_for(&artifact).to_string());
+
+    let preview = preview(&registry, &path).await.unwrap();
+    assert_eq!(preview.adapter_kind, "wasm-fixture");
+    // The fixture names itself by its kind.
+    assert_eq!(preview.name, "wasm-fixture");
+    assert_eq!(preview.adapter_version, "0.1.0");
+    assert_eq!(preview.interface_version, "1.3.0");
+    assert_eq!(preview.tag, None);
+    assert_eq!(preview.artifact_sha256, manifest::sha256(&artifact));
+    assert_eq!(preview.hosts, ["{base_url}"]);
+    assert_eq!(
+        preview.roles.iter().map(|r| r.role.as_str()).collect::<Vec<_>>(),
+        ["wasm-fixture:survey-desk", "ci"],
+        "the fixture's custom role and CI"
+    );
+    assert_eq!(
+        preview.limits,
+        install::AdapterLimits {
+            deadline_secs: 30,
+            deadline_asked: true,
+            memory_mib: 256,
+            memory_asked: false,
+        }
+    );
+
+    assert_eq!(installed_rows(&pool).await, 0, "no row");
+    assert_eq!(stored(store.path()), 0, "no artifact");
+    assert!(
+        !kinds(&registry).contains(&"wasm-fixture".to_owned()),
+        "not on offer"
+    );
+}
+
+/// The confirm installs the release the reader was shown and no other: an
+/// artifact whose hash is not the one confirmed is refused, and nothing is
+/// written.
+#[tokio::test]
+async fn an_install_of_another_artifact_than_the_one_confirmed_is_refused() {
+    let (pool, _connector) = scratch("install-pinned").await;
+    let store = tempfile::tempdir().unwrap();
+    let registry = Registry::default();
+    let artifact = fixture_bytes();
+    let (_dir, path) = release(&artifact, &manifest_for(&artifact).to_string());
+    let shown = "0".repeat(64);
+
+    let Err(error) = install::install_from(
+        &pool,
+        &registry,
+        store.path(),
+        &knobas_app::sources::remote::Endpoints::default(),
+        path.to_str().unwrap(),
+        Some(&shown),
+    )
+    .await
+    else {
+        panic!("an artifact other than the confirmed one must not install");
+    };
+    let ipc = error.to_ipc();
+    assert_eq!(ipc.code, knobas_app::IpcErrorCode::Invalid);
+    says(
+        &ipc.message,
+        &format!(
+            "the release changed after it was checked: its artifact was {shown} and is now {}",
+            manifest::sha256(&artifact)
+        ),
+    );
+    assert_eq!(installed_rows(&pool).await, 0, "no row");
+    assert_eq!(stored(store.path()), 0, "no artifact");
+
+    let confirmed = manifest::sha256(&artifact);
+    install::install_from(
+        &pool,
+        &registry,
+        store.path(),
+        &knobas_app::sources::remote::Endpoints::default(),
+        path.to_str().unwrap(),
+        Some(&confirmed),
+    )
+    .await
+    .expect("the confirmed artifact installs");
+    assert_eq!(installed_rows(&pool).await, 1);
+}
+
+#[tokio::test]
+async fn a_preview_of_a_kind_already_installed_is_refused() {
+    let (pool, _connector) = scratch("install-preview-taken").await;
+    let store = tempfile::tempdir().unwrap();
+    let registry = Registry::default();
+    install_fixture(&pool, &registry, store.path()).await;
+    let artifact = fixture_bytes();
+    let (_dir, path) = release(&artifact, &manifest_for(&artifact).to_string());
+    let Err(error) = preview(&registry, &path).await else {
+        panic!("a taken kind must be refused at the preview");
+    };
+    let ipc = error.to_ipc();
+    assert_eq!(ipc.code, knobas_app::IpcErrorCode::Conflict);
+    says(
+        &ipc.message,
+        "an adapter of kind \"wasm-fixture\" is already installed",
+    );
 }

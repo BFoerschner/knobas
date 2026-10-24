@@ -16,6 +16,12 @@
 //! `limits` the deadline and memory cap of every call into it (#1204), as
 //! install's manifest made them.
 //!
+//! **Shown, then confirmed** (#2031). [`preview_install`] runs every check
+//! install runs and writes nothing: it answers what the reader decides on,
+//! the adapter's name, version, roles, hosts and limits, and the artifact's
+//! hash. The install that follows the confirm is held to that hash, so a
+//! release that moved in between is refused rather than installed unseen.
+//!
 //! **From a release** (#1209): what the reader pastes may be a GitHub
 //! repository URL or a manifest URL as well as a local path
 //! ([`super::remote`]); the install records it in `source_url` with the
@@ -59,6 +65,81 @@ pub struct InstalledAdapter {
     pub template: knobas_source::SourceDescriptor,
 }
 
+/// What the reader is shown before an install or an update (#2031): every
+/// check has passed and nothing is written. `artifact_sha256` is what the
+/// confirm sends back, so what installs is what was shown.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct AdapterPreview {
+    pub adapter_kind: String,
+    /// The descriptor's name, or the kind for an installed adapter refused at load.
+    pub name: String,
+    pub adapter_version: String,
+    pub interface_version: String,
+    pub source_url: String,
+    /// The release's tag; `None` for a local manifest, which is no release.
+    pub tag: Option<String>,
+    pub artifact_sha256: String,
+    /// The hosts it may reach, as the manifest writes them (`{base_url}`).
+    pub hosts: Vec<String>,
+    /// The roles its descriptor claims; empty for an installed adapter
+    /// refused at load, whose descriptor was never read.
+    pub roles: Vec<knobas_source::role::RoleClaim>,
+    pub limits: AdapterLimits,
+}
+
+/// The limits every call into the adapter is held to (#1204): what the
+/// manifest asks for, each absent one at the host's default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct AdapterLimits {
+    /// The deadline of one call, in seconds.
+    pub deadline_secs: u32,
+    /// Whether the manifest asks for the deadline; `false` is the default.
+    pub deadline_asked: bool,
+    /// The memory cap of one call, in MiB.
+    pub memory_mib: u32,
+    /// Whether the manifest asks for the memory cap; `false` is the default.
+    pub memory_asked: bool,
+}
+
+impl AdapterLimits {
+    /// What `asked` comes to, each absent limit at the host's default.
+    #[must_use]
+    pub fn of(asked: &manifest::Limits) -> Self {
+        let default_deadline =
+            u32::try_from(knobas_wasm_host::limits::DEFAULT_DEADLINE.as_secs()).unwrap_or(u32::MAX);
+        Self {
+            deadline_secs: asked.deadline_secs.unwrap_or(default_deadline),
+            deadline_asked: asked.deadline_secs.is_some(),
+            memory_mib: asked
+                .memory_mib
+                .unwrap_or(knobas_wasm_host::limits::DEFAULT_MEMORY_MIB),
+            memory_asked: asked.memory_mib.is_some(),
+        }
+    }
+}
+
+impl AdapterPreview {
+    /// The preview of a release fetched from `source_url` and checked.
+    pub(crate) fn of(source_url: String, fetched: &Fetched) -> Self {
+        let m = &fetched.checked.manifest;
+        let template = fetched.checked.adapter.template();
+        Self {
+            adapter_kind: m.adapter_kind.clone(),
+            name: template.name,
+            adapter_version: m.adapter_version.clone(),
+            interface_version: m.interface_version.clone(),
+            source_url,
+            tag: fetched.tag.clone(),
+            artifact_sha256: m.artifact.sha256.clone(),
+            hosts: m.hosts.clone(),
+            roles: template.roles,
+            limits: AdapterLimits::of(&m.limits),
+        }
+    }
+}
+
 /// Why an install did not happen.
 #[derive(Debug, thiserror::Error)]
 pub enum InstallError {
@@ -81,6 +162,11 @@ pub enum InstallError {
          adapter is {installed:?}"
     )]
     KindChanged { installed: String, release: String },
+    #[error(
+        "the release changed after it was checked: its artifact was {confirmed} and is now \
+         {release}"
+    )]
+    Changed { confirmed: String, release: String },
     #[error("uninstall asks about every source of {kind:?}; no answer for {missing}")]
     Unanswered { kind: String, missing: String },
     #[error("cannot remove the source {id}: {error}")]
@@ -102,6 +188,7 @@ impl InstallError {
             Self::ManifestUnreadable { .. }
             | Self::Refused(_)
             | Self::KindChanged { .. }
+            | Self::Changed { .. }
             | Self::Unanswered { .. } => crate::IpcError::invalid(self),
             Self::Fetch(remote::FetchError::Unreachable { .. }) => {
                 crate::IpcError::new(crate::IpcErrorCode::Unreachable, self)
@@ -141,6 +228,7 @@ pub async fn install(
         store,
         &Endpoints::default(),
         &Origin::Local(manifest_path),
+        None,
     )
     .await
 }
@@ -148,19 +236,53 @@ pub async fn install(
 /// Install from what the reader pasted (#1209): a GitHub repository URL
 /// (its latest release), a manifest URL, or a local manifest's path.
 ///
+/// `confirmed` is the artifact hash the reader was shown
+/// ([`preview_install`]); a release whose artifact is another is refused.
+///
 /// # Errors
 ///
-/// As [`install`], and [`InstallError::Fetch`] when the release cannot be
-/// found or read.
+/// As [`install`], [`InstallError::Fetch`] when the release cannot be
+/// found or read, and [`InstallError::Changed`] when its artifact is not the
+/// confirmed one.
 pub async fn install_from(
     pool: &PgPool,
     registry: &Registry,
     store: &Path,
     endpoints: &Endpoints,
     input: &str,
+    confirmed: Option<&str>,
 ) -> Result<InstalledAdapter, InstallError> {
     let origin = Origin::parse(input, endpoints)?;
-    install_origin(pool, registry, store, endpoints, &origin).await
+    install_origin(pool, registry, store, endpoints, &origin, confirmed).await
+}
+
+/// What installing from `input` would record, with every check install
+/// runs, the kind's too, and nothing written (#2031).
+///
+/// # Errors
+///
+/// As [`install_from`], but never one that writes.
+pub async fn preview_install(
+    registry: &Registry,
+    endpoints: &Endpoints,
+    input: &str,
+) -> Result<AdapterPreview, InstallError> {
+    let origin = Origin::parse(input, endpoints)?;
+    let fetched = fetch_checked(&origin, Pin::Latest, endpoints).await?;
+    registry.check_free(&fetched.checked.manifest.adapter_kind)?;
+    Ok(AdapterPreview::of(origin.record(endpoints), &fetched))
+}
+
+/// [`InstallError::Changed`] unless the fetched artifact is the `confirmed` one.
+pub(crate) fn held_to(fetched: &Fetched, confirmed: Option<&str>) -> Result<(), InstallError> {
+    let release = &fetched.checked.manifest.artifact.sha256;
+    match confirmed {
+        Some(confirmed) if confirmed != release => Err(InstallError::Changed {
+            confirmed: confirmed.to_owned(),
+            release: release.clone(),
+        }),
+        _ => Ok(()),
+    }
 }
 
 /// A release's manifest and artifact, fetched and held to every static
@@ -212,8 +334,11 @@ async fn install_origin(
     store: &Path,
     endpoints: &Endpoints,
     origin: &Origin,
+    confirmed: Option<&str>,
 ) -> Result<InstalledAdapter, InstallError> {
-    let Fetched { tag, checked } = fetch_checked(origin, Pin::Latest, endpoints).await?;
+    let fetched = fetch_checked(origin, Pin::Latest, endpoints).await?;
+    held_to(&fetched, confirmed)?;
+    let Fetched { tag, checked } = fetched;
     registry.check_free(&checked.manifest.adapter_kind)?;
 
     store_artifact(store, &checked.manifest.artifact.sha256, &checked.artifact)
@@ -274,6 +399,7 @@ pub async fn install_for_profile(
     registry: &Registry,
     profile_dir: &Path,
     input: &str,
+    confirmed: &str,
 ) -> Result<InstalledAdapter, InstallError> {
     install_from(
         pool,
@@ -281,6 +407,7 @@ pub async fn install_for_profile(
         &store_dir(profile_dir),
         &Endpoints::default(),
         input,
+        Some(confirmed),
     )
     .await
 }
