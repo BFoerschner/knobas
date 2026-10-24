@@ -42,6 +42,14 @@ export function savedViewKindWords({ kind, board_type }: Pick<SavedViewSource, "
   return `${type} board`.trim();
 }
 
+/**
+ * The queries a saved view shows, its own and then its sub-query, leaving out each its record does not carry
+ * (#2050): a source's kind declares where its query is, and a view with none draws no empty query.
+ */
+export function savedViewQueries({ source_query, sub_query }: Pick<SavedViewSource, "source_query" | "sub_query">): string[] {
+  return [source_query, sub_query ?? ""].filter((query) => query.trim() !== "");
+}
+
 /** A sprint's end as the header says it (#879): *22 Oct*, in the reader's zone; `""` for a date that is not one. */
 export function sprintEnds(iso: string): string {
   const at = new Date(iso);

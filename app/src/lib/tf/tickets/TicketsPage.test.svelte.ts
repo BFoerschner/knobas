@@ -1718,6 +1718,38 @@ test("a second ticket system's view says where it comes from, what decides it, a
   noJira(dialog()!.textContent);
 });
 
+// #2050: the query is what the source's kind declares, and a view whose record carries none has none.
+test("a saved view with no query says what decides it with no dangling query, in its source line and View settings", async () => {
+  const h = kestrelHarness();
+  h.views[1]!.saved_view_source = { ...h.views[1]!.saved_view_source!, source_query: "", unsynced: [] };
+  await open(h, null, "kestrel-board-7");
+  expect(srcLines()).toEqual([
+    "Kestrel decides which tickets, from the Scrum board Customs flow, active sprint Sprint 9. Read again at every sync, last 4 min ago. Open in Kestrel",
+  ]);
+  expect(target.querySelector(".tf-vw-srcline code")).toBeNull();
+
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  await settle();
+  const settings = dialog()!.textContent!.replace(/\s+/g, " ");
+  expect(settings).toContain(
+    "Kestrel decides, from the Scrum board Customs flow. knobas reads it again at every sync and keeps Kestrel's order. Like the board in Kestrel,",
+  );
+  expect(dialog()!.querySelector(".tf-vw-source-query")).toBeNull();
+});
+
+test("a saved view's own query and sub-query show in its source line and View settings", async () => {
+  const h = kestrelHarness();
+  h.views[1]!.saved_view_source = { ...h.views[1]!.saved_view_source!, source_query: "is:open milestone:train", sub_query: "label:ops", sprint: null, unsynced: [] };
+  await open(h, null, "kestrel-board-7");
+  expect(srcLines()).toEqual([
+    "Kestrel decides which tickets, from the Scrum board Customs flow: is:open milestone:train and label:ops. Read again at every sync, last 4 min ago. Open in Kestrel",
+  ]);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  await settle();
+  expect(dialog()!.querySelector(".tf-vw-source-query")!.textContent).toBe("is:open milestone:train\nlabel:ops");
+  expect(dialog()!.textContent!.replace(/\s+/g, " ")).toContain("knobas runs its query at every sync and keeps Kestrel's order.");
+});
+
 test("with two ticket systems the list's foot and a view of your own name both", async () => {
   const { h } = jiraHarness();
   h.views.push({ ...kestrelHarness().views[1]!, position: 2 });
