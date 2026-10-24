@@ -6126,6 +6126,35 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
         id(knobas_source_gitea::keys::commit_key(owner, repo, &sha)),
         id(knobas_source_gitea::keys::pr_key(owner, repo, number)),
     ];
+    // What the probes could have made: a branch, an issue, a pull request.
+    // Counted on both repositories before any view is drawn and after the
+    // last, so a forge that took `{}` for a create would fail here.
+    let mirror = format!("{admin}/ops-runbooks-mirror");
+    let footprint = async |repository: &str| -> Vec<usize> {
+        let mut counts = Vec::new();
+        for listing in [
+            "branches?",
+            "issues?state=all&type=issues&",
+            "pulls?state=all&",
+        ] {
+            let answer = http
+                .get(format!("{api}/repos/{repository}/{listing}limit=1"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .expect("GET a listing's count");
+            counts.push(
+                answer
+                    .headers()
+                    .get("x-total-count")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or_else(|| panic!("{repository} {listing}: no X-Total-Count")),
+            );
+        }
+        counts
+    };
+    let before = (footprint(&full).await, footprint(&mirror).await);
     let config = serde_json::json!({ "repos": [full] });
     let narrow = env.source_with(&read_only, config.clone());
     let wide = env.source_with(&writes, config);
@@ -6152,7 +6181,6 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
         b.expect("the README reads").expect("drawn"),
     ));
 
-    let mirror = format!("{admin}/ops-runbooks-mirror");
     let tip: serde_json::Value = http
         .get(format!("{api}/repos/{mirror}/commits?limit=1"))
         .header("Authorization", &auth)
@@ -6167,8 +6195,14 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
     let pushless = outsider
         .view(&format!("gitea:{mirror}@{mirror_sha}"), None)
         .await;
+    let after = (footprint(&full).await, footprint(&mirror).await);
 
     remove().await;
+
+    assert_eq!(
+        after, before,
+        "the empty-bodied probes created no branch, issue or pull request"
+    );
 
     for (entity, narrow, wide) in &seen {
         println!("LIVE {entity}: read-only {:?}", offered(narrow));
