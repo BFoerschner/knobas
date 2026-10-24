@@ -8,7 +8,7 @@ import type { ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, c
 import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBackupSchedule, shareExport } from "../../ipc/backup";
 import type { acceptSuggestion, actionItemTicket, artifactPreview, captureContext, captureShortcut, checkoutSettings, cloneRepo, codeFacts, completeInboxItem, createActionItemTicket, createLink, createNote, deleteLinkSet, deleteNote, deleteRunPreset, dismissSuggestion, docsCreatePage, docsEditSection, docsExportMarkdown, docsPage, docsSearch, docsTree, downloadRunFile, entityCheckout, entityCheckoutDiff, entityThread, entityView, exportNotesMarkdown, followMerges, getEntity, getNote, hideLinkSetMember, inboxCount, inboxItems, jobLinkSets, jobPipelines, jobReach, linkSet, linkSetHints, linkSets, listContexts, listEntities, listProjects, miniBoard, moveNotesToConfluence, notificationKinds, notify, olderPipelineRuns, openCheckout, owedTickets, parentLinks, pipelineRuns, pipelineSettings, pipelines, prViewedFiles, previewLinkSetPattern, previewLinkSetRule, promoteContext, proposalEvidence, publishStandupProtocol, reachableTransitions, recordCaptureContext, resolveUrl, revealNote, roomSuggestions, runArtifacts, runChain, runLog, runPresets, runTests, saveLinkSet, saveNote, saveRunPreset, setCaptureShortcut, setCheckoutApplications, setCheckoutOverride, setClonesRoot, setNotesShown, setNotificationKinds, setParentLinks, setPipelinePinned, setPrFileViewed, setStandupPublishTarget, snoozeInboxItem, standupDigest, standupProtocol, standupPublishTarget, startWorkAmend, startWorkFlow, startWorkRetry, startWorkRun, startWorkSkip, submitWrite, testHistory, unlink, visitEntity } from "../../ipc/entity";
 import type { createSmartList, deleteSmartList, deleteTicketView, filterSuggestions, hideSavedView, launcherHome, openSavedView, renameSmartList, saveTicketView, search, smartLists, ticketViews, translateTicketView } from "../../ipc/search";
-import type { addSource, amendWrite, applyHeldWrite, backfillSource, checkAdapterUpdates, credentialHealth, dbStats, deleteSource, demoLoad, discardWrite, flushWrites, installAdapter, listAdapters, listInstalledAdapters, listSources, listSyncRuns, pendingWrites, reindexFts, setSourceSecret, syncAll, syncNow, syncNowWithProgress, syncStatus, testSource, uninstallAdapter, updateAdapter, updateSource, watchSync, writeQueueCounts } from "../../ipc/sources";
+import type { addSource, amendWrite, applyHeldWrite, backfillSource, checkAdapterUpdates, credentialHealth, dbStats, deleteSource, demoLoad, discardWrite, flushWrites, installAdapter, listAdapters, listInstalledAdapters, listSources, listSyncRuns, pendingWrites, previewInstallAdapter, previewUpdateAdapter, reindexFts, setSourceSecret, syncAll, syncNow, syncNowWithProgress, syncStatus, testSource, uninstallAdapter, updateAdapter, updateSource, watchSync, writeQueueCounts } from "../../ipc/sources";
 import type { adHocBlock, createBlock, currentTimer, dayBlocks, deleteBlock, dismissBlock, logAllPreview, logWork, passiveAttribution, setPassiveAttribution, startTimer, stopTimer, timerHeartbeat, updateBlock, weekTimesheet, worklogDraft } from "../../ipc/time";
 
 type Answer<F extends (...args: never[]) => Promise<unknown>> = Awaited<ReturnType<F>>;
@@ -135,8 +135,10 @@ export interface Answers {
   place_dep_kind: Answer<typeof placeDepKind>;
   pr_viewed_files: Answer<typeof prViewedFiles>;
   preview_estate_import: Answer<typeof previewEstateImport>;
+  preview_install_adapter: Answer<typeof previewInstallAdapter>;
   preview_link_set_pattern: Answer<typeof previewLinkSetPattern>;
   preview_link_set_rule: Answer<typeof previewLinkSetRule>;
+  preview_update_adapter: Answer<typeof previewUpdateAdapter>;
   produce_estate_file: Answer<typeof produceEstateFile>;
   promote_context: Answer<typeof promoteContext>;
   proposal_evidence: Answer<typeof proposalEvidence>;

@@ -7,6 +7,12 @@
   the checks' reason, a check that could not run. Nothing updates on its own.
   *Check for updates* asks again; knobas also asks at app start.
 
+  *Update* checks the new release first and switches nothing (#2031). When
+  its hosts, roles or limits differ from the installed release's, *Update
+  <name> to <release>?* says what changed and waits for its *Update*; when
+  they are the same it switches at once. Either way the switch is held to
+  the artifact that was checked.
+
   An adapter refused at load or restore says why on its row (a restore whose
   release changed hash is one), and can still be uninstalled.
 
@@ -18,9 +24,11 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { AdapterStatus } from "../../ipc/sources";
+  import type { AdapterStatus, UpdatePreview } from "../../ipc/sources";
   import { push } from "../../shell/toasts.svelte";
   import type { Layers } from "../layers.svelte";
+  import { updateChanges } from "./adapter-preview";
+  import TfAdapterFacts from "./TfAdapterFacts.svelte";
   import TfDialog from "./TfDialog.svelte";
   import type { SettingsPorts } from "./ports";
 
@@ -31,7 +39,10 @@
     onremoved,
     onchanged,
   }: {
-    ports: Pick<SettingsPorts, "listInstalledAdapters" | "checkAdapterUpdates" | "updateAdapter" | "uninstallAdapter">;
+    ports: Pick<
+      SettingsPorts,
+      "listInstalledAdapters" | "checkAdapterUpdates" | "previewUpdateAdapter" | "updateAdapter" | "uninstallAdapter"
+    >;
     layers: Layers;
     /** Moves when an install may have added a row (*Add a source* closed). */
     refresh?: number;
@@ -44,6 +55,8 @@
   let rows = $state<AdapterStatus[]>([]);
   let checking = $state(false);
   let updating = $state<string | null>(null);
+  /** The update whose changes *Update <name> to <release>?* shows, and what changed. */
+  let confirming = $state<{ row: AdapterStatus; preview: UpdatePreview; changes: string[] } | null>(null);
   /** The adapter whose *Uninstall…* is open, and each source's answer: purge or not. */
   let uninstalling = $state<AdapterStatus | null>(null);
   let purge = $state<Record<string, boolean>>({});
@@ -98,19 +111,52 @@
     }
   }
 
+  /** A refused or failed update: the reason, and the row's line read again. */
+  async function failed(row: AdapterStatus, cause: unknown) {
+    push({ text: `${capital(ipcErrorMessage(cause))}. ${row.name} stays on ${release(row)}.`, tone: "err" });
+    rows = await ports.listInstalledAdapters().catch(() => rows);
+  }
+
+  /** *Update*: the new release checked, and asked about when it may do more or other than the installed one. */
   async function update(row: AdapterStatus) {
     updating = row.adapter_kind;
+    let preview: UpdatePreview;
     try {
-      const next = await ports.updateAdapter(row.adapter_kind);
+      preview = await ports.previewUpdateAdapter(row.adapter_kind);
+    } catch (cause) {
+      await failed(row, cause);
+      updating = null;
+      return;
+    }
+    const changes = updateChanges(preview.installed, preview.release);
+    if (changes.length > 0) {
+      updating = null;
+      confirming = { row, preview, changes };
+      return;
+    }
+    await switchTo(row, preview);
+  }
+
+  /** The switch, held to the release that was checked. */
+  async function switchTo(row: AdapterStatus, preview: UpdatePreview) {
+    updating = row.adapter_kind;
+    try {
+      const next = await ports.updateAdapter(row.adapter_kind, preview.release.artifact_sha256);
       rows = rows.map((r) => (r.adapter_kind === next.adapter_kind ? next : r));
       onchanged();
       push({ text: `Updated ${next.name} to ${release(next)}` });
     } catch (cause) {
-      push({ text: `${capital(ipcErrorMessage(cause))}. ${row.name} stays on ${release(row)}.`, tone: "err" });
-      rows = await ports.listInstalledAdapters().catch(() => rows);
+      await failed(row, cause);
     } finally {
       updating = null;
     }
+  }
+
+  function confirmUpdate() {
+    const asked = confirming;
+    if (asked === null) return;
+    confirming = null;
+    void switchTo(asked.row, asked.preview);
   }
 
   function askUninstall(row: AdapterStatus) {
@@ -198,6 +244,25 @@
     {#snippet footer()}
       <button class="tf-btn tf-ghost" onclick={() => (uninstalling = null)}>Cancel</button>
       <button class="tf-btn tf-primary tf-danger" onclick={() => void uninstall()}>Uninstall</button>
+    {/snippet}
+  </TfDialog>
+{/if}
+
+{#if confirming !== null}
+  {@const asked = confirming}
+  {@const next = asked.preview.release}
+  <TfDialog title="Update {asked.row.name} to {next.tag ?? next.adapter_version}?" {layers} onclose={() => (confirming = null)}>
+    {#snippet body()}
+      <p class="tf-dlg-note">This release changes what {asked.row.name} may do:</p>
+      <ul class="tf-ext-changes">
+        {#each asked.changes as line (line)}<li>{line}</li>{/each}
+      </ul>
+      <TfAdapterFacts preview={next} />
+      <p class="tf-dlg-note">{asked.row.name} stays on {release(asked.row)} until you press Update.</p>
+    {/snippet}
+    {#snippet footer()}
+      <button class="tf-btn tf-ghost" onclick={() => (confirming = null)}>Cancel</button>
+      <button class="tf-btn tf-primary" onclick={confirmUpdate}>Update</button>
     {/snippet}
   </TfDialog>
 {/if}

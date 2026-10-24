@@ -69,4 +69,7 @@
 }
 .tf-ext-row:last-child { border-bottom: 0; }
 .tf-ext-row .tf-dim { overflow-wrap: anywhere; }
+/* An adapter's release before the confirm (#2031): a path or URL breaks anywhere. */
+.tf-ext-from { overflow-wrap: anywhere; }
+.tf-ext-changes { margin: 0; padding-left: 18px; font-size: var(--t-sm); }
 
