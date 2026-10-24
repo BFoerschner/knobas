@@ -1,7 +1,8 @@
 //! *Create monitor* on *Assets nothing watches* (#864) once its create is
 //! queued (#1959): the read names the create on its way on every asset and
 //! route that records the monitor's name, until the mirror holds the monitor
-//! or the write is held, refused or withdrawn. So a reload before the poll
+//! or the write is held on drift, refused or withdrawn; one held as unconfirmed
+//! stays on its way until the reader discards it (#1966). So a reload before the poll
 //! draws *Monitor queued* rather than offering *Create monitor* again, and
 //! Uptime Kuma, which takes a second monitor of the same name, is not sent one.
 //!
@@ -154,8 +155,9 @@ async fn a_sent_create_with_no_receipt_has_arrived_once_a_monitor_of_its_name_is
     assert_eq!(on_its_way(&pool).await, [("pg-main".to_owned(), None)]);
 }
 
-/// Held, refused and withdrawn creates wait on the reader in the queue, or
-/// will not go at all, so the row offers *Create monitor*. A sent create the
+/// Held on drift (never sent), refused and withdrawn creates wait on the
+/// reader in the queue, or will not go at all, so the row offers *Create
+/// monitor*. A sent create the
 /// mirror has not brought in within the patience is not taken for on its way.
 #[tokio::test]
 async fn a_held_refused_withdrawn_or_long_lost_create_is_not_on_its_way() {
@@ -192,6 +194,54 @@ async fn a_held_refused_withdrawn_or_long_lost_create_is_not_on_its_way() {
         [("pg-main".to_owned(), Some((again, WriteState::Pending)))],
         "the press after them is on its way"
     );
+}
+
+/// A create held as unconfirmed (#1125) reached Uptime Kuma and got no answer,
+/// so the monitor may exist: it is on its way, and the row draws *Monitor
+/// queued*, until the reader sends it again (pending, still on its way) or
+/// discards it (#1966). A drift hold beside it was never sent, and is not.
+#[tokio::test]
+async fn a_create_held_as_unconfirmed_is_on_its_way_until_the_reader_discards_it() {
+    let pool = pool("monitor-on-its-way-unconfirmed").await;
+    recording(&pool, "pg-main", "pg-main").await;
+    let drift = create(&pool, "pg-main").await;
+    knobas_core::write_queue::hold(&pool, drift, serde_json::json!({}))
+        .await
+        .unwrap();
+    assert_eq!(on_its_way(&pool).await, [("pg-main".to_owned(), None)], "drift");
+
+    let unanswered = create(&pool, "pg-main").await;
+    knobas_core::write_queue::hold(
+        &pool,
+        unanswered,
+        knobas_core::write_queue::unconfirmed(
+            "create_monitor",
+            serde_json::json!({}),
+            "Uptime Kuma",
+            "the connection closed before an answer",
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        on_its_way(&pool).await,
+        [("pg-main".to_owned(), Some((unanswered, WriteState::Held)))],
+        "unconfirmed"
+    );
+
+    knobas_core::write_queue::apply_anyway(&pool, unanswered)
+        .await
+        .unwrap();
+    assert_eq!(
+        on_its_way(&pool).await,
+        [("pg-main".to_owned(), Some((unanswered, WriteState::Pending)))],
+        "sent again"
+    );
+
+    knobas_core::write_queue::discard(&pool, unanswered)
+        .await
+        .unwrap();
+    assert_eq!(on_its_way(&pool).await, [("pg-main".to_owned(), None)], "discarded");
 }
 
 /// A route records the names that attach its monitors too (#976), and two

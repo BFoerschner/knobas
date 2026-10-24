@@ -2380,17 +2380,21 @@ select r.id, r.name, r.url,
  order by ea.path_text asc, ea.name asc, r.name asc, r.id asc";
 
 /// The *Create monitor* writes on their way (#1959): `(id, name)` of each
-/// `create_monitor` row that is `pending`, or `sent` within the patience
-/// (`sources::write_queue::ARRIVAL_PATIENCE`) and not mirrored yet, oldest
-/// first.
+/// `create_monitor` row that is `pending`, held as unconfirmed (#1966), or
+/// `sent` within the patience (`sources::write_queue::ARRIVAL_PATIENCE`) and
+/// not mirrored yet, oldest first.
 ///
 /// **Not mirrored yet** is the receipt's monitor (`<source_id>:<remote_id>`,
 /// Kuma's minted id, #453 and #1949) absent from the mirror, tombstoned rows
 /// included, since a monitor that arrived and left has arrived; and no live
 /// monitor of the create's name in its source, which is how one with no
 /// receipt is found, and the name is what attaches it (`knobas_sync::attach`).
-/// Held and refused rows wait on the reader in the queue, and a withdrawn one
-/// will not go, so none of them is on its way: #1951's ruling for a ticket.
+/// A create **held as unconfirmed** (`knobas_core::write_queue::unconfirmed`,
+/// #1125: its held side names `unconfirmed`) reached Kuma and got no answer,
+/// so the monitor may exist: it is on its way until the reader sends it again
+/// or discards it (Björn's ruling on #1966). A drift hold was never sent, and a
+/// refused row waits on the reader in the queue, so neither is on its way, nor
+/// is a withdrawn one, which will not go: #1951's ruling for a ticket.
 ///
 /// A **payload read of a knobas-owned shape** (ADR-0007): the name is read at
 /// `payload->'CreateMonitor'->>'name'`, `WriteOp`'s serde shape, as
@@ -2409,6 +2413,7 @@ const ON_ITS_WAY: &str = "select w.id, w.payload->'CreateMonitor'->>'name' as na
    and ($4::text is null or w.source_id = $4)
    and ($5::text is null or w.payload->'CreateMonitor'->>'name' = $5)
    and (w.state = 'pending'
+        or (w.state = 'held' and w.held_snapshot ? 'unconfirmed')
         or (w.state = 'sent'
             and w.settled_at > now() - $2::interval
             and not exists (select 1 from sync.item i
@@ -2437,23 +2442,30 @@ async fn creates_on_their_way(
 }
 
 /// The newest *Create monitor* on its way to `source_id` for a monitor called
-/// `name` ([`ON_ITS_WAY`]), by write id: what `submit_write` refuses a second
-/// create of (#1959), so the asset pane's retry (`MonitorDialog.svelte`) and a
-/// second press anywhere send Uptime Kuma no duplicate.
+/// `name` ([`ON_ITS_WAY`]), as the queue holds it: what `submit_write` refuses
+/// a second create of (#1959), so the asset pane's retry
+/// (`MonitorDialog.svelte`) and a second press anywhere send Uptime Kuma no
+/// duplicate. The row says whether it is held as unconfirmed
+/// ([`QueuedWrite::may_have_landed`](knobas_core::write_queue::QueuedWrite::may_have_landed)),
+/// which the refusal words differently (#1966).
 ///
 /// # Errors
 ///
-/// [`IpcError`] if the read fails.
+/// [`IpcError`] if a read fails.
 pub async fn newest_create_on_its_way(
     pool: &PgPool,
     source_id: &str,
     name: &str,
-) -> Result<Option<i64>, IpcError> {
-    Ok(creates_on_their_way(pool, Some(source_id), Some(name))
+) -> Result<Option<knobas_core::write_queue::QueuedWrite>, IpcError> {
+    let newest = creates_on_their_way(pool, Some(source_id), Some(name))
         .await?
         .into_iter()
         .map(|(id, _)| id)
-        .max())
+        .max();
+    match newest {
+        Some(id) => Ok(knobas_core::write_queue::get(pool, id).await?),
+        None => Ok(None),
+    }
 }
 
 /// Each row's [`UnmonitoredAsset::monitor_on_its_way`]: the newest create on

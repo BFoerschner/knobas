@@ -52,8 +52,8 @@ use crate::IpcError;
 ///   A keychain that will not open says nothing about what the instance
 ///   offers, so an op the kind's roles allow is queued then (#1944);
 /// * a `CreateMonitor` whose name has a create on its way to the same source
-///   (#1959, `assets::newest_create_on_its_way`): Uptime Kuma takes a second
-///   monitor of a name it has.
+///   (#1959, `assets::newest_create_on_its_way`), one held as unconfirmed
+///   included (#1966): Uptime Kuma takes a second monitor of a name it has.
 ///
 /// # Errors
 ///
@@ -827,15 +827,26 @@ pub(crate) async fn submittable(
     // Kuma takes a second monitor of a name it has, and the row a create
     // leaves on *Assets nothing watches* stays until the poll mirrors the
     // monitor, so a second press, or the asset pane's retry, would make two.
-    // Held and refused creates are not on their way: the reader's retry goes.
+    // A create held as unconfirmed may have landed, so it is on its way too
+    // until the reader sends it again or discards it (#1966). Drift holds and
+    // refused creates are not on their way: the reader's retry goes.
     if let WriteOp::CreateMonitor { name, .. } = &op
         && let Some(write) = crate::assets::newest_create_on_its_way(pool, &source.id, name).await?
     {
-        return Err(IpcError::conflict(format!(
-            "a monitor named {name:?} is already on its way to {} (write {write}); \
-             it attaches once the next poll mirrors it",
-            source.display_name
-        )));
+        let source_name = &source.display_name;
+        let id = write.id;
+        return Err(IpcError::conflict(if write.may_have_landed() {
+            format!(
+                "a monitor named {name:?} may already be in {source_name}: it was sent and \
+                 got no answer (write {id}). Check {source_name}, then send it again or \
+                 discard it in the write queue"
+            )
+        } else {
+            format!(
+                "a monitor named {name:?} is already on its way to {source_name} (write {id}); \
+                 it attaches once the next poll mirrors it"
+            )
+        }));
     }
     Ok((op, source.id))
 }
@@ -1318,6 +1329,92 @@ mod tests {
         submittable(&pool, &locked, &registry(), payload("gitea"))
             .await
             .expect("refused, the first waits on the reader: the retry goes");
+    }
+
+    /// #1966: a create held as unconfirmed reached Kuma and got no answer, so
+    /// the monitor may exist. A second create of its name is refused, saying
+    /// what to check, until the reader discards it; a drift hold never sent
+    /// lets it through.
+    #[tokio::test]
+    async fn a_second_create_of_a_monitor_held_as_unconfirmed_is_refused_until_it_is_discarded() {
+        let pool = pool().await;
+        let kuma = unique("kuma-unconfirmed-submit");
+        configured_with(
+            &pool,
+            &kuma,
+            knobas_source_kuma::ADAPTER_KIND,
+            knobas_source::AuthMethod::ApiToken,
+        )
+        .await;
+        let locked: std::sync::Arc<dyn knobas_secrets::SecretStore> = std::sync::Arc::new(Locked);
+        let target = format!("{kuma}:monitors");
+        let payload = |name: &str| {
+            serde_json::to_value(WriteOp::CreateMonitor {
+                entity: target.clone(),
+                name: name.to_owned(),
+                url: "https://gitea.test/".to_owned(),
+                kind: knobas_source::MonitorKind::Http,
+            })
+            .unwrap()
+        };
+        let queued = |name: &'static str| {
+            let payload = payload(name);
+            let pool = pool.clone();
+            let kuma = kuma.clone();
+            let target = target.clone();
+            async move {
+                knobas_core::write_queue::queue(
+                    &pool,
+                    &kuma,
+                    &knobas_core::entity::EntityRef::parse(&target).unwrap(),
+                    "create_monitor",
+                    payload,
+                    serde_json::json!({}),
+                )
+                .await
+                .expect("a create, queued")
+                .id
+            }
+        };
+        let drift = queued("redis").await;
+        knobas_core::write_queue::hold(&pool, drift, serde_json::json!({}))
+            .await
+            .unwrap();
+        submittable(&pool, &locked, &registry(), payload("redis"))
+            .await
+            .expect("held on drift, the first was never sent: the retry goes");
+
+        let unanswered = queued("gitea").await;
+        knobas_core::write_queue::hold(
+            &pool,
+            unanswered,
+            knobas_core::write_queue::unconfirmed(
+                "create_monitor",
+                serde_json::json!({}),
+                "Uptime Kuma",
+                "the connection closed before an answer",
+            ),
+        )
+        .await
+        .unwrap();
+        let error = submittable(&pool, &locked, &registry(), payload("gitea"))
+            .await
+            .expect_err("the first may have landed");
+        assert_eq!(error.code, crate::IpcErrorCode::Conflict);
+        assert!(
+            error.message.contains("\"gitea\"")
+                && error.message.contains("may already be")
+                && error.message.contains("send it again or discard it"),
+            "{}",
+            error.message
+        );
+
+        knobas_core::write_queue::discard(&pool, unanswered)
+            .await
+            .unwrap();
+        submittable(&pool, &locked, &registry(), payload("gitea"))
+            .await
+            .expect("discarded, the reader found nothing there: the retry goes");
     }
 
     /// #1944: a locked keychain is this machine learning nothing about the
