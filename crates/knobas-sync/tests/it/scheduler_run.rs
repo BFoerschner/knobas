@@ -51,6 +51,9 @@ struct MockRegistry {
     /// mock's [`Fault`] has no member for. TeamCity's deleted-watermark
     /// refusal is one (#1477).
     protocol: Mutex<bool>,
+    /// Whether the built adapter's sync sends more than knobas' own rate
+    /// limit lets through in its send budget (#1980): see [`Renamed::sync`].
+    quota: Mutex<bool>,
     /// How many times an adapter this registry built was asked for its
     /// descriptor. A run asks once (#1701).
     descriptor_calls: Arc<std::sync::atomic::AtomicUsize>,
@@ -72,6 +75,7 @@ impl AdapterRegistry for MockRegistry {
             inner,
             cursors: Arc::clone(&self.cursors),
             protocol: *self.protocol.lock().unwrap(),
+            quota: *self.quota.lock().unwrap(),
             descriptor_calls: Arc::clone(&self.descriptor_calls),
         }))
     }
@@ -84,6 +88,7 @@ struct Renamed {
     inner: MockSource,
     cursors: Arc<Mutex<Vec<Option<knobas_source::Cursor>>>>,
     protocol: bool,
+    quota: bool,
     descriptor_calls: Arc<std::sync::atomic::AtomicUsize>,
 }
 
@@ -120,6 +125,9 @@ impl Source for Renamed {
                 "simulated: the server answered and the adapter refused the answer",
             ));
         }
+        if self.quota {
+            return Err(fan_out_past_the_local_quota().await);
+        }
         // Rewrite the mock's namespace onto this instance's id, which is what a
         // real adapter does natively.
         let mut renaming = Renaming {
@@ -145,6 +153,68 @@ impl Source for Renamed {
             "this fake has no workflow, so there are no reachable transitions for {entity:?}"
         )))
     }
+}
+
+/// What a sync answers when it fans out more requests than knobas' own rate
+/// limit serves in the send budget (#1980).
+///
+/// Three `GET`s through one `HttpClient` at one a second with a burst of one
+/// and a 200 ms budget, against a server of its own that answers every
+/// request `200`: its own port, so its own origin and its own limiter. The
+/// first goes on the burst; the second cannot pass the limiter within the
+/// budget, so it fails with the quota and is never sent. The error is
+/// handed back as is, the way an adapter's `?` hands it back.
+async fn fan_out_past_the_local_quota() -> SourceError {
+    let url = answers_200();
+    let client = knobas_http::HttpClient::new(knobas_http::HttpConfig {
+        base_url: url,
+        requests_per_second: 1,
+        burst: 1,
+        ..knobas_http::HttpConfig::default()
+    })
+    .unwrap()
+    .with_send_budget(std::time::Duration::from_millis(200));
+    for _ in 0..3 {
+        if let Err(error) = client
+            .send(client.request(knobas_http::Method::GET, "/rest/api/2/search"))
+            .await
+        {
+            return error;
+        }
+    }
+    panic!("three sends at one a second, burst one, fit no 200 ms budget");
+}
+
+/// A server on a port of its own that answers every request `200` with an
+/// empty body, on a thread of its own with blocking sockets; its URL.
+fn answers_200() -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for socket in listener.incoming() {
+            let Ok(mut socket) = socket else { return };
+            std::thread::spawn(move || {
+                let mut read = Vec::new();
+                let mut buffer = [0u8; 4096];
+                loop {
+                    if let Some(end) = read.windows(4).position(|w| w == b"\r\n\r\n") {
+                        read.drain(..end + 4);
+                        let answer = b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n";
+                        if socket.write_all(answer).is_err() {
+                            return;
+                        }
+                        continue;
+                    }
+                    match socket.read(&mut buffer) {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => read.extend_from_slice(&buffer[..n]),
+                    }
+                }
+            });
+        }
+    });
+    url
 }
 
 struct Renaming<'s> {
@@ -234,6 +304,7 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
         tombstone: Mutex::new(false),
         cursors: Arc::new(Mutex::new(Vec::new())),
         protocol: Mutex::new(false),
+        quota: Mutex::new(false),
         descriptor_calls: Arc::default(),
     });
 
@@ -516,6 +587,57 @@ async fn an_error_run_clears_a_stale_unreachable_and_an_unreachable_run_sets_it_
     assert_eq!(row.outcome, Some(SyncOutcome::Unreachable));
     let cfg = config::get(&h.deps.pool, &h.id).await.unwrap().unwrap();
     assert_eq!(cfg.health.state, AuthState::Unreachable);
+}
+
+/// **A run stopped by knobas' own rate limit does not back the source off**
+/// (#1980, SPI-11 of #1630).
+///
+/// The sync fans out past the local quota inside the send budget, so it
+/// ends `Error` with the quota's message: the source was not asked, and a
+/// backoff would hold it 1, 2, 5... minutes for a wait knobas imposed on
+/// itself. The scheduler reads the stop from
+/// [`knobas_http::watch_local_quota`], never from the message, and leaves
+/// the backoff alone, as it does for a cancelled run. Nor does the run count
+/// on the ladder: the next failure the source causes waits the first rung.
+#[tokio::test]
+async fn a_run_stopped_on_the_local_quota_sets_no_backoff() {
+    let h = harness(AuthKind::Method(AuthMethod::Pat), true).await;
+    *h.registry.quota.lock().unwrap() = true;
+
+    let (row, _) = one_run(&h, SyncTrigger::Schedule).await;
+    assert_eq!(row.outcome, Some(SyncOutcome::Error));
+    let error = row.error.as_deref().unwrap();
+    assert!(
+        error.contains("local rate limit") && error.contains("1 request a second"),
+        "the row names the quota it stopped on: {error}"
+    );
+    let cfg = config::get(&h.deps.pool, &h.id).await.unwrap().unwrap();
+    assert_eq!(
+        cfg.backoff_until, None,
+        "a wait knobas imposed backs nothing off"
+    );
+    assert_eq!(
+        run_log::failures_since_last_ok(&h.deps.pool, &h.id)
+            .await
+            .unwrap(),
+        0,
+        "nor does it climb the ladder"
+    );
+
+    *h.registry.quota.lock().unwrap() = false;
+    *h.registry.fault.lock().unwrap() = Fault::Unreachable;
+    one_run(&h, SyncTrigger::Schedule).await;
+    let until = config::get(&h.deps.pool, &h.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .backoff_until
+        .expect("the source's own failure backs it off");
+    let delay = (until - chrono::Utc::now()).num_seconds();
+    assert!(
+        (45..=70).contains(&delay),
+        "on the first rung, as if the quota stop never happened: {delay}s"
+    );
 }
 
 /// ...and an error is not a verdict on a credential: a source whose health is

@@ -385,6 +385,11 @@ pub(crate) enum RunFailure {
     Secret(String),
     Source(SourceError),
     Sync(SyncError),
+    /// The sync failed on a send knobas' own rate limit held past the send
+    /// budget, as [`knobas_http::watch_local_quota`] saw it (#1980). Logged
+    /// [`run_log::LOCAL_QUOTA_PREFIX`] first, which is what keeps the
+    /// backoff off it.
+    LocalQuota(SyncError),
     Db(sqlx::Error),
 }
 
@@ -406,6 +411,7 @@ impl RunFailure {
             RunFailure::NotConfigured
             | RunFailure::Secret(_)
             | RunFailure::Source(_)
+            | RunFailure::LocalQuota(_)
             | RunFailure::Db(_) => SyncOutcome::Error,
         }
     }
@@ -422,6 +428,7 @@ impl RunFailure {
             }
             RunFailure::Source(error) => error.to_string(),
             RunFailure::Sync(error) => error.to_string(),
+            RunFailure::LocalQuota(error) => format!("{}{error}", run_log::LOCAL_QUOTA_PREFIX),
             RunFailure::Db(error) => error.to_string(),
         }
     }
@@ -939,10 +946,19 @@ async fn attempt(
         Some(o) => o,
         None => source.as_ref(),
     };
-    let report = match mode {
-        RunMode::Incremental => run_from_stored_cursor(&mut conn, &deps.pool, watched).await,
-        RunMode::Backfill => run_backfill(&mut conn, &deps.pool, watched).await,
+    // Watched for knobas' own rate limit (#1980): a send it held past the
+    // budget fails the sync with a status-less `Protocol`, which is also what
+    // an adapter's own refusal looks like, and only the mark tells them apart.
+    // The sync alone: the adapter is built on a blocking thread the watch
+    // cannot see into, and discovery's failure is not the run's. Boxed: the
+    // watch nests the sync's future one level deeper, and every caller's
+    // future holds this one, which took `knobas-app`'s layout past the
+    // compiler's query depth.
+    let sync: std::pin::Pin<Box<dyn Future<Output = _> + Send + '_>> = match mode {
+        RunMode::Incremental => Box::pin(run_from_stored_cursor(&mut conn, &deps.pool, watched)),
+        RunMode::Backfill => Box::pin(run_backfill(&mut conn, &deps.pool, watched)),
     };
+    let (report, held_on) = knobas_http::watch_local_quota(sync).await;
 
     // Explicit, and not left to `Drop`: `PgConnection::drop` closes the socket
     // without a terminate message, and a run that ends every five minutes
@@ -953,7 +969,13 @@ async fn attempt(
     if let (Ok(_), Some(found)) = (&report, &discovered) {
         record_discovered(deps, source_id, found).await;
     }
-    report.map_err(RunFailure::Sync)
+    // The same test as `write_queue::retryable`'s: change the two together.
+    report.map_err(|error| match error {
+        SyncError::Source(SourceError::Protocol { status: None, .. }) if held_on.is_some() => {
+            RunFailure::LocalQuota(error)
+        }
+        error => RunFailure::Sync(error),
+    })
 }
 
 /// Close the run: log it, judge the credential, set or clear the backoff, emit.
@@ -1075,6 +1097,12 @@ async fn apply_health_and_backoff(deps: &SchedulerDeps, source_id: &str, result:
     if result.was_cancelled() {
         return;
     }
+    // A run knobas' own rate limit stopped (#1980) failed on a request the
+    // source was never sent. Judged on the credential like any error run,
+    // below, but the backoff is left as it was: holding the source off would
+    // be knobas backing off from itself. `failures_since_last_ok` does not
+    // count it either.
+    let held_by_knobas = result.stopped_on_local_quota();
     let (state, detail) = match result.outcome {
         SyncOutcome::Ok => (Some(AuthState::Ok), None),
         SyncOutcome::Unauthorized if result.error.as_deref() == Some(MISSING_SECRET_MESSAGE) => {
@@ -1102,7 +1130,7 @@ async fn apply_health_and_backoff(deps: &SchedulerDeps, source_id: &str, result:
 
     let backoff = if result.outcome == SyncOutcome::Ok {
         config::clear_backoff(&deps.pool, source_id).await
-    } else if result.outcome.backs_off() {
+    } else if result.outcome.backs_off() && !held_by_knobas {
         // The rung is derived from the log, so it survives a restart with no
         // in-memory counter to lose.
         match run_log::failures_since_last_ok(&deps.pool, source_id).await {
@@ -1126,6 +1154,8 @@ async fn apply_health_and_backoff(deps: &SchedulerDeps, source_id: &str, result:
         // was there stays -- clearing it would make a source that was already
         // failing look ready the moment its credential is fixed by something
         // other than `set_source_secret`, which is the one path that clears it.
+        // A run the local quota stopped lands here too, and keeps whatever
+        // backoff the source's own failures set.
         Ok(())
     };
     if let Err(error) = backoff {

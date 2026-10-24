@@ -606,8 +606,10 @@ impl HttpClient {
             // either way this attempt never left. A retry reports what the
             // source said the attempt before; a first attempt has only the
             // wait to report, and it is knobas' own quota -- `Protocol`,
-            // never `Unreachable`, which would back the source off for a wait
-            // it did not impose.
+            // never `Unreachable`, since the source was never asked. The
+            // error alone does not keep a backoff off, since a caller backs
+            // off on a `Protocol` too; a caller tells a quota stop apart by
+            // the mark below, under `watch_local_quota` (#1729, #1980).
             let attempt_timeout = match (ready, self.attempt_timeout(started)) {
                 (Ok(()), Some(timeout)) => timeout,
                 (ready, _) => {
