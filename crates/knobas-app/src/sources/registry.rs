@@ -284,8 +284,14 @@ impl Registry {
 
     /// Record that the installed adapter of `kind` was refused at load, so a
     /// source of it fails to build with `reason` rather than as unknown.
+    ///
+    /// A loaded adapter of `kind` goes (#1632): the registry is the process's,
+    /// so a retried bring-up or a restore's reinstall can refuse a kind an
+    /// earlier load put there, and a kind both loaded and refused would go on
+    /// building sources of the adapter Settings calls refused.
     pub fn refuse(&self, kind: &str, reason: String) {
         let mut external = self.write();
+        external.loaded.retain(|a| a.kind() != kind);
         external.refused.retain(|(k, _)| k != kind);
         external.refused.push((kind.to_owned(), reason));
     }
@@ -429,6 +435,21 @@ mod tests {
             panic!("a refused adapter must not build");
         };
         assert!(error.to_string().contains("its hash changed"), "{error}");
+    }
+
+    /// Bring-up's retry and a restore's reinstall both refuse through here,
+    /// over a registry an earlier load may have filled (#1632).
+    #[test]
+    fn refusing_a_loaded_kind_unloads_it() {
+        use knobas_sync::scheduler::AdapterRegistry as _;
+        let registry = Registry::default();
+        registry.add(knobas_wasm_host::load_fixture()).unwrap();
+        registry.refuse("wasm-fixture", "its artifact is gone".to_owned());
+        assert!(registry.external_template("wasm-fixture").is_none());
+        let Err(error) = registry.build(fixture_instance()) else {
+            panic!("a refused adapter must not build");
+        };
+        assert!(error.to_string().contains("its artifact is gone"), "{error}");
     }
 
     /// A read holding the registry as the trait object reaches the Docs
