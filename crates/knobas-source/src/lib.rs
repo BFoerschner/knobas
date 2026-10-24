@@ -29,6 +29,7 @@ pub mod contract;
 pub mod diff;
 pub mod docs;
 pub mod fingerprint;
+pub mod grants;
 pub mod instance;
 pub mod pipeline;
 pub mod query;
@@ -1766,6 +1767,27 @@ pub trait Source: Send + Sync {
     fn undeclared_reason(&self, op: &WriteOp) -> Option<String> {
         let _ = op;
         None
+    }
+    /// The writes among `asks` this source's **credential** cannot make, each
+    /// with its reason (issue #2040, [`grants`]): what a surface that draws a
+    /// write from [`SourceDescriptor::write_ops`] asks before drawing it
+    /// enabled. An ask it does not answer is no verdict, and is drawn as
+    /// before.
+    ///
+    /// Read, never probed: an adapter answers from a read of what its
+    /// credential may do, and sends no write to find out. It answers only
+    /// about asks it was given, and only for ops it declares.
+    ///
+    /// The default answers nothing, which is every adapter whose credential
+    /// cannot be narrower than the adapter (a mock, Uptime Kuma, whose
+    /// account holds every right), and every WASM guest. A failed read is an
+    /// error, and the caller reads it as no verdict, as it reads nothing.
+    async fn refused_writes(
+        &self,
+        asks: &[grants::WriteAsk],
+    ) -> Result<Vec<grants::RefusedWrite>, SourceError> {
+        let _ = asks;
+        Ok(Vec::new())
     }
     /// The statuses this entity's workflow offers **from where it stands right
     /// now**, in the source's own spelling (`CONTEXT.md`: *reachable

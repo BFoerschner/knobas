@@ -140,6 +140,9 @@ async fn build_config(
     } else {
         Vec::new()
     };
+    // What the user may write (#2040); a read that fails is no verdict, and
+    // the view draws as before.
+    let grants = crate::grants::Grants::read(viewer.rest).await;
     let now = Utc::now();
     let sections = Tab::ALL
         .into_iter()
@@ -158,7 +161,11 @@ async fn build_config(
     } else {
         Vec::new()
     };
-    Ok(SourceView { sections, actions })
+    let mut view = SourceView { sections, actions };
+    if let (Ok(grants), Some(project)) = (grants, nonblank(record.project_id.as_deref())) {
+        view.refuse_writes(|op| grants.refusal(op, project));
+    }
+    Ok(view)
 }
 
 fn tab(tab: Tab, title: &str, count: Option<usize>, blocks: Vec<Block>) -> ViewSection {

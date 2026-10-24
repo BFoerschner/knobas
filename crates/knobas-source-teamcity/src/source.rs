@@ -294,6 +294,20 @@ impl Source for TeamCitySource {
         )))
     }
 
+    /// The asks the user's TeamCity permissions refuse (#2040), read from
+    /// `/app/rest/users/current/permissions` and never probed: see
+    /// [`crate::grants`]. An entity of another source is not answered.
+    async fn refused_writes(
+        &self,
+        asks: &[knobas_source::grants::WriteAsk],
+    ) -> Result<Vec<knobas_source::grants::RefusedWrite>, SourceError> {
+        let keyed: Vec<_> = asks
+            .iter()
+            .filter_map(|a| self.key_of(&a.entity).ok().map(|key| (a, key)))
+            .collect();
+        crate::grants::refused(&self.rest, &keyed).await
+    }
+
     /// A build configuration's overview, parameters, steps, triggers and VCS
     /// roots (#664), and a build's overview, changes, failed tests, log tail,
     /// artifacts and parameters (#665) (ADR-0020). See [`crate::view`].

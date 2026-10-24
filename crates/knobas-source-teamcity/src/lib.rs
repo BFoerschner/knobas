@@ -33,6 +33,7 @@ mod client;
 mod config;
 mod cursor;
 mod descriptor;
+mod grants;
 mod http;
 mod ids;
 mod log;
