@@ -74,8 +74,7 @@ export function clockLabel(iso: string | null, now: Date = new Date(), bare = fa
 export function stampLabel(iso: string, now: Date = new Date(), bare = false): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return "";
-  const day = clockLabel(iso, now, bare);
-  return dayWord(at, now) === null ? `${day} ${clockOf(at)}` : day;
+  return dayWord(at, now) === null ? `${dateOf(at)} ${clockOf(at)}` : clockLabel(iso, now, bare);
 }
 
 /**

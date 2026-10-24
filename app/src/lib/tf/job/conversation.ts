@@ -11,6 +11,7 @@
  */
 import type { Thread, ThreadChange, ThreadComment } from "../../ipc/entity";
 import { isFiltering, matchesAll, type FilterState } from "../filter/filter";
+import { dayKey } from "../../time/day";
 import { stampLabel } from "../../time/format";
 
 /** How many entries an unfiltered thread keeps above its fold (R-5.3). */
@@ -52,14 +53,6 @@ export function commentCount(n: number): string {
 /** `"2 mention you"`, `"1 mentions you"`. */
 export function mentionCount(n: number): string {
   return n === 1 ? "1 mentions you" : `${n} mention you`;
-}
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function day(at: Date): string {
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 }
 
 /**
@@ -171,7 +164,7 @@ export function drawThread(
     if (folded > 0) {
       const first = entries.find((entry) => !keep.includes(entry));
       const at = first?.kind === "comment" ? first.comment.at : (first?.change.at ?? null);
-      foldedFrom = at === null ? null : day(new Date(at));
+      foldedFrom = at === null ? null : dayKey(new Date(at));
     }
     entries = keep;
   }
