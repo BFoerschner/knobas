@@ -117,6 +117,49 @@ async fn a_second_bring_up_over_one_registry_refuses_no_installed_adapter() {
     );
 }
 
+/// LIFE-1's other half (#1632): a retried bring-up that refuses an adapter
+/// the first attempt loaded drops the loaded one. Its artifact file went
+/// between the two attempts, so the retry records a refusal, and the
+/// registry must not go on building sources of the adapter Settings calls
+/// refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_retried_bring_up_that_refuses_a_loaded_adapter_unloads_it() {
+    let (pool, connector) = scratch("bring-up-refuses-loaded").await;
+    let data = tempfile::tempdir().unwrap();
+    let profile = Profile::new(false, data.path());
+    let store = install::store_dir(&profile.dir);
+    let installed = install_fixture(&pool, &Registry::default(), &store).await;
+
+    let registry = Registry::default();
+    let app = mock_app(&profile, &registry);
+    assert_eq!(
+        bring_up(&app, &profile, &connector, &registry),
+        DbState::Ready
+    );
+    shutdown(&app);
+    assert!(
+        crate::external_adapter_install::kinds(&registry).contains(&"wasm-fixture".to_owned()),
+        "the first bring-up loads the adapter"
+    );
+
+    std::fs::remove_file(install::artifact_path(&store, &installed.artifact_sha256)).unwrap();
+    let app = mock_app(&profile, &registry);
+    assert_eq!(
+        bring_up(&app, &profile, &connector, &registry),
+        DbState::Ready
+    );
+    shutdown(&app);
+
+    assert!(
+        registry.refusal("wasm-fixture").is_some(),
+        "the retry refuses the adapter whose artifact is gone"
+    );
+    assert!(
+        !crate::external_adapter_install::kinds(&registry).contains(&"wasm-fixture".to_owned()),
+        "a refused adapter is no longer loaded"
+    );
+}
+
 /// #278: a timer that outlived the last process is closed **before** the
 /// state reads `Ready`, because `Ready` is when the shell makes its first
 /// `current_timer` read and would draw a clock that ran all night.

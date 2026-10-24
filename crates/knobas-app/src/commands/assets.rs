@@ -128,16 +128,13 @@ pub async fn get_asset<R: tauri::Runtime>(
 /// saying "what this instance offers depends on a credential". Every other
 /// source's template answer is the whole answer, and it does not name the op.
 ///
-/// **An empty list rather than a refusal** when the sync engine has not
-/// started, `monitor_write_ops`' rule: the pane draws during bring-up, and a
-/// moment when knobas cannot say which sources can write is a moment for no
-/// button rather than for no pane.
+/// The sources state is there whenever the caller's `lifecycle.pool()?` was:
+/// bring-up manages it before it installs the pool (IPC-9, #1663), so the
+/// `?` below is never the answer a reader gets.
 async fn monitor_targets<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Result<Vec<assets::MonitorTarget>, IpcError> {
-    let Ok(state) = crate::sources::state(app) else {
-        return Ok(Vec::new());
-    };
+    let state = crate::sources::state(app)?;
     let could = worth_asking(&state.registry.descriptors());
 
     let mut targets = Vec::new();
@@ -905,12 +902,11 @@ pub async fn monitor_roster<R: tauri::Runtime>(
 /// for Uptime Kuma the answer depends on whether that source's keychain item
 /// carries an account, so a template descriptor could not give it.
 ///
-/// **An empty answer before the sync engine is up**, rather than a refusal.
-/// The roster itself needs only the pool, so the tab draws during bring-up;
-/// what it does not have then is a keychain, and a tab with no buttons is the
-/// right drawing for a moment when knobas cannot say which buttons there are.
+/// The sources state is there whenever the caller's `lifecycle.pool()?` was,
+/// as for [`monitor_targets`].
 ///
-/// A keychain that *is* there and refuses reads the same way, and that is
+/// A keychain that refuses reads as a source offering nothing, so its
+/// monitors draw no buttons, and that is
 /// [`instance_write_ops`](crate::sources::crud::instance_write_ops)' doing
 /// rather than this loop's: a locked keychain must not cost the reader the
 /// whole Monitors tab, which needs nothing from it but two buttons.
@@ -918,9 +914,7 @@ async fn monitor_write_ops<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     rows: &[assets::MonitorRow],
 ) -> Result<std::collections::HashMap<String, Vec<String>>, IpcError> {
-    let Ok(state) = crate::sources::state(app) else {
-        return Ok(std::collections::HashMap::new());
-    };
+    let state = crate::sources::state(app)?;
     let mut offered = std::collections::HashMap::new();
     for source_id in rows
         .iter()

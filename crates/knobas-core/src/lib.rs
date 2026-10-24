@@ -40,8 +40,9 @@ pub use knobas_spi_types::{
 pub use knobas_spi_types::{delivery, entity, payload, tone};
 
 /// Declare an enum whose variants are a **closed vocabulary shared with the
-/// database**: each one has a stored spelling, and a CHECK constraint in the
-/// migrations lists exactly those spellings.
+/// database**: each one has a stored or computed spelling, and for every user
+/// but one (below) a CHECK constraint in the migrations lists exactly those
+/// spellings.
 ///
 /// The point is that `ALL` and `as_str` are generated from the *same* variant
 /// list as the enum itself, so the three cannot drift. A hand-written `ALL`
@@ -54,6 +55,10 @@ pub use knobas_spi_types::{delivery, entity, payload, tone};
 /// With this, adding a variant necessarily adds it to `ALL`, and the tests
 /// that walk `ALL` against the migration then fail until the constraint knows
 /// about it too -- which is a red test instead of a broken write.
+///
+/// One user has no constraint to be pinned against: `inbox::Category`, whose
+/// spelling a statement computes rather than a column stores. It takes the
+/// macro for the one list and the codec, and has no migration test.
 ///
 /// It lives here, in the crate every other one depends on, because both sides
 /// of the bridge need it: `link::Origin` here and `knobas_sync`'s `AuthState`,

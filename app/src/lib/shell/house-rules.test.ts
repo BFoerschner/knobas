@@ -75,10 +75,20 @@ function networkSources(root: string = ROOT, entries: string[] = ENTRY_HTML): st
   return [...walkFiles(root, /\.(svelte|ts|css|json|html)$/), ...entries].sort();
 }
 
+/**
+ * A URL with a scheme, or a protocol-relative one (`//host/…`) where a
+ * stylesheet's `url(` or an element's `src`/`href` would load it: under
+ * `just dev` the page's scheme is `http:`, so `//fonts.googleapis.com` is a
+ * fetch like any other (FE-7). A bare `//` elsewhere is a comment or a path.
+ */
+const REMOTE_URL = [/https?:\/\/([^\s"'`/)\]}>]+)/g, /(?:\burl\(\s*|\b(?:src|href)\s*=\s*)["']?\/\/([^\s"'`/)\]}>]+)/g];
+
 /** True when `text` names a host that is neither loopback nor reserved. */
 function hasRemoteReference(text: string): boolean {
-  for (const match of text.matchAll(/https?:\/\/([^\s"'`/)\]}>]+)/g)) {
-    if (!RESERVED_HOST.test(match[1]!)) return true;
+  for (const pattern of REMOTE_URL) {
+    for (const match of text.matchAll(pattern)) {
+      if (!RESERVED_HOST.test(match[1]!)) return true;
+    }
   }
   return false;
 }
@@ -252,6 +262,24 @@ test("a remote @import in a stylesheet fails the network rule", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("a protocol-relative url(), src or href fails the network rule (FE-7)", () => {
+  const offences = [
+    '@import url("//fonts.googleapis.com/css2?family=Inter");',
+    "@font-face { src: url(//fonts.gstatic.com/s/inter.woff2); }",
+    "<link rel=\"stylesheet\" href=\"//fonts.googleapis.com/css2\">",
+    "<script src='//cdn.jsdelivr.net/npm/x.js'></script>",
+    "<img src=//cdn.example.co/x.png>",
+  ];
+  const fine = [
+    '@import url("//localhost:5301/x.css");',
+    "<img src=\"//cdn.example.com/x.png\">",
+    "// a line comment that says src //fonts.googleapis.com",
+    "const path = `${base}//double`;",
+  ];
+  expect(offences.filter((text) => !hasRemoteReference(text))).toEqual([]);
+  expect(fine.filter((text) => hasRemoteReference(text))).toEqual([]);
 });
 
 /**

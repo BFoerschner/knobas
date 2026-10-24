@@ -407,8 +407,9 @@ fn the_generated_ipc_mirror_is_written() {
     let generated = ipc_dir().join("generated");
     sync(fresh.path(), &generated);
 
-    // Read back: `just ipc-mirror` compares the folder with HEAD, so a sync
-    // that wrote nothing would pass a stale file as current.
+    // Read back: `just ipc-mirror` compares the folder with a snapshot taken
+    // before this run (#1694), so a sync that wrote nothing would pass a stale
+    // file as current.
     assert_eq!(
         ts_files(&generated),
         produced,
