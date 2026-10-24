@@ -491,10 +491,12 @@ async fn concurrent_runs_never_exceed_the_cap() {
     // runs finished before the last began, so the peak fell short of a cap
     // that was holding.
     await_inside_count(&held.inside, SYNC_CONCURRENCY).await;
-    // A margin, not a witness: a scheduler with no cap lets the other three in
-    // straight after, and this is the time it gets to. Load only shortens it,
-    // which can let that mutant pass, never fail a scheduler that holds.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The other three found the cap full and wait for a permit (#1927): from
+    // here none of them can reach the adapter before the door opens, so the
+    // peak read now is the peak of the whole wave. Before, a 300 ms margin
+    // stood for this, and a run past the cap that arrived later than the
+    // look went unseen.
+    await_waiting_for_a_permit(&scheduler, 3).await;
     let peak = held.peak.load(Ordering::SeqCst);
     held.door.open();
     // Every triggered run has finished: a condition, not a span (#307).
@@ -554,9 +556,10 @@ async fn six_blocked_runs_five_go_and_the_sixth_waits() {
     // Blocked at the door until the end of the test (#1920), not for a 1.5 s
     // dwell that had to outlast the waits below on a loaded machine.
     await_inside_count(inside, 5).await;
-    // A margin for the sixth to get in if the cap let it; load can shorten
-    // it, never fail a cap that holds.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The sixth found the cap full and waits for a permit (#1927), so it
+    // cannot reach the adapter while the five are held: the count below is
+    // final until the door opens, not a look taken before a late sixth.
+    await_waiting_for_a_permit(&scheduler, 1).await;
     assert_eq!(
         inside.load(Ordering::SeqCst),
         5,
@@ -1467,24 +1470,35 @@ async fn a_sync_after_a_write_waits_for_a_run_that_began_after_it_asked() {
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, _) = deps(sched_pool, Duration::from_millis(600)).await;
+    let (deps, held) = held_deps(sched_pool).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
     // The run `write_queue::flush` leaves behind after every write that lands.
-    // It is going before the caller below writes the thing it will look for.
+    // It is going before the caller below writes the thing it will look for,
+    // and it stays going, held at the door, until that caller has joined it
+    // (#1927). Before, a 600 ms dwell and a 100 ms margin stood for that, and
+    // a load that saw the dwell out first left `sync_after_write` starting
+    // the one run itself: every assertion below still passed, and the join
+    // this test is about never happened.
     let stale = scheduler
         .trigger(&id, SyncTrigger::Manual, None)
         .await
         .unwrap();
-    // Well inside the adapter's dwell, so this joins a live run rather than
-    // racing its ending. A margin, not a door (#1920): nothing outside the
-    // scheduler shows that `sync_after_write` has enrolled, so a door could
-    // not be opened at the right moment. A load that sees the dwell out first
-    // leaves `sync_after_write` starting the one run itself, which still
-    // passes every assertion below and only weakens the test (#1927).
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    await_inside_count(&held.inside, 1).await;
+    let asked = tokio::spawn({
+        let scheduler = scheduler.clone();
+        let id = id.clone();
+        async move { scheduler.sync_after_write(&id).await }
+    });
+    // Its sink is enrolled in the stale run: the trigger above enrolled none.
+    await_watching(&scheduler, &id, 1).await;
+    held.door.open();
 
-    let waited_on = scheduler.sync_after_write(&id).await.unwrap();
+    let waited_on = tokio::time::timeout(Duration::from_secs(30), asked)
+        .await
+        .expect("the sync after the write answers once its run ends")
+        .unwrap()
+        .unwrap();
     scheduler.shutdown().await;
 
     assert_ne!(
@@ -2447,6 +2461,46 @@ async fn await_inside(inside: &AtomicUsize) {
 }
 
 /// Wait until at least `runs` runs are inside the adapter at once.
+/// Wait until `runs` runs found the concurrency cap full and wait for a
+/// permit (#1927): the positive sign that the cap is holding them, where an
+/// adapter count alone cannot tell a held run from one not yet arrived.
+async fn await_waiting_for_a_permit(scheduler: &Scheduler, runs: usize) {
+    // A hang guard, as in `await_inside_count`.
+    for _ in 0..3000 {
+        if scheduler.waiting_for_a_permit() >= runs {
+            assert_eq!(
+                scheduler.waiting_for_a_permit(),
+                runs,
+                "more runs wait for a permit than were triggered past the cap"
+            );
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!(
+        "{} of {runs} runs waited for a permit in thirty seconds: the cap let them in, \
+         or they never asked",
+        scheduler.waiting_for_a_permit()
+    );
+}
+
+/// Wait until `sinks` callers are enrolled in `source`'s run in flight: the
+/// positive sign that a caller has joined the run, which nothing it returns
+/// shows while the run is still going (#1927).
+async fn await_watching(scheduler: &Scheduler, source: &str, sinks: usize) {
+    // A hang guard, as in `await_inside_count`.
+    for _ in 0..3000 {
+        if scheduler.watching(source).await >= sinks {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!(
+        "{} of {sinks} callers joined {source}'s run in thirty seconds",
+        scheduler.watching(source).await
+    );
+}
+
 async fn await_inside_count(inside: &AtomicUsize, runs: usize) {
     // A deadline on a machine that may be running six other test binaries,
     // not a measurement of how long reaching the adapter takes. Thirty

@@ -1510,6 +1510,9 @@ struct Claims {
 struct Inner {
     deps: SchedulerDeps,
     permits: Semaphore,
+    /// How many runs found every permit taken and are waiting for one: see
+    /// [`Scheduler::waiting_for_a_permit`].
+    waiting: std::sync::atomic::AtomicUsize,
     claims: Mutex<Claims>,
     /// Poked when something changed that might make a source due (a finished
     /// run, a new source, a re-entered credential), so the UI does not wait out
@@ -1585,6 +1588,7 @@ impl Scheduler {
             deps,
             analyzer,
             permits: Semaphore::new(SYNC_CONCURRENCY),
+            waiting: std::sync::atomic::AtomicUsize::new(0),
             claims: Mutex::new(Claims {
                 runs: HashMap::new(),
                 pending_purges: HashSet::new(),
@@ -1993,6 +1997,31 @@ impl Scheduler {
         &self.inner.background
     }
 
+    /// How many runs are waiting for a permit: triggered, their row open, and
+    /// all [`SYNC_CONCURRENCY`] permits taken when they asked (#1189). Counted
+    /// from the moment a run finds none free until it gets one or is
+    /// cancelled, so a run counted here cannot reach its adapter until a
+    /// permit is let go. A test reads here that a run is held by the cap
+    /// rather than not yet arrived (#1927).
+    #[must_use]
+    pub fn waiting_for_a_permit(&self) -> usize {
+        self.inner.waiting.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// How many sinks are enrolled in the source's run in flight, each to hear
+    /// its progress and its ending; `0` when no run is in flight. A caller
+    /// that joined the run ([`watch`](Self::watch), a second trigger,
+    /// [`sync_after_write`](Self::sync_after_write)) is one of them from the
+    /// moment it joined, so a test reads here that a caller has joined before
+    /// it lets the run end (#1927).
+    pub async fn watching(&self, source_id: &str) -> usize {
+        let claims = self.inner.claims.lock().await;
+        claims
+            .runs
+            .get(source_id)
+            .map_or(0, |entry| entry.watchers.enrolled())
+    }
+
     /// Whether [`shutdown`](Self::shutdown) has begun: from its first step on,
     /// nothing new starts.
     #[must_use]
@@ -2076,6 +2105,24 @@ impl Scheduler {
         {
             tracing::warn!("the sync pool did not close in time; the postmaster will reap it");
         }
+    }
+}
+
+/// One run counted in [`Inner::waiting`] for as long as it waits for a
+/// permit, however the wait ends: given a permit, cancelled, or the task
+/// aborted at the quit's grace.
+struct Waiting<'a>(&'a std::sync::atomic::AtomicUsize);
+
+impl<'a> Waiting<'a> {
+    fn enter(waiting: &'a std::sync::atomic::AtomicUsize) -> Waiting<'a> {
+        waiting.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Waiting(waiting)
+    }
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -2283,10 +2330,19 @@ impl Inner {
             started,
             recorder: Some(Arc::clone(&self)),
         };
-        let permit = tokio::select! {
-            biased;
-            () = self.cancel.cancelled() => None,
-            permit = self.permits.acquire() => permit.ok(),
+        let permit = match self.permits.try_acquire() {
+            Ok(permit) => Some(permit),
+            // Every permit is taken: counted while it waits, so the cap is
+            // something a reader can see holding a run, not only the absence
+            // of one more run in the adapter (#1927).
+            Err(_) => {
+                let _waiting = Waiting::enter(&self.waiting);
+                tokio::select! {
+                    biased;
+                    () = self.cancel.cancelled() => None,
+                    permit = self.permits.acquire() => permit.ok(),
+                }
+            }
         };
 
         let result = match permit {
