@@ -1592,11 +1592,13 @@ fields: Array<PayloadPath>, };
  * row's `wait_reason` is `null` on every row that is not `pending`, on a
  * pending one that has not been tried yet, which `attempted_at` is what
  * distinguishes, and on one a person acting on the source released
- * ([`release_unauthorized`]).
+ * ([`release_credential_waits`]).
  *
  * The two are waited out differently (#1628): an `unreachable` write is
  * tried again on the sync side's backoff ladder, an `unauthorized` one
- * only after a person acts on the source or presses *Flush now*.
+ * only after a person acts on the source or presses *Flush now*. A
+ * person acting on the source also ends a keychain fault's wait at once
+ * (#1944).
  *
  * The reasons are documented here and not on each variant because the
  * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a

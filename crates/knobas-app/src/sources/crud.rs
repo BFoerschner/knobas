@@ -162,25 +162,54 @@ fn instance_from(
 ///
 /// **The keychain refusal is the one worth naming**, because swallowing it is
 /// a decision rather than an oversight. A locked keychain, `errSecAuthFailed`
-/// and a *Deny* on the prompt all arrive as `SecretError::Backend`, and both
-/// callers of this are surfaces that must survive one: the Monitors tab reads
-/// the roster out of the database and would otherwise refuse the whole tab
-/// over a credential it needs only to decide which two buttons to draw, and
-/// `submit_write` would refuse a Jira *comment* -- an op the adapter *kind*
-/// declares, needing no credential to be queueable at all -- because a
-/// keychain it never had to open would not open. `backup`'s
+/// and a *Deny* on the prompt all arrive as `SecretError::Backend`, and the
+/// Monitors tab must survive one: it reads the roster out of the database and
+/// would otherwise refuse the whole tab over a credential it needs only to
+/// decide which two buttons to draw. `submit_write` must survive one too, and
+/// it needs more than an empty list: [`instance_offers`] tells it the
+/// keychain gave no answer, so a pause pressed while it is locked is queued
+/// rather than refused (#1944). `backup`'s
 /// `a_keychain_that_refuses_one_source_still_settles_the_others` is the same
 /// failure met from the other side: a refusal is this machine learning
 /// nothing, and turning that into a per-machine verdict is the bug.
 ///
 /// So it is infallible on purpose: there is no answer this can give that a
 /// caller should propagate, and returning a `Result` is how the next caller
-/// comes to propagate one.
+/// comes to propagate one. A caller that has to tell "offers nothing" from
+/// "the keychain gave no answer" asks [`instance_offers`].
 pub async fn instance_write_ops(
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
     cfg: &knobas_sync::config::SourceConfigRow,
 ) -> Vec<String> {
+    match instance_offers(secrets, registry, cfg).await {
+        InstanceOffers::Ops(ops) => ops,
+        InstanceOffers::KeychainSilent => Vec::new(),
+    }
+}
+
+/// What [`instance_offers`] learned about an instance's write ops.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstanceOffers {
+    /// The instance's own `write_ops`, empty for one that has no credential
+    /// or whose adapter would not build.
+    Ops(Vec<String>),
+    /// The keychain would not open, so this machine learned nothing about the
+    /// instance (#1944). Not a verdict: the sync waits the same fault out.
+    KeychainSilent,
+}
+
+/// [`instance_write_ops`], keeping apart the one state that is no answer at
+/// all: a keychain fault. A missing credential is an answer (a Kuma with no
+/// account offers no pause), and so is an adapter that refuses to build.
+///
+/// `submit_write` is the caller that needs the difference. A refusal there is
+/// a verdict on the write, and a locked keychain gave none (#1944).
+pub async fn instance_offers(
+    secrets: &Arc<dyn SecretStore>,
+    registry: &Arc<dyn AdapterRegistry>,
+    cfg: &knobas_sync::config::SourceConfigRow,
+) -> InstanceOffers {
     let credential = match cfg.auth_kind.method() {
         None => Credential::default(),
         Some(_) => match knobas_secrets::spawn::get(
@@ -190,7 +219,8 @@ pub async fn instance_write_ops(
         .await
         {
             Ok(Some(stored)) => stored.into(),
-            Ok(None) | Err(_) => return Vec::new(),
+            Ok(None) => return InstanceOffers::Ops(Vec::new()),
+            Err(_) => return InstanceOffers::KeychainSilent,
         },
     };
     let built = knobas_sync::scheduler::build_off_runtime(
@@ -206,9 +236,11 @@ pub async fn instance_write_ops(
         ),
     )
     .await;
-    built
-        .map(|source| source.descriptor().write_ops)
-        .unwrap_or_default()
+    InstanceOffers::Ops(
+        built
+            .map(|source| source.descriptor().write_ops)
+            .unwrap_or_default(),
+    )
 }
 
 /// Create a source: secret first, then the row.
@@ -442,7 +474,7 @@ pub async fn update(
     .await?
     .ok_or_else(|| SourcesError::NotFound(id.to_owned()))?;
     if reaches_it_anew {
-        release_unauthorized_writes(pool, id).await;
+        release_credential_waits(pool, id).await;
     }
 
     let template = template_for(registry, &row.adapter_kind)?;
@@ -528,7 +560,7 @@ pub async fn set_secret(
         },
     )
     .await?;
-    release_unauthorized_writes(pool, id).await;
+    release_credential_waits(pool, id).await;
 
     let source = knobas_sync::scheduler::build_off_runtime(
         registry,
@@ -571,8 +603,10 @@ pub async fn set_secret(
 }
 
 /// A person acted on what source `id`'s writes wait for: the writes waiting
-/// on a refused credential are owed again, and the next flush sends them
-/// (#1628).
+/// on its credential are owed again, and the next flush sends them. That is a
+/// refused credential (#1628) and a keychain that would not open (#1944):
+/// a save is the person having unlocked it, and the write should not sit on
+/// its rung for up to an hour after.
 ///
 /// [`set_secret`] calls it for any credential saved -- the secret, the
 /// account beside it, or both -- whether or not the test that follows
@@ -586,9 +620,9 @@ pub async fn set_secret(
 /// A failure is logged, not raised: the credential is stored by now, and an
 /// error here would tell the reader their save failed. The writes stay
 /// waiting, and *Flush now* still sends them.
-async fn release_unauthorized_writes(pool: &PgPool, id: &str) {
-    if let Err(error) = knobas_sync::write_queue::release_unauthorized(pool, id).await {
-        tracing::warn!(source = %id, %error, "the write queue kept its unauthorized writes waiting");
+async fn release_credential_waits(pool: &PgPool, id: &str) {
+    if let Err(error) = knobas_sync::write_queue::release_credential_waits(pool, id).await {
+        tracing::warn!(source = %id, %error, "the write queue kept its credential's writes waiting");
     }
 }
 

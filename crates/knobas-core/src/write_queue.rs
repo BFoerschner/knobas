@@ -109,11 +109,13 @@ crate::closed_vocabulary! {
     /// row's `wait_reason` is `null` on every row that is not `pending`, on a
     /// pending one that has not been tried yet, which `attempted_at` is what
     /// distinguishes, and on one a person acting on the source released
-    /// ([`release_unauthorized`]).
+    /// ([`release_credential_waits`]).
     ///
     /// The two are waited out differently (#1628): an `unreachable` write is
     /// tried again on the sync side's backoff ladder, an `unauthorized` one
-    /// only after a person acts on the source or presses *Flush now*.
+    /// only after a person acts on the source or presses *Flush now*. A
+    /// person acting on the source also ends a keychain fault's wait at once
+    /// (#1944).
     ///
     /// The reasons are documented here and not on each variant because the
     /// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
@@ -136,6 +138,22 @@ crate::closed_vocabulary! {
 /// reads the panel's copy, so a rename on either side is a red test rather
 /// than a panel that says "The server did not answer." again.
 pub const KEYCHAIN_DETAIL_PREFIX: &str = "keychain:";
+
+/// Whether a write waiting for `reason`, told `detail`, waits on its
+/// source's credential: one the source refused, or a keychain that would not
+/// open (#1944). What [`release_credential_waits`] releases, in Rust; its
+/// statement says the same in SQL, and
+/// `the_release_statement_releases_exactly_what_waits_on_credential_names`
+/// (`tests/it/write_queue.rs`) holds the two to one answer.
+#[must_use]
+pub fn waits_on_credential(reason: WaitReason, detail: Option<&str>) -> bool {
+    match reason {
+        WaitReason::Unauthorized => true,
+        WaitReason::Unreachable => {
+            detail.is_some_and(|detail| detail.starts_with(KEYCHAIN_DETAIL_PREFIX))
+        }
+    }
+}
 
 /// Every column of `knobas.write_queue` that leaves this module, in one place
 /// -- plus the one *derived* column, `source_enabled`, which is not a column
@@ -862,8 +880,9 @@ pub async fn wait(
 }
 
 /// A person acted on `source_id` -- a new credential, a new address or
-/// configuration: its writes waiting on a refused credential are owed again
-/// (#1628). Each comes back pending with `wait_reason` null, which
+/// configuration: its writes waiting on its credential ([`waits_on_credential`])
+/// are owed again: a refused one (#1628), and a keychain that would not open
+/// (#1944). Each comes back pending with `wait_reason` null, which
 /// the flush loop reads as "nothing known in its way", so the next flush sends
 /// it with whatever credential is stored now.
 ///
@@ -873,23 +892,30 @@ pub async fn wait(
 /// is about to re-enter. `detail` is kept: it is still what the last attempt
 /// was told.
 ///
+/// A keychain wait would pass on its own on the ladder. Releasing it too is
+/// for the person who just unlocked the keychain and saved: the write goes
+/// with the next flush rather than up to an hour later.
+///
 /// Whole-source rather than `where id = $1`, so it is not one of the
 /// [`transition!`]s below; the state guard is theirs.
 ///
 /// # Errors
 ///
 /// [`CoreError::Db`] if the statement fails.
-pub async fn release_unauthorized(
+pub async fn release_credential_waits(
     pool: &PgPool,
     source_id: &str,
 ) -> Result<Vec<QueuedWrite>, CoreError> {
     let rows = sqlx::query_as::<_, QueuedWrite>(concat!(
         "update knobas.write_queue set wait_reason = null
-          where source_id = $1 and state = 'pending' and wait_reason = 'unauthorized'
+          where source_id = $1 and state = 'pending'
+            and (wait_reason = 'unauthorized'
+                 or (wait_reason = 'unreachable' and starts_with(detail, $2)))
          returning ",
         queue_columns!()
     ))
     .bind(source_id)
+    .bind(KEYCHAIN_DETAIL_PREFIX)
     .fetch_all(pool)
     .await?;
     Ok(rows)

@@ -773,4 +773,28 @@ mod tests {
         assert_eq!(summary["roles"], serde_json::json!([]), "{summary}");
         assert_eq!(summary["role_misses"], serde_json::json!([]), "{summary}");
     }
+
+    /// #1946: a keychain error names the keychain once. `SecretError` prints
+    /// the store's own words, and the wrapper says where they came from: a
+    /// locked keychain in add, update or test used to read
+    /// `keychain: keychain: User interaction is not allowed.`
+    #[test]
+    fn a_keychain_error_names_the_keychain_once() {
+        use knobas_secrets::SecretError;
+        for (error, reads) in [
+            (
+                SecretError::Backend("User interaction is not allowed.".to_owned()),
+                "keychain: User interaction is not allowed.",
+            ),
+            (
+                SecretError::Unavailable,
+                "keychain: the credential store refused access",
+            ),
+            (SecretError::NotFound, "keychain: no stored credential"),
+        ] {
+            let wrapped = super::SourcesError::Secret(error);
+            assert_eq!(wrapped.to_string(), reads);
+            assert_eq!(super::to_ipc(&wrapped, None).message, reads);
+        }
+    }
 }

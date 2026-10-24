@@ -249,7 +249,7 @@ impl Source for Fake {
             renewed
         };
         if renewed {
-            flusher::release_unauthorized(&self.pool, &self.id)
+            flusher::release_credential_waits(&self.pool, &self.id)
                 .await
                 .unwrap();
         }
@@ -503,6 +503,17 @@ impl SyncEvents for Recorder {
 /// What a locked keychain answers a read with; `None` while it is open.
 type LockedWith = Arc<Mutex<Option<fn() -> knobas_secrets::SecretError>>>;
 
+/// A door on the next read of a locked keychain (#1944): the read says it has
+/// begun, then waits to be let go before it fails. What a prompt waiting on
+/// a person looks like to the flush.
+struct KeychainDoor {
+    reached: tokio::sync::oneshot::Sender<()>,
+    open: std::sync::mpsc::Receiver<()>,
+}
+
+/// The door [`Lockable`] holds its next locked read at, if any.
+type KeychainDoors = Arc<Mutex<Option<KeychainDoor>>>;
+
 /// A keychain that can be locked (#1741). What a locked macOS keychain
 /// answers a read with, `errSecInteractionNotAllowed`, arrives as
 /// [`SecretError::Backend`](knobas_secrets::SecretError::Backend); a store
@@ -512,6 +523,7 @@ type LockedWith = Arc<Mutex<Option<fn() -> knobas_secrets::SecretError>>>;
 struct Lockable {
     inner: MemoryStore,
     locked_with: LockedWith,
+    door: KeychainDoors,
 }
 
 /// The read a locked macOS keychain fails with.
@@ -524,7 +536,14 @@ impl SecretStore for Lockable {
         &self,
         account: &knobas_secrets::KeychainAccount,
     ) -> Result<Option<Secret>, knobas_secrets::SecretError> {
-        if let Some(error) = *self.locked_with.lock().unwrap() {
+        let locked = *self.locked_with.lock().unwrap();
+        if let Some(error) = locked {
+            // On the store's own blocking thread, as a keychain prompt is.
+            let door = self.door.lock().unwrap().take();
+            if let Some(door) = door {
+                let _ = door.reached.send(());
+                let _ = door.open.recv();
+            }
             return Err(error());
         }
         self.inner.get(account)
@@ -547,6 +566,7 @@ impl SecretStore for Lockable {
 struct Harness {
     deps: SchedulerDeps,
     locked_with: LockedWith,
+    keychain_door: KeychainDoors,
     events: Arc<Recorder>,
     answer: Arc<Mutex<Answer>>,
     asked: Arc<Mutex<usize>>,
@@ -576,6 +596,23 @@ impl Harness {
 
     fn unlock_keychain(&self) {
         *self.locked_with.lock().unwrap() = None;
+    }
+
+    /// Hold the next read of the locked keychain at a door: the first
+    /// receiver hears the read begin, and a send on the second lets it fail.
+    fn hold_the_keychain_read(
+        &self,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (reached, heard) = tokio::sync::oneshot::channel();
+        let (open, opened) = std::sync::mpsc::channel();
+        *self.keychain_door.lock().unwrap() = Some(KeychainDoor {
+            reached,
+            open: opened,
+        });
+        (heard, open)
     }
 
     /// What the fake actually accepted, in order, each write read back by the
@@ -970,6 +1007,7 @@ async fn harness() -> Harness {
     let doors = Arc::new(Mutex::new(Doors::default()));
     let events = Arc::new(Recorder::default());
     let locked_with: LockedWith = Arc::new(Mutex::new(None));
+    let keychain_door: KeychainDoors = Arc::new(Mutex::new(None));
     Harness {
         deps: SchedulerDeps {
             pool: pool.clone(),
@@ -988,12 +1026,14 @@ async fn harness() -> Harness {
             secrets: Arc::new(Lockable {
                 inner: secrets,
                 locked_with: Arc::clone(&locked_with),
+                door: Arc::clone(&keychain_door),
             }),
             events: Arc::clone(&events) as Arc<dyn SyncEvents>,
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
             quit: knobas_sync::scheduler::Quit::default(),
         },
         locked_with,
+        keychain_door,
         events,
         answer,
         asked,
@@ -1143,7 +1183,7 @@ async fn an_undeliverable_write_is_kept_and_flushes_when_the_source_returns() {
         h.delivered().is_empty(),
         "a rejected credential is not re-sent"
     );
-    flusher::release_unauthorized(h.pool(), &h.source)
+    flusher::release_credential_waits(h.pool(), &h.source)
         .await
         .unwrap();
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
@@ -2588,7 +2628,7 @@ async fn a_new_credential_releases_the_wait_on_its_own_source_only() {
     let write = h.comment(&ticket, "re-entered").await;
     let theirs = other.comment(&elsewhere, "still refused").await;
 
-    let released = flusher::release_unauthorized(h.pool(), &h.source)
+    let released = flusher::release_credential_waits(h.pool(), &h.source)
         .await
         .unwrap();
     assert_eq!(
@@ -2723,6 +2763,83 @@ async fn a_write_flushed_while_the_store_refuses_access_waits_on_the_keychain() 
         Some("keychain: the credential store refused access")
     );
     assert_eq!(h.asked(), 0);
+}
+
+/// #1944: a credential save is a person acting on what a keychain wait
+/// waits for, so it releases that write as it releases a refused one, and
+/// the next flush sends it without waiting out its rung. A write waiting on
+/// a server that did not answer stays on its rung: the save changed nothing
+/// about the server.
+#[tokio::test]
+async fn a_credential_save_releases_a_write_waiting_on_the_keychain() {
+    let h = harness().await;
+    let locked = h.mirror("PAY-48", "a payout fails").await;
+    let silent = h.mirror("PAY-49", "a payout fails").await;
+
+    h.lock_keychain(interaction_not_allowed);
+    let keychain = h.comment(&locked, "typed while it was locked").await;
+    h.unlock_keychain();
+    h.answer(Answer::Unreachable);
+    let server = h.comment(&silent, "typed while it was down").await;
+    assert_eq!(h.asked(), 1, "only the second write reached the source");
+
+    let released = flusher::release_credential_waits(h.pool(), &h.source)
+        .await
+        .unwrap();
+    assert_eq!(
+        released.iter().map(|w| w.id).collect::<Vec<_>>(),
+        vec![keychain.id]
+    );
+    assert_eq!(h.reload(keychain.id).await.wait_reason, None);
+    assert_eq!(
+        h.reload(server.id).await.wait_reason,
+        Some(WaitReason::Unreachable)
+    );
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.reload(keychain.id).await.state, WriteState::Sent);
+    assert_eq!(
+        h.delivered(),
+        vec!["typed while it was locked".to_owned()],
+        "the server's write waits out its rung"
+    );
+}
+
+/// #1944: a save made while a flush is reading the locked keychain is newer
+/// than the fault that read meets, as a save is newer than a 401 the
+/// replaced credential got (#1628). The write stays released, and the next
+/// flush tries it at once rather than after a rung.
+#[tokio::test]
+async fn a_keychain_fault_met_across_a_credential_save_does_not_put_the_write_back_to_wait() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-50", "a payout fails").await;
+
+    h.lock_keychain(interaction_not_allowed);
+    let write = flusher::queue(
+        &h.deps,
+        &h.source,
+        WriteOp::Comment {
+            entity: ticket.to_string(),
+            body: "saved across the read".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    let (reading, let_it_fail) = h.hold_the_keychain_read();
+    let (flushed, ()) = tokio::join!(flusher::flush_entity_of(&h.deps, write.id), async {
+        reading.await.expect("the flush reads the keychain");
+        flusher::release_credential_waits(h.pool(), &h.source)
+            .await
+            .unwrap();
+        let_it_fail.send(()).unwrap();
+    });
+    flushed.unwrap();
+    assert_eq!(h.reload(write.id).await.wait_reason, None);
+
+    h.unlock_keychain();
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
 }
 
 /// #1741: the panel tells a keychain wait from a silent server by the
