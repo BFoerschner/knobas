@@ -1,5 +1,5 @@
 /**
- * `?fake-ipc`: The sources cockpit: five sources, their health, runs and adapters, and
+ * `?fake-ipc`: The sources cockpit: seven sources, their health, runs and adapters, and
  * the Add-source dialog's writes.
  */
 import { GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "../../../sources/fixtures";
@@ -16,7 +16,7 @@ const KIND_INFO = [
   { id: "pr", label: "Pull request", plural: "Pull requests", monogram: "PR", full_sync_exhaustive: false },
 ];
 
-/** The five sources the sources view draws. */
+/** The seven sources the sources view draws. */
 export const FIXTURE_SOURCES: SourceSummary[] = [
   {
     ...fixtureSource("mock", "mock", "Tidewater (mock)", "https://mock.tidewater.example", "ok", 21, 90, null),
@@ -99,6 +99,13 @@ export const FIXTURE_SOURCES: SourceSummary[] = [
   {
     ...fixtureSource("kuma", "kuma", "Uptime Kuma", "https://status.tidewater.example", "missing_secret", 6, 95, "ApiToken"),
     roles: [{ role: "monitoring", reads: [] }],
+  },
+  // A second ticket system that offers a saved view (#2032), so Tickets can
+  // be shot naming a source that is not Jira. Kestrel is fixture-only: no
+  // adapter of that name exists, and nothing here claims what one would do.
+  {
+    ...fixtureSource("kestrel", "kestrel", "Tidewater Kestrel", "https://kestrel.tidewater.example", "ok", 1, 97, "Pat"),
+    roles: [{ role: "ticket-system", reads: [] }],
   },
 ];
 
@@ -215,7 +222,10 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     // The role it claims, as the real adapter does (#1193, #1208).
     roles: [{ role: "ticket-system", reads: ["reachable_transitions", "translate_query"] }],
     write_ops: [],
-    entity_kinds: KIND_INFO,
+    entity_kinds: [...KIND_INFO, { id: "jira_view", label: "Jira view", plural: "Jira views", monogram: "JV", full_sync_exhaustive: false }],
+    // Its boards and filters are the ticket system's saved views, named *Jira*
+    // and not the adapter's name, as the real descriptor declares (#1207, #2032).
+    payload_paths: [{ kind: "jira_view", frame: "saved_view", system_name: "Jira" } as KindPaths],
     // The generated-form case: a select with a default, two lists, two texts.
     // The *same* transcription the form tests render, not a second copy of it.
     // A fixture that drifted from the corpus under test would leave browser QA
@@ -264,6 +274,21 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
       { kind: "build_config", frame: "pipeline" } as KindPaths,
     ],
     config_schema: TEAMCITY_SCHEMA,
+  }),
+  // The fixture-only second ticket system (#2032): one saved-view kind, named Kestrel.
+  descriptor({
+    id: "kestrel",
+    adapter_kind: "kestrel",
+    name: "Kestrel",
+    capabilities: [],
+    adapter_version: "0.1.0",
+    auth_methods: ["Pat"],
+    min_sync_interval_secs: 60,
+    roles: [{ role: "ticket-system", reads: [] }],
+    write_ops: [],
+    entity_kinds: [...KIND_INFO, { id: "kestrel_view", label: "Saved board", plural: "Saved boards", monogram: "SB", full_sync_exhaustive: false }],
+    payload_paths: [{ kind: "kestrel_view", frame: "saved_view", system_name: "Kestrel" } as KindPaths],
+    config_schema: { type: "object", properties: {} },
   }),
 ];
 
@@ -502,7 +527,7 @@ function uninstallOne(args: Record<string, unknown>) {
 /** This feature's commands. */
 export function handlers(): Handlers {
   return {
-    // The sources cockpit. Five sources, one of them refusing its credential
+    // The sources cockpit. Seven sources, one of them refusing its credential
     // and one with a PAT running out, because those are the two rows a person
     // has to *do* something about and they are the ones a screenshot has to be
     // able to show.
