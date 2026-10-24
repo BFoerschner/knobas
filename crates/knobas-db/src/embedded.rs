@@ -614,9 +614,9 @@ impl EmbeddedDb {
     ///
     /// [`DbError::ServerStart`] if the start fails, naming the data directory
     /// and the server's reason. A port something else took in the meantime
-    /// is one cause: the server listens on `127.0.0.1` alone,
-    /// and a stranger there ends its start. [`DbError::Sqlx`] if the server
-    /// does not answer the pool afterwards.
+    /// is one cause: the server listens on `127.0.0.1` alone, and a stranger
+    /// there ends its start. [`DbError::Sqlx`] if the server does not answer
+    /// the pool afterwards.
     pub async fn restart(&mut self) -> Result<(), DbError> {
         if self.owner_lock.is_some()
             && let Some(settings) = self.server_settings().cloned()
@@ -1906,6 +1906,9 @@ const START_LOG: &str = "start.log";
 /// a `FATAL` one: all of a short log, the end of a long one.
 const REASON_LINES: usize = 5;
 
+/// The severity label of the line that says why a server stopped.
+const FATAL: &str = "FATAL:";
+
 /// Start `postgresql`'s server. A failed start is a [`DbError::ServerStart`]
 /// naming the data directory and the reason the server gave (#2025).
 ///
@@ -1940,8 +1943,8 @@ fn start_reason(log: &[u8], since: u64) -> Option<String> {
     let written = String::from_utf8_lossy(log.get(from..).unwrap_or(log));
     let one_line = |line: &str| line.split_whitespace().collect::<Vec<_>>().join(" ");
     if let Some(fatal) = written.lines().rev().find_map(|line| {
-        line.find("FATAL:")
-            .map(|at| &line[at + "FATAL:".len()..])
+        line.find(FATAL)
+            .map(|at| &line[at + FATAL.len()..])
             .filter(|reason| !reason.trim().is_empty())
     }) {
         return Some(one_line(fatal));

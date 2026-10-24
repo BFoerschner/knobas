@@ -32,6 +32,18 @@ fn assert_names_the_directory_and_the_reason(error: &str, data_dir: &std::path::
     );
 }
 
+/// The error a start on `root_dir` failed with, stopping a server that came
+/// up anyway.
+async fn launch_error(root_dir: &std::path::Path) -> String {
+    match EmbeddedDb::start(config(root_dir)).await {
+        Ok(db) => {
+            db.stop().await.unwrap();
+            panic!("a cluster with no pg_hba.conf started");
+        }
+        Err(error) => error.to_string(),
+    }
+}
+
 /// The acceptance case: a stopped cluster that lost `pg_hba.conf`, launched.
 #[tokio::test]
 async fn a_launch_on_a_cluster_that_lost_pg_hba_conf_names_the_directory_and_the_reason() {
@@ -45,26 +57,8 @@ async fn a_launch_on_a_cluster_that_lost_pg_hba_conf_names_the_directory_and_the
         .unwrap();
     std::fs::remove_file(data_dir.join("pg_hba.conf")).unwrap();
 
-    let error = match EmbeddedDb::start(config(dir.path())).await {
-        Ok(db) => {
-            db.stop().await.unwrap();
-            panic!("a cluster with no pg_hba.conf started");
-        }
-        Err(error) => error.to_string(),
-    };
+    let error = launch_error(dir.path()).await;
     assert_names_the_directory_and_the_reason(&error, &data_dir);
-}
-
-/// The error a start on `root_dir` failed with, stopping a server that came
-/// up anyway.
-async fn launch_error(root_dir: &std::path::Path) -> String {
-    match EmbeddedDb::start(config(root_dir)).await {
-        Ok(db) => {
-            db.stop().await.unwrap();
-            panic!("a cluster with no pg_hba.conf started");
-        }
-        Err(error) => error.to_string(),
-    }
 }
 
 /// The handle's own restart after its server died (`restart`, the started
@@ -89,7 +83,7 @@ async fn a_restart_on_a_cluster_that_lost_pg_hba_conf_names_the_directory_and_th
 /// An adopted handle's restart, which starts a `PostgreSQL` of its own
 /// (`restart`, the adopted arm).
 #[tokio::test]
-async fn an_adopted_servers_restart_on_a_cluster_that_lost_pg_hba_conf_names_the_reason() {
+async fn an_adopted_servers_restart_on_a_cluster_that_lost_pg_hba_conf_names_the_directory_and_the_reason() {
     let dir = tempfile::tempdir().unwrap();
     let data_dir = dir.path().join("data");
     EmbeddedDb::start(config(dir.path())).await.unwrap().abandon();
