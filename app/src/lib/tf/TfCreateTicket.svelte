@@ -35,7 +35,7 @@
     words?: boolean;
     layers?: Layers;
     /** What the projects' sources' credentials cannot write (#2052); the bridge's when left out. */
-    refusedWrites?: RefusedWritesPort;
+    refusedWrites?: RefusedWritesPort | undefined;
     onclose: () => void;
     onfile: (draft: TicketDraft & { project: string }) => void;
   } = $props();

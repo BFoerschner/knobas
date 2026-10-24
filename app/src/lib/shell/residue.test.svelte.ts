@@ -44,7 +44,7 @@ import { join } from "node:path";
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { CaptureShortcut, EntityDetail, EntityPage, EntityRow } from "../ipc/entity";
+import type { CaptureShortcut, EntityDetail, EntityPage, EntityRow, Project } from "../ipc/entity";
 import type { QueuedWrite } from "../ipc/sources";
 import { sourceFacts } from "../tf/job/source-facts.fixture";
 
@@ -337,6 +337,7 @@ const TfPipeline = (await import("../tf/builds/TfPipeline.svelte")).default;
 const TfRun = (await import("../tf/builds/TfRun.svelte")).default;
 const TfRunChain = (await import("../tf/builds/TfRunChain.svelte")).default;
 const TfRunTicket = (await import("../tf/builds/TfRunTicket.svelte")).default;
+const TfCreateTicket = (await import("../tf/TfCreateTicket.svelte")).default;
 const { markQueued } = await import("../tf/queued.svelte");
 const TfRunLog = (await import("../tf/builds/TfRunLog.svelte")).default;
 const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
@@ -954,11 +955,32 @@ const CASES: Case[] = [
               submitWrite: () => deferred({ id: 1 } as QueuedWrite),
               listen: (event, handler) => mockedListen(event, handler),
               follower: () => ({ follow: () => () => {} }),
+              refusedWrites: () => deferred([]),
             },
           },
         }),
       };
     },
+  },
+  {
+    /**
+     * The create-ticket dialog (#1451): what its projects' credentials cannot
+     * file (#2052) answering late.
+     */
+    name: "TfCreateTicket",
+    source: "lib/tf/TfCreateTicket.svelte",
+    open: (target) => ({
+      app: mount(TfCreateTicket, {
+        target,
+        props: {
+          draft: { project: "jira:PAY", type: "Task", title: "A failing test", body: "" },
+          projects: [{ source_id: "jira", key: "PAY", name: "Payments" } as Project],
+          refusedWrites: () => deferred([]),
+          onclose: () => {},
+          onfile: () => {},
+        },
+      }),
+    }),
   },
   {
     /** The run's Log tab (#854): the log and a download answering late. */
