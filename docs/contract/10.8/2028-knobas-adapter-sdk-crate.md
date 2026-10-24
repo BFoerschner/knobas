@@ -9,9 +9,9 @@
 
   **What the crate is.** `crates/knobas-adapter-sdk` generates the guest bindings of `world
   adapter` (wit-bindgen 0.62.0) and keeps them `#[doc(hidden)]`. An adapter implements one trait,
-  `knobas_adapter_sdk::Adapter`: `Source`'s methods in the trait's order, synchronous, over the SPI
-  types, with `new(Instance)` for the resource's constructor and `Source`'s defaults for the
-  optional reads (`translate_query` and `download` included, though they are the `query` and
+  `knobas_adapter_sdk::Adapter`: `Source`'s methods in the trait's order but `undeclared_reason`
+  (the host's to word, for every guest), synchronous, over the SPI types, with `new(Instance)` for
+  the resource's constructor and `Source`'s defaults for the optional reads (`translate_query` and `download` included, though they are the `query` and
   `downloads` exports). `knobas_adapter_sdk::export!(Type)` exports it. The crate re-exports
   `knobas-source` as `spi`, and gives `Instance` (the WIT `instance` with its config as a
   `serde_json::Value`), `Sink` (`item`, `walked`), `DownloadSink` (`start`, `write`) and `log`.
@@ -33,6 +33,9 @@
 
   **The fixture is its first user.** `crates/knobas-wasm-fixture` implements `Adapter` and holds
   no bindings, no `wit_bindgen` dependency and no WIT conversion. Nothing in
-  `crates/knobas-wasm-host/tests/it/` changed. What crosses is the same apart from one wording:
-  a config that is not JSON (which the host never sends, since it writes a `serde_json::Value`)
-  now reads as `null`.
+  `crates/knobas-wasm-host/tests/it/` changed. For everything a knobas host sends, what crosses
+  is the same. Only input a host never sends answers differently: a config that is not JSON reads
+  as `null`, and a write op, saved view or download target that does not decode is refused by the
+  SDK (`the host's <what> does not decode: …`) before the fixture sees it. Timestamps are written
+  with their fraction (`AutoSi`), which for the fixture's whole-second instants is the same text
+  as before.

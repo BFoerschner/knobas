@@ -4,7 +4,7 @@
 
 use crate::bindings::exports::knobas::adapter::source::{Guest, GuestAdapter};
 use crate::bindings::knobas::adapter::types as wit;
-use crate::convert::{self, decode, json, to_wit};
+use crate::convert::{self, error_to_wit, from_json, to_json};
 use crate::{Adapter, Sink};
 
 /// The `adapter` resource: one [`Adapter`] for one call.
@@ -19,7 +19,9 @@ impl<A: Adapter> Guest for A {
 fn json_option<T: serde::Serialize>(
     answer: Result<Option<T>, knobas_source::SourceError>,
 ) -> Result<Option<String>, wit::SourceError> {
-    answer.map(|value| value.as_ref().map(json)).map_err(to_wit)
+    answer
+        .map(|value| value.as_ref().map(to_json))
+        .map_err(error_to_wit)
 }
 
 impl<A: Adapter> GuestAdapter for Component<A> {
@@ -28,27 +30,29 @@ impl<A: Adapter> GuestAdapter for Component<A> {
     }
 
     fn descriptor(&self) -> String {
-        json(&self.0.descriptor())
+        to_json(&self.0.descriptor())
     }
 
     fn test_connection(&self) -> Result<wit::ConnectionInfo, wit::SourceError> {
         self.0
             .test_connection()
             .map(convert::connection_info)
-            .map_err(to_wit)
+            .map_err(error_to_wit)
     }
 
     fn sync(&self, cursor: Option<String>) -> Result<String, wit::SourceError> {
-        self.0.sync(cursor, &mut Sink { _host: () }).map_err(to_wit)
+        self.0
+            .sync(cursor, &mut Sink { _host: () })
+            .map_err(error_to_wit)
     }
 
     fn write(&self, op: String) -> Result<wit::WriteReceipt, wit::SourceError> {
-        let op = decode(&op, "write op").map_err(to_wit)?;
-        self.0.write(op).map(convert::receipt).map_err(to_wit)
+        let op = from_json(&op, "write op").map_err(error_to_wit)?;
+        self.0.write(op).map(convert::receipt).map_err(error_to_wit)
     }
 
     fn reachable_transitions(&self, entity: String) -> Result<Vec<String>, wit::SourceError> {
-        self.0.reachable_transitions(&entity).map_err(to_wit)
+        self.0.reachable_transitions(&entity).map_err(error_to_wit)
     }
 
     fn view(
@@ -72,7 +76,7 @@ impl<A: Adapter> GuestAdapter for Component<A> {
         self.0
             .older_runs(&entity, &before, count)
             .map(|runs| runs.map(|runs| runs.into_iter().map(convert::item).collect()))
-            .map_err(to_wit)
+            .map_err(error_to_wit)
     }
 
     fn run_chain(&self, run: String) -> Result<Option<Vec<wit::RunChainStep>>, wit::SourceError> {
@@ -81,7 +85,7 @@ impl<A: Adapter> GuestAdapter for Component<A> {
             .map(|steps| {
                 steps.map(|steps| steps.into_iter().map(convert::run_chain_step).collect())
             })
-            .map_err(to_wit)
+            .map_err(error_to_wit)
     }
 
     fn run_log(
@@ -129,7 +133,7 @@ impl<A: Adapter> crate::bindings::exports::knobas::adapter::query::Guest for A {
         instance: wit::Instance,
         saved_view: String,
     ) -> Result<Option<String>, wit::SourceError> {
-        let view: serde_json::Value = decode(&saved_view, "saved view").map_err(to_wit)?;
+        let view: serde_json::Value = from_json(&saved_view, "saved view").map_err(error_to_wit)?;
         json_option(A::new(convert::instance(instance)).translate_query(&view))
     }
 }
@@ -142,9 +146,9 @@ impl<A: Adapter> crate::bindings::exports::knobas::adapter::downloads::Guest for
         entity: String,
         target: String,
     ) -> Result<bool, wit::SourceError> {
-        let target = decode(&target, "download target").map_err(to_wit)?;
+        let target = from_json(&target, "download target").map_err(error_to_wit)?;
         A::new(convert::instance(instance))
             .download(&entity, &target, &mut crate::DownloadSink { _host: () })
-            .map_err(to_wit)
+            .map_err(error_to_wit)
     }
 }

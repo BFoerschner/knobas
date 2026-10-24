@@ -56,7 +56,7 @@ use knobas_source::{pipeline, run, view};
 /// The `knobas:adapter` version this SDK builds against: its WIT package's,
 /// and this crate's own version.
 #[cfg(not(feature = "v1_0"))]
-pub const INTERFACE_VERSION: &str = "1.3.0";
+pub const INTERFACE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The `knobas:adapter` version this SDK builds against: the frozen 1.0.0
 /// world, under the `v1_0` feature.
 #[cfg(feature = "v1_0")]
@@ -129,6 +129,7 @@ pub mod log {
 /// Where [`Adapter::sync`] hands its items: `knobas_source::Sink`, owned by
 /// the host.
 pub struct Sink {
+    /// Private, so only the SDK makes one.
     _host: (),
 }
 
@@ -136,7 +137,7 @@ impl Sink {
     /// Accept one item, or fail the sync. An error is the sink's: return it
     /// from `sync` with `?`, as it came (`Source::sync` says why).
     pub fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
-        bindings::knobas::adapter::sink::item(&convert::item(item)).map_err(convert::from_wit)
+        bindings::knobas::adapter::sink::item(&convert::item(item)).map_err(convert::error_from_wit)
     }
 
     /// How far the run's outer walk has got: `Sink::walked`. `done` units
@@ -157,6 +158,7 @@ impl Sink {
 /// chunk to the file being written.
 #[cfg(not(feature = "v1_0"))]
 pub struct DownloadSink {
+    /// Private, so only the SDK makes one.
     _host: (),
 }
 
@@ -164,18 +166,20 @@ pub struct DownloadSink {
 impl DownloadSink {
     /// Once, before the first byte: the file name the source suggests.
     pub fn start(&mut self, file_name: &str) -> Result<(), SourceError> {
-        bindings::knobas::adapter::download_sink::start(file_name).map_err(convert::from_wit)
+        bindings::knobas::adapter::download_sink::start(file_name).map_err(convert::error_from_wit)
     }
 
     /// The next bytes, in order. An error is the sink's: return it from
     /// `download` as it came.
     pub fn write(&mut self, bytes: &[u8]) -> Result<(), SourceError> {
-        bindings::knobas::adapter::download_sink::write(bytes).map_err(convert::from_wit)
+        bindings::knobas::adapter::download_sink::write(bytes).map_err(convert::error_from_wit)
     }
 }
 
 /// An external adapter: `knobas_source::Source`, method for method in the
-/// trait's order, as a component implements it.
+/// trait's order, as a component implements it. `undeclared_reason` is left
+/// out: the host refuses an undeclared write before it crosses, with the
+/// generic wording, as `Source` says of every WASM guest.
 ///
 /// What each method answers, and what the contract battery holds it to, is
 /// the `Source` method of the same name; only the shape differs. A

@@ -169,12 +169,8 @@ fn flood(times: u64) {
     }
 }
 
-fn protocol(message: String) -> SourceError {
-    SourceError::protocol(message)
-}
-
 /// One of the fixture's reads, written as its JSON, as the SPI type it is.
-fn spi<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
+fn decoded<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
     serde_json::from_value(value).expect("the fixture's own read decodes")
 }
 
@@ -219,7 +215,7 @@ impl Fixture {
     /// The fault to answer with, or `None` for a healthy fixture.
     fn faulted(&self) -> Result<Option<SourceError>, SourceError> {
         match &self.fault {
-            Err(message) => Err(protocol(message.clone())),
+            Err(message) => Err(SourceError::protocol(message.clone())),
             Ok(Fault::None | Fault::SwallowSink | Fault::Spin | Fault::Hog) => Ok(None),
             Ok(Fault::Unauthorized) => Ok(Some(SourceError::Unauthorized { status: Some(401) })),
             Ok(Fault::Unreachable) => Ok(Some(SourceError::Unreachable(
@@ -304,7 +300,7 @@ impl Fixture {
     }
 
     fn no_workflow(&self) -> SourceError {
-        protocol(format!(
+        SourceError::protocol(format!(
             "the {KIND} adapter has no workflow: source {:?} offers no transitions",
             self.id
         ))
@@ -477,7 +473,9 @@ impl Adapter for Fixture {
                 .parse::<usize>()
                 .ok()
                 .filter(|n| *n <= self.corpus().len())
-                .ok_or_else(|| protocol(format!("cursor {c:?} is not one the fixture wrote")))?,
+                .ok_or_else(|| {
+                    SourceError::protocol(format!("cursor {c:?} is not one the fixture wrote"))
+                })?,
         };
         let swallow = matches!(self.fault, Ok(Fault::SwallowSink));
         let corpus = self.corpus();
@@ -500,7 +498,7 @@ impl Adapter for Fixture {
     fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         let text = serde_json::to_string(&op).expect("a write op serializes");
         let refuse = || {
-            protocol(format!(
+            SourceError::protocol(format!(
                 "the {KIND} adapter performs only {BOOK_REPAIR:?} on a survey, so it refuses {text}"
             ))
         };
@@ -538,14 +536,16 @@ impl Adapter for Fixture {
     ) -> Result<Option<view::SourceView>, SourceError> {
         if self.is_run(entity) {
             return builds::view(section)
-                .map(|view| Some(spi(view)))
-                .ok_or_else(|| protocol(format!("the run's view has no section {section:?}")));
+                .map(|view| Some(decoded(view)))
+                .ok_or_else(|| {
+                    SourceError::protocol(format!("the run's view has no section {section:?}"))
+                });
         }
         let key = self.key(entity);
         let Some((_, title, body)) = SURVEYS.iter().find(|(k, _, _)| Some(*k) == key) else {
             return Ok(None);
         };
-        Ok(Some(spi(serde_json::json!({
+        Ok(Some(decoded(serde_json::json!({
             "sections": [{
                 "id": "survey",
                 "title": title,
@@ -584,9 +584,11 @@ impl Adapter for Fixture {
         entity: &str,
     ) -> Result<Option<pipeline::PipelineSettings>, SourceError> {
         if self.key(entity) != Some(builds::PIPELINE) {
-            return Err(protocol(format!("{entity} is not the fixture's pipeline")));
+            return Err(SourceError::protocol(format!(
+                "{entity} is not the fixture's pipeline"
+            )));
         }
-        Ok(Some(spi(builds::pipeline_settings())))
+        Ok(Some(decoded(builds::pipeline_settings())))
     }
 
     /// One run older than the sync's window, `run-0`, before `run-1`.
@@ -597,7 +599,9 @@ impl Adapter for Fixture {
         count: u32,
     ) -> Result<Option<Vec<SyncItem>>, SourceError> {
         if self.key(entity) != Some(builds::PIPELINE) {
-            return Err(protocol(format!("{entity} is not the fixture's pipeline")));
+            return Err(SourceError::protocol(format!(
+                "{entity} is not the fixture's pipeline"
+            )));
         }
         let older = (self.is_run(before) && count > 0)
             .then(|| self.run(builds::OLDER_RUN, "41"))
@@ -619,12 +623,12 @@ impl Adapter for Fixture {
         count: u32,
     ) -> Result<Option<run::RunLog>, SourceError> {
         self.the_run(entity)?;
-        Ok(Some(spi(builds::run_log(from, count))))
+        Ok(Some(decoded(builds::run_log(from, count))))
     }
 
     fn run_tests(&self, entity: &str) -> Result<Option<run::RunTests>, SourceError> {
         self.the_run(entity)?;
-        Ok(Some(spi(builds::run_tests())))
+        Ok(Some(decoded(builds::run_tests())))
     }
 
     fn test_history(
@@ -633,7 +637,7 @@ impl Adapter for Fixture {
         _test: &str,
     ) -> Result<Option<Vec<run::TestOutcome>>, SourceError> {
         self.the_run(entity)?;
-        Ok(Some(spi(builds::test_history())))
+        Ok(Some(decoded(builds::test_history())))
     }
 
     fn run_artifacts(
@@ -643,8 +647,10 @@ impl Adapter for Fixture {
     ) -> Result<Option<Vec<run::ArtifactEntry>>, SourceError> {
         self.the_run(entity)?;
         builds::run_artifacts(path)
-            .map(|entries| Some(spi(entries)))
-            .ok_or_else(|| protocol(format!("the run has no artifact folder {path:?}")))
+            .map(|entries| Some(decoded(entries)))
+            .ok_or_else(|| {
+                SourceError::protocol(format!("the run has no artifact folder {path:?}"))
+            })
     }
 
     fn artifact_preview(
@@ -653,9 +659,10 @@ impl Adapter for Fixture {
         path: &str,
     ) -> Result<Option<run::ArtifactPreview>, SourceError> {
         self.the_run(entity)?;
-        let text = builds::artifact_text(path)
-            .ok_or_else(|| protocol(format!("the run has no artifact file {path:?}")))?;
-        Ok(Some(spi(
+        let text = builds::artifact_text(path).ok_or_else(|| {
+            SourceError::protocol(format!("the run has no artifact file {path:?}"))
+        })?;
+        Ok(Some(decoded(
             serde_json::json!({ "text": text, "truncated": false }),
         )))
     }
@@ -669,7 +676,7 @@ impl Adapter for Fixture {
         view: &serde_json::Value,
     ) -> Result<Option<knobas_adapter_sdk::spi::query::Translation>, SourceError> {
         Ok(view["survey_query"].as_str().map(|query| {
-            spi(serde_json::json!({
+            decoded(serde_json::json!({
                 "conditions": [{ "key": "label", "negated": false, "values": [query] }],
                 "kept": 1,
                 "left_out": [],
@@ -699,8 +706,9 @@ impl Adapter for Fixture {
                 )
             }
             run::DownloadTarget::File { path } => {
-                let text = builds::artifact_text(path)
-                    .ok_or_else(|| protocol(format!("the run has no artifact file {path:?}")))?;
+                let text = builds::artifact_text(path).ok_or_else(|| {
+                    SourceError::protocol(format!("the run has no artifact file {path:?}"))
+                })?;
                 let name = path.rsplit('/').next().unwrap_or(path).to_owned();
                 (name, Box::new(std::iter::once(text.as_bytes().to_vec())))
             }
@@ -727,7 +735,9 @@ impl Fixture {
         if self.is_run(entity) {
             Ok(())
         } else {
-            Err(protocol(format!("{entity} is not a run of the fixture")))
+            Err(SourceError::protocol(format!(
+                "{entity} is not a run of the fixture"
+            )))
         }
     }
 }

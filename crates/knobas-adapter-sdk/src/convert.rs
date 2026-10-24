@@ -20,7 +20,7 @@ pub(crate) fn instance(instance: wit::Instance) -> Instance {
 }
 
 /// The adapter's error, variant for variant.
-pub(crate) fn to_wit(error: SourceError) -> wit::SourceError {
+pub(crate) fn error_to_wit(error: SourceError) -> wit::SourceError {
     match error {
         SourceError::Unauthorized { status } => wit::SourceError::Unauthorized(status),
         SourceError::Unreachable(detail) => wit::SourceError::Unreachable(detail),
@@ -38,8 +38,8 @@ pub(crate) fn to_wit(error: SourceError) -> wit::SourceError {
 }
 
 /// A sink's error as the host sent it, so the adapter can return it as it
-/// came: [`to_wit`] gives back the very same value.
-pub(crate) fn from_wit(error: wit::SourceError) -> SourceError {
+/// came: [`error_to_wit`] gives back the very same value.
+pub(crate) fn error_from_wit(error: wit::SourceError) -> SourceError {
     match error {
         wit::SourceError::Unauthorized(status) => SourceError::Unauthorized { status },
         wit::SourceError::Unreachable(detail) => SourceError::Unreachable(detail),
@@ -102,12 +102,12 @@ pub(crate) fn receipt(receipt: WriteReceipt) -> wit::WriteReceipt {
 }
 
 /// An SPI value as the serde JSON the host decodes.
-pub(crate) fn json<T: serde::Serialize>(value: &T) -> String {
+pub(crate) fn to_json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).expect("an SPI type serializes")
 }
 
 /// The serde JSON of the SPI type `what` names, as the host encoded it.
-pub(crate) fn decode<T: serde::de::DeserializeOwned>(
+pub(crate) fn from_json<T: serde::de::DeserializeOwned>(
     text: &str,
     what: &str,
 ) -> Result<T, SourceError> {
@@ -148,13 +148,16 @@ mod tests {
         ]
     }
 
-    /// A sink's error crosses back out of the adapter as it came in, so an
-    /// adapter that returns it with `?` returns the host's own error.
+    /// A sink's error, as the host sends it, crosses back out of the
+    /// adapter as it came in, so an adapter that returns it with `?` returns
+    /// the host's own error.
     #[test]
     fn a_sink_error_returned_as_it_came_reaches_the_host_unchanged() {
         for error in every_error() {
-            let text = format!("{error:?}");
-            assert_eq!(format!("{:?}", super::from_wit(super::to_wit(error))), text);
+            let sent = super::error_to_wit(error);
+            let text = format!("{sent:?}");
+            let returned = super::error_to_wit(super::error_from_wit(sent));
+            assert_eq!(format!("{returned:?}"), text);
         }
     }
 
@@ -163,7 +166,7 @@ mod tests {
     fn each_error_is_its_own_wit_variant() {
         let wit: Vec<String> = every_error()
             .into_iter()
-            .map(|e| format!("{:?}", super::to_wit(e)))
+            .map(|e| format!("{:?}", super::error_to_wit(e)))
             .collect();
         assert_eq!(
             wit,
