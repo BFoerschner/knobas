@@ -4,7 +4,7 @@
 //! Writing an adapter is implementing [`Adapter`] and naming the type in
 //! [`export!`]:
 //!
-//! ```ignore
+//! ```no_run
 //! use knobas_adapter_sdk::{Adapter, ConnectionInfo, Instance, Sink, SourceDescriptor};
 //! use knobas_adapter_sdk::{Cursor, SourceError, WriteOp, WriteReceipt, spi::view::SourceView};
 //!

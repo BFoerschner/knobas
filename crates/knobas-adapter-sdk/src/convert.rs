@@ -114,3 +114,112 @@ pub(crate) fn decode<T: serde::de::DeserializeOwned>(
     serde_json::from_str(text)
         .map_err(|e| SourceError::protocol(format!("the host's {what} does not decode: {e}")))
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+    use knobas_source::{EntityRef, SourceError, SyncItem};
+
+    use super::wit;
+
+    /// Every `SourceError`, each with what it carries.
+    fn every_error() -> Vec<SourceError> {
+        vec![
+            SourceError::Unauthorized { status: Some(403) },
+            SourceError::Unauthorized { status: None },
+            SourceError::Unreachable("dns: no such host".into()),
+            SourceError::Unconfirmed {
+                status: Some(504),
+                message: "gateway timeout after the send".into(),
+            },
+            SourceError::Protocol {
+                status: Some(422),
+                message: "no such status".into(),
+            },
+            SourceError::Protocol {
+                status: None,
+                message: "the adapter's own".into(),
+            },
+            SourceError::Sink("the mirror is gone".into()),
+            SourceError::Moved {
+                base: "b7e1".into(),
+                current: "# Crane telemetry".into(),
+            },
+        ]
+    }
+
+    /// A sink's error crosses back out of the adapter as it came in, so an
+    /// adapter that returns it with `?` returns the host's own error.
+    #[test]
+    fn a_sink_error_returned_as_it_came_reaches_the_host_unchanged() {
+        for error in every_error() {
+            let text = format!("{error:?}");
+            assert_eq!(format!("{:?}", super::from_wit(super::to_wit(error))), text);
+        }
+    }
+
+    /// The WIT variant the host decodes each error from, statuses included.
+    #[test]
+    fn each_error_is_its_own_wit_variant() {
+        let wit: Vec<String> = every_error()
+            .into_iter()
+            .map(|e| format!("{:?}", super::to_wit(e)))
+            .collect();
+        assert_eq!(
+            wit,
+            [
+                "SourceError::Unauthorized(Some(403))",
+                "SourceError::Unauthorized(None)",
+                "SourceError::Unreachable(\"dns: no such host\")",
+                "SourceError::Unconfirmed(Fault { status: Some(504), message: \"gateway timeout after the send\" })",
+                "SourceError::Protocol(Fault { status: Some(422), message: \"no such status\" })",
+                "SourceError::Protocol(Fault { status: None, message: \"the adapter's own\" })",
+                "SourceError::Sink(\"the mirror is gone\")",
+                "SourceError::Moved(Moved { base: \"b7e1\", current: \"# Crane telemetry\" })",
+            ]
+        );
+    }
+
+    /// An item as the host's `sync_item` decodes it: the entity as
+    /// `<namespace>:<key>`, the instant in UTC with its fraction kept, the
+    /// payload as its JSON text.
+    #[test]
+    fn an_item_crosses_as_its_entity_id_its_rfc_3339_instant_and_its_payload_text() {
+        let at = chrono::Utc
+            .with_ymd_and_hms(2026, 10, 18, 9, 0, 0)
+            .unwrap()
+            + chrono::Duration::milliseconds(250);
+        let item = super::item(SyncItem {
+            entity: EntityRef::new("surveys", "survey-1"),
+            kind: "survey".into(),
+            title: "Quay crane 4 inspection".into(),
+            body_text: "hoist brake worn".into(),
+            author: Some("harbourmaster".into()),
+            updated_at: Some(at),
+            payload: serde_json::json!({ "key": "survey-1" }),
+            web_url: Some("https://surveys.invalid/1".into()),
+            deleted: true,
+        });
+        assert_eq!(item.entity, "surveys:survey-1");
+        assert_eq!(item.updated_at.as_deref(), Some("2026-10-18T09:00:00.250Z"));
+        assert_eq!(item.payload, r#"{"key":"survey-1"}"#);
+        assert_eq!(item.web_url.as_deref(), Some("https://surveys.invalid/1"));
+        assert!(item.deleted);
+    }
+
+    /// The instance's config arrives as text and reaches the adapter as the
+    /// value it spells.
+    #[test]
+    fn the_instance_config_reaches_the_adapter_as_its_value() {
+        let instance = super::instance(wit::Instance {
+            id: "surveys".into(),
+            kind: "wasm-fixture".into(),
+            display_name: "Surveys".into(),
+            base_url: "https://surveys.invalid".into(),
+            config: r#"{"fault":"none","download_mib":2}"#.into(),
+        });
+        assert_eq!(instance.id, "surveys");
+        assert_eq!(instance.config["download_mib"], 2);
+        assert_eq!(instance.config["fault"], "none");
+    }
+}
