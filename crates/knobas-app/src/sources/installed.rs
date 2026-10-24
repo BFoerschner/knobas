@@ -360,7 +360,7 @@ pub async fn preview_update(
 ///
 /// [`InstallError::NotInstalled`], the refusal of the check that failed,
 /// [`InstallError::KindChanged`] when the release is another adapter,
-/// [`InstallError::Changed`] when its artifact is not the confirmed one, or
+/// [`InstallError::ArtifactChanged`] when its artifact is not the confirmed one, or
 /// what could not be fetched or stored.
 pub async fn update(
     pool: &PgPool,

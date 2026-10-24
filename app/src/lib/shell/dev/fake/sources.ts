@@ -466,7 +466,11 @@ function updateOne(args: Record<string, unknown>): AdapterStatus {
   const { release } = previewUpdate(args);
   const row = installed(args["kind"]);
   if (String(args["sha256"] ?? "") !== release.artifact_sha256) {
-    throw { code: "invalid", message: "the release changed after it was checked", source_id: null };
+    throw {
+      code: "invalid",
+      message: `the release changed after it was checked: its artifact was ${String(args["sha256"] ?? "")} and is now ${release.artifact_sha256}`,
+      source_id: null,
+    };
   }
   row.tag = release.tag;
   row.adapter_version = release.adapter_version;

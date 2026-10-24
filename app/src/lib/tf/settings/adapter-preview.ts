@@ -11,7 +11,7 @@ import { secondsLabel } from "../../time/format";
 import { roleWord } from "./settings";
 
 /** One manifest host in words: a fixed host as written, a template by the setting it is read from. */
-export function hostWord(host: string): string {
+function hostWord(host: string): string {
   const key = /^\{(.+)\}$/.exec(host)?.[1];
   if (key === undefined) return host;
   return key === "base_url" ? "this source's address" : `the host in its ${key} setting`;

@@ -166,7 +166,7 @@ pub enum InstallError {
         "the release changed after it was checked: its artifact was {confirmed} and is now \
          {release}"
     )]
-    Changed { confirmed: String, release: String },
+    ArtifactChanged { confirmed: String, release: String },
     #[error("uninstall asks about every source of {kind:?}; no answer for {missing}")]
     Unanswered { kind: String, missing: String },
     #[error("cannot remove the source {id}: {error}")]
@@ -188,7 +188,7 @@ impl InstallError {
             Self::ManifestUnreadable { .. }
             | Self::Refused(_)
             | Self::KindChanged { .. }
-            | Self::Changed { .. }
+            | Self::ArtifactChanged { .. }
             | Self::Unanswered { .. } => crate::IpcError::invalid(self),
             Self::Fetch(remote::FetchError::Unreachable { .. }) => {
                 crate::IpcError::new(crate::IpcErrorCode::Unreachable, self)
@@ -242,7 +242,7 @@ pub async fn install(
 /// # Errors
 ///
 /// As [`install`], [`InstallError::Fetch`] when the release cannot be
-/// found or read, and [`InstallError::Changed`] when its artifact is not the
+/// found or read, and [`InstallError::ArtifactChanged`] when its artifact is not the
 /// confirmed one.
 pub async fn install_from(
     pool: &PgPool,
@@ -273,11 +273,11 @@ pub async fn preview_install(
     Ok(AdapterPreview::of(origin.record(endpoints), &fetched))
 }
 
-/// [`InstallError::Changed`] unless the fetched artifact is the `confirmed` one.
+/// [`InstallError::ArtifactChanged`] unless the fetched artifact is the `confirmed` one.
 pub(crate) fn held_to(fetched: &Fetched, confirmed: Option<&str>) -> Result<(), InstallError> {
     let release = &fetched.checked.manifest.artifact.sha256;
     match confirmed {
-        Some(confirmed) if confirmed != release => Err(InstallError::Changed {
+        Some(confirmed) if confirmed != release => Err(InstallError::ArtifactChanged {
             confirmed: confirmed.to_owned(),
             release: release.clone(),
         }),

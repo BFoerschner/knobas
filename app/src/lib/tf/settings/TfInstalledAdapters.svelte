@@ -125,16 +125,13 @@
       preview = await ports.previewUpdateAdapter(row.adapter_kind);
     } catch (cause) {
       await failed(row, cause);
-      updating = null;
       return;
+    } finally {
+      updating = null;
     }
     const changes = updateChanges(preview.installed, preview.release);
-    if (changes.length > 0) {
-      updating = null;
-      confirming = { row, preview, changes };
-      return;
-    }
-    await switchTo(row, preview);
+    if (changes.length > 0) confirming = { row, preview, changes };
+    else await switchTo(row, preview);
   }
 
   /** The switch, held to the release that was checked. */
@@ -258,7 +255,7 @@
         {#each asked.changes as line (line)}<li>{line}</li>{/each}
       </ul>
       <TfAdapterFacts preview={next} />
-      <p class="tf-dlg-note">{asked.row.name} stays on {release(asked.row)} until you press Update.</p>
+      <p class="tf-dlg-note">{asked.row.name} stays on {asked.row.tag ?? asked.row.adapter_version} until you press Update.</p>
     {/snippet}
     {#snippet footer()}
       <button class="tf-btn tf-ghost" onclick={() => (confirming = null)}>Cancel</button>
