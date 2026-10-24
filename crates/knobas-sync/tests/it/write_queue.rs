@@ -1787,6 +1787,11 @@ async fn two_flushes_of_one_source_deliver_a_write_once() {
         "the second flusher must not repost what the first was already sending"
     );
     assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+    assert_eq!(
+        flusher::waiting_on_source(&h.source),
+        0,
+        "a flusher that got the lock is no longer counted as waiting for it"
+    );
 }
 
 /// #1629: the source's lock is held per write, so a second flusher takes its
