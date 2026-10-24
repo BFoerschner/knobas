@@ -91,7 +91,7 @@ impl Source for Slow {
             id: self.id.clone(),
             adapter_kind: "slow".into(),
             name: "Slow".into(),
-            capabilities: Vec::new(),
+            capabilities: vec![knobas_source::Capability::Write],
             adapter_version: "0.1.0".into(),
             auth_methods: Vec::new(),
             accepts_account: false,
@@ -100,7 +100,9 @@ impl Source for Slow {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
-            write_ops: Vec::new(),
+            // The comment its writes are: the flush refuses an op the source
+            // does not declare (#1950).
+            write_ops: vec!["comment".into()],
             entity_kinds: vec![knobas_source::KindInfo {
                 id: "ticket".into(),
                 label: "T".into(),

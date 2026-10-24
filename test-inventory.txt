@@ -4036,6 +4036,8 @@ knobas-sync	test/it	write_queue::a_write_the_source_refuses_on_repeat_waits_rath
 knobas-sync	test/it	write_queue::a_write_whose_credential_was_rejected_is_not_sent_again_by_the_next_flushes
 knobas-sync	test/it	write_queue::an_amend_does_not_wait_for_the_flush_tasks_other_writes
 knobas-sync	test/it	write_queue::an_edited_held_write_sends_what_the_user_wrote
+knobas-sync	test/it	write_queue::an_op_the_source_does_not_declare_is_refused_without_reaching_it
+knobas-sync	test/it	write_queue::an_undeclared_op_on_a_moved_target_is_refused_rather_than_held
 knobas-sync	test/it	write_queue::an_undecodable_write_is_refused_rather_than_held
 knobas-sync	test/it	write_queue::an_undeliverable_write_is_kept_and_flushes_when_the_source_returns
 knobas-sync	test/it	write_queue::an_unreachable_write_is_tried_again_on_the_sync_ladder
@@ -4115,6 +4117,8 @@ knobas-wasm-host	test/it	host::a_component_built_against_a_newer_minor_version_i
 knobas-wasm-host	test/it	host::a_component_built_against_another_major_version_is_refused_at_load
 knobas-wasm-host	test/it	host::a_component_that_exports_no_source_is_refused_at_load
 knobas-wasm-host	test/it	host::a_core_module_is_not_a_component
+knobas-wasm-host	test/it	host::a_guest_is_never_handed_a_write_it_does_not_declare
+knobas-wasm-host	test/it	host::a_guest_that_performs_undeclared_writes_passes_the_contract_battery
 knobas-wasm-host	test/it	host::a_saved_view_s_query_crosses_to_the_component_and_its_translation_back
 knobas-wasm-host	test/it	host::a_sink_error_the_component_swallows_still_fails_the_sync
 knobas-wasm-host	test/it	host::a_sync_emits_the_fixed_corpus_and_resumes_from_its_cursor

@@ -4,7 +4,7 @@
 
 use knobas_source::contract::{Fault, VecSink, battery};
 use knobas_source::instance::SourceInstance;
-use knobas_source::{AuthMethod, SourceError};
+use knobas_source::{AuthMethod, SourceError, WriteOp};
 use knobas_wasm_host::{LoadError, Version, WasmAdapter, load_fixture};
 
 fn instance(id: &str, config: serde_json::Value) -> SourceInstance {
@@ -38,6 +38,81 @@ async fn the_host_wrapping_the_fixture_passes_the_contract_battery() {
             Err(e) => panic!("the fixture must build: {e:?}"),
         },
     )
+    .await;
+}
+
+/// Battery clause 5 at runtime (#1950): a guest that performs every op it is
+/// handed, though it declares one source action, is never handed another.
+/// The host refuses an undeclared op, and a source action of an undeclared
+/// id, by name before the call crosses; the declared one still reaches the
+/// guest, which answers it with its own receipt.
+#[tokio::test]
+async fn a_guest_is_never_handed_a_write_it_does_not_declare() {
+    let config = serde_json::json!({ "performs_undeclared": true });
+    let source = match load_fixture().build(instance("surveys", config)) {
+        Ok(source) => source,
+        Err(e) => panic!("the fixture must build: {e:?}"),
+    };
+    let fields = std::collections::BTreeMap::from([("day".to_owned(), "Tuesday".to_owned())]);
+
+    let comment = source
+        .write(WriteOp::Comment {
+            entity: "surveys:survey-1".to_owned(),
+            body: "fender cracked".to_owned(),
+        })
+        .await;
+    assert_eq!(
+        comment.map_err(|e| e.to_string()),
+        Err(
+            "protocol: source \"surveys\" does not declare the write \"comment\", so it was not \
+             sent"
+                .to_owned()
+        )
+    );
+    let scrap = source
+        .write(WriteOp::SourceAction {
+            entity: "surveys:survey-1".to_owned(),
+            id: "scrap_crane".to_owned(),
+            fields: fields.clone(),
+        })
+        .await;
+    assert_eq!(
+        scrap.map_err(|e| e.to_string()),
+        Err(
+            "protocol: source \"surveys\" does not declare the source action \"scrap_crane\", so \
+             it was not sent"
+                .to_owned()
+        )
+    );
+
+    let booked = source
+        .write(WriteOp::SourceAction {
+            entity: "surveys:survey-1".to_owned(),
+            id: "book_repair".to_owned(),
+            fields,
+        })
+        .await
+        .expect("the declared action crosses");
+    assert_eq!(
+        booked.remote_id.as_deref(),
+        Some("performed source_action"),
+        "the guest performed it"
+    );
+}
+
+/// The same guest passes the battery whole: clause 5 and clause 11 probe it
+/// with ops it would perform, and the host refuses them first.
+#[tokio::test]
+async fn a_guest_that_performs_undeclared_writes_passes_the_contract_battery() {
+    let adapter = load_fixture();
+    battery(|fault| {
+        let mut config = fault_config(fault);
+        config["performs_undeclared"] = serde_json::Value::Bool(true);
+        match adapter.build(instance("surveys", config)) {
+            Ok(source) => source,
+            Err(e) => panic!("the fixture must build: {e:?}"),
+        }
+    })
     .await;
 }
 

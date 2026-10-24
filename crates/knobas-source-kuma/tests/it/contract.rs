@@ -255,6 +255,9 @@ async fn every_write_is_refused_by_name_without_an_account() {
             "create_monitor",
         ),
     ] {
+        // The same reason the flush words its own refusal with, so a write
+        // the queue refuses first reads as this one does (#1950).
+        let reason = source.undeclared_reason(&op);
         let refused = source.write(op).await;
         let message = match refused {
             Err(knobas_source::SourceError::Protocol { message, .. }) => message,
@@ -262,6 +265,7 @@ async fn every_write_is_refused_by_name_without_an_account() {
         };
         assert!(message.contains(named), "{message}");
         assert!(message.contains("no account"), "{message}");
+        assert_eq!(reason.as_deref(), Some(message.as_str()));
     }
 }
 

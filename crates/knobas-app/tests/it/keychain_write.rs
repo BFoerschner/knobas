@@ -107,21 +107,23 @@ impl Source for Fake {
         Ok(cursor.unwrap_or_default())
     }
 
-    /// Battery clause 5, as every adapter answers it: an op this instance
-    /// does not declare is refused by name and never sent.
+    /// Performs whatever it is handed, declared or not: the flush is what
+    /// refuses an op this instance does not declare, before it is sent
+    /// (#1950).
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
-        if !descriptor(self.account)
-            .write_ops
-            .iter()
-            .any(|declared| declared == op.identifier())
-        {
-            return Err(SourceError::protocol(format!(
-                "this instance does not offer {:?}",
-                op.identifier()
-            )));
-        }
         self.asked.lock().unwrap().push(op);
         Ok(WriteReceipt::none())
+    }
+
+    /// What Kuma's adapter says of an instance with no account: the account
+    /// to add. The flush words its refusal with it (#1950).
+    fn undeclared_reason(&self, op: &WriteOp) -> Option<String> {
+        (!self.account).then(|| {
+            format!(
+                "this instance has no account, so it cannot perform {:?} -- add the account",
+                op.identifier()
+            )
+        })
     }
 
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
@@ -467,8 +469,9 @@ async fn a_pause_queued_while_the_keychain_is_locked_sends_nothing_at_quit_and_g
 /// #1944, the other direction: a write queued on the roles' word while the
 /// keychain is locked, for an instance that turns out not to offer it. A
 /// Kuma with no account offers no pause (#452), and once the keychain
-/// answers, the flush refuses the pause by name and sends nothing. The roles
-/// widen only what may wait; the instance still decides what is sent.
+/// answers, the flush refuses the pause by name and sends nothing, in the
+/// adapter's words for why (#1950). The roles widen only what may wait; the
+/// instance still decides what is sent.
 #[tokio::test]
 async fn a_pause_queued_while_the_keychain_is_locked_is_refused_once_it_answers_with_no_account() {
     let f = fixture_with("keychain_write_no_account", false).await;
@@ -490,7 +493,11 @@ async fn a_pause_queued_while_the_keychain_is_locked_is_refused_once_it_answers_
     assert_eq!(refused.state, WriteState::Refused);
     assert_eq!(
         refused.detail.as_deref(),
-        Some("protocol: this instance does not offer \"pause_monitor\"")
+        Some(
+            "protocol: this instance has no account, so it cannot perform \"pause_monitor\" -- \
+             add the account"
+        ),
+        "the adapter's reason, which names what to add, rather than the generic refusal"
     );
     assert_eq!(f.asked(), 0, "nothing reached the source");
 

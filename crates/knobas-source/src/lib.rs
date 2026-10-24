@@ -115,7 +115,8 @@ pub struct SourceDescriptor {
     /// per-adapter table, which is why [`Capability::Write`] alone is not
     /// enough: once `WriteOp` grows, "supports writes" no longer says *which*
     /// actions to offer. An adapter must reject any op absent from this list
-    /// with [`SourceError::Protocol`].
+    /// with [`SourceError::Protocol`], and the write queue and the WASM host
+    /// refuse one before it is handed over ([`Self::declares`], #1950).
     ///
     /// This and [`Capability::Write`] are two signals for one fact and must
     /// agree: declaring `Write` with no ops leaves the UI nothing to offer,
@@ -225,6 +226,48 @@ pub struct SourceDescriptor {
     /// whose items open by their stored address alone.
     #[serde(default)]
     pub url_forms: Vec<url_forms::UrlForm>,
+}
+
+impl SourceDescriptor {
+    /// Does this source declare `op`? `Ok` when [`Self::write_ops`] lists its
+    /// [identifier](WriteOp::identifier) and, for a
+    /// [source action](WriteOp::SourceAction), [`Self::source_actions`] lists
+    /// its id. Otherwise the [`SourceError::Protocol`] that refuses it, naming
+    /// the source and the op.
+    ///
+    /// **Clause 5 held by the caller, not only by the adapter** (#1950). The
+    /// write queue's flush asks this of the built source's own descriptor
+    /// before it hands any op over, and the WASM host asks it before a call
+    /// crosses into a guest, so an op the instance does not declare is
+    /// refused there with nothing sent, whatever the adapter would have done
+    /// with it. Every compiled-in adapter still refuses one itself, and
+    /// [`contract::battery`] still holds it to that: the check here is the
+    /// rule in one place, theirs is the defence behind it. The flush words
+    /// the refusal by [`Source::undeclared_reason`] where the adapter has a
+    /// more specific one.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Protocol`] when the op, or the source action's id, is
+    /// not declared.
+    pub fn declares(&self, op: &WriteOp) -> Result<(), SourceError> {
+        let id = op.identifier();
+        if !self.write_ops.iter().any(|declared| declared == id) {
+            return Err(SourceError::protocol(format!(
+                "source {:?} does not declare the write {id:?}, so it was not sent",
+                self.id
+            )));
+        }
+        if let WriteOp::SourceAction { id, .. } = op
+            && !self.source_actions.iter().any(|declared| declared == id)
+        {
+            return Err(SourceError::protocol(format!(
+                "source {:?} does not declare the source action {id:?}, so it was not sent",
+                self.id
+            )));
+        }
+        Ok(())
+    }
 }
 
 // The declaration types themselves live in `knobas-spi-types`, not here: the
@@ -1693,7 +1736,12 @@ pub trait Source: Send + Sync {
     ) -> Result<Cursor, SourceError>;
     /// Perform a write on the remote system. Ops absent from
     /// [`SourceDescriptor::write_ops`] must be refused with
-    /// [`SourceError::Protocol`] rather than attempted.
+    /// [`SourceError::Protocol`] rather than attempted. The write queue's
+    /// flush, the one caller, refuses one first by
+    /// [`SourceDescriptor::declares`] against this source's own descriptor,
+    /// and the WASM host does the same before a call crosses into a guest
+    /// (#1950). An adapter's refusal is the defence behind them, still held
+    /// by [`contract::battery`].
     ///
     /// The answer is a [`WriteReceipt`], which for almost every op is
     /// [`WriteReceipt::none`]: knobas addresses what it wrote by *reading it
@@ -1703,6 +1751,19 @@ pub trait Source: Send + Sync {
     /// edit or delete would need (issue #280) -- and an adapter that has
     /// nothing to say answers `none` rather than inventing an id.
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError>;
+    /// Why this source does not declare `op`, in words a person can act on,
+    /// when the adapter knows more than that it does not. An Uptime Kuma with
+    /// no account names the account to add (#452).
+    ///
+    /// The flush asks this only after [`SourceDescriptor::declares`] refused
+    /// `op`, and the answer becomes the refused row's detail in place of the
+    /// generic one (#1950). It is a wording, not a check: it sends nothing,
+    /// and its answer never decides whether `op` is refused. The default,
+    /// `None`, keeps the generic wording, as does every WASM guest.
+    fn undeclared_reason(&self, op: &WriteOp) -> Option<String> {
+        let _ = op;
+        None
+    }
     /// The statuses this entity's workflow offers **from where it stands right
     /// now**, in the source's own spelling (`CONTEXT.md`: *reachable
     /// transition*).

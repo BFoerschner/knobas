@@ -869,6 +869,22 @@ async fn attempt(
             return Ok(false);
         }
     };
+    // Battery clause 5, held here rather than left to each adapter (#1950):
+    // an op the built source does not declare is refused by name and never
+    // handed over. A submit checks the kind's ops and, with the keychain
+    // locked, only what the kind's roles allow (#1944), so a row can carry an
+    // op this instance does not offer, and an installed guest is not held to
+    // the battery at runtime. Refused at once, as an undecodable row is, and
+    // before hold detection: no change to the target makes it declared, and
+    // a held row's *Send again* would only be refused here. Worded by the
+    // adapter where it knows why (a Kuma with no account names the account).
+    if let Err(undeclared) = source.descriptor().declares(&op) {
+        let refusal = source
+            .undeclared_reason(&op)
+            .map_or(undeclared, SourceError::protocol);
+        refused(deps, write, &refusal.to_string()).await?;
+        return Ok(false);
+    }
     let delivery = op.delivery();
     let entity = match EntityRef::parse(op.target()) {
         Ok(entity) => entity,

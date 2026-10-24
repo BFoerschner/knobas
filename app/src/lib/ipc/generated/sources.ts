@@ -1013,7 +1013,8 @@ min_sync_interval_secs: number,
  * per-adapter table, which is why [`Capability::Write`] alone is not
  * enough: once `WriteOp` grows, "supports writes" no longer says *which*
  * actions to offer. An adapter must reject any op absent from this list
- * with [`SourceError::Protocol`].
+ * with [`SourceError::Protocol`], and the write queue and the WASM host
+ * refuse one before it is handed over ([`Self::declares`], #1950).
  *
  * This and [`Capability::Write`] are two signals for one fact and must
  * agree: declaring `Write` with no ops leaves the UI nothing to offer,

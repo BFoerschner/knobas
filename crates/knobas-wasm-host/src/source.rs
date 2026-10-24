@@ -423,7 +423,11 @@ impl Source for WasmSource {
         .await
     }
 
+    /// Battery clause 5, held by the host (#1950): an installed guest is not
+    /// run against the battery, so the host refuses an op its descriptor does
+    /// not declare, by name, and the call never crosses into the guest.
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
+        self.descriptor.declares(&op)?;
         let op = convert::to_json(&op);
         call!(self, call_write, &op).map(convert::receipt)
     }
