@@ -1,29 +1,46 @@
 /**
- * **The budget of a test that reads the whole of `app/src`** (#2035).
+ * **How long a test may take on this machine** (#2035, #2044).
  *
- * `testTimeout` (15 s, `vite.config.ts`) is sized for a unit test slowed by a
- * neighbour's build. A guard that type-checks every source file costs in
- * proportion to the tree instead, and the `check.yml` runner, where vitest
- * shares two cores with cargo, runs it eight to ten times slower than a Mac:
- * `browser-globals` passed 15 s there at 544 files and turned main red. A
- * budget per file keeps such a guard's pass from depending on how far the
- * tree has grown, and a guard that hangs still fails.
+ * `vite.config.ts` takes `testTimeout` from here, and the whole-tree guards
+ * take `wholeTreeBudget()`.
  *
- * 100 ms a file: the costliest guard, `nullish-fallback`, took 31 s for about
- * 500 files (62 ms a file) in the slower of the two runner runs measured,
- * 40124502573. Run-to-run spread on that runner was 1.6 times.
+ * `just check` runs eight threads at once: vitest's four workers
+ * (`maxWorkers`) beside cargo's four rustc jobs (`CARGO_BUILD_JOBS`). The
+ * 12-core Mac gives each a core, and 15 s there is three times Vitest's
+ * default, room for a neighbour's gate. The two-core `check.yml` runner gives
+ * each a quarter of one, and there the same tests ran eight to ten times
+ * their Mac time, with a 1.6 times spread between runs on one day: the
+ * launcher-chain, TfCode and `browser-globals` tests each passed 15 s in one
+ * of runs 40120926029, 40124502573 and 40127451817. So the budget grows by
+ * eight over the core count, four times on the runner, and stays 15 s from
+ * eight cores up. A test that hangs still fails, in a minute on the runner.
  */
 import { readdirSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { join } from "node:path";
 
-/** What any test may take before its own work: `vite.config.ts`'s `testTimeout`. */
-const BASE_MS = 15_000;
+/** The threads `just check` runs at once: four vitest workers, four rustc jobs. */
+const THREADS = 8;
+
+/** Every test's timeout: 15 s with a core per thread, more on a machine with fewer cores. */
+export const TEST_TIMEOUT_MS = 15_000 * Math.max(1, THREADS / availableParallelism());
+
+/**
+ * 100 ms a file on top: the costliest whole-tree guard, `nullish-fallback`,
+ * took 40 s for about 500 files (81 ms a file) on the runner in 40127451817,
+ * the slowest of the three runs.
+ */
 const MS_PER_FILE = 100;
 
-/** The timeout for a test that scans `app/src`, counted over every `.ts` and `.svelte` file there, tests included. */
+/**
+ * The timeout for a test that scans `app/src`, counted over every `.ts` and
+ * `.svelte` file there, tests included. Such a guard costs in proportion to
+ * the tree, so a budget per file keeps its pass from depending on how far the
+ * tree has grown.
+ */
 export function wholeTreeBudget(): number {
   const files = readdirSync(join(process.cwd(), "src"), { recursive: true, encoding: "utf8" }).filter((name) =>
     /\.(svelte|ts)$/.test(name),
   ).length;
-  return BASE_MS + files * MS_PER_FILE;
+  return TEST_TIMEOUT_MS + files * MS_PER_FILE;
 }
