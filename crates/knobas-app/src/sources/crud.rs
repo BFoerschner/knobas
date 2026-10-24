@@ -829,6 +829,56 @@ pub async fn reachable_transitions(
     Ok(source.reachable_transitions(entity_id).await?)
 }
 
+/// The writes among `asks` their sources' credentials cannot make, each with
+/// its reason (#2040): what a surface that draws a write from the template
+/// `write_ops` asks before drawing it enabled.
+///
+/// Each ask goes to its entity's own source, built once for all of its asks
+/// as [`reachable_transitions`] builds it, and the sources are asked side by
+/// side. The answers come back in the order asked.
+///
+/// **Infallible on purpose**, for [`instance_write_ops`]' reason: a surface
+/// deciding how to draw a button must not be an error path. Everything that
+/// is no verdict refuses nothing, and the write is drawn as before: an
+/// entity no configured source owns, a keychain that would not answer, an
+/// adapter that would not build, a read the source failed, and an answer
+/// about a write nobody asked about.
+pub async fn refused_writes(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &Arc<dyn AdapterRegistry>,
+    asks: &[knobas_source::grants::WriteAsk],
+) -> Vec<knobas_source::grants::RefusedWrite> {
+    let mut by_source: Vec<(String, Vec<knobas_source::grants::WriteAsk>)> = Vec::new();
+    for ask in asks {
+        let Ok(parsed) = knobas_core::entity::EntityRef::parse(&ask.entity) else {
+            continue;
+        };
+        match by_source.iter_mut().find(|(id, _)| *id == parsed.namespace) {
+            Some((_, of)) => of.push(ask.clone()),
+            None => by_source.push((parsed.namespace, vec![ask.clone()])),
+        }
+    }
+    let mut asked = tokio::task::JoinSet::new();
+    for (id, of) in by_source {
+        let (pool, secrets, registry) = (pool.clone(), secrets.clone(), registry.clone());
+        asked.spawn(async move {
+            let answer = match adapter_for(&pool, &secrets, &registry, &of[0].entity).await {
+                Ok(source) => source.refused_writes(&of).await.map_err(SourcesError::from),
+                Err(error) => Err(error),
+            };
+            answer.unwrap_or_else(|error| {
+                tracing::debug!(source = %id, %error, "refused_writes: no verdict");
+                Vec::new()
+            })
+        });
+    }
+    let answered: Vec<_> = asked.join_all().await.into_iter().flatten().collect();
+    asks.iter()
+        .filter_map(|ask| answered.iter().find(|r| r.refuses(ask)).cloned())
+        .collect()
+}
+
 /// The source view of `entity_id` (#661, ADR-0020): the entity's own adapter
 /// asked live, the way [`reachable_transitions`] asks it, and nothing stored.
 ///

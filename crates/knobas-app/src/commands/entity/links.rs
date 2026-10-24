@@ -340,6 +340,33 @@ pub async fn entity_view<R: tauri::Runtime>(
     .map_err(|error| crate::sources::to_ipc(&error, None))
 }
 
+/// The writes among `asks` their sources' credentials cannot make, each with
+/// its reason (#2040, ADR-0020 rule 4): a surface that draws a write from the
+/// template `write_ops` -- the inbox's *Re-run*, the Builds frame's *Run…* --
+/// asks this after drawing, and draws each refused one disabled with the
+/// reason.
+///
+/// Read live from each entity's own source and never stored, like
+/// [`entity_view`]; nothing is sent to find out. An ask the answer leaves out
+/// is no verdict and keeps its drawing: a source that cannot tell, whose read
+/// failed, or that no configuration names.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and nothing else: see [`crate::sources::crud::refused_writes`].
+#[tauri::command]
+pub async fn refused_writes<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    asks: Vec<knobas_source::grants::WriteAsk>,
+) -> Result<Vec<knobas_source::grants::RefusedWrite>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    Ok(
+        crate::sources::crud::refused_writes(&state.pool, &state.secrets, &state.registry, &asks)
+            .await,
+    )
+}
+
 /// Everything the note view draws for one note (#46).
 ///
 /// Deliberately **not** [`EntityDetail`], and the difference is not tidiness:

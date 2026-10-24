@@ -111,6 +111,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_source::view::Block::export_all(cfg)?;
     knobas_source::view::Crumb::export_all(cfg)?;
     knobas_source::view::EntryKind::export_all(cfg)?;
+    knobas_source::grants::WriteAsk::export_all(cfg)?;
+    knobas_source::grants::RefusedWrite::export_all(cfg)?;
     knobas_source::view::TreeEntry::export_all(cfg)?;
     knobas_source::view::ViewSection::export_all(cfg)?;
     knobas_source::view::SourceView::export_all(cfg)?;

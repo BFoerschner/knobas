@@ -58,6 +58,7 @@ import type {
   Protocol,
   PublishTarget,
   Reached,
+  RefusedWrite,
   RuleTicket,
   RunLog,
   RunPreset,
@@ -70,6 +71,7 @@ import type {
   TestOutcome,
   Thread,
   UrlMatch,
+  WriteAsk,
 } from "./generated/entity";
 // The write queue's own types live with the queue's other commands. A
 // write-back is an operation on an entity, which is why `submitWrite` is here;
@@ -212,6 +214,7 @@ export type {
   PublishTarget,
   ReachOrigin,
   Reached,
+  RefusedWrite,
   RuleTicket,
   RunLog,
   RunPreset,
@@ -250,6 +253,7 @@ export type {
   ViewRow,
   ViewSection,
   WorkingTreeState,
+  WriteAsk,
 } from "./generated/entity";
 
 /**
@@ -726,6 +730,23 @@ export function reachableTransitions(entityId: string): Promise<string[]> {
  */
 export function entityView(entityId: string, section: string | null = null): Promise<SourceView | null> {
   return invoke<SourceView | null>("entity_view", { entityId, section });
+}
+
+/**
+ * The writes among `asks` their sources' credentials cannot make, each with
+ * its reason — `knobas_app::commands::entity::refused_writes` (#2040,
+ * ADR-0020 rule 4).
+ *
+ * For a surface that draws a write from what the adapter declares (the
+ * inbox's *Re-run*, the Builds frame's *Run…*): it asks after drawing, and
+ * draws each refused write disabled with the reason. Read live from each
+ * entity's own source, never stored, and nothing is sent to find out. An ask
+ * the answer leaves out is no verdict and keeps its drawing. Rejects only
+ * with `not_ready` before bring-up.
+ */
+export function refusedWrites(asks: WriteAsk[]): Promise<RefusedWrite[]> {
+  if (asks.length === 0) return Promise.resolve([]);
+  return invoke<RefusedWrite[]>("refused_writes", { asks });
 }
 
 /**

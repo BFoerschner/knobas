@@ -40,7 +40,8 @@ pub struct WriteAsk {
 }
 
 /// A write the source's credential cannot make, and why, in words a person
-/// can act on: *This TeamCity user may not run builds in Payout*.
+/// can act on: *This TeamCity user cannot run builds in Payout: it lacks the
+/// Run build permission*.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct RefusedWrite {

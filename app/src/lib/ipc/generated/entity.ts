@@ -2901,6 +2901,12 @@ kind: string,
 step: string, origin: ReachOrigin, };
 
 /**
+ * A write the source's credential cannot make, and why, in words a person
+ * can act on: *This TeamCity user may not run builds in Payout*.
+ */
+export type RefusedWrite = { entity: string, op: string, reason: string, };
+
+/**
  * A ticket a rule or a set applies to.
  */
 export type RuleTicket = { entity_id: string, title: string, mine: boolean, };
@@ -3859,3 +3865,17 @@ untracked: number,
  * Paths with an unresolved merge conflict.
  */
 conflicted: number, };
+
+/**
+ * One write a surface would offer: `op` on `entity`.
+ *
+ * `entity` is an [`EntityRef`](knobas_spi_types::entity::EntityRef) in
+ * string form, the address every [`WriteOp`](crate::WriteOp) carries. For a
+ * create it is the container the write acts in (a project, a space), the
+ * entity the create's own payload names.
+ */
+export type WriteAsk = { entity: string, 
+/**
+ * A [`WriteOp`](crate::WriteOp) identifier, as `write_ops` spells it.
+ */
+op: string, };

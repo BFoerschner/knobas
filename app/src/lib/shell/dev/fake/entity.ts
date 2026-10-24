@@ -458,6 +458,8 @@ export function handlers(): Handlers {
     visit_entity: (args) => visitEntity(args),
     reachable_transitions: (args) => fakeTransitions(args),
     entity_view: (args) => entityView(args),
+    // Every fake source's credential may make every write it declares (#2040).
+    refused_writes: () => [],
     resolve_url: (args) => resolveUrl(args),
     create_link: (args) => {
       const from = String(args["fromId"]);
