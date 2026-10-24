@@ -1432,11 +1432,13 @@ header: string, lines: Array<DiffLine>, };
  * The seven kinds of demand the inbox distinguishes.
  *
  * Serialized as its stored spelling, which is also the first half of every
- * [`InboxItem::key`]. **Not a database vocabulary**: no column holds a
- * category, because no table holds an item -- `knobas.inbox_state` stores the
- * composed key as opaque text and nothing constrains it. So this list has no
- * CHECK to be pinned against and is deliberately not declared with
- * [`crate::closed_vocabulary!`], whose whole purpose is that pinning.
+ * [`InboxItem::key`]. **No CHECK pins it**: no column holds a category,
+ * because no table holds an item -- `knobas.inbox_state` stores the composed
+ * key as opaque text and nothing constrains it. It is declared with
+ * [`crate::closed_vocabulary!`] all the same (#1989), for the rest of what the
+ * macro gives: `ALL` and `as_str` from the variant list, so a category cannot
+ * be missing from `ALL`, and the codec the stream's statement decodes its
+ * computed `category` column through.
  *
  * - `review_request`: Somebody is waiting on your review of a pull request.
  * - `mention`: Somebody wrote your name at you.

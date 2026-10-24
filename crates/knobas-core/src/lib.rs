@@ -55,6 +55,10 @@ pub use knobas_spi_types::{delivery, entity, payload, tone};
 /// that walk `ALL` against the migration then fail until the constraint knows
 /// about it too -- which is a red test instead of a broken write.
 ///
+/// One user has no constraint to be pinned against: `inbox::Category`, whose
+/// spelling a statement computes rather than a column stores. It takes the
+/// macro for the one list and the codec, and has no migration test.
+///
 /// It lives here, in the crate every other one depends on, because both sides
 /// of the bridge need it: `link::Origin` here and `knobas_sync`'s `AuthState`,
 /// `SyncTrigger` and `SyncOutcome` are the same kind of list against the same

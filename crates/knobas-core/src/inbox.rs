@@ -98,67 +98,45 @@ use sqlx::PgPool;
 
 use crate::CoreError;
 
-/// The seven kinds of demand the inbox distinguishes.
-///
-/// Serialized as its stored spelling, which is also the first half of every
-/// [`InboxItem::key`]. **Not a database vocabulary**: no column holds a
-/// category, because no table holds an item -- `knobas.inbox_state` stores the
-/// composed key as opaque text and nothing constrains it. So this list has no
-/// CHECK to be pinned against and is deliberately not declared with
-/// [`crate::closed_vocabulary!`], whose whole purpose is that pinning.
-///
-/// - `review_request`: Somebody is waiting on your review of a pull request.
-/// - `mention`: Somebody wrote your name at you.
-/// - `failed_build`: A build on your work went red.
-/// - `new_assignment`: Work arrived: a ticket somebody else pointed at you.
-/// - `credential_expiry`: A credential knobas holds stops working soon.
-/// - `failed_sign_in`: A source refuses knobas' sign-in, or knobas holds no
-///   credential for it, so it takes nothing until somebody acts.
-/// - `alert`: A monitor watching something in the estate is down or slow, and a
-///   context holds the asset it watches.
-///
-/// The shell's union is generated from this enum, so a category added here
-/// makes a total `switch` over it fail `svelte-check` rather than fall through
-/// to a label nobody notices.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize, ts_rs::TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export_to = "entity.ts", rename = "InboxCategory")]
-pub enum Category {
-    ReviewRequest,
-    Mention,
-    FailedBuild,
-    NewAssignment,
-    CredentialExpiry,
-    FailedSignIn,
-    Alert,
+crate::closed_vocabulary! {
+    /// The seven kinds of demand the inbox distinguishes.
+    ///
+    /// Serialized as its stored spelling, which is also the first half of every
+    /// [`InboxItem::key`]. **No CHECK pins it**: no column holds a category,
+    /// because no table holds an item -- `knobas.inbox_state` stores the composed
+    /// key as opaque text and nothing constrains it. It is declared with
+    /// [`crate::closed_vocabulary!`] all the same (#1989), for the rest of what the
+    /// macro gives: `ALL` and `as_str` from the variant list, so a category cannot
+    /// be missing from `ALL`, and the codec the stream's statement decodes its
+    /// computed `category` column through.
+    ///
+    /// - `review_request`: Somebody is waiting on your review of a pull request.
+    /// - `mention`: Somebody wrote your name at you.
+    /// - `failed_build`: A build on your work went red.
+    /// - `new_assignment`: Work arrived: a ticket somebody else pointed at you.
+    /// - `credential_expiry`: A credential knobas holds stops working soon.
+    /// - `failed_sign_in`: A source refuses knobas' sign-in, or knobas holds no
+    ///   credential for it, so it takes nothing until somebody acts.
+    /// - `alert`: A monitor watching something in the estate is down or slow, and a
+    ///   context holds the asset it watches.
+    ///
+    /// The shell's union is generated from this enum, so a category added here
+    /// makes a total `switch` over it fail `svelte-check` rather than fall through
+    /// to a label nobody notices.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "entity.ts", rename = "InboxCategory")]
+    pub enum Category {
+        ReviewRequest => "review_request",
+        Mention => "mention",
+        FailedBuild => "failed_build",
+        NewAssignment => "new_assignment",
+        CredentialExpiry => "credential_expiry",
+        FailedSignIn => "failed_sign_in",
+        Alert => "alert",
+    }
 }
 
 impl Category {
-    /// Every category, generated from the same list as the rules below.
-    pub const ALL: &'static [Category] = &[
-        Category::ReviewRequest,
-        Category::Mention,
-        Category::FailedBuild,
-        Category::NewAssignment,
-        Category::CredentialExpiry,
-        Category::FailedSignIn,
-        Category::Alert,
-    ];
-
-    /// The spelling that opens an [`InboxItem::key`].
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Category::ReviewRequest => "review_request",
-            Category::Mention => "mention",
-            Category::FailedBuild => "failed_build",
-            Category::NewAssignment => "new_assignment",
-            Category::CredentialExpiry => "credential_expiry",
-            Category::FailedSignIn => "failed_sign_in",
-            Category::Alert => "alert",
-        }
-    }
-
     /// The write ops an item of this category is asking for, best first.
     ///
     /// **Candidates, not an offer.** These are `WriteOp` identifiers; whether
@@ -204,29 +182,6 @@ impl Category {
     }
 }
 
-impl std::fmt::Display for Category {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// A `category` spelling that names no known category.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("unknown inbox category {0:?}")]
-pub struct UnknownCategory(pub String);
-
-impl std::str::FromStr for Category {
-    type Err = UnknownCategory;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Category::ALL
-            .iter()
-            .copied()
-            .find(|category| category.as_str() == value)
-            .ok_or_else(|| UnknownCategory(value.to_owned()))
-    }
-}
-
 /// One line of the stream.
 ///
 /// Everything a reader needs to judge an item without opening it (#45, story
@@ -249,7 +204,6 @@ pub struct InboxItem {
     pub key: String,
     /// Which demand this is. Decoded from the statement's text column so the
     /// wire form is the enum rather than a bare string.
-    #[sqlx(try_from = "String")]
     pub category: Category,
     /// The source that owes this item -- a `source_config.id`, which is also
     /// the entity namespace.
@@ -287,14 +241,6 @@ pub struct InboxItem {
     ///
     /// RFC 3339 on the wire.
     pub snoozed_until: Option<DateTime<Utc>>,
-}
-
-impl TryFrom<String> for Category {
-    type Error = UnknownCategory;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.parse()
-    }
 }
 
 /// How long before a credential expires knobas starts asking about it, and how
