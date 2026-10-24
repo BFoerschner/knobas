@@ -36,6 +36,7 @@
 //!   `knobas_core::activity::record` -- the single activity writer.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use knobas_core::activity;
@@ -436,11 +437,64 @@ fn gate(source_id: &str) -> Arc<Gate> {
 #[derive(Default)]
 struct Gate {
     /// Held across one turn at a write ([`turn`]): the re-read, then the
-    /// attempt and its settle, or the wait a failed build records.
+    /// attempt and its settle, or the wait a failed build records. Taken
+    /// through [`Gate::queue`] only, so [`Gate::waiting`] counts its queue.
     flush: tokio::sync::Mutex<()>,
+    /// How many flushers are in [`Gate::flush`]'s queue: read by
+    /// [`waiting_on_source`], and by nothing that decides anything.
+    waiting: AtomicUsize,
     /// How many times [`release_unauthorized`] has run for the source in this
     /// process.
     releases: tokio::sync::Mutex<u64>,
+}
+
+impl Gate {
+    /// Take [`Gate::flush`], counted in [`Gate::waiting`] from the poll that
+    /// put this flusher in the lock's queue until it holds the lock, or until
+    /// the wait is dropped (the quit came first).
+    ///
+    /// A `Pending` poll of tokio's lock means the flusher is queued: tokio
+    /// queues a waiter in the same poll it finds the lock taken. The one other
+    /// `Pending` is tokio's cooperative budget running out, which would count a
+    /// flusher that is not queued yet; `unconstrained` takes that one out, for
+    /// the polls of this lock and nothing else in the turn (#1926).
+    async fn queue(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        /// One flusher in the queue, counted for as long as this lives.
+        struct Queued<'a>(&'a AtomicUsize);
+        impl Drop for Queued<'_> {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+
+        let mut lock = std::pin::pin!(tokio::task::coop::unconstrained(self.flush.lock()));
+        let mut queued = None;
+        std::future::poll_fn(|cx| {
+            let poll = lock.as_mut().poll(cx);
+            if poll.is_pending() && queued.is_none() {
+                self.waiting.fetch_add(1, Ordering::SeqCst);
+                queued = Some(Queued(&self.waiting));
+            }
+            poll
+        })
+        .await
+    }
+}
+
+/// How many flushers are queued for `source_id`'s lock behind whoever holds
+/// it -- the write on the wire -- and have not yet come out of that wait. A
+/// flusher the lock was just handed to is counted until its next poll.
+///
+/// A read for tests (#1926), as [`Background::running`] is: the lock is fair,
+/// so a flusher counted here is served before any flusher that asks after it,
+/// the flush task's next write included. Nothing outside this module could
+/// see that otherwise, and a test that needs a submit queued before the write
+/// on the wire lands gave it a dwell, which a loaded machine outran.
+///
+/// [`Background::running`]: crate::background::Background::running
+#[must_use]
+pub fn waiting_on_source(source_id: &str) -> usize {
+    gate(source_id).waiting.load(Ordering::SeqCst)
 }
 
 /// The credential a flush built its adapter with, named by the source's
@@ -608,7 +662,7 @@ async fn turn<'g>(
     let sending = tokio::select! {
         biased;
         () = deps.quit.token().cancelled() => return Ok(Turn::Stopped),
-        sending = gate.flush.lock() => sending,
+        sending = gate.queue() => sending,
     };
     let Some(now) = store::get(&deps.pool, read.id).await? else {
         return Ok(Turn::Gone);
