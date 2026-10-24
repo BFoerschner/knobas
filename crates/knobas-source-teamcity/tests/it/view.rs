@@ -642,6 +642,17 @@ async fn one_section_is_read_without_the_others() {
         "only the configuration and what the user may write were read: {asked:#?}"
     );
 
+    // A tab that offers no write reads nothing of what the user may write (#2040).
+    let before = asked.len();
+    source(&server)
+        .view(CONFIG, Some("steps"))
+        .await
+        .expect("the read succeeds")
+        .expect("drawn");
+    let asked = server.received_requests().await.expect("recorded");
+    let steps: Vec<_> = asked[before..].iter().map(|r| r.url.path()).collect();
+    assert_eq!(steps, [CONFIG_PATH]);
+
     let refused = source(&server).view(CONFIG, Some("log")).await;
     assert!(
         matches!(&refused, Err(SourceError::Protocol { message, .. }) if message.contains("log")),
