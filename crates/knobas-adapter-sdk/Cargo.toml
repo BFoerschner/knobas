@@ -1,0 +1,34 @@
+[package]
+name = "knobas-adapter-sdk"
+edition.workspace = true
+# The `knobas:adapter` interface version this SDK binds (#2028), not the
+# workspace's: `wit/adapter.wit`'s package version, which a test holds it to.
+# A WIT minor bumps this with it, in the same §10.8 entry.
+version = "1.3.0"
+license.workspace = true
+
+# The Rust SDK of the adapter standard (spec #1192, ADR-0028): the
+# `knobas:adapter` bindings, the SPI types, and the one trait an external
+# adapter implements, `Adapter`. The WIT conversions and the export macro
+# live here, so an adapter crate holds none of them. The fixture component
+# (`crates/knobas-wasm-fixture`) is its first user.
+#
+# Builds for `wasm32-wasip2`, and on the host target too, where the imports
+# it binds are never called: what `cargo test` and clippy see.
+[dependencies]
+chrono.workspace = true
+knobas-source = { path = "../knobas-source" }
+serde.workspace = true
+serde_json.workspace = true
+# Pinned exactly: 0.62.0 is the newest release older than two weeks
+# (2026-09-10). Re-exported for the export macro, so an adapter crate does
+# not depend on it itself.
+wit-bindgen = { version = "=0.62.0", default-features = false, features = ["macros", "realloc", "std"] }
+
+[features]
+# Build against the frozen 1.0.0 world (`wit-1.0.0/`) instead: no
+# `downloads`, no `query`, no `sink.walked`, so `Adapter` has no `download`
+# or `translate_query`. What the host's hold on 1.0.0 components is tested
+# with (#1205): the fixture's `v1_0` turns it on. An adapter has no use for
+# it, since every knobas that hosts components hosts 1.3.0.
+v1_0 = []

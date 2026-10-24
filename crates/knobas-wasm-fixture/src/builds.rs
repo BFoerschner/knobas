@@ -13,9 +13,9 @@
 //!   artifact set is `download_mib` MiB of them (config, default 1), which
 //!   the component never holds more than one chunk of.
 
-use knobas_source::KindInfo;
-use knobas_source::role::{CI, RoleClaim};
-use knobas_source::{Frame, KindPaths, PayloadPath, StatePath, StateValue, Tone};
+use knobas_adapter_sdk::spi::KindInfo;
+use knobas_adapter_sdk::spi::role::{CI, RoleClaim};
+use knobas_adapter_sdk::spi::{Frame, KindPaths, PayloadPath, StatePath, StateValue, Tone};
 use serde_json::{Value, json};
 
 pub const PIPELINE: &str = "pipeline-1";

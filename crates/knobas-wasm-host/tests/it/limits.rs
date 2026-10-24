@@ -234,11 +234,11 @@ async fn an_outgoing_body_past_the_memory_cap_is_refused() {
 }
 
 /// A host log line: the source it names and its message.
-type Line = (String, String);
+pub(crate) type Line = (String, String);
 
 /// Every log line the host wrote for a source in this binary, through a
 /// subscriber set once (a call may run on a thread of its own).
-fn logged() -> &'static std::sync::Mutex<Vec<Line>> {
+pub(crate) fn logged() -> &'static std::sync::Mutex<Vec<Line>> {
     use tracing_subscriber::layer::SubscriberExt as _;
 
     struct Catch;
