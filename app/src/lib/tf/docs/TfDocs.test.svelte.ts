@@ -5,7 +5,7 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { DocPage, DocsTree, Reached, WriteAsk } from "../../ipc/entity";
+import type { DocPage, DocsTree, Reached, RefusedWrite, WriteAsk } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
@@ -601,12 +601,12 @@ test("the tree's New page on another space than the open page's is not refused b
 
 test("an editor open before the refusal lands saves nothing, its Save section drawn refused (#2053)", async () => {
   const reason = "This Confluence user cannot edit On-call handbook: the page's restrictions leave it out";
-  let answer: (refused: { entity: string; op: string; reason: string }[]) => void = () => {};
+  let answer: (refused: RefusedWrite[]) => void = () => {};
   const io = await draw(
     ["confluence:2"],
     ports({
       docsPage: vi.fn(async () => RICH),
-      refusedWrites: vi.fn(() => new Promise((resolve) => (answer = resolve))),
+      refusedWrites: vi.fn(() => new Promise<RefusedWrite[]>((resolve) => (answer = resolve))),
     }),
   );
   button("Edit section")!.click();
