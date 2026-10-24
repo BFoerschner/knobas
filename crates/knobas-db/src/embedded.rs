@@ -1658,8 +1658,8 @@ fn recover_or_mark(data_dir: &Path) -> Result<(), DbError> {
         Shape::Unfinished => {
             tracing::warn!(
                 data_dir = %data_dir.display(),
-                "an interrupted initdb left this data directory with no database in it: \
-                 removing it so initdb runs again"
+                "this data directory holds no database, as an interrupted initdb leaves \
+                 it: removing it so initdb runs again"
             );
             std::fs::remove_dir_all(data_dir).map_err(|source| DbError::io(data_dir, source))
         }
@@ -1674,7 +1674,7 @@ enum Shape {
     /// Nothing at all, or an empty directory.
     NotInitialised,
     /// No `PG_VERSION`, no `postgresql.conf`, and a database in it or one
-    /// that may be: no `initdb` left it, and no launch removes it.
+    /// that may be: no launch removes it or marks it.
     Unrecognised,
     /// No marker, and it holds a database or may: a finished `initdb` an
     /// older build ran, or one whose databases cannot be listed.
@@ -1686,7 +1686,8 @@ enum Shape {
 /// Read `data_dir`'s shape. **A doubt about a database keeps the
 /// directory**: an entry that cannot be examined counts as present, so an
 /// unreadable marker keeps it, and a `base/` or `pg_tblspc/` that cannot be
-/// listed, or is missing, counts as holding a database.
+/// listed counts as holding a database. With `PG_VERSION`, so does a missing
+/// one.
 ///
 /// Without `PG_VERSION` and with `postgresql.conf`, it is unfinished (#1637):
 /// `initdb` writes `PG_VERSION` first and its cleanup removes it first.
@@ -1715,29 +1716,30 @@ fn shape(data_dir: &Path) -> Shape {
     if present(INITDB_FINISHED) {
         return Shape::Marked;
     }
-    // `missing` is what a directory that is not there counts as.
-    let only = |dir: &str, allowed: &[&str], missing: bool| match std::fs::read_dir(
-        data_dir.join(dir),
-    ) {
-        Ok(entries) => entries.into_iter().all(|entry| {
+    // Whether `dir` holds nothing but `allowed`, or `None` when it is not
+    // there. Any other error is a doubt: it holds more.
+    let holds_only = |dir: &str, allowed: &[&str]| match std::fs::read_dir(data_dir.join(dir)) {
+        Ok(entries) => Some(entries.into_iter().all(|entry| {
             entry.is_ok_and(|entry| {
                 entry
                     .file_name()
                     .to_str()
                     .is_some_and(|name| allowed.contains(&name))
             })
-        }),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => missing,
-        Err(_) => false,
+        })),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => None,
+        Err(_) => Some(false),
     };
     if !present("PG_VERSION") {
         return if present("postgresql.conf") {
             Shape::Unfinished
-        } else if only("", &[], true) {
+        } else if holds_only("", &[]).unwrap_or(true) {
             Shape::NotInitialised
-        } else if only("base", &["1", "4", "5"], true) && only("pg_tblspc", &[], true) {
-            // Killed before `PG_VERSION` made `base/` or `pg_tblspc/`, or in
-            // a cleanup that removed one; the cleanup may leave `base/5`.
+        } else if holds_only("base", &["1", "4", "5"]).unwrap_or(true)
+            && holds_only("pg_tblspc", &[]).unwrap_or(true)
+        {
+            // A missing one holds nothing here: the kill came before
+            // `initdb` made it, or after its cleanup removed it.
             Shape::Unfinished
         } else {
             Shape::Unrecognised
@@ -1746,7 +1748,9 @@ fn shape(data_dir: &Path) -> Shape {
     // Even "not found" is a doubt here: `initdb` makes both before
     // `PG_VERSION`, so a missing one is a link to a volume not mounted, or a
     // directory being copied in, not a killed `initdb`.
-    if only("base", &["1", "4"], false) && only("pg_tblspc", &[], false) {
+    if holds_only("base", &["1", "4"]).unwrap_or(false)
+        && holds_only("pg_tblspc", &[]).unwrap_or(false)
+    {
         Shape::Unfinished
     } else {
         Shape::HoldsDatabase
@@ -3345,47 +3349,48 @@ esac
     }
 
     /// #1985: without `PG_VERSION` and `postgresql.conf`, a directory that
-    /// holds a database, or one whose `base/` cannot be listed, is kept; an
-    /// empty one is left for `initdb`.
+    /// holds a database, or whose `base/` cannot be listed, is kept unmarked.
     #[cfg(unix)]
     #[test]
     fn a_directory_without_pg_version_that_may_hold_a_database_is_kept() {
         use std::os::unix::fs::PermissionsExt;
-        for database in ["base/16384", "pg_tblspc/16385", "unreadable"] {
+        for fixture in ["base/16384", "pg_tblspc/16385", "unreadable base"] {
             let dir = tempfile::tempdir().unwrap();
             let data = dir.path().join("data");
-            std::fs::create_dir_all(data.join("base/1")).unwrap();
+            let base = data.join("base");
+            std::fs::create_dir_all(base.join("1")).unwrap();
             std::fs::create_dir_all(data.join("pg_tblspc")).unwrap();
-            if database == "unreadable" {
-                let base = data.join("base");
+            if fixture == "unreadable base" {
                 std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o000)).unwrap();
             } else {
-                std::fs::create_dir_all(data.join(database)).unwrap();
+                std::fs::create_dir_all(data.join(fixture)).unwrap();
             }
 
             let found = shape(&data);
             recover_or_mark(&data).unwrap();
-            let kept = data.join("base").exists();
-            let base = data.join("base");
+            let kept = base.exists();
             let _ = std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700));
 
-            assert_eq!(found, Shape::Unrecognised, "{database}");
-            assert!(kept, "{database}: kept");
+            assert_eq!(found, Shape::Unrecognised, "{fixture}");
+            assert!(kept, "{fixture}: kept");
             assert!(
                 !data.join(INITDB_FINISHED).exists(),
-                "{database}: not marked"
+                "{fixture}: not marked"
             );
         }
+    }
 
+    /// #1985: an empty or absent data directory is still not initialised, and
+    /// is left for `initdb`.
+    #[test]
+    fn an_empty_or_absent_data_directory_is_not_initialised() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
+        assert_eq!(shape(&data), Shape::NotInitialised, "absent");
         std::fs::create_dir_all(&data).unwrap();
         assert_eq!(shape(&data), Shape::NotInitialised, "empty");
-        assert_eq!(
-            shape(&dir.path().join("absent")),
-            Shape::NotInitialised,
-            "absent"
-        );
+        recover_or_mark(&data).unwrap();
+        assert!(data.is_dir(), "left for initdb");
     }
 
     /// #1819: a marked directory is never removed, whatever it lacks later.
