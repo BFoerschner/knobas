@@ -123,8 +123,9 @@ pub(crate) mod mirror {
     ///
     /// Tauri reads the key, so a test that asks whether the call text
     /// *contains* an argument name passes on `offset: when.offsetMinutes`,
-    /// which sends no `offsetMinutes`. The next-character rule keeps out a
-    /// generic's `B` in `<A, B>` and a value's `b` in `f(a, b)`.
+    /// which sends no `offsetMinutes`. Reading after `>(` keeps out the
+    /// generic's own names, and the next-character rule keeps out a value's
+    /// `b` in `f(a, b)`.
     pub(crate) fn keys(invocation: &str) -> Vec<&str> {
         let args = invocation.split_once(">(").map_or(invocation, |(_, a)| a);
         let is_ident = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
@@ -136,14 +137,36 @@ pub(crate) mod mirror {
                 .map_or(args.len(), |i| start + i);
             let before = args[..start].trim_end().chars().next_back();
             let after = args[end..].trim_start().chars().next();
-            if matches!(before, Some('{' | ','))
-                && matches!(after, Some(':' | ',' | '}'))
-            {
+            if matches!(before, Some('{' | ',')) && matches!(after, Some(':' | ',' | '}')) {
                 found.push(&args[start..end]);
             }
             at = end;
         }
         found
+    }
+
+    /// Both directions: every registered command is invoked, every invoked
+    /// command is registered.
+    pub(crate) fn assert_mirrors(module: &str, mirror: &'static str, barrel: &str, min: usize) {
+        let registered = registered(module);
+        assert!(
+            registered.len() >= min,
+            "only {} {module} commands found in the handler list -- the parse is wrong, not the list",
+            registered.len()
+        );
+        let invoked = invoked(mirror);
+        for command in &registered {
+            assert!(
+                invoked.contains(command),
+                "{command} is in the handler list but {barrel} has no invoke<..>(\"{command}\" call"
+            );
+        }
+        for name in &invoked {
+            assert!(
+                registered.contains(name),
+                "{barrel} invokes {name}, which is not in the handler list under commands::{module}"
+            );
+        }
     }
 
     mod tests {
@@ -177,30 +200,6 @@ pub(crate) mod mirror {
   }"#;
             assert_eq!(keys(call), ["target", "kind", "id", "note", "inRoom"]);
             assert!(keys(r#"invoke<void>("stop_timer""#).is_empty());
-        }
-    }
-
-    /// Both directions: every registered command is invoked, every invoked
-    /// command is registered.
-    pub(crate) fn assert_mirrors(module: &str, mirror: &'static str, barrel: &str, min: usize) {
-        let registered = registered(module);
-        assert!(
-            registered.len() >= min,
-            "only {} {module} commands found in the handler list -- the parse is wrong, not the list",
-            registered.len()
-        );
-        let invoked = invoked(mirror);
-        for command in &registered {
-            assert!(
-                invoked.contains(command),
-                "{command} is in the handler list but {barrel} has no invoke<..>(\"{command}\" call"
-            );
-        }
-        for name in &invoked {
-            assert!(
-                registered.contains(name),
-                "{barrel} invokes {name}, which is not in the handler list under commands::{module}"
-            );
         }
     }
 }

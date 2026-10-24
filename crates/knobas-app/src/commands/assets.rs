@@ -1144,8 +1144,8 @@ mod tests {
     /// `assetId` argument and the `parent_id` field inside the row it answers
     /// with -- and getting either wrong is a call that arrives with the value
     /// missing and no error anywhere. Read off the call's keys, not its text:
-    /// a name on the value side, as in `changes: edits`, sends nothing
-    /// (#2008).
+    /// a name on the value side is not sent, so `changes: edits` sends no
+    /// `edits` (#2008).
     #[test]
     fn the_mirror_sends_the_argument_names_tauri_expects() {
         for (call, argument) in [

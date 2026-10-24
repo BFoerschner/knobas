@@ -510,8 +510,8 @@ mod tests {
     /// `foreground` argument and the `entity_id` field inside it -- and
     /// getting either wrong is a call that arrives with the value missing and
     /// no error anywhere. Read off the call's keys, not its text: a name on
-    /// the value side, as in `offset: when.offsetMinutes`, sends nothing
-    /// (#2008).
+    /// the value side is not sent, so `offset: when.offsetMinutes` sends no
+    /// `offsetMinutes` (#2008).
     #[test]
     fn the_mirror_sends_the_argument_names_tauri_expects() {
         for (call, argument) in [
