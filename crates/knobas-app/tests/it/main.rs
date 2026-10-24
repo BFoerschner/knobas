@@ -62,6 +62,7 @@ mod registry_reads_ipc;
 mod responsiveness_probe;
 mod run_presets_ipc;
 mod run_reads_ipc;
+mod run_ticket_ipc;
 mod search_ipc;
 mod signals_ipc;
 mod sources_crud;

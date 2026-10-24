@@ -667,6 +667,20 @@ export function submitWrite(payload: WriteOpPayload, linkTo?: string): Promise<Q
 }
 
 /**
+ * The tickets filed from `entityId` that it does not link yet — `owed_tickets`
+ * (#1953): each `CreateTicket` queued with it as its `linkTo` (a failed run's
+ * *Create ticket*, #1451) and not withdrawn, oldest first, held and refused
+ * ones included with their state. The read resolves first, so a ticket the
+ * mirror now holds is linked and not named.
+ *
+ * What a page reads to know a create is on its way after a reload, when its
+ * session's marks are gone.
+ */
+export function owedTickets(entityId: string): Promise<QueuedWrite[]> {
+  return invoke<QueuedWrite[]>("owed_tickets", { entityId });
+}
+
+/**
  * What this ticket's workflow offers from where it stands **right now** —
  * `knobas_app::commands::entity::reachable_transitions` (#498).
  *

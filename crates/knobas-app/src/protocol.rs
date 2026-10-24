@@ -654,10 +654,12 @@ async fn mirrored(pool: &PgPool, entity_id: &str) -> Result<bool, IpcError> {
     Ok(found.is_some())
 }
 
-/// The creates `note_id`'s action items filed that still owe it their link
-/// (#1951), oldest first: each `create_ticket` whose row names the note as
-/// its `link_to` (`commands::entity::create_action_item_ticket_inner` writes
-/// it) and that was not withdrawn.
+/// The tickets filed from `note_id` that still owe it their link, oldest
+/// first: each `create_ticket` whose row names it as its `link_to` and that
+/// was not withdrawn. A protocol note's action items write it
+/// (`commands::entity::create_action_item_ticket_inner`, #1951), and so does
+/// a failed run's *Create ticket* (`submit_write`'s `link_to`, #1451), whose
+/// page reads it through `commands::entity::owed_tickets` (#1953).
 ///
 /// # Errors
 ///
