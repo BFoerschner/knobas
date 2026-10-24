@@ -418,7 +418,13 @@ const CLOCK_SLACK: &str = "5 minutes";
 /// is empty). A ticket of the same title the source last changed before the
 /// write was queued is somebody else's -- a title the reader made generic,
 /// filed before -- never this one.
-async fn ticket_filed(
+///
+/// **The one title rule** (#1958). A run's *Create ticket* is resolved here by
+/// [`link_on_arrival`], and an action item's by
+/// `commands::entity::action_item_ticket_inner`, and since #1951 both resolve
+/// the same row: two rules would give two answers, and which one won would
+/// depend on which reader asked first.
+pub(crate) async fn ticket_filed(
     pool: &sqlx::PgPool,
     write_id: i64,
     source_id: &str,

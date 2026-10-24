@@ -281,22 +281,19 @@ const STATE_OPEN: &str = "open";
 /// does not exist. Postgres' default escape character is `\`, and the value
 /// is bound, so escaping the three metacharacters is the whole job.
 ///
-/// The escaping itself is [`escape_like`], shared since #289.
+/// The escaping itself is [`escape_like`].
 fn like_prefix(repo: &EntityRef) -> String {
     format!("{}%", escape_like(&repo.to_string()))
 }
 
 /// The escaping half of [`like_prefix`], without the trailing `%`.
 ///
-/// Split out for #289, which needs the same escaping for a **source id**:
-/// `protocol::ticket_titled` narrows a look-back-after-write to one
-/// source's corpus with `<escaped source id>:%`, and source ids carry
-/// underscores just as repository names do. It wants the escaping and its own
-/// separator, not this function's bare `%` -- and trimming the `%` back off
-/// would be wrong for an id that ends in one, since its own `%` is escaped to
-/// `\%` and a trim cannot tell the two apart. So the escaping is shared and
-/// each caller spells its own pattern.
-pub(crate) fn escape_like(value: &str) -> String {
+/// Split out for #289, whose look-back for an action item's ticket narrowed to
+/// one source's corpus with `<escaped source id>:%`. That read went in #1958:
+/// an action item's ticket is now found by `sources::write_queue::ticket_filed`,
+/// which matches `source_id` exactly and needs no pattern. The split stays
+/// because the escaping is the part worth testing on its own.
+fn escape_like(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 4);
     for ch in value.chars() {
         if matches!(ch, '%' | '_' | '\\') {
