@@ -564,6 +564,7 @@ mod tests {
     use crate::model::{CommentPage, Myself, SearchPage, ServerInfo, WorklogPage};
     use knobas_source::contract::VecSink;
     use std::sync::Mutex;
+    use std::sync::atomic::Ordering;
 
     /// A Jira Software with boards: each board is `(id, name, type, filter
     /// jql, sub-query, columns, keys its query answers)`. No issues: the
@@ -596,11 +597,24 @@ mod tests {
         queries: Mutex<Vec<String>>,
         /// The page size each keys-only search asked for.
         key_pages: Mutex<Vec<u32>>,
+        /// What Jira holds once the first board page has been answered: a
+        /// board deleted or renamed while the listing is read.
+        then: Option<Vec<FakeBoard>>,
+        /// Board pages answered so far.
+        board_pages: std::sync::atomic::AtomicU32,
     }
 
     impl Agile {
+        /// The boards Jira holds now.
+        fn held(&self) -> &[FakeBoard] {
+            match &self.then {
+                Some(then) if self.board_pages.load(Ordering::SeqCst) > 0 => then,
+                _ => &self.boards,
+            }
+        }
+
         fn board(&self, id: u64) -> Option<&FakeBoard> {
-            self.boards
+            self.held()
                 .iter()
                 .chain(&self.elsewhere)
                 .find(|b| b.0 == id)
@@ -683,10 +697,14 @@ mod tests {
             if self.no_software || project.is_some_and(|p| self.unlisted.contains(&p)) {
                 return Err(not_found());
             }
-            let listed: Vec<&FakeBoard> = match project {
-                Some(_) => self.boards.iter().collect(),
-                None => self.boards.iter().chain(&self.elsewhere).collect(),
+            let mut listed: Vec<&FakeBoard> = match project {
+                Some(_) => self.held().iter().collect(),
+                None => self.held().iter().chain(&self.elsewhere).collect(),
             };
+            // Jira Software 10.3's order, measured on the seeded Jira for
+            // #2003: by name, ignoring case, so a rename moves a row.
+            listed.sort_by_key(|b| b.1.to_lowercase());
+            self.board_pages.fetch_add(1, Ordering::SeqCst);
             let values: Vec<Value> = listed
                 .iter()
                 .skip(start_at as usize)
@@ -1144,6 +1162,87 @@ mod tests {
         let (items, _) = sync(&api, None).await;
         let keys: Vec<&str> = items.iter().map(|i| i.entity.key.as_str()).collect();
         assert_eq!(keys, ["board-21", "filter-122", "filter-10300"]);
+    }
+
+    /// Sixty boards on PAY, more than one listing page: board `100 + n` is
+    /// named `board nn`, so Jira lists them in id order.
+    fn many() -> Vec<FakeBoard> {
+        (1..=60_u64)
+            .map(|n| {
+                let leak = |text: String| -> &'static str { Box::leak(text.into_boxed_str()) };
+                (
+                    100 + n,
+                    leak(format!("board {n:02}")),
+                    "kanban",
+                    leak(format!("project = PAY AND labels = b{n} ORDER BY Rank ASC")),
+                    None,
+                    columns(None, "none"),
+                    vec!["PAY-1"],
+                )
+            })
+            .collect()
+    }
+
+    /// A run over `then` after a first run over `before`, an hour on, so the
+    /// second reads the boards: what it delivers, as `(key, gone)`. PAY
+    /// alone, so one listing: the fake lists every board on each project.
+    async fn read_again(before: Vec<FakeBoard>, then: Vec<FakeBoard>) -> Vec<(String, bool)> {
+        let pay = crate::JiraConfig::from_json(&json!({ "projects": ["PAY"] })).unwrap();
+        let (_, first) = sync_with(
+            &Agile {
+                boards: before.clone(),
+                ..Agile::default()
+            },
+            &pay,
+            None,
+        )
+        .await;
+        let api = Agile {
+            boards: before,
+            then: Some(then),
+            clock_minutes: 120,
+            ..Agile::default()
+        };
+        let (items, _) = sync_with(&api, &pay, Some(first)).await;
+        items
+            .iter()
+            .map(|i| (i.entity.key.clone(), i.deleted))
+            .collect()
+    }
+
+    /// A board deleted from a page already read shifts the first board of
+    /// the next page onto it (#2003): no page of that listing holds it, and
+    /// the run must not deliver it as gone.
+    #[tokio::test]
+    async fn a_board_deleted_while_the_listing_is_read_hides_no_other() {
+        let before = many();
+        let mut then = before.clone();
+        then.retain(|b| b.0 != 110);
+        assert_eq!(
+            read_again(before, then).await,
+            [("board-110".to_owned(), true)],
+            "the deleted board goes, and every other board stays"
+        );
+    }
+
+    /// A rename moves a row in Jira's name order (#2003): a board renamed
+    /// from an unread page to one already read is on no page of that listing.
+    #[tokio::test]
+    async fn a_board_renamed_while_the_listing_is_read_hides_no_other() {
+        let before = many();
+        let mut then = before.clone();
+        let renamed = then.iter_mut().find(|b| b.0 == 155).unwrap();
+        renamed.1 = "board 00";
+        let delivered = read_again(before, then).await;
+        assert!(
+            delivered.iter().all(|(_, gone)| !gone),
+            "nothing went: {delivered:?}"
+        );
+        assert_eq!(
+            delivered,
+            [("board-155".to_owned(), false)],
+            "the renamed board, delivered under its new name"
+        );
     }
 
     /// Jira Data Center's search maximum (#1700): the keys are all a view's
