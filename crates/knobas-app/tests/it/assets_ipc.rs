@@ -6160,9 +6160,10 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
     );
     // In `ROUTES_TO`'s order, by name, which both readers render as they get
     // it. The expected order is asked of the same database rather than
-    // written here: the names mix cases, and `en_US.UTF-8` sorts case
-    // differently on macOS and Linux. The file lists them in another order, so
-    // a lost `order by` shows here.
+    // written here: the names mix cases, and a cluster made before #2013
+    // sorts them by its libc locale, which orders case differently on macOS
+    // and Linux. The file lists them in another order, so a lost `order by`
+    // shows here.
     let names: Vec<String> = answer.routes.iter().map(|r| r.name.clone()).collect();
     let by_name: Vec<String> =
         sqlx::query_scalar("select n from unnest($1::text[]) as n order by n")

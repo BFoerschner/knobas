@@ -1,6 +1,8 @@
 // A crate root resolves `mod` beside itself, so the path is spelled out.
 #[path = "embedded/elsewhere.rs"]
 mod elsewhere;
+#[path = "embedded/locale.rs"]
+mod locale;
 #[path = "embedded/slow_answer.rs"]
 mod slow_answer;
 
@@ -1779,9 +1781,19 @@ fn stdout_of_a_child(test: &str, url: Option<&str>) -> String {
 /// This binary re-run as a child on the one test named `test` -- its pid and
 /// output, passed or not.
 fn run_a_child(test: &str, url: Option<&str>) -> (u32, std::process::Output) {
+    run_a_child_with(test, url, &[])
+}
+
+/// [`run_a_child`], with `env` set in the child's environment too.
+fn run_a_child_with(
+    test: &str,
+    url: Option<&str>,
+    env: &[(&str, &str)],
+) -> (u32, std::process::Output) {
     let mut child = std::process::Command::new(std::env::current_exe().unwrap());
     child
         .args(["--exact", test, "--nocapture"])
+        .envs(env.iter().copied())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     match url {
