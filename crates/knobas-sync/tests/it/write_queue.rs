@@ -500,13 +500,23 @@ impl SyncEvents for Recorder {
     }
 }
 
-/// A keychain that can be locked (#1741): what a locked macOS keychain
+/// What a locked keychain answers a read with.
+type Locked = Arc<Mutex<Option<fn() -> knobas_secrets::SecretError>>>;
+
+/// A keychain that can be locked (#1741). What a locked macOS keychain
 /// answers a read with, `errSecInteractionNotAllowed`, arrives as
-/// [`SecretError::Backend`](knobas_secrets::SecretError::Backend), so that is
-/// what a locked one here answers. Open, it is the [`MemoryStore`] it wraps.
+/// [`SecretError::Backend`](knobas_secrets::SecretError::Backend); a store
+/// that refuses access as
+/// [`Unavailable`](knobas_secrets::SecretError::Unavailable). Open, it is the
+/// [`MemoryStore`] it wraps.
 struct Lockable {
     inner: MemoryStore,
-    locked: Arc<std::sync::atomic::AtomicBool>,
+    locked: Locked,
+}
+
+/// The read a locked macOS keychain fails with.
+fn interaction_not_allowed() -> knobas_secrets::SecretError {
+    knobas_secrets::SecretError::Backend("User interaction is not allowed.".to_owned())
 }
 
 impl SecretStore for Lockable {
@@ -514,10 +524,8 @@ impl SecretStore for Lockable {
         &self,
         account: &knobas_secrets::KeychainAccount,
     ) -> Result<Option<Secret>, knobas_secrets::SecretError> {
-        if self.locked.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(knobas_secrets::SecretError::Backend(
-                "User interaction is not allowed.".to_owned(),
-            ));
+        if let Some(error) = *self.locked.lock().unwrap() {
+            return Err(error());
         }
         self.inner.get(account)
     }
@@ -538,7 +546,7 @@ impl SecretStore for Lockable {
 
 struct Harness {
     deps: SchedulerDeps,
-    locked: Arc<std::sync::atomic::AtomicBool>,
+    locked: Locked,
     events: Arc<Recorder>,
     answer: Arc<Mutex<Answer>>,
     asked: Arc<Mutex<usize>>,
@@ -560,10 +568,10 @@ impl Harness {
         *self.answer.lock().unwrap() = answer;
     }
 
-    /// Lock or unlock the keychain the flushes read the credential from.
-    fn lock_keychain(&self, locked: bool) {
-        self.locked
-            .store(locked, std::sync::atomic::Ordering::SeqCst);
+    /// Lock the keychain the flushes read the credential from, to fail every
+    /// read with `error`, or unlock it with `None`.
+    fn lock_keychain(&self, error: Option<fn() -> knobas_secrets::SecretError>) {
+        *self.locked.lock().unwrap() = error;
     }
 
     /// What the fake actually accepted, in order, each write read back by the
@@ -957,7 +965,7 @@ async fn harness() -> Harness {
     let file_at = Arc::new(Mutex::new(None));
     let doors = Arc::new(Mutex::new(Doors::default()));
     let events = Arc::new(Recorder::default());
-    let locked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let locked: Locked = Arc::new(Mutex::new(None));
     Harness {
         deps: SchedulerDeps {
             pool: pool.clone(),
@@ -2668,7 +2676,7 @@ async fn a_write_flushed_while_the_keychain_is_locked_climbs_the_ladder() {
     let h = harness().await;
     let ticket = h.mirror("PAY-46", "a payout fails").await;
 
-    h.lock_keychain(true);
+    h.lock_keychain(Some(interaction_not_allowed));
     let write = h.comment(&ticket, "typed while the keychain was locked").await;
     let waiting = h.reload(write.id).await;
     assert_eq!(waiting.state, WriteState::Pending);
@@ -2680,7 +2688,7 @@ async fn a_write_flushed_while_the_keychain_is_locked_climbs_the_ladder() {
     );
     assert_eq!(h.asked(), 0, "the source is not asked without a credential");
 
-    h.lock_keychain(false);
+    h.lock_keychain(None);
     h.rewind(50).await;
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
     assert_eq!(h.asked(), 0, "not before the first rung, one minute");
@@ -2692,6 +2700,24 @@ async fn a_write_flushed_while_the_keychain_is_locked_climbs_the_ladder() {
         h.delivered(),
         vec!["typed while the keychain was locked".to_owned()]
     );
+}
+
+/// #1741: a store that refuses access is a keychain fault too, and its detail
+/// starts `keychain:` although its own message does not.
+#[tokio::test]
+async fn a_write_flushed_while_the_store_refuses_access_waits_on_the_keychain() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-47", "a payout fails").await;
+
+    h.lock_keychain(Some(|| knobas_secrets::SecretError::Unavailable));
+    let write = h.comment(&ticket, "typed while the store refused").await;
+    let waiting = h.reload(write.id).await;
+    assert_eq!(waiting.wait_reason, Some(WaitReason::Unreachable));
+    assert_eq!(
+        waiting.detail.as_deref(),
+        Some("keychain: the credential store refused access")
+    );
+    assert_eq!(h.asked(), 0);
 }
 
 /// #1628: *Flush now* is the reader saying "try it": it sends a

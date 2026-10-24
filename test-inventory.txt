@@ -4018,6 +4018,7 @@ knobas-sync	test/it	write_queue::a_title_edit_holds_on_a_retitle_and_not_on_a_cl
 knobas-sync	test/it	write_queue::a_withdrawn_write_is_terminal_and_recorded
 knobas-sync	test/it	write_queue::a_write_a_source_can_take_goes_at_once
 knobas-sync	test/it	write_queue::a_write_flushed_while_the_keychain_is_locked_climbs_the_ladder
+knobas-sync	test/it	write_queue::a_write_flushed_while_the_store_refuses_access_waits_on_the_keychain
 knobas-sync	test/it	write_queue::a_write_the_local_quota_held_waits_on_the_ladder
 knobas-sync	test/it	write_queue::a_write_the_source_refuses_on_repeat_waits_rather_than_holds
 knobas-sync	test/it	write_queue::a_write_whose_credential_was_rejected_is_not_sent_again_by_the_next_flushes
