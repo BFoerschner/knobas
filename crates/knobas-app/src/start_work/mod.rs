@@ -99,6 +99,9 @@ pub enum Landing {
         source: String,
         detail: Option<String>,
     },
+    /// A **held write** whose source the user turned off (#204): the remedy is
+    /// re-enabling the source, not a choice between versions.
+    SourceOff,
     /// The source refused this write, in its own words.
     Refused { detail: String },
     /// The row is gone: discarded, or never readable.
@@ -280,6 +283,8 @@ pub trait Steps: Send + Sync {
 ///   (#1973). Its retry re-reads the write and sends nothing while the write
 ///   is open, so once the user sends it again from the queue, the retry is what
 ///   moves the step on.
+/// * **Each hold says which it is** (CONTEXT.md, *Held write*): a target that
+///   changed, a source turned off, a send never answered. Never collapsed.
 /// * **Refused carries the source's own sentence**, so a permanent failure is
 ///   reportable rather than merely counted.
 #[must_use]
@@ -311,6 +316,14 @@ pub fn outcome_of(landing: &Landing) -> (StepOutcome, Option<String>) {
                 }),
             )
         }
+        Landing::SourceOff => (
+            StepOutcome::Failed,
+            Some(
+                "its source is turned off, so the write is held -- re-enable it in Sources \
+                 to send it, or discard it in the write queue"
+                    .to_owned(),
+            ),
+        ),
         Landing::Refused { detail } => (StepOutcome::Failed, Some(detail.clone())),
         Landing::Withdrawn => (
             StepOutcome::Failed,
@@ -1227,6 +1240,18 @@ mod tests {
         assert!(!detail.contains("changed"), "{detail}");
     }
 
+    /// A hold because the user turned the source off is not a target that
+    /// changed either (#204): the remedy is the source toggle, and the step
+    /// says so. It still stops the step, as every other hold does.
+    #[test]
+    fn a_hold_for_a_source_turned_off_says_so_and_stops_the_step() {
+        let (outcome, detail) = outcome_of(&Landing::SourceOff);
+        assert_eq!(outcome, StepOutcome::Failed);
+        let detail = detail.expect("a reason");
+        assert!(detail.contains("turned off"), "{detail}");
+        assert!(!detail.contains("changed"), "{detail}");
+    }
+
     /// A refusal carries the source's own sentence up to the stepper, so a
     /// permanent failure is reportable rather than merely counted.
     #[test]
@@ -1249,6 +1274,7 @@ mod tests {
                 source: String::new(),
                 detail: None,
             },
+            Landing::SourceOff,
             Landing::Refused {
                 detail: String::new(),
             },

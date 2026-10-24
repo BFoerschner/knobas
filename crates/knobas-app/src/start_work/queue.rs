@@ -132,8 +132,9 @@ impl<S: Borrow<SourcesState> + Send + Sync> Steps for Queue<S> {
 ///
 /// A held row says which of the three holds it is (CONTEXT.md, *Held write*:
 /// the reasons are never collapsed). A send never answered comes first
-/// ([`QueuedWrite::may_have_landed`]): whether the write may already be at the
-/// source is what decides that nothing may invite a second send (#1973).
+/// ([`QueuedWrite::may_have_landed`]), turned off or not: whether the write may
+/// already be at the source is what decides that nothing may invite a second
+/// send (#1973). Then a source the user turned off, then the drift.
 #[must_use]
 pub fn landing_from(row: Option<QueuedWrite>) -> Landing {
     let Some(row) = row else {
@@ -153,6 +154,7 @@ pub fn landing_from(row: Option<QueuedWrite>) -> Landing {
                 detail: text("detail").filter(|detail| !detail.is_empty()),
             }
         }
+        WriteState::Held if !row.source_enabled => Landing::SourceOff,
         WriteState::Held => Landing::Held { detail: row.detail },
         WriteState::Refused => Landing::Refused {
             detail: row
@@ -497,7 +499,8 @@ mod tests {
     /// The held side's `unconfirmed` key is what tells a send never answered
     /// from a target that changed (#1125, #1966); the step reads the first as
     /// its own landing, naming the source to check, and never as a drift
-    /// (#1973). A held row without it is the drift it always was.
+    /// (#1973). A source turned off is its own landing too (#204), and a
+    /// held row with neither is the drift it always was.
     #[test]
     fn each_reason_a_write_is_held_is_its_own_landing() {
         let unconfirmed = write_queue::unconfirmed(
@@ -519,6 +522,7 @@ mod tests {
             landing_from(Some(held(Some(unconfirmed), false))),
             Landing::Unconfirmed { .. }
         ));
+        assert_eq!(landing_from(Some(held(None, false))), Landing::SourceOff);
         assert_eq!(
             landing_from(Some(held(Some(serde_json::json!({"op": "transition"})), true))),
             Landing::Held {
