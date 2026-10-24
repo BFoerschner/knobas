@@ -45,7 +45,7 @@ if [ ! -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
     exit 0
 fi
 fixture=$(mktemp -d "${TMPDIR:-/tmp}/knobas-shot-steps.XXXXXX")
-server= stalled=
+server='' stalled=''
 # The stalled case runs in the background; a run that ends before its `wait`
 # stops it, and its SIGTERM handler takes its Chrome down.
 cleanup() {
