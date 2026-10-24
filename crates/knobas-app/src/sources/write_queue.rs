@@ -49,6 +49,8 @@ use crate::IpcError;
 ///   renders its action bar from, so an op absent from it is one that should
 ///   never have been offered (story 13), and saying so at the call is the
 ///   difference between an interface that lies and one that does not.
+///   A keychain that will not open says nothing about what the instance
+///   offers, so an op the kind's roles allow is queued then (#1944).
 ///
 /// # Errors
 ///
@@ -703,19 +705,36 @@ pub(crate) async fn submittable(
     // only when **neither** the kind nor the instance has ever heard of it,
     // which is the case this refusal exists for (story 13: an op absent from
     // `write_ops` is one that should never have been offered).
-    let template: Vec<String> = registry
+    //
+    // **A keychain that would not open is no answer about the instance**
+    // (#1944). The instance half is then every write the kind's roles say a
+    // source filling them may offer (`knobas_source::role`), which for a Kuma
+    // is its pause, resume and create. The write is queued, and the flush
+    // waits the keychain out on the sync's ladder (#1741). If the instance
+    // turns out not to offer it, the adapter refuses it there (battery
+    // clause 5). An op no instance of the kind could offer is still refused
+    // here.
+    let template = registry
         .descriptors()
         .into_iter()
         .find(|d| d.adapter_kind == source.adapter_kind)
-        .map(|d| d.write_ops)
         .ok_or_else(|| {
             IpcError::internal(format!(
                 "source {:?} is a {:?}, which no compiled-in adapter answers to",
                 source.id, source.adapter_kind
             ))
         })?;
-    let mut declared = template;
-    for offered in crate::sources::crud::instance_write_ops(secrets, registry, &source).await {
+    let instance = match crate::sources::crud::instance_offers(secrets, registry, &source).await {
+        crate::sources::crud::InstanceOffers::Ops(ops) => ops,
+        crate::sources::crud::InstanceOffers::KeychainSilent => template
+            .roles
+            .iter()
+            .filter_map(|claim| knobas_source::role::minimum(&claim.role))
+            .flat_map(|minimum| minimum.writes.iter().map(|&op| op.to_owned()))
+            .collect(),
+    };
+    let mut declared = template.write_ops;
+    for offered in instance {
         if !declared.contains(&offered) {
             declared.push(offered);
         }
@@ -1107,6 +1126,79 @@ mod tests {
             .expect("a Kuma with an account offers pause_monitor");
         assert_eq!(op.identifier(), "pause_monitor");
         assert_eq!(source, id);
+    }
+
+    /// A keychain that will not open, as a locked macOS keychain answers a
+    /// read: `errSecInteractionNotAllowed`, arriving as `Backend`.
+    struct Locked;
+
+    impl knobas_secrets::SecretStore for Locked {
+        fn get(
+            &self,
+            _account: &knobas_secrets::KeychainAccount,
+        ) -> Result<Option<knobas_secrets::Secret>, knobas_secrets::SecretError> {
+            Err(knobas_secrets::SecretError::Backend(
+                "User interaction is not allowed.".to_owned(),
+            ))
+        }
+        fn put(
+            &self,
+            _account: &knobas_secrets::KeychainAccount,
+            _secret: &knobas_secrets::Secret,
+        ) -> Result<(), knobas_secrets::SecretError> {
+            unreachable!("submittable writes no credential")
+        }
+        fn delete(
+            &self,
+            _account: &knobas_secrets::KeychainAccount,
+        ) -> Result<(), knobas_secrets::SecretError> {
+            unreachable!("submittable deletes no credential")
+        }
+    }
+
+    /// #1944: a locked keychain is this machine learning nothing about the
+    /// instance, not the instance offering nothing. A pause pressed while it
+    /// is locked is queued, and the flush waits the keychain out as the sync
+    /// does, where it used to be refused at the button. The kind's roles say
+    /// what an instance may offer, so an op no instance of the kind could
+    /// offer is still refused.
+    #[tokio::test]
+    async fn a_pause_pressed_while_the_keychain_is_locked_is_queued_not_refused() {
+        let pool = pool().await;
+        let kuma = unique("kuma-locked-submit");
+        configured_with(
+            &pool,
+            &kuma,
+            knobas_source_kuma::ADAPTER_KIND,
+            knobas_source::AuthMethod::ApiToken,
+        )
+        .await;
+        let locked: std::sync::Arc<dyn knobas_secrets::SecretStore> = std::sync::Arc::new(Locked);
+
+        let (op, source) = submittable(
+            &pool,
+            &locked,
+            &registry(),
+            serde_json::json!({ "PauseMonitor": { "entity": format!("{kuma}:8") } }),
+        )
+        .await
+        .expect("a pause the keychain could not answer for is queued");
+        assert_eq!(op.identifier(), "pause_monitor");
+        assert_eq!(source, kuma);
+
+        let teamcity = unique("teamcity-locked-submit");
+        configured(&pool, &teamcity, "teamcity").await;
+        let error = submittable(
+            &pool,
+            &locked,
+            &registry(),
+            serde_json::json!({
+                "Comment": { "entity": format!("{teamcity}:build:1187"), "body": "hi" }
+            }),
+        )
+        .await
+        .expect_err("no CI source comments, keychain or not");
+        assert_eq!(error.code, crate::IpcErrorCode::Invalid);
     }
 
     /// A target that is not an entity id names nothing the queue could ever

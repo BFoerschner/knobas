@@ -175,12 +175,41 @@ fn instance_from(
 ///
 /// So it is infallible on purpose: there is no answer this can give that a
 /// caller should propagate, and returning a `Result` is how the next caller
-/// comes to propagate one.
+/// comes to propagate one. A caller that has to tell "offers nothing" from
+/// "the keychain gave no answer" asks [`instance_offers`].
 pub async fn instance_write_ops(
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
     cfg: &knobas_sync::config::SourceConfigRow,
 ) -> Vec<String> {
+    match instance_offers(secrets, registry, cfg).await {
+        InstanceOffers::Ops(ops) => ops,
+        InstanceOffers::KeychainSilent => Vec::new(),
+    }
+}
+
+/// What [`instance_offers`] learned about an instance's write ops.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstanceOffers {
+    /// The instance's own `write_ops`, empty for one that has no credential
+    /// or whose adapter would not build.
+    Ops(Vec<String>),
+    /// The keychain would not open, so this machine learned nothing about the
+    /// instance (#1944). Not a verdict: the sync waits the same fault out.
+    KeychainSilent,
+}
+
+/// [`instance_write_ops`], keeping apart the one state that is no answer at
+/// all: a keychain fault. A missing credential is an answer (a Kuma with no
+/// account offers no pause), and so is an adapter that refuses to build.
+///
+/// `submit_write` is the caller that needs the difference. A refusal there is
+/// a verdict on the write, and a locked keychain gave none (#1944).
+pub async fn instance_offers(
+    secrets: &Arc<dyn SecretStore>,
+    registry: &Arc<dyn AdapterRegistry>,
+    cfg: &knobas_sync::config::SourceConfigRow,
+) -> InstanceOffers {
     let credential = match cfg.auth_kind.method() {
         None => Credential::default(),
         Some(_) => match knobas_secrets::spawn::get(
@@ -190,7 +219,8 @@ pub async fn instance_write_ops(
         .await
         {
             Ok(Some(stored)) => stored.into(),
-            Ok(None) | Err(_) => return Vec::new(),
+            Ok(None) => return InstanceOffers::Ops(Vec::new()),
+            Err(_) => return InstanceOffers::KeychainSilent,
         },
     };
     let built = knobas_sync::scheduler::build_off_runtime(
@@ -206,9 +236,11 @@ pub async fn instance_write_ops(
         ),
     )
     .await;
-    built
-        .map(|source| source.descriptor().write_ops)
-        .unwrap_or_default()
+    InstanceOffers::Ops(
+        built
+            .map(|source| source.descriptor().write_ops)
+            .unwrap_or_default(),
+    )
 }
 
 /// Create a source: secret first, then the row.
