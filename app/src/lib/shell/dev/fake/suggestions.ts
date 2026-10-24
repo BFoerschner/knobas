@@ -12,6 +12,7 @@ import type {
 } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
 import { CORPUS, FAKE_CONTEXTS } from "./corpus";
+import { keyOf } from "../../../time/format";
 
 /**
  * What a detection pass would propose over this corpus, in the detector's own
@@ -177,7 +178,7 @@ function proposalEvidence(args: Record<string, unknown>): ProposalEvidence {
   const support: string[] = [];
   const against: string[] = [];
   if (KEY_RULES.includes(rule)) {
-    const key = link.to_id.slice(link.to_id.indexOf(":") + 1);
+    const key = keyOf(link.to_id);
     excerpts.push({ entity_id: link.from_id, parts: markIn(textOf(link.from_id), [key], false) });
   } else if (rule === "similar_text") {
     const words = (link.reason ?? "").replace(/^both mention /, "").split(", ");

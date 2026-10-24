@@ -183,7 +183,7 @@ function candidates(kind: LinkSetMemberKind): { id: string; source: string; proj
       source: row.source_id,
       projects: row.path.length ? row.path : [row.group ?? ""],
       under: [],
-      names: [row.name, row.entity_id.slice(row.entity_id.indexOf(":") + 1)],
+      names: [row.name, keyOf(row.entity_id)],
     }));
   }
   if (kind !== "page") return [];

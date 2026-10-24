@@ -13,7 +13,11 @@
  * working day is belongs to the source's settings.
  */
 
-/** The key half of an entity id: `jira:PAY-231` reads `PAY-231`. */
+/**
+ * The key half of an entity id, past its first colon only: `jira:PAY-231`
+ * reads `PAY-231`, `confluence:ENG:SEPA design` reads `ENG:SEPA design`. The
+ * one copy: `house-rules.test.ts` refuses the slice written in place (#1986).
+ */
 export function keyOf(entityId: string): string {
   return entityId.slice(entityId.indexOf(":") + 1);
 }

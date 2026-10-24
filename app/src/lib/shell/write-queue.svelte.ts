@@ -24,7 +24,7 @@
  * nothing in this file may do it either. `write-queue.test.svelte.ts` runs the
  * clock forward over a held write and asserts it is still held.
  */
-import { minutesLabel } from "../time/format";
+import { keyOf, minutesLabel } from "../time/format";
 import {
   amendWrite,
   applyHeldWrite,
@@ -433,7 +433,7 @@ export function writeWords(
   const op = variant === undefined ? undefined : bag[variant];
   const str = (key: string): string | null => (typeof op?.[key] === "string" ? (op[key] as string) : null);
   const target = str("entity") ?? row.entity_id;
-  const key: WritePart = { text: target.slice(target.indexOf(":") + 1), code: true };
+  const key: WritePart = { text: keyOf(target), code: true };
   /** The target by its title, or by what it is when the title is not known. */
   const titled = (named: string, unnamed: string): WritePart[] => {
     const title = name(target);

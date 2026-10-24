@@ -21,6 +21,7 @@
   import StateChip from "../shell/StateChip.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { provenance } from "./format";
+  import { keyOf } from "../time/format";
 
   let {
     entityId,
@@ -79,11 +80,8 @@
     onhover: () => void;
   } = $props();
 
-  /**
-   * The key half of the id — only the *first* colon separates namespace from
-   * key, so `split(":")[1]` would truncate `confluence:ENG:SEPA design`.
-   */
-  const key = $derived(entityId.slice(entityId.indexOf(":") + 1));
+  /** The key half of the id: `confluence:ENG:SEPA design` reads `ENG:SEPA design`. */
+  const key = $derived(keyOf(entityId));
   const prov = $derived(provenance(sourceId, syncedAt, sources, now, named));
 </script>
 

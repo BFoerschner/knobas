@@ -569,3 +569,24 @@ test("no page under the ticket-first shell drops rows by source", () => {
     "lib/tf/job/job.ts",
   ]);
 });
+
+/**
+ * An entity id's key is `keyOf` (`lib/time/format.ts`), never a slice past
+ * its first colon written in place (#1986). Seven copies survived #1678's
+ * grep for `function keyOf`, because none was a function; this scans for the
+ * expression itself, and for the `split(":")` forms that truncate a key which
+ * holds a colon of its own (`confluence:ENG:SEPA design`).
+ *
+ * The `?fake-ipc` backend is in the scan: it builds the same keys a surface
+ * reads back. Tests are not: a fixture may spell an id however it likes.
+ */
+test("no module splits an entity id into its key in place", () => {
+  const inline = /\.slice\([^()]*\.indexOf\(":"\)\s*\+\s*1\s*\)|\.split\(":"\)(\[1\]|\.pop\(\))/;
+  expect(
+    offenders(
+      (text, file) =>
+        !/\.test\.(svelte\.)?ts$/.test(file) && file !== join(ROOT, "lib", "time", "format.ts") && inline.test(codeOf(text)),
+    ),
+    "an entity id's key is keyOf from lib/time/format.ts",
+  ).toEqual([]);
+});

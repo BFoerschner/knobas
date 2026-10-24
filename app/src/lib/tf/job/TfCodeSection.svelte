@@ -12,6 +12,7 @@
 <script lang="ts">
   import type { CheckoutView, EntityRow, Reached } from "../../ipc/entity";
   import { kindSingular } from "../../shell/kinds";
+  import { keyOf } from "../../time/format";
   import { ago } from "../../shell/time";
   import type { Layers } from "../layers.svelte";
   import type { Apps } from "../openin/apps.svelte";
@@ -63,7 +64,7 @@
 
   /** The repository the line is about, for *Clone*'s folder. */
   const repoTitle = $derived(
-    sorted.find((row) => row.entity_id === checkout?.repo_entity_id)?.title ?? checkout?.repo_entity_id?.split(":").pop() ?? "",
+    sorted.find((row) => row.entity_id === checkout?.repo_entity_id)?.title ?? (checkout?.repo_entity_id ? keyOf(checkout.repo_entity_id) : ""),
   );
 
   function sub(row: EntityRow): string {

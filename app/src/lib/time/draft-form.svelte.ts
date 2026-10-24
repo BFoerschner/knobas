@@ -13,7 +13,7 @@
  */
 import type { Draft, LoggedWork } from "../ipc/time";
 import { atClock, clockOf } from "./draft";
-import { minutesLabel } from "./format";
+import { keyOf, minutesLabel } from "./format";
 
 export class DraftForm {
   readonly draft: Draft;
@@ -71,7 +71,7 @@ export class DraftForm {
 
   /** `PAY-231`: the half after the first colon, as everywhere else. */
   get key(): string {
-    return this.draft.entity_id.slice(this.draft.entity_id.indexOf(":") + 1);
+    return keyOf(this.draft.entity_id);
   }
 
   toggle(id: string) {

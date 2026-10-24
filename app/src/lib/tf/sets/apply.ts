@@ -9,6 +9,7 @@
  */
 import type { EntityRow, LinkEnd, LinkSetDraft, LinkSetMemberKind, LinkSetRow, LinkSetRule } from "../../ipc/entity";
 import { itemsOf, ruleLabel } from "./sets";
+import { keyOf } from "../../time/format";
 
 /** A set as `save_link_set` takes it back: members, patterns and rules in their order. */
 export function draftOf(set: Pick<LinkSetRow, "id" | "name" | "description" | "members" | "patterns" | "rules">): LinkSetDraft {
@@ -150,7 +151,7 @@ export async function epicAbove(
 
 /** The project rule's value, `<source>:<key prefix>`; `null` for a key with no project part. */
 export function projectOf(row: Pick<EntityRow, "entity_id" | "source_id">): string | null {
-  const key = row.entity_id.slice(row.entity_id.indexOf(":") + 1);
+  const key = keyOf(row.entity_id);
   const dash = key.lastIndexOf("-");
   return dash > 0 ? `${row.source_id}:${key.slice(0, dash)}` : null;
 }
