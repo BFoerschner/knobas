@@ -24,6 +24,8 @@ import { join } from "node:path";
 import ts from "typescript";
 import { expect, test } from "vitest";
 
+import { wholeTreeBudget } from "./test-budget";
+
 /** `eslint-config-react-app`'s `confusing-browser-globals`, cut to the names `lib.dom` declares as plain globals that a local plausibly shadows. */
 const CONFUSING = new Set([
   "close",
@@ -180,4 +182,4 @@ test("the scan flags the #928 shape and nothing a local or a property can be", (
 
 test("no source file uses a confusing browser global bare", () => {
   expect(bareGlobalUses(sources())).toEqual([]);
-});
+}, wholeTreeBudget());

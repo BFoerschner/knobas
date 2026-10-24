@@ -23,6 +23,8 @@ import { svelte2tsx } from "svelte2tsx";
 import ts from "typescript";
 import { expect, test } from "vitest";
 
+import { wholeTreeBudget } from "./test-budget";
+
 const APP = process.cwd();
 const svelteVersion = (JSON.parse(readFileSync(join(APP, "node_modules/svelte/package.json"), "utf8")) as { version: string }).version;
 
@@ -115,4 +117,4 @@ test("no `??` falls back on a value the type says is always there", () => {
   ).toEqual([]);
   const stale = [...KEPT.keys()].filter((hit) => !found.includes(hit));
   expect(stale, "these KEPT entries match nothing: remove them").toEqual([]);
-}, 60_000);
+}, wholeTreeBudget());
