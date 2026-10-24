@@ -10,12 +10,14 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { TicketViewRow } from "../../ipc/search";
 import type {
+  AdapterPreview,
   AdapterStatus,
   CredentialHealth,
   SourceSummary,
   SourceSyncStatus,
   SyncProgress,
   SyncRunRow,
+  UpdatePreview,
 } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
 import { GITEA_SCHEMA, JIRA_SCHEMA } from "../../sources/fixtures";
@@ -151,9 +153,11 @@ function ports(over: Partial<SettingsPorts> = {}): SettingsPorts {
     watchSync: vi.fn(() => Promise.resolve(null)),
     syncAll: vi.fn(() => Promise.resolve([1, 2])),
     addSource: vi.fn(() => Promise.reject(new Error("not in this test"))),
+    previewInstallAdapter: vi.fn(() => Promise.reject(new Error("not in this test"))),
     installAdapter: vi.fn(() => Promise.reject(new Error("not in this test"))),
     listInstalledAdapters: vi.fn(() => Promise.resolve([])),
     checkAdapterUpdates: vi.fn(() => Promise.resolve([])),
+    previewUpdateAdapter: vi.fn(() => Promise.reject(new Error("not in this test"))),
     updateAdapter: vi.fn(() => Promise.reject(new Error("not in this test"))),
     uninstallAdapter: vi.fn(() => Promise.resolve()),
     listen: vi.fn(() => Promise.resolve(() => {})),
@@ -586,6 +590,39 @@ function installAnswer() {
   };
 }
 
+/** What `preview_install_adapter` answers for [`SURVEYS`]'s manifest (#2031). */
+function previewAnswer(): AdapterPreview {
+  return {
+    adapter_kind: "wasm-fixture",
+    name: "Harbour surveys",
+    adapter_version: "0.1.0",
+    interface_version: "1.0.0",
+    source_url: "/releases/knobas-adapter.json",
+    tag: null,
+    artifact_sha256: "a".repeat(64),
+    confirm_sha256: "c".repeat(64),
+    hosts: ["{base_url}", "api.example.com", "{mirror}"],
+    roles: [
+      { role: "wasm-fixture:survey-desk", reads: [] },
+      { role: "ci", reads: ["run_log"] },
+    ],
+    limits: { deadline_secs: 30, deadline_asked: true, memory_mib: 256, memory_asked: false },
+  };
+}
+
+/** The dialog over Add a source: *Install <name>?* (#2031). */
+function confirmDialog(): HTMLElement {
+  const found = [...target.querySelectorAll<HTMLElement>('.tf-dialog[role="dialog"]')];
+  if (found.length < 2) throw new Error("no dialog over the dialog");
+  return found.at(-1)!;
+}
+
+function confirmButton(text: string): HTMLButtonElement {
+  const found = [...confirmDialog().querySelectorAll("button")].find((el) => el.textContent?.trim() === text);
+  if (!found) throw new Error(`no button "${text}" in the dialog over the dialog`);
+  return found;
+}
+
 /** A source of [`SURVEYS`]'s kind, as `list_sources` lists it. */
 const HARBOUR = summary("harbour", "Harbour", "ok", {
   adapter_kind: "wasm-fixture",
@@ -609,6 +646,7 @@ test("a source of an adapter just installed in Add a source opens with its descr
   let installed = false;
   let added = false;
   p.listAdapters = vi.fn(() => Promise.resolve(installed ? [jira, SURVEYS] : [jira]));
+  p.previewInstallAdapter = vi.fn(() => Promise.resolve(previewAnswer()));
   p.installAdapter = vi.fn(() => {
     installed = true;
     return Promise.resolve(installAnswer());
@@ -623,7 +661,9 @@ test("a source of an adapter just installed in Add a source opens with its descr
   button("+ Add a source").click();
   await settle();
   type("#tf-add-manifest", "/releases/knobas-adapter.json");
-  dialogButton("Install").click();
+  dialogButton("Install…").click();
+  await settle();
+  confirmButton("Install").click();
   await settle();
   type("#tf-add-id", "harbour");
   type("#tf-add-address", "https://surveys.harbour.example");
@@ -656,6 +696,7 @@ test("an Update that changes an adapter's schema shows the new fields on its sou
     listInstalledAdapters: vi.fn(() =>
       Promise.resolve([adapterRow({ update: { state: "available", tag: "v0.2.0", adapter_version: "0.2.0" } })]),
     ),
+    previewUpdateAdapter: vi.fn(() => Promise.resolve(updatePreview())),
     updateAdapter: vi.fn(() => {
       updated = true;
       return Promise.resolve(adapterRow({ tag: "v0.2.0", adapter_version: "0.2.0" }));
@@ -699,21 +740,68 @@ test("an Uninstall takes the adapter out of what Settings offers (#1406)", async
   expect(radios.map((label) => label.querySelector("span")?.firstChild?.textContent)).toEqual(["Jira Data Center"]);
 });
 
+test("Add a source shows an adapter's roles, hosts and limits before it installs (#2031)", async () => {
+  const p = ports({
+    previewInstallAdapter: vi.fn(() => Promise.resolve(previewAnswer())),
+    installAdapter: vi.fn(() => Promise.resolve(installAnswer())),
+  });
+  await open([], p);
+  button("+ Add a source").click();
+  await settle();
+  type("#tf-add-manifest", "  /releases/knobas-adapter.json ");
+  dialogButton("Install…").click();
+  await settle();
+
+  expect(p.previewInstallAdapter).toHaveBeenCalledWith("/releases/knobas-adapter.json");
+  expect(p.installAdapter).not.toHaveBeenCalled();
+  expect(confirmDialog().querySelector("header h2")?.textContent?.trim()).toBe("Install Harbour surveys?");
+  const facts = [...confirmDialog().querySelectorAll(".tf-facts dt")].map((dt) => [dt.textContent, dt.nextElementSibling?.textContent]);
+  expect(facts).toEqual([
+    ["Version", "0.1.0 · no release"],
+    ["From", "/releases/knobas-adapter.json"],
+    ["Roles", "wasm-fixture:survey-desk, CI"],
+    ["Hosts", "It may reach this source's address, api.example.com and the host in its mirror setting, and no other host."],
+    ["Limits", "30 s per call (asked for), 256 MiB of memory (the default)"],
+  ]);
+});
+
+test("Cancel on Install <name>? installs nothing and offers nothing new (#2031)", async () => {
+  const p = ports({ previewInstallAdapter: vi.fn(() => Promise.resolve(previewAnswer())) });
+  await open([], p);
+  button("+ Add a source").click();
+  await settle();
+  type("#tf-add-manifest", "/releases/knobas-adapter.json");
+  dialogButton("Install…").click();
+  await settle();
+  confirmButton("Cancel").click();
+  await settle();
+
+  expect(p.installAdapter).not.toHaveBeenCalled();
+  expect(target.querySelectorAll('.tf-dialog[role="dialog"]')).toHaveLength(1);
+  expect(dialog().querySelectorAll(".tf-radio label")).toHaveLength(1);
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-manifest")!.value).toBe("/releases/knobas-adapter.json");
+});
+
 test("Add a source installs an adapter from a manifest, and it joins the radios chosen (#1202)", async () => {
   const p = ports();
   const jira = (await p.listAdapters())[0]!;
   p.listAdapters = vi.fn().mockResolvedValueOnce([jira]).mockResolvedValue([jira, SURVEYS]);
+  p.previewInstallAdapter = vi.fn(() => Promise.resolve(previewAnswer()));
   p.installAdapter = vi.fn(() => Promise.resolve(installAnswer()));
   await open([], p);
   button("+ Add a source").click();
   await settle();
-  expect(dialogButton("Install").disabled).toBe(true);
+  expect(dialogButton("Install…").disabled).toBe(true);
 
   type("#tf-add-manifest", "  /releases/knobas-adapter.json ");
-  dialogButton("Install").click();
+  dialogButton("Install…").click();
+  await settle();
+  confirmButton("Install").click();
   await settle();
 
-  expect(p.installAdapter).toHaveBeenCalledWith("/releases/knobas-adapter.json");
+  // Held to the artifact the preview showed (#2031).
+  expect(p.installAdapter).toHaveBeenCalledWith("/releases/knobas-adapter.json", "c".repeat(64));
+  expect(target.querySelectorAll('.tf-dialog[role="dialog"]')).toHaveLength(1);
   expect(dialog().querySelector('[role="status"]#tf-add-manifest-note')?.textContent?.trim()).toBe(
     "Installed Harbour surveys 0.1.0. It may reach this source's address, api.example.com and the host in its mirror setting, and no other host.",
   );
@@ -730,7 +818,7 @@ test("Add a source installs an adapter from a manifest, and it joins the radios 
 
 test("Add a source shows a refused install with its reason, and offers nothing new (#1202)", async () => {
   const p = ports({
-    installAdapter: vi.fn(() =>
+    previewInstallAdapter: vi.fn(() =>
       Promise.reject({
         code: "invalid",
         message:
@@ -743,9 +831,12 @@ test("Add a source shows a refused install with its reason, and offers nothing n
   button("+ Add a source").click();
   await settle();
   type("#tf-add-manifest", "/releases/knobas-adapter.json");
-  dialogButton("Install").click();
+  dialogButton("Install…").click();
   await settle();
 
+  // Refused at the check (#2031): no Install <name>? to confirm, and nothing installed.
+  expect(target.querySelectorAll('.tf-dialog[role="dialog"]')).toHaveLength(1);
+  expect(p.installAdapter).not.toHaveBeenCalled();
   expect(dialog().querySelector('[role="alert"]#tf-add-manifest-note')?.textContent?.trim()).toBe(
     "Install refused: the adapter's role claims are refused: role \"other:thing\" is neither a built-in role",
   );
@@ -1260,6 +1351,29 @@ function adapterRow(over: Partial<AdapterStatus> = {}): AdapterStatus {
   };
 }
 
+/** The update's preview: `release` laid over the installed release's facts (#2031). */
+function updatePreview(release: Partial<AdapterPreview> = {}): UpdatePreview {
+  const installed: AdapterPreview = {
+    ...previewAnswer(),
+    source_url: "https://github.test/harbour/surveys",
+    tag: "v0.1.0",
+    artifact_sha256: "5".repeat(64),
+    confirm_sha256: "7".repeat(64),
+    hosts: ["{base_url}"],
+  };
+  return {
+    installed,
+    release: {
+      ...installed,
+      tag: "v0.2.0",
+      adapter_version: "0.2.0",
+      artifact_sha256: "6".repeat(64),
+      confirm_sha256: "8".repeat(64),
+      ...release,
+    },
+  };
+}
+
 function adaptersSection(): HTMLElement {
   const found = target.querySelector<HTMLElement>('section[aria-labelledby="tf-ext-h"]');
   if (!found) throw new Error("no Installed adapters section");
@@ -1276,6 +1390,7 @@ test("an update available is said, and nothing updates until Update is pressed (
     listInstalledAdapters: vi.fn(() =>
       Promise.resolve([adapterRow({ update: { state: "available", tag: "v0.2.0", adapter_version: "0.2.0" } })]),
     ),
+    previewUpdateAdapter: vi.fn(() => Promise.resolve(updatePreview())),
     updateAdapter: vi.fn(() => Promise.resolve(adapterRow({ tag: "v0.2.0", adapter_version: "0.2.0" }))),
   });
   await open([], p);
@@ -1286,9 +1401,53 @@ test("an update available is said, and nothing updates until Update is pressed (
 
   button("Update").click();
   await settle();
-  expect(p.updateAdapter).toHaveBeenCalledWith("wasm-fixture");
+  // The same hosts, roles and limits: nothing to ask, and the switch is held to what was checked (#2031).
+  expect(target.querySelector('.tf-dialog[role="dialog"]')).toBeNull();
+  expect(p.updateAdapter).toHaveBeenCalledWith("wasm-fixture", "8".repeat(64));
   expect(adaptersSection().textContent).toContain("Harbour surveys 0.2.0");
   expect(adaptersSection().textContent).not.toContain("Update available");
+});
+
+test("an update that may reach more hosts or claims more roles says what changed and waits for Update (#2031)", async () => {
+  const p = ports({
+    listInstalledAdapters: vi.fn(() =>
+      Promise.resolve([adapterRow({ update: { state: "available", tag: "v0.2.0", adapter_version: "0.2.0" } })]),
+    ),
+    previewUpdateAdapter: vi.fn(() =>
+      Promise.resolve(
+        updatePreview({
+          hosts: ["{base_url}", "archive.harbour.example"],
+          roles: [...previewAnswer().roles, { role: "ticket-system", reads: [] }],
+          limits: { deadline_secs: 30, deadline_asked: true, memory_mib: 512, memory_asked: true },
+        }),
+      ),
+    ),
+    updateAdapter: vi.fn(() => Promise.resolve(adapterRow({ tag: "v0.2.0", adapter_version: "0.2.0" }))),
+  });
+  await open([], p);
+  button("Update").click();
+  await settle();
+
+  expect(p.updateAdapter).not.toHaveBeenCalled();
+  expect(dialog().querySelector("header h2")?.textContent).toBe("Update Harbour surveys to v0.2.0?");
+  expect([...dialog().querySelectorAll(".tf-ext-changes li")].map((li) => li.textContent)).toEqual([
+    "It may newly reach archive.harbour.example.",
+    "It newly claims ticket system.",
+    "Each call may use 512 MiB of memory, was 256 MiB.",
+  ]);
+  expect(dialog().textContent).toContain("Harbour surveys stays on v0.1.0 until you press Update.");
+
+  dialogButton("Cancel").click();
+  await settle();
+  expect(p.updateAdapter).not.toHaveBeenCalled();
+  expect(adaptersSection().textContent).toContain("Harbour surveys 0.1.0");
+
+  button("Update").click();
+  await settle();
+  dialogButton("Update").click();
+  await settle();
+  expect(p.updateAdapter).toHaveBeenCalledExactlyOnceWith("wasm-fixture", "8".repeat(64));
+  expect(adaptersSection().textContent).toContain("Harbour surveys 0.2.0");
 });
 
 test("a refused update says why and that the installed version stays (#1209)", async () => {
@@ -1298,7 +1457,7 @@ test("a refused update says why and that the installed version stays (#1209)", a
   const listInstalledAdapters = vi.fn().mockResolvedValueOnce([before]).mockResolvedValue([after]);
   const p = ports({
     listInstalledAdapters,
-    updateAdapter: vi.fn(() => Promise.reject({ code: "invalid", message: reason, source_id: null })),
+    previewUpdateAdapter: vi.fn(() => Promise.reject({ code: "invalid", message: reason, source_id: null })),
   });
   await open([], p);
   button("Update").click();

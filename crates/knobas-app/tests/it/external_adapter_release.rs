@@ -163,7 +163,7 @@ async fn install_from(
     forge: &Forge,
     input: &str,
 ) -> install::InstalledAdapter {
-    install::install_from(pool, registry, store, &forge.endpoints(), input)
+    install::install_from(pool, registry, store, &forge.endpoints(), input, None)
         .await
         .unwrap_or_else(|error| panic!("{input} must install: {error}"))
 }
@@ -262,6 +262,7 @@ async fn a_release_with_no_manifest_is_refused_naming_it() {
         store.path(),
         &forge.endpoints(),
         &forge.repo_url(),
+        None,
     )
     .await
     else {
@@ -334,6 +335,7 @@ async fn a_newer_tag_shows_update_available_and_nothing_changes_until_the_reader
         store.path(),
         &forge.endpoints(),
         "wasm-fixture",
+        None,
     )
     .await
     .expect("the newer release passes every check");
@@ -399,6 +401,7 @@ async fn an_update_whose_static_checks_fail_stays_on_the_old_version_with_the_re
         store.path(),
         &forge.endpoints(),
         "wasm-fixture",
+        None,
     )
     .await
     else {
@@ -422,6 +425,195 @@ async fn an_update_whose_static_checks_fail_stays_on_the_old_version_with_the_re
     );
     assert!(install::artifact_path(store.path(), &sha_of(&first)).is_file());
     assert!(builds(&registry), "the old version still runs");
+}
+
+// -- the update's preview and confirm (#2031) --------------------------------------
+
+/// The preview answers what is installed beside the latest release, with
+/// the hosts, roles and limits of each, and switches nothing.
+#[tokio::test]
+async fn an_update_preview_shows_the_release_beside_what_is_installed_and_switches_nothing() {
+    let forge = Forge::start().await;
+    let first = forge.publish("v0.1.0", &fixture_bytes(), |_| {}).await;
+    let (pool, _connector) = scratch("update-preview").await;
+    let store = tempfile::tempdir().unwrap();
+    let registry = Registry::default();
+    install_from(&pool, &registry, store.path(), &forge, &forge.repo_url()).await;
+    let newer = forge
+        .publish("v0.2.0", &newer_bytes(), |m| {
+            m["hosts"] = serde_json::json!(["{base_url}", "api.example.com"]);
+            m["limits"] = serde_json::json!({ "memory_mib": 512 });
+        })
+        .await;
+
+    let preview = installed::preview_update(&pool, &registry, &forge.endpoints(), "wasm-fixture")
+        .await
+        .expect("the newer release passes every check");
+    assert_eq!(preview.installed.tag.as_deref(), Some("v0.1.0"));
+    assert_eq!(preview.installed.artifact_sha256, sha_of(&first));
+    assert_eq!(preview.installed.hosts, ["{base_url}"]);
+    assert_eq!(preview.installed.name, "wasm-fixture");
+    assert_eq!(
+        preview
+            .installed
+            .roles
+            .iter()
+            .map(|r| r.role.as_str())
+            .collect::<Vec<_>>(),
+        ["wasm-fixture:survey-desk", "ci"],
+        "the fixture's custom role and CI"
+    );
+    assert_eq!(
+        preview.installed.limits,
+        install::AdapterLimits {
+            deadline_secs: 30,
+            deadline_asked: true,
+            memory_mib: 256,
+            memory_asked: false,
+        }
+    );
+    assert_eq!(preview.release.tag.as_deref(), Some("v0.2.0"));
+    assert_eq!(preview.release.artifact_sha256, sha_of(&newer));
+    assert_eq!(preview.release.hosts, ["{base_url}", "api.example.com"]);
+    assert_eq!(preview.release.roles, preview.installed.roles);
+    assert_eq!(
+        preview.release.limits,
+        install::AdapterLimits {
+            deadline_secs: 600,
+            deadline_asked: false,
+            memory_mib: 512,
+            memory_asked: true,
+        }
+    );
+
+    let status = only(&pool, &registry).await;
+    assert_eq!(status.tag.as_deref(), Some("v0.1.0"), "nothing switched");
+    assert_eq!(status.hosts, ["{base_url}"]);
+    assert!(!install::artifact_path(store.path(), &sha_of(&newer)).exists());
+}
+
+/// A release the checks refuse is refused at the preview, with the reason
+/// recorded beside the check as an update records it.
+#[tokio::test]
+async fn an_update_preview_the_checks_refuse_records_the_reason() {
+    let forge = Forge::start().await;
+    forge.publish("v0.1.0", &fixture_bytes(), |_| {}).await;
+    let (pool, _connector) = scratch("update-preview-refused").await;
+    let store = tempfile::tempdir().unwrap();
+    let registry = Registry::default();
+    install_from(&pool, &registry, store.path(), &forge, &forge.repo_url()).await;
+    forge
+        .publish("v0.2.0", &newer_bytes(), |m| {
+            m["interface_version"] = "2.0.0".into()
+        })
+        .await;
+    installed::check_updates(&pool, &registry, &forge.endpoints())
+        .await
+        .unwrap();
+
+    let Err(error) =
+        installed::preview_update(&pool, &registry, &forge.endpoints(), "wasm-fixture").await
+    else {
+        panic!("a release the checks refuse has no preview");
+    };
+    let reason = error.to_ipc().message;
+    assert_eq!(
+        only(&pool, &registry).await.update,
+        Some(UpdateCheck::Refused {
+            tag: Some("v0.2.0".to_owned()),
+            reason,
+        })
+    );
+}
+
+/// The confirm switches to the release the reader was shown and no other:
+/// one published after the preview is refused, and the old version stays.
+#[tokio::test]
+async fn an_update_to_another_artifact_than_the_one_confirmed_is_refused() {
+    let forge = Forge::start().await;
+    let first = forge.publish("v0.1.0", &fixture_bytes(), |_| {}).await;
+    let (pool, _connector) = scratch("update-pinned").await;
+    let store = tempfile::tempdir().unwrap();
+    let registry = Registry::default();
+    install_from(&pool, &registry, store.path(), &forge, &forge.repo_url()).await;
+    forge.publish("v0.2.0", &newer_bytes(), |_| {}).await;
+    let shown = installed::preview_update(&pool, &registry, &forge.endpoints(), "wasm-fixture")
+        .await
+        .unwrap()
+        .release
+        .confirm_sha256;
+    let later = patched(&fixture_bytes(), "Reefer plug audit", "Reefer plug probe");
+    forge.publish("v0.3.0", &later, |_| {}).await;
+
+    let Err(error) = installed::update(
+        &pool,
+        &registry,
+        store.path(),
+        &forge.endpoints(),
+        "wasm-fixture",
+        Some(&shown),
+    )
+    .await
+    else {
+        panic!("a release other than the confirmed one must not switch");
+    };
+    let ipc = error.to_ipc();
+    assert_eq!(ipc.code, knobas_app::IpcErrorCode::Invalid);
+    assert!(
+        ipc.message
+            .contains("the release changed after it was checked"),
+        "{}",
+        ipc.message
+    );
+    let status = only(&pool, &registry).await;
+    assert_eq!(status.tag.as_deref(), Some("v0.1.0"));
+    assert_eq!(status.artifact_sha256, sha_of(&first));
+    assert!(builds(&registry), "the old version still runs");
+}
+
+/// The release swapped under its tag after the preview, around the same
+/// artifact, for a manifest with a host the reader was not shown, is refused at the confirm: the artifact's
+/// hash alone does not cover the manifest's hosts.
+#[tokio::test]
+async fn an_update_whose_hosts_widened_after_the_preview_is_refused() {
+    let forge = Forge::start().await;
+    let first = forge.publish("v0.1.0", &fixture_bytes(), |_| {}).await;
+    let (pool, _connector) = scratch("update-pinned-hosts").await;
+    let store = tempfile::tempdir().unwrap();
+    let registry = Registry::default();
+    install_from(&pool, &registry, store.path(), &forge, &forge.repo_url()).await;
+    forge.publish("v0.2.0", &newer_bytes(), |_| {}).await;
+    let shown = installed::preview_update(&pool, &registry, &forge.endpoints(), "wasm-fixture")
+        .await
+        .unwrap()
+        .release;
+    forge
+        .publish("v0.2.0", &newer_bytes(), |m| {
+            m["hosts"] = serde_json::json!(["{base_url}", "collect.example"]);
+        })
+        .await;
+
+    let Err(error) = installed::update(
+        &pool,
+        &registry,
+        store.path(),
+        &forge.endpoints(),
+        "wasm-fixture",
+        Some(&shown.confirm_sha256),
+    )
+    .await
+    else {
+        panic!("a host the reader was not shown must not switch in");
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("the release changed after it was checked"),
+        "{error}"
+    );
+    let status = only(&pool, &registry).await;
+    assert_eq!(status.artifact_sha256, sha_of(&first));
+    assert_eq!(status.hosts, ["{base_url}"]);
 }
 
 // -- uninstall (#1210) -----------------------------------------------------------
@@ -747,7 +939,7 @@ async fn a_public_github_repository_installs_its_latest_release() {
     let registry = Registry::default();
     let endpoints = Endpoints::default();
 
-    let installed = install::install_from(&pool, &registry, store.path(), &endpoints, &repo)
+    let installed = install::install_from(&pool, &registry, store.path(), &endpoints, &repo, None)
         .await
         .unwrap_or_else(|error| panic!("{repo} must install: {error}"));
     assert!(installed.tag.is_some(), "a release has a tag");
@@ -780,6 +972,7 @@ async fn an_update_that_cannot_reach_its_release_is_a_failed_check() {
         store.path(),
         &forge.endpoints(),
         "wasm-fixture",
+        None,
     )
     .await
     else {

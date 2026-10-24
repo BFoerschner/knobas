@@ -104,18 +104,45 @@ fn not_installable() -> IpcError {
 /// ADR-0028): every static check, then the artifact stored under its hash,
 /// the install recorded, and the adapter in `list_adapters` from then on.
 /// A refusal is `invalid` with the check's reason; a kind already taken is
-/// `conflict`.
+/// `conflict`. `sha256` is the `confirm_sha256` `preview_install_adapter`
+/// answered (#2031): over the artifact, the hosts and the limits the reader
+/// was shown. A release it does not match is `invalid` and installs nothing.
 #[tauri::command]
 pub async fn install_adapter<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     profile: State<'_, crate::Profile>,
     manifest: String,
+    sha256: String,
 ) -> Result<crate::sources::install::InstalledAdapter, IpcError> {
     let state = crate::sources::state(&app)?;
     let registry = state.installable().ok_or_else(not_installable)?;
-    crate::sources::install::install_for_profile(&state.pool, &registry, &profile.dir, &manifest)
-        .await
-        .map_err(|error| error.to_ipc())
+    crate::sources::install::install_for_profile(
+        &state.pool,
+        &registry,
+        &profile.dir,
+        &manifest,
+        &sha256,
+    )
+    .await
+    .map_err(|error| error.to_ipc())
+}
+
+/// What `install_adapter` would install from `manifest` (#2031): every check
+/// it runs, and nothing written. Refuses as `install_adapter` refuses.
+#[tauri::command]
+pub async fn preview_install_adapter<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    manifest: String,
+) -> Result<crate::sources::install::AdapterPreview, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let registry = state.installable().ok_or_else(not_installable)?;
+    crate::sources::install::preview_install(
+        &registry,
+        &crate::sources::remote::Endpoints::default(),
+        &manifest,
+    )
+    .await
+    .map_err(|error| error.to_ipc())
 }
 
 /// Every installed external adapter (#1209, #1210): its pin, its sources,
@@ -148,11 +175,14 @@ pub async fn check_adapter_updates<R: tauri::Runtime>(
 
 /// Update an installed adapter to its latest release (#1209), after every
 /// static check; a refusal is `invalid` and leaves the old version running.
+/// `sha256` is the release's `confirm_sha256` `preview_update_adapter`
+/// answered (#2031); a release it does not match is `invalid`.
 #[tauri::command]
 pub async fn update_adapter<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     profile: State<'_, crate::Profile>,
     kind: String,
+    sha256: String,
 ) -> Result<crate::sources::installed::AdapterStatus, IpcError> {
     let state = crate::sources::state(&app)?;
     let installs = installs(&state, &profile.dir)?;
@@ -160,6 +190,28 @@ pub async fn update_adapter<R: tauri::Runtime>(
         &state.pool,
         &installs.registry,
         &installs.store,
+        &installs.endpoints,
+        &kind,
+        Some(&sha256),
+    )
+    .await
+    .map_err(|error| error.to_ipc())
+}
+
+/// What `update_adapter` would switch to, beside what is installed (#2031):
+/// every check it runs, and nothing switched. Refuses as `update_adapter`
+/// refuses, and records the refusal beside the update check as it does.
+#[tauri::command]
+pub async fn preview_update_adapter<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    profile: State<'_, crate::Profile>,
+    kind: String,
+) -> Result<crate::sources::installed::UpdatePreview, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let installs = installs(&state, &profile.dir)?;
+    crate::sources::installed::preview_update(
+        &state.pool,
+        &installs.registry,
         &installs.endpoints,
         &kind,
     )
@@ -1025,7 +1077,7 @@ mod tests {
             "sources",
             MIRROR,
             "app/src/lib/ipc/sources.ts",
-            29,
+            31,
         );
     }
 }

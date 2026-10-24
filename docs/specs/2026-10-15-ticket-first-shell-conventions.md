@@ -98,6 +98,8 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 
 - A button that re-reads an open write rather than sending it again never says *Retry*: a queued start-work step's says *Check again*, and a failed step's keeps *Retry*. *Retry* is for repeating what failed. Beside a write that may already have landed, it reads as an invitation to send twice. (#1998)
 
+- Code the reader has to trust (an external adapter's install or update) is checked before anything is written. An install always asks, and an update asks when what it may reach, claim or use differs from what is installed. The confirm names the roles it claims, every host it may reach and its limits, and the write is held to what was checked (the artifact's hash, its hosts and its limits), so a release that moved in between is refused rather than installed unseen. (#2031)
+
 - Deleting a note is the one irreversible write sent at once: a confirm dialog asks first, and the toast "Deleted <title>" offers no *Undo*, because the `deleted` activity line is final (#1464's ruling, #1504).
 
 ## Checkouts

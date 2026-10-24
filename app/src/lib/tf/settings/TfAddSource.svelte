@@ -16,11 +16,14 @@
 
   *Install an adapter* (#1202, #1209, ADR-0028) takes a GitHub repository
   URL (its latest release), a manifest URL, or the path of a local
-  `knobas-adapter.json`. Install runs the static checks; a refusal is shown
-  with its reason, and an installed adapter joins the radios, chosen, so its
-  generated form is there to fill. The install note
-  names every host the adapter may reach (#1203): a fixed host as written, a
-  template by the setting it is read from, since no source exists yet.
+  `knobas-adapter.json`. *Install…* runs every check and writes nothing
+  (#2031): a refusal is shown with its reason and offers no install, and a
+  release that passes opens *Install <name>?*, which names its version, the
+  roles it claims, every host it may reach (#1203: a fixed host as written, a
+  template by the setting it is read from, since no source exists yet) and
+  the limits it asks for. Only its *Install* installs, held to the release
+  that was shown (its artifact, hosts and limits); *Cancel* leaves nothing behind. An installed adapter joins
+  the radios, chosen, so its generated form is there to fill.
 
   The rooms dialog's five steps are one page here, as prototype-6 draws it.
   Its *Schedule* step is not drawn: a new source syncs every 15 minutes, its
@@ -28,7 +31,7 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { AuthMethod, ConnectionReport, SourceDescriptor, SourceSummary } from "../../ipc/sources";
+  import type { AdapterPreview, AuthMethod, ConnectionReport, SourceDescriptor, SourceSummary } from "../../ipc/sources";
   import { ACCOUNT_INCOMPLETE, accountHalfDone, accountOf } from "../../sources/account";
   import { connectionLine, connectionNote, failedReport, noteAfterFill } from "../../sources/connection";
   import { defaultValues, validate } from "../../sources/schema-form";
@@ -36,6 +39,8 @@
   import type { SettingsPorts } from "./ports";
   import { AUTH_LABEL, defaultIntervalFor, fillFound, SOURCE_ID_PATTERN } from "../../sources/new-source";
   import { pageFields } from "./source-config";
+  import { reach } from "./adapter-preview";
+  import TfAdapterFacts from "./TfAdapterFacts.svelte";
   import TfDialog from "./TfDialog.svelte";
   import TfSchemaForm from "./TfSchemaForm.svelte";
 
@@ -45,7 +50,7 @@
     onclose,
     onsaved,
   }: {
-    ports: Pick<SettingsPorts, "listAdapters" | "testSource" | "addSource" | "installAdapter">;
+    ports: Pick<SettingsPorts, "listAdapters" | "testSource" | "addSource" | "previewInstallAdapter" | "installAdapter">;
     layers: Layers;
     onclose: () => void;
     onsaved: (source: SourceSummary) => void;
@@ -71,7 +76,10 @@
   let saving = $state(false);
   let saveError = $state<string | null>(null);
   let manifest = $state("");
-  let installing = $state(false);
+  /** What the install row is doing: checking a release, or installing the confirmed one. */
+  let installing = $state<"checking" | "installing" | null>(null);
+  /** The checked release *Install <name>?* asks about, and the input it was read from. */
+  let confirming = $state<{ input: string; preview: AdapterPreview } | null>(null);
   /** The last install's answer: what was installed, or why it was refused. */
   let installNote = $state<{ ok: boolean; text: string } | null>(null);
 
@@ -136,25 +144,35 @@
     tested = null;
   }
 
-  /** The manifest's hosts in words: what the adapter may reach, and only that. */
-  function reach(hosts: string[]): string {
-    if (hosts.length === 0) return "It may reach no host.";
-    const words = hosts.map((host) => {
-      const key = /^\{(.+)\}$/.exec(host)?.[1];
-      if (key === undefined) return host;
-      return key === "base_url" ? "this source's address" : `the host in its ${key} setting`;
-    });
-    const list = words.length === 1 ? words[0] : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
-    return `It may reach ${list}, and no other host.`;
+  /** A refusal's note: the backend's reason opens with knobas' own word, so only that is capitalised. */
+  function refused(cause: unknown) {
+    const reason = ipcErrorMessage(cause);
+    installNote = { ok: false, text: reason.charAt(0).toUpperCase() + reason.slice(1) };
   }
 
-  async function install() {
+  /** *Install…*: every check, nothing written; a release that passes is asked about. */
+  async function check() {
     const path = manifest.trim();
-    if (path === "" || installing) return;
-    installing = true;
+    if (path === "" || installing !== null) return;
+    installing = "checking";
     installNote = null;
     try {
-      const answer = await ports.installAdapter(path);
+      confirming = { input: path, preview: await ports.previewInstallAdapter(path) };
+    } catch (cause) {
+      refused(cause);
+    } finally {
+      installing = null;
+    }
+  }
+
+  /** *Install* in *Install <name>?*: the release that was shown, and no other. */
+  async function install() {
+    const asked = confirming;
+    if (asked === null || installing !== null) return;
+    confirming = null;
+    installing = "installing";
+    try {
+      const answer = await ports.installAdapter(asked.input, asked.preview.confirm_sha256);
       const rows = await ports.listAdapters();
       adapters = rows;
       const row = rows.find((adapter) => adapter.adapter_kind === answer.adapter_kind);
@@ -165,11 +183,9 @@
         text: `Installed ${answer.template.name} ${answer.adapter_version}. ${reach(answer.hosts)}`,
       };
     } catch (cause) {
-      // The backend's reason opens with knobas' own word, so only that is capitalised.
-      const reason = ipcErrorMessage(cause);
-      installNote = { ok: false, text: reason.charAt(0).toUpperCase() + reason.slice(1) };
+      refused(cause);
     } finally {
-      installing = false;
+      installing = null;
     }
   }
 
@@ -253,7 +269,9 @@
           aria-describedby="tf-add-manifest-note"
           bind:value={manifest}
         />
-        <button class="tf-btn" disabled={manifest.trim() === "" || installing} onclick={() => void install()}>Install</button>
+        <button class="tf-btn" disabled={manifest.trim() === "" || installing !== null} onclick={() => void check()}>
+          {installing === "checking" ? "Checking…" : installing === "installing" ? "Installing…" : "Install…"}
+        </button>
       </div>
     </div>
     {#if installNote !== null}
@@ -262,7 +280,9 @@
         {installNote.text}
       </p>
     {:else}
-      <p class="tf-dlg-note" id="tf-add-manifest-note">A GitHub repository, a manifest URL or a local manifest. Install checks it before the adapter is offered.</p>
+      <p class="tf-dlg-note" id="tf-add-manifest-note">
+        A GitHub repository, a manifest URL or a local manifest. Install checks it and shows what it may reach before anything is installed.
+      </p>
     {/if}
     {#if chosen !== null}
       <div class="tf-formgrid">
@@ -320,3 +340,17 @@
     <button class="tf-btn tf-primary" disabled={!canAdd} onclick={() => void add()}>Add source</button>
   {/snippet}
 </TfDialog>
+
+{#if confirming !== null}
+  {@const preview = confirming.preview}
+  <TfDialog title="Install {preview.name}?" {layers} onclose={() => (confirming = null)}>
+    {#snippet body()}
+      <TfAdapterFacts {preview} />
+      <p class="tf-dlg-note">It runs with no disk and no keychain. Nothing is installed until you press Install.</p>
+    {/snippet}
+    {#snippet footer()}
+      <button class="tf-btn tf-ghost" onclick={() => (confirming = null)}>Cancel</button>
+      <button class="tf-btn tf-primary" onclick={() => void install()}>Install</button>
+    {/snippet}
+  </TfDialog>
+{/if}

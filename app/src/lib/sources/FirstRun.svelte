@@ -136,7 +136,7 @@
      */
     health?: Health;
     /** What *Add a source* reads and writes: the ports Settings gives it. */
-    ports?: Pick<SettingsPorts, "listAdapters" | "testSource" | "addSource" | "installAdapter">;
+    ports?: Pick<SettingsPorts, "listAdapters" | "testSource" | "addSource" | "previewInstallAdapter" | "installAdapter">;
     /** The layer stack the dialog registers with, so `Esc` can close it. */
     layers?: Layers;
     /**

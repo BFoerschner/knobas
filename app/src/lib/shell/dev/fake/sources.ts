@@ -3,7 +3,7 @@
  * the Add-source dialog's writes.
  */
 import { GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "../../../sources/fixtures";
-import type { AdapterStatus, AuthMethod, AuthState, KindPaths, SourceDescriptor, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../../ipc/sources";
+import type { AdapterPreview, AdapterStatus, AuthMethod, AuthState, KindPaths, SourceDescriptor, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../../ipc/sources";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed } from "../fake-seed";
 import { CORPUS, ROLE_CLAIMERS, SYNCED_AT } from "./corpus";
@@ -343,9 +343,11 @@ function fakeRuns(args: Record<string, unknown>): SyncRunRow[] {
 }
 
 /**
- * The fixture external adapter (#1202) as `install_adapter` answers it: a
- * path ending in `knobas-adapter.json` installs it, and `list_adapters`
- * offers it from then on; any other path is refused with a reason.
+ * The fixture external adapter (#1202) as `preview_install_adapter` and
+ * `install_adapter` answer it: a path ending in `knobas-adapter.json` is
+ * previewed and then installed, and `list_adapters` offers it from then on;
+ * any other path is refused with a reason. The install is held to the hash
+ * the preview showed (#2031).
  */
 const FIXTURE_EXTERNAL: SourceDescriptor = descriptor({
   id: "wasm-fixture",
@@ -366,40 +368,59 @@ const FIXTURE_EXTERNAL: SourceDescriptor = descriptor({
   },
 });
 
-function installAdapter(args: Record<string, unknown>) {
-  const manifest = String(args["manifest"] ?? "");
+/** Its artifact's hash, and the newer release's (`v0.2.0`). */
+const FIXTURE_SHA = "5".repeat(64);
+const NEWER_SHA = "6".repeat(64);
+
+/** What a confirm sends back for a release (`confirm_sha256`): its artifact, hosts and limits as one string. */
+function confirmOf(artifact: string, hosts: string[]): string {
+  return `${artifact}|${hosts.join(",")}`;
+}
+
+/** What the fixture's manifest declares: its address, and a deadline it asks for. */
+const FIXTURE_HOSTS = ["{base_url}"];
+const FIXTURE_LIMITS = { deadline_secs: 60, deadline_asked: true, memory_mib: 256, memory_asked: false };
+
+function previewFor(manifest: string): AdapterPreview {
   if (!manifest.endsWith("knobas-adapter.json")) {
     throw { code: "invalid", message: `cannot read the manifest ${manifest}: No such file or directory (os error 2)`, source_id: null };
   }
   if (FIXTURE_ADAPTERS.some((adapter) => adapter.adapter_kind === FIXTURE_EXTERNAL.adapter_kind)) {
     throw { code: "conflict", message: 'install refused: an adapter of kind "wasm-fixture" is already installed', source_id: null };
   }
-  // Widened: the fixture rows are literal types, and this one is not among them.
-  (FIXTURE_ADAPTERS as unknown[]).push(FIXTURE_EXTERNAL);
-  const remote = manifest.startsWith("https://");
-  INSTALLED.push({
+  return {
     adapter_kind: FIXTURE_EXTERNAL.adapter_kind,
     name: FIXTURE_EXTERNAL.name,
     adapter_version: FIXTURE_EXTERNAL.adapter_version,
     interface_version: "1.0.0",
     source_url: manifest,
-    tag: remote ? "v0.1.0" : null,
-    artifact_sha256: "5".repeat(64),
-    hosts: ["{base_url}"],
-    sources: [],
-    refused: null,
-    update: null,
-  });
-  return {
-    adapter_kind: FIXTURE_EXTERNAL.adapter_kind,
-    adapter_version: FIXTURE_EXTERNAL.adapter_version,
-    interface_version: "1.0.0",
-    source_url: manifest,
-    tag: remote ? "v0.1.0" : null,
-    artifact_sha256: "5".repeat(64),
-    hosts: ["{base_url}"],
-    template: FIXTURE_EXTERNAL,
+    tag: manifest.startsWith("https://") ? "v0.1.0" : null,
+    artifact_sha256: FIXTURE_SHA,
+    confirm_sha256: confirmOf(FIXTURE_SHA, FIXTURE_HOSTS),
+    hosts: FIXTURE_HOSTS,
+    roles: FIXTURE_EXTERNAL.roles,
+    limits: FIXTURE_LIMITS,
   };
+}
+
+/** The backend's refusal of a confirm the release no longer matches. */
+const RELEASE_CHANGED = "the release changed after it was checked: its artifact, hosts or limits are not the ones shown";
+
+function installAdapter(args: Record<string, unknown>) {
+  const preview = previewFor(String(args["manifest"] ?? ""));
+  const shown = String(args["sha256"] ?? "");
+  if (shown !== preview.confirm_sha256) {
+    throw {
+      code: "invalid",
+      message: RELEASE_CHANGED,
+      source_id: null,
+    };
+  }
+  // Widened: the fixture rows are literal types, and this one is not among them.
+  (FIXTURE_ADAPTERS as unknown[]).push(FIXTURE_EXTERNAL);
+  const { roles: _roles, limits: _limits, name: _name, confirm_sha256: _confirm, ...pin } = preview;
+  INSTALLED.push({ ...pin, name: preview.name, sources: [], refused: null, update: null });
+  return { ...pin, template: FIXTURE_EXTERNAL };
 }
 
 /**
@@ -425,13 +446,47 @@ function checkUpdates(): AdapterStatus[] {
   return INSTALLED;
 }
 
-function updateOne(args: Record<string, unknown>): AdapterStatus {
+/**
+ * The newer release beside the installed one (#2031): it may also reach
+ * the harbour's survey archive, which the update dialog says before it
+ * switches.
+ */
+function previewUpdate(args: Record<string, unknown>) {
   const row = installed(args["kind"]);
-  if (row.update?.state === "available") {
-    row.tag = row.update.tag;
-    row.adapter_version = row.update.adapter_version;
-    row.artifact_sha256 = "6".repeat(64);
+  const now: AdapterPreview = {
+    ...row,
+    confirm_sha256: confirmOf(row.artifact_sha256, row.hosts),
+    roles: FIXTURE_EXTERNAL.roles,
+    limits: FIXTURE_LIMITS,
+  };
+  const available = row.update?.state === "available" ? row.update : null;
+  const release: AdapterPreview = available
+    ? {
+        ...now,
+        tag: available.tag,
+        adapter_version: available.adapter_version,
+        artifact_sha256: NEWER_SHA,
+        confirm_sha256: confirmOf(NEWER_SHA, [...FIXTURE_HOSTS, "archive.harbour.example"]),
+        hosts: [...FIXTURE_HOSTS, "archive.harbour.example"],
+      }
+    : now;
+  return { installed: now, release };
+}
+
+function updateOne(args: Record<string, unknown>): AdapterStatus {
+  const { release } = previewUpdate(args);
+  const row = installed(args["kind"]);
+  if (String(args["sha256"] ?? "") !== release.confirm_sha256) {
+    throw {
+      code: "invalid",
+      message: RELEASE_CHANGED,
+      source_id: null,
+    };
   }
+  row.tag = release.tag;
+  row.adapter_version = release.adapter_version;
+  row.artifact_sha256 = release.artifact_sha256;
+  row.hosts = release.hosts;
   row.update = null;
   return row;
 }
@@ -453,9 +508,11 @@ export function handlers(): Handlers {
     // able to show.
     list_sources: () => FIXTURE_SOURCES,
     list_adapters: () => FIXTURE_ADAPTERS,
+    preview_install_adapter: (args) => previewFor(String(args["manifest"] ?? "")),
     install_adapter: (args) => installAdapter(args),
     list_installed_adapters: () => INSTALLED,
     check_adapter_updates: () => checkUpdates(),
+    preview_update_adapter: (args) => previewUpdate(args),
     update_adapter: (args) => updateOne(args),
     uninstall_adapter: (args) => uninstallOne(args),
     credential_health: () => FIXTURE_SOURCES.map((source) => source.health),

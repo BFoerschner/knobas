@@ -1219,7 +1219,10 @@ test("the fixture's install adds the descriptor to list_adapters and add_source 
   const handlers = demoHandlers();
   type Source = { id: string; adapter_kind: string; health: { source_id: string }; kinds: { id: string }[] };
   const before = (handlers["list_sources"]!({}) as Source[]).length;
-  handlers["install_adapter"]!({ manifest: "/releases/knobas-adapter.json" });
+  const preview = handlers["preview_install_adapter"]!({ manifest: "/releases/knobas-adapter.json" }) as { confirm_sha256: string };
+  // The preview offers nothing yet (#2031).
+  expect((handlers["list_adapters"]!({}) as { adapter_kind: string }[]).map((row) => row.adapter_kind)).not.toContain("wasm-fixture");
+  handlers["install_adapter"]!({ manifest: "/releases/knobas-adapter.json", sha256: preview.confirm_sha256 });
   const kinds = (handlers["list_adapters"]!({}) as { adapter_kind: string }[]).map((row) => row.adapter_kind);
   expect(kinds).toContain("wasm-fixture");
 

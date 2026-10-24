@@ -9,6 +9,12 @@
 //! the stored artifact and the registry as they were, and records the
 //! reason beside the check.
 //!
+//! **Shown, then confirmed** (#2031). [`preview_update`] fetches and checks
+//! the latest release as [`update`] does, and answers it beside what is
+//! installed, so the reader sees what an update changes before it switches;
+//! [`update`] is then held to the release the reader was shown
+//! ([`install::confirm_sha256`]).
+//!
 //! **Uninstall** takes one answer per source of the adapter, *purge* or
 //! *keep*, and removes each source through the source-removal path
 //! ([`super::crud::delete`]) before the install itself.
@@ -112,6 +118,15 @@ pub struct AdapterStatus {
     pub refused: Option<String>,
     /// The last update check; `None` before one ran.
     pub update: Option<UpdateCheck>,
+}
+
+/// An update before it switches (#2031): what is installed, and the latest
+/// release, which has passed every check.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct UpdatePreview {
+    pub installed: install::AdapterPreview,
+    pub release: install::AdapterPreview,
 }
 
 /// Uninstall's answer for one source: remove its items, or keep them.
@@ -258,24 +273,15 @@ pub async fn check_updates(
     list(pool, registry).await
 }
 
-/// Update the adapter of `kind` to its origin's latest release: every
-/// static check first, then the artifact stored, the row moved and the
-/// registry's adapter replaced. A refusal changes nothing installed, and is
+/// The latest release at `installed`'s origin, held to every static check
+/// and to `installed`'s kind. A refusal or a release that cannot be read is
 /// recorded beside the update check.
-///
-/// # Errors
-///
-/// [`InstallError::NotInstalled`], the refusal of the check that failed,
-/// [`InstallError::KindChanged`] when the release is another adapter, or
-/// what could not be fetched or stored.
-pub async fn update(
-    pool: &PgPool,
+async fn latest_checked(
     registry: &Registry,
-    store: &Path,
     endpoints: &Endpoints,
-    kind: &str,
-) -> Result<AdapterStatus, InstallError> {
-    let installed = row(pool, kind).await?;
+    installed: &Row,
+) -> Result<install::Fetched, InstallError> {
+    let kind = installed.adapter_kind.as_str();
     let origin = Origin::parse(&installed.source_url, endpoints)?;
     let fetched = match install::fetch_checked(&origin, Pin::Latest, endpoints).await {
         Ok(fetched) if fetched.checked.manifest.adapter_kind != kind => {
@@ -286,31 +292,94 @@ pub async fn update(
         }
         other => other,
     };
-    let install::Fetched { tag, checked } = match fetched {
-        Ok(fetched) => fetched,
-        Err(error) => {
-            let reason = error.to_string();
-            let check = match &error {
-                InstallError::Refused(_) | InstallError::KindChanged { .. } => {
-                    let tag = match registry.update(kind) {
-                        Some(
-                            UpdateCheck::Available { tag, .. } | UpdateCheck::Refused { tag, .. },
-                        ) => tag,
-                        _ => None,
-                    };
-                    Some(UpdateCheck::Refused { tag, reason })
-                }
-                InstallError::Fetch(_) | InstallError::ManifestUnreadable { .. } => {
-                    Some(UpdateCheck::Failed { reason })
-                }
-                _ => None,
-            };
-            if let Some(check) = check {
-                registry.set_update(kind, check);
+    fetched.inspect_err(|error| {
+        let reason = error.to_string();
+        let check = match error {
+            InstallError::Refused(_) | InstallError::KindChanged { .. } => {
+                let tag = match registry.update(kind) {
+                    Some(UpdateCheck::Available { tag, .. } | UpdateCheck::Refused { tag, .. }) => {
+                        tag
+                    }
+                    _ => None,
+                };
+                Some(UpdateCheck::Refused { tag, reason })
             }
-            return Err(error);
+            InstallError::Fetch(_) | InstallError::ManifestUnreadable { .. } => {
+                Some(UpdateCheck::Failed { reason })
+            }
+            _ => None,
+        };
+        if let Some(check) = check {
+            registry.set_update(kind, check);
         }
+    })
+}
+
+/// What updating the adapter of `kind` would switch to, beside what is
+/// installed, with every check [`update`] runs and nothing switched
+/// (#2031). A refusal is recorded beside the update check, as [`update`]
+/// records it.
+///
+/// # Errors
+///
+/// As [`update`], but never one that writes.
+pub async fn preview_update(
+    pool: &PgPool,
+    registry: &Registry,
+    endpoints: &Endpoints,
+    kind: &str,
+) -> Result<UpdatePreview, InstallError> {
+    let installed = row(pool, kind).await?;
+    let fetched = latest_checked(registry, endpoints, &installed).await?;
+    let release = install::AdapterPreview::of(installed.source_url.clone(), &fetched);
+    let template = registry.external_template(kind);
+    let installed = install::AdapterPreview {
+        name: template
+            .as_ref()
+            .map_or_else(|| installed.adapter_kind.clone(), |t| t.name.clone()),
+        roles: template.map(|t| t.roles).unwrap_or_default(),
+        limits: install::AdapterLimits::of(&installed.limits),
+        adapter_kind: installed.adapter_kind,
+        adapter_version: installed.adapter_version,
+        interface_version: installed.interface_version,
+        source_url: installed.source_url,
+        tag: installed.tag,
+        confirm_sha256: install::confirm_sha256(
+            &installed.artifact_sha256,
+            &installed.hosts,
+            &installed.limits,
+        ),
+        artifact_sha256: installed.artifact_sha256,
+        hosts: installed.hosts,
     };
+    Ok(UpdatePreview { installed, release })
+}
+
+/// Update the adapter of `kind` to its origin's latest release: every
+/// static check first, then the artifact stored, the row moved and the
+/// registry's adapter replaced. A refusal changes nothing installed, and is
+/// recorded beside the update check. `confirmed` is the release's
+/// `confirm_sha256` the reader was shown ([`preview_update`]); a release it
+/// does not match is refused.
+///
+/// # Errors
+///
+/// [`InstallError::NotInstalled`], the refusal of the check that failed,
+/// [`InstallError::KindChanged`] when the release is another adapter,
+/// [`InstallError::ReleaseChanged`] when it is not the confirmed one, or
+/// what could not be fetched or stored.
+pub async fn update(
+    pool: &PgPool,
+    registry: &Registry,
+    store: &Path,
+    endpoints: &Endpoints,
+    kind: &str,
+    confirmed: Option<&str>,
+) -> Result<AdapterStatus, InstallError> {
+    let installed = row(pool, kind).await?;
+    let fetched = latest_checked(registry, endpoints, &installed).await?;
+    install::held_to(&fetched, confirmed)?;
+    let install::Fetched { tag, checked } = fetched;
     let m = &checked.manifest;
     install::store_artifact(store, &m.artifact.sha256, &checked.artifact)
         .await

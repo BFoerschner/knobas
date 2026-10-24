@@ -2,6 +2,56 @@
 import type { KindInfo, Tone } from "./entity";
 
 /**
+ * The limits every call into the adapter is held to (#1204): what the
+ * manifest asks for, each absent one at the host's default.
+ */
+export type AdapterLimits = { 
+/**
+ * The deadline of one call, in seconds.
+ */
+deadline_secs: number, 
+/**
+ * Whether the manifest asks for the deadline; `false` is the default.
+ */
+deadline_asked: boolean, 
+/**
+ * The memory cap of one call, in MiB.
+ */
+memory_mib: number, 
+/**
+ * Whether the manifest asks for the memory cap; `false` is the default.
+ */
+memory_asked: boolean, };
+
+/**
+ * What the reader is shown before an install or an update (#2031): every
+ * check has passed and nothing is written. `confirm_sha256` is what the
+ * confirm sends back, so what installs is what was shown.
+ */
+export type AdapterPreview = { adapter_kind: string, 
+/**
+ * The descriptor's name, or the kind for an installed adapter refused at load.
+ */
+name: string, adapter_version: string, interface_version: string, source_url: string, 
+/**
+ * The release's tag; `None` for a local manifest, which is no release.
+ */
+tag: string | null, artifact_sha256: string, 
+/**
+ * What the confirm sends back: [`confirm_sha256`] of this release.
+ */
+confirm_sha256: string, 
+/**
+ * The hosts it may reach, as the manifest writes them (`{base_url}`).
+ */
+hosts: Array<string>, 
+/**
+ * The roles its descriptor claims; empty for an installed adapter
+ * refused at load, whose descriptor was never read.
+ */
+roles: Array<RoleClaim>, limits: AdapterLimits, };
+
+/**
  * A source of an installed adapter, for uninstall's question.
  */
 export type AdapterSource = { id: string, display_name: string, };
@@ -1522,6 +1572,12 @@ trigger: Trigger, };
  * type's and a field's doc but not a variant's (#1325).
  */
 export type UpdateCheck = { "state": "current" } | { "state": "available", tag: string | null, adapter_version: string, } | { "state": "failed", reason: string, } | { "state": "refused", tag: string | null, reason: string, };
+
+/**
+ * An update before it switches (#2031): what is installed, and the latest
+ * release, which has passed every check.
+ */
+export type UpdatePreview = { installed: AdapterPreview, release: AdapterPreview, };
 
 /**
  * How an [`UpdatePullRequestBranch`](WriteOp::UpdatePullRequestBranch)

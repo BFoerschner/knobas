@@ -16,6 +16,7 @@
  */
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
+  AdapterPreview,
   AdapterStatus,
   ConnectionReport,
   CredentialHealth,
@@ -34,10 +35,13 @@ import type {
   SyncProgress,
   SyncReport,
   SyncRunRow,
+  UpdatePreview,
   WriteOpPayload,
 } from "./generated/sources";
 
 export type {
+  AdapterLimits,
+  AdapterPreview,
   AdapterSource,
   AdapterStatus,
   AuthMethod,
@@ -87,6 +91,7 @@ export type {
   TriggerPath,
   TriggerValue,
   UpdateCheck,
+  UpdatePreview,
   UpdateStyle,
   WaitReason,
   WriteOpPayload,
@@ -114,14 +119,24 @@ export function listAdapters(): Promise<SourceDescriptor[]> {
 }
 
 /**
- * Install an external adapter (#1202, #1209): `source` is a GitHub
- * repository URL (its latest release), a manifest URL, or a local
- * `knobas-adapter.json`. A refused install rejects with `invalid` and the
- * check's reason; a kind already taken with `conflict`; a release nobody
- * answers for with `unreachable`.
+ * What installing from `manifest` would install (#2031), every check run
+ * and nothing written: a GitHub repository URL (its latest release), a
+ * manifest URL, or a local `knobas-adapter.json`. A refused install rejects
+ * with `invalid` and the check's reason; a kind already taken with
+ * `conflict`; a release nobody answers for with `unreachable`.
  */
-export function installAdapter(manifest: string): Promise<InstalledAdapter> {
-  return invoke<InstalledAdapter>("install_adapter", { manifest });
+export function previewInstallAdapter(manifest: string): Promise<AdapterPreview> {
+  return invoke<AdapterPreview>("preview_install_adapter", { manifest });
+}
+
+/**
+ * Install an external adapter (#1202, #1209) once the reader confirmed its
+ * preview: `sha256` is the preview's `confirm_sha256`, over the artifact,
+ * hosts and limits it showed, and a release it does not match rejects with
+ * `invalid`. Refuses as the preview refuses.
+ */
+export function installAdapter(manifest: string, sha256: string): Promise<InstalledAdapter> {
+  return invoke<InstalledAdapter>("install_adapter", { manifest, sha256 });
 }
 
 export function listInstalledAdapters(): Promise<AdapterStatus[]> {
@@ -134,11 +149,21 @@ export function checkAdapterUpdates(): Promise<AdapterStatus[]> {
 }
 
 /**
- * Update to the latest release after every static check. A refusal rejects
- * with `invalid` and its reason, and the installed version stays.
+ * The latest release beside what is installed (#2031), every check run and
+ * nothing switched. A refusal rejects with `invalid` and is recorded on the
+ * row as an update's is.
  */
-export function updateAdapter(kind: string): Promise<AdapterStatus> {
-  return invoke<AdapterStatus>("update_adapter", { kind });
+export function previewUpdateAdapter(kind: string): Promise<UpdatePreview> {
+  return invoke<UpdatePreview>("preview_update_adapter", { kind });
+}
+
+/**
+ * Update to the latest release after every static check, held to the
+ * release its preview showed (`sha256`, the release's `confirm_sha256`). A refusal rejects with
+ * `invalid` and its reason, and the installed version stays.
+ */
+export function updateAdapter(kind: string, sha256: string): Promise<AdapterStatus> {
+  return invoke<AdapterStatus>("update_adapter", { kind, sha256 });
 }
 
 /**

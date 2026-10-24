@@ -48,8 +48,10 @@ import {
   reindexFts,
   deleteSource,
   installAdapter,
+  previewInstallAdapter,
   listInstalledAdapters,
   checkAdapterUpdates,
+  previewUpdateAdapter,
   updateAdapter,
   uninstallAdapter,
   listAdapters,
@@ -65,7 +67,9 @@ import {
   type ConnectionReport,
   type DbStats,
   type InstalledAdapter,
+  type AdapterPreview,
   type AdapterStatus,
+  type UpdatePreview,
   type Removal,
   type CredentialHealth,
   type NewSource,
@@ -104,12 +108,16 @@ export interface SettingsPorts {
   syncAll: () => Promise<number[]>;
   /** *Add a source* (#903): the secret and the row in one call, as the rooms `AddSource` sent it. */
   addSource: (input: NewSource) => Promise<SourceSummary>;
-  /** *Install an adapter* in Add a source (#1202): a local `knobas-adapter.json`. */
-  installAdapter: (manifest: string) => Promise<InstalledAdapter>;
+  /** *Install an adapter* in Add a source (#1202): what it would install, shown before the confirm (#2031). */
+  previewInstallAdapter: (manifest: string) => Promise<AdapterPreview>;
+  /** The install once confirmed, held to its preview's `confirm_sha256`. */
+  installAdapter: (manifest: string, sha256: string) => Promise<InstalledAdapter>;
   /** *Installed adapters* under Sources (#1209, #1210). */
   listInstalledAdapters: () => Promise<AdapterStatus[]>;
   checkAdapterUpdates: () => Promise<AdapterStatus[]>;
-  updateAdapter: (kind: string) => Promise<AdapterStatus>;
+  /** What an *Update* switches to, beside what is installed (#2031). */
+  previewUpdateAdapter: (kind: string) => Promise<UpdatePreview>;
+  updateAdapter: (kind: string, sha256: string) => Promise<AdapterStatus>;
   uninstallAdapter: (kind: string, removals: Removal[]) => Promise<void>;
   listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
   /** Every ticket view (#812): a Jira source's page lists its Jira views (#878). */
@@ -148,10 +156,12 @@ export const realSettingsPorts: SettingsPorts = {
   },
   syncAll: () => syncAll(),
   addSource: (input) => addSource(input),
-  installAdapter: (manifest) => installAdapter(manifest),
+  previewInstallAdapter: (manifest) => previewInstallAdapter(manifest),
+  installAdapter: (manifest, sha256) => installAdapter(manifest, sha256),
   listInstalledAdapters: () => listInstalledAdapters(),
   checkAdapterUpdates: () => checkAdapterUpdates(),
-  updateAdapter: (kind) => updateAdapter(kind),
+  previewUpdateAdapter: (kind) => previewUpdateAdapter(kind),
+  updateAdapter: (kind, sha256) => updateAdapter(kind, sha256),
   uninstallAdapter: (kind, removals) => uninstallAdapter(kind, removals),
   listen: (event, handler) => tauriListen(event, handler),
   ticketViews: () => ticketViews(),

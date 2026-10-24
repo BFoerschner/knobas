@@ -606,6 +606,11 @@ pub fn run() {
             // not link yet, appended at the foot: the list is append-only
             // (§10.8).
             commands::entity::owed_tickets,
+            // #2031's previews an install and an update show before the
+            // reader confirms, appended at the foot: the list is append-only
+            // (§10.8).
+            commands::sources::preview_install_adapter,
+            commands::sources::preview_update_adapter,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
