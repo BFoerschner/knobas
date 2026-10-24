@@ -56,6 +56,14 @@ title: string,
  */
 state: WriteState, 
 /**
+ * Whether the create is held as one its source may have taken (#1125):
+ * sent once and never answered, so the ticket may exist. Such a create
+ * is on its way until the reader sends it again or discards it, and the
+ * tab offers no second *Create ticket* for it (Björn's ruling on #1966);
+ * `false` for every other state, a drift hold included.
+ */
+may_have_landed: boolean, 
+/**
  * The queue's or the source's sentence about the write. Untrusted text.
  */
 detail: string | null, 

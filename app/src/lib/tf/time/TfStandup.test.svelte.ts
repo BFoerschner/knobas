@@ -209,16 +209,16 @@ function open(
         listProjects: async () => [{ source_id: "jira", key: "OPS", name: "Operations" }],
         createActionItemTicket: async (...args: unknown[]) => {
           calls.tickets.push(args);
-          return { write_id: 9, title: String(args[3]), state: "pending", detail: null, ticket_entity_id: null, linked: false };
+          return { write_id: 9, title: String(args[3]), state: "pending", may_have_landed: false, detail: null, ticket_entity_id: null, linked: false };
         },
         actionItemTicket: async (_note: string, writeId: number) => {
           calls.asked.push(writeId);
           const words = String(calls.tickets.at(-1)?.[3] ?? over.owed?.find((owed) => owed.write_id === writeId)?.title);
           // Sent, and the sync after it has not brought the ticket in.
-          if (!mirror.held) return { write_id: writeId, title: words, state: "sent", detail: null, ticket_entity_id: null, linked: false };
+          if (!mirror.held) return { write_id: writeId, title: words, state: "sent", may_have_landed: false, detail: null, ticket_entity_id: null, linked: false };
           // Landed: the backend draws the protocol's link to the ticket it found by the item's words.
           if (!links.some((entry) => entry.other.entity_id === "jira:OPS-131")) links.push(ticketLink("jira:OPS-131", words));
-          return { write_id: writeId, title: words, state: "sent", detail: null, ticket_entity_id: "jira:OPS-131", linked: true };
+          return { write_id: writeId, title: words, state: "sent", may_have_landed: false, detail: null, ticket_entity_id: "jira:OPS-131", linked: true };
         },
         listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
           const handlers = heard.get(event) ?? new Set();
@@ -410,7 +410,7 @@ test("after a create, leaving the tab and coming back shows the ticket's key, no
 
 /** A create the protocol's read names as owing its link: filed before the reload, its ticket not mirrored yet. */
 function owed(over: Partial<ActionItemTicket> = {}): ActionItemTicket {
-  return { write_id: 9, title: "Decide the manual-review SLA", state: "sent", detail: null, ticket_entity_id: null, linked: false, ...over };
+  return { write_id: 9, title: "Decide the manual-review SLA", state: "sent", may_have_landed: false, detail: null, ticket_entity_id: null, linked: false, ...over };
 }
 
 /** A sync of `source` ended, as `sync:state` says it. */
