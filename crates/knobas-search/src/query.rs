@@ -375,7 +375,10 @@ pub fn parse(raw: &str, vocab: &Vocabulary) -> Parsed {
     // (`-"retry batch"`) is just as closed: its tsquery text is
     // `!( 'retri' <-> 'batch' )`, and `:*` after the parenthesis is a syntax
     // error (#1648). A bare `-word` is not closed: its text ends in a quoted
-    // lexeme, so it stays a prefix.
+    // lexeme, so it stays a prefix. This reads only the last *typed* term, so
+    // it is the cheap first check: the statement guards the cast again on the
+    // tsquery text itself, which catches a negated phrase followed by a word
+    // Postgres drops (`-"retry batch" the`, #1971).
     parsed.prefix_last_term = !raw.ends_with(char::is_whitespace)
         && !parsed.query.text.is_empty()
         && terms
