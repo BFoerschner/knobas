@@ -11370,6 +11370,8 @@ set.
   before the finished query. On an incremental run that window is the few requests between the
   two queries; against it stands a re-emission of the same builds on every poll. A ceiling equal
   to the watermark still clamps. *Reversing:* low, one `filter`.
+  (Amended 2026-10-24 by #1989: for a source scoped to a configuration list the window is
+  `C + 2` requests or more, not a few. See `## #1989` below.)
 - **Glossary.** *Ruling:* CONTEXT.md's *Backfill* also names the cap refusal as a case it is the
   way out of. *Reversing:* low.
 
@@ -16443,3 +16445,51 @@ Björn: "try not to create so many backlog tickets, tell the implementers to try
 - **How a value goes back.** *Ruling:* in place, to a deep copy of what it held once the module had loaded. Arrays, maps, sets and plain objects are copied; functions are shared (the Jira fixture's `member` matchers, which `structuredClone` refuses). A module's `let`s are reassigned by its own `onFakeReset`, from one `seedOf({ … })` copy taken at load, so no starting value is written twice. The clone timers are cleared before the map empties. *Reasoning:* other modules hold the same arrays (`FIXTURE_ESTATE` is pushed by `estate-import.ts`, `FAKE_CONTEXTS` is read by `notes.ts`), so the array itself has to stay the same object. Handlers also edit elements in place (`asset.name = …`, `jira.source.hidden = …`), so a shallow refill would keep those edits. No module keeps an element of a kept array across a reset: every lookup is a `find` by id, and the one `indexOf` (`FIXTURE_EXTERNAL`) is on an object the seed does not hold. *Reversing:* trivial.
 - **The class is 39 values, not the ticket's 29.** *Ruling:* all 39 are fixed here. The 10 the ticket did not list are `entity.ts#LINKS`, `estate.ts#FIXTURE_ESTATE`, `#FIXTURE_ROUTES` and `#ASSET_HISTORY`, `smart-lists.ts#FIXTURE_SAVED`, `sources.ts#FIXTURE_SOURCES`, `#FIXTURE_ADAPTERS` and `#INSTALLED`, and `ticket-views.ts#VIEWS` and `#JIRA`. The id counters keep counting (#1762). *Reasoning:* the scan finds them by the same rule, and each costs one name in a `keepSeed` call. *Reversing:* n/a.
 - **The tests' own isolation is gone.** *Ruling:* `fake-tauri.test.ts` no longer calls `vi.resetModules()` in its two tests, and its comments no longer say a fresh `demoHandlers()` keeps the state. `fake-features.test.ts` no longer puts the shipped applications back by hand. *Reasoning:* each worked around this cause, and the comments became false. *Reversing:* trivial.
+## #1989: small leftovers from checking the 2026-10-22 review's fixes (implementer, Opus, 2026-10-24)
+
+- **Ruling #1626 amended, the window not bounded.** *Fork:* the ticket's two options, amend the
+  reasoning with the per-configuration count or bound the window. *Ruling:* amended. The reasoning
+  above said an ignored ceiling leaves "the few requests between the two queries" unprotected. For
+  a source scoped to a configuration list the run reads `/projects` and `/buildTypes` and then asks
+  once per configuration, so the window runs to the last configuration's `sinceBuild` query. That
+  is `C + 2` requests or more for `C` configurations, about `C / 5` seconds at the default 5 req/s
+  once the burst of 10 is spent, and 40 s for two hundred. The ceiling is ignored only when the
+  opening pages show nothing as new as the watermark. On a server whose pages are unordered (#91)
+  that is routine, not rare, so the exposure grows with `C`. `cursor::advance`'s docs now say so.
+  *Reasoning:* bounding it changes what the opening probe asks and needs a seeded live run to
+  confirm the locator, which is more than a leftover. The trade is still the one #1626 made,
+  re-emission on every poll against a narrow loss: a build queued mid-run, still running at its
+  configuration's query, while a later one finished before its own. Filed as #2016 with a
+  direction (an incremental probe asking `sinceBuild` of the watermark). *Reversing:* low for the
+  text; #2016 is the bound.
+- **`inbox::Category` declared with `closed_vocabulary!`, not noted.** *Fork:* let the macro pass
+  `ts_rs::TS` through, or note why the hand-rolled codec stays. *Ruling:* declared with the macro.
+  *Reasoning:* the macro already passes enum attributes through, and `AssetStatus` derives
+  `ts_rs::TS` that way, so the obstacle the ticket names was not there. The enum's own docs gave a
+  different reason, no CHECK to pin. That covers only the migration test, not the one list `ALL`
+  and `as_str` come from, and a category missing from the hand-written `ALL` was the drift the
+  macro exists to rule out. The generated `InboxCategory` union is byte-for-byte unchanged. A
+  decode failure now reads `unknown Category value`, through the shared `UnknownValue`.
+  *Reversing:* low.
+- **The flash-timer test counts timers.** *Fork:* witness the stray timer through what the reader
+  sees, or through the timers left after the unmount. *Ruling:* the timers. *Reasoning:* the
+  stray timer has no visible effect. After the second flash's own run returns early on
+  `id === flashed`, the effect no longer reads `drawn`, so nothing reruns it when the first timer
+  clears `flashed`. What is left is a timer that outlives the page, which is the PAGE-14 test's own
+  measure. *Reversing:* n/a.
+- **The double hold is fixed in `Registry::refuse`, not in `load_installed`.** *Ruling:* a refusal
+  drops the loaded adapter of its kind. *Reasoning:* the restore's reinstall
+  (`installed::reinstall_restored`) refuses through the same call over the same process registry,
+  so the cause has two instances and one place. *Reversing:* low.
+- **The reverse pin reads `apply_key_value`'s match arms from the source.** *Reasoning:* no probe
+  can name a key nobody has listed yet. The scan takes the string literals that open an arm,
+  between `match key {` and the `_ => return false` fallback, and compares them with
+  `NEGATION_UNSUPPORTED_KEYS` as sets. *Reversing:* low.
+- **`demo_load`'s `if let Ok(state) = sources::state(&app)` stays.** *Fork:* drop it with the
+  assets arms as the same class. *Ruling:* kept. *Reasoning:* `tests/it/ipc.rs`'
+  `demo_load_ends_with_a_terminal_sync_state_for_the_mock` reaches it with no sources state
+  managed, and the arm writes nothing, it only skips the analyzer request. *Reversing:* low.
+- **Test seams picked, not confirmed.** The TDD skill asks for the seams to be agreed first. Run
+  unattended, they were picked: the Dependencies page mounted over stand-in ports, the house-rule
+  matcher, the parser's own test module, bring-up over one registry (as LIFE-1's test does) plus
+  `Registry::refuse`.

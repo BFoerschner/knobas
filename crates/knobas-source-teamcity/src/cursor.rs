@@ -116,9 +116,14 @@ pub(crate) struct Seen {
 /// opening pages keep missing them. What ignoring it gives up is the clamp's
 /// protection for that one run: a build queued after the in-flight poll, still
 /// running while a build queued after it finished before the finished query
-/// went out. On an incremental run that window is the few requests between the
-/// two queries, against a re-emission on every poll. A ceiling at or above
-/// `previous` clamps as before.
+/// went out. How wide that window is depends on the source (#1989). Unscoped
+/// or scoped by project, it is the few requests between the two queries. Scoped
+/// to a configuration list, it runs to the last configuration's `sinceBuild`
+/// query: `/projects`, `/buildTypes`, then one query per configuration, so
+/// `C + 2` requests or more for `C` configurations. At the default 5 req/s
+/// that is about `C / 5` seconds once the burst is spent, 40 s for two
+/// hundred. Against it stands a re-emission on every poll. A ceiling at or
+/// above `previous` clamps as before.
 pub(crate) fn advance(previous: i64, seen: Seen) -> i64 {
     let Seen {
         max_finished,
