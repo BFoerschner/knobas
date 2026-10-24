@@ -1,3 +1,8 @@
+knobas-adapter-sdk	lib/knobas_adapter_sdk	convert::tests::a_sink_error_returned_as_it_came_reaches_the_host_unchanged
+knobas-adapter-sdk	lib/knobas_adapter_sdk	convert::tests::an_item_crosses_as_its_entity_id_its_rfc_3339_instant_and_its_payload_text
+knobas-adapter-sdk	lib/knobas_adapter_sdk	convert::tests::each_error_is_its_own_wit_variant
+knobas-adapter-sdk	lib/knobas_adapter_sdk	convert::tests::the_instance_config_reaches_the_adapter_as_its_value
+knobas-adapter-sdk	lib/knobas_adapter_sdk	tests::the_crate_version_is_the_interface_version_it_binds
 knobas-app	lib/knobas_app	assets::docker::tests::a_container_lands_under_the_engine_whose_context_found_it
 knobas-app	lib/knobas_app	assets::docker::tests::every_line_is_one_container_and_the_id_is_read_by_nothing
 knobas-app	lib/knobas_app	assets::docker::tests::no_two_context_and_name_pairs_spell_one_id
