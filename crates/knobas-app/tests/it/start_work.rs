@@ -918,8 +918,8 @@ async fn a_retry_of_a_step_that_already_succeeded_is_refused_and_sends_nothing()
     assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Succeeded);
 }
 
-/// **A door before the send.** The run has read the flow and is looking at
-/// the source when the step is skipped underneath it. The run's move to
+/// The run's branch read is held while the step is skipped underneath it:
+/// the run has read the flow and is looking at the source. The run's move to
 /// running may only leave a pending step, so it finds the step taken and does
 /// not send it.
 #[tokio::test]
@@ -968,7 +968,7 @@ async fn a_step_skipped_while_the_run_looks_is_not_sent() {
     assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Skipped);
 }
 
-/// **The door.** A send is held open, the step is interrupted underneath it,
+/// A send is held open, the step is interrupted underneath it,
 /// then the send lands. The landing may not leave a step that is no longer
 /// running, so the interruption stands -- but the write it made is kept on the
 /// step, and the retry adopts that write rather than sending a second.

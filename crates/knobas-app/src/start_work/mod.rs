@@ -450,13 +450,25 @@ const RETRIES: &[StepOutcome] = &[
 /// reasons -- a succeeded step's effect exists, and a running one's send is out.
 const SKIPS: &[StepOutcome] = RETRIES;
 
+/// What the run may take: a step nothing has started. Anything else was taken
+/// since the run read the flow -- skipped, or settled by another run.
+const TAKES: &[StepOutcome] = &[StepOutcome::Pending];
+
+/// What a send's landing may leave: the `running` the run marked it. A step
+/// interrupted while the send was out keeps the interruption.
+const LANDS: &[StepOutcome] = &[StepOutcome::Running];
+
+/// What a failing run may mark failed: the step it was on, before or during
+/// its send.
+const STOPS: &[StepOutcome] = &[StepOutcome::Pending, StepOutcome::Running];
+
 /// The refusal for a step that is not in an outcome the command may leave --
 /// most often because it moved on between the stepper's read and this write
 /// (#1707). Names the outcome it is in now.
-async fn moved_on(pool: &PgPool, step_id: i64, done: &str) -> IpcError {
+async fn moved_on(pool: &PgPool, step_id: i64, verb: &str) -> IpcError {
     match store::get(pool, step_id).await {
         Ok(Some(step)) => IpcError::conflict(format!(
-            "the {} step is {} now, so it cannot be {done}",
+            "the {} step is {} now, so it cannot be {verb}",
             step.step, step.outcome
         )),
         Ok(None) => IpcError::not_found(format!("no start-work step with id {step_id}")),
@@ -674,10 +686,7 @@ async fn stop_where_it_was(pool: &PgPool, ticket: &EntityRef, why: &str) {
         }
         _ => return,
     };
-    // Pending or running: the step the run was on, unless something settled it
-    // since.
-    let on = [StepOutcome::Pending, StepOutcome::Running];
-    if let Err(error) = store::settle(pool, id, &on, StepOutcome::Failed, None, Some(why)).await {
+    if let Err(error) = store::settle(pool, id, STOPS, StepOutcome::Failed, None, Some(why)).await {
         tracing::warn!(%ticket, %error, "a failed start-work run could not mark its step");
     }
 }
@@ -866,21 +875,19 @@ async fn dispatch(
 ) -> Result<(), IpcError> {
     // A step that is no longer pending was taken since the run read it, and is
     // not sent (#1707).
-    let pending = [StepOutcome::Pending];
-    if store::settle(pool, step.id, &pending, StepOutcome::Running, None, None)
+    if store::settle(pool, step.id, TAKES, StepOutcome::Running, None, None)
         .await?
         .is_none()
     {
         return Ok(());
     }
-    let running = [StepOutcome::Running];
     match steps.dispatch(payload).await {
         Ok((write_id, landing)) => {
             let (outcome, detail) = outcome_of(&landing);
             let landed = store::settle(
                 pool,
                 step.id,
-                &running,
+                LANDS,
                 outcome,
                 Some(write_id),
                 detail.as_deref(),
@@ -901,7 +908,7 @@ async fn dispatch(
             let failed = store::settle(
                 pool,
                 step.id,
-                &running,
+                LANDS,
                 StepOutcome::Failed,
                 None,
                 Some(&error.message),
@@ -1048,8 +1055,7 @@ async fn settle_read(
     outcome: StepOutcome,
     detail: &str,
 ) -> Result<(), IpcError> {
-    let pending = [StepOutcome::Pending];
-    if store::settle(pool, step.id, &pending, outcome, None, Some(detail))
+    if store::settle(pool, step.id, TAKES, outcome, None, Some(detail))
         .await?
         .is_some()
     {

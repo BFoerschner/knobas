@@ -904,6 +904,9 @@ test("a To Do ticket of mine shows Start work, proposed in the suggested reposit
   const select = target.querySelector<HTMLSelectElement>(".tf-step select[aria-label='Repository']")!;
   expect([...select.options].map((option) => option.textContent)).toEqual(["tidewater/payout-service (suggested)", "tidewater/ledger"]);
   expect(target.querySelector<HTMLInputElement>("input[aria-label='Create branch']")?.value).toBe("feature/PAY-231-retry-failed-sepa-payouts");
+  // A step nothing has sent yet is the reader's to edit (#1707).
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Create branch']")?.disabled).toBe(false);
+  expect(select.disabled).toBe(false);
   expect(target.querySelector<HTMLInputElement>("input[aria-label='Move ticket']")?.value).toBe("To Do to In Progress");
   expect(section("code")).toBeNull();
   expect(section("builds")).toBeNull();
@@ -944,7 +947,7 @@ test("each step's state follows the flow as its writes move through the queue, a
   expect(steps().slice(0, 4).map(([, state]) => state)).toEqual(["done", "queued", "ready", "ready"]);
   const queued = target.querySelector(".tf-step[data-step='pr']")!;
   // A queued step's write is still open: it is amended in the write queue,
-  // not here (#1707). A step nothing has sent yet is still the reader's.
+  // not here (#1707). A step that landed is not edited either.
   expect(queued.querySelector<HTMLInputElement>("input")?.disabled).toBe(true);
   expect(target.querySelector<HTMLInputElement>(".tf-step[data-step='branch'] input")?.disabled).toBe(true);
   [...queued.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Retry")!.click();
