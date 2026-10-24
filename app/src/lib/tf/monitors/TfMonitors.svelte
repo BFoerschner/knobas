@@ -462,7 +462,7 @@
         </thead>
         <tbody>
           {#each rows as row (row.entity_id)}
-            {@const chip = stateChip(row)}
+            {@const chip = stateChip(row, now)}
             {@const down = chip.tone === "err" && !row.tombstoned}
             <tr>
               <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>

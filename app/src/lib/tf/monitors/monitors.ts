@@ -12,6 +12,7 @@ import type { AssetDetail, AssetProperty, MonitorRow, MonitorTarget, Unmonitored
 import type { MonitorKind } from "../../ipc/sources";
 import { bar, chipOf as chipStateOf } from "../../assets/monitors";
 import { matchesAll } from "../filter/filter";
+import { stampLabel } from "../../time/format";
 import type { JobIndex } from "../job/open-jobs";
 
 /** A chip's tone; `null` is the muted chip (paused, no reading). */
@@ -26,8 +27,6 @@ export function sorted(rows: readonly MonitorRow[]): MonitorRow[] {
     (a, b) => (RANK[chipStateOf(a)] ?? 3) - (RANK[chipStateOf(b)] ?? 3) || a.name.localeCompare(b.name),
   );
 }
-
-const pad = (n: number) => String(n).padStart(2, "0");
 
 /** Milliseconds as prototype-6 writes them: `140 ms`, `8 400 ms`, `0.4 ms`. */
 export function responseText(ms: number | null): string {
@@ -58,14 +57,18 @@ function downSince(row: MonitorRow): Date | null {
   return date !== null && !Number.isNaN(date.getTime()) ? date : null;
 }
 
-/** The state chip: its words, as prototype-6 words them, and its tone. */
-export function stateChip(row: MonitorRow): { label: string; tone: ChipTone } {
+/**
+ * The state chip: its words, as prototype-6 words them, and its tone. *down
+ * since 12:40* today, else *yesterday 12:40* or *2026-10-12 12:40*
+ * (`stampLabel`, #1986).
+ */
+export function stateChip(row: MonitorRow, now: Date = new Date()): { label: string; tone: ChipTone } {
   switch (chipStateOf(row)) {
     case "paused":
       return { label: "paused", tone: null };
     case "down": {
       const since = downSince(row);
-      return { label: since ? `down since ${pad(since.getHours())}:${pad(since.getMinutes())}` : "down", tone: "err" };
+      return { label: since ? `down since ${stampLabel(since.toISOString(), now, true)}` : "down", tone: "err" };
     }
     case "warn":
       return {
