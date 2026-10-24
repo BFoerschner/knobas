@@ -762,7 +762,7 @@ mod tests {
         identity_fault: Option<SourceError>,
         /// Pages whose `version.when` moves forward the moment the walk asks
         /// for its second page -- the mid-run edit the ceiling exists for.
-        edit_mid_walk: Mutex<Option<(String, String)>>,
+        edit_mid_walk: Mutex<Option<Vec<(&'static str, &'static str)>>>,
         /// Pages deleted the moment the walk asks for its second page.
         delete_mid_walk: Mutex<Option<Vec<&'static str>>>,
         /// Places among siblings that change the moment the mention walk is
@@ -816,10 +816,16 @@ mod tests {
         /// and the mid-run deletion.
         fn between_pages(&self) {
             let mut pages = self.pages.lock().unwrap();
-            if let Some((id, when)) = self.edit_mid_walk.lock().unwrap().take() {
+            for (id, when) in self
+                .edit_mid_walk
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap_or_default()
+            {
                 for p in pages.iter_mut() {
-                    if p["id"] == json!(id.clone()) {
-                        p["version"]["when"] = json!(when.clone());
+                    if p["id"] == json!(id) {
+                        p["version"]["when"] = json!(when);
                         p["version"]["number"] = json!(99);
                     }
                 }
@@ -1538,8 +1544,7 @@ mod tests {
         // 104, the last in the walk's order, is edited the moment the walk
         // asks for its second page, to well past the ceiling -- and the walk,
         // which is still paging, reads it so.
-        *fake.edit_mid_walk.lock().unwrap() =
-            Some(("104".to_owned(), "2026-08-22T11:59:00.000Z".to_owned()));
+        *fake.edit_mid_walk.lock().unwrap() = Some(vec![("104", "2026-08-22T11:59:00.000Z")]);
 
         let (items, cursor) = run(&fake, &cfg(json!({ "page_size": 2 })), None)
             .await
@@ -1586,12 +1591,30 @@ mod tests {
     #[tokio::test]
     async fn a_page_edited_mid_walk_shifts_no_row_past_the_walk() {
         let fake = Fake::new(a_corpus());
-        *fake.edit_mid_walk.lock().unwrap() =
-            Some(("100".to_owned(), "2026-08-22T11:59:00.000Z".to_owned()));
+        *fake.edit_mid_walk.lock().unwrap() = Some(vec![("100", "2026-08-22T11:59:00.000Z")]);
         let (items, _) = run(&fake, &cfg(json!({ "page_size": 2 })), None)
             .await
             .unwrap();
         assert_eq!(ids(&items), vec!["100", "101", "102", "103", "104"]);
+    }
+
+    /// **Why the order matters and not only the anchor.** Over three pages,
+    /// both pages already read are edited after the first result. Over
+    /// `lastmodified` they move to the end, behind 102, and the next request,
+    /// asked from the last page read, opens on 100: a page the walk has read,
+    /// which is where an anchored result says nothing unread is before it. It
+    /// is wrong only because an edit moved the row, which `created` rules out.
+    #[tokio::test]
+    async fn pages_read_and_edited_mid_walk_hide_no_unread_one() {
+        let fake = Fake::new(a_corpus().into_iter().take(3).collect());
+        *fake.edit_mid_walk.lock().unwrap() = Some(vec![
+            ("100", "2026-08-22T11:58:00.000Z"),
+            ("101", "2026-08-22T11:59:00.000Z"),
+        ]);
+        let (items, _) = run(&fake, &cfg(json!({ "page_size": 2 })), None)
+            .await
+            .unwrap();
+        assert_eq!(ids(&items), vec!["100", "101", "102"]);
     }
 
     /// **A page deleted mid-walk hides no other** (#1976). Page 100, already
