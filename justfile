@@ -1589,9 +1589,10 @@ _require-live-env SOURCE +NAMES:
 # `forgejo`, port 3002, its own volume and seed state, `seed-forgejo.sh`)
 # instead of Gitea. Forgejo is stopped again at the end if the run started it;
 # Gitea is left alone. It takes the Gitea lock. `gitea-live-capped` and
-# `start-work-live` have no Forgejo form. No gate runs this form, so a change to
-# a test this recipe runs is run here as well as against Gitea (#2034: a test
-# added after #1195 was green on Gitea and had never met Forgejo).
+# `start-work-live` have no Forgejo form. No gate runs this form, so a change
+# this recipe exercises, a test or the adapter code under one, is run here as
+# well as against Gitea (#2034: a test added after #1195 was green on Gitea and
+# had never met Forgejo).
 #
 # That container is this adapter's contract source (interfaces §4.2). The
 # wiremock stand-in the rest of its suite runs against exists only so

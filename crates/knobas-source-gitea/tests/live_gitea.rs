@@ -1844,7 +1844,8 @@ async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_r
 /// fake is least able to speak for the real server: it matches no `since=` at
 /// all, serves every branch's list in one page, and answers `sha=<branch>` with
 /// whatever the fixture mounted under that key. So `since=` being server-side
-/// *and* inclusive, `sha=` really selecting that branch's history, and
+/// *and* inclusive (on Gitea; Forgejo 17 ignores it, #2034, and the walk's own
+/// filter holds the bound there), `sha=` really selecting that branch's history, and
 /// `commits_at_watermark` closing the boundary the inclusive filter re-delivers
 /// are three assumptions only this container can settle.
 ///
