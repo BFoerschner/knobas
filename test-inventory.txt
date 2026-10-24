@@ -1702,6 +1702,7 @@ knobas-db	lib/knobas_db	backup::tests::a_two_word_tag_does_not_shift_the_schema
 knobas-db	lib/knobas_db	backup::tests::an_object_with_no_schema_reads_a_dash
 knobas-db	lib/knobas_db	backup::tests::the_header_and_the_comments_are_not_entries
 knobas-db	lib/knobas_db	embedded::tests::a_directory_a_finished_initdb_made_is_never_removed
+knobas-db	lib/knobas_db	embedded::tests::a_directory_that_lost_an_initdb_file_and_may_hold_a_database_is_kept
 knobas-db	lib/knobas_db	embedded::tests::a_directory_whose_databases_are_on_a_missing_volume_is_kept
 knobas-db	lib/knobas_db	embedded::tests::a_directory_whose_databases_cannot_be_listed_is_kept
 knobas-db	lib/knobas_db	embedded::tests::a_directory_without_pg_version_that_may_hold_a_database_is_kept
@@ -1711,6 +1712,7 @@ knobas-db	lib/knobas_db	embedded::tests::a_launch_that_started_cold_authenticate
 knobas-db	lib/knobas_db	embedded::tests::a_marked_directory_is_never_removed
 knobas-db	lib/knobas_db	embedded::tests::a_path_that_cannot_be_resolved_is_never_proof_of_a_mismatch
 knobas-db	lib/knobas_db	embedded::tests::a_released_ownership_lock_is_free_while_children_are_spawned
+knobas-db	lib/knobas_db	embedded::tests::a_removal_cut_short_leaves_no_pg_version
 knobas-db	lib/knobas_db	embedded::tests::a_stranger_on_the_recorded_port_clears_the_lock_whatever_the_pid_is_doing
 knobas-db	lib/knobas_db	embedded::tests::a_timed_out_initdb_is_stopped_and_removes_what_it_made
 knobas-db	lib/knobas_db	embedded::tests::a_tool_comes_from_the_pinned_version_when_several_are_installed
@@ -1763,6 +1765,8 @@ knobas-db	test/backup	an_archive_from_before_the_saved_view_rename_restores
 knobas-db	test/backup	the_archive_carries_the_owned_schema_and_leaves_the_mirror_out
 knobas-db	test/embedded	a_connector_does_not_print_its_password
 knobas-db	test/embedded	a_connector_hands_out_connections_outside_every_pool
+knobas-db	test/embedded	a_data_directory_a_server_ran_on_that_lost_an_initdb_file_is_kept_unmarked
+knobas-db	test/embedded	a_data_directory_an_initdb_cleanup_cut_short_after_pg_version_left_is_initialised_again
 knobas-db	test/embedded	a_data_directory_an_initdb_killed_before_pg_version_left_is_initialised_again
 knobas-db	test/embedded	a_data_directory_an_interrupted_initdb_left_is_initialised_again
 knobas-db	test/embedded	a_data_directory_that_holds_a_database_is_never_removed
