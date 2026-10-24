@@ -26,7 +26,7 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: cargo test -p knobas-db --test embedded locale:: -- --nocapture
+        run: "cargo test -p knobas-db --test embedded locale:: -- --nocapture"
       - name: The #1843 dotted-capital-I tests
         shell: bash
         env:
