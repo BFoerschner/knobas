@@ -46,6 +46,8 @@ slot=$1 out=$2; shift 2
 port=$((5300 + slot)); size=${SHOT_SIZE:-1440,900}; theme=${SHOT_THEME:-}; full=${SHOT_FULL:-}
 case $theme in ''|light|dark) ;; *) echo "shot: SHOT_THEME must be light or dark, got '$theme'" >&2; exit 2 ;; esac
 case $full in ''|1) ;; *) echo "shot: SHOT_FULL must be 1 or unset, got '$full'" >&2; exit 2 ;; esac
+wait_s=${SHOT_START_WAIT_S:-120}
+case $wait_s in ''|0*|*[!0-9]*) echo "shot: SHOT_START_WAIT_S must be a whole number of seconds, got '$wait_s'" >&2; exit 2 ;; esac
 dry=${SHOT_DRY_RUN:-}
 # The checkout this script lives in, not the one the caller stands in: run from
 # the root checkout, `git rev-parse` there shot a worktree's change with the
@@ -58,11 +60,12 @@ vite_pid=
 stop() { [ -z "$vite_pid" ] || { pkill -TERM -P "$vite_pid" 2>/dev/null || true; kill "$vite_pid" 2>/dev/null || true; wait "$vite_pid" 2>/dev/null || true; }; }
 trap stop EXIT
 if [ -z "$dry" ] && ! up; then
-  (cd "$root/app" && exec npx vite --port "$port" --strictPort >"${TMPDIR:-/tmp}/knobas-shot-vite-$slot.log" 2>&1) &
+  log="${TMPDIR:-/tmp}/knobas-shot-vite-$slot.log"
+  (cd "$root/app" && exec npx vite --port "$port" --strictPort >"$log" 2>&1) &
   vite_pid=$!
   # Polled until it answers (#1957): a loaded machine starts vite slowly, so the
   # guard is sized past that, and a vite that died fails at once.
-  log="${TMPDIR:-/tmp}/knobas-shot-vite-$slot.log" wait_s=${SHOT_START_WAIT_S:-120} from=$SECONDS
+  from=$SECONDS
   until up; do
     kill -0 "$vite_pid" 2>/dev/null || { echo "shot: the dev server on :$port exited before it answered; log: $log" >&2; exit 1; }
     [ $((SECONDS - from)) -lt "$wait_s" ] || { echo "shot: the dev server on :$port did not answer within $wait_s s (SHOT_START_WAIT_S); log: $log" >&2; exit 1; }

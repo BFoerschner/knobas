@@ -32,11 +32,12 @@
 //   SHOT_FULL=1 grows the viewport to the tallest scrolling element's content before the
 //   capture (at most 8000 px), so a long page is one image.
 //   The waits (#1957) poll for the state they need and run out only on a guard sized
-//   past a loaded machine's, each named in its failure: SHOT_START_WAIT_S (default 120)
-//   for Chrome's DevTools endpoint to offer a page and the first route to finish
-//   loading; SHOT_STEP_WAIT_S (default 60) for the element a step names. A Chrome that
-//   exits before it offers a page fails at once. SHOT_CHROME replaces the Chrome binary
-//   (scripts/shot-test.sh starts a late one and a dead one).
+//   past a loaded machine's, each named in its failure: SHOT_START_WAIT_S (default 120,
+//   whole seconds) for Chrome's DevTools endpoint to offer a page, the first route to
+//   finish loading and any one DevTools command to be answered; SHOT_STEP_WAIT_S
+//   (default 60) for the element a step names. A probe that hangs is cut off at its
+//   guard too. A Chrome that exits before it offers a page fails at once. SHOT_CHROME
+//   replaces the Chrome binary (scripts/shot-test.sh starts a late, a dead and a mute one).
 //   Every uncaught exception and console.error in the page is printed as `shot: uncaught …`
 //   or `shot: console.error …`. An uncaught exception fails the shot (exit 1) after its image
 //   is written, so a screen that throws never passes as a picture; SHOT_ALLOW_ERRORS=1 lets
@@ -47,19 +48,32 @@ import { writeFileSync } from "node:fs";
 const [port, debug, profile, size, theme, file, spec, extra = ""] = process.argv.slice(2);
 const [width, height] = size.split(",").map(Number);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-// A guard in seconds from the environment, or its default.
+// A guard in whole seconds from the environment, or its default; anything else is
+// refused, as shot.sh refuses it.
 const guard = (name, fallback) => {
-  const s = Number(process.env[name] ?? fallback);
-  return Number.isFinite(s) && s > 0 ? s : fallback;
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  if (!/^[1-9][0-9]*$/.test(raw)) {
+    console.error(`shot: ${name} must be a whole number of seconds, got '${raw}'`);
+    process.exit(2);
+  }
+  return Number(raw);
 };
 const START_WAIT_S = guard("SHOT_START_WAIT_S", 120);
 const STEP_WAIT_S = guard("SHOT_STEP_WAIT_S", 60);
+// `promise`'s value, or `fallback` once `ms` pass with it unsettled.
+const bounded = (ms, promise, fallback = null) => {
+  let timer;
+  const out = new Promise((r) => (timer = setTimeout(() => r(fallback), ms)));
+  return Promise.race([promise, out]).finally(() => clearTimeout(timer));
+};
 // Polls `probe` every 250 ms until it returns something truthy, or the guard runs
-// out (null). `stop` is asked between polls for a reason to give up at once.
+// out (null); a probe still unanswered at the guard is given up on (at least 1 s
+// for the last). `stop` is asked between polls for a reason to give up at once.
 const poll = async (seconds, probe, stop = () => null) => {
   const deadline = Date.now() + seconds * 1000;
   for (;;) {
-    const got = await probe();
+    const got = await bounded(Math.max(1000, deadline - Date.now()), probe());
     if (got) return got;
     if (stop() || Date.now() >= deadline) return null;
     await sleep(250);
@@ -147,12 +161,13 @@ for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => done(1,
 process.on("exit", closeChrome);
 try {
   // What the DevTools endpoint last answered, for the failure when none is a page.
-  let seen = `nothing yet on :${debug}`;
+  let seen;
   const page = await poll(
     START_WAIT_S,
     async () => {
+      seen = `:${debug} has not answered`;
       try {
-        const targets = await (await fetch(`http://localhost:${debug}/json`)).json();
+        const targets = await (await fetch(`http://localhost:${debug}/json`, { signal: AbortSignal.timeout(10000) })).json();
         seen = `:${debug} listed ${targets.length} target(s)${targets.length ? `: ${targets.map((t) => t.type).join(", ")}` : ""}`;
         return targets.find((t) => t.type === "page");
       } catch (e) {
@@ -185,12 +200,15 @@ try {
       consoleErrors.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" ").split("\n")[0]);
     }
   };
-  const send = (method, params = {}) =>
-    new Promise((resolve) => {
-      const id = ++seq;
-      waiting.set(id, resolve);
-      ws.send(JSON.stringify({ id, method, params }));
-    });
+  // One DevTools command's answer; a Chrome that never answers it fails the shot.
+  const send = async (method, params = {}) => {
+    const id = ++seq;
+    const answer = new Promise((resolve) => waiting.set(id, resolve));
+    ws.send(JSON.stringify({ id, method, params }));
+    const a = await bounded(START_WAIT_S * 1000, answer);
+    if (!a) throw new Error(`Chrome did not answer ${method} within ${START_WAIT_S} s (SHOT_START_WAIT_S)`);
+    return a;
+  };
   const evaluate = async (expression) => {
     const a = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     return a.result?.result?.value;
@@ -305,7 +323,7 @@ try {
       return true;
     })()`;
   };
-  const within = ` within ${STEP_WAIT_S} s (SHOT_STEP_WAIT_S)`;
+  const stepGuard = ` within ${STEP_WAIT_S} s (SHOT_STEP_WAIT_S)`;
   let first = true;
   for (const segment of spec.split(" > ")) {
     const [route, ...steps] = segment.split(" + ").map((s) => s.trim());
@@ -329,14 +347,14 @@ try {
       const arg = step.slice(colon + 1);
       if (verb === "click" || verb === "focus") {
         const hit = await poll(STEP_WAIT_S, () => evaluate(verb === "click" ? clickJs(arg) : focusJs(arg)));
-        if (!hit) done(1, `shot: step '${step}' found no enabled element on #/${path}${within}`);
+        if (!hit) done(1, `shot: step '${step}' found no enabled element on #/${path}${stepGuard}`);
       } else if (POINTER.has(verb)) {
         const at = await poll(STEP_WAIT_S, () => evaluate(pointJs(arg)));
-        if (!at) done(1, `shot: step '${step}' found no visible enabled element on #/${path}${within}`);
+        if (!at) done(1, `shot: step '${step}' found no visible enabled element on #/${path}${stepGuard}`);
         await pointer(verb, at);
       } else if (verb === "select" && arg.slice(arg.startsWith("testid=") ? 7 : 0).includes("=")) {
         const hit = await poll(STEP_WAIT_S, () => evaluate(selectJs(arg)));
-        if (!hit) done(1, `shot: step '${step}' found no such select and option on #/${path}${within}`);
+        if (!hit) done(1, `shot: step '${step}' found no such select and option on #/${path}${stepGuard}`);
       } else if (verb === "type") {
         await send("Input.insertText", { text: arg });
       } else if (verb === "key") {

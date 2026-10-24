@@ -7,7 +7,8 @@
 # - two step routes that share their first 120 characters get two images;
 # - run from another directory, the script uses its own checkout;
 # and then, through scripts/shot-steps.mjs in headless Chrome (skipped where
-# Chrome is not installed), the pointer steps on a fixture page.
+# Chrome is not installed), the pointer steps on a fixture page, and Chrome's
+# start (#1957): a late one passes, a dead one and a mute one fail saying so.
 set -euo pipefail
 here=$(dirname "$0")
 shot=$here/shot.sh
@@ -38,14 +39,20 @@ case $elsewhere in *"root=$checkout "*) ;; *) fail "run from /, the root is not 
 # `Hovered` stands only while the row is under the pointer, so the hover holds
 # through later steps to the capture. A miss on each new step exits 1 naming it.
 if [ ! -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
-    echo "shot-test: no Chrome at the path shot-steps.mjs starts; the pointer-step cases skipped"
+    echo "shot-test: no Chrome at the path shot-steps.mjs starts; the pointer-step and start-up cases skipped"
     if [ "$failures" -gt 0 ]; then echo "shot-test: $failures failure(s)" >&2; exit 1; fi
     echo "shot-test: ok"
     exit 0
 fi
 fixture=$(mktemp -d "${TMPDIR:-/tmp}/knobas-shot-steps.XXXXXX")
-server=
-cleanup() { [ -z "$server" ] || kill "$server" 2>/dev/null || true; rm -rf "$fixture"; }
+server= stalled=
+# The stalled case runs in the background; a run that ends before its `wait`
+# stops it, and its SIGTERM handler takes its Chrome down.
+cleanup() {
+    [ -z "$server" ] || kill "$server" 2>/dev/null || true
+    [ -z "$stalled" ] || { kill "$stalled" 2>/dev/null || true; wait "$stalled" 2>/dev/null || true; }
+    rm -rf "$fixture"
+}
 trap cleanup EXIT
 cat >"$fixture/index.html" <<'HTML'
 <!doctype html><meta charset="utf-8"><body style="margin:0;font:16px sans-serif">
@@ -123,7 +130,25 @@ if SHOT_CHROME=$fixture/mute-chrome SHOT_START_WAIT_S=2 steps mute '#/'; then
 else
     grep -q "Chrome offered no page within 2 s (SHOT_START_WAIT_S); last seen: " "$fixture/mute.err" || fail "a mute Chrome's failure: $(cat "$fixture/mute.err")"
 fi
-wait "$stalled" || fail "a Chrome 20 s late failed: $(cat "$fixture/stalled.err")"
+# One that takes the connection and never answers: the probe hangs, and the
+# guard still ends it.
+cat >"$fixture/hung-chrome" <<'SH'
+#!/bin/sh
+exec node -e '
+const port = process.argv.find((a) => a.startsWith("--remote-debugging-port=")).split("=")[1];
+require("net").createServer(() => {}).listen(Number(port));
+' -- "$@"
+SH
+chmod +x "$fixture/hung-chrome"
+from=$SECONDS
+if SHOT_CHROME=$fixture/hung-chrome SHOT_START_WAIT_S=3 steps hung '#/'; then
+    fail "a Chrome that never answers its endpoint passed"
+else
+    grep -q "Chrome offered no page within 3 s (SHOT_START_WAIT_S); last seen: :[0-9]* has not answered" "$fixture/hung.err" || fail "a hung Chrome's failure: $(cat "$fixture/hung.err")"
+    [ $((SECONDS - from)) -lt 9 ] || fail "a hung Chrome took $((SECONDS - from)) s to fail, past its 3 s guard"
+fi
+status=0; wait "$stalled" || status=$?; stalled=
+[ "$status" = 0 ] || fail "a Chrome 20 s late failed: $(cat "$fixture/stalled.err")"
 [ -s "$fixture/stalled.png" ] || fail "a Chrome 20 s late wrote no image"
 
 # No browser the cases above started is left (#1603): each carried a profile
