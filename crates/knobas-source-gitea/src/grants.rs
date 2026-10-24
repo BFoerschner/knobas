@@ -181,8 +181,9 @@ pub(crate) async fn probe(source: &GiteaSource, owner: &str, repo: &str, ops: &[
 }
 
 /// The asks among `asks` the token cannot make (#2054): each repository the
-/// asks name is probed once, for the categories its asks fall in. An ask of another source, an id this adapter
-/// did not issue and an op it does not declare are not answered.
+/// asks name is probed once, for the categories its asks fall in. An ask of
+/// another source, an id this adapter did not issue and an op it does not
+/// declare are not answered, and send nothing.
 pub(crate) async fn refused(source: &GiteaSource, asks: &[WriteAsk]) -> Vec<RefusedWrite> {
     let declared = crate::descriptor_template().write_ops;
     let mut by_repository: Vec<((String, String), Vec<&WriteAsk>)> = Vec::new();
