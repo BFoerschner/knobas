@@ -99,7 +99,7 @@
       }
       if (!live) return;
       // A protocol opens where `itemHash` sends it: Time › Standup at its date.
-      if (protocolDayOf(note.note.title) !== null) return ports.replace(entityAddress("note", note.note.id, false, note.note.title));
+      if (protocolDayOf(note.note.title) !== null) return ports.replace(entityAddress("note", note.note.id, note.note.title));
       read = { note };
     })();
     return () => {
@@ -159,7 +159,7 @@
                 class="tf-note-gone"
                 title="Withdrawn upstream">{token.ref.target.title}</span
               >{:else}<a
-                href={entityAddress(token.ref.target.kind, token.ref.target.entity_id, false, token.ref.target.title)}
+                href={entityAddress(token.ref.target.kind, token.ref.target.entity_id, token.ref.target.title)}
                 >{token.ref.target.title}</a
               >{/if}{/each}</p>
       </div>
@@ -174,7 +174,7 @@
               {#if other.kind === "ctx" || other.deleted_at !== null}
                 <span class:tf-note-gone={other.deleted_at !== null}>{other.title}</span>
               {:else}
-                <a href={entityAddress(other.kind, other.entity_id, false, other.title)}>{other.title}</a>
+                <a href={entityAddress(other.kind, other.entity_id, other.title)}>{other.title}</a>
               {/if}
             </li>
           {/each}

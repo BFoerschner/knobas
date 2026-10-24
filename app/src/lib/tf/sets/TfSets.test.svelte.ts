@@ -238,7 +238,7 @@ test("the editor draws a panel per kind, the rules with live counts and the tick
   expect(text(".tf-rule-n")).toEqual(["2 tickets", "1 ticket"]);
   expect(text(".tf-roll")).toEqual(["2 of them yours. New tickets join as soon as they match."]);
   expect(text(".tf-keys a.tf-mine")).toEqual(["PAY-231", "PAY-240"]);
-  expect(target.querySelector<HTMLAnchorElement>(".tf-keys a")?.getAttribute("href")).toBe("#/job/PAY-231");
+  expect(target.querySelector<HTMLAnchorElement>(".tf-keys a")?.getAttribute("href")).toBe("#/job/jira%3APAY-231");
 });
 
 test("Add… marks what is already in, and adds what was picked as one save", async () => {

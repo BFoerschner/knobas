@@ -269,15 +269,15 @@ test("a board read in lanes draws the server's lanes in its order, each with eve
   expect(moreLanesLine(0)).toBeNull();
 });
 
-test("a key two sources hold is shared, and its tickets open at their source's address (#1476)", () => {
+test("a key two sources hold is shared, and every ticket opens at its source's address (#1476, #1977)", () => {
   const jira = card(231, "To Do");
   const mock = { ...card(231, "Done"), entity_id: "mock:PAY-231", source_id: "mock" };
   const columns = [named("To Do", ["To Do"]), { status: "Done", cards: [mock, card(7, "Done")], total: 2 }];
   columns[0]!.cards = [jira, card(8, "To Do")];
   const shared = sharedKeys(columns);
   expect([...shared]).toEqual(["PAY-231"]);
-  expect(ticketAddress(jira, shared)).toBe("#/job/jira%3APAY-231");
-  expect(ticketAddress(mock, shared)).toBe("#/job/mock%3APAY-231");
-  // A key one source holds addresses as before.
-  expect(ticketAddress(card(7), shared)).toBe("#/job/PAY-7");
+  expect(ticketAddress(jira)).toBe("#/job/jira%3APAY-231");
+  expect(ticketAddress(mock)).toBe("#/job/mock%3APAY-231");
+  // A key one source holds names its source too.
+  expect(ticketAddress(card(7))).toBe("#/job/jira%3APAY-7");
 });

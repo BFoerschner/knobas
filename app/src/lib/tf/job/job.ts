@@ -19,6 +19,7 @@ import { protocolDayOf } from "../../standup/protocol";
 import { keyOf, minutesLabel } from "../../time/format";
 import { minutesOf } from "../../time/week";
 import { CI, claims } from "../roles.svelte";
+import { jobHash } from "../route";
 import { reenterWords, secretNoun } from "../settings/settings";
 
 /** What the job reads of a `list_sources` row: the fields of the wire row it uses, all always sent. */
@@ -263,7 +264,8 @@ export function runKindsOf(registry: Pick<KindRegistry, "frameKinds">): readonly
 /**
  * The full view a row opens (R-4.10): the item's own address in the new
  * shell, never a panel. The address carries the entity id, because a pull
- * request's number is unique only inside its repository. A branch and a
+ * request's number is unique only inside its repository and a ticket's key
+ * only inside its source (#1977). A branch and a
  * commit keep addresses of their own, which send the reader on to the
  * repository page that draws them (#1440). A kind with no view
  * of its own opens the section that lists it: a Jira view its ticket view, a
@@ -290,7 +292,7 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind"> & { title?: 
     case "commit":
       return `#/commit/${id}`;
     case "ticket":
-      return `#/job/${encodeURIComponent(keyOf(row.entity_id))}`;
+      return jobHash(row.entity_id);
     case "build":
       return `#/build/${id}`;
     case "page":

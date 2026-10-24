@@ -155,7 +155,7 @@
       <p class="tf-small">…</p>
     {:else if conversation.comments === 0}
       <p class="tf-small">No comments yet.</p>
-      <a class="tf-btn tf-sm tf-cbtn" href="#/job/{encodeURIComponent(key)}/conversation">Comment</a>
+      <a class="tf-btn tf-sm tf-cbtn" href="{jobHash(detail.row.entity_id)}/conversation">Comment</a>
     {:else}
       <p class="tf-small">
         {commentCount(conversation.comments)}{#if conversation.fresh > 0 && lastVisit !== null}, <b
@@ -169,7 +169,7 @@
             : ""}: {conversation.latest.body}
         </div>
       {/if}
-      <a class="tf-btn tf-sm tf-cbtn" href="#/job/{encodeURIComponent(key)}/conversation">Read the conversation</a>
+      <a class="tf-btn tf-sm tf-cbtn" href="{jobHash(detail.row.entity_id)}/conversation">Read the conversation</a>
     {/if}
   </section>
   <section>

@@ -87,6 +87,7 @@
   import TfImport from "./TfImport.svelte";
   import { importedLine } from "./import";
   import { isEntityId, resolveTicket } from "../job/job";
+  import { jobHash } from "../route";
   import { reachedPart } from "./reach";
   import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
@@ -573,7 +574,7 @@
             type="button"
             aria-pressed={ticket !== null}
             onclick={() =>
-              (location.hash = host === "job" ? `#/job/${encodeURIComponent(scopeKey)}/map` : `#/deps/job/${encodeURIComponent(scopeKey)}`)}
+              (location.hash = host === "job" ? `${jobHash(ticketId ?? scopeKey)}/map` : `#/deps/job/${encodeURIComponent(scopeKey)}`)}
             >This job <span class="tf-jobk">{scopeKey}</span></button
           >
           <button type="button" aria-pressed={ticket === null} onclick={() => (location.hash = "#/deps")}>Everything</button>

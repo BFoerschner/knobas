@@ -29,9 +29,10 @@
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import type { Layers } from "../layers.svelte";
+  import { jobHash } from "../route";
   import { decisions as sessionDecisions, UNDO_MS, type Decisions } from "./decisions.svelte";
   import {
-    aboutKey,
+    aboutTicket,
     claim,
     currentOf,
     endName,
@@ -130,7 +131,7 @@
   );
 
   const current = $derived(currentOf(list, decisions.verdicts, sid));
-  const about = $derived(current === null ? null : aboutKey(current));
+  const about = $derived(current === null ? null : aboutTicket(current));
 
   $effect(() => {
     relation = current?.link.relation ?? "related";
@@ -264,8 +265,8 @@
           <h1>Is this a real connection?</h1>
           <span class="tf-dim"
             >{list.indexOf(current) + 1} of {list.length}{#if about !== null}, about <a
-                href="#/job/{encodeURIComponent(about)}"
-                class="tf-mono">{about}</a
+                href={jobHash(about.entityId)}
+                class="tf-mono">{about.key}</a
               >{/if}</span
           >
         </div>

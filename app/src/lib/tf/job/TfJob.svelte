@@ -314,7 +314,7 @@
           name: `Comment on ${key}`,
           resend: () => {
             askAgain(id, "comment", body);
-            location.hash = `${jobHash(key)}/conversation`;
+            location.hash = `${jobHash(id)}/conversation`;
           },
         },
         follower,
@@ -355,7 +355,7 @@
           name: `Move of ${key} to ${status}`,
           resend: () => {
             askAgain(id, "status", status);
-            location.hash = jobHash(key);
+            location.hash = jobHash(id);
           },
         },
         follower,
@@ -455,6 +455,7 @@
   </div>
 {:else if detail}
   {@const key = keyOf(detail.row.entity_id)}
+  {@const address = jobHash(detail.row.entity_id)}
   <div class="tf-ws" class:tf-mapmode={current.id === "map"}>
     <TfJobCard
       {detail}
@@ -474,7 +475,7 @@
     <section class="tf-work">
       <div class="tf-wtabs" role="tablist">
         {#each TABS as each (each.id)}
-          <a href="#/job/{encodeURIComponent(key)}{each.path}" role="tab" aria-selected={current.id === each.id}
+          <a href="{address}{each.path}" role="tab" aria-selected={current.id === each.id}
             >{each.name}{#if each.id === "conversation" && conversation !== null}{#if conversation.comments > 0}{" "}<span
                     class="tf-count">{conversation.comments}</span
                   >{/if}{#if conversation.fresh > 0}{" "}<span class="tf-count tf-info">{conversation.fresh} new</span>{/if}{/if}</a
@@ -529,7 +530,7 @@
                 {/snippet}
               </TfSection>
             {/if}
-            <TfSection id="assets" title="Assets" openLabel="Open in Dependencies" openHref="#/job/{encodeURIComponent(key)}/map" footHref="#/assets" rows={assetLines} rollup={assets ? assetsRollup(assets) : null} />
+            <TfSection id="assets" title="Assets" openLabel="Open in Dependencies" openHref="{address}/map" footHref="#/assets" rows={assetLines} rollup={assets ? assetsRollup(assets) : null} />
             <TfSection id="monitors" title="Monitors" openLabel="Open Monitors" openHref="#/monitors" footHref="#/monitors" onopen={() => (sessionFilter("monitors").scope = "job")} rows={lines(monitors)} rollup={monitors ? monitorsRollup(monitors) : null} />
             <TfSection id="pages" title="Pages" openLabel="Open Docs view" openHref="#/docs" footHref="#/docs" onopen={() => (sessionFilter("docs").scope = "job")} rows={lines(pages)} rollup={pages ? pagesRollup(pages) : null} />
           </div>

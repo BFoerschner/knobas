@@ -46,7 +46,7 @@
       <h3>Work it belongs to</h3>
       <div class="tf-rail-list">
         {#each page.work as work (work.entity_id)}
-          <a href={jobHash(work.key)}
+          <a href={jobHash(work.entity_id)}
             ><span class="tf-mono">{work.key}</span> {work.title}{#if work.status}<span class="tf-s">{work.status}</span
               >{/if}</a
           >

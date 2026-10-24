@@ -178,7 +178,7 @@ test("from a view opened from the job, Link to opens the job with its link dialo
   press("Tab");
   press("Enter");
   await until(() => linkDialog() !== null, "the job's link dialog never opened");
-  expect(location.hash).toBe("#/job/PAY-231");
+  expect(location.hash).toBe("#/job/mock%3APAY-231");
   expect(linkDialog()!.querySelector(".tf-picked")?.textContent).toContain(FIRST_UNMONITORED);
 });
 

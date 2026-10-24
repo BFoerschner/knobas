@@ -132,7 +132,7 @@ test("clicking a row navigates to the other end's stable address", () => {
   screen.buttons("Retry storm postmortem")[0]!.click();
   flushSync();
 
-  expect(screen.onopen).toHaveBeenCalledWith("#/job/PAY-228");
+  expect(screen.onopen).toHaveBeenCalledWith("#/job/mock%3APAY-228");
 
   screen.done();
 });
