@@ -5,6 +5,7 @@
 import { GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "../../../sources/fixtures";
 import type { AdapterStatus, AuthMethod, AuthState, KindPaths, SourceDescriptor, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../../ipc/sources";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed } from "../fake-seed";
 import { CORPUS, ROLE_CLAIMERS, SYNCED_AT } from "./corpus";
 
 // -- the sources cockpit's fixture -------------------------------------------
@@ -543,3 +544,5 @@ export function handlers(): Handlers {
     },
   };
 }
+
+keepSeed(FIXTURE_SOURCES, FIXTURE_ADAPTERS, INSTALLED);

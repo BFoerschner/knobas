@@ -20,6 +20,7 @@ import type { LaneColumn, LaneField, MiniBoardCard, MiniBoardLane, SourceStatuse
 import type { QueryKey, QueryTranslation, SavedViewSource, ViewLanes, CardField, ListColumn, ListSort } from "../../../ipc/search";
 import { laneOf } from "../../../tf/tickets/tickets";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed } from "../fake-seed";
 import { fakeTicketCount, fakeTicketKeys } from "./corpus";
 
 type LanedCard = Pick<
@@ -355,3 +356,5 @@ export function handlers(): Handlers {
     },
   };
 }
+
+keepSeed(VIEWS, JIRA);

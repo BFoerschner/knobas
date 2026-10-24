@@ -24,6 +24,7 @@
 import type { DepLayer, Dependencies, DepItem, DepRelation, DepView, DepViews, DepViewSettings, LayerInView } from "../../../ipc/assets";
 import type { Tone } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
+import { onFakeReset, seedOf } from "../fake-seed";
 import { CORPUS } from "./corpus";
 import { FIXTURE_ESTATE, FIXTURE_ROUTES } from "./estate";
 import { fakePipelines } from "./builds";
@@ -294,3 +295,8 @@ export function handlers(): Handlers {
     },
   };
 }
+
+const atLoad = seedOf({ layers, views });
+onFakeReset(() => {
+  ({ layers, views } = atLoad());
+});

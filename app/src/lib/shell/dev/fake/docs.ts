@@ -40,6 +40,7 @@
  */
 import type { QueuedWrite, WriteOpPayload } from "../../../ipc/sources";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed } from "../fake-seed";
 import type {
   DocBlock,
   DocHit,
@@ -643,3 +644,5 @@ export function handlers(): Handlers {
     },
   };
 }
+
+keepSeed(PAGES);

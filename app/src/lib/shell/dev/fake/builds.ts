@@ -35,6 +35,7 @@ import type {
   ViewSection,
 } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed } from "../fake-seed";
 import { fakeRoleScope } from "./corpus";
 import { keyOf } from "../../../time/format";
 
@@ -698,3 +699,5 @@ export function handlers(): Handlers {
     },
   };
 }
+
+keepSeed(pins, presets);

@@ -6,14 +6,14 @@
  * proposal with no reason is not shippable.
  *
  * This file lives under `dev/` on purpose. `house-rules.test.ts` resolves
- * every importer of the dev harness and requires the set to be exactly
- * `App.svelte`, exempting only files inside the harness directory itself;
- * a test one level up would be a second door into the fixture.
+ * every importer of the dev harness and requires the set to be exactly the
+ * doors it names, exempting only files inside the harness directory itself;
+ * a test one level up would be another door into the fixture.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 
 import type { AssetDetail, AssetRow } from "../../ipc/assets";
 import { columnPathFor, stripFor, wireKey, wiresFor } from "../../assets/tree";
@@ -85,9 +85,9 @@ test("the page is scoped to the room it is read from", () => {
 });
 
 /**
- * Last in the file on purpose: the answer is session state, as it is for the
- * contexts handlers, and a fresh `demoHandlers()` does not reset it. Every
- * expectation here is relative to the read before it for the same reason.
+ * The answer is session state, as it is for the contexts handlers: it holds
+ * for the rest of the test and goes back to its seed after it (#2004). Every
+ * expectation here is relative to the read before it.
  */
 test("accepting or dismissing removes the row from the next read and drops the count", () => {
   const handlers = demoHandlers();
@@ -366,10 +366,8 @@ test("Depends on this lists every route landing on what breaks, and none above i
  * that file is the one Import gesture a reader will make here, and what it has
  * to answer is criterion 3's sentence: every entry already in the tree.
  *
- * Last in the file, and the two tests are ordered: the second one deletes an
- * asset, and the fixture's estate is session state that a fresh
- * `demoHandlers()` does not reset — the same rule the suggestion tests above
- * are written under.
+ * The second test deletes an asset; the fixture's estate is session state,
+ * and goes back to its seed after the test (#2004).
  */
 test("importing the estate file previews every entry as already in the tree", () => {
   const handlers = demoHandlers();
@@ -1103,10 +1101,9 @@ test("the argument parse reads what the barrel sends, and the recorder keeps a r
 });
 
 test("every argument a faked handler reads is a camel-cased key the barrel's invoke sends it", async () => {
-  // A fixture of its own: calling every write handler with nothing may touch
-  // the module state the other tests in this file read.
-  vi.resetModules();
-  const handlers = (await import("./fake-tauri")).demoHandlers();
+  // Calling every write handler with nothing may touch the fixture's state,
+  // which goes back to its seed after the test (#2004).
+  const handlers = demoHandlers();
   const sent = barrelArguments();
 
   let reads = 0;
@@ -1217,10 +1214,9 @@ test("the fixture's TeamCity has a run the server never answered, with the long 
   expect(runs.filter((run) => run.id === unanswered[0]!.id)).toHaveLength(1);
 });
 
-test("the fixture's install adds the descriptor to list_adapters and add_source adds the row to list_sources (#1406)", async () => {
-  // A fixture of its own: the install and the new source are module state the other tests read.
-  vi.resetModules();
-  const handlers = (await import("./fake-tauri")).demoHandlers();
+test("the fixture's install adds the descriptor to list_adapters and add_source adds the row to list_sources (#1406)", () => {
+  // The install and the new source go back to the seed after the test (#2004).
+  const handlers = demoHandlers();
   type Source = { id: string; adapter_kind: string; health: { source_id: string }; kinds: { id: string }[] };
   const before = (handlers["list_sources"]!({}) as Source[]).length;
   handlers["install_adapter"]!({ manifest: "/releases/knobas-adapter.json" });

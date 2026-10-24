@@ -11,6 +11,7 @@ import type {
   SuggestionPage,
 } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed } from "../fake-seed";
 import { CORPUS, FAKE_CONTEXTS } from "./corpus";
 import { keyOf } from "../../../time/format";
 
@@ -213,3 +214,5 @@ export function handlers(): Handlers {
     proposal_evidence: (args) => proposalEvidence(args),
   };
 }
+
+keepSeed(ANSWERED);

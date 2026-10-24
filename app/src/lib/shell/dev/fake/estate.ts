@@ -7,6 +7,7 @@
 import ESTATE_FILE from "../../../../../../testenv/estate.json";
 import type { AssetProperty, AssetRow, DependsOnRow, PropertyValue } from "../../../ipc/assets";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed } from "../fake-seed";
 import { SYNCED_AT } from "./corpus";
 
 // -- the estate -------------------------------------------------------------
@@ -1005,3 +1006,5 @@ export function handlers(): Handlers {
     delete_route: (args) => deleteRoute(args),
   };
 }
+
+keepSeed(FIXTURE_ESTATE, FIXTURE_ROUTES, ASSET_HISTORY);

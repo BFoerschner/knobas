@@ -72,6 +72,12 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // In a plain `.ts` file, so the scan lists it by hand ({@link UNSCANNED}): the shell's
   // one write follower, with the listener it registered.
   "shell/follow-write.ts#shared": async () => (await import("./follow-write")).resetWriteFollower(),
+  // The `?fake-ipc` backend's state, which each `fake/` module registers as it
+  // loads (#2004). Plain `.ts` too; `dev/fake-seed.test.ts` scans `fake/` itself.
+  // Behind the guard `house-rules.test.ts` asks of every door into `shell/dev/`.
+  "shell/dev/fake-seed.ts#restores": async () => {
+    if (import.meta.env.DEV) (await import("./dev/fake-seed")).resetFake();
+  },
 };
 
 /**
@@ -85,7 +91,7 @@ export const NOT_YET_RESET: readonly string[] = [];
  * `view-read.ts`) and components, not other plain `.ts` files. Each must still
  * be a key of {@link RESETS}.
  */
-export const UNSCANNED: readonly string[] = ["shell/follow-write.ts#shared"];
+export const UNSCANNED: readonly string[] = ["shell/follow-write.ts#shared", "shell/dev/fake-seed.ts#restores"];
 
 /**
  * A file that mocks a store's dependency with a partial factory cannot load the

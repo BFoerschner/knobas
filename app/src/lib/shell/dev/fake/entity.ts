@@ -4,6 +4,7 @@
  */
 import type { LinkEntry, LinkRow, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed } from "../fake-seed";
 import { CORPUS, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
@@ -478,3 +479,5 @@ export function handlers(): Handlers {
     },
   };
 }
+
+keepSeed(LINKS);
