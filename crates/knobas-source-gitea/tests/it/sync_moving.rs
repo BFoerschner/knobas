@@ -45,6 +45,8 @@ pub struct World {
     pub ignores_bounds: bool,
     /// Commits listed from the first page whatever `page` says, as no
     /// measured server does: the runaway case the page caps guard against.
+    /// A fault the pinned containers cannot be made to produce, so this fake
+    /// is its witness (ADR-0013, "A fault the real instance cannot produce").
     pub ignores_pages: bool,
     hooks: Vec<(String, u32, Change)>,
 }

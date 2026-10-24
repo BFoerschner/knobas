@@ -5761,6 +5761,141 @@ async fn the_commit_listings_bounds_are_server_side_on_gitea_and_ignored_on_forg
     );
 }
 
+/// #2034, the read past the cap on the real server. 1,100 commits pushed at
+/// once against a budget of 1,000: the first incremental run delivers the
+/// newest 1,000 and is cut, and the next must deliver the other 100. Forgejo
+/// ignores `until=`, so that run lists the branch from its head and passes the
+/// 1,000 it already delivered first, a whole page cap of them; before #2034
+/// it stopped there on every run. Gitea's `until=` keeps those pages from
+/// being listed, so on Gitea this is the plain catch-up. Its own organisation
+/// repository, removed before and after, so no other test's counts move.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_commit_catch_up_reads_past_a_page_cap_of_commits_the_server_lists_above_it() {
+    const PUSHED: i64 = 1_100;
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let api = format!("{}/api/v1", env.url);
+    let (admin, password) = TESTENV_ADMIN;
+    let scratch = "knobas-live-deep-catch-up";
+    let full_name = format!("{}/{scratch}", env.owner);
+    let remove = async || {
+        let _ = http
+            .delete(format!("{api}/repos/{full_name}"))
+            .basic_auth(admin, Some(password))
+            .send()
+            .await;
+    };
+    remove().await;
+    let created = http
+        .post(format!("{api}/orgs/{}/repos", env.owner))
+        .basic_auth(admin, Some(password))
+        .json(&serde_json::json!({ "name": scratch, "auto_init": true, "default_branch": "main" }))
+        .send()
+        .await
+        .expect("POST /orgs/{owner}/repos");
+    assert!(
+        created.status().is_success(),
+        "create the repository: {}",
+        created.status()
+    );
+    let source = env.source(serde_json::json!({
+        "repos": [full_name], "commits_per_repo": 1000, "prs_per_repo": 0
+    }));
+    let (_, cursor) = full(&*source).await;
+
+    // Empty commits a second apart, all after the first one's second, made
+    // by `git fast-import` and pushed in one go.
+    let dir = std::env::temp_dir().join(format!("knobas-live-deep-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let remote = env
+        .url
+        .replacen("://", &format!("://{admin}:{password}@"), 1)
+        + &format!("/{full_name}.git");
+    let git = |args: &[&str], input: Option<&str>| -> String {
+        use std::io::Write as _;
+        let mut child = std::process::Command::new("git")
+            .args(args)
+            .current_dir(if args[0] == "clone" {
+                std::env::temp_dir()
+            } else {
+                dir.clone()
+            })
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("git runs");
+        if let Some(input) = input {
+            child
+                .stdin
+                .take()
+                .expect("a stdin")
+                .write_all(input.as_bytes())
+                .expect("git reads the stream");
+        }
+        let out = child.wait_with_output().expect("git ends");
+        assert!(out.status.success(), "git {args:?}: {}", out.status);
+        String::from_utf8(out.stdout)
+            .expect("UTF-8")
+            .trim()
+            .to_owned()
+    };
+    git(
+        &["clone", "-q", &remote, dir.to_str().expect("a UTF-8 path")],
+        None,
+    );
+    let head = git(&["rev-parse", "HEAD"], None);
+    let start = chrono::Utc::now().timestamp() + 60;
+    let mut stream = String::new();
+    for k in 1..=PUSHED {
+        let message = format!("knobas live: deep catch-up {k}\n");
+        stream += &format!(
+            "commit refs/heads/main\ncommitter knobas <knobas@tidewater.example> {} +0000\ndata {}\n{message}",
+            start + k,
+            message.len()
+        );
+        if k == 1 {
+            stream += &format!("from {head}\n");
+        }
+        stream += "\n";
+    }
+    git(&["fast-import", "--quiet"], Some(&stream));
+    git(&["push", "-q", "origin", "main"], None);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let mut delivered: Vec<String> = Vec::new();
+    let mut cursor = cursor;
+    for run in 1..=2 {
+        let mut sink = VecSink(Vec::new());
+        cursor = source
+            .sync(Some(cursor), &mut sink)
+            .await
+            .expect("an incremental sync");
+        let commits = of_kind(&sink.0, "commit");
+        println!("LIVE deep catch-up run {run}: {} commits", commits.len());
+        delivered.extend(commits.iter().map(|i| i.entity.key.clone()));
+    }
+    let position: serde_json::Value = serde_json::from_str(&cursor).expect("the cursor is JSON");
+    remove().await;
+
+    let distinct: std::collections::BTreeSet<&String> = delivered.iter().collect();
+    assert_eq!(
+        (delivered.len(), distinct.len()),
+        (1_100, 1_100),
+        "every pushed commit, once each, in two runs"
+    );
+    assert!(
+        position["repos"][&full_name]
+            .get("commits_catching_up")
+            .is_none(),
+        "caught up: {}",
+        position["repos"][&full_name]
+    );
+}
+
 /// #1716: a branch walk of more than one page asks `git/refs/heads` for every
 /// branch name at once, and relies on it being one unpaged answer naming
 /// exactly what the paged listing names, at the same heads. Asked with

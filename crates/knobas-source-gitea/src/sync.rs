@@ -182,7 +182,9 @@ const MAX_BRANCH_PAGES: u32 = 21;
 // `*_per_repo` of theirs and are never swept, so stopping is the normal case
 // and cannot be read downstream as a deletion. On an incremental run a
 // reached cap cuts the walk short exactly as the budget does, and the next run
-// continues it (#1624, [`pulls`]).
+// continues it (#1624, [`pulls`]) -- except where a commit catch-up's capped
+// pages all lay above its window, which only a server ignoring `until=` lists:
+// that walk reads on from the next page (#2034, [`walk_commits`]).
 //
 // The empty page costs these two nothing, unlike the exhaustive pair: a budget
 // of 1,000 is spent by the last record of page 20 and breaks the walk there,
@@ -191,8 +193,10 @@ const MAX_BRANCH_PAGES: u32 = 21;
 // `MAX_BRANCH_PAGES` went to 21: a 21st request is one they never make.
 /// Pull requests per repository, per run.
 const MAX_PR_PAGES: u32 = 20;
-/// Commits per *branch* per run. `commits_per_repo` is the whole-repository
-/// budget the walk actually spends, and is what bites first.
+/// Pages per walk of one branch. `commits_per_repo` is the whole-repository
+/// budget the walk actually spends, and is what bites first. A catch-up over
+/// a server that ignores `until=` opens a further walk past the pages above
+/// its window, which spend no budget (#2034).
 const MAX_COMMIT_PAGES: u32 = 20;
 /// Issues per repository per run (#1206): 10,000 at 50 a page, plus the empty
 /// page that ends them. Unbudgeted, so reaching it ends the run with
@@ -1522,8 +1526,8 @@ async fn issue_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, number: u64
 ///
 /// Gitea's `since=` is inclusive and server-side, so the boundary commits come
 /// back on every run (Forgejo 17 ignores it and `until=`, #2034, and the walk
-/// filters both bounds itself); `commits_at_watermark` is what keeps them from being
-/// re-delivered. Commits are immutable, so a delivered object id is delivered
+/// filters both bounds itself); `commits_at_watermark` is what keeps them from
+/// being re-delivered. Commits are immutable, so a delivered object id is delivered
 /// for good -- which is why this boundary, unlike the pull requests', needs no
 /// fingerprint (#764): nothing about a commit can change inside its second,
 /// and a new commit in that second has an object id the set does not hold.
@@ -1743,9 +1747,10 @@ async fn walk_commits(
         let branch = leg.branch.as_str();
         let mut on_leg: Vec<(String, Option<DateTime<Utc>>)> = Vec::new();
         // A reached cap ends a full sync's branch quietly (see the note on
-        // the caps), and cuts an incremental walk short like the budget.
-        // `skip` is the pages a cap passed over above a catch-up's window.
-        let from = |skip: u32| {
+        // the caps), and cuts an incremental walk short like the budget,
+        // unless the walk is still passing commits above a catch-up's window
+        // (below). `skip` is the pages earlier walks of this leg read.
+        let walk_from = |skip: u32| {
             PageWalk::new(PageNumber, MAX_COMMIT_PAGES, move |page| {
                 source.client.commits(
                     at.owner,
@@ -1757,11 +1762,11 @@ async fn walk_commits(
             })
         };
         let mut skip = 0;
-        let mut walk = from(skip);
+        let mut walk = walk_from(skip);
         // The commits above the window met on this leg, and whether the last
         // page read held any this leg had not met before (#2034).
         let mut above: HashSet<String> = HashSet::new();
-        let mut overhead = false;
+        let mut passing_above = false;
         loop {
             let batch = match walk.next().await {
                 Ok(Walked::Page(batch)) => batch,
@@ -1773,11 +1778,11 @@ async fn walk_commits(
                 // may read. Stopping there would leave the same catch-up to
                 // every run after, so the walk reads on from the next page.
                 // Bounded by the branch's own history: a page that only
-                // repeats what this leg already read is not `overhead`.
-                Ok(Walked::Capped) if overhead => {
+                // repeats what this leg already read is not `passing_above`.
+                Ok(Walked::Capped) if passing_above => {
                     skip += MAX_COMMIT_PAGES;
-                    walk = from(skip);
-                    overhead = false;
+                    walk = walk_from(skip);
+                    passing_above = false;
                     continue;
                 }
                 Ok(Walked::Capped) => {
@@ -1879,7 +1884,7 @@ async fn walk_commits(
             if fresh == 0 {
                 break;
             }
-            overhead = new_above > 0;
+            passing_above = new_above > 0;
         }
     }
     Ok(out)
