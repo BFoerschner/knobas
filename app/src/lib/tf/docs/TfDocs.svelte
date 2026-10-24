@@ -855,7 +855,7 @@
               webUrl={p.web_url}
               sections={p.sections}
               editable={p.writes.includes("update_page") && p.version !== null}
-              refused={refusal("update_page")}
+              refusal={refusal("update_page")}
               {stems}
               onopen={open}
               oncopy={copy}

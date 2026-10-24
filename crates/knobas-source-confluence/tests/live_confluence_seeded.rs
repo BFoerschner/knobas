@@ -67,7 +67,8 @@
 //!
 //! One **user**, its token and a private **space** it may only view, minted
 //! for the refused-writes test (#2053) and deleted again from [`Minted`]'s
-//! `Drop`, each checked gone; a killed run's are deleted by the next run's
+//! `Drop`: the token's delete checked by its answer, the space and the user
+//! each checked gone; a killed run's are deleted by the next run's
 //! [`Minted::new`] before it mints its own.
 //!
 //! What a *killed* run left behind is put back by the next one:
@@ -1932,7 +1933,8 @@ impl Minted {
 }
 
 impl Mint {
-    /// The token, the space and the user deleted, each checked gone.
+    /// The token deleted (its `204` checked), then the space and the user,
+    /// each checked gone. Deleting the user takes its tokens too.
     async fn take_away(&self, http: &reqwest::Client) -> Result<(), String> {
         let (url, (user, password)) = (&self.url, &self.admin);
         let send = |method: reqwest::Method, path: String, auth: (String, String)| {

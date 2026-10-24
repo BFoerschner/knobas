@@ -184,7 +184,8 @@ impl ConfluenceHttp {
     /// (#2053: `getPermissions` is the one way an ordinary user can read its
     /// own space permissions on Data Center).
     ///
-    /// Retried like a `GET`, since the methods called here change nothing.
+    /// Retried like a `GET`, so **only a method that changes nothing** may
+    /// be called through it; a write would be sent again on a retry.
     /// The service answers a failure as `{"error":{"message":…}}`, which
     /// comes back as [`SourceError::Protocol`] carrying that message.
     ///

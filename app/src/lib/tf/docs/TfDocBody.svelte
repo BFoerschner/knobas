@@ -8,7 +8,7 @@
   section* and *Cancel*; the backend says which sections are text-only
   (`DocSection.refusal`), and a refused one draws the button disabled with the
   reason. Saving goes through the write queue (`onsave`). A page its
-  source's credential may not edit (`refused`, #2053) draws every *Edit
+  source's credential may not edit (`refusal`, #2053) draws every *Edit
   section* disabled with that reason.
 
   A saved section draws its queued text in place of the old, muted and marked
@@ -31,7 +31,7 @@
     webUrl,
     sections,
     editable,
-    refused = null,
+    refusal = null,
     stems = [],
     onopen,
     oncopy,
@@ -46,7 +46,7 @@
     /** Whether the page's source takes a section edit at all. */
     editable: boolean;
     /** Why the source's credential may not edit this page (#2053), or `null`. */
-    refused?: string | null;
+    refusal?: string | null;
     stems?: string[];
     onopen: (url: string) => void;
     oncopy: (code: string) => void;
@@ -79,7 +79,7 @@
 
   function open(number: number) {
     const section = sections.find((s) => s.number === number);
-    if (!section || section.text === null || refused !== null) return;
+    if (!section || section.text === null || refusal !== null) return;
     editing = number;
     draft = queuedText(number) ?? section.text;
   }
@@ -113,7 +113,7 @@
           <a href={pageHash(entityId, section.number)} title="Link to this section">#</a>
           {#if editable && said}
             {#if said.refusal === null}
-              <button type="button" {...refusedAttrs(refused)} onclick={() => open(section.number)}>Edit section</button>
+              <button type="button" {...refusedAttrs(refusal)} onclick={() => open(section.number)}>Edit section</button>
             {:else}
               <button type="button" disabled title={refusalReason(said.refusal, sourceName)}>Edit section</button>
             {/if}

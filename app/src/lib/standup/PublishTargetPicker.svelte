@@ -36,7 +36,7 @@
 -->
 <script lang="ts">
   import type { PublishTarget } from "../ipc/entity";
-  import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort } from "../shell/refused-writes";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../shell/refused-writes";
   import { search as realSearch, type SearchHit } from "../ipc/search";
   import type { PublishableSource } from "./protocol";
   import { presumedSource } from "./protocol";
@@ -69,11 +69,11 @@
 
   let refused = $state<RefusedWrite[]>([]);
   /** The chosen parent and every hit, as a string, so a search with the same hits asks nothing again. */
-  const asks = $derived(
+  const askKey = $derived(
     JSON.stringify([...new Set([...(parent === null ? [] : [parent]), ...hits.map((hit) => hit.entity_id)])].map((entity) => ({ entity, op: "create_page" }))),
   );
   $effect(() =>
-    askInto(JSON.parse(asks), refusedWrites, (answer) => {
+    askInto(JSON.parse(askKey) as WriteAsk[], refusedWrites, (answer) => {
       refused = answer;
       announce();
     }),
