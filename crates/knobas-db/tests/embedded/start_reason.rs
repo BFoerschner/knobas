@@ -164,3 +164,36 @@ async fn the_retry_after_a_stale_lock_names_the_directory_and_the_retrys_reason(
         "the reason is the retry's, not the refused first start's: {error}"
     );
 }
+
+/// Two failed launches in a row: the first over `pg_hba.conf`, whose `FATAL`
+/// stays in `start.log`, the second over a lost `global/pg_control`, which the
+/// postmaster reports on stderr with no `FATAL` label. The second error is
+/// the second start's own lines, never the first start's `FATAL`.
+#[tokio::test]
+async fn a_start_without_a_fatal_line_never_reports_an_earlier_starts_fatal() {
+    let dir = tempfile::tempdir().unwrap();
+    let data_dir = dir.path().join("data");
+    EmbeddedDb::start(config(dir.path()))
+        .await
+        .unwrap()
+        .stop()
+        .await
+        .unwrap();
+    let hba = data_dir.join("pg_hba.conf");
+    let kept = std::fs::read(&hba).unwrap();
+    std::fs::remove_file(&hba).unwrap();
+    let first = launch_error(dir.path()).await;
+    assert_names_the_directory_and_the_reason(&first, &data_dir);
+
+    std::fs::write(&hba, kept).unwrap();
+    std::fs::remove_file(data_dir.join("global/pg_control")).unwrap();
+    let second = launch_error(dir.path()).await;
+    assert!(
+        second.contains("pg_control"),
+        "the second start gives its own reason: {second}"
+    );
+    assert!(
+        !second.contains("pg_hba.conf"),
+        "the first start's FATAL is not the second's reason: {second}"
+    );
+}
