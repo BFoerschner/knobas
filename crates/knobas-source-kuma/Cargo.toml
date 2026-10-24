@@ -41,13 +41,15 @@ serde_json.workspace = true
 # produce, and the reason issue #486 rules a fake in for it alone. It is
 # hand-rolled on the test's runtime so its hold passes on the paused clock
 # (`test-util`) the deadline is measured on, and `sync` says when it holds a
-# read (#1925).
+# read (#1925). The session tests' engine.io stand-in
+# (`socket_session_tests.rs`) is hand-rolled the same way and for the same
+# reason: its stalls hold a request open on the test's runtime, where the
+# timeouts they are measured against run (#1935).
 tokio = { workspace = true, features = ["net", "io-util", "sync", "test-util"] }
 # The docker-free stand-in for Kuma's `/metrics`, recorded off the pinned
 # container: `just check` and CI run no containers (roadmap §3), so the
 # contract battery needs a server that answers without one; every shape it
 # encodes is re-asserted in `tests/live_kuma.rs` against the real Kuma, and if
-# the two disagree, the recording is what is wrong. The session tests'
-# engine.io stand-in (`socket_session_tests.rs`) is one too.
+# the two disagree, the recording is what is wrong.
 # It brings no `reqwest` of its own; `cargo tree -i reqwest` must stay at one.
 wiremock = "0.6"

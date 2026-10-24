@@ -703,14 +703,19 @@ mod tests {
     /// The component's own time between reads is not the server's stall: a
     /// frame that comes inside the gap of the read that waits for it passes,
     /// however long ago the last read was.
-    #[tokio::test]
+    ///
+    /// On tokio's paused clock (#1935), where the gap and the frame's delay
+    /// run alike and nothing is on a wire: the frame comes a millisecond
+    /// inside the gap, which a gap counted from the last read had long run
+    /// out.
+    #[tokio::test(start_paused = true)]
     async fn a_reader_that_pauses_longer_than_the_gap_is_not_timed_out() {
         let (frames, mut body) = gated();
         frames.send(Bytes::from_static(b"one")).await.unwrap();
         assert!(matches!(body.frame().await, Some(Ok(_))));
         tokio::time::sleep(GAP * 3).await;
         let later = tokio::spawn(async move {
-            tokio::time::sleep(GAP / 4).await;
+            tokio::time::sleep(GAP - Duration::from_millis(1)).await;
             frames.send(Bytes::from_static(b"two")).await.unwrap();
         });
         let next = body.frame().await;
