@@ -500,8 +500,53 @@ impl SyncEvents for Recorder {
     }
 }
 
+/// What a locked keychain answers a read with; `None` while it is open.
+type LockedWith = Arc<Mutex<Option<fn() -> knobas_secrets::SecretError>>>;
+
+/// A keychain that can be locked (#1741). What a locked macOS keychain
+/// answers a read with, `errSecInteractionNotAllowed`, arrives as
+/// [`SecretError::Backend`](knobas_secrets::SecretError::Backend); a store
+/// that refuses access as
+/// [`Unavailable`](knobas_secrets::SecretError::Unavailable). Open, it is the
+/// [`MemoryStore`] it wraps.
+struct Lockable {
+    inner: MemoryStore,
+    locked_with: LockedWith,
+}
+
+/// The read a locked macOS keychain fails with.
+fn interaction_not_allowed() -> knobas_secrets::SecretError {
+    knobas_secrets::SecretError::Backend("User interaction is not allowed.".to_owned())
+}
+
+impl SecretStore for Lockable {
+    fn get(
+        &self,
+        account: &knobas_secrets::KeychainAccount,
+    ) -> Result<Option<Secret>, knobas_secrets::SecretError> {
+        if let Some(error) = *self.locked_with.lock().unwrap() {
+            return Err(error());
+        }
+        self.inner.get(account)
+    }
+    fn put(
+        &self,
+        account: &knobas_secrets::KeychainAccount,
+        secret: &Secret,
+    ) -> Result<(), knobas_secrets::SecretError> {
+        self.inner.put(account, secret)
+    }
+    fn delete(
+        &self,
+        account: &knobas_secrets::KeychainAccount,
+    ) -> Result<(), knobas_secrets::SecretError> {
+        self.inner.delete(account)
+    }
+}
+
 struct Harness {
     deps: SchedulerDeps,
+    locked_with: LockedWith,
     events: Arc<Recorder>,
     answer: Arc<Mutex<Answer>>,
     asked: Arc<Mutex<usize>>,
@@ -521,6 +566,16 @@ impl Harness {
 
     fn answer(&self, answer: Answer) {
         *self.answer.lock().unwrap() = answer;
+    }
+
+    /// Lock the keychain the flushes read the credential from: every read
+    /// fails with what `error` makes, until [`Self::unlock_keychain`].
+    fn lock_keychain(&self, error: fn() -> knobas_secrets::SecretError) {
+        *self.locked_with.lock().unwrap() = Some(error);
+    }
+
+    fn unlock_keychain(&self) {
+        *self.locked_with.lock().unwrap() = None;
     }
 
     /// What the fake actually accepted, in order, each write read back by the
@@ -914,6 +969,7 @@ async fn harness() -> Harness {
     let file_at = Arc::new(Mutex::new(None));
     let doors = Arc::new(Mutex::new(Doors::default()));
     let events = Arc::new(Recorder::default());
+    let locked_with: LockedWith = Arc::new(Mutex::new(None));
     Harness {
         deps: SchedulerDeps {
             pool: pool.clone(),
@@ -929,11 +985,15 @@ async fn harness() -> Harness {
                 doors: Arc::clone(&doors),
                 pool,
             }),
-            secrets: Arc::new(secrets),
+            secrets: Arc::new(Lockable {
+                inner: secrets,
+                locked_with: Arc::clone(&locked_with),
+            }),
             events: Arc::clone(&events) as Arc<dyn SyncEvents>,
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
             quit: knobas_sync::scheduler::Quit::default(),
         },
+        locked_with,
         events,
         answer,
         asked,
@@ -2608,6 +2668,77 @@ async fn an_unreachable_write_is_tried_again_on_the_sync_ladder() {
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
     assert_eq!(h.asked(), 3);
     assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+}
+
+/// #1741: a keychain that would not open is not a refused credential. A
+/// write flushed while it is locked waits `unreachable` and climbs the same
+/// ladder the sync does, rather than waiting for a person, and goes once the
+/// keychain is open and the rung has passed. The source is never asked
+/// while the credential cannot be read.
+#[tokio::test]
+async fn a_write_flushed_while_the_keychain_is_locked_climbs_the_ladder() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-46", "a payout fails").await;
+
+    h.lock_keychain(interaction_not_allowed);
+    let write = h
+        .comment(&ticket, "typed while the keychain was locked")
+        .await;
+    let waiting = h.reload(write.id).await;
+    assert_eq!(waiting.state, WriteState::Pending);
+    assert_eq!(waiting.wait_reason, Some(WaitReason::Unreachable));
+    // The panel reads the detail for `keychain:`, and prints it: once.
+    assert_eq!(
+        waiting.detail.as_deref(),
+        Some("keychain: User interaction is not allowed.")
+    );
+    assert_eq!(h.asked(), 0, "the source is not asked without a credential");
+
+    h.unlock_keychain();
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.asked(), 0, "not before the first rung, one minute");
+
+    h.rewind(60).await;
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+    assert_eq!(
+        h.delivered(),
+        vec!["typed while the keychain was locked".to_owned()]
+    );
+}
+
+/// #1741: a store that refuses access is a keychain fault too, and its detail
+/// starts `keychain:` although its own message does not.
+#[tokio::test]
+async fn a_write_flushed_while_the_store_refuses_access_waits_on_the_keychain() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-47", "a payout fails").await;
+
+    h.lock_keychain(|| knobas_secrets::SecretError::Unavailable);
+    let write = h.comment(&ticket, "typed while the store refused").await;
+    let waiting = h.reload(write.id).await;
+    assert_eq!(waiting.wait_reason, Some(WaitReason::Unreachable));
+    assert_eq!(
+        waiting.detail.as_deref(),
+        Some("keychain: the credential store refused access")
+    );
+    assert_eq!(h.asked(), 0);
+}
+
+/// #1741: the panel tells a keychain wait from a silent server by the
+/// detail's prefix, a string contract across the bridge. The two tests above
+/// pin the detail the queue writes; this pins that the panel reads the same
+/// prefix, read off the file the component ships. A rename on either side is
+/// a red here, not a panel that says "The server did not answer." again.
+#[test]
+fn the_panel_reads_the_keychain_prefix_the_queue_writes() {
+    const PANEL: &str = include_str!("../../../../app/src/lib/shell/WriteQueue.svelte");
+    let reads = format!("startsWith(\"{}\")", store::KEYCHAIN_DETAIL_PREFIX);
+    assert!(
+        PANEL.contains(&reads),
+        "WriteQueue.svelte does not read the detail for {reads}, so a write waiting on \
+         the keychain reads as a server that did not answer"
+    );
 }
 
 /// #1628: *Flush now* is the reader saying "try it": it sends a

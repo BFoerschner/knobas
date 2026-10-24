@@ -1076,13 +1076,18 @@ async fn build(
     crate::scheduler::build_source(deps, &cfg)
         .await
         .map_err(|failure| {
-            // Only a database fault is worth calling "the server did not
-            // answer". Everything else here -- no credential, a configuration
-            // the adapter refuses, a keychain that would not open -- is
-            // something a person has to act on, which is what `Unauthorized`
-            // means to the shell.
+            // A database fault and a keychain that would not open pass on
+            // their own, so they wait `unreachable` and climb the ladder.
+            // The keychain is the sync's reading of the same fault (#1741):
+            // a locked macOS keychain, a *Deny* on its prompt and a store
+            // fault all arrive as `SecretError::Backend`, which the sync logs
+            // as an error and backs off from. The detail starts `keychain:`,
+            // which is how the panel tells it from a server that did not
+            // answer. Everything else here -- no credential, a configuration
+            // the adapter refuses -- is something a person has to act on,
+            // which is what `Unauthorized` means to the shell.
             let reason = match &failure {
-                RunFailure::Db(_) => WaitReason::Unreachable,
+                RunFailure::Db(_) | RunFailure::Secret(_) => WaitReason::Unreachable,
                 RunFailure::Source(error) => {
                     retryable(error, None).unwrap_or(WaitReason::Unauthorized)
                 }

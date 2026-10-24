@@ -193,6 +193,10 @@ pub enum SecretError {
     /// [`Unavailable`](SecretError::Unavailable) -- see that variant's docs for
     /// why, and for what an *Unlock your keychain* affordance has to key off
     /// instead. Pinned by `the_macos_codes_land_where_the_docs_say_they_do`.
+    ///
+    /// A sync and a queued write both read it as passing on its own: the sync
+    /// backs off, and the write waits `unreachable` on the same ladder rather
+    /// than for a person (#1741).
     #[error("keychain: {0}")]
     Backend(String),
     /// The store is there but refused access to it.

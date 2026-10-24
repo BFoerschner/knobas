@@ -96,7 +96,9 @@ impl WriteState {
 crate::closed_vocabulary! {
     /// Why a pending write has not gone yet.
     ///
-    /// - `unreachable`: the server did not answer.
+    /// - `unreachable`: the server did not answer, or the keychain would not
+    ///   open. The two climb the same ladder, and a keychain fault's
+    ///   `detail` starts `keychain:` (#1741).
     /// - `unauthorized`: the credential was refused.
     ///
     /// Only the two *retryable* faults appear here, the ones that pass on
@@ -123,6 +125,17 @@ crate::closed_vocabulary! {
         Unauthorized => "unauthorized",
     }
 }
+
+/// How an `unreachable` write's `detail` starts when the keychain would not
+/// open (#1741), followed by one space and the store's own text.
+///
+/// A string contract across the bridge: the queue panel
+/// (`app/src/lib/shell/WriteQueue.svelte`) tells a keychain fault from a
+/// server that did not answer by this prefix alone. One constant on this
+/// side, and `knobas-sync`'s `the_panel_reads_the_keychain_prefix_the_queue_writes`
+/// reads the panel's copy, so a rename on either side is a red test rather
+/// than a panel that says "The server did not answer." again.
+pub const KEYCHAIN_DETAIL_PREFIX: &str = "keychain:";
 
 /// Every column of `knobas.write_queue` that leaves this module, in one place
 /// -- plus the one *derived* column, `source_enabled`, which is not a column

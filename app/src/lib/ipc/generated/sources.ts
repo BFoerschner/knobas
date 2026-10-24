@@ -1579,7 +1579,9 @@ fields: Array<PayloadPath>, };
 /**
  * Why a pending write has not gone yet.
  *
- * - `unreachable`: the server did not answer.
+ * - `unreachable`: the server did not answer, or the keychain would not
+ *   open. The two climb the same ladder, and a keychain fault's
+ *   `detail` starts `keychain:` (#1741).
  * - `unauthorized`: the credential was refused.
  *
  * Only the two *retryable* faults appear here, the ones that pass on

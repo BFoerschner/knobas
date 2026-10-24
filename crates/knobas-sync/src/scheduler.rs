@@ -413,7 +413,12 @@ impl RunFailure {
         match self {
             RunFailure::NotConfigured => "the source has no configuration row".to_owned(),
             RunFailure::MissingSecret => MISSING_SECRET_MESSAGE.to_owned(),
-            RunFailure::Secret(detail) => format!("keychain: {detail}"),
+            RunFailure::Secret(detail) => {
+                format!(
+                    "{} {detail}",
+                    knobas_core::write_queue::KEYCHAIN_DETAIL_PREFIX
+                )
+            }
             RunFailure::Source(error) => error.to_string(),
             RunFailure::Sync(error) => error.to_string(),
             RunFailure::Db(error) => error.to_string(),
@@ -457,7 +462,14 @@ async fn instance_for(
                 &knobas_secrets::KeychainAccount::source(&cfg.id),
             )
             .await
-            .map_err(|e| RunFailure::Secret(e.to_string()))?;
+            .map_err(|e| {
+                // `Backend` already says `keychain:`, and `message` says it
+                // again; a reader sees the prefix once (#1741).
+                RunFailure::Secret(match e {
+                    knobas_secrets::SecretError::Backend(detail) => detail,
+                    other => other.to_string(),
+                })
+            })?;
             let stored = stored.ok_or(RunFailure::MissingSecret)?;
             (Some(stored.value), stored.account)
         }

@@ -300,6 +300,24 @@ test("a write behind a held one names the held write, and an unblocked neighbour
   screen.done();
 });
 
+// #1741: a write flushed while the keychain was locked waits `unreachable`
+// and climbs the ladder; the detail the queue records starts `keychain:`.
+test("a write waiting on a keychain that would not open says so, not that the server did not answer", async () => {
+  rows = [
+    write({ id: 4, detail: "keychain: User interaction is not allowed." }),
+    write({ id: 5, entity_id: "jira:PAY-300" }),
+  ];
+  counts = { pending: 2, held: 0, refused: 0 };
+  const screen = await render();
+  const waiting = screen.section("Waiting")!;
+  const reasons = [...waiting.querySelectorAll(".tf-wq-why")].map((node) => node.textContent);
+  expect(reasons).toEqual([
+    "The keychain would not open. Unlock it and this is tried again on its own.",
+    "The server did not answer.",
+  ]);
+  screen.done();
+});
+
 test("once the blocker is discarded the write waits on its source alone", async () => {
   rows = [write({ id: 3, attempted_at: null }), write({ id: 1, state: "refused" })];
   counts = { pending: 1, held: 0, refused: 1 };
