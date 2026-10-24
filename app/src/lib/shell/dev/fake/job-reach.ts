@@ -23,7 +23,7 @@
  */
 import type { Reached, StartWorkStep } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
-import { keepSeed, onFakeReset } from "../fake-seed";
+import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 import { keyOf } from "../../../time/format";
 
 const HOST = "http://127.0.0.1:5399";
@@ -274,7 +274,8 @@ export function handlers(): Handlers {
   };
 }
 
+const atLoad = seedOf({ parentLinks });
 onFakeReset(() => {
-  parentLinks = true;
+  ({ parentLinks } = atLoad());
 });
 keepSeed(FLOWS);

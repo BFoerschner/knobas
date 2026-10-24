@@ -4,7 +4,7 @@
  */
 import type { Produced } from "../../../ipc/assets";
 import type { Handlers } from "../fake-tauri";
-import { onFakeReset } from "../fake-seed";
+import { onFakeReset, seedOf } from "../fake-seed";
 import {
   type EstateFileAsset,
   type EstateFileRoute,
@@ -310,7 +310,7 @@ export function handlers(): Handlers {
   };
 }
 
+const atLoad = seedOf({ IMPORTER_TOKEN, PRODUCED_FILE });
 onFakeReset(() => {
-  IMPORTER_TOKEN = null;
-  PRODUCED_FILE = null;
+  ({ IMPORTER_TOKEN, PRODUCED_FILE } = atLoad());
 });

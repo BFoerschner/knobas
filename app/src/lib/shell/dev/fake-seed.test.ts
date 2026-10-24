@@ -90,10 +90,13 @@ function written(name: string, texts: string[]): boolean {
   return texts.some((text) => write.test(text));
 }
 
-/** The names a module hands to `keepSeed` or mentions in an `onFakeReset`. */
+/** The names a module hands to `keepSeed`, or assigns in an `onFakeReset` (`x = …` or `({ x, y } = …)`). */
 function registered(text: string): Set<string> {
-  const held = [...text.matchAll(/^keepSeed\(([^)]*)\);$/gm), ...text.matchAll(/^onFakeReset\(\(\) => \{([\s\S]*?)^\}\);$/gm)];
-  return new Set(held.flatMap((match) => match[1]!.match(/\b\w+\b/g) ?? []));
+  const kept = [...text.matchAll(/^keepSeed\(([^)]*)\);$/gm)].map((match) => match[1]!);
+  const assigned = [...text.matchAll(/^onFakeReset\(\(\) => \{([\s\S]*?)^\}\);$/gm)].flatMap((match) =>
+    [...match[1]!.matchAll(/^\s+(?:(\w+)|\(\{([^}]*)\})\s+=[^=>]/gm)].map((each) => each[1] ?? each[2]!),
+  );
+  return new Set([...kept, ...assigned].flatMap((names) => names.match(/\b\w+\b/g) ?? []));
 }
 
 /** Each module's changeable values that no registration names; an exported `const` may be changed by any module. */
@@ -134,11 +137,14 @@ test("the scan sees what it is meant to", () => {
       "  open = true;",
       "}",
       "keepSeed(EDITED);",
+      "const ONLY_READ = new Map<string, number>();",
+      "  ONLY_READ.set('x', 1);",
       "onFakeReset(() => {",
+      "  for (const timer of ONLY_READ.values()) clearInterval(timer);",
       "  open = false;",
       "});",
     ].join("\n"),
     "b.ts": ["function handlers() {", "  (SHARED as unknown[]).push(1);", "  local.push(1);", "}"].join("\n"),
   };
-  expect(unkept(files)).toEqual(["a.ts#picked", "a.ts#ADDED", "a.ts#SHARED"]);
+  expect(unkept(files)).toEqual(["a.ts#picked", "a.ts#ADDED", "a.ts#SHARED", "a.ts#ONLY_READ"]);
 });

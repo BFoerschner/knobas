@@ -296,9 +296,7 @@ export function handlers(): Handlers {
   };
 }
 
-const seededLayers = seedOf(layers);
-const seededViews = seedOf(views);
+const atLoad = seedOf({ layers, views });
 onFakeReset(() => {
-  layers = seededLayers();
-  views = seededViews();
+  ({ layers, views } = atLoad());
 });

@@ -6,9 +6,9 @@
  * proposal with no reason is not shippable.
  *
  * This file lives under `dev/` on purpose. `house-rules.test.ts` resolves
- * every importer of the dev harness and requires the set to be exactly
- * `App.svelte`, exempting only files inside the harness directory itself;
- * a test one level up would be a second door into the fixture.
+ * every importer of the dev harness and requires the set to be exactly the
+ * doors it names, exempting only files inside the harness directory itself;
+ * a test one level up would be another door into the fixture.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -1214,7 +1214,7 @@ test("the fixture's TeamCity has a run the server never answered, with the long 
   expect(runs.filter((run) => run.id === unanswered[0]!.id)).toHaveLength(1);
 });
 
-test("the fixture's install adds the descriptor to list_adapters and add_source adds the row to list_sources (#1406)", async () => {
+test("the fixture's install adds the descriptor to list_adapters and add_source adds the row to list_sources (#1406)", () => {
   // The install and the new source go back to the seed after the test (#2004).
   const handlers = demoHandlers();
   type Source = { id: string; adapter_kind: string; health: { source_id: string }; kinds: { id: string }[] };

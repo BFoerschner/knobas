@@ -378,9 +378,9 @@ test("the dev harness is only reachable behind import.meta.env.DEV", () => {
     // `capture.ts` is the second, added on purpose with #503: the capture
     // window is its own document (`capture.html`) with its own mount, so the
     // browser walk that photographs it loads a page `App.svelte` is not on.
-    // One door per document, and both behind the same guard. `test-resets.ts`
-    // is the third, with #2004: no bundle loads it (`test-setup.ts` does), and
-    // it puts the fake back to its seed after every test.
+    // One door per document, and both behind the same guard. `test-resets.ts`,
+    // added with #2004, is no document's: only `test-setup.ts` loads it, to put
+    // the fake back to its seed after every test, and it keeps the same guard.
   ).toEqual(["App.svelte", "capture.ts", "lib/shell/test-resets.ts"]);
 });
 

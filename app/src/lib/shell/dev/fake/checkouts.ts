@@ -405,15 +405,9 @@ export function attach(installed: FakeBridge): void {
   bridge = installed;
 }
 
-const apps = seedOf(fakeApps);
+const atLoad = seedOf({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge });
 onFakeReset(() => {
   for (const timer of fakeCloning.values()) clearInterval(timer);
-  fakeClonesRoot = DEFAULT_CLONES_ROOT;
-  fakeApps = apps();
-  fakeDefault = "vscode";
-  fakeOpenFails = null;
-  fakeNoGit = false;
-  fakeClonePercent = null;
-  bridge = null;
+  ({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge } = atLoad());
 });
 keepSeed(fakeOverrides, fakeCloning, fakeCloned);

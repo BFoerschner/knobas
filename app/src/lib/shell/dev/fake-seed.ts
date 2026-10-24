@@ -9,7 +9,10 @@
  * on a module-level value under `fake/` that a handler can change and no
  * registration names.
  *
- * Outside `fake/` because every module there is a feature with handlers.
+ * A value's seed is what it holds once its module has loaded, before any
+ * feature's `seed(params)` reads the page's `?fake-*` flags: those are a dev
+ * page's, and no test sets them. Outside `fake/` because every module there is
+ * a feature with handlers.
  */
 
 const restores: (() => void)[] = [];
@@ -26,7 +29,11 @@ export function keepSeed(...values: object[]): void {
   }
 }
 
-/** A fresh copy of `value` as it is now, each time it is called: a `let`'s seed. */
+/**
+ * A fresh copy of `value` as it is now, each time it is called. A module's `let`s
+ * go in as one object and come back by destructuring:
+ * `onFakeReset(() => { ({ a, b } = atLoad()); })`.
+ */
 export function seedOf<T>(value: T): () => T {
   const seed = copy(value);
   return () => copy(seed);

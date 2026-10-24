@@ -436,8 +436,8 @@ export function handlers(): Handlers {
   };
 }
 
-const seededSets = seedOf(SETS);
+const atLoad = seedOf({ SETS });
 onFakeReset(() => {
-  SETS = seededSets();
+  ({ SETS } = atLoad());
 });
 keepSeed(HIDDEN);
