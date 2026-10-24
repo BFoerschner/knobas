@@ -20,6 +20,11 @@ check() { # check <pass|refuse> <command>
     [ "$status" -eq 0 ] || [ "$status" -eq 2 ] || got="exit $status"
     [ "$got" = "$want" ] || fail "wanted $want, got $got: $command"
 }
+says() { # says <the start of a rule's message> <command>: refused with that rule's message
+    local want=$1 command=$2 err status=0
+    err=$(call "$command" | python3 -I "$guard" 2>&1 >/dev/null) || status=$?
+    case "$status $err" in "2 bash-guard: $want"*) ;; *) fail "wanted \"$want\", got $status $err: $command" ;; esac
+}
 
 # cd
 check refuse 'cd /tmp && ls'
@@ -148,6 +153,51 @@ check pass $'cat <<\\EOF\n$(cd x && pwd)\nEOF'
 check pass $'cat <<EOF\n\\$(cd x && pwd)\nEOF'
 check pass $'cat <<EOF\nroot: $(git rev-parse --show-toplevel)\nEOF'
 check pass $'cat > /tmp/y <<EOF\n$(cat ./.git/HEAD)\nEOF'
+
+# a redirection before the name is no name: the word after it is (#1981)
+cd_rule='`cd` chained' rm_rule='`rm` with a glob' write_rule='A Bash write under'
+says "$cd_rule" '>/dev/null cd /tmp && ls'
+says "$cd_rule" '2>/dev/null cd /tmp && ls'
+says "$cd_rule" '</dev/null cd /tmp && ls'
+says "$cd_rule" '{ >/dev/null cd /tmp; ls; }'
+says "$cd_rule" 'if >/dev/null cd /tmp; then ls; fi'
+says "$cd_rule" '&>/dev/null cd /tmp && ls'
+says "$rm_rule" '>/dev/null rm -f *.png'
+says "$write_rule" '2>&1 sed -i s/a/b/ ~/.zshrc'
+says "$write_rule" '</dev/null cp x ~/.claude/settings.json'
+says "$write_rule" '2> .git/x ls'
+says "$cd_rule" 'cd /tmp 2>/dev/null && ls'
+check pass 'cd /tmp 2>/dev/null'
+check pass '>/dev/null cd /tmp'
+check pass 'ls &>/dev/null'
+check pass 'cd /tmp &>/dev/null'
+check pass 'exec >/dev/null 2>&1'
+check pass 'diff <(ls a) <(ls b) 2>&1'
+check pass "echo '>.git/x'"
+
+# a `<<` inside `$[...]` or `${...}` is a shift or pattern text, no heredoc, so the next line is read
+says "$cd_rule" $'echo $[1<<2]\ncd /tmp && ls'
+says "$cd_rule" $'echo ${x/<<EOF/y}\ncd /tmp && ls'
+says "$cd_rule" $'echo ${x:-"}<<EOF"}\ncd /tmp && ls'
+says "$cd_rule" 'echo ${x:-$(cd /tmp && ls)}'
+says "$rm_rule" 'rm -f ${T}/*.png'
+check pass 'echo ${x/<<EOF/y} $[1<<2]'
+check pass 'echo ${#x} # cd x && y'
+
+# a script a shell reads on stdin, a command `find -exec` runs, and a `case` in a substitution are read
+says "$cd_rule" $'bash <<\'EOF\'\ncd /tmp && ls\nEOF'
+says "$cd_rule" $'sh -s x <<EOF\ncd /tmp\nls\nEOF'
+says "$cd_rule" "bash <<<'cd /tmp && ls'"
+says "$write_rule" 'bash <<< "echo x > .git/info/exclude"'
+says "$cd_rule" "find . -exec sh -c 'cd /tmp && ls' _ {} \\;"
+says "$rm_rule" 'find . -type d -execdir rm -f *.png +'
+says "$cd_rule" 'echo $(case a in a) cd /tmp && ls;; esac)'
+says "$cd_rule" 'echo $(case a in (a|b) ls;; c) cd /tmp && ls;; esac)'
+check pass $'bash scripts/x.sh <<\'EOF\'\ncd /tmp && ls\nEOF'
+check pass $'cat <<\'EOF\' | grep x\ncd /tmp && ls\nEOF'
+check pass "bash <<<'ls; pwd'"
+check pass 'find . -name "*.png" -exec ls {} + -print'
+check pass 'echo $(case $x in a) echo a;; esac) && ls'
 
 # shell configuration
 check refuse 'echo export X=1 >> ~/.bashrc'

@@ -20,13 +20,23 @@ The shapes, each one a prompt or a rule of CLAUDE.md's *Machine* section:
 * A write, move or delete under `~/.claude/` or any `.git/` (git commands are fine).
 * A write to a shell configuration file (`~/.bashrc`, `~/.zshrc`, ...).
 
+A redirection is no command name, wherever it stands: `>/dev/null cd x && y` and
+`2>&1 sed -i ... ~/.zshrc` are read as the cd and the sed they are (#1981).
+
 Only the command line is read, the way the shell reads it: quotes first. Quoted
 text and heredoc bodies are data, never commands, so a commit message or a
 script written through a heredoc that mentions `cd` passes; only an unquoted
 `<<` that is not `<<<` opens a heredoc, and a `((...))` is arithmetic, whose `<<`
 is a shift. What runs as a command is read as one: a `$(...)` or backquote
 (quoted or not, in arithmetic too, and in the body of a heredoc whose delimiter
-is unquoted), and the string of an `eval` or `sh -c`.
+is unquoted), the string of an `eval` or `sh -c`, the script a shell reads from
+a heredoc or here-string (`bash <<EOF`, `sh <<<x`), and the command of a `find -exec`.
+A `${...}` or `$[...]` is read whole, so its `<<` opens no heredoc, and a `case`
+pattern's `)` closes no substitution.
+
+Known gaps, none seen in a transcript (#1981): a script piped into a shell
+(`echo 'cd x && y' | bash`, since what a pipe's left side prints is unknown), and
+a shell's script file (`bash x.sh`), which is never read.
 
 Test: scripts/bash-guard-test.sh, run by `just witness-unit`.
 """
@@ -50,7 +60,7 @@ RESERVED = {"{", "}", "!", "if", "then", "else", "elif", "fi", "do", "done", "wh
 # Words after which a `((` is arithmetic, as at a command's start: `if ((x))`, `for ((i=0; ...))`, `time -p ((x))`.
 ARITHMETIC_LEADS = RESERVED | {"for", "time", "-p", "coproc"}
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
-MAX_DEPTH = 8  # eval and `sh -c` nested deeper than this are not read
+MAX_DEPTH = 8  # eval, `sh -c`, shell stdin and `find -exec` scripts nested deeper than this are not read
 SHELL_CONFIG = (".bashrc", ".bash_profile", ".profile", ".zshrc", ".zprofile", ".zshenv", ".zlogin")
 
 
@@ -78,6 +88,8 @@ class Word:
         self.expands = False  # a `$` or backquote outside single quotes
         self.globs = False  # `*`, `?` or `[` outside any quotes
         self.subs = []  # one list of commands per `$(...)` or backquote in the word
+        self.redirect = False  # a redirection, its target the rest of the text: `>x`, `<x`, `<<<x`
+        self.body = None  # a heredoc's body, on the word that stands for it
 
 
 class Parser:
@@ -100,6 +112,7 @@ class Parser:
         commands = [[]]
         word = None
         parens = 0  # plain parentheses opened inside this substitution
+        cases = []  # each open `case`: "head" up to its `in`, then "pattern" up to a `)`, then "body" up to `;;`
 
         def current():
             nonlocal word
@@ -109,6 +122,13 @@ class Parser:
         def end_word():
             nonlocal word
             if word is not None:
+                first = all(w.text in RESERVED for w in commands[-1])
+                if first and word.text == "case":
+                    cases.append("head")
+                elif first and word.text == "esac" and cases:
+                    cases.pop()
+                elif cases and cases[-1] == "head" and word.text == "in":
+                    cases[-1] = "pattern"
                 commands[-1].append(word)
                 word = None
 
@@ -124,6 +144,13 @@ class Parser:
                     current().text += s[i + 1]
                 i += 2
                 continue
+            if c == ")" and parens == 0 and cases and cases[-1] == "pattern":
+                cases[-1] = "body"
+                new_command()
+                i += 1
+                continue
+            if c == ";" and s[i + 1:i + 2] in (";", "&") and cases and cases[-1] == "body":
+                cases[-1] = "pattern"
             if (stop == "`" and c == "`") or (stop == ")" and c == ")" and parens == 0):
                 end_word()
                 return [cmd for cmd in commands if cmd], i + 1
@@ -141,13 +168,16 @@ class Parser:
             if s.startswith("$(", i) or c == "`":
                 i = self.expansion(i, current())
                 continue
+            if s.startswith(("${", "$["), i):
+                i = self.braced(i, current())
+                continue
             if c == "#" and word is None:  # a comment runs to the end of the line
                 i = find_or_end(s, "\n", i)
                 continue
             if c == "\n":
                 new_command()
                 i = self.heredoc_bodies(i + 1)
-                new_command()  # a body's substitutions may have filled a command of only `<<EOF`
+                new_command()  # a body's word may have filled a command of only `<<EOF`
                 continue
             if s.startswith("((", i) and word is None and all(w.text in ARITHMETIC_LEADS for w in commands[-1]):
                 expression = Word()
@@ -156,6 +186,30 @@ class Parser:
                     commands[-1].append(expression)
                     i = j
                     continue
+            if s.startswith("<<<", i):  # a here-string: the next word is its text
+                end_word()
+                word = self.redirection("<<<")
+                i = self.skip_blanks(i + 3)
+                continue
+            if s.startswith("<<", i):
+                end_word()
+                i = self.heredoc(i + 2, commands[-1])
+                continue
+            if (c in "<>" and not s.startswith("(", i + 1)) or s.startswith("&>", i):
+                # `2>` and `{fd}>` are no words of the command; a digit
+                # quoted or glued to more text is (`a2>x` is the word `a2`).
+                if word is not None and re.fullmatch(r"[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\}", word.text) \
+                        and s.endswith(word.text, 0, i):
+                    word = None
+                end_word()
+                j = i + (c == "&")
+                writes = s[j] == ">" or s.startswith("<>", j)
+                j += 1
+                while j < len(s) and s[j] in ">&|":
+                    j += 1
+                word = self.redirection(">" if writes else "<")
+                i = self.skip_blanks(j)
+                continue
             if c in ";|&()":
                 if c == "(":
                     parens += 1
@@ -168,21 +222,6 @@ class Parser:
                 end_word()
                 i += 1
                 continue
-            if s.startswith("<<", i):  # `<<<`, a here-string, reads an empty delimiter: no heredoc
-                end_word()
-                i = self.heredoc(i + 2, commands[-1])
-                continue
-            if c == ">":
-                end_word()
-                j = i
-                while j < len(s) and s[j] in ">&|":
-                    j += 1
-                word = Word()
-                word.text = ">"
-                i = j
-                while i < len(s) and s[i] in " \t":
-                    i += 1
-                continue
             w = current()
             if c == "$":
                 w.expands = True
@@ -192,6 +231,19 @@ class Parser:
             i += 1
         end_word()
         return [cmd for cmd in commands if cmd], i
+
+    @staticmethod
+    def redirection(text):
+        """A redirection's word, its target still to be read into it."""
+        word = Word()
+        word.redirect, word.text = True, text
+        return word
+
+    def skip_blanks(self, i):
+        """The index past the blanks at `i`."""
+        while i < len(self.s) and self.s[i] in " \t":
+            i += 1
+        return i
 
     def double_quoted(self, i, word):
         """Read a double-quoted string from `i` (past the quote) into `word`; the index past the closing quote."""
@@ -270,6 +322,35 @@ class Parser:
         word.subs += inner.subs
         return j
 
+    def braced(self, i, word):
+        """Read the `${...}` or `$[...]` at `i` into `word` as one expansion; the index past its close.
+
+        Its `<<` is pattern text or a shift, never a heredoc. Its quotes and
+        nested braces are read as the shell reads them, and a substitution in it runs.
+        """
+        s = self.s
+        opener, closer = s[i + 1], "}" if s[i + 1] == "{" else "]"
+        inner = Word()  # the substitutions inside, whose text is already in s[i:j]
+        j, depth = i + 2, 1
+        while j < len(s) and depth:
+            if s[j] == "\\":
+                j += 2
+            elif s[j] == "'":
+                j = find_or_end(s, "'", j + 1) + 1
+            elif s[j] == '"':
+                j = self.double_quoted(j + 1, inner)
+            elif s.startswith(("$(", "`"), j):
+                j = self.expansion(j, inner)
+            elif s.startswith(("${", "$["), j):
+                j = self.braced(j, inner)
+            else:
+                depth += {opener: 1, closer: -1}.get(s[j], 0)
+                j += 1
+        word.text += s[i:j]
+        word.expands = True
+        word.subs += inner.subs
+        return min(j, len(s))
+
     def substitution(self, i, word):
         """Parse the `$(...)` or backquote at `i` as commands of its own, kept on `word`."""
         if self.s[i] == "`":
@@ -284,14 +365,11 @@ class Parser:
     def heredoc(self, i, command):
         """Read the delimiter of a heredoc whose `<<` ends before `i`; its body starts at the next unquoted newline.
 
-        The third `<` of a here-string ends the delimiter at once, so `<<<` opens nothing.
-        `command` is the list of words the heredoc belongs to, which its body's substitutions join.
+        `command` is the list of words the heredoc belongs to, which its body's word joins.
         """
         s = self.s
         strip_tabs = s.startswith("-", i)
-        i += strip_tabs
-        while i < len(s) and s[i] in " \t":
-            i += 1
+        i = self.skip_blanks(i + strip_tabs)
         delimiter, quoted = "", False
         while i < len(s) and s[i] not in " \t\n;|&<>()":
             quoted = quoted or s[i] in "'\"\\"
@@ -311,23 +389,25 @@ class Parser:
     def heredoc_bodies(self, i):
         """Read the bodies of the heredocs opened on the line that ended before `i`; the index past the last.
 
-        A body is data, but when its delimiter is unquoted the shell runs its
-        `$(...)` and backquotes: they join the heredoc's command as one more word.
+        Each body joins the heredoc's command as one more word, a redirection
+        holding its text for a shell that reads its script from stdin. A body is
+        data, but when its delimiter is unquoted the shell runs its `$(...)` and
+        backquotes: that word holds their commands.
         """
         s = self.s
         pending, self.pending = self.pending, []
         for heredoc in pending:
-            body = Word()
+            body, lines = self.redirection("<<" + heredoc.delimiter), []
             while i < len(s):
                 j = find_or_end(s, "\n", i)
                 line = s[i:j]
                 if (line.lstrip("\t") if heredoc.strip_tabs else line) == heredoc.delimiter:
                     i = j + 1
                     break
+                lines.append(line)
                 i = j + 1 if heredoc.quoted else self.body_line(i, body)
-            if body.subs:
-                body.text = "<<" + heredoc.delimiter  # the substitutions' text is no path to write to
-                heredoc.command.append(body)
+            body.body = "\n".join(lines)  # what a shell reading its script from stdin runs
+            heredoc.command.append(body)
         return min(i, len(s))
 
     def body_line(self, i, word):
@@ -350,8 +430,9 @@ def commands_of(command):
     """Split a command line into simple commands, each a list of Words.
 
     `;`, `&&`, `||`, `|`, `&`, newlines and parentheses start a new command; a
-    substitution's commands hang off the word that holds it. Redirection
-    targets are kept as words beginning with `>`.
+    substitution's commands hang off the word that holds it. A redirection is
+    a word of its own (`Word.redirect`): `>` and its target for a write, `<`
+    for a read, `<<<` for a here-string, and `<<` and its delimiter for a heredoc.
     """
     return Parser(command).parse(0)[0]
 
@@ -361,6 +442,9 @@ def name_and_args(words):
     i = 0
     while i < len(words):
         text = words[i].text
+        if words[i].redirect:  # `>/dev/null cd x`: the name comes after
+            i += 1
+            continue
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", text):
             i += 1
             continue
@@ -388,11 +472,11 @@ def name_and_args(words):
         break
     if i >= len(words):
         return None, []
-    return words[i].text.rsplit("/", 1)[-1], words[i + 1:]
+    return words[i].text.rsplit("/", 1)[-1], [w for w in words[i + 1:] if not w.redirect]
 
 
-def script_of(name, args):
-    """The command line an `eval` or `sh -c` runs, or None."""
+def script_of(name, args, words):
+    """The command line an `eval`, `sh -c` or a shell reading stdin (`bash <<EOF`, `sh <<<x`) runs, or None."""
     if name == "eval":
         return " ".join(a.text for a in args)
     if name in SHELLS:
@@ -400,7 +484,25 @@ def script_of(name, args):
             if re.match(r"^-[a-zA-Z]*c[a-zA-Z]*$", a.text):
                 operands = [b.text for b in args[k + 1:] if not b.text.startswith(("-", "+"))]
                 return operands[0] if operands else None
+        if any(re.match(r"^-[a-zA-Z]*s", a.text) for a in args) or all(a.text.startswith(("-", "+")) for a in args):
+            fed = [w.body if w.body is not None else w.text[len("<<<"):] for w in words
+                   if w.body is not None or (w.redirect and w.text.startswith("<<<"))]
+            return fed[-1] if fed else None  # the last one is what the shell reads
     return None
+
+
+def exec_commands(name, args):
+    """The commands a `find -exec`, `-execdir`, `-ok` or `-okdir` runs, each up to its `;` or `+`."""
+    out, run = [], None
+    for a in args if name == "find" else []:
+        if run is not None and a.text in (";", "+"):
+            out.append(run)
+            run = None
+        elif run is not None:
+            run.append(a)
+        elif a.text in ("-exec", "-execdir", "-ok", "-okdir"):
+            run = []
+    return out
 
 
 class Simple(NamedTuple):
@@ -413,21 +515,22 @@ class Simple(NamedTuple):
     counts: bool = True  # False for an `eval` or `sh -c`, which its string's commands stand in for
 
 
-def simple_commands(commands, depth=0):  # depth: substitutions, eval and `sh -c` strings around these
-    """Every simple command, those inside substitutions, `eval` and `sh -c` strings included.
+def simple_commands(commands, depth=0):  # depth: the substitutions and scripts (`script_of`, `find -exec`) around these
+    """Every simple command, those inside substitutions, `script_of` scripts and `find -exec` included.
 
-    An `eval` or `sh -c` stands for the commands of its string: it is kept for
-    its redirections, but does not count as a command of its own.
+    An `eval`, `sh -c` or shell reading stdin stands for the commands of its
+    script: it is kept for its redirections, but does not count as a command of its own.
     """
     out = []
     for words in commands:
         name, args = name_and_args(words)
-        script = script_of(name, args) if depth < MAX_DEPTH else None
+        script = script_of(name, args, words) if depth < MAX_DEPTH else None
         if script is not None:
             out.append(Simple(words, name, args, 0, counts=False))
             out += simple_commands(commands_of(script), depth + 1)
             continue
         nested = [x for w in words for sub in w.subs for x in simple_commands(sub, depth + 1)]
+        nested += simple_commands(exec_commands(name, args), depth + 1)
         out.append(Simple(words, name, args, sum(x.counts for x in nested)))
         out += nested
     return out
@@ -466,7 +569,7 @@ def verdict(command):
                             f"(`{a.text}`). Name each file, or leave them.")
         writes = name in WRITERS or (name in IN_PLACE and any(re.match(IN_PLACE[name], a.text) for a in args))
         targets = [a.text for a in args if not a.text.startswith("-")] if writes else []
-        targets += [a.text[1:] for a in words if a.text.startswith(">") and len(a.text) > 1]
+        targets += [a.text[1:] for a in words if a.redirect and a.text.startswith(">") and len(a.text) > 1]
         for t in targets:
             why = protected(t)
             if why:
