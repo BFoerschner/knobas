@@ -516,7 +516,7 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
         .recv_timeout(PATIENCE)
         .expect("the quit waited out its grace: a write started after it began");
     quitting.join().expect("the quit finishes");
-    let entered_during_quit = *wrote.entered.lock().unwrap();
+    let entered = *wrote.entered.lock().unwrap();
 
     let reader = connector.pool(1).await.unwrap();
     let state_of = async |id: i64| {
@@ -526,10 +526,7 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
             .expect("the row is there")
             .state
     };
-    assert_eq!(
-        entered_during_quit, 1,
-        "the submit made after the quit began was sent"
-    );
+    assert_eq!(entered, 1, "the submit made after the quit began was sent");
     assert_eq!(
         state_of(first.id).await,
         WriteState::Sent,

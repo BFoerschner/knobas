@@ -45,7 +45,6 @@ use knobas_core::payload::StatePath;
 use knobas_core::write_queue::{self as store, QueuedWrite, WaitReason, WriteState};
 use knobas_http::LocalQuota;
 use knobas_source::{Source, SourceError, WriteOp, WriteReceipt};
-use tokio_util::sync::CancellationToken;
 
 use crate::config;
 use crate::scheduler::{RunFailure, SchedulerDeps};
@@ -305,7 +304,7 @@ async fn flush_every(deps: &SchedulerDeps, pass: Pass) {
         }
     };
     for source in sources {
-        if deps.quit.token().is_cancelled() {
+        if deps.quit.has_begun() {
             return;
         }
         if pass == Pass::Owed && source.health.state.needs_human() {
@@ -508,7 +507,6 @@ async fn flush(
     pass: Pass,
     reach: Reach<'_>,
 ) -> Result<(), FlushError> {
-    let stop = deps.quit.token();
     let gate = gate(source_id);
 
     let mut due = heads(deps, source_id, pass, reach).await?;
@@ -531,7 +529,7 @@ async fn flush(
             // owes waits for the same reason, rather than one of them failing
             // and the rest silently not being tried.
             for write in due {
-                match turn(deps, &gate, &write, pass, stop).await? {
+                match turn(deps, &gate, &write, pass).await? {
                     Turn::Go(_sending, write) => {
                         waited(deps, &seen, &write, reason.0, &reason.1).await?;
                     }
@@ -546,7 +544,7 @@ async fn flush(
     loop {
         let mut progressed = false;
         for write in due {
-            match turn(deps, &gate, &write, pass, stop).await? {
+            match turn(deps, &gate, &write, pass).await? {
                 Turn::Go(_sending, write) => {
                     if attempt(deps, &seen, source.as_ref(), &write).await? {
                         progressed = true;
@@ -606,11 +604,10 @@ async fn turn<'g>(
     gate: &'g Gate,
     read: &QueuedWrite,
     pass: Pass,
-    stop: &CancellationToken,
 ) -> Result<Turn<'g>, FlushError> {
     let sending = tokio::select! {
         biased;
-        () = stop.cancelled() => return Ok(Turn::Stopped),
+        () = deps.quit.token().cancelled() => return Ok(Turn::Stopped),
         sending = gate.flush.lock() => sending,
     };
     let Some(now) = store::get(&deps.pool, read.id).await? else {

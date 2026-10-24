@@ -192,6 +192,11 @@ pub struct SchedulerDeps {
 pub struct Quit(CancellationToken);
 
 impl Quit {
+    /// Whether [`Scheduler::shutdown`] has begun.
+    pub(crate) fn has_begun(&self) -> bool {
+        self.0.is_cancelled()
+    }
+
     /// The token itself: cancelled by [`Scheduler::shutdown`], selected
     /// against between writes.
     pub(crate) fn token(&self) -> &CancellationToken {
