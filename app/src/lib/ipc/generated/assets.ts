@@ -1,5 +1,6 @@
 // Generated from the Rust types by ts-rs; do not edit. Regenerate with `cargo test -p knobas-app --lib ipc_mirror` (crates/knobas-app/src/ipc_mirror.rs).
 import type { ActivityRow, LinkEntry, Tone } from "./entity";
+import type { QueuedWrite } from "./sources";
 
 /**
  * One asset an alert's monitor watches, as the estate's list of open alerts
@@ -1570,7 +1571,15 @@ owner: string | null,
  * exposing asset sits (the asset's own name last) and whose environment and
  * owner are that asset's, in force.
  */
-url: string | null, };
+url: string | null, 
+/**
+ * The newest *Create monitor* on its way for a name this asset or route
+ * records (#1959), as the queue holds it; `null` where none is. So a
+ * reload before the poll draws *Monitor queued* rather than offering the
+ * create again, which Uptime Kuma would take as a second monitor.
+ * [`ON_ITS_WAY`] says which creates are on their way.
+ */
+monitor_on_its_way: QueuedWrite | null, };
 
 /**
  * One monitor name on one asset that answers to nothing in the mirror.

@@ -162,7 +162,7 @@ pub async fn hold_arrival_link(
 
 /// How long after a write was sent its link is still looked for. A branch of
 /// that name turning up later than this is not taken for what the write made.
-const ARRIVAL_PATIENCE: &str = "7 days";
+pub(crate) const ARRIVAL_PATIENCE: &str = "7 days";
 
 /// Resolve the links `source_id`'s sent writes still owe (#1050): each one
 /// whose branch or pull request the mirror now holds is linked to its ticket
@@ -819,6 +819,20 @@ pub(crate) async fn submittable(
             op.identifier()
         )));
     }
+    // **A monitor already on its way is not created twice** (#1959). Uptime
+    // Kuma takes a second monitor of a name it has, and the row a create
+    // leaves on *Assets nothing watches* stays until the poll mirrors the
+    // monitor, so a second press, or the asset pane's retry, would make two.
+    // Held and refused creates are not on their way: the reader's retry goes.
+    if let WriteOp::CreateMonitor { name, .. } = &op
+        && let Some(write) = crate::assets::monitor_on_its_way(pool, &source.id, name).await?
+    {
+        return Err(IpcError::conflict(format!(
+            "a monitor named {name:?} is already on its way to {} (write {write}); \
+             it attaches once the next poll mirrors it",
+            source.display_name
+        )));
+    }
     Ok((op, source.id))
 }
 
@@ -1239,6 +1253,61 @@ mod tests {
         ) -> Result<(), knobas_secrets::SecretError> {
             unreachable!("submittable deletes no credential")
         }
+    }
+
+    /// #1959: Uptime Kuma takes a second monitor of a name it already has,
+    /// so a *Create monitor* for a name whose create is on its way to that
+    /// source is refused before a row exists: the asset pane's retry and a
+    /// second press anywhere send no duplicate. Another name goes, and so
+    /// does the same name once the first create was refused.
+    #[tokio::test]
+    async fn a_second_create_of_a_monitor_on_its_way_is_refused_before_it_is_queued() {
+        let pool = pool().await;
+        let kuma = unique("kuma-twice-submit");
+        configured_with(
+            &pool,
+            &kuma,
+            knobas_source_kuma::ADAPTER_KIND,
+            knobas_source::AuthMethod::ApiToken,
+        )
+        .await;
+        let locked: std::sync::Arc<dyn knobas_secrets::SecretStore> = std::sync::Arc::new(Locked);
+        let target = format!("{kuma}:monitors");
+        let payload = |name: &str| {
+            serde_json::json!({ "CreateMonitor": {
+                "entity": target, "name": name, "url": "https://gitea.test/", "kind": "http"
+            }})
+        };
+        let first = knobas_core::write_queue::queue(
+            &pool,
+            &kuma,
+            &knobas_core::entity::EntityRef::parse(&target).unwrap(),
+            "create_monitor",
+            payload("gitea"),
+            serde_json::json!({}),
+        )
+        .await
+        .expect("the first create, queued");
+
+        let error = submittable(&pool, &locked, &registry(), payload("gitea"))
+            .await
+            .expect_err("the first is on its way");
+        assert_eq!(error.code, crate::IpcErrorCode::Conflict);
+        assert!(
+            error.message.contains("\"gitea\"") && error.message.contains("on its way"),
+            "{}",
+            error.message
+        );
+        submittable(&pool, &locked, &registry(), payload("redis"))
+            .await
+            .expect("another name goes");
+
+        knobas_core::write_queue::refuse(&pool, first.id, "no Docker host")
+            .await
+            .unwrap();
+        submittable(&pool, &locked, &registry(), payload("gitea"))
+            .await
+            .expect("refused, the first waits on the reader: the retry goes");
     }
 
     /// #1944: a locked keychain is this machine learning nothing about the
