@@ -19,15 +19,15 @@ fn ran_in_a_c_locale_child(test: &str) -> bool {
     if std::env::var_os(CHILD).is_some() {
         return false;
     }
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-    child
-        .args(["--exact", test, "--nocapture"])
-        .env(CHILD, "1")
-        .env_remove("KNOBAS_TEST_DB_URL");
-    for variable in ["LC_ALL", "LANG", "LC_CTYPE", "LC_COLLATE", "LC_MESSAGES"] {
-        child.env(variable, "C");
-    }
-    let output = child.output().expect("re-run this binary as a child");
+    let env = [
+        (CHILD, "1"),
+        ("LC_ALL", "C"),
+        ("LANG", "C"),
+        ("LC_CTYPE", "C"),
+        ("LC_COLLATE", "C"),
+        ("LC_MESSAGES", "C"),
+    ];
+    let (_, output) = super::run_a_child_with(test, None, &env);
     print!("{}", super::stdout_of_a_passed_child(test, &output));
     true
 }
@@ -44,6 +44,8 @@ async fn fresh_cluster() -> (EmbeddedDb, tempfile::TempDir) {
     (db, dir)
 }
 
+/// The app's database on a new cluster is the builtin provider's `C.UTF-8`,
+/// with the C library's collation and ctype fixed per platform, not `C`.
 #[tokio::test]
 async fn a_new_clusters_database_has_the_builtin_c_utf8_locale_whatever_it_was_started_under() {
     let test = "locale::a_new_clusters_database_has_the_builtin_c_utf8_locale_whatever_it_was_started_under";
@@ -59,7 +61,9 @@ async fn a_new_clusters_database_has_the_builtin_c_utf8_locale_whatever_it_was_s
     .await;
     db.stop().await.unwrap();
     let (database, provider, locale, collate, ctype) = row.unwrap();
-    println!("{database}: provider {provider}, locale {locale:?}, collate {collate}, ctype {ctype}");
+    println!(
+        "{database}: provider {provider}, locale {locale:?}, collate {collate}, ctype {ctype}"
+    );
     assert_eq!(database, "knobas", "the app's own database");
     assert_eq!(provider, "b", "the builtin provider");
     assert_eq!(locale.as_deref(), Some("C.UTF-8"));
@@ -69,6 +73,9 @@ async fn a_new_clusters_database_has_the_builtin_c_utf8_locale_whatever_it_was_s
     assert_eq!((collate.as_str(), ctype.as_str()), (expected, expected));
 }
 
+/// A new cluster folds `Ü` and `İ` in `lower()`, lowercases the launcher's
+/// `tsvector`, and keeps `Ü`'s trigrams, which `pg_trgm` takes from the C
+/// library's ctype rather than the builtin provider.
 #[tokio::test]
 async fn a_new_cluster_lowercases_and_keeps_non_ascii_letters_whatever_it_was_started_under() {
     let test = "locale::a_new_cluster_lowercases_and_keeps_non_ascii_letters_whatever_it_was_started_under";
@@ -92,8 +99,14 @@ async fn a_new_cluster_lowercases_and_keeps_non_ascii_letters_whatever_it_was_st
     db.stop().await.unwrap();
     let (umlauts, dotted_i, tsvector, with_u, without_u) = probe.unwrap();
     assert_eq!(umlauts, "üäö", "lower() folds umlauts");
-    assert_eq!(dotted_i, "i", "lower() folds İ as #1843's key matching expects");
-    assert_eq!(tsvector, "'überweisung':1", "the launcher's index is lowercased");
+    assert_eq!(
+        dotted_i, "i",
+        "lower() folds İ as #1843's key matching expects"
+    );
+    assert_eq!(
+        tsvector, "'überweisung':1",
+        "the launcher's index is lowercased"
+    );
     assert!(
         with_u > without_u,
         "pg_trgm keeps Ü's trigrams: {with_u} for Überweisung, {without_u} for berweisung"

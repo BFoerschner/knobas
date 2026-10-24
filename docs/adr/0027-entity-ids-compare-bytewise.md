@@ -12,7 +12,7 @@ Decided 2026-10-18, unattended (#1172, recorded in `docs/decisions/2026-10-unatt
 - **Reads say nothing.** PostgreSQL resolves `C` against the default collation in favour of `C`, so `e.id = $1` or `l.from_id = i.entity_id` compares bytewise and uses the key's own index. No macro, no second index.
 - **Equality is unchanged.** Both collations are deterministic: two ids are equal exactly when their bytes are.
 - **A sort by id is bytewise.** That is the order Rust's `str` sorts in. No sort a user reads is by id alone. Titles, names and paths keep the database's collation, so they stay sorted the way the user reads them. (Amended 2026-10-24, #2013: on a cluster created since then the database's collation is the builtin `C.UTF-8`, so they sort by code point; see Considered options.)
-- **New and existing databases get the same schema.** Migration `0050` changes the columns. `initdb` and `create database` are unchanged.
+- **New and existing databases get the same schema.** Migration `0050` changes the columns. `initdb` and `create database` are unchanged. (Amended 2026-10-24, #2013: `initdb` now sets the cluster's locale; the id columns are the same on both.)
 
 ## Considered options
 

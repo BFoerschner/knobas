@@ -1800,10 +1800,9 @@ const INITDB_GRACE: Duration = Duration::from_secs(10);
 ///
 /// The crate's `setup()` runs `initdb` too, but with no way to set
 /// `kill_on_drop`, so a timed-out `initdb` kept running after knobas had given
-/// up (#1637). This runs the same command with the same flags, and a locale
-/// of its own ([`LOCALE_FLAGS`], #2013), and the `setup()` that follows finds
-/// `postgresql.conf` and skips its own. A
-/// finished `initdb` is marked ([`INITDB_FINISHED`]), so no later launch
+/// up (#1637). This runs the crate's command, plus a fixed locale (#2013,
+/// [`LIBC_LOCALE`]), and the `setup()` that follows finds `postgresql.conf`
+/// and skips its own. A finished `initdb` is marked ([`INITDB_FINISHED`]), so no later launch
 /// removes the directory.
 ///
 /// The password file is created here, as the crate would, but readable by
@@ -1892,36 +1891,22 @@ fn write_password_file(path: &Path, password: &str) -> Result<(), DbError> {
         .map_err(|source| DbError::io(path, source))
 }
 
-/// The locale every cluster knobas creates gets, whatever environment the app
-/// was started in (#2013). Unset, `initdb` takes it from the environment, and
-/// an app started from Finder inherits launchd's, which has no `LANG`: the
-/// cluster came out libc `C`, where `lower()` and `to_tsvector` leave `Ü`
-/// alone and `pg_trgm` drops it.
+/// The C library's collation and ctype every cluster knobas creates gets,
+/// beside the builtin provider's `C.UTF-8` ([`run_initdb`], #2013).
 ///
-/// - **The builtin provider's `C.UTF-8`**, the database's default collation:
-///   Unicode case folding on every platform, and titles, names and paths sort
-///   by code point (Björn, triage of #2013; ADR-0027).
-/// - **The C library's collation and ctype**, which `pg_trgm` still reads to
-///   tell a letter from a separator: `C.UTF-8` where the C library has it.
-///   Windows has no `C.UTF-8` locale, so it gets `en-US`, a name every
-///   Windows 10 and 11 install has, never the user's own.
+/// Left unset, `initdb` takes the locale from the environment, and an app
+/// started from Finder inherits launchd's, which has no `LANG`: the cluster
+/// came out libc `C`, where `lower()` and `to_tsvector` leave `Ü` alone and
+/// `pg_trgm` drops it. The builtin provider is the database's default
+/// collation: Unicode case folding on every platform, and titles, names and
+/// paths sort by code point (Björn, triage of #2013; ADR-0027). `pg_trgm`
+/// still reads the C library's ctype to tell a letter from a separator, so
+/// that is fixed too: `C.UTF-8` where the C library has it, and on Windows,
+/// which has none, `en-US`, a name every Windows 10 and 11 install has.
 ///
 /// The other categories (`lc_messages`, `lc_numeric`, ...) are server
 /// settings, not fixed per database, and still come from the environment.
-const LOCALE_FLAGS: [&str; 4] = [
-    "--locale-provider=builtin",
-    "--builtin-locale=C.UTF-8",
-    if cfg!(windows) {
-        "--lc-collate=en-US"
-    } else {
-        "--lc-collate=C.UTF-8"
-    },
-    if cfg!(windows) {
-        "--lc-ctype=en-US"
-    } else {
-        "--lc-ctype=C.UTF-8"
-    },
-];
+const LIBC_LOCALE: &str = if cfg!(windows) { "en-US" } else { "C.UTF-8" };
 
 /// Run `initdb` into `settings.data_dir`, as `postgresql_embedded` would, with
 /// `kill_on_drop` and a bounded wait.
@@ -1956,7 +1941,10 @@ async fn run_initdb(initdb: &Path, settings: &Settings, limit: Duration) -> Resu
         .arg(&settings.data_dir)
         .arg("--encoding")
         .arg("UTF8")
-        .args(LOCALE_FLAGS)
+        .arg("--locale-provider=builtin")
+        .arg("--builtin-locale=C.UTF-8")
+        .arg(format!("--lc-collate={LIBC_LOCALE}"))
+        .arg(format!("--lc-ctype={LIBC_LOCALE}"))
         .arg("--pwfile")
         .arg(&settings.password_file)
         .arg("--username")
