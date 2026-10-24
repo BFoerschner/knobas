@@ -414,7 +414,10 @@ impl RunFailure {
             RunFailure::NotConfigured => "the source has no configuration row".to_owned(),
             RunFailure::MissingSecret => MISSING_SECRET_MESSAGE.to_owned(),
             RunFailure::Secret(detail) => {
-                format!("{} {detail}", knobas_core::write_queue::KEYCHAIN_DETAIL_PREFIX)
+                format!(
+                    "{} {detail}",
+                    knobas_core::write_queue::KEYCHAIN_DETAIL_PREFIX
+                )
             }
             RunFailure::Source(error) => error.to_string(),
             RunFailure::Sync(error) => error.to_string(),

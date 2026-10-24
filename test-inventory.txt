@@ -4031,6 +4031,7 @@ knobas-sync	test/it	write_queue::flush_now_does_not_wait_out_the_ladder
 knobas-sync	test/it	write_queue::flush_now_sends_an_unauthorized_write_once_and_the_tick_after_it_does_not
 knobas-sync	test/it	write_queue::one_entitys_writes_keep_their_order_without_blocking_another
 knobas-sync	test/it	write_queue::send_mine_anyway_does_not_wait_for_the_flush_tasks_other_writes
+knobas-sync	test/it	write_queue::the_panel_reads_the_keychain_prefix_the_queue_writes
 knobas-sync	test/it	write_queue::two_comments_back_to_back_on_one_pull_request_both_go_in_order
 knobas-sync	test/it	write_queue::two_flushes_of_one_source_deliver_a_write_once
 knobas-sync	test/it	write_queue_flush_all::a_held_write_never_flushes_on_its_own
