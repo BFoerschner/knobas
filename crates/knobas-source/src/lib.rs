@@ -227,6 +227,46 @@ pub struct SourceDescriptor {
     pub url_forms: Vec<url_forms::UrlForm>,
 }
 
+impl SourceDescriptor {
+    /// Does this source declare `op`? `Ok` when [`Self::write_ops`] lists its
+    /// [identifier](WriteOp::identifier) and, for a
+    /// [source action](WriteOp::SourceAction), [`Self::source_actions`] lists
+    /// its id. Otherwise the [`SourceError::Protocol`] that refuses it, naming
+    /// the source and the op.
+    ///
+    /// **Clause 5 held by the caller, not only by the adapter** (#1950). The
+    /// write queue's flush asks this of the built source's own descriptor
+    /// before it hands any op over, and the WASM host asks it before a call
+    /// crosses into a guest, so an op the instance does not declare is
+    /// refused there with nothing sent, whatever the adapter would have done
+    /// with it. Every compiled-in adapter still refuses one itself, and
+    /// [`contract::battery`] still holds it to that: the check here is the
+    /// rule in one place, theirs is the defence behind it.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Protocol`] when the op, or the source action's id, is
+    /// not declared.
+    pub fn declares(&self, op: &WriteOp) -> Result<(), SourceError> {
+        let id = op.identifier();
+        if !self.write_ops.iter().any(|declared| declared == id) {
+            return Err(SourceError::protocol(format!(
+                "source {:?} does not declare the write {id:?}, so it was not sent",
+                self.id
+            )));
+        }
+        if let WriteOp::SourceAction { id, .. } = op
+            && !self.source_actions.iter().any(|declared| declared == id)
+        {
+            return Err(SourceError::protocol(format!(
+                "source {:?} does not declare the source action {id:?}, so it was not sent",
+                self.id
+            )));
+        }
+        Ok(())
+    }
+}
+
 // The declaration types themselves live in `knobas-spi-types`, not here: the
 // adapters that write them depend on this crate, and the readers that resolve
 // them are in `knobas-core`, which may not depend on the SPI. Neither

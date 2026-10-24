@@ -436,7 +436,8 @@ impl AdapterRegistry for FakeRegistry {
 
 /// The fake's descriptor. It declares one payload path, a pull request's
 /// state in Gitea's shape (#666), which is what a queued close or reopen holds
-/// on (#706); nothing else here reads a declaration.
+/// on (#706), and the write ops and source action the flush holds a queued
+/// write to (#1950).
 fn fake_descriptor(id: &str) -> SourceDescriptor {
     use knobas_core::payload::{KindPaths, PayloadPath, StatePath, StateValue};
     use knobas_core::tone::Tone;
@@ -444,16 +445,32 @@ fn fake_descriptor(id: &str) -> SourceDescriptor {
         id: id.to_owned(),
         adapter_kind: "mock".to_owned(),
         name: "Fake".to_owned(),
-        capabilities: Vec::new(),
+        capabilities: vec![knobas_source::Capability::Write],
         adapter_version: "0".to_owned(),
         auth_methods: vec![AuthMethod::Pat],
         accepts_account: false,
         min_sync_interval_secs: 60,
         roles: Vec::new(),
-        source_actions: Vec::new(),
+        source_actions: vec!["add_label".to_owned()],
         clone_from: Vec::new(),
         url_forms: Vec::new(),
-        write_ops: vec!["comment".to_owned()],
+        // Every op these tests queue, and no other: the flush refuses one the
+        // source does not declare before handing it over (#1950), and
+        // `an_op_the_source_does_not_declare_is_refused_without_reaching_it`
+        // queues a transition and an undeclared source action to see it.
+        write_ops: [
+            "comment",
+            "commit_file",
+            "create_monitor",
+            "create_page",
+            "create_pull_request",
+            "create_ticket",
+            "edit_pull_request",
+            "source_action",
+            "update_page",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
         entity_kinds: vec![KindInfo {
             id: "ticket".to_owned(),
             label: "Ticket".to_owned(),
@@ -1217,6 +1234,75 @@ async fn a_refused_write_is_reported_and_never_retried() {
         "a refusal is a decision, not a blip"
     );
     assert!(h.verbs().contains(&"refused".to_owned()));
+}
+
+/// Battery clause 5, held by the flush itself (#1950): an op the built
+/// source does not declare is refused by name and never handed to it, and so
+/// is a source action whose id it does not declare. This fake performs every
+/// op it is handed, as a guest that declares fewer than it implements does,
+/// so the refusal can only be the queue's.
+#[tokio::test]
+async fn an_op_the_source_does_not_declare_is_refused_without_reaching_it() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-1950", "a payout fails").await;
+    let pull = mirror_pull(&h, "o/r#1950", "Bound the retry jitter", "open").await;
+
+    h.answer(Answer::Accept);
+    let transition = flusher::submit(
+        &h.deps,
+        &h.source,
+        WriteOp::Transition {
+            entity: ticket.to_string(),
+            status: "Done".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    let action = flusher::submit(
+        &h.deps,
+        &h.source,
+        WriteOp::SourceAction {
+            entity: pull.to_string(),
+            id: "close_forever".to_owned(),
+            fields: std::collections::BTreeMap::new(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let transition = h.reload(transition.id).await;
+    assert_eq!(transition.state, WriteState::Refused);
+    assert_eq!(
+        transition.detail.as_deref(),
+        Some(
+            format!(
+                "protocol: source {:?} does not declare the write \"transition\", so it was not \
+                 sent",
+                h.source
+            )
+            .as_str()
+        )
+    );
+    let action = h.reload(action.id).await;
+    assert_eq!(action.state, WriteState::Refused);
+    assert_eq!(
+        action.detail.as_deref(),
+        Some(
+            format!(
+                "protocol: source {:?} does not declare the source action \"close_forever\", so \
+                 it was not sent",
+                h.source
+            )
+            .as_str()
+        )
+    );
+    assert_eq!(h.asked(), 0, "nothing reached the source");
+
+    // The control: an op it declares, on the same source, goes. On another
+    // ticket, since a refusal stays open and stops its own entity's queue.
+    let other = h.mirror("PAY-1951", "a payout fails").await;
+    h.comment(&other, "on it").await;
+    assert_eq!(h.delivered(), vec!["on it".to_owned()]);
 }
 
 /// Story 11, and the property the whole feature rests on: a target that moved
