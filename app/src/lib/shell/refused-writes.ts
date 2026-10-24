@@ -1,0 +1,40 @@
+/**
+ * What a source's credential cannot write (#2040, ADR-0020 rule 4), for a
+ * surface that draws a write from what the adapter declares: the inbox's
+ * *Re-run*, the Builds frame's *Run…*, *Re-run* and parameters.
+ *
+ * A surface draws its writes as before, then asks `refused_writes` about
+ * them and draws each refused one disabled with the reason (`aria-disabled`
+ * and the reason as its title, as the repository page draws a refused
+ * *New branch…*). A press on it queues nothing. Anything that is not an
+ * answer (a rejection, an ask left out) is no verdict, and the write stays
+ * as it was drawn.
+ */
+import { refusedWrites, type RefusedWrite, type WriteAsk } from "../ipc/entity";
+
+export type { RefusedWrite, WriteAsk };
+
+/** The read, injectable so a component test needs no Tauri bridge. */
+export type RefusedWritesPort = (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
+
+/**
+ * `asks` sent once each, and the answer; a rejection answers nothing. No
+ * ask sends nothing.
+ */
+export async function askRefused(asks: readonly WriteAsk[], read: RefusedWritesPort = refusedWrites): Promise<RefusedWrite[]> {
+  const once = asks.filter(
+    (ask, i) => asks.findIndex((other) => other.entity === ask.entity && other.op === ask.op) === i,
+  );
+  if (once.length === 0) return [];
+  try {
+    return await read(once);
+  } catch {
+    return [];
+  }
+}
+
+/** Why `op` on `entity` cannot be made, by `answer`, or `null`. */
+export function refusalOf(answer: readonly RefusedWrite[], entity: string | null, op: string): string | null {
+  if (entity === null) return null;
+  return answer.find((refused) => refused.entity === entity && refused.op === op)?.reason ?? null;
+}

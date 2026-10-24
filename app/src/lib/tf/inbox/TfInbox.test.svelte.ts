@@ -8,7 +8,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { createInbox, type Inbox } from "../../inbox/inbox.svelte";
-import type { ContextRow, EntityDetail, InboxEntry, InboxItem, Reached } from "../../ipc/entity";
+import type { ContextRow, EntityDetail, InboxEntry, InboxItem, Reached, RefusedWrite, WriteAsk } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
@@ -55,10 +55,13 @@ const SNOOZED = [
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
 let calls: string[];
+/** Each `refused_writes` the view sent, as JSON. */
+let asked: string[];
 
 beforeEach(() => {
   toasts.items.length = 0;
   calls = [];
+  asked = [];
   target = document.createElement("div");
   document.body.appendChild(target);
 });
@@ -109,9 +112,19 @@ function context(anchor: string): ContextRow {
 }
 
 async function open(
-  over: { job?: string | null; contexts?: ContextRow[]; extra?: InboxEntry[]; clock?: boolean } = {},
+  over: {
+    job?: string | null;
+    contexts?: ContextRow[];
+    extra?: InboxEntry[];
+    clock?: boolean;
+    refused?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
+  } = {},
 ) {
   const ports = {
+    refusedWrites: async (asks: WriteAsk[]) => {
+      asked.push(JSON.stringify(asks));
+      return over.refused ? over.refused(asks) : [];
+    },
     listContexts: async () => over.contexts ?? [],
     listSources: async () => [sourceFacts("jira"), sourceFacts("gitea"), sourceFacts("tc", { display_name: "TeamCity" })],
     getEntity: async (id: string) => {
@@ -206,6 +219,25 @@ test("Re-run queues the source's write and says so", async () => {
   await settle();
   expect(calls).toContain(`write ${JSON.stringify({ RerunBuild: { entity: "tc:Payout#1187" } })}`);
   expect(toasts.items.at(-1)!.text).toBe("Queued: re-run Payout_IntegrationTests #1187.");
+});
+
+test("Re-run the source's credential cannot make is drawn disabled saying why, and queues nothing (#2040)", async () => {
+  const reason = "This TeamCity user cannot run builds in Payout: it lacks the Run build permission";
+  await open({ refused: async (asks) => asks.map((ask) => ({ ...ask, reason })) });
+  expect(asked).toEqual([JSON.stringify([{ entity: "tc:Payout#1187", op: "rerun_build" }])]);
+  const rerun = button(rowOf("Payout_Integration"), "Re-run");
+  expect(rerun.getAttribute("aria-disabled")).toBe("true");
+  expect(rerun.title).toBe(reason);
+  rerun.click();
+  await settle();
+  expect(calls.filter((call) => call.startsWith("write"))).toEqual([]);
+});
+
+test("Re-run stays enabled where the source refuses nothing, or cannot tell (#2040)", async () => {
+  await open({ refused: async () => { throw { code: "not_ready", message: "no", source_id: null }; } });
+  const rerun = button(rowOf("Payout_Integration"), "Re-run");
+  expect(rerun.getAttribute("aria-disabled")).toBeNull();
+  expect(rerun.title).toBe("");
 });
 
 test("Re-run on a source whose sign-in fails says the write waits there, and Show queue opens the queue", async () => {
