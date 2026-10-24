@@ -500,8 +500,8 @@ impl SyncEvents for Recorder {
     }
 }
 
-/// What a locked keychain answers a read with.
-type Locked = Arc<Mutex<Option<fn() -> knobas_secrets::SecretError>>>;
+/// What a locked keychain answers a read with; `None` while it is open.
+type LockedWith = Arc<Mutex<Option<fn() -> knobas_secrets::SecretError>>>;
 
 /// A keychain that can be locked (#1741). What a locked macOS keychain
 /// answers a read with, `errSecInteractionNotAllowed`, arrives as
@@ -511,7 +511,7 @@ type Locked = Arc<Mutex<Option<fn() -> knobas_secrets::SecretError>>>;
 /// [`MemoryStore`] it wraps.
 struct Lockable {
     inner: MemoryStore,
-    locked: Locked,
+    locked_with: LockedWith,
 }
 
 /// The read a locked macOS keychain fails with.
@@ -524,7 +524,7 @@ impl SecretStore for Lockable {
         &self,
         account: &knobas_secrets::KeychainAccount,
     ) -> Result<Option<Secret>, knobas_secrets::SecretError> {
-        if let Some(error) = *self.locked.lock().unwrap() {
+        if let Some(error) = *self.locked_with.lock().unwrap() {
             return Err(error());
         }
         self.inner.get(account)
@@ -546,7 +546,7 @@ impl SecretStore for Lockable {
 
 struct Harness {
     deps: SchedulerDeps,
-    locked: Locked,
+    locked_with: LockedWith,
     events: Arc<Recorder>,
     answer: Arc<Mutex<Answer>>,
     asked: Arc<Mutex<usize>>,
@@ -568,10 +568,14 @@ impl Harness {
         *self.answer.lock().unwrap() = answer;
     }
 
-    /// Lock the keychain the flushes read the credential from, to fail every
-    /// read with `error`, or unlock it with `None`.
-    fn lock_keychain(&self, error: Option<fn() -> knobas_secrets::SecretError>) {
-        *self.locked.lock().unwrap() = error;
+    /// Lock the keychain the flushes read the credential from: every read
+    /// fails with what `error` makes, until [`Self::unlock_keychain`].
+    fn lock_keychain(&self, error: fn() -> knobas_secrets::SecretError) {
+        *self.locked_with.lock().unwrap() = Some(error);
+    }
+
+    fn unlock_keychain(&self) {
+        *self.locked_with.lock().unwrap() = None;
     }
 
     /// What the fake actually accepted, in order, each write read back by the
@@ -965,7 +969,7 @@ async fn harness() -> Harness {
     let file_at = Arc::new(Mutex::new(None));
     let doors = Arc::new(Mutex::new(Doors::default()));
     let events = Arc::new(Recorder::default());
-    let locked: Locked = Arc::new(Mutex::new(None));
+    let locked_with: LockedWith = Arc::new(Mutex::new(None));
     Harness {
         deps: SchedulerDeps {
             pool: pool.clone(),
@@ -983,13 +987,13 @@ async fn harness() -> Harness {
             }),
             secrets: Arc::new(Lockable {
                 inner: secrets,
-                locked: Arc::clone(&locked),
+                locked_with: Arc::clone(&locked_with),
             }),
             events: Arc::clone(&events) as Arc<dyn SyncEvents>,
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
             quit: knobas_sync::scheduler::Quit::default(),
         },
-        locked,
+        locked_with,
         events,
         answer,
         asked,
@@ -2676,8 +2680,10 @@ async fn a_write_flushed_while_the_keychain_is_locked_climbs_the_ladder() {
     let h = harness().await;
     let ticket = h.mirror("PAY-46", "a payout fails").await;
 
-    h.lock_keychain(Some(interaction_not_allowed));
-    let write = h.comment(&ticket, "typed while the keychain was locked").await;
+    h.lock_keychain(interaction_not_allowed);
+    let write = h
+        .comment(&ticket, "typed while the keychain was locked")
+        .await;
     let waiting = h.reload(write.id).await;
     assert_eq!(waiting.state, WriteState::Pending);
     assert_eq!(waiting.wait_reason, Some(WaitReason::Unreachable));
@@ -2688,12 +2694,11 @@ async fn a_write_flushed_while_the_keychain_is_locked_climbs_the_ladder() {
     );
     assert_eq!(h.asked(), 0, "the source is not asked without a credential");
 
-    h.lock_keychain(None);
-    h.rewind(50).await;
+    h.unlock_keychain();
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
     assert_eq!(h.asked(), 0, "not before the first rung, one minute");
 
-    h.rewind(10).await;
+    h.rewind(60).await;
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
     assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
     assert_eq!(
@@ -2709,7 +2714,7 @@ async fn a_write_flushed_while_the_store_refuses_access_waits_on_the_keychain() 
     let h = harness().await;
     let ticket = h.mirror("PAY-47", "a payout fails").await;
 
-    h.lock_keychain(Some(|| knobas_secrets::SecretError::Unavailable));
+    h.lock_keychain(|| knobas_secrets::SecretError::Unavailable);
     let write = h.comment(&ticket, "typed while the store refused").await;
     let waiting = h.reload(write.id).await;
     assert_eq!(waiting.wait_reason, Some(WaitReason::Unreachable));
