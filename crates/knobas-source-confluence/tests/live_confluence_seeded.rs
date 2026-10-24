@@ -1846,7 +1846,11 @@ async fn call_as(
 }
 
 /// The viewer and its space, taken away again from `Drop` and checked gone.
-struct Minted {
+struct Minted(Mint);
+
+/// What [`Minted`] takes away, and how.
+#[derive(Clone)]
+struct Mint {
     url: String,
     admin: (String, String),
     /// The viewer's token id, once it minted one.
@@ -1857,12 +1861,12 @@ impl Minted {
     /// Clears what a killed run left, then mints the viewer and the space,
     /// and gives the viewer *View* there and nothing else.
     async fn new(seeded: &Seeded) -> (Minted, String) {
-        let minted = Minted {
+        let mint = Mint {
             url: seeded.url.clone(),
             admin: (seeded.user.clone(), seeded.password.clone()),
             token: None,
         };
-        if let Err(left) = minted.take_away(&seeded.http).await {
+        if let Err(left) = mint.take_away(&seeded.http).await {
             panic!("an earlier run's viewer could not be taken away: {left}");
         }
         let admin = (seeded.user.as_str(), seeded.password.as_str());
@@ -1881,6 +1885,9 @@ impl Minted {
         )
         .await;
         assert!(matches!(status, 200 | 201), "minting {VIEWER}: {status} {made}");
+        // From here on `Drop` takes the user away again, and the space if
+        // it was made.
+        let minted = Minted(mint);
         let viewer_key = made["userKey"].as_str().expect("a user key").to_owned();
         // A private space: only its creator holds anything in it.
         let (status, space) = call_as(
@@ -1919,10 +1926,12 @@ impl Minted {
         )
         .await;
         assert_eq!(status, 201, "minting the viewer's token: {made}");
-        self.token = made["id"].as_u64();
+        self.0.token = made["id"].as_u64();
         made["rawToken"].as_str().expect("a raw token").to_owned()
     }
+}
 
+impl Mint {
     /// The token, the space and the user deleted, each checked gone.
     async fn take_away(&self, http: &reqwest::Client) -> Result<(), String> {
         let (url, (user, password)) = (&self.url, &self.admin);
@@ -1982,17 +1991,13 @@ impl Minted {
 
 impl Drop for Minted {
     fn drop(&mut self) {
-        let minted = Minted {
-            url: self.url.clone(),
-            admin: self.admin.clone(),
-            token: self.token.take(),
-        };
+        let mint = self.0.clone();
         Cleanup::new(
             "the live suite did not take away the viewer it minted, so the server is no longer \
              in the plain-seed state",
             format!("{VIEWER} and space {VIEWER_SPACE} may still exist; the next run clears them"),
         )
-        .run(move || async move { minted.take_away(&client()).await });
+        .run(move || async move { mint.take_away(&client()).await });
     }
 }
 
