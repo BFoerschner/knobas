@@ -923,7 +923,7 @@ fn decoded(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     use knobas_source::SourceError;
 
@@ -940,10 +940,14 @@ mod tests {
     /// conflicts, for good (#721): patience runs out, and then Gitea's 405 is
     /// the answer -- a refusal the queue records, not a write that waits
     /// forever.
-    #[tokio::test]
+    ///
+    /// Patience is a duration, so the test runs on tokio's paused clock
+    /// (#1925), where the waits are exactly as long as they say and nothing
+    /// else is waited on: the count and the time are both exact.
+    #[tokio::test(start_paused = true)]
     async fn a_merge_still_refused_when_patience_runs_out_is_a_refusal() {
         let tries = Cell::new(0);
-        let started = Instant::now();
+        let started = tokio::time::Instant::now();
         let result = patiently(Duration::from_millis(600), || {
             tries.set(tries.get() + 1);
             async { Err(refused("Please try again later")) }
@@ -954,8 +958,7 @@ mod tests {
         assert_eq!(error.status(), Some(405));
         // 250 ms, 350 ms (what was left): three asks in 600 ms of waiting.
         assert_eq!(tries.get(), 3);
-        assert!(started.elapsed() >= Duration::from_millis(600));
-        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(started.elapsed(), Duration::from_millis(600));
     }
 
     /// Only Gitea's *"Please try again later"* 405 is waited out: the same

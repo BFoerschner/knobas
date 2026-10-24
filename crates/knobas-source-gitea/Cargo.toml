@@ -26,7 +26,8 @@ tracing = "0.1"
 
 [dev-dependencies]
 serde_json.workspace = true
-tokio.workspace = true
+# `test-util` for the paused clock the merge-patience test runs on (#1925).
+tokio = { workspace = true, features = ["test-util"] }
 # The cleanup runner `live_env::Litter`'s `Drop` calls (#1913), shared with
 # every other live suite: a thread and runtime of its own, a bound, a report.
 knobas-live-cleanup = { path = "../knobas-live-cleanup" }
