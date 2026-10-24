@@ -363,6 +363,14 @@ instances=$(pgrep -x "$APP_EXECUTABLE" | wc -l | tr -d ' ' || true)
     "started from a path this run did not launch."
 note "one instance"
 
+# A tiling window manager gives the window whatever share of the screen is
+# left, and below WITNESS_MIN_WIDTH a breakpoint hides what a driver reaches
+# for (#2056: Tickets' preview, beside a terminal under AeroSpace). Sized, or
+# refused naming the size, before the driver's first step.
+step "giving the window a known size (at least $WITNESS_MIN_WIDTH points wide)"
+witness_window_size "$ax" "$app_pid" | sed 's/^/desktop-witness:   /' ||
+    fail "driver '$driver_name' not run: the window is too narrow for it (above)."
+
 # ---------------------------------------------------------------------------
 # 6. The driver.
 # ---------------------------------------------------------------------------

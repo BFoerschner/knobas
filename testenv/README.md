@@ -1678,6 +1678,20 @@ shown, so the page does not send the reader to Settings) with its title and
 its *Captured from* row. Then it opens Settings › *Notes and capture* again
 and asserts one note more than it counted.
 
+**The window gets a known size before the driver runs** (#2056). A tiling
+window manager gives a new window whatever share of the screen is left, and
+below 1240 px Tickets hides the preview `capture` opens its job from: under
+AeroSpace, beside a terminal, the driver waited for a preview that was never
+drawn. So the harness runs `witness_window_size` (`desktop-witness-lib.sh`)
+between the first draw and the driver, and `just live-shot` runs it before its
+steps file. When AeroSpace is running (its CLI answers), the window is
+fullscreened by its window id, whatever its width, and the fullscreen ends
+with the window. Elsewhere a window narrower than `WITNESS_MIN_WIDTH` (1241
+points, pinned against `tickets.css` by `desktop-witness-test.sh`) is widened
+through `ax resize`. The run log then prints the size the driver runs at,
+or, below the minimum, names the size and the minimum and fails before the
+driver's first step.
+
 **The capture window is counted as a window, on both sides of the keystroke**
 (#548). `ax windows` lists what knobas has open, one line per window with its
 title, and the driver counts the ones titled `Capture` just before the shortcut
@@ -2131,9 +2145,10 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
   Gitea and the JVM lock for a JVM product, and exports `./seed --env` for the
   steps file (`type "$KNOBAS_GITEA_TOKEN"`). Unset, it starts no product and
   takes no product lock.
-- **`LIVE_SHOT_AEROSPACE=1`** fullscreens the window in AeroSpace, so a tiling
-  window manager does not resize it between shots. It is off by default and
-  refused when `aerospace` is not on PATH.
+- **The window gets the desktop witness's known size** before the steps run
+  (#2056): fullscreen when AeroSpace is running, so a tiling window manager
+  does not resize it between shots, and refused below 1241 points wide. See
+  *The window gets a known size* under *The desktop witness (macOS)*.
 - **On a failed command** it writes `failed.png` and `failed-ax.txt` (the
   window's accessibility tree) beside the shots, then quits the app with ⌘Q.
   If the app is still running after that, it is killed, and the embedded

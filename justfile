@@ -1501,7 +1501,7 @@ desktop-witness driver="":
 # key, click-at, settle; testenv/live-shot.sh has each) and writes the knobas
 # window only, scaled from Retina, to <out>. LIVE_SHOT_PRODUCT=gitea (or another
 # testenv/live product) brings one up under its lock first and exports its
-# `./seed --env`; LIVE_SHOT_AEROSPACE=1 fullscreens the window in AeroSpace.
+# `./seed --env`. Under AeroSpace the window is fullscreened, as the witness's is.
 # Takes the screen and the desktop witness's lock; never part of a gate.
 live-shot out steps:
     testenv/live-shot.sh {{ quote(out) }} {{ quote(steps) }}

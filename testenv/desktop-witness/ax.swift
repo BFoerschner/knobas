@@ -625,6 +625,20 @@ func windowID(pid: pid_t) -> Int32 {
     return 0
 }
 
+/// Sets the app's largest window to `width` x `height` points (#2056): the
+/// window-size step widens a window a window manager left too narrow. The
+/// window manager may refuse or undo it, so the caller reads the size again.
+func resize(pid: pid_t, width: Int, height: Int) -> Int32 {
+    let framed = windows(of: pid).compactMap { window in frame(window).map { (window, $0) } }
+    guard let (window, _) = framed.max(by: { $0.1.width * $0.1.height < $1.1.width * $1.1.height }) else {
+        return fail("pid \(pid) has no window to resize")
+    }
+    var size = CGSize(width: width, height: height)
+    guard let value = AXValueCreate(.cgSize, &size) else { return fail("could not make a size value") }
+    let result = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
+    return result == .success ? 0 : fail("the window refused the size \(width)x\(height) (AXError \(result.rawValue))")
+}
+
 // MARK: - Entry point
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -693,6 +707,8 @@ case "window-id" where arguments.count == 2 && integer(1) != nil:
     status = windowID(pid: pid_t(integer(1)!))
 case "wait-content" where arguments.count == 3 && integer(1) != nil && seconds(2) != nil:
     status = waitContent(pid: pid_t(integer(1)!), seconds: seconds(2)!)
+case "resize" where arguments.count == 4 && integer(1) != nil && integer(2) != nil && integer(3) != nil:
+    status = resize(pid: pid_t(integer(1)!), width: integer(2)!, height: integer(3)!)
 default:
     FileHandle.standardError.write(
         Data(
@@ -717,6 +733,7 @@ default:
                    ax click-at <pid> <label> [n]
                    ax window-id <pid>
                    ax wait-content <pid> <seconds>
+                   ax resize <pid> <width> <height>
 
             """.utf8))
     status = 2
