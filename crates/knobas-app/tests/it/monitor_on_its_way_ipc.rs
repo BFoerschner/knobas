@@ -208,7 +208,11 @@ async fn a_create_held_as_unconfirmed_is_on_its_way_until_the_reader_discards_it
     knobas_core::write_queue::hold(&pool, drift, serde_json::json!({}))
         .await
         .unwrap();
-    assert_eq!(on_its_way(&pool).await, [("pg-main".to_owned(), None)], "drift");
+    assert_eq!(
+        on_its_way(&pool).await,
+        [("pg-main".to_owned(), None)],
+        "drift"
+    );
 
     let unanswered = create(&pool, "pg-main").await;
     knobas_core::write_queue::hold(
@@ -234,14 +238,21 @@ async fn a_create_held_as_unconfirmed_is_on_its_way_until_the_reader_discards_it
         .unwrap();
     assert_eq!(
         on_its_way(&pool).await,
-        [("pg-main".to_owned(), Some((unanswered, WriteState::Pending)))],
+        [(
+            "pg-main".to_owned(),
+            Some((unanswered, WriteState::Pending))
+        )],
         "sent again"
     );
 
     knobas_core::write_queue::discard(&pool, unanswered)
         .await
         .unwrap();
-    assert_eq!(on_its_way(&pool).await, [("pg-main".to_owned(), None)], "discarded");
+    assert_eq!(
+        on_its_way(&pool).await,
+        [("pg-main".to_owned(), None)],
+        "discarded"
+    );
 }
 
 /// A route records the names that attach its monitors too (#976), and two
