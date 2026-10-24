@@ -567,6 +567,29 @@ test("the fixture's Not monitored roster is the estate's assets with no monitor 
 });
 
 /**
+ * *Create monitor* under `?fake-ipc` (#1959): the fixture mirrors no monitor,
+ * so the asset the create recorded its name on stays on the list with the
+ * create on its way, as the real read says before the poll, and no other row
+ * carries it.
+ */
+test("the fixture keeps a created monitor's asset listed with its create on its way", () => {
+  const handlers = demoHandlers();
+  type Gap = { id: string; name: string; monitor_on_its_way: { id: number } | null };
+  const before = handlers["unmonitored_assets"]!({}) as Gap[];
+  const asset = before.find((gap) => gap.id.startsWith("asset:"))!;
+  handlers["edit_asset"]!({ assetId: asset.id, edits: [{ field: "monitors", added: ["fixture-1959"] }] });
+  const write = handlers["submit_write"]!({
+    payload: { CreateMonitor: { entity: "kuma:monitors", name: "fixture-1959", url: "https://x.test/", kind: "http" } },
+  }) as { id: number };
+
+  const after = handlers["unmonitored_assets"]!({}) as Gap[];
+  expect(after.map((gap) => gap.id)).toEqual(before.map((gap) => gap.id));
+  expect(after.filter((gap) => gap.monitor_on_its_way !== null).map((gap) => [gap.id, gap.monitor_on_its_way!.id])).toEqual([
+    [asset.id, write.id],
+  ]);
+});
+
+/**
  * The ack a card offers under `?fake-ipc` (#449's button over #446's write).
  *
  * The two things the real command guarantees and a fixture can get wrong: the

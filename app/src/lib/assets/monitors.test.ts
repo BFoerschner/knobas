@@ -223,6 +223,7 @@ function unwatched(name: string, typeId: string, label: string): UnmonitoredAsse
     environment: null,
     owner: null,
     url: null,
+    monitor_on_its_way: null,
   };
 }
 

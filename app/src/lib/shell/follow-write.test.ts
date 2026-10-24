@@ -86,6 +86,26 @@ test("a write that went says nothing more and stops listening", async () => {
   expect(stopped).toBe(1);
 });
 
+test("a write that left the open rows tells onleave once, and a held one does not (#1959)", async () => {
+  open = [write("pending")];
+  const onleave = vi.fn();
+  followWrite(write("pending"), { name: "Monitor", onleave }, follower);
+  await settle();
+  expect(onleave).not.toHaveBeenCalled();
+  open = [];
+  event();
+  await settle();
+  event();
+  await settle();
+  expect(onleave).toHaveBeenCalledOnce();
+
+  const held = vi.fn();
+  open = [write("held", "moved", 8)];
+  followWrite(write("pending", null, 8), { name: "Monitor", onleave: held }, follower);
+  await settle();
+  expect(held).not.toHaveBeenCalled();
+});
+
 test("a refused write says why, offers the queue and Edit and resend, and stops", async () => {
   open = [write("pending")];
   const resend = vi.fn();
