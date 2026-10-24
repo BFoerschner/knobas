@@ -35,7 +35,7 @@
   cannot read opens as text with a line naming the part, and no tickets.
   *+ New view*, *Edit view*, *Save as a view* (the text the bar sends now,
   with how the tickets show) and *Duplicate* open the view editor (#814);
-  on a Jira view, *Save as a view* and *Make an editable copy* open it on a
+  on a saved view, *Save as a view* and *Make an editable copy* open it on a
   copy of your own, from the parts of its query knobas can test, as its
   source reads them (#880, #1208), and only where the source translates it;
   *Delete*, in the ⋯ menus and the editor, a toast's *Undo* takes back.
@@ -675,7 +675,7 @@
       {/if}
     {/snippet}
     {#snippet saveButton()}
-      <!-- On a Jira view it is a copy, so a source that translates no query offers none (#1208). -->
+      <!-- On a saved view it is a copy, so a source that translates no query offers none (#1208). -->
       {#if !view?.saved_view_source || offersCopy(view)}
         <button type="button" class="tf-btn tf-sm tf-ghost tf-vw-savef" onclick={() => void saveAsView()}>Save as a view</button>
       {/if}
@@ -818,7 +818,7 @@
 
   {#if drafting !== null}
     {@const editing = drafting.editing}
-    <!-- Keyed: *Make an editable copy* in a Jira view's settings opens a new editor on the copy. -->
+    <!-- Keyed: *Make an editable copy* in a saved view's settings opens a new editor on the copy. -->
     {#key drafting}<ViewEditor
       draft={drafting.draft}
       editing={editing !== null}

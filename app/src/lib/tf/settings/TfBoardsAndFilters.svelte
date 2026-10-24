@@ -7,7 +7,7 @@
     the adapter's config (`boards.ts`), each saved as it changes through the
     page's own save, so a sync recorded field id is kept. Read at the next
     sync.
-  - Every Jira view the source keeps: its ticket count, the tickets on it
+  - Every saved view the source keeps: its ticket count, the tickets on it
     knobas does not mirror, and *Hide* / *Show* (`hide_saved_view`).
 -->
 <script lang="ts">
