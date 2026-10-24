@@ -1161,18 +1161,17 @@ impl SilentServer {
     /// reports the probe accepted, it has accepted everything before it,
     /// and the probe's place in the order is the count.
     async fn hits(&self) -> usize {
-        let probe = tokio::net::TcpStream::connect(("127.0.0.1", self.port))
+        let probe_stream = tokio::net::TcpStream::connect(("127.0.0.1", self.port))
             .await
             .expect("the probe connects");
-        let probe = probe.local_addr().expect("probe address");
+        let probe = probe_stream.local_addr().expect("probe address");
         let mut accepted = self.accepted.clone();
-        let peers = tokio::time::timeout(
-            Duration::from_secs(10),
+        let peers = real_backstop(
+            "the server's accept of the probe",
             accepted.wait_for(|peers| peers.contains(&probe)),
         )
         .await
-        .expect("the server accepts the probe")
-        .expect("the accept loop is running");
+        .expect("the server outlives its handle");
         peers
             .iter()
             .position(|peer| *peer == probe)
