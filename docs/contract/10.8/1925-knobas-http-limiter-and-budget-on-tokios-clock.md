@@ -30,6 +30,10 @@
   `a_retry_the_quota_stopped_is_not_marked`, and `hung_up::a_read_sent_again_stays_inside_the_send_budget`)
   run on tokio's paused clock, held still by a running blocking task (`HeldClock`) while a request
   is on the loopback and moved only once `CountingServer::exchanges_over` says nothing is left on
-  the wire, and assert what went exactly. `hits_within_the_burst` and `queued_sends` are gone;
-  `CountingServer` reads each connection to its end and counts the exchanges that are over. No
-  test is added or removed.
+  the wire, and assert what went exactly. `hits_within_the_burst` and `queued_sends` are gone.
+  New helpers: `HeldClock`; `real_backstop`, a 20 s real-time hang backstop for a wait on the held
+  clock; `start_sends`, `ended`, `went` and `the_rest_stopped_on_the_quota` over `Ended`, what one
+  send ended in and when; `queued_behind_one_a_second` and `ten_on_the_loose_client`; and the
+  budgets `SHORT_BUDGET` (now a `Duration` in scope), `UNDER_A_REFILL`, `TWO_A_SECOND_WINDOW` and
+  `ONE_REFILLED`. `CountingServer` reads each connection to its end and counts the exchanges that
+  are over (`exchanges_over`). No test is added or removed.
