@@ -462,6 +462,18 @@ async fn owe_the_note(pool: &PgPool, write_id: i64, note_id: &str) -> Result<(),
     crate::sources::write_queue::hold_arrival_link(pool, write_id, note_id).await
 }
 
+/// The link [`owe_the_note`] held is drawn: dropped from the row, as
+/// `link_arrivals` drops one it drew, so a link the reader removes is not
+/// drawn again by the next sync.
+async fn owed_no_more(pool: &PgPool, write_id: i64) -> Result<(), IpcError> {
+    sqlx::query("update knobas.write_queue set link_to = null where id = $1")
+        .bind(write_id)
+        .execute(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    Ok(())
+}
+
 /// The checks and the `CreateTicket` payload both paths share.
 async fn action_item_payload(
     pool: &PgPool,
@@ -550,6 +562,7 @@ pub async fn action_item_ticket_inner(
                 crate::protocol::ACTION_ITEM_RELATION,
             )
             .await?;
+            owed_no_more(pool, write_id).await?;
             linked = true;
         }
     }
