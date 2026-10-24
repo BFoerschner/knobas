@@ -1844,7 +1844,8 @@ async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_r
 /// fake is least able to speak for the real server: it matches no `since=` at
 /// all, serves every branch's list in one page, and answers `sha=<branch>` with
 /// whatever the fixture mounted under that key. So `since=` being server-side
-/// *and* inclusive, `sha=` really selecting that branch's history, and
+/// *and* inclusive (on Gitea; Forgejo 17 ignores it, #2034, and the walk's own
+/// filter holds the bound there), `sha=` really selecting that branch's history, and
 /// `commits_at_watermark` closing the boundary the inclusive filter re-delivers
 /// are three assumptions only this container can settle.
 ///
@@ -5698,14 +5699,24 @@ async fn the_repository_listing_pages_in_ascending_id_order() {
     );
 }
 
-/// #1624: a commit catch-up bounds its window from above with `until=`, which
-/// the adapter takes to be server-side and inclusive like `since=`. Checked:
-/// every commit at or before a commit's own `created` comes back, it among
-/// them, and nothing after it.
+/// #1624, #2034: a commit walk bounds its window with `since=` and, on a
+/// catch-up, `until=`. Gitea 1.27.3 hands both to `git log --since/--until`,
+/// on the committer date its `created` carries, so both are server-side and
+/// inclusive: for a commit's own `created`, `until=` answers every commit at
+/// or before it, it among them, and nothing after, and `since=` the mirror
+/// image. Forgejo 17.0.0 declares neither parameter on this endpoint and lists
+/// the branch whole whatever they say, which is why the adapter holds both
+/// bounds client-side too (`sync::walk_commits`). Checked: which of the two the
+/// server under test does, so neither forge's answer can drift unseen.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
-async fn the_commit_listings_until_is_server_side_and_inclusive() {
+async fn the_commit_listings_bounds_are_server_side_on_gitea_and_ignored_on_forgejo() {
     let env = env();
+    // Forgejo names the Gitea it forked from in its version: measured
+    // `17.0.0+gitea-1.22.0`, against Gitea's bare `1.27.3`.
+    let version = api_json(&env, "version").await;
+    let version = version["version"].as_str().expect("a version").to_owned();
+    let forgejo = version.contains("+gitea-");
     let base = format!(
         "repos/{}/commits?sha=main&stat=false&verification=false&files=false&limit=50",
         env.full_name()
@@ -5715,6 +5726,7 @@ async fn the_commit_listings_until_is_server_side_and_inclusive() {
             .expect("RFC 3339")
             .with_timezone(&chrono::Utc)
     };
+    let sha = |c: &serde_json::Value| c["sha"].as_str().expect("sha").to_owned();
     let all = api_json(&env, &base).await;
     let all = all.as_array().expect("a commit list");
     let times: std::collections::BTreeSet<_> = all.iter().map(created).collect();
@@ -5722,25 +5734,166 @@ async fn the_commit_listings_until_is_server_side_and_inclusive() {
         times.len() >= 2,
         "the seed's main has commits on two seconds: {times:?}"
     );
-    // The older of the two newest seconds, so something lies after it.
+    // The older of the two newest seconds, so something lies on each side.
     let cut = *times.iter().rev().nth(1).expect("two seconds");
-    let until = cut.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let bounded = api_json(&env, &format!("{base}&until={until}")).await;
-    let bounded: Vec<String> = bounded
-        .as_array()
-        .expect("a commit list")
-        .iter()
-        .map(|c| c["sha"].as_str().expect("sha").to_owned())
-        .collect();
-    let expected: Vec<String> = all
-        .iter()
-        .filter(|c| created(c) <= cut)
-        .map(|c| c["sha"].as_str().expect("sha").to_owned())
-        .collect();
-    assert!(!expected.is_empty());
+    let at = cut.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let listed = async |bound: &str| -> Vec<String> {
+        let body = api_json(&env, &format!("{base}&{bound}={at}")).await;
+        body.as_array()
+            .expect("a commit list")
+            .iter()
+            .map(sha)
+            .collect()
+    };
+    let kept = |keep: &dyn Fn(&serde_json::Value) -> bool| -> Vec<String> {
+        all.iter().filter(|c| forgejo || keep(c)).map(sha).collect()
+    };
+    let (to_cut, from_cut) = (kept(&|c| created(c) <= cut), kept(&|c| created(c) >= cut));
+    assert!(!to_cut.is_empty() && !from_cut.is_empty());
     assert_eq!(
-        bounded, expected,
-        "until={until} is inclusive and nothing after it comes back"
+        listed("until").await,
+        to_cut,
+        "until={at} on {version}: inclusive and server-side on Gitea, ignored on Forgejo"
+    );
+    assert_eq!(
+        listed("since").await,
+        from_cut,
+        "since={at} on {version}: inclusive and server-side on Gitea, ignored on Forgejo"
+    );
+}
+
+/// #2034, the read past the cap on the real server. 1,100 commits pushed at
+/// once against a budget of 1,000: the first incremental run delivers the
+/// newest 1,000 and is cut, and the next must deliver the other 100. Forgejo
+/// ignores `until=`, so that run lists the branch from its head and passes the
+/// 1,000 it already delivered first, a whole page cap of them; before #2034
+/// it stopped there on every run. Gitea's `until=` keeps those pages from
+/// being listed, so on Gitea this is the plain catch-up. Its own organisation
+/// repository, removed before and after, so no other test's counts move.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_commit_catch_up_reads_past_a_page_cap_of_commits_the_server_lists_above_it() {
+    const PUSHED: i64 = 1_100;
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let api = format!("{}/api/v1", env.url);
+    let (admin, password) = TESTENV_ADMIN;
+    let scratch = "knobas-live-deep-catch-up";
+    let full_name = format!("{}/{scratch}", env.owner);
+    let remove = async || {
+        let _ = http
+            .delete(format!("{api}/repos/{full_name}"))
+            .basic_auth(admin, Some(password))
+            .send()
+            .await;
+    };
+    remove().await;
+    let created = http
+        .post(format!("{api}/orgs/{}/repos", env.owner))
+        .basic_auth(admin, Some(password))
+        .json(&serde_json::json!({ "name": scratch, "auto_init": true, "default_branch": "main" }))
+        .send()
+        .await
+        .expect("POST /orgs/{owner}/repos");
+    assert!(
+        created.status().is_success(),
+        "create the repository: {}",
+        created.status()
+    );
+    let source = env.source(serde_json::json!({
+        "repos": [full_name], "commits_per_repo": 1000, "prs_per_repo": 0
+    }));
+    let (_, cursor) = full(&*source).await;
+
+    // Empty commits a second apart, all after the first one's second, made
+    // by `git fast-import` and pushed in one go.
+    let dir = std::env::temp_dir().join(format!("knobas-live-deep-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let remote = env
+        .url
+        .replacen("://", &format!("://{admin}:{password}@"), 1)
+        + &format!("/{full_name}.git");
+    let git = |args: &[&str], input: Option<&str>| -> String {
+        use std::io::Write as _;
+        let mut child = std::process::Command::new("git")
+            .args(args)
+            .current_dir(if args[0] == "clone" {
+                std::env::temp_dir()
+            } else {
+                dir.clone()
+            })
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("git runs");
+        if let Some(input) = input {
+            child
+                .stdin
+                .take()
+                .expect("a stdin")
+                .write_all(input.as_bytes())
+                .expect("git reads the stream");
+        }
+        let out = child.wait_with_output().expect("git ends");
+        assert!(out.status.success(), "git {args:?}: {}", out.status);
+        String::from_utf8(out.stdout)
+            .expect("UTF-8")
+            .trim()
+            .to_owned()
+    };
+    git(
+        &["clone", "-q", &remote, dir.to_str().expect("a UTF-8 path")],
+        None,
+    );
+    let head = git(&["rev-parse", "HEAD"], None);
+    let start = chrono::Utc::now().timestamp() + 60;
+    let mut stream = String::new();
+    for k in 1..=PUSHED {
+        let message = format!("knobas live: deep catch-up {k}\n");
+        stream += &format!(
+            "commit refs/heads/main\ncommitter knobas <knobas@tidewater.example> {} +0000\ndata {}\n{message}",
+            start + k,
+            message.len()
+        );
+        if k == 1 {
+            stream += &format!("from {head}\n");
+        }
+        stream += "\n";
+    }
+    git(&["fast-import", "--quiet"], Some(&stream));
+    git(&["push", "-q", "origin", "main"], None);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let mut delivered: Vec<String> = Vec::new();
+    let mut cursor = cursor;
+    for run in 1..=2 {
+        let mut sink = VecSink(Vec::new());
+        cursor = source
+            .sync(Some(cursor), &mut sink)
+            .await
+            .expect("an incremental sync");
+        let commits = of_kind(&sink.0, "commit");
+        println!("LIVE deep catch-up run {run}: {} commits", commits.len());
+        delivered.extend(commits.iter().map(|i| i.entity.key.clone()));
+    }
+    let position: serde_json::Value = serde_json::from_str(&cursor).expect("the cursor is JSON");
+    remove().await;
+
+    let distinct: std::collections::BTreeSet<&String> = delivered.iter().collect();
+    assert_eq!(
+        (delivered.len(), distinct.len()),
+        (1_100, 1_100),
+        "every pushed commit, once each, in two runs"
+    );
+    assert!(
+        position["repos"][&full_name]
+            .get("commits_catching_up")
+            .is_none(),
+        "caught up: {}",
+        position["repos"][&full_name]
     );
 }
 

@@ -13,7 +13,8 @@
 //!   stands. Certifies the *shapes* interfaces §4.2 fixes: the key forms, the
 //!   `{ok,data}` envelope, `state=all`, the discussion living on the issue of
 //!   the same index, `sort=recentupdate` really ordering newest-first, `since=`
-//!   being server-side and inclusive, and a revoked token's 401.
+//!   being server-side and inclusive (on Gitea; Forgejo 17 ignores it and
+//!   `until=` on commits, #2034), and a revoked token's 401.
 //! * [`live_gitea_capped`] -- `just gitea-live-capped`, that file plus
 //!   `testenv/docker-compose.capped.yml`. Certifies exactly one property, and
 //!   one the default configuration structurally cannot: that a listing survives

@@ -460,11 +460,13 @@ impl GiteaClient {
     /// default to **true** in Gitea; turning them off is the difference between
     /// a listing and a diff dump.
     ///
-    /// `since` and `until` are both server-side and inclusive (git's
+    /// On Gitea `since` and `until` are both server-side and inclusive (git's
     /// `--since`/`--until` on the committer date, which is `created`);
-    /// `live_gitea` asserts both. `until` bounds a catch-up's window from
-    /// above (#1624), so it does not re-list the commits the walk it
-    /// continues already delivered.
+    /// Forgejo 17 declares neither here and ignores both (#2034), which is
+    /// why the walk holds both bounds itself. `live_gitea` asserts each
+    /// forge's answer. `until` bounds a catch-up's window from above (#1624),
+    /// so Gitea does not re-list the commits the walk it continues already
+    /// delivered.
     pub(crate) async fn commits(
         &self,
         owner: &str,
