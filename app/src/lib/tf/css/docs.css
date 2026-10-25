@@ -123,7 +123,7 @@
 .tf-cmts .tf-msg.tf-queued .tf-cmt-queued { color: var(--muted); white-space: pre-wrap; }
 .tf-doc h2 .tf-queued-mark { font-family: var(--sans); vertical-align: middle; }
 .tf-doc .tf-sec-queued { color: var(--muted); white-space: pre-wrap; border-left: 2px dashed var(--rule); padding-left: 10px; }
-/* The Docs search, the rail, the find bar and the writes (#860 to #862) */
+/* The Docs search, the outline, the find bar and the writes (#860 to #862) */
 .tf-dl-head .tf-fsearch { max-width: none; flex: none; padding: 6px 9px; }
 .tf-dl-head .tf-dl-scope { display: flex; }
 .tf-dl-scope button { flex: 1; }
@@ -146,6 +146,7 @@
 .tf-dl-for .tf-why { display: block; font-size: var(--t-2xs); color: var(--warn); font-weight: 600; }
 .tf-rd-tree a[aria-current="true"] .tf-why { color: inherit; }
 .tf-rd-meta button.tf-chip { border: 0; background: var(--muted-bg); color: var(--muted); font-family: inherit; cursor: pointer; }
+/* 38px high: the sticky outline sits that far down while it is open (.tf-rd-outline, #2081). */
 .tf-findbar {
   position: sticky; top: 0; z-index: 3; display: flex; gap: 8px; align-items: center; background: var(--card);
   color: var(--card-ink); padding: 6px 16px; font-size: var(--t-sm);

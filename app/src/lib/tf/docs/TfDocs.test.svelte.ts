@@ -11,6 +11,7 @@ import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetQueued } from "../queued.svelte";
 import { parseTfHash } from "../route";
+import { READER_NARROW } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -295,7 +296,7 @@ test("comments are listed with their author, or say there are none", async () =>
   expect(target.querySelector(".tf-cmts")?.textContent).toContain("No comments yet.");
 });
 
-// -- the search, the find bar, the rail and the writes (#860 to #862) --
+// -- the search, the find bar, the outline and the writes (#860 to #862) --
 
 import type { DocsHits } from "../../ipc/entity";
 
@@ -449,7 +450,7 @@ function windowWidth(narrow: boolean): void {
       media: query,
       // Only the reader's own threshold, as the stylesheet writes it, answers.
       get matches() {
-        return query === "(max-width: 1239px)" && narrow;
+        return query === READER_NARROW && narrow;
       },
       addEventListener: (_: string, hear: (event: Event) => void) => heard.add(hear),
       removeEventListener: (_: string, hear: (event: Event) => void) => heard.delete(hear),
@@ -524,6 +525,12 @@ test("a narrow window folds the outline between the actions row and the first se
 
   await drawPage(PAGE);
   expect(fold()!.querySelector("summary")?.textContent).toBe("On this page1 section");
+
+  // Finding words no section holds ("first" is only above the first heading): no badge of zero.
+  await drawPage(OUTLINED, { docsSearch: vi.fn(async () => ({ ...HITS, needles: ["first"] })) });
+  await findOnPage("first");
+  expect(fold()!.querySelector("summary")?.textContent).toBe("On this page2 sections");
+  location.hash = "";
 });
 
 test("the outline moves between the margin and the fold as the window crosses 1240px, and the fold opens closed on every page (#2081)", async () => {

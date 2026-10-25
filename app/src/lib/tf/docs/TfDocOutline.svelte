@@ -5,7 +5,8 @@
   On a wide window it is the page's right column, sticking while the page
   scrolls (the margin). Below 1240px (`folded`) it is a fold between the
   actions row and the first section, closed, its summary counting the
-  sections and, while the find bar is open, the matches in them (#2081).
+  sections and, while the find bar is open, the matches in them, a badge
+  drawn only above zero (#2081).
 -->
 <script lang="ts">
   import type { DocPage } from "../../ipc/entity";
@@ -46,7 +47,7 @@
     <details class="tf-rd-fold">
       <summary
         >On this page<span class="tf-count">{outline.length} section{outline.length === 1 ? "" : "s"}</span
-        >{#if stems.length > 0}<span class="tf-hits">{total} match{total === 1 ? "" : "es"}</span>{/if}</summary
+        >{#if total > 0}<span class="tf-hits">{total} match{total === 1 ? "" : "es"}</span>{/if}</summary
       >
       {@render toc()}
     </details>

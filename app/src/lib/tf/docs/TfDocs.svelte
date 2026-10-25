@@ -19,7 +19,7 @@
   keeps the query: every match is marked and the find bar steps through them
   (R-10.5, R-10.12). The outline (`TfDocOutline`, R-10.15) is the page's own
   right column, sticking while the page scrolls; below 1240px
-  (`READER_NARROW`, read through `matchMedia`) it folds between the actions
+  (`READER_NARROW`, read through Svelte's `MediaQuery`) it folds between the actions
   row and the first section instead. `#/docs` opens the page read last, and every
   page opened is a visit (`visit_entity`), which is what "read last" reads.
 
