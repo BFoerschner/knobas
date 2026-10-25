@@ -31,18 +31,27 @@
     Log tab at that step. The page reads the log once and hands that read to
     the Log tab; a run in flight is read again when the Log tab opens. No
     log, or a log without steps, draws no bar.
+
+  - **Refresh** (#2137, after #2107): the run as `get_entity` reads it draws
+    *Refresh* or *Sync now* at the end of the header's actions
+    (`TfDetailRefresh`), and the withdrawn and turned-off banners under the
+    header (`TfDetailBanners`). A refresh reads the run again as a finished
+    sync does, over what the page drew.
 -->
 <script lang="ts">
   import { clockLabel, secondsLabel } from "../../time/format";
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import type { PipelineRow, PipelineSettings, RunLog, RunRow, SourceView } from "../../ipc/entity";
+  import type { EntityDetail, PipelineRow, PipelineSettings, RunLog, RunRow, SourceView } from "../../ipc/entity";
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import { settleEchoes } from "../queued.svelte";
+  import { createDetailRefresh } from "../refresh.svelte";
+  import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { commitHash, fileHash } from "../repo/repo";
   import { pipelineHash, runTone } from "./builds";
   import {
@@ -137,6 +146,10 @@
   let token = 0;
   /** How many times the page has read the run again after a sync (#1450): the open tab reads again on each. */
   let rereads = $state(0);
+  /** The run as `get_entity` reads it (#2137): what its *Refresh* and banners draw over; `null` until read. */
+  let detail = $state<EntityDetail | null>(null);
+  /** The header's *Refresh* or *Sync now* (#2107). */
+  const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
   $effect(() => {
     const wanted = { pipelineId, runId };
@@ -169,15 +182,28 @@
     failure = null;
     settings = null;
     log = null;
+    detail = null;
+    refresh.reset();
     void findRun(pipe, id, mine);
     void readLog(id, mine);
-    readView(id, mine);
+    void readView(id, mine);
+    void readDetail(id, mine);
     readSettings(pipe, mine);
   }
 
+  /** The run's item (#2137); a failed read keeps the last one, and none draws no *Refresh*. */
+  function readDetail(id: string, mine: number): Promise<void> {
+    return ports.getEntity(id).then(
+      (answer) => {
+        if (mine === token) detail = answer;
+      },
+      () => {},
+    );
+  }
+
   /** The run's view, and its first failed test where the view counts failures; a failed read keeps the last view. */
-  function readView(id: string, mine: number) {
-    ports.view(id).then(
+  function readView(id: string, mine: number): Promise<void> {
+    return ports.view(id).then(
       (answer) => {
         if (mine !== token) return;
         view = answer;
@@ -222,20 +248,24 @@
   }
 
   /**
-   * A sync of the run's source finished (#1450): the run, its view, its log
-   * and the open tab again, over what is drawn. The tab, its filter and an
-   * open dialog stay; a failed read keeps the last answer and says so.
+   * A sync of the run's source finished (#1450), or a *Refresh* read the run
+   * (#2137): the run, its item, its view, its log and the open tab again,
+   * over what is drawn. The tab, its filter and an open dialog stay; a failed
+   * read keeps the last answer and says so. Settles once the page's own
+   * reads have answered.
    */
-  function reread(pipe: string, id: string) {
+  function reread(pipe: string, id: string): Promise<unknown> {
     // A new token: a read again answering after a later one is dropped.
     const mine = ++token;
-    void findRun(pipe, id, mine);
-    void readLog(id, mine);
-    readView(id, mine);
+    const reads = [findRun(pipe, id, mine), readLog(id, mine), readView(id, mine), readDetail(id, mine)];
     // The first settings read, if still out, answers under the old token.
     if (settings === null) readSettings(pipe, mine);
     rereads += 1;
+    return Promise.allSettled(reads);
   }
+
+  /** The *Refresh*'s read again, of the run the page is on. */
+  const rereadRun = async () => void (await reread(pipelineId, runId));
 
   $effect(() => {
     const wanted = { pipelineId, runId };
@@ -449,8 +479,10 @@
       {#if run.web_url !== null}
         <button type="button" class="tf-btn tf-ghost" onclick={() => openExternal(run.web_url)}>Open in {pipeline.source_name}</button>
       {/if}
+      {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={rereadRun} />{/if}
     </div>
   </header>
+  {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
 
   {#if segments.length > 0}
     <div class="tf-stepsbar">
