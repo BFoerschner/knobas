@@ -979,6 +979,8 @@ knobas-app	test/it	protocol_ipc::the_ticket_read_refuses_a_write_that_files_no_t
 knobas-app	test/it	read_plans::every_reshaped_read_plans_without_estimates_on_analyzed_tables
 knobas-app	test/it	read_plans::every_reshaped_read_plans_without_estimates_on_tables_never_analyzed
 knobas-app	test/it	refresh::a_failed_refresh_leaves_the_write_sent_and_the_run_still_starts
+knobas-app	test/it	refresh::a_landed_write_on_a_1_3_0_external_source_gets_the_run_alone
+knobas-app	test/it	refresh::a_landed_write_on_an_external_source_is_refreshed_across_the_boundary
 knobas-app	test/it	refresh::a_landed_writes_item_is_mirrored_from_the_mock_before_any_run_starts
 knobas-app	test/it	refresh::a_mock_that_does_not_offer_the_read_gets_the_run_alone
 knobas-app	test/it	refresh::a_refresh_waits_behind_a_run_in_flight_whose_older_payload_does_not_overwrite_it
@@ -4418,6 +4420,11 @@ knobas-wasm-host	test/it	reads::a_survey_s_view_offers_its_declared_source_actio
 knobas-wasm-host	test/it	reads::every_run_and_pipeline_read_answers_across_the_boundary
 knobas-wasm-host	test/it	reads::the_component_hears_the_sink_s_refusal_of_a_download
 knobas-wasm-host	test/it	reads::the_run_s_deferred_sections_carry_the_diff_and_the_tree
+knobas-wasm-host	test/it	refresh::a_1_3_0_component_installs_syncs_and_answers_not_offered
+knobas-wasm-host	test/it	refresh::a_component_without_refresh_that_declares_it_is_not_believed
+knobas-wasm-host	test/it	refresh::a_failed_refresh_is_an_error_not_gone
+knobas-wasm-host	test/it	refresh::a_refresh_crosses_as_the_item_the_sync_emits_for_that_id
+knobas-wasm-host	test/it	refresh::a_refresh_of_an_item_deleted_at_the_source_answers_gone
 knobas-wasm-host	test/it	walk::a_1_0_0_component_still_installs_syncs_and_reports_no_walk
 knobas-wasm-host	test/it	walk::a_1_3_0_component_s_walk_reaches_the_engine_s_progress_sink
 knobas-wasm-host	test/it	walk::a_reading_after_the_sink_refused_an_item_is_dropped
