@@ -9,6 +9,7 @@
  * hold is `#/job/<source>:<key>` (#1476).
  */
 import type {
+  DocBacklink,
   DocBlock,
   DocForYou,
   DocHit,
@@ -227,6 +228,44 @@ export function createdBy(page: DocPage): { who: string; at: string | null } | n
   if (first) return { who: shortWho(first.by, first.by_name, page.me), at: first.at };
   if (page.version === 1) return { who: shortWho(page.editor, page.editor_name, page.me), at: page.updated_at };
   return null;
+}
+
+/**
+ * How many backlinks the backend loads at most (the `limit 50` of
+ * `knobas_app::docs`'s `BACKLINKS` query): at this many there may be more, so
+ * *Linked from* says `50+`.
+ */
+export const BACKLINK_LIMIT = 50;
+
+/** *Linked from*'s heading: the number of backlinks, `50+` at the backend's limit (#2080). */
+export function linkedFromHeading(count: number): string {
+  if (count >= BACKLINK_LIMIT) return `Linked from ${BACKLINK_LIMIT}+ pages`;
+  return `Linked from ${count} ${count === 1 ? "page" : "pages"}`;
+}
+
+/** One fold of *Linked from*: a space's backlinks, or the ones with no space key (`key` `null`). */
+export interface BacklinkGroup {
+  key: string | null;
+  /** The space's name from the tree, `null` where the tree names none. */
+  name: string | null;
+  links: DocBacklink[];
+}
+
+/**
+ * *Linked from* by space (#2080): one group per space key, ordered by key,
+ * its pages by title; the backlinks with no key last. A space is named from
+ * the tree's spaces of the page's own source, since two sources can share a key.
+ */
+export function backlinkGroups(backlinks: DocBacklink[], spaces: readonly DocSpace[], sourceId: string): BacklinkGroup[] {
+  const byKey = new Map<string | null, DocBacklink[]>();
+  for (const link of backlinks) byKey.set(link.space_key, [...(byKey.get(link.space_key) ?? []), link]);
+  const keys = [...byKey.keys()].filter((k): k is string => k !== null).sort((a, b) => a.localeCompare(b));
+  const group = (key: string | null): BacklinkGroup => ({
+    key,
+    name: key === null ? null : (spaces.find((s) => s.source_id === sourceId && s.key === key)?.name ?? null),
+    links: [...byKey.get(key)!].sort((a, b) => a.title.localeCompare(b.title)),
+  });
+  return [...keys.map(group), ...(byKey.has(null) ? [group(null)] : [])];
 }
 
 /** *You* for the reader, else the person as the source names them. */

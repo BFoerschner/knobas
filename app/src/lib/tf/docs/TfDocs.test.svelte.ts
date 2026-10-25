@@ -412,22 +412,103 @@ const RICH: DocPage = {
   writes: ["comment", "update_page", "create_page"],
 };
 
-test("the rail: the outline, the work, the pages that link here and the history", async () => {
+test("the margin holds only the outline (#2080)", async () => {
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
-  const rail = target.querySelector("aside[aria-label='About this page']")!;
-  expect([...rail.querySelectorAll("h3")].map((h) => h.textContent)).toEqual([
-    "On this page",
+  const margin = target.querySelector("aside[aria-label='On this page']")!;
+  expect([...margin.querySelectorAll("h3")].map((h) => h.textContent)).toEqual(["On this page"]);
+  expect([...margin.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+    ["Ledger", "#/page/confluence%3A2/1"],
+  ]);
+  expect(target.textContent).not.toContain("History");
+});
+
+const LINKED: DocPage["backlinks"] = [
+  { entity_id: "confluence:11", title: "Runbook index", space_key: "OPS" },
+  { entity_id: "confluence:13", title: "Scratch notes", space_key: null },
+  { entity_id: "confluence:14", title: "Team charter", space_key: "TEAM" },
+  { entity_id: "confluence:5", title: "Payout design", space_key: "ENG" },
+  { entity_id: "confluence:12", title: "Alerting", space_key: "OPS" },
+];
+
+/** The tree, with another source's TEAM: a backlink's space is named from the page's own source only. */
+const TREE_ELSEWHERE: DocsTree = { ...TREE, spaces: [...TREE.spaces, { source_id: "wiki", key: "TEAM", name: "Not this one", pages: [] }] };
+
+const foot = () => target.querySelector(".tf-rd-page")!;
+const linkedHeading = () => [...foot().querySelectorAll("h3")].find((h) => h.textContent?.startsWith("Linked from"));
+const groups = () =>
+  [...foot().querySelectorAll("details")].map((d) => ({
+    summary: d.querySelector("summary")!.textContent,
+    open: d.open,
+    pages: [...d.querySelectorAll("li a")].map((a) => [a.textContent, a.getAttribute("href")]),
+  }));
+
+test("the page foot: Work it belongs to, then Linked from by space, after the body and before the comments (#2080)", async () => {
+  await draw(["confluence:2"], ports({ docsTree: vi.fn(async () => TREE_ELSEWHERE), docsPage: vi.fn(async () => ({ ...RICH, backlinks: LINKED })) }));
+  const page = foot();
+  expect([...page.querySelectorAll("h3, .tf-cmts h2")].map((h) => h.textContent?.trim())).toEqual([
     "Work it belongs to",
-    "Pages that link here",
-    "History",
+    "Linked from 5 pages",
+    "Comments 1",
   ]);
-  expect(rail.querySelector(".tf-toc a")?.getAttribute("href")).toBe("#/page/confluence%3A2/1");
-  expect(rail.querySelector("a[href='#/job/jira%3AOPS-77']")?.textContent).toContain("To Do");
-  expect(rail.querySelector("a[href='#/page/confluence%3A5']")?.textContent).toBe("Payout designENG");
-  expect([...rail.querySelectorAll(".tf-rail-list div")].map((d) => d.textContent)).toEqual([
-    "EditedTomasz, 2026-07-02",
-    "Createdyou, 2026-01-02",
+  const work = [...page.querySelectorAll("h3")].find((h) => h.textContent === "Work it belongs to")!;
+  // After the page body: its last block comes before the foot.
+  expect(page.querySelector(".tf-macro")!.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const job = work.parentElement!.querySelector<HTMLAnchorElement>("li a")!;
+  expect(job.getAttribute("href")).toBe("#/job/jira%3AOPS-77");
+  expect(job.closest("li")!.textContent).toBe("OPS-77 On-call runbook outdatedTo Do");
+
+  expect(groups()).toEqual([
+    { summary: "ENG Engineering1", open: false, pages: [["Payout design", "#/page/confluence%3A5"]] },
+    {
+      summary: "OPS Operations2",
+      open: false,
+      pages: [
+        ["Alerting", "#/page/confluence%3A12"],
+        ["Runbook index", "#/page/confluence%3A11"],
+      ],
+    },
+    { summary: "TEAM1", open: false, pages: [["Team charter", "#/page/confluence%3A14"]] },
+    { summary: "Other pages1", open: false, pages: [["Scratch notes", "#/page/confluence%3A13"]] },
   ]);
+});
+
+test("the page foot leaves out what is empty: no work, no backlinks, no Other pages (#2080)", async () => {
+  await draw(["confluence:2"]);
+  expect(foot().textContent).not.toContain("Work it belongs to");
+  expect(linkedHeading()).toBeUndefined();
+  expect(foot().querySelector("details")).toBeNull();
+
+  if (view) unmount(view);
+  target.innerHTML = "";
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, backlinks: LINKED.filter((l) => l.space_key !== null) })) }));
+  expect(linkedHeading()?.textContent).toBe("Linked from 4 pages");
+  expect(groups().map((g) => g.summary)).toEqual(["ENG Engineering1", "OPS Operations2", "TEAM1"]);
+});
+
+test("Linked from says 50+ when the backend's 50 arrive, and the count below that (#2080)", async () => {
+  const many = (n: number): DocPage["backlinks"] =>
+    Array.from({ length: n }, (_, i) => ({ entity_id: `confluence:${100 + i}`, title: `Page ${100 + i}`, space_key: "OPS" }));
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, backlinks: many(50) })) }));
+  expect(linkedHeading()?.textContent).toBe("Linked from 50+ pages");
+  expect(groups().map((g) => g.summary)).toEqual(["OPS Operations50"]);
+
+  if (view) unmount(view);
+  target.innerHTML = "";
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, backlinks: many(49) })) }));
+  expect(linkedHeading()?.textContent).toBe("Linked from 49 pages");
+});
+
+test("every Linked from group is closed again when another page opens (#2080)", async () => {
+  const docsPage = vi.fn(async (id: string) => ({ ...(id === "confluence:1" ? OTHER : PAGE), backlinks: LINKED }));
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  for (const d of foot().querySelectorAll("details")) d.open = true;
+  expect(groups().every((g) => g.open)).toBe(true);
+  props.rest = ["confluence:1"];
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+  expect(groups().map((g) => g.open)).toEqual([false, false, false, false]);
 });
 
 test("the meta line names who created the page: version 1's entry, else the editor of a first version, else nobody (#2080)", async () => {

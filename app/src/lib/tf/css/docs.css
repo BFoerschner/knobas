@@ -169,8 +169,26 @@
   font-size: var(--t-2xs); font-weight: 700; color: var(--card-ink); background: var(--card); border-radius: 8px;
   padding: 0 5px; margin-left: 4px;
 }
-.tf-rail-list a, .tf-rail-list div { display: block; padding: 4px 0; text-decoration: none; line-height: 1.35; }
-.tf-rail-list .tf-s { display: block; font-size: var(--t-xs); color: var(--ink-2); }
+/* The page foot (#2080): Work it belongs to, then Linked from, one closed fold per space. */
+.tf-rd-foot { margin-top: 32px; font-family: var(--sans); font-size: var(--t-sm); line-height: 1.5; color: var(--ink-2); }
+.tf-rd-foot + .tf-rd-foot { margin-top: 22px; }
+.tf .tf-rd-foot h3 { font-size: var(--t-sm); font-weight: 600; color: var(--ink); margin: 0 0 6px; }
+.tf-doc .tf-rd-foot ul { margin: 0; padding-left: 18px; line-height: 1.7; }
+.tf-doc .tf-rd-foot li { margin: 0; }
+.tf-rd-foot li::marker { color: var(--ink-2); }
+.tf-rd-foot a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.tf-rd-foot .tf-s { font-size: var(--t-xs); margin-left: 6px; }
+.tf-doc .tf-rd-linked ul { padding: 0 0 4px 32px; }
+.tf-rd-linked summary {
+  list-style: none; cursor: pointer; display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 6px 2px 2px;
+  border-radius: 3px; font-size: var(--t-xs);
+}
+.tf-rd-linked summary::-webkit-details-marker { display: none; }
+.tf-rd-linked summary::before { content: "▸"; width: 10px; color: var(--ink-2); font-size: var(--t-2xs); }
+.tf-rd-linked details[open] > summary::before { content: "▾"; }
+.tf-rd-linked summary:hover { background: var(--sheet-2); }
+.tf-rd-linked summary b { color: var(--ink); font-weight: 600; }
+.tf-rd-linked details + details { margin-top: 2px; }
 .tf-sec-edit {
   border: 1.5px solid var(--ink); border-radius: 6px; padding: 10px; margin: 0 0 18px; font-family: var(--sans);
   background: var(--sheet);

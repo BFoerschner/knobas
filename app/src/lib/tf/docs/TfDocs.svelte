@@ -11,13 +11,15 @@
   bottom.
 
   **Middle**, the page at most 74 characters wide in the reading face: the
-  breadcrumb, the title, who edited it when, the version, the reading time
-  and the labels (each searches for itself), the actions, the blocks by
-  section (*Edit section*) and the comments with the composer (R-10.9 to
-  R-10.14). A page opened from a hit keeps the query: every match is marked
-  and the find bar steps through them (R-10.5, R-10.12).
+  breadcrumb, the title, who edited it when, who created it (#2080), the
+  version, the reading time and the labels (each searches for itself), the
+  actions row with *More ▾* (#2082), the blocks by section (*Edit section*),
+  the page foot (*Work it belongs to*, *Linked from*, `TfDocFoot`) and the
+  comments with the composer (R-10.9 to R-10.15). A page opened from a hit
+  keeps the query: every match is marked and the find bar steps through them
+  (R-10.5, R-10.12).
 
-  **Right**, the rail (R-10.15). `#/docs` opens the page read last, and every
+  **Right**, the outline (R-10.15). `#/docs` opens the page read last, and every
   page opened is a visit (`visit_entity`), which is what "read last" reads.
 
   Drawn over the declared Docs frame (ADR-0022): `docs_tree`, `docs_page`,
@@ -76,6 +78,7 @@
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocBody from "./TfDocBody.svelte";
+  import TfDocFoot from "./TfDocFoot.svelte";
   import TfDocHits from "./TfDocHits.svelte";
   import TfDocMore from "./TfDocMore.svelte";
   import TfDocRail from "./TfDocRail.svelte";
@@ -948,6 +951,9 @@
           {:else}
             <p class="tf-dl-note">knobas cannot read this page's body. Open it in {p.source_name}.</p>
           {/if}
+          {#key p.entity_id}
+            <TfDocFoot page={p} spaces={tree?.spaces ?? []} />
+          {/key}
           <div class="tf-cmts">
             <h2>Comments {#if p.comments.length > 0}<span class="tf-count">{p.comments.length}</span>{/if}</h2>
             {#each p.comments as c, i (i)}
