@@ -37,14 +37,15 @@ use std::time::Duration;
 use knobas_source::{RefreshAnswer, SourceError, SyncItem};
 
 /// How long an active monitor may stay unpublished before the refresh gives
-/// up on it: one check of a monitor the create op makes (`create`'s
-/// sixteen-second timeout, a check against a host that does not answer),
-/// with room. A monitor not published by then is read by the next run.
+/// up on it: one check of a monitor the create op makes against a host that
+/// accepts and never answers (`create`'s sixteen-second timeout; its first
+/// beat lands when the check times out), with room for a loaded machine. A
+/// monitor not published by then is read by the next run.
 ///
 /// The refresh holds the source's run lock while it waits, so this is also
-/// how long it can hold off the run after the write. Measured, it waits a
-/// third of a second.
-pub(crate) const FIRST_BEAT: Duration = Duration::from_secs(20);
+/// how long it can hold off the run after the write. Against a host that
+/// answers, it waits a third of a second or nothing at all.
+pub(crate) const FIRST_BEAT: Duration = Duration::from_secs(30);
 
 /// How often the document is read again while an active monitor is waited
 /// for.

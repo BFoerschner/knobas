@@ -1163,6 +1163,67 @@ async fn a_tcp_check_is_published_as_a_port_monitor() {
     );
 }
 
+/// **A refresh waits out a created monitor's first heartbeat (#2100).** The
+/// monitor checks a host that accepts the connection and never answers, so
+/// Kuma publishes no series for it until the check times out, sixteen
+/// seconds on: the refresh asked the moment the create lands reads a
+/// document without it, asks Kuma whether it runs, and reads the document
+/// again until it is there. Answered gone, the mirror would tombstone a
+/// monitor Kuma is running.
+///
+/// The stalled host is the witness the other creates cannot be: a check of a
+/// host that answers lands in a third of a second, often inside the
+/// refresh's first read of `/metrics`, and a refresh that never waited
+/// passes them.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn a_refresh_waits_for_a_created_monitors_first_heartbeat() {
+    const STALLED: &str = "knobas-live-created-stalled";
+    let env = env();
+    let source = env.writable();
+    let _litter = Scratch::removing(STALLED);
+    kuma_monitor(&["delete", STALLED]);
+
+    // Accepts every connection and holds it unanswered for the test's life.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a local port");
+    let port = listener.local_addr().expect("its address").port();
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in listener.incoming().flatten() {
+            held.push(stream);
+        }
+    });
+
+    let receipt = source
+        .write(WriteOp::CreateMonitor {
+            entity: knobas_source::monitor_target("kuma"),
+            name: STALLED.to_owned(),
+            url: format!("http://host.docker.internal:{port}/"),
+            kind: knobas_source::MonitorKind::Http,
+        })
+        .await
+        .expect("the account creates a monitor");
+    let minted = receipt.remote_id.expect("Kuma names the monitor it minted");
+    let asked = Instant::now();
+    let answer = source
+        .refresh(&format!("kuma:{minted}"))
+        .await
+        .expect("the refresh of the monitor just created");
+    let waited = asked.elapsed();
+    println!("LIVE refresh of a stalled create answered after {waited:?}");
+    match answer {
+        RefreshAnswer::Item(item) => {
+            assert_eq!(item.title, STALLED);
+            assert!(!item.deleted);
+        }
+        other => panic!("a running monitor is not gone to its refresh: {other:?}"),
+    }
+    assert!(
+        waited > Duration::from_secs(5),
+        "the stalled check published at once, so this witnessed no wait: {waited:?}"
+    );
+}
+
 /// **The chosen-host direction of #864's Docker check, live (#978).** The seed
 /// gives this Kuma a Docker host (`testenv-docker-proxy`, a read-only socket
 /// proxy), so a Docker check of a testenv container is created with that host
