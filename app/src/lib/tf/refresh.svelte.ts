@@ -19,11 +19,20 @@ import { refreshEntity, type EntityRefresh } from "../ipc/sources";
 import { sourceSyncs, type RoleSync, type RoleSyncs } from "./role-sync.svelte";
 import { push } from "../shell/toasts.svelte";
 
+/**
+ * What a refresh reads of the item it is drawn for: an {@link EntityDetail},
+ * or a surface's own row that says the same (a monitor's roster row, #2138).
+ */
+export type RefreshSubject = Pick<EntityDetail, "refreshes"> & {
+  row: Pick<EntityDetail["row"], "entity_id">;
+  source: Pick<EntityDetail["source"], "id" | "display_name" | "enabled">;
+};
+
 /** What a detail offers: *Refresh*, *Sync now*, or nothing. */
 export type RefreshOffer = "refresh" | "sync" | null;
 
 /** The offer `detail`'s read makes. */
-function refreshOffer(detail: EntityDetail): RefreshOffer {
+function refreshOffer(detail: RefreshSubject): RefreshOffer {
   if (!detail.source.enabled) return null;
   return detail.refreshes ? "refresh" : "sync";
 }
@@ -46,14 +55,14 @@ export interface DetailRefresh {
   /** The last refresh's failure line, `Couldn't refresh: <reason>`, or `null`. */
   readonly failed: string | null;
   /** What `detail` offers, *Sync now* in place of *Refresh* once the source said it does not read one item. */
-  offer(detail: EntityDetail): RefreshOffer;
+  offer(detail: RefreshSubject): RefreshOffer;
   /** The run `detail`'s *Sync now* starts or joins. */
-  syncOf(detail: EntityDetail): RoleSync;
+  syncOf(detail: RefreshSubject): RoleSync;
   /**
    * Refresh `detail`'s item, then `reread` the detail. A failure keeps the
    * detail as it was and says why.
    */
-  refresh(detail: EntityDetail, reread: () => Promise<void> | void): Promise<void>;
+  refresh(detail: RefreshSubject, reread: () => Promise<void> | void): Promise<void>;
   /** Back to nothing asked, for another item. */
   reset(): void;
 }

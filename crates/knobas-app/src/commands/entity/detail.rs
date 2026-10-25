@@ -1,6 +1,7 @@
 //! The detail view: one entity, its links, activity and builds.
 
 use super::*;
+use crate::sources::refresh::template_refreshes as refreshes;
 
 // -- the detail view --------------------------------------------------------
 
@@ -165,17 +166,6 @@ fn kind_info_for(
         .entity_kinds
         .into_iter()
         .find(|info| info.id == kind)
-}
-
-/// Whether `adapter_kind`'s template declares the read of one item: the
-/// detail's [`EntityDetail::refreshes`].
-fn refreshes(registry: &dyn AdapterRegistry, adapter_kind: Option<&str>) -> bool {
-    adapter_kind.is_some_and(|kind| {
-        registry
-            .descriptors()
-            .iter()
-            .any(|template| template.adapter_kind == kind && template.refreshes())
-    })
 }
 
 /// One entity, for the detail slide-over.

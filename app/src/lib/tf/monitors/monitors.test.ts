@@ -41,6 +41,7 @@ function row(over: Partial<MonitorRow>): MonitorRow {
     tombstoned: false,
     assets: [{ id: "asset:r1", name: "payouts", path: "edge", type_label: "Service" }],
     actions: ["pause_monitor"],
+    refreshes: true,
     samples: [],
     ...over,
   };

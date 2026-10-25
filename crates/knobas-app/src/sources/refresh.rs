@@ -7,7 +7,21 @@
 //! the reader's *Refresh* on an item's detail.
 
 use knobas_sync::refresh::{RefreshError, RefreshOutcome};
-use knobas_sync::scheduler::{RefreshEnd, RefreshEnded, Scheduler};
+use knobas_sync::scheduler::{AdapterRegistry, RefreshEnd, RefreshEnded, Scheduler};
+
+/// Whether `adapter_kind`'s template declares the read of one item
+/// (`SourceDescriptor::refreshes`): what a detail's
+/// `EntityDetail::refreshes` (#2107) and a roster row's `MonitorRow::refreshes`
+/// (#2138) say, read off the registry so no source is built and no keychain
+/// read. `false` for no configured kind or a kind no template answers.
+pub fn template_refreshes(registry: &dyn AdapterRegistry, adapter_kind: Option<&str>) -> bool {
+    adapter_kind.is_some_and(|kind| {
+        registry
+            .descriptors()
+            .iter()
+            .any(|template| template.adapter_kind == kind && template.refreshes())
+    })
+}
 
 /// Refresh `entity_id` from its source, after the write `write_id` when one
 /// is being read back.

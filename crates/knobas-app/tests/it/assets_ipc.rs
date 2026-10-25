@@ -5317,6 +5317,63 @@ async fn the_roster_holds_only_the_monitoring_fillers_monitors_paused_ones_inclu
     assert!(row(&roster, "filler paused").tombstoned);
 }
 
+/// The process registry with Uptime Kuma's read of one item taken away: a
+/// monitoring adapter that only syncs, which no compiled-in one is today.
+struct KumaThatOnlySyncs(Registry);
+
+impl knobas_sync::scheduler::AdapterRegistry for KumaThatOnlySyncs {
+    fn descriptors(&self) -> Vec<knobas_source::SourceDescriptor> {
+        let mut templates = knobas_sync::scheduler::AdapterRegistry::descriptors(&self.0);
+        for template in &mut templates {
+            if template.adapter_kind == "kuma" {
+                template
+                    .capabilities
+                    .retain(|capability| *capability != knobas_source::Capability::Refresh);
+            }
+        }
+        templates
+    }
+
+    fn build(
+        &self,
+        instance: knobas_source::instance::SourceInstance,
+    ) -> Result<Box<dyn knobas_source::Source>, knobas_source::SourceError> {
+        knobas_sync::scheduler::AdapterRegistry::build(&self.0, instance)
+    }
+}
+
+/// **A roster row says whether its monitor can be refreshed** (#2138): the
+/// row's *Refresh* or *Sync now*, as `EntityDetail::refreshes` says it for a
+/// detail, read off the template of the source's configured adapter kind.
+#[tokio::test]
+async fn a_roster_row_says_whether_its_adapter_reads_one_monitor() {
+    let pool = pool("monitors-roster-refreshes").await;
+    kuma_monitor(
+        &pool,
+        "kuma",
+        "gitea",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+
+    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+        .await
+        .expect("the roster");
+    assert!(
+        row(&roster, "gitea").refreshes,
+        "Uptime Kuma reads one monitor (#2100)"
+    );
+
+    let roster = assets::monitor_roster(&pool, &KumaThatOnlySyncs(Registry::for_process()))
+        .await
+        .expect("the roster");
+    assert!(
+        !row(&roster, "gitea").refreshes,
+        "a template without Refresh gets Sync now"
+    );
+}
+
 /// **A monitor links to the assets it watches; one without says so by carrying
 /// none** (criterion 3).
 ///

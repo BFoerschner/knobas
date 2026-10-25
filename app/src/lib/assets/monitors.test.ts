@@ -41,6 +41,7 @@ function monitor(name: string, state: string | null, tombstoned = false): Monito
     source_id: "kuma",
     name,
     actions: [],
+    refreshes: true,
     state,
     monitor_type: "http",
     target: null,

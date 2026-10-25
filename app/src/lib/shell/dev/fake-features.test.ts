@@ -707,3 +707,11 @@ test("a fixture build and its configuration answer get_entity; TeamCity refreshe
   expect(h["refresh_entity"]!({ entityId: config.row.entity_id })).toEqual({ outcome: "not_offered" });
   expect(() => h["get_entity"]!({ entityId: "teamcity:buildType:Nope" })).toThrow();
 });
+
+test("a Monitors roster row says it refreshes, and refresh_entity reads its monitor back (#2138)", () => {
+  const h = demoHandlers() as Calls;
+  const roster = h["monitor_roster"]!({}) as { entity_id: string; refreshes: boolean }[];
+  expect(roster.length).toBeGreaterThan(0);
+  expect(roster.every((row) => row.refreshes)).toBe(true);
+  expect(h["refresh_entity"]!({ entityId: roster[0]!.entity_id })).toEqual({ outcome: "refreshed" });
+});

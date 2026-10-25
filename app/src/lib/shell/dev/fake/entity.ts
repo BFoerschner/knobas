@@ -181,16 +181,21 @@ onFakeReset(() => {
 
 /**
  * `refresh_entity` (#2107): a corpus row is read back as it stands, and the
- * refresh ends on `item:refreshed`. `?fake-refresh-failed`
+ * refresh ends on `item:refreshed`, a roster monitor's too. `?fake-refresh-failed`
  * answers the failure line's reason instead, for a screenshot of it.
  */
 function refreshEntity(args: Record<string, unknown>): EntityRefresh {
   const id = String(args["entityId"] ?? "");
-  const detail = getEntity(args);
-  if (!detail.source.enabled) return { outcome: "turned_off" };
-  if (!REFRESHING_ADAPTERS.has(detail.source.adapter_kind)) return { outcome: "not_offered" };
-  // TeamCity reads a build by id, never a build configuration (#2127).
-  if (detail.row.kind === "build_config") return { outcome: "not_offered" };
+  // The Monitors roster's monitors (`fake/monitors.ts`, #2138) are Kuma's,
+  // which reads one, and are not in the corpus `get_entity` answers from.
+  const rosterMonitor = id.startsWith("kuma:") && !CORPUS.some((entry) => entry.entity_id === id);
+  if (!rosterMonitor) {
+    const detail = getEntity(args);
+    if (!detail.source.enabled) return { outcome: "turned_off" };
+    if (!REFRESHING_ADAPTERS.has(detail.source.adapter_kind)) return { outcome: "not_offered" };
+    // TeamCity reads a build by id, never a build configuration (#2127).
+    if (detail.row.kind === "build_config") return { outcome: "not_offered" };
+  }
   const failed = new URLSearchParams(location.search).has("fake-refresh-failed");
   setTimeout(() => bridge?.emit("item:refreshed", { entity_id: id, write_id: null, ended: failed ? "failed" : "refreshed" }), 0);
   return failed ? { outcome: "failed", reason: "502 Bad Gateway from the source" } : { outcome: "refreshed" };

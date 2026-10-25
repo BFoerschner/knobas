@@ -930,6 +930,12 @@ pub struct MonitorRow {
     /// of them is refused by Kuma with its own words -- which is the source's
     /// answer to give, not a guess to make here.
     pub actions: Vec<String>,
+    /// Whether its source's adapter reads one monitor (`Capability::Refresh`,
+    /// ADR-0031): the row draws *Refresh*, else *Sync now* (#2138), as
+    /// `EntityDetail::refreshes` chooses a detail's. Read off the template of
+    /// the source's configured adapter kind, so the roster builds no source.
+    /// A turned-off source's monitors are not on the roster at all.
+    pub refreshes: bool,
     /// Its samples inside the bar's 24-hour window, **oldest first**.
     ///
     /// Raw and not bucketed, because the bucketing is the tab's and is tested
@@ -2025,7 +2031,7 @@ const BAR_WINDOW_HOURS: i32 = 24;
 /// By name, then by id: the tab is a list a person reads down, and two
 /// monitors named the same still draw in a fixed order.
 const ROSTER: &str = "select i.entity_id, i.source_id, i.title, i.payload, i.web_url, i.synced_at,
-                             e.deleted_at is not null as tombstoned
+                             e.deleted_at is not null as tombstoned, s.kind as adapter_kind
   from sync.item i
   join knobas.entity e on e.id = i.entity_id
   left join knobas.source_config s on s.id = i.source_id
@@ -2184,6 +2190,10 @@ pub async fn monitor_roster(
                 // "nothing has said yet", and empty *after* that means "this
                 // source offers nothing", which draws the same: no buttons.
                 actions: Vec::new(),
+                refreshes: crate::sources::refresh::template_refreshes(
+                    registry,
+                    row.try_get::<Option<String>, _>("adapter_kind")?.as_deref(),
+                ),
                 samples,
                 entity_id,
             })
@@ -6963,6 +6973,7 @@ mod tests {
             tombstoned,
             assets: Vec::new(),
             actions: Vec::new(),
+            refreshes: true,
             samples: Vec::new(),
         };
         let offered = HashMap::from([(
