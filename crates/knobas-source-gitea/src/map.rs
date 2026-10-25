@@ -235,10 +235,29 @@ pub(crate) fn pr_item(
         ),
         author: pr.user.as_ref().and_then(|u| non_blank(u.login.as_deref())),
         updated_at: real_time(pr.updated_at).or_else(|| real_time(pr.created_at)),
-        payload: raw.clone(),
+        payload: with_reviewers_listed(raw),
         web_url: non_blank(pr.html_url.as_deref()),
         deleted: false,
     }
+}
+
+/// A pull request's record with `requested_reviewers: null` written as `[]`,
+/// the one departure from the record verbatim a pull request has (#2098).
+///
+/// For a pull request nobody was asked to review, Gitea 1.27.3's `/pulls`
+/// listing answers `null` and its read of the one pull request `[]`;
+/// Forgejo 17 answers `[]` to both (measured by the live battery's clause
+/// 13). The run reads the listing and a refresh the one pull request, so
+/// without this the stored record, at a path the descriptor declares, would
+/// depend on which read brought it. Both say "nobody".
+fn with_reviewers_listed(raw: &Value) -> Value {
+    let mut payload = raw.clone();
+    if let Some(reviewers) = payload.get_mut("requested_reviewers")
+        && reviewers.is_null()
+    {
+        *reviewers = Value::Array(Vec::new());
+    }
+    payload
 }
 
 /// The scope of the label an issue's priority is read from (#1206), as

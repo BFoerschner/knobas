@@ -184,28 +184,31 @@ async fn a_repository_a_branch_and_a_commit_are_not_offered() {
     assert_eq!(fake.requests().await, before, "nothing was asked of Gitea");
 }
 
-/// Gitea's listing answers `requested_reviewers: null` for a pull request
-/// nobody was asked to review, and its read of that one pull request `[]`
-/// (1.27.3, measured by the live battery's clause 13, #2098): the refresh
-/// answers the listing's `null`, so the stored record is the one a run
-/// stores.
+/// For a pull request nobody was asked to review, Gitea 1.27.3's listing
+/// answers `requested_reviewers: null` and its read of that one pull request
+/// `[]`; Forgejo 17 answers `[]` to both (measured by the live battery's
+/// clause 13 on each, #2098). A run and a refresh store `[]` either way, so
+/// the stored record does not depend on which read brought it.
 #[tokio::test]
-async fn a_pull_request_nobody_was_asked_to_review_reads_back_as_the_listing_has_it() {
-    let mut state = State::tidewater();
-    let listed = &mut state.pulls.get_mut("tidewater/payout-service").unwrap()[1];
-    listed["requested_reviewers"] = json!(null);
-    let mut read_whole = listed.clone();
-    read_whole["requested_reviewers"] = json!([]);
-    let fake = Fake::start(&state).await;
-    Mock::given(method("GET"))
-        .and(path("/api/v1/repos/tidewater/payout-service/pulls/142"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(read_whole))
-        .with_priority(1)
-        .mount(fake.server())
-        .await;
-    let source = source(fake.base_url(), json!({}));
-    let items = full(&*source).await;
-    let read = item(source.refresh(PR).await.expect("the read succeeds"), PR);
-    assert_eq!(read.payload, emitted(&items, PR).payload);
-    assert_eq!(read.payload["requested_reviewers"], json!(null));
+async fn a_pull_request_nobody_was_asked_to_review_is_stored_alike_by_a_run_and_a_refresh() {
+    for listed_as in [json!(null), json!([])] {
+        let mut state = State::tidewater();
+        let listed = &mut state.pulls.get_mut("tidewater/payout-service").unwrap()[1];
+        listed["requested_reviewers"] = listed_as.clone();
+        let mut read_whole = listed.clone();
+        read_whole["requested_reviewers"] = json!([]);
+        let fake = Fake::start(&state).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/tidewater/payout-service/pulls/142"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(read_whole))
+            .with_priority(1)
+            .mount(fake.server())
+            .await;
+        let source = source(fake.base_url(), json!({}));
+        let items = full(&*source).await;
+        let synced = emitted(&items, PR);
+        let read = item(source.refresh(PR).await.expect("the read succeeds"), PR);
+        assert_eq!(read.payload, synced.payload, "listed as {listed_as}");
+        assert_eq!(synced.payload["requested_reviewers"], json!([]), "listed as {listed_as}");
+    }
 }

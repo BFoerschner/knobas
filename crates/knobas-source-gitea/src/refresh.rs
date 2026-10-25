@@ -60,7 +60,7 @@ pub(crate) async fn refresh(
         Thread::Pull => source.client.pull(&owner, &repo, number).await,
         Thread::Issue => source.client.issue(&owner, &repo, number).await,
     };
-    let mut raw = match read {
+    let raw = match read {
         Ok(raw) => raw,
         Err(error) if error.status() == Some(404) => return Ok(RefreshAnswer::Gone),
         Err(error) => return Err(error),
@@ -78,7 +78,6 @@ pub(crate) async fn refresh(
     };
     let item = match of {
         Thread::Pull => {
-            as_listed(&mut raw);
             let pr: model::PullRequest = parse(&raw, entity)?;
             let Some(comments) = discussion_of(source, at, number, pr.comments, of).await? else {
                 return Ok(RefreshAnswer::Gone);
@@ -110,19 +109,4 @@ fn parse<T: serde::de::DeserializeOwned>(raw: &Value, entity: &str) -> Result<T,
     serde_json::from_value(raw.clone()).map_err(|error| {
         SourceError::protocol(format!("gitea: {entity:?} answered a record this adapter cannot read: {error}"))
     })
-}
-
-/// A pull request read whole, in the shape the `/pulls` listing serves it,
-/// which is the shape a run stores. They differ in one field the descriptor
-/// declares (Gitea 1.27.3, measured by the live battery's clause 13, #2098):
-/// for a pull request nobody was asked to review, the listing answers
-/// `requested_reviewers: null` and the read of the one pull request `[]`.
-/// Both say "nobody", and the listing never answers `[]`, so `[]` is written
-/// as `null`.
-fn as_listed(raw: &mut Value) {
-    if let Some(reviewers) = raw.get_mut("requested_reviewers")
-        && reviewers.as_array().is_some_and(Vec::is_empty)
-    {
-        *reviewers = Value::Null;
-    }
 }
