@@ -64,6 +64,61 @@ export function askInto(
   };
 }
 
+/** How long a typed-for set stands still before {@link createAsker} asks about it (#2063). */
+export const SETTLE_MS = 250;
+
+const keyOf = (ask: WriteAsk) => JSON.stringify([ask.entity, ask.op]);
+
+/**
+ * Asks for a surface whose drawn set changes as the reader types, such as
+ * the publish-target picker's hits (#2063). {@link askInto} sends one round
+ * per set, and a round is one source read per entity, so a set that changes
+ * per keystroke would ask per keystroke. Here each ask is sent once for the
+ * asker's life, and every answer is handed to `land`, however late, since
+ * it stays true for the entities it names. One that is rejected is
+ * forgotten, so a later `ask` sends it again.
+ *
+ * `ask(now, settled, read)` sends `now` at once and `settled` once
+ * {@link SETTLE_MS} pass without another `ask`, and returns the cleanup that
+ * cancels the wait, for an `$effect`. `stop()`, for the surface's teardown,
+ * lands nothing more.
+ */
+export function createAsker(land: (answer: RefusedWrite[]) => void) {
+  const asked = new Set<string>();
+  let stopped = false;
+  const send = (asks: readonly WriteAsk[], read: RefusedWritesPort | undefined) => {
+    const fresh = asks.filter((ask) => {
+      const key = keyOf(ask);
+      if (asked.has(key)) return false;
+      asked.add(key);
+      return true;
+    });
+    if (fresh.length === 0) return;
+    // `then` reaches the bridge, so a shell without it is a rejection too.
+    void Promise.resolve()
+      .then(() => (read ?? refusedWrites)(fresh))
+      .then(
+        (answer) => {
+          if (!stopped) land(answer);
+        },
+        () => {
+          for (const ask of fresh) asked.delete(keyOf(ask));
+        },
+      );
+  };
+  return {
+    ask(now: readonly WriteAsk[], settled: readonly WriteAsk[], read: RefusedWritesPort | undefined): () => void {
+      send(now, read);
+      if (settled.every((ask) => asked.has(keyOf(ask)))) return () => {};
+      const wait = setTimeout(() => send(settled, read), SETTLE_MS);
+      return () => clearTimeout(wait);
+    },
+    stop() {
+      stopped = true;
+    },
+  };
+}
+
 /** A refused write's control's attributes (a button, a select): `aria-disabled` and the reason as its title; none where `reason` is `null`. */
 export function refusedAttrs(reason: string | null): { "aria-disabled"?: "true"; title?: string } {
   return reason === null ? {} : { "aria-disabled": "true", title: reason };

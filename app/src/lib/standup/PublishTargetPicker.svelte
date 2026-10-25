@@ -33,10 +33,17 @@
   add pages to is drawn disabled with the reason and cannot be picked, and a
   chosen parent it refuses says why and announces no target. Nothing else
   needs to know: each host disables its action on an incomplete target.
+
+  One ask is one page read per page and one permissions read per space, so
+  the hits are asked about once the search has stood still, and each page
+  once while the picker is open (#2063). A hit picked before its answer
+  lands is asked about at once, and is announced until a refusal says why.
 -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
+
   import type { PublishTarget } from "../ipc/entity";
-  import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../shell/refused-writes";
+  import { createAsker, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../shell/refused-writes";
   import { search as realSearch, type SearchHit } from "../ipc/search";
   import type { PublishableSource } from "./protocol";
   import { presumedSource } from "./protocol";
@@ -68,16 +75,21 @@
   let hits = $state<SearchHit[]>([]);
 
   let refused = $state<RefusedWrite[]>([]);
-  /** The chosen parent and every hit, as a string, so a search with the same hits asks nothing again. */
-  const askKey = $derived(
-    JSON.stringify([...new Set([...(parent === null ? [] : [parent]), ...hits.map((hit) => hit.entity_id)])].map((entity) => ({ entity, op: "create_page" }))),
-  );
-  $effect(() =>
-    askInto(JSON.parse(askKey) as WriteAsk[], refusedWrites, (answer) => {
-      refused = answer;
-      announce();
-    }),
-  );
+  const asker = createAsker((answer) => {
+    refused = [...refused, ...answer];
+    announce();
+  });
+  onDestroy(asker.stop);
+  /** The chosen parent, then every hit, as a string, so a search with the same hits asks nothing again. */
+  const askKey = $derived(JSON.stringify([parent, hits.map((hit) => hit.entity_id)]));
+  // The parent at once, since whether a target is announced waits on it; the
+  // hits once the search stands still, so typing asks per pause, not per key
+  // (#2063). Each page is asked about once while the picker is open.
+  $effect(() => {
+    const [chosen, shown] = JSON.parse(askKey) as [string | null, string[]];
+    const ask = (entity: string): WriteAsk => ({ entity, op: "create_page" });
+    return asker.ask(chosen === null ? [] : [ask(chosen)], shown.map(ask), refusedWrites);
+  });
   /** Why no page can be added under `page`, or `null`. */
   const why = (page: string | null) => refusalOf(refused, page, "create_page");
 
