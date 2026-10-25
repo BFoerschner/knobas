@@ -591,6 +591,12 @@ impl TriggerValue {
 /// - `saved_view`: a view a ticket system keeps of its own tickets (#1207): a
 ///   Jira board or filter. Each item of the kind becomes a ticket view,
 ///   whichever adapter emits it; `knobas_sync::saved_views` reads its payload.
+///   The kind must declare where a view's query is (`source_query`, the
+///   ticket-system minimum, #2050) and may declare its `board_type`,
+///   `sub_query` and `sprint`; those are read there and at no key of the
+///   frame's choosing. The frame's own keys are fixed: `kind` (`board` or
+///   `filter`), `id`, `columns` (`[{"name", "statuses", "limit"}]`), `keys`
+///   (the tickets' keys in the source's order) and `query`.
 ///
 /// The parts are documented here and not on each variant because the
 /// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
