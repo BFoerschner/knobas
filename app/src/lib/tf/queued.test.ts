@@ -237,3 +237,15 @@ test("a surface that reads on every run's end says so, and hears each", async ()
   bridge.emit(EVENTS.syncState, runEnded("jira"));
   expect(reads).toBe(1);
 });
+
+test("the refresh event naming an echo's write says it landed: the echo reads sent before its surface re-reads (#2103)", async () => {
+  const bridge = fakeListen();
+  let seen: (string | undefined)[] = [];
+  watchEchoes("pr", () => void (seen = [echoOn("gitea:pr/1", "edit")?.state, echoOn("gitea:pr/1", "close")?.state]), { listen: bridge.listen });
+  await Promise.resolve();
+  const { follower } = fakeFollower();
+  echoWrite("gitea:pr/1", "edit", "edit", { write: { id: 40 }, following: { name: "Edit" }, follower, surface: "pr", source: "gitea" });
+  echoWrite("gitea:pr/1", "close", "close", { write: { id: 41 }, following: { name: "Close" }, follower, surface: "pr", source: "gitea" });
+  bridge.emit(EVENTS.itemRefreshed, refreshed("gitea:pr/1", 40));
+  expect(seen).toEqual(["sent", "queued"]);
+});

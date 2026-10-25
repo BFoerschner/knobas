@@ -24,6 +24,7 @@ import { createPendingComments, type PendingCommentStore } from "../../detail/vi
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
+import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes } from "../queued.svelte";
 import TfPr, { type PrPorts } from "./TfPr.svelte";
 
@@ -897,7 +898,7 @@ test("a close the read still shows open keeps its chip and its holds", async () 
   expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
 });
 
-test("a landed merge drops its chip; an edit, which no read shows, keeps its chip for the session", async () => {
+test("a landed merge drops its chip; an edit the queue has not sent keeps its chip", async () => {
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, mergeAction(null)]) }));
   button("Edit")!.click();
   flushSync();
@@ -969,4 +970,134 @@ test("the repository is found in a source of more than 1000 repositories (#1825)
   expect(target.querySelector(".tf-crumbs a[href='#/repo/" + encodeURIComponent(REPO) + "']")?.textContent).toBe("tidewater/payout-service");
   expect(offsets).toEqual([0, 1000]);
   expect(text(".tf-prlocal")).toContain("/Users/mara/code/payout-service");
+});
+
+// -- The echo's one lifecycle: queued, sent, gone on the live view's re-read (#2103) --
+
+/** Ports whose writes answer ids from 80 up, whose view is `read()` as each read is asked, and whose events the test raises. */
+function lifecycle(read: () => SourceView, author = "mara") {
+  const sync = echoEvents(settle);
+  const { follower, sent } = echoFollower();
+  let next = 80;
+  const io = ports({
+    author,
+    entityView: async () => read(),
+    submitWrite: async (payload) => {
+      writes.push(payload);
+      return { id: next++ } as never;
+    },
+    listen: sync.listen,
+  });
+  return { sync, follower, sent, io };
+}
+
+/** `view` with the conversation holding one more of mara's comments. */
+function withComment(view: SourceView, words: string): SourceView {
+  return {
+    ...view,
+    sections: view.sections.map((s) =>
+      s.id === "conversation" ? { ...s, blocks: [...s.blocks, { type: "facts", facts: [fact("mara", "2026-10-25 10:00")] }, { type: "text", text: words, markdown: true }] } : s,
+    ),
+  } as SourceView;
+}
+
+test("a comment's echo says queued, then sent, and goes on the view's re-read the refresh event asks, the page not opened again (#2103)", async () => {
+  let read = prView();
+  const { sync, follower, sent, io } = lifecycle(() => read);
+  await draw([PR, "conversation"], io, follower);
+  type(target.querySelector<HTMLTextAreaElement>(".tf-compose textarea")!, "Jitter is bounded now.");
+  button("Comment")!.click();
+  await settle();
+  const echoed = () => [...target.querySelectorAll(".tf-convo .tf-msg.tf-queued .tf-chip")].map((c) => c.textContent?.trim());
+  expect(echoed()).toEqual(["queued"]);
+  sent(80);
+  expect(echoed()).toEqual(["sent"]);
+  read = withComment(prView(), "Jitter is bounded now.");
+  await sync.refreshed(PR, 80);
+  expect(echoed()).toEqual([]);
+  expect(target.querySelectorAll(".tf-convo .tf-msg")).toHaveLength(3);
+});
+
+test("a merge, a close and a reopen each say queued, then sent, and go on the re-read whose state moved (#2103)", async () => {
+  for (const [queue, verb, from, to] of [
+    [queueMerge, "merge", prView([COMMENT, EDIT, CLOSE, mergeAction(null)]), prView([COMMENT], "merged")],
+    [queueClose, "close", prView([COMMENT, EDIT, CLOSE, mergeAction(null)]), prView([COMMENT, EDIT, REOPEN], "closed")],
+    [
+      async () => {
+        button("Reopen")!.click();
+        flushSync();
+        dialogButton("Reopen").click();
+        await settle();
+      },
+      "reopen",
+      prView([COMMENT, EDIT, REOPEN], "closed"),
+      prView([COMMENT, EDIT, CLOSE, mergeAction(null)]),
+    ],
+  ] as const) {
+    let read = from;
+    const { sync, follower, sent, io } = lifecycle(() => read);
+    await draw([PR], io, follower);
+    await queue();
+    expect(chips().slice(1)).toEqual([`${verb} queued`]);
+    sent(80);
+    expect(chips().slice(1)).toEqual([`${verb} sent`]);
+    await sync.ended("gitea"); // the source still says what it said: the echo stays
+    expect(chips().slice(1)).toEqual([`${verb} sent`]);
+    read = to;
+    await sync.refreshed(PR, 80);
+    expect(chips().slice(1)).toEqual([]);
+    unmount(view!);
+    view = null;
+    forgetEchoes();
+  }
+});
+
+test("an edit says queued, then sent, and goes on the first live read asked once it is sent; a read before keeps it (#2103)", async () => {
+  const read = prView([COMMENT, EDIT, mergeAction(null)]);
+  const { sync, follower, sent, io } = lifecycle(() => read);
+  await draw([PR], io, follower);
+  button("Edit")!.click();
+  flushSync();
+  const title = document.querySelector<HTMLInputElement>('.tf-dialog input[aria-label="Title"]')!;
+  title.value = "SEPA retry with backoff";
+  title.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  dialogButton("Edit").click();
+  await settle();
+  expect(chips()).toEqual(["open", "edit queued"]);
+  await sync.ended("gitea"); // read while the edit is still open: not yet shown
+  expect(chips()).toEqual(["open", "edit queued"]);
+  sent(80);
+  expect(chips()).toEqual(["open", "edit sent"]);
+  await sync.ended("gitea");
+  expect(chips()).toEqual(["open"]);
+});
+
+test("a review goes on the re-read of the refresh that followed it, even before the follow has heard it sent (#2103)", async () => {
+  const read = prView([COMMENT, APPROVE, EDIT, mergeAction(null)]);
+  const { sync, follower, io } = lifecycle(() => read, "jonas");
+  await draw([PR], io, follower);
+  button("Review…")!.click();
+  flushSync();
+  dialogButton("Submit review").click();
+  await settle();
+  expect(chips()).toEqual(["open", "review queued"]);
+  await sync.refreshed(PR, 80);
+  expect(chips()).toEqual(["open"]);
+});
+
+test("a source action says queued, then sent, and goes on the re-read once sent (#2103)", async () => {
+  const stamp = action("source_action", "Stamp release", { values: { id: "stamp_release" } });
+  const read = prView([COMMENT, EDIT, stamp, mergeAction(null)]);
+  const { sync, follower, sent, io } = lifecycle(() => read);
+  await draw([PR], io, follower);
+  button("Stamp release")!.click();
+  flushSync();
+  dialogButton("Stamp release").click();
+  await settle();
+  expect(chips()).toEqual(["open", "stamp release queued"]);
+  sent(80);
+  expect(chips()).toEqual(["open", "stamp release sent"]);
+  await sync.refreshed(PR, 80);
+  expect(chips()).toEqual(["open"]);
 });

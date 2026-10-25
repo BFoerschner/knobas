@@ -162,6 +162,8 @@ export function watchEchoes(surface: string, reread: () => void, how: EchoWatch 
       .catch(() => {});
   hear(EVENTS.itemRefreshed, (payload) => {
     const ended = payload as RefreshEnded;
+    // A refresh that followed a write follows it landed (ADR-0031): its echo is *sent*, whatever the follow has heard yet.
+    if (ended.write_id !== null) for (const all of Object.values(echoes)) for (const echo of all) if (echo.write === ended.write_id) echo.state = "sent";
     if (mine().some(({ entity, m }) => entity === ended.entity_id || (m.write !== null && m.write === ended.write_id))) reread();
   });
   hear(EVENTS.syncState, (payload) => {
