@@ -217,6 +217,18 @@ export function shortWho(user: string | null, name: string | null, me: string[])
  */
 export const LINK_RELATION = "documents";
 
+/**
+ * Who created the page and when, for the meta line's *Created by* (#2080):
+ * the version numbered 1 in its history, else the page's own editor while the
+ * page is at version 1; `null` when neither says.
+ */
+export function createdBy(page: DocPage): { who: string; at: string | null } | null {
+  const first = page.history.find((v) => v.number === 1);
+  if (first) return { who: shortWho(first.by, first.by_name, page.me), at: first.at };
+  if (page.version === 1) return { who: shortWho(page.editor, page.editor_name, page.me), at: page.updated_at };
+  return null;
+}
+
 /** *You* for the reader, else the person as the source names them. */
 export function person(user: string | null, name: string | null, me: string[]): string {
   if (user !== null && me.includes(user)) return "You";

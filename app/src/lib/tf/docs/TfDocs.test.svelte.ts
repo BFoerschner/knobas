@@ -430,6 +430,28 @@ test("the rail: the outline, the work, the pages that link here and the history"
   ]);
 });
 
+test("the meta line names who created the page: version 1's entry, else the editor of a first version, else nobody (#2080)", async () => {
+  const meta = () => [...target.querySelectorAll(".tf-rd-meta > *")].map((m) => m.textContent?.trim());
+  const redraw = async (page: DocPage) => {
+    if (view) unmount(view);
+    target.innerHTML = "";
+    await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => page) }));
+  };
+  await redraw(RICH);
+  expect(meta()).toEqual([
+    "Tomasz Wójcik edited 2026-07-02",
+    "Created by you, 2026-01-02",
+    "version 31",
+    "1 min read",
+    "ops",
+    "on-call",
+  ]);
+  await redraw({ ...PAGE, version: 1 });
+  expect(meta()).toContain("Created by Tomasz, 2026-07-02");
+  await redraw(PAGE);
+  expect(meta().filter((m) => m?.startsWith("Created"))).toEqual([]);
+});
+
 test("Edit section opens the text, saves it through the queue against the version read; a refused one says why", async () => {
   const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
   button("Edit section")!.click();

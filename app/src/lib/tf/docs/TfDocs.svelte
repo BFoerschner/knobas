@@ -84,6 +84,7 @@
   import TfNewPage from "./TfNewPage.svelte";
   import {
     copyLinkText,
+    createdBy,
     LINK_RELATION,
     blockWords,
     firstPage,
@@ -870,6 +871,7 @@
       <div class="tf-empty"><p>Could not open this page: {pageError}</p></div>
     {:else if page !== null}
       {@const p = page}
+      {@const created = createdBy(p)}
       <article class="tf-rd-page" bind:this={article}>
         <div class="tf-rd-crumb">
           {#if job !== null}
@@ -889,6 +891,9 @@
         <div class="tf-rd-meta">
           {#if p.editor !== null || p.updated_at !== null}
             <span>{person(p.editor, p.editor_name, p.me)} edited {clockLabel(p.updated_at)}</span>
+          {/if}
+          {#if created}
+            <span>Created by {created.who}{#if created.at !== null}, {clockLabel(created.at)}{/if}</span>
           {/if}
           {#if p.version !== null}<span>version {p.version}</span>{/if}
           {#if p.readable}<span>{readingMinutes(p)} min read</span>{/if}
