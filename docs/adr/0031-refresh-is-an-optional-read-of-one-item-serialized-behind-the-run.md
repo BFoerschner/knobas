@@ -4,7 +4,7 @@ status: proposed
 
 # Refresh is an optional read of one item, serialized behind its source's run
 
-After a write lands, knobas has so far caught the mirror up by starting an incremental run of the whole source (`refresh` in `crates/knobas-app/src/sources/write_queue.rs`, story 15). That run is skipped on the scheduler's flush tick, *Flush now* and *Apply anyway*. It can also join a run that started before the write. So a write that went out can still draw *queued* until the next scheduled run, 15 minutes by default for Jira, Confluence and Gitea. `Source` had no read of one item: `sync` was its whole read side.
+After a write lands, knobas has so far caught the mirror up by starting an incremental run of the whole source (`refresh` in `crates/knobas-app/src/sources/write_queue.rs`, story 15). That run is skipped on the scheduler's flush tick, *Flush now*, *Apply anyway* and after an *amend*. It can also join a run that started before the write. So a write that went out can still draw *queued* until the next scheduled run, 15 minutes by default for Jira, Confluence and Gitea. `Source` had no read of one item: `sync` was its whole read side.
 
 Decided 2026-10-25 (Björn, refresh-after-write grilling): **a [refresh](../../CONTEXT.md#refresh) is a new, optional `Source` read of one item by id. It answers the same `SyncItem` a run emits, goes through the same item write, and takes the source's run lock instead of checking an item version.**
 
