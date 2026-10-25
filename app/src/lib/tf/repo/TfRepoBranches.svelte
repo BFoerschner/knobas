@@ -35,6 +35,7 @@
   import { untrack } from "svelte";
   import { echoWrite, echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
+  import { onRefreshed } from "./refreshed.svelte";
   import {
     DELETED,
     MADE,
@@ -91,15 +92,13 @@
   });
 
   // A refresh of the page reads the listing again, over what the tab drew (#2135).
-  let seenRefresh: number | null = null;
-  $effect(() => {
-    const n = refreshed;
-    if (seenRefresh !== null && n !== seenRefresh) untrack(() => {
-        const id = repoId;
-        readBranches(id, () => repoId === id, true);
-      });
-    seenRefresh = n;
-  });
+  onRefreshed(
+    () => refreshed,
+    () => {
+      const id = repoId;
+      readBranches(id, () => repoId === id, true);
+    },
+  );
 
   /**
    * The listing, then each branch's standing and its tip's author; each echo

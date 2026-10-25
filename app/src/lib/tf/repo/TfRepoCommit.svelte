@@ -14,8 +14,8 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { ChoiceOption, DiffFile, EntityDetail } from "../../ipc/entity";
   import TfDiff from "../code/TfDiff.svelte";
-  import { untrack } from "svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
+  import { onRefreshed } from "./refreshed.svelte";
   import { branchFrom, repoHash, shaOf } from "./repo";
 
   let {
@@ -55,12 +55,13 @@
   });
 
   // A refresh of the page reads the commit again, over what the tab drew.
-  let seenRefresh: number | null = null;
-  $effect(() => {
-    const n = refreshed;
-    if (seenRefresh !== null && n !== seenRefresh) untrack(() => readCommit(commitId, () => true, true));
-    seenRefresh = n;
-  });
+  onRefreshed(
+    () => refreshed,
+    () => {
+      const id = commitId;
+      readCommit(id, () => commitId === id, true);
+    },
+  );
 
   /** The commit's row and its diff; `again` keeps what the tab drew when a read fails. */
   function readCommit(id: string, alive: () => boolean, again = false) {

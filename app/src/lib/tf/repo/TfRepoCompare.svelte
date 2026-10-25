@@ -31,6 +31,7 @@
   import TfDiff from "../code/TfDiff.svelte";
   import { itemHash, resolveTicket } from "../job/job";
   import type { RepoPorts } from "./TfRepo.svelte";
+  import { onRefreshed } from "./refreshed.svelte";
   import {
     branchStanding,
     compareHash,
@@ -95,15 +96,13 @@
   });
 
   // A refresh of the page reads the branch again, over what the page drew.
-  let seenRefresh: number | null = null;
-  $effect(() => {
-    const n = refreshed;
-    if (seenRefresh !== null && n !== seenRefresh) untrack(() => {
-        const id = listedId;
-        if (id !== null) readBranch(id, () => listedId === id, true);
-      });
-    seenRefresh = n;
-  });
+  onRefreshed(
+    () => refreshed,
+    () => {
+      const id = listedId;
+      if (id !== null) readBranch(id, () => listedId === id, true);
+    },
+  );
 
   /** The branch's standing and its diff; `again` keeps what the page drew when a read fails. */
   function readBranch(id: string, alive: () => boolean, again = false) {

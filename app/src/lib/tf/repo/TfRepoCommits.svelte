@@ -20,8 +20,8 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
-  import { untrack } from "svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
+  import { onRefreshed } from "./refreshed.svelte";
   import { commitHash, viewRows, visibleViewRows } from "./repo";
 
   let {
@@ -60,15 +60,13 @@
   });
 
   // A refresh of the page reads the commits again, over what the tab drew.
-  let seenRefresh: number | null = null;
-  $effect(() => {
-    const n = refreshed;
-    if (seenRefresh !== null && n !== seenRefresh) {
-      const where = untrack(() => at);
-      untrack(() => readCommits(where, () => at === where, true));
-    }
-    seenRefresh = n;
-  });
+  onRefreshed(
+    () => refreshed,
+    () => {
+      const where = at;
+      readCommits(where, () => at === where, true);
+    },
+  );
 
   /** The commits at `where`, then whose are mine; `again` keeps what the tab drew when it fails. */
   function readCommits(where: string, alive: () => boolean, again = false) {

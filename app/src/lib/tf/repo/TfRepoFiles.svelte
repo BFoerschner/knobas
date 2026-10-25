@@ -33,6 +33,7 @@
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
+  import { onRefreshed } from "./refreshed.svelte";
   import {
     REPO_FILES,
     ancestors,
@@ -273,15 +274,13 @@
 
   // A refresh of the page reads every directory drawn and the file again,
   // over what the tab drew; what the reader typed stays.
-  let seenRefresh: number | null = null;
-  $effect(() => {
-    const n = refreshed;
-    if (seenRefresh !== null && n !== seenRefresh) untrack(() => {
-        rereadTree();
-        rereadFile();
-      });
-    seenRefresh = n;
-  });
+  onRefreshed(
+    () => refreshed,
+    () => {
+      rereadTree();
+      rereadFile();
+    },
+  );
 
   function rereadTree() {
     const mine = generation;
