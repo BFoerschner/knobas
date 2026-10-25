@@ -588,7 +588,7 @@ There is no separate Docs home and no separate results page. `#/docs` opens the 
 
 - **R-10.9** Two panes (amended 2026-10-25, #2078; `docs-reader.html` is the reference):
   - **left**: the space picker, search, and the tree or the hits (R-10.1 to R-10.3), 300 px wide;
-  - **right**: the page, at full width. Nothing in it is capped in width: running text, panels, comments, code, tables and the section editor all fill it. The page's outline is a sticky column on its right (R-10.15).
+  - **right**: the page, at full width, with nothing capped: running text, panels, comments, code, tables and the section editor all fill it. The page's outline is a sticky column on its right (R-10.15).
 
   Below 1240 px the outline folds above the page, closed, and the tree narrows to 220 px. Below 900 px the tree becomes a drawer that slides over the page: a *Pages* button at the start of the breadcrumb row opens it, and so do `/` and a label chip.
 - **R-10.10** **Header** (amended 2026-10-25, #2078): the breadcrumb (job chip, Docs, space, parent), the title, then the meta line: who edited it when, *Created by* who and when, the version, the reading time, and labels. A label is a button that searches for it. The actions row, in order: *Link to <job>* (only when the page is opened from a job), *Link to…*, *New page here*, *Copy link* (copies the knobas address and the Confluence URL), *Open in Confluence*, and *More ▾*, which holds *Export as Markdown* and is where later actions go. The header has no *Comment* button: commenting happens in the comment box at the page foot (R-10.14).
