@@ -431,9 +431,9 @@ pub async fn create_action_item_ticket_inner(
     let pool = &state.pool;
     let (project_ref, payload) =
         action_item_payload(pool, note_id, project, ticket_type, title, body).await?;
-    let (queued, source_id) = crate::sources::write_queue::queue(state, payload).await?;
+    let (queued, _) = crate::sources::write_queue::queue(state, payload).await?;
     owe_the_note(pool, queued.id, note_id).await?;
-    crate::sources::write_queue::flush(state, &source_id, queued.id).await?;
+    crate::sources::write_queue::flush(state, queued.id).await?;
     // The same wait, for the same reason: a created ticket has no address
     // until the mirror has it, and this is the call that goes looking.
     crate::sources::write_queue::sync_after_write(state, &project_ref.namespace).await;

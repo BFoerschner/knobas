@@ -1027,7 +1027,7 @@ async fn commit(
         crate::sources::write_queue::send_in_background(state, source_id, queued.id);
         return Ok(worklog);
     }
-    crate::sources::write_queue::flush(state, &source_id, queued.id).await?;
+    crate::sources::write_queue::flush(state, queued.id).await?;
 
     // Read back rather than answer with what was just written: the flush above
     // may have settled the write, and if it did, the copy carries Jira's id

@@ -825,10 +825,12 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
 ///   which is why the state it comes back with is `pending` and not `sent`;
 /// * the queue then delivers it in the background (#752), so the row settles
 ///   as `sent` shortly after the answer;
-/// * a sync run for that source follows. knobas has no per-entity read -- the
-///   whole of the read direction is `Source::sync` -- so "refresh the mirror
-///   for the affected entity" is an *incremental* run of its source, which is
-///   what the log row proves happened.
+/// * a sync run for that source follows, one that **began after the write
+///   reached `sent`** (#2094): what follows every landed write, from every send
+///   path, is decided in one place (`write_queue::after_landing`), and the
+///   scheduler this command's state was started with
+///   (`sources::test_scheduler`, through `sources::start_scheduler`) is the one
+///   that carries it there. `after_landing.rs` holds the other send paths.
 ///
 /// The mock adapter declares `comment` and accepts it, so the write really
 /// goes; nothing here stubs the queue.
@@ -873,13 +875,6 @@ async fn a_submitted_write_is_queued_delivered_and_followed_by_a_re_read() {
     .execute(&pool)
     .await
     .unwrap();
-
-    let runs_before: i64 =
-        sqlx::query_scalar("select count(*) from knobas.sync_run where source_id = $1")
-            .bind(source_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
 
     let pool_for_state = pool.clone();
     // The shared database `pool` is on, which is where this test's sources are.
@@ -930,22 +925,28 @@ async fn a_submitted_write_is_queued_delivered_and_followed_by_a_re_read() {
     );
 
     // The re-read is asked for after the write lands and runs on its own task.
-    let mut runs_after = runs_before;
+    // A run counts only if it **started after** the write was `sent`: one
+    // already going began before the write and cannot hold it.
+    let mut after: Option<i64> = None;
     for _ in 0..200 {
-        runs_after =
-            sqlx::query_scalar("select count(*) from knobas.sync_run where source_id = $1")
-                .bind(source_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        if runs_after > runs_before {
+        after = sqlx::query_scalar(
+            "select r.id from knobas.sync_run r, knobas.write_queue w
+              where w.id = $2 and r.source_id = $1 and r.started_at > w.settled_at
+              limit 1",
+        )
+        .bind(source_id)
+        .bind(id)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        if after.is_some() {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     assert!(
-        runs_after > runs_before,
-        "a write that landed must be followed by a run that re-reads the source, or the \
+        after.is_some(),
+        "a write that landed must be followed by a run that began after it, or the \
          app disagrees with itself until the next scheduled sync (story 15)"
     );
 }

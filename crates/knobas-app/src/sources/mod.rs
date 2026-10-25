@@ -600,7 +600,7 @@ pub async fn bring_up<R: tauri::Runtime>(
     // One set for the background sends and the owed-link resolutions, which
     // the scheduler's shutdown awaits before it closes the pool (#1633).
     let background = knobas_sync::background::Background::new();
-    let scheduler = Scheduler::start_with_background(
+    let scheduler = start_scheduler(
         SchedulerDeps {
             pool: deps.sync_pool,
             connections: Arc::new(DbConnections(deps.connections)),
@@ -629,6 +629,31 @@ pub async fn bring_up<R: tauri::Runtime>(
         secrets: deps.secrets,
         registry,
     })
+}
+
+/// Start the scheduler over `deps`, holding `background` as its background
+/// set, with every landed write followed by
+/// [`write_queue::after_landing`] (#2094): the one way the app starts one,
+/// so no send path, the scheduler's own flush tick included, can land a
+/// write that nothing reads back. [`bring_up`] and [`test_scheduler`] start
+/// theirs here, and so may a test that hands in deps of its own.
+///
+/// # Errors
+/// As [`Scheduler::start_with_background`].
+pub async fn start_scheduler(
+    mut deps: SchedulerDeps,
+    background: knobas_sync::background::Background,
+) -> Result<Scheduler, sqlx::Error> {
+    let slot = Arc::new(std::sync::OnceLock::new());
+    deps.events = Arc::new(write_queue::FollowLandings {
+        inner: deps.events,
+        scheduler: Arc::clone(&slot),
+    });
+    let scheduler = Scheduler::start_with_background(deps, background).await?;
+    // Before any flush: the tick's first comes a startup delay after this,
+    // and the commands have no scheduler to send through until it returns.
+    let _ = slot.set(scheduler.downgrade());
+    Ok(scheduler)
 }
 
 /// The one-time pass of #1501: archive every job context whose ticket the
@@ -689,7 +714,7 @@ pub async fn test_scheduler<R: tauri::Runtime>(
     registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
 ) -> Result<Scheduler, sqlx::Error> {
     let background = knobas_sync::background::Background::new();
-    Scheduler::start_with_background(
+    start_scheduler(
         SchedulerDeps {
             connections: Arc::new(DbConnections(connections)),
             pool: pool.clone(),

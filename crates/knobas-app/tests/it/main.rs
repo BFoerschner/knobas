@@ -13,6 +13,7 @@
 //! name (`test-layout-exceptions.txt`). `live_digest/` is theirs.
 
 mod adapter_to_mirror;
+mod after_landing;
 mod assets_ipc;
 mod background_write;
 mod backup;

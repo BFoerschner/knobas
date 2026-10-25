@@ -1368,9 +1368,9 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     //
     // What moves the mirror in the middle of a test that syncs once, at the
     // top? The write queue's own follow-up read.
-    // `knobas_app::sources::write_queue::flush` fires an incremental sync as
-    // soon as a write lands (`refresh`, story 15), and `Scheduler::trigger`
-    // **spawns** that run -- so the transition above returned with a sync of
+    // `knobas_app::sources::write_queue::after_landing` asks for an incremental
+    // sync as soon as a write lands (story 15, #2094), on a task of its own, and
+    // `Scheduler::trigger` **spawns** that run -- so the transition above returned with a sync of
     // this source still in flight. It re-reads `PAY-240`, whose `updated`
     // moved with the transition, and commits a `sync.item` row carrying the
     // new status. Land that commit between the `queue` and the `flush_source`

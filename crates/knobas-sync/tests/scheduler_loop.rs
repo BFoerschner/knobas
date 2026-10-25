@@ -1475,7 +1475,7 @@ async fn a_sync_after_a_write_waits_for_a_run_that_began_after_it_asked() {
     let (deps, held) = held_deps(sched_pool).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
-    // The run `write_queue::flush` leaves behind after every write that lands.
+    // The run `write_queue::after_landing` leaves behind after every write that lands.
     // It is going before the caller below writes the thing it will look for,
     // and it stays going, held at the door, until that caller has joined it
     // (#1927). Before, a 600 ms dwell and a 100 ms margin stood for that, and
