@@ -468,6 +468,11 @@
   }
 </script>
 
+{#snippet mutedLine(words: string)}
+  <!-- A muted line the source wrote into a tab, where it put it (#2065). -->
+  <p class="tf-dim tf-prline">{words}</p>
+{/snippet}
+
 <div class="tf-full">
   <nav class="tf-crumbs" aria-label="Breadcrumb">
     {#if job !== null}
@@ -560,7 +565,7 @@
           {:else if tab === "overview"}
             {#each overview as part, p (p)}
               {#if "line" in part}
-                <p class="tf-dim tf-prline">{part.line}</p>
+                {@render mutedLine(part.line)}
               {:else if "checks" in part}
                 <h2 class="tf-cgroup-h">Checks</h2>
                 <table class="tf-tbl tf-prchecks">
@@ -586,9 +591,9 @@
             <div class="tf-convo">
               {#each conversation as part, n (n)}
                 {#if "line" in part}
-                  <p class="tf-dim tf-prline">{part.line}</p>
+                  {@render mutedLine(part.line)}
                 {:else}
-                {@const message = part.item}
+                {@const message = part.message}
                 {@const own = me !== null && message.who === me}
                 <article class="tf-msg">
                   <span class="tf-av" class:tf-me={own} aria-hidden="true">{initials(message.who)}</span>
@@ -632,11 +637,11 @@
           {:else if tab === "commits"}
             {#each commitList as part, p (p)}
               {#if "line" in part}
-                <p class="tf-dim tf-prline">{part.line}</p>
+                {@render mutedLine(part.line)}
               {:else}
                 <table class="tf-tbl tf-rcommits">
                   <tbody>
-                    {#each part.item as row, n (n)}
+                    {#each part.commits as row, n (n)}
                       {@const proposal = row.entity_id === null ? undefined : proposals[row.entity_id]}
                       {@const opens = row.entity_id !== null && repo !== null}
                       <tr class:tf-row={opens} onclick={(event) => openCommit(event, row)}>

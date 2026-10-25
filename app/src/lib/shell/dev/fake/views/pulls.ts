@@ -258,10 +258,10 @@ const UNREAD_COMMENTS: ViewBlock = {
 
 /** Gitea's refusal for a write this token cannot make: the category's write scope (`grants.rs`). */
 function refusedOnReadOnly(list: ViewAction[]): ViewAction[] {
-  const issue = new Set(["comment", "source_action"]);
-  return list.map((one) => ({
-    ...one,
-    disabled: `This token cannot write: it lacks the ${issue.has(one.write_op) ? "write:issue" : "write:repository"} scope`,
+  const issueWrites = new Set(["comment", "source_action"]);
+  return list.map((write) => ({
+    ...write,
+    disabled: `This token cannot write: it lacks the ${issueWrites.has(write.write_op) ? "write:issue" : "write:repository"} scope`,
   }));
 }
 

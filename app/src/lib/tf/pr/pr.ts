@@ -56,10 +56,15 @@ function section(view: SourceView | null, id: string): ViewSection | undefined {
  * commit or a message. A list's own last note (a cut list's *The first 250
  * of 312*) sits in a list of what it lists, so it stays in that list.
  */
-function lineOf(block: ViewBlock): string[] | null {
+function linesOf(block: ViewBlock): Line[] | null {
   if (block.type !== "entities" || block.title !== null || block.rows.length === 0) return null;
   const quiet = block.rows.every((row) => row.tone === "muted" && row.entity_id === null && row.chip === null);
-  return quiet ? block.rows.map((row) => row.title) : null;
+  return quiet ? block.rows.map((row) => ({ line: row.title })) : null;
+}
+
+/** A muted line as a tab draws it: its words. */
+export interface Line {
+  line: string;
 }
 
 /** The overview's facts, in order. */
@@ -89,7 +94,7 @@ export function headerOf(view: SourceView | null): PrHeader {
   const branches = value("Branches")?.value ?? null;
   const at = branches?.indexOf(" → ") ?? -1;
   const blocks = section(view, "overview")?.blocks ?? [];
-  const checks = blocks.find((block) => block.type === "entities" && lineOf(block) === null);
+  const checks = blocks.find((block) => block.type === "entities" && linesOf(block) === null);
   const text = blocks.find((block) => block.type === "text");
   return {
     state: state ? { text: state.value, tone: state.tone } : null,
@@ -102,20 +107,20 @@ export function headerOf(view: SourceView | null): PrHeader {
 }
 
 /** What the Overview tab draws, in the source's order: the checks, the description, and a muted line where the source put one. */
-export type OverviewPart = { line: string } | { checks: ViewRow[] } | { description: string };
+export type OverviewPart = Line | { checks: ViewRow[] } | { description: string };
 
 export function overviewParts(view: SourceView | null): OverviewPart[] {
   const parts: OverviewPart[] = [];
-  let checks = false;
-  let description = false;
+  let seenChecks = false;
+  let seenDescription = false;
   for (const block of section(view, "overview")?.blocks ?? []) {
-    const lines = lineOf(block);
-    if (lines !== null) parts.push(...lines.map((line) => ({ line })));
-    else if (block.type === "entities" && !checks) {
-      checks = true;
+    const lines = linesOf(block);
+    if (lines !== null) parts.push(...lines);
+    else if (block.type === "entities" && !seenChecks) {
+      seenChecks = true;
       if (block.rows.length > 0) parts.push({ checks: block.rows });
-    } else if (block.type === "text" && !description) {
-      description = true;
+    } else if (block.type === "text" && !seenDescription) {
+      seenDescription = true;
       parts.push({ description: block.text });
     }
   }
@@ -131,7 +136,7 @@ function checksPlace(view: SourceView | null): ViewRow[] {
   const checks = headerOf(view).checks;
   if (checks.length > 0) return checks;
   const first = (section(view, "overview")?.blocks ?? []).find((block) => block.type === "entities");
-  return first?.type === "entities" && lineOf(first) !== null ? first.rows : [];
+  return first?.type === "entities" && linesOf(first) !== null ? first.rows : [];
 }
 
 /** Each tab's count, from its section; `null` where the source gave none. */
@@ -269,17 +274,14 @@ export interface PrMessage {
   body: string;
 }
 
-/** What a tab draws of its section, in the source's order: a muted line, or one of the tab's own things. */
-export type Part<T> = { line: string } | { item: T };
-
 /**
  * The conversation, oldest first: the source writes each entry as a facts
  * block (who, when, and a review's *Review* verdict) and then its words, if
  * it has any; a muted line (comments the token may not read, #2042) stands
  * where the source put it.
  */
-export function conversationParts(view: SourceView | null): Part<PrMessage>[] {
-  const parts: Part<PrMessage>[] = [];
+export function conversationParts(view: SourceView | null): (Line | { message: PrMessage })[] {
+  const parts: (Line | { message: PrMessage })[] = [];
   for (const block of section(view, "conversation")?.blocks ?? []) {
     const last = parts.at(-1);
     if (block.type === "facts") {
@@ -287,17 +289,17 @@ export function conversationParts(view: SourceView | null): Part<PrMessage>[] {
       if (!said) continue;
       const review = rest.find((fact) => fact.label === "Review");
       parts.push({
-        item: {
+        message: {
           who: said.label,
           at: said.value,
           verdict: review ? { text: review.value, tone: review.tone } : null,
           body: "",
         },
       });
-    } else if (block.type === "text" && last !== undefined && "item" in last) {
-      last.item.body = block.text;
+    } else if (block.type === "text" && last !== undefined && "message" in last) {
+      last.message.body = block.text;
     } else {
-      for (const line of lineOf(block) ?? []) parts.push({ line });
+      parts.push(...(linesOf(block) ?? []));
     }
   }
   return parts;
@@ -305,20 +307,18 @@ export function conversationParts(view: SourceView | null): Part<PrMessage>[] {
 
 /** The conversation's messages alone, oldest first. */
 export function conversationOf(view: SourceView | null): PrMessage[] {
-  return conversationParts(view).flatMap((part) => ("item" in part ? [part.item] : []));
+  return conversationParts(view).flatMap((part) => ("message" in part ? [part.message] : []));
 }
 
 /**
- * What *Commits* draws, in the source's order: the pull request's commits
- * (the note a cut list ends on included), and a muted line where the source
- * put one, which is none of them.
+ * What *Commits* draws, in the source's order: each list of the pull
+ * request's commits (the note a cut list ends on included), and a muted line
+ * where the source put one, which is none of them.
  */
-export function commitParts(view: SourceView | null): Part<ViewRow[]>[] {
-  const parts: Part<ViewRow[]>[] = [];
-  for (const block of section(view, "commits")?.blocks ?? []) {
-    const lines = lineOf(block);
-    if (lines !== null) parts.push(...lines.map((line) => ({ line })));
-    else if (block.type === "entities" && block.rows.length > 0 && !parts.some((part) => "item" in part)) parts.push({ item: block.rows });
-  }
-  return parts;
+export function commitParts(view: SourceView | null): (Line | { commits: ViewRow[] })[] {
+  return (section(view, "commits")?.blocks ?? []).flatMap((block): (Line | { commits: ViewRow[] })[] => {
+    const lines = linesOf(block);
+    if (lines !== null) return lines;
+    return block.type === "entities" && block.rows.length > 0 ? [{ commits: block.rows }] : [];
+  });
 }
