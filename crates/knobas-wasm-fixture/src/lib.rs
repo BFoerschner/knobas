@@ -1,7 +1,7 @@
 //! The fixture external adapter (issue #1198, ADR-0028).
 //!
 //! A test adapter built to a WASM component against
-//! `knobas:adapter@1.3.0`. It serves three surveys, and a pipeline with one
+//! `knobas:adapter@1.4.0`. It serves three surveys, and a pipeline with one
 //! run ([`builds`], #1205), so that the host can be tested with the contract
 //! battery, every live read, and through the sync engine into the mirror,
 //! without a real product behind it. No external
@@ -34,6 +34,18 @@
 //! * **Built with `--features v1_0`** it is the same adapter against the
 //!   frozen 1.0.0 world (the SDK's `v1_0`), which has no `downloads`, `query` or
 //!   `sink.walked`: what the host's hold on 1.0.0 components is tested with.
+//! * **Built with `--features v1_3`** it is the same adapter against the
+//!   frozen 1.3.0 world (the SDK's `v1_3`), the minor before `refresh`: it
+//!   exports no `refresh` and declares no `Capability::Refresh`, so its
+//!   source falls back to a run after a landed write (#2101).
+//! * **The refresh** (1.4.0, #2101, ADR-0031): `refresh` reads one item by
+//!   id as the sync emits it, every kind, and the older run `older_runs`
+//!   answers; an id of this source it does not hold is *gone*.
+//!   **`"deleted": "<key>"`** is that survey deleted at the source: the sync
+//!   no longer emits it, and a refresh of it answers *gone*.
+//!   **`"declares_refresh": <bool>`** overrides whether the descriptor
+//!   declares `Capability::Refresh` (by default: whether this build exports
+//!   `refresh`), for a component that claims a read it does not export.
 //! * **The walk** (1.3.0, #1380): the outer unit is the item itself, as the
 //!   mock's is. A sync reports `walked` before each item it hands and once
 //!   after the last, `of` the items this run hands (`"items"`), so a sync
@@ -154,6 +166,10 @@ pub struct Fixture {
     descriptor_dwell_ms: u64,
     /// Whether `write` performs every op, declared or not (#1950).
     performs_undeclared: bool,
+    /// The survey deleted at the source, which no read answers (#2101).
+    deleted: Option<String>,
+    /// Whether the descriptor declares `Capability::Refresh` (#2101).
+    declares_refresh: bool,
 }
 
 /// The size of one message of a log flood.
@@ -199,6 +215,8 @@ fn read_fault(value: &serde_json::Value) -> Result<Fault, String> {
             "log_flood",
             "descriptor_dwell_ms",
             "performs_undeclared",
+            "deleted",
+            "declares_refresh",
             "mirror",
             "username",
         ]
@@ -278,7 +296,11 @@ impl Fixture {
 
     /// Every item, in the order the cursor counts them.
     fn corpus(&self) -> Vec<SyncItem> {
-        let mut items: Vec<SyncItem> = SURVEYS.iter().map(|s| self.survey(*s)).collect();
+        let mut items: Vec<SyncItem> = SURVEYS
+            .iter()
+            .filter(|(key, _, _)| self.deleted.as_deref() != Some(*key))
+            .map(|s| self.survey(*s))
+            .collect();
         items.push(self.frame_item(
             builds::PIPELINE,
             "pipeline",
@@ -358,6 +380,14 @@ impl Adapter for Fixture {
                 .get("performs_undeclared")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false),
+            declares_refresh: config
+                .get("declares_refresh")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(cfg!(not(any(feature = "v1_0", feature = "v1_3")))),
+            deleted: config
+                .get("deleted")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
             received: serde_json::json!({
                 "id": instance.id,
                 "kind": instance.kind,
@@ -384,8 +414,14 @@ impl Adapter for Fixture {
             adapter_kind: KIND.into(),
             name: self.name.clone(),
             // It writes only its source action (#1407); the battery holds
-            // `Write` and `write_ops` to each other.
-            capabilities: vec![Capability::Write],
+            // `Write` and `write_ops` to each other, and `Refresh` and what
+            // `refresh` answers (#2101), which a build against 1.3.0 or
+            // earlier has no `refresh` for.
+            capabilities: if self.declares_refresh {
+                vec![Capability::Write, Capability::Refresh]
+            } else {
+                vec![Capability::Write]
+            },
             adapter_version: "0.1.0".into(),
             // A token, which the fixture never reads: every source takes a
             // credential at Add source, and the host attaches it (#1203).
@@ -416,6 +452,8 @@ impl Adapter for Fixture {
                     "log_flood": { "type": "integer" },
                     "descriptor_dwell_ms": { "type": "integer" },
                     "performs_undeclared": { "type": "boolean" },
+                    "deleted": { "type": "string" },
+                    "declares_refresh": { "type": "boolean" },
                     "mirror": { "type": "string" },
                     "username": { "type": "string" },
                 },
@@ -675,6 +713,30 @@ impl Adapter for Fixture {
         Ok(Some(decoded(
             serde_json::json!({ "text": text, "truncated": false }),
         )))
+    }
+
+    /// (#2101) Every item the sync emits, by its id, and the older run
+    /// [`builds::OLDER_RUN`]; an id of this source it does not hold, a
+    /// `"deleted"` survey among them, is gone. A faulted fixture fails as
+    /// its sync does.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn refresh(&self, entity: &str) -> Result<knobas_adapter_sdk::RefreshAnswer, SourceError> {
+        use knobas_adapter_sdk::RefreshAnswer;
+        self.healthy()?;
+        let Some(key) = self.key(entity) else {
+            return Err(SourceError::protocol(format!(
+                "{entity} is not an item of source {:?}",
+                self.id
+            )));
+        };
+        if key == builds::OLDER_RUN {
+            return Ok(RefreshAnswer::Item(self.run(builds::OLDER_RUN, "41")));
+        }
+        Ok(self
+            .corpus()
+            .into_iter()
+            .find(|item| item.entity.to_string() == entity)
+            .map_or(RefreshAnswer::Gone, RefreshAnswer::Item))
     }
 
     /// (#1208) A payload's `"survey_query"` string as one `label`

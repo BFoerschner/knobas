@@ -1,13 +1,15 @@
 //! [`WasmSource`]: the `Source` trait, forwarded across the WIT boundary.
 
 use knobas_source::{
-    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, SyncItem, WriteOp,
-    WriteReceipt, pipeline, run, view,
+    Capability, ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError,
+    SyncItem, WriteOp, WriteReceipt, pipeline, run, view,
 };
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use wasmtime::Store;
-use wasmtime::component::ResourceAny;
+use wasmtime::component::{
+    ComponentExportIndex, ComponentNamedList, Lift, Lower, ResourceAny, TypedFunc,
+};
 
 use crate::bindings::knobas::adapter::{download_sink, log, sink};
 use crate::{HostState, WasmAdapter, bindings, convert, limits, net, new_store, wit};
@@ -264,16 +266,22 @@ macro_rules! call {
 type DownloadParams<'a> = (&'a wit::Instance, &'a str, &'a str);
 type DownloadResults = (Result<bool, wit::SourceError>,);
 
-/// `downloads.download` of a fresh instance of the component in `store`.
-async fn download_func<'a>(
+/// The optional function `name` at `index` (looked up at load by
+/// `optional_export`) of a fresh instance of the component in `store`, typed
+/// as the host calls it: `downloads.download` (1.1.0) and `refresh.refresh`
+/// (1.4.0).
+async fn optional_func<P, R>(
     adapter: &WasmAdapter,
     store: &mut Store<HostState>,
-) -> Result<wasmtime::component::TypedFunc<DownloadParams<'a>, DownloadResults>, SourceError> {
-    let index = adapter
-        .inner
-        .download
-        .as_ref()
-        .ok_or_else(|| SourceError::protocol("the component exports no download"))?;
+    index: Option<&ComponentExportIndex>,
+    name: &str,
+) -> Result<TypedFunc<P, R>, SourceError>
+where
+    P: ComponentNamedList + Lower,
+    R: ComponentNamedList + Lift,
+{
+    let index =
+        index.ok_or_else(|| SourceError::protocol(format!("the component exports no {name}")))?;
     let instance = adapter
         .inner
         .pre
@@ -286,14 +294,63 @@ async fn download_func<'a>(
         .map_err(|e| failed(adapter, &e))
 }
 
-/// At load: the `download` a component exports has the type 1.1.0 gives it.
-pub(crate) async fn check_download(adapter: &WasmAdapter) -> Result<(), String> {
-    let mut store = new_store(
+/// `downloads.download` of a fresh instance of the component in `store`.
+async fn download_func<'a>(
+    adapter: &WasmAdapter,
+    store: &mut Store<HostState>,
+) -> Result<TypedFunc<DownloadParams<'a>, DownloadResults>, SourceError> {
+    optional_func(adapter, store, adapter.inner.download.as_ref(), "download").await
+}
+
+/// `refresh.refresh-answer` (1.4.0, #2101), as the host lifts it: the
+/// `refresh` interface is not in the statically bound world `hosted`, so its
+/// one type is written out here, case for case.
+#[derive(wasmtime::component::ComponentType, wasmtime::component::Lift, Debug)]
+#[component(variant)]
+enum WitRefreshAnswer {
+    #[component(name = "item")]
+    Item(wit::SyncItem),
+    #[component(name = "gone")]
+    Gone,
+    #[component(name = "not-offered")]
+    NotOffered,
+}
+
+/// `refresh.refresh`'s parameters and results, as the host calls it.
+type RefreshParams<'a> = (&'a wit::Instance, &'a str);
+type RefreshResults = (Result<WitRefreshAnswer, wit::SourceError>,);
+
+/// `refresh.refresh` of a fresh instance of the component in `store`.
+async fn refresh_func<'a>(
+    adapter: &WasmAdapter,
+    store: &mut Store<HostState>,
+) -> Result<TypedFunc<RefreshParams<'a>, RefreshResults>, SourceError> {
+    optional_func(adapter, store, adapter.inner.refresh.as_ref(), "refresh").await
+}
+
+/// A store for a check at load, before any source of the adapter exists.
+fn probe_store(adapter: &WasmAdapter) -> Store<HostState> {
+    new_store(
         adapter,
         crate::PROBE_ID,
         SinkSlot::none(),
         Arc::new(net::Policy::none(crate::PROBE_ID)),
-    );
+    )
+}
+
+/// At load: the `refresh` a component exports has the type 1.4.0 gives it.
+pub(crate) async fn check_refresh(adapter: &WasmAdapter) -> Result<(), String> {
+    let mut store = probe_store(adapter);
+    limits::bounded(adapter, async {
+        refresh_func(adapter, &mut store).await.map(drop)
+    })
+    .await
+    .map_err(|e| format!("its refresh does not have the type knobas hosts: {e}"))
+}
+
+/// At load: the `download` a component exports has the type 1.1.0 gives it.
+pub(crate) async fn check_download(adapter: &WasmAdapter) -> Result<(), String> {
+    let mut store = probe_store(adapter);
     limits::bounded(adapter, async {
         download_func(adapter, &mut store).await.map(drop)
     })
@@ -301,7 +358,12 @@ pub(crate) async fn check_download(adapter: &WasmAdapter) -> Result<(), String> 
     .map_err(|e| format!("its download does not have the type knobas hosts: {e}"))
 }
 
-/// The component's descriptor for `instance`, decoded.
+/// The component's descriptor for `instance`, decoded. A component that
+/// exports no `refresh` (any built against 1.3.0 or earlier) declares no
+/// [`Capability::Refresh`] whatever its JSON says: the app reads the
+/// declaration to choose between *Refresh* and *Sync now*, and between a
+/// refresh and the run alone after a landed write, and the host would answer
+/// *not offered* to every refresh of it (#2101).
 pub(crate) async fn descriptor(
     adapter: &WasmAdapter,
     instance: wit::Instance,
@@ -316,7 +378,13 @@ pub(crate) async fn descriptor(
             .call_descriptor(&mut store, resource)
             .await
             .map_err(|e| failed(adapter, &e))?;
-        convert::json(&text, "descriptor")
+        let mut descriptor: SourceDescriptor = convert::json(&text, "descriptor")?;
+        if !adapter.refreshes() {
+            descriptor
+                .capabilities
+                .retain(|c| *c != Capability::Refresh);
+        }
+        Ok(descriptor)
     })
     .await
 }
@@ -430,6 +498,38 @@ impl Source for WasmSource {
         self.descriptor.declares(&op)?;
         let op = convert::to_json(&op);
         call!(self, call_write, &op).map(convert::receipt)
+    }
+
+    /// `refresh.refresh` where the component exports it (1.4.0, #2101), and
+    /// the trait's default, *not offered*, where it does not: a component
+    /// built against 1.3.0 or earlier is never called, so its source falls
+    /// back to a run. Within the adapter's deadline, as every call is
+    /// (#1204). An item crosses as `sink.item`'s does, and one that does not
+    /// decode fails the read.
+    async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
+        if !self.adapter.refreshes() {
+            return Ok(RefreshAnswer::NotOffered);
+        }
+        let answer = limits::bounded(&self.adapter, async {
+            let mut store = new_store(
+                &self.adapter,
+                &self.instance.id,
+                SinkSlot::none(),
+                Arc::clone(&self.policy),
+            );
+            let func = refresh_func(&self.adapter, &mut store).await?;
+            let (answer,) = func
+                .call_async(&mut store, (&self.instance, entity))
+                .await
+                .map_err(|e| failed(&self.adapter, &e))?;
+            answer.map_err(convert::error)
+        })
+        .await?;
+        Ok(match answer {
+            WitRefreshAnswer::Item(item) => RefreshAnswer::Item(convert::sync_item(item)?),
+            WitRefreshAnswer::Gone => RefreshAnswer::Gone,
+            WitRefreshAnswer::NotOffered => RefreshAnswer::NotOffered,
+        })
     }
 
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {

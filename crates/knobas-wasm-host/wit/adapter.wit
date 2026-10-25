@@ -15,7 +15,7 @@
 /// round-trip tested there, and it is what spec §3a made the SPI's types for:
 /// plain data that can leave the process without a contract change. Each
 /// such parameter or result names the Rust type whose JSON it is.
-package knobas:adapter@1.3.0;
+package knobas:adapter@1.4.0;
 
 interface types {
     /// The serde JSON of the `knobas-source` type its use names.
@@ -231,11 +231,42 @@ interface query {
     translate-query: func(instance: instance, saved-view: json) -> result<option<json>, source-error>;
 }
 
+/// `Source::refresh` (1.4.0, #2101, ADR-0031): read one item by id, after a
+/// write lands, so the mirror holds what the write made before the next run.
+///
+/// Its own interface, not a function on `adapter`, for the reason
+/// `downloads` is: a component built against an earlier 1.x, which does not
+/// export it, still links, and answers `not-offered` for every id. Its
+/// source then falls back to a run after a landed write, and its detail
+/// offers *Sync now*.
+interface refresh {
+    use types.{instance, sync-item, source-error};
+
+    /// `knobas_source::RefreshAnswer`, variant for variant.
+    variant refresh-answer {
+        /// The item as the source holds it now, in the shape `sync` hands
+        /// it to `sink.item`.
+        item(sync-item),
+        /// The source no longer has the item; the host tombstones it.
+        gone,
+        /// This adapter does not read this item's kind by id.
+        not-offered,
+    }
+
+    /// `entity` is an `EntityRef` in string form, in the instance's
+    /// namespace. A read and nothing else: a failed read is an error with
+    /// `sync`'s fault classification, never `gone`. An adapter that answers
+    /// anything but `not-offered` declares `Capability::Refresh` in its
+    /// descriptor, and one that declares it exports this interface.
+    refresh: func(instance: instance, entity: string) -> result<refresh-answer, source-error>;
+}
+
 /// What the host binds of every 1.x component: the 1.0.0 world, and the
 /// imports later minors add, which a component that does not use them never
 /// imports (`download-sink` in 1.1.0, `sink.walked` in 1.3.0: a function the
 /// host provides and an earlier component's `sink` import does not name).
-/// `downloads` (1.1.0) and `query` (1.2.0) are looked up apart, as optional.
+/// `downloads` (1.1.0), `query` (1.2.0) and `refresh` (1.4.0) are looked up
+/// apart, as optional.
 world hosted {
     import sink;
     import log;
@@ -243,17 +274,19 @@ world hosted {
     export source;
 }
 
-/// What an external adapter is: it exports `source`, `downloads` and `query`,
-/// and may call `sink`, `download-sink` and `log`. Nothing else is granted
-/// beyond WASI with nothing in it (no directory, no environment, no socket)
-/// and `wasi:http` 0.2's outgoing handler, which the host holds to the hosts
-/// the adapter's manifest declares and attaches the source's credential to
-/// (#1203).
+/// What an external adapter is: it exports `source`, `downloads`, `query` and
+/// `refresh`, and may call `sink`, `download-sink` and `log`. Nothing else is
+/// granted beyond WASI with nothing in it (no directory, no environment, no
+/// socket) and `wasi:http` 0.2's outgoing handler, which the host holds to
+/// the hosts the adapter's manifest declares and attaches the source's
+/// credential to (#1203).
 ///
 /// 1.1.0 added `download-sink` and `downloads` (#1205); 1.2.0 added `query`
-/// (#1208); 1.3.0 added `sink.walked` (#1380).
+/// (#1208); 1.3.0 added `sink.walked` (#1380); 1.4.0 added `refresh`
+/// (#2101).
 world adapter {
     include hosted;
     export downloads;
     export query;
+    export refresh;
 }

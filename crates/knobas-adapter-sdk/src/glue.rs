@@ -152,3 +152,24 @@ impl<A: Adapter> crate::bindings::exports::knobas::adapter::downloads::Guest for
             .map_err(error_to_wit)
     }
 }
+
+/// `refresh` (1.4.0, #2101): a free function, as `query` is.
+#[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+impl<A: Adapter> crate::bindings::exports::knobas::adapter::refresh::Guest for A {
+    fn refresh(
+        instance: wit::Instance,
+        entity: String,
+    ) -> Result<crate::bindings::exports::knobas::adapter::refresh::RefreshAnswer, wit::SourceError>
+    {
+        use crate::bindings::exports::knobas::adapter::refresh::RefreshAnswer as Wit;
+        use knobas_source::RefreshAnswer;
+        match A::new(convert::instance(instance))
+            .refresh(&entity)
+            .map_err(error_to_wit)?
+        {
+            RefreshAnswer::Item(item) => Ok(Wit::Item(convert::item(item))),
+            RefreshAnswer::Gone => Ok(Wit::Gone),
+            RefreshAnswer::NotOffered => Ok(Wit::NotOffered),
+        }
+    }
+}

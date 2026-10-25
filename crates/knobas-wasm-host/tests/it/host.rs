@@ -319,13 +319,13 @@ fn a_component_built_against_another_major_version_is_refused_at_load() {
     assert_eq!(
         error.to_string(),
         "the component is built against knobas:adapter@2.0.0, and this knobas hosts \
-         knobas:adapter@1.x up to 1.3.0"
+         knobas:adapter@1.x up to 1.4.0"
     );
 }
 
 #[test]
 fn a_component_built_against_a_newer_minor_version_is_refused_at_load() {
-    let error = load_error(&exporting("1.4.0"));
+    let error = load_error(&exporting("1.5.0"));
     assert!(matches!(error, LoadError::Unsupported { .. }), "{error:?}");
 }
 
