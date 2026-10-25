@@ -1555,6 +1555,14 @@ async fn issue_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, number: u64
 /// examined down to the watermark and the rest from their heads,
 /// and then the branches that moved since, as [`pulls`] does. A full sync's
 /// budget is unchanged (ADR-0003).
+///
+/// **On a server that ignores `until=` the cut branch starts on the page the
+/// cut fell on (#2039).** Forgejo 17 lists a catch-up's branch from its head,
+/// so without that every run re-read what the runs before it delivered: a
+/// catch-up of N commits under a budget of B read about N²/2B records.
+/// [`CommitsCatchUp`]'s `page` says where to go, and [`walk_commits`] goes
+/// there only once the branch's first page shows the server listed above
+/// the window.
 #[expect(
     clippy::too_many_arguments,
     reason = "the whole per-repository walk state, threaded explicitly: a struct \
