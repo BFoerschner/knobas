@@ -10,6 +10,7 @@ import type { DownloadTarget, LinkEntry, PipelineRow, Project, RunLog, PipelineS
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
 import { noteWithdrawn } from "../../shell/write-queue.svelte";
+import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes, echoesOn } from "../queued.svelte";
 import type { RunPorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
@@ -1009,7 +1010,7 @@ test("after a reload, a ticket filed from the run and still queued draws Ticket 
   expect(echoesOn("teamcity:build:1187", "ticket")).toMatchObject([{ write: 41, kind: "ticket", text: FILED_TITLE, base: null, state: "queued" }]);
 });
 
-test("after a reload, a ticket sent and not mirrored yet stays queued until the sync that brings it in draws it", async () => {
+test("after a reload, a ticket sent and not mirrored yet reads Ticket sent until the sync that brings it in draws it", async () => {
   let owed = [owedWrite(41, "sent")];
   let links: LinkEntry[] = [];
   const drawn = draw("teamcity:build:1187", undefined, {
@@ -1018,7 +1019,7 @@ test("after a reload, a ticket sent and not mirrored yet stays queued until the 
   });
   await settle();
   expect(button("Create ticket")).toBeUndefined();
-  expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket queued");
+  expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket sent");
   // The ticket's listen for the sync that brings it in, beside the page's own.
   const listening = drawn.listening();
 
@@ -1026,7 +1027,7 @@ test("after a reload, a ticket sent and not mirrored yet stays queued until the 
   drawn.sync({ source_id: "teamcity", running: false });
   await settle();
   expect(button("Create ticket")).toBeUndefined();
-  expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket queued");
+  expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket sent");
 
   // Jira's sync brings it in: the read links it and names it no more.
   owed = [];
@@ -1153,4 +1154,36 @@ test("an owed read that answers before the create's own answer marks it once, an
   for (const hear of hearing) hear({ ...owedWrite(41, "refused"), detail: "Summary is required" });
   await settle();
   expect(toasts.items.slice(before).map((toast) => toast.text)).toEqual(["Ticket was refused: Summary is required"]);
+});
+
+// -- the echo's one lifecycle: queued, sent, gone on the refresh's read (#2104) --
+
+test("Ticket queued goes Ticket sent on landing, and goes once the refresh's read of the run's links holds the ticket (#2104)", async () => {
+  const events = echoEvents(settle);
+  const { follower, sent } = echoFollower();
+  let links: LinkEntry[] = [];
+  draw("teamcity:build:1187", undefined, {
+    links: () => Promise.resolve(links),
+    submitWrite: () => Promise.resolve({ id: 61 } as QueuedWrite),
+    listen: events.listen,
+    follower: () => follower,
+  });
+  await settle();
+  button("Create ticket")!.click();
+  await settle();
+  const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
+  select.value = "jira:PAY";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  dialogButton("Create ticket")!.click();
+  await settle();
+  const chip = () => target.querySelector(".tf-problem .tf-acts .tf-chip")?.textContent ?? null;
+  expect(chip()).toBe("Ticket queued");
+  sent(61);
+  expect(chip()).toBe("Ticket sent");
+  // The ticket arrived and its arrival linked it to the run (#2095): the refresh names the create.
+  links = [ticketLink("PAY-342", FILED_TITLE)];
+  await events.refreshed("jira:PAY-342", 61);
+  expect(chip()).toBeNull();
+  expect([...target.querySelectorAll(".tf-problem a")].some((a) => a.textContent?.includes("PAY-342"))).toBe(true);
 });

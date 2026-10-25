@@ -9,9 +9,11 @@
 
   The run's tickets are its confirmed links (`get_entity`'s `links`), read
   with the page and again on each of its re-reads; while a ticket filed here
-  is queued the button gives way to *Ticket queued* (the shared queued
-  module, kind `ticket`), and a sync of any source ending reads the links
-  again until one holds a ticket of the queued title. A run with a ticket
+  is on its way the button gives way to its echo (`tf/queued.svelte.ts`,
+  kind `ticket`, #2104): *Ticket queued*, then *Ticket sent* once the create
+  landed. The refresh event naming the create (the ticket's arrival links it,
+  #2095), or a sync of any source ending, reads the links again until one
+  holds a ticket of the queued title. A run with a ticket
   linked draws the ticket, and no *Create ticket*.
 
   The echo dies with a reload; the create's row does not (#1953). So
@@ -35,9 +37,9 @@
   import { push } from "../../shell/toasts.svelte";
   import { createTicketPayload, draftOfPayload, projectSource, type TicketDraft } from "../create-ticket";
   import { itemHash, keyOf } from "../job/job";
-  import { askAgain, echoWrite, echoOn, echoesOn, sameWords, settleEchoes, takeAgain } from "../queued.svelte";
+  import { askAgain, echoWrite, echoOn, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes } from "../queued.svelte";
   import TfCreateTicket from "../TfCreateTicket.svelte";
-  import { listenSynced, type RunPorts } from "./pipeline-ports";
+  import type { RunPorts } from "./pipeline-ports";
   import { linkedTickets } from "./run";
 
   let {
@@ -62,6 +64,8 @@
 
   /** The kind of the echo on the run. */
   const TICKET = "ticket";
+  /** The surface its echo is tagged with, for `watchEchoes` (#2104). */
+  const RUN_TICKET = "run-ticket";
 
   let links = $state<LinkEntry[]>([]);
   let asking = $state<TicketDraft | null>(null);
@@ -107,7 +111,7 @@
     if (filed === null) return;
     // A sent one is past where the queue could hold or refuse it: nothing to follow.
     const follow = newest.state !== "sent" ? { following: following(id, filed), follower: ports.follower() } : {};
-    echoWrite(id, TICKET, filed.title, { write: newest, ...follow });
+    echoWrite(id, TICKET, filed.title, { write: newest, ...follow, surface: RUN_TICKET, source: projectSource(filed.project) });
   }
 
   /** What a held or refused create says, and *Edit and resend* back to the run with what was filed (not offered for an unconfirmed send, #1966). */
@@ -128,11 +132,12 @@
     untrack(() => readLinks(wanted));
   });
 
-  // While a ticket filed here is queued, the sync that brings it in may be any source's.
+  // While a ticket filed here is on its way, the refresh naming it, or the
+  // sync that brings it in, which may be any source's, reads the links again.
   $effect(() => {
     if (queued === null) return;
     const wanted = runId;
-    return listenSynced(ports, null, () => {}, () => readLinks(wanted));
+    return untrack(() => watchEchoes(RUN_TICKET, () => readLinks(wanted), { listen: ports.listen, everyRun: true }));
   });
 
   // *Edit and resend*: the dialog again, with what was filed.
@@ -159,7 +164,7 @@
       const write = await ports.submitWrite(createTicketPayload(filed), id);
       // An owed read that answered before this did has marked and followed it already: one follow, one toast.
       if (!echoesOn(id, TICKET).some((mark) => mark.write === write.id)) {
-        echoWrite(id, TICKET, title, { write, following: following(id, filed), follower: ports.follower() });
+        echoWrite(id, TICKET, title, { write, following: following(id, filed), follower: ports.follower(), surface: RUN_TICKET, source });
       }
       const summary = sources.find((s) => s.id === source);
       toastQueued(`ticket ${title}`, { id: source, display_name: summary?.display_name ?? source });
@@ -175,7 +180,7 @@
   >
 {:else}
   {#if queued !== null}
-    <span class="tf-chip tf-info" title={queued.text}>Ticket queued</span>
+    <span class="tf-chip tf-info" title={queued.text}>Ticket {queued.state}</span>
   {:else}
     <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void open(draft)}>Create ticket</button>
   {/if}
