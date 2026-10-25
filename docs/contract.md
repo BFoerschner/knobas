@@ -1512,8 +1512,8 @@ the only one a sync run reads — reports the same instant truncated to the seco
 two changes inside one second apart, and a run between them recognised the second as already
 delivered and dropped it before the sink. **Permanently**: `updated` does not move again on its
 own, so no later incremental run reached it and only a backfill recovered it. The everyday
-sequence that hits it is not rare — `knobas_app::sources::write_queue`'s `refresh` fires a sync
-after every landed write, so *comment through knobas, then reassign in Jira* is exactly it, and
+sequence that hits it is not rare — `knobas_app::sources::write_queue::after_landing` runs a sync
+after every landed write (#2094), so *comment through knobas, then reassign in Jira* is exactly it, and
 `author` is what the standup digest's mirror half, the inbox's author matching (#82) and every
 `@me` filter key on.
 

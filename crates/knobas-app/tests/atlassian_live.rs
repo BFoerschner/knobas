@@ -1387,8 +1387,11 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     // wait is on the mirrored status itself, to [`INDEX_BUDGET`], the budget
     // `knobas-source-jira`'s own live suite uses for this index.
     //
-    // `sync` here is not an extra run in the ordinary case: `trigger` attaches
-    // to the run `after_landing` already started and waits for its ending.
+    // `sync` here costs no run of its own in the ordinary case: `trigger`
+    // attaches to the run `after_landing` started and waits for its ending.
+    // When that task has not asked yet, this starts the run instead, and
+    // `after_landing` joins it and asks for one more (#2094); the poll below
+    // reads the mirror either way.
     //
     // **What this compares, and what it does not.** `project`'s fallback arm
     // -- the one `"transition"` takes -- compares `title`, `text`,
