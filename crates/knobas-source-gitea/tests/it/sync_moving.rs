@@ -1513,3 +1513,31 @@ async fn an_incremental_commit_walk_over_a_server_that_ignores_since_ends_on_the
     expected.sort();
     assert_eq!(got, expected);
 }
+
+/// Gitea bounds a catch-up's listing with `until=`, so its first page is
+/// already the window's and the page the cut fell on counts pages of a
+/// listing the run no longer asks for. The walk never goes there: the same
+/// push as above, with the server honouring both bounds, reads pages 1 to 3
+/// on the second run and nothing twice.
+#[tokio::test]
+async fn a_commit_catch_up_on_a_server_that_bounds_until_never_goes_to_its_page() {
+    let (_server, moving, gitea, cursor) = forgejo_with_a_push(40, 10).await;
+    moving.with(|world| world.ignores_bounds = false);
+    let (first, cursor) = run(&*gitea, Some(&cursor)).await;
+    assert_eq!(
+        position(&cursor, PAYOUT)["commits_catching_up"]["page"],
+        json!(2)
+    );
+
+    commit_pages(&moving);
+    let (second, cursor) = run(&*gitea, Some(&cursor)).await;
+    assert_eq!(commit_pages(&moving), vec![1, 2, 3]);
+
+    let (rest, _) = catch_up(&*gitea, cursor, 5).await;
+    let mut all = rest;
+    for items in [&first, &second] {
+        all.extend(emitted(items, "commit"));
+    }
+    all.sort();
+    assert_eq!(all, every_pushed(40), "all 40, once each");
+}
