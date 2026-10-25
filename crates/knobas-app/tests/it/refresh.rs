@@ -708,21 +708,38 @@ async fn a_ticket_filed_from_a_run_is_linked_to_it_before_the_follow_up_run_ends
 /// Two mock instances over one scratch database, neither due: `mockread`
 /// reads one item and files tickets, `mocknoread` offers the run alone.
 async fn mock_fixture(name: &str) -> (SourcesState, Heard) {
+    scheduled(
+        name,
+        knobas_app::sources::Registry::for_process(),
+        "mock",
+        &[
+            ("mockread", json!({ "files_tickets": true })),
+            ("mocknoread", json!({ "refresh": false })),
+        ],
+    )
+    .await
+}
+
+/// A scheduler started the way the app starts it over `registry`, with a
+/// source of `kind` per `(id, config)` in `sources`, none of them due.
+async fn scheduled(
+    name: &str,
+    registry: knobas_app::sources::Registry,
+    kind: &str,
+    sources: &[(&str, serde_json::Value)],
+) -> (SourcesState, Heard) {
     let connector = knobas_db::test_util::scratch_database(name).await;
     let pool = connector.pool(4).await.expect("a pool");
-    for (id, config) in [
-        ("mockread", json!({ "files_tickets": true })),
-        ("mocknoread", json!({ "refresh": false })),
-    ] {
+    for (id, config) in sources {
         knobas_sync::config::insert(
             &pool,
             &knobas_sync::config::InsertConfig {
-                id: id.to_owned(),
-                adapter_kind: "mock".to_owned(),
-                display_name: id.to_owned(),
+                id: (*id).to_owned(),
+                adapter_kind: kind.to_owned(),
+                display_name: (*id).to_owned(),
                 base_url: String::new(),
                 auth_kind: knobas_sync::config::AuthKind::None,
-                config,
+                config: config.clone(),
                 sync_interval_secs: 86_400,
                 enabled: true,
             },
@@ -731,7 +748,7 @@ async fn mock_fixture(name: &str) -> (SourcesState, Heard) {
         .expect("the source row is written");
         not_due(&pool, id).await;
     }
-    let registry: Arc<dyn AdapterRegistry> = Arc::new(knobas_app::sources::Registry::for_process());
+    let registry: Arc<dyn AdapterRegistry> = Arc::new(registry);
     let secrets: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
     let heard = Heard::default();
     let scheduler = knobas_app::sources::start_scheduler(
@@ -885,6 +902,107 @@ async fn a_mock_that_does_not_offer_the_read_gets_the_run_alone() {
         .await
         .unwrap();
     assert_eq!(held, 0, "nothing was refreshed");
+    assert!(heard.0.lock().unwrap().is_empty(), "no refresh happened");
+    state.scheduler.shutdown().await;
+}
+
+// -- the WASM fixture, an external adapter (#2101) ------------------------------
+
+/// One source of the fixture component at `artifact`, `surveys`, at the
+/// fixture's own position, so the run after a write writes nothing: an item
+/// in the mirror afterwards could only be a refresh's.
+async fn wasm_fixture(name: &str, artifact: &std::path::Path) -> (SourcesState, Heard) {
+    let adapter = knobas_wasm_host::WasmAdapter::load(artifact).unwrap_or_else(|e| {
+        panic!(
+            "the fixture at {} does not load ({e}); `just wasm-fixture` builds it",
+            artifact.display()
+        )
+    });
+    let registry = knobas_app::sources::Registry::default();
+    registry.add(adapter).expect("the fixture's kind is free");
+    let fixture = scheduled(name, registry, "wasm-fixture", &[("surveys", json!({}))]).await;
+    sqlx::query("update knobas.source_config set cursor = '5' where id = 'surveys'")
+        .execute(&fixture.0.pool)
+        .await
+        .unwrap();
+    fixture
+}
+
+/// The fixture's one write, on its first survey.
+fn book_repair() -> serde_json::Value {
+    json!({ "SourceAction": {
+        "entity": "surveys:survey-1",
+        "id": "book_repair",
+        "fields": { "day": "Tuesday" },
+    } })
+}
+
+async fn held(pool: &sqlx::PgPool) -> Vec<String> {
+    sqlx::query_scalar("select entity_id from sync.item where source_id = 'surveys'")
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+/// **A 1.4.0 component's landed write is followed by its refresh**: the
+/// survey is read across the boundary and mirrored before the run starts.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_landed_write_on_an_external_source_is_refreshed_across_the_boundary() {
+    let (state, heard) = wasm_fixture(
+        "refresh_wasm_offered",
+        &knobas_wasm_host::fixture_component(),
+    )
+    .await;
+    let id = write_queue::submit_in_background(&state, book_repair())
+        .await
+        .expect("queued")
+        .id;
+    assert_eq!(settled(&state, id).await, WriteState::Sent);
+    run_after(&state.pool, "surveys", id).await;
+    let (written, run_started) =
+        written_and_run_started(&state.pool, "surveys:survey-1", id).await;
+    assert!(
+        written < run_started,
+        "the refresh wrote it ({written}) before the run began ({run_started})"
+    );
+    assert_eq!(
+        live_title(&state.pool, "surveys:survey-1").await.as_deref(),
+        Some("Quay crane 4 inspection")
+    );
+    assert_eq!(
+        heard
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|e| (e.entity_id.clone(), e.write_id, e.ended))
+            .collect::<Vec<_>>(),
+        [(
+            "surveys:survey-1".to_owned(),
+            Some(id),
+            RefreshEnd::Refreshed
+        )]
+    );
+    state.scheduler.shutdown().await;
+}
+
+/// **A component built against 1.3.0, the minor before `refresh`, gets the
+/// run alone** after a landed write: nothing is read by id, and the run that
+/// follows the write is all that happens.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_landed_write_on_a_1_3_0_external_source_gets_the_run_alone() {
+    let (state, heard) = wasm_fixture(
+        "refresh_wasm_unoffered",
+        &knobas_wasm_host::fixture_component_v1_3(),
+    )
+    .await;
+    let id = write_queue::submit_in_background(&state, book_repair())
+        .await
+        .expect("queued")
+        .id;
+    assert_eq!(settled(&state, id).await, WriteState::Sent);
+    run_after(&state.pool, "surveys", id).await;
+    assert_eq!(held(&state.pool).await, Vec::<String>::new(), "nothing was refreshed");
     assert!(heard.0.lock().unwrap().is_empty(), "no refresh happened");
     state.scheduler.shutdown().await;
 }
