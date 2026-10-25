@@ -109,6 +109,7 @@ impl Source for Slow {
                 plural: "T".into(),
                 monogram: "SL".into(),
                 full_sync_exhaustive: true,
+                refreshes: true,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             // Nothing declared: this stand-in has no payload shapes to

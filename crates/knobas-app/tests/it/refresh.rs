@@ -177,6 +177,7 @@ fn kind(id: &str) -> KindInfo {
         plural: format!("{id}s"),
         monogram: "T".to_owned(),
         full_sync_exhaustive: true,
+        refreshes: true,
     }
 }
 

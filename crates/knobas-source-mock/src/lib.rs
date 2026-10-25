@@ -1242,6 +1242,7 @@ impl Source for MockSource {
                     plural: "Tickets".to_owned(),
                     monogram: "TK".to_owned(),
                     full_sync_exhaustive: true,
+                    refreshes: true,
                 },
                 KindInfo {
                     id: "pr".to_owned(),
@@ -1249,6 +1250,7 @@ impl Source for MockSource {
                     plural: "Pull requests".to_owned(),
                     monogram: "PR".to_owned(),
                     full_sync_exhaustive: true,
+                    refreshes: true,
                 },
                 KindInfo {
                     id: "build".to_owned(),
@@ -1256,6 +1258,7 @@ impl Source for MockSource {
                     plural: "Builds".to_owned(),
                     monogram: "BU".to_owned(),
                     full_sync_exhaustive: true,
+                    refreshes: true,
                 },
                 KindInfo {
                     id: "page".to_owned(),
@@ -1263,6 +1266,7 @@ impl Source for MockSource {
                     plural: "Pages".to_owned(),
                     monogram: "PG".to_owned(),
                     full_sync_exhaustive: true,
+                    refreshes: true,
                 },
                 KindInfo {
                     id: "commit".to_owned(),
@@ -1270,6 +1274,7 @@ impl Source for MockSource {
                     plural: "Commits".to_owned(),
                     monogram: "CM".to_owned(),
                     full_sync_exhaustive: true,
+                    refreshes: true,
                 },
                 // The two the corpus gained in #537. `RP` and `BR` are the
                 // monograms `app/src/lib/shell/kinds.ts` already draws for
@@ -1286,6 +1291,7 @@ impl Source for MockSource {
                     plural: "Repositories".to_owned(),
                     monogram: "RP".to_owned(),
                     full_sync_exhaustive: true,
+                    refreshes: true,
                 },
                 KindInfo {
                     id: "branch".to_owned(),
@@ -1293,6 +1299,7 @@ impl Source for MockSource {
                     plural: "Branches".to_owned(),
                     monogram: "BR".to_owned(),
                     full_sync_exhaustive: true,
+                    refreshes: true,
                 },
                 // The Builds frame's pipeline (#1240); a `build` is its run.
                 KindInfo {
@@ -1301,6 +1308,7 @@ impl Source for MockSource {
                     plural: "Pipelines".to_owned(),
                     monogram: "PL".to_owned(),
                     full_sync_exhaustive: true,
+                    refreshes: true,
                 },
                 KindInfo {
                     id: "monitor".to_owned(),
@@ -1308,6 +1316,7 @@ impl Source for MockSource {
                     plural: "Monitors".to_owned(),
                     monogram: "MO".to_owned(),
                     full_sync_exhaustive: true,
+                    refreshes: true,
                 },
             ],
             // Every kind above declares `full_sync_exhaustive: true`: the

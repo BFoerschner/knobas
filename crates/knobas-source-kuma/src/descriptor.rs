@@ -155,6 +155,7 @@ pub fn descriptor_template() -> SourceDescriptor {
             // which is why the adapter tombstones a vanished monitor itself --
             // see `crate::cursor`.
             full_sync_exhaustive: true,
+            refreshes: true,
         }],
         config_schema: config_schema(),
         payload_paths: payload_paths(),

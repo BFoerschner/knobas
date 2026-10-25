@@ -847,7 +847,12 @@ mod tests {
             source.refresh("jira-eu:PAY-231").await,
             Err(SourceError::Protocol { .. })
         ));
-        assert!(source.descriptor().refreshes());
+        let descriptor = source.descriptor();
+        assert!(descriptor.refreshes());
+        // So a view's detail draws *Sync now*, and a ticket's *Refresh*
+        // (#2146). The offline battery's corpus holds no view to ask.
+        assert!(!descriptor.refreshes_kind(crate::KIND_JIRA_VIEW));
+        assert!(descriptor.refreshes_kind(crate::KIND_TICKET));
     }
 
     /// An id that does not parse names nothing, and nothing about waiting makes

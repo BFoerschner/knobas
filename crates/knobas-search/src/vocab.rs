@@ -527,6 +527,7 @@ fn owned_kinds() -> BTreeMap<String, KindInfo> {
                     plural: owned.plural.to_owned(),
                     monogram: owned.monogram.to_owned(),
                     full_sync_exhaustive: false,
+                    refreshes: true,
                 },
             )
         })
@@ -548,6 +549,7 @@ fn derive_kind_info(kind: &str) -> KindInfo {
         // in the sync engine reads this value anyway -- it reads the
         // descriptor the adapter returned.
         full_sync_exhaustive: false,
+        refreshes: true,
     }
 }
 
@@ -650,6 +652,7 @@ mod tests {
             plural: "Tickets".to_owned(),
             monogram: "JI".to_owned(),
             full_sync_exhaustive: true,
+            refreshes: true,
         }])]);
         assert_eq!(catalog.info("ticket").monogram, "JI");
         assert_eq!(catalog.declared_kinds(), ["ticket"]);
@@ -691,6 +694,7 @@ mod tests {
             plural: "Tickets".to_owned(),
             monogram: "JI".to_owned(),
             full_sync_exhaustive: true,
+            refreshes: true,
         }])]);
 
         // `route` joined `asset` and `note` with M4.0's routes (#432).
@@ -752,6 +756,7 @@ mod tests {
             plural: "Stickies".to_owned(),
             monogram: "ST".to_owned(),
             full_sync_exhaustive: true,
+            refreshes: true,
         }])]);
         assert_eq!(catalog.info("note").plural, "Notes");
         assert!(!catalog.is_declared("note"));
@@ -816,6 +821,7 @@ mod tests {
             plural: derive_plural(id, &derive_label(id)),
             monogram: monogram.to_owned(),
             full_sync_exhaustive: true,
+            refreshes: true,
         }
     }
 

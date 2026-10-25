@@ -231,12 +231,27 @@ pub struct SourceDescriptor {
 
 impl SourceDescriptor {
     /// Whether this source reads one item by id: it declares
-    /// [`Capability::Refresh`] (ADR-0031). Answered off the descriptor, so a
-    /// caller deciding between *Refresh* and *Sync now*, or between a
-    /// refresh and the run alone after a landed write, calls nothing.
+    /// [`Capability::Refresh`] (ADR-0031), for some kind. Answered off the
+    /// descriptor, so a caller deciding between a refresh and the run alone
+    /// after a landed write calls nothing; one deciding between *Refresh* and
+    /// *Sync now* for an item asks [`Self::refreshes_kind`] (#2146).
     #[must_use]
     pub fn refreshes(&self) -> bool {
         self.capabilities.contains(&Capability::Refresh)
+    }
+
+    /// Whether this source reads an item of `kind` by id (#2146): it
+    /// declares [`Capability::Refresh`] and its
+    /// [`entity_kinds`](Self::entity_kinds) entry for `kind` says
+    /// [`KindInfo::refreshes`]. `false` for a kind it does not declare.
+    /// What an item's detail reads to draw *Refresh* or *Sync now*.
+    #[must_use]
+    pub fn refreshes_kind(&self, kind: &str) -> bool {
+        self.refreshes()
+            && self
+                .entity_kinds
+                .iter()
+                .any(|info| info.id == kind && info.refreshes)
     }
 
     /// Does this source declare `op`? `Ok` when [`Self::write_ops`] lists its
@@ -383,6 +398,32 @@ pub struct KindInfo {
     /// it without knowing the remote corpus, so the adapter's own integration
     /// tests are what hold it honest.
     pub full_sync_exhaustive: bool,
+    /// Whether [`Source::refresh`] reads an item **of this kind** by id
+    /// (#2146, ADR-0031). Read only under [`Capability::Refresh`], through
+    /// [`SourceDescriptor::refreshes_kind`]: the capability says the adapter
+    /// reads one item at all, this says which of its kinds. `false` for a
+    /// kind its refresh answers [`RefreshAnswer::NotOffered`] for, such as
+    /// TeamCity's build configuration or Gitea's repository, branch and
+    /// commit, so their detail draws *Sync now* from the start rather than
+    /// *Refresh* until the first press. [`contract::battery`] clause 13
+    /// holds it to the answers, kind by kind.
+    ///
+    /// **Per kind, not per adapter**, as [`Self::full_sync_exhaustive`] is.
+    ///
+    /// `#[serde(default = ...)]` to `true`, so a descriptor that predates
+    /// this (an external adapter's JSON) reads as one whose every kind is
+    /// refreshed when it declares the capability, which is what it was read
+    /// as before. Left out of the TypeScript mirror: the shell reads
+    /// `EntityDetail.refreshes`, never an adapter's kinds.
+    #[serde(default = "every_kind_refreshes")]
+    #[ts(skip)]
+    pub refreshes: bool,
+}
+
+/// [`KindInfo::refreshes`]' default: a kind is refreshed unless its
+/// descriptor says otherwise.
+fn every_kind_refreshes() -> bool {
+    true
 }
 
 /// What an adapter can do beyond plain syncing (spec §3).
@@ -2174,6 +2215,7 @@ mod tests {
                 plural: "Tickets".into(),
                 monogram: "JI".into(),
                 full_sync_exhaustive: true,
+                refreshes: true,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             payload_paths: vec![KindPaths {
@@ -2234,6 +2276,41 @@ mod tests {
             .remove("min_sync_interval_secs");
         let older: SourceDescriptor = serde_json::from_value(wire).unwrap();
         assert_eq!(older.min_sync_interval_secs, 60);
+    }
+
+    /// A kind's refresh flag (#2146) crosses as declared, a descriptor from
+    /// a peer that predates it reads every kind refreshed, and a kind is
+    /// refreshed only under `Capability::Refresh`.
+    #[test]
+    fn a_kinds_refresh_flag_round_trips_defaults_on_and_needs_the_capability() {
+        let mut declared = SourceDescriptor {
+            capabilities: vec![Capability::Refresh],
+            ..a_descriptor()
+        };
+        let mut config = declared.entity_kinds[0].clone();
+        config.id = "config".into();
+        config.refreshes = false;
+        declared.entity_kinds.push(config);
+        let first = declared.entity_kinds[0].id.clone();
+        assert!(declared.refreshes_kind(&first));
+        assert!(!declared.refreshes_kind("config"));
+        assert!(!declared.refreshes_kind("not-declared"));
+
+        let mut wire = serde_json::to_value(&declared).unwrap();
+        let back: SourceDescriptor = serde_json::from_value(wire.clone()).unwrap();
+        assert!(back.refreshes_kind(&first) && !back.refreshes_kind("config"));
+
+        for kind in wire["entity_kinds"].as_array_mut().unwrap() {
+            kind.as_object_mut().unwrap().remove("refreshes");
+        }
+        let older: SourceDescriptor = serde_json::from_value(wire).unwrap();
+        assert!(older.refreshes_kind(&first) && older.refreshes_kind("config"));
+
+        let without = SourceDescriptor {
+            capabilities: Vec::new(),
+            ..older
+        };
+        assert!(!without.refreshes_kind(&first));
     }
 
     /// An external adapter's descriptor crosses the WIT boundary as this

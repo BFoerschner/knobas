@@ -105,7 +105,9 @@ knobas-app	lib/knobas_app	commands::assets::tests::the_relations_the_panel_walks
 knobas-app	lib/knobas_app	commands::backup::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::entity::detail::tests::a_declared_kind_resolves_to_the_adapters_own_metadata
 knobas-app	lib/knobas_app	commands::entity::detail::tests::can_refresh_is_the_adapters_declaration
+knobas-app	lib/knobas_app	commands::entity::detail::tests::can_refresh_is_the_kinds_declaration
 knobas-app	lib/knobas_app	commands::entity::detail::tests::nothing_declared_resolves_to_none_rather_than_to_a_guess
+knobas-app	lib/knobas_app	commands::entity::detail::tests::the_fake_ipcs_not_refreshed_kinds_are_the_descriptors
 knobas-app	lib/knobas_app	commands::entity::detail::tests::two_adapters_declaring_one_kind_do_not_fight
 knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_role_the_mirror_sends
 knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_saved_view_the_mirror_sends
@@ -2469,6 +2471,7 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_deferred_section_that
 knobas-source	lib/knobas_source	contract::tests::rejects_a_do_nothing_adapter
 knobas-source	lib/knobas_source	contract::tests::rejects_a_foreign_namespace
 knobas-source	lib/knobas_source	contract::tests::rejects_a_frame_kind_with_no_pipeline_path
+knobas-source	lib/knobas_source	contract::tests::rejects_a_kind_declared_refreshed_that_the_refresh_does_not_offer
 knobas-source	lib/knobas_source	contract::tests::rejects_a_monitoring_claim_whose_monitors_declare_no_state
 knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_at_a_key_the_records_do_not_have
 knobas-source	lib/knobas_source	contract::tests::rejects_a_parent_at_that_leads_to_a_string
@@ -2481,6 +2484,7 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_path_misspelled_befor
 knobas-source	lib/knobas_source	contract::tests::rejects_a_path_that_lands_on_an_object
 knobas-source	lib/knobas_source	contract::tests::rejects_a_pipeline_with_no_name_path
 knobas-source	lib/knobas_source	contract::tests::rejects_a_read_only_ticket_system_that_answers_its_transitions_read
+knobas-source	lib/knobas_source	contract::tests::rejects_a_refresh_of_a_kind_declared_not_refreshed
 knobas-source	lib/knobas_source	contract::tests::rejects_a_refresh_that_answers_a_live_item_gone
 knobas-source	lib/knobas_source	contract::tests::rejects_a_refresh_that_disagrees_at_a_declared_path
 knobas-source	lib/knobas_source	contract::tests::rejects_a_refresh_under_another_title
@@ -2599,6 +2603,7 @@ knobas-source	lib/knobas_source	run::tests::an_artifact_path_never_climbs_out_of
 knobas-source	lib/knobas_source	tests::a_commit_file_crosses_in_its_own_shape
 knobas-source	lib/knobas_source	tests::a_create_queued_before_kinds_reads_as_an_http_check
 knobas-source	lib/knobas_source	tests::a_fault_from_a_response_carries_the_status_it_came_from
+knobas-source	lib/knobas_source	tests::a_kinds_refresh_flag_round_trips_defaults_on_and_needs_the_capability
 knobas-source	lib/knobas_source	tests::a_merge_queued_before_the_delete_flag_reads_as_one_that_keeps_the_branch
 knobas-source	lib/knobas_source	tests::a_merge_style_is_its_lowercase_word_and_nothing_else_decodes
 knobas-source	lib/knobas_source	tests::a_moved_target_crosses_with_what_the_source_holds_now

@@ -738,6 +738,7 @@ mod tests {
                 plural: "Tickets".into(),
                 monogram: "TI".into(),
                 full_sync_exhaustive: true,
+                refreshes: true,
             }],
             config_schema: serde_json::json!({}),
             payload_paths: Vec::new(),
@@ -750,6 +751,7 @@ mod tests {
             plural: "Monitors".into(),
             monogram: "MO".into(),
             full_sync_exhaustive: true,
+            refreshes: true,
         });
         assert_eq!(
             monitor_paths(&descriptor),

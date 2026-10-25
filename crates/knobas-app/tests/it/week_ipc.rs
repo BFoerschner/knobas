@@ -184,6 +184,7 @@ fn descriptor() -> SourceDescriptor {
             plural: "Tickets".to_owned(),
             monogram: "JI".to_owned(),
             full_sync_exhaustive: true,
+            refreshes: true,
         }],
         config_schema: json!({"type": "object", "properties": {}}),
         payload_paths: Vec::new(),

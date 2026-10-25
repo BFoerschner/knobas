@@ -73,6 +73,7 @@ pub fn descriptor_template() -> SourceDescriptor {
                 // wholly exhaustive (ADR-0003 changed where the claim is written,
                 // not what Jira claims).
                 full_sync_exhaustive: true,
+                refreshes: true,
             },
             KindInfo {
                 id: crate::KIND_JIRA_VIEW.to_owned(),
@@ -83,6 +84,9 @@ pub fn descriptor_template() -> SourceDescriptor {
                 // board that stops coming back is gone in Jira: the run itself
                 // says so (`views::gone`), and a full sync's sweep agrees.
                 full_sync_exhaustive: true,
+                // A view's id is not an issue key: it is read with the
+                // boards, and `refresh` answers it not offered (#2146).
+                refreshes: false,
             },
         ],
         config_schema: config_schema(),

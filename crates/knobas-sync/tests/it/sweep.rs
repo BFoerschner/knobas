@@ -76,6 +76,7 @@ impl Source for Shrinking {
                     plural: (*id).to_owned(),
                     monogram: "SH".into(),
                     full_sync_exhaustive: *exhaustive,
+                    refreshes: true,
                 })
                 .collect(),
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),

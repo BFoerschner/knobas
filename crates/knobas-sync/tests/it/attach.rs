@@ -71,6 +71,7 @@ impl Source for Monitors {
                 plural: self.kind.to_owned(),
                 monogram: "MO".into(),
                 full_sync_exhaustive: true,
+                refreshes: true,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             payload_paths: vec![knobas_source::KindPaths {

@@ -85,6 +85,7 @@ pub fn descriptor_template() -> SourceDescriptor {
             // weakening: a space this source was never configured to sync has
             // no rows in the mirror for a sweep to tombstone.
             full_sync_exhaustive: true,
+            refreshes: true,
         }],
         config_schema: config_schema(),
         payload_paths: payload_paths(),

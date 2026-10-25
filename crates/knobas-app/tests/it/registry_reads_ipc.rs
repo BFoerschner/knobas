@@ -64,6 +64,7 @@ impl AdapterRegistry for Probe {
                 plural: "Probe tickets".to_owned(),
                 monogram: "PT".to_owned(),
                 full_sync_exhaustive: true,
+                refreshes: true,
             }],
             config_schema: json!({}),
             payload_paths: vec![

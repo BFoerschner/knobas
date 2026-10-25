@@ -132,6 +132,7 @@ fn descriptor(id: &str, kind: &str, write_ops: &[String]) -> SourceDescriptor {
             plural: "Pull requests".to_owned(),
             monogram: "PR".to_owned(),
             full_sync_exhaustive: true,
+            refreshes: true,
         }],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
         // Where this stand-in keeps what the inbox reads (#277). Gitea's

@@ -71,6 +71,7 @@ pub fn descriptor_template() -> SourceDescriptor {
                 plural: "Builds".to_owned(),
                 monogram: "BU".to_owned(),
                 full_sync_exhaustive: false,
+                refreshes: true,
             },
             KindInfo {
                 id: KIND_BUILD_CONFIG.to_owned(),
@@ -78,6 +79,9 @@ pub fn descriptor_template() -> SourceDescriptor {
                 plural: "Build configurations".to_owned(),
                 monogram: "BC".to_owned(),
                 full_sync_exhaustive: false,
+                // `refresh` answers a configuration not offered: the run that
+                // follows its one write is all it needs (#2146).
+                refreshes: false,
             },
         ],
         // **The reason that field exists.** A TeamCity full sync fetches the

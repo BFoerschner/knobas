@@ -128,6 +128,9 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             // repository in scope. This is what retires the row of a
             // repository that was deleted upstream.
             full_sync_exhaustive: true,
+            // `crate::refresh` reads a pull request and an issue by id, and
+            // answers a repository, branch or commit not offered (#2146).
+            refreshes: false,
         },
         KindInfo {
             id: KIND_BRANCH.into(),
@@ -141,6 +144,7 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             // branch -- and `branch` is precisely the kind links hang off
             // (spec §5a).
             full_sync_exhaustive: true,
+            refreshes: false,
         },
         KindInfo {
             id: KIND_PR.into(),
@@ -150,6 +154,7 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             // `prs_per_repo` bounds what one run mirrors, cursor-less runs
             // included. A budgeted kind is non-exhaustive by definition.
             full_sync_exhaustive: false,
+            refreshes: true,
         },
         KindInfo {
             id: KIND_COMMIT.into(),
@@ -158,6 +163,7 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             monogram: "CM".into(),
             // `commits_per_repo`, likewise.
             full_sync_exhaustive: false,
+            refreshes: false,
         },
         KindInfo {
             id: KIND_TICKET.into(),
@@ -173,6 +179,7 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             // admin deleted stays in the mirror. A closed one is still listed
             // (`state=all`), so closing moves its state and never tombstones it.
             full_sync_exhaustive: false,
+            refreshes: true,
         },
     ]
 }

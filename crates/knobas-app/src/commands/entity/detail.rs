@@ -21,8 +21,9 @@ pub struct EntityDetail {
     /// produces). Both cases fall through to the frontend's §3a humaniser,
     /// which is what §3a asks for when nothing declares anything.
     pub kind_info: Option<knobas_source::KindInfo>,
-    /// Whether the item's adapter reads one item by id (#2107, ADR-0031):
-    /// its descriptor declares `Capability::Refresh`. The detail draws
+    /// Whether the item's adapter reads one item **of its kind** by id
+    /// (#2107, #2146, ADR-0031): its descriptor declares `Capability::Refresh`
+    /// and the kind's `KindInfo::refreshes`. The detail draws
     /// *Refresh* where it does and *Sync now* where it does not, both only
     /// while [`SourceRef::enabled`]. Off the adapter's template, so the read
     /// builds no source; `false` for a source with no configuration row or
@@ -117,7 +118,11 @@ pub async fn get_entity_inner(
             detail.configured_adapter_kind.as_deref(),
             &detail.row.kind,
         ),
-        refreshes: refreshes(registry, detail.configured_adapter_kind.as_deref()),
+        refreshes: refreshes(
+            registry,
+            detail.configured_adapter_kind.as_deref(),
+            &detail.row.kind,
+        ),
         row: detail.row,
         source: detail.source,
         body_text: detail.body_text,
@@ -241,7 +246,7 @@ mod tests {
     fn can_refresh_is_the_adapters_declaration() {
         let templates = registry().templates();
         assert!(
-            refreshes(&registry(), Some("mock")),
+            refreshes(&registry(), Some("mock"), "ticket"),
             "the mock reads one item"
         );
         // An adapter that does not declare the read, while one is compiled
@@ -249,13 +254,88 @@ mod tests {
         let quiet = templates.iter().find(|template| !template.refreshes());
         if let Some(quiet) = quiet {
             assert!(
-                !refreshes(&registry(), Some(&quiet.adapter_kind)),
+                !refreshes(&registry(), Some(&quiet.adapter_kind), "ticket"),
                 "{} does not declare the read",
                 quiet.adapter_kind
             );
         }
-        assert!(!refreshes(&registry(), None));
-        assert!(!refreshes(&registry(), Some("not-a-compiled-in-adapter")));
+        assert!(!refreshes(&registry(), None, "ticket"));
+        assert!(!refreshes(
+            &registry(),
+            Some("not-a-compiled-in-adapter"),
+            "ticket"
+        ));
+    }
+
+    /// Per kind, not per adapter (#2146): TeamCity reads a build by id and
+    /// answers a build configuration *not offered*, so a configuration's
+    /// detail draws *Sync now* from the start, and a build's *Refresh*. A
+    /// kind the adapter does not declare is not refreshed either.
+    #[test]
+    fn can_refresh_is_the_kinds_declaration() {
+        assert!(refreshes(&registry(), Some("teamcity"), "build"));
+        assert!(!refreshes(&registry(), Some("teamcity"), "build_config"));
+        assert!(refreshes(&registry(), Some("gitea"), "pr"));
+        for kind in ["repo", "branch", "commit"] {
+            assert!(!refreshes(&registry(), Some("gitea"), kind), "gitea {kind}");
+        }
+        assert!(!refreshes(&registry(), Some("jira"), "jira_view"));
+        assert!(!refreshes(&registry(), Some("mock"), "no-such-kind"));
+    }
+
+    /// The `?fake-ipc` fixture's `NOT_REFRESHED` (`fake/entity.ts`) is a
+    /// hand copy of the kinds each refreshing template declares not
+    /// refreshed (#2146): it lists exactly those, adapter by adapter, so a
+    /// flag flipped on one side fails here rather than drawing the other
+    /// button in the fixture only.
+    #[test]
+    fn the_fake_ipcs_not_refreshed_kinds_are_the_descriptors() {
+        use std::collections::{BTreeMap, BTreeSet};
+        let fixture = include_str!("../../../../../app/src/lib/shell/dev/fake/entity.ts");
+        let header = "const NOT_REFRESHED: Readonly<Record<string, ReadonlySet<string>>> = {";
+        let start = fixture
+            .find(header)
+            .unwrap_or_else(|| panic!("`{header}` is not in fake/entity.ts"))
+            + header.len();
+        let body = &fixture[start..];
+        let body = &body[..body.find("\n};").expect("NOT_REFRESHED is never closed")];
+        let fake: BTreeMap<String, BTreeSet<String>> = body
+            .lines()
+            .filter_map(|line| line.trim().split_once(": new Set(["))
+            .map(|(adapter, kinds)| {
+                let kinds = kinds.split("])").next().unwrap_or_default();
+                let kinds = kinds
+                    .split(',')
+                    .map(|kind| kind.trim().trim_matches('"').to_owned())
+                    .filter(|kind| !kind.is_empty())
+                    .collect();
+                (adapter.to_owned(), kinds)
+            })
+            .collect();
+        assert!(
+            !fake.is_empty(),
+            "no entries read from NOT_REFRESHED:\n{body}"
+        );
+        let declared: BTreeMap<String, BTreeSet<String>> = registry()
+            .templates()
+            .into_iter()
+            .filter(knobas_source::SourceDescriptor::refreshes)
+            .map(|template| {
+                let kinds = template
+                    .entity_kinds
+                    .iter()
+                    .filter(|info| !info.refreshes)
+                    .map(|info| info.id.clone())
+                    .collect::<BTreeSet<_>>();
+                (template.adapter_kind, kinds)
+            })
+            .filter(|(_, kinds)| !kinds.is_empty())
+            .collect();
+        assert_eq!(
+            fake, declared,
+            "app/src/lib/shell/dev/fake/entity.ts's NOT_REFRESHED is no longer the kinds the \
+             refreshing templates declare `refreshes: false`"
+        );
     }
 
     /// One kind id declared by two adapters resolves by **adapter**, not by

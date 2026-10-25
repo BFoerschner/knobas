@@ -121,6 +121,7 @@ impl Source for Monitors {
                     plural: (*kind).to_owned(),
                     monogram: "MO".into(),
                     full_sync_exhaustive: true,
+                    refreshes: true,
                 })
                 .collect(),
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),

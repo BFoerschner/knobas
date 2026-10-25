@@ -4,8 +4,8 @@
  * it settles on what came back and never blanks.
  *
  * Which button a detail draws is its read's answer, not a second call: an
- * adapter that reads one item (`EntityDetail.refreshes`) gets *Refresh*, one
- * that does not gets *Sync now*, which runs the item's source through
+ * item whose adapter reads one of its kind (`EntityDetail.refreshes`, #2146)
+ * gets *Refresh*, one that does not gets *Sync now*, which runs the item's source through
  * {@link sourceSyncs}, the run every detail of that source shares. A turned-off
  * source gets neither; its banner's remedy is re-enabling it. A tombstoned
  * item keeps *Refresh*: a read that finds it brings it back.

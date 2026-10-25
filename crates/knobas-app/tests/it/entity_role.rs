@@ -32,6 +32,7 @@ impl knobas_sync::scheduler::AdapterRegistry for WithCustom {
             plural: id.to_owned(),
             monogram: "XX".to_owned(),
             full_sync_exhaustive: true,
+            refreshes: true,
         };
         all.push(SourceDescriptor {
             id: CUSTOM.to_owned(),

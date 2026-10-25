@@ -51,6 +51,7 @@ impl Source for Tickets {
                 plural: "Tickets".into(),
                 monogram: "TI".into(),
                 full_sync_exhaustive: false,
+                refreshes: true,
             }],
             config_schema: json!({ "type": "object", "properties": {} }),
             payload_paths: vec![KindPaths {

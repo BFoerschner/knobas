@@ -102,6 +102,7 @@ fn descriptor() -> SourceDescriptor {
             plural: "Monitors".to_owned(),
             monogram: "MO".to_owned(),
             full_sync_exhaustive: true,
+            refreshes: true,
         }],
         config_schema: json!({"type": "object", "properties": {}}),
         payload_paths: Vec::new(),

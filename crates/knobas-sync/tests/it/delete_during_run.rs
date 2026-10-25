@@ -130,6 +130,7 @@ impl Source for PausingSource {
                 plural: "Tickets".to_owned(),
                 monogram: "TK".to_owned(),
                 full_sync_exhaustive: false,
+                refreshes: true,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             payload_paths: Vec::new(),

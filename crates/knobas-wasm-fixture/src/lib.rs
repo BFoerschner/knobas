@@ -436,6 +436,7 @@ impl Adapter for Fixture {
                     plural: "Surveys".into(),
                     monogram: "SV".into(),
                     full_sync_exhaustive: true,
+                    refreshes: true,
                 },
                 pipeline,
                 run,

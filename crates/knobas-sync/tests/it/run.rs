@@ -150,6 +150,7 @@ impl Source for FakeSource {
                 // Everything it is given, every run: the engine's sweep may
                 // tombstone what it stops emitting.
                 full_sync_exhaustive: true,
+                refreshes: true,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             // Nothing declared: this stand-in has no payload shapes to
