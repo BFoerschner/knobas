@@ -33,14 +33,14 @@ use knobas_source::SourceError;
 
 use crate::model::{ContentPage, CurrentUser, RawContent};
 
-/// What the **mention walk** asks a record to carry.
+/// What the **comment walk** asks a record to carry.
 ///
 /// Deliberately thin: it needs the id, the `version` its cursor entry is made
 /// of, and the `container` a comment hangs off. The page it resolves to is
-/// then fetched whole with [`EXPAND`], so a mentioning page and a page the
-/// ordinary walk delivered are mapped from byte-identical records rather than
-/// from two shapes that have to agree.
-pub(crate) const MENTION_EXPAND: &str = "version,container";
+/// then fetched whole with [`EXPAND`], so a page a comment led to and a page
+/// the ordinary walk delivered are mapped from byte-identical records rather
+/// than from two shapes that have to agree.
+pub(crate) const COMMENT_EXPAND: &str = "version,container";
 
 /// What the **positions sweep** asks a record to carry (#1138): its place
 /// among its siblings, and nothing else -- no body, so Data Center answers up
@@ -119,11 +119,11 @@ pub(crate) trait ConfluenceApi: Send + Sync {
     async fn comments(&self, id: &str, start: u32, limit: u32) -> Result<ContentPage, SourceError>;
     /// `GET /rest/api/content/{id}?expand=…` -- one record by id.
     ///
-    /// The mention walk's second half: a comment that names the account is
-    /// found by CQL, and the **page** it hangs off is what becomes the item,
-    /// fetched here. A search cannot do it -- `id = <n>` is CQL, but a comment
-    /// on a page nobody edited is precisely the case whose page the walk's own
-    /// bound excludes.
+    /// The comment walk's second half: a comment new or edited since the
+    /// cursor is found by CQL, and the **page** it hangs off is what becomes
+    /// the item, fetched here. A search cannot do it -- `id = <n>` is CQL, but
+    /// a comment on a page nobody edited is precisely the case whose page the
+    /// walk's own bound excludes.
     async fn content(&self, id: &str, expand: &str) -> Result<RawContent, SourceError>;
     /// `GET /rest/api/user?key=…` -- the user a mention's `ri:userkey` names
     /// (#953), as Confluence's own user record. Data Center has no bulk form

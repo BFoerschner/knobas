@@ -68,7 +68,7 @@ pub(crate) fn to_sync_item(
         // **This is not the cursor's idea of changed, and must not become
         // it.** `crate::sync` walks and clamps on the page's own
         // `version.when`, because that is what CQL's `lastmodified` matches
-        // for a page; the mention walk is how a comment is reached instead. A
+        // for a page; the comment walk is how a comment is reached instead. A
         // record whose comments carry no `version` -- a server that would not
         // expand that deeply -- falls back to the page's stamp, which is the
         // miss direction and the behaviour before the expansion was asked for.
@@ -405,7 +405,7 @@ mod tests {
     /// otherwise be dated by whatever edit it last had. Every reader that
     /// filters on recency would drop it, `knobas_core::inbox`'s
     /// `WINDOW_DAYS` first among them -- which is precisely the case the
-    /// mention walk exists to reach.
+    /// comment walk exists to reach.
     ///
     /// Three arms, because the direction matters in each: a newer comment
     /// wins, an older one does not drag the page backwards, and a comment

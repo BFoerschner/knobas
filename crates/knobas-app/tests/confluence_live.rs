@@ -635,25 +635,11 @@ async fn the_three_page_writes_go_through_the_queue_and_come_back_from_confluenc
         commented.detail
     );
 
-    // Read back **through the adapter's own expansion**, not through the
-    // mirror -- and the reason is a measured fact about this product rather
-    // than a shortcut.
-    //
-    // A comment is separate content: posting one does not move its page's
-    // `lastmodified`, which is what the page walk's CQL matches, so no
-    // incremental sync can reach a page whose only change is a fresh comment
-    // (contract §4.2 D, "mentions"; #287's own live suite prints the two
-    // identical timestamps that prove it). The one path that *does* reach one
-    // is the mention query, and it reaches only comments that mention this
-    // account -- which this one deliberately does not, because a suite that
-    // could only assert a comment it had also @-mentioned itself in would be
-    // asserting the mention feature rather than the write.
-    //
-    // So what is asserted here is the write and the expansion: the comment is
-    // on the page, it is stored as the storage format the adapter rendered,
-    // and it carries the author and the instant `EXPAND` asks for. Those two
-    // fields are #286's widening, and this is the only place the real server
-    // confirms it.
+    // Read back **through the adapter's own expansion** first: the comment
+    // is on the page, it is stored as the storage format the adapter
+    // rendered, and it carries the author and the instant `EXPAND` asks for.
+    // Those two fields are #286's widening, and this is the only place the
+    // real server confirms it. The mirror comes after, below.
     let record = env
         .content(&edited.id, knobas_source_confluence::EXPAND_FOR_TESTS)
         .await;
@@ -692,6 +678,28 @@ async fn the_three_page_writes_go_through_the_queue_and_come_back_from_confluenc
     assert!(
         mine["version"]["when"].as_str().is_some(),
         "the widened EXPAND did not bring the comment's instant: {mine}"
+    );
+
+    // **And the mirror has it**, from the sync the write's own re-read runs
+    // and the incremental ones after it while the index catches up (#2073).
+    // A comment does not move its page's `lastmodified`, so the page walk
+    // cannot bring it; until #2073 the second walk took only comments that
+    // mention this account, which this one deliberately does not, and the
+    // thread showed it only after the next page edit.
+    let comment_id = mine["id"]
+        .as_str()
+        .expect("the comment has an id")
+        .to_owned();
+    let mirrored_after = sync_until(&state, &edited.id, "the comment knobas posted", |payload| {
+        payload["children"]["comment"]["results"]
+            .as_array()
+            .is_some_and(|thread| thread.iter().any(|c| c["id"] == json!(comment_id)))
+    })
+    .await;
+    assert_eq!(
+        mirrored_after["version"]["number"].as_i64(),
+        Some(base_version + 1),
+        "the page was edited again, so the page walk could have brought the comment"
     );
 
     // -- a created page ------------------------------------------------------
