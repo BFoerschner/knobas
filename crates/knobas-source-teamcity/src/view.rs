@@ -266,7 +266,8 @@ fn overview(
 /// the branches the recent builds ran on -- newest first and each once -- as
 /// suggestions. The branch starts empty, which is the default branch; the
 /// dialog also offers the *Parameters* tab's values to override for this run
-/// (`with_settings`).
+/// (`with_settings`), unless the user may not send them
+/// ([`run_without_settings`], #2055).
 ///
 /// **Never the default branch by name.** TeamCity resolves an explicit
 /// `branchName: main` against the branch specification to a logical branch

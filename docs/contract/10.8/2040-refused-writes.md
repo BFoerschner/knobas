@@ -38,3 +38,8 @@
   Gitea answers `refused_writes` from its empty-bodied branch and issue creates, which Gitea
   refuses for the scope or for the body before anything is made (#2030); see
   `2054-gitea-refused-writes.md`.
+
+  **Amendment (#2055, 2026-10-25): an ask can name one field of its write.** `WriteAsk` and
+  `RefusedWrite` gain `field: Option<String>`, absent on the wire when `None`, so a surface can
+  ask whether a write may carry one field of its payload (a TeamCity run's `parameters` and
+  `first_in_queue`); see `2055-a-write-ask-names-a-field.md`.
