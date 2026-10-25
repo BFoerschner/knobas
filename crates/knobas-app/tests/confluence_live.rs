@@ -690,6 +690,21 @@ async fn the_three_page_writes_go_through_the_queue_and_come_back_from_confluenc
         .as_str()
         .expect("the comment has an id")
         .to_owned();
+    // **The receipt names that comment** (#2074): the settle stamped the id
+    // Confluence answered the write with, witnessed here by Confluence's own
+    // read of the page's thread rather than by the receipt itself. It is what
+    // Docs drops its queued comment by once the words were edited.
+    let stamped: Option<String> =
+        sqlx::query_scalar("select remote_id from knobas.write_queue where id = $1")
+            .bind(commented.id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("the comment's queue row");
+    assert_eq!(
+        stamped.as_deref(),
+        Some(comment_id.as_str()),
+        "the comment write's row is not stamped with the id Confluence gave the comment"
+    );
     let mirrored_after = sync_until(&state, &edited.id, "the comment knobas posted", |payload| {
         payload["children"]["comment"]["results"]
             .as_array()
