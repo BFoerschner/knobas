@@ -659,7 +659,7 @@ knobas-app	test/it	dependencies_ipc::views_are_saved_renamed_chosen_and_deleted
 knobas-app	test/it	docs_ipc::a_new_page_goes_under_its_parent_in_storage_format
 knobas-app	test/it	docs_ipc::a_page_read_names_its_comments_and_the_ids_its_sent_comments_were_given
 knobas-app	test/it	docs_ipc::a_page_reads_as_blocks_with_the_mirror_filled_in
-knobas-app	test/it	docs_ipc::a_page_reads_with_its_rail_and_sections
+knobas-app	test/it	docs_ipc::a_page_reads_with_its_context_and_sections
 knobas-app	test/it	docs_ipc::a_page_under_a_parent_loop_keeps_its_parent
 knobas-app	test/it	docs_ipc::a_parent_loop_is_cut_and_both_pages_sit_at_the_top
 knobas-app	test/it	docs_ipc::a_search_finds_pages_with_every_word_and_says_where_the_snippet_is

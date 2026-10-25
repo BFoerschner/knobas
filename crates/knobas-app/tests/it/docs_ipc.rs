@@ -854,7 +854,7 @@ async fn the_space_the_grammar_and_the_empty_query() {
     );
 }
 
-// -- the rail, the export and the writes (#861, #862) -------------------------
+// -- the page's context, the export and the writes (#861, #862) ---------------
 
 /// A Jira source and a ticket in it with a status, for *Work it belongs to*.
 async fn ticket(pool: &sqlx::PgPool, title: &str, status: &str) -> (String, String) {
@@ -885,12 +885,12 @@ async fn ticket(pool: &sqlx::PgPool, title: &str, status: &str) -> (String, Stri
     (id, key)
 }
 
-/// The rail: pages that link here (from the link lines written at sync, in
+/// The page's context: its backlinks (from the link lines written at sync, in
 /// the same source, never itself), the work it belongs to (chips and knobas
 /// links, with status), the history and the sections; and the writes the
 /// source takes.
 #[tokio::test]
-async fn a_page_reads_with_its_rail_and_sections() {
+async fn a_page_reads_with_its_context_and_sections() {
     let pool = pool().await;
     let src = confluence(&pool).await;
     let (chip, chip_key) = ticket(&pool, "Retry failed payouts", "In Progress").await;
