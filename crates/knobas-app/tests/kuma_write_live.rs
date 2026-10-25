@@ -35,6 +35,7 @@
 //! (`alert_chain_live.rs` records the same reasoning).
 
 mod live_digest;
+mod live_refresh;
 
 use std::process::Command;
 use std::sync::Arc;
@@ -47,8 +48,9 @@ use knobas_core::write_queue::WriteState;
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
 use knobas_source::instance::Account;
-use knobas_sync::scheduler::{Scheduler, SchedulerDeps};
+use knobas_sync::scheduler::{RefreshEnd, Scheduler, SchedulerDeps, SyncEvents};
 use live_digest::{Connections, Quiet, sync};
+use live_refresh::{Snapshots, remote_id};
 use serde_json::json;
 use sqlx::{PgPool, Row};
 
@@ -174,7 +176,23 @@ impl Drop for Scratch {
 /// whole subject: without the account this source declares no write ops and
 /// `submit_write` refuses the pause by name.
 async fn app(env: &Env) -> SourcesState {
-    let connector = knobas_db::test_util::scratch_database("kuma_write").await;
+    app_with(env, None).await
+}
+
+/// [`app`], and given `events`, the app's own scheduler
+/// (`knobas_app::sources::start_scheduler`) telling them: there a landed
+/// write is followed as in the app, by its refresh and then a run (#2100,
+/// ADR-0031).
+async fn app_with(
+    env: &Env,
+    events: Option<&dyn Fn(PgPool) -> Arc<dyn SyncEvents>>,
+) -> SourcesState {
+    let connector = knobas_db::test_util::scratch_database(if events.is_some() {
+        "kuma_write_refresh"
+    } else {
+        "kuma_write"
+    })
+    .await;
     let pool = connector
         .pool(4)
         .await
@@ -210,16 +228,25 @@ async fn app(env: &Env) -> SourcesState {
     .await
     .expect("the source row is written");
 
-    let scheduler = Scheduler::start(SchedulerDeps {
+    let deps = |events: Arc<dyn SyncEvents>| SchedulerDeps {
         pool: pool.clone(),
-        connections: Arc::new(Connections(connector)),
+        connections: Arc::new(Connections(connector.clone())),
         registry: Arc::new(Registry::for_process()),
         secrets: secrets.clone(),
-        events: Arc::new(Quiet),
+        events,
         timing: knobas_sync::scheduler::SchedulerTiming::default(),
         quit: knobas_sync::scheduler::Quit::default(),
-    })
-    .await
+    };
+    let scheduler = match events {
+        None => Scheduler::start(deps(Arc::new(Quiet))).await,
+        Some(events) => {
+            knobas_app::sources::start_scheduler(
+                deps(events(pool.clone())),
+                knobas_sync::background::Background::new(),
+            )
+            .await
+        }
+    }
     .expect("a scheduler over the scratch database");
 
     SourcesState {
@@ -366,6 +393,110 @@ async fn a_pause_queued_through_the_write_queue_reaches_kuma_and_the_mirror() {
     .expect("the scratch monitor is live in the mirror again");
 
     state.scheduler.shutdown().await;
+}
+
+/// **Each landed write refreshes its monitor before the run after it (#2100,
+/// ADR-0031)**: the pause tombstones it, which is what the roster draws
+/// *Paused* from (`monitors.ts`, a tombstoned row), the resume brings it back,
+/// and a create is mirrored by the id Kuma minted.
+///
+/// Read when each refresh ends (`live_refresh::Snapshots`), with the runs of
+/// the source started since the write settled counted beside it: none, or
+/// the run is what the mirror shows. The resume and the create are read
+/// back the moment Kuma acknowledges them, before their first heartbeat
+/// publishes a series, which is the half `crate::refresh` in the adapter
+/// waits out.
+// Multi-threaded: `Snapshots` reads the mirror inside the event, in place.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn each_landed_write_refreshes_its_monitor_before_the_run_after_it() {
+    let env = env();
+    let taken = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let heard = std::sync::Mutex::new(None);
+    let state = app_with(
+        &env,
+        Some(&|pool: PgPool| -> Arc<dyn SyncEvents> {
+            let snapshots = Snapshots {
+                pool,
+                taken: Arc::clone(&taken),
+            };
+            *heard.lock().unwrap() = Some(snapshots.clone());
+            Arc::new(snapshots)
+        }),
+    )
+    .await;
+    let snapshots = heard.lock().unwrap().take().expect("the events were built");
+    let _scratch = Scratch::add();
+    let _litter = Scratch::removing(CREATED);
+    kuma_monitor(&["delete", CREATED]);
+
+    let (entity, _) = until_mirrored(&state, "the scratch monitor is mirrored live", |row| {
+        matches!(row, Some((_, false)))
+    })
+    .await
+    .expect("the scratch monitor is in the mirror");
+
+    let paused = sent(&state, json!({ "PauseMonitor": { "entity": entity.clone() } })).await;
+    let shot = snapshots.of(paused).await;
+    assert_eq!(shot.ended.entity_id, entity);
+    assert_eq!(shot.ended.ended, RefreshEnd::Gone, "the pause");
+    assert_eq!(shot.runs_since_the_write, 0, "the pause: a run started first");
+    assert!(
+        shot.payload.is_none(),
+        "the paused monitor is tombstoned, so the roster draws it Paused: {:?}",
+        shot.payload
+    );
+
+    let resumed = sent(&state, json!({ "ResumeMonitor": { "entity": entity.clone() } })).await;
+    let shot = snapshots.of(resumed).await;
+    assert_eq!(shot.ended.entity_id, entity);
+    assert_eq!(shot.ended.ended, RefreshEnd::Refreshed, "the resume");
+    assert_eq!(shot.runs_since_the_write, 0, "the resume: a run started first");
+    let payload = shot.payload.expect("the resumed monitor is live in the mirror");
+    assert!(
+        payload.get("state").is_some_and(|s| !s.is_null()),
+        "a resumed monitor is mirrored with a state: {payload}"
+    );
+
+    let created = sent(
+        &state,
+        json!({
+            "CreateMonitor": {
+                "entity": knobas_source::monitor_target(KUMA),
+                "name": CREATED,
+                "url": SCRATCH_URL,
+            }
+        }),
+    )
+    .await;
+    let minted = remote_id(&state.pool, created).await;
+    let shot = snapshots.of(created).await;
+    assert_eq!(
+        shot.ended.entity_id,
+        format!("{KUMA}:{minted}"),
+        "the create is refreshed by the id Kuma minted"
+    );
+    assert_eq!(shot.ended.ended, RefreshEnd::Refreshed, "the create");
+    assert_eq!(shot.runs_since_the_write, 0, "the create: a run started first");
+    let payload = shot.payload.expect("the created monitor is in the mirror");
+    println!("LIVE create {minted}: mirrored {payload}");
+    assert_eq!(payload["name"], CREATED);
+    assert_eq!(payload["id"], json!(minted));
+
+    state.scheduler.shutdown().await;
+}
+
+/// `op` through the queue, settled `sent`: its queue row's id.
+async fn sent(state: &SourcesState, op: serde_json::Value) -> i64 {
+    let queued = write_queue::submit(state, op.clone())
+        .await
+        .unwrap_or_else(|e| panic!("the queue takes {op}: {e:?}"));
+    let row = knobas_core::write_queue::get(&state.pool, queued.id)
+        .await
+        .expect("the queue row is readable")
+        .expect("the queue row exists");
+    assert_eq!(row.state, WriteState::Sent, "{op}: {:?}", row.detail);
+    queued.id
 }
 
 /// The negative, at the same seam: **a Kuma with only its API key refuses the
