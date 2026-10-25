@@ -1714,8 +1714,10 @@ impl Refreshes {
 /// refresh is asserted to end before that run's `started_at`. What it holds is
 /// held to **Jira's own answer**: the status Jira reports, the comment and the
 /// worklog by the ids Jira gave them, the ticket by the key the receipt names.
-/// Jira's search index lags the write, which is what the adapter's wait is
-/// for: a refresh that read the index at once would hold the issue as it was.
+/// Jira's search index can lag the write, which the adapter waits for; on
+/// the runs this was written against the index already held each write when
+/// the refresh searched, so the wait itself is witnessed by the adapter's
+/// unit tests (`refresh::tests`), not here.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
 async fn each_landed_write_is_in_the_mirror_as_jira_holds_it_before_its_run() {

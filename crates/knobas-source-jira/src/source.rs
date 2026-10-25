@@ -106,6 +106,16 @@ impl JiraSource {
         Ok(key)
     }
 
+    /// The read side over this instance: what a sync and a refresh run on.
+    fn reader(&self) -> SyncRun<'_> {
+        SyncRun {
+            api: &self.http,
+            cfg: &self.cfg,
+            source_id: &self.id,
+            base_url: &self.base_url,
+        }
+    }
+
     /// This instance's Epic Link custom field id, or `None` where the instance
     /// has none to find.
     ///
@@ -279,14 +289,7 @@ impl Source for JiraSource {
         cursor: Option<Cursor>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
-        SyncRun {
-            api: &self.http,
-            cfg: &self.cfg,
-            source_id: &self.id,
-            base_url: &self.base_url,
-        }
-        .run(cursor, sink)
-        .await
+        self.reader().run(cursor, sink).await
     }
 
     /// One issue, by a search on its key (#2097, [`crate::refresh`]). A
@@ -298,14 +301,7 @@ impl Source for JiraSource {
         if !is_issue_key(&key) {
             return Ok(RefreshAnswer::NotOffered);
         }
-        SyncRun {
-            api: &self.http,
-            cfg: &self.cfg,
-            source_id: &self.id,
-            base_url: &self.base_url,
-        }
-        .refresh(&key, crate::refresh::PATIENCE)
-        .await
+        self.reader().refresh(&key, crate::refresh::PATIENCE).await
     }
 
     /// Perform one of the three writes M2 ratified for Jira, or refuse.
@@ -836,8 +832,6 @@ mod tests {
         assert!(message.contains("not a Jira project"), "{message}");
     }
 
-    /// An id that does not parse names nothing, and nothing about waiting makes
-    /// it parse -- so it is a refusal, which the queue does not retry.
     /// A view is not read by id, and no request is made to say so; an id
     /// of another source is refused before any request too.
     #[tokio::test]
@@ -856,6 +850,8 @@ mod tests {
         assert!(source.descriptor().refreshes());
     }
 
+    /// An id that does not parse names nothing, and nothing about waiting makes
+    /// it parse -- so it is a refusal, which the queue does not retry.
     #[tokio::test]
     async fn an_entity_id_that_is_not_one_is_refused() {
         let mut i = instance(json!({}));

@@ -89,7 +89,7 @@ pub(crate) trait JiraApi: Send + Sync {
     /// and `updated` as the **database** holds them, or `None` for a key Jira
     /// answers 404 (deleted, or not this account's to see). A refresh's probe
     /// ([`crate::refresh`], #2097), never its item: the item is the search's.
-    /// A sync run's fakes model no probe, so the default answers none.
+    /// A sync run's fakes model no probe, so the default is no answer.
     async fn issue_stamp(&self, _key: &str) -> Result<Option<Issue>, SourceError> {
         Err(SourceError::protocol("this Jira answers no issue read"))
     }

@@ -247,13 +247,7 @@ impl SyncRun<'_> {
                     continue;
                 }
                 self.complete(&mut raw).await?;
-                let item = map::to_sync_item(
-                    self.source_id,
-                    self.base_url,
-                    self.cfg.epic_link_field.as_deref(),
-                    self.cfg.sprint_field.as_deref(),
-                    &raw,
-                );
+                let item = self.item_of(&raw);
                 // Sink failures are never swallowed (SPI doc on `Source::sync`).
                 sink.item(item).await?;
                 emitted += 1;
@@ -415,6 +409,18 @@ impl SyncRun<'_> {
             raw.set_worklogs(page.worklogs);
         }
         Ok(())
+    }
+
+    /// One completed record as the item this source emits for it: the walk's
+    /// and a refresh's one mapping (#2097).
+    pub(crate) fn item_of(&self, raw: &RawIssue) -> knobas_source::SyncItem {
+        map::to_sync_item(
+            self.source_id,
+            self.base_url,
+            self.cfg.epic_link_field.as_deref(),
+            self.cfg.sprint_field.as_deref(),
+            raw,
+        )
     }
 
     pub(crate) fn fields(&self) -> String {

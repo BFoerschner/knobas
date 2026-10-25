@@ -59,15 +59,23 @@ pub(crate) fn build_ceiling_jql(cfg: &JiraConfig) -> String {
     }
 }
 
-/// A refresh's search for one issue (#2097): `<scope> AND key = "<key>"`,
-/// or the key alone when `scoped` is false or the source has no scope. The
-/// scope is the walk's, so the issue is read only where a run would read it.
+/// Where a refresh's search for one issue looks (#2097).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Within {
+    /// Inside the walk's scope, so the issue is read only where a run reads it.
+    Scope,
+    /// Anywhere this account sees: whether the index holds it at all.
+    Anywhere,
+}
+
+/// A refresh's search for one issue: `<scope> AND key = "<key>"`, or the
+/// key alone [`Within::Anywhere`] or when the source has no scope.
 ///
 /// `key` is one `JiraSource::issue_key`'s grammar passed
 /// (`[A-Z][A-Z0-9_]*-\d+`), so it holds no quote to escape.
-pub(crate) fn build_key_jql(cfg: &JiraConfig, key: &str, scoped: bool) -> String {
+pub(crate) fn build_key_jql(cfg: &JiraConfig, key: &str, within: Within) -> String {
     let by_key = format!("key = \"{key}\"");
-    match scope(cfg).filter(|_| scoped) {
+    match scope(cfg).filter(|_| within == Within::Scope) {
         Some(scope) => format!("{scope} AND {by_key}"),
         None => by_key,
     }
@@ -116,23 +124,23 @@ mod tests {
     fn a_refresh_searches_the_key_inside_the_walks_scope() {
         let projects = cfg(json!({ "projects": ["PAY", "OPS"] }));
         assert_eq!(
-            build_key_jql(&projects, "PAY-231", true),
+            build_key_jql(&projects, "PAY-231", Within::Scope),
             r#"project in ("PAY", "OPS") AND key = "PAY-231""#
         );
         assert_eq!(
-            build_key_jql(&projects, "PAY-231", false),
+            build_key_jql(&projects, "PAY-231", Within::Anywhere),
             r#"key = "PAY-231""#
         );
         assert_eq!(
             build_key_jql(
                 &cfg(json!({ "jql_filter": "a = 1 OR b = 2" })),
                 "PAY-1",
-                true
+                Within::Scope
             ),
             r#"(a = 1 OR b = 2) AND key = "PAY-1""#
         );
         assert_eq!(
-            build_key_jql(&cfg(json!({})), "PAY-1", true),
+            build_key_jql(&cfg(json!({})), "PAY-1", Within::Scope),
             r#"key = "PAY-1""#
         );
         assert!(is_scoped(&projects));

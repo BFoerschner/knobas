@@ -29,8 +29,7 @@ use std::time::Duration;
 use chrono::{DateTime, SubsecRound, Utc};
 use knobas_source::{RefreshAnswer, SourceError};
 
-use crate::jql::{build_key_jql, is_scoped};
-use crate::map;
+use crate::jql::{Within, build_key_jql, is_scoped};
 use crate::model::RawIssue;
 use crate::sync::SyncRun;
 use crate::time::parse_jira_time;
@@ -40,7 +39,9 @@ use crate::time::parse_jira_time;
 /// `atlassian_live`'s wait for the same index takes.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Patience {
+    /// The wait between two searches.
     pub every: Duration,
+    /// How many searches, the first included.
     pub tries: u32,
 }
 
@@ -80,15 +81,20 @@ impl SyncRun<'_> {
             if attempt > 0 {
                 tokio::time::sleep(patience.every).await;
             }
-            if let Some(raw) = self.indexed(key, true, held, &fields).await? {
+            if let Some(raw) = self.indexed(key, Within::Scope, held, &fields).await? {
                 return self.item(raw).await;
             }
             // Not in the scope's answer: outside the scope, or not indexed
             // yet. Only the index can say which. Once it holds the issue
             // fresh, the scope is asked once more, since the index may have
             // caught up between the two searches.
-            if is_scoped(self.cfg) && self.indexed(key, false, held, &fields).await?.is_some() {
-                return match self.indexed(key, true, held, &fields).await? {
+            if is_scoped(self.cfg)
+                && self
+                    .indexed(key, Within::Anywhere, held, &fields)
+                    .await?
+                    .is_some()
+            {
+                return match self.indexed(key, Within::Scope, held, &fields).await? {
                     Some(raw) => self.item(raw).await,
                     None => Ok(RefreshAnswer::Gone),
                 };
@@ -103,26 +109,20 @@ impl SyncRun<'_> {
     /// The record completed and mapped as the walk completes and maps it.
     async fn item(&self, mut raw: RawIssue) -> Result<RefreshAnswer, SourceError> {
         self.complete(&mut raw).await?;
-        Ok(RefreshAnswer::Item(map::to_sync_item(
-            self.source_id,
-            self.base_url,
-            self.cfg.epic_link_field.as_deref(),
-            self.cfg.sprint_field.as_deref(),
-            &raw,
-        )))
+        Ok(RefreshAnswer::Item(self.item_of(&raw)))
     }
 
     /// The search's record of `key`, when it is at least as new as `held`.
     async fn indexed(
         &self,
         key: &str,
-        scoped: bool,
+        within: Within,
         held: Option<DateTime<Utc>>,
         fields: &str,
     ) -> Result<Option<RawIssue>, SourceError> {
         let page = self
             .api
-            .search(&build_key_jql(self.cfg, key, scoped), 0, 1, fields)
+            .search(&build_key_jql(self.cfg, key, within), 0, 1, fields)
             .await?;
         Ok(page.issues.into_iter().find(|raw| {
             let indexed = raw
@@ -134,6 +134,9 @@ impl SyncRun<'_> {
             raw.issue.key == key
                 && match (held, indexed) {
                     (Some(held), Some(indexed)) => indexed >= held,
+                    // No stamp on either side gives nothing to compare: the
+                    // record is taken as it stands, as the walk takes one
+                    // with no `updated` (`crate::sync`).
                     _ => true,
                 }
         }))
