@@ -390,11 +390,11 @@ liveup() { # liveup <name> <product> -- `testenv/live up <product>` in the scrat
 echo knobas-confluence >"$STUB_RUNNING_FILE"
 rc=$(liveup up1 confluence)
 check "live-up of a JVM product succeeds" "$rc" "0"
-keeper=$(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)
-check "after live-up the JVM lock is still held, by live-up" "$keeper" " live-up-confluence-kept $scratch/tree"
+keeper_lock=$(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)
+check "after live-up the JVM lock is still held, by live-up" "$keeper_lock" " live-up-confluence-kept $scratch/tree"
 checks=$((checks + 1))
 _lt_alive() { [ -n "$1" ] && kill -0 "${1%% *}" 2>/dev/null; }
-_lt_alive "$keeper" || fail "the lock's holder outlives the live-up that started it" "$keeper"
+_lt_alive "$keeper_lock" || fail "the lock's holder outlives the live-up that started it" "$keeper_lock"
 check "live-up says the product keeps the lock" "$(cat "$scratch/up1.out")" "holds the JVM lock until"
 taker otherworktree TAKER_TREE="$scratch/elsewhere/testenv" KNOBAS_LIVE_LOCK_WAIT=1
 rc=$(wait_rc otherworktree)
@@ -405,7 +405,7 @@ taker sameworktree KNOBAS_LIVE_LOCK_WAIT=1
 rc=$(wait_rc sameworktree)
 check "the live-up's own worktree runs under its lock" "$rc" "0"
 sleep 0.3
-check "and leaves the lock with the keeper" "$(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)" "$keeper"
+check "and leaves the lock with the keeper" "$(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)" "$keeper_lock"
 mkdir -p "$scratch/elsewhere/testenv"
 rc=$( (
   # shellcheck source=testenv/live-lib.sh disable=SC1091
@@ -416,8 +416,8 @@ rc=$( (
 check "live-down from another worktree succeeds" "$rc" "0"
 lock_gone "live-down, from any worktree, gives the live-up's lock back"
 checks=$((checks + 1))
-for ((i = 0; i < 50; i++)); do _lt_alive "$keeper" || break; sleep 0.1; done
-! _lt_alive "$keeper" || fail "live-down ends the keeper" "$keeper"
+for ((i = 0; i < 50; i++)); do _lt_alive "$keeper_lock" || break; sleep 0.1; done
+! _lt_alive "$keeper_lock" || fail "live-down ends the keeper" "$keeper_lock"
 # A product that goes away without live-down (removed by hand, a VM restart)
 # frees the lock too, at the keeper's next look.
 rc=$(liveup up2 confluence)
