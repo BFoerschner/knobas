@@ -3548,7 +3548,7 @@ async fn wiki_app(
 ///    mention *is* in the storage format and what the fixture cannot hold.
 /// 3. An incremental sync. The page's own `lastmodified` is asserted either
 ///    way and printed: on this product a comment does not move it, so the page
-///    walk cannot reach the page and the mention query is the only path to it.
+///    walk cannot reach the page and the comment walk is the only path to it.
 /// 4. The item is in the inbox as a **mention**, keyed on the page.
 /// 5. Its actions are **empty** -- the adapter declares no write op yet
 ///    (#286) -- and *snooze* records an activity line naming the page, which
@@ -3597,7 +3597,7 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
         "SEEDED page {} lastmodified: {before} before the comment, {after} after -- {}",
         wiki.page,
         if before == after {
-            "unchanged, so the page walk cannot reach it and the mention query is the only path"
+            "unchanged, so the page walk cannot reach it and the comment walk is the only path"
         } else {
             "MOVED, so the page walk reaches it too and this run witnesses the weaker path"
         }
@@ -3612,7 +3612,7 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
         assert!(
             std::time::Instant::now() < deadline,
             "no inbox mention after {INDEX_BUDGET:?} of syncing -- Confluence's CQL index never \
-             answered `mention = currentUser()` for comment {}",
+             answered `type = comment` for comment {}",
             mention.id
         );
     };
@@ -3685,6 +3685,288 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
 
     state.scheduler.shutdown().await;
     drop(mention);
+}
+
+/// The second account the comment test posts as (#2073): minted for the test
+/// and taken away again, so the plain seed's one Confluence user is what the
+/// next suite finds.
+const COMMENTER: &str = "knobas-commenter";
+const COMMENTER_PASSWORD: &str = "knobas-commenter-2073";
+
+/// [`COMMENTER`], and the comment it posted, both taken away when the guard
+/// drops and checked gone.
+struct Commenter {
+    url: String,
+    admin: (String, String),
+    comment: Option<String>,
+}
+
+impl Commenter {
+    /// Take away what a killed run left, then mint the account. The seeded
+    /// space grants `confluence-users`, which a new user is in, so it may
+    /// comment there.
+    async fn mint(wiki: &Wiki) -> Commenter {
+        let commenter = Commenter {
+            url: wiki.url.clone(),
+            admin: (wiki.user.clone(), wiki.password.clone()),
+            comment: None,
+        };
+        if let Err(left) = commenter.take_away().await {
+            panic!("an earlier run's {COMMENTER} could not be taken away: {left}");
+        }
+        let (status, made) = wiki
+            .api(
+                reqwest::Method::POST,
+                "rest/api/admin/user",
+                Some(json!({
+                    "userName": COMMENTER,
+                    "fullName": "Live commenter",
+                    "email": "commenter@example.com",
+                    "password": COMMENTER_PASSWORD,
+                    "notifyViaEmail": false,
+                })),
+            )
+            .await;
+        assert!(
+            matches!(status, 200 | 201),
+            "minting {COMMENTER}: {status} {made}"
+        );
+        commenter
+    }
+
+    /// One request as [`COMMENTER`].
+    async fn api(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> (u16, serde_json::Value) {
+        let http = client();
+        api(
+            &http,
+            &self.url,
+            COMMENTER,
+            COMMENTER_PASSWORD,
+            method,
+            path,
+            body,
+        )
+        .await
+    }
+
+    /// Post `text` on page `page` as [`COMMENTER`]; answers the comment's id.
+    async fn post(&mut self, page: &str, text: &str) -> String {
+        let (status, body) = self
+            .api(
+                reqwest::Method::POST,
+                "rest/api/content",
+                Some(json!({
+                    "type": "comment",
+                    "container": { "id": page, "type": "page" },
+                    "body": { "storage": { "value": format!("<p>{text}</p>"), "representation": "storage" } },
+                })),
+            )
+            .await;
+        assert_eq!(status, 200, "{COMMENTER} commenting on {page}: {body}");
+        let id = body["id"].as_str().expect("a comment id").to_owned();
+        self.comment = Some(id.clone());
+        id
+    }
+
+    /// Edit comment `id` on page `page` to `text`, as [`COMMENTER`] and as
+    /// version 2, the way the editor's *Edit* on a comment does.
+    async fn edit(&self, page: &str, id: &str, text: &str) {
+        let (status, body) = self
+            .api(
+                reqwest::Method::PUT,
+                &format!("rest/api/content/{id}"),
+                Some(json!({
+                    "id": id,
+                    "type": "comment",
+                    "container": { "id": page, "type": "page" },
+                    "version": { "number": 2 },
+                    "body": { "storage": { "value": format!("<p>{text}</p>"), "representation": "storage" } },
+                })),
+            )
+            .await;
+        assert_eq!(status, 200, "{COMMENTER} editing comment {id}: {body}");
+    }
+
+    /// The comment deleted, then the account, each checked gone.
+    async fn take_away(&self) -> Result<(), String> {
+        let http = client();
+        let (user, password) = (&self.admin.0, &self.admin.1);
+        let call = |method: reqwest::Method, path: String| {
+            let http = &http;
+            async move { api(http, &self.url, user, password, method, &path, None).await }
+        };
+        let gone = |path: String| {
+            let call = &call;
+            async move {
+                for _ in 0..60 {
+                    if call(reqwest::Method::GET, path.clone()).await.0 == 404 {
+                        return Ok(());
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                Err(format!("{path} is still there"))
+            }
+        };
+        if let Some(id) = &self.comment {
+            let path = format!("rest/api/content/{id}");
+            let (status, body) = call(reqwest::Method::DELETE, path.clone()).await;
+            if !matches!(status, 200 | 204 | 404) {
+                return Err(format!("DELETE comment {id} -> {status}: {body}"));
+            }
+            gone(path).await?;
+        }
+        let user_path = format!("rest/api/user?username={COMMENTER}");
+        if call(reqwest::Method::GET, user_path.clone()).await.0 != 404 {
+            let (status, body) = call(
+                reqwest::Method::DELETE,
+                format!("rest/api/admin/user/{COMMENTER}"),
+            )
+            .await;
+            if !(200..300).contains(&status) {
+                return Err(format!("DELETE user {COMMENTER} -> {status}: {body}"));
+            }
+            gone(user_path).await?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Commenter {
+    fn drop(&mut self) {
+        let commenter = Commenter {
+            url: self.url.clone(),
+            admin: self.admin.clone(),
+            comment: self.comment.take(),
+        };
+        undo(
+            &format!("{COMMENTER} and its comment"),
+            move || async move { commenter.take_away().await },
+        );
+    }
+}
+
+/// The thread of page `id` as the mirror holds it: `(comment id, author,
+/// storage)` per comment.
+async fn mirrored_thread(pool: &sqlx::PgPool, id: &str) -> Vec<(String, String, String)> {
+    let payload = sqlx::query_scalar::<_, serde_json::Value>(
+        "select payload from sync.live_item where entity_id = $1",
+    )
+    .bind(format!("{CONFLUENCE}:{id}"))
+    .fetch_optional(pool)
+    .await
+    .expect("the mirror is readable")
+    .unwrap_or_default();
+    payload["children"]["comment"]["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|c| {
+            let field = |v: &serde_json::Value| v.as_str().unwrap_or_default().to_owned();
+            (
+                field(&c["id"]),
+                field(&c["version"]["by"]["username"]),
+                field(&c["body"]["storage"]["value"]),
+            )
+        })
+        .collect()
+}
+
+/// Sync until the mirrored thread of page `id` holds comment `comment` saying
+/// `text`, or [`INDEX_BUDGET`] runs out. Answers the syncs it took.
+async fn sync_until_comment(
+    state: &SourcesState,
+    id: &str,
+    comment: &str,
+    text: &str,
+) -> (usize, (String, String, String)) {
+    let deadline = std::time::Instant::now() + INDEX_BUDGET;
+    let mut syncs = 0;
+    loop {
+        sync(state, CONFLUENCE).await;
+        syncs += 1;
+        let thread = mirrored_thread(&state.pool, id).await;
+        if let Some(found) = thread
+            .iter()
+            .find(|(cid, _, storage)| cid == comment && storage.contains(text))
+        {
+            return (syncs, found.clone());
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "after {syncs} incremental syncs over {INDEX_BUDGET:?} the mirror of page {id} \
+             still has no comment {comment} saying {text:?}: {thread:?}"
+        );
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    }
+}
+
+/// **A comment another account posts, and then edits, reaches the mirror of
+/// a page nobody edited** (#2073), through the real Confluence, the real sync
+/// engine and the real mirror.
+///
+/// 1. A full sync, which mirrors the seeded space and leaves a cursor.
+/// 2. A second account, minted for the test, comments on the seeded page. The
+///    comment names nobody, so the mention walk this replaced never saw it.
+/// 3. Incremental syncs until the mirrored thread holds it.
+/// 4. The account edits the comment in Confluence; incremental syncs until
+///    the mirror holds the new text.
+/// 5. The page's own version is the one it had before step 2: the page walk
+///    could reach neither, so the comment walk is what brought both.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_comment_another_account_posts_and_edits_reaches_the_mirror_of_an_unedited_page() {
+    let wiki = wiki();
+    wiki.clear_leftovers().await;
+    let (state, _events) = wiki_app(
+        "atlassian_live_comment",
+        &wiki,
+        AuthMethod::UserPassword,
+        &wiki.password,
+    )
+    .await;
+
+    // 1. The seeded corpus, and a cursor.
+    sync(&state, CONFLUENCE).await;
+    assert!(
+        confluence_pages(&state.pool)
+            .await
+            .contains(&format!("confluence:{}", wiki.page)),
+        "the seeded page is mirrored before anything is written"
+    );
+    let version = |record: serde_json::Value| record["version"]["number"].as_i64();
+    let before = version(wiki.content(&wiki.page, "version").await);
+
+    // 2. Somebody else's comment.
+    let mut commenter = Commenter::mint(&wiki).await;
+    let posted = format!("the retry budget looks right to me [{LITTER_LABEL}]");
+    let id = commenter.post(&wiki.page, &posted).await;
+
+    // 3. The incremental runs, polled until the index has it.
+    let (syncs, (_, author, _)) = sync_until_comment(&state, &wiki.page, &id, &posted).await;
+    assert_eq!(author, COMMENTER, "the comment is mirrored with its author");
+    println!("SEEDED comment {id} by {COMMENTER} mirrored after {syncs} incremental sync(s)");
+
+    // 4. Its edit, made in Confluence.
+    let edited = format!("meh [{LITTER_LABEL}]");
+    commenter.edit(&wiki.page, &id, &edited).await;
+    let (syncs, _) = sync_until_comment(&state, &wiki.page, &id, &edited).await;
+    println!("SEEDED comment {id}'s edit mirrored after {syncs} incremental sync(s)");
+
+    // 5. The page itself never moved.
+    assert_eq!(
+        version(wiki.content(&wiki.page, "version").await),
+        before,
+        "the page was edited under the test, so it no longer shows that the comment walk \
+         and not the page walk brought the comment"
+    );
+
+    state.scheduler.shutdown().await;
+    drop(commenter);
 }
 
 /// **M3.2's other exit criterion: the launcher finds "SEPA payout retry
