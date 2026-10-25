@@ -24,13 +24,19 @@
   A run or a parameter change the source's credential cannot make
   (`refused_writes`, #2040) is drawn disabled with the reason, and a press on
   it opens nothing.
+
+  *Refresh* or *Sync now* (#2137, after #2107) ends the header's actions over
+  the pipeline as `get_entity` reads it (`TfDetailRefresh`), with the
+  withdrawn and turned-off banners under the header (`TfDetailBanners`). A
+  refresh reads the pipeline's row (the list's), its runs, its settings and
+  its item again, over what the page drew.
 -->
 <script lang="ts">
   import { secondsLabel } from "../../time/format";
   import { onDestroy, onMount, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import type { PipelineRow, PipelineSettings, RunRow, Setting } from "../../ipc/entity";
+  import type { EntityDetail, PipelineRow, PipelineSettings, RunRow, Setting } from "../../ipc/entity";
   import type { SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite } from "../../shell/refused-writes";
@@ -41,6 +47,9 @@
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
   import { echoOn, echoWrite, echoesOn, sentWrites, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
+  import { createDetailRefresh } from "../refresh.svelte";
+  import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { runHash, runTone, shortTime } from "./builds";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
@@ -96,6 +105,7 @@
     job,
     runs: readRuns,
     onpin,
+    rereadRow,
     ports = BRIDGE,
   }: {
     pipeline: PipelineRow;
@@ -107,6 +117,8 @@
     runs: (pipelineId: string) => Promise<RunRow[]>;
     /** *Pin* / *Unpin*: the list's pins (#849), which the list owns. */
     onpin?: () => void;
+    /** Read the pipeline's row again, the list's (#2137): a *Refresh* asks it before the page's own reads. */
+    rereadRow?: () => Promise<void> | void;
     ports?: PipelinePorts;
   } = $props();
 
@@ -129,6 +141,10 @@
   let olderFailed = $state<string | null>(null);
   /** Bumped on every new pipeline, so an answer for the last one is dropped. */
   let token = 0;
+  /** The pipeline as `get_entity` reads it (#2137): what its *Refresh* and banners draw over; `null` until read. */
+  let detail = $state<EntityDetail | null>(null);
+  /** The header's *Refresh* or *Sync now* (#2107). */
+  const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
   $effect(() => {
     const wanted = id;
@@ -165,6 +181,9 @@
     settingsRead = false;
     older = "more";
     olderFailed = null;
+    detail = null;
+    refresh.reset();
+    void readDetail(wanted, () => mine === token);
     readRuns(wanted).then(
       (rows) => {
         if (mine !== token) return;
@@ -190,22 +209,35 @@
     );
   }
 
+  /** The pipeline's item (#2137); a failed read keeps the last one, and none draws no *Refresh*. */
+  function readDetail(wanted: string, current: () => boolean): Promise<void> {
+    return ports.getEntity(wanted).then(
+      (answer) => {
+        if (current()) detail = answer;
+      },
+      () => {},
+    );
+  }
+
   /** Bumped on every read again, so an older one answering late is dropped. */
   let rereads = 0;
 
   /**
    * A sync of the pipeline's source finished (#1450): the runs again, older
    * pages kept, the reader's filter, tab and dialog untouched. A failed read
-   * keeps the runs it had and says so.
+   * keeps the runs it had and says so. A *Refresh* (`everything`, #2137) reads
+   * the settings and the item too; it settles once those reads have answered.
    */
-  function reread(wanted: string) {
+  function reread(wanted: string, everything = false): Promise<unknown> {
     const mine = token;
     const seq = ++rereads;
     const current = () => mine === token && seq === rereads;
+    const reads: Promise<unknown>[] = [];
+    if (everything) reads.push(readDetail(wanted, current));
     // A parameter change waiting to be read (#2104): the settings again too.
-    if (untrack(() => echoesOn(wanted).some((echo) => echo.kind.startsWith(paramKind(""))))) {
+    if (everything || untrack(() => echoesOn(wanted).some((echo) => echo.kind.startsWith(paramKind(""))))) {
       const sentBefore = untrack(() => sentWrites(wanted));
-      ports.settings(wanted).then(
+      const read = ports.settings(wanted).then(
         (answer) => {
           if (mine !== token) return;
           settleEchoes(wanted, paramLanded(answer, sentBefore));
@@ -214,8 +246,9 @@
         // The tab keeps what it read; the next read tries again.
         () => {},
       );
+      reads.push(read);
     }
-    readRuns(wanted).then(
+    const runs = readRuns(wanted).then(
       (rows) => {
         if (!current()) return;
         settleEchoes(wanted, runLanded(rows));
@@ -226,6 +259,13 @@
         if (current()) failed = ipcErrorMessage(cause);
       },
     );
+    return Promise.allSettled([...reads, runs]);
+  }
+
+  /** The *Refresh*'s read again (#2137): the list's row of the pipeline, then the page's own reads. */
+  async function refreshRead() {
+    const wanted = id;
+    await Promise.allSettled([Promise.resolve().then(() => rereadRow?.()), reread(wanted, true)]);
   }
 
   // The refresh after a write echoed here reads the runs (and a changed
@@ -519,8 +559,10 @@
     {#if pipeline.web_url !== null}
       <button type="button" class="tf-btn tf-ghost" onclick={openInSource}>Open in {pipeline.source_name}</button>
     {/if}
+    {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={refreshRead} />{/if}
   </div>
 </header>
+{#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
 
 {#if stale !== null}
   <div class="tf-stale tf-bstale">

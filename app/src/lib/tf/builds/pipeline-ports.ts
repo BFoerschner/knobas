@@ -29,6 +29,7 @@ import type {
   ArtifactEntry,
   ArtifactPreview,
   DownloadTarget,
+  EntityDetail,
   LinkEntry,
   PipelineSettings,
   Project,
@@ -55,6 +56,7 @@ import type { RefusedWritesPort } from "../../shell/refused-writes";
 import { openExternal } from "../../shell/open-external";
 import { isEntityId, resolveTicket } from "../job/job";
 import { branchOptions } from "../repo/repo";
+import type { DetailRefreshPorts } from "../refresh.svelte";
 import type { StartValue } from "./run-dialog";
 
 export interface PipelinePorts {
@@ -88,6 +90,10 @@ export interface PipelinePorts {
   follower: () => WriteFollower;
   /** The writes the source's credential cannot make (`refused_writes`, #2040). */
   refusedWrites: RefusedWritesPort;
+  /** The page's own item, the pipeline or the run, as `get_entity` reads it: its *Refresh* and banners (#2137). */
+  getEntity: (entityId: string) => Promise<EntityDetail>;
+  /** The header's *Refresh* or *Sync now* (#2107, #2137); the bridge's when left out. */
+  refresh?: DetailRefreshPorts;
 }
 
 /** How many branches the job's read takes: a job reaches a handful. */
@@ -152,6 +158,7 @@ export const BRIDGE: PipelinePorts = {
   listen: (event, handler) => tauriListen(event, handler),
   follower: () => writeFollower(),
   refusedWrites: (asks) => refusedWrites(asks),
+  getEntity: (entityId) => getEntity(entityId),
 };
 
 /** The run page's reads (#853): the pipeline page's, and the run's source view. */

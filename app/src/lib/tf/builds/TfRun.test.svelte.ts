@@ -15,6 +15,7 @@ import { forgetEchoes, echoesOn } from "../queued.svelte";
 import type { RunPorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
 import TfRun from "./TfRun.svelte";
+import { detailOf, refreshProbe } from "./refresh.fixture";
 import type { WriteAsk } from "../../shell/refused-writes";
 
 let target: HTMLElement;
@@ -268,6 +269,7 @@ function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<Ru
     links: () => Promise.resolve([]),
     owedTickets: () => Promise.resolve([]),
     refusedWrites: () => Promise.resolve([]),
+    getEntity: (id) => Promise.resolve(detailOf(id)),
     ...overrides,
   };
   const crumbs = createRawSnippet((parts: () => { name: string }[]) => ({
@@ -1186,4 +1188,84 @@ test("Ticket queued goes Ticket sent on landing, and goes once the refresh's rea
   await events.refreshed("jira:PAY-342", 61);
   expect(chip()).toBeNull();
   expect([...target.querySelectorAll(".tf-problem a")].some((a) => a.textContent?.includes("PAY-342"))).toBe(true);
+});
+
+// -- Refresh (#2137) -----------------------------------------------------------
+
+const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-bhead .tf-acts .tf-refresh");
+
+test("Refresh on a run reads it from its source, then the run, its view and its log again over what it drew", async () => {
+  const probe = refreshProbe();
+  let logs = 0;
+  let details = 0;
+  const drawn = draw("teamcity:build:1187", undefined, {
+    refresh: probe.ports,
+    log: () => (logs++, Promise.resolve(null)),
+    getEntity: (id) => (details++, Promise.resolve(detailOf(id))),
+  });
+  await settle();
+  const before = { reads: drawn.reads, views: drawn.views.length, logs, details };
+  expect(refreshButton()?.textContent).toBe("Refresh");
+
+  refreshButton()!.click();
+  flushSync();
+  expect(refreshButton()?.textContent).toBe("Refreshing…");
+  expect(target.querySelector("h1")?.textContent).toContain("#1187");
+  await settle();
+  expect(probe.refreshed).toEqual(["teamcity:build:1187"]);
+  expect(drawn.reads).toBe(before.reads + 1);
+  expect(drawn.views.length).toBeGreaterThan(before.views);
+  expect(logs).toBe(before.logs + 1);
+  expect(details).toBe(before.details + 1);
+  expect(refreshButton()?.textContent).toBe("Refresh");
+});
+
+test("a run whose refresh failed keeps its page and says why under the header", async () => {
+  const probe = refreshProbe();
+  probe.answer = { outcome: "failed", reason: "502 Bad Gateway" };
+  draw("teamcity:build:1187", undefined, { refresh: probe.ports });
+  await settle();
+  refreshButton()!.click();
+  await settle();
+  expect(target.querySelector(".tf-refresh-failed")?.textContent).toBe("Couldn't refresh: 502 Bad Gateway");
+  expect(target.querySelector("h1")?.textContent).toContain("#1187");
+  expect(target.querySelector(".tf-bhead + .tf-refresh-failed, .tf-bhead ~ .tf-refresh-failed")).not.toBeNull();
+});
+
+test("a run whose adapter reads no one item offers Sync now, which runs its source", async () => {
+  const probe = refreshProbe();
+  draw("teamcity:build:1187", undefined, {
+    refresh: probe.ports,
+    getEntity: (id) => Promise.resolve(detailOf(id, { refreshes: false })),
+  });
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Sync now");
+  refreshButton()!.click();
+  await settle();
+  expect(probe.synced).toEqual(["teamcity"]);
+  expect(probe.refreshed).toEqual([]);
+});
+
+test("a run of a turned-off source draws neither button, and says its source is off; a withdrawn one says so", async () => {
+  draw("teamcity:build:1187", undefined, {
+    refresh: refreshProbe().ports,
+    getEntity: (id) =>
+      Promise.resolve(
+        detailOf(id, {
+          deleted_at: "2026-10-16T08:00:00Z",
+          source: { id: "teamcity", display_name: "Tidewater CI", adapter_kind: "teamcity", enabled: false },
+        }),
+      ),
+  });
+  await settle();
+  expect(refreshButton()).toBeNull();
+  expect(target.querySelector(".tf-turnedoff")?.textContent).toContain("Tidewater CI is disabled");
+  expect(target.querySelector(".tf-withdrawn")?.textContent).toContain("Withdrawn upstream");
+});
+
+test("a run whose item cannot be read keeps its page and draws no Refresh", async () => {
+  draw("teamcity:build:1187", undefined, { getEntity: () => Promise.reject(new Error("not in the mirror")) });
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toContain("#1187");
+  expect(refreshButton()).toBeNull();
 });

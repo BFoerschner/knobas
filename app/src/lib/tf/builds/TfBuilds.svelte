@@ -137,18 +137,32 @@
     );
   });
 
-  // *Sync now*'s runs ended (#2106): the list is read again, kept drawn meanwhile.
+  /** Bumped on every read again of the list, so an older one answering late is dropped. */
+  let listReads = 0;
+  /**
+   * The list read again, kept drawn meanwhile: when *Sync now*'s runs end
+   * (#2106), and on the pipeline page's *Refresh* (#2137), whose row of the
+   * pipeline is among it. A failed read keeps the list and says so, until a
+   * read again answers.
+   */
+  async function rereadPipelines() {
+    const at = ++listReads;
+    try {
+      const rows = await ports.pipelines();
+      if (at !== listReads) return;
+      all = rows;
+      failed = null;
+    } catch (error) {
+      if (at === listReads) failed = message(error);
+    }
+  }
+
   let pipelinesAt = untrack(() => syncRevision);
   $effect(() => {
     const at = syncRevision;
     if (!ready || at === pipelinesAt) return;
     pipelinesAt = at;
-    ports.pipelines().then(
-      (rows) => {
-        if (at === pipelinesAt) all = rows;
-      },
-      (error: unknown) => (failed = message(error)),
-    );
+    void untrack(() => rereadPipelines());
   });
 
   // *This job* (#850): on by default while a job is current.
@@ -409,7 +423,7 @@
         ...(selected.group !== null ? [{ name: selected.group, href: "#/builds" }] : []),
         { name: selected.name },
       ])}
-      <TfPipeline pipeline={selected} {rest} {job} runs={ports.runs} onpin={() => togglePin(selected!)} />
+      <TfPipeline pipeline={selected} {rest} {job} runs={ports.runs} onpin={() => togglePin(selected!)} rereadRow={rereadPipelines} />
     {:else if all !== null && all.length > 0}
       {@render crumbs([{ name: "Builds" }])}
       <div class="tf-empty"><p>No pipeline at this address. Pick one on the left.</p></div>

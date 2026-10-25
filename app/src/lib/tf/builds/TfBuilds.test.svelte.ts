@@ -14,10 +14,18 @@ import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
 vi.mock("../../ipc/sources", async (original) => ({
   ...(await original<typeof import("../../ipc/sources")>()),
   listSources: vi.fn(async () => [{ id: "jira" }, { id: "tidewater" }]),
+  refreshEntity: vi.fn(async () => ({ outcome: "refreshed" })),
 }));
 vi.mock("../../ipc/entity", async (original) => ({
   ...(await original<typeof import("../../ipc/entity")>()),
-  getEntity: vi.fn(async (id: string) => ({ row: { entity_id: id, kind: "ticket", title: id } })),
+  // The run and pipeline pages read their own item too, for *Refresh* (#2137).
+  getEntity: vi.fn(async (id: string) => ({
+    row: { entity_id: id, kind: id.includes(":build:") ? "build" : id.includes(":buildType:") ? "build_config" : "ticket", title: id },
+    source: { id: "tidewater", display_name: "Tidewater CI", adapter_kind: "teamcity", enabled: true },
+    refreshes: true,
+    deleted_at: null,
+    links: [],
+  })),
   jobPipelines: vi.fn(async () => []),
 }));
 
@@ -395,4 +403,39 @@ test("/ focuses the pipeline filter, and the runs filter beside it draws no hint
   expect(event.defaultPrevented).toBe(true);
   expect(document.activeElement).toBe(fields[0]);
   expect(runs.contains(document.activeElement)).toBe(false);
+});
+
+test("Refresh on a pipeline reads the list again, and its row as the read answers it (#2137)", async () => {
+  let reads = 0;
+  let list = LIST;
+  const ports: BuildsPorts = {
+    pipelines: () => (reads++, Promise.resolve(list)),
+    runs: (id) => Promise.resolve(LIST.find((p) => p.entity_id === id)?.recent ?? []),
+  };
+  page = mount(TfBuilds, { target, props: { ready: true, head: "builds", rest: [LIST[1]!.entity_id], job: null, ports } });
+  await settle();
+  const before = reads;
+  list = LIST.map((p, at) => (at === 1 ? { ...p, name: "Payout_IntegrationTests_v2" } : p));
+  target.querySelector<HTMLButtonElement>(".tf-bhead .tf-refresh")!.click();
+  await settle();
+  expect(reads).toBe(before + 1);
+  expect(target.querySelector(".tf-bmain h1")?.textContent).toBe("Payout_IntegrationTests_v2");
+});
+
+test("a read again of the list that answers takes away the note an earlier failed one left (#2137)", async () => {
+  let fail = false;
+  const ports: BuildsPorts = {
+    pipelines: () => (fail ? Promise.reject(new Error("database is locked")) : Promise.resolve(LIST)),
+    runs: (id) => Promise.resolve(LIST.find((p) => p.entity_id === id)?.recent ?? []),
+  };
+  page = mount(TfBuilds, { target, props: { ready: true, head: "builds", rest: [LIST[1]!.entity_id], job: null, ports } });
+  await settle();
+  fail = true;
+  target.querySelector<HTMLButtonElement>(".tf-bhead .tf-refresh")!.click();
+  await settle();
+  expect(target.querySelector(".tf-pl-note")?.textContent).toContain("database is locked");
+  fail = false;
+  target.querySelector<HTMLButtonElement>(".tf-bhead .tf-refresh")!.click();
+  await settle();
+  expect(target.querySelector(".tf-pl-note")).toBeNull();
 });
