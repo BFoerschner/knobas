@@ -5,12 +5,14 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, type MockInstance, test, vi } from "vitest";
 
-import type { DocPage, DocsTree, Reached, RefusedWrite, WriteAsk } from "../../ipc/entity";
-import type { QueuedWrite } from "../../ipc/sources";
+import type { DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, WriteAsk } from "../../ipc/entity";
+import type { EntityRefresh, QueuedWrite, SourceSyncStatus } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import { forgetEchoes } from "../queued.svelte";
+import type { DetailRefreshPorts } from "../refresh.svelte";
+import { createSourceSyncs } from "../role-sync.svelte";
 import { parseTfHash } from "../route";
 import { READER_DRAWER, READER_NARROW } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
@@ -123,6 +125,8 @@ function ports(over: Partial<DocsPorts> = {}): DocsPorts {
     submitWrite: vi.fn(async () => QUEUED),
     visitEntity: vi.fn(async () => null),
     jobReach: vi.fn(async () => []),
+    // The page's row is not read: no *Refresh*, no banner (#2136).
+    getEntity: vi.fn(async (id: string) => Promise.reject({ code: "not_found", message: `${id} is not in the mirror`, source_id: null })),
     openExternal: vi.fn(async () => {}),
     copy: vi.fn(async () => {}),
     ...over,
@@ -1880,4 +1884,183 @@ test("the refresh event's re-read keeps the picked space, the search, an open se
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!.value).toBe("Half said");
   expect(io.visitEntity).toHaveBeenCalledTimes(1);
+});
+
+// ---- Refresh on a Docs page (#2136) ----
+
+/** The open page's row as `get_entity` reads it (#2136): the button's offer and the two banners come from it. */
+function pageDetail(over: Partial<EntityDetail> = {}): EntityDetail {
+  return {
+    row: { entity_id: "confluence:2", source_id: "confluence", kind: "page", title: "On-call handbook" },
+    source: { id: "confluence", display_name: "Tidewater Confluence", adapter_kind: "confluence", enabled: true },
+    refreshes: true,
+    deleted_at: null,
+    ...over,
+  } as unknown as EntityDetail;
+}
+
+/** What a refresh read, the runs *Sync now* asked for, and `sync:state` sent to its run. */
+function refreshing(answer: () => Promise<EntityRefresh> = async () => ({ outcome: "refreshed" })) {
+  const refreshed: string[] = [];
+  const synced: string[] = [];
+  const handlers = new Set<(event: { payload: unknown }) => void>();
+  const ports: DetailRefreshPorts = {
+    refreshEntity: (entityId) => (refreshed.push(entityId), answer()),
+    syncs: createSourceSyncs({
+      syncRole: () => Promise.reject(new Error("a page never syncs a role")),
+      syncNow: async (sourceId) => (synced.push(sourceId), 77),
+      syncStatus: async () => [],
+      listen: async (_event, handler) => {
+        handlers.add(handler);
+        return () => handlers.delete(handler);
+      },
+    }),
+  };
+  const ended = async (source = "confluence") => {
+    const row: SourceSyncStatus = { source_id: source, running: false, run_id: 77, started_at: null, last_finished_at: null, last_outcome: "ok", next_run_at: null, backoff_until: null, last_changed: null };
+    for (const handler of [...handlers]) handler({ payload: row });
+    await settle();
+  };
+  return { ports, refreshed, synced, ended };
+}
+
+const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-rd-acts .tf-refresh");
+const docBanners = () => [...target.querySelectorAll(".tf-withdrawn, .tf-turnedoff, .tf-refresh-failed")].map(squash);
+
+test("Refresh ends the actions row, reads the page from its source, then the tree, the page and its row again, keeping what the reader had open (#2136)", async () => {
+  const r = refreshing();
+  const getEntity = vi.fn(async () => pageDetail());
+  const io = ports({ docsPage: vi.fn(async () => RICH), docsSearch: vi.fn(async () => HITS), getEntity, refresh: r.ports });
+  await draw(["confluence:2"], io);
+  expect(getEntity).toHaveBeenCalledWith("confluence:2");
+  expect(actions().at(-1)).toBe("Refresh");
+
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  select.value = "*";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  type("ledger");
+  await settle();
+  button("Edit section")!.click();
+  await settle();
+  fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!, "Half typed");
+  fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!, "Half said");
+  await settle();
+  const searches = vi.mocked(io.docsSearch).mock.calls.length;
+
+  refreshButton()!.click();
+  await settle();
+  expect(r.refreshed).toEqual(["confluence:2"]);
+  expect(io.docsTree).toHaveBeenCalledTimes(2);
+  expect(io.docsPage).toHaveBeenCalledTimes(2);
+  expect(getEntity).toHaveBeenCalledTimes(2);
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(target.querySelector("h1")?.textContent).toBe(RICH.title);
+  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("*");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!.value).toBe("ledger");
+  expect(vi.mocked(io.docsSearch).mock.calls.length).toBe(searches);
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!.value).toBe("Half said");
+  // A refresh is not a visit.
+  expect(io.visitEntity).toHaveBeenCalledTimes(1);
+});
+
+test("the page is drawn while a refresh is out, and the button says Refreshing… (#2136)", async () => {
+  let answer: (value: EntityRefresh) => void = () => {};
+  const r = refreshing(() => new Promise((resolve) => (answer = resolve)));
+  const io = ports({ getEntity: vi.fn(async () => pageDetail()), refresh: r.ports });
+  await draw(["confluence:2"], io);
+  refreshButton()!.click();
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Refreshing…");
+  expect(refreshButton()?.disabled).toBe(true);
+  expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
+  answer({ outcome: "refreshed" });
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(io.docsPage).toHaveBeenCalledTimes(2);
+});
+
+test("a refresh that failed keeps the page and says why under the actions row (#2136)", async () => {
+  const r = refreshing(async () => ({ outcome: "failed", reason: "502 Bad Gateway" }));
+  const io = ports({ getEntity: vi.fn(async () => pageDetail()), refresh: r.ports });
+  await draw(["confluence:2"], io);
+  refreshButton()!.click();
+  await settle();
+  expect(docBanners()).toEqual(["Couldn't refresh: 502 Bad Gateway"]);
+  expect(target.querySelector(".tf-refresh-failed")?.previousElementSibling?.classList.contains("tf-rd-acts")).toBe(true);
+  expect(io.docsPage).toHaveBeenCalledTimes(1);
+  expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
+});
+
+test("a page whose adapter does not read one page offers Sync now, and the run's end reads the page again (#2136)", async () => {
+  const r = refreshing();
+  const getEntity = vi.fn(async () => pageDetail({ refreshes: false }));
+  const io = ports({ getEntity, refresh: r.ports });
+  await draw(["confluence:2"], io);
+  expect(refreshButton()?.textContent).toBe("Sync now");
+
+  refreshButton()!.click();
+  await settle();
+  expect(r.synced).toEqual(["confluence"]);
+  expect(r.refreshed).toEqual([]);
+  expect(refreshButton()?.textContent).toBe("Syncing…");
+
+  await r.ended();
+  expect(refreshButton()?.textContent).toBe("Sync now");
+  expect(io.docsPage).toHaveBeenCalledTimes(2);
+  expect(getEntity).toHaveBeenCalledTimes(2);
+});
+
+test("a turned-off source's page draws neither button and its banner; a withdrawn one keeps Refresh and says so (#2136)", async () => {
+  const off = refreshing();
+  await draw(["confluence:2"], ports({ getEntity: vi.fn(async () => pageDetail({ source: { ...pageDetail().source, enabled: false } })), refresh: off.ports }));
+  expect(refreshButton()).toBeNull();
+  expect(docBanners()).toEqual([
+    "Its source is turned off: Tidewater Confluence is disabled, so this item is hidden everywhere else. Re-enable the source to bring it back.",
+  ]);
+  unmount(view!);
+  view = null;
+
+  await draw(["confluence:2"], ports({ getEntity: vi.fn(async () => pageDetail({ deleted_at: "2026-10-20T10:00:00Z" })), refresh: refreshing().ports }));
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(docBanners()).toHaveLength(1);
+  expect(docBanners()[0]).toMatch(/^Withdrawn upstream, last seen .* ago\./);
+});
+
+test("a page whose row cannot be read draws no button and no banner, the page as ever (#2136)", async () => {
+  await draw(["confluence:2"], ports({ refresh: refreshing().ports }));
+  expect(refreshButton()).toBeNull();
+  expect(docBanners()).toEqual([]);
+  expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
+});
+
+test("another page opened while a refresh is out reads nothing back over it, and starts with nothing asked (#2136)", async () => {
+  let answer: (value: EntityRefresh) => void = () => {};
+  const r = refreshing(() => new Promise((resolve) => (answer = resolve)));
+  const docsPage = vi.fn(async (id: string) => (id === "confluence:1" ? OTHER : PAGE));
+  const getEntity = vi.fn(async (id: string) => pageDetail({ row: { ...pageDetail().row, entity_id: id } }));
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage, getEntity, refresh: r.ports }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  refreshButton()!.click();
+  await settle();
+  props.rest = ["confluence:1"];
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  answer({ outcome: "refreshed" });
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+  expect(docsPage.mock.calls.map(([id]) => id)).toEqual(["confluence:2", "confluence:1"]);
+});
+
+test("a refresh whose row re-read fails keeps the button and the banners drawn (#2136)", async () => {
+  let fail = false;
+  const getEntity = vi.fn(async () => (fail ? Promise.reject(new Error("database is locked")) : pageDetail({ deleted_at: "2026-10-20T10:00:00Z" })));
+  await draw(["confluence:2"], ports({ getEntity, refresh: refreshing().ports }));
+  fail = true;
+  refreshButton()!.click();
+  await settle();
+  expect(getEntity).toHaveBeenCalledTimes(2);
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(docBanners()).toHaveLength(1);
 });

@@ -26,6 +26,9 @@
  *   ticket (PAY-231, PAY-228, OPS-77), so a chip cannot disagree with the
  *   board; a key `CORPUS` lacks draws as a bare key, as the real read does.
  * - Pages with prototype-6's generic body carry no comments.
+ * - `get_entity` answers only for *SEPA payout retry design* (`confluence:sepa`,
+ *   which `CORPUS` holds), so only that page draws *Refresh* (#2136); the
+ *   real read answers for every mirrored page.
  * - The search is a small stand-in for the backend's (`docs_search`): every
  *   word must appear (prototype-6's stemming), `"…"`, `-word`, `by:`,
  *   `updated:` and `space:` as the grammar reads them; ranking is title
