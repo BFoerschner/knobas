@@ -2,7 +2,8 @@
  * A detail's *Refresh* and *Sync now* in a test (#2144, over #2107's
  * `refresh.svelte.ts`): the ports with what they were asked, and the
  * `sync:state` a test sends to end a *Sync now* run; and `detailOf`, the
- * `get_entity` read of a build the run and pipeline pages draw them from.
+ * `get_entity` read of an item of a kind (a build unless said otherwise) the
+ * run and pipeline pages draw them from.
  * The detail pages, the monitor roster and the residue harness build their
  * refresh from this one fake.
  */
@@ -14,10 +15,14 @@ import { createSourceSyncs } from "./role-sync.svelte";
 /** The run id `sync_now` answers unless a test says otherwise, and the one {@link RefreshProbe.end} ends. */
 const RUN = 77;
 
-/** `get_entity` of `entityId`: a TeamCity item that reads one item, unless `extra` says otherwise. */
-export function detailOf(entityId: string, extra: Partial<EntityDetail> = {}): EntityDetail {
+/**
+ * `get_entity` of `entityId`: a TeamCity item of `kind` that reads one item,
+ * unless `extra` says otherwise. A test whose ids are of several kinds (a
+ * pipeline, its runs, the ticket *This job* resolves) passes each its own.
+ */
+export function detailOf(entityId: string, extra: Partial<EntityDetail> = {}, kind = "build"): EntityDetail {
   return {
-    row: { entity_id: entityId, source_id: "teamcity", kind: "build", title: entityId } as EntityRow,
+    row: { entity_id: entityId, source_id: "teamcity", kind, title: entityId } as EntityRow,
     source: { id: "teamcity", display_name: "Tidewater CI", adapter_kind: "teamcity", enabled: true },
     refreshes: true,
     deleted_at: null,
