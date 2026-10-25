@@ -82,6 +82,8 @@ export interface Echoing {
   source?: string;
   /** Called once the follow sees the write sent, for a surface that reads at once what the write made (Standup's ticket, #2104). */
   onsent?: () => void;
+  /** Called once the write will not go (held or refused), its echo dropped, for a surface whose read still names it (Monitors' create, #2105). */
+  onstop?: () => void;
 }
 
 const echoes: Record<string, Echo[]> = $state({});
@@ -107,7 +109,11 @@ export function echoWrite(entity: string, kind: string, text: string, how: Echoi
     for (const echo of echoes[entity] ?? []) if (echo.write === write) echo.state = "sent";
     how.onsent?.();
   };
-  follows.add(followWrite({ id: write }, { ...how.following, onstop: gone, onleave: sent }, how.follower ?? writeFollower()));
+  const stopped = () => {
+    gone();
+    how.onstop?.();
+  };
+  follows.add(followWrite({ id: write }, { ...how.following, onstop: stopped, onleave: sent }, how.follower ?? writeFollower()));
 }
 
 function drop(entity: string, gone: (echo: Echo) => boolean): void {
@@ -171,11 +177,12 @@ export function watchEchoes(surface: string, reread: () => void, how: EchoWatch 
     if (ended.write_id !== null) for (const all of Object.values(echoes)) for (const echo of all) if (echo.write === ended.write_id) echo.state = "sent";
     if (mine().some(({ entity, m }) => entity === ended.entity_id || (m.write !== null && m.write === ended.write_id))) reread();
   });
-  hear(EVENTS.syncState, (payload) => {
-    const row = payload as SourceSyncStatus;
-    if (row.running || how.runEnds === false) return;
-    if (how.everyRun || mine().some(({ m }) => m.source === null || m.source === row.source_id)) reread();
-  });
+  if (how.runEnds !== false)
+    hear(EVENTS.syncState, (payload) => {
+      const row = payload as SourceSyncStatus;
+      if (row.running) return;
+      if (how.everyRun || mine().some(({ m }) => m.source === null || m.source === row.source_id)) reread();
+    });
   return () => {
     dead = true;
     for (const off of offs.splice(0)) off();
