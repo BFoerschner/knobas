@@ -4,7 +4,7 @@
  * `crates/knobas-app/tests/it/standup_ipc.rs`'s and `protocol.rs`'s.
  */
 import { flushSync, mount, tick, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { ActionItemTicket, DigestLine, LinkEnd, LinkEntry, Protocol, PublishTarget, RefusedWrite, StandupDigest, WriteAsk } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
@@ -90,6 +90,7 @@ let target: HTMLDivElement;
 let view: ReturnType<typeof mount> | null = null;
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -97,6 +98,7 @@ afterEach(() => {
   if (view) unmount(view);
   view = null;
   target.remove();
+  vi.useRealTimers();
 });
 
 async function settle() {
@@ -105,6 +107,16 @@ async function settle() {
     await Promise.resolve();
   }
   flushSync();
+}
+
+/**
+ * The save pause out (`saveAfterMs: 0`, a timer all the same) and the save it
+ * started settled. `setTimeout` is fake in this file, so the pause ends when
+ * the clock is stepped, not after a sleep (#2048).
+ */
+async function pausedOut() {
+  vi.advanceTimersByTime(0);
+  await settle();
 }
 
 function open(
@@ -294,9 +306,7 @@ test("pressing someone off saves the body without them, and they stay a chip to 
   const { calls } = open();
   await settle();
   button("Tomasz Wójcik").click();
-  await settle();
-  await new Promise((done) => setTimeout(done, 5));
-  await settle();
+  await pausedOut();
   expect(calls.saved.at(-1)).toContain("## Attendees\n\n- Mara Lindqvist\n\n## Notes");
   expect(button("Tomasz Wójcik").getAttribute("aria-pressed")).toBe("false");
 });
@@ -307,8 +317,7 @@ test("a note typed under someone's name is saved as their bullet", async () => {
   const box = target.querySelectorAll<HTMLTextAreaElement>(".tf-su-pn textarea")[1]!;
   box.value = "Runbook today";
   box.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((done) => setTimeout(done, 5));
-  await settle();
+  await pausedOut();
   expect(calls.saved.at(-1)).toContain("- Mara Lindqvist: Review open.\n- Tomasz Wójcik: Runbook today\n");
 });
 
@@ -599,11 +608,10 @@ test("two overlapping saves land in order, the newer body last, and no save read
   for (const typed of ["first", "second"]) {
     box().value = typed;
     box().dispatchEvent(new Event("input", { bubbles: true }));
-    await new Promise((done) => setTimeout(done, 5));
+    await pausedOut();
   }
   release();
-  await settle();
-  await new Promise((done) => setTimeout(done, 5));
+  // Both pauses are out; what is left is the chain, which settles without a timer.
   await settle();
   expect(stored()).toContain("Tomasz Wójcik: second");
   expect(calls.reads).toBe(reads);
@@ -616,9 +624,8 @@ test("a refused save does not break the chain: the next save still lands (#1679)
   for (const typed of ["first", "second"]) {
     box().value = typed;
     box().dispatchEvent(new Event("input", { bubbles: true }));
-    await new Promise((done) => setTimeout(done, 5));
+    await pausedOut();
   }
-  await new Promise((done) => setTimeout(done, 20));
   await settle();
   expect(stored()).toContain("Tomasz Wójcik: second");
 });

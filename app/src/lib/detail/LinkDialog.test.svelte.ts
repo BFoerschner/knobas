@@ -8,7 +8,7 @@
  * than as a raw error somewhere else.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { SearchQuery, SearchResponse } from "../ipc/search";
 import { waitFor } from "../shell/test-wait";
@@ -136,6 +136,8 @@ function render(over: { fromId?: string; fromTitle?: string } = {}) {
   };
 }
 
+afterEach(() => vi.useRealTimers());
+
 beforeEach(() => {
   queries.length = 0;
   writes.length = 0;
@@ -179,12 +181,14 @@ test("the target picker searches what is typed", async () => {
  * timer never fires a search for a component that is gone.
  */
 test("closing the dialog within the debounce sends no search", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const screen = render();
 
   screen.type(screen.picker(), "payout");
   screen.done();
-  // Past the debounce, on real timers.
-  await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 60));
+  // Past the debounce on the fake clock, which would fire a timer the close left armed (#2048).
+  vi.advanceTimersByTime(DEBOUNCE_MS);
+  await Promise.resolve();
 
   expect(queries, "a search was sent after the dialog closed").toEqual([]);
 });
