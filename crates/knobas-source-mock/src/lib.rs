@@ -49,8 +49,8 @@ use knobas_core::entity::EntityRef;
 use knobas_source::contract::Fault;
 use knobas_source::instance::SourceInstance;
 use knobas_source::{
-    Capability, ConnectionInfo, Cursor, KindInfo, Sink, Source, SourceDescriptor, SourceError,
-    SyncItem, WriteOp, WriteReceipt,
+    Capability, ConnectionInfo, Cursor, KindInfo, RefreshAnswer, Sink, Source, SourceDescriptor,
+    SourceError, SyncItem, WriteOp, WriteReceipt,
 };
 use serde::{Deserialize, Serialize};
 
@@ -398,7 +398,27 @@ pub struct MockSource {
     fault: Fault,
     /// Whether a full sync also reports [`TOMBSTONED_KEY`] as deleted.
     tombstone: bool,
+    /// Whether this instance reads one item by id ([`Source::refresh`],
+    /// ADR-0031). On unless its config says `"refresh": false`, which is how
+    /// a test gets a source that offers the run alone.
+    refresh: bool,
+    /// Whether this instance files tickets (`create_ticket`), which it then
+    /// holds as its remote system would ([`filed`]). Off unless its config
+    /// says `"files_tickets": true`: the demo files nothing.
+    files_tickets: bool,
     written: Mutex<Vec<WriteOp>>,
+}
+
+/// The tickets each mock instance has filed, by instance id: the mock's
+/// remote system, which outlives the instance that filed them as a real
+/// server outlives an adapter. The app builds an adapter per flush, per run
+/// and per refresh, so a ticket filed by one must be there for the next.
+fn filed() -> std::sync::MutexGuard<'static, BTreeMap<String, Vec<Ticket>>> {
+    static FILED: OnceLock<Mutex<BTreeMap<String, Vec<Ticket>>>> = OnceLock::new();
+    FILED
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 impl Default for MockSource {
@@ -423,6 +443,8 @@ impl MockSource {
             id: SOURCE_ID.to_owned(),
             fault,
             tombstone: false,
+            refresh: true,
+            files_tickets: false,
             written: Mutex::new(Vec::new()),
         }
     }
@@ -778,26 +800,37 @@ fn branch_payload(b: &Branch) -> serde_json::Value {
 }
 
 /// Every work item in the fixture, in the order the mock emits them.
+/// A ticket as the sync emits it, a filed one ([`filed`]) included.
+fn ticket_item(source_id: &str, t: &Ticket) -> SyncItem {
+    item(
+        source_id,
+        "ticket",
+        t.key.clone(),
+        t.summary.clone(),
+        body_text(
+            [t.summary.clone()]
+                .into_iter()
+                .chain(t.description.clone())
+                .chain(t.comments.iter().map(|c| c.text.clone())),
+        ),
+        t.assignee.clone(),
+        t.updated,
+        &ticket_payload(t),
+        Some(format!("{MOCK_BASE}/browse/{}", t.key)),
+    )
+}
+
+/// The key the mock gives the `n`th ticket an instance files, from 1. Its
+/// own prefix, so it never names a fixture ticket.
+fn filed_key(n: usize) -> String {
+    format!("NEW-{n}")
+}
+
 fn items(source_id: &str) -> Vec<SyncItem> {
     let f = fixture();
     let mut out = Vec::new();
     for t in &f.tickets {
-        out.push(item(
-            source_id,
-            "ticket",
-            t.key.clone(),
-            t.summary.clone(),
-            body_text(
-                [t.summary.clone()]
-                    .into_iter()
-                    .chain(t.description.clone())
-                    .chain(t.comments.iter().map(|c| c.text.clone())),
-            ),
-            t.assignee.clone(),
-            t.updated,
-            &ticket_payload(t),
-            Some(format!("{MOCK_BASE}/browse/{}", t.key)),
-        ));
+        out.push(ticket_item(source_id, t));
     }
     for p in &f.prs {
         out.push(item(
@@ -1141,7 +1174,13 @@ impl Source for MockSource {
             // entry point for. `Write` stays -- it and `write_ops` are two
             // signals for one fact, and the battery needs a declared op to
             // exercise the write path against.
-            capabilities: vec![Capability::Write],
+            // `Refresh` unless this instance was configured to offer the run
+            // alone: the read below answers every kind it emits.
+            capabilities: if self.refresh {
+                vec![Capability::Write, Capability::Refresh]
+            } else {
+                vec![Capability::Write]
+            },
             adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
             // Nothing to authenticate against: the fixture is compiled in.
             auth_methods: Vec::new(),
@@ -1176,7 +1215,11 @@ impl Source for MockSource {
             // and a clone is built from each repository's own page, as before.
             clone_from: vec![knobas_source::clone_urls::CloneFrom::BaseUrl],
             url_forms: Vec::new(),
-            write_ops: vec!["comment".to_owned()],
+            write_ops: if self.files_tickets {
+                vec!["comment".to_owned(), "create_ticket".to_owned()]
+            } else {
+                vec!["comment".to_owned()]
+            },
             // The UI renders this source's launcher groups and chips from these
             // alone, so every kind `sync` emits is declared here.
             entity_kinds: vec![
@@ -1302,6 +1345,14 @@ impl Source for MockSource {
             return Ok(CURSOR.to_owned());
         }
         let mut fixture = items(&self.id);
+        // What this instance filed is part of its world: a full sync that
+        // left it out would sweep it.
+        if self.files_tickets {
+            let filed = filed();
+            if let Some(tickets) = filed.get(&self.id) {
+                fixture.extend(tickets.iter().map(|t| ticket_item(&self.id, t)));
+            }
+        }
         if self.tombstone {
             // Last, and still inside the sync: a deletion is an item like any
             // other, carrying the last-known title so the UI can render what
@@ -1336,10 +1387,67 @@ impl Source for MockSource {
         if let Some(err) = self.fault_error() {
             return Err(err);
         }
+        // A filed ticket is held and named by its key, which is its entity's
+        // local part (`WriteOp::receipt_names_an_entity`).
+        let receipt = match &op {
+            WriteOp::CreateTicket {
+                title,
+                body,
+                ticket_type,
+                ..
+            } => {
+                let mut filed = filed();
+                let tickets = filed.entry(self.id.clone()).or_default();
+                let key = filed_key(tickets.len() + 1);
+                tickets.push(Ticket {
+                    key: key.clone(),
+                    epic: None,
+                    summary: title.clone(),
+                    kind: ticket_type.clone(),
+                    status: "To Do".to_owned(),
+                    priority: None,
+                    assignee: None,
+                    assigned_by: None,
+                    updated: None,
+                    description: Some(body.clone()),
+                    estimate_h: None,
+                    spent_week_m: None,
+                    blocked_by: Vec::new(),
+                    comments: Vec::new(),
+                    worklogs: Vec::new(),
+                    project: None,
+                });
+                WriteReceipt::id(key)
+            }
+            // A comment creates no row with an id of its own, so there is
+            // nothing to hand back -- see `WriteReceipt`.
+            _ => WriteReceipt::none(),
+        };
         self.lock().push(op);
-        // Nothing here creates a row with an id of its own, so there is
-        // nothing to hand back -- see `WriteReceipt`.
-        Ok(WriteReceipt::none())
+        Ok(receipt)
+    }
+
+    /// The item its full sync emits for `entity`, or *gone* for an id it
+    /// does not emit live, [`TOMBSTONED_KEY`] among them (ADR-0031). Not
+    /// offered by an instance configured with `"refresh": false`.
+    async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
+        if !self.refresh {
+            return Ok(RefreshAnswer::NotOffered);
+        }
+        if let Some(err) = self.fault_error() {
+            return Err(err);
+        }
+        let mut world = items(&self.id);
+        if self.files_tickets {
+            let filed = filed();
+            if let Some(tickets) = filed.get(&self.id) {
+                world.extend(tickets.iter().map(|t| ticket_item(&self.id, t)));
+            }
+        }
+        Ok(world
+            .into_iter()
+            .find(|item| item.entity.to_string() == entity)
+            .map_or(RefreshAnswer::Gone, RefreshAnswer::Item))
     }
 
     /// Refused: the fixture has statuses but no workflow (#498).
@@ -1402,12 +1510,13 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// finding, carried on the M0/M1 ledger as #48).
 ///
 /// ```json
-/// { "fault": "none" | "unauthorized" | "unreachable", "tombstone": true }
+/// { "fault": "none" | "unauthorized" | "unreachable", "tombstone": true,
+///   "refresh": false, "files_tickets": true }
 /// ```
 ///
-/// Both keys are optional and both default to the healthy fixture, so a source
-/// added through the Add-source form -- whose generated config carries neither
-/// -- is exactly the mock it has always been.
+/// Every key is optional and each defaults to the healthy fixture, refreshing
+/// and filing nothing, so a source added through the Add-source form -- whose
+/// generated config carries none -- is exactly the mock it has always been.
 ///
 /// # Errors
 ///
@@ -1435,6 +1544,8 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     Ok(Box::new(MockSource {
         id: instance.id,
         tombstone: config.tombstone,
+        refresh: config.refresh,
+        files_tickets: config.files_tickets,
         ..MockSource::with_fault(config.fault.into())
     }))
 }
@@ -1455,12 +1566,27 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
 /// it has always been. **The schema is deliberately not widened to declare
 /// these**: they drive tests and fixtures, and a form offering a person a
 /// *Simulate a 401* checkbox would be offering them a broken source.
-#[derive(Debug, Default, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct MockConfig {
     fault: ConfiguredFault,
     /// Whether a full sync also reports [`TOMBSTONED_KEY`] as deleted.
     tombstone: bool,
+    /// Whether the instance reads one item by id. On by default.
+    refresh: bool,
+    /// Whether the instance files tickets. Off by default.
+    files_tickets: bool,
+}
+
+impl Default for MockConfig {
+    fn default() -> Self {
+        Self {
+            fault: ConfiguredFault::default(),
+            tombstone: false,
+            refresh: true,
+            files_tickets: false,
+        }
+    }
 }
 
 /// [`Fault`], as it is spelled in a config.
