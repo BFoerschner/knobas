@@ -339,7 +339,7 @@ const TfRun = (await import("../tf/builds/TfRun.svelte")).default;
 const TfRunChain = (await import("../tf/builds/TfRunChain.svelte")).default;
 const TfRunTicket = (await import("../tf/builds/TfRunTicket.svelte")).default;
 const TfCreateTicket = (await import("../tf/TfCreateTicket.svelte")).default;
-const { markQueued } = await import("../tf/queued.svelte");
+const { echoWrite } = await import("../tf/queued.svelte");
 const TfRunLog = (await import("../tf/builds/TfRunLog.svelte")).default;
 const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
 const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).default;
@@ -947,7 +947,7 @@ const CASES: Case[] = [
     name: "TfRunTicket",
     source: "lib/tf/builds/TfRunTicket.svelte",
     open: (target) => {
-      markQueued("teamcity:build:1", "ticket", "A failing test fails in A #1");
+      echoWrite("teamcity:build:1", "ticket", "A failing test fails in A #1");
       return {
         app: mount(TfRunTicket, {
           target,

@@ -14,7 +14,7 @@ import type { EntityDetail, EntityRow, SourceView, ViewAction, ViewBlock, ViewRo
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
-import { forgetQueued } from "./queued.svelte";
+import { forgetEchoes } from "./queued.svelte";
 import { sourceName } from "./repo";
 import TfRepo, { type RepoPorts } from "./TfRepo.svelte";
 
@@ -150,7 +150,7 @@ let links: (string | null)[];
 let reads: [string, string | null][];
 
 beforeEach(() => {
-  forgetQueued();
+  forgetEchoes();
   toasts.items = [];
   writes = [];
   links = [];

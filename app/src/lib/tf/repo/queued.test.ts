@@ -4,11 +4,11 @@
  */
 import { beforeEach, expect, test } from "vitest";
 
-import { forgetQueued, isDeleteQueued, madeNotListed, markCommit, markDeleted, markMade, queuedCommit } from "./queued.svelte";
+import { forgetEchoes, isDeleteQueued, madeNotListed, markCommit, markDeleted, markMade, queuedCommit } from "./queued.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
 
-beforeEach(() => forgetQueued());
+beforeEach(() => forgetEchoes());
 
 test("a branch queued to be made is drawn until the listing holds it", () => {
   markMade(REPO, "feature/PAY-231-x");
@@ -29,6 +29,6 @@ test("a branch queued to be deleted is marked in its repository only", () => {
   markDeleted(REPO, "chore/bump-tokio");
   expect(isDeleteQueued(REPO, "chore/bump-tokio")).toBe(true);
   expect(isDeleteQueued(REPO, "main")).toBe(false);
-  forgetQueued();
+  forgetEchoes();
   expect(isDeleteQueued(REPO, "chore/bump-tokio")).toBe(false);
 });

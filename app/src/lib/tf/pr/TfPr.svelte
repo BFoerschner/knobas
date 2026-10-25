@@ -101,7 +101,7 @@
     tabCounts,
     type PrTab,
   } from "./pr";
-  import { askAgain, markQueued, queuedMark, queuedMarks, sameWords, settleQueued, takeAgain, type Mark } from "../queued.svelte";
+  import { askAgain, echoWrite, echoOn, echoesOn, sameWords, settleEchoes, takeAgain, type Echo } from "../queued.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfPrFiles from "./TfPrFiles.svelte";
@@ -338,9 +338,9 @@
   let merging = $state(false);
 
   /** The comments this session queued that the conversation did not hold when it was read. */
-  const queuedComments = $derived(prId === null ? [] : queuedMarks(prId, "comment").map((mark) => mark.text));
+  const queuedComments = $derived(prId === null ? [] : echoesOn(prId, "comment").map((mark) => mark.text));
   /** The chips of what this session queued here, beside the state: `close queued`. */
-  const chips = $derived(prId === null ? [] : queuedMarks(prId).filter((mark) => mark.kind !== "comment").map((mark) => mark.text));
+  const chips = $derived(prId === null ? [] : echoesOn(prId).filter((mark) => mark.kind !== "comment").map((mark) => mark.text));
 
   /**
    * The writes whose landing the view's *State* reads (#1542): each goes once
@@ -351,7 +351,7 @@
   const STATE_READ = ["merge", "close", "reopen"];
 
   /** Whether the read in `answer` shows `mark` landed. */
-  function landedIn(answer: SourceView, mark: Mark): boolean {
+  function landedIn(answer: SourceView, mark: Echo): boolean {
     if (mark.kind === "comment") return conversationOf(answer).some((message) => sameWords(message.body, mark.text));
     const state = headerOf(answer).state?.text ?? null;
     return STATE_READ.includes(mark.kind) && state !== null && mark.base !== null && state !== mark.base;
@@ -362,7 +362,7 @@
     const answer = view;
     const id = prId;
     if (id === null || answer == null) return;
-    untrack(() => settleQueued(id, (mark) => landedIn(answer, mark)));
+    untrack(() => settleEchoes(id, (mark) => landedIn(answer, mark)));
   });
 
   // *Edit and resend* on a refused comment: the box again, with its words.
@@ -374,7 +374,7 @@
 
   /** Mark a write queued as `verb`, followed under `name`. */
   function markChip(id: string, verb: string, name: string, write: QueuedWrite) {
-    markQueued(id, verb, chipOf(verb), { write, base: header.state?.text ?? null, following: { name }, follower });
+    echoWrite(id, verb, chipOf(verb), { write, base: header.state?.text ?? null, following: { name }, follower });
   }
 
   /**
@@ -401,7 +401,7 @@
     if (prId === null) return null;
     const id = prId;
     for (const verb of HOLDS[key] ?? []) {
-      const mark = queuedMark(id, verb);
+      const mark = echoOn(id, verb);
       if (mark !== null) return mark.text;
     }
     return null;
@@ -435,7 +435,7 @@
     try {
       const id = prId;
       const write = await ports.submitWrite({ Comment: { entity: id, body } });
-      markQueued(id, "comment", body, {
+      echoWrite(id, "comment", body, {
         write,
         many: true,
         following: {

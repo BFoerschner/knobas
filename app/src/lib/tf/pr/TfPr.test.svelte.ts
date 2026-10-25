@@ -24,7 +24,7 @@ import { createPendingComments, type PendingCommentStore } from "../../detail/vi
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
-import { forgetQueued } from "../queued.svelte";
+import { forgetEchoes } from "../queued.svelte";
 import TfPr, { type PrPorts } from "./TfPr.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
@@ -210,7 +210,7 @@ beforeEach(() => {
 
 /** What a page queued is held for the session (#1424), and each test is one. */
 afterEach(() => {
-  forgetQueued();
+  forgetEchoes();
   health.replace([]);
   if (view) unmount(view);
   view = null;
@@ -853,14 +853,14 @@ test("the hold outlives leaving the page and ends with the session; a source's o
   expect(holdOf("Merge…")).toEqual(["true", "merge queued"]);
   expect(holdOf("Edit")).toEqual(["true", "merge queued"]);
   unmount(view!);
-  forgetQueued();
+  forgetEchoes();
   await draw([PR], offered());
   expect(holdOf("Merge…")).toEqual([null, ""]);
   expect(button("Merge…")!.classList.contains("tf-primary")).toBe(true);
   expect(holdOf("Edit")).toEqual([null, ""]);
 });
 
-// -- A queued mark goes once the source's read shows it (#1542) -------------
+// -- An echo goes once the source's read shows it (#1542) -------------
 
 const REOPEN = action("edit_pull_request", "Reopen", { values: { state: "open" } });
 

@@ -17,7 +17,7 @@ import {
   jobBranchFor,
   keptRuns,
   longest,
-  markQueuedRun,
+  echoRun,
   pipelineWord,
   QUEUED_RUN,
   queuedRunRows,
@@ -31,7 +31,7 @@ import {
   triggerLabel,
   triggersSentence,
 } from "./pipeline";
-import { forgetQueued, queuedMarks, type Mark } from "../queued.svelte";
+import { forgetEchoes, echoesOn, type Echo } from "../queued.svelte";
 
 function run(no: number, tone: "ok" | "err" | "info", extra: Partial<RunRow> = {}): RunRow {
   return {
@@ -267,7 +267,7 @@ test("the warn line: a failing sign-in with its fix, a failed sync without one, 
 
 // -- runs queued this session (#1449) -------------------------------------------
 
-const mark = (write: number, branch: string, base: string | null): Mark => ({ write, kind: "run", text: branch, base, state: "queued", surface: null, source: null });
+const mark = (write: number, branch: string, base: string | null): Echo => ({ write, kind: "run", text: branch, base, state: "queued", surface: null, source: null });
 
 test("a queued run is a queued row on its branch, the default branch where it named none, newest first", () => {
   const rows = queuedRunRows([mark(4, "feature/x", "teamcity:build:9"), mark(5, "", "teamcity:build:9")], "main");
@@ -312,11 +312,11 @@ test("a sync status heard takes its source's place, or joins the list", () => {
 test("a run queued before the page's read arrives is based on the pipeline's own recent runs", () => {
   const follower = { follow: () => () => {} };
   const pipeline = { entity_id: "teamcity:buildType:X", name: "X", recent: [run(7, "ok"), run(6, "ok")] };
-  markQueuedRun(pipeline, { id: 3 }, null, null, follower);
-  markQueuedRun(pipeline, { id: 4 }, "feature/x", [run(8, "ok")], follower);
-  expect(queuedMarks("teamcity:buildType:X", QUEUED_RUN)).toMatchObject([
+  echoRun(pipeline, { id: 3 }, null, null, follower);
+  echoRun(pipeline, { id: 4 }, "feature/x", [run(8, "ok")], follower);
+  expect(echoesOn("teamcity:buildType:X", QUEUED_RUN)).toMatchObject([
     { write: 3, kind: QUEUED_RUN, text: "", base: "teamcity:build:7", state: "queued" },
     { write: 4, kind: QUEUED_RUN, text: "feature/x", base: "teamcity:build:8", state: "queued" },
   ]);
-  forgetQueued();
+  forgetEchoes();
 });

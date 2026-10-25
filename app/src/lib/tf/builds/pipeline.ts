@@ -16,7 +16,7 @@ import { refusalOf, type RefusedWrite, type WriteAsk } from "../../shell/refused
 import type { WriteSource } from "../../shell/queued-toast";
 import { matchesAll } from "../filter/filter";
 import type { WriteFollower } from "../../shell/follow-write";
-import { markQueued, type Mark } from "../queued.svelte";
+import { echoWrite, type Echo } from "../queued.svelte";
 import { reenterWords, secretNoun } from "../settings/settings";
 import { pipelineHash, runTone, shortTime } from "./builds";
 
@@ -78,14 +78,14 @@ export function runBranch(payload: WriteOpPayload): string | null {
  * queue holds or refuses it. `held` is the runs the page holds, newest first;
  * before its read arrives, the pipeline's own recent runs stand in.
  */
-export function markQueuedRun(
+export function echoRun(
   pipeline: Pick<PipelineRow, "entity_id" | "name" | "recent">,
   write: Pick<QueuedWrite, "id">,
   branch: string | null,
   held: readonly RunRow[] | null,
   follower: WriteFollower,
 ): void {
-  markQueued(pipeline.entity_id, QUEUED_RUN, branch ?? "", {
+  echoWrite(pipeline.entity_id, QUEUED_RUN, branch ?? "", {
     write,
     base: (held ?? pipeline.recent)[0]?.entity_id ?? null,
     many: true,
@@ -95,7 +95,7 @@ export function markQueuedRun(
 }
 
 /** The runs queued this session and not yet read back, as queued rows, newest first. */
-export function queuedRunRows(marks: readonly Mark[], fallback: string | null): RunRow[] {
+export function queuedRunRows(marks: readonly Echo[], fallback: string | null): RunRow[] {
   return marks
     .map((mark, at): RunRow => ({
       entity_id: startedHere(mark.write ?? -1 - at),
@@ -121,13 +121,13 @@ export function queuedRunRows(marks: readonly Mark[], fallback: string | null): 
 }
 
 /**
- * Which queued runs a read holds (#1449), for `settleQueued`: a run newer
+ * Which queued runs a read holds (#1449), for `settleEchoes`: a run newer
  * than the newest the page held as it was queued, on its branch (any, for
  * one queued on the default), that no change or schedule started. Each such
  * run holds one queued run, the oldest first, so two queued and one read
  * back leaves one queued row.
  */
-export function runLanded(rows: readonly RunRow[]): (mark: Mark) => boolean {
+export function runLanded(rows: readonly RunRow[]): (mark: Echo) => boolean {
   const taken = new Set<string>();
   return (mark) => {
     const at = mark.base === null ? -1 : rows.findIndex((row) => row.entity_id === mark.base);

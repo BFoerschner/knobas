@@ -58,7 +58,7 @@ export function queuedCommit(repoId: string, branch: string, path: string, sha: 
 }
 
 /** Forget every mark: a new session, which is what each test is. */
-export function forgetQueued(): void {
+export function forgetEchoes(): void {
   for (const bag of [made, deleted, commits] as Record<string, unknown>[]) {
     for (const key of Object.keys(bag)) delete bag[key];
   }

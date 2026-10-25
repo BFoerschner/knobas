@@ -10,7 +10,7 @@ import type { QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
-import { forgetQueued } from "../queued.svelte";
+import { forgetEchoes } from "../queued.svelte";
 import { parseTfHash } from "../route";
 import { READER_DRAWER, READER_NARROW } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
@@ -106,7 +106,7 @@ beforeEach(() => {
 
 /** What a page queued is held for the session (#1424), and each test is one. */
 afterEach(() => {
-  forgetQueued();
+  forgetEchoes();
   if (view) unmount(view);
   view = null;
   target.remove();

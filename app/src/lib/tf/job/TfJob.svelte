@@ -86,7 +86,7 @@
   import { createJobReader } from "./job-reader.svelte";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { currentJob, linkRequest, type LinkTarget } from "./current.svelte";
-  import { askAgain, markQueued, queuedMark, queuedMarks, sameWords, settleQueued } from "../queued.svelte";
+  import { askAgain, echoWrite, echoOn, echoesOn, sameWords, settleEchoes } from "../queued.svelte";
   import { jobHash } from "../route";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfDeps from "../deps/TfDeps.svelte";
@@ -297,16 +297,16 @@
 
   // ---- what this job queued, drawn at once (#1424) ----
   /** The status a queued move picked, drawn in the select until the ticket's status moves. */
-  const queuedStatus = $derived(detail ? (queuedMark(detail.row.entity_id, "status")?.text ?? null) : null);
+  const queuedStatus = $derived(detail ? (echoOn(detail.row.entity_id, "status")?.text ?? null) : null);
   /** The comments queued here, drawn at the end of the thread until the thread holds them. */
-  const queuedComments = $derived(detail ? queuedMarks(detail.row.entity_id, "comment").map((mark) => mark.text) : []);
+  const queuedComments = $derived(detail ? echoesOn(detail.row.entity_id, "comment").map((mark) => mark.text) : []);
 
   // Each read of the ticket drops a move once its status moved from where the move left it.
   $effect(() => {
     if (!detail) return;
     const id = detail.row.entity_id;
     const status = detail.status;
-    untrack(() => settleQueued(id, (mark) => mark.kind === "status" && mark.base !== status));
+    untrack(() => settleEchoes(id, (mark) => mark.kind === "status" && mark.base !== status));
   });
 
   // Each read of the thread drops a comment it holds.
@@ -314,7 +314,7 @@
     if (!detail || thread === null) return;
     const id = detail.row.entity_id;
     const said = thread.comments;
-    untrack(() => settleQueued(id, (mark) => mark.kind === "comment" && said.some((c) => sameWords(c.body, mark.text))));
+    untrack(() => settleEchoes(id, (mark) => mark.kind === "comment" && said.some((c) => sameWords(c.body, mark.text))));
   });
 
   async function comment(body: string): Promise<boolean> {
@@ -324,7 +324,7 @@
     const source = detail.source;
     try {
       const write = await ports.submitWrite({ Comment: { entity: id, body } });
-      markQueued(id, "comment", body, {
+      echoWrite(id, "comment", body, {
         write,
         many: true,
         following: {
@@ -365,7 +365,7 @@
     const from = detail.status;
     try {
       const write = await ports.submitWrite({ Transition: { entity: id, status } });
-      markQueued(id, "status", status, {
+      echoWrite(id, "status", status, {
         write,
         base: from,
         following: {

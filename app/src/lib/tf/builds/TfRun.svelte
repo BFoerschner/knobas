@@ -42,14 +42,14 @@
   import { toastQueued } from "../../shell/queued-toast";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
-  import { settleQueued } from "../queued.svelte";
+  import { settleEchoes } from "../queued.svelte";
   import { commitHash, fileHash } from "../repo/repo";
   import { pipelineHash, runTone } from "./builds";
   import {
     chipTone,
     defaultBranch,
     jobBranchFor,
-    markQueuedRun,
+    echoRun,
     pipelineSource,
     queuedRunWhat,
     resultWord,
@@ -213,7 +213,7 @@
         rows = [...rows, ...older];
       }
       if (mine !== token) return;
-      settleQueued(pipe, runLanded(rows));
+      settleEchoes(pipe, runLanded(rows));
       held = rows;
       runsFailed = null;
     } catch (cause) {
@@ -348,7 +348,7 @@
   async function queue(request: RunRequest) {
     try {
       const write = await ports.submitWrite(request.payload);
-      markQueuedRun(pipeline, write, runBranch(request.payload), held, ports.follower());
+      echoRun(pipeline, write, runBranch(request.payload), held, ports.follower());
       toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline));
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });

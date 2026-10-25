@@ -40,7 +40,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
-  import { queuedMarks, settleQueued } from "../queued.svelte";
+  import { echoesOn, settleEchoes } from "../queued.svelte";
   import { runHash, runTone, shortTime } from "./builds";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
@@ -67,7 +67,7 @@
     jobBranchFor,
     keptRuns,
     longest,
-    markQueuedRun,
+    echoRun,
     pipelineWord,
     pipelineSource,
     QUEUED_RUN,
@@ -166,7 +166,7 @@
     readRuns(wanted).then(
       (rows) => {
         if (mine !== token) return;
-        settleQueued(wanted, runLanded(rows));
+        settleEchoes(wanted, runLanded(rows));
         held = rows;
       },
       (cause: unknown) => {
@@ -202,7 +202,7 @@
     readRuns(wanted).then(
       (rows) => {
         if (!current()) return;
-        settleQueued(wanted, runLanded(rows));
+        settleEchoes(wanted, runLanded(rows));
         failed = null;
         held = appendOlder(rows, held ?? []);
       },
@@ -245,7 +245,7 @@
    * Runs queued this session, here or on a run page, drawn *queued* until a
    * read holds them (R-9.8, #1449); the queue holding or refusing one drops it.
    */
-  const started = $derived(queuedRunRows(queuedMarks(id, QUEUED_RUN), defaultBranch(settings)));
+  const started = $derived(queuedRunRows(echoesOn(id, QUEUED_RUN), defaultBranch(settings)));
   const all = $derived(held === null ? null : [...started, ...held]);
 
   async function more() {
@@ -307,7 +307,7 @@
   async function queue(payload: WriteOpPayload, summary: string): Promise<boolean> {
     try {
       const write = await ports.submitWrite(payload);
-      markQueuedRun(pipeline, write, runBranch(payload), held, ports.follower());
+      echoRun(pipeline, write, runBranch(payload), held, ports.follower());
       toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline));
       return true;
     } catch (cause) {

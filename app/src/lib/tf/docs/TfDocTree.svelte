@@ -7,7 +7,7 @@
 <script lang="ts">
   import Self from "./TfDocTree.svelte";
   import type { DocSpace } from "../../ipc/entity";
-  import { queuedMarks } from "../queued.svelte";
+  import { echoesOn } from "../queued.svelte";
   import { childrenOf, holds, pageHash } from "./docs";
 
   let { space, parent = null, current }: { space: DocSpace; parent?: string | null; current: string | null } =
@@ -17,7 +17,7 @@
 </script>
 
 {#each nodes as node (node.entity_id)}
-  {@const queued = queuedMarks(node.entity_id, "page")}
+  {@const queued = echoesOn(node.entity_id, "page")}
   {#if childrenOf(space, node.entity_id).length > 0 || queued.length > 0}
     <details open={queued.length > 0 || (current !== null && holds(space, node, current))}>
       <summary class:tf-cur={node.entity_id === current}
