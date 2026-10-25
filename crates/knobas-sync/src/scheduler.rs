@@ -166,6 +166,12 @@ pub trait SyncEvents: Send + Sync + 'static {
     /// `sources::refresh`), once the item and its links on arrival are
     /// written. A wrapper passes it on; the default hears nothing.
     fn refresh_ended(&self, _ended: &RefreshEnded) {}
+    /// The events themselves, for a caller that must reach its concrete
+    /// type: `knobas-app` asks its own wrapper which landed writes are still
+    /// being followed (#2115). `None`, the default, for every other.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 /// The payload of the shell's `item:refreshed` event: a refresh of one item
@@ -1802,16 +1808,11 @@ impl Scheduler {
     /// that is slow (story 11).
     ///
     /// **What that costs, and who pays it.** The second run is paid whenever
-    /// one was in flight, and that is the ordinary case for every caller this
-    /// has -- not just start-work. That same `after_landing` asks for this the
-    /// moment a write lands, and each caller asks for it again immediately
-    /// after a write, so all three wait out two incremental syncs where one
-    /// would do: start-work's link step (issue #44), #289's protocol publish,
-    /// and the ticket an action item is turned into. Whichever of the two asks
-    /// first starts the run, and the other joins it and asks once more. There
-    /// is one run only when there was none to join: the follow-up's had
-    /// finished before this asked, or there was none because the source
-    /// refused the write.
+    /// one was in flight. `after_landing` asks for this once per landed
+    /// write. A caller in `knobas-app` that looks for what its write made
+    /// (start-work's link step, issue #44; #289's protocol publish; an action
+    /// item's ticket) waits for that follow-up instead, and asks for a run of
+    /// its own only when no follow-up of the source is in flight (#2115).
     ///
     /// ADR-0005 guarantees a run id always comes with an ending -- including
     /// the id of a run already in flight -- so neither wait can be for

@@ -123,7 +123,9 @@ impl<S: Borrow<SourcesState> + Send + Sync> Steps for Queue<S> {
         // early. **Or before a run that could have seen it has
         // finished** -- waiting out the one this flow's own branch write left
         // in flight is `Scheduler::sync_after_write`'s job and was the #358
-        // flake.
+        // flake. Where the pull request's own landing is still being followed
+        // (its refresh, then its run), that is what this waits for, starting
+        // no run beside it (#2115).
         crate::sources::write_queue::sync_after_write(self.state.borrow(), source).await;
     }
 }

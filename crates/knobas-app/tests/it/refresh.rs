@@ -643,26 +643,14 @@ async fn a_ticket_filed_from_a_run_is_linked_to_it_before_the_follow_up_run_ends
     mirrored(&f).await;
     let runs_before = finished_runs(&f.state.pool, SOURCE).await;
 
-    // Queued with its link owed and then sent by *Flush now*, so the one
-    // thing after the send is `after_landing`: a submit that waits for a run
-    // of its own (`submit_linked_in_background`) can start that run first,
-    // and a refresh waits behind a run in flight.
-    let filed = WriteOp::CreateTicket {
-        entity: BUILD.to_owned(),
-        title: "Build #1 failed".to_owned(),
-        body: "filed from the run".to_owned(),
-        ticket_type: "Bug".to_owned(),
-    };
-    let id = knobas_sync::write_queue::queue(f.state.scheduler.deps(), SOURCE, filed)
+    // Sent the way *File ticket* sends it, its link owed on the row: the
+    // caller waits for the landed write's follow-up rather than starting a
+    // run of its own, so the refresh is the first thing under the run lock
+    // (#2115).
+    let id = write_queue::submit_linked_in_background(&f.state, filed(), BUILD.to_owned())
         .await
         .expect("queued")
         .id;
-    write_queue::hold_arrival_link(&f.state.pool, id, BUILD)
-        .await
-        .expect("the link is owed");
-    write_queue::flush_now(&f.state, Some(SOURCE.to_owned()))
-        .await
-        .expect("sent");
     assert_eq!(settled(&f.state, id).await, WriteState::Sent);
     // The door stays shut, so no run of the source can end while this waits:
     // the link can only come from the refresh.
@@ -700,6 +688,57 @@ async fn a_ticket_filed_from_a_run_is_linked_to_it_before_the_follow_up_run_ends
     );
     f.open_the_door();
     run_after(&f.state.pool, SOURCE, id).await;
+    f.state.scheduler.shutdown().await;
+}
+
+/// *File ticket* from the failed build: what the fake files as PAY-9.
+fn filed() -> serde_json::Value {
+    json!({ "CreateTicket": {
+        "entity": BUILD,
+        "title": "Build #1 failed",
+        "body": "filed from the run",
+        "ticket_type": "Bug",
+    } })
+}
+
+/// **A send whose caller waits for the mirror starts no run of its own**
+/// (#2115). The landed write's follow-up is the refresh, then one run that
+/// began after the write; the caller waits for that and then looks. A caller
+/// that started its own run beside it was a second run, and one the refresh
+/// could find in flight and wait behind.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_send_waits_for_the_landed_writes_follow_up_and_starts_no_run_of_its_own() {
+    let f = fixture("refresh_linked_one_run").await;
+    mirrored(&f).await;
+    f.open_the_door();
+    let id = write_queue::submit_linked_in_background(&f.state, filed(), BUILD.to_owned())
+        .await
+        .expect("queued")
+        .id;
+    assert_eq!(settled(&f.state, id).await, WriteState::Sent);
+    run_after(&f.state.pool, SOURCE, id).await;
+    until("the send and everything after it are over", || async {
+        f.state.scheduler.background().running() == 0
+    })
+    .await;
+    let after: i64 = sqlx::query_scalar(
+        "select count(*) from knobas.sync_run r, knobas.write_queue w
+          where w.id = $2 and r.source_id = $1 and r.started_at > w.settled_at",
+    )
+    .bind(SOURCE)
+    .bind(id)
+    .fetch_one(&f.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(after, 1, "one run after the write: the follow-up's");
+    assert_eq!(
+        f.heard()
+            .into_iter()
+            .map(|e| (e.entity_id, e.write_id))
+            .collect::<Vec<_>>(),
+        [(FILED.to_owned(), Some(id))],
+        "the filed ticket was refreshed"
+    );
     f.state.scheduler.shutdown().await;
 }
 
