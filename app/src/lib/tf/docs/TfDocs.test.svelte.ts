@@ -240,7 +240,6 @@ test("the body: a live ticket chip, my mention in yellow, a page link, code with
   ]);
   expect(doc.querySelector("a.tf-pgl")?.getAttribute("href")).toBe("#/page/confluence%3A7");
   expect(doc.querySelector("pre code")?.textContent).toBe("select 1;");
-  expect(doc.querySelector("pre .tf-lang")?.textContent).toBe("sql");
   expect(doc.querySelector("thead th")?.textContent).toBe("After");
   expect(doc.querySelector(".tf-macro")?.textContent).toContain(
     "This part is a Confluence roadmap macro, which knobas does not draw.",
@@ -259,6 +258,29 @@ test("Copy copies the code, and the placeholder and Open in Confluence open the 
   await settle();
   expect(io.openExternal).toHaveBeenCalledTimes(2);
   expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
+});
+
+test("a code block's language and Copy sit in a strip above the code, and nothing sits inside the code (#2083)", async () => {
+  const blocks: DocPage["blocks"] = [
+    { type: "code", code: "select 1;", language: "sql" },
+    { type: "code", code: "ls -la", language: null },
+  ];
+  const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const pres = [...target.querySelectorAll(".tf-doc pre")];
+  expect(pres).toHaveLength(2);
+  const strips = pres.map((pre) => pre.previousElementSibling!);
+  expect(strips.map((s) => [...s.children].map((c) => [c.tagName, c.textContent]))).toEqual([
+    [
+      ["SPAN", "sql"],
+      ["BUTTON", "Copy"],
+    ],
+    [["BUTTON", "Copy"]],
+  ]);
+  // The code area holds the code and nothing else: no control over a long line.
+  expect(pres.map((pre) => [...pre.children].map((c) => c.tagName))).toEqual([["CODE"], ["CODE"]]);
+  strips[1]!.querySelector("button")!.click();
+  await settle();
+  expect(io.copy).toHaveBeenCalledWith("ls -la");
 });
 
 test("comments are listed with their author, or say there are none", async () => {

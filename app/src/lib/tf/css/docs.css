@@ -61,12 +61,19 @@
 .tf-doc li { margin: 4px 0; }
 .tf-doc li > p:last-child, .tf-doc .tf-callout p:last-child { margin-bottom: 0; }
 .tf-doc code { font: .82em var(--mono); font-variant-ligatures: none; background: var(--sheet-2); padding: 1px 5px; border-radius: 3px; }
-.tf-doc pre {
-  font: var(--t-md)/1.55 var(--mono); font-variant-ligatures: none; background: var(--sheet-2); border: 1px solid var(--rule); border-radius: 6px;
-  padding: 12px 14px; overflow: auto; position: relative; margin: 0 0 18px; white-space: pre;
+/* A code block: its language and Copy in a strip above the code, so neither covers a long line (#2083). */
+.tf-pre { margin: 0 0 18px; }
+.tf-doc li > p:has(+ .tf-pre) { margin-bottom: 8px; }
+.tf-pre-bar {
+  display: flex; align-items: center; gap: 8px; padding: 2px 4px 2px 14px; background: var(--sheet-2);
+  border: 1px solid var(--rule); border-bottom-color: var(--rule-2); border-radius: 6px 6px 0 0;
+  font: var(--t-xs) var(--sans); color: var(--ink-2);
 }
-.tf-doc pre .tf-copy { position: absolute; top: 6px; right: 6px; font: var(--t-xs) var(--sans); }
-.tf-doc pre .tf-lang { position: absolute; bottom: 4px; right: 10px; font: var(--t-2xs) var(--sans); color: var(--ink-2); }
+.tf-pre-bar .tf-btn { margin-left: auto; font-size: var(--t-xs); padding: 2px 8px; }
+.tf-doc pre {
+  font: var(--t-md)/1.55 var(--mono); font-variant-ligatures: none; background: var(--sheet-2); border: 1px solid var(--rule);
+  border-top: 0; border-radius: 0 0 6px 6px; padding: 12px 14px; overflow: auto; margin: 0; white-space: pre;
+}
 .tf-doc table { border-collapse: collapse; width: 100%; font-family: var(--sans); font-size: var(--t-md); line-height: 1.45; margin: 0 0 18px; }
 .tf-doc th, .tf-doc td { border: 1px solid var(--rule); padding: 7px 10px; text-align: left; vertical-align: top; }
 .tf-doc th { background: var(--sheet-2); font-weight: 600; }

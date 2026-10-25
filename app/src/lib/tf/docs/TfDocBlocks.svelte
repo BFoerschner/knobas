@@ -46,9 +46,14 @@
     </svelte:element>
   {:else if block.type === "code"}
     {@const code = block.code}
-    <pre><button type="button" class="tf-btn tf-sm tf-ghost tf-copy" onclick={() => oncopy(code)}>Copy</button><code
-        ><TfMarked text={code} {stems} /></code
-      >{#if block.language}<span class="tf-lang">{block.language}</span>{/if}</pre>
+    <!-- The language and Copy sit in a strip above the code, so neither covers a long line (#2083). -->
+    <div class="tf-pre">
+      <div class="tf-pre-bar">
+        {#if block.language}<span>{block.language}</span>{/if}
+        <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => oncopy(code)}>Copy</button>
+      </div>
+      <pre><code><TfMarked text={code} {stems} /></code></pre>
+    </div>
   {:else if block.type === "table"}
     {@const head = headed(block.rows)}
     <table>
