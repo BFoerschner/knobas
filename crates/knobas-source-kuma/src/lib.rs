@@ -50,6 +50,7 @@ mod http;
 mod map;
 mod metrics;
 mod model;
+mod refresh;
 mod socket;
 mod source;
 

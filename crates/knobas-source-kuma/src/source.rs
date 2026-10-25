@@ -4,14 +4,14 @@ use std::sync::Arc;
 
 use knobas_source::instance::SourceInstance;
 use knobas_source::{
-    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, SyncItem, WriteOp,
-    WriteReceipt,
+    ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError, SyncItem,
+    WriteOp, WriteReceipt,
 };
 
 use crate::cursor::Position;
 use crate::http::KumaHttp;
 use crate::socket::KumaSocket;
-use crate::{KumaConfig, create, descriptor, http, map, metrics, model, socket};
+use crate::{KumaConfig, create, descriptor, http, map, metrics, model, refresh, socket};
 
 /// One configured Uptime Kuma instance.
 pub struct KumaSource {
@@ -119,6 +119,28 @@ fn monitor_id(entity: &str) -> Result<i64, SourceError> {
             parsed.key
         ))
     })
+}
+
+/// The monitor a refresh reads (#2100): Kuma's id, or `None` for an entity of
+/// this source that is not a monitor -- the roster a create targets
+/// ([`knobas_source::monitor_target`]), read back when its receipt named no
+/// id.
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`] for an id that is not an entity's, or another
+/// instance's: `kuma-eu:8` is not this Kuma's monitor 8, and reading it here
+/// would answer for the wrong server.
+fn refreshed_monitor(source_id: &str, entity: &str) -> Result<Option<i64>, SourceError> {
+    let parsed = knobas_core::entity::EntityRef::parse(entity).map_err(|error| {
+        SourceError::protocol(format!("{entity:?} is not an entity id: {error}"))
+    })?;
+    if parsed.namespace != source_id {
+        return Err(SourceError::protocol(format!(
+            "{entity:?} is not this Uptime Kuma's own: its monitors are {source_id:?}'s"
+        )));
+    }
+    Ok(parsed.key.parse::<i64>().ok())
 }
 
 /// Check that a create's target is **this** source's own.
@@ -367,6 +389,16 @@ impl Source for KumaSource {
         Ok(WriteReceipt::none())
     }
 
+    /// One monitor read back out of `/metrics` (ADR-0031, #2100), and asked
+    /// after over socket.io when the document omits it and the source has
+    /// an account: [`crate::refresh`] argues both halves.
+    async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
+        let Some(id) = refreshed_monitor(&self.id, entity)? else {
+            return Ok(RefreshAnswer::NotOffered);
+        };
+        refresh::read(self, id, refresh::FIRST_BEAT).await
+    }
+
     /// Refused: Uptime Kuma has no workflow (#498).
     ///
     /// A monitor is up, down or paused because of what the checks found and
@@ -397,6 +429,34 @@ impl Source for KumaSource {
         _section: Option<&str>,
     ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
         Ok(None)
+    }
+}
+
+/// The refresh's two observations ([`crate::refresh`]): the document the run
+/// reads, and the account's channel when there is one.
+#[async_trait::async_trait]
+impl refresh::Roster for KumaSource {
+    async fn published(&self, id: i64) -> Result<Option<SyncItem>, SourceError> {
+        let body = self.http.metrics().await?;
+        let key = id.to_string();
+        Ok(model::monitors(&metrics::parse(&body))
+            .iter()
+            .find(|monitor| monitor.id == key)
+            .map(|monitor| map::to_sync_item(&self.id, &self.base_url, monitor)))
+    }
+
+    async fn active(&self, id: i64) -> Result<Option<bool>, SourceError> {
+        let Some(socket) = self.socket.as_ref() else {
+            return Ok(None);
+        };
+        match socket
+            .ask(socket::GET_MONITOR_EVENT, &serde_json::json!(id))
+            .await?
+        {
+            Some(answered) => refresh::active_of(&answered).map(Some),
+            // Not there, or not the account's: either way not running.
+            None => Ok(Some(false)),
+        }
     }
 }
 
@@ -623,3 +683,4 @@ mod tests {
         assert_eq!(trimmed_base_url("http://x:3001"), "http://x:3001");
     }
 }
+

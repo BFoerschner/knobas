@@ -214,6 +214,8 @@ pub(crate) const RESUME_EVENT: &str = "resumeMonitor";
 /// as `add` rather than `addMonitor` -- the odd one out among the three, which
 /// is why it is spelled here beside its siblings instead of at the call site.
 pub(crate) const ADD_EVENT: &str = "add";
+/// The one read (#2100): a monitor's record by id, `active` among it.
+pub(crate) const GET_MONITOR_EVENT: &str = "getMonitor";
 
 /// One Kuma instance's socket.io access, as an account.
 #[derive(Debug)]
@@ -428,11 +430,40 @@ impl KumaSocket {
         event: &str,
         build: impl Fn(&Pushed) -> Result<serde_json::Value, SourceError>,
     ) -> Result<serde_json::Value, SourceError> {
+        verdict(&self.acked(event, &build).await?, event)
+    }
+
+    /// A **read** over the channel (#2100): Kuma's answer when it says `ok`,
+    /// and `None` when it refuses, which for a read is an answer rather than
+    /// a fault -- `getMonitor` of a monitor that is not there, or not the
+    /// account's, answers `{"ok":false,"msg":"Cannot read properties of null
+    /// (reading 'id')"}` on the pinned 2.5.3 (measured 2026-10-25).
+    ///
+    /// # Errors
+    ///
+    /// [`KumaSocket::call`]'s, but for the refusal.
+    pub(crate) async fn ask(
+        &self,
+        event: &str,
+        argument: &serde_json::Value,
+    ) -> Result<Option<serde_json::Value>, SourceError> {
+        let payload = self.acked(event, &|_| Ok(argument.clone())).await?;
+        Ok(reading(&payload, event)?.ok())
+    }
+
+    /// The exchange under one deadline, and the ack's payload back unread:
+    /// [`KumaSocket::call_with`] and [`KumaSocket::ask`] each say what they
+    /// make of it.
+    async fn acked(
+        &self,
+        event: &str,
+        build: &impl Fn(&Pushed) -> Result<serde_json::Value, SourceError>,
+    ) -> Result<String, SourceError> {
         let mut held = self.held.lock().await;
         let mut emitted = false;
         let Ok(answered) = tokio::time::timeout(
             self.budget,
-            self.exchange(&mut held, &mut emitted, event, &build),
+            self.exchange(&mut held, &mut emitted, event, build),
         )
         .await
         else {
@@ -458,7 +489,7 @@ impl KumaSocket {
                 self.budget
             )));
         };
-        verdict(&answered?, event)
+        answered
     }
 
     /// The write itself: on the held session if it is still good, else on a
@@ -918,6 +949,18 @@ fn login_verdict(payload: &str, username: &str) -> Result<(), SourceError> {
 /// The pinned 2.5.3 never answers that way; a Kuma whose ack shape changed
 /// does, on every write.
 fn verdict(payload: &str, event: &str) -> Result<serde_json::Value, SourceError> {
+    reading(payload, event)?.map_err(|refused| {
+        SourceError::protocol(format!("Uptime Kuma refused {event}: {}", said(&refused)))
+    })
+}
+
+/// The ack read as Kuma's answer: `Ok(Ok(_))` when it says `ok: true`,
+/// `Ok(Err(_))` for its refusal, and [`SourceError::Unconfirmed`] for an ack
+/// that says neither ([`verdict`]'s reasoning, #1721).
+fn reading(
+    payload: &str,
+    event: &str,
+) -> Result<Result<serde_json::Value, serde_json::Value>, SourceError> {
     let unread = |why: &str| SourceError::Unconfirmed {
         status: None,
         message: format!(
@@ -928,11 +971,8 @@ fn verdict(payload: &str, event: &str) -> Result<serde_json::Value, SourceError>
     };
     let answered = answer(payload).map_err(unread)?;
     match ok_of(&answered) {
-        Some(true) => Ok(answered),
-        Some(false) => Err(SourceError::protocol(format!(
-            "Uptime Kuma refused {event}: {}",
-            said(&answered)
-        ))),
+        Some(true) => Ok(Ok(answered)),
+        Some(false) => Ok(Err(answered)),
         None => Err(unread("its answer carries no `ok`")),
     }
 }
