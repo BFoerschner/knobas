@@ -1044,14 +1044,22 @@ seeded one it creates nothing.
 ## A seeded pull request that is no longer open (#884)
 
 `seed-gitea.sh` refuses when a pull request the fixture says is open ("SEPA
-retry with exponential backoff", "Add payout CSV export") is merged or closed
-on the server, and prints the remedy: Gitea on a fresh volume (`docker compose
+retry with exponential backoff", "Add payout CSV export") is merged on the
+server, and prints the remedy: Gitea on a fresh volume (`docker compose
 rm -sfv gitea`, remove the `gitea-data` volume, delete `seed-state.json`, seed
-again; `./reset` does the same for every product). A merged pull request whose
-head branch is gone cannot be reopened, and a replacement would invent history on
-`main`, so the seed does not repair it. The live suites only merge pull requests
-they opened on `knobas-` branches (audited in #884: every `MergePullRequest` site in
-`live_gitea.rs` and `start_work_live.rs` merges its own); what merged the original
+again; `./reset` does the same for every product). A merged pull request
+cannot be reopened, and a replacement would invent history on `main`, so the
+seed does not repair it. A **closed** one it reopens (#2110): closing merges
+nothing, so the reopen restores the fixture exactly. An open pull request on
+the same head and base is closed first: Gitea would reopen beside it, leaving
+the fixture one open pull request over. When Gitea refuses the reopen (the
+head branch is gone) the seed refuses as for a merged one, with Gitea's
+answer in the message. On 2026-10-25 Gitea's timeline points to a person:
+payout-service#142 closed through the app's *Close* action and a pull request
+with the body `asdf` opened from its branch 15 s later, not a suite. The live
+suites only merge pull requests they opened on `knobas-` branches (audited in
+#884: every `MergePullRequest` site in `live_gitea.rs` and `start_work_live.rs`
+merges its own); what merged the original
 one on 2026-10-14 was not a suite. `testenv/gitea-pr-state-test.sh` (in `just
 witness-unit`) holds the rule to account.
 
