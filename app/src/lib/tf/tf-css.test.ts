@@ -367,11 +367,13 @@ test("below 900px the Docs tree is a drawer over the page, on the component's ow
   const backdrop = rule(".tf-rd-backdrop");
   expect(backdrop).toMatch(/position:\s*absolute/);
   expect(backdrop).toMatch(/inset:\s*0/);
+  expect(backdrop, "the scrim fades in, as the design system's Motion asks").toMatch(/animation:\s*tf-fade \.15s/);
   expect(Number(/z-index:\s*(\d+)/.exec(backdrop)![1])).toBeLessThan(Number(/z-index:\s*(\d+)/.exec(tree)![1]));
   // Reduced motion: no slide, open or closed, and the rule outranks the band's.
   const still = code.slice(code.indexOf("@media (prefers-reduced-motion: reduce) {", at));
   const stillRule = still.slice(0, still.indexOf("\n}"));
   expect(stillRule).toMatch(/\.tf-rd \.tf-rd-tree,\s*\.tf-rd\.tf-rd-drawer \.tf-rd-tree\s*\{\s*transition:\s*none;/);
+  expect(stillRule).toMatch(/\.tf-rd-backdrop\s*\{\s*animation:\s*none;/);
 });
 
 /** The one-row bars that stick: never taller than the window, so they need no bound of their own (#2091). */

@@ -427,13 +427,12 @@
   function searchLabel(label: string, chip: HTMLElement): void {
     query = label;
     find = "";
-    if (drawerWindow.current) openDrawer(chip);
-    focusSearch();
+    openSearch(chip);
   }
 
   // ---- below 900px the tree is a drawer over the page (#2084) ----
   /** A window narrower than 900px, where the tree leaves the grid and the Pages button opens it. */
-  const drawerWindow = new MediaQuery(READER_DRAWER);
+  const drawerBand = new MediaQuery(READER_DRAWER);
   let drawer = $state(false);
   /** What opened the drawer, which focus goes back to when it closes. */
   let opener: HTMLElement | null = null;
@@ -451,15 +450,19 @@
     if (back !== null && document.contains(back)) back.focus();
   }
 
-  /** The search field takes focus; in the drawer once it is drawn, as a hidden field takes none. */
-  function focusSearch(): void {
+  /**
+   * The search field takes focus, below 900px in the drawer, opened from
+   * `from`, once it is drawn: a hidden field takes none.
+   */
+  function openSearch(from: Element | null): void {
+    if (drawerBand.current) openDrawer(from);
     if (drawer) void tick().then(() => field?.focus());
     else field?.focus();
   }
 
   // Widening the window past 900px resets the drawer: the tree is back in its column.
   $effect(() => {
-    if (drawerWindow.current) return;
+    if (drawerBand.current) return;
     drawer = false;
     opener = null;
   });
@@ -490,8 +493,7 @@
       if (at instanceof HTMLInputElement || at instanceof HTMLTextAreaElement || at instanceof HTMLSelectElement) return;
       if (at instanceof HTMLElement && at.isContentEditable) return;
       event.preventDefault();
-      if (drawerWindow.current) openDrawer(at);
-      focusSearch();
+      openSearch(at);
     };
     window.addEventListener("keydown", onkey);
     return () => window.removeEventListener("keydown", onkey);
@@ -946,16 +948,13 @@
       <div class="tf-rd-sheet">
         <article class="tf-rd-page" bind:this={article}>
           <div class="tf-rd-crumbrow">
-            {#if drawerWindow.current}
+            {#if drawerBand.current}
               <button
                 type="button"
                 class="tf-btn tf-sm tf-rd-pages"
                 aria-controls="tf-docs-tree"
                 aria-expanded={drawer}
-                onclick={(event) => {
-                  openDrawer(event.currentTarget);
-                  focusSearch();
-                }}
+                onclick={(event) => openSearch(event.currentTarget)}
                 ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"
                   ><path d="M2.5 3.5h11M5 8h8.5M5 12.5h8.5M2.5 8h.5M2.5 12.5h.5" /></svg
                 >Pages</button
