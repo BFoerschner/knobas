@@ -83,7 +83,8 @@
 
 <script lang="ts">
   import { clockLabel } from "../../time/format";
-  import { flushSync, onMount, untrack, type Snippet } from "svelte";
+  import { flushSync, onMount, untrack } from "svelte";
+  import type { RoleFrameProps } from "../page-entry";
 
   import {
     getEntity,
@@ -172,11 +173,7 @@
     viewId?: string | null;
     /** How long, in ms, the filter waits for the next key before it reads: the launcher's 90. */
     typingPause?: number;
-    /** The role frame's *Sync now* (#2106), drawn with the header's actions. */
-    sync?: Snippet;
-    /** Moves when that *Sync now*'s runs have all ended (#2106). */
-    syncRevision?: number;
-  } = $props();
+  } & RoleFrameProps = $props();
 
   // ---- the views ----
   let views = $state<TicketViewRow[] | null>(null);

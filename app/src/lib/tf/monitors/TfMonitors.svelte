@@ -65,7 +65,8 @@
 
 <script lang="ts">
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { onDestroy, type Snippet } from "svelte";
+  import { onDestroy } from "svelte";
+  import type { RoleFrameProps } from "../page-entry";
 
   import { ipcErrorMessage } from "../../ipc";
   import { ackAlert, editAsset, editRoute, getAsset, getRoute, monitorRoster, openAlerts, unmonitoredAssets } from "../../ipc/assets";
@@ -132,14 +133,9 @@
     ports?: MonitorPorts;
     /** Injectable clock, for the bars and the header's *synced*. */
     now?: Date;
-    /** The role frame's *Sync now* (#2106), drawn with the header's actions. */
-    sync?: Snippet;
-    /**
-     * Moves when that *Sync now*'s runs have all ended (#2106). Unread: this
-     * view reads again on the end of every run of its role's sources already.
-     */
-    syncRevision?: number;
-  } = $props();
+    // The frame's `syncRevision` (#2106) is left unread: this view reads
+    // again on the end of every run of its role's sources already.
+  } & RoleFrameProps = $props();
 
   const now = $derived(fixedNow ?? new Date());
   const tab = $derived<"all" | "unmonitored">(rest[0] === "unmonitored" ? "unmonitored" : "all");

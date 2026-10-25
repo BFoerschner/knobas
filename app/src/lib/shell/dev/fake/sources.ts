@@ -6,6 +6,7 @@ import { GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "../../../sources/fix
 import type { AdapterPreview, AdapterStatus, AuthMethod, AuthState, KindPaths, SourceDescriptor, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
+import { fills } from "../../../tf/roles.svelte";
 import { CORPUS, ROLE_CLAIMERS, SYNCED_AT } from "./corpus";
 
 // -- the sources cockpit's fixture -------------------------------------------
@@ -548,12 +549,7 @@ onFakeReset(() => {
  */
 function syncRole(args: Record<string, unknown>): { source_id: string; run_id: number }[] {
   const role = String(args["role"] ?? "");
-  const runs = FIXTURE_SOURCES.filter(
-    (source) =>
-      source.enabled &&
-      source.roles.some((claim) => claim.role === role) &&
-      !source.role_misses.some((miss) => miss.role === role),
-  )
+  const runs = FIXTURE_SOURCES.filter((source) => source.enabled && fills(source, role))
     .map((source) => source.id)
     .sort()
     .map((source_id, index) => ({ source_id, run_id: 191 + index }));

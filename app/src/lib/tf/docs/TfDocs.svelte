@@ -46,7 +46,8 @@
 -->
 <script lang="ts">
   import { clockLabel } from "../../time/format";
-  import { tick, untrack, type Snippet } from "svelte";
+  import { tick, untrack } from "svelte";
+  import type { RoleFrameProps } from "../page-entry";
   import { MediaQuery } from "svelte/reactivity";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -164,14 +165,9 @@
     layers?: Layers;
     /** Follows each queued edit, comment and page, so one held or refused drops its echo (#1424). */
     follower?: WriteFollower;
-    /** The role frame's *Sync now* (#2106), drawn with the header's actions. */
-    sync?: Snippet;
-    /**
-     * Moves when that *Sync now*'s runs have all ended (#2106). Unread: this
-     * view reads again on the end of every run of its role's sources already.
-     */
-    syncRevision?: number;
-  } = $props();
+    // The frame's `syncRevision` (#2106) is left unread: this view reads
+    // again on the end of every run of its role's sources already.
+  } & RoleFrameProps = $props();
 
   const io: DocsPorts = $derived(
     ports ?? {

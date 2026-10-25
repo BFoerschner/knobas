@@ -23,7 +23,7 @@
   `#/repo/<entity id>` and `#/pr/<entity id>`.
 -->
 <script lang="ts" module>
-  import type { Snippet } from "svelte";
+  import type { RoleFrameProps } from "../page-entry";
   import type { CheckoutView, CodeFacts, EntityFilter, EntityPage } from "../../ipc/entity";
   import { readAllRows } from "../repo/repo";
   import type { SourceSummary } from "../../ipc/sources";
@@ -101,11 +101,7 @@
     ports?: CodePorts;
     /** Injectable clock, for the time column and *Idle > 5 days*. */
     now?: Date;
-    /** The role frame's *Sync now* (#2106), drawn with the header's actions. */
-    sync?: Snippet;
-    /** Moves when that *Sync now*'s runs have all ended (#2106). */
-    syncRevision?: number;
-  } = $props();
+  } & RoleFrameProps = $props();
 
   const now = $derived(fixedNow ?? new Date());
   const tab = $derived<"repos" | "prs">(rest[0] === "prs" ? "prs" : "repos");

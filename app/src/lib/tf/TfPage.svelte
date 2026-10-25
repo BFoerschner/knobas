@@ -25,7 +25,7 @@
 -->
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { TfPageContext } from "./page-entry";
+  import type { RoleFrameProps, TfPageContext } from "./page-entry";
   import { pageFor } from "./pages";
   import { SECTION_NAME } from "./route";
   import TfCrumbs from "./TfCrumbs.svelte";
@@ -63,6 +63,10 @@
 
   /** The role this page is a view of, and its *Sync now* (#2106). */
   const roleSync = $derived(page?.role === undefined ? null : ctx.roleSyncs.of(page.role));
+  /** What the frame hands a role view beside its own props: nothing for any other page. */
+  const frameProps = $derived<RoleFrameProps>(
+    roleSync === null ? {} : { sync: syncNow, syncRevision: roleSync.revision },
+  );
 </script>
 
 {#snippet syncNow()}
@@ -73,19 +77,11 @@
   {@const Page = page.component}
   <div class="tf-full">
     <TfCrumbs {job} {jobAt} name={SECTION_NAME[route.section]} />
-    {#if roleSync !== null}
-      <Page {...pageProps} sync={syncNow} syncRevision={roleSync.revision} />
-    {:else}
-      <Page {...pageProps} />
-    {/if}
+    <Page {...pageProps} {...frameProps} />
   </div>
 {:else if page}
   {@const Page = page.component}
-  {#if roleSync !== null}
-    <Page {...pageProps} sync={syncNow} syncRevision={roleSync.revision} />
-  {:else}
-    <Page {...pageProps} />
-  {/if}
+  <Page {...pageProps} {...frameProps} />
 {:else if route.view === "job"}
   <div class="tf-full">
     <header class="tf-fhead">

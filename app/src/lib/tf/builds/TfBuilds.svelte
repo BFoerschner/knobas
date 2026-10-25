@@ -54,7 +54,8 @@
 </script>
 
 <script lang="ts">
-  import { onMount, tick, untrack, type Snippet } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
+  import type { RoleFrameProps } from "../page-entry";
 
   import {
     getEntity,
@@ -115,11 +116,7 @@
     /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
     jobAt?: string | null;
     ports?: BuildsPorts;
-    /** The role frame's *Sync now* (#2106), drawn with the header's actions. */
-    sync?: Snippet;
-    /** Moves when that *Sync now*'s runs have all ended (#2106). */
-    syncRevision?: number;
-  } = $props();
+  } & RoleFrameProps = $props();
 
   const filter = sessionFilter("builds-pipelines");
   const chips = $derived(filter.chips["state"] ?? []);

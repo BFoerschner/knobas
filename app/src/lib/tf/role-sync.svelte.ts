@@ -125,6 +125,7 @@ function createRoleSync(ports: RoleSyncPorts, role: string): RoleSync {
           return;
         }
         // A run that ended before the listener caught it is over by the status.
+        // A failed status read loses nothing: the listener still hears each ending.
         for (const row of await ports.syncStatus().catch(() => [])) heard(row);
       } catch (error) {
         state.failed = ipcErrorMessage(error);
