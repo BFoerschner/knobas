@@ -58,7 +58,8 @@
 //! # What this file writes, and what it takes away
 //!
 //! One **title**, on one seeded page, changed to make it the *renamed* page of
-//! the incremental test and changed back when the test ends -- passing or
+//! the incremental test (and again, as the walk-reading test's edit inside its
+//! window, #2113) and changed back when each test ends -- passing or
 //! panicking alike, from [`Renamed`]'s `Drop`, through
 //! `knobas_live_cleanup::Cleanup`, and checked afterwards rather than
 //! assumed. A title is the smallest edit that moves `version.when` while
@@ -538,6 +539,54 @@ impl Seeded {
         }
     }
 
+    /// **Wait until the search index serves `id` under `title`**: the entry an
+    /// edit through the REST API makes, and not the one from before it.
+    ///
+    /// The record changes at once and the index later ([`INDEX_BUDGET`]), so
+    /// a run that starts straight after a rename can probe a ceiling, and
+    /// walk a window, that the rename is not in yet. A title is what the
+    /// rename changed, so the index answering the page for its new title is
+    /// the index holding the rename's entry, `lastmodified` included.
+    async fn indexed_as(&self, id: &str, title: &str) {
+        let cql = format!(
+            "type = page AND space in (\"{}\") AND title = \"{title}\"",
+            self.seed.space
+        );
+        let deadline = std::time::Instant::now() + INDEX_BUDGET;
+        let started = std::time::Instant::now();
+        loop {
+            let response = self
+                .http
+                .get(format!("{}/rest/api/content/search", self.url))
+                .header("Accept", "application/json")
+                .basic_auth(&self.user, Some(&self.password))
+                .query(&[("cql", cql.as_str()), ("limit", "50")])
+                .send()
+                .await
+                .unwrap_or_else(|e| panic!("the title probe ({cql}): {e}"));
+            let status = response.status().as_u16();
+            let text = response.text().await.unwrap_or_default();
+            assert_eq!(status, 200, "the title probe ({cql}): {text}");
+            let body: serde_json::Value = serde_json::from_str(&text)
+                .unwrap_or_else(|e| panic!("the title probe ({cql}): unreadable body {text}: {e}"));
+            let found = body["results"]
+                .as_array()
+                .is_some_and(|rs| rs.iter().any(|r| r["id"].as_str() == Some(id)));
+            if found {
+                println!(
+                    "SEEDED index serves {id} as {title:?} after {:?}",
+                    started.elapsed()
+                );
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Confluence's search index does not serve {id} as {title:?} after {INDEX_BUDGET:?}"
+            );
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
     /// Put every seeded page's title back to what the seed created it with,
     /// and say what had to be put back -- **the recovery path**, since only a
     /// process that unwinds reaches a `Drop` and a run that was *killed*
@@ -603,8 +652,8 @@ impl Seeded {
     }
 }
 
-/// The one rename this suite makes, undone when the guard drops -- passing or
-/// panicking alike -- and the removal checked.
+/// One test's rename, undone when the guard drops -- passing or panicking
+/// alike -- and the removal checked.
 struct Renamed {
     url: String,
     user: String,
@@ -1286,8 +1335,9 @@ async fn the_space_and_the_ancestors_are_where_their_readers_look() {
 ///
 /// The walk's ordering key was the corpus's `lastmodified` until #1976, and
 /// this suite moves one page's twice: `a_renamed_page_keeps_its_id_and_moves_the_watermark_to_itself`
-/// renames `sepa-design` and then puts the title back, each a version bump.
-/// It polls the index out to [`INDEX_BUDGET`] for the *rename*; the restore
+/// renames `sepa-design` and then puts the title back, each a version bump,
+/// and `a_run_reports_its_walk_over_the_real_pages` does the same (#2113).
+/// Each polls the index out to [`INDEX_BUDGET`] for the *rename*; the restore
 /// happens in [`Renamed`]'s `Drop`, which checks the record but cannot wait
 /// on the index. `clear_leftovers` above is a second such write whenever a
 /// killed run left a title behind.
@@ -1754,11 +1804,22 @@ async fn fills_every_role_it_claims_on_the_seeded_corpus() {
 /// Over 2-result pages, so a `totalSize` that counted only *this* page (the
 /// envelope's `size`) reads below the whole space on the first reading, which
 /// the clamp to `done` would otherwise hide by the last.
+///
+/// **The window is made, not found (#2113).** The idle run's window is the
+/// two minutes before the full run's watermark, and only a page edited in
+/// them is in it. A fresh seed leaves every page there; a Confluence left up
+/// between runs leaves none, or only an edit the index has not caught up
+/// with. So the test renames a page first and waits for the index to serve
+/// the rename before either run: the full run's ceiling is then the rename,
+/// and the window holds it on any fixture, however long it has been up.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn a_run_reports_its_walk_over_the_real_pages() {
     let seeded = seeded();
-    seeded.clear_leftovers().await;
+    let mut guard = Renamed::new(&seeded).await;
+    let target = seeded.seeded_page("sepa-design").clone();
+    let renamed = guard.rename(&seeded, &target.id, &target.title).await;
+    seeded.indexed_as(&target.id, &renamed).await;
     let mut paged = seeded.scoped();
     paged["page_size"] = serde_json::json!(2);
     let source = seeded.source(paged);
@@ -1800,7 +1861,8 @@ async fn a_run_reports_its_walk_over_the_real_pages() {
     assert_eq!(idle_unit, "pages");
     assert!(
         idle_done > done,
-        "the sweep's {done} pages, then the window on top: {idle_done}"
+        "the sweep's {done} pages, then the window on top, the rename of {} in it: {idle_done}",
+        target.id
     );
     assert_eq!(idle_of, of.map(|_| idle_done), "it ends at its own total");
     let counts: Vec<u64> = idle.readings.iter().map(|r| r.0).collect();
