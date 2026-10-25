@@ -11,6 +11,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - Durations and clocks are Archivo with tabular figures, not mono; mono is for code values. Where the design system and prototype-6 differ, the design system decides. (#809, PR #885; reused by #816, PR #898)
 - A dialog of its own width passes `className` to `tf/settings/TfDialog.svelte` (the view editor's `tf-vw-dialog`), never a second dialog shell. (#814)
 - A selected card is `aria-current="true"` with the `tf-card` class, so the focus ring follows the design system's `--card-ink` rule. Not `aria-selected` on a button. (#810, PR #895)
+- A component that draws something else on a narrow window reads the stylesheet's own query: one exported constant (the Docs reader's `READER_NARROW`) handed to Svelte's `MediaQuery`, the same text in the `@media` rule, and a `tf-css.test.ts` check that the rule exists. Written as `max-width`, so the test setup's `matchMedia` stub (every query false) draws the wide layout. (#2081)
 
 ## Mounting and the shell switch
 

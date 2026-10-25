@@ -3,7 +3,7 @@
  * what the backend reads is `crates/knobas-app/tests/it/docs_ipc.rs`'s.
  */
 import { flushSync, mount, tick, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, type MockInstance, test, vi } from "vitest";
 
 import type { DocPage, DocsTree, Reached, RefusedWrite, WriteAsk } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
@@ -11,6 +11,7 @@ import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetQueued } from "../queued.svelte";
 import { parseTfHash } from "../route";
+import { READER_NARROW } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -295,7 +296,7 @@ test("comments are listed with their author, or say there are none", async () =>
   expect(target.querySelector(".tf-cmts")?.textContent).toContain("No comments yet.");
 });
 
-// -- the search, the find bar, the rail and the writes (#860 to #862) --
+// -- the search, the find bar, the outline and the writes (#860 to #862) --
 
 import type { DocsHits } from "../../ipc/entity";
 
@@ -425,6 +426,132 @@ test("the margin holds only the outline (#2080)", async () => {
     ["Ledger", "#/page/confluence%3A2/1"],
   ]);
   expect(target.textContent).not.toContain("History");
+});
+
+/** A page of two sections, each holding "ledger" twice. */
+const OUTLINED: DocPage = {
+  ...PAGE,
+  blocks: [
+    { type: "paragraph", text: [text("Read this first.")] },
+    { type: "heading", level: 2, text: [text("Ledger")] },
+    { type: "paragraph", text: [text("The ledger closes nightly.")] },
+    { type: "heading", level: 2, text: [text("Escalation")] },
+    { type: "paragraph", text: [text("Page the ledger owner; the ledger team answers.")] },
+  ],
+};
+
+/** What the reader's `matchMedia` answers: the window is narrower than 1240px, or not. */
+let windowNarrow: (narrow: boolean) => void = () => {};
+let media: MockInstance<typeof window.matchMedia> | null = null;
+function windowWidth(narrow: boolean): void {
+  const heard = new Set<(event: Event) => void>();
+  media = vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+    const list = {
+      media: query,
+      // Only the reader's own threshold, as the stylesheet writes it, answers.
+      get matches() {
+        return query === READER_NARROW && narrow;
+      },
+      addEventListener: (_: string, hear: (event: Event) => void) => heard.add(hear),
+      removeEventListener: (_: string, hear: (event: Event) => void) => heard.delete(hear),
+    };
+    return list as unknown as MediaQueryList;
+  });
+  windowNarrow = (now) => {
+    narrow = now;
+    for (const hear of heard) hear(new Event("change"));
+  };
+}
+afterEach(() => {
+  media?.mockRestore();
+  media = null;
+});
+
+const margin = () => target.querySelector("aside[aria-label='On this page']");
+const fold = () => target.querySelector<HTMLDetailsElement>("details.tf-rd-fold");
+const outlineOf = (root: Element) =>
+  [...root.querySelectorAll(".tf-toc a")].map((a) => [a.firstChild?.textContent, a.querySelector(".tf-hits")?.textContent ?? null]);
+
+/** Opens the handbook from a search for `word`, so the find bar is open on it. */
+async function findOnPage(word: string): Promise<void> {
+  const input = type(word);
+  await settle();
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  await settle();
+  expect(target.querySelector(".tf-findbar input")).not.toBeNull();
+}
+
+test("a wide window puts the outline in the page's right column, with match counts while finding (#2081)", async () => {
+  windowWidth(false);
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => OUTLINED), docsSearch: vi.fn(async () => HITS) }));
+  const aside = margin()!;
+  // The page's own column, inside what scrolls, beside the page's content.
+  expect(aside.parentElement?.classList.contains("tf-rd-sheet")).toBe(true);
+  expect(aside.previousElementSibling?.classList.contains("tf-rd-page")).toBe(true);
+  expect(aside.closest(".tf-rd-main")).not.toBeNull();
+  expect(fold()).toBeNull();
+  expect(outlineOf(aside)).toEqual([
+    ["Ledger", null],
+    ["Escalation", null],
+  ]);
+  await findOnPage("ledger");
+  expect(outlineOf(margin()!)).toEqual([
+    ["Ledger", "2"],
+    ["Escalation", "2"],
+  ]);
+  location.hash = "";
+});
+
+test("a narrow window folds the outline between the actions row and the first section, closed, counting sections and matches (#2081)", async () => {
+  windowWidth(true);
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => OUTLINED), docsSearch: vi.fn(async () => HITS) }));
+  expect(margin()).toBeNull();
+  const f = fold()!;
+  expect(f.open).toBe(false);
+  expect(f.previousElementSibling?.classList.contains("tf-rd-acts")).toBe(true);
+  expect(f.nextElementSibling?.classList.contains("tf-doc")).toBe(true);
+  expect(f.querySelector("summary")?.textContent).toBe("On this page2 sections");
+  expect(outlineOf(f)).toEqual([
+    ["Ledger", null],
+    ["Escalation", null],
+  ]);
+  await findOnPage("ledger");
+  expect(fold()!.querySelector("summary")?.textContent).toBe("On this page2 sections4 matches");
+  expect(outlineOf(fold()!)).toEqual([
+    ["Ledger", "2"],
+    ["Escalation", "2"],
+  ]);
+  location.hash = "";
+
+  await drawPage(PAGE);
+  expect(fold()!.querySelector("summary")?.textContent).toBe("On this page1 section");
+
+  // Finding words no section holds ("first" is only above the first heading): no badge of zero.
+  await drawPage(OUTLINED, { docsSearch: vi.fn(async () => ({ ...HITS, needles: ["first"] })) });
+  await findOnPage("first");
+  expect(fold()!.querySelector("summary")?.textContent).toBe("On this page2 sections");
+  location.hash = "";
+});
+
+test("the outline moves between the margin and the fold as the window crosses 1240px, and the fold opens closed on every page (#2081)", async () => {
+  windowWidth(false);
+  const docsPage = vi.fn(async (id: string) => (id === "confluence:1" ? { ...OUTLINED, entity_id: id, title: "Ops home" } : OUTLINED));
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  expect(margin()).not.toBeNull();
+  windowNarrow(true);
+  await settle();
+  expect(margin()).toBeNull();
+  fold()!.open = true;
+  props.rest = ["confluence:1"];
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+  expect(fold()!.open).toBe(false);
+  windowNarrow(false);
+  await settle();
+  expect(fold()).toBeNull();
+  expect(margin()).not.toBeNull();
 });
 
 const LINKED: DocPage["backlinks"] = [
