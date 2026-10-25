@@ -59,7 +59,9 @@
   let draft = $state("");
   let saving = $state(false);
 
-  // Another page closes an open editor; the same page read again keeps it (#2072).
+  // Another page closes an open editor; the same page read again keeps it
+  // (#2072). The `$derived` is what keeps it: the effect hears the id only when
+  // it changes, not every new page object the prop is read through.
   const pageId = $derived(entityId);
   $effect(() => {
     void pageId;

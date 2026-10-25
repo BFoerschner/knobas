@@ -1013,6 +1013,9 @@ test("a held or refused write drops its echo and toasts; Edit and resend reopens
 
 // ---- a sync run's end reads Docs again (#2072) ----
 
+/** The page the reader opens while a read of the handbook is still out. */
+const OTHER: DocPage = { ...PAGE, entity_id: "confluence:1", title: "Ops home", ancestors: [] };
+
 /** A `listen` port the test raises `sync:state` through, as the backend reports a run. */
 function syncEvents() {
   const heard: ((event: { payload: unknown }) => void)[] = [];
@@ -1129,7 +1132,6 @@ test("a sync run's re-read of the open page keeps the find bar on the match the 
 
 test("a sync run's page re-read that answers after another page was opened does not replace it (#2072)", async () => {
   const sync = syncEvents();
-  const OTHER: DocPage = { ...PAGE, entity_id: "confluence:1", title: "Ops home", ancestors: [] };
   let late: (page: DocPage) => void = () => {};
   const docsPage = vi.fn(async (id: string) => {
     if (id === "confluence:1") return OTHER;
@@ -1170,7 +1172,6 @@ test("a sync run's re-read that fails leaves the last tree and page on screen (#
 });
 
 test("Link to <job>'s page re-read that answers after another page was opened does not replace it (#2072)", async () => {
-  const OTHER: DocPage = { ...PAGE, entity_id: "confluence:1", title: "Ops home", ancestors: [] };
   let late: (page: DocPage) => void = () => {};
   const docsPage = vi.fn(async (id: string) => {
     if (id === "confluence:1") return OTHER;
@@ -1193,7 +1194,6 @@ test("Link to <job>'s page re-read that answers after another page was opened do
 });
 
 test("a link that answers after another page was opened reads nothing back over it (#2072)", async () => {
-  const OTHER: DocPage = { ...PAGE, entity_id: "confluence:1", title: "Ops home", ancestors: [] };
   const docsPage = vi.fn(async (id: string) => (id === "confluence:1" ? OTHER : RICH));
   let linked: () => void = () => {};
   const links = linkPorts();

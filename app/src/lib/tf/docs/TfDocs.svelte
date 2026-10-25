@@ -432,12 +432,23 @@
   let marks = $state(0);
   let at = $state(-1);
 
-  function jump(step: number): void {
+  /** The page's matches as drawn, counted for the find bar. */
+  function matches(): HTMLElement[] {
     const all = article ? [...article.querySelectorAll("mark")] : [];
     marks = all.length;
+    return all;
+  }
+
+  /** Mark match `at` as the current one. */
+  function markCurrent(all: HTMLElement[]): void {
+    all.forEach((m, i) => m.classList.toggle("tf-cur", i === at));
+  }
+
+  function jump(step: number): void {
+    const all = matches();
     if (all.length === 0) return;
     at = (at + step + all.length) % all.length;
-    all.forEach((m, i) => m.classList.toggle("tf-cur", i === at));
+    markCurrent(all);
     all[at]?.scrollIntoView?.({ block: "center" });
   }
 
@@ -449,23 +460,22 @@
   // run's, #2072) stays where the reader is, on the match they stepped to.
   $effect(() => {
     const p = page;
-    const now = stems;
+    const query = stems;
     if (p === null) return;
-    const again = started?.id === p.entity_id && started.stems === now;
-    started = { id: p.entity_id, stems: now };
+    const again = started?.id === p.entity_id && started.stems === query;
+    started = { id: p.entity_id, stems: query };
     void tick().then(() => {
       if (again) {
-        const all = article ? [...article.querySelectorAll("mark")] : [];
-        marks = all.length;
+        const all = matches();
         at = Math.min(at, all.length - 1);
-        all.forEach((m, i) => m.classList.toggle("tf-cur", i === at));
+        markCurrent(all);
         follow();
         return;
       }
       at = -1;
       if (place.kind === "page" && place.section !== null) {
         document.getElementById(`s-${place.section}`)?.scrollIntoView?.();
-        marks = article ? article.querySelectorAll("mark").length : 0;
+        matches();
       } else if (stems.length > 0) jump(1);
       else marks = 0;
       follow();
