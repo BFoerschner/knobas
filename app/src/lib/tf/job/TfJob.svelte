@@ -324,7 +324,7 @@
     if (!detail) return;
     const id = detail.row.entity_id;
     const status = detail.status;
-    untrack(() => settleEchoes(id, (mark) => mark.kind === "status" && mark.base !== status));
+    untrack(() => settleEchoes(id, (echo) => echo.kind === "status" && echo.base !== status));
   });
 
   // Each read of the thread drops a comment it holds.
@@ -332,7 +332,7 @@
     if (!detail || thread === null) return;
     const id = detail.row.entity_id;
     const said = thread.comments;
-    untrack(() => settleEchoes(id, (mark) => mark.kind === "comment" && said.some((c) => sameWords(c.body, mark.text))));
+    untrack(() => settleEchoes(id, (echo) => echo.kind === "comment" && said.some((c) => sameWords(c.body, echo.text))));
   });
 
   async function comment(body: string): Promise<boolean> {

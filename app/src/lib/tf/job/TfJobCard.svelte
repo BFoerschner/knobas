@@ -24,7 +24,7 @@
   import type { Timer } from "../../shell/timer.svelte";
   import { clockReading } from "../../time/day";
   import { refusedAttrs } from "../../shell/refused-writes";
-  import { takeAgain } from "../queued.svelte";
+  import { takeAgain, type Echo } from "../queued.svelte";
   import { jobHash } from "../route";
   import { commentCount, firstName, mentionCount, since, stamp, type Summary } from "./conversation";
   import { blockers, factsLine, keyOf, weekLine, type WeekReading } from "./job";
@@ -52,7 +52,7 @@
     /** Where the ticket can move now, or `null` while the workflow read is out. */
     offered: string[] | null;
     /** Where that move's write is: *queued* while open, *sent* once landed (#2103). */
-    queuedState?: "queued" | "sent";
+    queuedState?: Echo["state"];
     week: WeekReading | null;
     /** The thread's summary, `null` while its read is out or after it failed. */
     conversation?: Summary | null;

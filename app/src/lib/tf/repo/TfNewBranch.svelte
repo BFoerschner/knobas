@@ -73,7 +73,7 @@
         return;
       }
       const write = await ports.submitWrite({ CreateBranch: { entity: repoId, name: branch, from_ref: start } }, ticket ?? undefined);
-      echoWrite(repoId, MADE, branch, { write, many: true, surface: REPO_BRANCHES, ...(source ? { source: source.id } : {}) });
+      echoWrite(repoId, MADE, branch, { write, many: true, following: { name: `Branch ${branch}` }, surface: REPO_BRANCHES, source: source?.id ?? null });
       toastQueued(`create branch ${branch} in ${repoName}`, source);
       onclose();
     } catch (cause) {

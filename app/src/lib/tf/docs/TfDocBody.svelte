@@ -12,7 +12,7 @@
   section*, and the *Save section* of an editor already open, disabled with
   that reason.
 
-  A saved section draws its queued text in place of the old, muted and marked
+  A saved section draws its queued text in place of the old, muted with its echo,
   *queued*, then *sent* (#1424, #2102), until a read of the page has a newer version; *Edit
   section* then starts from the queued text, and *Edit and resend* on a held
   or refused save opens the editor with it.

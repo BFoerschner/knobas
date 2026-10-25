@@ -80,8 +80,8 @@ export interface Echoing {
   follower?: WriteFollower;
   /** The surface drawing it, for `watchEchoes` (#2102). */
   surface?: string;
-  /** The source its write goes to, for `watchEchoes`'s run ends. */
-  source?: string;
+  /** The source its write goes to, for `watchEchoes`'s run ends; `null` or none for any. */
+  source?: string | null;
   /** Called once the follow sees the write sent, for a surface that reads at once what the write made (Standup's ticket, #2104). */
   onsent?: () => void;
   /** Called once the write will not go (held or refused), its echo dropped, for a surface whose read still names it (Monitors' create, #2105). */
@@ -136,6 +136,15 @@ export function echoesOn(entity: string, kind?: string): Echo[] {
 /** The newest echo of `kind` on `entity`, or `null`. */
 export function echoOn(entity: string, kind: string): Echo | null {
   return echoesOn(entity, kind).at(-1) ?? null;
+}
+
+/**
+ * The writes of `entity`'s echoes already *sent*: taken as a live read is
+ * asked, they are the ones that read shows, for a write whose landing no
+ * field reads (#2103).
+ */
+export function sentWrites(entity: string): Set<number> {
+  return new Set((echoes[entity] ?? []).flatMap((echo) => (echo.state === "sent" && echo.write !== null ? [echo.write] : [])));
 }
 
 /** A read of `entity` arrived: drop each echo it shows `landed`. */

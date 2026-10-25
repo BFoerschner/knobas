@@ -350,7 +350,7 @@ test("Delete… on a branch with unmerged commits warns what is lost, the open P
   await settle();
   expect(writes).toEqual([{ DeleteBranch: { entity: FEATURE } }]);
   expect(dialog()).toBeNull();
-  expect(text(rowOf("feature/").querySelector(".tf-chip.tf-warn"))).toBe("delete queued");
+  expect(text(rowOf("feature/").querySelector(".tf-chip.tf-info"))).toBe("delete queued");
   expect(button("Delete…", rowOf("feature/"))).toBeUndefined();
   expect(toasts.items.at(-1)!.text).toBe("Queued: delete branch feature/PAY-231-sepa-retry.");
 });
@@ -891,11 +891,11 @@ test("a branch deleted goes once the listing's re-read the refresh event asks no
   flushSync();
   button("Delete branch", dialog()!)!.click();
   await settle();
-  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-warn"))).toBe("delete queued");
+  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("delete queued");
   // The refresh says it landed before the listing is read again.
   listing = [vrow(MAIN, "main", "default", "5d77e1a2c3 · 1 day ago"), vrow(FEATURE, "feature/PAY-231-sepa-retry", null, "c90d11e4a7 · 3 hours ago"), vrow(CHORE, "chore/bump-tokio", null, "77aa00bb11 · 5 days ago")];
   await events.refreshed(CHORE, 1);
-  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-warn"))).toBe("delete sent");
+  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("delete sent");
   listing = [vrow(MAIN, "main", "default", "5d77e1a2c3 · 1 day ago"), vrow(FEATURE, "feature/PAY-231-sepa-retry", null, "c90d11e4a7 · 3 hours ago")];
   await events.ended("gitea");
   expect(branchNames()).toEqual(["main default", "feature/PAY-231-sepa-retry"]);

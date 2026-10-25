@@ -40,7 +40,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
-  import { echoOn, echoWrite, echoesOn, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
+  import { echoOn, echoWrite, echoesOn, sentWrites, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
   import { runHash, runTone, shortTime } from "./builds";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
@@ -203,9 +203,8 @@
     const seq = ++rereads;
     const current = () => mine === token && seq === rereads;
     // A parameter change waiting to be read (#2104): the settings again too.
-    const params = untrack(() => echoesOn(wanted).filter((echo) => echo.kind !== QUEUED_RUN));
-    if (params.length > 0) {
-      const sentBefore = new Set(params.flatMap((echo) => (echo.state === "sent" && echo.write !== null ? [echo.write] : [])));
+    if (untrack(() => echoesOn(wanted).some((echo) => echo.kind.startsWith(paramKind(""))))) {
+      const sentBefore = untrack(() => sentWrites(wanted));
       ports.settings(wanted).then(
         (answer) => {
           if (mine !== token) return;
@@ -266,8 +265,8 @@
   });
 
   /**
-   * Runs queued this session, here or on a run page, drawn *queued* until a
-   * read holds them (R-9.8, #1449); the queue holding or refusing one drops it.
+   * Runs queued this session, here or on a run page, drawn *queued*, then
+   * *sent*, until a read holds them (R-9.8, #1449); the queue holding or refusing one drops it.
    */
   const started = $derived(queuedRunRows(echoesOn(id, QUEUED_RUN), defaultBranch(settings)));
   const all = $derived(held === null ? null : [...started, ...held]);

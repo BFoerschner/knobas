@@ -34,7 +34,7 @@ export function isStartedHere(run: RunRow): boolean {
 }
 
 /**
- * The kind of mark a queued run is on its pipeline (#1449, `queued.svelte.ts`):
+ * The kind of echo a queued run is on its pipeline (#1449, `queued.svelte.ts`):
  * its text the branch it was queued on (`""` for the default), its base the
  * newest run the page held as it was queued.
  */
@@ -79,7 +79,7 @@ export function runBranch(payload: WriteOpPayload): string | null {
 }
 
 /**
- * A run queued on `pipeline`, from its page or a run page (#1449): marked on
+ * A run queued on `pipeline`, from its page or a run page (#1449): echoed on
  * the pipeline until a read holds it ({@link runLanded}), followed until the
  * queue holds or refuses it. `held` is the runs the page holds, newest first;
  * before its read arrives, the pipeline's own recent runs stand in.
@@ -103,13 +103,13 @@ export function echoRun(
 }
 
 /** The runs queued this session and not yet read back, as queued rows, newest first. */
-export function queuedRunRows(marks: readonly Echo[], fallback: string | null): RunRow[] {
-  return marks
-    .map((mark, at): RunRow => ({
-      entity_id: startedHere(mark.write ?? -1 - at),
+export function queuedRunRows(echoes: readonly Echo[], fallback: string | null): RunRow[] {
+  return echoes
+    .map((echo, at): RunRow => ({
+      entity_id: startedHere(echo.write ?? -1 - at),
       number: null,
-      state: { text: mark.state, tone: "info" },
-      branch: mark.text !== "" ? mark.text : fallback,
+      state: { text: echo.state, tone: "info" },
+      branch: echo.text !== "" ? echo.text : fallback,
       started: null,
       finished: null,
       duration_seconds: null,
@@ -135,10 +135,10 @@ export function queuedRunRows(marks: readonly Echo[], fallback: string | null): 
  * run holds one queued run, the oldest first, so two queued and one read
  * back leaves one queued row.
  */
-export function runLanded(rows: readonly RunRow[]): (mark: Echo) => boolean {
+export function runLanded(rows: readonly RunRow[]): (echo: Echo) => boolean {
   const taken = new Set<string>();
-  return (mark) => {
-    const at = mark.base === null ? -1 : rows.findIndex((row) => row.entity_id === mark.base);
+  return (echo) => {
+    const at = echo.base === null ? -1 : rows.findIndex((row) => row.entity_id === echo.base);
     const newer = at < 0 ? rows : rows.slice(0, at);
     const held = [...newer].reverse().find(
       (row) =>
@@ -146,7 +146,7 @@ export function runLanded(rows: readonly RunRow[]): (mark: Echo) => boolean {
         !isStartedHere(row) &&
         row.trigger !== "change" &&
         row.trigger !== "schedule" &&
-        (mark.text === "" || row.branch === null || branchName(row.branch) === branchName(mark.text)),
+        (echo.text === "" || row.branch === null || branchName(row.branch) === branchName(echo.text)),
     );
     if (held === undefined) return false;
     taken.add(held.entity_id);

@@ -20,7 +20,7 @@
   each read of the links also asks `owed_tickets`, the tickets filed from the
   run that it does not link yet, and one still on its way (`pending`, `sent`,
   or held as unconfirmed: sent and never answered, so the ticket may exist,
-  #1966) is marked queued as if filed this session, followed while the queue
+  #1966) is echoed as if filed this session, followed while the queue
   still holds it. A refused one, or one held on drift, offers *Create ticket*,
   as it does once a live follow hears so: it waits on the reader in the
   queue. One held as unconfirmed stays queued until the reader sends it
@@ -94,17 +94,17 @@
           if (id !== runId) return;
           links = answer;
           const held = linkedTickets(answer);
-          settleEchoes(id, (mark) => mark.kind === TICKET && held.some((ticket) => sameWords(ticket.title, mark.text)));
+          settleEchoes(id, (echo) => echo.kind === TICKET && held.some((ticket) => sameWords(ticket.title, echo.text)));
         },
         () => {},
       );
   }
 
-  /** The newest ticket filed from the run before this page opened and still on its way, marked queued (#1953). */
+  /** The newest ticket filed from the run before this page opened and still on its way, echoed (#1953). */
   function markOwed(id: string, owed: readonly QueuedWrite[]) {
     const going = owed.filter((write) => write.state === "pending" || write.state === "sent" || mayHaveLanded(write));
-    const marked = echoesOn(id, TICKET);
-    if (going.some((write) => marked.some((mark) => mark.write === write.id))) return;
+    const echoed = echoesOn(id, TICKET);
+    if (going.some((write) => echoed.some((echo) => echo.write === write.id))) return;
     const newest = going.at(-1);
     if (newest === undefined) return;
     const filed = draftOfPayload(newest.payload);
@@ -162,8 +162,8 @@
     const source = projectSource(filed.project);
     try {
       const write = await ports.submitWrite(createTicketPayload(filed), id);
-      // An owed read that answered before this did has marked and followed it already: one follow, one toast.
-      if (!echoesOn(id, TICKET).some((mark) => mark.write === write.id)) {
+      // An owed read that answered before this did has echoed and followed it already: one follow, one toast.
+      if (!echoesOn(id, TICKET).some((echo) => echo.write === write.id)) {
         echoWrite(id, TICKET, title, { write, following: following(id, filed), follower: ports.follower(), surface: RUN_TICKET, source });
       }
       const summary = sources.find((s) => s.id === source);

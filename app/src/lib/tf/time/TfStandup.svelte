@@ -458,7 +458,7 @@
       following: { name: "Ticket", resend: () => void openTicketDialog(text, project, type) },
       follower: io.follower,
       surface: STANDUP,
-      ...(project !== null ? { source: projectSource(project) } : {}),
+      source: project === null ? null : projectSource(project),
       onsent: () => void address(write.id),
     });
   }
@@ -699,7 +699,7 @@
           {#if made === null}
             <button class="tf-btn tf-sm" onclick={() => void openTicketDialog(item.text)}>Create ticket</button>
           {:else if made.ticket === null}
-            <span class="tf-chip">{made.state}</span>
+            <span class="tf-chip tf-info">{made.state}</span>
           {:else}
             <a class="tf-mono" href={jobHash(made.ticket)}>{keyOf(made.ticket)}</a>
             {#if made.status}<span class="tf-chip">{made.status}</span>{/if}

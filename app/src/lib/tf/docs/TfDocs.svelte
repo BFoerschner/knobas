@@ -681,7 +681,7 @@
       if (node.parent === null) continue;
       under.set(node.parent, (under.get(node.parent) ?? new Set()).add(node.title.trim()));
     }
-    for (const [parent, titles] of under) settleEchoes(parent, (mark) => mark.kind === "page" && titles.has(mark.text.trim()));
+    for (const [parent, titles] of under) settleEchoes(parent, (echo) => echo.kind === "page" && titles.has(echo.text.trim()));
   }
 
   // A page read drops a section edit once the version moved, and a comment it holds:
@@ -695,14 +695,14 @@
     const said = p.comments.map((c) => c.blocks.map(blockWords).join(" "));
     const held = new Set(p.comments.flatMap((c) => (c.id === null ? [] : [c.id])));
     const commentOfWrite = new Map(p.sent_comments.map((s) => [s.write_id, s.comment_id]));
-    const holds = (mark: Echo) => {
-      const id = mark.write === null ? undefined : commentOfWrite.get(mark.write);
-      return id === undefined ? said.some((words) => sameWords(words, mark.text)) : held.has(id);
+    const holds = (echo: Echo) => {
+      const id = echo.write === null ? undefined : commentOfWrite.get(echo.write);
+      return id === undefined ? said.some((words) => sameWords(words, echo.text)) : held.has(id);
     };
     untrack(() =>
       settleEchoes(
         p.entity_id,
-        (mark) => (mark.kind.startsWith("section ") && mark.base !== version) || (mark.kind === "comment" && holds(mark)),
+        (echo) => (echo.kind.startsWith("section ") && echo.base !== version) || (echo.kind === "comment" && holds(echo)),
       ),
     );
   });
@@ -1088,12 +1088,12 @@
                   </div>
                 </div>
               {/each}
-              {#each queuedComments as mark, n (n)}
+              {#each queuedComments as echo, n (n)}
                 <div class="tf-msg tf-queued">
                   <span class="tf-av tf-me">{initials(p.me[0] ?? null)}</span>
                   <div class="tf-cmt-body">
-                    <div class="tf-who"><b>You</b> <span class="tf-chip tf-info">{mark.state}</span></div>
-                    <p class="tf-cmt-queued">{mark.text}</p>
+                    <div class="tf-who"><b>You</b> <span class="tf-chip tf-info">{echo.state}</span></div>
+                    <p class="tf-cmt-queued">{echo.text}</p>
                   </div>
                 </div>
               {/each}

@@ -80,7 +80,7 @@
   import { getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import { mayHaveLanded, writeFollower } from "../../shell/follow-write";
-  import { echoOn, echoWrite, echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
+  import { echoOn, echoWrite, echoesOn, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { ago } from "../../shell/time";
   import { push } from "../../shell/toasts.svelte";
@@ -282,7 +282,7 @@
   });
 
   /** What a row's create draws: its echo's word, else the read's (a sent create still counts as on its way); `null` for none. */
-  function createWord(row: UnmonitoredAsset): "queued" | "sent" | null {
+  function createWord(row: UnmonitoredAsset): Echo["state"] | null {
     const echo = echoOn(row.id, CREATE);
     if (echo !== null) return echo.state;
     const write = row.monitor_on_its_way;

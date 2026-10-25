@@ -96,7 +96,6 @@
     ports.entityView(id, "branches").then(
       (view) => {
         if (!alive()) return;
-        const live = alive;
         listed = viewRows(view?.sections[0]);
         const names = new Set(listed.map((row) => row.title));
         settleEchoes(id, (echo) => (echo.kind === MADE && names.has(echo.text)) || (echo.kind === DELETED && !names.has(echo.text)));
@@ -104,18 +103,18 @@
         if (every.length > 0)
           ports.codeFacts(every).then(
             (answer) => {
-              if (live()) facts = Object.fromEntries(answer.map((entry) => [entry.entity_id, entry]));
+              if (alive()) facts = Object.fromEntries(answer.map((entry) => [entry.entity_id, entry]));
             },
             () => {},
           );
         const ids = listed.filter((row) => row.entity_id !== null && row.chip !== "default").map((row) => row.entity_id!);
         let next = 0;
         const worker = async () => {
-          while (live() && next < ids.length) {
+          while (alive() && next < ids.length) {
             const branchId = ids[next++]!;
             try {
               const standing = branchStanding(await ports.entityView(branchId, null));
-              if (live()) standings[branchId] = standing;
+              if (alive()) standings[branchId] = standing;
             } catch {
               // A branch whose view fails draws without its standing.
             }
@@ -182,7 +181,7 @@
     busy = true;
     try {
       const write = await ports.submitWrite({ DeleteBranch: { entity: row.entityId } });
-      echoWrite(repoId, DELETED, row.name, { write, many: true, surface: REPO_BRANCHES, ...(source ? { source: source.id } : {}) });
+      echoWrite(repoId, DELETED, row.name, { write, many: true, following: { name: `Delete of ${row.name}` }, surface: REPO_BRANCHES, source: source?.id ?? null });
       toastQueued(`delete branch ${row.name}`, source);
       deleting = null;
     } catch (cause) {
@@ -219,7 +218,7 @@
           <td class="tf-mono"
             ><Marked text={row.name} typed={filter.text} />{#if row.isDefault}{" "}<span class="tf-chip">default</span>{/if}{#if made.has(row.name)}{" "}<span
                 class="tf-chip tf-info">{made.get(row.name)}</span
-              >{/if}{#if gone !== null}{" "}<span class="tf-chip tf-warn">delete {gone}</span>{/if}</td
+              >{/if}{#if gone !== null}{" "}<span class="tf-chip tf-info">delete {gone}</span>{/if}</td
           >
           <td
             >{#if standing?.merged}<span class="tf-chip tf-ok">merged</span>{:else}{against(standing)}{/if}</td

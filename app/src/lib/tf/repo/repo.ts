@@ -43,11 +43,6 @@ export function headLine(
 }
 
 /**
- * The page's tabs, in prototype-6's order. A later ticket that builds one
- * replaces its `NOT_BUILT` entry in `TfRepo.svelte` with an arm drawing its
- * component; the tab row is this list.
- */
-/**
  * The repository page's echoes (#839, #845, #2105; `tf/queued.svelte.ts`),
  * all on the repository's entity: a branch being made (`MADE`, its text the
  * name) or deleted (`DELETED`), drawn on *Branches* until its listing holds
@@ -62,6 +57,11 @@ export const commitKind = (branch: string, path: string) => `commit ${branch}\u0
 export const REPO_BRANCHES = "repo-branches";
 export const REPO_FILES = "repo-files";
 
+/**
+ * The page's tabs, in prototype-6's order. A later ticket that builds one
+ * replaces its `NOT_BUILT` entry in `TfRepo.svelte` with an arm drawing its
+ * component; the tab row is this list.
+ */
 export const REPO_TABS = [
   { id: "files", label: "Files" },
   { id: "commits", label: "Commits" },

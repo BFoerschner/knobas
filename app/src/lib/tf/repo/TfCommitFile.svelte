@@ -86,10 +86,16 @@
       toastQueued(onto === null ? `commit ${path} to ${branch}` : `commit ${path} to ${onto}, then open a PR`, source);
       onclose();
       if (onto === null) {
-        echoWrite(repoId, commitKind(branch, path), message.trim(), { write, base: baseSha, surface: REPO_FILES, ...(source ? { source: source.id } : {}) });
+        echoWrite(repoId, commitKind(branch, path), message.trim(), {
+          write,
+          base: baseSha,
+          following: { name: `Commit of ${path}` },
+          surface: REPO_FILES,
+          source: source?.id ?? null,
+        });
         location.hash = fileHash(repoId, path);
       } else {
-        echoWrite(repoId, MADE, onto, { write, many: true, surface: REPO_BRANCHES, ...(source ? { source: source.id } : {}) });
+        echoWrite(repoId, MADE, onto, { write, many: true, following: { name: `Commit of ${path} to ${onto}` }, surface: REPO_BRANCHES, source: source?.id ?? null });
         location.hash = compareHash(repoId, onto);
       }
     } catch (cause) {

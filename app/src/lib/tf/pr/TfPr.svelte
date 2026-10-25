@@ -103,7 +103,7 @@
     tabCounts,
     type PrTab,
   } from "./pr";
-  import { askAgain, echoWrite, echoOn, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes, type Echo, type EchoListen } from "../queued.svelte";
+  import { askAgain, echoWrite, echoOn, echoesOn, sameWords, sentWrites, settleEchoes, takeAgain, watchEchoes, type Echo, type EchoListen } from "../queued.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfPrFiles from "./TfPrFiles.svelte";
@@ -141,7 +141,7 @@
     ports?: PrPorts;
     /** The reader's pending line comments (#842): this viewer's, kept across restarts. */
     pending?: PendingCommentStore;
-    /** Follows each queued write, so one held or refused drops its mark (#1424). */
+    /** Follows each queued write, so one held or refused drops its echo (#1424). */
     follower?: WriteFollower;
   } = $props();
 
@@ -231,7 +231,7 @@
   function readView(id: string, live: () => boolean, again = false) {
     const asked = ++viewAsked;
     // A live read asked once a write was sent is a read of the source after it.
-    const sentBefore = untrack(() => new Set(echoesOn(id).flatMap((echo) => (echo.state === "sent" && echo.write !== null ? [echo.write] : []))));
+    const sentBefore = untrack(() => sentWrites(id));
     ports.entityView(id, null).then(
       (answer) => {
         if (!live() || asked !== viewAsked) return;
@@ -405,7 +405,7 @@
 
   /** Echo a write queued as `verb`, followed under `name`. */
   function echoChip(id: string, verb: string, name: string, write: QueuedWrite) {
-    echoWrite(id, verb, verb, { write, base: header.state?.text ?? null, following: { name }, follower, surface: PR_SURFACE, ...(detail?.source?.id ? { source: detail.source.id } : {}) });
+    echoWrite(id, verb, verb, { write, base: header.state?.text ?? null, following: { name }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null });
   }
 
   /**
@@ -472,7 +472,7 @@
         write,
         many: true,
         surface: PR_SURFACE,
-        ...(source ? { source: source.id } : {}),
+        source: source?.id ?? null,
         following: {
           name: "Comment",
           resend: () => {
