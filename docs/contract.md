@@ -2446,6 +2446,29 @@ second listing's record first where both hold a board. Witnessed by `views::test
 `a_board_renamed_between_the_two_listings_arrives_under_its_new_name`, and `live_jira_seeded`'s
 `the_board_listing_is_in_name_order_and_a_rename_moves_a_row`.
 
+### Amendments from the Jira refresh (2026-10-25, binding) — issue #2097
+
+Ruled by the Opus implementer (`docs/decisions/2026-10-unattended-rulings.md`, "#2097"). The
+change is in `crates/knobas-source-jira/**`, `crates/knobas-mockd/**` and tests, none of which
+§10.8 freezes; `Source::refresh` itself is #2095's entry (`contract/10.8/2095-source-refresh.md`),
+so **no §10.8 entry is owed**; no cursor version moves.
+
+**Jira declares `Capability::Refresh` and reads a ticket by a search on its key**:
+`<scope> AND key = "<KEY>"` through the walk's own `/search` (same `fields`, `expand=changelog`,
+the comment and worklog containers completed as the walk completes them), so the item is the one
+a run emits. A `jira_view` is not offered. Before the search, `GET /rest/api/2/issue/{key}?fields=updated`
+reads the database: a 404, or an issue answering under another key (moved), is *gone*; its
+`updated`, cut to the second, is what the search's record must reach, asked again every 250 ms
+for up to 10 s, since the index lags a write. That GET's record is never the item. An issue the
+index holds fresh outside the scope is *gone*; an index that never catches up is
+`SourceError::Unreachable`. **§4.2's read endpoints** gain `GET /rest/api/2/issue/{key}` with
+`fields=updated`; **§5 mockd's JQL subset gains `key = KEY`**, as #1623 grew it, so the adapter's
+tests against mockd send the query the adapter sends. Witnessed by `refresh::tests` and
+`jql::tests` in `knobas-source-jira`, mockd's `key_equals_keeps_the_one_issue`, the battery's
+clause 13 against mockd and the seeded Jira, `live_jira_seeded`'s
+`a_refresh_reads_a_filed_issue_as_the_sync_does_and_a_deleted_one_gone`, and `atlassian_live`'s
+`each_landed_write_is_in_the_mirror_as_jira_holds_it_before_its_run`.
+
 ---
 
 ## 10. As built — the contract PR (2026-08-24)
