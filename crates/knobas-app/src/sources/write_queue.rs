@@ -9,7 +9,7 @@
 
 use knobas_core::write_queue::{QueuedWrite, WriteState};
 use knobas_source::WriteOp;
-use knobas_sync::scheduler::{Scheduler, SchedulerDeps};
+use knobas_sync::scheduler::Scheduler;
 
 use crate::IpcError;
 
@@ -66,8 +66,8 @@ pub async fn submit(
     state: &crate::sources::SourcesState,
     payload: serde_json::Value,
 ) -> Result<QueuedWrite, IpcError> {
-    let (queued, source_id) = queue(state, payload).await?;
-    flush(state, &source_id, queued.id).await?;
+    let (queued, _) = queue(state, payload).await?;
+    flush(state, queued.id).await?;
     Ok(queued)
 }
 
@@ -77,8 +77,9 @@ pub async fn submit(
 /// Everything [`submit`] refuses is refused here too, before the answer: the
 /// checks and the row are local, and they are the only things between the
 /// reader pressing *Comment* and the dialog closing. The send -- the remote
-/// call, a merge's bounded retry (#721), the re-read of the mirror when it
-/// lands -- is [`flush`], spawned onto the runtime with a copy of the state.
+/// call, a merge's bounded retry (#721) -- is [`flush`], spawned onto the
+/// runtime with a copy of the state; the re-read of the mirror when it lands
+/// is [`after_landing`]'s, as for every send.
 ///
 /// **The queue's rules hold.** The spawned flush is `flush_entity_of`, the
 /// scheduler's flush narrowed to this write's entity (#1797): one write of a source at a time (its per-source lock, re-read
@@ -292,6 +293,9 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
     }
     fn activity_new(&self, row: knobas_core::activity::ActivityRow) {
         self.inner.activity_new(row);
+    }
+    fn write_landed(&self, write: &QueuedWrite) {
+        self.inner.write_landed(write);
     }
 }
 
@@ -562,7 +566,7 @@ where
 {
     let task = state.clone();
     let spawned = state.scheduler.background().spawn(async move {
-        if let Err(error) = deliver(&task, &source_id, id).await {
+        if let Err(error) = deliver(&task, id).await {
             tracing::warn!(
                 source = %source_id,
                 write_id = id,
@@ -690,54 +694,29 @@ where
 /// was at the source.
 pub(crate) async fn flush(
     state: &crate::sources::SourcesState,
-    source_id: &str,
     write_id: i64,
 ) -> Result<(), IpcError> {
-    let (task, source_id) = (state.clone(), source_id.to_owned());
+    let task = state.clone();
     in_the_set(&state.scheduler, move |_| async move {
-        deliver(&task, &source_id, write_id).await
+        deliver(&task, write_id).await
     })
     .await
 }
 
 /// Send the write's entity in queue order
-/// (`knobas_sync::write_queue::flush_entity_of`, #1797), and re-read the mirror
-/// if the write landed. Both callers run it in the background set: [`flush`],
-/// which waits for it (and, once the quit has begun, runs it where it is),
-/// and [`spawn_send`], which does not wait.
+/// (`knobas_sync::write_queue::flush_entity_of`, #1797). Both callers run it in
+/// the background set: [`flush`], which waits for it (and, once the quit has
+/// begun, runs it where it is), and [`spawn_send`], which does not wait. What
+/// follows a write that lands is [`after_landing`]'s, as on every send path.
 ///
 /// # Errors
 ///
 /// As [`submit`]. A source that cannot take the write is **not** an error --
 /// that is what the queue is for.
-async fn deliver(
-    state: &crate::sources::SourcesState,
-    source_id: &str,
-    write_id: i64,
-) -> Result<(), IpcError> {
-    let scheduler = &state.scheduler;
-    knobas_sync::write_queue::flush_entity_of(scheduler.deps(), write_id)
+async fn deliver(state: &crate::sources::SourcesState, write_id: i64) -> Result<(), IpcError> {
+    knobas_sync::write_queue::flush_entity_of(state.scheduler.deps(), write_id)
         .await
-        .map_err(IpcError::internal)?;
-
-    // Story 15: a write that landed is reflected in the mirror now, rather
-    // than at the next scheduled sync -- otherwise the app disagrees with
-    // itself for up to five minutes right after the user acted.
-    //
-    // An **incremental** run, and through the scheduler rather than around it:
-    // the SPI has no per-entity read (`Source::sync` is the whole of the read
-    // direction), so the narrowest thing knobas can ask for is "whatever
-    // changed since the cursor", which is exactly the item that was just
-    // written to. `trigger` dedupes against a run already in flight, so a
-    // burst of writes costs one run rather than one each.
-    //
-    // Only when the write actually **went**. A write that is waiting has
-    // changed nothing at the source, and a run for it would re-read what
-    // nobody touched.
-    if landed(scheduler.deps(), write_id).await {
-        refresh(scheduler, source_id).await;
-    }
-    Ok(())
+        .map_err(IpcError::internal)
 }
 
 /// Everything [`submit`] decides before a row exists, as one function so a
@@ -863,35 +842,90 @@ fn role_writes(descriptor: &knobas_source::SourceDescriptor) -> Vec<String> {
         .collect()
 }
 
-/// Did this write settle as *sent*?
+/// **What follows a write that reached `sent`** (#2094), whichever path sent
+/// it: a submit and its background and linked variants, the scheduler's
+/// flush tick, *Flush now*, *Apply anyway*, an amendment. This is the one
+/// place that decides it; [`FollowLandings`] brings every landed write here.
 ///
-/// Re-read rather than inferred from what [`knobas_sync::write_queue::submit`]
-/// returned: that row is the write **as queued**, before the attempt, which is
-/// the honest shape for the caller and says nothing about the outcome.
-async fn landed(deps: &SchedulerDeps, id: i64) -> bool {
-    matches!(
-        knobas_core::write_queue::get(&deps.pool, id).await,
-        Ok(Some(row)) if row.state == WriteState::Sent
-    )
+/// For now, a run of the write's source that **began after the write**, waited
+/// for ([`Scheduler::sync_after_write`]), so the mirror shows what was written
+/// without waiting for the next scheduled sync (story 15), and a run already in
+/// flight, which began before the write, does not stand in for it.
+///
+/// A failure is logged and dropped: the write **landed**, and reporting the
+/// follow-up read's failure as the write's would tell the user their edit did
+/// not go when it did. The next scheduled sync re-reads the source either way.
+pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
+    if let Err(error) = scheduler.sync_after_write(&write.source_id).await {
+        tracing::warn!(
+            source = %write.source_id,
+            write_id = write.id,
+            %error,
+            "a write landed but the mirror could not be re-read for it"
+        );
+    }
 }
 
-/// Ask for an incremental sync of `source_id`, best effort.
-///
-/// Logged and dropped rather than raised: the write **landed**, and reporting
-/// the follow-up read's failure as the write's would tell the user their edit
-/// did not go when it did. The scheduler's own tick re-reads the source a few
-/// minutes later either way, so the cost of a failure here is staleness, not
-/// loss.
-async fn refresh(scheduler: &Scheduler, source_id: &str) {
-    if let Err(error) = scheduler
-        .trigger(source_id, knobas_sync::SyncTrigger::Manual, None)
-        .await
-    {
-        tracing::warn!(
-            source = source_id,
-            %error,
-            "a write landed but the mirror could not be refreshed for it"
-        );
+/// The scheduler's events, and for every write that lands,
+/// [`after_landing`] in the scheduler's background set, so the quit waits for
+/// it. Every event is passed on unchanged. Put on by
+/// [`crate::sources::start_scheduler`], the one way the app starts a
+/// scheduler.
+pub(crate) struct FollowLandings {
+    inner: std::sync::Arc<dyn knobas_sync::scheduler::SyncEvents>,
+    /// The scheduler these events belong to, set once it has started. Weak,
+    /// since the scheduler holds its events.
+    scheduler_slot: SchedulerSlot,
+}
+
+/// Where [`FollowLandings`] finds its scheduler once it has started.
+pub(crate) type SchedulerSlot =
+    std::sync::Arc<std::sync::OnceLock<knobas_sync::scheduler::WeakScheduler>>;
+
+impl FollowLandings {
+    /// `inner`, followed, and the slot to put the scheduler in once it has
+    /// started: until then a landed write is followed by nothing.
+    pub(crate) fn wrap(
+        inner: std::sync::Arc<dyn knobas_sync::scheduler::SyncEvents>,
+    ) -> (FollowLandings, SchedulerSlot) {
+        let scheduler_slot = SchedulerSlot::default();
+        let slot = std::sync::Arc::clone(&scheduler_slot);
+        (
+            FollowLandings {
+                inner,
+                scheduler_slot,
+            },
+            slot,
+        )
+    }
+}
+
+impl knobas_sync::scheduler::SyncEvents for FollowLandings {
+    fn sync_state(&self, status: knobas_sync::SourceSyncStatus) {
+        self.inner.sync_state(status);
+    }
+    fn source_health(&self, health: knobas_sync::CredentialHealth) {
+        self.inner.source_health(health);
+    }
+    fn activity_new(&self, row: knobas_core::activity::ActivityRow) {
+        self.inner.activity_new(row);
+    }
+    fn write_landed(&self, write: &QueuedWrite) {
+        if let Some(scheduler) = self.scheduler_slot.get().and_then(|weak| weak.upgrade()) {
+            let (task, landed) = (scheduler.clone(), write.clone());
+            // Refused once the quit has begun: the next start's scheduled
+            // sync reads the source.
+            let spawned = scheduler
+                .background()
+                .spawn(async move { after_landing(&task, &landed).await });
+            if !spawned {
+                tracing::info!(
+                    write_id = write.id,
+                    "knobas is quitting: the landed write is read back at the next start"
+                );
+            }
+        }
+        self.inner.write_landed(write);
     }
 }
 
@@ -986,17 +1020,18 @@ fn check(existing: &knobas_core::write_queue::QueuedWrite, op: &WriteOp) -> Resu
 /// Sync a source and **wait for a run that can see what was just written**
 /// (issue #289).
 ///
-/// [`refresh`] triggers and moves on, which is right for the write that has
-/// just landed: nothing is waiting on the mirror, and story 15 only asks that
-/// the app stop disagreeing with itself within the second. A caller that is
-/// about to *look for what its write created* needs the other behaviour, and
+/// [`after_landing`] asks for the same run after every write that lands, on a
+/// task of its own that nobody waits on. A caller that is about to *look for
+/// what its write created* has to wait for it itself, and
 /// [`Scheduler::sync_after_write`](knobas_sync::scheduler::Scheduler::sync_after_write)
-/// is where it lives -- including the reason one wait is not enough (#358).
+/// is where that lives -- including the reason one wait is not enough (#358).
+/// The two asking at once cost what one caller after a run in flight does:
+/// the run one of them started, and one more.
 ///
 /// A failure to trigger, or to wait, is **not** an error: it leaves a mirror
 /// that may be behind, which every caller of this already has to handle --
 /// there is no link yet, and the next read draws it. Logged and dropped
-/// rather than raised, exactly as [`refresh`] does with its own: nothing here
+/// rather than raised, exactly as [`after_landing`] does with its own: nothing here
 /// reaches the caller, and a warning is what makes a source that could not be
 /// re-read visible to whoever is reading the log.
 pub(crate) async fn sync_after_write(state: &crate::sources::SourcesState, source_id: &str) {

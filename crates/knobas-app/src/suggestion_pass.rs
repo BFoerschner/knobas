@@ -266,6 +266,9 @@ impl<E: SyncEvents> SyncEvents for SuggestOnSync<E> {
     fn activity_new(&self, row: knobas_core::activity::ActivityRow) {
         self.inner.activity_new(row);
     }
+    fn write_landed(&self, write: &knobas_core::write_queue::QueuedWrite) {
+        self.inner.write_landed(write);
+    }
 }
 
 impl Inner {

@@ -152,6 +152,15 @@ pub trait SyncEvents: Send + Sync + 'static {
     /// `activity:new` -- the status bar's "latest change" line (§2). At most one
     /// per run, which is well inside the ≥ 1 s coalescing rule.
     fn activity_new(&self, row: ActivityRow);
+    /// A queued write reached `sent` (#2094), from whichever path sent it:
+    /// a submit, the flush tick, *Flush now*, *Apply anyway*, an amendment.
+    /// Every one passes the one settle in [`crate::write_queue`], which calls
+    /// this once the row says `sent`, so an implementation hears every landed
+    /// write and no other. `knobas-app` decides what follows one
+    /// (`sources::write_queue`); everything else hears nothing, the default.
+    ///
+    /// Called inside the flush, so it must not block: spawn what it starts.
+    fn write_landed(&self, _write: &knobas_core::write_queue::QueuedWrite) {}
 }
 
 /// Everything a run needs. Cloned into each spawned task via `Arc`.
@@ -1435,6 +1444,22 @@ pub struct Scheduler {
     inner: Arc<Inner>,
 }
 
+/// A handle on the scheduler that does not keep it alive (#2094): for a
+/// [`SyncEvents`] that starts runs. The events live inside the scheduler, so
+/// a [`Scheduler`] held there would be a cycle that never lets it go.
+#[derive(Clone)]
+pub struct WeakScheduler {
+    inner: std::sync::Weak<Inner>,
+}
+
+impl WeakScheduler {
+    /// The scheduler, while anything else still holds it.
+    #[must_use]
+    pub fn upgrade(&self) -> Option<Scheduler> {
+        self.inner.upgrade().map(|inner| Scheduler { inner })
+    }
+}
+
 /// One source's most recent run, as [`Claims::runs`] holds it.
 ///
 /// The flag is the *claim on the source's first sync*, and it is what makes
@@ -1636,6 +1661,14 @@ impl Scheduler {
         Ok(Scheduler { inner })
     }
 
+    /// A [`WeakScheduler`] onto this one.
+    #[must_use]
+    pub fn downgrade(&self) -> WeakScheduler {
+        WeakScheduler {
+            inner: Arc::downgrade(&self.inner),
+        }
+    }
+
     /// What the scheduler was built with.
     ///
     /// The write queue's flush loop takes the same [`SchedulerDeps`] -- it
@@ -1694,12 +1727,13 @@ impl Scheduler {
     /// just written** (issues #289, #358).
     ///
     /// [`trigger`](Self::trigger) starts or joins a run and answers straight
-    /// away, which is right for a write that has just landed: nothing is
-    /// waiting on the mirror, and story 15 only asks that the app stop
-    /// disagreeing with itself within the second.
+    /// away, and a run it joins may have begun before the write. So every
+    /// landed write is followed by this rather than by a trigger (#2094):
+    /// `knobas-app`'s `sources::write_queue::after_landing` asks for it, on a
+    /// task nobody waits on.
     ///
-    /// A caller that is about to *look for what its write created* needs the
-    /// other behaviour, and the reason is `start_work::queue::Queue::refresh`'s
+    /// A caller that is about to *look for what its write created* waits for
+    /// it too, and the reason is `start_work::queue::Queue::refresh`'s
     /// in as many words: what a create made has an entity only once a sync has
     /// seen it (even where its receipt names it, #1949), so the only way to
     /// link one is to read the mirror, and reading it before the run that
@@ -1713,9 +1747,9 @@ impl Scheduler {
     /// writes cost one run rather than one each -- and the same dedupe hands
     /// this caller a run that **began before the write did**.
     ///
-    /// That is not a corner: `knobas-app`'s `sources::write_queue::flush` --
-    /// the crate above this one, so named rather than linked -- starts exactly
-    /// such a run after every write that lands, so a flow which writes twice
+    /// That is not a corner: `knobas-app`'s `sources::write_queue::after_landing`
+    /// -- the crate above this one, so named rather than linked -- asks for a
+    /// run after every write that lands ([`SyncEvents::write_landed`], #2094), so a flow which writes twice
     /// and then looks for what it made is the ordinary case. Start-work is one (issue
     /// #44): a branch, a pull request, then find the pull request. The branch's
     /// refresh was still going, this joined it, its ending arrived faithfully
@@ -1735,16 +1769,15 @@ impl Scheduler {
     ///
     /// **What that costs, and who pays it.** The second run is paid whenever
     /// one was in flight, and that is the ordinary case for every caller this
-    /// has -- not just start-work. That same `flush` triggers its refresh the
-    /// moment a write lands, and each caller asks for this immediately after a
-    /// write, so all three now wait out two incremental syncs where they
-    /// waited out one: start-work's link step (issue #44), #289's protocol
-    /// publish, and the ticket an action item is turned into. For start-work
-    /// the run they used to wait out was the wrong one; for the other two it
-    /// usually was not, and this cannot tell those apart, because `flush`
-    /// discards which of the two its own trigger got. A source with nothing in
-    /// flight still costs a single run: `flush`'s run finished before this
-    /// asked, or there was none because the source refused the write.
+    /// has -- not just start-work. That same `after_landing` asks for this the
+    /// moment a write lands, and each caller asks for it again immediately
+    /// after a write, so all three wait out two incremental syncs where one
+    /// would do: start-work's link step (issue #44), #289's protocol publish,
+    /// and the ticket an action item is turned into. Whichever of the two asks
+    /// first starts the run, and the other joins it and asks once more. There
+    /// is one run only when there was none to join: the follow-up's had
+    /// finished before this asked, or there was none because the source
+    /// refused the write.
     ///
     /// ADR-0005 guarantees a run id always comes with an ending -- including
     /// the id of a run already in flight -- so neither wait can be for

@@ -1368,9 +1368,9 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     //
     // What moves the mirror in the middle of a test that syncs once, at the
     // top? The write queue's own follow-up read.
-    // `knobas_app::sources::write_queue::flush` fires an incremental sync as
-    // soon as a write lands (`refresh`, story 15), and `Scheduler::trigger`
-    // **spawns** that run -- so the transition above returned with a sync of
+    // `knobas_app::sources::write_queue::after_landing` asks for an
+    // incremental sync as soon as a write lands (story 15, #2094), on a task
+    // of its own, and the scheduler **spawns** that run -- so the transition above returned with a sync of
     // this source still in flight. It re-reads `PAY-240`, whose `updated`
     // moved with the transition, and commits a `sync.item` row carrying the
     // new status. Land that commit between the `queue` and the `flush_source`
@@ -1387,8 +1387,11 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     // wait is on the mirrored status itself, to [`INDEX_BUDGET`], the budget
     // `knobas-source-jira`'s own live suite uses for this index.
     //
-    // `sync` here is not an extra run in the ordinary case: `trigger` attaches
-    // to the run `refresh` already started and waits for its ending.
+    // `sync` here costs no run of its own in the ordinary case: `trigger`
+    // attaches to the run `after_landing` started and waits for its ending.
+    // When that task has not asked yet, this starts the run instead, and
+    // `after_landing` joins it and asks for one more (#2094); the poll below
+    // reads the mirror either way.
     //
     // **What this compares, and what it does not.** `project`'s fallback arm
     // -- the one `"transition"` takes -- compares `title`, `text`,
@@ -2742,7 +2745,7 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
     //
     // It did not use to, and this is where that showed. The comment above ran
     // through the write queue, which fires a sync as soon as the write lands
-    // (`knobas_app::sources::write_queue`'s `refresh`), and the assignment
+    // (`knobas_app::sources::write_queue::after_landing`), and the assignment
     // below it landed inside the same second -- 88 ms after, measured. Jira's
     // `/search` reports `updated` to the second, so to a run those were one
     // version of the ticket, and the cursor's `(key, updated)` pair recognised

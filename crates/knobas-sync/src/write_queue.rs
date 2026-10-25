@@ -956,6 +956,7 @@ async fn settle(
                 store::sent(&deps.pool, write.id, receipt.remote_id.as_deref()).await?
             {
                 announce(deps, "sent", &sent).await;
+                deps.events.write_landed(&sent);
                 return Ok(true);
             }
             // The row settled under us -- the user withdrew it while it was

@@ -193,7 +193,7 @@ impl JiraCursor {
     /// landed in the same second as the one before it. `/search` reports whole
     /// seconds, an issue changes in milliseconds, and a sync between the two
     /// changes is the ordinary case rather than a rare one -- every landed
-    /// write triggers one (`knobas_app::sources::write_queue`'s `refresh`).
+    /// write triggers one (`knobas_app::sources::write_queue::after_landing`).
     /// The dropped change was then permanent: `updated` does not move again on
     /// its own, so no later incremental run reached it either.
     ///
