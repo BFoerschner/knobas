@@ -1041,8 +1041,9 @@ assets: Array<MonitoredAsset>,
  */
 actions: Array<string>, 
 /**
- * Whether its source's adapter reads one monitor (`Capability::Refresh`,
- * ADR-0031): the row draws *Refresh*, else *Sync now* (#2138), as
+ * Whether its source's adapter reads one monitor (`Capability::Refresh`
+ * and the monitor kind's `KindInfo::refreshes`, ADR-0031, #2146): the row
+ * draws *Refresh*, else *Sync now* (#2138), as
  * `EntityDetail::refreshes` chooses a detail's. Read off the template of
  * the source's configured adapter kind, so the roster builds no source.
  * A turned-off source's monitors are not on the roster at all.

@@ -9,17 +9,22 @@
 use knobas_sync::refresh::{RefreshError, RefreshOutcome};
 use knobas_sync::scheduler::{AdapterRegistry, RefreshEnd, RefreshEnded, Scheduler};
 
-/// Whether `adapter_kind`'s template declares the read of one item
-/// (`SourceDescriptor::refreshes`): what a detail's
+/// Whether `adapter_kind`'s template declares the read of one item of
+/// `kind` (`SourceDescriptor::refreshes_kind`, #2146): what a detail's
 /// `EntityDetail::refreshes` (#2107) and a roster row's `MonitorRow::refreshes`
-/// (#2138) say, read off the registry so no source is built and no keychain
-/// read. `false` for no configured kind or a kind no template answers.
-pub fn template_refreshes(registry: &dyn AdapterRegistry, adapter_kind: Option<&str>) -> bool {
-    adapter_kind.is_some_and(|kind| {
+/// (#2138) say for their row's kind, read off the registry so no source is
+/// built and no keychain read. `false` for no configured kind, a kind no
+/// template answers, or an entity kind the template does not refresh.
+pub fn template_refreshes(
+    registry: &dyn AdapterRegistry,
+    adapter_kind: Option<&str>,
+    kind: &str,
+) -> bool {
+    adapter_kind.is_some_and(|adapter_kind| {
         registry
             .descriptors()
             .iter()
-            .any(|template| template.adapter_kind == kind && template.refreshes())
+            .any(|template| template.adapter_kind == adapter_kind && template.refreshes_kind(kind))
     })
 }
 

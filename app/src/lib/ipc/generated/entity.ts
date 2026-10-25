@@ -1086,8 +1086,9 @@ export type EntityDetail = { row: EntityRow, source: SourceRef,
  */
 kind_info: KindInfo | null, 
 /**
- * Whether the item's adapter reads one item by id (#2107, ADR-0031):
- * its descriptor declares `Capability::Refresh`. The detail draws
+ * Whether the item's adapter reads one item **of its kind** by id
+ * (#2107, #2146, ADR-0031): its descriptor declares `Capability::Refresh`
+ * and the kind's `KindInfo::refreshes`. The detail draws
  * *Refresh* where it does and *Sync now* where it does not, both only
  * while [`SourceRef::enabled`]. Off the adapter's template, so the read
  * builds no source; `false` for a source with no configuration row or

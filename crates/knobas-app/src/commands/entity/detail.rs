@@ -21,8 +21,9 @@ pub struct EntityDetail {
     /// produces). Both cases fall through to the frontend's §3a humaniser,
     /// which is what §3a asks for when nothing declares anything.
     pub kind_info: Option<knobas_source::KindInfo>,
-    /// Whether the item's adapter reads one item by id (#2107, ADR-0031):
-    /// its descriptor declares `Capability::Refresh`. The detail draws
+    /// Whether the item's adapter reads one item **of its kind** by id
+    /// (#2107, #2146, ADR-0031): its descriptor declares `Capability::Refresh`
+    /// and the kind's `KindInfo::refreshes`. The detail draws
     /// *Refresh* where it does and *Sync now* where it does not, both only
     /// while [`SourceRef::enabled`]. Off the adapter's template, so the read
     /// builds no source; `false` for a source with no configuration row or
@@ -117,7 +118,11 @@ pub async fn get_entity_inner(
             detail.configured_adapter_kind.as_deref(),
             &detail.row.kind,
         ),
-        refreshes: refreshes(registry, detail.configured_adapter_kind.as_deref()),
+        refreshes: refreshes(
+            registry,
+            detail.configured_adapter_kind.as_deref(),
+            &detail.row.kind,
+        ),
         row: detail.row,
         source: detail.source,
         body_text: detail.body_text,
@@ -241,7 +246,7 @@ mod tests {
     fn can_refresh_is_the_adapters_declaration() {
         let templates = registry().templates();
         assert!(
-            refreshes(&registry(), Some("mock")),
+            refreshes(&registry(), Some("mock"), "ticket"),
             "the mock reads one item"
         );
         // An adapter that does not declare the read, while one is compiled
@@ -249,13 +254,33 @@ mod tests {
         let quiet = templates.iter().find(|template| !template.refreshes());
         if let Some(quiet) = quiet {
             assert!(
-                !refreshes(&registry(), Some(&quiet.adapter_kind)),
+                !refreshes(&registry(), Some(&quiet.adapter_kind), "ticket"),
                 "{} does not declare the read",
                 quiet.adapter_kind
             );
         }
-        assert!(!refreshes(&registry(), None));
-        assert!(!refreshes(&registry(), Some("not-a-compiled-in-adapter")));
+        assert!(!refreshes(&registry(), None, "ticket"));
+        assert!(!refreshes(
+            &registry(),
+            Some("not-a-compiled-in-adapter"),
+            "ticket"
+        ));
+    }
+
+    /// Per kind, not per adapter (#2146): TeamCity reads a build by id and
+    /// answers a build configuration *not offered*, so a configuration's
+    /// detail draws *Sync now* from the start, and a build's *Refresh*. A
+    /// kind the adapter does not declare is not refreshed either.
+    #[test]
+    fn can_refresh_is_the_kinds_declaration() {
+        assert!(refreshes(&registry(), Some("teamcity"), "build"));
+        assert!(!refreshes(&registry(), Some("teamcity"), "build_config"));
+        assert!(refreshes(&registry(), Some("gitea"), "pr"));
+        for kind in ["repo", "branch", "commit"] {
+            assert!(!refreshes(&registry(), Some("gitea"), kind), "gitea {kind}");
+        }
+        assert!(!refreshes(&registry(), Some("jira"), "jira_view"));
+        assert!(!refreshes(&registry(), Some("mock"), "no-such-kind"));
     }
 
     /// One kind id declared by two adapters resolves by **adapter**, not by
