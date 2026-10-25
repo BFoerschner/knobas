@@ -10,7 +10,8 @@
 
   The comment box at the end queues a `Comment` write (BUILT): the box clears
   on queue, and the comment is drawn at the end of the thread at once, muted
-  and marked *queued* (#1424), until a read of the thread holds its words.
+  with its echo (#1424, #2103), *queued* and then *sent*, until a read of the
+  thread (the refresh after the write, or a run's end) holds its words.
   *Edit and resend* on a held or refused one puts its words back in the box.
   A comment the source's credential cannot make (`refused`, #2052) draws
   *Comment* disabled with the reason under the box, and queues nothing.
@@ -22,7 +23,7 @@
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { refusedAttrs } from "../../shell/refused-writes";
-  import { takeAgain } from "../queued.svelte";
+  import { takeAgain, type Echo } from "../queued.svelte";
   import { initials } from "../tickets/tickets";
   import { CHANGES, MENTIONS, NEW, changeLine, drawThread, firstName, mentionRuns, since, stamp } from "./conversation";
 
@@ -41,7 +42,7 @@
     /** The ticket's entity id, which *Edit and resend* names. */
     entityId: string;
     /** The comments queued here that the thread does not hold yet (#1424). */
-    queued?: string[];
+    queued?: Pick<Echo, "text" | "state">[];
     /** `null` while the read is out. */
     thread: Thread | null;
     /** When the reader last opened this job before now; `null` for never. */
@@ -150,12 +151,12 @@
       <div class="tf-empty">{thread.comments.length === 0 ? "No comments yet." : "No comments match."}</div>
     {/if}
   {/if}
-  {#each queued as body, n (n)}
+  {#each queued as echo, n (n)}
     <article class="tf-msg tf-queued">
       <span class="tf-av tf-me" aria-hidden="true">{initials(myName)}</span>
       <div class="tf-msg-body">
-        <div class="tf-who"><b>You</b><span class="tf-chip tf-info">queued</span></div>
-        <p>{body}</p>
+        <div class="tf-who"><b>You</b><span class="tf-chip tf-info">{echo.state}</span></div>
+        <p>{echo.text}</p>
       </div>
     </article>
   {/each}

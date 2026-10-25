@@ -27,6 +27,7 @@ import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { page as codeRowPage } from "../code-row/page";
 import { writeQueuePanel } from "../../shell/write-queue.svelte";
+import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes } from "../queued.svelte";
 import { sessionFilter } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
@@ -1372,4 +1373,81 @@ test("a move the queue refuses drops the queued status and toasts; Edit and rese
   expect(location.hash).toBe("#/job/jira%3APAY-231");
   expect(document.activeElement).toBe(select);
   expect(select.value).toBe("In Progress");
+});
+
+// ---- the echo's one lifecycle: queued, sent, gone on the refresh's read (#2103) ----
+
+const squash = (node: Element) => (node.textContent ?? "").replace(/\s+/g, " ").trim();
+
+test("a move's echo says queued, then sent, and goes on the refresh event's read, the job not opened again (#2103)", async () => {
+  const sync = echoEvents(settle);
+  const { follower, sent } = echoFollower();
+  let status = "In Progress";
+  let next = 70;
+  const io = ports({
+    getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status })) : Promise.reject({ code: "not_found" })),
+    submitWrite: () => Promise.resolve({ id: next++ } as never),
+    listen: sync.listen,
+  });
+  open("PAY-231", { ports: io, follower });
+  await settle();
+  await pick("In Review");
+  expect(statusShown()).toEqual(["In Review", true, "queued"]);
+
+  sent(70);
+  expect(statusShown()).toEqual(["In Review", true, "sent"]);
+
+  // Another ticket's refresh reads nothing that settles it.
+  await sync.refreshed("jira:PAY-9", 99);
+  expect(statusShown()).toEqual(["In Review", true, "sent"]);
+
+  status = "In Review";
+  await sync.refreshed(ID, 70);
+  expect(statusShown()).toEqual(["In Review", false, null]);
+});
+
+test("a move's echo also goes on the read a run of its source's end brings (#2103)", async () => {
+  const sync = echoEvents(settle);
+  let status = "In Progress";
+  const io = ports({
+    getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status })) : Promise.reject({ code: "not_found" })),
+    submitWrite: () => Promise.resolve({ id: 71 } as never),
+    listen: sync.listen,
+  });
+  open("PAY-231", { ports: io });
+  await settle();
+  await pick("In Review");
+  status = "In Review";
+  await sync.ended("gitea");
+  expect(statusShown()).toEqual(["In Review", true, "queued"]);
+  await sync.ended("jira");
+  expect(statusShown()).toEqual(["In Review", false, null]);
+});
+
+test("a comment's echo says queued, then sent, and goes on the refresh event's read of the thread, the job not opened again (#2103)", async () => {
+  const sync = echoEvents(settle);
+  const { follower, sent } = echoFollower();
+  let said: { author: string; at: string; body: string; mine: boolean; mentions_me: boolean }[] = [];
+  const io = ports({
+    entityThread: () => Promise.resolve({ comments: said, changes: [], me: ["mara"] }),
+    submitWrite: () => Promise.resolve({ id: 72 } as never),
+    listen: sync.listen,
+  });
+  open("PAY-231", { ports: io, follower, tab: "conversation" });
+  await settle();
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
+  box.value = "Looking at the jitter now";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!.click();
+  await settle();
+  const echoed = () => [...target.querySelectorAll(".tf-convo .tf-msg.tf-queued .tf-chip")].map((chip) => squash(chip));
+  expect(echoed()).toEqual(["queued"]);
+
+  sent(72);
+  expect(echoed()).toEqual(["sent"]);
+
+  said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false }];
+  await sync.refreshed(ID, 72);
+  expect(echoed()).toEqual([]);
 });

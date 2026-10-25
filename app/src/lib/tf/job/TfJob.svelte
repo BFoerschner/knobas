@@ -86,7 +86,7 @@
   import { createJobReader } from "./job-reader.svelte";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { currentJob, linkRequest, type LinkTarget } from "./current.svelte";
-  import { askAgain, echoWrite, echoOn, echoesOn, sameWords, settleEchoes } from "../queued.svelte";
+  import { askAgain, echoWrite, echoOn, echoesOn, sameWords, settleEchoes, watchEchoes } from "../queued.svelte";
   import { jobHash } from "../route";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfDeps from "../deps/TfDeps.svelte";
@@ -296,10 +296,28 @@
   }
 
   // ---- what this job queued, drawn at once (#1424) ----
+  /** The surface the job's echoes are tagged with, for `watchEchoes` (#2103). */
+  const JOB = "job";
   /** The status a queued move picked, drawn in the select until the ticket's status moves. */
-  const queuedStatus = $derived(detail ? (echoOn(detail.row.entity_id, "status")?.text ?? null) : null);
+  const statusEcho = $derived(detail ? echoOn(detail.row.entity_id, "status") : null);
   /** The comments queued here, drawn at the end of the thread until the thread holds them. */
-  const queuedComments = $derived(detail ? echoesOn(detail.row.entity_id, "comment").map((mark) => mark.text) : []);
+  const queuedComments = $derived(detail ? echoesOn(detail.row.entity_id, "comment") : []);
+
+  // The refresh after one of the job's writes, or a run of its source's end,
+  // reads the ticket and its thread again (#2103), so the echoes below settle
+  // without the job being opened again.
+  $effect(() =>
+    untrack(() =>
+      watchEchoes(
+        JOB,
+        () => {
+          reader.rereadDetail();
+          reader.rereadThread();
+        },
+        { listen: ports.listen },
+      ),
+    ),
+  );
 
   // Each read of the ticket drops a move once its status moved from where the move left it.
   $effect(() => {
@@ -327,6 +345,8 @@
       echoWrite(id, "comment", body, {
         write,
         many: true,
+        surface: JOB,
+        source: source.id,
         following: {
           name: `Comment on ${key}`,
           resend: () => {
@@ -368,6 +388,8 @@
       echoWrite(id, "status", status, {
         write,
         base: from,
+        surface: JOB,
+        source: source.id,
         following: {
           name: `Move of ${key} to ${status}`,
           resend: () => {
@@ -484,7 +506,8 @@
       {lastVisit}
       now={today()}
       {timer}
-      queued={queuedStatus}
+      queued={statusEcho?.text ?? null}
+      queuedState={statusEcho?.state}
       refused={moveRefused}
       onmove={move}
       onstop={() => ontimer?.()}

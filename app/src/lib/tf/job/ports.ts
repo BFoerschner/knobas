@@ -5,6 +5,7 @@
  * `job_reach`, which #817 adds, and `job_link_sets`, #867's.
  */
 import { getAsset, type AssetDetail } from "../../ipc/assets";
+import type { EchoListen } from "../queued.svelte";
 import {
   createLink,
   entityCheckout,
@@ -84,6 +85,8 @@ export interface JobPorts {
   startWork: StartWorkApi;
   /** What the ticket's source's credential cannot write (#2052); the bridge's when left out. */
   refusedWrites?: RefusedWritesPort;
+  /** Hears `item:refreshed` and `sync:state`, which read the job again for its echoes (#2103); the bridge's when left out. */
+  listen?: EchoListen;
 }
 
 /**

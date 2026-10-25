@@ -132,9 +132,12 @@ export function settleEchoes(entity: string, landed: (echo: Echo) => boolean): v
   drop(entity, landed);
 }
 
+/** The bridge's `listen`, as a surface's ports carry it for `watchEchoes`. */
+export type EchoListen = (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
+
 export interface EchoWatch {
   /** The bridge's `listen`; Tauri's when omitted. */
-  listen?: ((event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>) | undefined;
+  listen?: EchoListen | undefined;
   /** Re-read on the end of every run of every source, for a surface that reads again on each anyway (Docs, #2072). */
   everyRun?: boolean;
 }
