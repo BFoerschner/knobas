@@ -2649,7 +2649,7 @@ knobas-source-confluence	lib/knobas_source_confluence	cursor::tests::a_changed_o
 knobas-source-confluence	lib/knobas_source_confluence	cursor::tests::a_page_is_recognised_by_its_version_not_by_its_timestamp
 knobas-source-confluence	lib/knobas_source_confluence	cursor::tests::a_window_larger_than_the_cap_keeps_the_newest
 knobas-source-confluence	lib/knobas_source_confluence	cursor::tests::an_unrecognised_envelope_reads_as_no_cursor
-knobas-source-confluence	lib/knobas_source_confluence	cursor::tests::comments_past_the_page_cap_push_out_no_page_entry
+knobas-source-confluence	lib/knobas_source_confluence	cursor::tests::comments_past_their_cap_push_out_no_page_entry
 knobas-source-confluence	lib/knobas_source_confluence	cursor::tests::seen_covers_the_band_the_next_query_really_returns
 knobas-source-confluence	lib/knobas_source_confluence	cursor::tests::the_next_query_starts_before_the_watermark
 knobas-source-confluence	lib/knobas_source_confluence	cursor::tests::the_same_window_encodes_to_the_same_bytes_in_any_arrival_order

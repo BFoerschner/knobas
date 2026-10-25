@@ -198,9 +198,11 @@ impl ConfluenceCursor {
     /// filtered and ordered alike and stored as one list, so the envelope's
     /// shape is what it was.
     ///
-    /// `bounds` carries the previous watermark and the run-start ceiling; the
-    /// clamp, the floor, the order and the cap are
-    /// [`knobas_source::watermark::advanced`]'s, shared with Jira.
+    /// `bounds` carries the previous watermark and the run-start ceiling. The
+    /// clamp, and the page walk's floor, order and cap, are
+    /// [`knobas_source::watermark::advanced`]'s, shared with Jira; the
+    /// comments' share repeats its floor and order here, because a second
+    /// call would cut it at the shared cap.
     pub(crate) fn advanced(
         bounds: Bounds,
         newest: DateTime<Utc>,
@@ -213,6 +215,8 @@ impl ConfluenceCursor {
             mut seen,
         } = watermark::advanced::<Cql, Seen>(bounds, newest, tz_offset_secs, seen_in_window);
         // The comments' share: the same band and order, under its own cap.
+        // Not a second `watermark::advanced` call, which would cut it at
+        // `SEEN_CAP`; that cap is shared with Jira and stays as it is.
         let floor = Cql::floor(
             watermark - chrono::Duration::minutes(watermark::OVERLAP_MINUTES),
             tz_offset_secs,
@@ -436,7 +440,7 @@ mod tests {
     /// the newest [`COMMENT_SEEN_CAP`] comments, all of them newer than every
     /// page, in one newest-first list.
     #[test]
-    fn comments_past_the_page_cap_push_out_no_page_entry() {
+    fn comments_past_their_cap_push_out_no_page_entry() {
         let base = utc("2026-08-22T10:40:00Z");
         let pages: Vec<Seen> = (0..3)
             .map(|i| Seen {
