@@ -3856,6 +3856,7 @@ knobas-source-teamcity	test/it	mockd::a_full_sync_mirrors_the_build_configuratio
 knobas-source-teamcity	test/it	mockd::a_mirrored_build_carries_what_the_ui_and_the_index_read
 knobas-source-teamcity	test/it	mockd::a_newly_finished_build_arrives_incrementally_and_then_the_source_is_idle
 knobas-source-teamcity	test/it	mockd::a_newly_queued_build_arrives_and_holds_the_watermark_below_itself
+knobas-source-teamcity	test/it	mockd::a_refresh_reads_a_build_by_id_and_a_404_as_gone
 knobas-source-teamcity	test/it	mockd::a_run_reports_its_walk_over_configurations_then_over_listed_builds
 knobas-source-teamcity	test/it	mockd::a_running_build_is_re_polled_without_moving_the_cursor
 knobas-source-teamcity	test/it	mockd::a_second_instance_namespaces_its_items_to_itself
