@@ -15,6 +15,7 @@ import type { EntityRow } from "../../ipc/entity";
 import type { SearchHit, SearchQuery, SearchResponse } from "../../ipc/search";
 import type { AdHocBlock, Block, DayBlock, OpenStretch, RunningTimer, TimerTarget } from "../../ipc/time";
 import { toasts } from "../../shell/toasts.svelte";
+import { until } from "../../shell/test-wait";
 import { createLayers } from "../layers.svelte";
 import TfDay from "./TfDay.svelte";
 import type { RefusedWritesPort, WriteAsk } from "../../shell/refused-writes";
@@ -456,12 +457,12 @@ test("an open stretch is measured in the sans face: Assign… fits where the mon
   expect(target.querySelector(".tf-tm-strip .tf-tm-gap text")?.textContent).toBe("Assign…");
 });
 
-/** Type into the dialog's search and wait out the launcher session's debounce. */
-async function search(text: string) {
+/** Type into the dialog's search and wait for the search the launcher session sends after its debounce (#2048). */
+async function search(searches: string[], text: string) {
   const box = target.querySelector<HTMLInputElement>('[aria-label="Search for a ticket"]')!;
   box.value = text;
   box.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
+  await until(() => searches.includes(text), `the search for ${text}`);
   await settle();
 }
 
@@ -477,7 +478,7 @@ test("Assign… on an open stretch picks a ticket by name and writes a block on 
   // No raw `ns:id` field: the reader searches, and the free-text placeholder is gone.
   expect(target.querySelector('[role="dialog"]')!.innerHTML).not.toContain("jira:PAY-231");
   expect(target.querySelector('[role="dialog"] select')).toBeNull();
-  await search("gateway");
+  await search(sent.searches, "gateway");
   expect(sent.searches).toEqual(["gateway"]);
   expect(options()).toEqual(["OPS-77 Rotate the gateway certificates"]);
   button(target, "OPS-77 Rotate the gateway certificates").click();

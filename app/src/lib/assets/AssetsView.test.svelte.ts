@@ -396,6 +396,7 @@ let scrolled: ScrollIntoViewOptions[] = [];
 function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
   const asked: (string | null)[] = [];
   const searched: SearchQuery[] = [];
+  searchedNow = searched;
   const opened: string[] = [];
   location.hash = hash;
   const nav = createTestNav();
@@ -565,13 +566,25 @@ function box(): HTMLInputElement {
   return input;
 }
 
-/** Type into the search box and wait the debounce out. */
+/** The mounted view's search port's queries, for {@link type} to wait on. */
+let searchedNow: SearchQuery[] = [];
+
+/**
+ * Type into the search box and wait for the search it sends once the debounce
+ * is out, then for its answer to draw (#2048; it was a fixed sleep). An empty
+ * box asks nothing and arms no timer, so there is nothing to wait for.
+ */
 async function type(text: string): Promise<void> {
+  const sent = searchedNow.length;
   const input = box();
   input.value = text;
   input.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 30));
+  if (text.trim() !== "") {
+    await waitFor(() => expect(searchedNow.length, `the search for ${text}`).toBeGreaterThan(sent));
+    // The answer is a resolved promise: one macrotask turn drains its chain.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
   flushSync();
 }
 
@@ -615,6 +628,7 @@ afterEach(() => {
   location.hash = "";
   Reflect.deleteProperty(Element.prototype, "scrollIntoView");
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 /**
@@ -1094,6 +1108,8 @@ test("typing a name opens the path to the first match and selects it", async () 
  * app wait the same amount of time.
  */
 test("the box waits for the typing to stop, and an empty box asks nothing", async () => {
+  // A fake clock, so "past the debounce" is a step and not a sleep (#2048).
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const { searched } = render("#/assets/tree");
   await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
@@ -1103,10 +1119,11 @@ test("the box waits for the typing to stop, and an empty box asks nothing", asyn
     input.dispatchEvent(new Event("input", { bubbles: true }));
     flushSync();
   }
-  await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 30));
+  vi.advanceTimersByTime(DEBOUNCE_MS);
   expect(searched.map((query) => query.raw)).toEqual(["git"]);
 
   await type("");
+  vi.advanceTimersByTime(DEBOUNCE_MS);
   expect(searched.map((query) => query.raw)).toEqual(["git"]);
 });
 
