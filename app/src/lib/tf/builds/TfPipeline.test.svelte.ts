@@ -1166,6 +1166,10 @@ test("a parameter change says queued, then sent, and goes once the read shows th
   // A run's end whose read still holds the old value keeps it.
   await events.ended("teamcity");
   expect(chip()).toBe("sent");
+  // Somebody else's change to another value is not this one landing.
+  read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "staging" } : p)) };
+  await events.ended("teamcity");
+  expect(chip()).toBe("sent");
   read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "prod-dryrun" } : p)) };
   await events.refreshed(PIPELINE.entity_id, 41);
   expect(chip()).toBeNull();

@@ -15,8 +15,8 @@ import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { echoEvents } from "../echo-events.fixture";
-import { echoWrite, forgetEchoes } from "../queued.svelte";
-import { MADE, REPO_BRANCHES, REPO_FILES, commitKind } from "./repo";
+import { echoWrite, echoesOn, forgetEchoes } from "../queued.svelte";
+import { DELETED, MADE, REPO_BRANCHES, REPO_FILES, commitKind } from "./repo";
 import { sourceName } from "./repo";
 import TfRepo, { type RepoPorts } from "./TfRepo.svelte";
 
@@ -899,6 +899,8 @@ test("a branch deleted goes once the listing's re-read the refresh event asks no
   listing = [vrow(MAIN, "main", "default", "5d77e1a2c3 · 1 day ago"), vrow(FEATURE, "feature/PAY-231-sepa-retry", null, "c90d11e4a7 · 3 hours ago")];
   await events.ended("gitea");
   expect(branchNames()).toEqual(["main default", "feature/PAY-231-sepa-retry"]);
+  // Gone, not only out of sight: a branch made again under the name draws no old delete.
+  expect(echoesOn(REPO, DELETED)).toEqual([]);
 });
 
 test("a file commit goes once the file's re-read the refresh event asks has a newer blob, the file not opened again (#2105)", async () => {
