@@ -2277,6 +2277,41 @@ mod tests {
         assert_eq!(older.min_sync_interval_secs, 60);
     }
 
+    /// A kind's refresh flag (#2146) crosses as declared, a descriptor from
+    /// a peer that predates it reads every kind refreshed, and a kind is
+    /// refreshed only under `Capability::Refresh`.
+    #[test]
+    fn a_kinds_refresh_flag_round_trips_defaults_on_and_needs_the_capability() {
+        let mut declared = SourceDescriptor {
+            capabilities: vec![Capability::Refresh],
+            ..a_descriptor()
+        };
+        let mut config = declared.entity_kinds[0].clone();
+        config.id = "config".into();
+        config.refreshes = false;
+        declared.entity_kinds.push(config);
+        let first = declared.entity_kinds[0].id.clone();
+        assert!(declared.refreshes_kind(&first));
+        assert!(!declared.refreshes_kind("config"));
+        assert!(!declared.refreshes_kind("not-declared"));
+
+        let mut wire = serde_json::to_value(&declared).unwrap();
+        let back: SourceDescriptor = serde_json::from_value(wire.clone()).unwrap();
+        assert!(back.refreshes_kind(&first) && !back.refreshes_kind("config"));
+
+        for kind in wire["entity_kinds"].as_array_mut().unwrap() {
+            kind.as_object_mut().unwrap().remove("refreshes");
+        }
+        let older: SourceDescriptor = serde_json::from_value(wire).unwrap();
+        assert!(older.refreshes_kind(&first) && older.refreshes_kind("config"));
+
+        let without = SourceDescriptor {
+            capabilities: Vec::new(),
+            ..older
+        };
+        assert!(!without.refreshes_kind(&first));
+    }
+
     /// An external adapter's descriptor crosses the WIT boundary as this
     /// JSON (#1475): one that declares forms keeps them, and one built before
     /// the slot existed, which sends no `url_forms` key, still decodes, as an

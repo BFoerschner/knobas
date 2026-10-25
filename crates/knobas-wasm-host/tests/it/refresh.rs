@@ -167,5 +167,13 @@ async fn a_component_without_refresh_that_declares_it_is_not_believed() {
     let adapter = install(&knobas_wasm_host::fixture_component_v1_3(), "1.3.0");
     let config = serde_json::json!({ "declares_refresh": true });
     let source = build(&adapter, config);
-    assert!(!source.descriptor().refreshes());
+    let descriptor = source.descriptor();
+    assert!(!descriptor.refreshes());
+    // Nor is any kind its JSON says is refreshed (#2146): the per-kind flag
+    // is read only under the capability the host dropped.
+    assert!(!descriptor.entity_kinds.is_empty());
+    for kind in &descriptor.entity_kinds {
+        assert!(kind.refreshes, "{}: the component's JSON says refreshed", kind.id);
+        assert!(!descriptor.refreshes_kind(&kind.id), "{}", kind.id);
+    }
 }
