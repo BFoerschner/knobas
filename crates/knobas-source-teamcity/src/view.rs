@@ -168,7 +168,13 @@ async fn build_config(
     };
     let mut view = SourceView { sections, actions };
     if let (Some(Ok(grants)), Some(project)) = (grants, nonblank(record.project_id.as_deref())) {
-        view.refuse_writes(|op| grants.refusal(op, project));
+        view.refuse_writes(|op| grants.refusal(op, None, project));
+        let overrides = crate::grants::RUN_PARAMETERS;
+        if let Some(reason) = grants.refusal(crate::WRITE_OP_RUN_BUILD, Some(overrides), project) {
+            for run in view.actions.iter_mut().filter(|a| a.with_settings) {
+                run_without_settings(run, &reason);
+            }
+        }
     }
     Ok(view)
 }
@@ -260,7 +266,8 @@ fn overview(
 /// the branches the recent builds ran on -- newest first and each once -- as
 /// suggestions. The branch starts empty, which is the default branch; the
 /// dialog also offers the *Parameters* tab's values to override for this run
-/// (`with_settings`).
+/// (`with_settings`), unless the user may not send them
+/// ([`run_without_settings`], #2055).
 ///
 /// **Never the default branch by name.** TeamCity resolves an explicit
 /// `branchName: main` against the branch specification to a logical branch
@@ -282,16 +289,28 @@ fn run_action(builds: &[Build]) -> ViewAction {
             placeholder: Some("default branch".to_owned()),
             ..ActionField::new("branch", "Branch", FieldKind::Text { suggestions })
         }],
-        confirm: Some(
-            "Queue one build of this configuration. Leave the branch empty for the default \
-             branch; only the values you change are sent, for this build alone."
-                .to_owned(),
-        ),
+        confirm: Some(format!(
+            "{RUN_SENTENCE}; only the values you change are sent, for this build alone."
+        )),
         primary: true,
         with_settings: true,
         ..ViewAction::new(crate::WRITE_OP_RUN_BUILD, "Run…")
     }
 }
+
+/// *Run…* for a user who may not override parameters (#2055): the branch
+/// alone, and the sentence says why, since TeamCity refuses a run carrying
+/// overrides from such a user.
+fn run_without_settings(run: &mut ViewAction, reason: &str) {
+    run.with_settings = false;
+    run.confirm = Some(format!(
+        "{RUN_SENTENCE}. The parameters are sent as they are: {reason}."
+    ));
+}
+
+/// What *Run…*'s sentence starts with, with or without the overrides.
+const RUN_SENTENCE: &str =
+    "Queue one build of this configuration. Leave the branch empty for the default branch";
 
 /// What happened to a build.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

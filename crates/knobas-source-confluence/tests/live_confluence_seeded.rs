@@ -2055,6 +2055,7 @@ async fn a_viewer_is_refused_the_writes_of_a_space_it_may_only_view() {
             .map(|op| WriteAsk {
                 entity: format!("confluence:{id}"),
                 op: op.to_owned(),
+                field: None,
             })
             .collect()
     };

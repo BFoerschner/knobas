@@ -22,6 +22,22 @@
 //! |---|---|
 //! | `run_build`, `trigger_build`, `rerun_build` | `run_build` |
 //! | `set_parameter` | `edit_project` |
+//! | `run_build` carrying `parameters` | `customize_build_parameters` |
+//! | `run_build` carrying `first_in_queue` | `reorder_build_queue`, held anywhere |
+//!
+//! **What a run may carry (#2055).** A run's parameter overrides and its
+//! place at the queue's top need permissions of their own, which a custom
+//! role can leave out while it gives `run_build` (measured on the seeded
+//! 2026.1.3 server by `live_teamcity_seeded.rs`). TeamCity documents
+//! *Customize build parameters* as what lets a user change a build's
+//! parameters when running it, and *Reorder builds in queue* as one of the
+//! permissions that cannot be given on a project. Its REST plugin, which
+//! JetBrains publishes under the Apache License 2.0, queues the build and
+//! only then moves it to the top (`Build.triggerBuild`), so a refused move
+//! comes after the run was queued. So the dialog asks about each field
+//! ([`WriteAsk::field`]) and draws the refused ones disabled. An assignment
+//! of `reorder_build_queue` anywhere is read as held rather than as a
+//! refusal on a guess.
 
 use std::collections::{HashMap, HashSet};
 
@@ -31,22 +47,33 @@ use knobas_source::grants::{RefusedWrite, WriteAsk};
 use crate::client::{HttpRest, Rest};
 use crate::projects::{ProjectTree, ROOT};
 
-/// The permission a TeamCity write needs, by its op; `None` for an op this
-/// adapter does not declare.
-fn needs(op: &str) -> Option<Permission> {
-    match op {
-        crate::WRITE_OP_RUN_BUILD | crate::WRITE_OP_TRIGGER_BUILD | crate::WRITE_OP_RERUN_BUILD => {
-            Some(Permission::RunBuild)
-        }
-        crate::WRITE_OP_SET_PARAMETER => Some(Permission::EditProject),
+/// The permission a TeamCity write needs, by its op, or the one a field of
+/// its payload needs beyond the write; `None` for an op this adapter does
+/// not declare, or a field that needs nothing more.
+fn needs(op: &str, field: Option<&str>) -> Option<Permission> {
+    match (op, field) {
+        (
+            crate::WRITE_OP_RUN_BUILD | crate::WRITE_OP_TRIGGER_BUILD | crate::WRITE_OP_RERUN_BUILD,
+            None,
+        ) => Some(Permission::RunBuild),
+        (crate::WRITE_OP_SET_PARAMETER, None) => Some(Permission::EditProject),
+        (crate::WRITE_OP_RUN_BUILD, Some(RUN_PARAMETERS)) => Some(Permission::CustomizeParameters),
+        (crate::WRITE_OP_RUN_BUILD, Some(RUN_FIRST_IN_QUEUE)) => Some(Permission::ReorderQueue),
         _ => None,
     }
 }
+
+/// `run_build`'s overrides, by the name its payload carries them under.
+pub(crate) const RUN_PARAMETERS: &str = "parameters";
+/// `run_build`'s *Put first in the queue*, by its payload name.
+const RUN_FIRST_IN_QUEUE: &str = "first_in_queue";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Permission {
     RunBuild,
     EditProject,
+    CustomizeParameters,
+    ReorderQueue,
 }
 
 impl Permission {
@@ -55,7 +82,16 @@ impl Permission {
         match self {
             Permission::RunBuild => "run_build",
             Permission::EditProject => "edit_project",
+            Permission::CustomizeParameters => "customize_build_parameters",
+            Permission::ReorderQueue => "reorder_build_queue",
         }
+    }
+
+    /// Whether TeamCity gives it on no project, only on the server: then an
+    /// assignment of it anywhere is read as held, rather than refusing on a
+    /// guess about how a project's role carrying it is answered.
+    fn is_global(self) -> bool {
+        self == Permission::ReorderQueue
     }
 
     /// Why a user without it cannot make the write, in `project`.
@@ -69,6 +105,13 @@ impl Permission {
                 "This TeamCity user cannot change the settings of {project}: it lacks the Edit \
                  project permission"
             ),
+            Permission::CustomizeParameters => format!(
+                "This TeamCity user cannot override parameters for one build in {project}: it \
+                 lacks the Customize build parameters permission"
+            ),
+            Permission::ReorderQueue => "This TeamCity user cannot put a build first in the \
+                                         queue: it lacks the Reorder builds in queue permission"
+                .to_owned(),
         }
     }
 }
@@ -116,19 +159,23 @@ impl Grants {
         Ok(grants)
     }
 
-    /// Why `op` cannot be made in `project`, or `None` where the user may
-    /// make it, or `op` is not one this adapter governs.
-    pub(crate) fn refusal(&self, op: &str, project: &str) -> Option<String> {
-        let permission = needs(op)?;
+    /// Why `op` cannot be made in `project`, or carry `field` there, or
+    /// `None` where the user may, or this adapter governs neither.
+    pub(crate) fn refusal(&self, op: &str, field: Option<&str>, project: &str) -> Option<String> {
+        let permission = needs(op, field)?;
         let held = |scope: &str| {
             self.on_project
                 .get(scope)
                 .is_some_and(|ids| ids.contains(permission.id()))
         };
         let holds = self.global.contains(permission.id())
-            || held(ROOT)
-            || held(project)
-            || self.tree.path(project).iter().any(|p| held(&p.id));
+            || if permission.is_global() {
+                self.on_project
+                    .values()
+                    .any(|ids| ids.contains(permission.id()))
+            } else {
+                held(ROOT) || held(project) || self.tree.path(project).iter().any(|p| held(&p.id))
+            };
         (!holds).then(|| permission.reason(&self.tree.name_of(project)))
     }
 }
@@ -147,7 +194,7 @@ pub(crate) async fn refused(
 ) -> Result<Vec<RefusedWrite>, SourceError> {
     let governed: Vec<_> = asks
         .iter()
-        .filter(|(a, _)| needs(&a.op).is_some())
+        .filter(|(a, _)| needs(&a.op, a.field.as_deref()).is_some())
         .collect();
     if governed.is_empty() {
         return Ok(Vec::new());
@@ -162,7 +209,7 @@ pub(crate) async fn refused(
         let Some(Some(project)) = projects.get(key.as_str()) else {
             continue;
         };
-        if let Some(reason) = grants.refusal(&ask.op, project) {
+        if let Some(reason) = grants.refusal(&ask.op, ask.field.as_deref(), project) {
             out.push(RefusedWrite::of(ask, reason));
         }
     }

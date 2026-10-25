@@ -81,13 +81,19 @@
 //! seed) and the counter is not wound back; that is harmless, because the seed
 //! sets a counter only while the build with the fixture's number is absent.
 //!
-//! **One user is minted, and deleted again** (#2040): [`MintedViewer`], a
-//! `PROJECT_VIEWER` at global scope with one token, removed from `Drop`
-//! passing or panicking alike, and removed first if a killed run left it.
-//! It writes nothing to find out: the test asserts the build queue and the
-//! newest build are as they were. For its project-scoped case it turns the
-//! server's per-project permissions on and puts them back from `Drop`
-//! ([`PerProject`]), and puts them off first if a killed run left them on.
+//! **Two users are minted, and deleted again** (#2040, #2055): [`MintedViewer`],
+//! a `PROJECT_VIEWER` at global scope with one token, and a runner holding a
+//! custom role ([`CustomRole`]) with `run_build` and no
+//! `customize_build_parameters`, each removed from `Drop` passing or
+//! panicking alike, and removed first if a killed run left it. Neither test
+//! writes anything to find out: each asserts the build queue and the newest
+//! build are as they were. For their project-scoped and custom-role cases
+//! they turn the server's per-project permissions on and put them back from
+//! `Drop` ([`PerProject`]), and put them off first if a killed run left them
+//! on. The runner's test also strips the All Users group, whose
+//! `PROJECT_DEVELOPER` every user holds, and puts its roles back from `Drop`
+//! ([`AllUsersBare`]). It records the roles on the group itself before it
+//! strips them, so the next run after a killed one puts back exactly those.
 //!
 //! **One owner at a time.** The leftover clearing cannot tell a sibling's
 //! build from a corpse, and clause 2 needs a server on which nothing is running:
@@ -4642,9 +4648,11 @@ async fn put_auth_settings(
 /// The user [`a_viewer_may_run_builds_and_may_not_change_parameters`] mints.
 const VIEWER: &str = "knobas-viewer-2040";
 
-/// A `PROJECT_VIEWER` at global scope and its credential, deleted again
-/// from `Drop` (its tokens go with it).
+/// A user the suite mints with the roles a test gives it (#2040: a
+/// `PROJECT_VIEWER` at global scope) and its credential, deleted again from
+/// `Drop` (its tokens go with it).
 struct MintedViewer {
+    name: &'static str,
     url: String,
     admin: String,
     password: String,
@@ -4655,21 +4663,35 @@ struct MintedViewer {
 
 impl MintedViewer {
     async fn mint(seeded: &Seeded) -> MintedViewer {
-        // A killed run's viewer first: the create below would be a conflict.
-        remove_user(&seeded.http, &seeded.url, &seeded.token)
+        MintedViewer::mint_as(
+            seeded,
+            VIEWER,
+            serde_json::json!([{ "roleId": "PROJECT_VIEWER", "scope": "g" }]),
+        )
+        .await
+    }
+
+    /// `name`, holding `roles` (`[{"roleId": …, "scope": …}]`).
+    async fn mint_as(
+        seeded: &Seeded,
+        name: &'static str,
+        roles: serde_json::Value,
+    ) -> MintedViewer {
+        // A killed run's user first: the create below would be a conflict.
+        remove_user(&seeded.http, &seeded.url, &seeded.token, name)
             .await
-            .unwrap_or_else(|e| panic!("removing a leftover {VIEWER}: {e}"));
-        let password = format!("{VIEWER}-{}", std::process::id());
+            .unwrap_or_else(|e| panic!("removing a leftover {name}: {e}"));
+        let password = format!("{name}-{}", std::process::id());
         let created = seeded
             .http
             .post(format!("{}/app/rest/users", seeded.url))
             .header("Accept", "application/json")
             .bearer_auth(&seeded.token)
             .json(&serde_json::json!({
-                "username": VIEWER,
-                "name": "knobas live viewer (#2040)",
+                "username": name,
+                "name": format!("knobas live user {name}"),
                 "password": password,
-                "roles": { "role": [{ "roleId": "PROJECT_VIEWER", "scope": "g" }] },
+                "roles": { "role": roles },
             }))
             .send()
             .await
@@ -4678,10 +4700,11 @@ impl MintedViewer {
         let body = created.text().await.unwrap_or_default();
         assert!(
             status.is_success(),
-            "creating {VIEWER} answered {status}: {body}"
+            "creating {name} answered {status}: {body}"
         );
         // Guarded from here on, so a failing token request still removes it.
         let mut viewer = MintedViewer {
+            name,
             url: seeded.url.clone(),
             admin: seeded.token.clone(),
             password: password.clone(),
@@ -4697,7 +4720,7 @@ impl MintedViewer {
                 seeded.url
             ))
             .header("Accept", "application/json")
-            .basic_auth(VIEWER, Some(&password))
+            .basic_auth(name, Some(&password))
             .send()
             .await
             .expect("POST .../tokens");
@@ -4706,7 +4729,7 @@ impl MintedViewer {
         viewer.token = body["value"].as_str().map(str::to_owned);
         if viewer.token.is_none() {
             eprintln!(
-                "{VIEWER} signs in with its password: minting its token answered {status}: {body}"
+                "{name} signs in with its password: minting its token answered {status}: {body}"
             );
         }
         viewer
@@ -4719,7 +4742,7 @@ impl MintedViewer {
             None => (
                 AuthMethod::UserPassword,
                 self.password.clone(),
-                serde_json::json!({ "username": VIEWER }),
+                serde_json::json!({ "username": self.name }),
             ),
         };
         match knobas_source_teamcity::build(SourceInstance {
@@ -4745,34 +4768,39 @@ impl MintedViewer {
             .header("Accept", "application/json");
         match &self.token {
             Some(token) => request.bearer_auth(token),
-            None => request.basic_auth(VIEWER, Some(&self.password)),
+            None => request.basic_auth(self.name, Some(&self.password)),
         }
     }
 }
 
 impl Drop for MintedViewer {
     fn drop(&mut self) {
-        let (url, admin) = (self.url.clone(), self.admin.clone());
+        let (url, admin, name) = (self.url.clone(), self.admin.clone(), self.name);
         Cleanup::new(
             "the live suite did not remove the user it minted",
-            format!("{VIEWER} may still be standing; the next run removes it first"),
+            format!("{name} may still be standing; the next run removes it first"),
         )
         .within(CLEANUP_BUDGET)
-        .run(move || async move { remove_user(&client(), &url, &admin).await });
+        .run(move || async move { remove_user(&client(), &url, &admin, name).await });
     }
 }
 
-/// `DELETE /app/rest/users/username:{VIEWER}`; a 404 is a user already gone.
-async fn remove_user(http: &reqwest::Client, url: &str, token: &str) -> Result<(), String> {
+/// `DELETE /app/rest/users/username:{name}`; a 404 is a user already gone.
+async fn remove_user(
+    http: &reqwest::Client,
+    url: &str,
+    token: &str,
+    name: &str,
+) -> Result<(), String> {
     let gone = http
-        .delete(format!("{url}/app/rest/users/username:{VIEWER}"))
+        .delete(format!("{url}/app/rest/users/username:{name}"))
         .bearer_auth(token)
         .send()
         .await
-        .map_err(|e| format!("DELETE {VIEWER}: {e}"))?;
+        .map_err(|e| format!("DELETE {name}: {e}"))?;
     match gone.status().as_u16() {
         200..=299 | 404 => Ok(()),
-        status => Err(format!("DELETE {VIEWER} answered {status}")),
+        status => Err(format!("DELETE {name} answered {status}")),
     }
 }
 
@@ -4814,6 +4842,7 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
     .map(|(entity, op)| WriteAsk {
         entity: entity.clone(),
         op: op.to_owned(),
+        field: None,
     })
     .collect();
     let queue = async || seeded.get("app/rest/buildQueue?fields=count").await.1["count"].clone();
@@ -4945,10 +4974,12 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
                 WriteAsk {
                     entity: config_entity.clone(),
                     op: "set_parameter".to_owned(),
+                    field: None,
                 },
                 WriteAsk {
                     entity: other_entity.clone(),
                     op: "set_parameter".to_owned(),
+                    field: None,
                 },
             ])
             .await
@@ -4996,6 +5027,411 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
     assert_eq!(status, 404, "{VIEWER} is removed again");
     assert_eq!(
         per_project().await,
+        serde_json::Value::Bool(false),
+        "per-project permissions are put back"
+    );
+}
+
+// --- What a run may carry (#2055) --------------------------------------------
+
+/// The user [`a_runner_may_run_and_may_not_override_or_jump_the_queue`] mints.
+const RUNNER: &str = "knobas-runner-2055";
+/// The name of the role it holds, which also marks a killed run.
+const RUNNER_ROLE: &str = "knobas runner (#2055)";
+const ALL_USERS_ROLES: &str = "app/rest/userGroups/key:ALL_USERS_GROUP/roles";
+/// The All Users group's properties, where [`AllUsersBare::strip`] records
+/// the roles it takes away under [`ALL_USERS_WAS`] until they are back.
+const ALL_USERS_PROPERTIES: &str = "app/rest/userGroups/key:ALL_USERS_GROUP/properties";
+const ALL_USERS_WAS: &str = "knobas-live-2055-roles";
+
+/// A custom role holding `permissions` and nothing else, deleted again from
+/// `Drop`. TeamCity edits roles only with per-project permissions on.
+struct CustomRole {
+    url: String,
+    admin: String,
+    id: String,
+}
+
+impl CustomRole {
+    /// The id of the role named [`RUNNER_ROLE`], where a killed run left one.
+    async fn leftover(seeded: &Seeded) -> Option<String> {
+        let (status, roles) = seeded.get("app/rest/roles?fields=role(id,name)").await;
+        assert_eq!(status, 200, "the roles: {roles}");
+        roles["role"]
+            .as_array()?
+            .iter()
+            .find(|r| r["name"] == RUNNER_ROLE)
+            .and_then(|r| r["id"].as_str().map(str::to_owned))
+    }
+
+    async fn create(seeded: &Seeded, permissions: &[&str]) -> CustomRole {
+        let created = seeded
+            .http
+            .post(format!("{}/app/rest/roles", seeded.url))
+            .header("Accept", "application/json")
+            .bearer_auth(&seeded.token)
+            .json(&serde_json::json!({
+                "name": RUNNER_ROLE,
+                "permissions": { "permission": permissions.iter().map(|id| serde_json::json!({ "id": id })).collect::<Vec<_>>() },
+            }))
+            .send()
+            .await
+            .expect("POST /app/rest/roles");
+        let status = created.status();
+        let body: serde_json::Value = created.json().await.unwrap_or_default();
+        let id = body["id"].as_str().map(str::to_owned);
+        let Some(id) = id.filter(|_| status.is_success()) else {
+            panic!("creating {RUNNER_ROLE} answered {status}: {body}");
+        };
+        CustomRole {
+            url: seeded.url.clone(),
+            admin: seeded.token.clone(),
+            id,
+        }
+    }
+}
+
+async fn delete_role(
+    http: &reqwest::Client,
+    url: &str,
+    token: &str,
+    id: &str,
+) -> Result<(), String> {
+    let gone = http
+        .delete(format!("{url}/app/rest/roles/id:{id}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("DELETE role {id}: {e}"))?;
+    match gone.status().as_u16() {
+        200..=299 | 404 => Ok(()),
+        status => Err(format!("DELETE role {id} answered {status}")),
+    }
+}
+
+impl Drop for CustomRole {
+    fn drop(&mut self) {
+        let (url, admin, id) = (self.url.clone(), self.admin.clone(), self.id.clone());
+        Cleanup::new(
+            "the live suite did not delete the role it made",
+            format!("{RUNNER_ROLE} may still be standing; the next run deletes it first"),
+        )
+        .within(CLEANUP_BUDGET)
+        .run(move || async move { delete_role(&client(), &url, &admin, &id).await });
+    }
+}
+
+/// The All Users group's roles as they were, put back from `Drop` after
+/// [`AllUsersBare::strip`] took them away: every user holds them, so a user
+/// without a permission they give is one only with the group bare. The
+/// roles are recorded on the group ([`ALL_USERS_WAS`]) before they go, and
+/// the record goes once they are back, so a killed run's group is put back
+/// to what it held rather than to a default.
+struct AllUsersBare {
+    url: String,
+    admin: String,
+    was: serde_json::Value,
+}
+
+impl AllUsersBare {
+    /// The roles a killed run recorded put back, and the record removed,
+    /// where a killed run left one: its `Drop` never ran.
+    async fn put_back_if_left_stripped(seeded: &Seeded) {
+        let (status, properties) = seeded.get(ALL_USERS_PROPERTIES).await;
+        assert_eq!(
+            status, 200,
+            "the All Users group's properties: {properties}"
+        );
+        let Some(recorded) = properties["property"].as_array().and_then(|all| {
+            all.iter()
+                .find(|p| p["name"] == ALL_USERS_WAS)
+                .and_then(|p| p["value"].as_str())
+        }) else {
+            return;
+        };
+        let was: serde_json::Value = serde_json::from_str(recorded)
+            .unwrap_or_else(|e| panic!("the recorded All Users roles {recorded}: {e}"));
+        eprintln!("the All Users group was left stripped, by a killed run: putting {was} back");
+        put_group_back(&seeded.http, &seeded.url, &seeded.token, &was)
+            .await
+            .unwrap_or_else(|e| panic!("putting a killed run's All Users group back: {e}"));
+    }
+
+    async fn strip(seeded: &Seeded) -> AllUsersBare {
+        let (status, was) = seeded.get(ALL_USERS_ROLES).await;
+        assert_eq!(status, 200, "the All Users group's roles: {was}");
+        eprintln!("the All Users group's roles: {was}");
+        // Recorded before anything is taken away; nothing to put back yet.
+        let recorded = seeded
+            .http
+            .put(format!(
+                "{}/{ALL_USERS_PROPERTIES}/{ALL_USERS_WAS}",
+                seeded.url
+            ))
+            .header("Accept", "text/plain")
+            .header("Content-Type", "text/plain")
+            .bearer_auth(&seeded.token)
+            .body(was.to_string())
+            .send()
+            .await
+            .expect("PUT the recorded All Users roles");
+        let status = recorded.status();
+        assert!(
+            status.is_success(),
+            "recording the All Users roles answered {status}: {}",
+            recorded.text().await.unwrap_or_default()
+        );
+        let guard = AllUsersBare {
+            url: seeded.url.clone(),
+            admin: seeded.token.clone(),
+            was,
+        };
+        put_group_roles(
+            &seeded.http,
+            &seeded.url,
+            &seeded.token,
+            &serde_json::json!({ "role": [] }),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("stripping the All Users group: {e}"));
+        guard
+    }
+}
+
+impl Drop for AllUsersBare {
+    fn drop(&mut self) {
+        let (url, admin, was) = (self.url.clone(), self.admin.clone(), self.was.clone());
+        Cleanup::new(
+            "the live suite did not put the All Users group's roles back",
+            format!(
+                "every user may be without them; the next run puts back the roles recorded in \
+                 the group's `{ALL_USERS_WAS}` property"
+            ),
+        )
+        .within(CLEANUP_BUDGET)
+        .run(move || async move { put_group_back(&client(), &url, &admin, &was).await });
+    }
+}
+
+/// The All Users group's roles put back to `was`, then the record of them
+/// removed; the record stays while the roles are not back.
+async fn put_group_back(
+    http: &reqwest::Client,
+    url: &str,
+    token: &str,
+    was: &serde_json::Value,
+) -> Result<(), String> {
+    put_group_roles(http, url, token, was).await?;
+    let gone = http
+        .delete(format!("{url}/{ALL_USERS_PROPERTIES}/{ALL_USERS_WAS}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("DELETE the recorded All Users roles: {e}"))?;
+    match gone.status().as_u16() {
+        200..=299 | 404 => Ok(()),
+        status => Err(format!(
+            "DELETE the recorded All Users roles answered {status}"
+        )),
+    }
+}
+
+/// `PUT` the All Users group's whole role set, and check the answer holds as
+/// many as were sent.
+async fn put_group_roles(
+    http: &reqwest::Client,
+    url: &str,
+    token: &str,
+    roles: &serde_json::Value,
+) -> Result<(), String> {
+    let put = http
+        .put(format!("{url}/{ALL_USERS_ROLES}"))
+        .header("Accept", "application/json")
+        .bearer_auth(token)
+        .json(roles)
+        .send()
+        .await
+        .map_err(|e| format!("PUT the All Users group's roles: {e}"))?;
+    let status = put.status();
+    let body: serde_json::Value = put.json().await.unwrap_or_default();
+    let count = |v: &serde_json::Value| v["role"].as_array().map_or(0, Vec::len);
+    if !status.is_success() || count(&body) != count(roles) {
+        return Err(format!(
+            "PUT the All Users group's roles answered {status}: {body}"
+        ));
+    }
+    Ok(())
+}
+
+/// The real server's answer to what #2055 reads (ADR-0013): a user may hold
+/// `run_build` without `customize_build_parameters` and `reorder_build_queue`,
+/// through a custom role, with the All Users group stripped of the
+/// `PROJECT_DEVELOPER` it gives everyone. Such a user may run the
+/// configuration and may not send overrides or put the run first in the
+/// queue, saying why; the configuration's view offers *Run…* without the
+/// overrides. The seed's token may send both. Nothing is written to find
+/// out: the queue and the newest build are as they were, and the group, the
+/// role, the user and per-project permissions are put back.
+#[tokio::test]
+#[ignore = "needs the seeded TeamCity: just teamcity-live-seeded"]
+async fn a_runner_may_run_and_may_not_override_or_jump_the_queue() {
+    use knobas_source::grants::WriteAsk;
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let config = "Payout_IntegrationTests";
+    let entity = format!("teamcity:buildType:{config}");
+    let asks = [
+        WriteAsk::new(&entity, "run_build"),
+        WriteAsk::new(&entity, "trigger_build"),
+        WriteAsk::with_field(&entity, "run_build", "parameters"),
+        WriteAsk::with_field(&entity, "run_build", "first_in_queue"),
+    ];
+    let queue = async || seeded.get("app/rest/buildQueue?fields=count").await.1["count"].clone();
+    let newest = async || {
+        seeded
+            .build_ids("defaultFilter:false,branch:default:any,count:1")
+            .await
+    };
+    let (queued_before, newest_before) = (queue().await, newest().await);
+
+    // A killed run's leftovers first, as the other guards do: its group
+    // stripped (put back to the roles it recorded), its role, its user, and
+    // per-project permissions left on.
+    AllUsersBare::put_back_if_left_stripped(&seeded).await;
+    if let Some(id) = CustomRole::leftover(&seeded).await {
+        delete_role(&seeded.http, &seeded.url, &seeded.token, &id)
+            .await
+            .unwrap_or_else(|e| panic!("deleting a killed run's {RUNNER_ROLE}: {e}"));
+    }
+    PerProject::off_if_left_on(&seeded).await;
+    let (_, group_before) = seeded.get(ALL_USERS_ROLES).await;
+
+    {
+        let _per_project = PerProject::on(&seeded).await;
+        let role = CustomRole::create(
+            &seeded,
+            &[
+                "view_project",
+                "view_build_configuration_settings",
+                "run_build",
+            ],
+        )
+        .await;
+        let _bare = AllUsersBare::strip(&seeded).await;
+        let runner = MintedViewer::mint_as(
+            &seeded,
+            RUNNER,
+            serde_json::json!([{ "roleId": role.id, "scope": "g" }]),
+        )
+        .await;
+
+        let response = runner
+            .get(&seeded, "app/rest/users/current/permissions")
+            .send()
+            .await
+            .expect("GET permissions");
+        let status = response.status();
+        let permissions: serde_json::Value = response.json().await.unwrap_or_default();
+        eprintln!("{RUNNER}'s permissions ({status}): {permissions}");
+        let held: Vec<&str> = permissions["permissionAssignment"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|p| p["permission"]["id"].as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(
+            held.contains(&"run_build"),
+            "{RUNNER} may run builds: {held:?}"
+        );
+        for lacking in ["customize_build_parameters", "reorder_build_queue"] {
+            assert!(
+                !held.contains(&lacking),
+                "{RUNNER} holds no {lacking}: {held:?}"
+            );
+        }
+
+        let source = runner.source(&seeded);
+        let refused = source
+            .refused_writes(&asks)
+            .await
+            .unwrap_or_else(|e| panic!("the runner's permissions read: {e:?}"));
+        let fields: Vec<_> = refused
+            .iter()
+            .map(|r| (r.op.as_str(), r.field.as_deref(), r.reason.as_str()))
+            .collect();
+        assert_eq!(
+            fields,
+            [
+                (
+                    "run_build",
+                    Some("parameters"),
+                    "This TeamCity user cannot override parameters for one build in Payout: it \
+                     lacks the Customize build parameters permission"
+                ),
+                (
+                    "run_build",
+                    Some("first_in_queue"),
+                    "This TeamCity user cannot put a build first in the queue: it lacks the \
+                     Reorder builds in queue permission"
+                ),
+            ],
+            "{refused:#?}"
+        );
+        let view = source
+            .view(&entity, None)
+            .await
+            .expect("the runner reads the view")
+            .expect("drawn");
+        let run = view
+            .actions
+            .iter()
+            .find(|a| a.write_op == "run_build")
+            .expect("Run… is offered");
+        assert_eq!(run.disabled, None, "the runner may run builds");
+        assert!(!run.with_settings, "and is offered no overrides: {run:?}");
+    }
+
+    let admin = seeded.source(serde_json::json!({}));
+    let refused = admin
+        .refused_writes(&asks)
+        .await
+        .expect("the seed account's permissions read");
+    assert_eq!(refused, [], "the seed's token may send both");
+
+    assert_eq!(
+        queue().await,
+        queued_before,
+        "nothing was queued to find out"
+    );
+    assert_eq!(
+        newest().await,
+        newest_before,
+        "no build was made to find out"
+    );
+    let (status, _) = seeded
+        .get(&format!("app/rest/users/username:{RUNNER}"))
+        .await;
+    assert_eq!(status, 404, "{RUNNER} is removed again");
+    assert_eq!(
+        CustomRole::leftover(&seeded).await,
+        None,
+        "{RUNNER_ROLE} is deleted again"
+    );
+    assert_eq!(
+        seeded.get(ALL_USERS_ROLES).await.1,
+        group_before,
+        "the All Users group's roles are put back"
+    );
+    let (_, properties) = seeded.get(ALL_USERS_PROPERTIES).await;
+    assert!(
+        !properties.to_string().contains(ALL_USERS_WAS),
+        "the record of the All Users roles is removed: {properties}"
+    );
+    assert_eq!(
+        seeded.get("app/rest/server/authSettings").await.1["perProjectPermissions"],
         serde_json::Value::Bool(false),
         "per-project permissions are put back"
     );

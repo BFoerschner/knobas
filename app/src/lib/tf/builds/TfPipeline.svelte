@@ -72,6 +72,8 @@
     pipelineSource,
     QUEUED_RUN,
     RUN_OP,
+    runFieldAsks,
+    runFieldRefusals,
     queuedRunRows,
     queuedRunWhat,
     resultWord,
@@ -132,19 +134,25 @@
   });
 
   /**
-   * What the source's credential cannot write on this pipeline (#2040): a run, and the op its
-   * settings name for a parameter. Asked once the settings are read, so once per pipeline.
+   * What the source's credential cannot write on this pipeline (#2040): a run, the op its
+   * settings name for a parameter, and the run's fields that need more than the run (#2055).
+   * Asked once the settings are read, so once per pipeline.
    */
   let refused = $state<RefusedWrite[]>([]);
   const parameterOp = $derived(settings?.parameter_write_op ?? null);
   $effect(() => {
     refused = [];
     if (!settingsRead) return;
-    const asks = [{ entity: id, op: RUN_OP }, ...(parameterOp !== null ? [{ entity: id, op: parameterOp }] : [])];
+    const asks = [
+      { entity: id, op: RUN_OP },
+      ...(parameterOp !== null ? [{ entity: id, op: parameterOp }] : []),
+      ...runFieldAsks(id),
+    ];
     return askInto(asks, ports.refusedWrites, (answer) => (refused = answer));
   });
   const cannotRun = $derived(refusalOf(refused, id, RUN_OP));
   const cannotChange = $derived(parameterOp === null ? null : refusalOf(refused, id, parameterOp));
+  const fieldRefusals = $derived(runFieldRefusals(refused, id));
 
   function open(wanted: string) {
     const mine = ++token;
@@ -720,6 +728,7 @@
     from={dialog.from}
     {jobBranch}
     secretNoun={stale?.fix?.secret ?? null}
+    {...fieldRefusals}
     {ports}
     onclose={() => (dialog = null)}
     {onrun}

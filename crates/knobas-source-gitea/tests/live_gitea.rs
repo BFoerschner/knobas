@@ -6386,6 +6386,7 @@ async fn a_read_only_token_is_refused_the_writes_drawn_outside_a_view_saying_why
     let ask = |entity: &str, op: &str| WriteAsk {
         entity: entity.to_owned(),
         op: op.to_owned(),
+        field: None,
     };
     let asks = [
         (ask(&issue, "comment"), "write:issue"),

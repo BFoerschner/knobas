@@ -96,6 +96,7 @@ fn ask(entity: &str, op: &str) -> WriteAsk {
     WriteAsk {
         entity: entity.to_owned(),
         op: op.to_owned(),
+        field: None,
     }
 }
 
@@ -103,6 +104,7 @@ fn refused(entity: &str, op: &str, reason: &str) -> RefusedWrite {
     RefusedWrite {
         entity: entity.to_owned(),
         op: op.to_owned(),
+        field: None,
         reason: reason.to_owned(),
     }
 }

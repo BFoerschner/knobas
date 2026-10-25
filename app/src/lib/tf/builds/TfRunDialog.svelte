@@ -14,6 +14,9 @@
     marked *changed* when it differs from its default; *Add a parameter*
     adds a free name and value row.
   - **<source> options**: clean checkout, put first in the queue.
+  - Where the source's credential may run and may not send the overrides or
+    the queue's top (#2055, `refused_writes` asked by the page), those are
+    drawn disabled saying why, and the run is sent without them.
   - **Save these settings as a preset named …**, knobas-local.
   - A warn line when the source's sign-in is failing, and the footer's line
     saying what will run.
@@ -26,6 +29,7 @@
 
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import type { PipelineRow, PipelineSettings, RunPreset, RunRow } from "../../ipc/entity";
+  import { refusedAttrs } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { defaultBranch } from "./pipeline";
@@ -39,6 +43,7 @@
     summaryOf,
     valuesFrom,
     type ExtraRow,
+    type RunField,
     type RunRequest,
     type StartValue,
   } from "./run-dialog";
@@ -50,6 +55,8 @@
     from = null,
     jobBranch = null,
     secretNoun = null,
+    cannotOverride = null,
+    cannotPutFirst = null,
     ports,
     onclose,
     onrun,
@@ -63,6 +70,10 @@
     jobBranch?: string | null;
     /** The credential the reader has to re-enter (its noun: *password*, *token*), or `null` while sign-in works. */
     secretNoun?: string | null;
+    /** Why the run cannot carry parameter overrides (#2055), or `null` where it may. */
+    cannotOverride?: string | null;
+    /** Why the run cannot go first in the queue (#2055), or `null` where it may. */
+    cannotPutFirst?: string | null;
     ports: Pick<PipelinePorts, "presets" | "deletePreset" | "repoBranches" | "runParameters">;
     onclose: () => void;
     onrun: (request: RunRequest) => void;
@@ -157,7 +168,13 @@
     if (!presets.some((p) => `preset:${p.name}` === start)) start = "";
   }
 
-  const overrides = $derived(overridesOf(fields, values, extra));
+  /** What the run carries: no override, and not the queue's top, where the credential may not send them. */
+  const overrides = $derived(cannotOverride !== null ? [] : overridesOf(fields, values, extra));
+  const firstInQueue = $derived(first && cannotPutFirst === null);
+  /** A parameter's field: what it will run with, which is its default where overrides are refused. */
+  function shownValue(field: RunField): string {
+    return cannotOverride !== null ? field.default : (values[field.name] ?? "");
+  }
   const shownBranch = $derived(branch.trim() || fallback || "the default branch");
   const summary = $derived(summaryOf(shownBranch, overrides));
 
@@ -203,7 +220,7 @@
   const fromLabel = $derived(from !== null && from.number !== null ? `#${from.number} settings` : "This run’s settings");
 
   function run() {
-    const options = { clean_checkout: clean, first_in_queue: first };
+    const options = { clean_checkout: clean, first_in_queue: firstInQueue };
     const payload = runPayload(pipeline.entity_id, branch, fallback, overrides, options);
     const sent = "RunBuild" in payload ? payload.RunBuild.branch : null;
     onrun({
@@ -272,14 +289,24 @@
       </div>
     </div>
 
-    {#if fields.length > 0}
+    {#if fields.length > 0 || cannotOverride !== null}
       <div class="tf-pane-h">Parameters</div>
+    {/if}
+    {#if cannotOverride !== null}
+      <p class="tf-dim tf-run-refused">{cannotOverride}</p>
+    {/if}
+    {#if fields.length > 0}
       <div class="tf-prm">
         {#each fields as field (field.name)}
           {@const id = `tf-run-p-${uid}-${field.name}`}
           <label class="tf-k" for={id} title={field.label !== null ? field.name : undefined}>{field.label ?? field.name}</label>
           {#if field.kind.type === "select"}
-            <select {id} aria-label={field.label ?? field.name} bind:value={values[field.name]}>
+            <select
+              {id}
+              aria-label={field.label ?? field.name}
+              disabled={cannotOverride !== null}
+              bind:value={() => shownValue(field), (value) => (values[field.name] = value)}
+            >
               {#each field.kind.options as option (option.value)}
                 <option value={option.value}>{option.label ?? option.value}</option>
               {/each}
@@ -290,14 +317,15 @@
               aria-label={field.label ?? field.name}
               type={field.secret ? "password" : "text"}
               placeholder={field.secret ? "(hidden)" : (field.hint ?? "")}
-              bind:value={values[field.name]}
+              disabled={cannotOverride !== null}
+              bind:value={() => shownValue(field), (value) => (values[field.name] = value)}
             />
           {/if}
-          <span class="tf-chg">{values[field.name] !== field.default ? "changed" : ""}</span>
+          <span class="tf-chg">{shownValue(field) !== field.default ? "changed" : ""}</span>
         {/each}
       </div>
     {/if}
-    {#if extra.length > 0}
+    {#if extra.length > 0 && cannotOverride === null}
       <div class="tf-prm">
         {#each extra as row, at (at)}
           <input class="tf-k" type="text" placeholder="name" aria-label={`Name of added parameter ${at + 1}`} bind:value={row.name} />
@@ -306,13 +334,23 @@
         {/each}
       </div>
     {/if}
-    <button type="button" class="tf-linkish tf-run-add" onclick={() => (extra = [...extra, { name: "", value: "" }])}>Add a parameter</button>
+    <button
+      type="button"
+      class="tf-linkish tf-run-add"
+      {...refusedAttrs(cannotOverride)}
+      onclick={() => {
+        if (cannotOverride === null) extra = [...extra, { name: "", value: "" }];
+      }}>Add a parameter</button
+    >
 
     <details class="tf-run-opts">
       <summary>{pipeline.source_name} options</summary>
       <div>
         <label class="tf-ck"><input type="checkbox" bind:checked={clean} /> Clean checkout</label>
-        <label class="tf-ck"><input type="checkbox" bind:checked={first} /> Put first in the queue</label>
+        <label class="tf-ck" title={cannotPutFirst ?? undefined}>
+          <input type="checkbox" disabled={cannotPutFirst !== null} bind:checked={() => firstInQueue, (checked) => (first = checked)} />
+          Put first in the queue
+        </label>
       </div>
     </details>
     <label class="tf-ck tf-run-save"

@@ -145,6 +145,7 @@ mod tests {
         WriteAsk {
             entity: entity.to_owned(),
             op: op.to_owned(),
+            field: None,
         }
     }
 

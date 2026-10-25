@@ -6,7 +6,12 @@
  * and *New page*, and stand-up's publish and its target picker, and Jira's
  * writes (#2052): the job's move and *Comment*, the worklog draft, the Day's
  * *Log…*, *Log all* and the create-ticket dialog. Gitea's comment, move and
- * new ticket are drawn by the same surfaces (#2054).
+ * new ticket are drawn by the same surfaces (#2054). An ask can name one
+ * field of its write (#2055): the Run… dialog asks about a run's
+ * `parameters` and `first_in_queue`, and draws a refused one's controls
+ * natively disabled, its reason as a line under *Parameters* or the
+ * checkbox label's title, since a disabled field cannot be focused to read
+ * a title.
  *
  * A surface draws its writes as before, then asks `refused_writes` about
  * them and draws each refused one disabled with the reason (`aria-disabled`
@@ -22,8 +27,8 @@ export type { RefusedWrite, WriteAsk };
 /** The read, injectable so a component test needs no Tauri bridge. */
 export type RefusedWritesPort = (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
 
-/** One ask as a string, to tell asks apart by entity and op. */
-const keyOf = (ask: WriteAsk) => JSON.stringify([ask.entity, ask.op]);
+/** One ask as a string, to tell asks apart by entity, op and field (#2055). */
+const keyOf = (ask: WriteAsk) => JSON.stringify([ask.entity, ask.op, ask.field ?? null]);
 
 /**
  * `asks` sent once each, and the answer; a rejection answers nothing. No
@@ -40,10 +45,21 @@ export async function askRefused(asks: readonly WriteAsk[], read?: RefusedWrites
   }
 }
 
-/** Why `op` on `entity` cannot be made, by `answer`, or `null`. */
-export function refusalOf(answer: readonly RefusedWrite[], entity: string | null, op: string): string | null {
+/**
+ * Why `op` on `entity` cannot be made, by `answer`, or `null`; with `field`,
+ * why the write cannot carry that field of its payload (#2055: a TeamCity
+ * run's `parameters` and `first_in_queue`).
+ */
+export function refusalOf(
+  answer: readonly RefusedWrite[],
+  entity: string | null,
+  op: string,
+  field: string | null = null,
+): string | null {
   if (entity === null) return null;
-  return answer.find((refused) => refused.entity === entity && refused.op === op)?.reason ?? null;
+  return (
+    answer.find((refused) => refused.entity === entity && refused.op === op && (refused.field ?? null) === field)?.reason ?? null
+  );
 }
 
 /**

@@ -4553,6 +4553,7 @@ async fn a_user_the_permission_scheme_refuses_is_refused_those_writes_and_nothin
     let ask = |entity: &str, op: &str| WriteAsk {
         entity: entity.to_owned(),
         op: op.to_owned(),
+        field: None,
     };
     let asks = [
         ask(&on, "comment"),
@@ -4566,6 +4567,7 @@ async fn a_user_the_permission_scheme_refuses_is_refused_those_writes_and_nothin
     let refused = |entity: &str, op: &str, reason: &str| RefusedWrite {
         entity: entity.to_owned(),
         op: op.to_owned(),
+        field: None,
         reason: reason.to_owned(),
     };
 

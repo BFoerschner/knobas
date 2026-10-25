@@ -2901,11 +2901,15 @@ kind: string,
 step: string, origin: ReachOrigin, };
 
 /**
- * A write the source's credential cannot make, and why, in words a person
- * can act on: *This TeamCity user cannot run builds in Payout: it lacks the
+ * A write the source's credential cannot make, or one field of it the write
+ * cannot carry, and why, in words a person can act on: *This TeamCity user cannot run builds in Payout: it lacks the
  * Run build permission*.
  */
-export type RefusedWrite = { entity: string, op: string, reason: string, };
+export type RefusedWrite = { entity: string, op: string, 
+/**
+ * The [`WriteAsk::field`] refused, or `None` for the write itself.
+ */
+field?: string, reason: string, };
 
 /**
  * A ticket a rule or a set applies to.
@@ -3868,7 +3872,8 @@ untracked: number,
 conflicted: number, };
 
 /**
- * One write a surface would offer: `op` on `entity`.
+ * One write a surface would offer: `op` on `entity`, or one field of it
+ * ([`field`](Self::field), #2055).
  *
  * `entity` is an [`EntityRef`](knobas_spi_types::entity::EntityRef) in
  * string form, the address every [`WriteOp`](crate::WriteOp) carries. For a
@@ -3879,4 +3884,17 @@ export type WriteAsk = { entity: string,
 /**
  * A [`WriteOp`](crate::WriteOp) identifier, as `write_ops` spells it.
  */
-op: string, };
+op: string, 
+/**
+ * One field of the op's payload, by the name the payload carries it
+ * under (`parameters`, `first_in_queue` on a `run_build`): may the
+ * write carry it set? `None` asks about the write itself (#2055).
+ *
+ * A field can need more than its write: a TeamCity user may run a
+ * build and not override its parameters for that run, or not put it
+ * first in the queue. Such an ask is answered by what the field needs
+ * beyond the write. An adapter that tells no field apart answers it as
+ * it answers the write, which is still true: a write the credential
+ * cannot make carries no field.
+ */
+field?: string, };

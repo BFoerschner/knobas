@@ -9,7 +9,8 @@
     dialog from this run, #852) and *Open in <source>*. A run in flight has
     *Stop*, disabled: it needs a new write. A run the source's credential
     cannot make (`refused_writes`, #2040) draws *Re-run* and both *Run
-    again…* disabled with the reason.
+    again…* disabled with the reason, and one that may not override
+    parameters (#2055) draws *Re-run* of a run that carried overrides so.
   - **Overview**: a failed run leads with its first failed test (the
     details as the source wrote them, *Show it in the log*, *Open the test
     file* where the details name a path, *Create ticket* or the ticket
@@ -58,6 +59,8 @@
     syncWith,
     triggerLabel,
     RUN_OP,
+    runFieldAsks,
+    runFieldRefusals,
   } from "./pipeline";
   import { RUN_BRIDGE, listenSynced, type RunPorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
@@ -140,13 +143,18 @@
     untrack(() => open(wanted.pipelineId, wanted.runId));
   });
 
-  /** What the source's credential cannot write on the run's pipeline (#2040), asked once per pipeline. */
+  /**
+   * What the source's credential cannot write on the run's pipeline (#2040), and the run's fields
+   * that need more than the run (#2055), asked once per pipeline.
+   */
   let refused = $state<RefusedWrite[]>([]);
   $effect(() => {
     refused = [];
-    return askInto([{ entity: pipelineId, op: RUN_OP }], ports.refusedWrites, (answer) => (refused = answer));
+    const asks = [{ entity: pipelineId, op: RUN_OP }, ...runFieldAsks(pipelineId)];
+    return askInto(asks, ports.refusedWrites, (answer) => (refused = answer));
   });
   const cannotRun = $derived(refusalOf(refused, pipelineId, RUN_OP));
+  const fieldRefusals = $derived(runFieldRefusals(refused, pipelineId));
   function runAgain() {
     if (cannotRun === null) dialog = true;
   }
@@ -354,9 +362,21 @@
     }
   }
 
+  /**
+   * What *Re-run* sends: this run's settings, its overrides among them. A credential that may not
+   * send overrides may not send those (#2055), so it is drawn disabled saying why, unless the run
+   * ran on the defaults alone.
+   */
+  const rerunning = $derived(run !== null && view !== null ? rerunRequest(pipelineId, run, settings, view) : null);
+  const cannotRerun = $derived(
+    cannotRun ??
+      (rerunning !== null && "RunBuild" in rerunning.payload && rerunning.payload.RunBuild.parameters.length > 0
+        ? fieldRefusals.cannotOverride
+        : null),
+  );
   function rerun() {
-    if (run === null || view === null || cannotRun !== null) return;
-    void queue(rerunRequest(pipelineId, run, settings, view));
+    if (rerunning === null || cannotRerun !== null) return;
+    void queue(rerunning);
   }
 
   let dialog = $state(false);
@@ -413,8 +433,8 @@
           type="button"
           class="tf-btn tf-primary"
           disabled={view === null}
-          aria-disabled={cannotRun !== null ? "true" : undefined}
-          title={cannotRun ?? (view === null && viewRead ? "The run's settings could not be read" : undefined)}
+          aria-disabled={cannotRerun !== null ? "true" : undefined}
+          title={cannotRerun ?? (view === null && viewRead ? "The run's settings could not be read" : undefined)}
           onclick={rerun}>Re-run</button
         >
         <button
@@ -612,6 +632,7 @@
       from={run}
       {jobBranch}
       secretNoun={stale?.fix?.secret ?? null}
+      {...fieldRefusals}
       {ports}
       onclose={() => (dialog = false)}
       {onrun}
