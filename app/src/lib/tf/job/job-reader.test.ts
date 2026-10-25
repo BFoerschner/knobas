@@ -274,3 +274,43 @@ test("a job closed drops every answer still out", async () => {
   expect(reader.detail).toBeUndefined();
   expect(reader.builds).toBeNull();
 });
+
+test("a refresh's reread reads the ticket, its moves, week, thread, link sets, reach and sections, and never visits or promotes again (#2134)", async () => {
+  const { reader, asked, status } = fakes();
+  reader.open("jira:B");
+  await flush();
+  asked.length = 0;
+
+  status.set("jira:B", "In Review");
+  await reader.reread();
+  expect(asked.sort()).toEqual(
+    [
+      "getEntity jira:B",
+      "reachableTransitions jira:B",
+      "weekTimesheet",
+      "entityThread jira:B",
+      "jobLinkSets jira:B",
+      "jobReach jira:B",
+      "listEntities ci jira:B",
+      "listEntities code-host jira:B",
+      "listEntities monitoring jira:B",
+      "listEntities wiki jira:B",
+    ].sort(),
+  );
+  expect(reader.detail?.status).toBe("In Review");
+  expect(slots(reader)).toEqual({ ...B, transitions: ["Done"] });
+});
+
+test("a refresh's reread still out when another job opens lands nothing of the first (#2134)", async () => {
+  const { reader, hold } = fakes();
+  reader.open("jira:A");
+  await flush();
+  const releaseA = hold("jira:A");
+  const out = reader.reread();
+  reader.open("jira:B");
+  await flush();
+  releaseA();
+  await out;
+  await flush();
+  expect(slots(reader)).toEqual(B);
+});

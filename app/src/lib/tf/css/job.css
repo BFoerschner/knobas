@@ -167,3 +167,5 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-radio label:has(> input:disabled) { cursor: not-allowed; color: var(--ink-2); }
 .tf-radio small { display: block; color: var(--ink-2); }
 
+/* The ticket's *Refresh* or *Sync now* (#2134) ends the tab bar, after Connections, on its baseline. */
+.tf-wtabs .tf-refresh { margin: 0 0 6px 6px; }

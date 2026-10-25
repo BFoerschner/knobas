@@ -19,7 +19,9 @@ import type {
   StartWorkStep,
   StateChip,
 } from "../../ipc/entity";
-import type { CredentialHealth, SourceSyncStatus, SourceDescriptor, WriteOpPayload } from "../../ipc/sources";
+import type { CredentialHealth, EntityRefresh, SourceSyncStatus, SourceDescriptor, WriteOpPayload } from "../../ipc/sources";
+import { createSourceSyncs } from "../role-sync.svelte";
+import type { DetailRefreshPorts } from "../refresh.svelte";
 import type { WriteAsk } from "../../shell/refused-writes";
 import type { RunningTimer, Week } from "../../ipc/time";
 import { health } from "../../shell/health.svelte";
@@ -1450,5 +1452,161 @@ test("a comment's echo says queued, then sent, and goes on the refresh event's r
 
   said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false }];
   await sync.refreshed(ID, 72);
+  expect(echoed()).toEqual([]);
+});
+
+// ---- Refresh on the job page (#2134, #2107's shared pieces) ----
+
+/** What the job asked to refresh, and the source runs its *Sync now* asked for. */
+const refreshAsks = { items: [] as string[], runs: [] as string[] };
+
+/** `refresh_entity` answering `answer`, and a *Sync now* whose run ends when `end()` is sent. */
+function refreshing(answer: () => Promise<EntityRefresh> = () => Promise.resolve({ outcome: "refreshed" })) {
+  refreshAsks.items.length = 0;
+  refreshAsks.runs.length = 0;
+  const handlers = new Set<(event: { payload: unknown }) => void>();
+  const refresh: DetailRefreshPorts = {
+    refreshEntity: (entityId) => (refreshAsks.items.push(entityId), answer()),
+    syncs: createSourceSyncs({
+      syncRole: () => Promise.reject(new Error("a detail never syncs a role")),
+      syncNow: (sourceId) => (refreshAsks.runs.push(sourceId), Promise.resolve(88)),
+      syncStatus: () => Promise.resolve([]),
+      listen: (_event, handler) => {
+        handlers.add(handler);
+        return Promise.resolve(() => handlers.delete(handler));
+      },
+    }),
+  };
+  const end = (source_id: string) => {
+    const row: SourceSyncStatus = { source_id, running: false, run_id: 88, started_at: null, last_finished_at: null, last_outcome: "ok", next_run_at: null, backoff_until: null, last_changed: null };
+    for (const handler of [...handlers]) handler({ payload: row });
+  };
+  return { refresh, end };
+}
+
+const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-wtabs .tf-refresh");
+const jobBanners = () => [...target.querySelectorAll(".tf-work > .tf-banner")].map((banner) => squash(banner));
+
+test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… meanwhile, and reads the job again without blanking it", async () => {
+  let answer!: (value: EntityRefresh) => void;
+  const { refresh } = refreshing(() => new Promise((resolve) => (answer = resolve)));
+  let title = "Retry failed SEPA payouts";
+  let threads = 0;
+  let reaches = 0;
+  const io = ports({
+    getEntity: (id) => (calls.read.push(id), id === ID ? Promise.resolve(ticket({ row: { ...ticket().row, title } })) : Promise.reject({ code: "not_found" })),
+    entityThread: () => (threads++, Promise.resolve({ comments: [], changes: [], me: ["mara"] })),
+    jobReach: () => (reaches++, Promise.resolve([])),
+    refresh,
+  });
+  open("PAY-231", { ports: io });
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  calls.read.length = 0;
+  threads = 0;
+  reaches = 0;
+
+  refreshButton()!.click();
+  await settle();
+  expect(refreshAsks.items).toEqual([ID]);
+  expect(refreshButton()?.textContent).toBe("Refreshing…");
+  expect(refreshButton()?.disabled).toBe(true);
+  expect(calls.read).toEqual([]);
+
+  title = "Retry failed SEPA payouts once";
+  answer({ outcome: "refreshed" });
+  flushSync();
+  // Drawn as it was until the read answers: the card never blanks.
+  expect(target.querySelector("[aria-label='Job card'] h1")?.textContent).toBe("Retry failed SEPA payouts");
+  await settle();
+  expect(target.querySelector("[aria-label='Job card'] h1")?.textContent).toBe("Retry failed SEPA payouts once");
+  expect(calls.read).toEqual([ID]);
+  expect(threads).toBe(1);
+  expect(reaches).toBe(1);
+  expect(calls.promote).toEqual([ID]);
+  expect(codeRows().length).toBeGreaterThan(0);
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(target.querySelector(".tf-refresh-failed")).toBeNull();
+});
+
+test("a failed refresh on the job says why under the tab bar and keeps the job as it was", async () => {
+  const { refresh } = refreshing(() => Promise.resolve({ outcome: "failed", reason: "connection refused" }));
+  open("PAY-231", { ports: ports({ refresh }) });
+  await settle();
+  calls.read.length = 0;
+  refreshButton()!.click();
+  await settle();
+  expect(jobBanners()).toEqual(["Couldn't refresh: connection refused"]);
+  expect(target.querySelector("[aria-label='Job card'] h1")?.textContent).toBe("Retry failed SEPA payouts");
+  expect(calls.read).toEqual([]);
+  expect(refreshButton()?.textContent).toBe("Refresh");
+});
+
+test("a ticket whose adapter does not read one item offers Sync now on the job, and the job is read again when the run ends", async () => {
+  const { refresh, end } = refreshing();
+  const io = ports({
+    getEntity: (id) => (calls.read.push(id), id === ID ? Promise.resolve(ticket({ refreshes: false })) : Promise.reject({ code: "not_found" })),
+    refresh,
+  });
+  open("PAY-231", { ports: io });
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Sync now");
+  calls.read.length = 0;
+
+  refreshButton()!.click();
+  await settle();
+  expect(refreshAsks.runs).toEqual(["jira"]);
+  expect(refreshAsks.items).toEqual([]);
+  expect(refreshButton()?.textContent).toBe("Syncing…");
+
+  end("jira");
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Sync now");
+  expect(calls.read).toEqual([ID]);
+});
+
+test("a turned-off source's ticket draws no Refresh on the job, and the withdrawn and turned-off banners show under the tab bar", async () => {
+  const { refresh } = refreshing();
+  const off = ticket({ deleted_at: "2026-10-15T12:00:00Z", source: { ...ticket().source, enabled: false } });
+  open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(off) : Promise.reject({ code: "not_found" })), refresh }) });
+  await settle();
+  expect(refreshButton()).toBeNull();
+  const shown = jobBanners();
+  expect(shown).toHaveLength(2);
+  expect(shown[0]).toMatch(/^Withdrawn upstream, last seen .+ ago\. Kept because links and notes may point at it\.$/);
+  expect(shown[1]).toBe(
+    "Its source is turned off: Jira is disabled, so this item is hidden everywhere else. Re-enable the source to bring it back.",
+  );
+});
+
+test("a move's echo goes on a Refresh's read of the ticket, and a comment's on its read of the thread (#2103)", async () => {
+  const { refresh } = refreshing();
+  let status = "In Progress";
+  let said: { author: string; at: string; body: string; mine: boolean; mentions_me: boolean }[] = [];
+  let next = 80;
+  const io = ports({
+    getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status })) : Promise.reject({ code: "not_found" })),
+    entityThread: () => Promise.resolve({ comments: said, changes: [], me: ["mara"] }),
+    submitWrite: () => Promise.resolve({ id: next++ } as never),
+    refresh,
+  });
+  open("PAY-231", { ports: io, tab: "conversation" });
+  await settle();
+  await pick("In Review");
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
+  box.value = "Looking at the jitter now";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!.click();
+  await settle();
+  const echoed = () => [...target.querySelectorAll(".tf-convo .tf-msg.tf-queued .tf-chip")].map((chip) => squash(chip));
+  expect(statusShown()).toEqual(["In Review", true, "queued"]);
+  expect(echoed()).toEqual(["queued"]);
+
+  status = "In Review";
+  said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false }];
+  refreshButton()!.click();
+  await settle();
+  expect(statusShown()).toEqual(["In Review", false, null]);
   expect(echoed()).toEqual([]);
 });

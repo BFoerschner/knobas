@@ -130,6 +130,14 @@ export interface JobReader {
   rereadThread(): void;
   /** After a clone finished: the checkout line's repository read again, while it has no clone. */
   rereadCheckout(): void;
+  /**
+   * After a *Refresh* (#2134): the ticket and its transitions, its week, its
+   * thread and its reach with the sections, each over what the page drew as
+   * `rereadDetail`, `rereadThread` and `rereadReach` read them (a failed
+   * ticket or thread read keeps what it drew). Settles once those reads have
+   * answered. Nothing is promoted again.
+   */
+  reread(): Promise<void>;
   /** Drops every answer still out. */
   close(): void;
 }
@@ -471,6 +479,22 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
         // The thread keeps what it has; the next open reads it again.
         () => {},
       );
+    },
+    async reread() {
+      const id = state.detail?.row.entity_id;
+      if (id === undefined) return;
+      const mine = token;
+      const ticket = ports.getEntity(id).then((again) => {
+        if (mine === token) state.detail = again;
+      });
+      const thread = ports.entityThread(id).then((again) => {
+        if (mine === token) state.thread = again;
+      });
+      readSections(id, mine);
+      void readRows(id, SECTION_READS.code, mine).then((rows) => {
+        if (mine === token && rows) state.code = rows;
+      });
+      await Promise.allSettled([ticket, thread, readWorkflow(id, mine), readWeek(id, mine), readInherited(id, mine), readReach(id, mine)]);
     },
     rereadCheckout() {
       const of = state.checkoutOf;
