@@ -6,7 +6,9 @@
 //! `/metrics` and nothing else, and everything the dashboard does it does over
 //! socket.io. So a Kuma that can write is a Kuma knobas has an **account** for,
 //! and this module is the whole of what that account is used for: log in, emit
-//! an event, read its answer -- and keep the session for the next write.
+//! an event, read its answer -- and keep the session for the next write. One
+//! event is a read rather than a write: the refresh's `getMonitor`
+//! ([`KumaSocket::ask`], #2100), on the same session.
 //!
 //! # Why the protocol is hand-written here
 //!
@@ -117,11 +119,12 @@
 //! # What it deliberately does not do
 //!
 //! **No upgrade to websocket**, although the handshake offers one: a session
-//! is read only while a write waits for its answer, and an upgrade would buy
+//! is read only while a write or a refresh waits for its answer, and an upgrade would buy
 //! nothing but a second transport to get wrong. **No goodbye**: a held session
 //! is left for Kuma to reap on its own ping timeout once the writes stop.
-//! **No `add`, no `deleteMonitor`, nothing else** -- spec #427 gives this
-//! channel pause, resume and create, and issue #452 is the first two.
+//! **No `deleteMonitor`, nothing else** -- spec #427 gives this channel pause,
+//! resume and create (issues #452 and #453), and #2100 the refresh's
+//! `getMonitor`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, PoisonError};
@@ -441,7 +444,10 @@ impl KumaSocket {
     ///
     /// # Errors
     ///
-    /// [`KumaSocket::call`]'s, but for the refusal.
+    /// [`KumaSocket::call`]'s, but for the refusal. A read changes nothing in
+    /// Kuma, so what that note says the write queue does with each class does
+    /// not apply: the refresh's caller logs the error, changes nothing, and
+    /// the run after the write reads the monitor.
     pub(crate) async fn ask(
         &self,
         event: &str,

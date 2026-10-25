@@ -54,7 +54,7 @@ const REREAD: Duration = Duration::from_millis(250);
 /// What the refresh reads a monitor through: the document, and the socket.io
 /// channel when the source has one.
 #[async_trait::async_trait]
-pub(crate) trait Roster: Sync {
+pub(crate) trait MonitorReads: Sync {
     /// The monitor as the document publishes it, mapped as the run maps it,
     /// or `None` when the document omits it.
     async fn published(&self, id: i64) -> Result<Option<SyncItem>, SourceError>;
@@ -65,7 +65,7 @@ pub(crate) trait Roster: Sync {
     async fn active(&self, id: i64) -> Result<Option<bool>, SourceError>;
 }
 
-/// Monitor `id`, read through `roster` (the module note).
+/// Monitor `id`, read through `reads` (the module note).
 ///
 /// # Errors
 ///
@@ -73,20 +73,20 @@ pub(crate) trait Roster: Sync {
 /// an active monitor still unpublished after `first_beat`: the read can be
 /// asked again, and the next run reads it.
 pub(crate) async fn read(
-    roster: &dyn Roster,
+    reads: &dyn MonitorReads,
     id: i64,
     first_beat: Duration,
 ) -> Result<RefreshAnswer, SourceError> {
-    if let Some(item) = roster.published(id).await? {
+    if let Some(item) = reads.published(id).await? {
         return Ok(RefreshAnswer::Item(item));
     }
-    if roster.active(id).await? != Some(true) {
+    if reads.active(id).await? != Some(true) {
         return Ok(RefreshAnswer::Gone);
     }
     let deadline = tokio::time::Instant::now() + first_beat;
     while tokio::time::Instant::now() < deadline {
         tokio::time::sleep(REREAD).await;
-        if let Some(item) = roster.published(id).await? {
+        if let Some(item) = reads.published(id).await? {
             return Ok(RefreshAnswer::Item(item));
         }
     }
@@ -123,7 +123,7 @@ mod tests {
 
     use super::*;
 
-    /// A roster that publishes the monitor from its `published_after`-th read
+    /// A script that publishes the monitor from its `published_after`-th read
     /// of the document on, and answers `active` as told.
     struct Script {
         published_after: Option<usize>,
@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl Roster for Script {
+    impl MonitorReads for Script {
         async fn published(&self, id: i64) -> Result<Option<SyncItem>, SourceError> {
             let mut reads = self.reads.lock().unwrap();
             *reads += 1;
@@ -184,10 +184,10 @@ mod tests {
     /// A published monitor is the item, and the channel is not asked.
     #[tokio::test]
     async fn a_published_monitor_is_the_item_without_asking_the_socket() {
-        let roster = Script::new(Some(0), Some(false));
-        let read = item(read(&roster, 8, FIRST_BEAT).await.unwrap());
+        let script = Script::new(Some(0), Some(false));
+        let read = item(read(&script, 8, FIRST_BEAT).await.unwrap());
         assert_eq!(read.entity.key, "8");
-        assert_eq!(*roster.asked.lock().unwrap(), 0);
+        assert_eq!(*script.asked.lock().unwrap(), 0);
     }
 
     /// Paused, or not there, is gone at once: no wait for a beat that is not
@@ -195,10 +195,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn an_omitted_monitor_kuma_is_not_running_is_gone_at_once() {
         let started = tokio::time::Instant::now();
-        let roster = Script::new(None, Some(false));
-        let answer = read(&roster, 8, FIRST_BEAT).await.unwrap();
+        let script = Script::new(None, Some(false));
+        let answer = read(&script, 8, FIRST_BEAT).await.unwrap();
         assert!(matches!(answer, RefreshAnswer::Gone), "{answer:?}");
-        assert_eq!(*roster.reads.lock().unwrap(), 1, "the document read once");
+        assert_eq!(*script.reads.lock().unwrap(), 1, "the document read once");
         assert_eq!(started.elapsed(), Duration::ZERO);
     }
 
@@ -206,20 +206,20 @@ mod tests {
     /// reads it.
     #[tokio::test(start_paused = true)]
     async fn an_omitted_monitor_is_gone_to_a_source_with_no_channel() {
-        let roster = Script::new(Some(2), None);
-        let answer = read(&roster, 8, FIRST_BEAT).await.unwrap();
+        let script = Script::new(Some(2), None);
+        let answer = read(&script, 8, FIRST_BEAT).await.unwrap();
         assert!(matches!(answer, RefreshAnswer::Gone), "{answer:?}");
-        assert_eq!(*roster.reads.lock().unwrap(), 1);
+        assert_eq!(*script.reads.lock().unwrap(), 1);
     }
 
     /// **The resume and the create (#2100)**: an active monitor the document
     /// omits is read again until its first heartbeat publishes it.
     #[tokio::test(start_paused = true)]
     async fn an_active_monitor_is_waited_for_until_it_is_published() {
-        let roster = Script::new(Some(3), Some(true));
-        let read = item(read(&roster, 521, FIRST_BEAT).await.unwrap());
+        let script = Script::new(Some(3), Some(true));
+        let read = item(read(&script, 521, FIRST_BEAT).await.unwrap());
         assert_eq!(read.entity.key, "521");
-        assert_eq!(*roster.reads.lock().unwrap(), 4);
+        assert_eq!(*script.reads.lock().unwrap(), 4);
     }
 
     /// An active monitor never published is an error the run after it
@@ -227,8 +227,8 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn an_active_monitor_never_published_is_an_error_not_gone() {
         let started = tokio::time::Instant::now();
-        let roster = Script::new(None, Some(true));
-        let error = read(&roster, 8, FIRST_BEAT).await.expect_err("never published");
+        let script = Script::new(None, Some(true));
+        let error = read(&script, 8, FIRST_BEAT).await.expect_err("never published");
         assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
         assert!(started.elapsed() >= FIRST_BEAT);
         assert!(started.elapsed() < FIRST_BEAT + REREAD * 2);
