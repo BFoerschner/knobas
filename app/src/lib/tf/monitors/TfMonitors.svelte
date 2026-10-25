@@ -8,18 +8,25 @@
     type, the state chip, the 24-hour bar, the response, the 30-day uptime,
     what it **Watches** (the asset's name and type, linking to the asset),
     *Ack* on a down monitor, and *Pause* or *Resume* where the source offers
-    it.
+    it; while a pause or resume is on its way its echo (*queued*, then *sent*,
+    `tf/queued.svelte.ts`, #2105) stands in the button's place until the
+    roster reads the new state.
   - **Assets nothing watches**: containers, services, routes, databases and VMs
     no monitor watches, each with *Create monitor* (`TfCreateMonitor.svelte`).
-    A row whose create is on its way draws *Monitor queued* instead (#1959):
+    A row whose create is on its way draws its echo instead (#1959, #2105),
+    *Monitor queued* and then *Monitor sent*:
     the row stays listed until the poll mirrors the monitor and attaches it,
     and Uptime Kuma takes a second monitor of the same name. The read names
     the create (`monitor_on_its_way`), so a reload draws it too. One held as
     unconfirmed (sent, never answered, so the monitor may be in Kuma) is on
     its way too, until the reader sends it again or discards it (#1966). A
     pending or unconfirmed one is followed: refused or held on drift, it gives
-    *Create monitor* back; sent or withdrawn, the list is read again. While any row is on its way, the end of
-    every sync reads it again, which is when a sent one's monitor arrives.
+    *Create monitor* back; sent or withdrawn, the list is read again. The
+    echo goes once the roster holds the monitor Kuma made or the read names
+    no such create; a sent create the read still names is drawn sent. The
+    refresh after one of the page's writes reads both lists again, and while
+    anything is on its way so does the end of every sync, which is when a
+    sent one's monitor arrives.
 
   Over `monitor_roster`, `open_alerts` (only for each down row's `acked_at`, so
   an ack outlives the visit; the tab draws no alert of its own, #1296), `ack_alert`, `submit_write` (`PauseMonitor`,

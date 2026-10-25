@@ -1,10 +1,11 @@
 /**
- * The shell's **echo** (CONTEXT.md, #2102): what a ticket-first page draws of
- * a write it queued this session (#1424, #1542), at once and where it lands:
- * the job's picked status and its comment, a Docs section's new text,
- * comment and page, a pull request's chips and its comment, a run queued on a
- * pipeline from its page or a run page (#1449). The repository page keeps its
- * own (`repo/queued.svelte.ts`). The code still says *echo* for one echo.
+ * The shell's **echo** (CONTEXT.md, #2102): what a page draws of a write it
+ * queued this session (#1424, #1542), at once and where it lands: the job's
+ * picked status and its comment, a Docs section's new text, comment and page,
+ * a pull request's chips and its comment, a run and a parameter change on a
+ * pipeline, a run's filed ticket, Standup's filed tickets, a monitor's
+ * create, pause and resume, and the repository's branches and file commits
+ * (#2103-#2105). Every surface's echo lives here.
  *
  * An echo is module `$state` by the entity it lands on, kind by kind, never
  * written anywhere: the write queue is the record, and a restart reads only
@@ -12,7 +13,8 @@
  *
  * - **queued** while its write is open (pending, or held as an unconfirmed
  *   send, which may have arrived, #1966), and **sent** once the write left
- *   the queue's open rows other than by withdrawal (`state`). It is never
+ *   the queue's open rows other than by withdrawal (`state`), or once a
+ *   refresh names its write, which follows the write landed. It is never
  *   *queued* again after that.
  * - **gone when the surface's read shows the write** (`settleEchoes`): each
  *   page says, as its read arrives, which of its echoes the read holds -- a

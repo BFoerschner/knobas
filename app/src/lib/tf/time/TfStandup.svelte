@@ -21,9 +21,12 @@
   the backend links the note to the ticket it found by the item's words, so an
   item whose words a linked ticket carries shows that ticket, not *Create
   ticket*. One filed before a reload whose ticket is not mirrored yet is read
-  back from the protocol's `owed_tickets` and drawn `queued` (#1951). While
-  any filed ticket is unnamed, the end of every sync asks for it again, so
-  the ticket the post-write read missed is named by the sync that brings it.
+  back from the protocol's `owed_tickets` and drawn as one filed now (#1951).
+  Each filed ticket is an echo on the protocol's note (`tf/queued.svelte.ts`,
+  #2104), *queued* and then *sent*, gone once the backend names its ticket:
+  asked when the write is sent, on the refresh event and on every sync's
+  end, so the ticket the post-write read missed is named by the sync that
+  brings it.
 
   *Publish to Confluence* asks `refused_writes` about the stored target's
   page (#2053): a page whose space the source's credential may not add pages
