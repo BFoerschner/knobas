@@ -305,9 +305,9 @@ against a stub `docker`, and `testenv/live-lock-test.sh` the lock — a second
 run waits and goes on, a dead holder's lock is taken over, the wait ends in
 a refusal naming the holder, `live_session` takes the lock before the guard
 and lets it go after the put-back, a `live-up` product's keeper holds it
-against other worktrees until `live-down`, and a Gitea session queues on the Gitea
-lock and never on the JVM one — both in `just witness-unit` and so in
-`just check`.
+against other worktrees until `live-down`, and a Gitea session queues on
+the Gitea lock and never on the JVM one — both in `just witness-unit` and so
+in `just check`.
 
 ## The live recipes
 

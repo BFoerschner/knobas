@@ -157,11 +157,11 @@ LIVE_LOCK_RECLAIMING=""
 
 # _live_lock_describe <target> -- the holder, in words.
 _live_lock_describe() {
-  local pid since recipe tree hint="" p
+  local pid since recipe tree hint="" product
   read -r pid since recipe tree <<<"$1"
   case $recipe in live-up-*-kept)
-    p=${recipe#live-up-}
-    hint=", kept for a live-up product: 'just live-down ${p%-kept}' from any worktree frees it" ;;
+    product=${recipe#live-up-}
+    hint=", kept for a live-up product: 'just live-down ${product%-kept}' from any worktree frees it" ;;
   esac
   echo "'$recipe' in ${tree:-?} (pid $pid, since $(date -r "$since" '+%H:%M:%S' 2>/dev/null || echo "$since")$hint)"
 }
@@ -313,7 +313,7 @@ _live_lock_kept_here() {
 
 # _live_lock_keep <product> -- hand the JVM lock this shell holds to a keeper.
 _live_lock_keep() {
-  local product=$1 old=$LIVE_LOCK_MINE kept="" i
+  local product=$1 old=$LIVE_LOCK_MINE kept="" keeper
   # Let through under this worktree's keeper: that one keeps.
   [ -n "$old" ] || return 0
   (
@@ -328,16 +328,23 @@ _live_lock_keep() {
     if [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$old" ] &&
       mv -f "$LIVE_LOCK.keep.$me" "$LIVE_LOCK"; then
       LIVE_LOCK_MINE=$mine
-      while live_is_up "$product" && [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$mine" ]; do
+      # Two misses in a row, so one `docker ps` hiccup does not free the lock.
+      misses=0
+      while [ "$misses" -lt 2 ] && [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$mine" ]; do
+        if live_is_up "$product"; then misses=0; else misses=$((misses + 1)); fi
+        [ "$misses" -lt 2 ] || break
         sleep "${KNOBAS_LIVE_KEEPER_POLL:-30}" &
         wait $! || true
       done
     fi
     rm -f "$LIVE_LOCK.keep.$me"
   ) </dev/null >/dev/null 2>&1 &
-  for ((i = 0; i < 100; i++)); do
-    kept=$(readlink "$LIVE_LOCK" 2>/dev/null || true)
-    [ "$kept" = "$old" ] || break
+  keeper=$!
+  # Until the keeper has swapped its link in or given up: no timeout, since
+  # this shell's release while the keeper is between its check and its `mv`
+  # would let a third run in and have the `mv` overwrite it.
+  while kept=$(readlink "$LIVE_LOCK" 2>/dev/null || true); [ "$kept" = "$old" ] &&
+    kill -0 "$keeper" 2>/dev/null; do
     sleep 0.1
   done
   if [ -n "$kept" ] && [ "$kept" != "$old" ]; then
@@ -350,13 +357,24 @@ _live_lock_keep() {
 
 # _live_lock_unkeep <product> -- end the keeper of this product's live-up.
 _live_lock_unkeep() {
-  local lock=${KNOBAS_LIVE_LOCK:-${TMPDIR:-/tmp}/knobas-live-jvm.lock} target pid since recipe tree
-  target=$(readlink "$lock" 2>/dev/null || true)
+  local target pid since recipe tree i
+  _live_lock_select jvm
+  target=$(readlink "$LIVE_LOCK" 2>/dev/null || true)
   read -r pid since recipe tree <<<"$target"
   [ "$recipe" = "live-up-$1-kept" ] || return 0
+  # The keeper's own trap gives the link back; removing it here could remove
+  # a lock another run took a moment after. A keeper that is gone without
+  # doing so left a dead holder, which the next taker takes over.
   kill "$pid" 2>/dev/null || true
-  [ "$(readlink "$lock" 2>/dev/null || true)" != "$target" ] || rm -f "$lock"
-  echo "live: $1: the JVM lock its live-up kept is free"
+  for ((i = 0; i < 50; i++)); do
+    [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$target" ] || break
+    sleep 0.1
+  done
+  if [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" != "$target" ]; then
+    echo "live: $1: the JVM lock its live-up kept is free"
+  else
+    echo "live: $1: the keeper of its live-up's JVM lock did not let go; the next run takes it over once pid $pid is gone" >&2
+  fi
 }
 
 # live_up_held <product> -- `testenv/live up`: a JVM product starts and seeds

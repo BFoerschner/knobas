@@ -10,9 +10,8 @@
 # <product> is gitea, forgejo (#1195), teamcity, jira or confluence. `up` of a JVM product
 # waits for the machine-wide JVM lock a live run holds (issue #690), then
 # refuses a second JVM product while one is up, naming it, and keeps the
-# lock until `down` (#2121). `just live-up` /
-# `just live-down` are these; the `just *-live` recipes do both around their
-# suites themselves.
+# lock until `down` (#2121). `just live-up` / `just live-down` are these; the
+# `just *-live` recipes do both around their suites themselves.
 set -euo pipefail
 # shellcheck source=testenv/live-lib.sh disable=SC1091
 . "$(cd "$(dirname "$0")" && pwd)/live-lib.sh"
