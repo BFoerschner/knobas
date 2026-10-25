@@ -259,6 +259,7 @@ mod tests {
         WriteAsk {
             entity: format!("confluence:{id}"),
             op: op.to_owned(),
+            field: None,
         }
     }
 

@@ -168,7 +168,13 @@ async fn build_config(
     };
     let mut view = SourceView { sections, actions };
     if let (Some(Ok(grants)), Some(project)) = (grants, nonblank(record.project_id.as_deref())) {
-        view.refuse_writes(|op| grants.refusal(op, project));
+        view.refuse_writes(|op| grants.refusal(op, None, project));
+        let overrides = crate::grants::RUN_PARAMETERS;
+        if let Some(reason) = grants.refusal(crate::WRITE_OP_RUN_BUILD, Some(overrides), project) {
+            for run in view.actions.iter_mut().filter(|a| a.with_settings) {
+                run_without_settings(run, &reason);
+            }
+        }
     }
     Ok(view)
 }
@@ -291,6 +297,17 @@ fn run_action(builds: &[Build]) -> ViewAction {
         with_settings: true,
         ..ViewAction::new(crate::WRITE_OP_RUN_BUILD, "Run…")
     }
+}
+
+/// *Run…* for a user who may not override parameters (#2055): the branch
+/// alone, and the sentence says why, since TeamCity refuses a run carrying
+/// overrides from such a user.
+fn run_without_settings(run: &mut ViewAction, reason: &str) {
+    run.with_settings = false;
+    run.confirm = Some(format!(
+        "Queue one build of this configuration. Leave the branch empty for the default branch. \
+         The parameters are sent as they are: {reason}."
+    ));
 }
 
 /// What happened to a build.

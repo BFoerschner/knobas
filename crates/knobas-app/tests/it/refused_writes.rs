@@ -95,6 +95,7 @@ impl Source for Narrow {
         out.push(RefusedWrite {
             entity: format!("{}:unasked", self.id),
             op: "rerun_build".into(),
+            field: None,
             reason: "nobody asked".into(),
         });
         Ok(out)
@@ -143,6 +144,7 @@ fn ask(entity: &str, op: &str) -> WriteAsk {
     WriteAsk {
         entity: entity.to_owned(),
         op: op.to_owned(),
+        field: None,
     }
 }
 

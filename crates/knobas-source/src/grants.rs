@@ -38,6 +38,40 @@ pub struct WriteAsk {
     pub entity: String,
     /// A [`WriteOp`](crate::WriteOp) identifier, as `write_ops` spells it.
     pub op: String,
+    /// One field of the op's payload, by the name the payload carries it
+    /// under (`parameters`, `first_in_queue` on a `run_build`): may the
+    /// write carry it set? `None` asks about the write itself (#2055).
+    ///
+    /// A field can need more than its write: a TeamCity user may run a
+    /// build and not override its parameters for that run, or not put it
+    /// first in the queue. Such an ask is answered by what the field needs
+    /// beyond the write. An adapter that tells no field apart answers it as
+    /// it answers the write, which is still true: a write the credential
+    /// cannot make carries no field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub field: Option<String>,
+}
+
+impl WriteAsk {
+    /// The ask about `op` on `entity` itself.
+    #[must_use]
+    pub fn new(entity: impl Into<String>, op: impl Into<String>) -> Self {
+        Self {
+            entity: entity.into(),
+            op: op.into(),
+            field: None,
+        }
+    }
+
+    /// The ask about `op` on `entity` carrying `field` set.
+    #[must_use]
+    pub fn with_field(entity: impl Into<String>, op: impl Into<String>, field: impl Into<String>) -> Self {
+        Self {
+            field: Some(field.into()),
+            ..Self::new(entity, op)
+        }
+    }
 }
 
 /// A write the source's credential cannot make, and why, in words a person
@@ -48,6 +82,10 @@ pub struct WriteAsk {
 pub struct RefusedWrite {
     pub entity: String,
     pub op: String,
+    /// The [`WriteAsk::field`] refused, or `None` for the write itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub field: Option<String>,
     pub reason: String,
 }
 
@@ -58,6 +96,7 @@ impl RefusedWrite {
         Self {
             entity: ask.entity.clone(),
             op: ask.op.clone(),
+            field: ask.field.clone(),
             reason: reason.into(),
         }
     }
@@ -65,6 +104,6 @@ impl RefusedWrite {
     /// Whether this refuses `ask`.
     #[must_use]
     pub fn refuses(&self, ask: &WriteAsk) -> bool {
-        self.entity == ask.entity && self.op == ask.op
+        self.entity == ask.entity && self.op == ask.op && self.field == ask.field
     }
 }

@@ -26,6 +26,7 @@ fn ask(entity: String, op: &str) -> WriteAsk {
     WriteAsk {
         entity,
         op: op.to_owned(),
+        field: None,
     }
 }
 
@@ -83,6 +84,7 @@ async fn a_read_only_token_is_refused_each_write_saying_which_scope() {
     let want = |entity: String, op: &str, reason: &str| RefusedWrite {
         entity,
         op: op.to_owned(),
+        field: None,
         reason: reason.to_owned(),
     };
     assert_eq!(
@@ -145,6 +147,7 @@ async fn an_account_that_may_not_push_is_refused_only_the_merge() {
         [RefusedWrite {
             entity: pull(),
             op: "merge_pull_request".to_owned(),
+            field: None,
             reason: "This account cannot push to this repository".to_owned(),
         }]
     );

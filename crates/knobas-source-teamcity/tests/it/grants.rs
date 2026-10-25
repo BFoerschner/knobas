@@ -49,6 +49,7 @@ fn ask(entity: &str, op: &str) -> WriteAsk {
     WriteAsk {
         entity: entity.to_owned(),
         op: op.to_owned(),
+        field: None,
     }
 }
 
@@ -148,6 +149,7 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
         [RefusedWrite {
             entity: CONFIG.to_owned(),
             op: "set_parameter".to_owned(),
+            field: None,
             reason: CANNOT_CHANGE.to_owned(),
         }]
     );
@@ -178,11 +180,13 @@ async fn a_permission_on_an_ancestor_holds_and_one_on_a_sibling_does_not() {
             RefusedWrite {
                 entity: CONFIG.to_owned(),
                 op: "run_build".to_owned(),
+                field: None,
                 reason: CANNOT_RUN.to_owned(),
             },
             RefusedWrite {
                 entity: BUILD.to_owned(),
                 op: "rerun_build".to_owned(),
+                field: None,
                 reason: CANNOT_RUN.to_owned(),
             },
         ]
@@ -257,8 +261,100 @@ async fn an_entity_whose_project_cannot_be_read_is_no_verdict() {
         [RefusedWrite {
             entity: CONFIG.to_owned(),
             op: "run_build".to_owned(),
+            field: None,
             reason: CANNOT_RUN.to_owned(),
         }]
+    );
+}
+
+// --- What a run may carry (#2055) --------------------------------------------
+
+const CANNOT_OVERRIDE: &str = "This TeamCity user cannot override parameters for one build in \
+     Payout: it lacks the Customize build parameters permission";
+const CANNOT_PUT_FIRST: &str =
+    "This TeamCity user cannot put a build first in the queue: it lacks the Reorder builds in \
+     queue permission";
+
+fn field(entity: &str, op: &str, field: &str) -> WriteAsk {
+    WriteAsk::with_field(entity, op, field)
+}
+
+/// A custom role may hold `run_build` without `customize_build_parameters`
+/// or `reorder_build_queue`. TeamCity checks the first when a run's
+/// parameters are set, before anything is queued, and the second when the
+/// queued build is moved to the top, after it was queued (2026.1.3's
+/// `BuildPromotionImpl.setCustomParameters` and `SecuredBuildQueue.moveTop`).
+/// So the run itself is the user's, and neither field is.
+#[tokio::test]
+async fn a_runner_may_run_and_may_not_override_parameters_or_jump_the_queue() {
+    let server = teamcity(vec![
+        assignment("view_project", None),
+        assignment("run_build", None),
+    ])
+    .await;
+    let refused = source(&server)
+        .refused_writes(&[
+            ask(CONFIG, "run_build"),
+            field(CONFIG, "run_build", "parameters"),
+            field(CONFIG, "run_build", "first_in_queue"),
+            field(CONFIG, "run_build", "clean_checkout"),
+            field(CONFIG, "run_build", "branch"),
+        ])
+        .await
+        .expect("the permissions read");
+    assert_eq!(
+        refused,
+        [
+            RefusedWrite {
+                entity: CONFIG.to_owned(),
+                op: "run_build".to_owned(),
+                field: Some("parameters".to_owned()),
+                reason: CANNOT_OVERRIDE.to_owned(),
+            },
+            RefusedWrite {
+                entity: CONFIG.to_owned(),
+                op: "run_build".to_owned(),
+                field: Some("first_in_queue".to_owned()),
+                reason: CANNOT_PUT_FIRST.to_owned(),
+            },
+        ]
+    );
+    only_reads(&server).await;
+}
+
+/// `customize_build_parameters` holds where a role holds, on the project or
+/// an ancestor. `reorder_build_queue` is not a project's: TeamCity checks it
+/// globally, so it holds wherever the read names it, and a role giving it on
+/// some project is not read as a refusal (never refuse on a guess).
+#[tokio::test]
+async fn overrides_follow_the_project_and_the_queue_top_is_not_refused_on_a_guess() {
+    let server = teamcity(vec![
+        assignment("run_build", None),
+        assignment("customize_build_parameters", Some("Tidewater")),
+        assignment("reorder_build_queue", Some("Ledger")),
+    ])
+    .await;
+    let refused = source(&server)
+        .refused_writes(&[
+            field(CONFIG, "run_build", "parameters"),
+            field(CONFIG, "run_build", "first_in_queue"),
+        ])
+        .await
+        .expect("the permissions read");
+    assert_eq!(refused, []);
+
+    let elsewhere = teamcity(vec![
+        assignment("run_build", None),
+        assignment("customize_build_parameters", Some("Ledger")),
+    ])
+    .await;
+    let refused = source(&elsewhere)
+        .refused_writes(&[field(CONFIG, "run_build", "parameters")])
+        .await
+        .expect("the permissions read");
+    assert_eq!(
+        refused.iter().map(|r| r.reason.as_str()).collect::<Vec<_>>(),
+        [CANNOT_OVERRIDE]
     );
 }
 
@@ -337,6 +433,46 @@ async fn the_view_draws_what_the_user_may_not_write_so() {
         .expect("the read")
         .expect("drawn");
     assert_eq!(editable(&view), [true]);
+}
+
+/// The view's *Run…* offers the parameters to override only to a user who
+/// may (#2055): without `customize_build_parameters` it asks for the branch
+/// alone, and its sentence says why the parameters stay as they are.
+#[tokio::test]
+async fn the_views_run_offers_overrides_only_to_a_user_who_may_send_them() {
+    let runner = teamcity(vec![assignment("run_build", None)]).await;
+    with_config(&runner).await;
+    let view = source(&runner)
+        .view(CONFIG, None)
+        .await
+        .expect("the read")
+        .expect("drawn");
+    let run = &view.actions[0];
+    assert_eq!((run.write_op.as_str(), run.disabled.as_deref()), ("run_build", None));
+    assert!(!run.with_settings, "{run:?}");
+    assert_eq!(
+        run.confirm.as_deref(),
+        Some(
+            "Queue one build of this configuration. Leave the branch empty for the default \
+             branch. The parameters are sent as they are: This TeamCity user cannot override \
+             parameters for one build in Payout: it lacks the Customize build parameters \
+             permission."
+        )
+    );
+    only_reads(&runner).await;
+
+    let developer = teamcity(vec![
+        assignment("run_build", Some("Payout")),
+        assignment("customize_build_parameters", Some("Payout")),
+    ])
+    .await;
+    with_config(&developer).await;
+    let view = source(&developer)
+        .view(CONFIG, None)
+        .await
+        .expect("the read")
+        .expect("drawn");
+    assert!(view.actions[0].with_settings, "{:?}", view.actions[0]);
 }
 
 /// A permissions read that fails draws the view as before: no verdict is not

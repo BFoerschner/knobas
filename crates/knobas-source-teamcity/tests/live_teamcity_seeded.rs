@@ -4814,6 +4814,7 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
     .map(|(entity, op)| WriteAsk {
         entity: entity.clone(),
         op: op.to_owned(),
+        field: None,
     })
     .collect();
     let queue = async || seeded.get("app/rest/buildQueue?fields=count").await.1["count"].clone();
@@ -4945,10 +4946,12 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
                 WriteAsk {
                     entity: config_entity.clone(),
                     op: "set_parameter".to_owned(),
+                    field: None,
                 },
                 WriteAsk {
                     entity: other_entity.clone(),
                     op: "set_parameter".to_owned(),
+                    field: None,
                 },
             ])
             .await
