@@ -54,7 +54,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack, type Snippet } from "svelte";
 
   import {
     getEntity,
@@ -101,6 +101,8 @@
     job,
     jobAt = null,
     ports = { pipelines: readPipelines, runs: (id) => pipelineRuns(id) },
+    sync,
+    syncRevision = 0,
   }: {
     /** Whether the database answers yet: the reads wait for it. */
     ready: boolean;
@@ -113,6 +115,10 @@
     /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
     jobAt?: string | null;
     ports?: BuildsPorts;
+    /** The role frame's *Sync now* (#2106), drawn with the header's actions. */
+    sync?: Snippet;
+    /** Moves when that *Sync now*'s runs have all ended (#2106). */
+    syncRevision?: number;
   } = $props();
 
   const filter = sessionFilter("builds-pipelines");
@@ -130,6 +136,20 @@
     if (!ready || all !== null) return;
     ports.pipelines().then(
       (rows) => (all = rows),
+      (error: unknown) => (failed = message(error)),
+    );
+  });
+
+  // *Sync now*'s runs ended (#2106): the list is read again, kept drawn meanwhile.
+  let pipelinesAt = untrack(() => syncRevision);
+  $effect(() => {
+    const at = syncRevision;
+    if (!ready || at === pipelinesAt) return;
+    pipelinesAt = at;
+    ports.pipelines().then(
+      (rows) => {
+        if (at === pipelinesAt) all = rows;
+      },
       (error: unknown) => (failed = message(error)),
     );
   });
@@ -347,6 +367,7 @@
           <button type="button" aria-pressed={chips.includes(chip)} onclick={() => toggle(chip)}>{chip}</button>
         {/each}
       </div>
+      {@render sync?.()}
     </div>
     <div class="tf-pl-list" bind:this={list}>
       {#if failed !== null}

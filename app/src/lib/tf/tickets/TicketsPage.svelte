@@ -83,7 +83,7 @@
 
 <script lang="ts">
   import { clockLabel } from "../../time/format";
-  import { flushSync, onMount, untrack } from "svelte";
+  import { flushSync, onMount, untrack, type Snippet } from "svelte";
 
   import {
     getEntity,
@@ -160,6 +160,8 @@
     },
     viewId = null,
     typingPause = 90,
+    sync,
+    syncRevision = 0,
   }: {
     /** Whether the database answers yet. */
     ready: boolean;
@@ -170,6 +172,10 @@
     viewId?: string | null;
     /** How long, in ms, the filter waits for the next key before it reads: the launcher's 90. */
     typingPause?: number;
+    /** The role frame's *Sync now* (#2106), drawn with the header's actions. */
+    sync?: Snippet;
+    /** Moves when that *Sync now*'s runs have all ended (#2106). */
+    syncRevision?: number;
   } = $props();
 
   // ---- the views ----
@@ -479,6 +485,15 @@
   });
   $effect(() => () => reader.close());
 
+  // *Sync now*'s runs ended (#2106): the board is read again.
+  let boardAt = untrack(() => syncRevision);
+  $effect(() => {
+    const at = syncRevision;
+    if (!ready || at === boardAt) return;
+    boardAt = at;
+    untrack(() => reader.refresh());
+  });
+
   // Once the database answers: the views and the suggestions.
   $effect(() => {
     if (!ready) return;
@@ -637,6 +652,7 @@
           onhide={() => void setHidden(view, true)}
         />
       {/if}
+      {@render sync?.()}
     </div>
     {#if view?.saved_view_source && view.saved_view}
       <SavedViewSourceLine

@@ -9,6 +9,12 @@
   shell's breadcrumb (`TfCrumbs.svelte`). A new screen adds a folder and does not edit this
   file. What stays here is the shell's own:
 
+  - **The role frame** (#2106): a page that names a `role` is a view of that
+    role, and is handed *Sync now* for it as the `sync` snippet, which its
+    header draws where its own actions go, and `syncRevision`, which moves
+    when those runs have ended. The button and its runs are this frame's, so
+    every role view draws the same one, and its runs outlive a view drawn
+    again.
   - **A bare `#/job`** with no job opened yet says how to open one. Job has no
     breadcrumb: it is the place the breadcrumb leads to.
   - **A full view not built yet** starts with the breadcrumb (R-1.6): the job
@@ -23,6 +29,7 @@
   import { pageFor } from "./pages";
   import { SECTION_NAME } from "./route";
   import TfCrumbs from "./TfCrumbs.svelte";
+  import TfSyncNow from "./TfSyncNow.svelte";
 
   /** Everything the shell hands a page; see `page-entry.ts`. */
   let { ctx }: { ctx: TfPageContext } = $props();
@@ -53,17 +60,32 @@
     const entry = page;
     return entry ? propSignals(() => entry.props(ctx)) : {};
   });
+
+  /** The role this page is a view of, and its *Sync now* (#2106). */
+  const roleSync = $derived(page?.role === undefined ? null : ctx.roleSyncs.of(page.role));
 </script>
+
+{#snippet syncNow()}
+  {#if roleSync !== null}<TfSyncNow sync={roleSync} />{/if}
+{/snippet}
 
 {#if page && page.crumbs && route.view === "full"}
   {@const Page = page.component}
   <div class="tf-full">
     <TfCrumbs {job} {jobAt} name={SECTION_NAME[route.section]} />
-    <Page {...pageProps} />
+    {#if roleSync !== null}
+      <Page {...pageProps} sync={syncNow} syncRevision={roleSync.revision} />
+    {:else}
+      <Page {...pageProps} />
+    {/if}
   </div>
 {:else if page}
   {@const Page = page.component}
-  <Page {...pageProps} />
+  {#if roleSync !== null}
+    <Page {...pageProps} sync={syncNow} syncRevision={roleSync.revision} />
+  {:else}
+    <Page {...pageProps} />
+  {/if}
 {:else if route.view === "job"}
   <div class="tf-full">
     <header class="tf-fhead">

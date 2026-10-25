@@ -12,11 +12,12 @@
  * the shell does not hand out yet adds it there and to the `ctx` that
  * `TfShell.svelte` builds, which is the one shared edit left.
  */
-import type { Component } from "svelte";
+import type { Component, Snippet } from "svelte";
 
 import type { Timer } from "../shell/timer.svelte";
 import type { JobPorts } from "./job/ports";
 import type { Layers } from "./layers.svelte";
+import type { RoleSyncs } from "./role-sync.svelte";
 import type { Theme } from "./theme.svelte";
 import type { TfRoute } from "./route";
 
@@ -48,6 +49,20 @@ export interface TfPageContext {
   /** Bumped when something outside the Time view changed a day's blocks. */
   timeRevision: number;
   ontimechanged: (() => void) | undefined;
+  /** Each role's *Sync now* (#2106), which the role frame draws into a role view's header. */
+  roleSyncs: RoleSyncs;
+}
+
+/**
+ * What the role frame hands a page that names a {@link TfPageEntry.role}
+ * (#2106), beside the props it reads off the context: its header draws `sync`
+ * where its own actions go, and `syncRevision` moves when the runs it
+ * started have all ended, so a view not re-read on a run's end by itself
+ * reads again.
+ */
+export interface RoleFrameProps {
+  sync?: Snippet;
+  syncRevision?: number;
 }
 
 /** One registered page, its types erased once {@link definePage} checked them. */
@@ -60,6 +75,12 @@ export interface TfPageEntry {
    * full view. A page that draws its own, like Settings, leaves it unset.
    */
   crumbs?: boolean;
+  /**
+   * The role the page is a view of (#2106), as `knobas_source::role` spells
+   * it. The frame then draws *Sync now* for it into the page's header, and
+   * hands the page {@link RoleFrameProps}.
+   */
+  role?: string;
   /**
    * The component's props, read off the shell's context for a matched route.
    * Always the same keys: `TfPage` reads them once per page and hands each
@@ -76,6 +97,7 @@ export function definePage<Props extends object, Matched extends TfRoute>(page: 
   matches: (route: TfRoute) => route is Matched;
   component: Component<Props>;
   crumbs?: boolean;
+  role?: string;
   props: (ctx: TfPageContext & { route: Matched }) => Props;
 }): TfPageEntry {
   return page as unknown as TfPageEntry;

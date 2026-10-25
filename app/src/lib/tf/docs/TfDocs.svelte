@@ -46,7 +46,7 @@
 -->
 <script lang="ts">
   import { clockLabel } from "../../time/format";
-  import { tick, untrack } from "svelte";
+  import { tick, untrack, type Snippet } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -150,6 +150,7 @@
     linkPorts,
     layers = sharedLayers,
     follower = writeFollower(),
+    sync,
   }: {
     ready: boolean;
     /** What follows the address's first segment. */
@@ -163,6 +164,13 @@
     layers?: Layers;
     /** Follows each queued edit, comment and page, so one held or refused drops its echo (#1424). */
     follower?: WriteFollower;
+    /** The role frame's *Sync now* (#2106), drawn with the header's actions. */
+    sync?: Snippet;
+    /**
+     * Moves when that *Sync now*'s runs have all ended (#2106). Unread: this
+     * view reads again on the end of every run of its role's sources already.
+     */
+    syncRevision?: number;
   } = $props();
 
   const io: DocsPorts = $derived(
@@ -843,6 +851,7 @@
         <kbd>/</kbd>
       </label>
       <div class="tf-dl-hint"><code>"…"</code> phrase, <code>-word</code> leave out, <code>by:</code> <code>updated:7d</code></div>
+      {@render sync?.()}
     </div>
     <div class="tf-dl-body">
       {#if treeError !== null}

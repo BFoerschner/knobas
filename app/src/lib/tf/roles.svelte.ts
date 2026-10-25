@@ -17,6 +17,7 @@
  *   editable copy only where it is claimed. It needs the list the shell read,
  *   which `TfShell.svelte` hands to {@link sourceRoles} once the database
  *   answers and again when a source is added or removed or a sync finishes.
+ * - {@link SourceRoles.syncs}: whether a role view draws *Sync now* (#2106).
  * - {@link claims}: whether a source claims a role, read off a source the
  *   caller holds (the job's Builds staleness warning, `job.ts`).
  *
@@ -43,6 +44,11 @@ export interface ClaimingSource {
   roles: readonly RoleClaim[];
   /** The claimed roles whose declared paths missed on the source's records (#1199). */
   role_misses: readonly RoleMiss[];
+  /**
+   * Whether the source is turned on: a turned-off one is never run (#2106).
+   * `list_sources` always says; a list that leaves it out reads as on.
+   */
+  enabled?: boolean;
 }
 
 /** Whether `source` claims `role`. */
@@ -69,6 +75,12 @@ export interface SourceRoles {
   answers(role: string, sourceId: string, read: string): boolean;
   /** What a person calls `sourceId` (#1476): its display name, or the id when the list never said. */
   nameOf(sourceId: string): string;
+  /**
+   * Whether a role view draws *Sync now* (#2106): some enabled source fills
+   * `role`. Not knowing is no. Which sources a click runs is the mirror's
+   * answer (`sync_role`); this only says whether there is one to ask about.
+   */
+  syncs(role: string): boolean;
 }
 
 export function createSourceRoles(): SourceRoles {
@@ -81,6 +93,7 @@ export function createSourceRoles(): SourceRoles {
         display_name: row.display_name,
         roles: [...row.roles],
         role_misses: [...row.role_misses],
+        enabled: row.enabled !== false,
       }));
     },
     forget() {
@@ -93,6 +106,9 @@ export function createSourceRoles(): SourceRoles {
     },
     nameOf(sourceId) {
       return state.sources?.find((row) => row.id === sourceId)?.display_name ?? sourceId;
+    },
+    syncs(role) {
+      return state.sources?.some((source) => source.enabled !== false && fills(source, role)) ?? false;
     },
   };
 }

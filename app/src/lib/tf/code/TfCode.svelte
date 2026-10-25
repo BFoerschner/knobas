@@ -23,6 +23,7 @@
   `#/repo/<entity id>` and `#/pr/<entity id>`.
 -->
 <script lang="ts" module>
+  import type { Snippet } from "svelte";
   import type { CheckoutView, CodeFacts, EntityFilter, EntityPage } from "../../ipc/entity";
   import { readAllRows } from "../repo/repo";
   import type { SourceSummary } from "../../ipc/sources";
@@ -88,6 +89,8 @@
       jobReach: (entityId) => jobReach(entityId),
     },
     now: fixedNow,
+    sync,
+    syncRevision = 0,
   }: {
     /** Whether the database answers yet: the reads wait for it. */
     ready: boolean;
@@ -98,6 +101,10 @@
     ports?: CodePorts;
     /** Injectable clock, for the time column and *Idle > 5 days*. */
     now?: Date;
+    /** The role frame's *Sync now* (#2106), drawn with the header's actions. */
+    sync?: Snippet;
+    /** Moves when that *Sync now*'s runs have all ended (#2106). */
+    syncRevision?: number;
   } = $props();
 
   const now = $derived(fixedNow ?? new Date());
@@ -152,6 +159,8 @@
 
   $effect(() => {
     if (!ready) return;
+    // *Sync now*'s runs ended (#2106): the rows are read again.
+    void syncRevision;
     let live = true;
     failed = null;
     checkouts = {};
@@ -369,6 +378,7 @@
     </div>
   </div>
   <div class="tf-acts">
+    {@render sync?.()}
     {#if compare !== null}
       <a class="tf-btn" href={compare}>New pull request</a>
     {:else}
