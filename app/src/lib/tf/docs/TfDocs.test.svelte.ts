@@ -2052,3 +2052,15 @@ test("another page opened while a refresh is out reads nothing back over it, and
   expect(target.querySelector("h1")?.textContent).toBe("Ops home");
   expect(docsPage.mock.calls.map(([id]) => id)).toEqual(["confluence:2", "confluence:1"]);
 });
+
+test("a refresh whose row re-read fails keeps the button and the banners drawn (#2136)", async () => {
+  let fail = false;
+  const getEntity = vi.fn(async () => (fail ? Promise.reject(new Error("database is locked")) : pageDetail({ deleted_at: "2026-10-20T10:00:00Z" })));
+  await draw(["confluence:2"], ports({ getEntity, refresh: refreshing().ports }));
+  fail = true;
+  refreshButton()!.click();
+  await settle();
+  expect(getEntity).toHaveBeenCalledTimes(2);
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(docBanners()).toHaveLength(1);
+});
