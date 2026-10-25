@@ -2192,6 +2192,16 @@ async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_
     assert_eq!(payload["merged"], false);
     assert_eq!(payload["head"]["ref"], head.as_str());
     assert_eq!(payload["base"]["ref"], base.as_str());
+    let at_gitea = env
+        .api(
+            reqwest::Method::GET,
+            &format!("/repos/{repo}/pulls/{number}"),
+            None,
+        )
+        .await;
+    assert_eq!(payload["state"], at_gitea["state"]);
+    assert_eq!(payload["updated_at"], at_gitea["updated_at"]);
+    assert_eq!(payload["head"]["sha"], at_gitea["head"]["sha"]);
 
     // -- Its merge -----------------------------------------------------------
     let (refreshed, (_, _, payload)) = sent_and_refreshed(
