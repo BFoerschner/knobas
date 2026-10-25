@@ -1963,3 +1963,303 @@ async fn a_commit_over_a_file_that_moved_is_held_with_both_versions_at_gitea() {
     assert_eq!(now, MINE_B64, "the branch holds the reader's text");
     drop(litter);
 }
+
+// -- a landed write's item is refreshed before its run (#2098) ---------------
+
+/// The scheduler's events, holding each refresh's end until the test has
+/// read the mirror: [`knobas_app::sources::refresh::refresh`] tells it before
+/// `after_landing` starts the follow-up run, so while it waits no run of the
+/// source has begun, and what the mirror holds then is the refresh's alone.
+struct HoldsRefreshes {
+    told: tokio::sync::mpsc::UnboundedSender<knobas_sync::scheduler::RefreshEnded>,
+    go: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl knobas_sync::scheduler::SyncEvents for HoldsRefreshes {
+    fn sync_state(&self, _status: knobas_sync::SourceSyncStatus) {}
+    fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
+    fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
+    fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
+        let _ = self.told.send(ended.clone());
+        // Bounded, so a test that panicked before its ack cannot hang the
+        // scheduler's quit.
+        let _ = self
+            .go
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .recv_timeout(std::time::Duration::from_secs(120));
+    }
+}
+
+/// The issue a test filed, deleted at the server when it goes out of scope,
+/// a panic included. Its title carries `live_gitea`'s `knobas-ticket-`
+/// prefix, so that suite's sweep takes back one this guard could not.
+struct FiledIssue(std::sync::Mutex<Option<u64>>);
+
+impl Drop for FiledIssue {
+    fn drop(&mut self) {
+        let Some(number) = *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        else {
+            return;
+        };
+        Cleanup::new(
+            format!("the issue #{number} this run filed is still standing"),
+            format!("delete issue #{number} by hand, or run `just gitea-live` to sweep it"),
+        )
+        .run(move || async move {
+            let env = env();
+            env.api(
+                reqwest::Method::DELETE,
+                &format!("/repos/{}/issues/{number}", env.full_name()),
+                None,
+            )
+            .await;
+            Ok(())
+        });
+    }
+}
+
+/// **Each write sent through the queue is in the mirror as Gitea holds it
+/// before the follow-up run starts** (#2098, ADR-0031): a created ticket, a
+/// comment on it, a created pull request and its merge. The app is started
+/// the way the app starts it (`start_scheduler`, so `after_landing` follows
+/// each landing), its tick held off; the refresh's end is held until the
+/// mirror is read, and no run of the source has begun since the write was
+/// sent. What the mirror holds is compared with Gitea's own record of each.
+///
+/// Only items this test makes: the issue (deleted at the end by
+/// [`FiledIssue`]), and a pull request between two scratch branches merged
+/// into the scratch base, never the default branch (#373), all taken back by
+/// [`Litter`].
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Gitea container -- see this file's header"]
+async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_up_run() {
+    let env = env();
+    let repo = env.full_name();
+    let pid = std::process::id();
+    let (base, head) = (
+        format!("{LITTER}i2098-{pid}-base"),
+        format!("{LITTER}i2098-{pid}-head"),
+    );
+    let litter = Litter::new(&env, head.clone(), base.clone()).await;
+    for (name, from) in [(&base, &litter.default_branch), (&head, &base)] {
+        env.api(
+            reqwest::Method::POST,
+            &format!("/repos/{repo}/branches"),
+            Some(json!({ "new_branch_name": name, "old_branch_name": from })),
+        )
+        .await;
+    }
+    env.api(
+        reqwest::Method::POST,
+        &format!("/repos/{repo}/contents/{head}.txt"),
+        Some(json!({ "branch": head, "content": "aTQ0Cg==", "message": format!("{head}: the work") })),
+    )
+    .await;
+
+    // The app, as `gitea_app` builds it, through `start_scheduler`.
+    let connector = knobas_db::test_util::scratch_database("start_work_live_refresh").await;
+    let pool = connector.pool(4).await.expect("a pool");
+    live_under::declare(&pool).await;
+    let secrets = Arc::new(MemoryStore::new());
+    secrets
+        .put(
+            &knobas_secrets::KeychainAccount::source(GITEA),
+            &Secret::just(AuthMethod::Pat, env.token.clone()),
+        )
+        .expect("the Gitea token is stored");
+    knobas_sync::config::insert(
+        &pool,
+        &knobas_sync::config::InsertConfig {
+            id: GITEA.to_owned(),
+            adapter_kind: "gitea".to_owned(),
+            display_name: GITEA.to_owned(),
+            base_url: env.url.clone(),
+            auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::Pat),
+            config: json!({ "repos": [repo] }),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .expect("the source row is written");
+    let (told, mut heard) = tokio::sync::mpsc::unbounded_channel();
+    let (ack, go) = std::sync::mpsc::channel();
+    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> =
+        Arc::new(Registry::for_process());
+    let scheduler = knobas_app::sources::start_scheduler(
+        SchedulerDeps {
+            pool: pool.clone(),
+            connections: Arc::new(Connections(connector)),
+            registry: Arc::clone(&registry),
+            secrets: secrets.clone(),
+            events: Arc::new(HoldsRefreshes {
+                told,
+                go: std::sync::Mutex::new(go),
+            }),
+            timing: tick_held_off(),
+            quit: knobas_sync::scheduler::Quit::default(),
+        },
+        knobas_sync::background::Background::new(),
+    )
+    .await
+    .expect("a scheduler");
+    let state = SourcesState {
+        pool,
+        scheduler,
+        secrets,
+        registry,
+    };
+    sync(&state, GITEA).await;
+
+    // -- A created ticket --------------------------------------------------
+    let filed = FiledIssue(std::sync::Mutex::new(None));
+    let title = format!("knobas-ticket-i2098-{pid}");
+    let (ticket, (mirror_title, _, payload)) = sent_and_refreshed(&state, &mut heard, &ack, json!({ "CreateTicket": {
+        "entity": format!("{GITEA}:{repo}"),
+        "title": title,
+        "body": "Filed through the queue to be refreshed.",
+        "ticket_type": "Task",
+    } }))
+    .await;
+    let number: u64 = ticket
+        .rsplit_once("/issues/")
+        .and_then(|(_, n)| n.parse().ok())
+        .unwrap_or_else(|| panic!("{ticket} names no issue"));
+    *filed.0.lock().unwrap() = Some(number);
+    let at_gitea = env
+        .api(reqwest::Method::GET, &format!("/repos/{repo}/issues/{number}"), None)
+        .await;
+    assert_eq!(mirror_title, title);
+    assert_eq!(payload["state"], at_gitea["state"]);
+    assert_eq!(payload["updated_at"], at_gitea["updated_at"]);
+
+    // -- A comment on it ----------------------------------------------------
+    let words = format!("refreshed before the run, {pid}");
+    let (refreshed, (_, body_text, payload)) = sent_and_refreshed(&state, &mut heard, &ack, comment_on(&ticket, &words)).await;
+    assert_eq!(refreshed, ticket);
+    let at_gitea = env
+        .api(reqwest::Method::GET, &format!("/repos/{repo}/issues/{number}"), None)
+        .await;
+    assert!(body_text.contains(&words), "{body_text:?}");
+    assert_eq!(payload["comments"], at_gitea["comments"]);
+    assert_eq!(payload["comments"], 1);
+
+    // -- A created pull request ----------------------------------------------
+    let pr_title = format!("knobas i2098 {pid}");
+    let (pull, (mirror_title, _, payload)) = sent_and_refreshed(&state, &mut heard, &ack, json!({ "CreatePullRequest": {
+        "entity": format!("{GITEA}:{repo}"),
+        "title": pr_title,
+        "body": "Opened through the queue to be refreshed.",
+        "head": head,
+        "base": base,
+    } }))
+    .await;
+    let number: u64 = pull
+        .rsplit_once('#')
+        .and_then(|(_, n)| n.parse().ok())
+        .unwrap_or_else(|| panic!("{pull} names no pull request"));
+    litter.opened(number);
+    assert_eq!(mirror_title, pr_title);
+    assert_eq!(payload["state"], "open");
+    assert_eq!(payload["merged"], false);
+    assert_eq!(payload["head"]["ref"], head.as_str());
+    assert_eq!(payload["base"]["ref"], base.as_str());
+
+    // -- Its merge -----------------------------------------------------------
+    let (refreshed, (_, _, payload)) = sent_and_refreshed(&state, &mut heard, &ack, json!({ "MergePullRequest": {
+        "entity": pull,
+        "style": "merge",
+        "delete_branch": false,
+    } }))
+    .await;
+    assert_eq!(refreshed, pull);
+    let at_gitea = env
+        .api(reqwest::Method::GET, &format!("/repos/{repo}/pulls/{number}"), None)
+        .await;
+    assert_eq!(at_gitea["merged"], true, "{at_gitea}");
+    assert_eq!(payload["merged"], at_gitea["merged"]);
+    assert_eq!(payload["state"], at_gitea["state"]);
+    assert_eq!(payload["merge_commit_sha"], at_gitea["merge_commit_sha"]);
+
+    state.scheduler.shutdown().await;
+    drop(filed);
+    drop(litter);
+    println!("refreshed before the run: {ticket} filed and commented on, {pull} opened and merged");
+}
+
+/// Send `payload` through the queue, wait for its refresh, and answer the
+/// entity refreshed with the mirror's title, text and payload for it, read
+/// while the refresh is held; then let the follow-up run go, and wait for it
+/// to finish so the next write is not sent under it.
+async fn sent_and_refreshed(
+    state: &SourcesState,
+    heard: &mut tokio::sync::mpsc::UnboundedReceiver<knobas_sync::scheduler::RefreshEnded>,
+    ack: &std::sync::mpsc::Sender<()>,
+    payload: serde_json::Value,
+) -> (String, (String, String, serde_json::Value)) {
+    use knobas_core::write_queue::WriteState;
+    use knobas_sync::scheduler::RefreshEnd;
+
+    let queued = knobas_app::sources::write_queue::submit_in_background(state, payload)
+        .await
+        .expect("queued");
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(60), heard.recv())
+        .await
+        .expect("the landed write is refreshed within a minute")
+        .expect("the events are still told");
+    assert_eq!(ended.write_id, Some(queued.id), "{ended:?}");
+    assert_eq!(ended.ended, RefreshEnd::Refreshed, "{ended:?}");
+    let row = knobas_core::write_queue::get(&state.pool, queued.id)
+        .await
+        .unwrap()
+        .expect("the write is on the queue");
+    assert_eq!(row.state, WriteState::Sent, "{row:?}");
+    let runs_since: i64 = sqlx::query_scalar(
+        "select count(*) from knobas.sync_run r, knobas.write_queue w
+          where w.id = $1 and r.source_id = w.source_id and r.started_at > w.settled_at",
+    )
+    .bind(queued.id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(runs_since, 0, "no run began before the refresh ended");
+    let mirrored: (String, String, serde_json::Value) = sqlx::query_as(
+        "select title, body_text, payload from sync.live_item where entity_id = $1",
+    )
+    .bind(&ended.entity_id)
+    .fetch_optional(&state.pool)
+    .await
+    .unwrap()
+    .unwrap_or_else(|| panic!("{} is not in the mirror", ended.entity_id));
+    ack.send(()).expect("the refresh is waiting");
+    settled(state, queued.id).await;
+    until_run_after(&state.pool, queued.id).await;
+    (ended.entity_id, mirrored)
+}
+
+/// Wait for a finished run of the Gitea source that began after write `id`
+/// was sent: the follow-up run, so the next write is not sent under it.
+async fn until_run_after(pool: &sqlx::PgPool, id: i64) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        let finished: Option<i64> = sqlx::query_scalar(
+            "select r.id from knobas.sync_run r, knobas.write_queue w
+              where w.id = $1 and r.source_id = w.source_id and r.started_at > w.settled_at
+                and r.finished_at is not null
+              limit 1",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .unwrap();
+        if finished.is_some() {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no run followed write {id} within two minutes"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}

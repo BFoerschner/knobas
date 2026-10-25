@@ -1679,6 +1679,12 @@ _require-live-env SOURCE +NAMES:
 # syncs the seeded ledger-api issues and an in-process mockd Jira into one app,
 # and reads the Tickets board over both. Read-only at Gitea.
 #
+# AND REFRESH (#2098): `each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_up_run`
+# sends a ticket, a comment on it, a pull request between two scratch branches
+# and its merge through the queue, and reads each item in the mirror as Gitea
+# holds it before the run that follows the write starts. Its issue and
+# branches are its own, taken back by its guards.
+#
 # AND CLONE (#823): `crates/knobas-app/tests/clone_live.rs` clones a seeded
 # repository over http (admitted by the test-only door; the app clones over
 # https and ssh only, ADR-0023), refuses a folder that is not a clone and a bad
@@ -1699,6 +1705,8 @@ gitea-live forge="gitea":
       -- --ignored --nocapture --test-threads=1 --exact back_to_back_comments_land_in_order_unheld_and_a_merge_between_holds_the_second
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
       -- --ignored --nocapture --test-threads=1 --exact a_gitea_issue_is_on_the_tickets_board_beside_a_jira_ticket
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
+      -- --ignored --nocapture --test-threads=1 --exact each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_up_run
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test clone_live \
       -- --ignored --nocapture --test-threads=1
 

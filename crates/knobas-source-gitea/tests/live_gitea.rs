@@ -5617,6 +5617,173 @@ async fn a_ticket_is_filed_moved_and_commented_on_through_its_writes() {
     println!("{id} filed, closed, reopened and commented on");
 }
 
+/// The item a refresh answers for `id`, or a panic naming what it answered.
+async fn refreshed(source: &dyn knobas_source::Source, id: &str) -> SyncItem {
+    match source.refresh(id).await {
+        Ok(knobas_source::RefreshAnswer::Item(item)) => item,
+        other => panic!("{id} refreshed as {other:?}, not as the item"),
+    }
+}
+
+/// **A refresh reads an issue and a pull request back as Gitea holds them**
+/// (#2098, ADR-0031), on items this test makes itself: an issue filed, read
+/// back as the next run emits it, commented on and read back with the
+/// comment, then deleted at the server and answered *gone*; a pull request
+/// opened from a scratch branch, read back as the run emits it, commented on
+/// and read back with the comment. A number Gitea never issued is *gone*, and
+/// the repository, the branch and its head commit are *not offered*. The
+/// battery's clause 13 holds the seeded items of the quiet repositories.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn an_issue_and_a_pull_request_are_refreshed_as_gitea_holds_them_and_gone_once_deleted() {
+    use knobas_source::{RefreshAnswer, WriteOp};
+
+    let env = env();
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    clear_test_issues(&http, &env, &auth).await;
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let repo_id = format!("gitea:{}", env.full_name());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let (_, cursor) = full(&*source).await;
+
+    // The issue: filed, read back as the run emits it.
+    let filed = source
+        .write(WriteOp::CreateTicket {
+            entity: repo_id.clone(),
+            title: format!("{TEST_ISSUE}refresh-{stamp}"),
+            body: "Filed by the live suite to be refreshed.".to_owned(),
+            ticket_type: "Task".to_owned(),
+        })
+        .await
+        .expect("Gitea takes the issue");
+    let ticket = format!("gitea:{}", filed.remote_id.expect("the receipt names it"));
+    let read = refreshed(&*source, &ticket).await;
+    let mut sink = VecSink(Vec::new());
+    source
+        .sync(Some(cursor), &mut sink)
+        .await
+        .expect("an incremental run");
+    let synced = sink
+        .0
+        .iter()
+        .find(|item| item.entity.to_string() == ticket)
+        .unwrap_or_else(|| panic!("the run did not emit {ticket}"));
+    assert_eq!(
+        (&read.kind, &read.title, &read.body_text, &read.payload),
+        (&synced.kind, &synced.title, &synced.body_text, &synced.payload),
+        "the refresh of {ticket} is the item the run emits"
+    );
+
+    // Commented on: the refresh brings the discussion.
+    let words = format!("refreshed comment {stamp}");
+    source
+        .write(WriteOp::Comment {
+            entity: ticket.clone(),
+            body: words.clone(),
+        })
+        .await
+        .expect("Gitea takes the comment");
+    let read = refreshed(&*source, &ticket).await;
+    assert!(read.body_text.contains(&words), "{:?}", read.body_text);
+    assert_eq!(read.payload["comments"], 1, "{:#?}", read.payload);
+
+    // Deleted at the server: gone.
+    clear_test_issues(&http, &env, &auth).await;
+    assert!(
+        matches!(source.refresh(&ticket).await, Ok(RefreshAnswer::Gone)),
+        "a deleted issue is gone"
+    );
+
+    // The pull request, from a scratch branch of this test's own.
+    let branch = format!("{}refresh-{stamp}", live_env::LITTER);
+    litter.branch_off_main(&branch).await;
+    push_file(
+        &http,
+        &env,
+        &branch,
+        &format!("{branch}.txt"),
+        &format!("{branch}: the work"),
+    )
+    .await;
+    let opened = source
+        .write(WriteOp::CreatePullRequest {
+            entity: repo_id.clone(),
+            title: format!("knobas refresh check {stamp}"),
+            body: "Opened to be refreshed.".to_owned(),
+            head: branch.clone(),
+            base: "main".to_owned(),
+        })
+        .await
+        .expect("Gitea opens the pull request");
+    let pull = format!("gitea:{}", opened.remote_id.expect("the receipt names it"));
+    let number: u64 = pull
+        .rsplit_once('#')
+        .and_then(|(_, n)| n.parse().ok())
+        .expect("a pull request key");
+    litter.will_open_pull(number);
+    let read = refreshed(&*source, &pull).await;
+    let (items, _) = full(&*source).await;
+    let synced = items
+        .iter()
+        .find(|item| item.entity.to_string() == pull)
+        .unwrap_or_else(|| panic!("the run did not emit {pull}"));
+    assert_eq!(
+        (&read.kind, &read.title, &read.body_text),
+        (&synced.kind, &synced.title, &synced.body_text),
+        "the refresh of {pull} is the item the run emits"
+    );
+    for at in [
+        "/state",
+        "/merged",
+        "/head/ref",
+        "/head/sha",
+        "/base/ref",
+        "/base/repo/full_name",
+    ] {
+        assert_eq!(
+            read.payload.pointer(at),
+            synced.payload.pointer(at),
+            "{pull} at {at}"
+        );
+    }
+    source
+        .write(WriteOp::Comment {
+            entity: pull.clone(),
+            body: words.clone(),
+        })
+        .await
+        .expect("Gitea takes the comment");
+    let read = refreshed(&*source, &pull).await;
+    assert!(read.body_text.contains(&words), "{:?}", read.body_text);
+
+    // A number never issued is gone; the kinds not read by id are not offered.
+    let unissued = format!("{repo_id}#{}", number + 100_000);
+    assert!(
+        matches!(source.refresh(&unissued).await, Ok(RefreshAnswer::Gone)),
+        "{unissued}"
+    );
+    let head = read.payload["head"]["sha"]
+        .as_str()
+        .expect("a head sha")
+        .to_owned();
+    for id in [
+        repo_id.clone(),
+        format!("{repo_id}@refs/heads/{branch}"),
+        format!("{repo_id}@{head}"),
+    ] {
+        assert!(
+            matches!(source.refresh(&id).await, Ok(RefreshAnswer::NotOffered)),
+            "{id}"
+        );
+    }
+    println!("refreshed {ticket} (then gone) and {pull}");
+}
+
 /// The walk reading against the real server (#1379): over the two quiet
 /// repositories, a full run and then an unchanged one each report 0, 1, 2 of 2
 /// `repositories`, and the unchanged one pushes no item while it does.
