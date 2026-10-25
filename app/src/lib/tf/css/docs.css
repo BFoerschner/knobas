@@ -164,9 +164,16 @@
 }
 .tf-findbar .tf-findx { margin-left: auto; }
 .tf mark.tf-cur { outline: 2px solid var(--card-ink); }
-.tf-rd-outline { position: sticky; top: 0; padding-top: 30px; font-size: var(--t-sm); }
-/* The find bar sticks to the top of the same scroll, so the outline sticks below it. */
-.tf-findbar ~ .tf-rd-sheet .tf-rd-outline { top: 38px; }
+/*
+  No taller than the window, with a scroll of its own, so a long outline's last section is in reach
+  at any scroll (#2091): the window less the shell's top bar and status bar (about 76px) and a margin.
+*/
+.tf-rd-outline {
+  position: sticky; top: 0; padding-top: 30px; font-size: var(--t-sm);
+  max-height: calc(100vh - 96px); overflow-y: auto;
+}
+/* The find bar sticks to the top of the same scroll, so the outline sticks below it, as much shorter. */
+.tf-findbar ~ .tf-rd-sheet .tf-rd-outline { top: 38px; max-height: calc(100vh - 134px); }
 .tf .tf-rd-outline h3 { font-size: var(--t-sm); font-weight: 600; color: var(--ink); margin: 0 0 8px; }
 .tf-toc a {
   display: block; padding: 5px 0 5px 12px; border-left: 2px solid var(--rule); text-decoration: none;

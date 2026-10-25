@@ -59,10 +59,13 @@
 /* *Submit review (N pending)*: prototype-6's warn-edged button. */
 .tf-btn.tf-warnbtn { border-color: var(--warn); color: var(--warn); }
 .tf-prfiles { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
+/* As tall as the diffs beside it, so the file list has room to stick in (#2091). */
+.tf-prfiles-nav { align-self: stretch; }
 .tf-prfiles-nav .tf-minif { max-width: none; margin-bottom: 8px; }
+/* Bounded by the window, with a scroll of its own, so a long list's last file is in reach (#2091). */
 .tf-flist {
   display: flex; flex-direction: column; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px;
-  font-size: var(--t-sm); position: sticky; top: 64px;
+  font-size: var(--t-sm); position: sticky; top: 64px; max-height: calc(100vh - 160px); overflow: auto;
 }
 .tf-flist button {
   display: flex; gap: 8px; padding: 6px 10px; border: 0; border-top: 1px solid var(--rule-2); background: none; color: var(--ink);

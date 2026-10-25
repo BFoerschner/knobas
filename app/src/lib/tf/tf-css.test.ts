@@ -373,3 +373,32 @@ test("below 900px the Docs tree is a drawer over the page, on the component's ow
   const stillRule = still.slice(0, still.indexOf("\n}"));
   expect(stillRule).toMatch(/\.tf-rd \.tf-rd-tree,\s*\.tf-rd\.tf-rd-drawer \.tf-rd-tree\s*\{\s*transition:\s*none;/);
 });
+
+/** The one-row bars that stick: never taller than the window, so they need no bound of their own (#2091). */
+const STICKY_BARS = [".tf-fbar", ".tf-findbar", ".tf-ln-h", ".tf-wtabs", ".tf-logbar"];
+
+test("every sticky side column is bounded by the window and scrolls on its own, so its last entry is reachable (#2091)", () => {
+  const sticky = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
+    .filter(([, , body]) => /position:\s*sticky/.test(body!))
+    .map(([, selector, body]) => [selector!.trim(), body!] as const);
+  const columns = sticky.filter(([selector]) => !STICKY_BARS.includes(selector));
+  // The columns this test was written against: it keeps finding them.
+  expect(columns.map(([selector]) => selector)).toEqual(
+    expect.arrayContaining([".tf-ftree", ".tf-flist", ".tf-rd-outline", ".tf-dp-rail", ".tf-dp-panel"]),
+  );
+  const unbounded = columns
+    .filter(([, body]) => !/max-height:\s*calc\(100vh - \d+px\)/.test(body) || !/overflow(-y)?:\s*auto/.test(body))
+    .map(([selector]) => selector);
+  expect(unbounded).toEqual([]);
+  // Below the open find bar the outline sticks lower, and is shorter by as much.
+  const lower = block(code, ".tf-findbar ~ .tf-rd-sheet .tf-rd-outline");
+  const by = (body: string) => Number(/max-height:\s*calc\(100vh - (\d+)px\)/.exec(body)?.[1]);
+  const top = (body: string) => Number(/(?<![\w-])top:\s*(\d+)/.exec(body)?.[1]);
+  const outline = block(code, ".tf-rd-outline");
+  expect(by(lower) - by(outline)).toBe(top(lower) - top(outline));
+});
+
+test("the changed files list sticks: its box is as tall as the diffs beside it (#2091)", () => {
+  // A sticky element moves only inside its parent, and a grid item kept to its content's height leaves it no room.
+  expect(block(code, ".tf-prfiles-nav")).toMatch(/align-self:\s*stretch/);
+});

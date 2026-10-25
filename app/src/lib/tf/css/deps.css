@@ -6,7 +6,11 @@
 .tf-dp-fail { color: var(--err); font-size: var(--t-sm); }
 .tf-dp-grid { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; align-items: start; }
 @media (max-width: 900px) { .tf-dp-grid { grid-template-columns: minmax(0, 1fr); } .tf-dp-rail { position: static; } }
-.tf-dp-rail { position: sticky; top: 8px; font-size: var(--t-sm); display: flex; flex-direction: column; gap: 1px; }
+/* Bounded by the window as the panel is, with a scroll of its own, so a long rail's last layer is in reach (#2091). */
+.tf-dp-rail {
+  position: sticky; top: 8px; font-size: var(--t-sm); display: flex; flex-direction: column; gap: 1px;
+  max-height: calc(100vh - 120px); overflow: auto;
+}
 .tf-dp-rh { font-size: var(--t-xs); color: var(--muted); margin: 2px 0 4px; }
 .tf-dp-rl { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
 .tf-dp-rl button {
