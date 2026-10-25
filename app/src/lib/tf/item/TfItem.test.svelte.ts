@@ -330,7 +330,7 @@ test("an item the mirror cannot read still draws the breadcrumb, named for an it
 // -- Refresh (#2107) -----------------------------------------------------------
 
 const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-fhead .tf-refresh");
-const banners = () => [...target.querySelectorAll(".tf-banner")].map((banner) => banner.textContent?.trim() ?? "");
+const banners = () => [...target.querySelectorAll(".tf-withdrawn, .tf-turnedoff")].map((banner) => banner.textContent?.trim() ?? "");
 
 /** Reads that answer `first`, then each of `later` in turn, counting the detail reads. */
 function reads(first: EntityDetail, ...later: EntityDetail[]) {
@@ -367,7 +367,7 @@ test("Refresh reads the item, says Refreshing… meanwhile, and settles without 
   expect(count.view).toBe(2);
   expect(target.querySelector("h1")?.textContent).toBe("Quay crane 4 inspection, signed off");
   expect(refreshButton()?.textContent).toBe("Refresh");
-  expect(target.querySelector(".tf-cfail")).toBeNull();
+  expect(target.querySelector(".tf-refresh-failed")).toBeNull();
 });
 
 test("a tombstoned item keeps Refresh, and one that comes back loses the withdrawn banner", async () => {
@@ -400,7 +400,7 @@ test("a failed refresh says why in one line and keeps the detail as it was", asy
 
   refreshButton()!.click();
   await settle();
-  expect(target.querySelector(".tf-cfail")?.textContent).toBe("Couldn't refresh: connection refused");
+  expect(target.querySelector(".tf-refresh-failed")?.textContent).toBe("Couldn't refresh: connection refused");
   expect(count.detail).toBe(1);
   expect(target.querySelector("h1")?.textContent).toBe("Quay crane 4 inspection");
   expect(target.querySelector(".tf-item-text")?.textContent).toBe(BODY);

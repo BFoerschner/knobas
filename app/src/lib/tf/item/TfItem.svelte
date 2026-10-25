@@ -228,7 +228,7 @@
       {/if}
     </header>
     <TfDetailBanners {detail} />
-    {#if refresh.failed !== null}<p class="tf-cfail" role="alert">{refresh.failed}</p>{/if}
+    {#if refresh.failed !== null}<div class="tf-banner tf-err tf-refresh-failed" role="alert">{refresh.failed}</div>{/if}
     <div class="tf-item-body">
       {#if view === undefined}
         <!-- The view has not answered yet. -->

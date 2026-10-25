@@ -599,7 +599,7 @@
       </div>
     </header>
     {#if detail !== null}<TfDetailBanners {detail} />{/if}
-    {#if refresh.failed !== null}<p class="tf-cfail" role="alert">{refresh.failed}</p>{/if}
+    {#if refresh.failed !== null}<div class="tf-banner tf-err tf-refresh-failed" role="alert">{refresh.failed}</div>{/if}
     <nav class="tf-tabs" aria-label="Pull request">
       {#each PR_TABS as entry (entry.id)}
         {@const count = counts[entry.id]}
