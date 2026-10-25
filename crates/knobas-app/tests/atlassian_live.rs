@@ -3695,7 +3695,11 @@ const COMMENTER_PASSWORD: &str = "knobas-commenter-2073";
 
 /// [`COMMENTER`], and the comment it posted, both taken away when the guard
 /// drops and checked gone.
-struct Commenter {
+struct Commenter(Mint);
+
+/// What [`Commenter`] takes away, and how.
+#[derive(Clone)]
+struct Mint {
     url: String,
     admin: (String, String),
     comment: Option<String>,
@@ -3706,12 +3710,12 @@ impl Commenter {
     /// space grants `confluence-users`, which a new user is in, so it may
     /// comment there.
     async fn mint(wiki: &Wiki) -> Commenter {
-        let commenter = Commenter {
+        let minted = Mint {
             url: wiki.url.clone(),
             admin: (wiki.user.clone(), wiki.password.clone()),
             comment: None,
         };
-        if let Err(left) = commenter.take_away().await {
+        if let Err(left) = minted.take_away().await {
             panic!("an earlier run's {COMMENTER} could not be taken away: {left}");
         }
         let (status, made) = wiki
@@ -3731,7 +3735,7 @@ impl Commenter {
             matches!(status, 200 | 201),
             "minting {COMMENTER}: {status} {made}"
         );
-        commenter
+        Commenter(minted)
     }
 
     /// One request as [`COMMENTER`].
@@ -3744,7 +3748,7 @@ impl Commenter {
         let http = client();
         api(
             &http,
-            &self.url,
+            &self.0.url,
             COMMENTER,
             COMMENTER_PASSWORD,
             method,
@@ -3769,7 +3773,7 @@ impl Commenter {
             .await;
         assert_eq!(status, 200, "{COMMENTER} commenting on {page}: {body}");
         let id = body["id"].as_str().expect("a comment id").to_owned();
-        self.comment = Some(id.clone());
+        self.0.comment = Some(id.clone());
         id
     }
 
@@ -3791,7 +3795,9 @@ impl Commenter {
             .await;
         assert_eq!(status, 200, "{COMMENTER} editing comment {id}: {body}");
     }
+}
 
+impl Mint {
     /// The comment deleted, then the account, each checked gone.
     async fn take_away(&self) -> Result<(), String> {
         let http = client();
@@ -3838,14 +3844,10 @@ impl Commenter {
 
 impl Drop for Commenter {
     fn drop(&mut self) {
-        let commenter = Commenter {
-            url: self.url.clone(),
-            admin: self.admin.clone(),
-            comment: self.comment.take(),
-        };
+        let minted = self.0.clone();
         undo(
             &format!("{COMMENTER} and its comment"),
-            move || async move { commenter.take_away().await },
+            move || async move { minted.take_away().await },
         );
     }
 }
