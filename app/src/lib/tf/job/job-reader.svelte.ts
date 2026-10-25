@@ -126,6 +126,8 @@ export interface JobReader {
    * `id` (by default, the one on screen).
    */
   rereadDetail(id?: string): void;
+  /** After a refresh or a run brought a queued comment in (#2103): the thread again, keeping the visit it answered. */
+  rereadThread(): void;
   /** After a clone finished: the checkout line's repository read again, while it has no clone. */
   rereadCheckout(): void;
   /** Drops every answer still out. */
@@ -457,6 +459,18 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
         () => {},
       );
       void readWorkflow(id, mine);
+    },
+    rereadThread() {
+      const id = state.detail?.row.entity_id;
+      if (id === undefined) return;
+      const mine = token;
+      ports.entityThread(id).then(
+        (again) => {
+          if (mine === token) state.thread = again;
+        },
+        // The thread keeps what it has; the next open reads it again.
+        () => {},
+      );
     },
     rereadCheckout() {
       const of = state.checkoutOf;

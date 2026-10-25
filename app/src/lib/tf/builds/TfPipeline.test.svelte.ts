@@ -12,7 +12,8 @@ import type { PipelineRow, PipelineSettings, RunRow } from "../../ipc/entity";
 import type { QueuedWrite, SourceDescriptor, SourceSummary, WriteOpPayload } from "../../ipc/sources";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
-import { forgetQueued, markQueued, queuedMarks } from "../queued.svelte";
+import { echoEvents, echoFollower } from "../echo-events.fixture";
+import { forgetEchoes, echoWrite, echoesOn } from "../queued.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
 import TfPipeline from "./TfPipeline.svelte";
@@ -30,7 +31,7 @@ afterEach(() => {
   if (page) unmount(page);
   page = null;
   target.remove();
-  forgetQueued();
+  forgetEchoes();
 });
 
 async function settle() {
@@ -498,7 +499,7 @@ test("the page stops listening when it goes", async () => {
 const runNos = () => [...target.querySelectorAll(".tf-runs tbody tr .tf-run-no")].map((td) => td.querySelector("b")?.textContent);
 
 test("a run queued on the run page is one queued row at the top; another pipeline draws none for it", async () => {
-  markQueued(PIPELINE.entity_id, QUEUED_RUN, "feature/PAY-231-sepa-retry", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
+  echoWrite(PIPELINE.entity_id, QUEUED_RUN, "feature/PAY-231-sepa-retry", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
   const drawn = draw();
   await settle();
   expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
@@ -512,7 +513,7 @@ test("a run queued on the run page is one queued row at the top; another pipelin
 });
 
 test("the queued row goes once a read holds the run, and is never drawn beside it", async () => {
-  markQueued(PIPELINE.entity_id, QUEUED_RUN, "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
+  echoWrite(PIPELINE.entity_id, QUEUED_RUN, "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
   const drawn = draw();
   await settle();
   expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
@@ -526,7 +527,7 @@ test("the queued row goes once a read holds the run, and is never drawn beside i
   drawn.sync!(synced("teamcity"));
   await settle();
   expect(runNos().slice(0, 2)).toEqual(["#1188", "#1187"]);
-  expect(queuedMarks(PIPELINE.entity_id, QUEUED_RUN)).toEqual([]);
+  expect(echoesOn(PIPELINE.entity_id, QUEUED_RUN)).toEqual([]);
   expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs 35");
 });
 
@@ -568,7 +569,7 @@ test("a click anywhere on a run row opens the run; its Log link and Run again…
 
 test("a click on a queued row opens nothing: there is no run yet", async () => {
   location.hash = "#/builds";
-  markQueued(PIPELINE.entity_id, QUEUED_RUN, "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
+  echoWrite(PIPELINE.entity_id, QUEUED_RUN, "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
   draw();
   await settle();
   (firstRow() as HTMLElement).querySelector<HTMLElement>(".tf-run-br")!.click();
@@ -1128,4 +1129,49 @@ test("Run… draws the overrides and the queue's top disabled saying why where t
       },
     },
   ]);
+});
+
+// -- the echo's one lifecycle: queued, sent, gone on the refresh's read (#2104) --
+
+test("a run queued here says queued, then sent, and goes on the refresh event's read that holds it (#2104)", async () => {
+  const events = echoEvents(settle);
+  const { follower, sent } = echoFollower();
+  const drawn = draw(undefined, "PAY-231", { listen: events.listen, follower: () => follower });
+  await settle();
+  button("Run on feature/PAY-231-sepa-retry")!.click();
+  await settle();
+  expect(runNos()[0]).toBe("queued");
+  sent(41);
+  expect(runNos()[0]).toBe("sent");
+  drawn.next = [run(1188, "ok", today(0, 30), { finished: null, duration_seconds: null, trigger: "person", started_by_me: true, branch: "feature/PAY-231-sepa-retry" }), ...RUNS];
+  await events.refreshed(PIPELINE.entity_id, 41);
+  expect(runNos().slice(0, 2)).toEqual(["#1188", "#1187"]);
+});
+
+test("a parameter change says queued, then sent, and goes once the read shows the new value, the page still mounted (#2104)", async () => {
+  const events = echoEvents(settle);
+  const { follower, sent } = echoFollower();
+  let read = KINDS;
+  draw([PIPELINE.entity_id, "params"], "PAY-231", { settings: () => Promise.resolve(read), listen: events.listen, follower: () => follower });
+  await settle();
+  paramRows()[0]!.querySelector<HTMLButtonElement>("button")!.click();
+  flushSync();
+  choose(target.querySelector<HTMLSelectElement>("select[aria-label='New default for env']")!, "prod-dryrun");
+  button("Save")!.click();
+  await settle();
+  const chip = () => paramRows()[0]!.querySelector("td:nth-child(2) .tf-chip")?.textContent ?? null;
+  expect(chip()).toBe("queued");
+  sent(41);
+  expect(chip()).toBe("sent");
+  // A run's end whose read still holds the old value keeps it.
+  await events.ended("teamcity");
+  expect(chip()).toBe("sent");
+  // Somebody else's change to another value is not this one landing.
+  read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "staging" } : p)) };
+  await events.ended("teamcity");
+  expect(chip()).toBe("sent");
+  read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "prod-dryrun" } : p)) };
+  await events.refreshed(PIPELINE.entity_id, 41);
+  expect(chip()).toBeNull();
+  expect(paramRows()[0]!.textContent).toContain("prod-dryrun");
 });

@@ -17,16 +17,7 @@ import { breadcrumbJob, currentJob, linkRequest } from "../tf/job/current.svelte
 import { createLayers } from "../tf/layers.svelte";
 import { createApps } from "../tf/openin/apps.svelte";
 import { createClones } from "../tf/openin/clones.svelte";
-import { askAgain, forgetQueued, markQueued, queuedMarks, takeAgain } from "../tf/queued.svelte";
-import {
-  forgetQueued as forgetRepoQueued,
-  isDeleteQueued,
-  madeNotListed,
-  markCommit,
-  markDeleted,
-  markMade,
-  queuedCommit,
-} from "../tf/repo/queued.svelte";
+import { askAgain, forgetEchoes, echoWrite, echoesOn, takeAgain } from "../tf/queued.svelte";
 import { createDecisions } from "../tf/review/decisions.svelte";
 import { createTheme } from "../tf/theme.svelte";
 import { createFollower, writeFollower } from "./follow-write";
@@ -319,31 +310,21 @@ test("clones.reset drops the marks and the finished count and unlistens", async 
   expect(listen, "the listener was not registered again").toHaveBeenCalledTimes(2);
 });
 
-test("tf queued marks and asks reset through forgetQueued", () => {
-  markQueued("e", "title", "New title");
+test("tf echoes and asks reset through forgetEchoes", () => {
+  echoWrite("e", "title", "New title");
   askAgain("e", "title", "again");
-  forgetQueued();
-  expect(queuedMarks("e")).toEqual([]);
+  forgetEchoes();
+  expect(echoesOn("e")).toEqual([]);
   expect(takeAgain("e", "title")).toBeNull();
 });
 
-test("forgetQueued stops the write follow a mark started", async () => {
+test("forgetEchoes stops the write follow an echo started", async () => {
   const unlisten = vi.fn();
   const follower = createFollower({ listen: async () => unlisten, pendingWrites: async () => [] });
-  markQueued("e", "title", "T", { write: { id: 9 }, following: { what: "x" } as never, follower });
+  echoWrite("e", "title", "T", { write: { id: 9 }, following: { what: "x" } as never, follower });
   await flush();
-  forgetQueued();
+  forgetEchoes();
   expect(unlisten).toHaveBeenCalledTimes(1);
-});
-
-test("the repo's queued names and commits reset through forgetQueued", () => {
-  markMade("r", "branch-a");
-  markDeleted("r", "branch-b");
-  markCommit("r", "main", "a.md", { message: "m", base: "sha" });
-  forgetRepoQueued();
-  expect(madeNotListed("r", [])).toEqual([]);
-  expect(isDeleteQueued("r", "branch-b")).toBe(false);
-  expect(queuedCommit("r", "main", "a.md", "sha")).toBeNull();
 });
 
 test("decisions.reset cancels a held write and forgets the verdicts", async () => {

@@ -91,6 +91,8 @@ let acks: string[];
 let heard: Map<number, Hear>;
 /** The page's `sync:state` listeners. */
 let synced: Set<(event: { payload: unknown }) => void>;
+/** The page's `item:refreshed` listeners (#2105). */
+let refreshes: Set<(event: { payload: unknown }) => void>;
 
 beforeEach(() => {
   toasts.items.splice(0);
@@ -100,6 +102,7 @@ beforeEach(() => {
   acks = [];
   heard = new Map();
   synced = new Set();
+  refreshes = new Set();
   target = document.createElement("div");
   document.body.appendChild(target);
 });
@@ -144,6 +147,10 @@ function ports(over: Partial<MonitorPorts> = {}): MonitorPorts {
     jobReach: async (id): Promise<Reached[]> =>
       id === "jira:PAY-231" ? [{ entity_id: "asset:f", kind: "asset", step: "asset:f", origin: { kind: "own" } as never }] : [],
     listen: async (event, handler) => {
+      if (event === EVENTS.itemRefreshed) {
+        refreshes.add(handler);
+        return () => refreshes.delete(handler);
+      }
       if (event !== EVENTS.syncState) return () => {};
       synced.add(handler);
       return () => synced.delete(handler);
@@ -473,22 +480,104 @@ test("a create withdrawn in the queue leaves the open rows, and the re-read give
   expect(button(rows()[0]!, "Create monitor")).toBeDefined();
 });
 
-test("a sent create stays queued until the end of the sync that brings its monitor in, and is not followed", async () => {
+test("a sent create reads Monitor sent until the end of the sync that brings its monitor in, and is not followed (#2105)", async () => {
   let watched = false;
   const stand = ports({
     unmonitoredAssets: async () =>
       watched ? UNWATCHED.filter((row) => row.id !== "asset:pg") : withCreate(() => onItsWay(7, "sent")).unmonitoredAssets(),
   });
   await draw(["unmonitored"], null, stand);
-  expect(lastCell(rows()[0]!)).toBe("Monitor queued");
+  expect(lastCell(rows()[0]!)).toBe("Monitor sent");
   expect(heard.size).toBe(0);
   syncEnds();
   await settle();
-  expect(lastCell(rows()[0]!)).toBe("Monitor queued");
+  expect(lastCell(rows()[0]!)).toBe("Monitor sent");
 
   watched = true;
   syncEnds();
   await settle();
   expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["Gitea"]);
   expect(synced.size).toBe(0);
+});
+
+// -- the echo's one lifecycle: queued, sent, gone on the roster's read (#2105) --
+
+/** Raise the refresh that followed write `write` on `entity` (#2095). */
+function refreshed(entity: string, write: number | null) {
+  for (const handler of refreshes) handler({ payload: { entity_id: entity, write_id: write, ended: "refreshed" } });
+}
+
+test("a create says Monitor queued, then Monitor sent, and goes once the roster holds the monitor Kuma made (#2105)", async () => {
+  let going: QueuedWrite | null = null;
+  let roster = ROSTER;
+  const stand = ports({
+    ...withCreate(() => going),
+    monitorRoster: async () => roster,
+    submitWrite: async (payload) => {
+      writes.push(payload);
+      going = onItsWay(writes.length, "pending");
+      return going;
+    },
+  });
+  await draw(["unmonitored"], null, stand);
+  button(rows()[0]!, "Create monitor")!.click();
+  await settle();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => text(b) === "Create monitor")!.click();
+  await settle();
+  const name = (writes[0] as { CreateMonitor: { name: string } }).CreateMonitor.name;
+  expect(lastCell(rows()[0]!)).toBe("Monitor queued");
+
+  // Sent: the queue no longer lists it, and the read names it sent.
+  going = onItsWay(1, "sent");
+  heard.get(1)!(undefined);
+  await settle();
+  expect(lastCell(rows()[0]!)).toBe("Monitor sent");
+
+  // Kuma made it and the poll attached it: the roster holds it, the asset is watched.
+  roster = [...ROSTER, monitor("kuma:9", name, { assets: [{ id: "asset:pg", name: "pg-main", path: null, type_label: "Database server" }] })];
+  going = null;
+  const watched = stand.unmonitoredAssets;
+  stand.unmonitoredAssets = async () => (await watched()).filter((row) => row.id !== "asset:pg");
+  refreshed("kuma:9", 1);
+  await settle();
+  expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["Gitea"]);
+});
+
+test("a pause and a resume each draw a row echo queued, then sent, gone once the roster's read shows the new state (#2105)", async () => {
+  let roster = ROSTER;
+  let next = 30;
+  const stand = ports({
+    monitorRoster: async () => roster,
+    submitWrite: async (payload) => {
+      writes.push(payload);
+      return { id: next++, state: "pending" } as QueuedWrite;
+    },
+  });
+  await draw([], null, stand);
+  const row = (name: string) => rows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
+  const echo = (name: string) => row(name).querySelector(".tf-mon-acts .tf-chip")?.textContent ?? null;
+  button(row("payouts /health"), "Pause")!.click();
+  await settle();
+  button(row("yard-planner"), "Resume")!.click();
+  await settle();
+  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["queued", "queued"]);
+  expect(button(row("payouts /health"), "Pause")).toBeUndefined();
+
+  heard.get(30)!(undefined);
+  heard.get(31)!(undefined);
+  await settle();
+  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["sent", "sent"]);
+
+  // A run's end before Kuma's /metrics moved: still on its way.
+  syncEnds();
+  await settle();
+  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["sent", "sent"]);
+
+  roster = ROSTER.map((one) =>
+    one.entity_id === "kuma:1" ? { ...one, tombstoned: true, actions: ["resume_monitor"] } : one.entity_id === "kuma:3" ? { ...one, tombstoned: false, actions: ["pause_monitor"] } : one,
+  );
+  refreshed("kuma:1", 30);
+  await settle();
+  expect([echo("payouts /health"), echo("yard-planner")]).toEqual([null, null]);
+  expect(button(row("payouts /health"), "Resume")).toBeDefined();
 });

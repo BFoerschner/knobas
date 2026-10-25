@@ -8,13 +8,22 @@
  * `submit_write` was handed, which is the whole of what the shell decides.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+// The repository's writes are followed by the shell's follower; a test that says what the queue heard puts its own in.
+const followed = vi.hoisted(() => ({ follower: null as import("../../shell/follow-write").WriteFollower | null }));
+vi.mock("../../shell/follow-write", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../shell/follow-write")>();
+  return { ...real, writeFollower: () => followed.follower ?? real.writeFollower() };
+});
 
 import type { EntityDetail, EntityRow, SourceView, ViewAction, ViewBlock, ViewRow } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
-import { forgetQueued } from "./queued.svelte";
+import { echoEvents, echoFollower } from "../echo-events.fixture";
+import { echoWrite, echoesOn, forgetEchoes } from "../queued.svelte";
+import { DELETED, MADE, REPO_BRANCHES, REPO_FILES, commitKind } from "./repo";
 import { sourceName } from "./repo";
 import TfRepo, { type RepoPorts } from "./TfRepo.svelte";
 
@@ -150,7 +159,7 @@ let links: (string | null)[];
 let reads: [string, string | null][];
 
 beforeEach(() => {
-  forgetQueued();
+  forgetEchoes();
   toasts.items = [];
   writes = [];
   links = [];
@@ -161,6 +170,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  followed.follower = null;
   health.replace([]);
   if (view) unmount(view);
   view = null;
@@ -348,7 +358,7 @@ test("Delete… on a branch with unmerged commits warns what is lost, the open P
   await settle();
   expect(writes).toEqual([{ DeleteBranch: { entity: FEATURE } }]);
   expect(dialog()).toBeNull();
-  expect(text(rowOf("feature/").querySelector(".tf-chip.tf-warn"))).toBe("delete queued");
+  expect(text(rowOf("feature/").querySelector(".tf-chip.tf-info"))).toBe("delete queued");
   expect(button("Delete…", rowOf("feature/"))).toBeUndefined();
   expect(toasts.items.at(-1)!.text).toBe("Queued: delete branch feature/PAY-231-sepa-retry.");
 });
@@ -845,4 +855,114 @@ describe("a repository whose source is not Gitea", () => {
   test("a source that is not yet known reads as the code host", () => {
     expect([sourceName(null), sourceName({ id: "forgejo", display_name: "" })]).toEqual(["the code host", "forgejo"]);
   });
+});
+
+// -- the echo's one lifecycle: settled on the listing's re-read (#2105) ------------
+
+/** Ports whose branch listing and README read are `listing()` and `readme()` as each read is asked, and whose events the test raises. */
+function rereading(listing: () => ViewRow[] | null, readme: () => string | null) {
+  const events = echoEvents(settle);
+  const base = ports();
+  const stand = ports({
+    listen: events.listen,
+    entityView: async (id, section) => {
+      const read = await base.entityView(id, section);
+      if (id === REPO && section === "branches" && listing() !== null) return one("branches", [{ type: "entities", title: null, rows: listing()! }]);
+      if (section === "file:README.md" && readme() !== null) {
+        const block = read!.sections[0]!.blocks[0] as Extract<ViewBlock, { type: "file" }>;
+        return one("file:README.md", [{ ...block, sha: readme() }]);
+      }
+      return read;
+    },
+  });
+  return { events, stand };
+}
+
+const branchNames = () => [...target.querySelectorAll(".tf-rbranches tbody tr")].map((tr) => text(tr.querySelector("td")));
+
+test("a branch made goes once the listing's re-read the refresh event asks holds it, the tab not opened again (#2105)", async () => {
+  echoWrite(REPO, MADE, "fix/PAY-231-readme", { write: { id: 5 }, many: true, surface: REPO_BRANCHES, source: "gitea" });
+  let listing: ViewRow[] | null = null;
+  const { events, stand } = rereading(() => listing, () => null);
+  await draw([REPO, "branches"], null, stand);
+  expect(branchNames().at(-1)).toBe("fix/PAY-231-readme queued");
+  listing = [vrow(MAIN, "main", "default", "5d77e1a2c3 · 1 day ago"), vrow(`${REPO}@refs/heads/fix/PAY-231-readme`, "fix/PAY-231-readme", null, "aa · now")];
+  await events.refreshed(`${REPO}@refs/heads/fix/PAY-231-readme`, 5);
+  expect(branchNames()).toEqual(["main default", "fix/PAY-231-readme"]);
+});
+
+test("a branch deleted goes once the listing's re-read the refresh event asks no longer holds it (#2105)", async () => {
+  let listing: ViewRow[] | null = null;
+  const { events, stand } = rereading(() => listing, () => null);
+  await draw([REPO, "branches"], null, stand);
+  button("Delete…", rowOf("chore/"))!.click();
+  flushSync();
+  button("Delete branch", dialog()!)!.click();
+  await settle();
+  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("delete queued");
+  // The refresh says it landed before the listing is read again.
+  listing = [vrow(MAIN, "main", "default", "5d77e1a2c3 · 1 day ago"), vrow(FEATURE, "feature/PAY-231-sepa-retry", null, "c90d11e4a7 · 3 hours ago"), vrow(CHORE, "chore/bump-tokio", null, "77aa00bb11 · 5 days ago")];
+  await events.refreshed(CHORE, 1);
+  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("delete sent");
+  listing = [vrow(MAIN, "main", "default", "5d77e1a2c3 · 1 day ago"), vrow(FEATURE, "feature/PAY-231-sepa-retry", null, "c90d11e4a7 · 3 hours ago")];
+  await events.ended("gitea");
+  expect(branchNames()).toEqual(["main default", "feature/PAY-231-sepa-retry"]);
+  // Gone, not only out of sight: a branch made again under the name draws no old delete.
+  expect(echoesOn(REPO, DELETED)).toEqual([]);
+});
+
+test("a file commit goes once the file's re-read the refresh event asks has a newer blob, the file not opened again (#2105)", async () => {
+  echoWrite(REPO, commitKind("main", "README.md"), "PAY-231: update README.md", { write: { id: 7 }, base: "blob-1", surface: REPO_FILES, source: "gitea" });
+  let readme: string | null = null;
+  const { events, stand } = rereading(() => null, () => readme);
+  await draw([REPO, "files", "README.md"], null, stand);
+  const banner = () => text(target.querySelector(".tf-fileview .tf-banner.tf-warn"));
+  expect(banner()).toBe("A commit of this file is queued: “PAY-231: update README.md”. It shows here once Gitea has it.");
+  await events.refreshed(REPO, 7);
+  expect(banner()).toBe("A commit of this file was sent: “PAY-231: update README.md”. It shows here once Gitea has it.");
+  readme = "blob-2";
+  await events.ended("gitea");
+  expect(banner()).toBe("");
+});
+
+test("a branch made, a branch deleted and a file commit the queue refuses each drop their echo and say why (#2105)", async () => {
+  const queue = echoFollower();
+  followed.follower = queue.follower;
+  await draw([REPO, "branches"]);
+  button("New branch…", target)!.click();
+  flushSync();
+  type(dialog()!.querySelector<HTMLInputElement>("input[type=text]")!, "fix/refused");
+  button("Create branch", dialog()!)!.click();
+  await settle();
+  button("Delete…", rowOf("chore/"))!.click();
+  flushSync();
+  button("Delete branch", dialog()!)!.click();
+  await settle();
+  expect(branchNames()).toContain("fix/refused queued");
+  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("delete queued");
+
+  queue.hear(1, { id: 1, state: "refused", detail: "403 Forbidden" });
+  queue.hear(2, { id: 2, state: "refused", detail: "403 Forbidden" });
+  flushSync();
+  expect(branchNames().some((name) => name.startsWith("fix/refused"))).toBe(false);
+  expect(rowOf("chore/").querySelector(".tf-chip.tf-info")).toBeNull();
+  expect(toasts.items.map((toast) => toast.text)).toContain("Branch fix/refused was refused: 403 Forbidden");
+  expect(toasts.items.map((toast) => toast.text)).toContain("Delete of chore/bump-tokio was refused: 403 Forbidden");
+  unmount(view!);
+  view = null;
+
+  await draw([REPO, "edit", "README.md"]);
+  type(editor(), "# payout\nnew line\n");
+  button("Commit change…", target)!.click();
+  flushSync();
+  button("Commit change", dialog()!)!.click();
+  await settle();
+  unmount(view!);
+  await draw([REPO, "files", "README.md"]);
+  const banner = () => text(target.querySelector(".tf-fileview .tf-banner.tf-warn"));
+  expect(banner()).toContain("A commit of this file is queued");
+  queue.hear(3, { id: 3, state: "refused", detail: "409 Conflict" });
+  flushSync();
+  expect(banner()).toBe("");
+  expect(toasts.items.at(-1)!.text).toBe("Commit of README.md was refused: 409 Conflict");
 });

@@ -9,16 +9,18 @@
 
   The run's tickets are its confirmed links (`get_entity`'s `links`), read
   with the page and again on each of its re-reads; while a ticket filed here
-  is queued the button gives way to *Ticket queued* (the shared queued
-  module, kind `ticket`), and a sync of any source ending reads the links
-  again until one holds a ticket of the queued title. A run with a ticket
+  is on its way the button gives way to its echo (`tf/queued.svelte.ts`,
+  kind `ticket`, #2104): *Ticket queued*, then *Ticket sent* once the create
+  landed. The refresh event naming the create (the ticket's arrival links it,
+  #2095), or a sync of any source ending, reads the links again until one
+  holds a ticket of the queued title. A run with a ticket
   linked draws the ticket, and no *Create ticket*.
 
-  The queued mark dies with a reload; the create's row does not (#1953). So
+  The echo dies with a reload; the create's row does not (#1953). So
   each read of the links also asks `owed_tickets`, the tickets filed from the
   run that it does not link yet, and one still on its way (`pending`, `sent`,
   or held as unconfirmed: sent and never answered, so the ticket may exist,
-  #1966) is marked queued as if filed this session, followed while the queue
+  #1966) is echoed as if filed this session, followed while the queue
   still holds it. A refused one, or one held on drift, offers *Create ticket*,
   as it does once a live follow hears so: it waits on the reader in the
   queue. One held as unconfirmed stays queued until the reader sends it
@@ -35,9 +37,9 @@
   import { push } from "../../shell/toasts.svelte";
   import { createTicketPayload, draftOfPayload, projectSource, type TicketDraft } from "../create-ticket";
   import { itemHash, keyOf } from "../job/job";
-  import { askAgain, markQueued, queuedMark, queuedMarks, sameWords, settleQueued, takeAgain } from "../queued.svelte";
+  import { askAgain, echoWrite, echoOn, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes } from "../queued.svelte";
   import TfCreateTicket from "../TfCreateTicket.svelte";
-  import { listenSynced, type RunPorts } from "./pipeline-ports";
+  import type { RunPorts } from "./pipeline-ports";
   import { linkedTickets } from "./run";
 
   let {
@@ -60,15 +62,17 @@
     rereads?: number;
   } = $props();
 
-  /** The kind of the queued mark on the run. */
+  /** The kind of the echo on the run. */
   const TICKET = "ticket";
+  /** The surface its echo is tagged with, for `watchEchoes` (#2104). */
+  const RUN_TICKET = "run-ticket";
 
   let links = $state<LinkEntry[]>([]);
   let asking = $state<TicketDraft | null>(null);
   let projects = $state<Project[]>([]);
 
   const tickets = $derived(linkedTickets(links));
-  const queued = $derived(queuedMark(runId, TICKET));
+  const queued = $derived(echoOn(runId, TICKET));
 
   /**
    * The owed tickets first, then the links: the owed read links a ticket the
@@ -90,24 +94,24 @@
           if (id !== runId) return;
           links = answer;
           const held = linkedTickets(answer);
-          settleQueued(id, (mark) => mark.kind === TICKET && held.some((ticket) => sameWords(ticket.title, mark.text)));
+          settleEchoes(id, (echo) => echo.kind === TICKET && held.some((ticket) => sameWords(ticket.title, echo.text)));
         },
         () => {},
       );
   }
 
-  /** The newest ticket filed from the run before this page opened and still on its way, marked queued (#1953). */
+  /** The newest ticket filed from the run before this page opened and still on its way, echoed (#1953). */
   function markOwed(id: string, owed: readonly QueuedWrite[]) {
     const going = owed.filter((write) => write.state === "pending" || write.state === "sent" || mayHaveLanded(write));
-    const marked = queuedMarks(id, TICKET);
-    if (going.some((write) => marked.some((mark) => mark.write === write.id))) return;
+    const echoed = echoesOn(id, TICKET);
+    if (going.some((write) => echoed.some((echo) => echo.write === write.id))) return;
     const newest = going.at(-1);
     if (newest === undefined) return;
     const filed = draftOfPayload(newest.payload);
     if (filed === null) return;
     // A sent one is past where the queue could hold or refuse it: nothing to follow.
     const follow = newest.state !== "sent" ? { following: following(id, filed), follower: ports.follower() } : {};
-    markQueued(id, TICKET, filed.title, { write: newest, ...follow });
+    echoWrite(id, TICKET, filed.title, { write: newest, ...follow, surface: RUN_TICKET, source: projectSource(filed.project) });
   }
 
   /** What a held or refused create says, and *Edit and resend* back to the run with what was filed (not offered for an unconfirmed send, #1966). */
@@ -128,11 +132,12 @@
     untrack(() => readLinks(wanted));
   });
 
-  // While a ticket filed here is queued, the sync that brings it in may be any source's.
+  // While a ticket filed here is on its way, the refresh naming it, or the
+  // sync that brings it in, which may be any source's, reads the links again.
   $effect(() => {
     if (queued === null) return;
     const wanted = runId;
-    return listenSynced(ports, null, () => {}, () => readLinks(wanted));
+    return untrack(() => watchEchoes(RUN_TICKET, () => readLinks(wanted), { listen: ports.listen, everyRun: true }));
   });
 
   // *Edit and resend*: the dialog again, with what was filed.
@@ -157,9 +162,9 @@
     const source = projectSource(filed.project);
     try {
       const write = await ports.submitWrite(createTicketPayload(filed), id);
-      // An owed read that answered before this did has marked and followed it already: one follow, one toast.
-      if (!queuedMarks(id, TICKET).some((mark) => mark.write === write.id)) {
-        markQueued(id, TICKET, title, { write, following: following(id, filed), follower: ports.follower() });
+      // An owed read that answered before this did has echoed and followed it already: one follow, one toast.
+      if (!echoesOn(id, TICKET).some((echo) => echo.write === write.id)) {
+        echoWrite(id, TICKET, title, { write, following: following(id, filed), follower: ports.follower(), surface: RUN_TICKET, source });
       }
       const summary = sources.find((s) => s.id === source);
       toastQueued(`ticket ${title}`, { id: source, display_name: summary?.display_name ?? source });
@@ -175,7 +180,7 @@
   >
 {:else}
   {#if queued !== null}
-    <span class="tf-chip tf-info" title={queued.text}>Ticket queued</span>
+    <span class="tf-chip tf-info" title={queued.text}>Ticket {queued.state}</span>
   {:else}
     <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void open(draft)}>Create ticket</button>
   {/if}

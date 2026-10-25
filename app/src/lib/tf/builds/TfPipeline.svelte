@@ -40,7 +40,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
-  import { queuedMarks, settleQueued } from "../queued.svelte";
+  import { echoOn, echoWrite, echoesOn, sentWrites, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
   import { runHash, runTone, shortTime } from "./builds";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
@@ -67,11 +67,13 @@
     jobBranchFor,
     keptRuns,
     longest,
-    markQueuedRun,
+    echoRun,
     pipelineWord,
     pipelineSource,
+    PIPELINE_SURFACE,
     QUEUED_RUN,
     RUN_OP,
+    paramKind,
     runFieldAsks,
     runFieldRefusals,
     queuedRunRows,
@@ -166,7 +168,7 @@
     readRuns(wanted).then(
       (rows) => {
         if (mine !== token) return;
-        settleQueued(wanted, runLanded(rows));
+        settleEchoes(wanted, runLanded(rows));
         held = rows;
       },
       (cause: unknown) => {
@@ -176,6 +178,7 @@
     ports.settings(wanted).then(
       (answer) => {
         if (mine !== token) return;
+        settleEchoes(wanted, paramLanded(answer, new Set()));
         settings = answer;
         settingsRead = true;
       },
@@ -199,10 +202,23 @@
     const mine = token;
     const seq = ++rereads;
     const current = () => mine === token && seq === rereads;
+    // A parameter change waiting to be read (#2104): the settings again too.
+    if (untrack(() => echoesOn(wanted).some((echo) => echo.kind.startsWith(paramKind(""))))) {
+      const sentBefore = untrack(() => sentWrites(wanted));
+      ports.settings(wanted).then(
+        (answer) => {
+          if (mine !== token) return;
+          settleEchoes(wanted, paramLanded(answer, sentBefore));
+          settings = answer;
+        },
+        // The tab keeps what it read; the next read tries again.
+        () => {},
+      );
+    }
     readRuns(wanted).then(
       (rows) => {
         if (!current()) return;
-        settleQueued(wanted, runLanded(rows));
+        settleEchoes(wanted, runLanded(rows));
         failed = null;
         held = appendOlder(rows, held ?? []);
       },
@@ -211,6 +227,13 @@
       },
     );
   }
+
+  // The refresh after a write echoed here reads the runs (and a changed
+  // parameter's settings) again (#2104); a run's end already does, above.
+  $effect(() => {
+    const wanted = id;
+    return untrack(() => watchEchoes(PIPELINE_SURFACE, () => reread(wanted), { listen: ports.listen, runEnds: false }));
+  });
 
   $effect(() => {
     const wanted = id;
@@ -242,10 +265,10 @@
   });
 
   /**
-   * Runs queued this session, here or on a run page, drawn *queued* until a
-   * read holds them (R-9.8, #1449); the queue holding or refusing one drops it.
+   * Runs queued this session, here or on a run page, drawn *queued*, then
+   * *sent*, until a read holds them (R-9.8, #1449); the queue holding or refusing one drops it.
    */
-  const started = $derived(queuedRunRows(queuedMarks(id, QUEUED_RUN), defaultBranch(settings)));
+  const started = $derived(queuedRunRows(echoesOn(id, QUEUED_RUN), defaultBranch(settings)));
   const all = $derived(held === null ? null : [...started, ...held]);
 
   async function more() {
@@ -307,7 +330,7 @@
   async function queue(payload: WriteOpPayload, summary: string): Promise<boolean> {
     try {
       const write = await ports.submitWrite(payload);
-      markQueuedRun(pipeline, write, runBranch(payload), held, ports.follower());
+      echoRun(pipeline, write, runBranch(payload), held, ports.follower());
       toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline));
       return true;
     } catch (cause) {
@@ -401,7 +424,21 @@
   let draft = $state("");
   /** Each parameter's field as the Run… dialog asks it (#1447): its kind and, for a fixed list, the options. */
   const fields = $derived(new Map(fieldsOf(settings).map((field) => [field.name, field])));
-  let queuedValues = $state<Record<string, string>>({});
+  /** A parameter change's echo on this pipeline, `null` for none (#2104). */
+  const paramEcho = (name: string): Echo | null => echoOn(id, paramKind(name));
+
+  /**
+   * Which parameter changes `answer` shows (#2104): a value that is now the
+   * one queued; a secret's, which no read draws, by a read asked once the
+   * change was sent (`sentBefore`).
+   */
+  function paramLanded(answer: PipelineSettings | null, sentBefore: ReadonlySet<number>): (echo: Echo) => boolean {
+    return (echo) => {
+      const setting = answer?.parameters.find((one) => paramKind(one.name) === echo.kind);
+      if (setting === undefined) return false;
+      return setting.secret ? echo.write !== null && sentBefore.has(echo.write) : setting.value === echo.text;
+    };
+  }
 
   /** Escape leaves the edit, and goes no further (the page's own Escape goes back). */
   function cancelOnEscape(event: KeyboardEvent) {
@@ -421,8 +458,15 @@
     const payload = op === null ? null : settingPayload(op, id, setting.name, draft, setting.secret ? null : setting.value);
     if (payload === null) return;
     try {
-      await ports.submitWrite(payload);
-      queuedValues = { ...queuedValues, [setting.name]: setting.secret ? "" : draft };
+      const write = await ports.submitWrite(payload);
+      echoWrite(id, paramKind(setting.name), setting.secret ? "" : draft, {
+        write,
+        base: setting.secret ? null : setting.value,
+        following: { name: `Change of ${setting.name} on ${pipeline.name}` },
+        follower: ports.follower(),
+        surface: PIPELINE_SURFACE,
+        source: pipeline.source_id,
+      });
       editing = null;
       toastQueued(`set ${setting.name} on ${pipeline.name}`, pipelineSource(pipeline));
     } catch (cause) {
@@ -562,11 +606,12 @@
             <tr class:tf-row={!isStartedHere(run)} onclick={(event) => openRow(event, run)}>
               <td class="tf-nowrap tf-run-no">
                 {#if isStartedHere(run)}
-                  <b>queued</b>
+                  <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet. -->
+                  <b>{run.state?.text ?? "queued"}</b>
                 {:else}
                   <a href={runHash(id, run.entity_id)}><b><Marked text={run.number !== null ? `#${run.number}` : "queued"} typed={filter.text} /></b></a>
                 {/if}
-                {#if run.state !== null}<span class={`tf-chip ${chipTone(run)}`}>{tone === "q" ? "queued" : run.state.text}</span>{/if}
+                {#if run.state !== null && !isStartedHere(run)}<span class={`tf-chip ${chipTone(run)}`}>{tone === "q" ? "queued" : run.state.text}</span>{/if}
               </td>
               <td class="tf-mono tf-run-br"
                 >{#if run.branch !== null}<Marked text={run.branch} typed={filter.text} />{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}{" "}<span
@@ -666,9 +711,9 @@
                 {:else if setting.secret}
                   <span class="tf-dim">(hidden)</span>
                 {:else}
-                  {(queuedValues[setting.name] ?? setting.value) || "(empty)"}
+                  {(paramEcho(setting.name)?.text ?? setting.value) || "(empty)"}
                 {/if}
-                {#if setting.name in queuedValues}<span class="tf-chip tf-info">queued</span>{/if}
+                {#if paramEcho(setting.name) !== null}<span class="tf-chip tf-info">{paramEcho(setting.name)?.state}</span>{/if}
               </td>
               <td class="tf-dim">
                 {field?.kindWord ?? "text"}

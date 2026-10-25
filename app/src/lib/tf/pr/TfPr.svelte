@@ -55,6 +55,8 @@
     /** *Viewed* on the pull request's files (#842). */
     prViewedFiles: (prId: string) => Promise<string[]>;
     setPrFileViewed: (prId: string, path: string, viewed: boolean) => Promise<string[]>;
+    /** Hears `item:refreshed` and `sync:state`, which read the live view again for the page's echoes (#2103); the bridge's when left out. */
+    listen?: EchoListen;
   }
 </script>
 
@@ -101,7 +103,7 @@
     tabCounts,
     type PrTab,
   } from "./pr";
-  import { askAgain, markQueued, queuedMark, queuedMarks, sameWords, settleQueued, takeAgain, type Mark } from "../queued.svelte";
+  import { askAgain, echoWrite, echoOn, echoesOn, sameWords, sentWrites, settleEchoes, takeAgain, watchEchoes, type Echo, type EchoListen } from "../queued.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfPrFiles from "./TfPrFiles.svelte";
@@ -139,7 +141,7 @@
     ports?: PrPorts;
     /** The reader's pending line comments (#842): this viewer's, kept across restarts. */
     pending?: PendingCommentStore;
-    /** Follows each queued write, so one held or refused drops its mark (#1424). */
+    /** Follows each queued write, so one held or refused drops its echo (#1424). */
     follower?: WriteFollower;
   } = $props();
 
@@ -199,27 +201,7 @@
         if (live) failed = ipcErrorMessage(error);
       },
     );
-    ports.entityView(id, null).then(
-      (answer) => {
-        if (!live) return;
-        view = answer;
-        for (const row of headerOf(answer).checks) {
-          const url = row.url;
-          if (url === null) continue;
-          ports.resolveUrl(url).then(
-            (match) => {
-              if (live && match !== null) runs[url] = match;
-            },
-            () => {},
-          );
-        }
-      },
-      (error) => {
-        if (!live) return;
-        view = null;
-        viewFailed = ipcErrorMessage(error);
-      },
-    );
+    readView(id, () => live);
     ports.roomSuggestions([], null, PROPOSALS).then(
       (page) => {
         if (!live) return;
@@ -234,6 +216,61 @@
     return () => {
       live = false;
     };
+  });
+
+  /** The surface the page's echoes are tagged with, for `watchEchoes` (#2103). */
+  const PR_SURFACE = "pr";
+  /** The newest read of the view asked: an older answer is dropped. */
+  let viewAsked = 0;
+
+  /**
+   * The live view (ADR-0020); each echo its answer shows landed goes (#1542,
+   * #2103). `again` is a re-read for the echoes, which keeps what the page
+   * drew when it fails.
+   */
+  function readView(id: string, live: () => boolean, again = false) {
+    const asked = ++viewAsked;
+    // A live read asked once a write was sent is a read of the source after it.
+    const sentBefore = untrack(() => sentWrites(id));
+    ports.entityView(id, null).then(
+      (answer) => {
+        if (!live() || asked !== viewAsked) return;
+        view = answer;
+        untrack(() => settleEchoes(id, (echo) => landedIn(answer, echo, sentBefore)));
+        for (const row of headerOf(answer).checks) {
+          const url = row.url;
+          if (url === null) continue;
+          ports.resolveUrl(url).then(
+            (match) => {
+              if (live() && match !== null) runs[url] = match;
+            },
+            () => {},
+          );
+        }
+      },
+      (error) => {
+        if (!live() || asked !== viewAsked || again) return;
+        view = null;
+        viewFailed = ipcErrorMessage(error);
+      },
+    );
+  }
+
+  // The refresh after one of the page's writes, or a run of its source's end,
+  // reads the live view again (#2103), so its echoes settle without the page
+  // being opened again.
+  $effect(() => {
+    if (!ready) return;
+    return untrack(() =>
+      watchEchoes(
+        PR_SURFACE,
+        () => {
+          const id = prId;
+          if (id !== null && view != null) readView(id, () => prId === id, true);
+        },
+        { listen: ports.listen },
+      ),
+    );
   });
 
   /** The repository the pull request is under: its declared parent, `owner/name`, in its source. */
@@ -338,32 +375,26 @@
   let merging = $state(false);
 
   /** The comments this session queued that the conversation did not hold when it was read. */
-  const queuedComments = $derived(prId === null ? [] : queuedMarks(prId, "comment").map((mark) => mark.text));
-  /** The chips of what this session queued here, beside the state: `close queued`. */
-  const chips = $derived(prId === null ? [] : queuedMarks(prId).filter((mark) => mark.kind !== "comment").map((mark) => mark.text));
+  const queuedComments = $derived(prId === null ? [] : echoesOn(prId, "comment"));
+  /** The chips of what this session queued here, beside the state: `close queued`, then `close sent`. */
+  const chips = $derived(prId === null ? [] : echoesOn(prId).filter((echo) => echo.kind !== "comment").map(chipOf));
 
   /**
    * The writes whose landing the view's *State* reads (#1542): each goes once
    * the state moved from what it was when the write was queued. An edit, an
-   * update, a review and a source's own action have no state to read, so their
-   * chip lasts the session unless the queue holds or refuses the write.
+   * update, a review and a source's own action have no state to read: the
+   * view is the source's own, read live (ADR-0020), so any read of it asked
+   * once the write was sent shows it (#2103).
    */
   const STATE_READ = ["merge", "close", "reopen"];
 
-  /** Whether the read in `answer` shows `mark` landed. */
-  function landedIn(answer: SourceView, mark: Mark): boolean {
-    if (mark.kind === "comment") return conversationOf(answer).some((message) => sameWords(message.body, mark.text));
+  /** Whether the read in `answer` shows `echo` landed; `sentBefore` holds the writes sent when it was asked. */
+  function landedIn(answer: SourceView | null, echo: Echo, sentBefore: ReadonlySet<number>): boolean {
+    if (echo.kind === "comment") return conversationOf(answer).some((message) => sameWords(message.body, echo.text));
+    if (!STATE_READ.includes(echo.kind)) return echo.write !== null && sentBefore.has(echo.write);
     const state = headerOf(answer).state?.text ?? null;
-    return STATE_READ.includes(mark.kind) && state !== null && mark.base !== null && state !== mark.base;
+    return state !== null && echo.base !== null && state !== echo.base;
   }
-
-  // Each read of the view drops what it shows landed.
-  $effect(() => {
-    const answer = view;
-    const id = prId;
-    if (id === null || answer == null) return;
-    untrack(() => settleQueued(id, (mark) => landedIn(answer, mark)));
-  });
 
   // *Edit and resend* on a refused comment: the box again, with its words.
   $effect(() => {
@@ -372,9 +403,9 @@
     if (again !== null) draft = again;
   });
 
-  /** Mark a write queued as `verb`, followed under `name`. */
-  function markChip(id: string, verb: string, name: string, write: QueuedWrite) {
-    markQueued(id, verb, chipOf(verb), { write, base: header.state?.text ?? null, following: { name }, follower });
+  /** Echo a write queued as `verb`, followed under `name`. */
+  function echoChip(id: string, verb: string, name: string, write: QueuedWrite) {
+    echoWrite(id, verb, verb, { write, base: header.state?.text ?? null, following: { name }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null });
   }
 
   /**
@@ -393,16 +424,18 @@
     reopen: ["merge", ...STATE_CHANGES],
   };
 
-  /** The chip a write queued as `verb` draws, which is also what holds a button back. */
-  const chipOf = (verb: string) => `${verb} queued`;
+  /** The chip an echo draws, which is also what holds a button back: `merge queued`, then `merge sent`. */
+  function chipOf(echo: Echo): string {
+    return `${echo.text} ${echo.state}`;
+  }
 
   /** The chip this session queued that holds the write keyed `key` back, or null while it is live. */
   function heldBy(key: string): string | null {
     if (prId === null) return null;
     const id = prId;
     for (const verb of HOLDS[key] ?? []) {
-      const mark = queuedMark(id, verb);
-      if (mark !== null) return mark.text;
+      const echo = echoOn(id, verb);
+      if (echo !== null) return chipOf(echo);
     }
     return null;
   }
@@ -435,9 +468,11 @@
     try {
       const id = prId;
       const write = await ports.submitWrite({ Comment: { entity: id, body } });
-      markQueued(id, "comment", body, {
+      echoWrite(id, "comment", body, {
         write,
         many: true,
+        surface: PR_SURFACE,
+        source: source?.id ?? null,
         following: {
           name: "Comment",
           resend: () => {
@@ -607,12 +642,12 @@
                 </article>
                 {/if}
               {/each}
-              {#each queuedComments as body, n (n)}
+              {#each queuedComments as echo, n (n)}
                 <article class="tf-msg tf-queued">
                   <span class="tf-av tf-me" aria-hidden="true">{initials(me)}</span>
                   <div class="tf-msg-body">
-                    <div class="tf-who"><b>You</b><span class="tf-chip tf-info">queued</span></div>
-                    <p>{body}</p>
+                    <div class="tf-who"><b>You</b><span class="tf-chip tf-info">{echo.state}</span></div>
+                    <p>{echo.text}</p>
                   </div>
                 </article>
               {/each}
@@ -701,7 +736,7 @@
     {pending}
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={(write) => markChip(prId, "review", "Review", write)}
+    onqueued={(write) => echoChip(prId, "review", "Review", write)}
     onclose={() => (reviewing = false)}
   />
 {/if}
@@ -717,7 +752,7 @@
     ready={readyRows}
     {ticket}
     submitWrite={ports.submitWrite}
-    onqueued={(write) => markChip(prId, "merge", "Merge", write)}
+    onqueued={(write) => echoChip(prId, "merge", "Merge", write)}
     onclose={() => (merging = false)}
   />
 {/if}
@@ -731,7 +766,7 @@
     what="{write.phrase} {name}"
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={(queued) => markChip(prId, write.verb, write.label, queued)}
+    onqueued={(queued) => echoChip(prId, write.verb, write.label, queued)}
     onclose={() => (shown = null)}
   />
 {/if}

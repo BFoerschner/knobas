@@ -21,9 +21,9 @@
   import { lineDiff } from "../code/line-diff";
   import TfDiff from "../code/TfDiff.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { markCommit, markMade } from "./queued.svelte";
+  import { echoWrite } from "../queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { commitPrefill, compareHash, fileHash } from "./repo";
+  import { MADE, REPO_BRANCHES, REPO_FILES, commitKind, commitPrefill, compareHash, fileHash } from "./repo";
 
   let {
     repoId,
@@ -80,16 +80,22 @@
     busy = true;
     const onto = target === "new" ? newBranch.trim() : null;
     try {
-      await ports.submitWrite({
+      const write = await ports.submitWrite({
         CommitFile: { repo: repoId, branch, new_branch: onto, path, content: after, message: message.trim(), base_sha: baseSha },
       });
       toastQueued(onto === null ? `commit ${path} to ${branch}` : `commit ${path} to ${onto}, then open a PR`, source);
       onclose();
       if (onto === null) {
-        markCommit(repoId, branch, path, { message: message.trim(), base: baseSha });
+        echoWrite(repoId, commitKind(branch, path), message.trim(), {
+          write,
+          base: baseSha,
+          following: { name: `Commit of ${path}` },
+          surface: REPO_FILES,
+          source: source?.id ?? null,
+        });
         location.hash = fileHash(repoId, path);
       } else {
-        markMade(repoId, onto);
+        echoWrite(repoId, MADE, onto, { write, many: true, following: { name: `Commit of ${path} to ${onto}` }, surface: REPO_BRANCHES, source: source?.id ?? null });
         location.hash = compareHash(repoId, onto);
       }
     } catch (cause) {

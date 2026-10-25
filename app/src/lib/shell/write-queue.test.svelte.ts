@@ -723,7 +723,7 @@ test("discard and cancel both withdraw the write", async () => {
   screen.done();
 });
 
-/** The pages' queued marks follow this (#1583): withdrawn and sent both leave `pending_writes`, so only this says which. */
+/** The pages' echoes follow this (#1583): withdrawn and sent both leave `pending_writes`, so only this says which. */
 test("a withdrawal from the panel is announced to whoever marked the write", async () => {
   rows = [held(), write()];
   counts = { pending: 1, held: 1, refused: 0 };

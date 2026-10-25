@@ -15,7 +15,9 @@
   `TfCommitFile`. Only a file the source gave a blob sha for (#883) can be
   edited, since that is what the commit is checked against; a binary or cut
   file cannot either, and *Edit* says why. A commit queued this session is a
-  banner on the file until the source holds a newer blob.
+  banner on the file, its echo (`tf/queued.svelte.ts`, #2105): *queued*, then
+  *sent*, until the source holds a newer blob, the file read again on the
+  refresh event and a run's end.
 
   With no file in the address the top directory's README opens.
 -->
@@ -27,11 +29,22 @@
   import type { CheckoutView, TreeEntry, ViewBlock, ViewSection } from "../../ipc/entity";
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
-  import { queuedCommit } from "./queued.svelte";
+  import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { ancestors, commitRefusal, editHash, fileHash, fileLines, pickDefaultFile, repoHash, sourceName } from "./repo";
+  import {
+    REPO_FILES,
+    ancestors,
+    commitKind,
+    commitRefusal,
+    editHash,
+    fileHash,
+    fileLines,
+    pickDefaultFile,
+    repoHash,
+    sourceName,
+  } from "./repo";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -49,7 +62,7 @@
     checkout = undefined,
     title = "",
   }: {
-    ports: Pick<RepoPorts, "entityView" | "submitWrite">;
+    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -172,6 +185,7 @@
         file = block?.type === "file" ? block : null;
         refusal = commitRefusal(read);
         draft = null;
+        settleCommit(file);
       },
       (error) => {
         if (live) fileFailed = ipcErrorMessage(error);
@@ -218,9 +232,41 @@
     committing = true;
   }
 
-  const queued = $derived(
-    file === null || branch === null ? null : queuedCommit(repoId, branch, file.path, file.sha),
-  );
+  /** The file's commit echo, while the file read is still the blob it was made against. */
+  const queued = $derived.by(() => {
+    if (file === null || branch === null) return null;
+    const echo = echoOn(repoId, commitKind(branch, file.path));
+    return echo !== null && echo.base === file.sha ? echo : null;
+  });
+
+  /** A read of `read` drops the file's commit echo once the source holds a newer blob. */
+  function settleCommit(read: FileBlock | null) {
+    const on = untrack(() => branch);
+    if (read === null || on === null) return;
+    settleEchoes(repoId, (echo) => echo.kind === commitKind(on, read.path) && echo.base !== read.sha);
+  }
+
+  // The refresh after the commit, or a run of its source's end, reads the
+  // file again (#2105); what the reader typed stays.
+  $effect(() => untrack(() => watchEchoes(REPO_FILES, rereadFile, { listen: ports.listen })));
+
+  function rereadFile() {
+    const section = fileSection;
+    const where = at;
+    if (section === null || section === MISSING) return;
+    readSection(section, where).then(
+      (read) => {
+        if (section !== fileSection || where !== at) return;
+        const block = read?.blocks[0];
+        if (block?.type !== "file") return;
+        file = block;
+        refusal = commitRefusal(read);
+        settleCommit(block);
+      },
+      // The file keeps what it drew; the next read tries again.
+      () => {},
+    );
+  }
 
   function toggle(dir: string) {
     if (open.has(dir)) open.delete(dir);
@@ -303,7 +349,7 @@
       </header>
       {#if queued !== null}
         <div class="tf-banner tf-warn">
-          A commit of this file is queued: “{queued.message}”. It shows here once {sourceName(source)} has it.
+          A commit of this file {queued.state === "sent" ? "was sent" : "is queued"}: “{queued.text}”. It shows here once {sourceName(source)} has it.
         </div>
       {/if}
       {#if changed.has(file.path)}

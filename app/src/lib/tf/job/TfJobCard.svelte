@@ -10,8 +10,9 @@
 
   **The status select offers only where the ticket can go now** (BUILT
   `reachable_transitions`). A pick queues the move, and the select shows the
-  picked status muted with *queued* beside it (#1424) until the ticket's
-  mirrored status moves or the queue holds or refuses the move; then it shows
+  picked status muted with its echo beside it (#1424, #2103), *queued* and
+  then *sent*, until a read of the ticket (the refresh after the write, or a
+  run's end) has its status moved or the queue holds or refuses the move; then it shows
   where the source last said. *Edit and resend* on a held move focuses it.
   A workflow that cannot be read leaves the select showing the current status
   and nothing else. A move the source's credential cannot make (`refused`,
@@ -23,7 +24,7 @@
   import type { Timer } from "../../shell/timer.svelte";
   import { clockReading } from "../../time/day";
   import { refusedAttrs } from "../../shell/refused-writes";
-  import { takeAgain } from "../queued.svelte";
+  import { takeAgain, type Echo } from "../queued.svelte";
   import { jobHash } from "../route";
   import { commentCount, firstName, mentionCount, since, stamp, type Summary } from "./conversation";
   import { blockers, factsLine, keyOf, weekLine, type WeekReading } from "./job";
@@ -39,6 +40,7 @@
     now = new Date(),
     timer,
     queued = null,
+    queuedState = "queued",
     refused = null,
     onmove,
     onstop,
@@ -49,6 +51,8 @@
     others?: EntityDetail[];
     /** Where the ticket can move now, or `null` while the workflow read is out. */
     offered: string[] | null;
+    /** Where that move's write is: *queued* while open, *sent* once landed (#2103). */
+    queuedState?: Echo["state"];
     week: WeekReading | null;
     /** The thread's summary, `null` while its read is out or after it failed. */
     conversation?: Summary | null;
@@ -130,7 +134,7 @@
         <option value={status}>{status}</option>
       {/each}
     </select>
-    {#if queued !== null}<span class="tf-chip tf-info tf-queued-mark">queued</span>{/if}
+    {#if queued !== null}<span class="tf-chip tf-info tf-queued-mark">{queuedState}</span>{/if}
     {#if facts}<span class="tf-jobdim">{facts}</span>{/if}
     {#each blockedBy as blocker (blocker)}
       <span class="tf-chip tf-err">Blocked by {blocker}</span>

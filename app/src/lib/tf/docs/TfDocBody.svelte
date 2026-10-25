@@ -12,7 +12,7 @@
   section*, and the *Save section* of an editor already open, disabled with
   that reason.
 
-  A saved section draws its queued text in place of the old, muted and marked
+  A saved section draws its queued text in place of the old, muted with its echo,
   *queued*, then *sent* (#1424, #2102), until a read of the page has a newer version; *Edit
   section* then starts from the queued text, and *Edit and resend* on a held
   or refused save opens the editor with it.
@@ -22,7 +22,7 @@
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocInlines from "./TfDocInlines.svelte";
   import { refusedAttrs } from "../../shell/refused-writes";
-  import { queuedMark, takeAgain } from "../queued.svelte";
+  import { echoOn, takeAgain } from "../queued.svelte";
   import { pageHash, refusalReason, sectionKind, sectionsOf } from "./docs";
 
   let {
@@ -79,9 +79,9 @@
   });
 
   /** The text a save of `number` queued, drawn until the page's version moves. */
-  const queuedText = (number: number) => queuedMark(entityId, sectionKind(number))?.text ?? null;
+  const queuedText = (number: number) => echoOn(entityId, sectionKind(number))?.text ?? null;
   /** Where that save's write is: `queued` or `sent` (#2102). */
-  const queuedState = (number: number) => queuedMark(entityId, sectionKind(number))?.state ?? null;
+  const queuedState = (number: number) => echoOn(entityId, sectionKind(number))?.state ?? null;
 
   function open(number: number) {
     const section = sections.find((s) => s.number === number);

@@ -81,7 +81,7 @@
   import { resolveTicket } from "../job/job";
   import TfLinkTo from "../job/TfLinkTo.svelte";
   import type { JobPorts } from "../job/ports";
-  import { askAgain, markQueued, queuedMarks, sameWords, settleQueued, takeAgain, watchEchoes, type Mark } from "../queued.svelte";
+  import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes, type Echo } from "../queued.svelte";
   import { jobHash } from "../route";
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
@@ -681,7 +681,7 @@
       if (node.parent === null) continue;
       under.set(node.parent, (under.get(node.parent) ?? new Set()).add(node.title.trim()));
     }
-    for (const [parent, titles] of under) settleQueued(parent, (mark) => mark.kind === "page" && titles.has(mark.text.trim()));
+    for (const [parent, titles] of under) settleEchoes(parent, (echo) => echo.kind === "page" && titles.has(echo.text.trim()));
   }
 
   // A page read drops a section edit once the version moved, and a comment it holds:
@@ -695,20 +695,20 @@
     const said = p.comments.map((c) => c.blocks.map(blockWords).join(" "));
     const held = new Set(p.comments.flatMap((c) => (c.id === null ? [] : [c.id])));
     const commentOfWrite = new Map(p.sent_comments.map((s) => [s.write_id, s.comment_id]));
-    const holds = (mark: Mark) => {
-      const id = mark.write === null ? undefined : commentOfWrite.get(mark.write);
-      return id === undefined ? said.some((words) => sameWords(words, mark.text)) : held.has(id);
+    const holds = (echo: Echo) => {
+      const id = echo.write === null ? undefined : commentOfWrite.get(echo.write);
+      return id === undefined ? said.some((words) => sameWords(words, echo.text)) : held.has(id);
     };
     untrack(() =>
-      settleQueued(
+      settleEchoes(
         p.entity_id,
-        (mark) => (mark.kind.startsWith("section ") && mark.base !== version) || (mark.kind === "comment" && holds(mark)),
+        (echo) => (echo.kind.startsWith("section ") && echo.base !== version) || (echo.kind === "comment" && holds(echo)),
       ),
     );
   });
 
   /** The comments queued on the open page that its read does not hold yet. */
-  const queuedComments = $derived(page === null ? [] : queuedMarks(page.entity_id, "comment"));
+  const queuedComments = $derived(page === null ? [] : echoesOn(page.entity_id, "comment"));
 
   // *Edit and resend* on a comment: the composer with its words.
   $effect(() => {
@@ -738,7 +738,7 @@
       const name = heading ? inlineWords(heading.text) : "";
       const id = p.entity_id;
       const kind = sectionKind(section);
-      markQueued(id, kind, text, {
+      echoWrite(id, kind, text, {
         write,
         base: String(p.version),
         surface: DOCS,
@@ -767,7 +767,7 @@
       const body = comment;
       const id = p.entity_id;
       const write = await io.submitWrite({ Comment: { entity: id, body } });
-      markQueued(id, "comment", body, {
+      echoWrite(id, "comment", body, {
         write,
         many: true,
         surface: DOCS,
@@ -802,7 +802,7 @@
       }
       const write = await io.docsCreatePage(next, ticket);
       const title = next.title.trim();
-      markQueued(next.parent, "page", title, {
+      echoWrite(next.parent, "page", title, {
         write,
         many: true,
         surface: DOCS,
@@ -1088,12 +1088,12 @@
                   </div>
                 </div>
               {/each}
-              {#each queuedComments as mark, n (n)}
+              {#each queuedComments as echo, n (n)}
                 <div class="tf-msg tf-queued">
                   <span class="tf-av tf-me">{initials(p.me[0] ?? null)}</span>
                   <div class="tf-cmt-body">
-                    <div class="tf-who"><b>You</b> <span class="tf-chip tf-info">{mark.state}</span></div>
-                    <p class="tf-cmt-queued">{mark.text}</p>
+                    <div class="tf-who"><b>You</b> <span class="tf-chip tf-info">{echo.state}</span></div>
+                    <p class="tf-cmt-queued">{echo.text}</p>
                   </div>
                 </div>
               {/each}

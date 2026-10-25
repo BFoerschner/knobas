@@ -8,18 +8,25 @@
     type, the state chip, the 24-hour bar, the response, the 30-day uptime,
     what it **Watches** (the asset's name and type, linking to the asset),
     *Ack* on a down monitor, and *Pause* or *Resume* where the source offers
-    it.
+    it; while a pause or resume is on its way its echo (*queued*, then *sent*,
+    `tf/queued.svelte.ts`, #2105) stands in the button's place until the
+    roster reads the new state.
   - **Assets nothing watches**: containers, services, routes, databases and VMs
     no monitor watches, each with *Create monitor* (`TfCreateMonitor.svelte`).
-    A row whose create is on its way draws *Monitor queued* instead (#1959):
+    A row whose create is on its way draws its echo instead (#1959, #2105),
+    *Monitor queued* and then *Monitor sent*:
     the row stays listed until the poll mirrors the monitor and attaches it,
     and Uptime Kuma takes a second monitor of the same name. The read names
     the create (`monitor_on_its_way`), so a reload draws it too. One held as
     unconfirmed (sent, never answered, so the monitor may be in Kuma) is on
     its way too, until the reader sends it again or discards it (#1966). A
     pending or unconfirmed one is followed: refused or held on drift, it gives
-    *Create monitor* back; sent or withdrawn, the list is read again. While any row is on its way, the end of
-    every sync reads it again, which is when a sent one's monitor arrives.
+    *Create monitor* back; sent or withdrawn, the list is read again. The
+    echo goes once the roster holds the monitor Kuma made or the read names
+    no such create; a sent create the read still names is drawn sent. The
+    refresh after one of the page's writes reads both lists again, and while
+    anything is on its way so does the end of every sync, which is when a
+    sent one's monitor arrives.
 
   Over `monitor_roster`, `open_alerts` (only for each down row's `acked_at`, so
   an ack outlives the visit; the tab draws no alert of its own, #1296), `ack_alert`, `submit_write` (`PauseMonitor`,
@@ -65,14 +72,15 @@
 
 <script lang="ts">
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { onDestroy } from "svelte";
+  import { untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
 
   import { ipcErrorMessage } from "../../ipc";
   import { ackAlert, editAsset, editRoute, getAsset, getRoute, monitorRoster, openAlerts, unmonitoredAssets } from "../../ipc/assets";
   import { getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
-  import { followWrite, mayHaveLanded, writeFollower } from "../../shell/follow-write";
+  import { mayHaveLanded, writeFollower } from "../../shell/follow-write";
+  import { echoOn, echoWrite, echoesOn, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { ago } from "../../shell/time";
   import { push } from "../../shell/toasts.svelte";
@@ -169,7 +177,9 @@
       if (live) failed = ipcErrorMessage(error);
     };
     ports.monitorRoster().then((rows) => {
-      if (live) roster = rows;
+      if (!live) return;
+      roster = rows;
+      settleRoster(rows);
     }, fail);
     ports.openAlerts().then(
       (alerts) => {
@@ -181,7 +191,9 @@
       () => {},
     );
     ports.unmonitoredAssets().then((rows) => {
-      if (live) unwatched = gaps(rows);
+      if (!live) return;
+      unwatched = gaps(rows);
+      settleUnwatched(rows);
     }, fail);
     ports.listSources().then(
       (rows) => {
@@ -206,51 +218,75 @@
     };
   });
 
-  const following: (() => void)[] = [];
-  /** The pending creates followed, by write id: one follow each, however often the list is read. */
-  const creates = new Map<number, () => void>();
-  onDestroy(() => {
-    for (const stop of following.splice(0)) stop();
-    for (const stop of creates.values()) stop();
-    creates.clear();
-  });
+  // -- the page's echoes (#2105) ----------------------------------------------
 
-  // -- a create on its way (#1959) -------------------------------------------
+  /** The surface Monitors' echoes are tagged with, for `watchEchoes`. */
+  const MONITORS = "monitors";
+  /** The kind of a create's echo on its asset, its text the monitor's name; and of a pause's or resume's on its monitor. */
+  const CREATE = "monitor";
+  const TOGGLE = "state";
 
+  /** Whether a roster row reads paused: gone from `/metrics`, or (with #2100's refresh) said so. */
+  const isPaused = (row: MonitorRow) => row.tombstoned || row.state === "paused";
+
+  /** The roster's check: a create goes once it holds the monitor Kuma made; a pause or a resume once the row reads the new state. */
+  function settleRoster(rows: readonly MonitorRow[]) {
+    const names = new Set(rows.map((row) => row.name));
+    for (const row of unwatched ?? []) settleEchoes(row.id, (echo) => echo.kind === CREATE && names.has(echo.text));
+    for (const row of rows) settleEchoes(row.entity_id, (echo) => echo.kind === TOGGLE && (echo.text === "pause") === isPaused(row));
+  }
+
+  /**
+   * The unwatched list's check: a create goes once its asset is watched (no
+   * longer listed), or once the read names no such create on it (withdrawn
+   * in the queue, which leaves the open rows as a sent one does).
+   */
+  function settleUnwatched(rows: readonly UnmonitoredAsset[]) {
+    const listed = new Map(rows.map((row) => [row.id, row]));
+    for (const id of untrack(() => echoedAssets)) {
+      const row = listed.get(id);
+      settleEchoes(id, (echo) => echo.kind === CREATE && (row === undefined || row.monitor_on_its_way?.id !== echo.write));
+    }
+  }
+
+  /** The assets this session echoed a create on. */
+  let echoedAssets = $state<string[]>([]);
+
+  /** A create on its way, echoed on its asset and followed: refused or held on drift, the row offers the create again; sent, the list is read again. */
+  function echoCreate(asset: string, name: string, write: QueuedWrite) {
+    if (echoesOn(asset, CREATE).some((echo) => echo.write === write.id)) return;
+    if (!echoedAssets.includes(asset)) echoedAssets = [...echoedAssets, asset];
+    echoWrite(asset, CREATE, name, {
+      write,
+      following: { name: `Monitor ${name}` },
+      follower: ports.follower(),
+      surface: MONITORS,
+      source: write.source_id,
+      onstop: () => {
+        markOnItsWay((going) => going?.id === write.id, null);
+        revision += 1;
+      },
+      onsent: () => (revision += 1),
+    });
+  }
+
+  // A create the read names as on its way and the queue may still hold
+  // (pending, or held as unconfirmed, #1966) is echoed and followed.
   $effect(() => {
-    const pending = new Map<number, UnmonitoredAsset>();
     for (const row of unwatched ?? []) {
       const write = row.monitor_on_its_way;
-      if (write === null || pending.has(write.id)) continue;
-      if (write.state === "pending" || mayHaveLanded(write)) pending.set(write.id, row);
+      if (write === null || !(write.state === "pending" || mayHaveLanded(write))) continue;
+      const payload = write.payload as { CreateMonitor?: { name?: string } } | undefined;
+      untrack(() => echoCreate(row.id, payload?.CreateMonitor?.name ?? row.name, write));
     }
-    for (const [id, stop] of creates) {
-      if (pending.has(id)) continue;
-      stop();
-      creates.delete(id);
-    }
-    for (const [id, row] of pending) if (!creates.has(id)) creates.set(id, followCreate(id, row));
   });
 
-  /** Follow one pending or unconfirmed create: refused or held on drift, the row offers the create again; sent or withdrawn, the list says which. */
-  function followCreate(id: number, row: UnmonitoredAsset): () => void {
-    const payload = row.monitor_on_its_way?.payload as { CreateMonitor?: { name?: string } } | undefined;
-    return followWrite(
-      { id },
-      {
-        name: `Monitor ${payload?.CreateMonitor?.name ?? row.name}`,
-        onstop: () => {
-          creates.delete(id);
-          markOnItsWay((write) => write?.id === id, null);
-          revision += 1;
-        },
-        onleave: () => {
-          creates.delete(id);
-          revision += 1;
-        },
-      },
-      ports.follower(),
-    );
+  /** What a row's create draws: its echo's word, else the read's (a sent create still counts as on its way); `null` for none. */
+  function createWord(row: UnmonitoredAsset): Echo["state"] | null {
+    const echo = echoOn(row.id, CREATE);
+    if (echo !== null) return echo.state;
+    const write = row.monitor_on_its_way;
+    return write === null ? null : write.state === "sent" ? "sent" : "queued";
   }
 
   /** Set the create on its way of every row `which` picks, as the page knows it before the next read. */
@@ -259,7 +295,13 @@
     unwatched = unwatched.map((row) => (which(row.monitor_on_its_way, row) ? { ...row, monitor_on_its_way: write } : row));
   }
 
-  const waiting = $derived((unwatched ?? []).some((row) => row.monitor_on_its_way !== null));
+  // The refresh after one of the page's writes reads both lists again; while
+  // a create or a pause is on its way, so does the end of every sync, which
+  // is when a sent one's monitor arrives or Kuma's /metrics moves.
+  $effect(() => untrack(() => watchEchoes(MONITORS, () => (revision += 1), { listen: ports.listen, runEnds: false })));
+  const waiting = $derived(
+    (unwatched ?? []).some((row) => createWord(row) !== null) || (roster ?? []).some((row) => echoOn(row.entity_id, TOGGLE) !== null),
+  );
   $effect(() => {
     if (!waiting) return;
     return listenSynced(ports, null, () => {}, () => (revision += 1));
@@ -352,7 +394,13 @@
     try {
       const write = await ports.submitWrite(form.build(row.entity_id));
       toastQueued(`${form.label.toLowerCase()} ${row.name}`, { id: row.source_id, display_name: sourceNames[row.source_id] ?? "" });
-      following.push(followWrite(write, { name: `${form.label} ${row.name}` }));
+      echoWrite(row.entity_id, TOGGLE, form.label.toLowerCase(), {
+        write,
+        following: { name: `${form.label} ${row.name}` },
+        follower: ports.follower(),
+        surface: MONITORS,
+        source: row.source_id,
+      });
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
     } finally {
@@ -392,6 +440,7 @@
     // Drawn at once, and followed by the effect above as the read will name it.
     // The re-read starts after the row was queued, and drops any read before it.
     markOnItsWay((_, row) => row.id === subject?.id, what.write);
+    if (subject) echoCreate(subject.id, what.name, what.write);
     revision += 1;
   }
 
@@ -438,14 +487,15 @@
         <thead><tr><th>Asset</th><th>Type</th><th>Env</th><th>Owner</th><th><span class="tf-sr">Actions</span></th></tr></thead>
         <tbody>
           {#each unwatched as asset (asset.id)}
+            {@const word = createWord(asset)}
             <tr class="tf-row" onclick={(event) => openAsset(event, asset.id)}>
               <td class="tf-mono"><a href={addressOf(asset.id)}>{asset.name}</a></td>
               <td>{asset.type_label}</td>
               <td>{asset.environment ?? ""}</td>
               <td>{asset.owner ?? ""}</td>
               <td class="tf-mon-acts">
-                {#if asset.monitor_on_its_way !== null}
-                  <span class="tf-chip tf-info" title={queuedTitle(asset.monitor_on_its_way)}>Monitor queued</span>
+                {#if word !== null}
+                  <span class="tf-chip tf-info" title={asset.monitor_on_its_way === null ? undefined : queuedTitle(asset.monitor_on_its_way)}>Monitor {word}</span>
                 {:else}
                   <button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
                     >Create monitor</button
@@ -469,6 +519,7 @@
           {#each rows as row (row.entity_id)}
             {@const chip = stateChip(row, now)}
             {@const down = chip.tone === "err" && !row.tombstoned}
+            {@const toggled = echoOn(row.entity_id, TOGGLE)}
             <tr>
               <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
               <td><span class="tf-chip" class:tf-ok={chip.tone === "ok"} class:tf-warn={chip.tone === "warn"} class:tf-err={chip.tone === "err"} class:tf-info={chip.tone === "info"}>{chip.label}</span></td>
@@ -492,9 +543,14 @@
                     >{row.entity_id in acked ? "Acked" : "Ack"}</button
                   >
                 {/if}
-                {#each row.actions.filter((op) => op in ROW_OPS) as op (op)}
-                  <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
-                {/each}
+                {#if toggled !== null}
+                  <!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. -->
+                  <span class="tf-chip tf-info tf-queued-mark">{toggled.state}</span>
+                {:else}
+                  {#each row.actions.filter((op) => op in ROW_OPS) as op (op)}
+                    <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
+                  {/each}
+                {/if}
               </td>
             </tr>
           {/each}
