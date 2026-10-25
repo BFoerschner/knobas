@@ -17266,6 +17266,7 @@ The merge-manager's rulings (Opus):
 - **The list's failed-read note.** *Ruling:* a read again of the Builds list that answers clears the note an earlier failed one left (`TfBuilds.svelte` `rereadPipelines`). Before, a failed *Refresh* or sync-end read left "Pipelines could not be read" over the list for good. *Cost of reversing:* one line.
 - **The test-stub copy.** *Ruling:* `builds/refresh.fixture.ts` stays as it is and is folded into #2144 with its siblings once #2135 lands. *Cost of reversing:* none.
 ## #2135: *Refresh* on a repository (implementer, Opus)
+## #2135: *Refresh* on a repository (implementer, Opus, 2026-10-25)
 
 - **How a tab hears the refresh.** *Fork:* a `refreshed` count prop each tab watches, a context registry the page's `reread` awaits, or remounting the tab. *Ruling:* the count prop, bumped in `TfRepo`'s `reread`. *Reasoning:* remounting blanks the tab, which the ticket forbids; a prop keeps each tab testable through the page's own seam and needs no new module. The cost: *Refreshing…* ends when the repository's own reads answer, not each tab's. *Cost of reversing:* one prop on five tabs.
 - **Local changes is not read again.** *Ruling:* a refresh reads what the source holds; the checkout and its diff are the disk's, read again on window focus and after a clone as before (ADR-0021). *Cost of reversing:* one effect in `TfRepoLocal`.
