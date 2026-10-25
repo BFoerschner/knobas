@@ -124,7 +124,6 @@ pub(crate) const BUILD_FIELDS: &str = concat!("count,nextHref,build(", build_rec
 /// run lists and `map::build_item` makes the same item of both.
 pub(crate) const BUILD_RECORD_FIELDS: &str = build_record!();
 
-
 /// What one parameter is asked for when `set_parameter` checks it against
 /// the value the reader edited (#668): what the view draws a parameter from,
 /// and nothing else. The same fields as each `property` of

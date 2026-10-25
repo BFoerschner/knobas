@@ -3975,7 +3975,9 @@ mod tests {
             "build_type_ids": ["Ledger_Deploy_Staging"]
         }))
         .expect("config");
-        assert!(is_gone(&refresh_of(&tidewater(), &by_type, 1187).await.unwrap()));
+        assert!(is_gone(
+            &refresh_of(&tidewater(), &by_type, 1187).await.unwrap()
+        ));
         refreshed(refresh_of(&tidewater(), &by_type, 412).await.unwrap());
 
         let by_project =

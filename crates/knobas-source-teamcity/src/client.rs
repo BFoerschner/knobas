@@ -12,11 +12,10 @@ use crate::TeamCityConfig;
 use crate::http;
 use crate::rest::{
     ARTIFACT_FIELDS, BUILD_CHANGE_FIELDS, BUILD_CONFIG_VIEW_FIELDS, BUILD_FIELDS, BUILD_ID_FIELDS,
-    BUILD_RECORD_FIELDS,
-    BUILD_TYPE_FIELDS, BUILD_VIEW_FIELDS, Build, BuildRecord, BuildType, Changes, ConfigRecord,
-    CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, PARAMETER_FIELDS,
-    PROJECT_FIELDS, PermissionAssignments, Project, Property, RECENT_BUILD_FIELDS, SERVER_FIELDS,
-    Server, TestOccurrences, USER_FIELDS,
+    BUILD_RECORD_FIELDS, BUILD_TYPE_FIELDS, BUILD_VIEW_FIELDS, Build, BuildRecord, BuildType,
+    Changes, ConfigRecord, CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator,
+    PARAMETER_FIELDS, PROJECT_FIELDS, PermissionAssignments, Project, Property,
+    RECENT_BUILD_FIELDS, SERVER_FIELDS, Server, TestOccurrences, USER_FIELDS,
 };
 
 /// One record, kept both as parsed fields and as the JSON it arrived as --
@@ -216,7 +215,10 @@ impl Rest for HttpRest {
 
     async fn build(&self, id: i64) -> Result<Option<Rec<Build>>, SourceError> {
         let path = format!("app/rest/builds/id:{id}");
-        let raw = match self.get_raw(&path, &[("fields", BUILD_RECORD_FIELDS)]).await {
+        let raw = match self
+            .get_raw(&path, &[("fields", BUILD_RECORD_FIELDS)])
+            .await
+        {
             Ok(raw) => raw,
             Err(error) if error.status() == Some(404) => return Ok(None),
             Err(error) => return Err(error),

@@ -1106,8 +1106,7 @@ async fn remote_id(pool: &sqlx::PgPool, id: i64) -> String {
 /// both builds are canceled and deleted again, and the agents re-enabled.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
-async fn a_landed_trigger_and_rerun_are_mirrored_as_their_queued_build_before_the_run_after_them()
-{
+async fn a_landed_trigger_and_rerun_are_mirrored_as_their_queued_build_before_the_run_after_them() {
     use knobas_app::sources::write_queue;
     use knobas_core::write_queue::WriteState;
 
