@@ -332,6 +332,10 @@ impl SyncRun<'_> {
         // The comment walk's share of it, kept apart because it is capped
         // apart (`ConfluenceCursor::advanced`).
         let mut comments_seen: Vec<Seen> = Vec::new();
+        // The comments each page the page walk sent carried, so the comment
+        // walk can tell a comment that went out with its page from one
+        // posted after the walk read that page.
+        let mut sent_threads: Threads = Threads::new();
         // Seeded from the previous position, so `None` here means neither
         // the run nor the previous cursor carries a stamp. That the new
         // position never falls below the previous one is `Bounds::previous`'s
@@ -397,6 +401,7 @@ impl SyncRun<'_> {
                 let item = map::to_sync_item(self.source_id, self.base_url, &raw, me);
                 // Sink failures are never swallowed (SPI doc on `Source::sync`).
                 delivered.insert(raw.content.id.clone());
+                sent_threads.insert(raw.content.id.clone(), thread(&raw));
                 sink.item(item).await?;
                 emitted += 1;
                 if let Some(u) = when {
@@ -429,6 +434,7 @@ impl SyncRun<'_> {
                     me,
                 },
                 &mut delivered,
+                &sent_threads,
                 &mut comments_seen,
                 &mut users,
                 sink,
@@ -591,6 +597,10 @@ impl SyncRun<'_> {
     ///   `COMMENT_EXPAND` record, so a page a comment led to and a page the
     ///   ordinary walk delivered are mapped from the same shape -- and the new
     ///   comment is in the payload where every other comment is.
+    /// * **A page the page walk already sent is not sent again**, and a
+    ///   comment its copy did not carry -- posted after the walk read the
+    ///   page -- is left out of `seen`, so the next run sends the page with
+    ///   it. Recorded, the entry would claim a delivery that never happened.
     /// * **A failure here fails the run**, and is not swallowed into a partial
     ///   success: a source that answered pages and not comments would
     ///   otherwise go quietly deaf to every discussion, and a stuck source is
@@ -599,6 +609,7 @@ impl SyncRun<'_> {
         &self,
         window: &Window<'_>,
         delivered: &mut std::collections::BTreeSet<String>,
+        sent_threads: &Threads,
         comments_seen: &mut Vec<Seen>,
         users: &mut Directory,
         sink: &mut (dyn Sink + Send),
@@ -616,9 +627,15 @@ impl SyncRun<'_> {
             for raw in &page.results {
                 let version = raw.content.version.as_ref();
                 let number = version.and_then(|v| v.number);
-                if let Some(u) = version
-                    .and_then(|v| v.when.as_deref())
-                    .and_then(crate::time::parse_time)
+                let page_id = raw.content.page_it_is_on();
+                let missed = page_id
+                    .as_ref()
+                    .and_then(|p| sent_threads.get(p))
+                    .is_some_and(|t| !t.contains(&(raw.content.id.clone(), number)));
+                if !missed
+                    && let Some(u) = version
+                        .and_then(|v| v.when.as_deref())
+                        .and_then(crate::time::parse_time)
                 {
                     comments_seen.push(Seen {
                         i: raw.content.id.clone(),
@@ -632,7 +649,7 @@ impl SyncRun<'_> {
                 {
                     continue;
                 }
-                let Some(page_id) = raw.content.page_it_is_on() else {
+                let Some(page_id) = page_id else {
                     continue;
                 };
                 if !delivered.insert(page_id.clone()) {
@@ -717,6 +734,31 @@ impl SyncRun<'_> {
     }
 }
 
+/// Each page the page walk sent, by id, with the comments its copy carried
+/// as `(comment id, version number)`.
+type Threads =
+    std::collections::BTreeMap<String, std::collections::BTreeSet<(String, Option<u64>)>>;
+
+/// The comments a page's record carries, as [`Threads`] holds them.
+fn thread(raw: &RawContent) -> std::collections::BTreeSet<(String, Option<u64>)> {
+    raw.content
+        .children
+        .as_ref()
+        .and_then(|c| c.comment.as_ref())
+        .map(|c| {
+            c.results
+                .iter()
+                .map(|r| {
+                    (
+                        r.content.id.clone(),
+                        r.content.version.as_ref().and_then(|v| v.number),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// The swept pages whose place differs from the one the mirror last received,
 /// less the ones this run already delivered fresh (#1138).
 ///
@@ -788,6 +830,9 @@ mod tests {
         /// asked for: a drag made after the page walk has delivered the page
         /// (#1138).
         reorder_on_comments: Mutex<Option<Vec<(String, i64)>>>,
+        /// A comment that lands on a page the moment the comment walk is
+        /// asked for: posted after the page walk had read that page.
+        comment_on_comments: Mutex<Option<(&'static str, Value)>>,
         /// The users `rest/api/user?key=` knows, by key (#953); any other key
         /// answers `404`.
         users: std::collections::BTreeMap<String, Value>,
@@ -810,6 +855,7 @@ mod tests {
                 edit_mid_walk: Mutex::new(None),
                 delete_mid_walk: Mutex::new(None),
                 reorder_on_comments: Mutex::new(None),
+                comment_on_comments: Mutex::new(None),
                 users: std::collections::BTreeMap::new(),
                 user_fault: None,
                 reports_total: false,
@@ -1009,6 +1055,11 @@ mod tests {
                 cql.contains("type = page") || is_comment_query(cql),
                 "every query this adapter sends is the page walk's or the comment walk's: {cql}"
             );
+            if is_comment_query(cql)
+                && let Some((page_id, comment)) = self.comment_on_comments.lock().unwrap().take()
+            {
+                a_comment_lands_on(self, page_id, comment);
+            }
             if is_comment_query(cql)
                 && let Some(places) = self.reorder_on_comments.lock().unwrap().take()
             {
@@ -1921,6 +1972,44 @@ mod tests {
             "a full sync already has the page: {:?}",
             fake.calls()
         );
+    }
+
+    /// A comment posted **after the page walk read its page** in the same
+    /// run: the page went out without it, so the comment's `seen` entry would
+    /// claim a delivery that never happened and no later run would bring it.
+    /// The page is not sent twice in that run; the next one sends it with the
+    /// comment, and the one after is idle.
+    #[tokio::test]
+    async fn a_comment_posted_after_the_page_walk_sent_its_page_reaches_the_next_run() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        for p in fake.pages.lock().unwrap().iter_mut() {
+            if p["id"] == json!("101") {
+                p["version"] = json!({ "number": 2, "when": "2026-09-02T00:00:00.000Z" });
+            }
+        }
+        *fake.comment_on_comments.lock().unwrap() = Some((
+            "101",
+            plain_comment("960", "2026-09-03T09:00:00.000Z", 1, "mara", "late"),
+        ));
+        let (edited, second) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert_eq!(ids(&edited), vec!["101"], "the page walk's copy, once");
+        assert!(
+            thread_of(&edited, "101").is_empty(),
+            "read before the comment"
+        );
+
+        let (items, third) = run(&fake, &cfg(json!({})), Some(second)).await.unwrap();
+        assert_eq!(ids(&items), vec!["101"], "{:?}", fake.calls());
+        assert_eq!(
+            thread_of(&items, "101"),
+            vec![("mara".to_owned(), "<p>late</p>".to_owned())]
+        );
+        let (idle, fourth) = run(&fake, &cfg(json!({})), Some(third.clone()))
+            .await
+            .unwrap();
+        assert!(idle.is_empty(), "{:?}", ids(&idle));
+        assert_eq!(fourth, third);
     }
 
     /// A comment record the walk cannot place produces nothing, and takes the
