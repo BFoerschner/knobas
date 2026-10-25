@@ -9,7 +9,7 @@ import { keepSeed, onFakeReset } from "../fake-seed";
 import { CORPUS, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
-import { runView } from "./builds";
+import { fixtureBuildEntity, runView } from "./builds";
 import { pullView } from "./views/pulls";
 import { repoView } from "./views/repos";
 
@@ -189,9 +189,28 @@ function refreshEntity(args: Record<string, unknown>): EntityRefresh {
   const detail = getEntity(args);
   if (!detail.source.enabled) return { outcome: "turned_off" };
   if (!REFRESHING_ADAPTERS.has(detail.source.adapter_kind)) return { outcome: "not_offered" };
+  // TeamCity reads a build by id, never a build configuration (#2127).
+  if (detail.row.kind === "build_config") return { outcome: "not_offered" };
   const failed = new URLSearchParams(location.search).has("fake-refresh-failed");
   setTimeout(() => bridge?.emit("item:refreshed", { entity_id: id, write_id: null, ended: failed ? "failed" : "refreshed" }), 0);
   return failed ? { outcome: "failed", reason: "502 Bad Gateway from the source" } : { outcome: "refreshed" };
+}
+
+/** A fixture build or build configuration the corpus does not hold, as a corpus row (#2137). */
+function buildEntry(id: string): (typeof CORPUS)[number] | undefined {
+  const found = fixtureBuildEntity(id);
+  if (found === undefined) return undefined;
+  return {
+    entity_id: id,
+    kind: found.kind,
+    title: found.title,
+    updated_at: null,
+    body_text: "",
+    author: null,
+    web_url: null,
+    deleted_at: null,
+    payload: { source: "teamcity", path: found.path.split("/").join(" › ") },
+  };
 }
 
 /** `get_entity`, including the two refusals the detail view branches on. */
@@ -200,7 +219,7 @@ function getEntity(args: Record<string, unknown>) {
   if (!id.includes(":") || id.startsWith(":") || id.endsWith(":")) {
     throw { code: "invalid", message: `entity id ${id} has no ':' separating namespace from key`, source_id: null };
   }
-  const entry = CORPUS.find((candidate) => candidate.entity_id === id);
+  const entry = CORPUS.find((candidate) => candidate.entity_id === id) ?? buildEntry(id);
   if (!entry) {
     throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
   }

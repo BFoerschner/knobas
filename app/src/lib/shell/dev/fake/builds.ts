@@ -489,6 +489,21 @@ export function fixtureRun(id: string): { config: string; no: number; st: Latest
   return { config, no, st };
 }
 
+/**
+ * A fixture build or build configuration as the mirror holds its row (#2137),
+ * for `get_entity` of an id the corpus does not hold, so the run and
+ * pipeline pages draw their *Refresh*; `undefined` for an id that is neither.
+ */
+export function fixtureBuildEntity(id: string): { kind: "build" | "build_config"; title: string; path: string } | undefined {
+  const run = fixtureRun(id);
+  const config = run?.config ?? (id.startsWith(`${SOURCE}:buildType:`) ? id.slice(`${SOURCE}:buildType:`.length) : null);
+  const path = Object.entries(CONFIGURATIONS).find(([, list]) => config !== null && list.includes(config))?.[0];
+  if (config === null || path === undefined) return undefined;
+  return run !== undefined
+    ? { kind: "build", title: `${config} #${run.no}`, path }
+    : { kind: "build_config", title: config, path };
+}
+
 export function runView(id: string, section: string | null): SourceView | undefined {
   const found = fixtureRun(id);
   if (found === undefined) return undefined;

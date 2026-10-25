@@ -694,3 +694,16 @@ test("refresh_entity reads a refreshing adapter's item back as refreshed, and re
   expect(h["refresh_entity"]!({ entityId: "jira:PAY-231" })).toEqual({ outcome: "refreshed" });
   expect(() => h["refresh_entity"]!({ entityId: "jira:NOPE-1" })).toThrow();
 });
+
+test("a fixture build and its configuration answer get_entity; TeamCity refreshes the build, not the configuration (#2137)", () => {
+  const h = demoHandlers() as Calls;
+  const run = h["get_entity"]!({ entityId: "teamcity:build:Payout_IntegrationTests-1186" }) as EntityDetail;
+  expect(run.row.kind).toBe("build");
+  expect(run.source.id).toBe("teamcity");
+  expect(run.refreshes).toBe(true);
+  expect(h["refresh_entity"]!({ entityId: run.row.entity_id })).toEqual({ outcome: "refreshed" });
+  const config = h["get_entity"]!({ entityId: "teamcity:buildType:Payout_IntegrationTests" }) as EntityDetail;
+  expect(config.row.kind).toBe("build_config");
+  expect(h["refresh_entity"]!({ entityId: config.row.entity_id })).toEqual({ outcome: "not_offered" });
+  expect(() => h["get_entity"]!({ entityId: "teamcity:buildType:Nope" })).toThrow();
+});
