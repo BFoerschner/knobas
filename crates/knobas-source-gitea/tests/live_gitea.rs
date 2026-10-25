@@ -5878,6 +5878,9 @@ async fn a_commit_catch_up_reads_past_a_page_cap_of_commits_the_server_lists_abo
         let commits = of_kind(&sink.0, "commit");
         println!("LIVE deep catch-up run {run}: {} commits", commits.len());
         delivered.extend(commits.iter().map(|i| i.entity.key.clone()));
+        if run == 1 {
+            hint_premise(&env, &full_name, &cursor).await;
+        }
     }
     let position: serde_json::Value = serde_json::from_str(&cursor).expect("the cursor is JSON");
     remove().await;
@@ -5895,6 +5898,51 @@ async fn a_commit_catch_up_reads_past_a_page_cap_of_commits_the_server_lists_abo
         "caught up: {}",
         position["repos"][&full_name]
     );
+}
+
+/// #2039, on the cursor the deep catch-up's first run left: the cut fell on
+/// page 20 of `main` (the newest 1,000 at 50 a page), and what the next run
+/// does with that page rests on what each forge answers under the catch-up's
+/// `until=`. Forgejo lists from the head whatever `until=` says, so page 1 is
+/// all above the window and page 20 still starts above it: the run goes
+/// there. Gitea bounds the listing, so its page 1 starts at or below the
+/// window's top and the run never goes to the page. Asserted here, before the
+/// next run, while the window is where the cursor says. Panics on a failure
+/// before the caller removes its repository, which its next run removes first.
+async fn hint_premise(env: &Env, full_name: &str, cursor: &str) {
+    let version = api_json(env, "version").await;
+    let forgejo = version["version"]
+        .as_str()
+        .expect("a version")
+        .contains("+gitea-");
+    let position: serde_json::Value = serde_json::from_str(cursor).expect("the cursor is JSON");
+    let catch_up = &position["repos"][full_name]["commits_catching_up"];
+    assert_eq!(catch_up["page"], 20, "where the cut fell: {catch_up}");
+    let below = catch_up["below"].as_str().expect("a resume point");
+    let created = |page: &serde_json::Value| {
+        let first = &page.as_array().expect("a commit list")[0];
+        chrono::DateTime::parse_from_rfc3339(first["created"].as_str().expect("created"))
+            .expect("RFC 3339")
+    };
+    let below_at = chrono::DateTime::parse_from_rfc3339(below).expect("RFC 3339");
+    let listed = |page: u32| {
+        format!(
+            "repos/{full_name}/commits?sha=main&stat=false&verification=false&files=false&limit=50&until={below}&page={page}"
+        )
+    };
+    let first = created(&api_json(env, &listed(1)).await);
+    if forgejo {
+        let twentieth = created(&api_json(env, &listed(20)).await);
+        assert!(
+            first > below_at && twentieth > below_at,
+            "Forgejo: pages 1 and 20 start above {below}: {first}, {twentieth}"
+        );
+    } else {
+        assert!(
+            first <= below_at,
+            "Gitea: page 1 under until= starts at or below {below}: {first}"
+        );
+    }
 }
 
 /// #1716: a branch walk of more than one page asks `git/refs/heads` for every

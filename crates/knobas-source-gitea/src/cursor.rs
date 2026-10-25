@@ -175,6 +175,15 @@ pub(crate) struct PullsCatchUp {
 /// finished, in walk order. The first was cut short and is read from `below`
 /// down to the watermark; the rest were never started and are read from
 /// their heads down to it.
+///
+/// `page` is the page of the first branch's listing the cut fell on (#2039).
+/// Gitea bounds a catch-up's listing with `until=`, so its first page is
+/// already the window's and the page goes unused. Forgejo 17 ignores
+/// `until=` and lists the branch from its head, and there the next run goes
+/// to this page once its first page shows nothing but commits above the
+/// window, rather than re-reading every page the cut walk delivered (see
+/// `sync::walk_commits`). Absent in a catch-up written before #2039, which
+/// is read from the branch head as before, so no version bump.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CommitsCatchUp {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -185,6 +194,8 @@ pub(crate) struct CommitsCatchUp {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub seen_at_newest: Vec<String>,
     pub branches: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<u32>,
 }
 
 impl GiteaCursor {
@@ -291,6 +302,7 @@ mod tests {
                     newest: at("2026-08-22T11:50:00Z"),
                     seen_at_newest: vec!["3333333333333333333333333333333333333333".to_owned()],
                     branches: vec!["main".to_owned(), "release/1.4".to_owned()],
+                    page: Some(7),
                 }),
                 branches: BTreeMap::from([(
                     "main".to_owned(),
@@ -369,6 +381,22 @@ mod tests {
         assert_eq!(commits.seen_at_below[0].as_bytes()[0], b'2');
         assert_eq!(commits.seen_at_newest[0].as_bytes()[0], b'3');
         assert_eq!(commits.branches, vec!["main", "release/1.4"]);
+        assert_eq!(commits.page, Some(7));
+    }
+
+    /// A commit catch-up written before #2039 carries no `page`. It still
+    /// parses, with no page, which the walk reads from the branch head as it
+    /// did before: the cursor version stays where it is.
+    #[test]
+    fn a_commit_catch_up_from_before_its_page_still_parses() {
+        let raw = r#"{"v":3,"repos":{"tidewater/payout-service":{"commits_catching_up":{"below":"2026-08-21T08:00:00Z","newest":"2026-08-22T11:50:00Z","branches":["main"]}}}}"#;
+        let cursor = GiteaCursor::parse(Some(raw)).expect("a version-3 cursor is usable");
+        let catch_up = cursor
+            .repo("tidewater/payout-service")
+            .commits_catching_up
+            .expect("the catch-up is read");
+        assert_eq!(catch_up.page, None);
+        assert_eq!(catch_up.branches, vec!["main"]);
     }
 
     /// Empty collections are omitted: the cursor is a text column that grows

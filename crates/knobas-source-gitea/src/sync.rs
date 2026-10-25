@@ -1555,6 +1555,14 @@ async fn issue_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, number: u64
 /// examined down to the watermark and the rest from their heads,
 /// and then the branches that moved since, as [`pulls`] does. A full sync's
 /// budget is unchanged (ADR-0003).
+///
+/// **On a server that ignores `until=` the cut branch starts on the page the
+/// cut fell on (#2039).** Forgejo 17 lists a catch-up's branch from its head,
+/// so without that every run re-read what the runs before it delivered: a
+/// catch-up of N commits under a budget of B read about N²/2B records.
+/// [`CommitsCatchUp`]'s `page` says where to go, and [`walk_commits`] goes
+/// there only once the branch's first page shows the server listed above
+/// the window.
 #[expect(
     clippy::too_many_arguments,
     reason = "the whole per-repository walk state, threaded explicitly: a struct \
@@ -1603,10 +1611,10 @@ async fn commits(
             .map(|(index, branch)| {
                 // The cut branch is read below where the cut fell, the rest
                 // from their heads.
-                let (upper, upper_seen) = if index == 0 {
-                    (catch_up.below, &catch_up.seen_at_below)
+                let (upper, upper_seen, hint) = if index == 0 {
+                    (catch_up.below, &catch_up.seen_at_below, catch_up.page)
                 } else {
-                    (None, &none)
+                    (None, &none, None)
                 };
                 Leg {
                     branch: branch.clone(),
@@ -1616,6 +1624,7 @@ async fn commits(
                         upper,
                         upper_seen,
                     },
+                    hint,
                 }
             })
             .collect();
@@ -1645,6 +1654,7 @@ async fn commits(
                 newest: newest.unwrap_or(catch_up.newest),
                 seen_at_newest,
                 branches,
+                page: Some(stop.page),
             });
             return Ok(());
         }
@@ -1678,6 +1688,7 @@ async fn commits(
                 upper: None,
                 upper_seen: &none,
             },
+            hint: None,
         })
         .collect();
     let walk = walk_commits(source, at, &legs, &mut budget, &mut seen, sink, emitted).await?;
@@ -1698,6 +1709,7 @@ async fn commits(
                 newest,
                 seen_at_newest: on_newest,
                 branches: legs[stop.leg..].iter().map(|l| l.branch.clone()).collect(),
+                page: Some(stop.page),
             });
         }
         _ => {
@@ -1712,6 +1724,8 @@ async fn commits(
 struct Leg<'a> {
     branch: String,
     window: Window<'a, Vec<String>>,
+    /// The page a catch-up's cut fell on, on the branch it cut (#2039).
+    hint: Option<u32>,
 }
 
 /// What one commit walk read.
@@ -1723,10 +1737,12 @@ struct CommitWalk {
     stopped: Option<Stop>,
 }
 
-/// The leg a budget or a page cap cut short, and what was examined on it.
+/// The leg a budget or a page cap cut short, what was examined on it, and
+/// the page of its listing the cut fell on.
 struct Stop {
     leg: usize,
     examined: Vec<(String, Option<DateTime<Utc>>)>,
+    page: u32,
 }
 
 async fn walk_commits(
@@ -1749,7 +1765,7 @@ async fn walk_commits(
         // A reached cap ends a full sync's branch quietly (see the note on
         // the caps), and cuts an incremental walk short like the budget,
         // unless the walk is still passing commits above a catch-up's window
-        // (below). `skip` is the pages earlier walks of this leg read.
+        // (below). `skip` is the pages before the walk's first.
         let walk_from = |skip: u32| {
             PageWalk::new(PageNumber, MAX_COMMIT_PAGES, move |page| {
                 source.client.commits(
@@ -1761,16 +1777,22 @@ async fn walk_commits(
                 )
             })
         };
-        let mut skip = 0;
-        let mut walk = walk_from(skip);
+        // The page last read, counted from the branch head.
+        let mut page = 0;
+        let mut walk = walk_from(page);
         // The commits above the window met on this leg, and whether the last
         // page read held any this leg had not met before (#2034).
         let mut above: HashSet<String> = HashSet::new();
         let mut passing_above = false;
+        // The walk has gone to a catch-up's page and not yet checked it (#2039).
+        let mut unchecked_hint = false;
         loop {
             let batch = match walk.next().await {
                 Ok(Walked::Page(batch)) => batch,
-                Ok(Walked::End) => break,
+                Ok(Walked::End) if !unchecked_hint => break,
+                // A catch-up's page past the end of the listing: not trusted,
+                // as any page that does not start above the window (below).
+                Ok(Walked::End) => Vec::new(),
                 Ok(Walked::Capped) if window.lower.is_none() => break,
                 // A server that ignores `until=` (Forgejo 17, #2034) lists a
                 // catch-up's branch from its head, and what the catch-up
@@ -1780,8 +1802,7 @@ async fn walk_commits(
                 // Bounded by the branch's own history: a page that only
                 // repeats what this leg already read is not `passing_above`.
                 Ok(Walked::Capped) if passing_above => {
-                    skip += MAX_COMMIT_PAGES;
-                    walk = walk_from(skip);
+                    walk = walk_from(page);
                     passing_above = false;
                     continue;
                 }
@@ -1789,6 +1810,7 @@ async fn walk_commits(
                     out.stopped = Some(Stop {
                         leg: index,
                         examined: on_leg,
+                        page,
                     });
                     return Ok(out);
                 }
@@ -1813,10 +1835,28 @@ async fn walk_commits(
                 }
                 Err(error) => return Err(RepoError::from(error)),
             };
+            page += 1;
+            if unchecked_hint {
+                unchecked_hint = false;
+                // Unread commits can sit above the page only where the
+                // branch lost history since (a force-push): its first commit
+                // is then at or below the window's top, and the walk reads on
+                // from page 2.
+                if !starts_above(&batch, window.upper) {
+                    page = 1;
+                    walk = walk_from(page);
+                    continue;
+                }
+            }
             // Records on this page that were not already-delivered history:
             // new ones, and the ones above a catch-up's window.
             let mut fresh = 0usize;
             let mut new_above = 0usize;
+            // The page's readable commits, those strictly above the window,
+            // and whether the last one lies below the watermark.
+            let mut readable = 0usize;
+            let mut over_top = 0usize;
+            let mut ends_below = false;
             for raw in batch {
                 let commit: model::Commit = match serde_json::from_value(raw.clone()) {
                     Ok(commit) => commit,
@@ -1830,6 +1870,9 @@ async fn walk_commits(
                     }
                 };
                 let happened = map::real_time(commit.happened_at());
+                readable += 1;
+                ends_below =
+                    matches!((window.lower, happened), (Some(mark), Some(when)) if when < mark);
                 if let (Some(top), Some(when)) = (window.upper, happened)
                     && (when > top || (when == top && window.upper_seen.contains(&commit.sha)))
                 {
@@ -1839,6 +1882,7 @@ async fn walk_commits(
                     if above.insert(commit.sha.clone()) {
                         new_above += 1;
                     }
+                    over_top += usize::from(when > top);
                     fresh += 1;
                     continue;
                 }
@@ -1873,6 +1917,7 @@ async fn walk_commits(
                         out.stopped = Some(Stop {
                             leg: index,
                             examined: on_leg,
+                            page,
                         });
                     }
                     return Ok(out);
@@ -1880,14 +1925,45 @@ async fn walk_commits(
             }
             // A page with nothing new on it is the end of this branch's new
             // history -- and if the server ignored `since=` altogether, it is
-            // the point where paging stops being worth anything.
-            if fresh == 0 {
+            // the point where paging stops being worth anything. So is a page
+            // that ends below the watermark (#2039): the listing is newest
+            // first, so nothing after it is new. Gitea's `since=` never lists
+            // such a page; Forgejo's listing reaches one on every walk, and
+            // stopping on it saves the page of old history after.
+            if fresh == 0 || ends_below {
                 break;
             }
             passing_above = new_above > 0;
+            // A catch-up's first page that holds only commits above its
+            // window is a server that ignored `until=` (Forgejo 17) listing
+            // from the branch head, and the pages down to where the cut fell
+            // are what the cut walk already delivered (#2039). The walk goes
+            // to that page, and checks it before trusting it (above). Gitea
+            // bounds the listing, so its first page never qualifies.
+            if page == 1
+                && let Some(hint) = leg.hint
+                && hint > 1
+                && over_top > 0
+                && over_top == readable
+            {
+                page = hint - 1;
+                walk = walk_from(page);
+                unchecked_hint = true;
+            }
         }
     }
     Ok(out)
+}
+
+/// Whether a page's first commit lies strictly above `upper`: what lets a
+/// catch-up start on the page its cut fell on (#2039), as
+/// [`walk_pulls`] checks its own.
+fn starts_above(batch: &[Value], upper: Option<DateTime<Utc>>) -> bool {
+    let first = batch
+        .first()
+        .and_then(|raw| serde_json::from_value::<model::Commit>(raw.clone()).ok())
+        .and_then(|commit| map::real_time(commit.happened_at()));
+    matches!((first, upper), (Some(first), Some(upper)) if first > upper)
 }
 
 /// Default branch first, then by name: on a first sync the budget should go to
