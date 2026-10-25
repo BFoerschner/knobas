@@ -600,8 +600,10 @@ pub async fn sync_all<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<Vec
 ///
 /// # Errors
 /// [`NotReady`](crate::IpcErrorCode::NotReady) while the engine is starting
-/// or stopping, and when the scheduler is shutting down mid-ask; `internal`
-/// when the database read of the role's fillers fails.
+/// or stopping, and when the scheduler is shutting down mid-ask;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) when a filler is removed
+/// between the read of the role's fillers and its run; `internal` when the
+/// database fails, reading the fillers or recording a run.
 #[tauri::command]
 pub async fn sync_role<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,

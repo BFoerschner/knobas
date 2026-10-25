@@ -1391,7 +1391,8 @@ pub async fn fillers(
 /// # Errors
 ///
 /// [`SourcesError::Db`] from the reads, [`SourcesError::Trigger`] from a
-/// trigger (the scheduler shutting down).
+/// trigger (the scheduler shutting down, a filler removed since the read, or
+/// the run's record failing).
 pub async fn sync_role(
     pool: &PgPool,
     registry: &dyn AdapterRegistry,

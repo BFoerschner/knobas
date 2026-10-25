@@ -21,7 +21,9 @@
   nobody fills, or whose fillers are all turned off, answers `[]`. Like `sync_now` it returns as
   soon as the runs are recorded, and each run ends on `sync:state` under its id (ADR-0005).
   Errors: `not_ready` while the engine is starting or stopping, and when the scheduler is
-  shutting down mid-ask; `internal` when the database read of the role's fillers fails.
+  shutting down mid-ask; `not_found` when a filler is removed between the read of the role's
+  fillers and its run (`TriggerError::UnknownSource`); `internal` when the database fails,
+  reading the fillers or recording a run.
 
   **One new DTO**, `crate::sources::RoleRun { source_id: String, run_id: i64 }`, in the generated
   `app/src/lib/ipc/generated/sources.ts` (`ipc_mirror`).
