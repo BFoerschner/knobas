@@ -503,6 +503,16 @@ test("a muted line in Commits is drawn as a line, never as a commit; the list af
   expect(text(".tf-prline")).toBe("Commits could not be read.");
   expect(target.querySelector(".tf-rcommits")).toBeNull();
   expect(target.querySelector(".tf-empty")).toBeNull();
+  if (view) unmount(view);
+  view = null;
+  // A muted row with a chip is a commit (the mirror lacks it), not a line; an empty list says *No commits.*
+  await draw([PR, "commits"], ports({ pr: withBlocks("commits", [{ type: "entities", title: null, rows: [vrow(null, "PAY-231: squash me", "77aa01bc2d", "muted")] }]) }));
+  expect([...target.querySelectorAll(".tf-rcommits tr")].map(cells)).toEqual(["77aa01bc2d | PAY-231: squash me | "]);
+  expect(target.querySelector(".tf-prline")).toBeNull();
+  if (view) unmount(view);
+  view = null;
+  await draw([PR, "commits"], ports({ pr: withBlocks("commits", [{ type: "entities", title: null, rows: [] }]) }));
+  expect(text(".tf-empty")).toBe("No commits.");
 });
 
 test("a source that offers no comment draws no comment box", async () => {
