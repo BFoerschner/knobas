@@ -2,7 +2,8 @@
 
 use knobas_source::instance::SourceInstance;
 use knobas_source::{
-    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp, WriteReceipt,
+    ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError, WriteOp,
+    WriteReceipt,
 };
 
 use crate::api::ConfluenceApi;
@@ -58,6 +59,16 @@ impl ConfluenceSource {
             )));
         }
         Ok(parsed.key)
+    }
+
+    /// This instance's reads, the run's and the refresh's.
+    fn sync_run(&self) -> SyncRun<'_> {
+        SyncRun {
+            api: &self.http,
+            cfg: &self.cfg,
+            source_id: &self.id,
+            base_url: &self.base_url,
+        }
     }
 }
 
@@ -152,14 +163,18 @@ impl Source for ConfluenceSource {
         cursor: Option<Cursor>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
-        SyncRun {
-            api: &self.http,
-            cfg: &self.cfg,
-            source_id: &self.id,
-            base_url: &self.base_url,
-        }
-        .run(cursor, sink)
-        .await
+        self.sync_run().run(cursor, sink).await
+    }
+
+    /// One page read by id ([`SyncRun::refresh`], ADR-0031): what a landed
+    /// write is followed by, so the mirror holds the page as Confluence does
+    /// before the run after the write starts.
+    ///
+    /// The id is unwrapped as a write's target is ([`Self::content_id`]): an
+    /// entity of another instance is refused, never read here.
+    async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
+        let id = self.content_id(entity)?;
+        self.sync_run().refresh(&id).await
     }
 
     /// The three writes this adapter declares, and a refusal by name for
@@ -372,7 +387,13 @@ mod tests {
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
         assert_eq!(d.name, "Tidewater Confluence");
         assert_eq!(d.entity_kinds.len(), 1);
-        assert_eq!(d.capabilities, vec![knobas_source::Capability::Write]);
+        assert_eq!(
+            d.capabilities,
+            vec![
+                knobas_source::Capability::Write,
+                knobas_source::Capability::Refresh
+            ]
+        );
         assert_eq!(d.write_ops, vec!["comment", "update_page", "create_page"]);
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.

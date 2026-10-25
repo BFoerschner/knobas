@@ -23,13 +23,17 @@ pub fn descriptor_template() -> SourceDescriptor {
         id: crate::ADAPTER_KIND.to_owned(),
         adapter_kind: crate::ADAPTER_KIND.to_owned(),
         name: "Confluence".to_owned(),
-        // `Write` since #286, and it is the only capability. `Capability::Search`
+        // `Write` since #286, and `Refresh` since #2096: a page is read back
+        // by id after a write lands (ADR-0031). `Capability::Search`
         // stays reserved for a server-side `Source::search` the SPI does not
         // have -- knobas' launcher answers from the mirror either way, and this
         // adapter would be the first with a real server-side search to declare
         // if the SPI ever grows one. `Webhooks` likewise: Confluence DC
         // has them and knobas has no receiver.
-        capabilities: vec![knobas_source::Capability::Write],
+        capabilities: vec![
+            knobas_source::Capability::Write,
+            knobas_source::Capability::Refresh,
+        ],
         adapter_version: crate::ADAPTER_VERSION.to_owned(),
         // Bearer PAT (DC >= 7.9) or Basic user+password (spec §3).
         auth_methods: vec![AuthMethod::Pat, AuthMethod::UserPassword],
@@ -254,7 +258,7 @@ mod tests {
         let d = descriptor_template();
         assert_eq!(d.id, crate::ADAPTER_KIND);
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
-        assert_eq!(d.capabilities, vec![Capability::Write]);
+        assert_eq!(d.capabilities, vec![Capability::Write, Capability::Refresh]);
         assert_eq!(d.write_ops, vec!["comment", "update_page", "create_page"]);
         assert_eq!(d.adapter_version, crate::ADAPTER_VERSION);
         assert_eq!(
@@ -431,7 +435,7 @@ mod tests {
             back.write_ops,
             vec!["comment", "update_page", "create_page"]
         );
-        assert_eq!(back.capabilities, vec![knobas_source::Capability::Write]);
+        assert_eq!(back.capabilities, descriptor_template().capabilities);
         assert!(back.entity_kinds[0].full_sync_exhaustive);
         // The declaration travels with it: a reader resolves it on the other
         // side of the bridge, so a hop that dropped it would turn every
