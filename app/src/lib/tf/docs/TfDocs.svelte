@@ -323,8 +323,9 @@
   }
 
   /**
-   * Read the open page `id` again, after a link or a sync run: no visit, and
-   * nothing once the reader has opened another page (#2072).
+   * Read the open page `id` and its row again, after a link, a sync run or a
+   * refresh: no visit, and nothing once the reader has opened another page
+   * (#2072, #2136).
    */
   function rereadPage(id: string | null): Promise<void> {
     if (id === null || id !== target) return Promise.resolve();
