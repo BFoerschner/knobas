@@ -173,7 +173,11 @@ async fn a_component_without_refresh_that_declares_it_is_not_believed() {
     // is read only under the capability the host dropped.
     assert!(!descriptor.entity_kinds.is_empty());
     for kind in &descriptor.entity_kinds {
-        assert!(kind.refreshes, "{}: the component's JSON says refreshed", kind.id);
+        assert!(
+            kind.refreshes,
+            "{}: the component's JSON says refreshed",
+            kind.id
+        );
         assert!(!descriptor.refreshes_kind(&kind.id), "{}", kind.id);
     }
 }

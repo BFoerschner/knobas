@@ -164,7 +164,8 @@ function sourceRef(id: string) {
 
 /**
  * The adapters that read one item by id on main (#2095-#2101), so the
- * detail's `refreshes` matches what their descriptors declare; Kestrel, and
+ * detail's `refreshes` matches what their descriptors declare together with
+ * `NOT_REFRESHED` below, a hand copy of their `KindInfo::refreshes`; Kestrel, and
  * a WASM component built against a world before 1.4.0, offer *Sync now*.
  */
 const REFRESHING_ADAPTERS = new Set(["mock", "jira", "confluence", "teamcity", "gitea", "kuma", "wasm-fixture"]);

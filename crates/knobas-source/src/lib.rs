@@ -231,9 +231,10 @@ pub struct SourceDescriptor {
 
 impl SourceDescriptor {
     /// Whether this source reads one item by id: it declares
-    /// [`Capability::Refresh`] (ADR-0031). Answered off the descriptor, so a
-    /// caller deciding between *Refresh* and *Sync now*, or between a
-    /// refresh and the run alone after a landed write, calls nothing.
+    /// [`Capability::Refresh`] (ADR-0031), for some kind. Answered off the
+    /// descriptor, so a caller deciding between a refresh and the run alone
+    /// after a landed write calls nothing; one deciding between *Refresh* and
+    /// *Sync now* for an item asks [`Self::refreshes_kind`] (#2146).
     #[must_use]
     pub fn refreshes(&self) -> bool {
         self.capabilities.contains(&Capability::Refresh)
