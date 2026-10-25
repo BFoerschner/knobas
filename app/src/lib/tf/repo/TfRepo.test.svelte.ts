@@ -548,7 +548,7 @@ test("Refresh on a repository reads it from its source, then its row, its branch
   expect([...target.querySelectorAll(".tf-code .tf-l")].map(text)).toEqual(["1// README.md", "2fn main() {}"]);
 });
 
-test("a refresh reads Commits, a commit and Branches again over what they drew", async () => {
+test("a refresh reads Commits, a commit, the compare page and Branches again over what they drew", async () => {
   const stand = (): RepoPorts => ports({ getEntity: repoDetail(), refresh: refreshing() });
   const press = async () => {
     const before = viewReads.length;
@@ -565,6 +565,10 @@ test("a refresh reads Commits, a commit and Branches again over what they drew",
   await draw([REPO, "commits", C1], stand());
   expect(await press()).toContainEqual([C1, null]);
   expect(text(target.querySelector(".tf-cgroup-h"))).toContain("PAY-231: jitter in backoff");
+  unmount(view!);
+
+  await draw([REPO, "compare", "feature", "PAY-231-sepa-retry"], stand());
+  expect(await press()).toEqual(expect.arrayContaining([[FEATURE, null], [FEATURE, "diff"]]));
   unmount(view!);
 
   await draw([REPO, "branches"], stand());
