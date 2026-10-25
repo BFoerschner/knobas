@@ -17286,3 +17286,9 @@ The merge-manager's rulings (Opus):
 - **The shared pieces.** *Ruling:* `TfDetailRefresh` and `DetailRefresh` take a `RefreshSubject` (the `EntityDetail` fields they read: `refreshes`, `row.entity_id`, `source.{id, display_name, enabled}`); an `EntityDetail` still is one, so no other caller changed. *Cost of reversing:* the type alias.
 - **One refresh per row.** *Ruling:* each row holds its own `DetailRefresh`, so one monitor's *Refreshing…* neither disables nor relabels another's. The re-read is the roster's (`revision`), resolved when that read answers; the pause and resume echoes settle on it as on any read. *Cost of reversing:* one map.
 - **Test seams (the TDD skill asks Björn).** *Ruling:* `tests/it/assets_ipc.rs` through `assets::monitor_roster` with a registry whose Kuma template lacks `Refresh`, and the shell (`TfMonitors.test.svelte.ts`, injected refresh ports). *Cost of reversing:* none.
+
+The merge-manager's rulings (Opus):
+
+- **A refresh whose roster read was replaced.** *Ruling:* fixed on the branch. The roster effect handed a replaced read's waiting refreshes to `rereads` after the newer read had already taken its own, so the first of two quick refreshes stayed *Refreshing…* until a third read. Now only a read no newer one replaced settles them, all at once (`TfMonitors.svelte` roster effect), tested by `a refresh whose roster read a second refresh's read replaced settles on that newer read`. *Cost of reversing:* none worth it.
+- **The conventions line's exception.** *Ruling:* #2136's sentence stands for a page of one item; the #2138 sentence now says outright that a list is its exception, and why (a round trip per row). *Cost of reversing:* one sentence.
+- **A `not_offered` answer switches only that row to *Sync now*.** *Ruling:* accept. Kuma never answers it for a monitor, and #2146 (the per-kind flag) removes the case. *Cost of reversing:* a refresher per source instead of per row.

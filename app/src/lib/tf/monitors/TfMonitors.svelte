@@ -183,14 +183,12 @@
 
   /** Bumped to read both lists again. */
   let revision = $state(0);
-  /** The refreshes waiting on the next roster read (#2138). */
+  /** The refreshes waiting on the roster read that answers next (#2138). */
   let rereads: (() => void)[] = [];
 
   $effect(() => {
     if (!ready) return;
     void revision;
-    const waiting = rereads;
-    rereads = [];
     let live = true;
     failed = null;
     const fail = (error: unknown) => {
@@ -205,9 +203,12 @@
         settleRoster(rows);
       }, fail)
       .finally(() => {
-        // A read a newer one replaced hands its refreshes to that one.
-        if (live) for (const done of waiting) done();
-        else rereads.push(...waiting);
+        // Only a read no newer one replaced settles the refreshes, all of them:
+        // each started before it (a `reread` starts a read), so it saw theirs.
+        if (!live) return;
+        const waiting = rereads;
+        rereads = [];
+        for (const done of waiting) done();
       });
     ports.openAlerts().then(
       (alerts) => {

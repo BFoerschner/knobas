@@ -671,3 +671,32 @@ test("a monitor whose refresh failed keeps the roster and says why under its row
   expect(text(rowNamed("payouts /health").querySelector(".tf-refresh"))).toBe("Refresh");
   expect(rows().filter((tr) => tr.querySelector(".tf-mbar"))).toHaveLength(4);
 });
+
+test("a refresh whose roster read a second refresh's read replaced settles on that newer read (#2138)", async () => {
+  let reads = 0;
+  const answers: ((rows: MonitorRow[]) => void)[] = [];
+  await draw(
+    [],
+    null,
+    ports({
+      monitorRoster: () => {
+        reads += 1;
+        if (reads === 1) return Promise.resolve(ROSTER);
+        return new Promise((resolve) => answers.push(resolve));
+      },
+    }),
+  );
+  rowNamed("payouts /health").querySelector<HTMLButtonElement>(".tf-refresh")!.click();
+  await settle();
+  rowNamed("pg-payments").querySelector<HTMLButtonElement>(".tf-refresh")!.click();
+  await settle();
+  expect(answers).toHaveLength(2);
+
+  // The first read answers after the second replaced it, then the second answers.
+  answers[0]!(ROSTER);
+  await settle();
+  answers[1]!(ROSTER);
+  await settle();
+  expect(text(rowNamed("payouts /health").querySelector(".tf-refresh"))).toBe("Refresh");
+  expect(text(rowNamed("pg-payments").querySelector(".tf-refresh"))).toBe("Refresh");
+});
