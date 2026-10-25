@@ -9,7 +9,8 @@ import type { QueuedWrite } from "../ipc/sources";
 import type { Hear, WriteFollower } from "../shell/follow-write";
 import { noteWithdrawn } from "../shell/write-queue.svelte";
 import { toasts } from "../shell/toasts.svelte";
-import { askAgain, forgetQueued, markQueued, queuedMark, queuedMarks, sameWords, settleQueued, takeAgain } from "./queued.svelte";
+import { EVENTS } from "../ipc";
+import { askAgain, forgetQueued, markQueued, queuedMark, queuedMarks, sameWords, settleQueued, takeAgain, watchEchoes } from "./queued.svelte";
 
 /** A follower the test speaks for: `hear(id, row)` is the queue's next read of write `id`. */
 function fakeFollower() {
@@ -134,4 +135,105 @@ test("a mark with no follow still goes when its write is withdrawn", () => {
   markQueued("tc:build/2", "run", "run queued", { write: { id: 8 } });
   noteWithdrawn(8);
   expect(queuedMark("tc:build/2", "run")).toBeNull();
+});
+
+// ---- the echo's one lifecycle (#2102) ----
+
+test("an echo reads queued while its write is open, sent once it is sent, and never queued after", () => {
+  const { follower, hear } = fakeFollower();
+  markQueued("confluence:1", "comment", "Hello", { many: true, write: { id: 10 }, following: { name: "Comment" }, follower });
+  expect(queuedMark("confluence:1", "comment")?.state).toBe("queued");
+
+  hear(10, row(10, "pending"));
+  expect(queuedMark("confluence:1", "comment")?.state).toBe("queued");
+
+  hear(10, undefined);
+  expect(queuedMark("confluence:1", "comment")?.state).toBe("sent");
+
+  // The follow is over: a stray read of an open row does not take it back to queued.
+  hear(10, row(10, "pending"));
+  expect(queuedMark("confluence:1", "comment")?.state).toBe("sent");
+});
+
+test("an echo of a write already sent starts sent", () => {
+  markQueued("tc:run/1", "ticket", "Flaky", { write: { id: 11, state: "sent" } });
+  expect(queuedMark("tc:run/1", "ticket")?.state).toBe("sent");
+});
+
+test("a sent echo goes when the surface's read shows the write, and a withdrawn one goes before it is sent", () => {
+  const { follower, hear } = fakeFollower();
+  markQueued("confluence:1", "page", "Runbook", { many: true, write: { id: 12 }, following: { name: "Page" }, follower });
+  markQueued("confluence:1", "page", "Notes", { many: true, write: { id: 13 }, following: { name: "Page" }, follower });
+  hear(12, undefined);
+  settleQueued("confluence:1", (mark) => mark.text === "Runbook");
+  noteWithdrawn(13);
+  expect(queuedMarks("confluence:1")).toEqual([]);
+});
+
+/** A bridge the test emits on: `emit(event, payload)` reaches every listener of `event`. */
+function fakeListen() {
+  const handlers = new Set<{ event: string; handler: (event: { payload: unknown }) => void }>();
+  return {
+    listen: (event: string, handler: (event: { payload: unknown }) => void) => {
+      const entry = { event, handler };
+      handlers.add(entry);
+      return Promise.resolve(() => void handlers.delete(entry));
+    },
+    emit: (event: string, payload: unknown) => {
+      for (const entry of [...handlers]) if (entry.event === event) entry.handler({ payload });
+    },
+    count: () => handlers.size,
+  };
+}
+
+const refreshed = (entity_id: string, write_id: number | null) => ({ entity_id, write_id, ended: "refreshed" });
+const runEnded = (source_id: string) => ({ source_id, running: false });
+
+test("a surface re-reads on the refresh event naming its echo's write or its entity, and not on another's", async () => {
+  const bridge = fakeListen();
+  let reads = 0;
+  const stop = watchEchoes("docs", () => void (reads += 1), { listen: bridge.listen });
+  await Promise.resolve();
+  markQueued("confluence:1", "page", "Runbook", { many: true, write: { id: 20 }, surface: "docs", source: "confluence" });
+  markQueued("confluence:2", "comment", "Hi", { many: true, write: { id: 21 }, surface: "docs", source: "confluence" });
+  markQueued("jira:PAY-1", "comment", "Elsewhere", { many: true, write: { id: 22 }, surface: "job", source: "jira" });
+
+  bridge.emit(EVENTS.itemRefreshed, refreshed("confluence:new", 20)); // the new page: by its write
+  expect(reads).toBe(1);
+  bridge.emit(EVENTS.itemRefreshed, refreshed("confluence:2", null)); // the commented page: by its entity
+  expect(reads).toBe(2);
+  bridge.emit(EVENTS.itemRefreshed, refreshed("confluence:9", 99)); // nothing Docs echoes
+  bridge.emit(EVENTS.itemRefreshed, refreshed("jira:PAY-1", 22)); // another surface's echo
+  expect(reads).toBe(2);
+
+  stop();
+  expect(bridge.count()).toBe(0);
+});
+
+test("a surface re-reads when a run of its echo's source ends, and not on another source's run or a run still going", async () => {
+  const bridge = fakeListen();
+  let reads = 0;
+  watchEchoes("docs", () => void (reads += 1), { listen: bridge.listen });
+  await Promise.resolve();
+  markQueued("confluence:1", "comment", "Hi", { many: true, write: { id: 30 }, surface: "docs", source: "confluence" });
+
+  bridge.emit(EVENTS.syncState, { source_id: "confluence", running: true });
+  bridge.emit(EVENTS.syncState, runEnded("jira"));
+  expect(reads).toBe(0);
+  bridge.emit(EVENTS.syncState, runEnded("confluence"));
+  expect(reads).toBe(1);
+
+  // Once the echo is gone, a run's end has nothing to settle.
+  settleQueued("confluence:1", () => true);
+  bridge.emit(EVENTS.syncState, runEnded("confluence"));
+  expect(reads).toBe(1);
+});
+
+test("a surface that reads on every run's end says so, and hears each", async () => {
+  const bridge = fakeListen();
+  let reads = 0;
+  watchEchoes("docs", () => void (reads += 1), { listen: bridge.listen, everyRun: true });
+  await Promise.resolve();
+  bridge.emit(EVENTS.syncState, runEnded("jira"));
+  expect(reads).toBe(1);
 });
