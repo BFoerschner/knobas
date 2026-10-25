@@ -611,7 +611,8 @@ test("two overlapping saves land in order, the newer body last, and no save read
     await pausedOut();
   }
   release();
-  await pausedOut();
+  // Both pauses are out; what is left is the chain, which settles without a timer.
+  await settle();
   expect(stored()).toContain("Tomasz Wójcik: second");
   expect(calls.reads).toBe(reads);
 });
@@ -625,6 +626,6 @@ test("a refused save does not break the chain: the next save still lands (#1679)
     box().dispatchEvent(new Event("input", { bubbles: true }));
     await pausedOut();
   }
-  await pausedOut();
+  await settle();
   expect(stored()).toContain("Tomasz Wójcik: second");
 });

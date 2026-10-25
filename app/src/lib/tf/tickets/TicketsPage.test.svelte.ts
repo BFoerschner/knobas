@@ -1068,12 +1068,13 @@ test("an address naming no view says so and offers All tickets", async () => {
 /**
  * The preview reads a moment after a change (`ViewEditor`'s debounce): wait for that read
  * to reach the harness, then let its answer draw. A fixed 200 ms sleep here lost the race
- * on a two-core runner (#2048). The editor's statuses read asks for one card a column, the
- * preview for nine or a whole lane, so a read of one is not the preview.
+ * on a two-core runner (#2048). The preview asks for nine cards a column, or whole lanes
+ * (`null`); the editor's statuses read asks for one and the page's own reads for 8 or 50.
  */
 async function previewed(h: Harness) {
   const sent = h.reads.length;
-  await until(() => h.reads.slice(sent).some((read) => read.perColumn !== 1), "the preview's debounced read");
+  const preview = (read: Harness["reads"][number]) => read.perColumn === 9 || read.perColumn === null;
+  await until(() => h.reads.slice(sent).some(preview), "the preview's debounced read");
   await settle();
 }
 
@@ -1423,7 +1424,6 @@ test("Make an editable copy opens New view on your own copy: the JQL it could te
   jiraReads.length = 0;
   await until(() => jiraReads.length > 0, "the copy's preview read");
   await settle();
-  expect(jiraReads.length).toBeGreaterThan(0);
   expect(jiraReads.every((ref) => ref === null)).toBe(true);
 
   [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Create view")!.click();

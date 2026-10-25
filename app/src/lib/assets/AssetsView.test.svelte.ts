@@ -396,7 +396,6 @@ let scrolled: ScrollIntoViewOptions[] = [];
 function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
   const asked: (string | null)[] = [];
   const searched: SearchQuery[] = [];
-  searchedNow = searched;
   const opened: string[] = [];
   location.hash = hash;
   const nav = createTestNav();
@@ -566,22 +565,19 @@ function box(): HTMLInputElement {
   return input;
 }
 
-/** The mounted view's search port's queries, for {@link type} to wait on. */
-let searchedNow: SearchQuery[] = [];
-
 /**
  * Type into the search box and wait for the search it sends once the debounce
  * is out, then for its answer to draw (#2048; it was a fixed sleep). An empty
  * box asks nothing and arms no timer, so there is nothing to wait for.
  */
-async function type(text: string): Promise<void> {
-  const sent = searchedNow.length;
+async function type(searched: SearchQuery[], text: string): Promise<void> {
+  const sent = searched.length;
   const input = box();
   input.value = text;
   input.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
   if (text.trim() !== "") {
-    await waitFor(() => expect(searchedNow.length, `the search for ${text}`).toBeGreaterThan(sent));
+    await waitFor(() => expect(searched.length, `the search for ${text}`).toBeGreaterThan(sent));
     // The answer is a resolved promise: one macrotask turn drains its chain.
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
@@ -1086,7 +1082,7 @@ test("typing a name opens the path to the first match and selects it", async () 
   const { nav, searched } = render("#/assets/tree");
   await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
-  await type("gitea-db");
+  await type(searched, "gitea-db");
   // What the box asked for, which is the estate's corpus and nothing else.
   expect(searched.at(-1)?.filters.kinds).toEqual(["asset"]);
   expect(searched.at(-1)?.raw).toBe("gitea-db");
@@ -1122,7 +1118,7 @@ test("the box waits for the typing to stop, and an empty box asks nothing", asyn
   vi.advanceTimersByTime(DEBOUNCE_MS);
   expect(searched.map((query) => query.raw)).toEqual(["git"]);
 
-  await type("");
+  await type(searched, "");
   vi.advanceTimersByTime(DEBOUNCE_MS);
   expect(searched.map((query) => query.raw)).toEqual(["git"]);
 });
@@ -1134,10 +1130,10 @@ test("the box waits for the typing to stop, and an empty box asks nothing", asyn
  * match must not blank the path the reader is standing in.
  */
 test("a query nothing matches leaves the columns where they were", async () => {
-  render("#/asset/asset:postgres");
+  const { searched } = render("#/asset/asset:postgres");
   await waitFor(() => expect(columns()).toHaveLength(3));
 
-  await type("nothing-is-called-this");
+  await type(searched, "nothing-is-called-this");
 
   expect(text()).toContain("Nothing in the estate matches");
   expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]);
@@ -1150,10 +1146,10 @@ test("a query nothing matches leaves the columns where they were", async () => {
  * columns back without losing the asset they were reading.
  */
 test("escape in the search box clears the query before it unwinds anything", async () => {
-  const { nav } = render("#/asset/asset:postgres");
+  const { nav, searched } = render("#/asset/asset:postgres");
   await waitFor(() => expect(columns()).toHaveLength(3));
 
-  await type("gitea");
+  await type(searched, "gitea");
   expect(text()).toContain("gitea-db");
 
   press("Escape", box());
@@ -1169,10 +1165,10 @@ test("escape in the search box clears the query before it unwinds anything", asy
  * in front of the reader is the one that answers.
  */
 test("the arrows move through the matches instead of the columns", async () => {
-  const { nav } = render("#/assets/tree");
+  const { nav, searched } = render("#/assets/tree");
   await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
-  await type("vm-");
+  await type(searched, "vm-");
   press("ArrowDown", box());
   press("Enter", box());
 
