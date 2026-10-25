@@ -57,10 +57,9 @@
     staleLine,
     syncWith,
     triggerLabel,
-    RUN_FIRST_IN_QUEUE,
     RUN_OP,
-    RUN_OVERRIDES,
     runFieldAsks,
+    runFieldRefusals,
   } from "./pipeline";
   import { RUN_BRIDGE, listenSynced, type RunPorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
@@ -154,8 +153,7 @@
     return askInto(asks, ports.refusedWrites, (answer) => (refused = answer));
   });
   const cannotRun = $derived(refusalOf(refused, pipelineId, RUN_OP));
-  const cannotOverride = $derived(refusalOf(refused, pipelineId, RUN_OP, RUN_OVERRIDES));
-  const cannotPutFirst = $derived(refusalOf(refused, pipelineId, RUN_OP, RUN_FIRST_IN_QUEUE));
+  const fieldRefusals = $derived(runFieldRefusals(refused, pipelineId));
   function runAgain() {
     if (cannotRun === null) dialog = true;
   }
@@ -621,8 +619,7 @@
       from={run}
       {jobBranch}
       secretNoun={stale?.fix?.secret ?? null}
-      {cannotOverride}
-      {cannotPutFirst}
+      {...fieldRefusals}
       {ports}
       onclose={() => (dialog = false)}
       {onrun}

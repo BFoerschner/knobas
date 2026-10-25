@@ -289,11 +289,9 @@ fn run_action(builds: &[Build]) -> ViewAction {
             placeholder: Some("default branch".to_owned()),
             ..ActionField::new("branch", "Branch", FieldKind::Text { suggestions })
         }],
-        confirm: Some(
-            "Queue one build of this configuration. Leave the branch empty for the default \
-             branch; only the values you change are sent, for this build alone."
-                .to_owned(),
-        ),
+        confirm: Some(format!(
+            "{RUN_SENTENCE}; only the values you change are sent, for this build alone."
+        )),
         primary: true,
         with_settings: true,
         ..ViewAction::new(crate::WRITE_OP_RUN_BUILD, "Run…")
@@ -306,10 +304,13 @@ fn run_action(builds: &[Build]) -> ViewAction {
 fn run_without_settings(run: &mut ViewAction, reason: &str) {
     run.with_settings = false;
     run.confirm = Some(format!(
-        "Queue one build of this configuration. Leave the branch empty for the default branch. \
-         The parameters are sent as they are: {reason}."
+        "{RUN_SENTENCE}. The parameters are sent as they are: {reason}."
     ));
 }
+
+/// What *Run…*'s sentence starts with, with or without the overrides.
+const RUN_SENTENCE: &str =
+    "Queue one build of this configuration. Leave the branch empty for the default branch";
 
 /// What happened to a build.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -87,6 +87,13 @@ impl Permission {
         }
     }
 
+    /// Whether TeamCity checks it globally, whatever the project: then an
+    /// assignment of it anywhere is read as held, rather than refusing on a
+    /// guess about how a project's role carrying it is answered.
+    fn is_global(self) -> bool {
+        self == Permission::ReorderQueue
+    }
+
     /// Why a user without it cannot make the write, in `project`.
     fn reason(self, project: &str) -> String {
         match self {
@@ -162,7 +169,7 @@ impl Grants {
                 .is_some_and(|ids| ids.contains(permission.id()))
         };
         let holds = self.global.contains(permission.id())
-            || if permission == Permission::ReorderQueue {
+            || if permission.is_global() {
                 self.on_project
                     .values()
                     .any(|ids| ids.contains(permission.id()))

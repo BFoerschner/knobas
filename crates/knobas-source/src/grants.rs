@@ -26,7 +26,8 @@
 //!
 //! Plain serde data, like everything else crossing the SPI.
 
-/// One write a surface would offer: `op` on `entity`.
+/// One write a surface would offer: `op` on `entity`, or one field of it
+/// ([`field`](Self::field), #2055).
 ///
 /// `entity` is an [`EntityRef`](knobas_spi_types::entity::EntityRef) in
 /// string form, the address every [`WriteOp`](crate::WriteOp) carries. For a
@@ -78,8 +79,8 @@ impl WriteAsk {
     }
 }
 
-/// A write the source's credential cannot make, and why, in words a person
-/// can act on: *This TeamCity user cannot run builds in Payout: it lacks the
+/// A write the source's credential cannot make, or one field of it the write
+/// cannot carry, and why, in words a person can act on: *This TeamCity user cannot run builds in Payout: it lacks the
 /// Run build permission*.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]

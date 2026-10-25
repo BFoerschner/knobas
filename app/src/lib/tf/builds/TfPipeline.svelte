@@ -71,10 +71,9 @@
     pipelineWord,
     pipelineSource,
     QUEUED_RUN,
-    RUN_FIRST_IN_QUEUE,
     RUN_OP,
-    RUN_OVERRIDES,
     runFieldAsks,
+    runFieldRefusals,
     queuedRunRows,
     queuedRunWhat,
     resultWord,
@@ -153,8 +152,7 @@
   });
   const cannotRun = $derived(refusalOf(refused, id, RUN_OP));
   const cannotChange = $derived(parameterOp === null ? null : refusalOf(refused, id, parameterOp));
-  const cannotOverride = $derived(refusalOf(refused, id, RUN_OP, RUN_OVERRIDES));
-  const cannotPutFirst = $derived(refusalOf(refused, id, RUN_OP, RUN_FIRST_IN_QUEUE));
+  const fieldRefusals = $derived(runFieldRefusals(refused, id));
 
   function open(wanted: string) {
     const mine = ++token;
@@ -730,8 +728,7 @@
     from={dialog.from}
     {jobBranch}
     secretNoun={stale?.fix?.secret ?? null}
-    {cannotOverride}
-    {cannotPutFirst}
+    {...fieldRefusals}
     {ports}
     onclose={() => (dialog = null)}
     {onrun}

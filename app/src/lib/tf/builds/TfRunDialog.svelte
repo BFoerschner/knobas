@@ -43,6 +43,7 @@
     summaryOf,
     valuesFrom,
     type ExtraRow,
+    type RunField,
     type RunRequest,
     type StartValue,
   } from "./run-dialog";
@@ -170,6 +171,10 @@
   /** What the run carries: no override, and not the queue's top, where the credential may not send them. */
   const overrides = $derived(cannotOverride !== null ? [] : overridesOf(fields, values, extra));
   const firstInQueue = $derived(first && cannotPutFirst === null);
+  /** A parameter's field: what it will run with, which is its default where overrides are refused. */
+  function shownValue(field: RunField): string {
+    return cannotOverride !== null ? field.default : (values[field.name] ?? "");
+  }
   const shownBranch = $derived(branch.trim() || fallback || "the default branch");
   const summary = $derived(summaryOf(shownBranch, overrides));
 
@@ -289,31 +294,19 @@
     {/if}
     {#if cannotOverride !== null}
       <p class="tf-dim tf-run-refused">{cannotOverride}</p>
-      {#if fields.length > 0}
-        <div class="tf-prm">
-          {#each fields as field (field.name)}
-            {@const id = `tf-run-p-${uid}-${field.name}`}
-            <label class="tf-k" for={id} title={field.label !== null ? field.name : undefined}>{field.label ?? field.name}</label>
-            {#if field.kind.type === "select"}
-              <select {id} aria-label={field.label ?? field.name} disabled value={field.default}>
-                {#each field.kind.options as option (option.value)}
-                  <option value={option.value}>{option.label ?? option.value}</option>
-                {/each}
-              </select>
-            {:else}
-              <input {id} aria-label={field.label ?? field.name} type={field.secret ? "password" : "text"} disabled value={field.default} />
-            {/if}
-            <span class="tf-chg"></span>
-          {/each}
-        </div>
-      {/if}
-    {:else if fields.length > 0}
+    {/if}
+    {#if fields.length > 0}
       <div class="tf-prm">
         {#each fields as field (field.name)}
           {@const id = `tf-run-p-${uid}-${field.name}`}
           <label class="tf-k" for={id} title={field.label !== null ? field.name : undefined}>{field.label ?? field.name}</label>
           {#if field.kind.type === "select"}
-            <select {id} aria-label={field.label ?? field.name} bind:value={values[field.name]}>
+            <select
+              {id}
+              aria-label={field.label ?? field.name}
+              disabled={cannotOverride !== null}
+              bind:value={() => shownValue(field), (value) => (values[field.name] = value)}
+            >
               {#each field.kind.options as option (option.value)}
                 <option value={option.value}>{option.label ?? option.value}</option>
               {/each}
@@ -324,10 +317,11 @@
               aria-label={field.label ?? field.name}
               type={field.secret ? "password" : "text"}
               placeholder={field.secret ? "(hidden)" : (field.hint ?? "")}
-              bind:value={values[field.name]}
+              disabled={cannotOverride !== null}
+              bind:value={() => shownValue(field), (value) => (values[field.name] = value)}
             />
           {/if}
-          <span class="tf-chg">{values[field.name] !== field.default ? "changed" : ""}</span>
+          <span class="tf-chg">{shownValue(field) !== field.default ? "changed" : ""}</span>
         {/each}
       </div>
     {/if}
@@ -353,11 +347,10 @@
       <summary>{pipeline.source_name} options</summary>
       <div>
         <label class="tf-ck"><input type="checkbox" bind:checked={clean} /> Clean checkout</label>
-        {#if cannotPutFirst !== null}
-          <label class="tf-ck" title={cannotPutFirst}><input type="checkbox" disabled checked={false} /> Put first in the queue</label>
-        {:else}
-          <label class="tf-ck"><input type="checkbox" bind:checked={first} /> Put first in the queue</label>
-        {/if}
+        <label class="tf-ck" title={cannotPutFirst ?? undefined}>
+          <input type="checkbox" disabled={cannotPutFirst !== null} bind:checked={() => firstInQueue, (checked) => (first = checked)} />
+          Put first in the queue
+        </label>
       </div>
     </details>
     <label class="tf-ck tf-run-save"

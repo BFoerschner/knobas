@@ -12,6 +12,7 @@ import type { PipelineRow, PipelineSettings, PipelineTrigger, RunRow } from "../
 import type { QueuedWrite, SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
 import { ageLabel, secondsLabel } from "../../time/format";
 import { signInFails } from "../../shell/health.svelte";
+import { refusalOf, type RefusedWrite, type WriteAsk } from "../../shell/refused-writes";
 import type { WriteSource } from "../../shell/queued-toast";
 import { matchesAll } from "../filter/filter";
 import type { WriteFollower } from "../../shell/follow-write";
@@ -47,12 +48,23 @@ export const RUN_OP = "run_build";
  * payload names: its parameter overrides and its place at the queue's top.
  * A TeamCity user may run builds and send neither.
  */
-export const RUN_OVERRIDES = "parameters";
+export const RUN_PARAMETERS = "parameters";
 export const RUN_FIRST_IN_QUEUE = "first_in_queue";
 
 /** What the Run… dialog asks `refused_writes` about the run's fields on `entity` (#2055). */
-export function runFieldAsks(entity: string): { entity: string; op: string; field: string }[] {
-  return [RUN_OVERRIDES, RUN_FIRST_IN_QUEUE].map((field) => ({ entity, op: RUN_OP, field }));
+export function runFieldAsks(entity: string): WriteAsk[] {
+  return [RUN_PARAMETERS, RUN_FIRST_IN_QUEUE].map((field) => ({ entity, op: RUN_OP, field }));
+}
+
+/** Why a run on `entity` cannot carry its overrides, and the queue's top, by `answer` (#2055); `null` where it may. */
+export function runFieldRefusals(
+  answer: readonly RefusedWrite[],
+  entity: string,
+): { cannotOverride: string | null; cannotPutFirst: string | null } {
+  return {
+    cannotOverride: refusalOf(answer, entity, RUN_OP, RUN_PARAMETERS),
+    cannotPutFirst: refusalOf(answer, entity, RUN_OP, RUN_FIRST_IN_QUEUE),
+  };
 }
 
 /** The branch a run write names: `null` for the default, as the Run… dialog sends it (#852). */
