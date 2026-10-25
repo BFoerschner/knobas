@@ -46,6 +46,12 @@
 //!   published as it stands. The export macro names this crate
 //!   `knobas_adapter_sdk`, so the dependency keeps that name (no
 //!   `package =` rename).
+//! * **The optional reads** default as `Source`'s do, so an adapter writes
+//!   only the ones it answers. Among them [`Adapter::refresh`] (1.4.0,
+//!   ADR-0031), the read of one item by id after a write lands: an adapter
+//!   that answers it declares [`spi::Capability::Refresh`], and one built
+//!   against an earlier 1.x answers *not offered*, so its source runs after
+//!   every landed write instead.
 
 // The bindings name this crate by its own name, so that the paths they
 // write resolve in the adapter crate the export macro expands in, and here.
@@ -56,15 +62,20 @@ mod glue;
 
 pub use knobas_source as spi;
 pub use knobas_source::{
-    ConnectionInfo, Cursor, SourceDescriptor, SourceError, SyncItem, WriteOp, WriteReceipt,
+    ConnectionInfo, Cursor, RefreshAnswer, SourceDescriptor, SourceError, SyncItem, WriteOp,
+    WriteReceipt,
 };
 
 use knobas_source::{pipeline, run, view};
 
 /// The `knobas:adapter` version this SDK builds against: its WIT package's,
 /// and this crate's own version.
-#[cfg(not(feature = "v1_0"))]
+#[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
 pub const INTERFACE_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The `knobas:adapter` version this SDK builds against: the frozen 1.3.0
+/// world, under the `v1_3` feature.
+#[cfg(all(feature = "v1_3", not(feature = "v1_0")))]
+pub const INTERFACE_VERSION: &str = "1.3.0";
 /// The `knobas:adapter` version this SDK builds against: the frozen 1.0.0
 /// world, under the `v1_0` feature.
 #[cfg(feature = "v1_0")]
@@ -74,10 +85,20 @@ pub const INTERFACE_VERSION: &str = "1.0.0";
 /// adapter's to name: the SDK's own types stand for every one.
 #[doc(hidden)]
 pub mod bindings {
-    #[cfg(not(feature = "v1_0"))]
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
     wit_bindgen::generate!({
         world: "adapter",
         path: "../knobas-wasm-host/wit",
+        pub_export_macro: true,
+        export_macro_name: "export_world",
+        default_bindings_module: "knobas_adapter_sdk::bindings",
+        runtime_path: "knobas_adapter_sdk::__private::wit_bindgen::rt",
+    });
+
+    #[cfg(all(feature = "v1_3", not(feature = "v1_0")))]
+    wit_bindgen::generate!({
+        world: "adapter",
+        path: "wit-1.3.0",
         pub_export_macro: true,
         export_macro_name: "export_world",
         default_bindings_module: "knobas_adapter_sdk::bindings",
@@ -282,6 +303,21 @@ pub trait Adapter: Sized + 'static {
         Ok(None)
     }
 
+    /// Read one item by id (ADR-0031): `entity` is an entity ref in string
+    /// form, in this instance's namespace. [`RefreshAnswer::Item`] is the
+    /// item as `sync` hands it to the sink for that id, [`RefreshAnswer::Gone`]
+    /// an id the source no longer has, and [`RefreshAnswer::NotOffered`], the
+    /// default, a kind this adapter does not read by id. An adapter that
+    /// answers anything else for any kind declares
+    /// [`spi::Capability::Refresh`]; the contract battery's clause 13 holds
+    /// both, and holds each answer to what the sync emitted. Built against
+    /// 1.3.0 or earlier, which has no `refresh`, it is never called.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
+        let _ = entity;
+        Ok(RefreshAnswer::NotOffered)
+    }
+
     /// `view` is the saved view's payload as this adapter emitted it.
     #[cfg(not(feature = "v1_0"))]
     fn translate_query(
@@ -321,8 +357,13 @@ mod tests {
     fn the_crate_version_is_the_interface_version_it_binds() {
         let wit = include_str!("../../knobas-wasm-host/wit/adapter.wit");
         assert_eq!(env!("CARGO_PKG_VERSION"), wit_version(wit));
-        #[cfg(not(feature = "v1_0"))]
+        #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
         assert_eq!(super::INTERFACE_VERSION, wit_version(wit));
+        #[cfg(all(feature = "v1_3", not(feature = "v1_0")))]
+        assert_eq!(
+            super::INTERFACE_VERSION,
+            wit_version(include_str!("../wit-1.3.0/adapter.wit"))
+        );
         #[cfg(feature = "v1_0")]
         assert_eq!(
             super::INTERFACE_VERSION,

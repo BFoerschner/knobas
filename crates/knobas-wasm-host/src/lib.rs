@@ -2,12 +2,12 @@
 //! wasmtime, is one more [`Source`].
 //!
 //! An external adapter is one WASM component built against the WIT world in
-//! `wit/adapter.wit`, `knobas:adapter@1.3.0`. [`WasmAdapter::load`] compiles
+//! `wit/adapter.wit`, `knobas:adapter@1.4.0`. [`WasmAdapter::load`] compiles
 //! it, refuses one built against a version this knobas cannot host, and
-//! reads its descriptor. A 1.0.0, 1.1.0 or 1.2.0 component is hosted too: what
+//! reads its descriptor. A 1.0.0 to 1.3.0 component is hosted too: what
 //! the later minors added is an import it does not use (`download-sink` in
 //! 1.1.0, `sink.walked` in 1.3.0) and exports (`downloads` in 1.1.0, `query`
-//! in 1.2.0) the host looks up as optional. [`WasmAdapter::build`] turns a
+//! in 1.2.0, `refresh` in 1.4.0) the host looks up as optional. [`WasmAdapter::build`] turns a
 //! configured instance into a `Box<dyn Source>`, which forwards each trait
 //! call across the interface. The sync engine, the write queue, IPC and the
 //! shell see that and nothing else.
@@ -74,7 +74,7 @@ pub const PACKAGE: &str = "knobas:adapter";
 /// newer than this one is hosted; every other is refused at load.
 pub const INTERFACE_VERSION: Version = Version {
     major: 1,
-    minor: 3,
+    minor: 4,
     patch: 0,
 };
 
@@ -87,6 +87,9 @@ const DOWNLOADS_EXPORT: &str = "knobas:adapter/downloads";
 /// The optional interface a 1.2.0 component exports `translate-query` in
 /// (#1208).
 const QUERY_EXPORT: &str = "knobas:adapter/query";
+
+/// The optional interface a 1.4.0 component exports `refresh` in (#2101).
+const REFRESH_EXPORT: &str = "knobas:adapter/refresh";
 
 /// The function `name` of the optional interface `interface` (without its
 /// version), or `None` when the component does not export the interface:
@@ -184,6 +187,8 @@ struct Inner {
     template: SourceDescriptor,
     /// `query.translate-query`, when the component exports it (1.2.0, #1208).
     translate_query: Option<ComponentExportIndex>,
+    /// `refresh.refresh`, when the component exports it (1.4.0, #2101).
+    refresh: Option<ComponentExportIndex>,
 }
 
 impl std::fmt::Debug for WasmAdapter {
@@ -250,6 +255,7 @@ impl WasmAdapter {
             .map_err(|e| LoadError::Link(format!("{e:#}")))?;
         let download = optional_export(&component, DOWNLOADS_EXPORT, "download")?;
         let translate_query = optional_export(&component, QUERY_EXPORT, "translate-query")?;
+        let refresh = optional_export(&component, REFRESH_EXPORT, "refresh")?;
         let mut adapter = Self {
             inner: Arc::new(Inner {
                 engine,
@@ -258,6 +264,7 @@ impl WasmAdapter {
                 version,
                 template: placeholder_descriptor(),
                 translate_query,
+                refresh,
             }),
             hosts: Arc::from([]),
             limits: limits::Limits::default(),
@@ -275,6 +282,9 @@ impl WasmAdapter {
             .template = template;
         if adapter.inner.download.is_some() {
             block_on(source::check_download(&adapter)).map_err(LoadError::Link)?;
+        }
+        if adapter.inner.refresh.is_some() {
+            block_on(source::check_refresh(&adapter)).map_err(LoadError::Link)?;
         }
         Ok(adapter)
     }
@@ -318,6 +328,15 @@ impl WasmAdapter {
     #[must_use]
     pub fn downloads(&self) -> bool {
         self.inner.download.is_some()
+    }
+
+    /// Whether the component exports `refresh` (1.4.0, #2101). A source of
+    /// one that does not answers *not offered* for every id, and its
+    /// descriptor declares no `Capability::Refresh` whatever the component
+    /// says.
+    #[must_use]
+    pub fn refreshes(&self) -> bool {
+        self.inner.refresh.is_some()
     }
 
     /// The interface version the component is built against.
@@ -578,6 +597,16 @@ pub fn fixture_component() -> std::path::PathBuf {
 pub fn fixture_component_v1_0() -> std::path::PathBuf {
     let current = fixture_component();
     current.with_file_name("knobas_wasm_fixture_v1_0.wasm")
+}
+
+/// The fixture built against the frozen 1.3.0 world, the minor before
+/// `refresh`, which `just wasm-fixture` keeps beside [`fixture_component`]
+/// (#2101).
+#[cfg(feature = "test-util")]
+#[must_use]
+pub fn fixture_component_v1_3() -> std::path::PathBuf {
+    let current = fixture_component();
+    current.with_file_name("knobas_wasm_fixture_v1_3.wasm")
 }
 
 /// The fixture component, loaded; panics naming the recipe that builds it.

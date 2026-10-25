@@ -109,7 +109,7 @@ fn reading(progress: &SyncProgress) -> (Option<u64>, Option<u64>, Option<&str>) 
 
 #[tokio::test]
 async fn a_1_3_0_component_s_walk_reaches_the_engine_s_progress_sink() {
-    let adapter = install(&knobas_wasm_host::fixture_component(), "1.3.0");
+    let adapter = install(&knobas_wasm_host::fixture_component_v1_3(), "1.3.0");
     let source = adapter.build(instance()).expect("the fixture builds");
 
     let (handed, messages) = observed_sync(source.as_ref(), None).await;
@@ -217,7 +217,7 @@ impl Sink for RefusesTheSecond {
 /// engine's sink hears nothing of it.
 #[tokio::test]
 async fn a_reading_after_the_sink_refused_an_item_is_dropped() {
-    let adapter = install(&knobas_wasm_host::fixture_component(), "1.3.0");
+    let adapter = install(&knobas_wasm_host::fixture_component_v1_3(), "1.3.0");
     let mut config = instance();
     config.config = serde_json::json!({ "fault": "swallow_sink" });
     let source = adapter.build(config).expect("the fixture builds");
