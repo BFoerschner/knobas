@@ -134,7 +134,7 @@ export function settleQueued(entity: string, landed: (mark: Mark) => boolean): v
 
 export interface EchoWatch {
   /** The bridge's `listen`; Tauri's when omitted. */
-  listen?: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
+  listen?: ((event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>) | undefined;
   /** Re-read on the end of every run of every source, for a surface that reads again on each anyway (Docs, #2072). */
   everyRun?: boolean;
 }

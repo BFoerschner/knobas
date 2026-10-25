@@ -801,7 +801,7 @@ test("Re-run leaves the run queued on its pipeline, from the newest run held, an
   await settle();
   button("Re-run")!.click();
   await settle();
-  expect(queuedMarks(PIPE, QUEUED_RUN)).toEqual([{ write: 9, kind: QUEUED_RUN, text: FEATURE, base: "teamcity:build:1188" }]);
+  expect(queuedMarks(PIPE, QUEUED_RUN)).toMatchObject([{ write: 9, kind: QUEUED_RUN, text: FEATURE, base: "teamcity:build:1188" }]);
   expect(target.textContent).not.toContain("queued");
 });
 
@@ -816,7 +816,7 @@ test("Run in Run again with changes… leaves the run queued on its pipeline too
   flushSync();
   [...target.querySelectorAll<HTMLButtonElement>(".tf-run-dialog button")].find((b) => b.textContent?.trim() === "Run")!.click();
   await settle();
-  expect(queuedMarks(PIPE, QUEUED_RUN)).toEqual([{ write: 9, kind: QUEUED_RUN, text: "", base: "teamcity:build:1188" }]);
+  expect(queuedMarks(PIPE, QUEUED_RUN)).toMatchObject([{ write: 9, kind: QUEUED_RUN, text: "", base: "teamcity:build:1188" }]);
 });
 
 // -- Create ticket (R-9.11, #1451) ---------------------------------------------
@@ -1006,7 +1006,7 @@ test("after a reload, a ticket filed from the run and still queued draws Ticket 
   const chip = target.querySelector<HTMLElement>(".tf-problem .tf-acts .tf-chip");
   expect(chip?.textContent).toBe("Ticket queued");
   expect(chip?.title).toBe(FILED_TITLE);
-  expect(queuedMarks("teamcity:build:1187", "ticket")).toEqual([{ write: 41, kind: "ticket", text: FILED_TITLE, base: null }]);
+  expect(queuedMarks("teamcity:build:1187", "ticket")).toMatchObject([{ write: 41, kind: "ticket", text: FILED_TITLE, base: null }]);
 });
 
 test("after a reload, a ticket sent and not mirrored yet stays queued until the sync that brings it in draws it", async () => {

@@ -267,7 +267,7 @@ test("the warn line: a failing sign-in with its fix, a failed sync without one, 
 
 // -- runs queued this session (#1449) -------------------------------------------
 
-const mark = (write: number, branch: string, base: string | null): Mark => ({ write, kind: "run", text: branch, base });
+const mark = (write: number, branch: string, base: string | null): Mark => ({ write, kind: "run", text: branch, base, state: "queued", surface: null, source: null });
 
 test("a queued run is a queued row on its branch, the default branch where it named none, newest first", () => {
   const rows = queuedRunRows([mark(4, "feature/x", "teamcity:build:9"), mark(5, "", "teamcity:build:9")], "main");
@@ -314,7 +314,7 @@ test("a run queued before the page's read arrives is based on the pipeline's own
   const pipeline = { entity_id: "teamcity:buildType:X", name: "X", recent: [run(7, "ok"), run(6, "ok")] };
   markQueuedRun(pipeline, { id: 3 }, null, null, follower);
   markQueuedRun(pipeline, { id: 4 }, "feature/x", [run(8, "ok")], follower);
-  expect(queuedMarks("teamcity:buildType:X", QUEUED_RUN)).toEqual([
+  expect(queuedMarks("teamcity:buildType:X", QUEUED_RUN)).toMatchObject([
     { write: 3, kind: QUEUED_RUN, text: "", base: "teamcity:build:7" },
     { write: 4, kind: QUEUED_RUN, text: "feature/x", base: "teamcity:build:8" },
   ]);

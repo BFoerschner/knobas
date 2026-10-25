@@ -1532,19 +1532,23 @@ test("a held or refused write drops its echo and toasts; Edit and resend reopens
 /** The page the reader opens while a read of the handbook is still out. */
 const OTHER: DocPage = { ...PAGE, entity_id: "confluence:1", title: "Ops home", ancestors: [] };
 
-/** A `listen` port the test raises `sync:state` through, as the backend reports a run. */
+/** A `listen` port the test raises `sync:state` and `item:refreshed` through, as the backend reports a run or a refresh. */
 function syncEvents() {
-  const heard: ((event: { payload: unknown }) => void)[] = [];
+  const heard: { event: string; handler: (event: { payload: unknown }) => void }[] = [];
+  const raise = async (event: string, payload: unknown) => {
+    for (const entry of [...heard]) if (entry.event === event) entry.handler({ payload });
+    await settle();
+  };
   return {
     listen: vi.fn(async (event: string, handler: (event: { payload: unknown }) => void) => {
-      if (event === "sync:state") heard.push(handler);
-      return () => heard.splice(heard.indexOf(handler), 1);
+      const entry = { event, handler };
+      heard.push(entry);
+      return () => void heard.splice(heard.indexOf(entry), 1);
     }) as unknown as NonNullable<DocsPorts["listen"]>,
     /** `source`'s run ends, as `sync:state` says it. */
-    async ended(source = "confluence") {
-      for (const handler of [...heard]) handler({ payload: { source_id: source, running: false } });
-      await settle();
-    },
+    ended: (source = "confluence") => raise("sync:state", { source_id: source, running: false }),
+    /** A refresh of `entity` after write `write` ended (#2095). */
+    refreshed: (entity: string, write: number | null) => raise("item:refreshed", { entity_id: entity, write_id: write, ended: "refreshed" }),
   };
 }
 
@@ -1754,4 +1758,126 @@ test("a sync run's re-read that fails before Docs drew anything shows the error 
   first(TREE);
   await settle();
   expect(target.textContent).toContain("Could not read the page tree: database is locked");
+});
+
+// ---- the echo's one lifecycle: queued, sent, gone on the refresh's read (#2102) ----
+
+/** A follower the test speaks for, as in the held-write test above. */
+function heldFollower() {
+  const hears = new Map<number, Hear>();
+  const follower: WriteFollower = {
+    follow(id, hear) {
+      hears.set(id, hear);
+      return () => hears.delete(id);
+    },
+  };
+  /** The queue's next read no longer lists write `id`: it was sent. */
+  const sent = (id: number) => {
+    hears.get(id)!(undefined);
+    flushSync();
+  };
+  return { follower, sent };
+}
+
+test("a comment's echo says queued, then sent, and goes on the refresh event's read, Docs not mounted again (#2102)", async () => {
+  const sync = syncEvents();
+  const { follower, sent } = heldFollower();
+  let read = RICH;
+  const io = ports({ docsPage: vi.fn(async () => read), submitWrite: vi.fn(async () => ({ ...QUEUED, id: 41 })), listen: sync.listen });
+  await draw(["confluence:2"], io, follower);
+  await sendComment("Done.");
+  expect(queuedComments()).toEqual(["MA You queued Done."]);
+
+  sent(41);
+  expect(queuedComments()).toEqual(["MA You sent Done."]);
+
+  read = {
+    ...RICH,
+    comments: [...RICH.comments, { id: "c-9", author: "me", author_name: "You", at: "2026-10-25T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Done.")] }] }],
+    sent_comments: [{ write_id: 41, comment_id: "c-9" }],
+  };
+  await sync.refreshed("confluence:2", 41);
+  expect(queuedComments()).toEqual([]);
+});
+
+test("a section edit's echo says queued, then sent, and goes once the refresh's read has a newer version (#2102)", async () => {
+  const sync = syncEvents();
+  const { follower, sent } = heldFollower();
+  let read = RICH;
+  const io = ports({ docsPage: vi.fn(async () => read), docsEditSection: vi.fn(async () => ({ ...QUEUED, id: 42 })), listen: sync.listen });
+  await draw(["confluence:2"], io, follower);
+  await saveSection("Ask Priya.");
+  expect(squash(section().querySelector("h2 .tf-queued-mark"))).toBe("queued");
+
+  sent(42);
+  expect(squash(section().querySelector("h2 .tf-queued-mark"))).toBe("sent");
+  expect(squash(section().querySelector(".tf-sec-queued"))).toBe("Ask Priya.");
+
+  // Another item's refresh reads nothing.
+  await sync.refreshed("confluence:9", 99);
+  expect(io.docsPage).toHaveBeenCalledTimes(1);
+
+  read = { ...RICH, version: 33 };
+  await sync.refreshed("confluence:2", 42);
+  expect(io.docsPage).toHaveBeenCalledTimes(2);
+  expect(section().querySelector(".tf-sec-queued")).toBeNull();
+  expect(section().querySelector("h2 .tf-queued-mark")).toBeNull();
+});
+
+test("a new page's echo says queued, then sent, and goes once the refresh's tree read holds it under its parent (#2102)", async () => {
+  const sync = syncEvents();
+  const { follower, sent } = heldFollower();
+  let read = TREE;
+  const io = ports({
+    docsPage: vi.fn(async () => RICH),
+    docsTree: vi.fn(async () => read),
+    docsCreatePage: vi.fn(async () => ({ ...QUEUED, id: 43 })),
+    listen: sync.listen,
+  });
+  await draw(["confluence:2"], io, follower);
+  await createPage("Retry metrics", "## Dashboards");
+  expect(queuedPages().map(squash)).toEqual(["Retry metrics queued"]);
+
+  sent(43);
+  expect(queuedPages().map(squash)).toEqual(["Retry metrics sent"]);
+
+  read = {
+    ...TREE,
+    spaces: [
+      { ...TREE.spaces[0]!, pages: [...TREE.spaces[0]!.pages, { entity_id: "confluence:30", title: "Retry metrics", parent: "confluence:2" }] },
+      TREE.spaces[1]!,
+    ],
+  };
+  // The refresh names the page the write made, which Docs knew only by its write.
+  await sync.refreshed("confluence:30", 43);
+  expect(queuedPages()).toEqual([]);
+});
+
+test("the refresh event's re-read keeps the picked space, the search, an open section editor's text and the composer's (#2102)", async () => {
+  const sync = syncEvents();
+  const io = ports({ docsPage: vi.fn(async () => RICH), docsSearch: vi.fn(async () => HITS), submitWrite: vi.fn(async () => ({ ...QUEUED, id: 44 })), listen: sync.listen });
+  await draw(["confluence:2"], io);
+  await sendComment("Done.");
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  select.value = "*";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  type("ledger");
+  await settle();
+  button("Edit section")!.click();
+  await settle();
+  fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!, "Half typed");
+  fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!, "Half said");
+  await settle();
+  const searches = vi.mocked(io.docsSearch).mock.calls.length;
+
+  await sync.refreshed("confluence:2", 44);
+  expect(io.docsTree).toHaveBeenCalledTimes(2);
+  expect(io.docsPage).toHaveBeenCalledTimes(2);
+  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("*");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!.value).toBe("ledger");
+  expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
+  expect(vi.mocked(io.docsSearch).mock.calls.length).toBe(searches);
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!.value).toBe("Half said");
+  expect(io.visitEntity).toHaveBeenCalledTimes(1);
 });

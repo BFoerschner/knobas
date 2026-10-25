@@ -2,7 +2,7 @@
   A space's page tree (#859, R-10.2): folders fold, a folder's title is itself
   a link, and the fold holding the open page starts open. Recurses into each
   folder by importing itself. A page queued under a page (#1424) is a muted
-  row with no link at the end of its parent's fold, which it opens.
+  row marked *queued*, then *sent* (#2102), with no link at the end of its parent's fold, which it opens.
 -->
 <script lang="ts">
   import Self from "./TfDocTree.svelte";
@@ -28,7 +28,7 @@
       <div class="tf-fold-in">
         <Self {space} parent={node.entity_id} {current} />
         {#each queued as mark, n (n)}
-          <span class="tf-dl-queued">{mark.text} <span class="tf-chip tf-info">queued</span></span>
+          <span class="tf-dl-queued">{mark.text} <span class="tf-chip tf-info">{mark.state}</span></span>
         {/each}
       </div>
     </details>
