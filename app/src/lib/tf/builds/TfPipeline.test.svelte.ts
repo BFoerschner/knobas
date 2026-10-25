@@ -17,6 +17,7 @@ import { forgetEchoes, echoWrite, echoesOn } from "../queued.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
 import TfPipeline from "./TfPipeline.svelte";
+import { detailOf, refreshProbe } from "./refresh.fixture";
 
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
@@ -152,6 +153,8 @@ interface Drawn {
   olderAsked: string[];
   /** How many times the runs were read. */
   reads: number;
+  /** How many times the page asked the list to read its pipeline's row again (#2137). */
+  rowReads: number;
   /** Fire `sync:state` as the shell hears it; `null` once the page stopped listening. */
   sync: ((payload: unknown) => void) | null;
   /** What the next runs read answers. */
@@ -168,7 +171,7 @@ function draw(
   overrides: Partial<PipelinePorts> = {},
   older: RunRow[][] = [[run(1150, "ok", daysAgo(9, 9))], []],
 ): Drawn {
-  const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [], reads: 0, sync: null, next: RUNS, go: () => {}, goPipeline: () => {} };
+  const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [], reads: 0, rowReads: 0, sync: null, next: RUNS, go: () => {}, goPipeline: () => {} };
   const ports: PipelinePorts = {
     older: (_id, before) => {
       drawn.olderAsked.push(before);
@@ -199,6 +202,7 @@ function draw(
     },
     follower: () => ({ follow: () => () => {} }),
     refusedWrites: () => Promise.resolve([]),
+    getEntity: (id) => Promise.resolve(detailOf(id, { refreshes: true })),
     ...overrides,
   };
   const runs = () => {
@@ -206,7 +210,8 @@ function draw(
     const next = drawn.next;
     return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
   };
-  const props = $state({ pipeline: PIPELINE, rest, job, runs, onpin: () => (drawn.pinned += 1), ports });
+  const rereadRow = () => void (drawn.rowReads += 1);
+  const props = $state({ pipeline: PIPELINE, rest, job, runs, onpin: () => (drawn.pinned += 1), rereadRow, ports });
   drawn.go = (next) => {
     props.rest = next;
     flushSync();
@@ -1172,6 +1177,111 @@ test("a parameter change says queued, then sent, and goes once the read shows th
   expect(chip()).toBe("sent");
   read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "prod-dryrun" } : p)) };
   await events.refreshed(PIPELINE.entity_id, 41);
+  expect(chip()).toBeNull();
+  expect(paramRows()[0]!.textContent).toContain("prod-dryrun");
+});
+
+// -- Refresh (#2137) -----------------------------------------------------------
+
+const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-bhead .tf-acts .tf-refresh");
+
+test("Refresh on a pipeline reads it from its source, then its row, its runs, its settings and its item again", async () => {
+  const probe = refreshProbe();
+  let settingsReads = 0;
+  let details = 0;
+  const drawn = draw([PIPELINE.entity_id], "PAY-231", {
+    refresh: probe.ports,
+    settings: () => (settingsReads++, Promise.resolve(SETTINGS)),
+    getEntity: (id) => (details++, Promise.resolve(detailOf(id))),
+  });
+  await settle();
+  const before = { reads: drawn.reads, settingsReads, details };
+  expect(refreshButton()?.textContent).toBe("Refresh");
+
+  refreshButton()!.click();
+  flushSync();
+  expect(refreshButton()?.textContent).toBe("Refreshing…");
+  await settle();
+  expect(probe.refreshed).toEqual([PIPELINE.entity_id]);
+  expect(drawn.rowReads).toBe(1);
+  expect(drawn.reads).toBe(before.reads + 1);
+  expect(settingsReads).toBe(before.settingsReads + 1);
+  expect(details).toBe(before.details + 1);
+  expect(target.querySelector("h1")?.textContent).toBe("Payout_IntegrationTests");
+  expect(target.querySelectorAll(".tf-runtbl tbody tr").length).toBeGreaterThan(0);
+  expect(refreshButton()?.textContent).toBe("Refresh");
+});
+
+test("a build configuration's source answering not offered runs its source, and the page says Sync now from then", async () => {
+  const probe = refreshProbe();
+  probe.answer = { outcome: "not_offered" };
+  const drawn = draw([PIPELINE.entity_id], "PAY-231", { refresh: probe.ports });
+  await settle();
+  refreshButton()!.click();
+  await settle();
+  expect(probe.synced).toEqual(["teamcity"]);
+  expect(refreshButton()?.textContent).toBe("Syncing…");
+  const reads = drawn.reads;
+  probe.status({ source_id: "teamcity", running: false, run_id: 77, started_at: null, last_finished_at: null, last_outcome: "ok", next_run_at: null, backoff_until: null, last_changed: null });
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Sync now");
+  // The run's end reads the page again.
+  expect(drawn.reads).toBeGreaterThan(reads);
+});
+
+test("a pipeline whose refresh failed keeps its runs and says why under the header", async () => {
+  const probe = refreshProbe();
+  probe.answer = { outcome: "failed", reason: "401 from TeamCity" };
+  draw([PIPELINE.entity_id], "PAY-231", { refresh: probe.ports });
+  await settle();
+  refreshButton()!.click();
+  await settle();
+  expect(target.querySelector(".tf-bhead ~ .tf-refresh-failed")?.textContent).toBe("Couldn't refresh: 401 from TeamCity");
+  expect(target.querySelector("h1")?.textContent).toBe("Payout_IntegrationTests");
+});
+
+test("a pipeline whose adapter reads no one item offers Sync now; a turned-off source neither, with its banner", async () => {
+  draw([PIPELINE.entity_id], "PAY-231", { refresh: refreshProbe().ports, getEntity: (id) => Promise.resolve(detailOf(id, { refreshes: false })) });
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Sync now");
+  unmount(page!);
+  page = null;
+  draw([PIPELINE.entity_id], "PAY-231", {
+    refresh: refreshProbe().ports,
+    getEntity: (id) =>
+      Promise.resolve(detailOf(id, { source: { id: "teamcity", display_name: "Tidewater CI", adapter_kind: "teamcity", enabled: false } })),
+  });
+  await settle();
+  expect(refreshButton()).toBeNull();
+  expect(target.querySelector(".tf-turnedoff")?.textContent).toContain("Tidewater CI is disabled");
+});
+
+test("a parameter change's echo goes on a refresh's read of the settings that shows the new value (#2128)", async () => {
+  const events = echoEvents(settle);
+  const { follower, sent } = echoFollower();
+  let read = KINDS;
+  draw([PIPELINE.entity_id, "params"], "PAY-231", {
+    settings: () => Promise.resolve(read),
+    listen: events.listen,
+    follower: () => follower,
+    refresh: refreshProbe().ports,
+  });
+  await settle();
+  paramRows()[0]!.querySelector<HTMLButtonElement>("button")!.click();
+  flushSync();
+  choose(target.querySelector<HTMLSelectElement>("select[aria-label='New default for env']")!, "prod-dryrun");
+  button("Save")!.click();
+  await settle();
+  const chip = () => paramRows()[0]!.querySelector("td:nth-child(2) .tf-chip")?.textContent ?? null;
+  sent(41);
+  expect(chip()).toBe("sent");
+  // A refresh whose read still holds the old value keeps the echo.
+  refreshButton()!.click();
+  await settle();
+  expect(chip()).toBe("sent");
+  read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "prod-dryrun" } : p)) };
+  refreshButton()!.click();
+  await settle();
   expect(chip()).toBeNull();
   expect(paramRows()[0]!.textContent).toContain("prod-dryrun");
 });

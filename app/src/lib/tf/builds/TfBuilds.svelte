@@ -151,6 +151,18 @@
     );
   });
 
+  /** The pipeline page's *Refresh* (#2137): the list read again, its row of the pipeline among it, kept drawn meanwhile. */
+  let rowReads = 0;
+  async function rereadPipelines() {
+    const at = ++rowReads;
+    try {
+      const rows = await ports.pipelines();
+      if (at === rowReads) all = rows;
+    } catch {
+      // The list keeps what it drew; the page's banner says why the refresh failed, if it did.
+    }
+  }
+
   // *This job* (#850): on by default while a job is current.
   const scope = $derived<Scope>(job !== null && (filter.scope ?? "job") === "job" ? "job" : "all");
   let reasons = $state<Map<string, PipelineReason[]> | null>(null);
@@ -409,7 +421,7 @@
         ...(selected.group !== null ? [{ name: selected.group, href: "#/builds" }] : []),
         { name: selected.name },
       ])}
-      <TfPipeline pipeline={selected} {rest} {job} runs={ports.runs} onpin={() => togglePin(selected!)} />
+      <TfPipeline pipeline={selected} {rest} {job} runs={ports.runs} onpin={() => togglePin(selected!)} rereadRow={rereadPipelines} />
     {:else if all !== null && all.length > 0}
       {@render crumbs([{ name: "Builds" }])}
       <div class="tf-empty"><p>No pipeline at this address. Pick one on the left.</p></div>
