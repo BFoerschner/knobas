@@ -993,6 +993,23 @@ async fn app_with(
     secret: &str,
     config: serde_json::Value,
 ) -> (SourcesState, Arc<Events>) {
+    let events = Arc::new(Events::default());
+    let state = app_over(name, env, auth, secret, config, events.clone(), false).await;
+    (state, events)
+}
+
+/// As [`app_with`], telling `events`, and with `follow_landings` started the
+/// way the app starts its scheduler (`knobas_app::sources::start_scheduler`),
+/// so a landed write is refreshed and followed by a run (#2094, #2095).
+async fn app_over(
+    name: &str,
+    env: &Env,
+    auth: AuthMethod,
+    secret: &str,
+    config: serde_json::Value,
+    events: Arc<dyn SyncEvents>,
+    follow_landings: bool,
+) -> SourcesState {
     let connector = knobas_db::test_util::scratch_database(name).await;
     let pool = connector
         .pool(4)
@@ -1024,28 +1041,28 @@ async fn app_with(
     .await
     .expect("the source row is written");
 
-    let events = Arc::new(Events::default());
-    let scheduler = Scheduler::start(SchedulerDeps {
+    let deps = SchedulerDeps {
         pool: pool.clone(),
         connections: Arc::new(Connections(connector)),
         registry: Arc::new(Registry::for_process()),
         secrets: secrets.clone(),
-        events: events.clone(),
+        events,
         timing: knobas_sync::scheduler::SchedulerTiming::default(),
         quit: knobas_sync::scheduler::Quit::default(),
-    })
-    .await
+    };
+    let scheduler = if follow_landings {
+        knobas_app::sources::start_scheduler(deps, knobas_sync::background::Background::new()).await
+    } else {
+        Scheduler::start(deps).await
+    }
     .expect("a scheduler over the scratch database");
 
-    (
-        SourcesState {
-            pool,
-            scheduler,
-            secrets,
-            registry: Arc::new(Registry::for_process()),
-        },
-        events,
-    )
+    SourcesState {
+        pool,
+        scheduler,
+        secrets,
+        registry: Arc::new(Registry::for_process()),
+    }
 }
 
 /// Sync the source **from no position at all**, and wait for the run to end.
@@ -1585,6 +1602,285 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
         "story 17: attributed to me"
     );
     println!("SEEDED created ticket: {created} ({title})");
+
+    state.scheduler.shutdown().await;
+    drop(litter);
+}
+
+/// A refresh as the shell is told of it (#2095), with the mirror's row for its
+/// item **read inside the telling**. `after_landing` tells the shell and only
+/// then asks for the follow-up run, so a row read here is the refresh's own,
+/// before any run of the write could write over it.
+struct Refreshed {
+    entity_id: String,
+    write_id: Option<i64>,
+    ended: knobas_sync::scheduler::RefreshEnd,
+    at: chrono::DateTime<chrono::Utc>,
+    payload: Option<serde_json::Value>,
+}
+
+/// The events of [`each_landed_write_is_in_the_mirror_as_jira_holds_it_before_its_run`]:
+/// every refresh, with its snapshot.
+#[derive(Default)]
+struct Refreshes {
+    pool: std::sync::OnceLock<sqlx::PgPool>,
+    seen: Mutex<Vec<Refreshed>>,
+}
+
+impl SyncEvents for Refreshes {
+    fn sync_state(&self, _status: knobas_sync::SourceSyncStatus) {}
+    fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
+    fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
+    fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
+        let at = chrono::Utc::now();
+        // Blocking the task that tells: `after_landing`'s, which asks for the
+        // run once this returns.
+        let payload = self.pool.get().and_then(|pool| {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(
+                    sqlx::query_scalar::<_, serde_json::Value>(
+                        "select payload from sync.live_item where entity_id = $1",
+                    )
+                    .bind(&ended.entity_id)
+                    .fetch_optional(pool),
+                )
+            })
+            .expect("the mirror is readable")
+        });
+        self.seen.lock().unwrap().push(Refreshed {
+            entity_id: ended.entity_id.clone(),
+            write_id: ended.write_id,
+            ended: ended.ended,
+            at,
+            payload,
+        });
+    }
+}
+
+impl Refreshes {
+    /// The refresh that followed write `id`, once the run that followed it
+    /// has started; and asserted to come first.
+    async fn of(&self, pool: &sqlx::PgPool, id: i64) -> (String, serde_json::Value) {
+        let deadline = std::time::Instant::now() + INDEX_BUDGET;
+        loop {
+            let run: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+                "select min(r.started_at) from knobas.sync_run r, knobas.write_queue w
+                  where w.id = $1 and r.source_id = w.source_id and r.started_at > w.settled_at",
+            )
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .expect("the runs are readable");
+            {
+                let seen = self.seen.lock().unwrap();
+                if let (Some(run), Some(refreshed)) =
+                    (run, seen.iter().find(|r| r.write_id == Some(id)))
+                {
+                    assert_eq!(
+                        refreshed.ended,
+                        knobas_sync::scheduler::RefreshEnd::Refreshed,
+                        "write {id}'s item {} was not read back",
+                        refreshed.entity_id
+                    );
+                    assert!(
+                        refreshed.at < run,
+                        "write {id}'s refresh ended at {}, after its run began at {run}",
+                        refreshed.at
+                    );
+                    let payload = refreshed.payload.clone().unwrap_or_else(|| {
+                        panic!(
+                            "{} is not in the mirror after its refresh",
+                            refreshed.entity_id
+                        )
+                    });
+                    return (refreshed.entity_id.clone(), payload);
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "write {id} was neither refreshed nor followed by a run within {INDEX_BUDGET:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+}
+
+/// **Each Jira write, read back into the mirror as Jira holds it before the
+/// run that follows it starts** (#2097): a transition, a comment, a worklog
+/// and a created ticket, each through the write queue.
+///
+/// The mirror's row is read at the moment the shell is told of the refresh
+/// ([`Refreshes`]), which is before the follow-up run is asked for, and the
+/// refresh is asserted to end before that run's `started_at`. What it holds is
+/// held to **Jira's own answer**: the status Jira reports, the comment and the
+/// worklog by the ids Jira gave them, the ticket by the key the receipt names.
+/// Jira's search index lags the write, which is what the adapter's wait is
+/// for: a refresh that read the index at once would hold the issue as it was.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn each_landed_write_is_in_the_mirror_as_jira_holds_it_before_its_run() {
+    use knobas_core::write_queue::WriteState;
+
+    let env = env();
+    env.clear_leftovers().await;
+    let mut litter = Litter::default();
+    let refreshes = Arc::new(Refreshes::default());
+    let state = app_over(
+        "atlassian_live_refresh",
+        &env,
+        AuthMethod::UserPassword,
+        &env.password,
+        json!({ "username": env.user }),
+        refreshes.clone(),
+        true,
+    )
+    .await;
+    refreshes.pool.set(state.pool.clone()).expect("set once");
+    sync(&state, JIRA).await;
+    let receipt = |id: i64| {
+        let pool = state.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<String>>(
+                "select remote_id from knobas.write_queue where id = $1",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("the queue row")
+            .expect("the receipt's id")
+        }
+    };
+
+    // -- a transition --------------------------------------------------------
+    let was = env.status_at_jira(TRANSITIONED).await;
+    let to = env
+        .statuses
+        .iter()
+        .find(|s| *s != &was)
+        .expect("more than one status")
+        .clone();
+    let row = write(
+        &state,
+        json!({ "Transition": { "entity": format!("{JIRA}:{TRANSITIONED}"), "status": to } }),
+    )
+    .await;
+    litter.moved = Some((TRANSITIONED.to_owned(), was));
+    assert_eq!(row.state, WriteState::Sent, "{:?}", row.detail);
+    let (entity, payload) = refreshes.of(&state.pool, row.id).await;
+    assert_eq!(entity, format!("{JIRA}:{TRANSITIONED}"));
+    assert_eq!(env.status_at_jira(TRANSITIONED).await, to);
+    assert_eq!(payload["fields"]["status"]["name"], to.as_str());
+
+    // -- a comment -----------------------------------------------------------
+    let body = format!(
+        "{LITTER_LABEL}: read back by its refresh (pid {})",
+        std::process::id()
+    );
+    let row = write(
+        &state,
+        json!({ "Comment": { "entity": format!("{JIRA}:{COMMENTED}"), "body": body } }),
+    )
+    .await;
+    let at_jira = env.issue(COMMENTED, "comment").await["fields"]["comment"]["comments"]
+        .as_array()
+        .and_then(|c| c.iter().find(|c| c["body"] == body.as_str()).cloned());
+    if let Some(id) = at_jira.as_ref().and_then(|c| c["id"].as_str()) {
+        litter.comment = Some((COMMENTED.to_owned(), id.to_owned()));
+    }
+    assert_eq!(row.state, WriteState::Sent, "{:?}", row.detail);
+    let at_jira = at_jira.expect("the comment is on the ticket at Jira");
+    let (entity, payload) = refreshes.of(&state.pool, row.id).await;
+    assert_eq!(entity, format!("{JIRA}:{COMMENTED}"));
+    assert!(
+        payload["fields"]["comment"]["comments"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|c| c["id"] == at_jira["id"] && c["body"] == body.as_str()),
+        "the mirror holds comment {} as Jira does: {}",
+        at_jira["id"],
+        payload["fields"]["comment"]
+    );
+
+    // -- a worklog -----------------------------------------------------------
+    let started = (chrono::Utc::now() - chrono::Duration::days(1))
+        .date_naive()
+        .and_hms_opt(9, 0, 0)
+        .expect("09:00")
+        .and_utc();
+    let row = write(
+        &state,
+        json!({ "LogWork": {
+            "entity": format!("{JIRA}:{COMMENTED}"),
+            "started": started,
+            "seconds": 900,
+            "comment": format!("{LITTER_LABEL}: read back by its refresh"),
+        } }),
+    )
+    .await;
+    assert_eq!(row.state, WriteState::Sent, "{:?}", row.detail);
+    let worklog = receipt(row.id).await;
+    litter.worklog = Some((COMMENTED.to_owned(), worklog.clone()));
+    let (entity, payload) = refreshes.of(&state.pool, row.id).await;
+    assert_eq!(entity, format!("{JIRA}:{COMMENTED}"));
+    assert!(
+        env.issue(COMMENTED, "worklog").await["fields"]["worklog"]["worklogs"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|w| w["id"] == worklog.as_str()),
+        "Jira holds worklog {worklog}"
+    );
+    assert!(
+        payload["fields"]["worklog"]["worklogs"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|w| w["id"] == worklog.as_str() && w["timeSpentSeconds"] == 900),
+        "the mirror holds worklog {worklog} as Jira does: {}",
+        payload["fields"]["worklog"]
+    );
+
+    // -- a created ticket ----------------------------------------------------
+    let title = format!(
+        "{LITTER_LABEL}: filed and read back (pid {})",
+        std::process::id()
+    );
+    let row = write(
+        &state,
+        json!({ "CreateTicket": {
+            "entity": format!("{JIRA}:{CREATE_PROJECT}"),
+            "title": title,
+            "body": "read back by its refresh",
+            "ticket_type": CREATE_TYPE
+        } }),
+    )
+    .await;
+    assert_eq!(row.state, WriteState::Sent, "{:?}", row.detail);
+    let created = receipt(row.id).await;
+    litter.created = Some(created.clone());
+    let (entity, payload) = refreshes.of(&state.pool, row.id).await;
+    assert_eq!(
+        entity,
+        format!("{JIRA}:{created}"),
+        "the ticket the receipt names"
+    );
+    assert_eq!(
+        env.issue(&created, "summary").await["fields"]["summary"],
+        title.as_str()
+    );
+    assert_eq!(payload["fields"]["summary"], title.as_str());
+    let (status, labelled) = env
+        .api(
+            reqwest::Method::PUT,
+            &format!("rest/api/2/issue/{created}"),
+            Some(json!({ "update": { "labels": [{ "add": LITTER_LABEL }] } })),
+        )
+        .await;
+    assert_eq!(status, 204, "labelling the created ticket: {labelled}");
+    println!(
+        "SEEDED refreshed {TRANSITIONED} as {to:?}, {COMMENTED}'s comment and worklog {worklog}, and {created} before each write's run"
+    );
 
     state.scheduler.shutdown().await;
     drop(litter);
