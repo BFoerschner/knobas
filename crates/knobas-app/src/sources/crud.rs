@@ -1372,6 +1372,50 @@ pub async fn fillers(
     Ok(role_scope(pool, registry, role).await?.sources)
 }
 
+/// A role view's *Sync now* (#2106): one incremental run of each **enabled**
+/// source that fills `role`, as [`fillers`] answers it, in id order.
+///
+/// The surface names a role and never the sources: who fills it is the
+/// mirror's answer, read per call. A source already running is joined, not
+/// started twice ([`Scheduler::trigger`]'s in-flight rule), so a second click
+/// costs nothing; either way the answer names the run, and ADR-0005 says that
+/// run comes with an ending on `sync:state`. Every run is `Manual`, which is
+/// an incremental sync from the stored cursor.
+///
+/// A turned-off source is skipped: turning a source off means knobas does not
+/// talk to it. A source whose credential needs a human is enabled and is run,
+/// as its own page's *Sync now* runs it.
+///
+/// [`Scheduler::trigger`]: knobas_sync::scheduler::Scheduler::trigger
+///
+/// # Errors
+///
+/// [`SourcesError::Db`] from the reads, [`SourcesError::Trigger`] from a
+/// trigger (the scheduler shutting down, a filler removed since the read, or
+/// the run's record failing).
+pub async fn sync_role(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    scheduler: &knobas_sync::scheduler::Scheduler,
+    role: &str,
+) -> Result<Vec<super::RoleRun>, SourcesError> {
+    let fill = fillers(pool, registry, role).await?;
+    let enabled: std::collections::HashSet<String> = config::list(pool)
+        .await?
+        .into_iter()
+        .filter(|row| row.enabled)
+        .map(|row| row.id)
+        .collect();
+    let mut runs = Vec::new();
+    for source_id in fill.into_iter().filter(|id| enabled.contains(id)) {
+        let run_id = scheduler
+            .trigger(&source_id, knobas_sync::SyncTrigger::Manual, None)
+            .await?;
+        runs.push(super::RoleRun { source_id, run_id });
+    }
+    Ok(runs)
+}
+
 /// [`fillers`], with the role's kinds among them.
 ///
 /// A built-in role's kinds are its minimum's, required and optional: each

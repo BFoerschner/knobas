@@ -5,6 +5,7 @@
  * page, not this one.
  */
 import { definePage } from "../page-entry";
+import { CODE_HOST } from "../roles.svelte";
 import type { TfRoute } from "../route";
 import TfCode from "./TfCode.svelte";
 
@@ -12,6 +13,7 @@ type CodeRoute = Extract<TfRoute, { view: "full" }> & { section: "code"; head: "
 
 export const page = definePage({
   matches: (route): route is CodeRoute => route.view === "full" && route.section === "code" && route.head === "code",
+  role: CODE_HOST,
   component: TfCode,
   crumbs: true,
   props: ({ route, ready, job }) => ({ ready, rest: route.rest, job }),

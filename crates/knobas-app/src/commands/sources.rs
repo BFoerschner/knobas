@@ -591,6 +591,35 @@ pub async fn sync_all<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<Vec
         .map_err(|error| to_ipc(&error.into(), None))
 }
 
+/// A role view's *Sync now* (#2106): start or join one incremental run of
+/// each enabled source that fills `role`, and answer them, one per source in
+/// id order. Who fills the role is the mirror's answer
+/// ([`crud::sync_role`]), never the surface's. Like [`sync_now`] it returns
+/// as soon as the runs are recorded; each ends on `sync:state`. A role nobody
+/// fills, or whose fillers are all turned off, answers no runs.
+///
+/// # Errors
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the engine is starting
+/// or stopping, and when the scheduler is shutting down mid-ask;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) when a filler is removed
+/// between the read of the role's fillers and its run; `internal` when the
+/// database fails, reading the fillers or recording a run.
+#[tauri::command]
+pub async fn sync_role<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    role: String,
+) -> Result<Vec<crate::sources::RoleRun>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crud::sync_role(
+        &state.pool,
+        state.registry.as_ref(),
+        &state.scheduler,
+        &role,
+    )
+    .await
+    .map_err(|error| to_ipc(&error, None))
+}
+
 /// What every source is doing, and when it goes next.
 ///
 /// The authoritative read: `sync:state` events are a hint that something moved

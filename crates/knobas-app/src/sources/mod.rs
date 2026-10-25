@@ -303,6 +303,15 @@ pub struct SourceDraft {
     pub secret: Option<SecretInput>,
 }
 
+/// One run a role view's *Sync now* started or joined (#2106): the source it
+/// runs, and the run's id, which its `sync:state` events name.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct RoleRun {
+    pub source_id: String,
+    pub run_id: i64,
+}
+
 /// One row of the sources view.
 #[derive(Debug, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "sources.ts")]

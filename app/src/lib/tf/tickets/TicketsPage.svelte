@@ -84,6 +84,7 @@
 <script lang="ts">
   import { clockLabel } from "../../time/format";
   import { flushSync, onMount, untrack } from "svelte";
+  import type { RoleFrameProps } from "../page-entry";
 
   import {
     getEntity,
@@ -160,6 +161,8 @@
     },
     viewId = null,
     typingPause = 90,
+    sync,
+    syncRevision = 0,
   }: {
     /** Whether the database answers yet. */
     ready: boolean;
@@ -170,7 +173,7 @@
     viewId?: string | null;
     /** How long, in ms, the filter waits for the next key before it reads: the launcher's 90. */
     typingPause?: number;
-  } = $props();
+  } & RoleFrameProps = $props();
 
   // ---- the views ----
   let views = $state<TicketViewRow[] | null>(null);
@@ -479,6 +482,15 @@
   });
   $effect(() => () => reader.close());
 
+  // *Sync now*'s runs ended (#2106): the board is read again.
+  let boardAt = untrack(() => syncRevision);
+  $effect(() => {
+    const at = syncRevision;
+    if (!ready || at === boardAt) return;
+    boardAt = at;
+    untrack(() => reader.refresh());
+  });
+
   // Once the database answers: the views and the suggestions.
   $effect(() => {
     if (!ready) return;
@@ -637,6 +649,7 @@
           onhide={() => void setHidden(view, true)}
         />
       {/if}
+      {@render sync?.()}
     </div>
     {#if view?.saved_view_source && view.saved_view}
       <SavedViewSourceLine

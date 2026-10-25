@@ -26,6 +26,7 @@ import type {
   QueueCounts,
   QueuedWrite,
   Removal,
+  RoleRun,
   SecretInput,
   SourceDescriptor,
   SourceDraft,
@@ -71,6 +72,7 @@ export type {
   ReviewVerdict,
   RoleClaim,
   RoleMiss,
+  RoleRun,
   SecretAccount,
   SecretInput,
   SourceCount,
@@ -292,6 +294,17 @@ export function backfillSource(sourceId: string): Promise<number> {
  */
 export function syncAll(): Promise<number[]> {
   return invoke<number[]>("sync_all");
+}
+
+/**
+ * A role view's *Sync now* (#2106): one incremental run of each enabled
+ * source that fills `role`, started or joined, one per source in id order.
+ * Who fills the role is the mirror's answer, never the surface's. Returns as
+ * soon as the runs are recorded; each ends on `EVENTS.syncState` under its
+ * `run_id`. A role nobody enabled fills answers `[]`.
+ */
+export function syncRole(role: string): Promise<RoleRun[]> {
+  return invoke<RoleRun[]>("sync_role", { role });
 }
 
 /**

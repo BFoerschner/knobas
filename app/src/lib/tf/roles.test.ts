@@ -8,8 +8,23 @@ import { expect, test } from "vitest";
 import { claims, createSourceRoles, fills } from "./roles.svelte";
 
 test("the role module offers no row filter: a surface draws what its read answered (#1300)", () => {
-  // `nameOf` names a source (#1476); it filters nothing.
-  expect(Object.keys(createSourceRoles()).sort()).toEqual(["answers", "forget", "nameOf", "take"]);
+  // `nameOf` names a source (#1476) and `syncs` says whether a role view draws *Sync now* (#2106); neither filters.
+  expect(Object.keys(createSourceRoles()).sort()).toEqual(["answers", "forget", "nameOf", "syncs", "take"]);
+});
+
+test("a role view syncs while an enabled source fills its role; not knowing is no (#2106)", () => {
+  const roles = createSourceRoles();
+  expect(roles.syncs("wiki")).toBe(false);
+  const miss = { role: "ci", kind: "build", field: "x", path: "x" };
+  roles.take([
+    { id: "wiki", display_name: "wiki", roles: [{ role: "wiki", reads: [] }], role_misses: [], enabled: true },
+    { id: "off", display_name: "off", roles: [{ role: "monitoring", reads: [] }], role_misses: [], enabled: false },
+    { id: "ci", display_name: "ci", roles: [{ role: "ci", reads: [] }], role_misses: [miss], enabled: true },
+  ]);
+  expect(roles.syncs("wiki")).toBe(true);
+  expect(roles.syncs("monitoring")).toBe(false);
+  expect(roles.syncs("ci")).toBe(false);
+  expect(roles.syncs("code-host")).toBe(false);
 });
 
 test("a source claims a role its list entry names, and fills it while its records missed none of the role's paths (#1199)", () => {

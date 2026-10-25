@@ -20,10 +20,13 @@ import { sourceRoles } from "./roles.svelte";
 import { jobHash, NAV, SECTION_NAME } from "./route";
 import TfShell, { type TfShellPorts } from "./TfShell.svelte";
 import { createTheme, type Theme } from "./theme.svelte";
+import { createRoleSyncs, type RoleSyncPorts, type RoleSyncs } from "./role-sync.svelte";
 import { sourceFacts } from "./job/source-facts.fixture";
 
 /** Every block the Day tab's *Add to* wrote, as its target (#1525). */
 const created = vi.hoisted(() => [] as unknown[]);
+/** How many times the Tickets board was read (#2106). */
+const boardReads = vi.hoisted(() => ({ n: 0 }));
 
 // The Day tab reads the real bridge; its one read here is an open stretch.
 vi.mock("../ipc/time", async (importOriginal) => ({
@@ -44,6 +47,10 @@ vi.mock("../ipc/time", async (importOriginal) => ({
 // custom role, and the view its `view` answers (#1202).
 vi.mock("../ipc/entity", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../ipc/entity")>()),
+  miniBoard: () => {
+    boardReads.n += 1;
+    return Promise.reject({ code: "not_ready", message: "no board in this suite", source_id: null });
+  },
   getEntity: (id: string) =>
     id === "surveys:survey-1"
       ? Promise.resolve({
@@ -184,7 +191,8 @@ function start(
     monitorsDown?: number;
     onstarttimer?: (entityId: string, title: string) => void;
     nav?: { back: () => void; forward: () => void };
-    sources?: { id: string; display_name: string; roles?: RoleClaim[] }[];
+    sources?: { id: string; display_name: string; roles?: RoleClaim[]; enabled?: boolean }[];
+    roleSyncs?: RoleSyncs;
     listSources?: TfShellPorts["listSources"];
     listen?: TfShellPorts["listen"];
     counts?: WriteQueue["counts"];
@@ -235,6 +243,7 @@ function start(
       onstarttimer: over.onstarttimer ?? (() => {}),
       jobPorts: over.jobPorts ?? JOB_PORTS,
       nav: over.nav ?? { back: () => {}, forward: () => {} },
+      ...(over.roleSyncs ? { roleSyncs: over.roleSyncs } : {}),
       ...(over.dialogs ? { dialogs: over.dialogs } : {}),
     },
   });
@@ -1114,4 +1123,105 @@ test("the dialogs snippet receives the sources' run statuses the shell holds (#1
   await settle();
   expect(target.querySelector("[data-runs]")).not.toBeNull();
   expect(runs().map((row) => `${row.source_id}:${row.last_outcome}`)).toEqual(["jira:ok"]);
+});
+
+// ---- *Sync now* in every role view's header (#2106) ----
+
+/** Every built-in role, as one source claims it. */
+const ALL_ROLES: RoleClaim[] = ["ticket-system", "wiki", "ci", "monitoring", "code-host"].map((role) => ({ role, reads: [] }));
+
+/** The role views, each with the role its page names. */
+const ROLE_VIEWS = ["#/tickets", "#/docs", "#/builds", "#/monitors", "#/code"];
+
+/** Role syncs whose `sync_role` answers one run of `mock`, and whose `sync:state` the test sends. */
+function roleSyncHarness() {
+  const asked: string[] = [];
+  const handlers = new Set<(event: { payload: unknown }) => void>();
+  const ports: RoleSyncPorts = {
+    syncRole: (role) => {
+      asked.push(role);
+      return Promise.resolve([{ source_id: "mock", run_id: 40 + asked.length }]);
+    },
+    syncStatus: () => Promise.resolve([]),
+    listen: (_event, handler) => {
+      handlers.add(handler);
+      return Promise.resolve(() => handlers.delete(handler));
+    },
+  };
+  const end = (run_id: number) => {
+    const row: SourceSyncStatus = { source_id: "mock", running: false, run_id, started_at: null, last_finished_at: null, last_outcome: "ok", next_run_at: null, backoff_until: null, last_changed: null };
+    for (const handler of [...handlers]) handler({ payload: row });
+  };
+  return { asked, syncs: createRoleSyncs(ports), end };
+}
+
+function syncButton(): HTMLButtonElement | null {
+  return (
+    [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+      ["Sync now", "Syncing…"].includes(button.textContent?.trim() ?? ""),
+    ) ?? null
+  );
+}
+
+test("every role view's header draws Sync now, once, and a view of no role draws none", async () => {
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
+  for (const view of ROLE_VIEWS) {
+    await at(view);
+    const buttons = [...target.querySelectorAll("button")].filter((button) => button.textContent?.trim() === "Sync now");
+    expect(buttons, view).toHaveLength(1);
+  }
+  await at("#/inbox");
+  expect(syncButton()).toBeNull();
+});
+
+test("a role with no enabled source draws no Sync now", async () => {
+  start({
+    sources: [
+      { id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: false },
+      { id: "jira", display_name: "Jira", roles: [{ role: "ticket-system", reads: [] }], enabled: true },
+    ],
+  });
+  await at("#/tickets");
+  expect(syncButton()?.textContent?.trim()).toBe("Sync now");
+  for (const view of ROLE_VIEWS.slice(1)) {
+    await at(view);
+    expect(syncButton(), view).toBeNull();
+  }
+});
+
+test("Sync now says Syncing… and is disabled until its runs end, then returns", async () => {
+  const { asked, syncs, end } = roleSyncHarness();
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }], roleSyncs: syncs });
+  await at("#/docs");
+  syncButton()!.click();
+  await settle();
+  expect(asked).toEqual(["wiki"]);
+  expect(syncButton()?.textContent?.trim()).toBe("Syncing…");
+  expect(syncButton()?.disabled).toBe(true);
+
+  // Still going on another view of the role? No: each role has its own runs.
+  await at("#/builds");
+  expect(syncButton()?.textContent?.trim()).toBe("Sync now");
+  await at("#/docs");
+  expect(syncButton()?.textContent?.trim()).toBe("Syncing…");
+
+  end(41);
+  await settle();
+  expect(syncButton()?.textContent?.trim()).toBe("Sync now");
+  expect(syncButton()?.disabled).toBe(false);
+});
+
+test("a view not re-read on a run's end reads again when its Sync now runs end", async () => {
+  const { asked, syncs, end } = roleSyncHarness();
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }], roleSyncs: syncs });
+  await at("#/tickets");
+  const before = boardReads.n;
+  syncButton()!.click();
+  await settle();
+  expect(asked).toEqual(["ticket-system"]);
+  expect(boardReads.n).toBe(before);
+
+  end(41);
+  await settle();
+  expect(boardReads.n).toBeGreaterThan(before);
 });

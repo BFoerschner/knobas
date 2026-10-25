@@ -849,6 +849,7 @@ knobas-app	test/it	ipc::every_sources_command_is_registered_and_reachable
 knobas-app	test/it	ipc::frontend_ready_replays_the_current_state
 knobas-app	test/it	ipc::list_adapters_serves_the_lifecycles_registry
 knobas-app	test/it	ipc::sync_now_answers_before_the_run_and_reports_it_on_the_event
+knobas-app	test/it	ipc::sync_role_runs_each_enabled_filler_and_joins_a_run_in_flight
 knobas-app	test/it	ipc::the_optional_channel_is_not_a_decodable_argument
 knobas-app	test/it	ipc::the_same_command_gets_through_once_the_database_is_up
 knobas-app	test/it	ipc::the_two_argument_shapes_decode_as_the_split_needs

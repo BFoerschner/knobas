@@ -25,7 +25,7 @@
   /** The reads the status bar needs, injectable so a test needs no bridge. */
   export interface TfShellPorts {
     /** The source list: the status bar's names, and each source's role claims (#1196) and misses (#1199). */
-    listSources: () => Promise<Pick<Summary, "id" | "display_name" | "roles" | "role_misses">[]>;
+    listSources: () => Promise<(Pick<Summary, "id" | "display_name" | "roles" | "role_misses"> & Partial<Pick<Summary, "enabled">>)[]>;
     syncStatus: () => Promise<SyncRow[]>;
     listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
   }
@@ -63,6 +63,7 @@
   import { bridgePorts, type JobPorts } from "./job/ports";
   import { breadcrumbJob, linkRequest } from "./job/current.svelte";
   import TfPage from "./TfPage.svelte";
+  import { roleSyncs as sharedRoleSyncs, type RoleSyncs } from "./role-sync.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
   import TfToasts from "./TfToasts.svelte";
   import TfTopBar from "./TfTopBar.svelte";
@@ -90,6 +91,7 @@
     dialogs,
     onlog,
     timeRevision = 0,
+    roleSyncs = sharedRoleSyncs,
     ontimechanged,
     nav = { back: () => history.back(), forward: () => history.forward() },
   }: {
@@ -124,6 +126,8 @@
     /** Bumped by `App.svelte` when a draft or a dialog changed a day's blocks. */
     timeRevision?: number;
     ontimechanged?: () => void;
+    /** Each role view's *Sync now* (#2106); the window's when omitted. */
+    roleSyncs?: RoleSyncs;
     /** History's back and forward (#693, #1086); the window's when omitted. */
     nav?: { back: () => void; forward: () => void };
   } = $props();
@@ -487,6 +491,7 @@
         onlog,
         timeRevision,
         ontimechanged,
+        roleSyncs,
       }}
     />
   </main>

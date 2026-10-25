@@ -983,6 +983,12 @@ field: string,
 path: string, };
 
 /**
+ * One run a role view's *Sync now* started or joined (#2106): the source it
+ * runs, and the run's id, which its `sync:state` events name.
+ */
+export type RoleRun = { source_id: string, run_id: number, };
+
+/**
  * A typed account on its way in -- the wire twin of
  * [`knobas_source::instance::Account`].
  *

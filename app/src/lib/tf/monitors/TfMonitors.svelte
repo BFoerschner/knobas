@@ -66,6 +66,7 @@
 <script lang="ts">
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { onDestroy } from "svelte";
+  import type { RoleFrameProps } from "../page-entry";
 
   import { ipcErrorMessage } from "../../ipc";
   import { ackAlert, editAsset, editRoute, getAsset, getRoute, monitorRoster, openAlerts, unmonitoredAssets } from "../../ipc/assets";
@@ -121,6 +122,7 @@
       follower: () => writeFollower(),
     },
     now: fixedNow,
+    sync,
   }: {
     /** Whether the database answers yet: the reads wait for it. */
     ready: boolean;
@@ -131,7 +133,9 @@
     ports?: MonitorPorts;
     /** Injectable clock, for the bars and the header's *synced*. */
     now?: Date;
-  } = $props();
+    // The frame's `syncRevision` (#2106) is left unread: this view reads
+    // again on the end of every run of its role's sources already.
+  } & RoleFrameProps = $props();
 
   const now = $derived(fixedNow ?? new Date());
   const tab = $derived<"all" | "unmonitored">(rest[0] === "unmonitored" ? "unmonitored" : "all");
@@ -408,6 +412,7 @@
     <h1>Monitors</h1>
     <div class="tf-sub">{header}</div>
   </div>
+  {#if sync}<div class="tf-acts">{@render sync()}</div>{/if}
 </header>
 <nav class="tf-tabs" aria-label="Monitors">
   <a href="#/monitors" aria-current={tab === "all" ? "page" : undefined}
