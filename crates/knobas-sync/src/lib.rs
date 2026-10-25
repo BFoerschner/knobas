@@ -1,5 +1,11 @@
 //! The sync engine: one run of a [`Source`] into Postgres.
 //!
+//! **Only this crate writes the mirror, and only under the source's lock.**
+//! A run is one writer; a [`refresh`] of one item (ADR-0031) is the other.
+//! Both take `pg_advisory_xact_lock` on the source id and write through the
+//! same item and entity upserts, so a refresh waits for a run in flight and a
+//! run that began before it cannot commit an older payload over it.
+//!
 //! [`run_once`] is the whole write side of a sync. It hands the adapter a
 //! [`Sink`] that batches its items into `knobas.entity` and `sync.item`, all in
 //! **one transaction** -- a run either lands completely or not at all, so a

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Refresh is an optional read of one item, serialized behind its source's run
