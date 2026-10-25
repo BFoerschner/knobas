@@ -312,7 +312,10 @@ mod tests {
                 (adapter.to_owned(), kinds)
             })
             .collect();
-        assert!(!fake.is_empty(), "no entries read from NOT_REFRESHED:\n{body}");
+        assert!(
+            !fake.is_empty(),
+            "no entries read from NOT_REFRESHED:\n{body}"
+        );
         let declared: BTreeMap<String, BTreeSet<String>> = registry()
             .templates()
             .into_iter()

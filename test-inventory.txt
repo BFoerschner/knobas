@@ -107,6 +107,7 @@ knobas-app	lib/knobas_app	commands::entity::detail::tests::a_declared_kind_resol
 knobas-app	lib/knobas_app	commands::entity::detail::tests::can_refresh_is_the_adapters_declaration
 knobas-app	lib/knobas_app	commands::entity::detail::tests::can_refresh_is_the_kinds_declaration
 knobas-app	lib/knobas_app	commands::entity::detail::tests::nothing_declared_resolves_to_none_rather_than_to_a_guess
+knobas-app	lib/knobas_app	commands::entity::detail::tests::the_fake_ipcs_not_refreshed_kinds_are_the_descriptors
 knobas-app	lib/knobas_app	commands::entity::detail::tests::two_adapters_declaring_one_kind_do_not_fight
 knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_role_the_mirror_sends
 knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_saved_view_the_mirror_sends
