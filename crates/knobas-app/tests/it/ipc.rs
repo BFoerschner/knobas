@@ -1471,6 +1471,13 @@ async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
     .await
     .expect("watch_sync answers on an idle source");
     assert_eq!(idle, None, "an idle source has no run to join");
+    // Read off the scheduler, not the channel: a run the idle call started
+    // or a sink it parked would be enrolled now, before it says a thing.
+    assert_eq!(
+        scheduler.watching("mock").await,
+        0,
+        "the idle call enrolled the channel"
+    );
 
     // Hold the run before it reads anything.
     let mut holder = pool.begin().await.unwrap();
@@ -1492,19 +1499,22 @@ async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
     .await
     .expect("watch_sync answers while a run goes");
     assert_eq!(joined, Some(run_id), "the page joins the run in flight");
-    // The held run may not have said Started yet: `execute_run` reports it
-    // before the run reaches the advisory lock, so a join that lands first
-    // hears it (#2117). That Started is the join's, not the idle call's, and
-    // is the only thing the channel may have heard so far.
+    assert_eq!(
+        scheduler.watching("mock").await,
+        1,
+        "the join enrolled the channel once, and only the join did"
+    );
+    // So far the channel may have heard the joined run's Started and nothing
+    // else: `execute_run` reports Started before the run reaches the advisory
+    // lock, so a join that lands first hears it (#2117).
     {
         let heard = heard.lock().unwrap();
-        let beyond_the_join: Vec<_> = heard
-            .iter()
-            .filter(|message| !(message.run_id == run_id && message.phase == SyncPhase::Started))
-            .collect();
         assert!(
-            beyond_the_join.is_empty() && heard.len() <= 1,
-            "the idle call enrolled the channel: {heard:?}"
+            heard
+                .iter()
+                .all(|message| message.run_id == run_id && message.phase == SyncPhase::Started)
+                && heard.len() <= 1,
+            "the channel heard more than the held run's Started: {heard:?}"
         );
     }
 
