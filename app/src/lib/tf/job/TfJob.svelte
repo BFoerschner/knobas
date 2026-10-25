@@ -107,7 +107,7 @@
   import TfStartWork from "./TfStartWork.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
-  import { createDetailRefresh, DETAIL_REFRESH_BRIDGE } from "../refresh.svelte";
+  import { createDetailRefresh } from "../refresh.svelte";
   import { ago } from "../../shell/time";
 
   let {
@@ -180,7 +180,7 @@
   const sync = $derived(reader.sync);
   const repos = $derived(reader.repos);
   /** The ticket's *Refresh* or *Sync now* (#2134). */
-  const refresh = createDetailRefresh(untrack(() => ports.refresh ?? DETAIL_REFRESH_BRIDGE));
+  const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
   /** The ticket's writes its source's credential cannot make (#2052), asked once per job opened. */
   let refused = $state<RefusedWrite[]>([]);

@@ -1,6 +1,7 @@
 <!--
   An item's detail's *Refresh* or *Sync now* (#2107), drawn in the detail's
-  header toolbar (`tf/refresh.svelte.ts`). *Refresh* reads the one item and
+  header toolbar, or at the end of the job page's tab bar (#2134)
+  (`tf/refresh.svelte.ts`). *Refresh* reads the one item and
   says *Refreshing…* meanwhile; *Sync now* runs the item's source, shared with
   every detail of it, and the detail is read again once that run ends. Neither
   is drawn for a turned-off source.

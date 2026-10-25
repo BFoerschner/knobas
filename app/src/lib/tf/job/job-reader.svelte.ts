@@ -340,6 +340,35 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     }
   }
 
+  /** The ticket again, over what was drawn; a failed read keeps it. */
+  async function readTicketAgain(id: string, mine: number) {
+    try {
+      const again = await ports.getEntity(id);
+      if (mine === token) state.detail = again;
+    } catch {
+      // The card keeps what it has; the next open reads it again.
+    }
+  }
+
+  /** The thread again, keeping the visit it answered; a failed read keeps it. */
+  async function readThreadAgain(id: string, mine: number) {
+    try {
+      const again = await ports.entityThread(id);
+      if (mine === token) state.thread = again;
+    } catch {
+      // The thread keeps what it has; the next open reads it again.
+    }
+  }
+
+  /** The link sets, the reach and every section again, the checkout line kept. */
+  async function readReachAgain(id: string, mine: number) {
+    readSections(id, mine);
+    void readRows(id, SECTION_READS.code, mine).then((rows) => {
+      if (mine === token && rows) state.code = rows;
+    });
+    await Promise.allSettled([readInherited(id, mine), readReach(id, mine)]);
+  }
+
   async function readCode(id: string, mine: number) {
     const rows = await readSection(ports.listEntities, id, SECTION_READS.code);
     if (mine !== token) return;
@@ -448,53 +477,30 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     },
     rereadReach(id) {
       if (state.detail?.row.entity_id !== id) return;
-      const mine = token;
-      void readInherited(id, mine);
-      void readReach(id, mine);
-      readSections(id, mine);
-      void readRows(id, SECTION_READS.code, mine).then((rows) => {
-        if (mine === token && rows) state.code = rows;
-      });
+      void readReachAgain(id, token);
     },
     rereadDetail(id = state.detail?.row.entity_id) {
       if (id === undefined || state.detail?.row.entity_id !== id) return;
       const mine = token;
-      ports.getEntity(id).then(
-        (again) => {
-          if (mine === token) state.detail = again;
-        },
-        // The card keeps what it has; the next open reads it again.
-        () => {},
-      );
+      void readTicketAgain(id, mine);
       void readWorkflow(id, mine);
     },
     rereadThread() {
       const id = state.detail?.row.entity_id;
       if (id === undefined) return;
-      const mine = token;
-      ports.entityThread(id).then(
-        (again) => {
-          if (mine === token) state.thread = again;
-        },
-        // The thread keeps what it has; the next open reads it again.
-        () => {},
-      );
+      void readThreadAgain(id, token);
     },
     async reread() {
       const id = state.detail?.row.entity_id;
       if (id === undefined) return;
       const mine = token;
-      const ticket = ports.getEntity(id).then((again) => {
-        if (mine === token) state.detail = again;
-      });
-      const thread = ports.entityThread(id).then((again) => {
-        if (mine === token) state.thread = again;
-      });
-      readSections(id, mine);
-      void readRows(id, SECTION_READS.code, mine).then((rows) => {
-        if (mine === token && rows) state.code = rows;
-      });
-      await Promise.allSettled([ticket, thread, readWorkflow(id, mine), readWeek(id, mine), readInherited(id, mine), readReach(id, mine)]);
+      await Promise.all([
+        readTicketAgain(id, mine),
+        readWorkflow(id, mine),
+        readWeek(id, mine),
+        readThreadAgain(id, mine),
+        readReachAgain(id, mine),
+      ]);
     },
     rereadCheckout() {
       const of = state.checkoutOf;

@@ -1457,13 +1457,13 @@ test("a comment's echo says queued, then sent, and goes on the refresh event's r
 
 // ---- Refresh on the job page (#2134, #2107's shared pieces) ----
 
-/** What the job asked to refresh, and the source runs its *Sync now* asked for. */
-const refreshAsks = { items: [] as string[], runs: [] as string[] };
-
-/** `refresh_entity` answering `answer`, and a *Sync now* whose run ends when `end()` is sent. */
+/**
+ * `refresh_entity` answering `answer`, and a *Sync now* whose run ends when
+ * `end()` is sent; `asks` holds the items it was asked to refresh and the
+ * source runs it was asked for.
+ */
 function refreshing(answer: () => Promise<EntityRefresh> = () => Promise.resolve({ outcome: "refreshed" })) {
-  refreshAsks.items.length = 0;
-  refreshAsks.runs.length = 0;
+  const refreshAsks = { items: [] as string[], runs: [] as string[] };
   const handlers = new Set<(event: { payload: unknown }) => void>();
   const refresh: DetailRefreshPorts = {
     refreshEntity: (entityId) => (refreshAsks.items.push(entityId), answer()),
@@ -1481,7 +1481,7 @@ function refreshing(answer: () => Promise<EntityRefresh> = () => Promise.resolve
     const row: SourceSyncStatus = { source_id, running: false, run_id: 88, started_at: null, last_finished_at: null, last_outcome: "ok", next_run_at: null, backoff_until: null, last_changed: null };
     for (const handler of [...handlers]) handler({ payload: row });
   };
-  return { refresh, end };
+  return { refresh, end, asks: refreshAsks };
 }
 
 const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-wtabs .tf-refresh");
@@ -1489,13 +1489,19 @@ const jobBanners = () => [...target.querySelectorAll(".tf-work > .tf-banner")].m
 
 test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… meanwhile, and reads the job again without blanking it", async () => {
   let answer!: (value: EntityRefresh) => void;
-  const { refresh } = refreshing(() => new Promise((resolve) => (answer = resolve)));
+  const { refresh, asks } = refreshing(() => new Promise((resolve) => (answer = resolve)));
   let title = "Retry failed SEPA payouts";
   let threads = 0;
   let reaches = 0;
+  /** Set, the thread's next read waits for it. */
+  let threadGate: Promise<void> | null = null;
   const io = ports({
     getEntity: (id) => (calls.read.push(id), id === ID ? Promise.resolve(ticket({ row: { ...ticket().row, title } })) : Promise.reject({ code: "not_found" })),
-    entityThread: () => (threads++, Promise.resolve({ comments: [], changes: [], me: ["mara"] })),
+    entityThread: async () => {
+      threads++;
+      await threadGate;
+      return { comments: [], changes: [], me: ["mara"] };
+    },
     jobReach: () => (reaches++, Promise.resolve([])),
     refresh,
   });
@@ -1508,18 +1514,24 @@ test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… me
 
   refreshButton()!.click();
   await settle();
-  expect(refreshAsks.items).toEqual([ID]);
+  expect(asks.items).toEqual([ID]);
   expect(refreshButton()?.textContent).toBe("Refreshing…");
   expect(refreshButton()?.disabled).toBe(true);
   expect(calls.read).toEqual([]);
 
   title = "Retry failed SEPA payouts once";
+  let releaseThread!: () => void;
+  threadGate = new Promise((resolve) => (releaseThread = resolve));
   answer({ outcome: "refreshed" });
   flushSync();
   // Drawn as it was until the read answers: the card never blanks.
   expect(target.querySelector("[aria-label='Job card'] h1")?.textContent).toBe("Retry failed SEPA payouts");
   await settle();
   expect(target.querySelector("[aria-label='Job card'] h1")?.textContent).toBe("Retry failed SEPA payouts once");
+  // Refreshing until every read of the job has answered, the thread's too.
+  expect(refreshButton()?.textContent).toBe("Refreshing…");
+  releaseThread();
+  await settle();
   expect(calls.read).toEqual([ID]);
   expect(threads).toBe(1);
   expect(reaches).toBe(1);
@@ -1543,7 +1555,7 @@ test("a failed refresh on the job says why under the tab bar and keeps the job a
 });
 
 test("a ticket whose adapter does not read one item offers Sync now on the job, and the job is read again when the run ends", async () => {
-  const { refresh, end } = refreshing();
+  const { refresh, end, asks } = refreshing();
   const io = ports({
     getEntity: (id) => (calls.read.push(id), id === ID ? Promise.resolve(ticket({ refreshes: false })) : Promise.reject({ code: "not_found" })),
     refresh,
@@ -1555,8 +1567,8 @@ test("a ticket whose adapter does not read one item offers Sync now on the job, 
 
   refreshButton()!.click();
   await settle();
-  expect(refreshAsks.runs).toEqual(["jira"]);
-  expect(refreshAsks.items).toEqual([]);
+  expect(asks.runs).toEqual(["jira"]);
+  expect(asks.items).toEqual([]);
   expect(refreshButton()?.textContent).toBe("Syncing…");
 
   end("jira");
