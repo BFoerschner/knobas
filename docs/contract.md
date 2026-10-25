@@ -2475,8 +2475,10 @@ clause 13 against mockd and the seeded Jira, `live_jira_seeded`'s
 
 Ruled by the Opus implementer (`docs/decisions/2026-10-unattended-rulings.md`, "#2100"). The
 change is in `crates/knobas-source-kuma/**`, one public check in `knobas_source::contract` and
-tests, none of which §10.8 freezes; `Source::refresh` itself is #2095's entry
-(`contract/10.8/2095-source-refresh.md`), so **no §10.8 entry is owed**; no cursor version moves.
+tests. `Source::refresh` itself is #2095's entry (`contract/10.8/2095-source-refresh.md`); the new
+public check is in `crates/knobas-source/src/**`, which §10.8 freezes, and is its own entry
+(`contract/10.8/2100-kuma-refresh-clause-13-alone.md`, merge-manager ruling); no cursor version
+moves.
 
 **Every Uptime Kuma instance declares `Capability::Refresh`**, the template included: the read
 needs only the API key. A refresh of `kuma:<id>` reads `GET /metrics` as a run does and emits the
@@ -2972,6 +2974,7 @@ the entries are no longer in this file, so a line number in `docs/contract.md` s
 - [#2095](contract/10.8/2095-item-refreshed-event.md) — The event schema: `item:refreshed` — issue #2095 (2026-10-25), ADR-0031. Parent spec #2085. No command, no ...
 - [#2095](contract/10.8/2095-source-refresh.md) — `crates/knobas-source/src/**`: `Source::refresh`, an optional read of one item by id — issue #2095 ...
 - [#2098](contract/10.8/2098-gitea-refresh.md) — Gitea's descriptor declares `Capability::Refresh`, and a pull request's stored payload writes ...
+- [#2100](contract/10.8/2100-kuma-refresh-clause-13-alone.md) — `crates/knobas-source/src/**`: `contract::refreshes_as_it_syncs`, battery clause 13 alone — issue #2100 ...
 - [#2106](contract/10.8/2106-sync-role.md) — One new command, `sync_role` — issue #2106 (2026-10-25): *Sync now* in every role view's header. Parent spec ...
 
 <!-- 10.8-index:end -->
