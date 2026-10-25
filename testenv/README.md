@@ -916,7 +916,13 @@ Confluence test missing from it fails loudly in the Jira run, and a listed name
 the file no longer has stops both recipes before they start a product.
 `--verify confluence` also waits until every seeded page comes back from a CQL
 search of the space: the full sync is a search, and on #633's first run the
-suites, now started seconds after the seed, saw two pages of seven.
+suites, now started seconds after the seed, saw two pages of seven. It waits
+the other way too: a page in `ENG` that `seed-state.json` does not record must
+have left the search, since the adapter suite bounds a full sync by the seeded
+pages and the home page (#2111). The content seed itself deletes every such
+page, trashed and purged, after it has found or created its own: a suite's
+guard deletes the page it made, a run that was killed reaches no guard, and a
+Confluence left up between runs kept that page for the next one.
 
 **What the content seed creates.** In Jira, the fixture's five people as
 users (`tidewater-dev`, six accounts on the ten-user key), the `PAY` and
@@ -2175,7 +2181,7 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
 | `./canary.sh` | `up` / `down` / `status` on the canary's host socket, `127.0.0.1:8299`. The one thing a live run may knock over. |
 | `./fetch-timebomb-keys.sh` | Pulls the two 10-user, 3-hour Data Center timebomb keys off Atlassian's public page, checks each decodes to the right product, prints `export` lines (`--write` also drops them in the git-ignored `.env.licences`). `seed-atlassian.sh` calls it when a key is unset. |
 | `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`); `./seed --atlassian` runs the script below after it. Takes `jira` or `confluence` to walk one wizard, which is the shape a loaded machine wants — see *Jira and Confluence, end to end*. |
-| `./seed-atlassian-content.sh` | The Tidewater people, projects, issues, comments, worklogs and links in the real Jira; the ENG space, pages and comments in the real Confluence. Takes `jira` or `confluence` to seed one. `--verify` reads PAY-231 and one page back, walks one throwaway ticket through `NARROW`'s workflow to prove it still narrows (the only write in that path; it deletes the ticket), and waits until every seeded page is in a CQL search. `just jira-live` / `just confluence-live` run the whole window. |
+| `./seed-atlassian-content.sh` | The Tidewater people, projects, issues, comments, worklogs and links in the real Jira; the ENG space, pages and comments in the real Confluence. Takes `jira` or `confluence` to seed one. `--verify` reads PAY-231 and one page back, walks one throwaway ticket through `NARROW`'s workflow to prove it still narrows (the only write in that path; it deletes the ticket), and waits until a CQL search returns exactly the seeded pages and the home page; the Confluence seed deletes the `ENG` pages it did not create. `just jira-live` / `just confluence-live` run the whole window. |
 | `./live` | `up` / `down <gitea\|teamcity\|jira\|confluence>` and `status`: the on-demand products (`live-lib.sh`), one JVM product at a time. `just live-up` / `live-down` / `live-status`. See *Live products, on demand*. |
 | `./live-test.sh` | Its unit tests against a stub `docker`: the one-JVM refusal, the remote-context refusal, what a run puts back, and that no run stops a Gitea it started, TeamCity's or Gitea's own (#698). `just witness-unit`, and part of `just check`. |
 | `./live-lock-test.sh` | The JVM lock's unit tests (#690), against a stub `docker` and a scratch lock: a second run waits for the first, a stale lock is taken over, the wait times out naming the holder. `just witness-unit`, and part of `just check`. |
