@@ -479,6 +479,138 @@ where
     if let Err(error) = crate::url_forms::check(&d) {
         panic!("descriptor.url_forms: {error}");
     }
+    // 13. The refresh (ADR-0031): declared exactly when it answers, and each
+    //     kind it answers for read back as the sync emitted it.
+    check_refresh(&*s, &d, &sink.0).await;
+}
+
+/// Clause 13: the read of one item by id ([`crate::Source::refresh`]).
+///
+/// Asked of **one item per kind** the sync emitted, the first of each, and of
+/// the first item it emitted deleted: a refresh is a read, safe against a
+/// live instance, but a corpus of thousands would be thousands of requests.
+///
+/// * A kind answered [`NotOffered`](crate::RefreshAnswer::NotOffered) is a
+///   kind this adapter does not refresh, and is skipped.
+/// * A kind answered otherwise is held to the sync: the same entity, kind and
+///   title, and the same value at every path the descriptor declares for the
+///   kind (its parent among them). A live item answered *gone* fails, and a
+///   deleted one must be *gone*.
+/// * `Capability::Refresh` and the answers are two signals for one fact, held
+///   to each other as `Capability::Write` is to `write_ops`: an adapter that
+///   answers for a kind declares it, and one that declares it answers for at
+///   least one kind its sync emitted.
+async fn check_refresh(
+    s: &dyn crate::Source,
+    d: &crate::SourceDescriptor,
+    items: &[crate::SyncItem],
+) {
+    let mut kinds = std::collections::HashSet::new();
+    let mut asked: Vec<&crate::SyncItem> = items
+        .iter()
+        .filter(|item| !item.deleted && kinds.insert(item.kind.as_str()))
+        .collect();
+    asked.extend(items.iter().find(|item| item.deleted));
+    let declares = d.refreshes();
+    let mut answered = false;
+    for item in asked {
+        let id = item.entity.to_string();
+        let answer = s
+            .refresh(&id)
+            .await
+            .unwrap_or_else(|error| panic!("refresh of {id}, which the sync emitted, failed: {error}"));
+        if matches!(answer, crate::RefreshAnswer::NotOffered) {
+            continue;
+        }
+        assert!(
+            declares,
+            "refresh answers for {id} but the descriptor does not declare Capability::Refresh -- \
+             the app reads that declaration to decide whether to ask"
+        );
+        answered = true;
+        match answer {
+            crate::RefreshAnswer::NotOffered => unreachable!("skipped above"),
+            crate::RefreshAnswer::Gone => assert!(
+                item.deleted,
+                "refresh answered {id} gone, but the sync emitted it live"
+            ),
+            crate::RefreshAnswer::Item(read) => {
+                assert!(
+                    !item.deleted && !read.deleted,
+                    "refresh of {id}, which the sync emitted deleted, must answer it gone, not \
+                     as an item"
+                );
+                assert_eq!(read.entity, item.entity, "refresh of {id} answered another item");
+                assert_eq!(read.kind, item.kind, "refresh of {id} answered another kind");
+                assert_eq!(
+                    read.title, item.title,
+                    "refresh of {id} answered another title than the sync emitted"
+                );
+                for path in d
+                    .payload_paths
+                    .iter()
+                    .filter(|paths| paths.kind == item.kind)
+                    .flat_map(declared_paths)
+                {
+                    let at = |payload| knobas_spi_types::payload::at(payload, &path);
+                    assert_eq!(
+                        at(&read.payload),
+                        at(&item.payload),
+                        "refresh of {id} disagrees with the sync at the declared path {:?}",
+                        path.segments()
+                    );
+                }
+            }
+        }
+    }
+    assert!(
+        !declares || answered,
+        "the descriptor declares Capability::Refresh but refresh answered NotOffered for every \
+         kind the sync emitted"
+    );
+}
+
+/// Every payload path a kind's declaration names, read off its serialized
+/// form so a path added to [`crate::KindPaths`] is held by clause 13 without
+/// a line here: each list of strings in it is a path, but the two lists of
+/// status names. A path relative to a parent or list element is compared at
+/// the root too, which is harmless: both answers are read the same way.
+fn declared_paths(paths: &crate::KindPaths) -> Vec<knobas_spi_types::payload::PayloadPath> {
+    fn walk(
+        value: &serde_json::Value,
+        key: &str,
+        out: &mut Vec<knobas_spi_types::payload::PayloadPath>,
+    ) {
+        match value {
+            serde_json::Value::Array(segments)
+                if !segments.is_empty() && segments.iter().all(serde_json::Value::is_string) =>
+            {
+                if key != "blocked_statuses" && key != "done_statuses" {
+                    out.push(knobas_spi_types::payload::PayloadPath::of(
+                        segments.iter().filter_map(serde_json::Value::as_str),
+                    ));
+                }
+            }
+            serde_json::Value::Array(entries) => {
+                for entry in entries {
+                    walk(entry, key, out);
+                }
+            }
+            serde_json::Value::Object(fields) => {
+                for (key, value) in fields {
+                    walk(value, key, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(
+        &serde_json::to_value(paths).expect("a declaration serializes"),
+        "",
+        &mut out,
+    );
+    out
 }
 
 /// Clause 11: the source actions an adapter declares are the ones it
@@ -1658,6 +1790,19 @@ mod tests {
         SourceActionOpWithoutActions,
         /// Declares `add_label` twice.
         RepeatsASourceAction,
+        /// Declares `Capability::Refresh` and reads its item back as the
+        /// sync emitted it: the conforming case of clause 13.
+        Refreshes,
+        /// Reads its item back without declaring `Capability::Refresh`.
+        RefreshesWithoutTheCapability,
+        /// Declares `Capability::Refresh` and answers `NotOffered` for all.
+        DeclaresRefreshAndOffersNone,
+        /// Reads its item back under another title than the sync's.
+        RefreshesAnotherTitle,
+        /// Reads its item back with another status at the declared path.
+        RefreshesAnotherStatus,
+        /// Answers a live item gone.
+        RefreshesALiveItemAsGone,
     }
 
     struct TestSource {
@@ -1708,6 +1853,13 @@ mod tests {
                     | Behavior::SourceActionOpWithoutActions
                     | Behavior::RepeatsASourceAction => {
                         vec![Capability::Search, Capability::Write]
+                    }
+                    Behavior::Refreshes
+                    | Behavior::DeclaresRefreshAndOffersNone
+                    | Behavior::RefreshesAnotherTitle
+                    | Behavior::RefreshesAnotherStatus
+                    | Behavior::RefreshesALiveItemAsGone => {
+                        vec![Capability::Search, Capability::Refresh]
                     }
                     _ => vec![Capability::Search],
                 },
@@ -2214,6 +2366,37 @@ mod tests {
                 pushed?;
             }
             Ok("1".into())
+        }
+
+        /// The item its own full sync emits for `entity`, bent as the
+        /// behavior says; `NotOffered` for every behavior that is not about
+        /// clause 13.
+        async fn refresh(&self, entity: &str) -> Result<crate::RefreshAnswer, SourceError> {
+            match self.behavior {
+                Behavior::Refreshes
+                | Behavior::RefreshesWithoutTheCapability
+                | Behavior::RefreshesAnotherTitle
+                | Behavior::RefreshesAnotherStatus => {}
+                Behavior::RefreshesALiveItemAsGone => return Ok(crate::RefreshAnswer::Gone),
+                _ => return Ok(crate::RefreshAnswer::NotOffered),
+            }
+            let mut synced = super::VecSink(Vec::new());
+            self.sync(None, &mut synced).await?;
+            let Some(mut item) = synced
+                .0
+                .into_iter()
+                .find(|item| item.entity.to_string() == entity)
+            else {
+                return Ok(crate::RefreshAnswer::Gone);
+            };
+            match self.behavior {
+                Behavior::RefreshesAnotherTitle => item.title = "Renamed".into(),
+                Behavior::RefreshesAnotherStatus => {
+                    item.payload["fields"]["status"]["name"] = "Done".into();
+                }
+                _ => {}
+            }
+            Ok(crate::RefreshAnswer::Item(item))
         }
 
         async fn write(&self, op: WriteOp) -> Result<crate::WriteReceipt, SourceError> {
@@ -3266,6 +3449,58 @@ mod tests {
                 "{id}: `target` reads another field than its delivery names"
             );
         }
+    }
+
+    // -- clause 13: the refresh (ADR-0031) -------------------------------------
+
+    #[tokio::test]
+    async fn accepts_an_adapter_that_reads_its_items_back_as_it_synced_them() {
+        run(Behavior::Refreshes)
+            .await
+            .expect("an adapter that refreshes faithfully must pass");
+    }
+
+    #[tokio::test]
+    async fn rejects_a_refresh_without_the_capability() {
+        rejects(
+            Behavior::RefreshesWithoutTheCapability,
+            "does not declare Capability::Refresh",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_the_capability_without_a_refresh() {
+        rejects(
+            Behavior::DeclaresRefreshAndOffersNone,
+            "declares Capability::Refresh but refresh answered NotOffered",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_refresh_under_another_title() {
+        rejects(Behavior::RefreshesAnotherTitle, "answered another title").await;
+    }
+
+    /// The declared path, not only the title: a status read back differently
+    /// is a ticket that moves column when it is refreshed.
+    #[tokio::test]
+    async fn rejects_a_refresh_that_disagrees_at_a_declared_path() {
+        rejects(
+            Behavior::RefreshesAnotherStatus,
+            "disagrees with the sync at the declared path",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_refresh_that_answers_a_live_item_gone() {
+        rejects(
+            Behavior::RefreshesALiveItemAsGone,
+            "but the sync emitted it live",
+        )
+        .await;
     }
 
     /// Every write a role's vocabulary names is a `WriteOp` the SPI knows, so

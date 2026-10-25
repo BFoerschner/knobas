@@ -411,6 +411,13 @@ impl Source for Observed<'_> {
         self.inner.write(op).await
     }
 
+    /// Delegated, and unreported: the descriptor above claims what the inner
+    /// adapter claims, `Capability::Refresh` included, so the read must be
+    /// the inner one's. A refresh is no part of a run (ADR-0031).
+    async fn refresh(&self, entity: &str) -> Result<knobas_source::RefreshAnswer, SourceError> {
+        self.inner.refresh(entity).await
+    }
+
     /// Delegated, and deliberately unreported: this decorator narrates a *sync
     /// run* -- a run id, a phase, a growing item count -- and the workflow read
     /// belongs to a detail somebody opened, which has no run and no progress
