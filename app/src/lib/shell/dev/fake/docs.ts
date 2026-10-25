@@ -489,12 +489,15 @@ function page(args: Record<string, unknown>): DocPage {
     version: body.version,
     labels: body.labels,
     blocks: body.blocks.map(block),
+    // The fake sends no comment, so it names none by id: Docs matches by the words.
     comments: body.comments.map(([who, said, text]) => ({
+      id: null,
       author: PEOPLE[who]?.[0] ?? null,
       author_name: PEOPLE[who]?.[1] ?? null,
       at: at(said),
       blocks: [para(text)],
     })),
+    sent_comments: [],
     me: [ME],
     sections: sections(body.blocks.map(block)),
     history: [

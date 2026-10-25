@@ -66,7 +66,8 @@ const PAGE: DocPage = {
     { type: "table", rows: [[{ header: true, text: [text("After")] }], [{ header: false, text: [text("15 min")] }]] },
     { type: "placeholder", name: "roadmap" },
   ],
-  comments: [{ author: "priya", author_name: "Priya Nair", at: "2026-08-19T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Rewriting it.")] }] }],
+  comments: [{ id: "65700", author: "priya", author_name: "Priya Nair", at: "2026-08-19T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Rewriting it.")] }] }],
+  sent_comments: [],
   me: ["mara"],
   sections: [{ number: 1, text: null, refusal: "code" }],
   history: [],
@@ -926,7 +927,46 @@ test("a queued comment is drawn at the end of the list until the page holds it",
 
   const said: DocPage = {
     ...RICH,
-    comments: [...RICH.comments, { author: "mara", author_name: "Mara Lindqvist", at: "2026-10-21T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Done.")] }] }],
+    comments: [...RICH.comments, { id: null, author: "mara", author_name: "Mara Lindqvist", at: "2026-10-21T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Done.")] }] }],
+  };
+  await redraw(["confluence:2"], ports({ docsPage: vi.fn(async () => said) }));
+  expect(queuedComments()).toEqual([]);
+});
+
+test("a queued comment drops once the read holds the comment its write was given, whatever it says by then (#2074)", async () => {
+  // `submitWrite` answers write 1 (QUEUED); the settle stamped it with Confluence's id 360600.
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  await sendComment("X");
+  expect(queuedComments()).toEqual(["MA You queued X"]);
+
+  const stamped: DocPage["sent_comments"] = [{ write_id: QUEUED.id, comment_id: "360600" }];
+  // Sent and named, not mirrored yet: somebody else's same words are not it.
+  const notYet: DocPage = {
+    ...RICH,
+    sent_comments: stamped,
+    comments: [...RICH.comments, { id: "360599", author: "priya", author_name: "Priya Nair", at: "2026-10-25T09:00:00Z", blocks: [{ type: "paragraph", text: [text("X")] }] }],
+  };
+  await redraw(["confluence:2"], ports({ docsPage: vi.fn(async () => notYet) }));
+  expect(queuedComments()).toEqual(["MA You queued X"]);
+
+  // Edited to "meh" in Confluence before knobas read it back.
+  const edited: DocPage = {
+    ...RICH,
+    sent_comments: stamped,
+    comments: [...RICH.comments, { id: "360600", author: "mara", author_name: "Mara Lindqvist", at: "2026-10-25T10:00:00Z", blocks: [{ type: "paragraph", text: [text("meh")] }] }],
+  };
+  await redraw(["confluence:2"], ports({ docsPage: vi.fn(async () => edited) }));
+  expect(queuedComments()).toEqual([]);
+});
+
+test("a queued comment whose write was given no id still drops when the thread holds its words (#2074)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  await sendComment("Done.");
+  const said: DocPage = {
+    ...RICH,
+    // Another write's id, not this one's: this mark falls back to the words.
+    sent_comments: [{ write_id: QUEUED.id + 1, comment_id: "360601" }],
+    comments: [...RICH.comments, { id: "360700", author: "mara", author_name: "Mara Lindqvist", at: "2026-10-25T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Done.")] }] }],
   };
   await redraw(["confluence:2"], ports({ docsPage: vi.fn(async () => said) }));
   expect(queuedComments()).toEqual([]);
@@ -1071,7 +1111,7 @@ test("a queued section edit and comment drop once a sync run ends and the open p
     ...RICH,
     version: 33,
     sections: [{ number: 1, text: "Ask Priya.", refusal: null }],
-    comments: [...RICH.comments, { author: "mara", author_name: "Mara Lindqvist", at: "2026-10-25T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Done.")] }] }],
+    comments: [...RICH.comments, { id: null, author: "mara", author_name: "Mara Lindqvist", at: "2026-10-25T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Done.")] }] }],
   };
   await sync.ended();
   expect(section().querySelector(".tf-sec-queued")).toBeNull();
