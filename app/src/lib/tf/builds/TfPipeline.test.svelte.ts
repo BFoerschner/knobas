@@ -1060,6 +1060,20 @@ const CANNOT_PUT_FIRST = "This TeamCity user cannot put a build first in the que
 test("Run… draws the overrides and the queue's top disabled saying why where the credential cannot send them, and sends neither (#2055)", async () => {
   const asked: string[] = [];
   const drawn = draw([PIPELINE.entity_id], "PAY-231", {
+    presets: () =>
+      Promise.resolve([
+        {
+          pipeline_id: PIPELINE.entity_id,
+          name: "Loud",
+          branch: null,
+          parameters: [
+            { name: "env", value: "prod-dryrun" },
+            { name: "env.TRACE", value: "1" },
+          ],
+          clean_checkout: false,
+          first_in_queue: true,
+        },
+      ]),
     refusedWrites: (asks) => {
       asked.push(JSON.stringify(asks));
       const reasons: Record<string, string> = { parameters: CANNOT_OVERRIDE, first_in_queue: CANNOT_PUT_FIRST };
@@ -1096,13 +1110,18 @@ test("Run… draws the overrides and the queue's top disabled saying why where t
   expect(top.querySelector("input")!.disabled).toBe(true);
   expect(summary()).toBe("On feature/PAY-231-sepa-retry, defaults");
 
+  // A preset that overrides and goes first fills neither in.
+  choose(field<HTMLSelectElement>("Start from"), "preset:Loud");
+  expect(env.value).toBe("staging");
+  expect(dialog()!.querySelector('input[aria-label="Name of added parameter 1"]')).toBeNull();
+  expect(top.querySelector("input")!.checked).toBe(false);
   button("Run")!.click();
   await settle();
   expect(drawn.writes).toEqual([
     {
       RunBuild: {
         entity: PIPELINE.entity_id,
-        branch: "feature/PAY-231-sepa-retry",
+        branch: null,
         parameters: [],
         clean_checkout: false,
         first_in_queue: false,
