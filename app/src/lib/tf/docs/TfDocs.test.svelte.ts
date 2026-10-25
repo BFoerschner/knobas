@@ -1191,3 +1191,22 @@ test("Link to <job>'s page re-read that answers after another page was opened do
   await settle();
   expect(target.querySelector("h1")?.textContent).toBe("Ops home");
 });
+
+test("a link that answers after another page was opened reads nothing back over it (#2072)", async () => {
+  const OTHER: DocPage = { ...PAGE, entity_id: "confluence:1", title: "Ops home", ancestors: [] };
+  const docsPage = vi.fn(async (id: string) => (id === "confluence:1" ? OTHER : RICH));
+  let linked: () => void = () => {};
+  const links = linkPorts();
+  links.createLink = vi.fn(() => new Promise<never>((resolve) => (linked = () => resolve(null as never))));
+  const props = $state({ ready: true, rest: ["confluence:2"], job: "PAY-231", ports: ports({ docsPage }), linkPorts: links as never });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  button("Link to PAY-231")!.click();
+  await settle();
+  props.rest = ["confluence:1"];
+  await settle();
+  linked();
+  await settle();
+  expect(docsPage.mock.calls.map(([id]) => id)).toEqual(["confluence:2", "confluence:1"]);
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+});
