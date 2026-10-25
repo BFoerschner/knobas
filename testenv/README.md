@@ -200,10 +200,24 @@ once, and only the few minutes each spends in TeamCity are serialised. The
 lock is a symlink whose target names the holder (`<pid> <epoch> <recipe>
 <worktree>`), taken with `ln -s` as the gate slots are (macOS has no
 `flock`); `readlink` it to see who holds it. `atlassian-live` holds it once
-for both of its halves, which run under it. `live-up` holds it only while it
-starts and seeds — the product then stays up, and the next run of another
-JVM product meets the refusal, as before. A product started by hand with
+for both of its halves, which run under it. A product started by hand with
 `docker compose` takes no lock; that is what the refusal is still for.
+
+**A `live-up` JVM product keeps the lock until `live-down` (#2121).** A suite
+run by hand against it (`cargo test … --test live_confluence_seeded`) takes no
+lock, so when `live-up` let the lock go after seeding, another worktree's
+`just confluence-live` took it, found Confluence up and edited the same pages
+mid-run. Now `live-up teamcity|jira|confluence` hands the lock to a detached
+keeper that holds it as `live-up-<product>-kept` in its worktree while the
+product is up. That worktree's own recipes and hand-run suites go on under
+it (`… runs under the JVM lock this worktree's live-up keeps`); every other
+worktree's run waits as for any holder, its waiting line ending in `'just
+live-down <product>' from any worktree frees it`. `live-down` ends the keeper
+and frees the lock, from any worktree; a product gone some other way (removed
+by hand, a VM restart) frees it at the keeper's next look
+(`KNOBAS_LIVE_KEEPER_POLL`, 30 s); a killed keeper is a dead holder, taken
+over. So run `just live-down <product>` when the session is over: until then
+the other worktrees' JVM runs queue behind it.
 
 **Gitea runs take turns on a lock of their own (#724).** Two `just
 gitea-live` runs from two worktrees broke each other: one run's cleanup
@@ -290,7 +304,8 @@ agent and no recipe does (the deputy's ruling on #634).
 against a stub `docker`, and `testenv/live-lock-test.sh` the lock — a second
 run waits and goes on, a dead holder's lock is taken over, the wait ends in
 a refusal naming the holder, `live_session` takes the lock before the guard
-and lets it go after the put-back, and a Gitea session queues on the Gitea
+and lets it go after the put-back, a `live-up` product's keeper holds it
+against other worktrees until `live-down`, and a Gitea session queues on the Gitea
 lock and never on the JVM one — both in `just witness-unit` and so in
 `just check`.
 

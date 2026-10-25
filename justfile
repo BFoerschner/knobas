@@ -2093,7 +2093,8 @@ teamcity-live-seeded:
 # names it. `down` stops TeamCity and Gitea (their volumes hold the seeded
 # corpus) and removes Jira and Confluence with their volumes (3-hour timebomb
 # licences: a kept volume is an expired product). testenv/README.md, "Live
-# products, on demand".
+# products, on demand". A JVM product's `live-up` keeps the JVM lock until its
+# `live-down` (#2121): other worktrees' JVM runs wait until then.
 live-up product:
     testenv/live up {{ quote(product) }}
 
