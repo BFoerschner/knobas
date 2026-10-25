@@ -10,6 +10,8 @@ import { brotliDecompressSync } from "node:zlib";
 
 import { expect, test } from "vitest";
 
+import { READER_NARROW } from "./docs/docs";
+
 const APP = process.cwd();
 /**
  * The sheet as the browser sees it: `tf.css` with each `./css/<area>.css`
@@ -315,4 +317,27 @@ test("a Find match in a broken Dependencies tile is --ink on --mark; elsewhere i
 test("the asset tree page is viewport-high, so its pane scrolls and the page does not (#1460)", () => {
   expect(block(code, ".tf-full:has(> .tf-asset-tree)")).toMatch(/(^|[{;\s])height:\s*100%/);
   expect(block(code, ".tf-asset-tree")).toMatch(/min-height:\s*0/);
+});
+
+test("the Docs reader: tree and page, the outline the page's sticky right column, folded on the component's own threshold (#2081)", () => {
+  expect(block(code, ".tf-rd")).toMatch(/grid-template-columns:\s*300px minmax\(0, 1fr\);/);
+  expect(block(code, ".tf-rd-sheet")).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\) 268px;/);
+  const outline = block(code, ".tf-rd-outline");
+  expect(outline).toMatch(/position:\s*sticky/);
+  expect(outline).toMatch(/top:\s*0/);
+  // The band the component reads through `matchMedia` is the stylesheet's own.
+  const at = code.indexOf(`@media ${READER_NARROW} {`);
+  expect(at, `no rule band for ${READER_NARROW}`).toBeGreaterThan(-1);
+  const band = code.slice(at, code.indexOf("\n}", at));
+  expect(band).toMatch(/\.tf-rd\s*\{[^}]*grid-template-columns:\s*220px minmax\(0, 1fr\)/);
+  expect(band).toMatch(/\.tf-rd-sheet\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)\s*;/);
+});
+
+test("nothing in the Docs reader's page is capped in width (#2081)", () => {
+  const capped = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
+    .filter(([, selector]) => /\.tf-(rd-page|rd-sheet|doc|cmts|sec-edit|compose|pre|callout|macro|rd-foot)\b/.test(selector!))
+    .filter(([, , body]) => /max-width/.test(body!))
+    .map(([, selector]) => selector!.trim());
+  expect(capped).toEqual([]);
+  expect(code).not.toContain("74ch");
 });

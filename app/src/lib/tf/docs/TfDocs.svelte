@@ -10,16 +10,17 @@
   in the field, the hits (R-10.1 to R-10.4, R-10.8). *New page* is at the
   bottom.
 
-  **Middle**, the page at most 74 characters wide in the reading face: the
-  breadcrumb, the title, who edited it when, who created it (#2080), the
+  **Right**, the page in the reading face, nothing in it capped in width
+  (#2081, R-10.9): the breadcrumb, the title, who edited it when, who created it (#2080), the
   version, the reading time and the labels (each searches for itself), the
   actions row with *More ▾* (#2082), the blocks by section (*Edit section*),
   the page foot (*Work it belongs to*, *Linked from*, `TfDocFoot`) and the
   comments with the composer (R-10.9 to R-10.15). A page opened from a hit
   keeps the query: every match is marked and the find bar steps through them
-  (R-10.5, R-10.12).
-
-  **Right**, the outline (R-10.15). `#/docs` opens the page read last, and every
+  (R-10.5, R-10.12). The outline (`TfDocOutline`, R-10.15) is the page's own
+  right column, sticking while the page scrolls; below 1240px
+  (`READER_NARROW`, read through `matchMedia`) it folds between the actions
+  row and the first section instead. `#/docs` opens the page read last, and every
   page opened is a visit (`visit_entity`), which is what "read last" reads.
 
   Drawn over the declared Docs frame (ADR-0022): `docs_tree`, `docs_page`,
@@ -43,6 +44,7 @@
 <script lang="ts">
   import { clockLabel } from "../../time/format";
   import { tick, untrack } from "svelte";
+  import { MediaQuery } from "svelte/reactivity";
 
   import { ipcErrorMessage } from "../../ipc";
   import {
@@ -81,7 +83,7 @@
   import TfDocFoot from "./TfDocFoot.svelte";
   import TfDocHits from "./TfDocHits.svelte";
   import TfDocMore from "./TfDocMore.svelte";
-  import TfDocRail from "./TfDocRail.svelte";
+  import TfDocOutline from "./TfDocOutline.svelte";
   import TfDocTree from "./TfDocTree.svelte";
   import TfMarked from "./TfMarked.svelte";
   import TfNewPage from "./TfNewPage.svelte";
@@ -98,6 +100,7 @@
     jobPageGroups,
     pageHash,
     pageToOpen,
+    READER_NARROW,
     person,
     placeOf,
     reachedPages,
@@ -501,6 +504,8 @@
   }
 
   // ---- the outline follows the scrolling ----
+  /** A window narrower than 1240px, where the outline folds above the page. */
+  const narrow = new MediaQuery(READER_NARROW);
   let active = $state<number | null>(null);
   function follow(): void {
     if (!main || !article) return;
@@ -875,145 +880,151 @@
     {:else if page !== null}
       {@const p = page}
       {@const created = createdBy(p)}
-      <article class="tf-rd-page" bind:this={article}>
-        <div class="tf-rd-crumb">
-          {#if job !== null}
-            <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a> ›
-          {/if}
-          <a href="#/docs">Docs</a>
-          {#if p.space}
-            › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>
-          {/if}
-          {#if parent}
-            › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}
-          {/if}
-        </div>
-        <h1 class="tf-rd-title">
-          <TfMarked text={p.title} {stems} />
-        </h1>
-        <div class="tf-rd-meta">
-          {#if p.editor !== null || p.updated_at !== null}
-            <span>{person(p.editor, p.editor_name, p.me)} edited {clockLabel(p.updated_at)}</span>
-          {/if}
-          {#if created}
-            <span>Created by {created.who}{#if created.at !== null}, {clockLabel(created.at)}{/if}</span>
-          {/if}
-          {#if p.version !== null}<span>version {p.version}</span>{/if}
-          {#if p.readable}<span>{readingMinutes(p)} min read</span>{/if}
-          {#each p.labels as label (label)}
-            <button type="button" class="tf-chip" title="Search for {label}" onclick={() => searchLabel(label)}
-              >{label}</button>
-          {/each}
-        </div>
-        <div class="tf-rd-acts">
-          {#if job !== null && linkPorts}
-            {@const key = job}
-            {@const ref = jobAt ?? job}
-            <button type="button" class="tf-btn tf-sm" onclick={() => linkToJob(p, ref, key)}>Link to {key}</button>
-          {/if}
-          {#if linkPorts}
-            <button type="button" class="tf-btn tf-sm" onclick={() => (linking = true)}>Link to…</button>
-          {/if}
-          {#if p.writes.includes("create_page")}
-            <button
-              type="button"
-              class="tf-btn tf-sm"
-              {...refusedAttrs(refusal("create_page"))}
-              onclick={() => {
-                if (refusal("create_page") === null) newPage = { space: pageSpace ? spaceId(pageSpace) : null, parent: p.entity_id };
-              }}
-              >New page here</button>
-          {/if}
-          <button type="button" class="tf-btn tf-sm" onclick={() => copyLink(p)}>Copy link</button>
-          {#if p.web_url}
-            {@const url = p.web_url}
-            <button type="button" class="tf-btn tf-sm" onclick={() => open(url)}>Open in {p.source_name}</button>
-          {/if}
-          {#if p.readable}
-            <TfDocMore onexport={() => exportMarkdown(p)} />
-          {/if}
-        </div>
-        <div class="tf-doc">
-          {#if p.readable}
-            <TfDocBody
-              blocks={p.blocks}
-              entityId={p.entity_id}
-              sourceName={p.source_name}
-              webUrl={p.web_url}
-              sections={p.sections}
-              editable={p.writes.includes("update_page") && p.version !== null}
-              refusal={refusal("update_page")}
-              {stems}
-              onopen={open}
-              oncopy={copy}
-              onsave={(section, text) => saveSection(p, section, text)}
-            />
-          {:else}
-            <p class="tf-dl-note">knobas cannot read this page's body. Open it in {p.source_name}.</p>
-          {/if}
-          {#key p.entity_id}
-            <TfDocFoot page={p} spaces={tree?.spaces ?? []} />
-          {/key}
-          <div class="tf-cmts">
-            <h2>Comments {#if p.comments.length > 0}<span class="tf-count">{p.comments.length}</span>{/if}</h2>
-            {#each p.comments as c, i (i)}
-              {@const mine = c.author !== null && p.me.includes(c.author)}
-              <div class="tf-msg">
-                <span class="tf-av" class:tf-me={mine}>{initials(c.author)}</span>
-                <div class="tf-cmt-body">
-                  <div class="tf-who">
-                    <b>{mine ? "You" : firstName(person(c.author, c.author_name, p.me))}</b>
-                    {c.at === null ? "" : clockLabel(c.at)}
-                  </div>
-                  <TfDocBlocks
-                    blocks={c.blocks}
-                    entityId={p.entity_id}
-                    sourceName={p.source_name}
-                    webUrl={p.web_url}
-                    onopen={open}
-                    oncopy={copy}
-                    {stems}
-                  />
-                </div>
-              </div>
-            {/each}
-            {#each queuedComments as body, n (n)}
-              <div class="tf-msg tf-queued">
-                <span class="tf-av tf-me">{initials(p.me[0] ?? null)}</span>
-                <div class="tf-cmt-body">
-                  <div class="tf-who"><b>You</b> <span class="tf-chip tf-info">queued</span></div>
-                  <p class="tf-cmt-queued">{body}</p>
-                </div>
-              </div>
-            {/each}
-            {#if p.comments.length === 0 && queuedComments.length === 0}
-              <p class="tf-dl-note">No comments yet.</p>
+      <div class="tf-rd-sheet">
+        <article class="tf-rd-page" bind:this={article}>
+          <div class="tf-rd-crumb">
+            {#if job !== null}
+              <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a> ›
             {/if}
-            {#if p.writes.includes("comment")}
-              <div class="tf-compose">
-                <textarea bind:this={composer} bind:value={comment} placeholder="Comment on this page" aria-label="Comment on this page"
-                ></textarea>
-                <div class="tf-acts">
-                  <button
-                    type="button"
-                    class="tf-btn tf-primary"
-                    disabled={commenting || comment.trim() === ""}
-                    {...refusedAttrs(refusal("comment"))}
-                    onclick={() => sendComment(p)}>Comment</button>
-                </div>
-              </div>
+            <a href="#/docs">Docs</a>
+            {#if p.space}
+              › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>
+            {/if}
+            {#if parent}
+              › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}
             {/if}
           </div>
-        </div>
-      </article>
+          <h1 class="tf-rd-title">
+            <TfMarked text={p.title} {stems} />
+          </h1>
+          <div class="tf-rd-meta">
+            {#if p.editor !== null || p.updated_at !== null}
+              <span>{person(p.editor, p.editor_name, p.me)} edited {clockLabel(p.updated_at)}</span>
+            {/if}
+            {#if created}
+              <span>Created by {created.who}{#if created.at !== null}, {clockLabel(created.at)}{/if}</span>
+            {/if}
+            {#if p.version !== null}<span>version {p.version}</span>{/if}
+            {#if p.readable}<span>{readingMinutes(p)} min read</span>{/if}
+            {#each p.labels as label (label)}
+              <button type="button" class="tf-chip" title="Search for {label}" onclick={() => searchLabel(label)}
+                >{label}</button>
+            {/each}
+          </div>
+          <div class="tf-rd-acts">
+            {#if job !== null && linkPorts}
+              {@const key = job}
+              {@const ref = jobAt ?? job}
+              <button type="button" class="tf-btn tf-sm" onclick={() => linkToJob(p, ref, key)}>Link to {key}</button>
+            {/if}
+            {#if linkPorts}
+              <button type="button" class="tf-btn tf-sm" onclick={() => (linking = true)}>Link to…</button>
+            {/if}
+            {#if p.writes.includes("create_page")}
+              <button
+                type="button"
+                class="tf-btn tf-sm"
+                {...refusedAttrs(refusal("create_page"))}
+                onclick={() => {
+                  if (refusal("create_page") === null) newPage = { space: pageSpace ? spaceId(pageSpace) : null, parent: p.entity_id };
+                }}
+                >New page here</button>
+            {/if}
+            <button type="button" class="tf-btn tf-sm" onclick={() => copyLink(p)}>Copy link</button>
+            {#if p.web_url}
+              {@const url = p.web_url}
+              <button type="button" class="tf-btn tf-sm" onclick={() => open(url)}>Open in {p.source_name}</button>
+            {/if}
+            {#if p.readable}
+              <TfDocMore onexport={() => exportMarkdown(p)} />
+            {/if}
+          </div>
+          {#if narrow.current}
+            {#key p.entity_id}
+              <TfDocOutline page={p} {stems} {active} folded />
+            {/key}
+          {/if}
+          <div class="tf-doc">
+            {#if p.readable}
+              <TfDocBody
+                blocks={p.blocks}
+                entityId={p.entity_id}
+                sourceName={p.source_name}
+                webUrl={p.web_url}
+                sections={p.sections}
+                editable={p.writes.includes("update_page") && p.version !== null}
+                refusal={refusal("update_page")}
+                {stems}
+                onopen={open}
+                oncopy={copy}
+                onsave={(section, text) => saveSection(p, section, text)}
+              />
+            {:else}
+              <p class="tf-dl-note">knobas cannot read this page's body. Open it in {p.source_name}.</p>
+            {/if}
+            {#key p.entity_id}
+              <TfDocFoot page={p} spaces={tree?.spaces ?? []} />
+            {/key}
+            <div class="tf-cmts">
+              <h2>Comments {#if p.comments.length > 0}<span class="tf-count">{p.comments.length}</span>{/if}</h2>
+              {#each p.comments as c, i (i)}
+                {@const mine = c.author !== null && p.me.includes(c.author)}
+                <div class="tf-msg">
+                  <span class="tf-av" class:tf-me={mine}>{initials(c.author)}</span>
+                  <div class="tf-cmt-body">
+                    <div class="tf-who">
+                      <b>{mine ? "You" : firstName(person(c.author, c.author_name, p.me))}</b>
+                      {c.at === null ? "" : clockLabel(c.at)}
+                    </div>
+                    <TfDocBlocks
+                      blocks={c.blocks}
+                      entityId={p.entity_id}
+                      sourceName={p.source_name}
+                      webUrl={p.web_url}
+                      onopen={open}
+                      oncopy={copy}
+                      {stems}
+                    />
+                  </div>
+                </div>
+              {/each}
+              {#each queuedComments as body, n (n)}
+                <div class="tf-msg tf-queued">
+                  <span class="tf-av tf-me">{initials(p.me[0] ?? null)}</span>
+                  <div class="tf-cmt-body">
+                    <div class="tf-who"><b>You</b> <span class="tf-chip tf-info">queued</span></div>
+                    <p class="tf-cmt-queued">{body}</p>
+                  </div>
+                </div>
+              {/each}
+              {#if p.comments.length === 0 && queuedComments.length === 0}
+                <p class="tf-dl-note">No comments yet.</p>
+              {/if}
+              {#if p.writes.includes("comment")}
+                <div class="tf-compose">
+                  <textarea bind:this={composer} bind:value={comment} placeholder="Comment on this page" aria-label="Comment on this page"
+                  ></textarea>
+                  <div class="tf-acts">
+                    <button
+                      type="button"
+                      class="tf-btn tf-primary"
+                      disabled={commenting || comment.trim() === ""}
+                      {...refusedAttrs(refusal("comment"))}
+                      onclick={() => sendComment(p)}>Comment</button>
+                  </div>
+                </div>
+              {/if}
+            </div>
+          </div>
+        </article>
+        {#if !narrow.current}
+          <TfDocOutline page={p} {stems} {active} folded={false} />
+        {/if}
+      </div>
     {:else if tree !== null && target === null}
       <div class="tf-empty"><p>Nothing to read yet. Pages appear here once a docs source has synced.</p></div>
     {/if}
   </section>
-
-  {#if page !== null && pageError === null}
-    <TfDocRail {page} {stems} {active} />
-  {/if}
 </div>
 
 {#if linking && page !== null && linkPorts}

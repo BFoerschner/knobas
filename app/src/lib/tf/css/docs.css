@@ -1,5 +1,5 @@
 /* ---------- Docs: the reader (#859, requirements §10, prototype-6's .rd) ---------- */
-.tf-rd { display: grid; grid-template-columns: 320px minmax(0, 1fr) 250px; height: 100%; }
+.tf-rd { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; }
 .tf-rd-tree { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-dl-head { padding: 12px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--rule); }
 .tf-dl-head select {
@@ -32,7 +32,12 @@
 .tf-rd-tree .tf-dl-queued .tf-chip { font-style: normal; }
 .tf-rd-tree summary.tf-spc { font-weight: 600; color: var(--ink-2); margin-top: 4px; }
 .tf-rd-main { overflow: auto; min-height: 0; }
-.tf-rd-page { max-width: 74ch; margin: 0 auto; padding: 22px 32px 90px; }
+.tf-rd-sheet {
+  display: grid; grid-template-columns: minmax(0, 1fr) 268px; column-gap: 56px; align-items: start;
+  padding: 22px clamp(16px, 3vw, 48px) 90px;
+}
+/* The page: nothing in it is capped in width (#2081). */
+.tf-rd-page { min-width: 0; }
 .tf-rd-crumb { font-size: var(--t-sm); color: var(--ink-2); }
 .tf-rd-crumb a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .tf-rd-crumb a.tf-jobchip { text-decoration: none; padding: 1px 6px; }
@@ -155,20 +160,30 @@
 }
 .tf-findbar .tf-findx { margin-left: auto; }
 .tf mark.tf-cur { outline: 2px solid var(--card-ink); }
-.tf-rd-rail {
-  border-left: 1px solid var(--rule); overflow: auto; padding: 18px 16px; font-size: var(--t-sm);
-  display: flex; flex-direction: column; gap: 22px; min-height: 0;
-}
-.tf-rd-rail h3 { font-size: var(--t-xs); color: var(--ink-2); margin: 0 0 6px; font-weight: 600; }
+.tf-rd-outline { position: sticky; top: 0; padding-top: 30px; font-size: var(--t-sm); }
+/* The find bar sticks to the top of the same scroll, so the outline sticks below it. */
+.tf-findbar ~ .tf-rd-sheet .tf-rd-outline { top: 38px; }
+.tf .tf-rd-outline h3 { font-size: var(--t-sm); font-weight: 600; color: var(--ink); margin: 0 0 8px; }
 .tf-toc a {
-  display: block; padding: 3px 0 3px 10px; border-left: 2px solid var(--rule); text-decoration: none;
-  color: var(--ink-2); font-size: var(--t-sm);
+  display: block; padding: 5px 0 5px 12px; border-left: 2px solid var(--rule); text-decoration: none;
+  color: var(--ink-2); font-size: var(--t-md);
 }
 .tf-toc a.tf-on { border-left-color: var(--ink); color: var(--ink); font-weight: 600; }
-.tf-toc .tf-hits {
+.tf-toc .tf-hits, .tf-rd-fold > summary .tf-hits {
   font-size: var(--t-2xs); font-weight: 700; color: var(--card-ink); background: var(--card); border-radius: 8px;
   padding: 0 5px; margin-left: 4px;
 }
+/* Below 1240px the outline is a fold between the actions row and the first section, closed (#2081). */
+.tf-rd-fold { margin-top: 16px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); font-family: var(--sans); }
+.tf-rd-fold > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 7px 12px;
+  font-size: var(--t-sm); font-weight: 600;
+}
+.tf-rd-fold > summary::-webkit-details-marker { display: none; }
+.tf-rd-fold > summary::before { content: "▸"; width: 10px; color: var(--ink-2); font-size: var(--t-2xs); }
+.tf-rd-fold[open] > summary::before { content: "▾"; }
+.tf-rd-fold > summary .tf-hits { margin-left: 0; }
+.tf-rd-fold .tf-toc { padding: 0 12px 10px; }
 /* The page foot (#2080): Work it belongs to, then Linked from, one closed fold per space. */
 .tf-rd-foot { margin-top: 32px; font-family: var(--sans); font-size: var(--t-sm); line-height: 1.5; color: var(--ink-2); }
 .tf-rd-foot + .tf-rd-foot { margin-top: 22px; }
@@ -204,11 +219,15 @@
   width: 100%; font: var(--t-lg)/1.6 var(--serif); border: 1px solid var(--rule); border-radius: 4px; padding: 8px;
   background: var(--paper); color: var(--ink); resize: vertical;
 }
-@media (max-width: 1240px) { .tf-rd { grid-template-columns: 220px minmax(0, 1fr); } .tf-rd-rail { display: none; } }
+/* The band `READER_NARROW` (docs/docs.ts) names: the component folds the outline in it (#2081). */
+@media (max-width: 1239px) {
+  .tf-rd { grid-template-columns: 220px minmax(0, 1fr); }
+  .tf-rd-sheet { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 900px) {
   .tf-rd { grid-template-columns: minmax(0, 1fr); height: auto; }
   .tf-rd-tree { display: none; }
-  .tf-rd-page { padding: 18px 16px 60px; }
+  .tf-rd-sheet { padding: 18px 16px 60px; }
   .tf .tf-rd-title { font-size: 30px; }
 }
 
