@@ -1075,3 +1075,33 @@ test("a queued section edit and comment drop once a sync run ends and the open p
   expect(queuedComments()).toEqual([]);
   expect(squash(target.querySelector(".tf-rd-meta"))).toContain("version 33");
 });
+
+test("a sync run's re-read keeps the picked space, the search, an open section editor's text and the composer's (#2072)", async () => {
+  const sync = syncEvents();
+  const io = ports({ docsPage: vi.fn(async () => RICH), docsSearch: vi.fn(async () => HITS), listen: sync.listen });
+  await draw(["confluence:2"], io);
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  select.value = "*";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  type("ledger");
+  await settle();
+  button("Edit section")!.click();
+  await settle();
+  fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!, "Half typed");
+  fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!, "Half said");
+  await settle();
+  const searches = vi.mocked(io.docsSearch).mock.calls.length;
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
+
+  await sync.ended();
+  expect(io.docsTree).toHaveBeenCalledTimes(2);
+  expect(io.docsPage).toHaveBeenCalledTimes(2);
+  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("*");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!.value).toBe("ledger");
+  expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
+  expect(vi.mocked(io.docsSearch).mock.calls.length).toBe(searches);
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!.value).toBe("Half said");
+  // A re-read is not a visit: the page was opened once.
+  expect(io.visitEntity).toHaveBeenCalledTimes(1);
+});
