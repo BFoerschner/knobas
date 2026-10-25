@@ -477,22 +477,22 @@ function synced(emit: (event: string, payload: unknown) => void, source = "jira"
   emit("sync:state", { source_id: source, running: false });
 }
 
-test("a reload before the sync shows a filed item queued, not Create ticket (#1951)", async () => {
+test("a reload before the sync shows a filed item sent, not Create ticket (#1951, #2104)", async () => {
   open({ owed: [owed()], mirrored: false });
   await settle();
   const rows = [...target.querySelectorAll(".tf-su-ai")];
   expect(rows[0]!.querySelector("button")).toBeNull();
-  expect(rows[0]!.querySelector(".tf-chip")?.textContent).toBe("queued");
+  expect(rows[0]!.querySelector(".tf-chip")?.textContent).toBe("sent");
   // The other item filed nothing and keeps its button.
   expect(rows[1]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket");
 });
 
-test("after a reload, the sync that brings the ticket in replaces queued with its key (#1951)", async () => {
+test("after a reload, the sync that brings the ticket in replaces sent with its key (#1951, #2104)", async () => {
   const { mirror, emit, calls } = open({ owed: [owed()], mirrored: false });
   await settle();
   synced(emit);
   await settle();
-  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("queued");
+  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("sent");
   mirror.held = true;
   synced(emit);
   await settle();
@@ -507,7 +507,7 @@ test("after a reload, the sync that brings the ticket in replaces queued with it
   expect(calls.asked).toHaveLength(asked);
 });
 
-test("a create whose ticket the post-write read missed is named by a later sync, not left queued (#1951)", async () => {
+test("a create whose ticket the post-write read missed reads sent and is named by a later sync (#1951, #2104)", async () => {
   const { hears, mirror, emit } = open({ mirrored: false });
   await settle();
   button("Create ticket").click();
@@ -521,7 +521,7 @@ test("a create whose ticket the post-write read missed is named by a later sync,
   // The row left the queue before any sync mirrored the ticket.
   hears.get(9)!(undefined);
   await settle();
-  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("queued");
+  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("sent");
   mirror.held = true;
   synced(emit);
   await settle();
@@ -628,4 +628,30 @@ test("a refused save does not break the chain: the next save still lands (#1679)
   }
   await settle();
   expect(stored()).toContain("Tomasz Wójcik: second");
+});
+
+// -- the echo's one lifecycle: queued, sent, gone on the refresh's read (#2104) --
+
+test("an action item's ticket echo says queued, then sent, and goes once the refresh event's read names the ticket (#2104)", async () => {
+  const { hears, mirror, emit } = open({ mirrored: false });
+  await settle();
+  button("Create ticket").click();
+  await settle();
+  const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
+  select.value = "jira:OPS";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find((found) => found.textContent?.trim() === "Create ticket")!.click();
+  await settle();
+  const first = () => target.querySelector(".tf-su-ai")!;
+  expect(first().querySelector(".tf-chip")?.textContent).toBe("queued");
+  hears.get(9)!(undefined);
+  await settle();
+  expect(first().querySelector(".tf-chip")?.textContent).toBe("sent");
+  // The refresh after the create brought the ticket in: the write names it.
+  mirror.held = true;
+  emit("item:refreshed", { entity_id: "jira:OPS-131", write_id: 9, ended: "refreshed" });
+  await settle();
+  expect(first().querySelector("a")?.textContent).toBe("OPS-131");
+  expect(first().querySelector(".tf-chip")?.textContent).toBe("To Do");
 });

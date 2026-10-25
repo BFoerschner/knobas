@@ -80,6 +80,8 @@ export interface Echoing {
   surface?: string;
   /** The source its write goes to, for `watchEchoes`'s run ends. */
   source?: string;
+  /** Called once the follow sees the write sent, for a surface that reads at once what the write made (Standup's ticket, #2104). */
+  onsent?: () => void;
 }
 
 const echoes: Record<string, Echo[]> = $state({});
@@ -103,6 +105,7 @@ export function echoWrite(entity: string, kind: string, text: string, how: Echoi
   // Left the open rows: sent, or withdrawn, which `onWithdrawn` has dropped already.
   const sent = () => {
     for (const echo of echoes[entity] ?? []) if (echo.write === write) echo.state = "sent";
+    how.onsent?.();
   };
   follows.add(followWrite({ id: write }, { ...how.following, onstop: gone, onleave: sent }, how.follower ?? writeFollower()));
 }

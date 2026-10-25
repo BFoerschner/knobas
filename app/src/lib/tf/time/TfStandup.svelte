@@ -56,7 +56,7 @@
     type StandupDigest,
   } from "../../ipc/entity";
   import { search as realSearch } from "../../ipc/search";
-  import { listAdapters as realListAdapters, listSources as realListSources } from "../../ipc/sources";
+  import { listAdapters as realListAdapters, listSources as realListSources, type QueuedWrite } from "../../ipc/sources";
   import { toastStopped, unconfirmedTeller, willNotGo, writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
@@ -64,7 +64,9 @@
   import { publishableSources } from "../../standup/protocol";
   import { digestWindows, LOOKBACK_DAYS } from "../../standup/standup";
   import { dayKey } from "../../time/day";
-  import { listenSynced, type PipelinePorts } from "../builds/pipeline-ports";
+  import type { PipelinePorts } from "../builds/pipeline-ports";
+  import { projectSource } from "../create-ticket";
+  import { echoWrite, echoesOn, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
   import { keyOf } from "../job/job";
   import { jobHash } from "../route";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
@@ -432,10 +434,31 @@
 
   // -- action items -------------------------------------------------------------
 
-  /** The tickets filed this session, by the action item's words. */
-  let filed = $state<
-    { writeId: number; text: string; project: string | null; type: string; ticket: string | null; status: string | null }[]
-  >([]);
+  /** The surface the action items' echoes are tagged with, for `watchEchoes` (#2104). */
+  const STANDUP = "standup";
+  /** What a filed ticket's echo sits on: the protocol's note. */
+  const noteEchoes = (note: string) => `standup:${note}`;
+  /** The tickets this session filed and named, by the action item's words. */
+  let named = $state<{ writeId: number; text: string; ticket: string; status: string | null }[]>([]);
+  /** The protocol's ticket echoes, oldest first: each a create on its way (#2104). */
+  const filed = $derived(protocol === null ? [] : echoesOn(noteEchoes(protocol.note_id), "ticket"));
+
+  /**
+   * A create on its way, drawn *queued* and then *sent* (`tf/queued.svelte.ts`):
+   * held or refused, it goes with a toast whose *Edit and resend* opens the
+   * dialog again; sent, the backend is asked which ticket it made.
+   */
+  function echoTicket(note: string, write: { id: number; state?: QueuedWrite["state"] }, text: string, project: string | null, type: string) {
+    echoWrite(noteEchoes(note), "ticket", text, {
+      write,
+      many: true,
+      following: { name: "Ticket", resend: () => void openTicketDialog(text, project, type) },
+      follower: io.follower,
+      surface: STANDUP,
+      ...(project !== null ? { source: projectSource(project) } : {}),
+      onsent: () => void address(write.id),
+    });
+  }
 
   /**
    * The creates filed before this tab opened that the protocol does not link
@@ -447,22 +470,24 @@
   function readOwed(opened: Protocol) {
     for (const owed of opened.owed_tickets) {
       if (owed.state !== "pending" && owed.state !== "sent" && !owed.may_have_landed) continue;
-      if (filed.some((made) => made.writeId === owed.write_id)) continue;
-      filed = [...filed, { writeId: owed.write_id, text: owed.title, project: null, type: "Task", ticket: null, status: null }];
-      if (owed.state !== "sent") followTicket(owed.write_id);
+      if (echoesOn(noteEchoes(opened.note_id), "ticket").some((echo) => echo.write === owed.write_id)) continue;
+      echoTicket(opened.note_id, { id: owed.write_id, state: owed.state }, owed.title, null, "Task");
     }
   }
 
-  // While a filed ticket is unnamed, the sync that brings it in may be any source's.
-  const unnamed = $derived(filed.some((made) => made.ticket === null));
-  $effect(() => {
-    if (!unnamed) return;
-    return untrack(() =>
-      listenSynced(io, null, () => {}, () => {
-        for (const made of filed) if (made.ticket === null) void address(made.writeId);
-      }),
-    );
-  });
+  // The refresh after a create, or the end of a sync, which may be any
+  // source's, asks again which ticket each create on its way made (#2104).
+  $effect(() =>
+    untrack(() =>
+      watchEchoes(
+        STANDUP,
+        () => {
+          for (const echo of filed) if (echo.write !== null) void address(echo.write);
+        },
+        { listen: io.listen, everyRun: true },
+      ),
+    ),
+  );
   let ticketFor = $state<{ text: string; project: string | null; type: string } | null>(null);
   let projects = $state<Project[]>([]);
 
@@ -487,41 +512,18 @@
         `From the standup protocol of ${day}.`,
       );
       ticketFor = null;
-      filed = [
-        ...filed,
-        { writeId: made.write_id, text: asked.text, project: asked.project, type: asked.type, ticket: null, status: null },
-      ];
+      echoTicket(current.note_id, { id: made.write_id, state: made.state }, asked.text, asked.project, asked.type);
       push({ text: `Ticket queued: ${asked.text}` });
-      if (made.ticket_entity_id === null) followTicket(made.write_id);
-      else void landed(made.write_id, made.ticket_entity_id);
+      if (made.ticket_entity_id !== null) void landed(current.note_id, made.write_id, made.ticket_entity_id);
     } catch (cause) {
       failure = ipcErrorMessage(cause);
     }
   }
 
-  function followTicket(writeId: number) {
-    const unconfirmed = unconfirmedTeller({ name: "Ticket" });
-    following.set(
-      writeId,
-      io.follower.follow(writeId, (row) => {
-        const echo = filed.find((made) => made.writeId === writeId);
-        if (!echo) return unfollow(writeId);
-        // Sent and never answered (#1966): on its way until sent again or discarded.
-        if (unconfirmed(row)) return;
-        if (willNotGo(row)) {
-          unfollow(writeId);
-          filed = filed.filter((made) => made.writeId !== writeId);
-          toastStopped(row, { name: "Ticket", resend: () => void openTicketDialog(echo.text, echo.project, echo.type) });
-          return;
-        }
-        if (row === undefined) void address(writeId);
-      }),
-    );
-  }
-
+  /** The echo's check (#2104): the backend names the ticket the create made, and the echo goes; refused or discarded, it goes too. */
   async function address(writeId: number) {
     const current = protocol;
-    if (!current || !filed.some((made) => made.writeId === writeId && made.ticket === null)) return;
+    if (!current || !filed.some((echo) => echo.write === writeId)) return;
     let answer;
     try {
       answer = await io.actionItemTicket(current.note_id, writeId);
@@ -529,24 +531,27 @@
       return;
     }
     if (answer.state === "refused" || answer.state === "discarded") {
-      unfollow(writeId);
-      filed = filed.filter((made) => made.writeId !== writeId);
+      settleEchoes(noteEchoes(current.note_id), (echo) => echo.write === writeId);
       return;
     }
     if (answer.ticket_entity_id === null) return;
-    unfollow(writeId);
-    await landed(writeId, answer.ticket_entity_id);
+    await landed(current.note_id, writeId, answer.ticket_entity_id);
   }
 
   /** The ticket is in the mirror: its key, and its status as the source says it. */
-  async function landed(writeId: number, ticket: string) {
+  async function landed(note: string, writeId: number, ticket: string) {
+    const echo = echoesOn(noteEchoes(note), "ticket").find((one) => one.write === writeId);
+    if (echo === undefined || named.some((made) => made.writeId === writeId)) return;
+    named = [...named, { writeId, text: echo.text, ticket, status: null }];
+    settleEchoes(noteEchoes(note), (one) => one.write === writeId);
     let status: string | null = null;
     try {
       status = (await io.getEntity(ticket)).row.state?.text ?? null;
     } catch {
       // The key is enough to open it; the status comes with the next read.
+      return;
     }
-    filed = filed.map((made) => (made.writeId === writeId ? { ...made, ticket, status } : made));
+    named = named.map((made) => (made.writeId === writeId ? { ...made, status } : made));
   }
 
   /** The tickets the protocol already links for an item (#1433), each with its status once read. */
@@ -568,11 +573,13 @@
     );
   }
 
-  /** This session's newest create for the item's words, else the ticket the protocol links for them. */
-  const filedFor = (text: string) =>
-    [...filed].reverse().find((made) => made.text.trim() === text.trim()) ??
-    linked.find((known) => known.text === text) ??
-    null;
+  /** This session's newest create for the item's words, on its way or named, else the ticket the protocol links for them. */
+  const filedFor = (text: string): { ticket: string | null; status: string | null; state: Echo["state"] } | null => {
+    const going = [...filed].reverse().find((echo) => echo.text.trim() === text.trim());
+    if (going !== undefined) return { ticket: null, status: null, state: going.state };
+    const made = [...named].reverse().find((one) => one.text.trim() === text.trim()) ?? linked.find((known) => known.text === text);
+    return made === undefined ? null : { ticket: made.ticket, status: made.status, state: "sent" };
+  };
 </script>
 
 <div class="tf-su">
@@ -689,7 +696,7 @@
           {#if made === null}
             <button class="tf-btn tf-sm" onclick={() => void openTicketDialog(item.text)}>Create ticket</button>
           {:else if made.ticket === null}
-            <span class="tf-chip">queued</span>
+            <span class="tf-chip">{made.state}</span>
           {:else}
             <a class="tf-mono" href={jobHash(made.ticket)}>{keyOf(made.ticket)}</a>
             {#if made.status}<span class="tf-chip">{made.status}</span>{/if}
