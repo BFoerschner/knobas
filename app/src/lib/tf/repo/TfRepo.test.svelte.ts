@@ -23,8 +23,7 @@ import type {
   ViewRow,
 } from "../../ipc/entity";
 import TfRepo, { type RepoPorts } from "./TfRepo.svelte";
-import { createSourceSyncs } from "../role-sync.svelte";
-import type { DetailRefreshPorts } from "../refresh.svelte";
+import { refreshProbe } from "../refresh.fixture";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
 const REPO = "gitea:tidewater/payout-service";
@@ -481,14 +480,6 @@ test("a repository the mirror does not hold says so", async () => {
 
 // -- Refresh (#2135) -----------------------------------------------------------
 
-const quietSyncs = () =>
-  createSourceSyncs({
-    syncRole: () => Promise.reject(new Error("unused")),
-    syncNow: () => Promise.reject(new Error("unused")),
-    syncStatus: async () => [],
-    listen: async () => () => {},
-  });
-
 /** The repository's detail with `over` on its read: its source and whether its adapter reads one item. */
 function repoDetail(over: { enabled?: boolean; refreshes?: boolean; deleted_at?: string | null } = {}): RepoPorts["getEntity"] {
   const base = ports().getEntity;
@@ -505,27 +496,17 @@ function repoDetail(over: { enabled?: boolean; refreshes?: boolean; deleted_at?:
 }
 
 const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-fhead .tf-refresh");
-const refreshing = (): DetailRefreshPorts => ({
-  refreshEntity: async () => ({ outcome: "refreshed" }),
-  syncs: quietSyncs(),
-});
 
 test("Refresh on a repository reads it from its source, then its row, its branches and the open file again, the page kept meanwhile", async () => {
-  const refreshed: string[] = [];
   let rows = 0;
   let answer!: () => void;
+  const probe = refreshProbe({ answer: () => new Promise((resolve) => (answer = () => resolve({ outcome: "refreshed" }))) });
   const getEntity = repoDetail();
   await draw(
     [REPO],
     ports({
       getEntity: async (id) => (id === REPO && (rows += 1), getEntity(id)),
-      refresh: {
-        refreshEntity: (id) => {
-          refreshed.push(id);
-          return new Promise((resolve) => (answer = () => resolve({ outcome: "refreshed" })));
-        },
-        syncs: quietSyncs(),
-      },
+      refresh: probe.ports,
     }),
   );
   expect(refreshButton()?.textContent).toBe("Refresh");
@@ -538,7 +519,7 @@ test("Refresh on a repository reads it from its source, then its row, its branch
 
   answer();
   await settle();
-  expect(refreshed).toEqual([REPO]);
+  expect(probe.refreshed).toEqual([REPO]);
   expect(rows).toBe(before.rows + 1);
   const again = viewReads.slice(before.reads);
   expect(again).toEqual(expect.arrayContaining([[REPO, "branches"], [REPO, "files"], [REPO, "file:README.md"]]));
@@ -549,7 +530,7 @@ test("Refresh on a repository reads it from its source, then its row, its branch
 });
 
 test("a refresh reads Commits, a commit, the compare page and Branches again over what they drew", async () => {
-  const stand = (): RepoPorts => ports({ getEntity: repoDetail(), refresh: refreshing() });
+  const stand = (): RepoPorts => ports({ getEntity: repoDetail(), refresh: refreshProbe().ports });
   const press = async () => {
     const before = viewReads.length;
     refreshButton()!.click();
@@ -583,7 +564,7 @@ test("a repository whose refresh failed keeps its page and says why", async () =
     [REPO, "commits"],
     ports({
       getEntity: repoDetail(),
-      refresh: { refreshEntity: async () => ({ outcome: "failed", reason: "502 Bad Gateway" }), syncs: quietSyncs() },
+      refresh: refreshProbe({ answer: async () => ({ outcome: "failed", reason: "502 Bad Gateway" }) }).ports,
     }),
   );
   refreshButton()!.click();
@@ -594,24 +575,24 @@ test("a repository whose refresh failed keeps its page and says why", async () =
 });
 
 test("a repository whose adapter does not read one item offers Sync now; a turned-off source neither, under its banner", async () => {
-  await draw([REPO], ports({ getEntity: repoDetail({ refreshes: false }), refresh: refreshing() }));
+  await draw([REPO], ports({ getEntity: repoDetail({ refreshes: false }), refresh: refreshProbe().ports }));
   expect(refreshButton()?.textContent).toBe("Sync now");
   expect(target.querySelector(".tf-turnedoff")).toBeNull();
   unmount(view!);
 
-  await draw([REPO], ports({ getEntity: repoDetail({ enabled: false }), refresh: refreshing() }));
+  await draw([REPO], ports({ getEntity: repoDetail({ enabled: false }), refresh: refreshProbe().ports }));
   expect(refreshButton()).toBeNull();
   expect(text(target.querySelector(".tf-turnedoff"))).toContain("Tidewater Gitea is disabled");
 });
 
 test("a repository withdrawn upstream says so and keeps Refresh", async () => {
-  await draw([REPO], ports({ getEntity: repoDetail({ deleted_at: "2026-08-20T10:00:00Z" }), refresh: refreshing() }));
+  await draw([REPO], ports({ getEntity: repoDetail({ deleted_at: "2026-08-20T10:00:00Z" }), refresh: refreshProbe().ports }));
   expect(text(target.querySelector(".tf-withdrawn"))).toContain("Withdrawn upstream");
   expect(refreshButton()?.textContent).toBe("Refresh");
 });
 
 test("the compare page keeps its branch's diff drawn while a refresh reads it again", async () => {
-  const base = ports({ getEntity: repoDetail(), refresh: refreshing() });
+  const base = ports({ getEntity: repoDetail(), refresh: refreshProbe().ports });
   let diffs = 0;
   await draw(
     [REPO, "compare", "feature", "PAY-231-sepa-retry"],
@@ -635,7 +616,7 @@ test("the compare page keeps its branch's diff drawn while a refresh reads it ag
 });
 
 test("Refreshing… holds until the open tab's re-read has answered too, as the job page's does", async () => {
-  const base = ports({ getEntity: repoDetail(), refresh: refreshing() });
+  const base = ports({ getEntity: repoDetail(), refresh: refreshProbe().ports });
   let commitsReads = 0;
   let answer!: () => void;
   await draw([REPO, "commits"], {

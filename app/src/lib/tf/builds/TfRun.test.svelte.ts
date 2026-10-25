@@ -15,7 +15,7 @@ import { forgetEchoes, echoesOn } from "../queued.svelte";
 import type { RunPorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
 import TfRun from "./TfRun.svelte";
-import { detailOf, refreshProbe } from "./refresh.fixture";
+import { detailOf, refreshProbe } from "../refresh.fixture";
 import type { WriteAsk } from "../../shell/refused-writes";
 
 let target: HTMLElement;
@@ -1222,7 +1222,7 @@ test("Refresh on a run reads it from its source, then the run, its view and its 
 
 test("a run whose refresh failed keeps its page and says why under the header", async () => {
   const probe = refreshProbe();
-  probe.answer = { outcome: "failed", reason: "502 Bad Gateway" };
+  probe.answer = async () => ({ outcome: "failed", reason: "502 Bad Gateway" });
   draw("teamcity:build:1187", undefined, { refresh: probe.ports });
   await settle();
   refreshButton()!.click();

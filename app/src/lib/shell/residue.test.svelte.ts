@@ -388,7 +388,7 @@ const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
 const TfItem = (await import("../tf/item/TfItem.svelte")).default;
 const TfDetailRefresh = (await import("../tf/TfDetailRefresh.svelte")).default;
 const { createDetailRefresh } = await import("../tf/refresh.svelte");
-const { createSourceSyncs } = await import("../tf/role-sync.svelte");
+const { refreshProbe } = await import("../tf/refresh.fixture");
 const TfCodeRow = (await import("../tf/code-row/TfCodeRow.svelte")).default;
 const TfNote = (await import("../tf/note/TfNote.svelte")).default;
 const { createPendingComments } = await import("../detail/view/pending-comments.svelte");
@@ -1597,15 +1597,7 @@ const CASES: Case[] = [
             refreshes: false,
             deleted_at: null,
           } as never,
-          refresh: createDetailRefresh({
-            refreshEntity: () => deferred({ outcome: "refreshed" } as never),
-            syncs: createSourceSyncs({
-              syncRole: () => deferred([] as never),
-              syncNow: () => deferred(5 as never),
-              syncStatus: () => deferred([] as never),
-              listen: () => deferred((() => {}) as never),
-            }),
-          }),
+          refresh: createDetailRefresh(refreshProbe({ hold: deferred }).ports),
           reread: () => {},
         },
       }),

@@ -17,7 +17,7 @@ import { forgetEchoes, echoWrite, echoesOn } from "../queued.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
 import TfPipeline from "./TfPipeline.svelte";
-import { detailOf, refreshProbe } from "./refresh.fixture";
+import { detailOf, refreshProbe } from "../refresh.fixture";
 
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
@@ -1214,7 +1214,7 @@ test("Refresh on a pipeline reads it from its source, then its row, its runs, it
 
 test("a build configuration's source answering not offered runs its source, and the page says Sync now from then", async () => {
   const probe = refreshProbe();
-  probe.answer = { outcome: "not_offered" };
+  probe.answer = async () => ({ outcome: "not_offered" });
   const drawn = draw([PIPELINE.entity_id], "PAY-231", { refresh: probe.ports });
   await settle();
   refreshButton()!.click();
@@ -1222,7 +1222,7 @@ test("a build configuration's source answering not offered runs its source, and 
   expect(probe.synced).toEqual(["teamcity"]);
   expect(refreshButton()?.textContent).toBe("Syncing…");
   const reads = drawn.reads;
-  probe.status({ source_id: "teamcity", running: false, run_id: 77, started_at: null, last_finished_at: null, last_outcome: "ok", next_run_at: null, backoff_until: null, last_changed: null });
+  probe.end("teamcity");
   await settle();
   expect(refreshButton()?.textContent).toBe("Sync now");
   // The run's end reads the page again.
@@ -1231,7 +1231,7 @@ test("a build configuration's source answering not offered runs its source, and 
 
 test("a pipeline whose refresh failed keeps its runs and says why under the header", async () => {
   const probe = refreshProbe();
-  probe.answer = { outcome: "failed", reason: "401 from TeamCity" };
+  probe.answer = async () => ({ outcome: "failed", reason: "401 from TeamCity" });
   draw([PIPELINE.entity_id], "PAY-231", { refresh: probe.ports });
   await settle();
   refreshButton()!.click();

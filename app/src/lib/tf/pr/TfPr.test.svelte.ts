@@ -27,7 +27,7 @@ import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes } from "../queued.svelte";
 import TfPr, { type PrPorts } from "./TfPr.svelte";
-import { createSourceSyncs } from "../role-sync.svelte";
+import { refreshProbe } from "../refresh.fixture";
 
 const REPO = "gitea:tidewater/payout-service";
 const PR = `${REPO}#142`;
@@ -1109,21 +1109,15 @@ test("a source action says queued, then sent, and goes on the re-read once sent 
 // -- Refresh (#2107) -----------------------------------------------------------
 
 test("Refresh on a pull request reads it from its source, then its row and its live view again", async () => {
-  const refreshed: string[] = [];
+  const probe = refreshProbe();
   let reads = 0;
   let views = 0;
-  const syncs = createSourceSyncs({
-    syncRole: () => Promise.reject(new Error("unused")),
-    syncNow: () => Promise.reject(new Error("unused")),
-    syncStatus: async () => [],
-    listen: async () => () => {},
-  });
   await draw(
     [PR],
     ports({
       getEntity: async () => (reads++, detail("mara")),
       entityView: async () => (views++, prView()),
-      refresh: { refreshEntity: async (id) => (refreshed.push(id), { outcome: "refreshed" }), syncs },
+      refresh: probe.ports,
     }),
   );
   const before = { reads, views };
@@ -1132,20 +1126,15 @@ test("Refresh on a pull request reads it from its source, then its row and its l
 
   refresh.click();
   await settle();
-  expect(refreshed).toEqual([PR]);
+  expect(probe.refreshed).toEqual([PR]);
   expect(reads).toBe(before.reads + 1);
   expect(views).toBe(before.views + 1);
   expect(text("h1")).toContain("SEPA retry with exponential backoff");
 });
 
 test("a pull request whose refresh failed keeps its page and says why", async () => {
-  const syncs = createSourceSyncs({
-    syncRole: () => Promise.reject(new Error("unused")),
-    syncNow: () => Promise.reject(new Error("unused")),
-    syncStatus: async () => [],
-    listen: async () => () => {},
-  });
-  await draw([PR], ports({ refresh: { refreshEntity: async () => ({ outcome: "failed", reason: "502 Bad Gateway" }), syncs } }));
+  const probe = refreshProbe({ answer: async () => ({ outcome: "failed", reason: "502 Bad Gateway" }) });
+  await draw([PR], ports({ refresh: probe.ports }));
   target.querySelector<HTMLButtonElement>(".tf-fhead .tf-refresh")!.click();
   await settle();
   expect(text(".tf-refresh-failed")).toBe("Couldn't refresh: 502 Bad Gateway");
