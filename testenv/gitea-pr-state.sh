@@ -14,9 +14,10 @@
 # `main` are as the seed left them, so reopening restores the fixture exactly.
 # Somebody clicking *Close* on payout-service#142 in the app took every Gitea
 # live suite down on 2026-10-25, and a new pull request was opened from its
-# branch. Gitea refuses the reopen while another open pull request holds the
-# same head and base, so the seed closes that one first: a seeded branch
-# carries only its seeded pull request. A reopen Gitea still refuses (the head
+# branch. The seed closes such a pull request first (any open one on the same
+# head and base): a seeded branch carries only its seeded pull request, and
+# Gitea 1.x reopens #142 beside it with a 201 (checked live), which would leave
+# the fixture one open pull request over. A reopen Gitea refuses (the head
 # branch is gone) ends in the refusal, with Gitea's answer in it.
 
 # gitea_require_open_pr <repo> <index> <title> -- needs the seed's `api`,

@@ -66,9 +66,9 @@ checks=$((checks + 1))
 [ "$PATCHED" = '/repos/tidewater/payout-service/pulls/1559 {"state":"closed"};/repos/tidewater/payout-service/pulls/2 {"state":"open"};' ] ||
   { echo "gitea-pr-state-test: FAIL the interloper's close and the reopen sent '$PATCHED'" >&2; failures=$((failures + 1)); }
 STUB_OPEN='[]'
-STUB_PATCH='409 {"message":"A pull request with the same head and base already exists"}'
+STUB_PATCH='422 {"message":"head branch does not exist"}'
 check "a closed one Gitea will not reopen is refused with its answer" '{"state":"closed","merged":false}' refused \
-  "is closed" "HTTP 409" "same head and base" "docker volume rm"
+  "is closed" "HTTP 422" "head branch does not exist" "docker volume rm"
 
 if [ "$failures" -ne 0 ]; then echo "gitea-pr-state-test: $failures of $checks failed" >&2; exit 1; fi
 echo "gitea-pr-state-test: $checks checks passed"

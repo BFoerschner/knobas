@@ -1050,10 +1050,11 @@ rm -sfv gitea`, remove the `gitea-data` volume, delete `seed-state.json`, seed
 again; `./reset` does the same for every product). A merged pull request
 cannot be reopened, and a replacement would invent history on `main`, so the
 seed does not repair it. A **closed** one it reopens (#2110): closing merges
-nothing, so the reopen restores the fixture exactly. When Gitea refuses the
-reopen (another open pull request holds the same head and base, or the head
-branch is gone) the seed refuses as for a merged one, with Gitea's answer in
-the message. On 2026-10-25 payout-service#142 was closed by hand through the
+nothing, so the reopen restores the fixture exactly. An open pull request on
+the same head and base is closed first: Gitea would reopen beside it, leaving
+the fixture one open pull request over. When Gitea refuses the reopen (the
+head branch is gone) the seed refuses as for a merged one, with Gitea's
+answer in the message. On 2026-10-25 payout-service#142 was closed by hand through the
 app's *Close* action, and a new pull request opened from its branch, not by a
 suite. The live suites only merge pull requests
 they opened on `knobas-` branches (audited in #884: every `MergePullRequest` site in
