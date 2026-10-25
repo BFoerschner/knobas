@@ -175,13 +175,17 @@ impl Source for ConfluenceSource {
     /// given a decision here. `create_page` and `update_page` (#286) arrived
     /// exactly that way.
     ///
-    /// **A create answers a receipt and an update does not**, and the
-    /// asymmetry is [`WriteReceipt`]'s own rule rather than an oversight:
-    /// knobas addresses what it wrote by reading it back, and a page it just
-    /// created is not in the mirror until the next sync -- the id Confluence
-    /// answered with is the only handle that exists in between. An
-    /// `update_page` and a `comment` change something knobas can already name,
-    /// so they answer [`WriteReceipt::none`].
+    /// **What a write creates answers a receipt and an update does not**, and
+    /// the asymmetry is [`WriteReceipt`]'s own rule rather than an oversight:
+    /// knobas addresses what it wrote by reading it back, and a page or a
+    /// comment it just created is not in the mirror until the next sync -- the
+    /// id Confluence answered with is the only handle that exists in between.
+    /// A `create_page` answers the page's id, its entity's local part; a
+    /// `comment` answers the comment's, which names something inside its
+    /// page's payload rather than an entity (#2074), and is what Docs knows
+    /// its own comment by once somebody has edited the words. An
+    /// `update_page` changes something knobas can already name, so it
+    /// answers [`WriteReceipt::none`].
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         match &op {
             WriteOp::CreatePage {
@@ -205,15 +209,11 @@ impl Source for ConfluenceSource {
                 Ok(WriteReceipt::none())
             }
             WriteOp::Comment { entity, body } => {
-                // The id `write::comment` answers with is dropped, and the
-                // value is in having asked for it: a Confluence that accepted
-                // the comment without naming it is a write reported as done
-                // with nothing to point at, which that function refuses rather
-                // than reports as success. The comment itself rides in its
-                // page's payload on the next sync (#284), so the mirror can
-                // name it and the receipt need not.
-                write::comment(&self.http, &self.content_id(entity)?, body).await?;
-                Ok(WriteReceipt::none())
+                // The comment rides in its page's payload on the next sync
+                // (#284) under this id, so the settle stamps it on the queue
+                // row and Docs matches its queued comment by it (#2074).
+                let id = write::comment(&self.http, &self.content_id(entity)?, body).await?;
+                Ok(WriteReceipt::id(id))
             }
             WriteOp::Transition { .. }
             | WriteOp::CreateTicket { .. }
@@ -507,6 +507,23 @@ mod tests {
                 "a refusal knobas raised itself carries no status"
             );
         }
+    }
+
+    /// A comment answers the id Confluence gave it (#2074), the way a created
+    /// page does: the comment lives in its page's payload, and the id is what
+    /// Docs knows its own comment by once that payload says something else.
+    #[tokio::test]
+    async fn a_comment_answers_the_id_confluence_gave_it() {
+        let mut i = instance(json!({}));
+        i.base_url = one_answer(r#"{"id":"360600","type":"comment","title":"Re: Runbook"}"#);
+        let receipt = built(i)
+            .write(WriteOp::Comment {
+                entity: "confluence:360548".to_owned(),
+                body: "X".to_owned(),
+            })
+            .await
+            .expect("the stub accepts the comment");
+        assert_eq!(receipt, WriteReceipt::id("360600"));
     }
 
     /// The descriptor and the dispatch have to name the same three ops, and
