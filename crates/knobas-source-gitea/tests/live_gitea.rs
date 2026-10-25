@@ -5630,7 +5630,8 @@ async fn refreshed(source: &dyn knobas_source::Source, id: &str) -> SyncItem {
 /// back as the next run emits it, commented on and read back with the
 /// comment, then deleted at the server and answered *gone*; a pull request
 /// opened from a scratch branch, read back as the run emits it, commented on
-/// and read back with the comment. A number Gitea never issued is *gone*, and
+/// and read back with the comment, then deleted and answered *gone*. A
+/// number Gitea never issued is *gone*, and
 /// the repository, the branch and its head commit are *not offered*. The
 /// battery's clause 13 holds the seeded items of the quiet repositories.
 #[tokio::test]
@@ -5641,6 +5642,7 @@ async fn an_issue_and_a_pull_request_are_refreshed_as_gitea_holds_them_and_gone_
     let env = env();
     let http = reqwest::Client::new();
     let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
     clear_test_issues(&http, &env, &auth).await;
     let mut litter = Litter::new(&env).await;
     let source = env.one_repo();
@@ -5760,17 +5762,29 @@ async fn an_issue_and_a_pull_request_are_refreshed_as_gitea_holds_them_and_gone_
         .expect("Gitea takes the comment");
     let read = refreshed(&*source, &pull).await;
     assert!(read.body_text.contains(&words), "{:?}", read.body_text);
-
-    // A number never issued is gone; the kinds not read by id are not offered.
-    let unissued = format!("{repo_id}#{}", number + 100_000);
-    assert!(
-        matches!(source.refresh(&unissued).await, Ok(RefreshAnswer::Gone)),
-        "{unissued}"
-    );
     let head = read.payload["head"]["sha"]
         .as_str()
         .expect("a head sha")
         .to_owned();
+
+    // Deleted at the server, as an admin deletes one (its issue): gone. A
+    // number never issued is gone too.
+    let deleted = http
+        .delete(format!("{api}/issues/{number}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("delete the pull request");
+    assert!(deleted.status().is_success(), "{}", deleted.status());
+    let unissued = format!("{repo_id}#{}", number + 100_000);
+    for id in [&pull, &unissued] {
+        assert!(
+            matches!(source.refresh(id).await, Ok(RefreshAnswer::Gone)),
+            "{id}"
+        );
+    }
+
+    // The kinds not read by id are not offered.
     for id in [
         repo_id.clone(),
         format!("{repo_id}@refs/heads/{branch}"),
