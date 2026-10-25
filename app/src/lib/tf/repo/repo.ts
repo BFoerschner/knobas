@@ -195,12 +195,14 @@ export function branchOptions(section: ViewSection | null): BranchOption[] {
   return options;
 }
 
-/** The view's rows of its first entities block. */
+/**
+ * The rows of every list the section holds, in the source's order: a muted
+ * line a source writes beside its list (`view::muted_line`) is drawn where
+ * it put it, as the note a cut list ends on is, never taken for the list
+ * (#2065).
+ */
 export function viewRows(section: ViewSection | null | undefined): ViewRow[] {
-  for (const block of section?.blocks ?? []) {
-    if (block.type === "entities") return block.rows;
-  }
-  return [];
+  return (section?.blocks ?? []).flatMap((block) => (block.type === "entities" ? block.rows : []));
 }
 
 /** The rows that hold every word typed, across sha, title and meta. */

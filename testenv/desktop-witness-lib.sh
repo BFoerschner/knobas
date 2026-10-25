@@ -583,10 +583,10 @@ has_reading() {
 # driver, so when an app change moved where a step lands, the driver kept
 # waiting for the old page and the next run went red on a correct app
 # (`capture.sh` after #1504). So a driver waits on a landing only through
-# these two, with `readonly` constants for arguments: `app/src/lib/shell/
-# test-witness.ts` reads the call out of the driver, a test in
-# `app/src/App.test.svelte.ts` replays the step and asserts the page draws
-# it, and `desktop-witness-test.sh` refuses a landing that test lacks.
+# these two, with `readonly` constants for arguments:
+# `app/src/lib/shell/test-witness.ts` reads the call out of the driver, a
+# test in `app/src/App.test.svelte.ts` replays the step and asserts the page
+# draws it, and `desktop-witness-test.sh` refuses a landing that test lacks.
 lands() {
     local landing=$1 reading
     shift

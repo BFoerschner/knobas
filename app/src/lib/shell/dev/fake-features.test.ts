@@ -5,7 +5,7 @@
 import { expect, test, vi } from "vitest";
 
 import type { AdHocBlock, DayBlock, OpenStretch } from "../../ipc/time";
-import type { EntityDetail, EntityPage } from "../../ipc/entity";
+import type { EntityDetail, EntityPage, SourceView } from "../../ipc/entity";
 import { repoOfRow, underRepoHash } from "../../tf/repo/repo";
 import { dayRows, offerRuns } from "../../tf/time/day-view";
 import { demoHandlers } from "./fake-tauri";
@@ -657,4 +657,32 @@ test("job PAY-231's branch and commit declare payout-service as their parent, so
     "#/repo/mock%3Atidewater%2Fpayout-service/branches",
   );
   expect(land("commit", "mock:9f2c1ab")).toBe("#/repo/mock%3Atidewater%2Fpayout-service/commits/mock%3A9f2c1ab");
+});
+
+test("PR #88 of fx-rates is read by a token without read:issue: Conversation opens on Gitea's line, the review under it, every write refused (#2065)", () => {
+  const h = demoHandlers() as Calls;
+  const view = h["entity_view"]!({ entityId: "mock:fx-rates#88", section: null }) as SourceView;
+  const conversation = view.sections.find((section) => section.id === "conversation")!;
+  expect(conversation.blocks[0]).toEqual({
+    type: "entities",
+    title: null,
+    rows: [
+      {
+        entity_id: null,
+        title: "This token cannot read this pull request's comments: it lacks the read:issue scope",
+        meta: null,
+        tone: "muted",
+        chip: null,
+        url: null,
+      },
+    ],
+  });
+  expect(conversation.blocks[1]).toMatchObject({ type: "facts", facts: [{ label: "jonas" }, { label: "Review", value: "approved", tone: "ok" }] });
+  expect(conversation.count).toBe(1);
+  // Nothing such a token may write: Gitea draws each write disabled, saying why (#2043).
+  expect(view.actions.length).toBeGreaterThan(0);
+  for (const action of view.actions) expect(action.disabled, action.label).toMatch(/^This token cannot write: it lacks the write:(issue|repository) scope$/);
+  // The other pull requests' conversations hold no such line.
+  const other = h["entity_view"]!({ entityId: "mock:booking-api#121", section: "conversation" }) as SourceView;
+  expect(other.sections[0]!.blocks).toEqual([]);
 });

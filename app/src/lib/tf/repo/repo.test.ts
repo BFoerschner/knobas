@@ -35,6 +35,7 @@ import {
   shaOf,
   underRepoHash,
   visibleRepoPrs,
+  viewRows,
   visibleViewRows,
 } from "./repo";
 
@@ -77,6 +78,13 @@ function section(rows: { entity_id: string | null; title: string; chip?: string 
     ],
   };
 }
+
+test("a list's rows are every list the section holds: a muted line before the branches is drawn, not taken for the list (#2065)", () => {
+  const branches = section([{ entity_id: `${REPO}@refs/heads/main`, title: "main", chip: "default", tone: "muted" }]);
+  const line = { type: "entities" as const, title: null, rows: [{ entity_id: null, title: "Protected branches could not be read.", meta: null, tone: "muted" as const, chip: null, url: null }] };
+  expect(viewRows({ ...branches, blocks: [line, ...branches.blocks] }).map((row) => row.title)).toEqual(["Protected branches could not be read.", "main"]);
+  expect(viewRows(null)).toEqual([]);
+});
 
 test("the dropdown offers the default branch first and every branch the mirror holds", () => {
   const options = branchOptions(

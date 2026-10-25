@@ -24,7 +24,9 @@
 
   Everything is the source's view of the pull request (`entity_view`), read
   once per pull request (its *Files* once more, when that tab opens); the
-  tabs only choose what to draw of it.
+  tabs only choose what to draw of it. A muted line the source writes into a
+  tab (comments the token may not read, checks it could not read) is drawn
+  as a line where the source put it, on every tab (#2065).
 -->
 <script lang="ts" module>
   import type {
@@ -88,9 +90,11 @@
   import { initials } from "../tickets/tickets";
   import {
     PR_TABS,
-    commitRows,
+    commitParts,
     conversationOf,
+    conversationParts,
     headerOf,
+    overviewParts,
     prHash,
     readPrRoute,
     readyLines,
@@ -271,8 +275,9 @@
   const readyRows = $derived(readyLines(view ?? null));
   const number = $derived(prId === null ? null : prNumber(prId));
   const title = $derived(detail?.row.title ?? "");
-  const messages = $derived(conversationOf(view ?? null));
-  const commits = $derived(commitRows(view ?? null));
+  const conversation = $derived(conversationParts(view ?? null));
+  const overview = $derived(overviewParts(view ?? null));
+  const commitList = $derived(commitParts(view ?? null));
   const actions = $derived(view?.actions ?? []);
   const name = $derived(number === null ? "PR" : `PR ${number}`);
 
@@ -463,6 +468,11 @@
   }
 </script>
 
+{#snippet mutedLine(words: string)}
+  <!-- A muted line the source wrote into a tab, where it put it (#2065). -->
+  <p class="tf-dim tf-prline">{words}</p>
+{/snippet}
+
 <div class="tf-full">
   <nav class="tf-crumbs" aria-label="Breadcrumb">
     {#if job !== null}
@@ -553,30 +563,37 @@
           {:else if view === undefined}
             <!-- The view has not answered yet. -->
           {:else if tab === "overview"}
-            {#if header.checks.length > 0}
-              <h2 class="tf-cgroup-h">Checks</h2>
-              <table class="tf-tbl tf-prchecks">
-                <tbody>
-                  {#each header.checks as row, n (n)}
-                    {@const run = runOf(row)}
-                    <tr class:tf-row={run !== null} onclick={() => run !== null && (location.hash = run)}>
-                      <td
-                        ><span class="tf-dot tf-{row.tone ?? 'muted'}"></span>
-                        {#if run !== null}<a href={run}>{row.title}</a>{:else}{row.title}{/if}</td
-                      >
-                      <td>{[row.chip, row.meta].filter((part) => part !== null && part !== "").join(", ")}</td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            {/if}
-            {#if header.description !== null}
-              <h2 class="tf-cgroup-h">Description</h2>
-              <div class="tf-panel tf-prdesc"><p>{header.description}</p></div>
-            {/if}
+            {#each overview as part, p (p)}
+              {#if "line" in part}
+                {@render mutedLine(part.line)}
+              {:else if "checks" in part}
+                <h2 class="tf-cgroup-h">Checks</h2>
+                <table class="tf-tbl tf-prchecks">
+                  <tbody>
+                    {#each part.checks as row, n (n)}
+                      {@const run = runOf(row)}
+                      <tr class:tf-row={run !== null} onclick={() => run !== null && (location.hash = run)}>
+                        <td
+                          ><span class="tf-dot tf-{row.tone ?? 'muted'}"></span>
+                          {#if run !== null}<a href={run}>{row.title}</a>{:else}{row.title}{/if}</td
+                        >
+                        <td>{[row.chip, row.meta].filter((bit) => bit !== null && bit !== "").join(", ")}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              {:else}
+                <h2 class="tf-cgroup-h">Description</h2>
+                <div class="tf-panel tf-prdesc"><p>{part.description}</p></div>
+              {/if}
+            {/each}
           {:else if tab === "conversation"}
             <div class="tf-convo">
-              {#each messages as message, n (n)}
+              {#each conversation as part, n (n)}
+                {#if "line" in part}
+                  {@render mutedLine(part.line)}
+                {:else}
+                {@const message = part.message}
                 {@const own = me !== null && message.who === me}
                 <article class="tf-msg">
                   <span class="tf-av" class:tf-me={own} aria-hidden="true">{initials(message.who)}</span>
@@ -588,6 +605,7 @@
                     {#if message.body !== ""}<p>{message.body}</p>{/if}
                   </div>
                 </article>
+                {/if}
               {/each}
               {#each queuedComments as body, n (n)}
                 <article class="tf-msg tf-queued">
@@ -598,7 +616,7 @@
                   </div>
                 </article>
               {/each}
-              {#if messages.length === 0 && queuedComments.length === 0}
+              {#if conversation.length === 0 && queuedComments.length === 0}
                 <div class="tf-empty">No comments yet.</div>
               {/if}
               {#if comment !== null}
@@ -617,29 +635,33 @@
               {/if}
             </div>
           {:else if tab === "commits"}
-            {#if commits.length === 0}
-              <div class="tf-empty">No commits.</div>
+            {#each commitList as part, p (p)}
+              {#if "line" in part}
+                {@render mutedLine(part.line)}
+              {:else}
+                <table class="tf-tbl tf-rcommits">
+                  <tbody>
+                    {#each part.commits as row, n (n)}
+                      {@const proposal = row.entity_id === null ? undefined : proposals[row.entity_id]}
+                      {@const opens = row.entity_id !== null && repo !== null}
+                      <tr class:tf-row={opens} onclick={(event) => openCommit(event, row)}>
+                        <td class="tf-mono"
+                          >{#if opens}<a href={commitHash(repo!.entity_id, row.entity_id!)}>{row.chip ?? ""}</a>{:else}{row.chip ?? ""}{/if}</td
+                        >
+                        <td class:tf-dim={row.chip === null}
+                          >{row.title}{#if proposal !== undefined}{" "}<a class="tf-chip tf-info" href="#/review/{encodeURIComponent(proposal)}"
+                              >proposed link, judge it</a
+                            >{/if}</td
+                        >
+                        <td class="tf-dim tf-nowrap">{row.meta ?? ""}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              {/if}
             {:else}
-              <table class="tf-tbl tf-rcommits">
-                <tbody>
-                  {#each commits as row, n (n)}
-                    {@const proposal = row.entity_id === null ? undefined : proposals[row.entity_id]}
-                    {@const opens = row.entity_id !== null && repo !== null}
-                    <tr class:tf-row={opens} onclick={(event) => openCommit(event, row)}>
-                      <td class="tf-mono"
-                        >{#if opens}<a href={commitHash(repo!.entity_id, row.entity_id!)}>{row.chip ?? ""}</a>{:else}{row.chip ?? ""}{/if}</td
-                      >
-                      <td class:tf-dim={row.chip === null}
-                        >{row.title}{#if proposal !== undefined}{" "}<a class="tf-chip tf-info" href="#/review/{encodeURIComponent(proposal)}"
-                            >proposed link, judge it</a
-                          >{/if}</td
-                      >
-                      <td class="tf-dim tf-nowrap">{row.meta ?? ""}</td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            {/if}
+              <div class="tf-empty">No commits.</div>
+            {/each}
           {/if}
         </div>
         <aside class="tf-side" aria-label="Ready to merge">

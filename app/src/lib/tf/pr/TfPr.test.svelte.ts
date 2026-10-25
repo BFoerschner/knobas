@@ -437,6 +437,84 @@ test("Conversation: each entry's who, when and verdict, then a comment queued an
   expect(toasts.items.at(-1)!.action?.label).toBe("Show queue");
 });
 
+/** The view with one section's blocks replaced, as a source that wrote something else there would send it. */
+function withBlocks(id: string, blocks: SourceView["sections"][number]["blocks"], from: SourceView = prView()): SourceView {
+  return { ...from, sections: from.sections.map((section) => (section.id === id ? { ...section, blocks } : section)) };
+}
+
+/** A muted line, as Gitea's `view::muted_line` writes one: an untitled list of one muted row with no entity (#2065). */
+const mutedLine = (title: string) => ({ type: "entities" as const, title: null, rows: [vrow(null, title, null, "muted")] });
+
+const UNREAD = "This token cannot read this pull request's comments: it lacks the read:issue scope";
+
+test("Conversation opens on the source's line where it cannot read the comments, the reviews under it (#2065)", async () => {
+  const pr = withBlocks("conversation", [
+    mutedLine(UNREAD),
+    { type: "facts", facts: [fact("priya.nair", "2026-08-22 09:30"), fact("Review", "approved", "ok")] },
+  ]);
+  await draw([PR, "conversation"], ports({ pr }));
+  const convo = [...target.querySelectorAll(".tf-convo > *")].map((node) => node.textContent?.replace(/\s+/g, " ").trim());
+  expect(convo[0]).toBe(UNREAD);
+  expect(convo[1]).toBe("PN priya.nair2026-08-22 09:30 approved");
+  expect(target.querySelector(".tf-convo .tf-prline")!.classList.contains("tf-dim")).toBe(true);
+});
+
+test("with no reviews either, Conversation is the source's line and never says No comments yet. (#2065)", async () => {
+  await draw([PR, "conversation"], ports({ pr: withBlocks("conversation", [mutedLine(UNREAD)]) }));
+  expect(text(".tf-convo .tf-prline")).toBe(UNREAD);
+  expect(target.querySelector(".tf-convo .tf-msg")).toBeNull();
+  expect(target.querySelector(".tf-convo .tf-empty")).toBeNull();
+});
+
+test("a muted line in Overview is drawn as a line where the source put it, never as a check (#2065)", async () => {
+  const [facts, checks, description] = prView().sections[0]!.blocks;
+  const unread = "Checks could not be read: gitea: 403 Forbidden";
+  await draw([PR], ports({ pr: withBlocks("overview", [facts!, mutedLine(unread), description!]) }));
+  expect(target.querySelector(".tf-prchecks")).toBeNull();
+  const body = [...target.querySelectorAll(".tf-prline, .tf-cgroup-h, .tf-prdesc")].map((node) => node.textContent?.trim());
+  expect(body).toEqual([unread, "Description", "Retries SEPA payouts."]);
+  // Where the checks could not be read, *Ready to merge?* says so in their place.
+  expect([...target.querySelectorAll(".tf-prready > span")].map((line) => line.textContent?.trim())).toEqual([
+    "Approvals: 1 of 2",
+    unread,
+    "No conflicts with main",
+  ]);
+  if (view) unmount(view);
+  view = null;
+  // A line after the checks stays a line: the checks are only the checks.
+  await draw([PR], ports({ pr: withBlocks("overview", [facts!, checks!, mutedLine("Two checks are on Gitea only."), description!]) }));
+  expect([...target.querySelectorAll(".tf-prchecks tr")].length).toBe(2);
+  expect(text(".tf-prchecks + .tf-prline")).toBe("Two checks are on Gitea only.");
+  expect([...target.querySelectorAll(".tf-prready > span")][1]!.textContent?.trim()).toBe("Checks: Payout_IntegrationTests #1187 failure");
+});
+
+test("a muted line in Commits is drawn as a line, never as a commit; the list after it is the commits (#2065)", async () => {
+  const [commits] = prView().sections[2]!.blocks;
+  await draw([PR, "commits"], ports({ pr: withBlocks("commits", [mutedLine("Commits signed by an unknown key are left out."), commits!]) }));
+  expect(text(".tf-prline")).toBe("Commits signed by an unknown key are left out.");
+  expect([...target.querySelectorAll(".tf-rcommits tr")].map(cells)).toEqual([
+    "c90d11e4a7 | PAY-231: jitter in backoff | mara · 2h",
+    "a41f2c08d3 | PAY-231 backoff jitter proposed link, judge it | mara · 6h",
+  ]);
+  if (view) unmount(view);
+  view = null;
+  // A tab holding only a line says it, not *No commits.*
+  await draw([PR, "commits"], ports({ pr: withBlocks("commits", [mutedLine("Commits could not be read.")]) }));
+  expect(text(".tf-prline")).toBe("Commits could not be read.");
+  expect(target.querySelector(".tf-rcommits")).toBeNull();
+  expect(target.querySelector(".tf-empty")).toBeNull();
+  if (view) unmount(view);
+  view = null;
+  // A muted row with a chip is a commit (the mirror lacks it), not a line; an empty list says *No commits.*
+  await draw([PR, "commits"], ports({ pr: withBlocks("commits", [{ type: "entities", title: null, rows: [vrow(null, "PAY-231: squash me", "77aa01bc2d", "muted")] }]) }));
+  expect([...target.querySelectorAll(".tf-rcommits tr")].map(cells)).toEqual(["77aa01bc2d | PAY-231: squash me | "]);
+  expect(target.querySelector(".tf-prline")).toBeNull();
+  if (view) unmount(view);
+  view = null;
+  await draw([PR, "commits"], ports({ pr: withBlocks("commits", [{ type: "entities", title: null, rows: [] }]) }));
+  expect(text(".tf-empty")).toBe("No commits.");
+});
+
 test("a source that offers no comment draws no comment box", async () => {
   await draw([PR, "conversation"], ports({ pr: prView([EDIT]) }));
   expect(target.querySelector(".tf-compose")).toBeNull();

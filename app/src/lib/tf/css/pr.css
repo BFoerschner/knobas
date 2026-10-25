@@ -10,6 +10,8 @@
 .tf-prchecks td:first-child { white-space: nowrap; }
 .tf-prchecks td:first-child .tf-dot { margin-right: 6px; }
 .tf-prdesc { padding: 12px 14px; }
+/* A muted line the source wrote into a tab (#2065): where it put it, quiet. */
+.tf-prline { margin: 0; font-size: var(--t-sm); }
 .tf-prdesc p { white-space: pre-line; overflow-wrap: anywhere; font-size: var(--t-sm); }
 .tf-dialog.tf-pr-dialog { width: min(620px, calc(100vw - 32px)); }
 .tf-pra { display: flex; flex-direction: column; gap: 8px; }
