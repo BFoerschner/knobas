@@ -240,7 +240,6 @@ test("the body: a live ticket chip, my mention in yellow, a page link, code with
   ]);
   expect(doc.querySelector("a.tf-pgl")?.getAttribute("href")).toBe("#/page/confluence%3A7");
   expect(doc.querySelector("pre code")?.textContent).toBe("select 1;");
-  expect(doc.querySelector("pre .tf-lang")?.textContent).toBe("sql");
   expect(doc.querySelector("thead th")?.textContent).toBe("After");
   expect(doc.querySelector(".tf-macro")?.textContent).toContain(
     "This part is a Confluence roadmap macro, which knobas does not draw.",
@@ -259,6 +258,29 @@ test("Copy copies the code, and the placeholder and Open in Confluence open the 
   await settle();
   expect(io.openExternal).toHaveBeenCalledTimes(2);
   expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
+});
+
+test("a code block's language and Copy sit in a strip above the code, and nothing sits inside the code (#2083)", async () => {
+  const blocks: DocPage["blocks"] = [
+    { type: "code", code: "select 1;", language: "sql" },
+    { type: "code", code: "ls -la", language: null },
+  ];
+  const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const pres = [...target.querySelectorAll(".tf-doc pre")];
+  expect(pres).toHaveLength(2);
+  const strips = pres.map((pre) => pre.previousElementSibling!);
+  expect(strips.map((s) => [...s.children].map((c) => [c.tagName, c.textContent]))).toEqual([
+    [
+      ["SPAN", "sql"],
+      ["BUTTON", "Copy"],
+    ],
+    [["BUTTON", "Copy"]],
+  ]);
+  // The code area holds the code and nothing else: no control over a long line.
+  expect(pres.map((pre) => [...pre.children].map((c) => c.tagName))).toEqual([["CODE"], ["CODE"]]);
+  strips[1]!.querySelector("button")!.click();
+  await settle();
+  expect(io.copy).toHaveBeenCalledWith("ls -la");
 });
 
 test("comments are listed with their author, or say there are none", async () => {
@@ -390,22 +412,121 @@ const RICH: DocPage = {
   writes: ["comment", "update_page", "create_page"],
 };
 
-test("the rail: the outline, the work, the pages that link here and the history", async () => {
+/** Draws the handbook as `page`, in place of whatever is mounted. */
+function drawPage(page: DocPage, over: Partial<DocsPorts> = {}): Promise<DocsPorts> {
+  return redraw(["confluence:2"], ports({ docsPage: vi.fn(async () => page), ...over }));
+}
+
+test("the margin holds only the outline (#2080)", async () => {
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
-  const rail = target.querySelector("aside[aria-label='About this page']")!;
-  expect([...rail.querySelectorAll("h3")].map((h) => h.textContent)).toEqual([
-    "On this page",
+  const margin = target.querySelector("aside[aria-label='On this page']")!;
+  expect([...margin.querySelectorAll("h3")].map((h) => h.textContent)).toEqual(["On this page"]);
+  expect([...margin.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+    ["Ledger", "#/page/confluence%3A2/1"],
+  ]);
+  expect(target.textContent).not.toContain("History");
+});
+
+const LINKED: DocPage["backlinks"] = [
+  { entity_id: "confluence:11", title: "Runbook index", space_key: "OPS" },
+  { entity_id: "confluence:13", title: "Scratch notes", space_key: null },
+  { entity_id: "confluence:14", title: "Team charter", space_key: "TEAM" },
+  { entity_id: "confluence:5", title: "Payout design", space_key: "ENG" },
+  { entity_id: "confluence:12", title: "Alerting", space_key: "OPS" },
+];
+
+/** The tree, with another source's TEAM: a backlink's space is named from the page's own source only. */
+const TREE_ELSEWHERE: DocsTree = { ...TREE, spaces: [...TREE.spaces, { source_id: "wiki", key: "TEAM", name: "Not this one", pages: [] }] };
+
+const article = () => target.querySelector(".tf-rd-page")!;
+const linkedHeading = () => [...article().querySelectorAll("h3")].find((h) => h.textContent?.startsWith("Linked from"));
+const groups = () =>
+  [...article().querySelectorAll("details")].map((d) => ({
+    summary: d.querySelector("summary")!.textContent,
+    open: d.open,
+    pages: [...d.querySelectorAll("li a")].map((a) => [a.textContent, a.getAttribute("href")]),
+  }));
+
+test("the page foot: Work it belongs to, then Linked from by space, after the body and before the comments (#2080)", async () => {
+  await drawPage({ ...RICH, backlinks: LINKED }, { docsTree: vi.fn(async () => TREE_ELSEWHERE) });
+  const page = article();
+  expect([...page.querySelectorAll("h3, .tf-cmts h2")].map((h) => h.textContent?.trim())).toEqual([
     "Work it belongs to",
-    "Pages that link here",
-    "History",
+    "Linked from 5 pages",
+    "Comments 1",
   ]);
-  expect(rail.querySelector(".tf-toc a")?.getAttribute("href")).toBe("#/page/confluence%3A2/1");
-  expect(rail.querySelector("a[href='#/job/jira%3AOPS-77']")?.textContent).toContain("To Do");
-  expect(rail.querySelector("a[href='#/page/confluence%3A5']")?.textContent).toBe("Payout designENG");
-  expect([...rail.querySelectorAll(".tf-rail-list div")].map((d) => d.textContent)).toEqual([
-    "EditedTomasz, 2026-07-02",
-    "Createdyou, 2026-01-02",
+  const work = [...page.querySelectorAll("h3")].find((h) => h.textContent === "Work it belongs to")!;
+  // After the page body: its last block comes before the foot.
+  expect(page.querySelector(".tf-macro")!.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const job = work.parentElement!.querySelector<HTMLAnchorElement>("li a")!;
+  expect(job.getAttribute("href")).toBe("#/job/jira%3AOPS-77");
+  expect(job.closest("li")!.textContent).toBe("OPS-77 On-call runbook outdatedTo Do");
+
+  expect(groups()).toEqual([
+    { summary: "ENG Engineering1", open: false, pages: [["Payout design", "#/page/confluence%3A5"]] },
+    {
+      summary: "OPS Operations2",
+      open: false,
+      pages: [
+        ["Alerting", "#/page/confluence%3A12"],
+        ["Runbook index", "#/page/confluence%3A11"],
+      ],
+    },
+    { summary: "TEAM1", open: false, pages: [["Team charter", "#/page/confluence%3A14"]] },
+    { summary: "Other pages1", open: false, pages: [["Scratch notes", "#/page/confluence%3A13"]] },
   ]);
+});
+
+test("the page foot leaves out what is empty: no work, no backlinks, no Other pages (#2080)", async () => {
+  await draw(["confluence:2"]);
+  expect(article().textContent).not.toContain("Work it belongs to");
+  expect(linkedHeading()).toBeUndefined();
+  expect(article().querySelector("details")).toBeNull();
+
+  await drawPage({ ...PAGE, backlinks: LINKED.filter((l) => l.space_key !== null) });
+  expect(linkedHeading()?.textContent).toBe("Linked from 4 pages");
+  expect(groups().map((g) => g.summary)).toEqual(["ENG Engineering1", "OPS Operations2", "TEAM1"]);
+});
+
+test("Linked from says 50+ when the backend's 50 arrive, and the count below that (#2080)", async () => {
+  const many = (n: number): DocPage["backlinks"] =>
+    Array.from({ length: n }, (_, i) => ({ entity_id: `confluence:${100 + i}`, title: `Page ${100 + i}`, space_key: "OPS" }));
+  await drawPage({ ...PAGE, backlinks: many(50) });
+  expect(linkedHeading()?.textContent).toBe("Linked from 50+ pages");
+  expect(groups().map((g) => g.summary)).toEqual(["OPS Operations50"]);
+
+  await drawPage({ ...PAGE, backlinks: many(49) });
+  expect(linkedHeading()?.textContent).toBe("Linked from 49 pages");
+});
+
+test("every Linked from group is closed again when another page opens (#2080)", async () => {
+  const docsPage = vi.fn(async (id: string) => ({ ...(id === "confluence:1" ? OTHER : PAGE), backlinks: LINKED }));
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  for (const d of article().querySelectorAll("details")) d.open = true;
+  expect(groups().every((g) => g.open)).toBe(true);
+  props.rest = ["confluence:1"];
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+  expect(groups().map((g) => g.open)).toEqual([false, false, false, false]);
+});
+
+test("the meta line names who created the page: version 1's entry, else the editor of a first version, else nobody (#2080)", async () => {
+  const meta = () => [...target.querySelectorAll(".tf-rd-meta > *")].map((m) => m.textContent?.trim());
+  await drawPage(RICH);
+  expect(meta()).toEqual([
+    "Tomasz Wójcik edited 2026-07-02",
+    "Created by you, 2026-01-02",
+    "version 31",
+    "1 min read",
+    "ops",
+    "on-call",
+  ]);
+  await drawPage({ ...PAGE, version: 1 });
+  expect(meta()).toContain("Created by Tomasz, 2026-07-02");
+  await drawPage(PAGE);
+  expect(meta().filter((m) => m?.startsWith("Created"))).toEqual([]);
 });
 
 test("Edit section opens the text, saves it through the queue against the version read; a refused one says why", async () => {
@@ -434,7 +555,7 @@ test("Edit section opens the text, saves it through the queue against the versio
   );
 });
 
-test("a comment goes through the queue; export, copy link and the actions a source does not take", async () => {
+test("a comment goes through the queue; copy link and the actions a source does not take", async () => {
   const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
   const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!;
   box.value = "Done.";
@@ -443,9 +564,6 @@ test("a comment goes through the queue; export, copy link and the actions a sour
   [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")][0]!.click();
   await settle();
   expect(io.submitWrite).toHaveBeenCalledWith({ Comment: { entity: "confluence:2", body: "Done." } });
-  button("Export as Markdown")!.click();
-  await settle();
-  expect(io.docsExportMarkdown).toHaveBeenCalledWith("confluence:2");
   button("Copy link")!.click();
   await settle();
   expect(io.copy).toHaveBeenCalledWith("#/page/confluence%3A2\nhttp://wiki.example/pages/2");
@@ -498,7 +616,7 @@ test("the writes the page's credential cannot make are drawn disabled saying why
   ]);
   const drawn = (label: string) => [...target.querySelectorAll("button")].filter((b) => b.textContent?.trim() === label);
   const refused: [string, string, number][] = [
-    ["Comment", "comment", 2],
+    ["Comment", "comment", 1],
     ["New page", "create_page", 1],
     ["New page here", "create_page", 1],
     ["Edit section", "update_page", 1],
@@ -802,6 +920,60 @@ test("This job and Link to <job> use the ticket the reader opened when two sourc
   button("Link to PAY-231")!.click();
   await settle();
   expect(links.createLink).toHaveBeenCalledWith("confluence:2", "tidewater:PAY-231", "documents");
+});
+
+const actions = () => [...target.querySelectorAll(".tf-rd-acts button")].map((b) => b.textContent?.trim());
+
+test("the actions row reads Link to <job> from a job, Link to…, New page here, Copy link, Open in, More; no Comment (#2082)", async () => {
+  await drawJob(["confluence:2"], undefined, ports({ jobReach: vi.fn(async () => REACH), docsPage: vi.fn(async () => RICH) }));
+  expect(actions()).toEqual(["Link to PAY-231", "Link to…", "New page here", "Copy link", "Open in Confluence", "More"]);
+
+  if (view) unmount(view);
+  target.innerHTML = "";
+  view = mount(TfDocs, {
+    target,
+    props: { ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage: vi.fn(async () => RICH) }), linkPorts: linkPorts() as never },
+  });
+  await settle();
+  expect(actions()).toEqual(["Link to…", "New page here", "Copy link", "Open in Confluence", "More"]);
+  // The comment box at the foot is the way to comment.
+  expect(button("Comment")?.closest(".tf-compose")).not.toBeNull();
+});
+
+test("More opens a menu holding Export as Markdown, closing on Esc, a pick or a click outside (#2082)", async () => {
+  const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  const more = button("More")!;
+  expect(more.getAttribute("aria-haspopup")).toBe("menu");
+  expect(more.getAttribute("aria-expanded")).toBe("false");
+  expect(target.querySelector("[role='menu']")).toBeNull();
+  const menu = async () => {
+    more.click();
+    await settle();
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    return target.querySelector<HTMLElement>("[role='menu']")!;
+  };
+
+  let open = await menu();
+  expect([...open.querySelectorAll("[role='menuitem']")].map((i) => i.textContent?.trim())).toEqual(["Export as Markdown"]);
+  expect(document.activeElement?.textContent?.trim()).toBe("Export as Markdown");
+  open.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await settle();
+  expect(target.querySelector("[role='menu']")).toBeNull();
+  expect(more.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(more);
+
+  open = await menu();
+  open.querySelector<HTMLButtonElement>("[role='menuitem']")!.click();
+  await settle();
+  expect(io.docsExportMarkdown).toHaveBeenCalledWith("confluence:2");
+  expect(target.querySelector("[role='menu']")).toBeNull();
+  expect(document.activeElement).toBe(more);
+
+  await menu();
+  target.querySelector("h1")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  await settle();
+  expect(target.querySelector("[role='menu']")).toBeNull();
+  expect(io.docsExportMarkdown).toHaveBeenCalledTimes(1);
 });
 
 test("the choice is kept for the session, and without a job there is no switch", async () => {

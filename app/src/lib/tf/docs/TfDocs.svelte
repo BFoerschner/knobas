@@ -11,13 +11,15 @@
   bottom.
 
   **Middle**, the page at most 74 characters wide in the reading face: the
-  breadcrumb, the title, who edited it when, the version, the reading time
-  and the labels (each searches for itself), the actions, the blocks by
-  section (*Edit section*) and the comments with the composer (R-10.9 to
-  R-10.14). A page opened from a hit keeps the query: every match is marked
-  and the find bar steps through them (R-10.5, R-10.12).
+  breadcrumb, the title, who edited it when, who created it (#2080), the
+  version, the reading time and the labels (each searches for itself), the
+  actions row with *More ▾* (#2082), the blocks by section (*Edit section*),
+  the page foot (*Work it belongs to*, *Linked from*, `TfDocFoot`) and the
+  comments with the composer (R-10.9 to R-10.15). A page opened from a hit
+  keeps the query: every match is marked and the find bar steps through them
+  (R-10.5, R-10.12).
 
-  **Right**, the rail (R-10.15). `#/docs` opens the page read last, and every
+  **Right**, the outline (R-10.15). `#/docs` opens the page read last, and every
   page opened is a visit (`visit_entity`), which is what "read last" reads.
 
   Drawn over the declared Docs frame (ADR-0022): `docs_tree`, `docs_page`,
@@ -76,13 +78,16 @@
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocBody from "./TfDocBody.svelte";
+  import TfDocFoot from "./TfDocFoot.svelte";
   import TfDocHits from "./TfDocHits.svelte";
+  import TfDocMore from "./TfDocMore.svelte";
   import TfDocRail from "./TfDocRail.svelte";
   import TfDocTree from "./TfDocTree.svelte";
   import TfMarked from "./TfMarked.svelte";
   import TfNewPage from "./TfNewPage.svelte";
   import {
     copyLinkText,
+    createdBy,
     LINK_RELATION,
     blockWords,
     firstPage,
@@ -869,6 +874,7 @@
       <div class="tf-empty"><p>Could not open this page: {pageError}</p></div>
     {:else if page !== null}
       {@const p = page}
+      {@const created = createdBy(p)}
       <article class="tf-rd-page" bind:this={article}>
         <div class="tf-rd-crumb">
           {#if job !== null}
@@ -889,6 +895,9 @@
           {#if p.editor !== null || p.updated_at !== null}
             <span>{person(p.editor, p.editor_name, p.me)} edited {clockLabel(p.updated_at)}</span>
           {/if}
+          {#if created}
+            <span>Created by {created.who}{#if created.at !== null}, {clockLabel(created.at)}{/if}</span>
+          {/if}
           {#if p.version !== null}<span>version {p.version}</span>{/if}
           {#if p.readable}<span>{readingMinutes(p)} min read</span>{/if}
           {#each p.labels as label (label)}
@@ -897,15 +906,12 @@
           {/each}
         </div>
         <div class="tf-rd-acts">
-          {#if p.writes.includes("comment")}
-            <button type="button" class="tf-btn tf-sm" {...refusedAttrs(refusal("comment"))} onclick={() => composer?.focus()}
-              >Comment</button>
-          {/if}
           {#if job !== null && linkPorts}
             {@const key = job}
             {@const ref = jobAt ?? job}
             <button type="button" class="tf-btn tf-sm" onclick={() => linkToJob(p, ref, key)}>Link to {key}</button>
-          {:else if linkPorts}
+          {/if}
+          {#if linkPorts}
             <button type="button" class="tf-btn tf-sm" onclick={() => (linking = true)}>Link to…</button>
           {/if}
           {#if p.writes.includes("create_page")}
@@ -918,15 +924,13 @@
               }}
               >New page here</button>
           {/if}
-          {#if p.readable}
-            <button type="button" class="tf-btn tf-sm" onclick={() => exportMarkdown(p)}>Export as Markdown</button>
-          {/if}
-          <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => copyLink(p)}>Copy link</button>
+          <button type="button" class="tf-btn tf-sm" onclick={() => copyLink(p)}>Copy link</button>
           {#if p.web_url}
             {@const url = p.web_url}
-            <button type="button" class="tf-btn tf-sm tf-ghost tf-openin" onclick={() => open(url)}>
-              Open in {p.source_name}
-            </button>
+            <button type="button" class="tf-btn tf-sm" onclick={() => open(url)}>Open in {p.source_name}</button>
+          {/if}
+          {#if p.readable}
+            <TfDocMore onexport={() => exportMarkdown(p)} />
           {/if}
         </div>
         <div class="tf-doc">
@@ -947,6 +951,9 @@
           {:else}
             <p class="tf-dl-note">knobas cannot read this page's body. Open it in {p.source_name}.</p>
           {/if}
+          {#key p.entity_id}
+            <TfDocFoot page={p} spaces={tree?.spaces ?? []} />
+          {/key}
           <div class="tf-cmts">
             <h2>Comments {#if p.comments.length > 0}<span class="tf-count">{p.comments.length}</span>{/if}</h2>
             {#each p.comments as c, i (i)}

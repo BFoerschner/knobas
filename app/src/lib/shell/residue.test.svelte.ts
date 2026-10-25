@@ -328,6 +328,7 @@ const App = (await import("../../App.svelte")).default;
 const TfShell = (await import("../tf/TfShell.svelte")).default;
 const TicketsPage = (await import("../tf/tickets/TicketsPage.svelte")).default;
 const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
+const TfDocMore = (await import("../tf/docs/TfDocMore.svelte")).default;
 const ViewEditor = (await import("../tf/tickets/ViewEditor.svelte")).default;
 const { draftNew } = await import("../tf/tickets/views");
 const { createBadges } = await import("../tf/badges.svelte");
@@ -691,6 +692,13 @@ const CASES: Case[] = [
     open: (target) => ({
       app: mount(ViewMenu, { target, props: { name: "My work", onedit: () => {}, onduplicate: () => {}, ondelete: () => {} } }),
     }),
+    exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
+  },
+  {
+    /** The Docs reader's More menu (#2082): its outside-click listener lives while it is open. */
+    name: "TfDocMore",
+    source: "lib/tf/docs/TfDocMore.svelte",
+    open: (target) => ({ app: mount(TfDocMore, { target, props: { onexport: () => {} } }) }),
     exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
   },
   {

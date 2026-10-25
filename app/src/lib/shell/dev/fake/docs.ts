@@ -508,6 +508,10 @@ function page(args: Record<string, unknown>): DocPage {
         at: at(when),
         message: null,
       },
+      // Where the page has moved on, its first version too, for *Created by* (#2080).
+      ...(body.version > 1
+        ? [{ number: 1, by: PEOPLE[by]?.[0] ?? null, by_name: PEOPLE[by]?.[1] ?? null, at: at("2026-06-01 09:00"), message: null }]
+        : []),
     ],
     backlinks: backlinks(found.title),
     work: work(body.blocks.map(block)),
