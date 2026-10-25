@@ -96,7 +96,7 @@
     () => refreshed,
     () => {
       const id = repoId;
-      readBranches(id, () => repoId === id, true);
+      return readBranches(id, () => repoId === id, true);
     },
   );
 
@@ -105,8 +105,8 @@
    * the listing shows landed goes. `again` keeps what the tab drew when it
    * fails.
    */
-  function readBranches(id: string, alive: () => boolean, again = false) {
-    ports.entityView(id, "branches").then(
+  function readBranches(id: string, alive: () => boolean, again = false): Promise<unknown> {
+    return ports.entityView(id, "branches").then(
       (view) => {
         if (!alive()) return;
         listed = viewRows(view?.sections[0]);
@@ -133,7 +133,7 @@
             }
           }
         };
-        for (let n = 0; n < AT_ONCE; n += 1) void worker();
+        return Promise.all(Array.from({ length: AT_ONCE }, worker));
       },
       (error) => {
         if (alive() && !again) failed = ipcErrorMessage(error);

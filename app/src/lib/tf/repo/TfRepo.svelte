@@ -20,7 +20,8 @@
     the header, as the repository's read offers, and the withdrawn and
     turned-off banners under it. A refresh reads the repository's own reads
     again, and `refreshed` tells the open tab to read its sections again, each
-    over what it drew.
+    over what it drew; *Refreshing…* holds until the tab's reads have answered
+    too (`refreshed.svelte.ts`).
   - **Writes** go through the write queue (`submit_write`): *New branch…*
     (`CreateBranch`), a branch's *Delete…* (`DeleteBranch`), *Create pull
     request* (`CreatePullRequest`) and an edit's commit (`CommitFile`).
@@ -123,6 +124,7 @@
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
+  import { provideTabRereads } from "./refreshed.svelte";
 
   let {
     ready,
@@ -187,6 +189,8 @@
   const refresh = createDetailRefresh(untrack(() => ports.refresh));
   /** How many refreshes the page has read again: a tab reads its own sections again on each (#2135). */
   let refreshed = $state(0);
+  /** The open tab's re-reads of a refresh: *Refreshing…* waits for them too, as the job page's does (#2134). */
+  const tabRereads = provideTabRereads();
 
   $effect(() => {
     if (!ready || repoId === null) return;
@@ -216,9 +220,10 @@
    * The repository's own reads: its row, its team and language, its pull
    * requests, its branches and its toolbar. `again` is a refresh's (#2135):
    * each read lands over what the page drew, and one that fails keeps it.
+   * Settles once every one of them has answered.
    */
   async function readRepo(id: string, alive: () => boolean, again: boolean): Promise<void> {
-    ports.codeFacts([id]).then(
+    const factsRead = ports.codeFacts([id]).then(
       (answer) => {
         if (alive()) facts = answer.find((entry) => entry.entity_id === id);
       },
@@ -226,7 +231,7 @@
     );
     // An empty repository has no branches; a source that cannot say reads as
     // one with only its default branch, which the repository's own view is.
-    ports.entityView(id, "branches").then(
+    const branchesRead = ports.entityView(id, "branches").then(
       (view) => {
         if (alive()) branches = branchOptions(view?.sections[0] ?? null);
       },
@@ -236,12 +241,17 @@
     );
     // Whether the source offers a branch here is its toolbar's answer
     // (ADR-0020 rule 4); a view that does not answer leaves the button be.
-    ports.entityView(id, null).then(
+    const toolbarRead = ports.entityView(id, null).then(
       (view) => {
         if (alive()) branchRefused = toolbarRefusal(view, "create_branch");
       },
       () => {},
     );
+    await Promise.all([factsRead, branchesRead, toolbarRead, readRow(id, alive, again)]);
+  }
+
+  /** The repository's row, then its pull requests. */
+  async function readRow(id: string, alive: () => boolean, again: boolean): Promise<void> {
     let found: EntityDetail;
     try {
       found = await ports.getEntity(id);
@@ -261,7 +271,7 @@
       include_deleted: false,
       reach: null,
     };
-    readAllRows((offset) => ports.listEntities(filter, LIMIT, offset)).then(
+    await readAllRows((offset) => ports.listEntities(filter, LIMIT, offset)).then(
       (rows) => {
         if (alive()) prs = repoPrs(rows, found.row);
       },
@@ -271,12 +281,12 @@
     );
   }
 
-  /** A refresh's re-read (#2135): the repository's reads and the open tab's, over what the page drew. */
+  /** A refresh's re-read (#2135): the repository's reads and the open tab's, over what the page drew; settles once all have answered. */
   async function reread(): Promise<void> {
     const id = repoId;
     if (id === null) return;
     refreshed += 1;
-    await readRepo(id, () => repoId === id, true);
+    await Promise.all([readRepo(id, () => repoId === id, true), tabRereads.settled()]);
   }
 
   /** The checkout, and its diff when it has changes: for the `M` marks. */

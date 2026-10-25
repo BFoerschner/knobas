@@ -633,3 +633,27 @@ test("the compare page keeps its branch's diff drawn while a refresh reads it ag
   expect(diffs).toBe(2);
   expect(target.querySelector(".tf-cbody .tf-diff")).not.toBeNull();
 });
+
+test("Refreshing… holds until the open tab's re-read has answered too, as the job page's does", async () => {
+  const base = ports({ getEntity: repoDetail(), refresh: refreshing() });
+  let commitsReads = 0;
+  let answer!: () => void;
+  await draw([REPO, "commits"], {
+    ...base,
+    entityView: (id, sectionId) => {
+      // The refresh's read of the commits stays out until the test answers it.
+      if (sectionId === "commits" && (commitsReads += 1) > 1)
+        return new Promise((resolve) => (answer = () => resolve(base.entityView(id, sectionId))));
+      return base.entityView(id, sectionId);
+    },
+  });
+  refreshButton()!.click();
+  await settle();
+  expect(commitsReads).toBe(2);
+  expect(refreshButton()?.textContent).toBe("Refreshing…");
+  expect(target.querySelectorAll(".tf-cbody tbody tr").length).toBe(2);
+
+  answer();
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Refresh");
+});

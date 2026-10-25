@@ -64,20 +64,20 @@
     () => refreshed,
     () => {
       const where = at;
-      readCommits(where, () => at === where, true);
+      return readCommits(where, () => at === where, true);
     },
   );
 
   /** The commits at `where`, then whose are mine; `again` keeps what the tab drew when it fails. */
-  function readCommits(where: string, alive: () => boolean, again = false) {
-    ports.entityView(where, "commits").then(
+  function readCommits(where: string, alive: () => boolean, again = false): Promise<unknown> {
+    return ports.entityView(where, "commits").then(
       (view) => {
         if (!alive()) return;
         const read = viewRows(view?.sections[0]);
         rows = read;
         const ids = read.flatMap((row) => (row.entity_id === null ? [] : [row.entity_id]));
         if (ids.length === 0) return;
-        ports.codeFacts(ids).then(
+        return ports.codeFacts(ids).then(
           (facts) => {
             if (alive()) mine = new Set(facts.filter((entry) => entry.mine).map((entry) => entry.entity_id));
           },

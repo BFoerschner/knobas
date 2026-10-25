@@ -254,11 +254,11 @@
   // file again (#2105); what the reader typed stays.
   $effect(() => untrack(() => watchEchoes(REPO_FILES, rereadFile, { listen: ports.listen })));
 
-  function rereadFile() {
+  function rereadFile(): Promise<void> {
     const section = fileSection;
     const where = at;
-    if (section === null || section === MISSING) return;
-    readSection(section, where).then(
+    if (section === null || section === MISSING) return Promise.resolve();
+    return readSection(section, where).then(
       (read) => {
         if (section !== fileSection || where !== at) return;
         const block = read?.blocks[0];
@@ -276,18 +276,16 @@
   // over what the tab drew; what the reader typed stays.
   onRefreshed(
     () => refreshed,
-    () => {
-      rereadTree();
-      rereadFile();
-    },
+    () => Promise.all([rereadTree(), rereadFile()]),
   );
 
-  function rereadTree() {
+  function rereadTree(): Promise<unknown> {
     const mine = generation;
+    const reads: Promise<unknown>[] = [];
     for (const dir of Object.keys(listings)) {
       const section = dir === "" ? "files" : entryOf(dir)?.section;
       if (section == null) continue;
-      readSection(section).then(
+      const read = readSection(section).then(
         (read) => {
           const block = read?.blocks[0];
           if (mine === generation && block?.type === "tree") listings[dir] = block.entries;
@@ -295,7 +293,9 @@
         // The directory keeps what it drew.
         () => {},
       );
+      reads.push(read);
     }
+    return Promise.all(reads);
   }
 
   function toggle(dir: string) {

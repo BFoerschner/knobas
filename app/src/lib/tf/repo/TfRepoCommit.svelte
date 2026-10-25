@@ -59,26 +59,27 @@
     () => refreshed,
     () => {
       const id = commitId;
-      readCommit(id, () => commitId === id, true);
+      return readCommit(id, () => commitId === id, true);
     },
   );
 
   /** The commit's row and its diff; `again` keeps what the tab drew when a read fails. */
-  function readCommit(id: string, alive: () => boolean, again = false) {
+  function readCommit(id: string, alive: () => boolean, again = false): Promise<unknown> {
     const mine = () => alive() && commitId === id;
     const fail = (error: unknown) => {
       if (mine() && !again) failed = ipcErrorMessage(error);
     };
-    ports.getEntity(id).then((answer) => {
+    const rowRead = ports.getEntity(id).then((answer) => {
       if (mine()) detail = answer;
     }, fail);
-    ports.entityView(id, null).then((view) => {
+    const viewRead = ports.entityView(id, null).then((view) => {
       if (!mine()) return;
       const diff = view?.sections.find((candidate) => candidate.id === "diff");
       const block = diff?.blocks.find((candidate) => candidate.type === "diff");
       files = block?.type === "diff" ? block.files : [];
       start = branchFrom(view);
     }, fail);
+    return Promise.all([rowRead, viewRead]);
   }
 
   const sha = $derived(shaOf(commitId));

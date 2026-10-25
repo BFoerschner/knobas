@@ -100,23 +100,24 @@
     () => refreshed,
     () => {
       const id = listedId;
-      if (id !== null) readBranch(id, () => listedId === id, true);
+      return id === null ? Promise.resolve() : readBranch(id, () => listedId === id, true);
     },
   );
 
   /** The branch's standing and its diff; `again` keeps what the page drew when a read fails. */
-  function readBranch(id: string, alive: () => boolean, again = false) {
+  function readBranch(id: string, alive: () => boolean, again = false): Promise<unknown> {
     const fail = (error: unknown) => {
       if (alive() && !again) failed = ipcErrorMessage(error);
     };
-    ports.entityView(id, null).then((view) => {
-      if (alive()) standing = branchStanding(view);
+    const standingRead = ports.entityView(id, null).then((answer) => {
+      if (alive()) standing = branchStanding(answer);
     }, fail);
-    ports.entityView(id, "diff").then((view) => {
+    const diffRead = ports.entityView(id, "diff").then((view) => {
       if (!alive()) return;
       const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
       files = block?.type === "diff" ? block.files : [];
     }, fail);
+    return Promise.all([standingRead, diffRead]);
   }
 
   // The form, proposed for each branch: from its ticket where it names one.
