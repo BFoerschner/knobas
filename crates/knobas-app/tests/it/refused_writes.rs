@@ -92,6 +92,16 @@ impl Source for Narrow {
             .filter(|a| a.op == "rerun_build")
             .map(|a| RefusedWrite::of(a, format!("{} may not re-run", self.id)))
             .collect();
+        out.extend(
+            asks.iter()
+                .filter_map(|a| Some((a, a.field.as_deref()?)))
+                .map(|(a, field)| RefusedWrite::of(a, format!("{} may not send {field}", self.id))),
+        );
+        // A field nobody asked about, on a write that was asked about.
+        out.extend(asks.iter().filter(|a| a.field.is_none()).map(|a| RefusedWrite {
+            field: Some("parameters".into()),
+            ..RefusedWrite::of(a, "nobody asked about its parameters")
+        }));
         out.push(RefusedWrite {
             entity: format!("{}:unasked", self.id),
             op: "rerun_build".into(),
@@ -214,5 +224,24 @@ async fn what_is_no_verdict_refuses_nothing_and_the_rest_are_still_answered() {
     assert_eq!(
         answer,
         [RefusedWrite::of(&asks[4], format!("{up} may not re-run"))]
+    );
+}
+
+/// A field of a write is its own ask (#2055): its answer comes back for it,
+/// and an answer about a field nobody asked about is dropped, even where the
+/// write itself was asked about.
+#[tokio::test]
+async fn a_field_is_answered_as_its_own_ask() {
+    let a = unique("narrow-field");
+    let f = fixture(&[&a]).await;
+    let config = format!("{a}:buildType:X");
+    let asks = [
+        ask(&config, "run_build"),
+        WriteAsk::with_field(&config, "run_build", "first_in_queue"),
+    ];
+    let answer = refused(&f, &asks).await;
+    assert_eq!(
+        answer,
+        [RefusedWrite::of(&asks[1], format!("{a} may not send first_in_queue"))]
     );
 }
