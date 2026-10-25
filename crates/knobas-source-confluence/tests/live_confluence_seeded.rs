@@ -1806,12 +1806,14 @@ async fn fills_every_role_it_claims_on_the_seeded_corpus() {
 /// the clamp to `done` would otherwise hide by the last.
 ///
 /// **The window is made, not found (#2113).** The idle run's window is the
-/// two minutes before the full run's watermark, and only a page edited in
-/// them is in it. A fresh seed leaves every page there; a Confluence left up
-/// between runs leaves none, or only an edit the index has not caught up
-/// with. So the test renames a page first and waits for the index to serve
-/// the rename before either run: the full run's ceiling is then the rename,
-/// and the window holds it on any fixture, however long it has been up.
+/// two minutes before the full run's watermark, read from the records, and
+/// the CQL behind it reads the index. After a quiet spell the first edit
+/// moves the record at once and the index seconds later, so a run in between
+/// takes a watermark two minutes past every `lastmodified` the index holds
+/// and walks an empty window -- red on a Confluence left up between runs. So
+/// the test makes that edit itself, a rename, and waits for the index to
+/// serve it before either run: record and index then agree on the newest
+/// page, and the window holds it on any fixture.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn a_run_reports_its_walk_over_the_real_pages() {
