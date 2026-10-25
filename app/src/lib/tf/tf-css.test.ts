@@ -10,7 +10,7 @@ import { brotliDecompressSync } from "node:zlib";
 
 import { expect, test } from "vitest";
 
-import { READER_NARROW } from "./docs/docs";
+import { READER_DRAWER, READER_NARROW } from "./docs/docs";
 
 const APP = process.cwd();
 /**
@@ -340,4 +340,36 @@ test("nothing in the Docs reader's page is capped in width (#2081)", () => {
     .map(([, selector]) => selector!.trim());
   expect(capped).toEqual([]);
   expect(code).not.toContain("74ch");
+});
+
+test("below 900px the Docs tree is a drawer over the page, on the component's own threshold, and still under reduced motion (#2084)", () => {
+  const at = code.indexOf(`@media ${READER_DRAWER} {`);
+  expect(at, `no rule band for ${READER_DRAWER}`).toBeGreaterThan(-1);
+  expect(code, "the old band put 900px on the narrow side").not.toContain("@media (max-width: 900px) {\n  .tf-rd");
+  const band = code.slice(at, code.indexOf("\n}", at));
+  const rule = (selector: string) => {
+    const from = band.indexOf(`${selector} {`);
+    expect(from, `no ${selector} in the band`).toBeGreaterThan(-1);
+    return band.slice(from, band.indexOf("}", from));
+  };
+  // The tree leaves the grid and lies over the page, so the page does not reflow.
+  expect(rule(".tf-rd")).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\);/);
+  expect(rule(".tf-rd")).toMatch(/position:\s*relative/);
+  const tree = rule(".tf-rd-tree");
+  expect(tree).toMatch(/position:\s*absolute/);
+  expect(tree).toMatch(/transform:\s*translateX\(-100%\)/);
+  expect(tree).toMatch(/visibility:\s*hidden/);
+  expect(tree).toMatch(/transition:\s*transform/);
+  expect(tree).not.toMatch(/display:\s*none/);
+  const open = rule(".tf-rd-drawer .tf-rd-tree");
+  expect(open).toMatch(/transform:\s*none/);
+  expect(open).toMatch(/visibility:\s*visible/);
+  const backdrop = rule(".tf-rd-backdrop");
+  expect(backdrop).toMatch(/position:\s*absolute/);
+  expect(backdrop).toMatch(/inset:\s*0/);
+  expect(Number(/z-index:\s*(\d+)/.exec(backdrop)![1])).toBeLessThan(Number(/z-index:\s*(\d+)/.exec(tree)![1]));
+  // Reduced motion: no slide, open or closed, and the rule outranks the band's.
+  const still = code.slice(code.indexOf("@media (prefers-reduced-motion: reduce) {", at));
+  const stillRule = still.slice(0, still.indexOf("\n}"));
+  expect(stillRule).toMatch(/\.tf-rd \.tf-rd-tree,\s*\.tf-rd\.tf-rd-drawer \.tf-rd-tree\s*\{\s*transition:\s*none;/);
 });

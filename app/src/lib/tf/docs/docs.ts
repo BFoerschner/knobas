@@ -397,6 +397,13 @@ export function sectionsOf(blocks: DocBlock[]): Section[] {
  */
 export const READER_NARROW = "(max-width: 1239px)";
 
+/**
+ * The windows the reader's tree is a drawer over the page in (#2084, R-10.9):
+ * narrower than 900px. `css/docs.css` writes the same query for the same
+ * band, and `tf-css.test.ts` holds the two together.
+ */
+export const READER_DRAWER = "(max-width: 899px)";
+
 /** The outline's count per section: matches in its heading and its blocks. */
 export function sectionMatches(blocks: DocBlock[], stems: string[]): Map<number, number> {
   const out = new Map<number, number>();

@@ -100,6 +100,7 @@
     jobPageGroups,
     pageHash,
     pageToOpen,
+    READER_DRAWER,
     READER_NARROW,
     person,
     placeOf,
@@ -420,13 +421,65 @@
     openHit(list[to]!.entity_id);
   }
 
-  function searchLabel(label: string): void {
+  function searchLabel(label: string, chip: HTMLElement): void {
     query = label;
     find = "";
-    field?.focus();
+    if (drawerWindow.current) openDrawer(chip);
+    focusSearch();
   }
 
-  // `/` focuses the search from anywhere in Docs.
+  // ---- below 900px the tree is a drawer over the page (#2084) ----
+  /** A window narrower than 900px, where the tree leaves the grid and the Pages button opens it. */
+  const drawerWindow = new MediaQuery(READER_DRAWER);
+  let drawer = $state(false);
+  /** What opened the drawer, which focus goes back to when it closes. */
+  let opener: HTMLElement | null = null;
+
+  function openDrawer(from: Element | null): void {
+    if (!drawer) opener = from instanceof HTMLElement ? from : null;
+    drawer = true;
+  }
+
+  function closeDrawer(): void {
+    if (!drawer) return;
+    drawer = false;
+    const back = opener;
+    opener = null;
+    if (back !== null && document.contains(back)) back.focus();
+  }
+
+  /** The search field takes focus; in the drawer once it is drawn, as a hidden field takes none. */
+  function focusSearch(): void {
+    if (drawer) void tick().then(() => field?.focus());
+    else field?.focus();
+  }
+
+  // Widening the window past 900px resets the drawer: the tree is back in its column.
+  $effect(() => {
+    if (drawerWindow.current) return;
+    drawer = false;
+    opener = null;
+  });
+
+  // Open, the drawer is a layer of the shell's, so `Esc` closes it wherever focus is (rung 2).
+  $effect(() => {
+    if (!drawer) return;
+    const off = untrack(() => layers.add({ kind: "drawer", close: closeDrawer }));
+    return () => untrack(off);
+  });
+
+  /** `Esc` inside the drawer closes it here, and a page picked in it closes it too. */
+  function ondrawerkey(event: KeyboardEvent): void {
+    if (!drawer || event.key !== "Escape") return;
+    event.preventDefault();
+    closeDrawer();
+  }
+
+  function ondrawerclick(event: MouseEvent): void {
+    if (drawer && event.target instanceof Element && event.target.closest("a[href]")) closeDrawer();
+  }
+
+  // `/` focuses the search from anywhere in Docs, opening the drawer first below 900px.
   $effect(() => {
     const onkey = (event: KeyboardEvent) => {
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -434,7 +487,8 @@
       if (at instanceof HTMLInputElement || at instanceof HTMLTextAreaElement || at instanceof HTMLSelectElement) return;
       if (at instanceof HTMLElement && at.isContentEditable) return;
       event.preventDefault();
-      field?.focus();
+      if (drawerWindow.current) openDrawer(at);
+      focusSearch();
     };
     window.addEventListener("keydown", onkey);
     return () => window.removeEventListener("keydown", onkey);
@@ -747,8 +801,9 @@
 
 </script>
 
-<div class="tf-rd">
-  <nav class="tf-rd-tree" aria-label="Docs">
+<div class="tf-rd" class:tf-rd-drawer={drawer}>
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <nav id="tf-docs-tree" class="tf-rd-tree" aria-label="Docs" onkeydown={ondrawerkey} onclick={ondrawerclick}>
     <div class="tf-dl-head">
       {#if job !== null}
         <div class="tf-seg tf-dl-scope" role="group" aria-label="Scope">
@@ -863,6 +918,11 @@
       </div>
     {/if}
   </nav>
+  {#if drawer}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="tf-rd-backdrop" onclick={closeDrawer}></div>
+  {/if}
 
   <section class="tf-rd-main" bind:this={main} onscroll={follow}>
     {#if find !== "" && page !== null}
@@ -882,17 +942,34 @@
       {@const created = createdBy(p)}
       <div class="tf-rd-sheet">
         <article class="tf-rd-page" bind:this={article}>
-          <div class="tf-rd-crumb">
-            {#if job !== null}
-              <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a> ›
+          <div class="tf-rd-crumbrow">
+            {#if drawerWindow.current}
+              <button
+                type="button"
+                class="tf-btn tf-sm tf-rd-pages"
+                aria-controls="tf-docs-tree"
+                aria-expanded={drawer}
+                onclick={(event) => {
+                  openDrawer(event.currentTarget);
+                  focusSearch();
+                }}
+                ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"
+                  ><path d="M2.5 3.5h11M5 8h8.5M5 12.5h8.5M2.5 8h.5M2.5 12.5h.5" /></svg
+                >Pages</button
+              >
             {/if}
-            <a href="#/docs">Docs</a>
-            {#if p.space}
-              › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>
-            {/if}
-            {#if parent}
-              › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}
-            {/if}
+            <div class="tf-rd-crumb">
+              {#if job !== null}
+                <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a> ›
+              {/if}
+              <a href="#/docs">Docs</a>
+              {#if p.space}
+                › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>
+              {/if}
+              {#if parent}
+                › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}
+              {/if}
+            </div>
           </div>
           <h1 class="tf-rd-title">
             <TfMarked text={p.title} {stems} />
@@ -907,7 +984,7 @@
             {#if p.version !== null}<span>version {p.version}</span>{/if}
             {#if p.readable}<span>{readingMinutes(p)} min read</span>{/if}
             {#each p.labels as label (label)}
-              <button type="button" class="tf-chip" title="Search for {label}" onclick={() => searchLabel(label)}
+              <button type="button" class="tf-chip" title="Search for {label}" onclick={(event) => searchLabel(label, event.currentTarget)}
                 >{label}</button>
             {/each}
           </div>
