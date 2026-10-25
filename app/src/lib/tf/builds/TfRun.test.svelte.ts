@@ -393,6 +393,20 @@ test("Run again with changes… from a credential that may not override sends th
   expect(drawn.writes.map((write) => ("RunBuild" in write ? write.RunBuild.parameters : null))).toEqual([[]]);
 });
 
+test("Re-run of a run that carried overrides, from a credential that may not send them, is drawn disabled saying why and queues nothing (#2055)", async () => {
+  const reason = "This TeamCity user cannot override parameters for one build in Payouts: it lacks the Customize build parameters permission";
+  const drawn = draw("teamcity:build:1187", "overview", {
+    refusedWrites: (asks) => Promise.resolve(asks.filter((ask) => ask.field === "parameters").map((ask) => ({ ...ask, reason }))),
+  });
+  await settle();
+  const rerun = button("Re-run")!;
+  expect(rerun.getAttribute("aria-disabled")).toBe("true");
+  expect(rerun.title).toBe(reason);
+  rerun.click();
+  await settle();
+  expect(drawn.writes).toEqual([]);
+});
+
 test("Open in the source opens the run's own page", async () => {
   const drawn = draw();
   await settle();
