@@ -704,6 +704,8 @@ test("a fixture build and its configuration answer get_entity; TeamCity refreshe
   expect(h["refresh_entity"]!({ entityId: run.row.entity_id })).toEqual({ outcome: "refreshed" });
   const config = h["get_entity"]!({ entityId: "teamcity:buildType:Payout_IntegrationTests" }) as EntityDetail;
   expect(config.row.kind).toBe("build_config");
+  // Per kind, as TeamCity's descriptor declares it (#2146): Sync now from the start.
+  expect(config.refreshes).toBe(false);
   expect(h["refresh_entity"]!({ entityId: config.row.entity_id })).toEqual({ outcome: "not_offered" });
   expect(() => h["get_entity"]!({ entityId: "teamcity:buildType:Nope" })).toThrow();
 });

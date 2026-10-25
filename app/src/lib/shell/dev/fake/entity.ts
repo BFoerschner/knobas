@@ -169,6 +169,22 @@ function sourceRef(id: string) {
  */
 const REFRESHING_ADAPTERS = new Set(["mock", "jira", "confluence", "teamcity", "gitea", "kuma", "wasm-fixture"]);
 
+/**
+ * The kinds those adapters' refresh answers *not offered*, as their
+ * descriptors declare them (`KindInfo::refreshes`, #2146): `get_entity`
+ * answers `refreshes` for the row's kind, not the adapter.
+ */
+const NOT_REFRESHED: Readonly<Record<string, ReadonlySet<string>>> = {
+  teamcity: new Set(["build_config"]),
+  gitea: new Set(["repo", "branch", "commit"]),
+  jira: new Set(["jira_view"]),
+};
+
+/** Whether `adapterKind`'s refresh reads an item of `kind`. */
+function refreshesKind(adapterKind: string, kind: string): boolean {
+  return REFRESHING_ADAPTERS.has(adapterKind) && !(NOT_REFRESHED[adapterKind]?.has(kind) ?? false);
+}
+
 let bridge: FakeBridge | null = null;
 
 /** Hold the bridge, so a refresh can end on `item:refreshed` (#2107). */
@@ -192,9 +208,7 @@ function refreshEntity(args: Record<string, unknown>): EntityRefresh {
   if (!rosterMonitor) {
     const detail = getEntity(args);
     if (!detail.source.enabled) return { outcome: "turned_off" };
-    if (!REFRESHING_ADAPTERS.has(detail.source.adapter_kind)) return { outcome: "not_offered" };
-    // TeamCity reads a build by id, never a build configuration (#2127).
-    if (detail.row.kind === "build_config") return { outcome: "not_offered" };
+    if (!refreshesKind(detail.source.adapter_kind, detail.row.kind)) return { outcome: "not_offered" };
   }
   const failed = new URLSearchParams(location.search).has("fake-refresh-failed");
   setTimeout(() => bridge?.emit("item:refreshed", { entity_id: id, write_id: null, ended: failed ? "failed" : "refreshed" }), 0);
@@ -235,7 +249,7 @@ function getEntity(args: Record<string, unknown>) {
     // `epic` here, so *Save as a link set…* (#869) offers the epic.
     row: entry.kind === "ticket" && row.path === null ? { ...row, path: fakeText(entry.payload["epic"]) } : row,
     source,
-    refreshes: REFRESHING_ADAPTERS.has(source.adapter_kind),
+    refreshes: refreshesKind(source.adapter_kind, entry.kind),
     // Null, where the real command now resolves the adapter's KindInfo from
     // the registry. Harmless divergence: the fallback path draws the same
     // words — knobas' own vocabulary (`kinds.ts` layer 2) matches the mock's
