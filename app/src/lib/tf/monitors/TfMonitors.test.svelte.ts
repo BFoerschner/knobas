@@ -15,8 +15,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import type { MonitorPorts } from "./TfMonitors.svelte";
 import TfMonitors from "./TfMonitors.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
-import { createSourceSyncs } from "../role-sync.svelte";
-import type { EntityRefresh } from "../../ipc/sources";
+import { refreshProbe, type RefreshProbe } from "../refresh.fixture";
 
 const NOW = new Date("2026-10-16T14:00:00Z");
 
@@ -96,10 +95,8 @@ let heard: Map<number, Hear>;
 let synced: Set<(event: { payload: unknown }) => void>;
 /** The page's `item:refreshed` listeners (#2105). */
 let refreshes: Set<(event: { payload: unknown }) => void>;
-/** The monitors a row's *Refresh* read from their source (#2138). */
-let refreshAsked: string[];
-/** The sources a row's *Sync now* ran. */
-let ranSources: string[];
+/** The rows' *Refresh* and *Sync now* (#2138): the monitors read from their source, the sources run. */
+let probe: RefreshProbe;
 
 beforeEach(() => {
   toasts.items.splice(0);
@@ -110,8 +107,7 @@ beforeEach(() => {
   heard = new Map();
   synced = new Set();
   refreshes = new Set();
-  refreshAsked = [];
-  ranSources = [];
+  probe = refreshProbe();
   target = document.createElement("div");
   document.body.appendChild(target);
 });
@@ -170,21 +166,8 @@ function ports(over: Partial<MonitorPorts> = {}): MonitorPorts {
         return () => heard.delete(id);
       },
     }),
-    refresh: refreshPorts(async () => ({ outcome: "refreshed" })),
+    refresh: probe.ports,
     ...over,
-  };
-}
-
-/** A row's *Refresh* answering `answer`, and its *Sync now* a run that never ends. */
-function refreshPorts(answer: () => Promise<EntityRefresh>): NonNullable<MonitorPorts["refresh"]> {
-  return {
-    refreshEntity: (id) => (refreshAsked.push(id), answer()),
-    syncs: createSourceSyncs({
-      syncRole: () => Promise.reject(new Error("unused")),
-      syncNow: async (source) => (ranSources.push(source), 1),
-      syncStatus: async () => [],
-      listen: async () => () => {},
-    }),
   };
 }
 
@@ -617,8 +600,8 @@ test("a row whose source reads one monitor draws Refresh, one whose source does 
 
   rowNamed("edge ping").querySelector<HTMLButtonElement>(".tf-refresh")!.click();
   await settle();
-  expect(ranSources).toEqual(["other"]);
-  expect(refreshAsked).toEqual([]);
+  expect(probe.synced).toEqual(["other"]);
+  expect(probe.refreshed).toEqual([]);
 });
 
 test("Refresh reads the monitor from its source, then the roster again over what it drew, and settles a pause on that read (#2138)", async () => {
@@ -647,7 +630,7 @@ test("Refresh reads the monitor from its source, then the roster again over what
   const refresh = rowNamed("payouts /health").querySelector<HTMLButtonElement>(".tf-refresh")!;
   refresh.click();
   await settle();
-  expect(refreshAsked).toEqual(["kuma:1"]);
+  expect(probe.refreshed).toEqual(["kuma:1"]);
   expect(reads).toBe(before + 1);
   // The roster stays drawn while its read is out, the button saying so.
   expect(rows()).toHaveLength(4);
@@ -662,7 +645,7 @@ test("Refresh reads the monitor from its source, then the roster again over what
 });
 
 test("a monitor whose refresh failed keeps the roster and says why under its row (#2138)", async () => {
-  await draw([], null, ports({ refresh: refreshPorts(async () => ({ outcome: "failed", reason: "Unreachable" })) }));
+  await draw([], null, ports({ refresh: refreshProbe({ answer: async () => ({ outcome: "failed", reason: "Unreachable" }) }).ports }));
   rowNamed("pg-payments").querySelector<HTMLButtonElement>(".tf-refresh")!.click();
   await settle();
   const failed = target.querySelector(".tf-refresh-failed");

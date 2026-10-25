@@ -7,9 +7,8 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { EntityDetail, SourceView, ViewAction } from "../../ipc/entity";
-import type { EntityRefresh, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
-import { createSourceSyncs } from "../role-sync.svelte";
-import type { DetailRefreshPorts } from "../refresh.svelte";
+import type { EntityRefresh, WriteOpPayload } from "../../ipc/sources";
+import { refreshProbe, type RefreshProbe } from "../refresh.fixture";
 import { toasts } from "../../shell/toasts.svelte";
 import TfItem, { type ItemPorts } from "./TfItem.svelte";
 
@@ -83,10 +82,7 @@ beforeEach(() => {
   target = document.createElement("div");
   document.body.appendChild(target);
   writes = [];
-  refreshed = [];
-  synced = [];
-  refreshAnswer = () => Promise.resolve({ outcome: "refreshed" });
-  syncAnswer = () => Promise.resolve(77);
+  probe = refreshProbe();
   toasts.items = [];
 });
 
@@ -101,39 +97,13 @@ async function settle() {
   flushSync();
 }
 
-/** What the page asked to refresh, and the source runs its *Sync now* asked for. */
-let refreshed: string[] = [];
-let synced: string[] = [];
-/** Sends `sync:state` to the page's *Sync now*. */
-let sendStatus: (row: SourceSyncStatus) => void = () => {};
-/** What `sync_now` answers next. */
-let syncAnswer: () => Promise<number> = () => Promise.resolve(77);
-/** What `refresh_entity` answers next. */
-let refreshAnswer: () => Promise<EntityRefresh> = () => Promise.resolve({ outcome: "refreshed" });
-
-function refreshPorts(): DetailRefreshPorts {
-  const handlers = new Set<(event: { payload: unknown }) => void>();
-  sendStatus = (row) => {
-    for (const handler of [...handlers]) handler({ payload: row });
-  };
-  return {
-    refreshEntity: (entityId) => (refreshed.push(entityId), refreshAnswer()),
-    syncs: createSourceSyncs({
-      syncRole: () => Promise.reject(new Error("a detail never syncs a role")),
-      syncNow: (sourceId) => (synced.push(sourceId), syncAnswer()),
-      syncStatus: () => Promise.resolve([]),
-      listen: (_event, handler) => {
-        handlers.add(handler);
-        return Promise.resolve(() => handlers.delete(handler));
-      },
-    }),
-  };
-}
+/** The page's *Refresh* and *Sync now*, and what they were asked. */
+let probe: RefreshProbe = refreshProbe();
 
 /** The page's reads as given; its writes land in {@link writes}. */
 async function open(reads: Omit<ItemPorts, "submitWrite">, id = ID, job: string | null = null) {
   const ports: ItemPorts = {
-    refresh: refreshPorts(),
+    refresh: probe.ports,
     ...reads,
     submitWrite: (payload) => {
       writes.push(payload);
@@ -352,12 +322,12 @@ test("Refresh reads the item, says Refreshing… meanwhile, and settles without 
   const { ports, count } = reads(detail(), detail({ row: { ...detail().row, title: "Quay crane 4 inspection, signed off" } }));
   await open(ports);
   let answer!: (value: EntityRefresh) => void;
-  refreshAnswer = () => new Promise((resolve) => (answer = resolve));
+  probe.answer = () => new Promise((resolve) => (answer = resolve));
 
   expect(refreshButton()?.textContent).toBe("Refresh");
   refreshButton()!.click();
   flushSync();
-  expect(refreshed).toEqual([ID]);
+  expect(probe.refreshed).toEqual([ID]);
   expect(refreshButton()?.textContent).toBe("Refreshing…");
   expect(refreshButton()?.disabled).toBe(true);
   // The detail stays drawn while the read is out.
@@ -381,14 +351,14 @@ test("a tombstoned item keeps Refresh, and one that comes back loses the withdra
 
   refreshButton()!.click();
   await settle();
-  expect(refreshed).toEqual([ID]);
+  expect(probe.refreshed).toEqual([ID]);
   expect(banners()).toEqual([]);
 });
 
 test("gone draws the withdrawn banner over the detail", async () => {
   await open(reads(detail(), detail({ deleted_at: "2026-10-25T08:00:00Z" })).ports);
   expect(banners()).toEqual([]);
-  refreshAnswer = () => Promise.resolve({ outcome: "gone" });
+  probe.answer = () => Promise.resolve({ outcome: "gone" });
 
   refreshButton()!.click();
   await settle();
@@ -399,7 +369,7 @@ test("gone draws the withdrawn banner over the detail", async () => {
 test("a failed refresh says why in one line and keeps the detail as it was", async () => {
   const { ports, count } = reads(detail());
   await open(ports);
-  refreshAnswer = () => Promise.resolve({ outcome: "failed", reason: "connection refused" });
+  probe.answer = () => Promise.resolve({ outcome: "failed", reason: "connection refused" });
 
   refreshButton()!.click();
   await settle();
@@ -417,11 +387,11 @@ test("an adapter that does not read one item offers Sync now, which runs the ite
 
   refreshButton()!.click();
   await settle();
-  expect(synced).toEqual(["surveys"]);
-  expect(refreshed).toEqual([]);
+  expect(probe.synced).toEqual(["surveys"]);
+  expect(probe.refreshed).toEqual([]);
   expect(refreshButton()?.textContent).toBe("Syncing…");
 
-  sendStatus({ source_id: "surveys", running: false, run_id: 77, started_at: null, last_finished_at: null, last_outcome: "ok", next_run_at: null, backoff_until: null, last_changed: null });
+  probe.end("surveys");
   await settle();
   expect(refreshButton()?.textContent).toBe("Sync now");
   expect(count.detail).toBe(2);
@@ -429,11 +399,11 @@ test("an adapter that does not read one item offers Sync now, which runs the ite
 
 test("an instance that answers not offered gets its source's run, and Sync now from then", async () => {
   await open(reads(detail()).ports);
-  refreshAnswer = () => Promise.resolve({ outcome: "not_offered" });
+  probe.answer = () => Promise.resolve({ outcome: "not_offered" });
 
   refreshButton()!.click();
   await settle();
-  expect(synced).toEqual(["surveys"]);
+  expect(probe.synced).toEqual(["surveys"]);
   expect(refreshButton()?.textContent).toBe("Syncing…");
 });
 
@@ -447,8 +417,8 @@ test("a turned-off source's item draws neither button, and its banner names the 
 
 test("a source run the not-offered answer asked for and was refused says why in a toast", async () => {
   await open(reads(detail()).ports);
-  refreshAnswer = () => Promise.resolve({ outcome: "not_offered" });
-  syncAnswer = () => Promise.reject({ code: "not_ready", message: "the engine is starting", source_id: null });
+  probe.answer = () => Promise.resolve({ outcome: "not_offered" });
+  probe.run = () => Promise.reject({ code: "not_ready", message: "the engine is starting", source_id: null });
 
   refreshButton()!.click();
   await settle();

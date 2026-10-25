@@ -20,8 +20,7 @@ import type {
   StateChip,
 } from "../../ipc/entity";
 import type { CredentialHealth, EntityRefresh, SourceSyncStatus, SourceDescriptor, WriteOpPayload } from "../../ipc/sources";
-import { createSourceSyncs } from "../role-sync.svelte";
-import type { DetailRefreshPorts } from "../refresh.svelte";
+import { refreshProbe } from "../refresh.fixture";
 import type { WriteAsk } from "../../shell/refused-writes";
 import type { RunningTimer, Week } from "../../ipc/time";
 import { health } from "../../shell/health.svelte";
@@ -1457,39 +1456,12 @@ test("a comment's echo says queued, then sent, and goes on the refresh event's r
 
 // ---- Refresh on the job page (#2134, #2107's shared pieces) ----
 
-/**
- * `refresh_entity` answering `answer`, and a *Sync now* whose run ends when
- * `end()` is sent; `asks` holds the items it was asked to refresh and the
- * source runs it was asked for.
- */
-function refreshing(answer: () => Promise<EntityRefresh> = () => Promise.resolve({ outcome: "refreshed" })) {
-  const refreshAsks = { items: [] as string[], runs: [] as string[] };
-  const handlers = new Set<(event: { payload: unknown }) => void>();
-  const refresh: DetailRefreshPorts = {
-    refreshEntity: (entityId) => (refreshAsks.items.push(entityId), answer()),
-    syncs: createSourceSyncs({
-      syncRole: () => Promise.reject(new Error("a detail never syncs a role")),
-      syncNow: (sourceId) => (refreshAsks.runs.push(sourceId), Promise.resolve(88)),
-      syncStatus: () => Promise.resolve([]),
-      listen: (_event, handler) => {
-        handlers.add(handler);
-        return Promise.resolve(() => handlers.delete(handler));
-      },
-    }),
-  };
-  const end = (source_id: string) => {
-    const row: SourceSyncStatus = { source_id, running: false, run_id: 88, started_at: null, last_finished_at: null, last_outcome: "ok", next_run_at: null, backoff_until: null, last_changed: null };
-    for (const handler of [...handlers]) handler({ payload: row });
-  };
-  return { refresh, end, asks: refreshAsks };
-}
-
 const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-wtabs .tf-refresh");
 const jobBanners = () => [...target.querySelectorAll(".tf-work > .tf-banner")].map((banner) => squash(banner));
 
 test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… meanwhile, and reads the job again without blanking it", async () => {
   let answer!: (value: EntityRefresh) => void;
-  const { refresh, asks } = refreshing(() => new Promise((resolve) => (answer = resolve)));
+  const probe = refreshProbe({ answer: () => new Promise((resolve) => (answer = resolve)) });
   let title = "Retry failed SEPA payouts";
   let threads = 0;
   let reaches = 0;
@@ -1503,7 +1475,7 @@ test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… me
       return { comments: [], changes: [], me: ["mara"] };
     },
     jobReach: () => (reaches++, Promise.resolve([])),
-    refresh,
+    refresh: probe.ports,
   });
   open("PAY-231", { ports: io });
   await settle();
@@ -1514,7 +1486,7 @@ test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… me
 
   refreshButton()!.click();
   await settle();
-  expect(asks.items).toEqual([ID]);
+  expect(probe.refreshed).toEqual([ID]);
   expect(refreshButton()?.textContent).toBe("Refreshing…");
   expect(refreshButton()?.disabled).toBe(true);
   expect(calls.read).toEqual([]);
@@ -1542,8 +1514,8 @@ test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… me
 });
 
 test("a failed refresh on the job says why under the tab bar and keeps the job as it was", async () => {
-  const { refresh } = refreshing(() => Promise.resolve({ outcome: "failed", reason: "connection refused" }));
-  open("PAY-231", { ports: ports({ refresh }) });
+  const probe = refreshProbe({ answer: () => Promise.resolve({ outcome: "failed", reason: "connection refused" }) });
+  open("PAY-231", { ports: ports({ refresh: probe.ports }) });
   await settle();
   calls.read.length = 0;
   refreshButton()!.click();
@@ -1555,10 +1527,10 @@ test("a failed refresh on the job says why under the tab bar and keeps the job a
 });
 
 test("a ticket whose adapter does not read one item offers Sync now on the job, and the job is read again when the run ends", async () => {
-  const { refresh, end, asks } = refreshing();
+  const probe = refreshProbe();
   const io = ports({
     getEntity: (id) => (calls.read.push(id), id === ID ? Promise.resolve(ticket({ refreshes: false })) : Promise.reject({ code: "not_found" })),
-    refresh,
+    refresh: probe.ports,
   });
   open("PAY-231", { ports: io });
   await settle();
@@ -1567,20 +1539,20 @@ test("a ticket whose adapter does not read one item offers Sync now on the job, 
 
   refreshButton()!.click();
   await settle();
-  expect(asks.runs).toEqual(["jira"]);
-  expect(asks.items).toEqual([]);
+  expect(probe.synced).toEqual(["jira"]);
+  expect(probe.refreshed).toEqual([]);
   expect(refreshButton()?.textContent).toBe("Syncing…");
 
-  end("jira");
+  probe.end("jira");
   await settle();
   expect(refreshButton()?.textContent).toBe("Sync now");
   expect(calls.read).toEqual([ID]);
 });
 
 test("a turned-off source's ticket draws no Refresh on the job, and the withdrawn and turned-off banners show under the tab bar", async () => {
-  const { refresh } = refreshing();
+  const probe = refreshProbe();
   const off = ticket({ deleted_at: "2026-10-15T12:00:00Z", source: { ...ticket().source, enabled: false } });
-  open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(off) : Promise.reject({ code: "not_found" })), refresh }) });
+  open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(off) : Promise.reject({ code: "not_found" })), refresh: probe.ports }) });
   await settle();
   expect(refreshButton()).toBeNull();
   const shown = jobBanners();
@@ -1592,7 +1564,7 @@ test("a turned-off source's ticket draws no Refresh on the job, and the withdraw
 });
 
 test("a move's echo goes on a Refresh's read of the ticket, and a comment's on its read of the thread (#2103)", async () => {
-  const { refresh } = refreshing();
+  const probe = refreshProbe();
   let status = "In Progress";
   let said: { author: string; at: string; body: string; mine: boolean; mentions_me: boolean }[] = [];
   let next = 80;
@@ -1600,7 +1572,7 @@ test("a move's echo goes on a Refresh's read of the ticket, and a comment's on i
     getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status })) : Promise.reject({ code: "not_found" })),
     entityThread: () => Promise.resolve({ comments: said, changes: [], me: ["mara"] }),
     submitWrite: () => Promise.resolve({ id: next++ } as never),
-    refresh,
+    refresh: probe.ports,
   });
   open("PAY-231", { ports: io, tab: "conversation" });
   await settle();
