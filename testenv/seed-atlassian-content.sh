@@ -369,20 +369,27 @@ verify_confluence() {
   # so a suite run straight after a seed from empty saw two pages of seven
   # (#633's first `atlassian-live`, where nothing ran between the content seed
   # and the Confluence suites any more). Every page recorded in seed-state.json
-  # must come back from a search of the space, waited for up to 180 s.
+  # must come back from a search of the space, waited for up to 180 s. And
+  # nothing else may (#2111): the adapter suite bounds a full sync by the
+  # seeded pages and the home page, and a page the seed deleted leaves the
+  # index as late as a created one joins it.
   _want=$(jq -r '[.confluence.pages[]?.id] | sort | join(" ")' "$STATE")
+  _home=$(jq -r '.confluence.home_page_id // empty' "$STATE")
   _waited=0
   while :; do
     conf GET "/rest/api/content/search?cql=$(urlenc "space = \"$SPACE_KEY\" and type = page")&limit=100"
     _have=$(printf '%s' "$API_BODY" | jq -r '[.results[]?.id] | sort | join(" ")' 2>/dev/null || echo)
     _missing=$(jq -rn --arg w "$_want" --arg h "$_have" '($w | split(" ")) - ($h | split(" ")) | join(" ")')
-    [ -n "$_missing" ] || break
+    _extra=$(jq -rn --arg w "$_want $_home" --arg h "$_have" '($h | split(" ")) - ($w | split(" ")) - [""] | join(" ")')
+    [ -n "$_missing$_extra" ] || break
     if [ "$_waited" -ge 180 ]; then
-      echo "  pages not in a CQL search of $SPACE_KEY after ${_waited}s: $_missing" >&2; _fail=1; break
+      [ -z "$_missing" ] || echo "  pages not in a CQL search of $SPACE_KEY after ${_waited}s: $_missing" >&2
+      [ -z "$_extra" ] || echo "  pages the seed does not record still in a CQL search of $SPACE_KEY after ${_waited}s: $_extra" >&2
+      _fail=1; break
     fi
     sleep 5; _waited=$((_waited + 5))
   done
-  [ -n "$_missing" ] || say "verify: every seeded page is in a CQL search of $SPACE_KEY (after ${_waited}s)"
+  [ -n "$_missing$_extra" ] || say "verify: a CQL search of $SPACE_KEY returns exactly the seeded pages and the home page (after ${_waited}s)"
 
   # The page with a body, and its first `## ` heading -- from the fixture, so
   # a renamed page in work.json is still what this checks for.
@@ -1017,6 +1024,41 @@ for row in $(jq -r --arg k "$SPACE_KEY" --arg n "$NESTED_PAGE" \
   PAGE_IDS=$(printf '%s' "$PAGE_IDS" | jq --arg f "$fid" --arg t "$title" --arg i "$pid" --arg p "$parent" --argjson c "$comment_ids" \
     '. + [{fixture_id: $f, title: $t, id: $i, parent_id: $p, comments: $c}]')
 done
+
+# -- pages the seed did not create go (#2111) --------------------------------
+# The space is the seed's: its home page and the pages just found or created
+# above, and nothing else. A suite that creates a page deletes it from a
+# guard, and a run that was killed reaches no guard, so its page stays -- and
+# on a Confluence left up between runs (`just live-up confluence`, or a
+# session killed before its trap) the next run's full sync returned them as
+# corpus the seed knows nothing about (#2111: twelve such pages). Scoped by
+# what this run keeps, not by what a suite might have named its page, so a
+# leftover of a suite not written yet goes too. Read from the content list,
+# not from CQL, which is the index and lags a create by seconds. Each one is
+# trashed and then purged, so its title is free for the run that makes it
+# again. The list is flat, every depth at once, so a stray's children are on
+# it beside their parent. On a fresh space, and on the second seed of every
+# window, nothing is deleted.
+KEEP=$(printf '%s' "$PAGE_IDS" | jq -c --arg h "$HOME_ID" '[$h] + map(.id)')
+STRAYS=0
+stray=
+start=0
+while :; do
+  conf GET "/rest/api/content?spaceKey=$SPACE_KEY&type=page&limit=100&start=$start"
+  expect "list the pages of $SPACE_KEY" 200
+  stray="$stray $(printf '%s' "$API_BODY" | jq -r --argjson k "$KEEP" \
+    '.results[] | select(.id as $i | $k | index($i) | not) | .id')"
+  [ "$(printf '%s' "$API_BODY" | jq '.size // 0')" -ge 100 ] || break
+  start=$((start + 100))
+done
+for id in $stray; do
+  conf DELETE "/rest/api/content/$id"
+  expect "trash page $id" 204 404
+  conf DELETE "/rest/api/content/$id?status=trashed"
+  expect "purge page $id" 204 404
+  STRAYS=$((STRAYS + 1))
+done
+[ "$STRAYS" -eq 0 ] || say "deleted $STRAYS pages in $SPACE_KEY the seed did not create"
 
 # The argument is a jq PROGRAM: $v is jq's variable, not the shell's.
 # shellcheck disable=SC2016
