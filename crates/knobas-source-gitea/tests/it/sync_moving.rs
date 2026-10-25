@@ -1496,6 +1496,51 @@ async fn a_commit_catch_up_whose_page_starts_below_its_window_reads_on_from_page
     );
 }
 
+/// A catch-up's page past the end of the listing is not the end of the
+/// branch: the branch is force-pushed to three pages between two runs, its
+/// first page still above the window, so page 4 answers empty. The run reads
+/// on from page 2 and delivers the seven left below the resume point.
+#[tokio::test]
+async fn a_commit_catch_up_whose_page_is_past_the_end_reads_on_from_page_two() {
+    let (_server, moving, gitea, cursor) = forgejo_with_a_push(40, 10).await;
+    let (_, cursor) = run(&*gitea, Some(&cursor)).await;
+    let (_, cursor) = run(&*gitea, Some(&cursor)).await;
+    assert_eq!(
+        position(&cursor, PAYOUT)["commits_catching_up"]["page"],
+        json!(4)
+    );
+    // Rewritten to the five newest, the seven `pushed(14..=20)` below the
+    // resume point `pushed(21)`, and the start: thirteen, three pages.
+    let kept = |id: &str| {
+        id == sha(1) || (14..=20).chain(36..=40).any(|k| pushed(k).0 == id)
+    };
+    moving.with(|world| {
+        let history = world
+            .commits
+            .get_mut(&format!("{PAYOUT}@main"))
+            .expect("main");
+        history.retain(|c| kept(text(c, "/sha")));
+        assert_eq!(history.len(), 13);
+    });
+
+    commit_pages(&moving);
+    let (third, _) = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run(&*gitea, Some(&cursor)),
+    )
+    .await
+    .expect("the walk goes back to the branch head once");
+    let pages = commit_pages(&moving);
+    assert!(pages.starts_with(&[1, 4, 2, 3]), "{pages:?}");
+    let mut got = emitted(&third, "commit");
+    got.sort();
+    let mut expected: Vec<String> = (14..=20)
+        .map(|k| format!("gitea:{PAYOUT}@{}", pushed(k).0))
+        .collect();
+    expected.sort();
+    assert_eq!(got, expected, "the seven below the resume point");
+}
+
 /// #2039: on the same server an incremental walk ends on the page that
 /// reaches below its watermark, rather than reading one more page of old
 /// history to find nothing new on it.
