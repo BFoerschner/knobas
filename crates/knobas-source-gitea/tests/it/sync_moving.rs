@@ -1468,7 +1468,12 @@ async fn a_commit_catch_up_whose_page_starts_below_its_window_reads_on_from_page
     });
 
     commit_pages(&moving);
-    let (third, _) = run(&*gitea, Some(&cursor)).await;
+    let (third, _) = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run(&*gitea, Some(&cursor)),
+    )
+    .await
+    .expect("the walk goes back to the branch head once, not round and round");
     let pages = commit_pages(&moving);
     assert_eq!(pages[..3], [1, 4, 2], "{pages:?}");
     let mut got = emitted(&third, "commit");
