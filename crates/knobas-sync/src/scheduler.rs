@@ -178,6 +178,7 @@ pub struct RefreshEnded {
     /// The queued write the refresh followed, or `None` for one the reader
     /// asked for.
     pub write_id: Option<i64>,
+    /// How it ended.
     pub ended: RefreshEnd,
 }
 

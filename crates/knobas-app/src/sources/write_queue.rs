@@ -865,9 +865,7 @@ fn role_writes(descriptor: &knobas_source::SourceDescriptor) -> Vec<String> {
 /// and the next scheduled sync re-reads the source either way.
 pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
     let entity = read_back(&scheduler.deps().pool, write).await;
-    if let Err(error) =
-        crate::sources::refresh::refresh(scheduler, &entity, Some(write.id)).await
-    {
+    if let Err(error) = crate::sources::refresh::refresh(scheduler, &entity, Some(write.id)).await {
         tracing::warn!(
             source = %write.source_id,
             write_id = write.id,

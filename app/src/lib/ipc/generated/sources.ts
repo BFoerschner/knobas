@@ -925,7 +925,11 @@ entity_id: string,
  * The queued write the refresh followed, or `None` for one the reader
  * asked for.
  */
-write_id: number | null, ended: RefreshEnd, };
+write_id: number | null, 
+/**
+ * How it ended.
+ */
+ended: RefreshEnd, };
 
 /**
  * Uninstall's answer for one source: remove its items, or keep them.

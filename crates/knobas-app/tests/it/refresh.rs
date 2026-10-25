@@ -532,8 +532,14 @@ async fn a_refresh_writes_no_activity_line_and_leaves_the_cursor() {
         .unwrap();
 
     let outcome = refresh::refresh(&f.state.scheduler, TICKET, None).await;
-    assert!(matches!(outcome, Ok(RefreshOutcome::Refreshed)), "{outcome:?}");
-    assert_eq!(live_title(&f.state.pool, TICKET).await.as_deref(), Some("before"));
+    assert!(
+        matches!(outcome, Ok(RefreshOutcome::Refreshed)),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        live_title(&f.state.pool, TICKET).await.as_deref(),
+        Some("before")
+    );
 
     let cursor: Option<String> =
         sqlx::query_scalar("select cursor from knobas.source_config where id = $1")
@@ -592,7 +598,11 @@ async fn gone_tombstones_the_item_and_an_answer_brings_it_back() {
     let ends: Vec<RefreshEnd> = f.heard().into_iter().map(|e| e.ended).collect();
     assert_eq!(
         ends,
-        [RefreshEnd::Refreshed, RefreshEnd::Gone, RefreshEnd::Refreshed]
+        [
+            RefreshEnd::Refreshed,
+            RefreshEnd::Gone,
+            RefreshEnd::Refreshed
+        ]
     );
     f.state.scheduler.shutdown().await;
 }
@@ -715,8 +725,7 @@ async fn mock_fixture(name: &str) -> (SourcesState, Heard) {
         .expect("the source row is written");
         not_due(&pool, id).await;
     }
-    let registry: Arc<dyn AdapterRegistry> =
-        Arc::new(knobas_app::sources::Registry::for_process());
+    let registry: Arc<dyn AdapterRegistry> = Arc::new(knobas_app::sources::Registry::for_process());
     let secrets: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
     let heard = Heard::default();
     let scheduler = knobas_app::sources::start_scheduler(
@@ -751,10 +760,7 @@ async fn written_and_run_started(
     pool: &sqlx::PgPool,
     entity: &str,
     id: i64,
-) -> (
-    chrono::DateTime<chrono::Utc>,
-    chrono::DateTime<chrono::Utc>,
-) {
+) -> (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) {
     sqlx::query_as(
         "select i.synced_at, r.started_at
            from sync.item i, knobas.write_queue w, knobas.sync_run r
@@ -824,7 +830,10 @@ async fn a_landed_writes_item_is_mirrored_from_the_mock_before_any_run_starts() 
             .await
             .unwrap();
     let (written, run_started) = written_and_run_started(&state.pool, &made, filed).await;
-    assert!(written < run_started, "{made}: {written} before {run_started}");
+    assert!(
+        written < run_started,
+        "{made}: {written} before {run_started}"
+    );
     assert_eq!(
         live_title(&state.pool, &made).await.as_deref(),
         Some("Payout retries stall")

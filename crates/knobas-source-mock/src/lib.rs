@@ -487,6 +487,19 @@ impl MockSource {
         self.written.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Every live item this instance's remote system holds: the fixture,
+    /// and what it filed ([`filed`]), which a full sync that left out would
+    /// sweep.
+    fn world(&self) -> Vec<SyncItem> {
+        let mut world = items(&self.id);
+        if self.files_tickets
+            && let Some(tickets) = filed().get(&self.id)
+        {
+            world.extend(tickets.iter().map(|t| ticket_item(&self.id, t)));
+        }
+        world
+    }
+
     /// The error this instance should report instead of doing the work.
     fn fault_error(&self) -> Option<SourceError> {
         match self.fault {
@@ -799,7 +812,6 @@ fn branch_payload(b: &Branch) -> serde_json::Value {
     payload
 }
 
-/// Every work item in the fixture, in the order the mock emits them.
 /// A ticket as the sync emits it, a filed one ([`filed`]) included.
 fn ticket_item(source_id: &str, t: &Ticket) -> SyncItem {
     item(
@@ -826,6 +838,7 @@ fn filed_key(n: usize) -> String {
     format!("NEW-{n}")
 }
 
+/// Every work item in the fixture, in the order the mock emits them.
 fn items(source_id: &str) -> Vec<SyncItem> {
     let f = fixture();
     let mut out = Vec::new();
@@ -1344,15 +1357,7 @@ impl Source for MockSource {
         if cursor.as_deref() == Some(CURSOR) {
             return Ok(CURSOR.to_owned());
         }
-        let mut fixture = items(&self.id);
-        // What this instance filed is part of its world: a full sync that
-        // left it out would sweep it.
-        if self.files_tickets {
-            let filed = filed();
-            if let Some(tickets) = filed.get(&self.id) {
-                fixture.extend(tickets.iter().map(|t| ticket_item(&self.id, t)));
-            }
-        }
+        let mut fixture = self.world();
         if self.tombstone {
             // Last, and still inside the sync: a deletion is an item like any
             // other, carrying the last-known title so the UI can render what
@@ -1437,14 +1442,8 @@ impl Source for MockSource {
         if let Some(err) = self.fault_error() {
             return Err(err);
         }
-        let mut world = items(&self.id);
-        if self.files_tickets {
-            let filed = filed();
-            if let Some(tickets) = filed.get(&self.id) {
-                world.extend(tickets.iter().map(|t| ticket_item(&self.id, t)));
-            }
-        }
-        Ok(world
+        Ok(self
+            .world()
             .into_iter()
             .find(|item| item.entity.to_string() == entity)
             .map_or(RefreshAnswer::Gone, RefreshAnswer::Item))

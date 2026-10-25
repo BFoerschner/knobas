@@ -1115,10 +1115,12 @@ async fn a_mock_configured_without_refresh_offers_none_and_passes_the_battery() 
         source.refresh("mock:PAY-231").await,
         Ok(knobas_source::RefreshAnswer::NotOffered)
     ));
-    assert!(knobas_source_mock::build(configured(serde_json::json!({})))
-        .expect("built")
-        .descriptor()
-        .refreshes());
+    assert!(
+        knobas_source_mock::build(configured(serde_json::json!({})))
+            .expect("built")
+            .descriptor()
+            .refreshes()
+    );
     battery(move |fault| match fault {
         Fault::None => knobas_source_mock::build(instance.clone()).expect("built"),
         other => Box::new(MockSource::with_fault(other)) as Box<dyn knobas_source::Source>,
@@ -1134,7 +1136,13 @@ async fn a_filing_mock_names_the_ticket_it_filed_and_reads_it_back() {
     let mut instance = configured(serde_json::json!({ "files_tickets": true }));
     instance.id = format!("mockfile{}", std::process::id());
     let filer = knobas_source_mock::build(instance.clone()).expect("built");
-    assert!(filer.descriptor().write_ops.iter().any(|op| op == "create_ticket"));
+    assert!(
+        filer
+            .descriptor()
+            .write_ops
+            .iter()
+            .any(|op| op == "create_ticket")
+    );
     let receipt = filer
         .write(knobas_source::WriteOp::CreateTicket {
             entity: format!("{}:PAY-231", instance.id),
@@ -1161,5 +1169,11 @@ async fn a_filing_mock_names_the_ticket_it_filed_and_reads_it_back() {
 
     // The plain mock files nothing.
     let plain = knobas_source_mock::build(configured(serde_json::json!({}))).expect("built");
-    assert!(!plain.descriptor().write_ops.iter().any(|op| op == "create_ticket"));
+    assert!(
+        !plain
+            .descriptor()
+            .write_ops
+            .iter()
+            .any(|op| op == "create_ticket")
+    );
 }

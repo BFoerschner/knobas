@@ -1731,6 +1731,12 @@ impl WriteReceipt {
 
 /// What a source answers when asked for one item by id
 /// ([`Source::refresh`], ADR-0031).
+///
+/// `Item` is unboxed, though it dwarfs the other two: the answer is built
+/// once per read and moved straight into the sink, and every adapter writes
+/// `RefreshAnswer::Item(item)` without a `Box::new` around what its sync
+/// already builds.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum RefreshAnswer {
     /// The item as the source holds it now, in the shape a sync emits it:

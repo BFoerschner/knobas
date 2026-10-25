@@ -72,8 +72,8 @@ pub async fn of_entity(
     deps: &SchedulerDeps,
     entity_id: &str,
 ) -> Result<RefreshOutcome, RefreshError> {
-    let entity = EntityRef::parse(entity_id)
-        .map_err(|_| RefreshError::NotAnEntity(entity_id.to_owned()))?;
+    let entity =
+        EntityRef::parse(entity_id).map_err(|_| RefreshError::NotAnEntity(entity_id.to_owned()))?;
     let cfg = crate::config::get(&deps.pool, &entity.namespace)
         .await
         .map_err(SyncError::Db)?
@@ -172,7 +172,10 @@ async fn refresh_locked(
     let outcome = match source.refresh(entity).await? {
         RefreshAnswer::NotOffered => return Ok(RefreshOutcome::NotOffered),
         RefreshAnswer::Gone => {
-            sqlx::query(TOMBSTONE).bind(entity).execute(&mut **tx).await?;
+            sqlx::query(TOMBSTONE)
+                .bind(entity)
+                .execute(&mut **tx)
+                .await?;
             RefreshOutcome::Gone
         }
         RefreshAnswer::Item(item) => {

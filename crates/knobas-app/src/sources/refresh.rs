@@ -46,10 +46,12 @@ pub async fn refresh(
         Err(RefreshError::Build(_) | RefreshError::Sync(_)) => RefreshEnd::Failed,
     };
     let deps = scheduler.deps();
+    // `Scheduler::refresh` answered, so the id parsed.
     if ended == RefreshEnd::Refreshed
-        && let Some((source_id, _)) = entity_id.split_once(':')
+        && let Ok(entity) = knobas_core::entity::EntityRef::parse(entity_id)
     {
-        super::write_queue::resolve_arrivals(&deps.pool, deps.registry.as_ref(), source_id).await;
+        super::write_queue::resolve_arrivals(&deps.pool, deps.registry.as_ref(), &entity.namespace)
+            .await;
     }
     deps.events.refresh_ended(&RefreshEnded {
         entity_id: entity_id.to_owned(),

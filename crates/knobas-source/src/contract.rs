@@ -515,10 +515,9 @@ async fn check_refresh(
     let mut answered = false;
     for item in asked {
         let id = item.entity.to_string();
-        let answer = s
-            .refresh(&id)
-            .await
-            .unwrap_or_else(|error| panic!("refresh of {id}, which the sync emitted, failed: {error}"));
+        let answer = s.refresh(&id).await.unwrap_or_else(|error| {
+            panic!("refresh of {id}, which the sync emitted, failed: {error}")
+        });
         if matches!(answer, crate::RefreshAnswer::NotOffered) {
             continue;
         }
@@ -540,8 +539,14 @@ async fn check_refresh(
                     "refresh of {id}, which the sync emitted deleted, must answer it gone, not \
                      as an item"
                 );
-                assert_eq!(read.entity, item.entity, "refresh of {id} answered another item");
-                assert_eq!(read.kind, item.kind, "refresh of {id} answered another kind");
+                assert_eq!(
+                    read.entity, item.entity,
+                    "refresh of {id} answered another item"
+                );
+                assert_eq!(
+                    read.kind, item.kind,
+                    "refresh of {id} answered another kind"
+                );
                 assert_eq!(
                     read.title, item.title,
                     "refresh of {id} answered another title than the sync emitted"
