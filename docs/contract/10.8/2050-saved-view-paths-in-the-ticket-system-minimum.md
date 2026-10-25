@@ -46,5 +46,16 @@
   longer reads `jql`, `type`, `sub_query` or `sprint` by name. The frame's own keys (`kind`, `id`,
   `columns`, `keys`, `query`) are read as before. **Rows already mirrored need no re-sync or
   migration:** Jira's declaration names the keys its payloads already carry, so the next run
-  projects every existing view to the same row. The one difference is that a query is trimmed and
-  a blank one is the empty query, as every declared string is read.
+  projects every existing view to the same row. The one difference is that the query, board type
+  and sub-query are read trimmed, as every declared string is: blanks around a JQL or a sub-query
+  go, and a blank query is the empty query. The upsert rewrites every column at each sync anyway,
+  so nothing reports the trimmed row as changed, and the reader's settings
+  (`knobas.ticket_view`) are not touched. The frame's own keys are named on `Frame`'s doc.
+
+  **Adapters already installed.** `role::check` runs at install and at an update's check
+  (`manifest::check`), never at load: `load_installed` and a restore's reinstall go through
+  `install::load_one`, which re-checks no role. So an external adapter installed before this
+  change whose saved-view kind declares no `source_query` keeps loading (its views draw no
+  query); a new install or an update of it is refused by clause 10, naming the path. No adapter
+  on main besides Jira uses the frame. The battery's frame check runs in an adapter's own tests
+  only.
