@@ -609,3 +609,27 @@ test("a repository withdrawn upstream says so and keeps Refresh", async () => {
   expect(text(target.querySelector(".tf-withdrawn"))).toContain("Withdrawn upstream");
   expect(refreshButton()?.textContent).toBe("Refresh");
 });
+
+test("the compare page keeps its branch's diff drawn while a refresh reads it again", async () => {
+  const base = ports({ getEntity: repoDetail(), refresh: refreshing() });
+  let diffs = 0;
+  await draw(
+    [REPO, "compare", "feature", "PAY-231-sepa-retry"],
+    {
+      ...base,
+      entityView: async (id, sectionId) => {
+        if (id === FEATURE && sectionId === null) return { sections: [], actions: [] };
+        if (id !== FEATURE || sectionId !== "diff") return base.entityView(id, sectionId);
+        // The first read answers; the refresh's stays out.
+        if ((diffs += 1) > 1) return new Promise(() => {});
+        const diff = await base.entityView(C1, null);
+        return section("diff", diff!.sections[0]!.blocks);
+      },
+    },
+  );
+  expect(target.querySelector(".tf-cbody .tf-diff")).not.toBeNull();
+  refreshButton()!.click();
+  await settle();
+  expect(diffs).toBe(2);
+  expect(target.querySelector(".tf-cbody .tf-diff")).not.toBeNull();
+});

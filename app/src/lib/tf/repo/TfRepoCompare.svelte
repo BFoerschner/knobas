@@ -65,6 +65,8 @@
   } = $props();
 
   const listed = $derived(branches.find((option) => option.name === head) ?? null);
+  /** The branch's entity: a refresh's new listing of the same branch reads nothing again on its own. */
+  const listedId = $derived(listed?.entityId ?? null);
   const into = $derived(defaultBranch ?? branches[0]?.name ?? "");
 
   let standing = $state<BranchStanding | null>(null);
@@ -80,7 +82,7 @@
 
   // The branch's view and its diff, read for each branch the address names.
   $effect(() => {
-    const id = listed?.entityId ?? null;
+    const id = listedId;
     let live = true;
     standing = null;
     files = null;
@@ -97,8 +99,8 @@
   $effect(() => {
     const n = refreshed;
     if (seenRefresh !== null && n !== seenRefresh) untrack(() => {
-        const id = listed?.entityId ?? null;
-        if (id !== null) readBranch(id, () => (listed?.entityId ?? null) === id, true);
+        const id = listedId;
+        if (id !== null) readBranch(id, () => listedId === id, true);
       });
     seenRefresh = n;
   });
