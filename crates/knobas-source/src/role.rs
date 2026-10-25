@@ -110,6 +110,14 @@ pub enum Field {
     Finished,
     /// A monitor's response time in milliseconds (#1224).
     ResponseTime,
+    /// A saved view's query, in the source's own language (#2050).
+    SourceQuery,
+    /// A saved view's board type (#2050).
+    BoardType,
+    /// The query a saved view narrows its own with (#2050).
+    SubQuery,
+    /// A saved view's active sprint, an object (#2050).
+    Sprint,
 }
 
 impl Field {
@@ -138,6 +146,10 @@ impl Field {
             Field::Started => "started",
             Field::Finished => "finished",
             Field::ResponseTime => "response_time",
+            Field::SourceQuery => "source_query",
+            Field::BoardType => "board_type",
+            Field::SubQuery => "sub_query",
+            Field::Sprint => "sprint",
         }
     }
 
@@ -156,11 +168,17 @@ impl Field {
     }
 }
 
-/// One kind a role requires, and the declared paths it must carry.
+/// One kind a role requires, the declared paths it must carry, and the ones
+/// it may: what a reader of the kind reads, and nothing else (#2050).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KindMinimum {
     pub kind: KindOf,
     pub paths: &'static [Field],
+    /// The paths the role reads when the kind declares them, and does
+    /// without when it does not: a saved view's board type, sub-query and
+    /// sprint. Never refused for being missing; the battery's clause 6 still
+    /// holds what is declared to the adapter's records.
+    pub optional_paths: &'static [Field],
 }
 
 /// A built-in role's minimum.
@@ -187,6 +205,7 @@ const fn kind(id: &'static str, paths: &'static [Field]) -> KindMinimum {
     KindMinimum {
         kind: KindOf::Id(id),
         paths,
+        optional_paths: &[],
     }
 }
 
@@ -194,6 +213,7 @@ const fn frame(frame: Frame, paths: &'static [Field]) -> KindMinimum {
     KindMinimum {
         kind: KindOf::Frame(frame),
         paths,
+        optional_paths: &[],
     }
 }
 
@@ -261,8 +281,14 @@ pub const MINIMUMS: &[Minimum] = &[
         // Saved views (#1207, ADR-0029): Jira's boards and filters. The kind
         // is named by its frame, as CI's are, so the projection
         // (`knobas_sync::saved_views`) keys on the frame and not on an
-        // adapter's kind id.
-        optional_kinds: &[frame(Frame::SavedView, &[])],
+        // adapter's kind id. It reads the view's query, board type, sub-query
+        // and sprint at these declared paths and at no key of its own
+        // choosing (#2050): the query is what the Tickets screen says decides
+        // the view, so a saved-view kind must say where it is.
+        optional_kinds: &[KindMinimum {
+            optional_paths: &[Field::BoardType, Field::SubQuery, Field::Sprint],
+            ..frame(Frame::SavedView, &[Field::SourceQuery])
+        }],
         // Required of every ticket system, and answered with a refusal by
         // name by one that declares no `transition` (#1225): a read-only
         // ticket system has no moves to offer. The battery's clause 8 holds
@@ -610,8 +636,8 @@ mod tests {
     fn every_required_field_is_named_as_kind_paths_serializes_it() {
         let wire = serde_json::to_value(KindPaths::default()).unwrap();
         for min in MINIMUMS {
-            for need in min.kinds {
-                for field in need.paths {
+            for need in min.kinds.iter().chain(min.optional_kinds) {
+                for field in need.paths.iter().chain(need.optional_paths) {
                     assert!(
                         wire.get(field.name()).is_some(),
                         "{:?} is not a KindPaths key",
@@ -701,6 +727,63 @@ mod tests {
         assert_eq!(
             check(&d).unwrap_err().to_string(),
             r#"role "monitoring" needs kind "monitor" to declare the path response_time"#
+        );
+    }
+
+    /// The ticket-system minimum's saved view (#2050, ADR-0029): a kind
+    /// declaring the frame must say where its query is, since the projection
+    /// reads it there and nowhere else. Its board type, sub-query and sprint
+    /// are the frame's too, and optional. A ticket system that emits no saved
+    /// view is not asked.
+    #[test]
+    fn a_saved_view_kind_needs_its_query() {
+        let mut d = code_host(
+            vec![RoleClaim::new(TICKET_SYSTEM, ["reachable_transitions"])],
+            "repo",
+        );
+        d.clone_from.clear();
+        let info = |id: &str| KindInfo {
+            id: id.into(),
+            label: id.into(),
+            plural: id.into(),
+            monogram: "TK".into(),
+            full_sync_exhaustive: true,
+        };
+        d.entity_kinds.push(info("ticket"));
+        let at = |key: &str| vec![PayloadPath::of([key])];
+        d.payload_paths.push(KindPaths {
+            kind: "ticket".into(),
+            status_name: at("status"),
+            priority: at("priority"),
+            assignee: at("assignee"),
+            issue_type: at("type"),
+            labels: vec![crate::ListPath::default()],
+            parent: vec![ParentPath {
+                kind: "ticket".into(),
+                at: PayloadPath::of(["parent"]),
+                names: vec![PayloadPath::of(["key"])],
+            }],
+            project_key: at("project"),
+            ..KindPaths::default()
+        });
+        assert_eq!(check(&d), Ok(()), "no saved view, nothing to ask");
+        d.entity_kinds.push(info("project_view"));
+        d.payload_paths.push(KindPaths {
+            kind: "project_view".into(),
+            frame: Some(Frame::SavedView),
+            source_query: at("filter"),
+            ..KindPaths::default()
+        });
+        assert_eq!(check(&d), Ok(()), "the optional paths may go undeclared");
+        d.payload_paths.last_mut().unwrap().source_query.clear();
+        assert_eq!(
+            check(&d).unwrap_err().to_string(),
+            r#"role "ticket-system" needs kind "project_view" to declare the path source_query"#
+        );
+        let saved = &minimum(TICKET_SYSTEM).unwrap().optional_kinds[0];
+        assert_eq!(
+            saved.optional_paths,
+            [Field::BoardType, Field::SubQuery, Field::Sprint]
         );
     }
 

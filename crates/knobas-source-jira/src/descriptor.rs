@@ -211,6 +211,14 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             // Jira's, not the source's name: a source named *Jira EU* still
             // lists its views under *Jira boards* and *Jira filters*.
             system_name: Some("Jira".to_owned()),
+            // Where `views` writes them (#2050): the saved filter's JQL (a
+            // filter's own), the board's type, a Kanban board's sub-query and
+            // a Scrum board's active sprint. The projection reads these and
+            // no key of its own.
+            source_query: vec![PayloadPath::of(["jql"])],
+            board_type: vec![PayloadPath::of(["type"])],
+            sub_query: vec![PayloadPath::of(["sub_query"])],
+            sprint: vec![PayloadPath::of(["sprint"])],
             ..KindPaths::default()
         },
     ]
@@ -331,6 +339,19 @@ mod tests {
             d.payload_paths[1].system_name.as_deref(),
             Some("Jira"),
             "the views' groups say Jira, not the source's own name"
+        );
+        // #2050: the saved-view frame reads a view's query, board type,
+        // sub-query and sprint where `views` writes them, and nowhere else.
+        let at = |key: &str| vec![knobas_source::PayloadPath::of([key])];
+        let view = &d.payload_paths[1];
+        assert_eq!(
+            (
+                &view.source_query,
+                &view.board_type,
+                &view.sub_query,
+                &view.sprint
+            ),
+            (&at("jql"), &at("type"), &at("sub_query"), &at("sprint"))
         );
         assert_eq!(d.entity_kinds[0].monogram, "JI");
         assert_eq!(d.entity_kinds[0].plural, "Tickets");

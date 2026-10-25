@@ -864,6 +864,20 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 );
             }
         }
+        // A ticket system's saved view (#2050): the projection reads a view's
+        // query at the declared `source_query` and at no key of its own, so a
+        // kind on the frame that declares none is a view that says nothing
+        // about which tickets it holds. Claimed or not: the projection keys
+        // on the frame, not on the ticket-system claim clause 10 checks.
+        if paths.frame == Some(knobas_spi_types::payload::Frame::SavedView) {
+            assert!(
+                !paths.source_query.is_empty(),
+                "descriptor.payload_paths declares kind {:?} a saved view but no `source_query` \
+                 path -- the Tickets screen says the view's query decides which tickets it \
+                 holds, and reads it there and nowhere else",
+                paths.kind
+            );
+        }
         assert!(
             declared_for.insert(paths.kind.as_str()),
             "descriptor.payload_paths declares kind {:?} twice; readers take the first entry, \
@@ -891,6 +905,8 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         /// An ISO 8601 instant, basic or extended: when a run started or
         /// finished (#848), as `parse_instant` reads one.
         Instant,
+        /// A JSON object: a saved view's sprint (#2050).
+        Object,
     }
 
     impl Wanted {
@@ -905,6 +921,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                     .as_i64()
                     .is_some_and(|n| n.unsigned_abs() < 1_000_000_000_000_000_000),
                 Wanted::Number => value.is_number(),
+                Wanted::Object => value.is_object(),
                 Wanted::Instant => value
                     .as_str()
                     .is_some_and(|t| knobas_spi_types::payload::parse_instant(t).is_some()),
@@ -919,6 +936,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 Wanted::Integer => "whole number",
                 Wanted::Number => "number",
                 Wanted::Instant => "ISO 8601 instant",
+                Wanted::Object => "object",
             }
         }
     }
@@ -963,7 +981,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 34] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 38] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -998,6 +1016,10 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::MERGED_AT, &paths.merged_at, Wanted::Instant),
             (field::RESPONSE_TIME, &paths.response_time, Wanted::Number),
             (field::BASE, &paths.base, Wanted::Text),
+            (field::SOURCE_QUERY, &paths.source_query, Wanted::Text),
+            (field::BOARD_TYPE, &paths.board_type, Wanted::Text),
+            (field::SUB_QUERY, &paths.sub_query, Wanted::Text),
+            (field::SPRINT, &paths.sprint, Wanted::Object),
         ];
         // The list fields: who a review is asked of, the commits a build ran
         // on (#710), a ticket's labels and its sprints' states (#811), a
@@ -1565,6 +1587,15 @@ mod tests {
         /// Declares the branch a pull request is opened into (#1227) at a
         /// key its records do not have (`bse`).
         BaseAtAMissingKey,
+        /// Declares its tickets saved views (#2050) with no `source_query`:
+        /// the projection reads a view's query there and nowhere else.
+        SavedViewWithoutQuery,
+        /// Declares its tickets saved views with a query, a board type, a
+        /// sub-query and a sprint, the sprint at an object: conforming.
+        SavedViewWithItsPaths,
+        /// Declares a saved view's sprint at the ticket's `key`, a string: a
+        /// sprint is an object.
+        SprintThatIsNoObject,
         /// Declares what a run is doing now at a key its records do not
         /// have (`stage`), on records with no `started`: runs not in flight,
         /// so the absent key is the source saying nothing (#1004).
@@ -1965,6 +1996,22 @@ mod tests {
                         }],
                         Behavior::BaseAtAMissingKey => vec![KindPaths {
                             base: vec![PayloadPath::of(["bse"])],
+                            ..good
+                        }],
+                        Behavior::SavedViewWithoutQuery => vec![KindPaths {
+                            frame: Some(knobas_spi_types::payload::Frame::SavedView),
+                            ..good
+                        }],
+                        Behavior::SavedViewWithItsPaths => vec![KindPaths {
+                            frame: Some(knobas_spi_types::payload::Frame::SavedView),
+                            source_query: vec![PayloadPath::of(["key"])],
+                            board_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
+                            sub_query: vec![PayloadPath::of(["fields", "project", "key"])],
+                            sprint: vec![PayloadPath::of(["fields", "epic"])],
+                            ..good
+                        }],
+                        Behavior::SprintThatIsNoObject => vec![KindPaths {
+                            sprint: vec![PayloadPath::of(["key"])],
                             ..good
                         }],
                         Behavior::AgentAtAMissingKey => vec![KindPaths {
@@ -2765,6 +2812,33 @@ mod tests {
         rejects(
             Behavior::BaseAtAMissingKey,
             "declares base of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    // -- a ticket system's saved views (#1207, #2050) ---------------------------
+
+    #[tokio::test]
+    async fn rejects_a_saved_view_kind_with_no_query_path() {
+        rejects(
+            Behavior::SavedViewWithoutQuery,
+            "a saved view but no `source_query` path",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn accepts_a_saved_view_kind_that_declares_its_paths() {
+        run(Behavior::SavedViewWithItsPaths)
+            .await
+            .expect("a query, a board type, a sub-query and a sprint object");
+    }
+
+    #[tokio::test]
+    async fn rejects_a_sprint_that_is_no_object() {
+        rejects(
+            Behavior::SprintThatIsNoObject,
+            "declares sprint of kind \"ticket\" at [\"key\"], which leads to a string",
         )
         .await;
     }

@@ -2413,6 +2413,7 @@ knobas-source	lib/knobas_source	contract::tests::accepts_a_later_candidate_an_ea
 knobas-source	lib/knobas_source	contract::tests::accepts_a_parent_name_an_earlier_name_resolves_for
 knobas-source	lib/knobas_source	contract::tests::accepts_a_read_only_ticket_system_that_refuses_its_transitions_read
 knobas-source	lib/knobas_source	contract::tests::accepts_a_response_time_with_a_fraction
+knobas-source	lib/knobas_source	contract::tests::accepts_a_saved_view_kind_that_declares_its_paths
 knobas-source	lib/knobas_source	contract::tests::accepts_a_started_by_absent_from_runs_nobody_started
 knobas-source	lib/knobas_source	contract::tests::accepts_a_ticket_system_claim_its_tickets_fill
 knobas-source	lib/knobas_source	contract::tests::accepts_a_wrong_declaration_for_a_kind_the_corpus_never_populates
@@ -2450,9 +2451,11 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_read_only_ticket_syst
 knobas-source	lib/knobas_source	contract::tests::rejects_a_refusal_that_does_not_name_the_adapter
 knobas-source	lib/knobas_source	contract::tests::rejects_a_response_time_that_is_no_number
 knobas-source	lib/knobas_source	contract::tests::rejects_a_reviewer_entry_key_the_elements_do_not_carry
+knobas-source	lib/knobas_source	contract::tests::rejects_a_saved_view_kind_with_no_query_path
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_action_declared_twice
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_id_knobas_keeps_for_itself
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_with_no_workflow_that_answers_the_read
+knobas-source	lib/knobas_source	contract::tests::rejects_a_sprint_that_is_no_object
 knobas-source	lib/knobas_source	contract::tests::rejects_a_started_by_absent_from_runs_a_person_started
 knobas-source	lib/knobas_source	contract::tests::rejects_a_started_by_at_a_key_no_record_has
 knobas-source	lib/knobas_source	contract::tests::rejects_a_started_time_that_is_no_instant
@@ -2549,6 +2552,7 @@ knobas-source	lib/knobas_source	role::tests::a_monitor_needs_its_state_and_its_r
 knobas-source	lib/knobas_source	role::tests::a_pull_request_that_declares_no_base_misses_the_base
 knobas-source	lib/knobas_source	role::tests::a_read_the_role_does_not_have_is_refused_by_name
 knobas-source	lib/knobas_source	role::tests::a_role_claimed_twice_is_refused
+knobas-source	lib/knobas_source	role::tests::a_saved_view_kind_needs_its_query
 knobas-source	lib/knobas_source	role::tests::each_required_read_is_needed
 knobas-source	lib/knobas_source	role::tests::every_required_field_is_named_as_kind_paths_serializes_it
 knobas-source	lib/knobas_source	run::tests::a_download_target_is_tagged_on_kind
@@ -4033,6 +4037,7 @@ knobas-sync	test/it	jira_views::a_board_whose_item_is_deleted_mid_projection_is_
 knobas-sync	test/it	jira_views::a_favourite_filter_shows_as_a_list_under_jira_filters
 knobas-sync	test/it	jira_views::a_jira_view_is_kept_with_its_tickets_in_jiras_order_and_shows_as_a_ticket_view
 knobas-sync	test/it	jira_views::a_renamed_jira_source_still_lists_its_views_under_jira_boards_and_filters
+knobas-sync	test/it	jira_views::a_saved_view_keeps_the_query_its_kind_declares_and_no_key_named_after_jira
 knobas-sync	test/it	jira_views::a_saved_view_of_a_ticket_system_that_is_not_jira_shows_as_a_ticket_view
 knobas-sync	test/it	jira_views::a_view_kind_that_declares_no_saved_view_frame_makes_no_ticket_view
 knobas-sync	test/it	jira_views::a_view_that_turns_up_after_the_first_sync_is_new_and_a_hidden_one_stays_hidden

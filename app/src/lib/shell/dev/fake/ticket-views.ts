@@ -236,6 +236,8 @@ jiraFilter(10251, "Resolved this week", "project in (PAY, OPS) AND resolved >= -
   copied([is("project", "PAY", "OPS")], 1, ["resolved >= -7d", "knobas has no condition for resolved"]));
 // A second ticket system's one saved view (#2032): Kestrel, fixture-only (`fake/sources.ts`),
 // under *Kestrel boards* as the sync names a group, so Tickets draws a source that is not Jira.
+// Its query and board type are what the projection reads at the paths Kestrel's kind declares
+// (#2050): it declares no sub-query or sprint, so the view has neither.
 SAVED.push({
   ref: "kestrel:board-7",
   member: (key) => key.startsWith("OPS-"),

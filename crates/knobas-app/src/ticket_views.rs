@@ -252,15 +252,19 @@ pub struct SavedViewSource {
     /// adapter is not compiled in or declares no saved views. What the shell's
     /// words about the view name: *Open in Jira*, *Jira decides which tickets*.
     pub system: String,
-    /// `scrum`, `kanban` or `simple` for a board; `None` for a filter.
+    /// The board's type in the source's own word (Jira's `scrum`, `kanban`
+    /// or `simple`), read at the kind's declared `board_type`; `None` for a
+    /// filter or a kind that declares none.
     pub board_type: Option<String>,
     /// The saved view's query in the source's own language, as the source
-    /// holds it (Jira's JQL); empty when the source sends none. Read from
-    /// `sync.saved_view.source_query`, the column the adapter's payload fills.
+    /// holds it (Jira's JQL); empty when its record carries none. Read from
+    /// `sync.saved_view.source_query`, which the projection fills from the
+    /// path the kind declares (`KindPaths::source_query`, #2050).
     pub source_query: String,
-    /// A Kanban board's sub-filter, or `None`.
+    /// A Kanban board's sub-filter, read at the declared `sub_query`, or `None`.
     pub sub_query: Option<String>,
-    /// A Scrum board's active sprint, `{"id", "name", "end_date"}`, or `None`.
+    /// A Scrum board's active sprint, `{"id", "name", "end_date"}`, read at the
+    /// declared `sprint`, or `None`.
     #[ts(as = "Option<ActiveSprint>", inline)]
     pub sprint: Option<serde_json::Value>,
     /// When the last sync read it (RFC 3339).

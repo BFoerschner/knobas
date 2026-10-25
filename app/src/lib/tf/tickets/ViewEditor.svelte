@@ -54,7 +54,7 @@
   } from "./editor";
   import { columnName, LANE_FIELDS, splitLanes } from "./tickets";
   import { counted } from "../counted";
-  import { copyKeeps, drawnSavedViewColumns, LIST_COLUMN_ORDER, ownViewKept, savedViewKindWords, type CopiedFrom } from "./views";
+  import { copyKeeps, drawnSavedViewColumns, LIST_COLUMN_ORDER, ownViewKept, savedViewKindWords, savedViewQueries, type CopiedFrom } from "./views";
 
   let {
     draft,
@@ -133,6 +133,8 @@
   const saveLabel = $derived(editing ? "Save view" : "Create view");
   /** Fixed for the dialog's life: a saved view stays one. */
   const fixedSource = untrack(() => savedViewSource);
+  /** The saved view's query and sub-query, each only when it has one (#2050). */
+  const fixedQueries = fixedSource === null ? [] : savedViewQueries(fixedSource);
   const title = $derived(fixedSource ? `Settings for ${start.name}` : editing ? `Edit ${start.name}` : "New view");
   /** *Which tickets* on a saved view: where its source's answer comes from, in prototype-6's words with the source's name. */
   const decidesLine = $derived.by(() => {
@@ -369,10 +371,10 @@
           <section class="tf-vw-sec">
             <h3>Which tickets</h3>
             <p>
-              {decidesLine} <b>{start.name}</b>. knobas runs its query at every sync and keeps {fixedSource.system}'s order.{#if fixedSource.sprint}{" "}Like the board in {fixedSource.system}, it shows the active sprint, now {fixedSource.sprint.name}, and moves on to the next
+              {decidesLine} <b>{start.name}</b>. knobas {fixedQueries.length > 0 ? "runs its query" : "reads it again"} at every sync and keeps {fixedSource.system}'s order.{#if fixedSource.sprint}{" "}Like the board in {fixedSource.system}, it shows the active sprint, now {fixedSource.sprint.name}, and moves on to the next
                 sprint when this one closes.{/if}
             </p>
-            <pre class="tf-vw-source-query">{fixedSource.source_query}{#if fixedSource.sub_query}{"\n"}{fixedSource.sub_query}{/if}</pre>
+            {#if fixedQueries.length > 0}<pre class="tf-vw-source-query">{fixedQueries.join("\n")}</pre>{/if}
             <!-- A source that does not translate its query (#1208) offers no copy, so the line does not either. -->
             <p class="tf-dim">
               {#if oncopy}To change which tickets it holds, change it in {fixedSource.system}, or make your own copy. {keepsLine}{:else}To

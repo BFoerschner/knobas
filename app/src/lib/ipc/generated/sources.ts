@@ -223,6 +223,12 @@ export type DbStats = { db_bytes: number, entity_count: number, item_count: numb
  * - `saved_view`: a view a ticket system keeps of its own tickets (#1207): a
  *   Jira board or filter. Each item of the kind becomes a ticket view,
  *   whichever adapter emits it; `knobas_sync::saved_views` reads its payload.
+ *   The kind must declare where a view's query is (`source_query`, the
+ *   ticket-system minimum, #2050) and may declare its `board_type`,
+ *   `sub_query` and `sprint`; those are read there and at no key of the
+ *   frame's choosing. The frame's own keys are fixed: `kind` (`board` or
+ *   `filter`), `id`, `columns` (`[{"name", "statuses", "limit"}]`), `keys`
+ *   (the tickets' keys in the source's order) and `query`.
  *
  * The parts are documented here and not on each variant because the
  * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
@@ -472,6 +478,31 @@ frame: Frame | null,
  * is not a saved view.
  */
 system_name: string | null, 
+/**
+ * The query a [`Frame::SavedView`] holds, in the source's own language
+ * (#2050): Jira's `jql`, the board's saved filter or the filter's own
+ * JQL. What the Tickets screen's source line and *View settings* draw;
+ * `sync.saved_view.source_query`. Required of a saved-view kind by the
+ * ticket-system minimum, and a view whose record carries none draws no
+ * query. Empty for every kind that is not a saved view.
+ */
+source_query: Array<PayloadPath>, 
+/**
+ * A saved view's board type in the source's own word (#2050): Jira's
+ * `type` (`scrum`, `kanban`, `simple`). Optional; a filter has none.
+ */
+board_type: Array<PayloadPath>, 
+/**
+ * The query a saved view narrows [`source_query`](Self::source_query)
+ * with (#2050): a Jira Kanban board's `sub_query`. Optional.
+ */
+sub_query: Array<PayloadPath>, 
+/**
+ * A saved view's active sprint (#2050), a JSON **object**
+ * `{"id", "name", "end_date"}` as the shell draws it: Jira's `sprint`
+ * on a Scrum board. Optional; a miss is no sprint.
+ */
+sprint: Array<PayloadPath>, 
 /**
  * What a pipeline is called (#848): TeamCity's configuration `name`.
  * Empty for every kind that is not a pipeline.
