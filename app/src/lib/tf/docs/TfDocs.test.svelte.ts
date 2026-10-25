@@ -1010,3 +1010,232 @@ test("a held or refused write drops its echo and toasts; Edit and resend reopens
   expect(dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")?.value).toBe("Retry metrics");
   expect(dialog.querySelector<HTMLTextAreaElement>("textarea[aria-label='Page text']")?.value).toBe("## Dashboards");
 });
+
+// ---- a sync run's end reads Docs again (#2072) ----
+
+/** The page the reader opens while a read of the handbook is still out. */
+const OTHER: DocPage = { ...PAGE, entity_id: "confluence:1", title: "Ops home", ancestors: [] };
+
+/** A `listen` port the test raises `sync:state` through, as the backend reports a run. */
+function syncEvents() {
+  const heard: ((event: { payload: unknown }) => void)[] = [];
+  return {
+    listen: vi.fn(async (event: string, handler: (event: { payload: unknown }) => void) => {
+      if (event === "sync:state") heard.push(handler);
+      return () => heard.splice(heard.indexOf(handler), 1);
+    }) as unknown as NonNullable<DocsPorts["listen"]>,
+    /** `source`'s run ends, as `sync:state` says it. */
+    async ended(source = "confluence") {
+      for (const handler of [...heard]) handler({ payload: { source_id: source, running: false } });
+      await settle();
+    },
+  };
+}
+
+test("a queued page's row drops once a sync run ends and the tree read then holds it, Docs not mounted again (#2072)", async () => {
+  const sync = syncEvents();
+  let read = TREE;
+  const io = ports({ docsPage: vi.fn(async () => RICH), docsTree: vi.fn(async () => read), listen: sync.listen });
+  await draw(["confluence:2"], io);
+  await createPage("Retry metrics", "## Dashboards");
+  expect(queuedPages()).toHaveLength(1);
+
+  read = {
+    ...TREE,
+    spaces: [
+      { ...TREE.spaces[0]!, pages: [...TREE.spaces[0]!.pages, { entity_id: "confluence:30", title: "Retry metrics", parent: "confluence:2" }] },
+      TREE.spaces[1]!,
+    ],
+  };
+  await sync.ended();
+  expect(queuedPages()).toEqual([]);
+  expect(squash(target.querySelector("nav[aria-label='Docs']"))).toContain("Retry metrics");
+});
+
+test("a queued section edit and comment drop once a sync run ends and the open page's read then holds them (#2072)", async () => {
+  const sync = syncEvents();
+  let read = RICH;
+  const io = ports({ docsPage: vi.fn(async () => read), listen: sync.listen });
+  await draw(["confluence:2"], io);
+  await saveSection("Ask Priya.");
+  await sendComment("Done.");
+  expect(section().querySelector(".tf-sec-queued")).not.toBeNull();
+  expect(queuedComments()).toHaveLength(1);
+
+  // A run that brought neither in: both still on their way.
+  await sync.ended();
+  expect(section().querySelector(".tf-sec-queued")).not.toBeNull();
+  expect(queuedComments()).toHaveLength(1);
+
+  read = {
+    ...RICH,
+    version: 33,
+    sections: [{ number: 1, text: "Ask Priya.", refusal: null }],
+    comments: [...RICH.comments, { author: "mara", author_name: "Mara Lindqvist", at: "2026-10-25T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Done.")] }] }],
+  };
+  await sync.ended();
+  expect(section().querySelector(".tf-sec-queued")).toBeNull();
+  expect(queuedComments()).toEqual([]);
+  expect(squash(target.querySelector(".tf-rd-meta"))).toContain("version 33");
+});
+
+test("a sync run's re-read keeps the picked space, the search, an open section editor's text and the composer's (#2072)", async () => {
+  const sync = syncEvents();
+  const io = ports({ docsPage: vi.fn(async () => RICH), docsSearch: vi.fn(async () => HITS), listen: sync.listen });
+  await draw(["confluence:2"], io);
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  select.value = "*";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  type("ledger");
+  await settle();
+  button("Edit section")!.click();
+  await settle();
+  fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!, "Half typed");
+  fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!, "Half said");
+  await settle();
+  const searches = vi.mocked(io.docsSearch).mock.calls.length;
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
+
+  await sync.ended();
+  expect(io.docsTree).toHaveBeenCalledTimes(2);
+  expect(io.docsPage).toHaveBeenCalledTimes(2);
+  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("*");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!.value).toBe("ledger");
+  expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
+  expect(vi.mocked(io.docsSearch).mock.calls.length).toBe(searches);
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!.value).toBe("Half said");
+  // A re-read is not a visit: the page was opened once.
+  expect(io.visitEntity).toHaveBeenCalledTimes(1);
+});
+
+test("a sync run's re-read of the open page keeps the find bar on the match the reader stepped to (#2072)", async () => {
+  const sync = syncEvents();
+  const twice: DocPage = { ...RICH, blocks: [{ type: "paragraph", text: [text("The ledger, and the ledger again.")] }] };
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => twice), docsSearch: vi.fn(async () => HITS), listen: sync.listen }));
+  const input = type("ledger");
+  await settle();
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await settle();
+  const bar = () => target.querySelector(".tf-findbar")!;
+  expect(bar().textContent).toContain("1 of 2");
+  bar().querySelector<HTMLButtonElement>("button[aria-label='Next']")!.click();
+  await settle();
+  expect(bar().textContent).toContain("2 of 2");
+
+  await sync.ended();
+  expect(bar().textContent).toContain("2 of 2");
+  const cur = [...target.querySelectorAll(".tf-rd-page mark")].map((m) => m.classList.contains("tf-cur"));
+  expect(cur).toEqual([false, true]);
+  location.hash = "";
+});
+
+test("a sync run's page re-read that answers after another page was opened does not replace it (#2072)", async () => {
+  const sync = syncEvents();
+  let late: (page: DocPage) => void = () => {};
+  const docsPage = vi.fn(async (id: string) => {
+    if (id === "confluence:1") return OTHER;
+    if (docsPage.mock.calls.length === 1) return PAGE;
+    return new Promise<DocPage>((resolve) => (late = resolve));
+  });
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage, listen: sync.listen }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  await sync.ended();
+  expect(docsPage).toHaveBeenCalledTimes(2);
+
+  // The reader opens another page while the re-read is out.
+  props.rest = ["confluence:1"];
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+  late({ ...PAGE, title: "Stale handbook" });
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+});
+
+test("a sync run's re-read that fails leaves the last tree and page on screen (#2072)", async () => {
+  const sync = syncEvents();
+  let fail = false;
+  const io = ports({
+    docsTree: vi.fn(async () => (fail ? Promise.reject(new Error("database is locked")) : TREE)),
+    docsPage: vi.fn(async () => (fail ? Promise.reject(new Error("database is locked")) : RICH)),
+    listen: sync.listen,
+  });
+  await draw(["confluence:2"], io);
+  fail = true;
+  await sync.ended();
+  expect(io.docsTree).toHaveBeenCalledTimes(2);
+  expect(io.docsPage).toHaveBeenCalledTimes(2);
+  expect(target.textContent).not.toContain("database is locked");
+  expect(squash(target.querySelector("nav[aria-label='Docs']"))).toContain("On-call handbook");
+  expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
+});
+
+test("Link to <job>'s page re-read that answers after another page was opened does not replace it (#2072)", async () => {
+  let late: (page: DocPage) => void = () => {};
+  const docsPage = vi.fn(async (id: string) => {
+    if (id === "confluence:1") return OTHER;
+    if (docsPage.mock.calls.length === 1) return RICH;
+    return new Promise<DocPage>((resolve) => (late = resolve));
+  });
+  const props = $state({ ready: true, rest: ["confluence:2"], job: "PAY-231", ports: ports({ docsPage }), linkPorts: linkPorts() as never });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  button("Link to PAY-231")!.click();
+  await settle();
+  expect(docsPage).toHaveBeenCalledTimes(2);
+
+  props.rest = ["confluence:1"];
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+  late({ ...RICH, title: "Stale handbook" });
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+});
+
+test("a link that answers after another page was opened reads nothing back over it (#2072)", async () => {
+  const docsPage = vi.fn(async (id: string) => (id === "confluence:1" ? OTHER : RICH));
+  let linked: () => void = () => {};
+  const links = linkPorts();
+  links.createLink = vi.fn(() => new Promise<never>((resolve) => (linked = () => resolve(null as never))));
+  const props = $state({ ready: true, rest: ["confluence:2"], job: "PAY-231", ports: ports({ docsPage }), linkPorts: links as never });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  button("Link to PAY-231")!.click();
+  await settle();
+  props.rest = ["confluence:1"];
+  await settle();
+  linked();
+  await settle();
+  expect(docsPage.mock.calls.map(([id]) => id)).toEqual(["confluence:2", "confluence:1"]);
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+});
+
+test("a sync run that ends while the open page's first read is out still opens it: the visit is recorded (#2072)", async () => {
+  const sync = syncEvents();
+  let first: (page: DocPage) => void = () => {};
+  const docsPage = vi.fn(async () => (docsPage.mock.calls.length === 1 ? new Promise<DocPage>((resolve) => (first = resolve)) : PAGE));
+  const io = ports({ docsPage, listen: sync.listen });
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: io } });
+  await settle();
+  await sync.ended();
+  first(PAGE);
+  await settle();
+  expect(docsPage).toHaveBeenCalledTimes(2);
+  expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
+  expect(io.visitEntity).toHaveBeenCalledWith("confluence:2");
+});
+
+test("a sync run's re-read that fails before Docs drew anything shows the error (#2072)", async () => {
+  const sync = syncEvents();
+  let first: (tree: DocsTree) => void = () => {};
+  const docsTree = vi.fn(async () =>
+    docsTree.mock.calls.length === 1 ? new Promise<DocsTree>((resolve) => (first = resolve)) : Promise.reject(new Error("database is locked")),
+  );
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsTree, listen: sync.listen }) } });
+  await settle();
+  await sync.ended();
+  first(TREE);
+  await settle();
+  expect(target.textContent).toContain("Could not read the page tree: database is locked");
+});

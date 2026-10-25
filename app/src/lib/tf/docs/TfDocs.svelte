@@ -60,6 +60,7 @@
     type Reached,
   } from "../../ipc/entity";
   import { drawn } from "../../detail/relations";
+  import { BRIDGE, listenSynced, type PipelinePorts } from "../builds/pipeline-ports";
   import { writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
@@ -122,6 +123,8 @@
     copy: (text: string) => Promise<void>;
     /** What the page's source refuses its credential (#2053); the IPC read when omitted. */
     refusedWrites?: RefusedWritesPort;
+    /** Hears `sync:state`, whose run ends read Docs again (#2072); the bridge's when omitted. */
+    listen?: PipelinePorts["listen"];
   }
 
   type LinkPorts = Pick<JobPorts, "listSources" | "getEntity" | "createLink" | "search" | "launcherHome">;
@@ -240,41 +243,82 @@
   const place = $derived(placeOf(rest));
   const target = $derived(tree === null ? null : pageToOpen(place, tree));
 
-  async function readTree() {
+  /** The reads asked so far; an answer to an older one than the last is dropped. */
+  let treeAsked = 0;
+  let pageAsked = 0;
+
+  /**
+   * Read the tree; a `quiet` read (a sync run's, #2072) that fails leaves the
+   * tree as drawn. With none drawn yet it stands in for the first read it
+   * dropped, so its error shows.
+   */
+  async function readTree(quiet: boolean) {
+    const mine = ++treeAsked;
     try {
       const read = await io.docsTree();
+      if (mine !== treeAsked) return;
       tree = read;
       treeError = null;
       settlePages(read);
     } catch (cause) {
-      treeError = ipcErrorMessage(cause);
+      if (mine === treeAsked && (!quiet || tree === null)) treeError = ipcErrorMessage(cause);
     }
+  }
+
+  /**
+   * Read page `id`. Opening it records the visit; a `quiet` read (a sync
+   * run's, #2072) records none, and one that fails leaves the page as drawn.
+   * A quiet read that dropped the opening read before `id` was drawn opens it
+   * in that read's place: visit and error as an opening read.
+   */
+  function readPage(id: string, quiet: boolean): void {
+    const mine = ++pageAsked;
+    void io.docsPage(id).then(
+      (answer) => {
+        if (mine !== pageAsked) return;
+        const opens = !quiet || page?.entity_id !== id;
+        page = answer;
+        pageError = null;
+        if (opens) void io.visitEntity(id).catch(() => {});
+      },
+      (cause: unknown) => {
+        if (mine === pageAsked && (!quiet || page?.entity_id !== id)) pageError = ipcErrorMessage(cause);
+      },
+    );
+  }
+
+  /**
+   * Read the open page `id` again, after a link or a sync run: no visit, and
+   * nothing once the reader has opened another page (#2072).
+   */
+  function rereadPage(id: string | null): void {
+    if (id !== null && id === target) readPage(id, true);
   }
 
   $effect(() => {
     if (!ready) return;
-    untrack(() => void readTree());
+    untrack(() => void readTree(false));
   });
 
   $effect(() => {
     const id = target;
     if (!ready || id === null) return;
     pageError = null;
-    let live = true;
-    void io.docsPage(id).then(
-      (answer) => {
-        if (!live) return;
-        page = answer;
-        pageError = null;
-        void io.visitEntity(id).catch(() => {});
-      },
-      (cause: unknown) => {
-        if (live) pageError = ipcErrorMessage(cause);
-      },
+    untrack(() => readPage(id, false));
+    // Another page, or none: the read asked for this one is dropped.
+    return () => void ++pageAsked;
+  });
+
+  // A sync run's end reads the tree and the open page again, so what it
+  // brought in settles what Docs queued without Docs being opened again (#2072).
+  $effect(() => {
+    if (!ready) return;
+    return untrack(() =>
+      listenSynced({ listen: io.listen ?? BRIDGE.listen }, null, () => {}, () => {
+        void readTree(true);
+        rereadPage(target);
+      }),
     );
-    return () => {
-      live = false;
-    };
   });
 
   const pageSpace = $derived(tree && page ? spaceOfPage(tree, page.entity_id) : undefined);
@@ -395,26 +439,50 @@
   let marks = $state(0);
   let at = $state(-1);
 
-  function jump(step: number): void {
+  /** The page's matches as drawn, counted for the find bar. */
+  function matches(): HTMLElement[] {
     const all = article ? [...article.querySelectorAll("mark")] : [];
     marks = all.length;
+    return all;
+  }
+
+  /** Mark match `at` as the current one. */
+  function markCurrent(all: HTMLElement[]): void {
+    all.forEach((m, i) => m.classList.toggle("tf-cur", i === at));
+  }
+
+  function jump(step: number): void {
+    const all = matches();
     if (all.length === 0) return;
     at = (at + step + all.length) % all.length;
-    all.forEach((m, i) => m.classList.toggle("tf-cur", i === at));
+    markCurrent(all);
     all[at]?.scrollIntoView?.({ block: "center" });
   }
 
+  /** The page and the query the find bar last started on. */
+  let started: { id: string; stems: string[] } | null = null;
+
   // A page drawn with a query marks its first match, unless the address names
-  // a section, which is scrolled to instead.
+  // a section, which is scrolled to instead. The same page read again (a sync
+  // run's, #2072) stays where the reader is, on the match they stepped to.
   $effect(() => {
     const p = page;
-    void stems;
+    const query = stems;
     if (p === null) return;
+    const again = started?.id === p.entity_id && started.stems === query;
+    started = { id: p.entity_id, stems: query };
     void tick().then(() => {
+      if (again) {
+        const all = matches();
+        at = Math.min(at, all.length - 1);
+        markCurrent(all);
+        follow();
+        return;
+      }
       at = -1;
       if (place.kind === "page" && place.section !== null) {
         document.getElementById(`s-${place.section}`)?.scrollIntoView?.();
-        marks = article ? article.querySelectorAll("mark").length : 0;
+        matches();
       } else if (stems.length > 0) jump(1);
       else marks = 0;
       follow();
@@ -515,7 +583,7 @@
       const row = drawn(LINK_RELATION, p.entity_id, ticket);
       await linkPorts!.createLink(row.fromId, row.toId, row.relation);
       push({ text: `Linked to ${key}` });
-      page = await io.docsPage(p.entity_id);
+      rereadPage(p.entity_id);
     } catch (cause) {
       push({ text: `Could not link it: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -945,7 +1013,7 @@
     onlinked={() => {
       linking = false;
       push({ text: "Linked in knobas" });
-      void io.docsPage(p.entity_id).then((answer) => (page = answer));
+      rereadPage(p.entity_id);
     }}
   />
 {/if}
