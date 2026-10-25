@@ -22,6 +22,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import TicketsPage, { forgetTicketsSession, type TicketsPorts } from "./TicketsPage.svelte";
 import { sourceRoles } from "../roles.svelte";
 import { LANE_FIELDS, laneOf } from "./tickets";
+import { until } from "../../shell/test-wait";
 
 // Every command that reaches the bridge past the page's ports, by name: the
 // page takes its reads through `ports`, so the list stays empty unless a read
@@ -1064,9 +1065,15 @@ test("an address naming no view says so and offers All tickets", async () => {
 
 // ---- the view editor (#814) ----
 
-/** The preview reads a moment after a change. */
-async function previewed() {
-  await new Promise((resolve) => setTimeout(resolve, 200));
+/**
+ * The preview reads a moment after a change (`ViewEditor`'s debounce): wait for that read
+ * to reach the harness, then let its answer draw. A fixed 200 ms sleep here lost the race
+ * on a two-core runner (#2048). The editor's statuses read asks for one card a column, the
+ * preview for nine or a whole lane, so a read of one is not the preview.
+ */
+async function previewed(h: Harness) {
+  const sent = h.reads.length;
+  await until(() => h.reads.slice(sent).some((read) => read.perColumn !== 1), "the preview's debounced read");
   await settle();
 }
 
@@ -1085,7 +1092,7 @@ test("+ New view opens the editor: conditions write the search line, the preview
   const h = harness();
   await open(h);
   [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
-  await previewed();
+  await previewed(h);
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(dialog()!.textContent).toContain("Kept in knobas. No source sees it.");
   expect(dialog()!.textContent).toContain("No conditions yet, so it holds every synced ticket.");
@@ -1103,7 +1110,7 @@ test("+ New view opens the editor: conditions write the search line, the preview
   inDialog("Bug").click();
   inDialog("is not").click();
   input(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Words in the key or summary"]')!, "payout");
-  await previewed();
+  await previewed(h);
   expect(searchLine().textContent).toBe("-issuetype:Bug payout");
   expect(h.reads.at(-1)!.query).toBe("-issuetype:Bug payout");
 
@@ -1124,7 +1131,7 @@ test("Edit view opens the text as conditions, saves over the view under its id, 
   const h = harness([], [view("bugs", "Bugs", "Mine", 0, { query: 'issuetype:Bug   assignee:me "sepa retry"' })]);
   await open(h, null, "bugs");
   [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view")!.click();
-  await previewed();
+  await previewed(h);
   expect(dialog()!.querySelector("h2")!.textContent).toBe("Edit Bugs");
   const fields = [...dialog()!.querySelectorAll<HTMLSelectElement>('select[aria-label="Field"]')].map((s) => s.value);
   expect(fields).toEqual(["issuetype", "assignee"]);
@@ -1142,7 +1149,7 @@ test("Edit view opens the text as conditions, saves over the view under its id, 
   menuOf("this view").click();
   await settle();
   menuItem("Edit view").click();
-  await previewed();
+  await previewed(h);
   inDialog("Story").click();
   await settle();
   inDialog("Save view").click();
@@ -1154,7 +1161,7 @@ test("each status sits on one column, an over-limit column is err, tickets on no
   const h = harness();
   await open(h);
   [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
-  await previewed();
+  await previewed(h);
   const cols = () => [...dialog()!.querySelectorAll<HTMLElement>(".tf-vw-col")];
   const pressed = (col: HTMLElement) =>
     [...col.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
@@ -1165,7 +1172,8 @@ test("each status sits on one column, an over-limit column is err, tickets on no
   input(cols()[0]!.querySelector<HTMLInputElement>('input[aria-label="At most"]')!, "10");
   // Done off its column: on no column.
   [...cols()[2]!.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].find((b) => b.textContent === "Done")!.click();
-  await previewed();
+  // Columns and limits redraw the answer already read; only the query reads again.
+  await settle();
   expect(dialog()!.textContent).toContain("Done is on no column, so those tickets do not show on the board.");
   expect(previewCols()).toEqual(["To Do13 of 10", "In Progress0", "Done0"]);
   expect(dialog()!.querySelector(".tf-vw-mcol")!.classList.contains("tf-vw-over")).toBe(true);
@@ -1182,7 +1190,7 @@ test("the search line underlines what the grammar does not read, and Signal is a
   menuOf("this view").click();
   await settle();
   menuItem("Edit view").click();
-  await previewed();
+  await previewed(h);
   expect([...searchLine().querySelectorAll(".tf-vw-newq")].map((s) => s.textContent)).toEqual(["sprint:next", "-under:PAY-200"]);
   expect(searchLine().textContent).toBe("sprint:next -under:PAY-200 label:sepa");
   const options = () => [...dialog()!.querySelector('select[aria-label="Field"]')!.querySelectorAll("option")].map((o) => o.textContent);
@@ -1202,7 +1210,7 @@ test("the search line underlines what the grammar does not read, and Signal is a
   menuOf("this view").click();
   await settle();
   menuItem("Edit view").click();
-  await previewed();
+  await previewed(h);
   expect(options()).toContain("Signal");
   input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Field"]')!, "signal");
   await settle();
@@ -1215,7 +1223,7 @@ test("Delete view in the editor deletes it, with Undo in the toast", async () =>
   const h = harness([], VIEWS);
   await open(h, null, "backlog");
   [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view")!.click();
-  await previewed();
+  await previewed(h);
   inDialog("Delete view").click();
   await settle();
   expect(dialog()).toBeNull();
@@ -1413,7 +1421,7 @@ test("Make an editable copy opens New view on your own copy: the JQL it could te
   ]);
   // The preview reads the copy's own text, not the Jira view's board.
   jiraReads.length = 0;
-  await new Promise((resolve) => setTimeout(resolve, 400));
+  await until(() => jiraReads.length > 0, "the copy's preview read");
   await settle();
   expect(jiraReads.length).toBeGreaterThan(0);
   expect(jiraReads.every((ref) => ref === null)).toBe(true);
@@ -1767,9 +1775,9 @@ test("a count of one reads in the singular: the filter bar's ticket and the edit
   await open(h);
   expect(count()).toBe("1 ticket");
   [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
-  await previewed();
+  await previewed(h);
   input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Lanes"]')!, "priority");
-  await previewed();
+  await previewed(h);
   expect(dialog()!.querySelector(".tf-vw-pnote")!.textContent!.trim()).toBe("In 1 lane by priority.");
 });
 
