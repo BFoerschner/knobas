@@ -254,6 +254,8 @@ mod tests {
             refreshes(&registry(), Some("mock")),
             "the mock reads one item"
         );
+        // An adapter that does not declare the read, while one is compiled
+        // in; the uninstalled kind below holds the "off" side either way.
         let quiet = templates.iter().find(|template| !template.refreshes());
         if let Some(quiet) = quiet {
             assert!(

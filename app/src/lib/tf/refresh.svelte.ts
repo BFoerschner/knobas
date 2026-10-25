@@ -17,12 +17,13 @@ import type { EntityDetail } from "../ipc/entity";
 import { ipcErrorMessage } from "../ipc";
 import { refreshEntity, type EntityRefresh } from "../ipc/sources";
 import { sourceSyncs, type RoleSync, type RoleSyncs } from "./role-sync.svelte";
+import { push } from "../shell/toasts.svelte";
 
 /** What a detail offers: *Refresh*, *Sync now*, or nothing. */
 export type RefreshOffer = "refresh" | "sync" | null;
 
 /** The offer `detail`'s read makes. */
-export function refreshOffer(detail: EntityDetail): RefreshOffer {
+function refreshOffer(detail: EntityDetail): RefreshOffer {
   if (!detail.source.enabled) return null;
   return detail.refreshes ? "refresh" : "sync";
 }
@@ -104,7 +105,9 @@ export function createDetailRefresh(ports: DetailRefreshPorts = DETAIL_REFRESH_B
       if (answer.outcome === "not_offered") {
         state.unoffered[detail.source.id] = true;
         state.reading = false;
-        void ports.syncs.of(detail.source.id).start();
+        const run = ports.syncs.of(detail.source.id);
+        await run.start();
+        if (run.failed !== null) push({ text: `Could not sync: ${run.failed}`, tone: "err" });
         return;
       }
       // Refreshed, gone, or turned off since the detail was read: the detail

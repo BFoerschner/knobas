@@ -110,7 +110,7 @@
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
-  import { createDetailRefresh, DETAIL_REFRESH_BRIDGE } from "../refresh.svelte";
+  import { createDetailRefresh } from "../refresh.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfPrFiles from "./TfPrFiles.svelte";
   import TfPrMerge from "./TfPrMerge.svelte";
@@ -175,7 +175,7 @@
   /** The proposal waiting on each commit, by the commit's entity id. */
   let proposals = $state<Record<string, string>>({});
   /** The header's *Refresh* or *Sync now* (#2107). */
-  const refresh = createDetailRefresh(untrack(() => ports.refresh ?? DETAIL_REFRESH_BRIDGE));
+  const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
   $effect(() => {
     if (!ready || prId === null) return;
@@ -598,8 +598,7 @@
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} />{/if}
       </div>
     </header>
-    {#if detail !== null}<TfDetailBanners {detail} />{/if}
-    {#if refresh.failed !== null}<div class="tf-banner tf-err tf-refresh-failed" role="alert">{refresh.failed}</div>{/if}
+    {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
     <nav class="tf-tabs" aria-label="Pull request">
       {#each PR_TABS as entry (entry.id)}
         {@const count = counts[entry.id]}

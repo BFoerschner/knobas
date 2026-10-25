@@ -86,6 +86,7 @@ beforeEach(() => {
   refreshed = [];
   synced = [];
   refreshAnswer = () => Promise.resolve({ outcome: "refreshed" });
+  syncAnswer = () => Promise.resolve(77);
   toasts.items = [];
 });
 
@@ -105,6 +106,8 @@ let refreshed: string[] = [];
 let synced: string[] = [];
 /** Sends `sync:state` to the page's *Sync now*. */
 let sendStatus: (row: SourceSyncStatus) => void = () => {};
+/** What `sync_now` answers next. */
+let syncAnswer: () => Promise<number> = () => Promise.resolve(77);
 /** What `refresh_entity` answers next. */
 let refreshAnswer: () => Promise<EntityRefresh> = () => Promise.resolve({ outcome: "refreshed" });
 
@@ -117,7 +120,7 @@ function refreshPorts(): DetailRefreshPorts {
     refreshEntity: (entityId) => (refreshed.push(entityId), refreshAnswer()),
     syncs: createSourceSyncs({
       syncRole: () => Promise.reject(new Error("a detail never syncs a role")),
-      syncNow: (sourceId) => (synced.push(sourceId), Promise.resolve(77)),
+      syncNow: (sourceId) => (synced.push(sourceId), syncAnswer()),
       syncStatus: () => Promise.resolve([]),
       listen: (_event, handler) => {
         handlers.add(handler);
@@ -440,4 +443,15 @@ test("a turned-off source's item draws neither button, and its banner names the 
   expect(banners()).toEqual([
     "Its source is turned off: Harbour surveys is disabled, so this item is hidden everywhere else. Re-enable the source to bring it back.",
   ]);
+});
+
+test("a source run the not-offered answer asked for and was refused says why in a toast", async () => {
+  await open(reads(detail()).ports);
+  refreshAnswer = () => Promise.resolve({ outcome: "not_offered" });
+  syncAnswer = () => Promise.reject({ code: "not_ready", message: "the engine is starting", source_id: null });
+
+  refreshButton()!.click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Could not sync: the engine is starting"]);
+  expect(refreshButton()?.textContent).toBe("Sync now");
 });

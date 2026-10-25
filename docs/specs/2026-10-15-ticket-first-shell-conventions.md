@@ -75,7 +75,6 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
   (`DocWrites` in the registry); the shell sends plain text. (#862)
 - A form generated from an adapter's `config_schema` is `tf/settings/TfSchemaForm.svelte` (settings rows or a dialog grid) over `sources/schema-form`. A source's config is saved as the stored config read again at the press with only the reader's changes over it (`tf/settings/source-config.ts`), never a copy read when the page opened: the sync writes into it too. (#903, #904, #1021, PR #1033)
 - Anything exported as Markdown goes through the one converter, `knobas_source::docs::markdown`, which reads the Docs frame's own `DocBlock`s (one vocabulary, #952); a link to another page is `page_file_name(title)`, the name the exporter writes. (#832)
-
 - A detail that reads its row through `get_entity` (an item's page, a pull request) draws *Refresh* or *Sync now* at the end of its header toolbar with `tf/TfDetailRefresh.svelte` over `tf/refresh.svelte.ts`, chosen by the read's `refreshes` and `source.enabled`, never by adapter kind; *Sync now* is the source's run in `sourceSyncs` (`tf/role-sync.svelte.ts`), shared by every detail of that source. A refresh re-reads the row and the live view over what the page drew, never blanking it; its failure is a `tf-banner tf-err` under the header reading `Couldn't refresh: <reason>`. The withdrawn and turned-off banners are `tf/TfDetailBanners.svelte`, under the header. (#2107)
 
 ## Copy and display

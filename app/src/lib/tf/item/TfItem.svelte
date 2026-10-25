@@ -82,7 +82,7 @@
   /** Deferred sections read so far, by id. */
   let opened = $state<Record<string, Opened>>({});
   /** The header's *Refresh* or *Sync now* (#2107). */
-  const refresh = createDetailRefresh(untrack(() => ports.refresh ?? DETAIL_REFRESH_BRIDGE));
+  const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
   $effect(() => {
     if (!ready) return;
@@ -227,8 +227,7 @@
         </div>
       {/if}
     </header>
-    <TfDetailBanners {detail} />
-    {#if refresh.failed !== null}<div class="tf-banner tf-err tf-refresh-failed" role="alert">{refresh.failed}</div>{/if}
+    <TfDetailBanners {detail} failed={refresh.failed} />
     <div class="tf-item-body">
       {#if view === undefined}
         <!-- The view has not answered yet. -->
