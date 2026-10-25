@@ -19,13 +19,18 @@ The shapes, each one a prompt or a rule of CLAUDE.md's *Machine* section:
   from a variable alone is fine: hundreds of `rm -rf $W/target` ran unattended.
 * A write, move or delete under `~/.claude/` or any `.git/` (git commands are fine).
 * A write to a shell configuration file (`~/.bashrc`, `~/.zshrc`, ...).
+* A `$(` inside single quotes or `$'...'` (`echo '$(readlink "$X")'`, #2153): the shell
+  runs nothing there, but Claude Code prompts on it. A backquote there does not prompt,
+  nor does a heredoc body, so the allowed form is a quoted heredoc (`<<'EOF'`) or a file.
+  It counts in an `eval` or `sh -c` string too, never in a script read from a heredoc.
 
 A redirection is no command name, wherever it stands: `>/dev/null cd x && y` and
 `2>&1 sed -i ... ~/.zshrc` are read as the cd and the sed they are (#1981).
 
 Only the command line is read, the way the shell reads it: quotes first. Quoted
-text and heredoc bodies are data, never commands, so a commit message or a
-script written through a heredoc that mentions `cd` passes; only an unquoted
+text and heredoc bodies are data, never commands (a single-quoted `$(` aside,
+above), so a commit message or a script written through a heredoc that mentions
+`cd` passes; only an unquoted
 `<<` that is not `<<<` opens a heredoc, and a `((...))` is arithmetic, whose `<<`
 is a shift. What runs as a command is read as one: a `$(...)` or backquote
 (quoted or not, in arithmetic too, and in the body of a heredoc whose delimiter
@@ -90,6 +95,7 @@ class Word:
         self.subs = []  # one list of commands per `$(...)` or backquote in the word
         self.redirect = False  # a redirection, its target the rest of the text: `>x`, `<x`, `<<<x`
         self.body = None  # a heredoc's body, on the word that stands for it
+        self.quoted_sub = False  # a `$(` in its single-quoted or `$'...'` text, which Claude Code prompts on
 
 
 class Parser:
@@ -105,6 +111,7 @@ class Parser:
     def __init__(self, text):
         self.s = text
         self.pending = []  # the Heredocs opened on the current line
+        self.body_subs = 0  # how deep inside the substitutions of an unquoted heredoc's body
 
     def parse(self, i, stop=None):
         """The commands from `i` up to `stop` (`)` or a backquote; None runs to the end), and the index past it."""
@@ -157,6 +164,7 @@ class Parser:
             if c == "'":
                 j = find_or_end(s, "'", i + 1)
                 current().text += s[i + 1:j]
+                self.single_quoted(s[i + 1:j], current())
                 i = j + 1
                 continue
             if s.startswith("$'", i):
@@ -232,6 +240,11 @@ class Parser:
         end_word()
         return [cmd for cmd in commands if cmd], i
 
+    def single_quoted(self, text, word):
+        """Note on `word` a `$(` in its single-quoted `text`, unless that text is in a heredoc's body."""
+        if "$(" in text and not self.body_subs:
+            word.quoted_sub = True
+
     @staticmethod
     def redirection(text):
         """A redirection's word, its target still to be read into it."""
@@ -267,7 +280,7 @@ class Parser:
 
     def ansi_quoted(self, i, word):
         """Read a `$'...'` string from `i` (past the quote), where a backslash escapes a quote."""
-        s = self.s
+        s, start = self.s, i
         while i < len(s) and s[i] != "'":
             if s[i] == "\\" and i + 1 < len(s):
                 word.text += s[i:i + 2]
@@ -275,6 +288,7 @@ class Parser:
                 continue
             word.text += s[i]
             i += 1
+        self.single_quoted(s[start:i], word)
         return i + 1
 
     def expansion(self, i, word):
@@ -306,7 +320,9 @@ class Parser:
                 j = self.double_quoted(j + 1, inner)
                 continue
             if s[j] == "'":
-                j = find_or_end(s, "'", j + 1) + 1
+                k = find_or_end(s, "'", j + 1)
+                self.single_quoted(s[j + 1:k], word)
+                j = k + 1
                 continue
             parens += {"(": 1, ")": -1}.get(s[j], 0)
             j += 1
@@ -336,7 +352,9 @@ class Parser:
             if s[j] == "\\":
                 j += 2
             elif s[j] == "'":
-                j = find_or_end(s, "'", j + 1) + 1
+                k = find_or_end(s, "'", j + 1)
+                self.single_quoted(s[j + 1:k], word)
+                j = k + 1
             elif s[j] == '"':
                 j = self.double_quoted(j + 1, inner)
             elif s.startswith(("$(", "`"), j):
@@ -420,7 +438,9 @@ class Parser:
             if s[i] == "\\":
                 i += 2
             elif s[i] == "`" or s.startswith("$(", i):
+                self.body_subs += 1
                 i = self.expansion(i, word)
+                self.body_subs -= 1
             else:
                 i += 1
         return i + 1
@@ -476,19 +496,23 @@ def name_and_args(words):
 
 
 def script_of(name, args, words):
-    """The command line an `eval`, `sh -c` or a shell reading stdin (`bash <<EOF`, `sh <<<x`) runs, or None."""
+    """The command line an `eval`, `sh -c` or a shell reading stdin (`bash <<EOF`, `sh <<<x`) runs, or None.
+
+    Paired with whether it is a heredoc's body rather than text of the command line.
+    """
     if name == "eval":
-        return " ".join(a.text for a in args)
+        return " ".join(a.text for a in args), False
     if name in SHELLS:
         for k, a in enumerate(args):
             if re.match(r"^-[a-zA-Z]*c[a-zA-Z]*$", a.text):
                 operands = [b.text for b in args[k + 1:] if not b.text.startswith(("-", "+"))]
-                return operands[0] if operands else None
+                return (operands[0] if operands else None), False
         if any(re.match(r"^-[a-zA-Z]*s", a.text) for a in args) or all(a.text.startswith(("-", "+")) for a in args):
-            fed = [w.body if w.body is not None else w.text[len("<<<"):] for w in words
-                   if w.body is not None or (w.redirect and w.text.startswith("<<<"))]
-            return fed[-1] if fed else None  # the last one is what the shell reads
-    return None
+            fed = [w for w in words if w.body is not None or (w.redirect and w.text.startswith("<<<"))]
+            if fed:  # the last one is what the shell reads
+                w = fed[-1]
+                return (w.body, True) if w.body is not None else (w.text[len("<<<"):], False)
+    return None, False
 
 
 def exec_commands(name, args):
@@ -513,25 +537,27 @@ class Simple(NamedTuple):
     args: list
     nested: int  # commands in the substitutions of its own words
     counts: bool = True  # False for an `eval` or `sh -c`, which its string's commands stand in for
+    from_body: bool = False  # read from a heredoc's body, which Claude Code's prompt check does not read
 
 
-def simple_commands(commands, depth=0):  # depth: the substitutions and scripts (`script_of`, `find -exec`) around these
+def simple_commands(commands, depth=0, from_body=False):  # depth: the substitutions and scripts (`script_of`, `find -exec`) around these
     """Every simple command, those inside substitutions, `script_of` scripts and `find -exec` included.
 
     An `eval`, `sh -c` or shell reading stdin stands for the commands of its
     script: it is kept for its redirections, but does not count as a command of its own.
+    `from_body` marks the commands of a script read from a heredoc's body.
     """
     out = []
     for words in commands:
         name, args = name_and_args(words)
-        script = script_of(name, args, words) if depth < MAX_DEPTH else None
+        script, body = script_of(name, args, words) if depth < MAX_DEPTH else (None, False)
         if script is not None:
-            out.append(Simple(words, name, args, 0, counts=False))
-            out += simple_commands(commands_of(script), depth + 1)
+            out.append(Simple(words, name, args, 0, counts=False, from_body=from_body))
+            out += simple_commands(commands_of(script), depth + 1, from_body or body)
             continue
-        nested = [x for w in words for sub in w.subs for x in simple_commands(sub, depth + 1)]
-        nested += simple_commands(exec_commands(name, args), depth + 1)
-        out.append(Simple(words, name, args, sum(x.counts for x in nested)))
+        nested = [x for w in words for sub in w.subs for x in simple_commands(sub, depth + 1, from_body)]
+        nested += simple_commands(exec_commands(name, args), depth + 1, from_body)
+        out.append(Simple(words, name, args, sum(x.counts for x in nested), from_body=from_body))
         out += nested
     return out
 
@@ -562,6 +588,10 @@ def verdict(command):
             return ("`cd` chained into a compound command stops the run for a permission prompt. "
                     "Use absolute paths, `git -C <dir>`, `npm --prefix <dir>`, or `env -C <dir> <cmd>` "
                     "for anything that must run in a directory (cargo, just).")
+        if not cmd.from_body and any(w.quoted_sub for w in words):
+            return ("A `$(` inside single quotes (or `$'...'`) stops the run for a permission prompt, "
+                    "though the shell runs nothing there. Put such text in a quoted heredoc (`<<'EOF'`) "
+                    "or a file written with Write, and read it from there.")
         if name == "rm":
             for a in args:
                 if not a.text.startswith("-") and a.globs:
