@@ -106,6 +106,7 @@ impl Source for Fake {
                 plural: "Tickets".to_owned(),
                 monogram: "TI".to_owned(),
                 full_sync_exhaustive: true,
+                refreshes: true,
             }],
             config_schema: serde_json::json!({"type": "object", "properties": {
                 "epic_link_field": {"type": ["string", "null"]},

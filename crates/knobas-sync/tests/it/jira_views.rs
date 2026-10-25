@@ -68,6 +68,7 @@ fn kind(id: &str) -> KindInfo {
         plural: id.to_owned(),
         monogram: "JV".into(),
         full_sync_exhaustive: true,
+        refreshes: true,
     }
 }
 

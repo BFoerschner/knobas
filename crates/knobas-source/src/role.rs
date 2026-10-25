@@ -579,6 +579,7 @@ mod tests {
             plural: id.to_owned(),
             monogram: "XX".to_owned(),
             full_sync_exhaustive: true,
+            refreshes: true,
         };
         let at = |key: &str| vec![PayloadPath::of([key])];
         let parent = vec![ParentPath {
@@ -714,6 +715,7 @@ mod tests {
             plural: "Monitors".into(),
             monogram: "MO".into(),
             full_sync_exhaustive: true,
+            refreshes: true,
         });
         let monitor = KindPaths {
             kind: "monitor".into(),
@@ -748,6 +750,7 @@ mod tests {
             plural: id.into(),
             monogram: "TK".into(),
             full_sync_exhaustive: true,
+            refreshes: true,
         };
         d.entity_kinds.push(info("ticket"));
         let at = |key: &str| vec![PayloadPath::of([key])];

@@ -61,6 +61,7 @@ pub fn kinds() -> [KindInfo; 2] {
         plural: plural.into(),
         monogram: monogram.into(),
         full_sync_exhaustive: true,
+        refreshes: true,
     };
     [
         kind("pipeline", "Pipeline", "Pipelines", "PL"),

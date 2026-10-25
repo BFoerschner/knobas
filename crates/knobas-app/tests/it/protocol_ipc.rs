@@ -256,6 +256,7 @@ fn kind(id: &str) -> KindInfo {
         plural: id.to_owned(),
         monogram: "P".to_owned(),
         full_sync_exhaustive: true,
+        refreshes: true,
     }
 }
 

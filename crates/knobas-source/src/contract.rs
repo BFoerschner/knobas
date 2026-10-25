@@ -479,8 +479,9 @@ where
     if let Err(error) = crate::url_forms::check(&d) {
         panic!("descriptor.url_forms: {error}");
     }
-    // 13. The refresh (ADR-0031): declared exactly when it answers, and each
-    //     kind it answers for read back as the sync emitted it.
+    // 13. The refresh (ADR-0031): declared exactly when it answers, kind by
+    //     kind (#2146), and each kind it answers for read back as the sync
+    //     emitted it.
     check_refresh(&*s, &d, &sink.0).await;
 }
 
@@ -491,7 +492,12 @@ where
 /// live instance, but a corpus of thousands would be thousands of requests.
 ///
 /// * A kind answered [`NotOffered`](crate::RefreshAnswer::NotOffered) is a
-///   kind this adapter does not refresh, and is skipped.
+///   kind this adapter does not refresh, and is skipped, but only for a kind
+///   whose [`KindInfo::refreshes`](crate::KindInfo::refreshes) says so: the
+///   app reads that flag to draw *Refresh* or *Sync now* on the item's
+///   detail, so a kind declared refreshed and answered `NotOffered` labels a
+///   press as something it does not do (#2146). A kind declared not
+///   refreshed and answered otherwise fails the same way round.
 /// * A kind answered otherwise is held to the sync: the same entity, kind and
 ///   title, and the same value at every path the descriptor declares for the
 ///   kind (its parent among them). A live item answered *gone* fails, and a
@@ -518,13 +524,24 @@ async fn check_refresh(
         let answer = s.refresh(&id).await.unwrap_or_else(|error| {
             panic!("refresh of {id}, which the sync emitted, failed: {error}")
         });
+        let kind = item.kind.as_str();
         if matches!(answer, crate::RefreshAnswer::NotOffered) {
+            assert!(
+                !d.refreshes_kind(kind),
+                "the descriptor declares kind {kind:?} refreshed but refresh answered NotOffered \
+                 for {id} -- its detail would draw Refresh for a press that runs the source"
+            );
             continue;
         }
         assert!(
             declares,
             "refresh answers for {id} but the descriptor does not declare Capability::Refresh -- \
              the app reads that declaration to decide whether to ask"
+        );
+        assert!(
+            d.refreshes_kind(kind),
+            "refresh answers for {id} but the descriptor declares kind {kind:?} not refreshed -- \
+             its detail would draw Sync now for an item the refresh reads"
         );
         answered = true;
         match answer {
@@ -1814,6 +1831,13 @@ mod tests {
         RefreshesWithoutTheCapability,
         /// Declares `Capability::Refresh` and answers `NotOffered` for all.
         DeclaresRefreshAndOffersNone,
+        /// Declares `Capability::Refresh`, says its one kind is not
+        /// refreshed, and answers `NotOffered` for it: the capability with no
+        /// kind behind it (#2146).
+        DeclaresRefreshForNoKind,
+        /// Declares `Capability::Refresh`, says its one kind is not
+        /// refreshed, and reads its item back all the same (#2146).
+        RefreshesAKindDeclaredNotRefreshed,
         /// Reads its item back under another title than the sync's.
         RefreshesAnotherTitle,
         /// Reads its item back with another status at the declared path.
@@ -1873,6 +1897,8 @@ mod tests {
                     }
                     Behavior::Refreshes
                     | Behavior::DeclaresRefreshAndOffersNone
+                    | Behavior::DeclaresRefreshForNoKind
+                    | Behavior::RefreshesAKindDeclaredNotRefreshed
                     | Behavior::RefreshesAnotherTitle
                     | Behavior::RefreshesAnotherStatus
                     | Behavior::RefreshesALiveItemAsGone => {
@@ -1948,6 +1974,11 @@ mod tests {
                         plural: format!("{label}s"),
                         monogram: monogram.to_owned(),
                         full_sync_exhaustive: true,
+                        refreshes: !matches!(
+                            self.behavior,
+                            Behavior::DeclaresRefreshForNoKind
+                                | Behavior::RefreshesAKindDeclaredNotRefreshed
+                        ),
                     };
                     let mut kinds = vec![kind("ticket", "Ticket", "TE")];
                     // The second kind exists only for the tolerance case, and
@@ -2392,6 +2423,7 @@ mod tests {
             match self.behavior {
                 Behavior::Refreshes
                 | Behavior::RefreshesWithoutTheCapability
+                | Behavior::RefreshesAKindDeclaredNotRefreshed
                 | Behavior::RefreshesAnotherTitle
                 | Behavior::RefreshesAnotherStatus => {}
                 Behavior::RefreshesALiveItemAsGone => return Ok(crate::RefreshAnswer::Gone),
@@ -3486,10 +3518,33 @@ mod tests {
         .await;
     }
 
+    /// A kind the descriptor says is refreshed and the refresh does not
+    /// read: the detail would draw *Refresh* for a press that runs the
+    /// source (#2146).
+    #[tokio::test]
+    async fn rejects_a_kind_declared_refreshed_that_the_refresh_does_not_offer() {
+        rejects(
+            Behavior::DeclaresRefreshAndOffersNone,
+            "declares kind \"ticket\" refreshed but refresh answered NotOffered",
+        )
+        .await;
+    }
+
+    /// The other direction: a kind declared not refreshed that the refresh
+    /// reads all the same draws *Sync now* for an item it could read.
+    #[tokio::test]
+    async fn rejects_a_refresh_of_a_kind_declared_not_refreshed() {
+        rejects(
+            Behavior::RefreshesAKindDeclaredNotRefreshed,
+            "but the descriptor declares kind \"ticket\" not refreshed",
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn rejects_the_capability_without_a_refresh() {
         rejects(
-            Behavior::DeclaresRefreshAndOffersNone,
+            Behavior::DeclaresRefreshForNoKind,
             "declares Capability::Refresh but refresh answered NotOffered",
         )
         .await;

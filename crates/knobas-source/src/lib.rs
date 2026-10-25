@@ -239,6 +239,20 @@ impl SourceDescriptor {
         self.capabilities.contains(&Capability::Refresh)
     }
 
+    /// Whether this source reads an item of `kind` by id (#2146): it
+    /// declares [`Capability::Refresh`] and its
+    /// [`entity_kinds`](Self::entity_kinds) entry for `kind` says
+    /// [`KindInfo::refreshes`]. `false` for a kind it does not declare.
+    /// What an item's detail reads to draw *Refresh* or *Sync now*.
+    #[must_use]
+    pub fn refreshes_kind(&self, kind: &str) -> bool {
+        self.refreshes()
+            && self
+                .entity_kinds
+                .iter()
+                .any(|info| info.id == kind && info.refreshes)
+    }
+
     /// Does this source declare `op`? `Ok` when [`Self::write_ops`] lists its
     /// [identifier](WriteOp::identifier) and, for a
     /// [source action](WriteOp::SourceAction), [`Self::source_actions`] lists
@@ -383,6 +397,32 @@ pub struct KindInfo {
     /// it without knowing the remote corpus, so the adapter's own integration
     /// tests are what hold it honest.
     pub full_sync_exhaustive: bool,
+    /// Whether [`Source::refresh`] reads an item **of this kind** by id
+    /// (#2146, ADR-0031). Read only under [`Capability::Refresh`], through
+    /// [`SourceDescriptor::refreshes_kind`]: the capability says the adapter
+    /// reads one item at all, this says which of its kinds. `false` for a
+    /// kind its refresh answers [`RefreshAnswer::NotOffered`] for, such as
+    /// TeamCity's build configuration or Gitea's repository, branch and
+    /// commit, so their detail draws *Sync now* from the start rather than
+    /// *Refresh* until the first press. [`contract::battery`] clause 13
+    /// holds it to the answers, kind by kind.
+    ///
+    /// **Per kind, not per adapter**, as [`Self::full_sync_exhaustive`] is.
+    ///
+    /// `#[serde(default = ...)]` to `true`, so a descriptor that predates
+    /// this (an external adapter's JSON) reads as one whose every kind is
+    /// refreshed when it declares the capability, which is what it was read
+    /// as before. Left out of the TypeScript mirror: the shell reads
+    /// `EntityDetail.refreshes`, never an adapter's kinds.
+    #[serde(default = "every_kind_refreshes")]
+    #[ts(skip)]
+    pub refreshes: bool,
+}
+
+/// [`KindInfo::refreshes`]' default: a kind is refreshed unless its
+/// descriptor says otherwise.
+fn every_kind_refreshes() -> bool {
+    true
 }
 
 /// What an adapter can do beyond plain syncing (spec §3).
@@ -2174,6 +2214,7 @@ mod tests {
                 plural: "Tickets".into(),
                 monogram: "JI".into(),
                 full_sync_exhaustive: true,
+                refreshes: true,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             payload_paths: vec![KindPaths {

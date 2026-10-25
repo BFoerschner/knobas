@@ -117,6 +117,7 @@ fn descriptor() -> SourceDescriptor {
             plural: "Pull requests".to_owned(),
             monogram: "PR".to_owned(),
             full_sync_exhaustive: true,
+            refreshes: true,
         }],
         config_schema: json!({"type": "object", "properties": {}}),
         payload_paths: Vec::new(),

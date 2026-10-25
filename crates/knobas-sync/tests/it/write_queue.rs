@@ -477,6 +477,7 @@ fn fake_descriptor(id: &str) -> SourceDescriptor {
             plural: "Tickets".to_owned(),
             monogram: "TI".to_owned(),
             full_sync_exhaustive: true,
+            refreshes: true,
         }],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
         payload_paths: vec![KindPaths {

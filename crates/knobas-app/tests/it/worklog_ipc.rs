@@ -165,6 +165,7 @@ fn descriptor() -> SourceDescriptor {
             plural: "Tickets".to_owned(),
             monogram: "JI".to_owned(),
             full_sync_exhaustive: true,
+            refreshes: true,
         }],
         config_schema: json!({"type": "object", "properties": {}}),
         // Nothing declared: no read here goes through a payload path (#277).

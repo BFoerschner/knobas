@@ -46,6 +46,7 @@ impl Source for Growing {
                 plural: "T".into(),
                 monogram: "GR".into(),
                 full_sync_exhaustive: false,
+                refreshes: true,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             payload_paths: Vec::new(),
