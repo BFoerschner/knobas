@@ -2143,16 +2143,20 @@ async fn the_opening_probe_from_the_watermark_holds_its_build_and_every_newer_on
     seeded.clear_leftovers().await;
     let ids = seeded.seeded_ids();
     let newest = *ids.last().expect("a seeded build");
-    // A watermark whose predecessor id names no build, from the middle up, so
-    // the page has older builds to leave out and newer ones to hold.
-    let watermark = *ids[ids.len() / 2..]
-        .iter()
-        .find(|&&id| !ids.contains(&(id - 1)))
-        .unwrap_or_else(|| panic!("a seeded id whose predecessor is not seeded: {ids:?}"));
-    let (status, _) = seeded
-        .get(&format!("app/rest/builds/id:{}?fields=id", watermark - 1))
-        .await;
-    assert_eq!(status, 404, "build {} is not on the server", watermark - 1);
+    // A watermark from the middle up, so the page has older builds to leave
+    // out and newer ones to hold: one whose predecessor id names no build
+    // where the seed left a gap, else the middle one. A fresh seed runs its
+    // builds back to back and leaves no gap (#2099), so the predecessor that
+    // names no build is witnessed above the newest build too, below.
+    let middle = &ids[ids.len() / 2..];
+    let gap = middle.iter().copied().find(|&id| !ids.contains(&(id - 1)));
+    let watermark = gap.unwrap_or(middle[0]);
+    if gap.is_some() {
+        let (status, _) = seeded
+            .get(&format!("app/rest/builds/id:{}?fields=id", watermark - 1))
+            .await;
+        assert_eq!(status, 404, "build {} is not on the server", watermark - 1);
+    }
 
     let probe = |w: i64| format!("sinceBuild:(id:{}),defaultFilter:false,count:100", w - 1);
     let mut page = seeded.build_ids(&probe(watermark)).await;
@@ -2167,6 +2171,17 @@ async fn the_opening_probe_from_the_watermark_holds_its_build_and_every_newer_on
         seeded.build_ids(&probe(newest + 1)).await,
         Vec::<i64>::new(),
         "above the newest build the probe page is empty"
+    );
+    // `sinceBuild:(id:newest+1)`: an id that names no build, read as a
+    // number rather than refused.
+    let (status, _) = seeded
+        .get(&format!("app/rest/builds/id:{}?fields=id", newest + 1))
+        .await;
+    assert_eq!(status, 404, "build {} is not on the server", newest + 1);
+    assert_eq!(
+        seeded.build_ids(&probe(newest + 2)).await,
+        Vec::<i64>::new(),
+        "a predecessor that names no build is read as a number"
     );
     println!("SEEDED probe from {watermark}: {page:?}");
 }
