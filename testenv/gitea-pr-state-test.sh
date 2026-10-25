@@ -12,7 +12,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 
 ORG=tidewater ADMIN=knobas:pw
 API_STATUS=200 API_BODY=''
-PATCHED=''
+PATCHED='' STUB_PATCH='500 {"message":"stub: no PATCH expected"}'
 api() {  # the open list answers STUB_OPEN; PATCH logs "<path> <body>" and answers STUB_PATCH
   if [ "$2" = PATCH ]; then
     PATCHED="$PATCHED$3 $4;"; API_STATUS=${STUB_PATCH%% *}; API_BODY=${STUB_PATCH#* }
