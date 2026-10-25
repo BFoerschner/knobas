@@ -303,7 +303,8 @@ live_lock_traps() {
 # run waits, with the 45 minutes and the refusal of any holder. `live_down
 # <product>`, from any worktree, ends the keeper and frees the lock; a product
 # gone some other way frees it at the keeper's next look
-# (`KNOBAS_LIVE_KEEPER_POLL`, default 30 s); a killed keeper is a dead holder.
+# (`KNOBAS_LIVE_KEEPER_POLL`, default 30 s), as does its worktree's removal or
+# `KNOBAS_LIVE_KEEPER_MAX` (3 h); a killed keeper is a dead holder.
 _live_lock_kept_here() {
   local pid since recipe tree
   read -r pid since recipe tree <<<"$1"
@@ -329,10 +330,16 @@ _live_lock_keep() {
       mv -f "$LIVE_LOCK.keep.$me" "$LIVE_LOCK"; then
       LIVE_LOCK_MINE=$mine
       # Two misses in a row, so one `docker ps` hiccup does not free the lock.
-      misses=0
+      misses=0 started=$SECONDS max=${KNOBAS_LIVE_KEEPER_MAX:-10800}
       while [ "$misses" -lt 2 ] && [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$mine" ]; do
         if live_is_up "$product"; then misses=0; else misses=$((misses + 1)); fi
         [ "$misses" -lt 2 ] || break
+        # A forgotten `live-down` must not queue every other worktree's JVM
+        # runs for good: the keeper lets go once its worktree is removed (a
+        # merge's cleanup) or after KNOBAS_LIVE_KEEPER_MAX (3 h, the Atlassian
+        # licence's life), the product left up for whoever runs next.
+        [ -d "$LIVE_TESTENV" ] || break
+        [ $((SECONDS - started)) -lt "$max" ] || break
         sleep "${KNOBAS_LIVE_KEEPER_POLL:-30}" &
         wait $! || true
       done

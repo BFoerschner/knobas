@@ -383,7 +383,7 @@ liveup() { # liveup <name> <product> -- `testenv/live up <product>` in the scrat
   (
     # shellcheck source=testenv/live-lib.sh disable=SC1091
     . "$here/live-lib.sh"
-    LIVE_TESTENV=$fake
+    LIVE_TESTENV=${3:-$fake}
     live_up_held "$2"
   ) >"$scratch/$1.out" 2>&1 && echo 0 || echo $?
 }
@@ -424,6 +424,22 @@ rc=$(liveup up2 confluence)
 check "a second live-up succeeds" "$rc" "0"
 : >"$STUB_RUNNING_FILE"
 lock_gone "a live-up product that is gone frees the lock"
+# A forgotten live-down does not hold the lock for good: the keeper lets go
+# once its worktree is removed, or after KNOBAS_LIVE_KEEPER_MAX.
+echo knobas-confluence >"$STUB_RUNNING_FILE"
+mkdir -p "$scratch/gone"
+cp -R "$scratch/tree" "$scratch/gone/"
+rc=$(liveup up3 confluence "$scratch/gone/tree/testenv")
+check "a live-up in a worktree to be removed succeeds" "$rc" "0"
+check "and its keeper holds the lock" "$(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)" "live-up-confluence-kept $scratch/gone/tree"
+rm -r "$scratch/gone/tree"
+lock_gone "a live-up whose worktree is removed frees the lock"
+rc=$(KNOBAS_LIVE_KEEPER_MAX=1 liveup up4 confluence)
+check "a live-up with a short keeper life succeeds" "$rc" "0"
+check "and its keeper holds the lock" "$(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)" "live-up-confluence-kept $scratch/tree"
+sleep 1
+lock_gone "a keeper lets go after KNOBAS_LIVE_KEEPER_MAX"
+: >"$STUB_RUNNING_FILE"
 
 if [ "$failures" -gt 0 ]; then
   echo "live-lock-test: $failures of $checks checks failed" >&2
