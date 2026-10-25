@@ -1,0 +1,530 @@
+<!doctype html>
+<!--
+  The Docs reader, as agreed on 2026-10-25 (grilling before /to-spec). One design, no alternatives.
+
+  What it shows:
+  - Wide windows: tree 300px | the page at full width (no character cap on anything) | a sticky outline, 268px.
+  - Below 1240px: the outline folds above the page, closed; the tree is 220px.
+  - Below 900px: the tree is a drawer. The "Pages" button opens it, so does `/` (cursor in the filter)
+    and a label chip (that label searched). Esc, a click outside or picking a page closes it; focus goes back.
+  - Header: meta line with "Created by"; actions Link to…, New page here, Copy link, Open in Confluence, More ▾
+    (Export as Markdown only, for now). No Comment button: the box at the foot is the way to comment.
+  - Code blocks: a strip above the code, language left, Copy right.
+  - Page foot, above the comments: Work it belongs to (open list), Linked from (grouped by space, pages with no
+    space key last under "Other pages", each group
+    closed every time, "50+" when the backend's limit of 50 is reached). Each is left out when empty.
+  Tokens and component styles are copied from app/src/lib/tf/css; only the reader layout is new.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs reader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&display=swap" rel="stylesheet">
+<style>
+/* ---------- tokens: app/src/lib/tf/css/tokens.css ---------- */
+:root {
+  --paper: #E4E8EC; --sheet: #F7F8F9; --sheet-2: #EEF1F4; --ink: #17212B; --ink-2: #4B5663;
+  --rule: #CBD2D9; --rule-2: #DDE2E7;
+  --card: #F2D157; --card-2: #E8C440; --card-ink: #2A230B; --card-ink-2: #5A4D1E;
+  --focus: #2F55D4; --mark: #F6E08F;
+  --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
+  --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
+  --shadow: 0 1px 0 rgba(23,33,43,.06), 0 8px 24px -12px rgba(23,33,43,.25);
+  --sans: "Archivo", system-ui, sans-serif;
+  --serif: "Source Serif 4", Georgia, serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  --t-2xs: 11px; --t-xs: 12px; --t-sm: 13px; --t-md: 14px; --t-lg: 15px; --t-xl: 17px;
+  --t-2xl: 20px; --t-3xl: 24px; --t-d1: 34px; --t-d2: 44px; --t-d3: 64px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --ink: #E4E9EE; --ink-2: #A0ABB7;
+    --rule: #323C47; --rule-2: #28313A;
+    --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
+    --focus: #8AA6FF; --mark: #5C4E17;
+    --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
+    --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
+    --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --ink: #E4E9EE; --ink-2: #A0ABB7;
+  --rule: #323C47; --rule-2: #28313A;
+  --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
+  --focus: #8AA6FF; --mark: #5C4E17;
+  --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
+  --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
+  --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; background: var(--paper); color: var(--ink); }
+body { font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; }
+button, input, select, textarea { font: inherit; color: inherit; background: none; border: 0; }
+button { cursor: pointer; }
+a { color: var(--info); text-decoration: none; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 2px; }
+
+/* ---------- the mockup's own strip (not part of the app) ---------- */
+.mk {
+  flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 7px 14px;
+  background: var(--sheet-2); border-bottom: 2px solid var(--ink); font-size: var(--t-sm); color: var(--ink-2);
+}
+.mk b { color: var(--ink); }
+.mk-theme { margin-left: auto; display: inline-flex; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; background: var(--sheet); }
+.mk-theme button { padding: 4px 10px; color: var(--ink-2); }
+.mk-theme button + button { border-left: 1px solid var(--rule); }
+.mk-theme button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
+.mk :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* ---------- the app root, in a frame instead of position: fixed ---------- */
+.tf {
+  flex: 1; min-height: 0; position: relative;
+  display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr);
+  background: var(--paper); color: var(--ink); font: 400 var(--t-md)/1.45 var(--sans); overflow: hidden;
+}
+.tf a { color: inherit; }
+.tf h1, .tf h2, .tf h3, .tf p { margin: 0; }
+.tf :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.tf .tf-mono { font-family: var(--mono); font-variant-ligatures: none; font-size: .9em; }
+
+/* ---------- chrome.css, abridged ---------- */
+.tf-top { display: flex; align-items: center; gap: 6px; padding: 8px 14px; background: var(--sheet); border-bottom: 1px solid var(--rule); min-width: 0; }
+.tf-brand { font-weight: 800; font-variation-settings: "wdth" 70; font-size: var(--t-2xl); margin-right: 10px; }
+.tf-nav { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tf-nav a { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 4px; color: var(--ink-2); white-space: nowrap; }
+.tf-nav a[aria-current="page"] { color: var(--ink); background: var(--sheet-2); box-shadow: inset 0 -2px 0 var(--ink); }
+.tf-count { font-size: var(--t-2xs); font-weight: 600; padding: 0 6px; border-radius: 9px; background: var(--muted-bg); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-spacer { flex: 1; }
+.tf-search { display: flex; align-items: center; gap: 8px; border: 1px solid var(--rule); background: var(--paper); border-radius: 4px; padding: 5px 10px; color: var(--ink-2); min-width: 170px; }
+.tf-search kbd { margin-left: auto; }
+.tf kbd { font: 600 var(--t-2xs) var(--mono); padding: 1px 5px; border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 3px; background: var(--sheet); color: var(--ink-2); }
+.tf-timer { display: flex; align-items: center; gap: 8px; border-radius: 4px; padding: 4px 10px; font-weight: 600; background: var(--sheet-2); color: var(--ink-2); white-space: nowrap; }
+.tf-iconbtn { display: inline-flex; color: var(--ink-2); padding: 6px; border-radius: 4px; }
+.tf-iconbtn:hover { background: var(--sheet-2); color: var(--ink); }
+.tf-iconbtn svg { width: 16px; height: 16px; }
+.tf-status { display: flex; gap: 18px; align-items: center; padding: 5px 14px; font-size: var(--t-xs); color: var(--ink-2); background: var(--sheet); border-top: 1px solid var(--rule); white-space: nowrap; overflow: hidden; }
+.tf-status b { color: var(--ink); }
+.tf-status .tf-queue { margin-left: auto; }
+.tf-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--rule); background: var(--sheet); padding: 5px 11px; border-radius: 4px; font-weight: 500; white-space: nowrap; }
+.tf-btn:hover { border-color: var(--ink-2); }
+.tf-btn.tf-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.tf-btn.tf-ghost { border-color: transparent; background: none; }
+.tf-btn.tf-ghost:hover { background: var(--sheet-2); }
+.tf-btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.tf-btn.tf-sm { padding: 3px 8px; font-size: var(--t-sm); }
+.tf-chip { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-xs); font-weight: 600; padding: 1px 7px; border-radius: 3px; white-space: nowrap; background: var(--muted-bg); color: var(--muted); }
+.tf-av { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font-size: var(--t-2xs); font-weight: 700; background: var(--sheet-2); color: var(--ink-2); border: 1px solid var(--rule); flex: none; }
+.tf-msg { display: flex; gap: 10px; align-items: flex-start; }
+/* job.css: the menu every ⋯ / ▾ button opens */
+.tf-menu { position: absolute; z-index: 4; min-width: 210px; padding: 4px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; box-shadow: var(--shadow); }
+.tf-menu [role="menuitem"] { display: flex; width: 100%; align-items: center; gap: 9px; padding: 5px 8px; border-radius: 4px; font-size: var(--t-sm); text-align: left; }
+.tf-menu [role="menuitem"]:hover, .tf-menu [role="menuitem"]:focus-visible { background: var(--sheet-2); }
+.tf-menu svg { width: 15px; height: 15px; color: var(--ink-2); flex: none; }
+
+/* ---------- the tree (docs.css, unchanged) ---------- */
+.tf-rd-tree { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.tf-dl-head { padding: 12px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--rule); }
+.tf-dl-head .tf-sel { font: 600 var(--t-md) var(--sans); border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); display: flex; justify-content: space-between; }
+.tf-fsearch { display: flex; align-items: center; gap: 8px; border: 1px solid var(--rule); background: var(--paper); border-radius: 4px; padding: 6px 9px; color: var(--ink-2); }
+.tf-fsearch input { flex: 1; min-width: 0; outline: 0; color: var(--ink); }
+.tf-fsearch:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
+.tf .tf-fsearch input:focus-visible { outline: 0; }
+.tf-dl-hint { font-size: var(--t-2xs); color: var(--ink-2); }
+.tf-dl-hint code { font: var(--t-2xs) var(--mono); background: var(--sheet-2); padding: 0 3px; border-radius: 2px; color: var(--ink); }
+.tf-dl-body { overflow: auto; flex: 1; padding: 6px 0 12px; }
+.tf-dl-foot { padding: 10px 12px; border-top: 1px solid var(--rule-2); }
+.tf-rd-tree a { display: block; padding: 4px 12px; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-rd-tree a:hover { background: var(--sheet-2); }
+.tf-rd-tree a[aria-current="true"] { background: var(--ink); color: var(--sheet); }
+.tf-rd-tree details > summary { list-style: none; cursor: pointer; padding: 4px 12px; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-rd-tree details > summary::-webkit-details-marker { display: none; }
+.tf-rd-tree details > summary::before { content: "▸ "; color: var(--ink-2); font-size: var(--t-2xs); }
+.tf-rd-tree details[open] > summary::before { content: "▾ "; }
+.tf-rd-tree details > summary:hover { background: var(--sheet-2); }
+.tf-rd-tree .tf-fold-in { padding-left: 16px; }
+
+/* ---------- the reader: tree | page, the outline inside the page ---------- */
+.tf-rd { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: 0; position: relative; overflow: hidden; }
+.tf-rd-main { overflow: auto; min-height: 0; }
+/* The page takes the whole width; the outline is its right column, sticky while the page scrolls. */
+.rd-page {
+  display: grid; grid-template-columns: minmax(0, 1fr) 268px; column-gap: 56px;
+  padding: 26px clamp(16px, 3vw, 48px) 90px;
+}
+.rd-head, .rd-body { grid-column: 1; min-width: 0; }
+.rd-outline { grid-column: 2; grid-row: 1 / span 2; align-self: start; position: sticky; top: 0; padding-top: 30px; }
+.tf .rd-outline h3 { font-size: var(--t-sm); font-weight: 600; color: var(--ink); margin: 0 0 8px; }
+.tf-toc a { display: block; padding: 5px 0 5px 12px; border-left: 2px solid var(--rule); color: var(--ink-2); font-size: var(--t-md); }
+.tf-toc a.tf-on { border-left-color: var(--ink); color: var(--ink); font-weight: 600; }
+.tf-toc .tf-hits { font-size: var(--t-2xs); font-weight: 700; color: var(--card-ink); background: var(--card); border-radius: 8px; padding: 0 5px; margin-left: 4px; }
+
+/* Header: crumb, title, meta, actions. The Pages button only exists below 900px. */
+.rd-crumbrow { display: flex; align-items: center; gap: 10px; }
+.rd-pages { display: none; }
+.rd-pages svg { width: 15px; height: 15px; }
+.tf-rd-crumb { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-rd-crumb a { text-decoration: underline; text-underline-offset: 2px; }
+.tf .tf-rd-title { font-family: var(--serif); font-size: 40px; line-height: 1.1; font-weight: 600; margin: 8px 0 10px; letter-spacing: -.01em; }
+.tf-rd-meta { font-size: var(--t-sm); color: var(--ink-2); display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; }
+.tf-rd-meta button.tf-chip { border: 0; cursor: pointer; }
+.rd-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.rd-more { position: relative; }
+.rd-more .tf-menu { top: calc(100% + 4px); left: 0; }
+.rd-more > button::after { content: "▾"; font-size: var(--t-2xs); color: var(--ink-2); }
+
+/* Below 1240px the outline folds above the page, closed. */
+.rd-outline-fold { display: none; margin-top: 16px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); }
+.rd-outline-fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: var(--t-sm); font-weight: 600; }
+.rd-outline-fold > summary::-webkit-details-marker { display: none; }
+.rd-outline-fold > summary::before { content: "▸"; width: 10px; color: var(--ink-2); font-size: var(--t-2xs); }
+.rd-outline-fold[open] > summary::before { content: "▾"; }
+.rd-outline-fold .tf-toc { padding: 0 12px 10px; }
+
+/* ---------- the page body (docs.css), at full width ---------- */
+.tf-doc { font-family: var(--serif); font-size: 17.5px; line-height: 1.65; color: var(--ink); }
+.tf-doc h2 { font-family: var(--serif); font-size: 25px; line-height: 1.25; margin: 36px 0 10px; font-weight: 600; scroll-margin-top: 50px; }
+.tf-doc > h2:first-child { margin-top: 22px; }
+.tf-doc p { margin: 0 0 15px; }
+.tf-doc ol, .tf-doc ul { margin: 0 0 15px; padding-left: 24px; }
+.tf-doc li { margin: 4px 0; }
+.tf-doc li > p:last-child, .tf-doc .tf-callout p:last-child { margin-bottom: 0; }
+.tf-doc li > p:has(+ .tf-pre) { margin-bottom: 8px; }
+.tf-doc code { font: .82em var(--mono); font-variant-ligatures: none; background: var(--sheet-2); padding: 1px 5px; border-radius: 3px; }
+/* A code block: language and Copy in a strip above the code, so neither covers a long line. */
+.tf-pre { margin: 0 0 18px; }
+.tf-pre-bar {
+  display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 2px 14px;
+  background: var(--sheet-2); border: 1px solid var(--rule); border-bottom-color: var(--rule-2); border-radius: 6px 6px 0 0;
+  font: var(--t-xs) var(--sans); color: var(--ink-2);
+}
+.tf-pre-bar .tf-btn { font-size: var(--t-xs); padding: 2px 8px; }
+.tf-doc pre {
+  font: var(--t-md)/1.55 var(--mono); font-variant-ligatures: none; background: var(--sheet-2); border: 1px solid var(--rule);
+  border-top: 0; border-radius: 0 0 6px 6px; padding: 12px 14px; overflow: auto; white-space: pre; margin: 0;
+}
+.tf-tblwrap { overflow-x: auto; margin: 0 0 18px; }
+.tf-doc table { border-collapse: collapse; width: 100%; font-family: var(--sans); font-size: var(--t-md); line-height: 1.45; }
+.tf-doc th, .tf-doc td { border: 1px solid var(--rule); padding: 7px 10px; text-align: left; vertical-align: top; }
+.tf-doc th { background: var(--sheet-2); font-weight: 600; }
+.tf-doc td code { font-size: var(--t-xs); white-space: nowrap; }
+.tf-callout { display: flex; gap: 10px; border-radius: 6px; padding: 11px 14px; margin: 0 0 18px; font-family: var(--sans); font-size: var(--t-lg); line-height: 1.5; border-left: 4px solid; }
+.tf-callout.tf-info { background: var(--info-bg); border-color: var(--info); }
+.tf-callout .tf-lbl { font-weight: 700; white-space: nowrap; }
+.tf-macro { border: 1px dashed var(--ink-2); border-radius: 6px; padding: 10px 14px; font-family: var(--sans); font-size: var(--t-md); color: var(--ink-2); margin: 0 0 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tf-macro .tf-btn { margin-left: auto; }
+
+/* ---------- the page foot: Work it belongs to, Linked from ---------- */
+.rd-foot { margin-top: 32px; font-size: var(--t-sm); color: var(--ink-2); }
+.rd-foot + .rd-foot { margin-top: 22px; }
+.tf .rd-foot h3 { font-size: var(--t-sm); font-weight: 600; color: var(--ink); margin: 0 0 6px; }
+.rd-foot ul { padding-left: 18px; line-height: 1.7; }
+.rd-foot li::marker { color: var(--ink-2); }
+.rd-foot a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.rd-foot .tf-s { font-size: var(--t-xs); margin-left: 6px; }
+/* Linked from: one fold per space, closed every time the page opens. */
+.rd-linked ul { padding: 0 0 4px 32px; }
+.rd-linked summary { list-style: none; cursor: pointer; display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 6px 2px 2px; border-radius: 3px; font-size: var(--t-xs); }
+.rd-linked summary::-webkit-details-marker { display: none; }
+.rd-linked summary::before { content: "▸"; width: 10px; color: var(--ink-2); font-size: var(--t-2xs); }
+.rd-linked details[open] > summary::before { content: "▾"; }
+.rd-linked summary:hover { background: var(--sheet-2); }
+.rd-linked summary b { color: var(--ink); font-weight: 600; }
+.rd-linked details + details { margin-top: 2px; }
+
+/* ---------- comments (docs.css) ---------- */
+.tf-cmts { border-top: 1px solid var(--rule); margin-top: 24px; padding-top: 18px; font-family: var(--sans); }
+.tf .tf-cmts h2 { font-family: var(--sans); font-size: var(--t-xl); margin: 0 0 12px; }
+.tf-cmts .tf-msg { margin-bottom: 10px; font-size: var(--t-md); line-height: 1.5; }
+.tf-cmts .tf-av { width: 28px; height: 28px; }
+.tf-cmts .tf-who { color: var(--ink-2); font-size: var(--t-sm); }
+.tf-cmts .tf-who b { color: var(--ink); }
+.tf-cmts .tf-cmt-body p { margin: 2px 0 6px; }
+.tf-compose { margin-top: 12px; border: 1px solid var(--rule); border-radius: 6px; padding: 10px; background: var(--sheet); }
+.tf-compose textarea { width: 100%; min-height: 72px; border: 1px solid var(--rule); border-radius: 4px; padding: 8px; background: var(--paper); resize: vertical; font-size: var(--t-md); }
+.tf-compose .tf-acts { display: flex; justify-content: flex-end; margin-top: 8px; }
+
+/* ---------- narrower windows ---------- */
+@media (max-width: 1239px) {
+  .tf-rd { grid-template-columns: 220px minmax(0, 1fr); }
+  .rd-page { grid-template-columns: minmax(0, 1fr); }
+  .rd-outline { display: none; }
+  .rd-outline-fold { display: block; }
+}
+/* Below 900px the tree is a drawer over the page. */
+.rd-backdrop { display: none; }
+@media (max-width: 899px) {
+  .tf-rd { grid-template-columns: minmax(0, 1fr); }
+  .tf-rd-tree {
+    position: absolute; top: 0; bottom: 0; left: 0; z-index: 6; width: min(320px, 86vw);
+    box-shadow: var(--shadow); transform: translateX(-100%); visibility: hidden;
+    transition: transform .18s ease-out, visibility 0s .18s;
+  }
+  .rd-drawer .tf-rd-tree { transform: none; visibility: visible; transition: transform .18s ease-out; }
+  .rd-drawer .rd-backdrop { display: block; position: absolute; inset: 0; z-index: 5; background: rgba(10, 14, 18, .45); }
+  .rd-pages { display: inline-flex; }
+  .tf .tf-rd-title { font-size: 30px; }
+  .tf-nav, .tf-search, .tf-timer { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .tf-rd-tree { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="mk" role="note">
+  <span><b>Docs reader</b>, the agreed design (2026-10-25).</span>
+  <span>Narrow the window: below 1240px the outline folds above the page; below 900px the tree becomes a drawer (the Pages button, or press <b>/</b>).</span>
+  <div class="mk-theme" role="group" aria-label="Theme">
+    <button type="button" data-theme="dark">Dark</button>
+    <button type="button" data-theme="light">Light</button>
+  </div>
+</div>
+
+<div class="tf" id="app">
+  <header class="tf-top">
+    <span class="tf-brand">knobas</span>
+    <nav class="tf-nav" aria-label="Views">
+      <a href="#">Tickets</a><a href="#">Job</a><a href="#">Inbox</a><a href="#">Code</a><a href="#">Builds</a>
+      <a href="#" aria-current="page">Docs</a><a href="#">Dependencies</a><a href="#">Monitors</a><a href="#">Link sets</a>
+      <a href="#">Proposed links <span class="tf-count">63</span></a><a href="#">Time</a>
+    </nav>
+    <span class="tf-spacer"></span>
+    <span class="tf-search"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg>Search<kbd>⌘K</kbd></span>
+    <span class="tf-timer">No timer ▶</span>
+    <button class="tf-iconbtn" aria-label="Settings"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.3"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg></button>
+    <button class="tf-iconbtn" aria-label="Theme"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor"/></svg></button>
+  </header>
+
+  <div class="tf-rd" id="rd">
+    <nav class="tf-rd-tree" id="tree" aria-label="Docs">
+      <div class="tf-dl-head">
+        <div class="tf-sel"><span>ENG Engineering (19)</span><span aria-hidden="true">⇕</span></div>
+        <label class="tf-fsearch"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg><input id="filter" type="search" placeholder="Search Engineering" aria-label="Search Engineering"><kbd>/</kbd></label>
+        <div class="tf-dl-hint"><code>"…"</code> phrase, <code>-word</code> leave out, <code>by:</code> <code>updated:7d</code></div>
+      </div>
+      <div class="tf-dl-body">
+        <details open><summary>Engineering Home</summary>
+          <div class="tf-fold-in">
+            <details><summary>Architecture decision records</summary></details>
+            <details><summary>Coding guidelines</summary></details>
+            <a href="#">Daily protocol 2026-08-21</a>
+            <a href="#">Ledger reconciliation runbook</a>
+            <a href="#" aria-current="true">Local development setup</a>
+            <a href="#">On-call handbook</a>
+            <details><summary>Payments architecture overview</summary></details>
+            <details><summary>Standup protocols</summary></details>
+          </div>
+        </details>
+      </div>
+      <div class="tf-dl-foot"><button class="tf-btn tf-sm">New page</button></div>
+    </nav>
+    <div class="rd-backdrop" id="backdrop"></div>
+
+    <section class="tf-rd-main">
+      <div class="rd-page">
+        <header class="rd-head">
+          <div class="rd-crumbrow">
+            <button type="button" class="tf-btn tf-sm rd-pages" id="pages" aria-controls="tree" aria-expanded="false"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 3.5h11M5 8h8.5M5 12.5h8.5M2.5 8h.5M2.5 12.5h.5"/></svg>Pages</button>
+            <div class="tf-rd-crumb"><a href="#">Docs</a> › <a href="#">Engineering</a> › <a href="#">Engineering Home</a></div>
+          </div>
+          <h1 class="tf-rd-title">Local development setup</h1>
+          <div class="tf-rd-meta">
+            <span>You edited today 09:31</span><span>Created by Tomasz, today 08:57</span><span>version 3</span><span>1 min read</span>
+            <button type="button" class="tf-chip" data-label="onboarding" title="Search for onboarding">onboarding</button>
+            <button type="button" class="tf-chip" data-label="howto" title="Search for howto">howto</button>
+          </div>
+          <div class="rd-acts">
+            <button class="tf-btn tf-sm">Link to PAY-142</button>
+            <button class="tf-btn tf-sm">Link to…</button>
+            <button class="tf-btn tf-sm">New page here</button>
+            <button class="tf-btn tf-sm">Copy link</button>
+            <button class="tf-btn tf-sm">Open in Confluence</button>
+            <div class="rd-more">
+              <button type="button" class="tf-btn tf-sm" id="more" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu">More</button>
+              <div class="tf-menu" id="more-menu" role="menu" hidden>
+                <button type="button" role="menuitem"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg>Export as Markdown</button>
+              </div>
+            </div>
+          </div>
+          <details class="rd-outline-fold"><summary>On this page <span class="tf-count">3 sections</span></summary>
+            <nav class="tf-toc" aria-label="On this page"><a href="#s1" class="tf-on">Setup</a><a href="#s2">Services and ports</a><a href="#s3">When a step fails</a></nav>
+          </details>
+        </header>
+
+        <aside class="rd-outline" aria-label="On this page">
+          <h3>On this page</h3>
+          <nav class="tf-toc"><a href="#s1" class="tf-on">Setup</a><a href="#s2">Services and ports</a><a href="#s3">When a step fails</a></nav>
+        </aside>
+
+        <article class="rd-body">
+          <div class="tf-doc">
+            <h2 id="s1">Setup</h2>
+            <div class="tf-callout tf-info"><span class="tf-lbl">Info</span><p>Takes about 30 minutes on a fresh laptop. Ask in #eng-help if a step fails.</p></div>
+            <ol>
+              <li><p>Install the toolchain:</p>
+                <div class="tf-pre"><div class="tf-pre-bar"><span>bash</span><button class="tf-btn tf-sm tf-ghost">Copy</button></div><pre>brew install rustup openjdk@21 postgresql@16 just
+rustup-init -y</pre></div></li>
+              <li><p>Clone the repos into <code>~/code</code>: payout-service, ledger-api, tidewater-schemas.</p></li>
+              <li><p>Start the dependencies:</p>
+                <div class="tf-pre"><div class="tf-pre-bar"><span>bash</span><button class="tf-btn tf-sm tf-ghost">Copy</button></div><pre>cd ~/code/payout-service
+just deps-up   # postgres + localstack</pre></div></li>
+              <li><p>Run the tests: <code>just test</code>.</p></li>
+            </ol>
+            <h2 id="s2">Services and ports</h2>
+            <p><code>just deps-up</code> starts these in Docker, so Docker Desktop has to be running first. Each one answers its health check within a minute on a warm machine; the first pull of the localstack image takes longer.</p>
+            <div class="tf-tblwrap"><table>
+              <thead><tr><th>Service</th><th>Port</th><th>Image</th><th>Health check</th></tr></thead>
+              <tbody>
+                <tr><td>postgres</td><td>5432</td><td><code>postgres:16.4-alpine</code></td><td><code>pg_isready -h localhost -U payout</code></td></tr>
+                <tr><td>localstack</td><td>4566</td><td><code>localstack/localstack:3.8</code></td><td><code>curl -s localhost:4566/_localstack/health</code></td></tr>
+                <tr><td>ledger-api</td><td>8081</td><td>built from <code>~/code/ledger-api</code></td><td><code>curl -s localhost:8081/actuator/health</code></td></tr>
+              </tbody>
+            </table></div>
+            <h2 id="s3">When a step fails</h2>
+            <p>Most failures on a fresh machine come from a port already in use, usually an older Postgres from Homebrew that is still running. Stop it, check nothing else holds the port, and recreate the containers:</p>
+            <div class="tf-pre"><div class="tf-pre-bar"><span>bash</span><button class="tf-btn tf-sm tf-ghost">Copy</button></div><pre>brew services stop postgresql@14 &amp;&amp; lsof -nP -iTCP:5432 -sTCP:LISTEN; just deps-down &amp;&amp; just deps-up --force-recreate</pre></div>
+            <div class="tf-macro">This part is a Confluence <b>expand</b> macro, which knobas does not draw.<button class="tf-btn tf-sm">Open this part in Confluence</button></div>
+          </div>
+
+          <section class="rd-foot">
+            <h3>Work it belongs to</h3>
+            <ul><li><a href="#"><span class="tf-mono">PAY-142</span> Shorten the local setup for new joiners</a><span class="tf-s">In progress</span></li></ul>
+          </section>
+          <section class="rd-foot rd-linked" id="linked"></section>
+
+          <section class="tf-cmts">
+            <h2>Comments <span class="tf-count">1</span></h2>
+            <div class="tf-msg"><span class="tf-av">LH</span><div class="tf-cmt-body">
+              <div class="tf-who"><b>Lena</b> today 08:57</div><p>Step 3 needs Docker running first, might be worth saying.</p>
+            </div></div>
+            <div class="tf-compose"><textarea aria-label="Comment on this page" placeholder="Comment on this page"></textarea>
+              <div class="tf-acts"><button class="tf-btn tf-primary" aria-disabled="true">Comment</button></div></div>
+          </section>
+        </article>
+      </div>
+    </section>
+  </div>
+
+  <footer class="tf-status">
+    <b>Sources</b><span>Confluence synced 8 min ago</span><span>Gitea 8 min ago</span>
+    <span class="tf-queue">No queued writes</span>
+  </footer>
+</div>
+
+<script>
+// ---------- Linked from: grouped by space key, names from the tree's spaces, pages by title ----------
+// A backlink carries only `space_key`; the name is looked up in DocsTree.spaces (same source as the page).
+const SPACES = { ENG: "Engineering", IT: "IT support", PLAT: "Platform", TEAM: "Team" };
+const BACKLINKS = [
+  ["Onboarding checklist", "TEAM"], ["Payments architecture overview", "ENG"], ["On-call handbook", "ENG"],
+  ["Ledger reconciliation runbook", "ENG"], ["New joiner, week one", "TEAM"], ["Q4 platform plan", "PLAT"], ["Laptop refresh 2026", "IT"],
+  ["Personal notes: setup gotchas", null],
+];
+const BACKEND_LIMIT = 50; // docs.rs BACKLINKS selects at most 50: at exactly 50 there may be more.
+
+function renderLinked(el, links) {
+  if (links.length === 0) { el.remove(); return; } // left out when nothing links here
+  const by = {};
+  const other = []; // backlinks with no space key: one last group, "Other pages"
+  for (const [title, key] of links) key ? (by[key] ??= []).push(title) : other.push(title);
+  const count = links.length >= BACKEND_LIMIT ? `${BACKEND_LIMIT}+` : String(links.length);
+  const group = (label, titles) => {
+    const pages = titles.sort().map(t => `<li><a href="#">${t}</a></li>`).join("");
+    return `<details><summary>${label}<span class="tf-count">${titles.length}</span></summary><ul>${pages}</ul></details>`;
+  };
+  const groups = Object.keys(by).sort().map(key => {
+    const name = SPACES[key] ? ` ${SPACES[key]}` : ""; // key only when the tree has no name
+    return group(`<b>${key}</b>${name}`, by[key]);
+  }).join("") + (other.length > 0 ? group("Other pages", other) : "");
+  el.innerHTML = `<h3>Linked from ${count} pages</h3>${groups}`;
+}
+renderLinked(document.getElementById("linked"), BACKLINKS);
+
+// ---------- More: closes on Esc, a pick or a click outside, and gives focus back (ViewMenu.svelte's pattern) ----------
+const more = document.getElementById("more");
+const menu = document.getElementById("more-menu");
+function setMenu(open, refocus) {
+  menu.hidden = !open;
+  more.setAttribute("aria-expanded", String(open));
+  if (open) menu.querySelector("[role=menuitem]").focus();
+  else if (refocus) more.focus();
+}
+more.addEventListener("click", () => setMenu(menu.hidden, false));
+menu.addEventListener("click", e => { if (e.target.closest("[role=menuitem]")) setMenu(false, true); });
+document.addEventListener("click", e => { if (!menu.hidden && !e.target.closest(".rd-more")) setMenu(false, false); });
+
+// ---------- The tree drawer, below 900px ----------
+const rd = document.getElementById("rd");
+const pagesBtn = document.getElementById("pages");
+const filter = document.getElementById("filter");
+const narrow = window.matchMedia("(max-width: 899px)");
+let opener = null;
+
+function openDrawer(from) {
+  opener = from;
+  rd.classList.add("rd-drawer");
+  pagesBtn.setAttribute("aria-expanded", "true");
+}
+function closeDrawer() {
+  if (!rd.classList.contains("rd-drawer")) return;
+  rd.classList.remove("rd-drawer");
+  pagesBtn.setAttribute("aria-expanded", "false");
+  if (opener) opener.focus();
+  opener = null;
+}
+pagesBtn.addEventListener("click", () => { openDrawer(pagesBtn); filter.focus(); });
+document.getElementById("backdrop").addEventListener("click", closeDrawer);
+document.getElementById("tree").addEventListener("click", e => {
+  const a = e.target.closest("a");
+  if (!a) return;
+  e.preventDefault();
+  if (narrow.matches) closeDrawer(); // picking a page closes the drawer
+});
+narrow.addEventListener("change", () => { if (!narrow.matches) closeDrawer(); });
+
+// `/` focuses the tree's filter from anywhere in Docs; below 900px it opens the drawer first.
+window.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    if (!menu.hidden) { setMenu(false, true); return; }
+    closeDrawer();
+    return;
+  }
+  if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+  const at = document.activeElement;
+  if (at instanceof HTMLInputElement || at instanceof HTMLTextAreaElement || at instanceof HTMLSelectElement) return;
+  e.preventDefault();
+  if (narrow.matches) openDrawer(at instanceof HTMLElement ? at : null);
+  filter.focus();
+});
+
+// A label chip searches that label in the tree's filter; below 900px it opens the drawer to show it.
+document.querySelectorAll("[data-label]").forEach(chip => chip.addEventListener("click", () => {
+  if (narrow.matches) openDrawer(chip);
+  filter.value = chip.dataset.label;
+  filter.focus();
+}));
+
+// Section links in the outline scroll the page; the mockup's other links go nowhere.
+document.querySelector(".tf-rd-main").addEventListener("click", e => {
+  const a = e.target.closest("a");
+  if (a && !a.getAttribute("href").startsWith("#s")) e.preventDefault();
+});
+
+// ---------- the mockup's theme toggle ----------
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  document.querySelectorAll(".mk-theme [data-theme]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.theme === t)));
+  try { localStorage.setItem("docs-reader-theme", t); } catch (e) {}
+}
+document.querySelectorAll(".mk-theme [data-theme]").forEach(b => b.addEventListener("click", () => setTheme(b.dataset.theme)));
+let saved = null;
+try { saved = localStorage.getItem("docs-reader-theme"); } catch (e) {}
+setTheme(saved || "dark");
+</script>
+</body>
+</html>

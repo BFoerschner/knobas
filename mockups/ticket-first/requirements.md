@@ -8,6 +8,7 @@ Written 2026-10-14 against `main` at `0681cc12`. This document says what the app
 - `prototype-4.html` reworks Builds: pipelines on the left, their runs on the right, and a run's log, tests and artifacts.
 - `prototype-5.html` makes Docs one reader with the space picker and full-text search at the top left, separates assets from monitors, and drops notes. It carries the BUILT/LOW/NEW tags in the UI.
 - `prototype-6.html` (2026-10-15) is prototype 5 drawn as if every function existed: no tags in the UI, every ruling of section 0 applied (the job's Map tab is Dependencies only, the global map is gone), and Time (section 13) and Settings (section 13a) drawn in full. **It is the reference.** Where it differs from the earlier ones, it wins.
+- `docs-reader.html` (2026-10-25, #2078) redraws the Docs reader alone: a full-width page, an outline-only margin, the page's context at its foot, and a tree drawer on narrow windows. For the reader (R-10.9, R-10.10, R-10.15) it wins over prototype-6.
 
 The capability sheet `mockups/shared/capabilities.md` lists what the backend already does. Every requirement below carries a tag:
 
@@ -585,11 +586,12 @@ There is no separate Docs home and no separate results page. `#/docs` opens the 
 
 ### 10b. Reader (`#/page/<id>`)
 
-- **R-10.9** Three panes:
-  - **left**: the space picker, search, and the tree or the hits (R-10.1 to R-10.3);
-  - **middle**: the page, at most 74 characters wide;
-  - **right**: the outline and the page's context.
-- **R-10.10** **Header**: the breadcrumb (job chip, Docs, space, parent), the title, then who edited it when, the version, the reading time, and labels. A label is a button that searches for it. Actions: *Comment*, *Link to <job>*, *New page here*, *Export as Markdown*, *Copy link* (copies the knobas address and the Confluence URL), and *Open in Confluence*, last and quiet.
+- **R-10.9** Two panes (amended 2026-10-25, #2078; `docs-reader.html` is the reference):
+  - **left**: the space picker, search, and the tree or the hits (R-10.1 to R-10.3), 300 px wide;
+  - **right**: the page, at full width, with nothing capped: running text, panels, comments, code, tables and the section editor all fill it. The page's outline is a sticky column on its right (R-10.15).
+
+  Below 1240 px the outline folds above the page, closed, and the tree narrows to 220 px. Below 900 px the tree becomes a drawer that slides over the page: a *Pages* button at the start of the breadcrumb row opens it, and so do `/` and a label chip.
+- **R-10.10** **Header** (amended 2026-10-25, #2078): the breadcrumb (job chip, Docs, space, parent), the title, then the meta line: who edited it when, *Created by* who and when, the version, the reading time, and labels. A label is a button that searches for it. The actions row, in order: *Link to <job>* (only when the page is opened from a job), *Link to…*, *New page here*, *Copy link* (copies the knobas address and the Confluence URL), *Open in Confluence*, and *More ▾*, which holds *Export as Markdown* and is where later actions go. The header has no *Comment* button: commenting happens in the comment box at the page foot (R-10.14).
 - **R-10.11** **The body** is drawn from a fixed set of blocks. The interface uses Archivo; the page body uses Source Serif 4 at 17.5 px with 1.65 line height.
   - headings (h2) with an anchor link and *Edit section* on hover;
   - paragraphs, lists, inline code;
@@ -605,14 +607,16 @@ There is no separate Docs home and no separate results page. `#/docs` opens the 
 - **R-10.12** **Find in page**. Arriving from a search keeps the query: a yellow bar at the top says "Matches for <query>" with an editable field, "1 of 6", previous and next (`Enter` and `Shift+Enter`), and ✕, which stops the highlighting. The hits stay in the left pane. Every match is marked. The outline shows the match count per section.
 - **R-10.13** **Edit section**: a section of only text, lists and panels turns into a text box in place, with *Save section* (through the write queue) and *Cancel*. A section with a table, code or a macro shows the button disabled, with the reason. BUILT (`UpdatePage`, the text-only rule).
 - **R-10.14** **Comments** at the end of the page, with the composer. BUILT (`Comment`).
-- **R-10.15** **The right rail**:
-  - *On this page*, an outline that follows your scrolling;
-  - *Work it belongs to*, the tickets the page references or is linked to, with their status;
-  - *Pages that link here*;
-  - *History*, the last versions with author and summary;
-  - *Attachments*.
+- **R-10.15** **The margin** right of the page holds only the outline, headed *On this page* (amended 2026-10-25, #2078). The outline sticks while the page scrolls, follows your scrolling, and shows the match count per section while the find bar is open (R-10.12). Below 1240 px the same outline is a closed fold between the actions row and the first section, showing the number of sections, and the total match count while the find bar is open.
 
-  LOW: backlinks, which are a link extraction from the storage body at sync time. History is BUILT as the version fields; comparing versions is LATER. Attachments are not synced (LATER).
+  The rest of the page's context sits at the **page foot**, after the body and before the comments, in this order, each left out when empty:
+  - *Work it belongs to*, the tickets the page references or is linked to, with key, title and status, as an open list;
+  - *Linked from*, the page's backlinks, grouped by space. Each space is a fold, closed every time a page opens, showing the space key, its name and its count, and opening to a list of pages. The heading counts the pages, "50+" when the reader's limit of 50 is reached;
+  - *Attachments*, once built.
+
+  The page's history is the last edit and *Created by* in the meta line (R-10.10); there is no History section.
+
+  BUILT: backlinks, a link extraction from the storage body at sync time, and the version fields behind *Created by*. Comparing versions is LATER. Attachments are not synced (LATER).
 - **R-10.16** **New page**: space, parent (*Under*, every page of the space), title, *Link it to <job>*, and a plain-text body where `##` starts a section and `-` starts a list. It goes through the write queue. BUILT (`CreatePage`).
 - **R-10.17** **Export as Markdown** downloads the page as `.md`: headings, lists, code fences, tables, panels as quotes, page links as relative `.md` links, and macros as HTML comments. LOW, but it is the same converter the move away from Confluence needs (D9), so it is worth building early.
 

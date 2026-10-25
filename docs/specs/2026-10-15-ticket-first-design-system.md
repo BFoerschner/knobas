@@ -77,7 +77,7 @@ The prototype uses about 30 sizes, many of them half-pixel neighbours (11.5, 12.
 | `--t-d2` | 44 px | Display figure (`wdth` 62, 800) | 44, 48 (the job key below 900 px) |
 | `--t-d3` | 64 px | The job key | 64 |
 
-The reading face keeps its own sizes because it's a different face doing a different job: body 17.5 px / 1.65, section heads 25 px, page title 40 px (30 px below 900 px). Lines stay under 80 characters; the reader column already does this.
+The reading face keeps its own sizes because it's a different face doing a different job: body 17.5 px / 1.65, section heads 25 px, page title 40 px (30 px below 900 px). The Docs reader sets no line length: its page runs the full width beside the tree and the outline (R-10.9, amended 2026-10-25, #2078).
 
 A rounding difference of half a pixel to two pixels against prototype-6 is an expected difference and doesn't need to be named in a PR one by one. A PR states once that it uses the scale.
 
