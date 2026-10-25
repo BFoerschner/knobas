@@ -77,6 +77,7 @@
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocBody from "./TfDocBody.svelte";
   import TfDocHits from "./TfDocHits.svelte";
+  import TfDocMore from "./TfDocMore.svelte";
   import TfDocRail from "./TfDocRail.svelte";
   import TfDocTree from "./TfDocTree.svelte";
   import TfMarked from "./TfMarked.svelte";
@@ -897,15 +898,12 @@
           {/each}
         </div>
         <div class="tf-rd-acts">
-          {#if p.writes.includes("comment")}
-            <button type="button" class="tf-btn tf-sm" {...refusedAttrs(refusal("comment"))} onclick={() => composer?.focus()}
-              >Comment</button>
-          {/if}
           {#if job !== null && linkPorts}
             {@const key = job}
             {@const ref = jobAt ?? job}
             <button type="button" class="tf-btn tf-sm" onclick={() => linkToJob(p, ref, key)}>Link to {key}</button>
-          {:else if linkPorts}
+          {/if}
+          {#if linkPorts}
             <button type="button" class="tf-btn tf-sm" onclick={() => (linking = true)}>Link to…</button>
           {/if}
           {#if p.writes.includes("create_page")}
@@ -918,15 +916,13 @@
               }}
               >New page here</button>
           {/if}
-          {#if p.readable}
-            <button type="button" class="tf-btn tf-sm" onclick={() => exportMarkdown(p)}>Export as Markdown</button>
-          {/if}
-          <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => copyLink(p)}>Copy link</button>
+          <button type="button" class="tf-btn tf-sm" onclick={() => copyLink(p)}>Copy link</button>
           {#if p.web_url}
             {@const url = p.web_url}
-            <button type="button" class="tf-btn tf-sm tf-ghost tf-openin" onclick={() => open(url)}>
-              Open in {p.source_name}
-            </button>
+            <button type="button" class="tf-btn tf-sm" onclick={() => open(url)}>Open in {p.source_name}</button>
+          {/if}
+          {#if p.readable}
+            <TfDocMore onexport={() => exportMarkdown(p)} />
           {/if}
         </div>
         <div class="tf-doc">

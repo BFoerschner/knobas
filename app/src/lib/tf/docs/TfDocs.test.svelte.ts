@@ -456,7 +456,7 @@ test("Edit section opens the text, saves it through the queue against the versio
   );
 });
 
-test("a comment goes through the queue; export, copy link and the actions a source does not take", async () => {
+test("a comment goes through the queue; copy link and the actions a source does not take", async () => {
   const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
   const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!;
   box.value = "Done.";
@@ -465,9 +465,6 @@ test("a comment goes through the queue; export, copy link and the actions a sour
   [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")][0]!.click();
   await settle();
   expect(io.submitWrite).toHaveBeenCalledWith({ Comment: { entity: "confluence:2", body: "Done." } });
-  button("Export as Markdown")!.click();
-  await settle();
-  expect(io.docsExportMarkdown).toHaveBeenCalledWith("confluence:2");
   button("Copy link")!.click();
   await settle();
   expect(io.copy).toHaveBeenCalledWith("#/page/confluence%3A2\nhttp://wiki.example/pages/2");
@@ -520,7 +517,7 @@ test("the writes the page's credential cannot make are drawn disabled saying why
   ]);
   const drawn = (label: string) => [...target.querySelectorAll("button")].filter((b) => b.textContent?.trim() === label);
   const refused: [string, string, number][] = [
-    ["Comment", "comment", 2],
+    ["Comment", "comment", 1],
     ["New page", "create_page", 1],
     ["New page here", "create_page", 1],
     ["Edit section", "update_page", 1],
@@ -824,6 +821,60 @@ test("This job and Link to <job> use the ticket the reader opened when two sourc
   button("Link to PAY-231")!.click();
   await settle();
   expect(links.createLink).toHaveBeenCalledWith("confluence:2", "tidewater:PAY-231", "documents");
+});
+
+const actions = () => [...target.querySelectorAll(".tf-rd-acts button")].map((b) => b.textContent?.trim());
+
+test("the actions row reads Link to <job> from a job, Link to…, New page here, Copy link, Open in, More; no Comment (#2082)", async () => {
+  await drawJob(["confluence:2"], undefined, ports({ jobReach: vi.fn(async () => REACH), docsPage: vi.fn(async () => RICH) }));
+  expect(actions()).toEqual(["Link to PAY-231", "Link to…", "New page here", "Copy link", "Open in Confluence", "More"]);
+
+  if (view) unmount(view);
+  target.innerHTML = "";
+  view = mount(TfDocs, {
+    target,
+    props: { ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage: vi.fn(async () => RICH) }), linkPorts: linkPorts() as never },
+  });
+  await settle();
+  expect(actions()).toEqual(["Link to…", "New page here", "Copy link", "Open in Confluence", "More"]);
+  // The comment box at the foot is the way to comment.
+  expect(button("Comment")?.closest(".tf-compose")).not.toBeNull();
+});
+
+test("More opens a menu holding Export as Markdown, closing on Esc, a pick or a click outside (#2082)", async () => {
+  const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  const more = button("More")!;
+  expect(more.getAttribute("aria-haspopup")).toBe("menu");
+  expect(more.getAttribute("aria-expanded")).toBe("false");
+  expect(target.querySelector("[role='menu']")).toBeNull();
+  const menu = async () => {
+    more.click();
+    await settle();
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    return target.querySelector<HTMLElement>("[role='menu']")!;
+  };
+
+  let open = await menu();
+  expect([...open.querySelectorAll("[role='menuitem']")].map((i) => i.textContent?.trim())).toEqual(["Export as Markdown"]);
+  expect(document.activeElement?.textContent?.trim()).toBe("Export as Markdown");
+  open.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await settle();
+  expect(target.querySelector("[role='menu']")).toBeNull();
+  expect(more.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(more);
+
+  open = await menu();
+  open.querySelector<HTMLButtonElement>("[role='menuitem']")!.click();
+  await settle();
+  expect(io.docsExportMarkdown).toHaveBeenCalledWith("confluence:2");
+  expect(target.querySelector("[role='menu']")).toBeNull();
+  expect(document.activeElement).toBe(more);
+
+  await menu();
+  target.querySelector("h1")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  await settle();
+  expect(target.querySelector("[role='menu']")).toBeNull();
+  expect(io.docsExportMarkdown).toHaveBeenCalledTimes(1);
 });
 
 test("the choice is kept for the session, and without a job there is no switch", async () => {
