@@ -1414,7 +1414,7 @@ fn a_command_through_the_real_pipeline_is_timed_by_name() {
 /// The source's settings page joins a run it did not start: `watch_sync`
 /// enrols the page's channel in the run in flight and answers its id, and the
 /// channel then hears the run out, ending included. On an idle source it
-/// answers nothing and the channel hears nothing.
+/// answers nothing and enrols nothing.
 ///
 /// The run is held in flight by the test itself: the source's advisory lock,
 /// taken on a connection of the test's own, is what every run of `mock` waits
@@ -1464,7 +1464,7 @@ async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
             .any(|message| matches!(message.phase, SyncPhase::Finished | SyncPhase::Failed))
     };
 
-    // Idle: nothing to join, nothing heard.
+    // Idle: nothing to join, nothing enrolled.
     let idle = knobas_app::commands::sources::watch_sync(
         app.handle().clone(),
         "mock".to_owned(),
@@ -1474,7 +1474,7 @@ async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
     .expect("watch_sync answers on an idle source");
     assert_eq!(idle, None, "an idle source has no run to join");
     // Read off the scheduler, not the channel: a run the idle call started
-    // or a sink it parked would be enrolled now, before it says a thing.
+    // with the channel would have it enrolled now, before it says a thing.
     assert_eq!(
         scheduler.watching("mock").await,
         0,
@@ -1512,10 +1512,11 @@ async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
     {
         let heard = heard.lock().unwrap();
         assert!(
-            heard
-                .iter()
-                .all(|message| message.run_id == run_id && message.phase == SyncPhase::Started)
-                && heard.len() <= 1,
+            match heard.as_slice() {
+                [] => true,
+                [only] => only.run_id == run_id && only.phase == SyncPhase::Started,
+                _ => false,
+            },
             "the channel heard more than the held run's Started: {heard:?}"
         );
     }
