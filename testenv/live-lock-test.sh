@@ -467,10 +467,10 @@ down_with() { # down_with <name> <target> -- `live down confluence` against a pl
 # down_spares <name> <pid> <what> -- live-down over a planted lock naming <pid>
 # signalled nothing and freed the lock.
 down_spares() {
-  check "live-down over $3 succeeds" "$rc" "0"
+  check "live-down over a $3 succeeds" "$rc" "0"
   checks=$((checks + 1))
   kill -0 "$2" 2>/dev/null || fail "live-down signals no $3" "$(cat "$scratch/$1.out")"
-  lock_gone "live-down frees the lock of $3"
+  lock_gone "live-down frees the lock of a $3"
 }
 echo knobas-confluence >"$STUB_RUNNING_FILE"
 # A process that is not a keeper, started before the epoch the lock names.
@@ -478,7 +478,7 @@ sleep 300 &
 other=$!
 pids+=("$other")
 rc=$(down_with reused-cmd "$other $(($(date +%s) + 60)) live-up-confluence-kept $scratch/tree")
-down_spares reused-cmd "$other" "a process whose command line is not the keeper's"
+down_spares reused-cmd "$other" "process whose command line is not the keeper's"
 check "and it says the pid is not its keeper" "$(cat "$scratch/reused-cmd.out")" "not its keeper"
 # A process that names `live up confluence` but started after the lock was taken.
 mkdir -p "$scratch/later"
@@ -488,7 +488,7 @@ later=$!
 pids+=("$later")
 sleep 0.2
 rc=$(down_with reused-late "$later $(($(date +%s) - 120)) live-up-confluence-kept $scratch/tree")
-down_spares reused-late "$later" "a process started after the lock's epoch"
+down_spares reused-late "$later" "process started after the lock's epoch"
 # A dead pid: the lock goes at once, without waiting on a keeper that is gone.
 sh -c 'exit 0' &
 gone=$!
