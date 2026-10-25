@@ -93,6 +93,18 @@ wait_for() {
   return 1
 }
 
+# lock_gone <what> [<lock>] -- the check that a run's lock is free once it is
+# done (#2120). A taker writes its .rc before its EXIT trap releases, so right
+# after `wait_rc` the link can still be there for a moment under load: poll up
+# to 5 s for it to go. A lock that is never given back still fails, naming
+# what it points at.
+lock_gone() {
+  local lock=${2:-$KNOBAS_LIVE_LOCK} i
+  checks=$((checks + 1))
+  for ((i = 0; i < 50; i++)); do [ -L "$lock" ] || return 0; sleep 0.1; done
+  fail "$1" "still held: $(readlink "$lock" 2>/dev/null || echo '(gone at the last look)')"
+}
+
 # holder <name> [<jvm|gitea>] -- a background shell in a tree of its own that
 # takes the lock (the JVM one unless named) as recipe <name>, says so in
 # $scratch/<name>.out, and lets it go when $scratch/<name>.release appears.
@@ -175,8 +187,7 @@ fi
 check "the second run goes on once the first lets go" "$rc" "0"
 check "the second run held the lock" "$out" "held by second"
 check "the second run says how long it waited" "$out" "after"
-checks=$((checks + 1))
-[ ! -L "$KNOBAS_LIVE_LOCK" ] || fail "the lock is free once both are done" "$(readlink "$KNOBAS_LIVE_LOCK")"
+lock_gone "the lock is free once both are done"
 
 # --- a stale lock is taken over -----------------------------------------------
 
@@ -191,8 +202,7 @@ check "a lock whose holder is dead is taken over" "$rc" "0"
 check "the takeover says so" "$out" "stale"
 check "the takeover names the dead holder" "$out" "corpse-recipe"
 check_not "a stale lock is not waited on" "$out" "waiting"
-checks=$((checks + 1))
-[ ! -L "$KNOBAS_LIVE_LOCK" ] || fail "the heir released the lock" "$(readlink "$KNOBAS_LIVE_LOCK")"
+lock_gone "the heir released the lock"
 
 # The same, the way it happens: a run SIGKILLed while it holds the lock, so no
 # trap gives it back. The lock must name the run's own process -- here a
@@ -294,8 +304,7 @@ check "a session with the lock free runs" "$rc" "0"
 check "the session stops what it started while still holding the lock" "$log" \
   "stop teamcity teamcity-agent [lock held]"
 check "and it starts it holding the lock" "$log" "up -d teamcity teamcity-agent [lock held]"
-checks=$((checks + 1))
-[ ! -L "$KNOBAS_LIVE_LOCK" ] || fail "the session releases the lock at its end" "$(readlink "$KNOBAS_LIVE_LOCK")"
+lock_gone "the session releases the lock at its end"
 
 # The backstop stays: with the lock free, a hand-started Jira still refuses a
 # TeamCity session -- and the refusal gives the lock back.
@@ -303,8 +312,7 @@ rc=$(session byhand teamcity STUB_RUNNING="knobas-jira")
 out=$(cat "$scratch/byhand.out")
 check_not "the one-JVM guard still refuses behind a free lock" "$rc" "0"
 check "the guard's refusal names the product that is up" "$out" "knobas-jira is running"
-checks=$((checks + 1))
-[ ! -L "$KNOBAS_LIVE_LOCK" ] || fail "a refused session gives the lock back" "$(readlink "$KNOBAS_LIVE_LOCK")"
+lock_gone "a refused session gives the lock back"
 
 # Gitea is not a JVM product: its session neither takes nor waits on the JVM lock.
 holder gitearun
@@ -341,8 +349,7 @@ check "the waiting Gitea session goes on once the first lets go" "$rc" "0"
 check "and says how long it waited" "$out" "took the Gitea lock after"
 check "it starts Gitea holding the Gitea lock" "$(cat "$STUB_LOG")" "up -d --wait gitea [lock free] [gitea lock held]"
 check_not "and, as every run, leaves Gitea up (#698)" "$(cat "$STUB_LOG")" "stop gitea"
-checks=$((checks + 1))
-[ ! -L "$KNOBAS_LIVE_GITEA_LOCK" ] || fail "the Gitea session releases its lock at its end" "$(readlink "$KNOBAS_LIVE_GITEA_LOCK")"
+lock_gone "the Gitea session releases its lock at its end" "$KNOBAS_LIVE_GITEA_LOCK"
 
 # The two locks are two: a JVM run does not wait on a Gitea run.
 holder giteaonlyholder gitea
@@ -363,8 +370,7 @@ rc=$(session giteaheir gitea STUB_RUNNING="" KNOBAS_LIVE_LOCK_WAIT=1)
 out=$(cat "$scratch/giteaheir.out")
 check "a Gitea lock whose holder was killed is taken over" "$rc" "0"
 check "the takeover says the Gitea lock was stale and names the holder" "$out" "the Gitea lock was stale -- its holder 'giteakilled'"
-checks=$((checks + 1))
-[ ! -L "$KNOBAS_LIVE_GITEA_LOCK" ] || fail "the heir releases the Gitea lock" "$(readlink "$KNOBAS_LIVE_GITEA_LOCK")"
+lock_gone "the heir releases the Gitea lock" "$KNOBAS_LIVE_GITEA_LOCK"
 
 if [ "$failures" -gt 0 ]; then
   echo "live-lock-test: $failures of $checks checks failed" >&2
