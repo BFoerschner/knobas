@@ -537,6 +537,9 @@ fn comment(raw: &Value, people: &People) -> Option<DocComment> {
             .map(str::to_owned)
     };
     Some(DocComment {
+        // Confluence's content id for the comment: the id a comment write
+        // answers (#2074), so Docs knows its own comment after an edit.
+        id: string(Some(raw), "id"),
         author: string(by, "username"),
         author_name: string(by, "displayName"),
         at: raw
@@ -1610,6 +1613,7 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
             "version": {"number": 31, "by": {"username": "tomasz", "userKey": "k-tw", "displayName": "Tomasz Wójcik"}},
             "metadata": {"labels": {"results": [{"name": "ops"}, {"name": "on-call"}]}},
             "children": {"comment": {"results": [{
+                "id": "65700",
                 "body": {"storage": {"value": "<p>Rewriting the Ledger section.</p>"}},
                 "history": {"createdBy": {"username": "tomasz", "displayName": "Tomasz Wójcik", "userKey": "k-tw"}, "createdDate": "2026-08-19T10:00:00.000Z"}
             }]}}
@@ -1634,6 +1638,7 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
         assert_eq!(
             doc.comments,
             vec![DocComment {
+                id: Some("65700".into()),
                 author: Some("tomasz".into()),
                 author_name: Some("Tomasz Wójcik".into()),
                 at: Some("2026-08-19T10:00:00.000Z".into()),

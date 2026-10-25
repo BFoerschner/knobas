@@ -110,6 +110,12 @@ pub struct DocPage {
     pub labels: Vec<String>,
     pub blocks: Vec<DocBlock>,
     pub comments: Vec<DocComment>,
+    /// The comment writes to this page that settled as sent with an id the
+    /// source named for the comment, oldest first (#2074). Docs drops a
+    /// queued comment once [`DocPage::comments`] holds a comment of that id,
+    /// whatever its words say by then; a mark whose write is not here falls
+    /// back to the words.
+    pub sent_comments: Vec<DocSentComment>,
     /// The identity `@me` resolves to, so the reader can say *You* for the
     /// editor and a comment's author.
     pub me: Vec<String>,
@@ -130,6 +136,25 @@ pub struct DocPage {
     #[ts(as = "Vec<DocWrite>")]
     pub writes: Vec<String>,
 }
+
+/// A comment write knobas sent to a page, and the id the source gave the
+/// comment (`knobas.write_queue.remote_id`, stamped by the settle from the
+/// write's receipt): the pair a queued comment is matched to its comment by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct DocSentComment {
+    /// The queued write's id, the one `submit_write` answered.
+    pub write_id: i64,
+    /// The source's id for the comment it made: [`DocComment::id`].
+    pub comment_id: String,
+}
+
+/// The comment writes to `page` that settled with a stamped id. Read off the
+/// `comment` op alone, so a comment id is never taken for an entity's.
+const SENT_COMMENTS: &str = "select id as write_id, remote_id as comment_id
+  from knobas.write_queue
+ where entity_id = $1 and op = 'comment' and state = 'sent' and remote_id is not null
+ order by id";
 
 /// A page that links to the one being read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
@@ -686,7 +711,23 @@ pub async fn page(
         }
     }
 
+    let sent_comments = if readable {
+        sqlx::query(SENT_COMMENTS)
+            .bind(&id)
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .map(|r| DocSentComment {
+                write_id: r.get("write_id"),
+                comment_id: r.get("comment_id"),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     Ok(DocPage {
+        sent_comments,
         writes: if readable {
             writes(&adapter_kind)
         } else {

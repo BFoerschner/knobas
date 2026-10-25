@@ -680,6 +680,7 @@ pub fn doc_content(
         .into_iter()
         .flatten()
         .map(|c| DocComment {
+            id: None,
             author: c["who"].as_str().map(str::to_owned),
             author_name: None,
             at: c["when"].as_str().map(str::to_owned),

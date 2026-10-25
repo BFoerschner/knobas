@@ -744,6 +744,13 @@ export type DocBlock = { "type": "heading", level: number, text: Array<DocInline
  */
 export type DocComment = { 
 /**
+ * The source's id for the comment, where it names one: Confluence's
+ * content id, the id its comment write answered (#2074). Docs drops a
+ * queued comment by it once the read holds it, whatever the words say by
+ * then. `None` from a source whose comments carry no id.
+ */
+id: string | null, 
+/**
  * The author's account name, the spelling `@me` matches. `None` where the
  * record names nobody.
  */
@@ -864,6 +871,14 @@ web_url: string | null,
  */
 readable: boolean, version: number | null, labels: Array<string>, blocks: Array<DocBlock>, comments: Array<DocComment>, 
 /**
+ * The comment writes to this page that settled as sent with an id the
+ * source named for the comment, oldest first (#2074). Docs drops a
+ * queued comment once [`DocPage::comments`] holds a comment of that id,
+ * whatever its words say by then; a mark whose write is not here falls
+ * back to the words.
+ */
+sent_comments: Array<DocSentComment>, 
+/**
  * The identity `@me` resolves to, so the reader can say *You* for the
  * editor and a comment's author.
  */
@@ -914,6 +929,21 @@ text: string | null,
  * Why knobas does not edit it, `None` when it does.
  */
 refusal: SectionRefusal | null, };
+
+/**
+ * A comment write knobas sent to a page, and the id the source gave the
+ * comment (`knobas.write_queue.remote_id`, stamped by the settle from the
+ * write's receipt): the pair a queued comment is matched to its comment by.
+ */
+export type DocSentComment = { 
+/**
+ * The queued write's id, the one `submit_write` answered.
+ */
+write_id: number, 
+/**
+ * The source's id for the comment it made: [`DocComment::id`].
+ */
+comment_id: string, };
 
 /**
  * A hit's snippet: where it is, and its text with the matches marked.
