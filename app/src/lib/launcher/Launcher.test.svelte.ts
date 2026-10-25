@@ -24,6 +24,7 @@ import type {
 import type { InboxItem } from "../ipc/entity";
 import type { CredentialHealth, SourceSyncStatus } from "../ipc/sources";
 import Launcher from "./Launcher.svelte";
+import { DEBOUNCE_MS } from "./session.svelte";
 
 const NOW = new Date("2026-08-25T12:00:00Z");
 
@@ -180,19 +181,28 @@ function open(props: Record<string, unknown> = {}) {
  * is a property of the machine, so the budget lost the race 2 runs in 6 under
  * a parallel fan-out (#86). Nothing in this file dynamically imports anything.
  *
- * The 90 ms debounce is not a counterexample. Where a test waits it out, it
- * does so with its own real timer (`setTimeout(…, 120)`) armed *after* the
- * debounce's, and the timer queue fires in due order — so what puts the search
- * before the assertion is the ordering, not the 30 ms of margin. The same
- * reading applies to the other microtask-count `settle()` helpers in this
- * repo (`SourcesView`, `Diagnostics`, `AddSource`, `FirstRun`): none of the
- * components they drive dynamically imports anything either.
+ * The 90 ms debounce is not a counterexample: `setTimeout` is fake in this
+ * file, and {@link debounced} moves its clock past the debounce, so no test
+ * waits on the wall clock (#2048). The same reading applies to the other
+ * microtask-count `settle()` helpers in this repo (`SourcesView`,
+ * `Diagnostics`, `AddSource`, `FirstRun`): none of the components they drive
+ * dynamically imports anything either.
  */
 async function settle() {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
   flushSync();
+}
+
+/**
+ * Past the session's debounce, and the search it sends settled. The debounce
+ * is the only timer the launcher arms, so the fake clock moving 90 ms on is
+ * the whole wait (#2048; it was a real 120 ms sleep).
+ */
+async function debounced() {
+  vi.advanceTimersByTime(DEBOUNCE_MS);
+  await settle();
 }
 
 function press(key: string, options: KeyboardEventInit = {}) {
@@ -209,6 +219,7 @@ function press(key: string, options: KeyboardEventInit = {}) {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -216,6 +227,7 @@ beforeEach(() => {
 afterEach(() => {
   if (app) unmount(app);
   app = undefined;
+  vi.useRealTimers();
   target.remove();
   // `recordScrolls()` stubs it; jsdom has none of its own.
   Reflect.deleteProperty(Element.prototype, "scrollIntoView");
@@ -271,8 +283,7 @@ test("markup in source text is rendered as characters, not as elements", async (
   await settle();
   target.querySelector("input")!.value = "xss";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   const row = target.querySelector(".tf-ln-res");
   expect(row, "the hit rendered").not.toBeNull();
@@ -291,8 +302,7 @@ test("groups render in the engine's order, with the count and what the page left
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   const headings = [...target.querySelectorAll(".tf-ln-lab")].map((el) => el.textContent?.trim());
   expect(headings).toEqual(["Tickets", "Pull requests", "Builds"]);
@@ -332,8 +342,7 @@ test("a source that is refusing the credential replaces the age on its rows", as
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
   expect(ages).toEqual(["synced 4 min ago", "gitea · sign in again", "synced 4 min ago"]);
@@ -377,8 +386,7 @@ test("an explicitly empty sources prop is a live reading, not an unsupplied one"
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
   expect(ages).toEqual(["synced 4 min ago", "synced 4 min ago", "synced 4 min ago"]);
@@ -427,8 +435,7 @@ test("with no sources prop, the rows take their health from the board", async ()
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   // Three rows from three different sources, only the middle one failing, so
   // a fixture that could not witness a mix-up is not what is being read here.
@@ -685,8 +692,7 @@ test("Enter on a row navigates to its address and closes the overlay", async () 
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   press("ArrowDown");
   press("Enter");
@@ -735,8 +741,7 @@ test("Tab steals no focus, and offers nothing while no detail is open", async ()
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   const input = target.querySelector("input");
   const event = press("Tab");
@@ -793,8 +798,7 @@ test("Tab offers Link to the open entity, and Enter hands the result to the shel
   // Search, so the selected row is a result rather than the board.
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   press("Tab");
   const chain = target.querySelector('[aria-label="Actions on the selected result"]');
@@ -814,8 +818,7 @@ test("moving the selection abandons an open chain", async () => {
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   press("Tab");
   expect(target.querySelector('[aria-label="Actions on the selected result"]')).not.toBeNull();
@@ -838,8 +841,7 @@ test("the open entity's own row has no chain", async () => {
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   press("Tab");
   expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
@@ -863,8 +865,7 @@ test("Tab offers Start timer on a result, with no detail open", async () => {
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   press("Tab");
   const chain = target.querySelector('[aria-label="Actions on the selected result"]');
@@ -918,8 +919,7 @@ test("a stored context result is not offered a timer, though it can still be lin
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   press("Tab");
   const chain = target.querySelector('[aria-label="Actions on the selected result"]');
@@ -946,8 +946,7 @@ test("Escape closes the chain before it clears the query", async () => {
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   press("Tab");
   press("Escape");
@@ -1011,8 +1010,7 @@ test("an unknown token is greyed out with a reason rather than silently ignored"
   await settle();
   target.querySelector("input")!.value = "env:prod /cf";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   const greyed = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-off")].map((el) => el.textContent?.trim());
   expect(greyed).toEqual([
@@ -1073,8 +1071,7 @@ test("a source chip is marked when that source is refusing the credential", asyn
   await settle();
   target.querySelector("input")!.value = "/gitea /jira sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   const chips = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-set")].map((el) => el.textContent?.trim());
   expect(chips).toEqual(["gitea", "jira"]);
@@ -1134,8 +1131,7 @@ test("a chip for a source with no health reading is not marked failing", async (
   await settle();
   target.querySelector("input")!.value = "/gitea /nowhere sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   const chips = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-set")].map((el) => el.textContent?.trim());
   expect(chips).toEqual(["gitea", "nowhere"]);
@@ -1177,8 +1173,7 @@ test("a named person is a chip, and nothing about them is greyed out", async () 
   await settle();
   target.querySelector("input")!.value = "@me @jonas sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   const chips = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-set")].map((el) => el.textContent?.trim());
   expect(chips).toEqual(["people", "@me", "jonas"]);
@@ -1204,8 +1199,7 @@ test("`?` lists the syntax, and clicking a row inserts it", async () => {
   await settle();
   target.querySelector("input")!.value = "?";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   const rows = [...target.querySelectorAll(".tf-ln-opt")];
   expect(rows.length).toBeGreaterThan(8);
@@ -1259,8 +1253,7 @@ test("an author search says which sources could not be asked", async () => {
   await settle();
   target.querySelector("input")!.value = "@jonas";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   const gap = target.querySelector(".tf-ln-gap");
   expect(gap?.textContent).toContain("An author search cannot be answered by:");
@@ -1306,8 +1299,7 @@ test("an author search every source could answer explains nothing", async () => 
   await settle();
   target.querySelector("input")!.value = "@jonas sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 
   // The results are there, so this is not green because nothing rendered.
   expect(target.textContent).toContain("Retry failed SEPA payouts");
@@ -1368,8 +1360,7 @@ const ESTATE = {
 async function search(text: string) {
   target.querySelector("input")!.value = text;
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
 }
 
 test("an asset hit draws its monogram and the path from the root", async () => {
@@ -2404,8 +2395,7 @@ test("a /source token is not 'no source matches' while the sources are unread", 
   });
   await settle();
   typeInBox("/cf x");
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
   expect(target.textContent).toContain("/cf");
   expect(target.textContent).not.toContain("no source matches");
 });
@@ -2437,8 +2427,7 @@ test("a search that never answers says Searching, never 'Nothing in the mirror m
   });
   await settle();
   typeInBox("sepa");
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
   expect(target.textContent).toContain("Searching");
   expect(target.textContent).not.toContain("Nothing in the mirror matches");
 });
@@ -2454,8 +2443,7 @@ test("a rejected search shows the reason, never 'Nothing in the mirror matches'"
   });
   await settle();
   typeInBox("sepa");
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
   expect(target.textContent).toContain("index is rebuilding");
   expect(target.textContent).not.toContain("Nothing in the mirror matches");
 });
@@ -2627,8 +2615,7 @@ test("typing resets the selection to the first row, and that row is scrolled bac
   press("ArrowDown");
   const scrolls = recordScrolls();
   await typeInto("sepa");
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
   const first = resultOptions()[0];
   expect(first?.textContent).toContain("Retry failed SEPA payouts");
   expect(scrolls.at(-1)).toEqual({ el: first, options: { block: "nearest" } });
@@ -2636,8 +2623,7 @@ test("typing resets the selection to the first row, and that row is scrolled bac
   // A new answer with the first row already selected brings it back too.
   scrolls.length = 0;
   await typeInto("sepa payouts");
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
   expect(scrolls.at(-1)).toEqual({ el: resultOptions()[0], options: { block: "nearest" } });
 });
 
@@ -3000,8 +2986,7 @@ test("two sources' PAY-231: each row names its source before its age, a unique k
   await settle();
   target.querySelector("input")!.value = "PAY-231";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await debounced();
   const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
   expect(ages).toEqual(["mock · synced just now", "jira · synced 25 min ago", "synced 4 min ago"]);
   // The Jira row opens Jira's PAY-231, by the address that names its source.
