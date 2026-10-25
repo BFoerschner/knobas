@@ -19,9 +19,11 @@ pub fn descriptor_template() -> SourceDescriptor {
         id: ADAPTER_KIND.to_owned(),
         adapter_kind: ADAPTER_KIND.to_owned(),
         name: "TeamCity".to_owned(),
-        // M2 (issue #43): this adapter writes. `Capability::Search` stays
-        // reserved for a future `Source::search`.
-        capabilities: vec![Capability::Write],
+        // M2 (issue #43): this adapter writes. And `Refresh` since #2099: a
+        // build is read back by id after a write lands (ADR-0031); a build
+        // configuration is not offered. `Capability::Search` stays reserved
+        // for a future `Source::search`.
+        capabilities: vec![Capability::Write, Capability::Refresh],
         adapter_version: ADAPTER_VERSION.to_owned(),
         // Bearer access token (TeamCity 2019.1+) or Basic user+password.
         auth_methods: vec![AuthMethod::Pat, AuthMethod::UserPassword],
@@ -267,7 +269,7 @@ mod tests {
         assert_eq!(d.name, "TeamCity");
         // The sources view renders its action bar from `write_ops` alone, so
         // this list is exactly what the user is offered (issue #43).
-        assert_eq!(d.capabilities, vec![Capability::Write]);
+        assert_eq!(d.capabilities, vec![Capability::Write, Capability::Refresh]);
         assert_eq!(
             d.write_ops,
             vec!["trigger_build", "rerun_build", "set_parameter", "run_build"]

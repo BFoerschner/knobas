@@ -1028,6 +1028,48 @@ fn in_scope_build(cfg: &TeamCityConfig, tree: &ProjectTree, b: &Build) -> bool {
         && in_projects(cfg, tree, project)
 }
 
+/// **A refresh** (ADR-0031, #2099): build `id`, read by id and mapped as a
+/// run maps it.
+///
+/// `GET /app/rest/builds/id:{id}` ([`Rest::build`]) with the record half of
+/// the selector a run lists builds with, so the payload is the one the
+/// run's pages carry, and [`map::build_item`] makes the item. By id and not
+/// by a locator page, so a build queued a moment ago -- what a trigger, a
+/// re-run or a custom run answers -- reads back at once, whatever state or
+/// branch it is in; the run's in-flight poll emits it the same way.
+///
+/// * `404` is [`Gone`](knobas_source::RefreshAnswer::Gone): deleted, which no
+///   run would deliver either. So is a build outside the configured scope
+///   (configuration list, or project and its subprojects), which the run
+///   filters out client-side and so never emits.
+/// * Every other failure is the error, never `Gone`.
+///
+/// The project tree is read only for a source scoped by project, as the run
+/// reads it only then to place a build.
+pub(crate) async fn refresh(
+    source_id: &str,
+    base_url: &str,
+    cfg: &TeamCityConfig,
+    rest: &dyn Rest,
+    id: i64,
+) -> Result<knobas_source::RefreshAnswer, SourceError> {
+    use knobas_source::RefreshAnswer;
+    let Some(b) = rest.build(id).await? else {
+        return Ok(RefreshAnswer::Gone);
+    };
+    let mut tree = None;
+    if !cfg.project_ids.is_empty() {
+        read_tree(rest, &mut tree).await?;
+    }
+    let no_tree = ProjectTree::default();
+    if !in_scope_build(cfg, tree.as_ref().unwrap_or(&no_tree), &b.rec) {
+        return Ok(RefreshAnswer::Gone);
+    }
+    Ok(RefreshAnswer::Item(map::build_item(
+        source_id, base_url, &b.raw, &b.rec,
+    )))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1064,6 +1106,9 @@ mod tests {
         /// A server whose ceiling probe misses `sinceBuild` -- see
         /// [`FakeRest::probe_misses_since_build`].
         probe_misses_since_build: bool,
+        /// What the by-id record read fails with instead of answering
+        /// (a refresh's failure, #2099). `None` answers.
+        fault: Option<fn() -> SourceError>,
         calls: Mutex<Vec<String>>,
     }
 
@@ -1100,6 +1145,7 @@ mod tests {
                 projects: None,
                 silent: false,
                 probe_misses_since_build: false,
+                fault: None,
                 calls: Mutex::new(Vec::new()),
             }
         }
@@ -1378,6 +1424,25 @@ mod tests {
                 .builds
                 .iter()
                 .any(|b| b.get("id").and_then(serde_json::Value::as_i64) == Some(id)))
+        }
+        /// From the corpus, as [`Self::build_exists`] answers: the record
+        /// whatever its state or facets, `None` for an id it has not got.
+        async fn build(&self, id: i64) -> Result<Option<Rec<Build>>, SourceError> {
+            self.calls
+                .lock()
+                .expect("not poisoned")
+                .push(format!("builds/id:{id} record"));
+            if let Some(fault) = self.fault {
+                return Err(fault());
+            }
+            Ok(self
+                .builds
+                .iter()
+                .find(|b| b.get("id").and_then(serde_json::Value::as_i64) == Some(id))
+                .map(|raw| Rec {
+                    raw: raw.clone(),
+                    rec: serde_json::from_value(raw.clone()).expect("fixture parses"),
+                }))
         }
     }
 
@@ -2683,6 +2748,9 @@ mod tests {
         async fn build_exists(&self, id: i64) -> Result<bool, SourceError> {
             self.snapshot(self.now()).build_exists(id).await
         }
+        async fn build(&self, id: i64) -> Result<Option<Rec<Build>>, SourceError> {
+            self.snapshot(self.now()).build(id).await
+        }
     }
 
     /// The clock [`MidRun`] keeps is what makes every mid-run test able to
@@ -3819,5 +3887,125 @@ mod tests {
             "oldest-first, and numerically: the key's string order would put build:10 before \
              build:2"
         );
+    }
+
+    // -- the refresh: one build read by id (ADR-0031, #2099) -----------------
+
+    async fn refresh_of(
+        rest: &FakeRest,
+        cfg: &TeamCityConfig,
+        id: i64,
+    ) -> Result<knobas_source::RefreshAnswer, SourceError> {
+        refresh("teamcity", TEST_BASE_URL, cfg, rest, id).await
+    }
+
+    fn refreshed(answer: knobas_source::RefreshAnswer) -> SyncItem {
+        match answer {
+            knobas_source::RefreshAnswer::Item(item) => item,
+            other => panic!("expected the build, got {other:?}"),
+        }
+    }
+
+    fn is_gone(answer: &knobas_source::RefreshAnswer) -> bool {
+        matches!(answer, knobas_source::RefreshAnswer::Gone)
+    }
+
+    /// **A refreshed build is the item a run emits for it**, field for
+    /// field: a finished one, and a queued one -- what a trigger or a re-run
+    /// is read back as the moment it lands.
+    #[tokio::test]
+    async fn a_refreshed_build_is_the_item_a_run_emits_for_it() {
+        let rest = FakeRest::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![
+                build(1189, "Payout_Build", "Payout", "queued"),
+                feature_branch_build(1187, "Payout_Build", "Payout", "finished"),
+            ],
+        );
+        let cfg = TeamCityConfig::default();
+        let (items, _) = run(&rest, &cfg, None).await;
+        for id in [1189, 1187] {
+            let key = format!("build:{id}");
+            let synced = items
+                .iter()
+                .find(|i| i.entity.key == key)
+                .unwrap_or_else(|| panic!("the run emits {key}"));
+            let item = refreshed(refresh_of(&rest, &cfg, id).await.unwrap());
+            assert_eq!(item.entity, synced.entity);
+            assert_eq!(item.kind, synced.kind);
+            assert_eq!(item.title, synced.title);
+            assert_eq!(item.body_text, synced.body_text);
+            assert_eq!(item.author, synced.author);
+            assert_eq!(item.updated_at, synced.updated_at);
+            assert_eq!(item.web_url, synced.web_url);
+            assert_eq!(item.payload, synced.payload);
+            assert!(!item.deleted);
+        }
+    }
+
+    /// **One read by id**, not a page: a build queued a moment ago is read as
+    /// TeamCity holds it, with no listing, no tree and no probe.
+    #[tokio::test]
+    async fn an_unscoped_refresh_reads_the_build_by_id_and_nothing_else() {
+        let rest = tidewater();
+        refreshed(
+            refresh_of(&rest, &TeamCityConfig::default(), 1188)
+                .await
+                .unwrap(),
+        );
+        assert_eq!(rest.calls(), vec!["builds/id:1188 record"]);
+    }
+
+    /// **A build TeamCity answers `404` for is gone**: deleted, which no run
+    /// would deliver either.
+    #[tokio::test]
+    async fn a_build_teamcity_does_not_have_is_gone() {
+        let answer = refresh_of(&tidewater(), &TeamCityConfig::default(), 999)
+            .await
+            .unwrap();
+        assert!(is_gone(&answer), "{answer:?}");
+    }
+
+    /// **A build outside the configured scope is gone**, by configuration
+    /// and by project -- a subproject's build inside it, as the run places
+    /// it by the tree.
+    #[tokio::test]
+    async fn a_build_outside_the_configured_scope_is_gone() {
+        let by_type = TeamCityConfig::from_json(&serde_json::json!({
+            "build_type_ids": ["Ledger_Deploy_Staging"]
+        }))
+        .expect("config");
+        assert!(is_gone(&refresh_of(&tidewater(), &by_type, 1187).await.unwrap()));
+        refreshed(refresh_of(&tidewater(), &by_type, 412).await.unwrap());
+
+        let by_project =
+            TeamCityConfig::from_json(&serde_json::json!({ "project_ids": ["Payments"] }))
+                .expect("config");
+        let rest = nested();
+        assert!(is_gone(&refresh_of(&rest, &by_project, 12).await.unwrap()));
+        refreshed(refresh_of(&rest, &by_project, 13).await.unwrap());
+    }
+
+    /// **A failed read is an error, never gone** (SPI doc on
+    /// `Source::refresh`): a refused credential tombstones nothing.
+    #[tokio::test]
+    async fn a_failed_read_is_an_error_and_never_gone() {
+        let mut rest = tidewater();
+        rest.fault = Some(|| SourceError::Unauthorized { status: Some(401) });
+        let error = refresh_of(&rest, &TeamCityConfig::default(), 1187)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, SourceError::Unauthorized { .. }),
+            "{error:?}"
+        );
+        rest.fault = Some(|| SourceError::Protocol {
+            status: Some(403),
+            message: "HTTP 403".into(),
+        });
+        let error = refresh_of(&rest, &TeamCityConfig::default(), 1187)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
     }
 }

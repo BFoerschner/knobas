@@ -106,6 +106,12 @@ impl Source for ViewsExcused {
         self.0.reachable_transitions(entity).await
     }
 
+    /// Delegated: a build's refresh reads `GET /app/rest/builds/id:{id}`
+    /// with the run's own record fields, which mockd serves (#2099).
+    async fn refresh(&self, entity: &str) -> Result<knobas_source::RefreshAnswer, SourceError> {
+        self.0.refresh(entity).await
+    }
+
     async fn view(
         &self,
         entity: &str,
