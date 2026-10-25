@@ -1492,10 +1492,21 @@ async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
     .await
     .expect("watch_sync answers while a run goes");
     assert_eq!(joined, Some(run_id), "the page joins the run in flight");
-    assert!(
-        heard.lock().unwrap().is_empty(),
-        "the idle call enrolled the channel"
-    );
+    // The held run may not have said Started yet: `execute_run` reports it
+    // before the run reaches the advisory lock, so a join that lands first
+    // hears it (#2117). That Started is the join's, not the idle call's, and
+    // is the only thing the channel may have heard so far.
+    {
+        let heard = heard.lock().unwrap();
+        let beyond_the_join: Vec<_> = heard
+            .iter()
+            .filter(|message| !(message.run_id == run_id && message.phase == SyncPhase::Started))
+            .collect();
+        assert!(
+            beyond_the_join.is_empty() && heard.len() <= 1,
+            "the idle call enrolled the channel: {heard:?}"
+        );
+    }
 
     holder.rollback().await.unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
