@@ -20,6 +20,14 @@ pub struct EntityDetail {
     /// produces). Both cases fall through to the frontend's §3a humaniser,
     /// which is what §3a asks for when nothing declares anything.
     pub kind_info: Option<knobas_source::KindInfo>,
+    /// Whether the item's adapter reads one item by id (#2107, ADR-0031):
+    /// its descriptor declares `Capability::Refresh`. The detail draws
+    /// *Refresh* where it does and *Sync now* where it does not, both only
+    /// while [`SourceRef::enabled`]. Off the adapter's template, so the read
+    /// builds no source; `false` for a source with no configuration row or
+    /// an adapter not installed. An instance that answers *not offered* all
+    /// the same gets the run in its place.
+    pub refreshes: bool,
     /// Untrusted source text. Rendered as text, never as markup (gotcha 7).
     pub body_text: String,
     pub author: Option<String>,
@@ -108,6 +116,7 @@ pub async fn get_entity_inner(
             detail.configured_adapter_kind.as_deref(),
             &detail.row.kind,
         ),
+        refreshes: refreshes(registry, detail.configured_adapter_kind.as_deref()),
         row: detail.row,
         source: detail.source,
         body_text: detail.body_text,
@@ -156,6 +165,17 @@ fn kind_info_for(
         .entity_kinds
         .into_iter()
         .find(|info| info.id == kind)
+}
+
+/// Whether `adapter_kind`'s template declares the read of one item: the
+/// detail's [`EntityDetail::refreshes`].
+fn refreshes(registry: &dyn AdapterRegistry, adapter_kind: Option<&str>) -> bool {
+    adapter_kind.is_some_and(|kind| {
+        registry
+            .descriptors()
+            .iter()
+            .any(|template| template.adapter_kind == kind && template.refreshes())
+    })
 }
 
 /// One entity, for the detail slide-over.
@@ -222,6 +242,30 @@ mod tests {
         assert!(kind_info_for(&registry(), Some("mock"), "no-such-kind").is_none());
         assert!(kind_info_for(&registry(), None, "ticket").is_none());
         assert!(kind_info_for(&registry(), Some("not-a-compiled-in-adapter"), "ticket").is_none());
+    }
+
+    /// The detail's *can refresh* is the adapter's own declaration, read off
+    /// its template: on for an adapter that declares `Capability::Refresh`,
+    /// off for one that does not, and off with no adapter to ask.
+    #[test]
+    fn can_refresh_is_the_adapters_declaration() {
+        let templates = registry().templates();
+        assert!(
+            refreshes(&registry(), Some("mock")),
+            "the mock reads one item"
+        );
+        // An adapter that does not declare the read, while one is compiled
+        // in; the uninstalled kind below holds the "off" side either way.
+        let quiet = templates.iter().find(|template| !template.refreshes());
+        if let Some(quiet) = quiet {
+            assert!(
+                !refreshes(&registry(), Some(&quiet.adapter_kind)),
+                "{} does not declare the read",
+                quiet.adapter_kind
+            );
+        }
+        assert!(!refreshes(&registry(), None));
+        assert!(!refreshes(&registry(), Some("not-a-compiled-in-adapter")));
     }
 
     /// One kind id declared by two adapters resolves by **adapter**, not by

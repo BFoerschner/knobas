@@ -1086,6 +1086,16 @@ export type EntityDetail = { row: EntityRow, source: SourceRef,
  */
 kind_info: KindInfo | null, 
 /**
+ * Whether the item's adapter reads one item by id (#2107, ADR-0031):
+ * its descriptor declares `Capability::Refresh`. The detail draws
+ * *Refresh* where it does and *Sync now* where it does not, both only
+ * while [`SourceRef::enabled`]. Off the adapter's template, so the read
+ * builds no source; `false` for a source with no configuration row or
+ * an adapter not installed. An instance that answers *not offered* all
+ * the same gets the run in its place.
+ */
+refreshes: boolean, 
+/**
  * Untrusted source text. Rendered as text, never as markup (gotcha 7).
  */
 body_text: string, author: string | null, 

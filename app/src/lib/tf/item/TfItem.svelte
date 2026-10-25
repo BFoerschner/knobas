@@ -28,15 +28,22 @@
     type ViewSection,
   } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+  import { DETAIL_REFRESH_BRIDGE, type DetailRefreshPorts } from "../refresh.svelte";
 
-  /** The page's two reads, and the write queue its actions queue through. */
+  /** The page's two reads, the write queue its actions queue through, and its *Refresh* (#2107). */
   export interface ItemPorts {
     getEntity: (entityId: string) => Promise<EntityDetail>;
     entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
+    refresh?: DetailRefreshPorts;
   }
 
-  const BRIDGE: ItemPorts = { getEntity, entityView, submitWrite: (payload) => submitWrite(payload) };
+  const BRIDGE: ItemPorts = {
+    getEntity,
+    entityView,
+    submitWrite: (payload) => submitWrite(payload),
+    refresh: DETAIL_REFRESH_BRIDGE,
+  };
 </script>
 
 <script lang="ts">
@@ -44,6 +51,10 @@
   import { actionName } from "../../detail/view/actions";
   import TfCrumbs from "../TfCrumbs.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
+  import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfDetailRefresh from "../TfDetailRefresh.svelte";
+  import { createDetailRefresh } from "../refresh.svelte";
+  import { untrack } from "svelte";
 
   let {
     id,
@@ -70,6 +81,8 @@
   type Opened = { section: ViewSection } | { failed: string };
   /** Deferred sections read so far, by id. */
   let opened = $state<Record<string, Opened>>({});
+  /** The header's *Refresh* or *Sync now* (#2107). */
+  const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
   $effect(() => {
     if (!ready) return;
@@ -81,6 +94,7 @@
     viewFailed = null;
     opened = {};
     shown = null;
+    untrack(() => refresh.reset());
     ports.getEntity(entity).then(
       (found) => live && (detail = found),
       (error: unknown) => live && (failed = ipcErrorMessage(error)),
@@ -97,6 +111,21 @@
       live = false;
     };
   });
+
+  /**
+   * The detail and its view read again after a refresh or its source's run
+   * (#2107), over what the page drew: a failed read keeps it.
+   */
+  async function reread() {
+    const entity = id;
+    const [found, answer] = await Promise.allSettled([ports.getEntity(entity), ports.entityView(entity, null)]);
+    if (entity !== id) return;
+    if (found.status === "fulfilled") detail = found.value;
+    if (answer.status === "fulfilled") {
+      view = answer.value;
+      viewFailed = null;
+    }
+  }
 
   function readDeferred(section: ViewSection) {
     const entity = id;
@@ -188,15 +217,17 @@
         <h1>{detail.row.title}</h1>
         <div class="tf-sub">{kindLabel} · {detail.source.display_name}</div>
       </div>
-      {#if detail.web_url !== null || actions.length > 0}
+      {#if detail.web_url !== null || actions.length > 0 || refresh.offer(detail) !== null}
         <div class="tf-acts">
           {@render buttonsOf(actions)}
+          <TfDetailRefresh {detail} {refresh} {reread} />
           {#if detail.web_url !== null}
             <a class="tf-btn" href={detail.web_url} target="_blank" rel="noreferrer">Open in {detail.source.display_name}</a>
           {/if}
         </div>
       {/if}
     </header>
+    <TfDetailBanners {detail} failed={refresh.failed} />
     <div class="tf-item-body">
       {#if view === undefined}
         <!-- The view has not answered yet. -->

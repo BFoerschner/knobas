@@ -66,6 +66,7 @@ function detail(id: string, title: string, path: string | null, links: LinkEntry
     row: { entity_id: id, kind: "ticket", source_id: "jira", title, updated_at: null, synced_at: "2026-10-15T09:00:00Z", path, state: null },
     source: { id: "jira", display_name: "Jira", adapter_kind: "jira", enabled: true },
     kind_info: null,
+    refreshes: true,
     body_text: "",
     author: null,
     payload: {},

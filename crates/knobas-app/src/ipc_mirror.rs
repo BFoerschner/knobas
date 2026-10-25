@@ -260,6 +260,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_source::SourceDescriptor::export_all(cfg)?;
     crate::sources::SourceSummary::export_all(cfg)?;
     crate::sources::RoleRun::export_all(cfg)?;
+    crate::sources::refresh::EntityRefresh::export_all(cfg)?;
     crate::sources::NewSource::export_all(cfg)?;
     crate::sources::SourcePatch::export_all(cfg)?;
     crate::sources::SourceDraft::export_all(cfg)?;

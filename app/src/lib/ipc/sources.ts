@@ -21,6 +21,7 @@ import type {
   ConnectionReport,
   CredentialHealth,
   DbStats,
+  EntityRefresh,
   InstalledAdapter,
   NewSource,
   QueueCounts,
@@ -66,6 +67,7 @@ export type {
   PullRequestState,
   QueueCounts,
   QueuedWrite,
+  EntityRefresh,
   RefreshEnd,
   RefreshEnded,
   Removal,
@@ -307,6 +309,15 @@ export function syncAll(): Promise<number[]> {
  */
 export function syncRole(role: string): Promise<RoleRun[]> {
   return invoke<RoleRun[]>("sync_role", { role });
+}
+
+/**
+ * An item's detail's *Refresh* (#2107): read `entityId` from its source and
+ * resolve once the refresh has ended, with how it ended. A refresh that read
+ * something also ends on `EVENTS.itemRefreshed` with no write.
+ */
+export function refreshEntity(entityId: string): Promise<EntityRefresh> {
+  return invoke<EntityRefresh>("refresh_entity", { entityId });
 }
 
 /**

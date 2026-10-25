@@ -60,3 +60,60 @@ pub async fn refresh(
     });
     outcome
 }
+
+/// How the reader's *Refresh* on an item's detail ended (#2107): what
+/// `refresh_entity` answers once the refresh is over.
+///
+/// `{ "outcome": "refreshed" }` and its siblings on the wire, `failed`
+/// carrying the source's reason, which the detail draws as *Couldn't
+/// refresh: <reason>*.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
+pub enum EntityRefresh {
+    /// The item is in the mirror as its source holds it, live again if it
+    /// was tombstoned.
+    Refreshed,
+    /// The source no longer has it: it is tombstoned.
+    Gone,
+    /// The adapter does not read one item: the caller runs the source.
+    NotOffered,
+    /// The source is turned off, so nothing was read.
+    TurnedOff,
+    /// The read failed and nothing changed.
+    Failed {
+        /// The source's own reason.
+        reason: String,
+    },
+}
+
+/// The reader's refresh of `entity_id`: [`refresh`], with no write behind it,
+/// answered as an [`EntityRefresh`].
+///
+/// # Errors
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an id that is not an
+/// entity's and [`NotFound`](crate::IpcErrorCode::NotFound) for a namespace no
+/// source is configured for, as `get_entity` answers both.
+pub async fn of_reader(
+    scheduler: &Scheduler,
+    entity_id: &str,
+) -> Result<EntityRefresh, crate::IpcError> {
+    match refresh(scheduler, entity_id, None).await {
+        Ok(RefreshOutcome::Refreshed) => Ok(EntityRefresh::Refreshed),
+        Ok(RefreshOutcome::Gone) => Ok(EntityRefresh::Gone),
+        Ok(RefreshOutcome::NotOffered) => Ok(EntityRefresh::NotOffered),
+        Err(RefreshError::TurnedOff(_)) => Ok(EntityRefresh::TurnedOff),
+        Err(error @ RefreshError::NotAnEntity(_)) => Err(crate::IpcError::invalid(error)),
+        Err(error @ RefreshError::NotConfigured(_)) => Err(crate::IpcError::not_found(error)),
+        Err(RefreshError::Build(reason)) => Ok(EntityRefresh::Failed { reason }),
+        // The source's own words, without the engine's `source:` prefix.
+        Err(RefreshError::Sync(knobas_sync::SyncError::Source(error))) => {
+            Ok(EntityRefresh::Failed {
+                reason: error.to_string(),
+            })
+        }
+        Err(RefreshError::Sync(error)) => Ok(EntityRefresh::Failed {
+            reason: error.to_string(),
+        }),
+    }
+}

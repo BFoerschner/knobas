@@ -620,6 +620,25 @@ pub async fn sync_role<R: tauri::Runtime>(
     .map_err(|error| to_ipc(&error, None))
 }
 
+/// An item's detail's *Refresh* (#2107): read `entity_id` from its source
+/// and answer once the refresh has ended, with how it ended
+/// ([`crate::sources::refresh::EntityRefresh`]). The refresh tells
+/// `item:refreshed` as every refresh does, with no write behind it.
+///
+/// # Errors
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the engine is starting
+/// or stopping; [`Invalid`](crate::IpcErrorCode::Invalid) for an id that is
+/// not an entity's; [`NotFound`](crate::IpcErrorCode::NotFound) for a
+/// namespace no source is configured for.
+#[tauri::command]
+pub async fn refresh_entity<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+) -> Result<crate::sources::refresh::EntityRefresh, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::sources::refresh::of_reader(&state.scheduler, &entity_id).await
+}
+
 /// What every source is doing, and when it goes next.
 ///
 /// The authoritative read: `sync:state` events are a hint that something moved

@@ -443,6 +443,7 @@ function jobTicket(): EntityDetail {
     },
     source: { id: "mock", display_name: "Mock", adapter_kind: "mock", enabled: true },
     kind_info: null,
+    refreshes: true,
     body_text: "",
     author: null,
     payload: {},

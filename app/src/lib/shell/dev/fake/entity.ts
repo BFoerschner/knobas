@@ -3,8 +3,9 @@
  * transitions, the conversation, and the URL resolver.
  */
 import type { LinkEntry, LinkRow, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
-import type { Handlers } from "../fake-tauri";
-import { keepSeed } from "../fake-seed";
+import type { EntityRefresh } from "../../../ipc/sources";
+import type { FakeBridge, Handlers } from "../fake-tauri";
+import { keepSeed, onFakeReset } from "../fake-seed";
 import { CORPUS, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
@@ -161,6 +162,38 @@ function sourceRef(id: string) {
     : { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true };
 }
 
+/**
+ * The adapters that read one item by id on main (#2095-#2101), so the
+ * detail's `refreshes` matches what their descriptors declare; Kestrel, and
+ * a WASM component built against a world before 1.4.0, offer *Sync now*.
+ */
+const REFRESHING_ADAPTERS = new Set(["mock", "jira", "confluence", "teamcity", "gitea", "kuma", "wasm-fixture"]);
+
+let bridge: FakeBridge | null = null;
+
+/** Hold the bridge, so a refresh can end on `item:refreshed` (#2107). */
+export function attach(installed: FakeBridge): void {
+  bridge = installed;
+}
+onFakeReset(() => {
+  bridge = null;
+});
+
+/**
+ * `refresh_entity` (#2107): a corpus row is read back as it stands, and the
+ * refresh ends on `item:refreshed`. `?fake-refresh-failed`
+ * answers the failure line's reason instead, for a screenshot of it.
+ */
+function refreshEntity(args: Record<string, unknown>): EntityRefresh {
+  const id = String(args["entityId"] ?? "");
+  const detail = getEntity(args);
+  if (!detail.source.enabled) return { outcome: "turned_off" };
+  if (!REFRESHING_ADAPTERS.has(detail.source.adapter_kind)) return { outcome: "not_offered" };
+  const failed = new URLSearchParams(location.search).has("fake-refresh-failed");
+  setTimeout(() => bridge?.emit("item:refreshed", { entity_id: id, write_id: null, ended: failed ? "failed" : "refreshed" }), 0);
+  return failed ? { outcome: "failed", reason: "502 Bad Gateway from the source" } : { outcome: "refreshed" };
+}
+
 /** `get_entity`, including the two refusals the detail view branches on. */
 function getEntity(args: Record<string, unknown>) {
   const id = String(args["entityId"] ?? "");
@@ -172,11 +205,13 @@ function getEntity(args: Record<string, unknown>) {
     throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
   }
   const row = mirrorRow(entry);
+  const source = sourceRef(row.source_id);
   return {
     // A ticket's path is its parent chain, as Jira declares it: the flat
     // `epic` here, so *Save as a link set…* (#869) offers the epic.
     row: entry.kind === "ticket" && row.path === null ? { ...row, path: fakeText(entry.payload["epic"]) } : row,
-    source: sourceRef(row.source_id),
+    source,
+    refreshes: REFRESHING_ADAPTERS.has(source.adapter_kind),
     // Null, where the real command now resolves the adapter's KindInfo from
     // the registry. Harmless divergence: the fallback path draws the same
     // words — knobas' own vocabulary (`kinds.ts` layer 2) matches the mock's
@@ -452,6 +487,7 @@ function visitEntity(args: Record<string, unknown>): string | null {
 export function handlers(): Handlers {
   return {
     get_entity: (args) => getEntity(args),
+    refresh_entity: (args) => refreshEntity(args),
     // A reload starts the fixture over, so nothing filed before it is owed (#1953).
     owed_tickets: () => [],
     entity_thread: (args) => entityThread(args),

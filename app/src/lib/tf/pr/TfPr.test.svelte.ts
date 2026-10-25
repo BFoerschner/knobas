@@ -27,6 +27,7 @@ import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes } from "../queued.svelte";
 import TfPr, { type PrPorts } from "./TfPr.svelte";
+import { createSourceSyncs } from "../role-sync.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
 const PR = `${REPO}#142`;
@@ -172,6 +173,9 @@ function detail(author: string): EntityDetail {
     row: row(PR, "pr", "SEPA retry with exponential backoff", { path: "tidewater/payout-service", state: { text: "open", tone: "info" } }),
     author,
     links: [],
+    source: { id: "gitea", display_name: "Tidewater Gitea", adapter_kind: "gitea", enabled: true },
+    refreshes: true,
+    deleted_at: null,
   } as unknown as EntityDetail;
 }
 
@@ -256,7 +260,7 @@ const button = (name: string) =>
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name) ??
   [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name);
 const cells = (tr: Element) => [...tr.querySelectorAll("td")].map((td) => td.textContent?.replace(/\s+/g, " ").trim()).join(" | ");
-const buttons = () => [...target.querySelectorAll(".tf-fhead .tf-acts button")].map((b) => b.textContent?.trim());
+const buttons = () => [...target.querySelectorAll(".tf-fhead .tf-acts button:not(.tf-refresh)")].map((b) => b.textContent?.trim());
 
 test("the header names the pull request, its state, head into base and the reader as its author", async () => {
   await draw([PR]);
@@ -1100,4 +1104,51 @@ test("a source action says queued, then sent, and goes on the re-read once sent 
   expect(chips()).toEqual(["open", "stamp release sent"]);
   await sync.refreshed(PR, 80);
   expect(chips()).toEqual(["open"]);
+});
+
+// -- Refresh (#2107) -----------------------------------------------------------
+
+test("Refresh on a pull request reads it from its source, then its row and its live view again", async () => {
+  const refreshed: string[] = [];
+  let reads = 0;
+  let views = 0;
+  const syncs = createSourceSyncs({
+    syncRole: () => Promise.reject(new Error("unused")),
+    syncNow: () => Promise.reject(new Error("unused")),
+    syncStatus: async () => [],
+    listen: async () => () => {},
+  });
+  await draw(
+    [PR],
+    ports({
+      getEntity: async () => (reads++, detail("mara")),
+      entityView: async () => (views++, prView()),
+      refresh: { refreshEntity: async (id) => (refreshed.push(id), { outcome: "refreshed" }), syncs },
+    }),
+  );
+  const before = { reads, views };
+  const refresh = target.querySelector<HTMLButtonElement>(".tf-fhead .tf-refresh")!;
+  expect(refresh.textContent).toBe("Refresh");
+
+  refresh.click();
+  await settle();
+  expect(refreshed).toEqual([PR]);
+  expect(reads).toBe(before.reads + 1);
+  expect(views).toBe(before.views + 1);
+  expect(text("h1")).toContain("SEPA retry with exponential backoff");
+});
+
+test("a pull request whose refresh failed keeps its page and says why", async () => {
+  const syncs = createSourceSyncs({
+    syncRole: () => Promise.reject(new Error("unused")),
+    syncNow: () => Promise.reject(new Error("unused")),
+    syncStatus: async () => [],
+    listen: async () => () => {},
+  });
+  await draw([PR], ports({ refresh: { refreshEntity: async () => ({ outcome: "failed", reason: "502 Bad Gateway" }), syncs } }));
+  target.querySelector<HTMLButtonElement>(".tf-fhead .tf-refresh")!.click();
+  await settle();
+  expect(text(".tf-refresh-failed")).toBe("Couldn't refresh: 502 Bad Gateway");
+  expect(text("h1")).toContain("SEPA retry with exponential backoff");
+  expect(target.querySelector(".tf-cbody")?.textContent).not.toBe("");
 });

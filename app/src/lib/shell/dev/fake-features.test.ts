@@ -686,3 +686,11 @@ test("PR #88 of fx-rates is read by a token without read:issue: Conversation ope
   const other = h["entity_view"]!({ entityId: "mock:booking-api#121", section: "conversation" }) as SourceView;
   expect(other.sections[0]!.blocks).toEqual([]);
 });
+
+test("refresh_entity reads a refreshing adapter's item back as refreshed, and refuses an id the mirror does not hold (#2107)", () => {
+  const h = demoHandlers() as Calls;
+  const detailOf = (entityId: string) => h["get_entity"]!({ entityId }) as EntityDetail;
+  expect(detailOf("jira:PAY-231").refreshes).toBe(true);
+  expect(h["refresh_entity"]!({ entityId: "jira:PAY-231" })).toEqual({ outcome: "refreshed" });
+  expect(() => h["refresh_entity"]!({ entityId: "jira:NOPE-1" })).toThrow();
+});

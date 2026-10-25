@@ -20,6 +20,7 @@ function ticket(id: string, status = "In Progress"): EntityDetail {
     row: { entity_id: id, kind: "ticket", source_id: "jira", title: `Ticket ${id}`, updated_at: "", synced_at: "", path: null, state: null },
     source: { id: "jira", display_name: "Jira", adapter_kind: "jira", enabled: true },
     kind_info: null,
+    refreshes: true,
     body_text: "",
     author: null,
     payload: {},

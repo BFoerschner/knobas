@@ -93,6 +93,7 @@ function ticket(links: LinkEntry[] = [PR, PAGE]): EntityDetail {
     },
     source: { id: "jira", display_name: "Jira", adapter_kind: "jira", enabled: true },
     kind_info: null,
+    refreshes: true,
     body_text: "",
     author: null,
     payload: {},
