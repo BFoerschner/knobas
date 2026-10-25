@@ -279,11 +279,10 @@ fn field(entity: &str, op: &str, field: &str) -> WriteAsk {
 }
 
 /// A custom role may hold `run_build` without `customize_build_parameters`
-/// or `reorder_build_queue`. TeamCity checks the first when a run's
-/// parameters are set, before anything is queued, and the second when the
-/// queued build is moved to the top, after it was queued (2026.1.3's
-/// `BuildPromotionImpl.setCustomParameters` and `SecuredBuildQueue.moveTop`).
-/// So the run itself is the user's, and neither field is.
+/// or `reorder_build_queue`: the first is what TeamCity documents as letting
+/// a user change a build's parameters when running it, the second what lets
+/// it reorder the queue. So the run itself is the user's, and neither field
+/// is.
 #[tokio::test]
 async fn a_runner_may_run_and_may_not_override_parameters_or_jump_the_queue() {
     let server = teamcity(vec![
@@ -322,8 +321,9 @@ async fn a_runner_may_run_and_may_not_override_parameters_or_jump_the_queue() {
 }
 
 /// `customize_build_parameters` holds where a role holds, on the project or
-/// an ancestor. `reorder_build_queue` is not a project's: TeamCity checks it
-/// globally, so it holds wherever the read names it, and a role giving it on
+/// an ancestor. `reorder_build_queue` is not a project's: TeamCity documents
+/// it as one no project can carry, so it holds wherever the read names it,
+/// and a role giving it on
 /// some project is not read as a refusal (never refuse on a guess).
 #[tokio::test]
 async fn overrides_follow_the_project_and_the_queue_top_is_not_refused_on_a_guess() {

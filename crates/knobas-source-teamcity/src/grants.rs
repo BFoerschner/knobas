@@ -27,17 +27,17 @@
 //!
 //! **What a run may carry (#2055).** A run's parameter overrides and its
 //! place at the queue's top need permissions of their own, which a custom
-//! role can leave out while it gives `run_build`. TeamCity 2026.1.3 checks
-//! `customize_build_parameters` on the configuration's project when the
-//! run's parameters are set (`BuildPromotionImpl.setCustomParameters`),
-//! before anything is queued, so the `POST` is refused and queues nothing.
-//! It checks `reorder_build_queue` globally when the queued build is moved
-//! to the top (`SecuredBuildQueue.moveTop`, which is the `BuildQueue` the
-//! REST plugin is handed), **after** the build was queued: the run starts
-//! and the write still answers 403. So the dialog asks about each field
-//! ([`WriteAsk::field`]) and draws the refused ones disabled. TeamCity says
-//! `reorder_build_queue` cannot be given on a project, so an assignment of
-//! it anywhere is read as held rather than as a refusal on a guess.
+//! role can leave out while it gives `run_build` (measured on the seeded
+//! 2026.1.3 server by `live_teamcity_seeded.rs`). TeamCity documents
+//! *Customize build parameters* as what lets a user change a build's
+//! parameters when running it, and *Reorder builds in queue* as one of the
+//! permissions that cannot be given on a project. Its REST plugin, which
+//! JetBrains publishes under the Apache License 2.0, queues the build and
+//! only then moves it to the top (`Build.triggerBuild`), so a refused move
+//! comes after the run was queued. So the dialog asks about each field
+//! ([`WriteAsk::field`]) and draws the refused ones disabled. An assignment
+//! of `reorder_build_queue` anywhere is read as held rather than as a
+//! refusal on a guess.
 
 use std::collections::{HashMap, HashSet};
 
@@ -87,7 +87,7 @@ impl Permission {
         }
     }
 
-    /// Whether TeamCity checks it globally, whatever the project: then an
+    /// Whether TeamCity gives it on no project, only on the server: then an
     /// assignment of it anywhere is read as held, rather than refusing on a
     /// guess about how a project's role carrying it is answered.
     fn is_global(self) -> bool {

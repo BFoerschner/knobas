@@ -17,7 +17,7 @@
   - **TeamCity** (`crates/knobas-source-teamcity/src/grants.rs`) answers `run_build` carrying
     `parameters` from `customize_build_parameters` (held as `run_build` is: global, `_Root`, the
     project or an ancestor) and carrying `first_in_queue` from `reorder_build_queue` (held where
-    any assignment names it, since TeamCity checks it globally). Same reads as #2040, no new
+    any assignment names it, since TeamCity documents it as a permission no project carries). Same reads as #2040, no new
     request. Its configuration view's *Run…* drops `with_settings` and says why in its sentence
     for a user who may not override.
   - **IPC.** The generated `WriteAsk` and `RefusedWrite` in `app/src/lib/ipc/generated/entity.ts`
