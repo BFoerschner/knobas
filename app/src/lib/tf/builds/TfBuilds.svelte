@@ -142,13 +142,16 @@
   /**
    * The list read again, kept drawn meanwhile: when *Sync now*'s runs end
    * (#2106), and on the pipeline page's *Refresh* (#2137), whose row of the
-   * pipeline is among it. A failed read keeps the list and says so.
+   * pipeline is among it. A failed read keeps the list and says so, until a
+   * read again answers.
    */
   async function rereadPipelines() {
     const at = ++listReads;
     try {
       const rows = await ports.pipelines();
-      if (at === listReads) all = rows;
+      if (at !== listReads) return;
+      all = rows;
+      failed = null;
     } catch (error) {
       if (at === listReads) failed = message(error);
     }

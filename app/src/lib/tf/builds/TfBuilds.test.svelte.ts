@@ -421,3 +421,21 @@ test("Refresh on a pipeline reads the list again, and its row as the read answer
   expect(reads).toBe(before + 1);
   expect(target.querySelector(".tf-bmain h1")?.textContent).toBe("Payout_IntegrationTests_v2");
 });
+
+test("a read again of the list that answers takes away the note an earlier failed one left (#2137)", async () => {
+  let fail = false;
+  const ports: BuildsPorts = {
+    pipelines: () => (fail ? Promise.reject(new Error("database is locked")) : Promise.resolve(LIST)),
+    runs: (id) => Promise.resolve(LIST.find((p) => p.entity_id === id)?.recent ?? []),
+  };
+  page = mount(TfBuilds, { target, props: { ready: true, head: "builds", rest: [LIST[1]!.entity_id], job: null, ports } });
+  await settle();
+  fail = true;
+  target.querySelector<HTMLButtonElement>(".tf-bhead .tf-refresh")!.click();
+  await settle();
+  expect(target.querySelector(".tf-pl-note")?.textContent).toContain("database is locked");
+  fail = false;
+  target.querySelector<HTMLButtonElement>(".tf-bhead .tf-refresh")!.click();
+  await settle();
+  expect(target.querySelector(".tf-pl-note")).toBeNull();
+});
