@@ -41,4 +41,5 @@
   `rejects_a_refresh_of_a_kind_declared_not_refreshed`, `rejects_the_capability_without_a_refresh`
   and `tests::a_kinds_refresh_flag_round_trips_defaults_on_and_needs_the_capability`; each
   adapter's battery run; `knobas-app`'s `commands::entity::detail::tests::can_refresh_is_the_kinds_declaration`;
-  and `fake-features.test.ts`.
+  `commands::entity::detail::tests::the_fake_ipcs_not_refreshed_kinds_are_the_descriptors`, which
+  holds the fixture's `NOT_REFRESHED` to the templates; and `fake-features.test.ts`.

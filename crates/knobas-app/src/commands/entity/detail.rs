@@ -283,6 +283,58 @@ mod tests {
         assert!(!refreshes(&registry(), Some("mock"), "no-such-kind"));
     }
 
+    /// The `?fake-ipc` fixture's `NOT_REFRESHED` (`fake/entity.ts`) is a
+    /// hand copy of the kinds each refreshing template declares not
+    /// refreshed (#2146): it lists exactly those, adapter by adapter, so a
+    /// flag flipped on one side fails here rather than drawing the other
+    /// button in the fixture only.
+    #[test]
+    fn the_fake_ipcs_not_refreshed_kinds_are_the_descriptors() {
+        use std::collections::{BTreeMap, BTreeSet};
+        let fixture = include_str!("../../../../../app/src/lib/shell/dev/fake/entity.ts");
+        let header = "const NOT_REFRESHED: Readonly<Record<string, ReadonlySet<string>>> = {";
+        let start = fixture
+            .find(header)
+            .unwrap_or_else(|| panic!("`{header}` is not in fake/entity.ts"))
+            + header.len();
+        let body = &fixture[start..];
+        let body = &body[..body.find("\n};").expect("NOT_REFRESHED is never closed")];
+        let fake: BTreeMap<String, BTreeSet<String>> = body
+            .lines()
+            .filter_map(|line| line.trim().split_once(": new Set(["))
+            .map(|(adapter, kinds)| {
+                let kinds = kinds.split("])").next().unwrap_or_default();
+                let kinds = kinds
+                    .split(',')
+                    .map(|kind| kind.trim().trim_matches('"').to_owned())
+                    .filter(|kind| !kind.is_empty())
+                    .collect();
+                (adapter.to_owned(), kinds)
+            })
+            .collect();
+        assert!(!fake.is_empty(), "no entries read from NOT_REFRESHED:\n{body}");
+        let declared: BTreeMap<String, BTreeSet<String>> = registry()
+            .templates()
+            .into_iter()
+            .filter(knobas_source::SourceDescriptor::refreshes)
+            .map(|template| {
+                let kinds = template
+                    .entity_kinds
+                    .iter()
+                    .filter(|info| !info.refreshes)
+                    .map(|info| info.id.clone())
+                    .collect::<BTreeSet<_>>();
+                (template.adapter_kind, kinds)
+            })
+            .filter(|(_, kinds)| !kinds.is_empty())
+            .collect();
+        assert_eq!(
+            fake, declared,
+            "app/src/lib/shell/dev/fake/entity.ts's NOT_REFRESHED is no longer the kinds the \
+             refreshing templates declare `refreshes: false`"
+        );
+    }
+
     /// One kind id declared by two adapters resolves by **adapter**, not by
     /// kind.
     ///

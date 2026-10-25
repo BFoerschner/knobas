@@ -173,7 +173,8 @@ const REFRESHING_ADAPTERS = new Set(["mock", "jira", "confluence", "teamcity", "
 /**
  * The kinds those adapters' refresh answers *not offered*, as their
  * descriptors declare them (`KindInfo::refreshes`, #2146): `get_entity`
- * answers `refreshes` for the row's kind, not the adapter.
+ * answers `refreshes` for the row's kind, not the adapter. Held to the
+ * templates by knobas-app's `the_fake_ipcs_not_refreshed_kinds_are_the_descriptors`.
  */
 const NOT_REFRESHED: Readonly<Record<string, ReadonlySet<string>>> = {
   teamcity: new Set(["build_config"]),
