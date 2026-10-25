@@ -1808,12 +1808,11 @@ impl Scheduler {
     /// that is slow (story 11).
     ///
     /// **What that costs, and who pays it.** The second run is paid whenever
-    /// one was in flight. A caller in `knobas-app` that looks for what its
-    /// write made (start-work's link step, issue #44; #289's protocol
-    /// publish; an action item's ticket) no longer asks beside
-    /// `after_landing`: it waits for the landed write's follow-up and asks
-    /// only when none is in flight (#2115), so the two do not join each
-    /// other's runs.
+    /// one was in flight. `after_landing` asks for this once per landed
+    /// write. A caller in `knobas-app` that looks for what its write made
+    /// (start-work's link step, issue #44; #289's protocol publish; an action
+    /// item's ticket) waits for that follow-up instead, and asks for a run of
+    /// its own only when no follow-up of the source is in flight (#2115).
     ///
     /// ADR-0005 guarantees a run id always comes with an ending -- including
     /// the id of a run already in flight -- so neither wait can be for

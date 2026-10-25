@@ -953,7 +953,7 @@ impl Following {
     }
 
     /// Count one landed write of `source` as followed until the answer drops.
-    fn enter(&self, source: &str) -> Followed {
+    fn count(&self, source: &str) -> Followed {
         self.0
             .send_modify(|counts| *counts.entry(source.to_owned()).or_default() += 1);
         Followed {
@@ -964,6 +964,11 @@ impl Following {
 
     /// Wait until no landed write of `source` is being followed. Answers
     /// whether one was when this asked.
+    ///
+    /// Not this caller's write alone: a source that keeps landing writes
+    /// keeps the count up, and the wait lasts as long as they do. A write
+    /// another flusher was still sending when this caller's flush read the
+    /// queue may not be counted yet; the caller then runs as before.
     async fn wait_out(&self, source: &str) -> bool {
         let mut counts = self.0.subscribe();
         let in_flight = |counts: &std::collections::HashMap<String, usize>| {
@@ -1037,7 +1042,7 @@ impl knobas_sync::scheduler::SyncEvents for FollowLandings {
             // follow-up ends. Refused once the quit has begun, which drops
             // the task and the count with it: the next start's scheduled
             // sync reads the source.
-            let followed = self.following.enter(&write.source_id);
+            let followed = self.following.count(&write.source_id);
             let spawned = scheduler.background().spawn(async move {
                 after_landing(&task, &landed).await;
                 drop(followed);

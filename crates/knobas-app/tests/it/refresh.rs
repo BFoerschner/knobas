@@ -691,6 +691,7 @@ async fn a_ticket_filed_from_a_run_is_linked_to_it_before_the_follow_up_run_ends
     f.state.scheduler.shutdown().await;
 }
 
+/// *File ticket* from the failed build: what the fake files as PAY-9.
 fn filed() -> serde_json::Value {
     json!({ "CreateTicket": {
         "entity": BUILD,
