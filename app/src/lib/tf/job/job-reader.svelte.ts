@@ -204,7 +204,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       if (mine !== token) return;
       void readProposals(context.id, id, mine);
       void readReach(id, mine);
-      readSections(id, mine);
+      void readSections(id, mine);
       if (offersStartWork(found.status, isMine(found, listed))) void readRepos(mine);
       await readCode(id, mine);
     } catch (cause) {
@@ -263,20 +263,22 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     }
   }
 
-  /** Builds, Pages and Monitors, each through the reach. */
-  function readSections(id: string, mine: number) {
+  /** Builds, Pages and Monitors, each through the reach; settles once all three have answered. */
+  async function readSections(id: string, mine: number) {
     // Builds asks for the CI role and the mirror answers its run kinds
     // (#1295); the adapters' claims only route a run to its page (#1256).
     void registry.load();
-    void readRows(id, SECTION_READS.builds, mine).then((rows) => {
-      if (mine === token && rows) state.builds = rows;
-    });
-    void readRows(id, SECTION_READS.pages, mine).then((rows) => {
-      if (mine === token && rows) state.pages = rows;
-    });
-    void readRows(id, SECTION_READS.monitors, mine).then((rows) => {
-      if (mine === token && rows) state.monitors = rows;
-    });
+    await Promise.all([
+      readRows(id, SECTION_READS.builds, mine).then((rows) => {
+        if (mine === token && rows) state.builds = rows;
+      }),
+      readRows(id, SECTION_READS.pages, mine).then((rows) => {
+        if (mine === token && rows) state.pages = rows;
+      }),
+      readRows(id, SECTION_READS.monitors, mine).then((rows) => {
+        if (mine === token && rows) state.monitors = rows;
+      }),
+    ]);
   }
 
   /** What the Builds section's warning reads: every source's credential and last run. */
@@ -360,13 +362,16 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     }
   }
 
-  /** The link sets, the reach and every section again, the checkout line kept. */
+  /** The link sets, the reach and every section again, the checkout line kept; settles once all have answered. */
   async function readReachAgain(id: string, mine: number) {
-    readSections(id, mine);
-    void readRows(id, SECTION_READS.code, mine).then((rows) => {
-      if (mine === token && rows) state.code = rows;
-    });
-    await Promise.allSettled([readInherited(id, mine), readReach(id, mine)]);
+    await Promise.allSettled([
+      readInherited(id, mine),
+      readReach(id, mine),
+      readSections(id, mine),
+      readRows(id, SECTION_READS.code, mine).then((rows) => {
+        if (mine === token && rows) state.code = rows;
+      }),
+    ]);
   }
 
   async function readCode(id: string, mine: number) {

@@ -66,6 +66,7 @@ function fakes(over: { failing?: string[] } = {}) {
     listEntities: async (filter: EntityFilter) => {
       asked.push(`listEntities ${filter.role} ${filter.reach}`);
       await wait(filter.reach);
+      await wait(`role ${filter.role}`);
       if (over.failing?.includes(filter.role ?? "")) throw { code: "unreachable", message: "down", source_id: null };
       return { rows: [row(filter.role, filter.reach)], total: 1, tally: null, groups: null };
     },
@@ -126,7 +127,7 @@ function fakes(over: { failing?: string[] } = {}) {
       release();
     };
   }
-  return { reader, asked, hold, status };
+  return { reader, asked, hold, status, holdRole: (role: string) => hold(`role ${role}`) };
 }
 
 /** What the reader holds about which ticket, one line a slot. */
@@ -312,5 +313,20 @@ test("a refresh's reread still out when another job opens lands nothing of the f
   releaseA();
   await out;
   await flush();
+  expect(slots(reader)).toEqual(B);
+});
+
+test("a refresh's reread settles only once every section has answered (#2134)", async () => {
+  const { reader, holdRole } = fakes();
+  reader.open("jira:B");
+  await flush();
+  const releaseBuilds = holdRole("ci");
+  let settled = false;
+  void reader.reread().then(() => (settled = true));
+  await flush();
+  expect(settled).toBe(false);
+  releaseBuilds();
+  await flush();
+  expect(settled).toBe(true);
   expect(slots(reader)).toEqual(B);
 });
