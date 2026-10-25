@@ -2186,3 +2186,160 @@ async fn a_viewer_is_refused_the_writes_of_a_space_it_may_only_view() {
     );
     drop(minted);
 }
+
+// -- the refresh: one page read by id (ADR-0031, #2096) ----------------------
+
+/// A page this suite creates to read back and then delete, deleted from the
+/// trash too when the guard drops -- passing or panicking alike -- and the
+/// removal checked. A killed run's page is the seed's to clear: the content
+/// seed deletes every ENG page it did not create (#2114).
+struct Created {
+    url: String,
+    user: String,
+    password: String,
+    id: Option<String>,
+}
+
+impl Drop for Created {
+    fn drop(&mut self) {
+        let Some(id) = self.id.take() else {
+            return;
+        };
+        let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
+        Cleanup::new(
+            "the live suite did not delete the page its refresh test created",
+            format!("page {id} may still be in the ENG space or its trash"),
+        )
+        .run(move || async move { purge(&client(), &url, &user, &password, &id).await });
+    }
+}
+
+/// Delete a page and purge it from the trash, and check nothing answers for
+/// it afterwards in either status.
+async fn purge(
+    http: &reqwest::Client,
+    url: &str,
+    user: &str,
+    password: &str,
+    id: &str,
+) -> Result<(), String> {
+    let send = |method: reqwest::Method, query: &'static str| {
+        http.request(method, format!("{url}/rest/api/content/{id}{query}"))
+            .header("Accept", "application/json")
+            .basic_auth(user, Some(password))
+            .send()
+    };
+    for query in ["", "?status=trashed"] {
+        let status = send(reqwest::Method::DELETE, query)
+            .await
+            .map_err(|e| format!("DELETE content {id}{query}: {e}"))?
+            .status();
+        if !status.is_success() && status != reqwest::StatusCode::NOT_FOUND {
+            return Err(format!("DELETE content {id}{query} -> {status}"));
+        }
+    }
+    for query in ["", "?status=trashed"] {
+        let status = send(reqwest::Method::GET, query)
+            .await
+            .map_err(|e| format!("GET content {id}{query}: {e}"))?
+            .status();
+        if status != reqwest::StatusCode::NOT_FOUND {
+            return Err(format!("GET content {id}{query} still answers {status}"));
+        }
+    }
+    Ok(())
+}
+
+/// **A page is read back by id as Confluence holds it the moment it exists,
+/// and as gone once it is deleted**: in the trash, and purged from it.
+///
+/// The battery's clause 13 holds every kind the sync emits to the refresh,
+/// but never asks it of a deleted page -- a CQL search reports no deletions,
+/// so the sync emits none. This is that half, against the real server: what
+/// Data Center answers `GET /rest/api/content/{id}` for a page in the trash,
+/// and for one purged.
+///
+/// Created and read straight away, with no wait for the search index: the
+/// refresh reads by id, which is what lets it follow a write before CQL has
+/// caught up.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_new_page_reads_back_at_once_and_a_deleted_one_reads_as_gone() {
+    use knobas_source::RefreshAnswer;
+    let seeded = seeded();
+    let source = seeded.source(seeded.scoped());
+    let mut created = Created {
+        url: seeded.url.clone(),
+        user: seeded.user.clone(),
+        password: seeded.password.clone(),
+        id: None,
+    };
+    let title = format!("Refresh probe{LITTER_SUFFIX}");
+    let body = "<p>read back by id</p>";
+    let (status, page) = seeded
+        .request(
+            reqwest::Method::POST,
+            "rest/api/content",
+            Some(serde_json::json!({
+                "type": "page",
+                "title": title,
+                "space": { "key": seeded.seed.space },
+                "ancestors": [{ "id": seeded.seed.home_page_id }],
+                "body": { "storage": { "value": body, "representation": "storage" } },
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "creating the probe page: {page}");
+    let id = page["id"].as_str().expect("the new page's id").to_owned();
+    created.id = Some(id.clone());
+    let entity = format!("confluence:{id}");
+
+    let item = match source.refresh(&entity).await.expect("the read") {
+        RefreshAnswer::Item(item) => item,
+        other => panic!("a page created a moment ago reads back, not {other:?}"),
+    };
+    assert_eq!(item.entity.to_string(), entity);
+    assert_eq!(item.kind, "page");
+    assert_eq!(item.title, title);
+    assert_eq!(item.payload["body"]["storage"]["value"], body);
+    assert_eq!(item.payload["space"]["key"], seeded.seed.space.as_str());
+    assert_eq!(
+        item.payload["ancestors"]
+            .as_array()
+            .and_then(|a| a.last())
+            .and_then(|a| a["id"].as_str()),
+        Some(seeded.seed.home_page_id.as_str()),
+        "under the page it was created under"
+    );
+
+    // The same page, out of this source's spaces: gone, as a full sync of a
+    // source configured so would tombstone it.
+    let elsewhere = seeded.source(serde_json::json!({ "spaces": ["NOSUCHSPACE"] }));
+    assert!(
+        matches!(
+            elsewhere.refresh(&entity).await.expect("the read"),
+            RefreshAnswer::Gone
+        ),
+        "a page outside the configured spaces is gone"
+    );
+
+    let (status, answer) = seeded
+        .request(reqwest::Method::DELETE, &format!("rest/api/content/{id}"), None)
+        .await;
+    assert!(status == 200 || status == 204, "deleting {id}: {status} {answer}");
+    let in_the_trash = source.refresh(&entity).await.expect("the read");
+    assert!(
+        matches!(in_the_trash, RefreshAnswer::Gone),
+        "a page in the trash is gone, not {in_the_trash:?}"
+    );
+
+    purge(&client(), &seeded.url, &seeded.user, &seeded.password, &id)
+        .await
+        .expect("the probe page is purged");
+    created.id = None;
+    let purged = source.refresh(&entity).await.expect("the read");
+    assert!(
+        matches!(purged, RefreshAnswer::Gone),
+        "a purged page is gone, not {purged:?}"
+    );
+}
