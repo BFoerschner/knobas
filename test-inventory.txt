@@ -657,6 +657,7 @@ knobas-app	test/it	dependencies_ipc::the_unique_index_refuses_a_duplicate_layer_
 knobas-app	test/it	dependencies_ipc::view_settings_refuse_an_unknown_group
 knobas-app	test/it	dependencies_ipc::views_are_saved_renamed_chosen_and_deleted
 knobas-app	test/it	docs_ipc::a_new_page_goes_under_its_parent_in_storage_format
+knobas-app	test/it	docs_ipc::a_page_read_names_its_comments_and_the_ids_its_sent_comments_were_given
 knobas-app	test/it	docs_ipc::a_page_reads_as_blocks_with_the_mirror_filled_in
 knobas-app	test/it	docs_ipc::a_page_reads_with_its_rail_and_sections
 knobas-app	test/it	docs_ipc::a_page_under_a_parent_loop_keeps_its_parent
@@ -2705,6 +2706,7 @@ knobas-source-confluence	lib/knobas_source_confluence	model::tests::the_envelope
 knobas-source-confluence	lib/knobas_source_confluence	model::tests::unknown_fields_do_not_break_parsing
 knobas-source-confluence	lib/knobas_source_confluence	source::tests::a_base_url_that_is_not_a_url_is_refused
 knobas-source-confluence	lib/knobas_source_confluence	source::tests::a_built_source_describes_the_instance_not_the_template
+knobas-source-confluence	lib/knobas_source_confluence	source::tests::a_comment_answers_the_id_confluence_gave_it
 knobas-source-confluence	lib/knobas_source_confluence	source::tests::a_source_with_no_secret_is_unauthorized
 knobas-source-confluence	lib/knobas_source_confluence	source::tests::a_successful_test_reports_the_account_and_no_note
 knobas-source-confluence	lib/knobas_source_confluence	source::tests::a_trailing_slash_on_the_base_url_is_trimmed_once
@@ -4185,6 +4187,7 @@ knobas-sync	test/it	write_queue::a_refusal_in_flight_when_the_credential_changes
 knobas-sync	test/it	write_queue::a_refused_write_is_reported_and_never_retried
 knobas-sync	test/it	write_queue::a_resend_harmless_write_the_server_hung_up_on_waits_on_the_ladder
 knobas-sync	test/it	write_queue::a_row_that_settled_some_other_way_is_not_called_withdrawn
+knobas-sync	test/it	write_queue::a_sent_comment_keeps_the_id_its_source_gave_it
 knobas-sync	test/it	write_queue::a_source_action_is_held_sent_and_refused_as_a_typed_write_is
 knobas-sync	test/it	write_queue::a_source_action_left_in_doubt_is_held_or_disclosed
 knobas-sync	test/it	write_queue::a_source_with_no_credential_keeps_the_write

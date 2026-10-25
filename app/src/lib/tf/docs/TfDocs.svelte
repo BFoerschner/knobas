@@ -71,7 +71,7 @@
   import { resolveTicket } from "../job/job";
   import TfLinkTo from "../job/TfLinkTo.svelte";
   import type { JobPorts } from "../job/ports";
-  import { askAgain, markQueued, queuedMarks, sameWords, settleQueued, takeAgain } from "../queued.svelte";
+  import { askAgain, markQueued, queuedMarks, sameWords, settleQueued, takeAgain, type Mark } from "../queued.svelte";
   import { jobHash } from "../route";
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
@@ -601,18 +601,25 @@
     for (const [parent, titles] of under) settleQueued(parent, (mark) => mark.kind === "page" && titles.has(mark.text.trim()));
   }
 
-  // A page read drops a section edit once the version moved, and a comment it holds.
+  // A page read drops a section edit once the version moved, and a comment it holds:
+  // by the id the source gave the comment where its write was stamped with one, so an
+  // edit in the source before the read does not keep it queued (#2074); by its words
+  // where the write has no id yet, or its source names none.
   $effect(() => {
     const p = page;
     if (p === null) return;
     const version = String(p.version);
     const said = p.comments.map((c) => c.blocks.map(blockWords).join(" "));
+    const held = new Set(p.comments.flatMap((c) => (c.id === null ? [] : [c.id])));
+    const commentOfWrite = new Map(p.sent_comments.map((s) => [s.write_id, s.comment_id]));
+    const holds = (mark: Mark) => {
+      const id = mark.write === null ? undefined : commentOfWrite.get(mark.write);
+      return id === undefined ? said.some((words) => sameWords(words, mark.text)) : held.has(id);
+    };
     untrack(() =>
       settleQueued(
         p.entity_id,
-        (mark) =>
-          (mark.kind.startsWith("section ") && mark.base !== version) ||
-          (mark.kind === "comment" && said.some((words) => sameWords(words, mark.text))),
+        (mark) => (mark.kind.startsWith("section ") && mark.base !== version) || (mark.kind === "comment" && holds(mark)),
       ),
     );
   });

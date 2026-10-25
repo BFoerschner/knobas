@@ -1680,8 +1680,16 @@ pub struct WriteReceipt {
     /// spelling (Jira's worklog ids are decimal strings). For a create of
     /// something the mirror holds -- a page, a ticket, a pull request, a
     /// commit, a queued build -- it is that entity's local part, so
-    /// `<source_id>:<remote_id>` is its entity id (#1121, #1754, #1949). A
-    /// create whose answer names what it made answers it here rather than
+    /// `<source_id>:<remote_id>` is its entity id (#1121, #1754, #1949).
+    ///
+    /// **Or it names something the write created inside an entity**, which
+    /// the mirror holds in that entity's payload rather than as an entity of
+    /// its own: a Confluence comment's id, which the page's comment carries
+    /// as `DocComment::id` (#2074). `<source_id>:<remote_id>` is then **not**
+    /// an entity id, so a reader of `knobas.write_queue.remote_id` that builds
+    /// one reads it only off an op, or an entity kind, whose id is an entity's.
+    ///
+    /// A create whose answer names what it made answers it here rather than
     /// dropping it. `None` when the op creates nothing addressable, or when
     /// the source did not say.
     pub remote_id: Option<String>,
@@ -1750,10 +1758,12 @@ pub trait Source: Send + Sync {
     /// The answer is a [`WriteReceipt`], which for almost every op is
     /// [`WriteReceipt::none`]: knobas addresses what it wrote by *reading it
     /// back*, and a receipt exists only for the writes where reading it back
-    /// cannot identify the thing that was made. There is one today -- a
-    /// worklog, whose id is what the local copy carries and what a later
-    /// edit or delete would need (issue #280) -- and an adapter that has
-    /// nothing to say answers `none` rather than inventing an id.
+    /// cannot identify the thing that was made: a worklog, whose id is what
+    /// the local copy carries (issue #280); a create the next sync mirrors
+    /// (a page, a ticket, a pull request, a commit, a queued build: #1121,
+    /// #1754, #1949); a Confluence comment, which its page's payload carries
+    /// under that id (#2074). An adapter that has nothing to say answers
+    /// `none` rather than inventing an id.
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError>;
     /// Why this source does not declare `op`, in words a person can act on,
     /// when the adapter knows more than that it does not. An Uptime Kuma with

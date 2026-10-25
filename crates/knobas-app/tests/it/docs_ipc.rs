@@ -459,6 +459,73 @@ async fn what_the_mirror_does_not_hold_stays_unresolved() {
     );
 }
 
+/// Queue a comment write on `page`; it stays pending.
+async fn queued_comment(pool: &sqlx::PgPool, source: &str, page: &str, body: &str) -> i64 {
+    let entity = knobas_core::entity::EntityRef::parse(page).unwrap();
+    knobas_core::write_queue::queue(
+        pool,
+        source,
+        &entity,
+        "comment",
+        json!({"Comment": {"entity": page, "body": body}}),
+        json!({}),
+    )
+    .await
+    .unwrap()
+    .id
+}
+
+/// Queue a comment write on `page` and settle it as sent, stamped with
+/// `remote_id` the way a source's receipt is (#2074).
+async fn sent_comment(
+    pool: &sqlx::PgPool,
+    source: &str,
+    page: &str,
+    body: &str,
+    remote_id: Option<&str>,
+) -> i64 {
+    let write = queued_comment(pool, source, page, body).await;
+    knobas_core::write_queue::sent(pool, write, remote_id)
+        .await
+        .unwrap()
+        .expect("a pending write settles");
+    write
+}
+
+/// The page read names each comment by the source's id for it, and the
+/// comment writes to this page the source named an id for, each with that id
+/// (#2074): what Docs drops a queued comment by once its words changed in
+/// Confluence. A write still on its way, one the source named nothing for and
+/// one to another page are not among them.
+#[tokio::test]
+async fn a_page_read_names_its_comments_and_the_ids_its_sent_comments_were_given() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let mut payload = page_payload("OPS", &[], "<p>Body</p>");
+    payload["children"]["comment"]["results"][0]["id"] = json!("360600");
+    let id = format!("{src}:360548");
+    item(&pool, &id, &src, "page", "Runbook", payload).await;
+    let other = page(&pool, &src, "2", "Other", "OPS", &[], "").await;
+
+    let named = sent_comment(&pool, &src, &id, "X", Some("360600")).await;
+    sent_comment(&pool, &src, &id, "unnamed", None).await;
+    sent_comment(&pool, &src, &other, "elsewhere", Some("360601")).await;
+    let pending = queued_comment(&pool, &src, &id, "pending").await;
+
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
+    assert_eq!(doc.comments[0].id.as_deref(), Some("360600"));
+    assert_eq!(
+        doc.sent_comments,
+        vec![knobas_app::docs::DocSentComment {
+            write_id: named,
+            comment_id: "360600".to_owned(),
+        }],
+        "only the sent write the source named; not write {pending}, still on its way"
+    );
+}
+
 /// Only a page is a page: another kind is `not_found`, and so is an id the
 /// mirror does not hold; a non-id is `invalid`.
 #[tokio::test]

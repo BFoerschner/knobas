@@ -154,6 +154,12 @@ pub struct DocWrites {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct DocComment {
+    /// The source's id for the comment, where it names one: Confluence's
+    /// content id, the id its comment write answered (#2074). Docs drops a
+    /// queued comment by it once the read holds it, whatever the words say by
+    /// then. `None` from a source whose comments carry no id.
+    #[serde(default)]
+    pub id: Option<String>,
     /// The author's account name, the spelling `@me` matches. `None` where the
     /// record names nobody.
     pub author: Option<String>,

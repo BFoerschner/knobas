@@ -1170,6 +1170,27 @@ async fn a_write_a_source_can_take_goes_at_once() {
     assert_eq!(h.verbs(), vec!["queued".to_owned(), "sent".to_owned()]);
 }
 
+/// A comment the source named is stamped with that id as it settles (#2074),
+/// the way a created page's is (#1949): Confluence answers the comment's id,
+/// and Docs matches its queued comment by it once the page read holds it.
+#[tokio::test]
+async fn a_sent_comment_keeps_the_id_its_source_gave_it() {
+    let h = harness().await;
+    let page = h.mirror_page("360548", "the runbook", 3).await;
+
+    h.receipt(Some("360600"));
+    let write = h.comment(&page, "X").await;
+
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+    let stamped: Option<String> =
+        sqlx::query_scalar("select remote_id from knobas.write_queue where id = $1")
+            .bind(write.id)
+            .fetch_one(h.pool())
+            .await
+            .unwrap();
+    assert_eq!(stamped.as_deref(), Some("360600"));
+}
+
 /// Stories 1, 2, 5 and 9: an edit made while the source cannot take it is
 /// kept, says which fault it is waiting on, and goes on its own once the
 /// source can take it -- no ceremony from the user.
