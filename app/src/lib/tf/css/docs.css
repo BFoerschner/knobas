@@ -51,6 +51,10 @@
 .tf-rd-acts {
   display: flex; gap: 6px; flex-wrap: wrap; margin: 16px 0 4px; padding-bottom: 14px; border-bottom: 1px solid var(--rule);
 }
+/* The shared Refresh (#2136) at the row's small size, as `tf-sm` draws the others. */
+.tf-rd-acts .tf-refresh { padding: 3px 8px; font-size: var(--t-sm); }
+/* The withdrawn, turned-off and failed-refresh banners under the actions row (#2136). */
+.tf-rd-page > .tf-banner { margin: 10px 0 0; }
 .tf-rd-more { position: relative; display: inline-flex; }
 .tf-rd-more > button::after { content: "▾"; font-size: var(--t-2xs); color: var(--ink-2); margin-left: 4px; }
 .tf-rd-more .tf-menu { left: 0; right: auto; }

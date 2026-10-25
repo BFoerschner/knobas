@@ -16,7 +16,9 @@
   **Right**, the page in the reading face, nothing in it capped in width
   (#2081, R-10.9): the breadcrumb, the title, who edited it when, who created it (#2080), the
   version, the reading time and the labels (each searches for itself), the
-  actions row with *More ▾* (#2082), the blocks by section (*Edit section*),
+  actions row with *More ▾* (#2082) and, at its end, *Refresh* or *Sync now*
+  (#2136: `TfDetailRefresh` over `get_entity` of the page) with the withdrawn,
+  turned-off and failed-refresh banners under it, the blocks by section (*Edit section*),
   the page foot (*Work it belongs to*, *Linked from*, `TfDocFoot`) and the
   comments with the composer (R-10.9 to R-10.15). A page opened from a hit
   keeps the query: every match is marked and the find bar steps through them
@@ -27,7 +29,8 @@
   page opened is a visit (`visit_entity`), which is what "read last" reads.
 
   Drawn over the declared Docs frame (ADR-0022): `docs_tree`, `docs_page`,
-  `docs_search`; the writes go through the write queue.
+  `docs_search`, and `get_entity` of the open page for its *Refresh* (#2136);
+  the writes go through the write queue.
 
   **This job** (#863, R-2.5, R-2.8): with a job current, *This job <key> N /
   All pages* sits above the space picker. On, the left column lists the pages
@@ -60,12 +63,14 @@
     docsPage as realDocsPage,
     docsSearch as realDocsSearch,
     docsTree as realDocsTree,
+    getEntity as realGetEntity,
     jobReach as realJobReach,
     submitWrite as realSubmitWrite,
     visitEntity as realVisitEntity,
     type DocPage,
     type DocsHits,
     type DocsTree,
+    type EntityDetail,
     type NewPage,
     type Reached,
   } from "../../ipc/entity";
@@ -82,7 +87,10 @@
   import TfLinkTo from "../job/TfLinkTo.svelte";
   import type { JobPorts } from "../job/ports";
   import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes, type Echo } from "../queued.svelte";
+  import { createDetailRefresh, DETAIL_REFRESH_BRIDGE, type DetailRefreshPorts } from "../refresh.svelte";
   import { jobHash } from "../route";
+  import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocBody from "./TfDocBody.svelte";
@@ -134,6 +142,14 @@
     visitEntity: typeof realVisitEntity;
     /** What a ticket reaches, for *This job* (#863). */
     jobReach: typeof realJobReach;
+    /**
+     * The open page's row (#2136): whether its source reads one page
+     * (`refreshes`), is turned on, and still holds it, for *Refresh* and the
+     * two banners. A row that cannot be read draws neither.
+     */
+    getEntity: typeof realGetEntity;
+    /** The actions row's *Refresh* (#2136); the bridge's when omitted. */
+    refresh?: DetailRefreshPorts;
     openExternal: (url: string) => Promise<void>;
     copy: (text: string) => Promise<void>;
     /** What the page's source refuses its credential (#2053); the IPC read when omitted. */
@@ -182,6 +198,7 @@
       submitWrite: realSubmitWrite,
       visitEntity: realVisitEntity,
       jobReach: realJobReach,
+      getEntity: realGetEntity,
       openExternal: realOpenExternal,
       copy: (text) => navigator.clipboard.writeText(text),
     },
@@ -289,9 +306,9 @@
    * A quiet read that dropped the opening read before `id` was drawn opens it
    * in that read's place: visit and error as an opening read.
    */
-  function readPage(id: string, quiet: boolean): void {
+  function readPage(id: string, quiet: boolean): Promise<void> {
     const mine = ++pageAsked;
-    void io.docsPage(id).then(
+    return io.docsPage(id).then(
       (answer) => {
         if (mine !== pageAsked) return;
         const opens = !quiet || page?.entity_id !== id;
@@ -309,8 +326,38 @@
    * Read the open page `id` again, after a link or a sync run: no visit, and
    * nothing once the reader has opened another page (#2072).
    */
-  function rereadPage(id: string | null): void {
-    if (id !== null && id === target) readPage(id, true);
+  function rereadPage(id: string | null): Promise<void> {
+    if (id === null || id !== target) return Promise.resolve();
+    return Promise.all([readPage(id, true), readDetail(id, true)]).then(() => {});
+  }
+
+  // ---- *Refresh* (#2136, #2107) ----
+  /** The open page's row (`get_entity`), `null` until read or when it cannot be. */
+  let detail = $state<EntityDetail | null>(null);
+  let detailAsked = 0;
+  /** The actions row's *Refresh* or *Sync now*. */
+  const refresh = createDetailRefresh(untrack(() => io.refresh ?? DETAIL_REFRESH_BRIDGE));
+
+  /** Read page `id`'s row; a `quiet` read that fails keeps the row drawn. */
+  function readDetail(id: string, quiet: boolean): Promise<void> {
+    const mine = ++detailAsked;
+    return io.getEntity(id).then(
+      (answer) => {
+        if (mine === detailAsked) detail = answer;
+      },
+      () => {
+        if (mine === detailAsked && !quiet) detail = null;
+      },
+    );
+  }
+
+  /**
+   * A refresh's re-read: the tree, the open page and its row, each over what
+   * Docs drew (#2072's quiet reads), so the picked space, the search, an open
+   * section editor and the composer keep what they hold.
+   */
+  function reread(): Promise<void> {
+    return Promise.all([readTree(true), rereadPage(target)]).then(() => {});
   }
 
   $effect(() => {
@@ -322,9 +369,17 @@
     const id = target;
     if (!ready || id === null) return;
     pageError = null;
-    untrack(() => readPage(id, false));
-    // Another page, or none: the read asked for this one is dropped.
-    return () => void ++pageAsked;
+    detail = null;
+    untrack(() => {
+      refresh.reset();
+      void readPage(id, false);
+      void readDetail(id, false);
+    });
+    // Another page, or none: the reads asked for this one are dropped.
+    return () => {
+      ++pageAsked;
+      ++detailAsked;
+    };
   });
 
   // A sync run's end (every run's, #2072) and a refresh naming one of Docs'
@@ -337,7 +392,7 @@
         DOCS,
         () => {
           void readTree(true);
-          rereadPage(target);
+          void rereadPage(target);
         },
         { listen: io.listen, everyRun: true },
       ),
@@ -663,7 +718,7 @@
       const row = drawn(LINK_RELATION, p.entity_id, ticket);
       await linkPorts!.createLink(row.fromId, row.toId, row.relation);
       push({ text: `Linked to ${key}` });
-      rereadPage(p.entity_id);
+      void rereadPage(p.entity_id);
     } catch (cause) {
       push({ text: `Could not link it: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -1038,7 +1093,9 @@
             {#if p.readable}
               <TfDocMore onexport={() => exportMarkdown(p)} />
             {/if}
+            {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} />{/if}
           </div>
+          {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
           {#if narrow.current}
             {#key p.entity_id}
               <TfDocOutline page={p} {stems} {active} folded />
@@ -1138,7 +1195,7 @@
     onlinked={() => {
       linking = false;
       push({ text: "Linked in knobas" });
-      rereadPage(p.entity_id);
+      void rereadPage(p.entity_id);
     }}
   />
 {/if}

@@ -2094,6 +2094,8 @@ const CASES: Case[] = [
             submitWrite: () => new Promise(() => {}),
             visitEntity: () => deferred(null),
             jobReach: () => deferred([]),
+            // The page's row (#2136), landing after the unmount like the page.
+            getEntity: () => deferred({ source: { id: "confluence", display_name: "Confluence", adapter_kind: "confluence", enabled: true }, refreshes: true, deleted_at: null } as never),
             openExternal: async () => {},
             copy: async () => {},
           },
