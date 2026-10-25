@@ -16,6 +16,6 @@ mattpocock-skills only: grilling → to-spec → to-tickets → `/loop /ticket-l
 
 ## Machine
 
-- **Unattended in bypass mode: no permission prompts.** A `PreToolUse` hook (`scripts/bash-guard.py`, wired in `.claude/settings.json`) refuses the Bash shapes that stop a run for a prompt: `cd` chained into a compound command, `rm` with a glob, writes under `~/.claude/` or any `.git/`, shell-config edits. Its message names the allowed form. Memory files change through Write/Edit. If a step needs a refused shape, skip it and say so.
+- **Unattended in bypass mode: no permission prompts.** A `PreToolUse` hook (`scripts/bash-guard.py`, wired in `.claude/settings.json`) refuses the Bash shapes that stop a run for a prompt: `cd` chained into a compound command, `rm` with a glob, writes under `~/.claude/` or any `.git/`, shell-config edits, a `$(` inside single quotes (put such text in a `<<'EOF'` heredoc or a file). Its message names the allowed form. Memory files change through Write/Edit. If a step needs a refused shape, skip it and say so.
 - The Bash tool is Homebrew bash 5.3 (`CLAUDE_CODE_SHELL` in `~/.claude/settings.json`; PATH from `~/.bashrc`). macOS: no `timeout` binary, no `pgrep -c`; never call a pager. Start piped test or gate commands with `set -o pipefail;`.
 - `gh pr merge` from the root checkout tries to switch it to `main`; a dirty root makes it exit 1 after the merge succeeded on GitHub.

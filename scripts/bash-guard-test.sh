@@ -199,6 +199,31 @@ check pass "bash <<<'ls; pwd'"
 check pass 'find . -name "*.png" -exec ls {} + -print'
 check pass 'echo $(case $x in a) echo a;; esac) && ls'
 
+# a `$(` inside single quotes is data to the shell, but Claude Code prompts on it (#2153)
+sq_rule='A `$(` inside single quotes'
+says "$sq_rule" "echo '\$(readlink \"\$X\")'"
+says "$sq_rule" "echo '      [ \"\$(readlink \"\$LIVE_LOCK\" 2>/dev/null || true)\" != \"\$target\" ] || rm -f \"\$LIVE_LOCK\"' '      :'"
+says "$sq_rule" "printf %s \$'a \$(b) \\'c\\''"
+says "$sq_rule" "echo \"\$(echo '\$(x)')\""
+says "$sq_rule" "eval \"echo '\\\$(x)'\""
+says "$sq_rule" "sh -c \"printf '\\\$(x)'\""
+says "$sq_rule" "bash <<<\"echo '\\\$(x)'\""
+says "$sq_rule" "echo \${x:-'\$(y)'}"
+# witnessed without a prompt: a backquote in single quotes, heredoc bodies, functions, `python3 -c`, `git -C`
+check pass "echo '\`readlink x\`'"
+check pass $'cat <<\'EOF\'\n$(readlink "$X")\nEOF'
+check pass $'cat <<\'EOF\'\necho \'$(readlink "$X")\'\nEOF'
+check pass $'bash <<\'EOF\'\necho \'$(readlink "$X")\'\nEOF'
+check pass $'cat <<EOF\n$(echo \'$(x)\')\nEOF'
+check pass $'f() {\n  { echo a; echo b; } >>$OUT\n}; f'
+check pass "python3 -c \"import sys; p = sys.argv[1]; open(p,'w').write('x')\" \"\$P\" a b"
+check pass 'git -C /Users/dev/Projects/knobas checkout -- scripts/bash-guard.py'
+# ...and a jq filter, a `$(` in double quotes, a `$` in single quotes without a paren
+check pass "gh pr list --json number | jq -r '.[] | \"\\(.number)\"'"
+check pass 'echo "$(date)"'
+check pass "echo \"'\$(date)'\""
+check pass "echo '\$HOME (x)' '\$ (x)'"
+
 # shell configuration
 check refuse 'echo export X=1 >> ~/.bashrc'
 check refuse 'cp /tmp/zshrc ~/.zshrc'
