@@ -94,6 +94,11 @@ pub mod events {
     /// it ended (#823, ADR-0023). Broadcast: every view that shows the
     /// repository draws the same button.
     pub const CLONE_PROGRESS: &str = "clone:progress";
+    /// Payload: `knobas_sync::scheduler::RefreshEnded` -- a refresh of one
+    /// item ended (#2095, ADR-0031): the item, the write it followed if any,
+    /// and whether it was refreshed, gone or failed. Broadcast: every view
+    /// that shows the item re-reads it, and a write's echo settles on it.
+    pub const ITEM_REFRESHED: &str = "item:refreshed";
 
     /// Send `payload` to the frontend as `name` -- to every window, or to the
     /// one labelled `target` -- from the main thread, whichever thread asks.
@@ -1178,6 +1183,7 @@ mod tests {
             super::events::NOTIFICATION_CLICKED,
             super::events::CAPTURE_OPEN_NOTE,
             super::events::CLONE_PROGRESS,
+            super::events::ITEM_REFRESHED,
         ];
         names.sort_unstable();
         declared.sort_unstable();

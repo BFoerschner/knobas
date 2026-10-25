@@ -907,6 +907,31 @@ held_snapshot: unknown | null, settled_at: string | null,
 source_enabled: boolean, };
 
 /**
+ * How a refresh ended. A refresh that was not offered, or refused because
+ * the source is turned off, did not happen and is not told.
+ */
+export type RefreshEnd = "refreshed" | "gone" | "failed";
+
+/**
+ * The payload of the shell's `item:refreshed` event: a refresh of one item
+ * ended (ADR-0031), and how.
+ */
+export type RefreshEnded = { 
+/**
+ * The item refreshed.
+ */
+entity_id: string, 
+/**
+ * The queued write the refresh followed, or `None` for one the reader
+ * asked for.
+ */
+write_id: number | null, 
+/**
+ * How it ended.
+ */
+ended: RefreshEnd, };
+
+/**
  * Uninstall's answer for one source: remove its items, or keep them.
  */
 export type Removal = { source_id: string, purge_items: boolean, };

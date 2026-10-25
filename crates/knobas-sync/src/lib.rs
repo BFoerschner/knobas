@@ -1,5 +1,11 @@
 //! The sync engine: one run of a [`Source`] into Postgres.
 //!
+//! **Only this crate writes the mirror, and only under the source's lock.**
+//! A run is one writer; a [`refresh`] of one item (ADR-0031) is the other.
+//! Both take `pg_advisory_xact_lock` on the source id and write through the
+//! same item and entity upserts, so a refresh waits for a run in flight and a
+//! run that began before it cannot commit an older payload over it.
+//!
 //! [`run_once`] is the whole write side of a sync. It hands the adapter a
 //! [`Sink`] that batches its items into `knobas.entity` and `sync.item`, all in
 //! **one transaction** -- a run either lands completely or not at all, so a
@@ -42,6 +48,7 @@ pub mod background;
 pub mod config;
 pub mod health;
 pub mod progress;
+pub mod refresh;
 pub mod role_check;
 pub mod run_log;
 pub mod samples;
@@ -749,6 +756,58 @@ async fn run_locked(
         0
     };
 
+    // A run's per-item work, over the mirror this run left: also a
+    // refresh's, for its one item (ADR-0031).
+    per_item_work(
+        tx,
+        source_id,
+        &PerItem {
+            monitor_paths,
+            saved_views,
+            payload_paths,
+        },
+        None,
+    )
+    .await?;
+
+    sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
+        .bind(&cursor)
+        .bind(source_id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(Locked {
+        cursor,
+        upserted,
+        deleted,
+        swept,
+        previous,
+    })
+}
+
+/// What [`per_item_work`] reads off the descriptor: the part of [`Declared`]
+/// a run shares with a refresh.
+struct PerItem {
+    monitor_paths: Option<knobas_core::payload::KindPaths>,
+    saved_views: Option<saved_views::SavedViewKinds>,
+    payload_paths: Vec<knobas_core::payload::KindPaths>,
+}
+
+/// The work a run does over the mirror once its items are written and its
+/// sweep is in, inside its transaction: a monitor's samples, alerts and
+/// attachments, the saved-view projection, the job contexts' follow.
+///
+/// A **refresh** does the same for its one item (ADR-0031), and `sampled` is
+/// that item: only a monitor that was read gets a sample. Everything else
+/// here reads the whole source's mirror and is idempotent over it, so the one
+/// item's change is all a refresh's pass can move. `None` is a run, which
+/// samples its whole roster.
+async fn per_item_work(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: &str,
+    per_item: &PerItem,
+    sampled: Option<&str>,
+) -> Result<(), SyncError> {
     // One sample per live monitor, for every run of a source that emits the
     // `monitor` kind (spec #427, issue #443). Three things about where this
     // sits, all of them load-bearing:
@@ -763,8 +822,8 @@ async fn run_locked(
     //    whose cursor is a digest emits *nothing* on an unchanged source
     //    (contract §4.2 E) and the roster is still exactly as up as it was.
     //    `samples` records the argument in full.
-    if let Some(declared) = &monitor_paths {
-        samples::append(tx, source_id, declared).await?;
+    if let Some(declared) = &per_item.monitor_paths {
+        samples::append(tx, source_id, declared, sampled).await?;
         // And the alerts, immediately after and in the same transaction
         // (spec #427, issue #444): the reconcile reads the newest sample of
         // every live monitor, which is the row the line above just wrote. One
@@ -803,7 +862,7 @@ async fn run_locked(
     // off the mirror -- `saved_views` says why each. Gated on the declaration for the
     // reason `attach` is above: the mirror can hold rows under an id whose
     // current descriptor no longer has the kind.
-    if let Some(declared) = &saved_views {
+    if let Some(declared) = &per_item.saved_views {
         saved_views::project(tx, source_id, declared).await?;
     }
 
@@ -816,23 +875,11 @@ async fn run_locked(
     knobas_core::context::follow_status(
         &mut **tx,
         source_id,
-        &knobas_core::payload::Declarations::empty().with(source_id, payload_paths),
+        &knobas_core::payload::Declarations::empty()
+            .with(source_id, per_item.payload_paths.clone()),
     )
     .await?;
-
-    sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
-        .bind(&cursor)
-        .bind(source_id)
-        .execute(&mut **tx)
-        .await?;
-
-    Ok(Locked {
-        cursor,
-        upserted,
-        deleted,
-        swept,
-        previous,
-    })
+    Ok(())
 }
 
 /// Hard-delete reconciliation for a full sync (interfaces §1, point 4), run

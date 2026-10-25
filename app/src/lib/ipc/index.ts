@@ -57,6 +57,11 @@ export const EVENTS = {
    * change of step, and how it ended (#823).
    */
   cloneProgress: "clone:progress",
+  /**
+   * `RefreshEnded` — a refresh of one item ended: the item, the write it
+   * followed if any, and whether it was refreshed, gone or failed (#2095).
+   */
+  itemRefreshed: "item:refreshed",
 } as const;
 
 /** What every command rejects with — `knobas_app::IpcError`. */

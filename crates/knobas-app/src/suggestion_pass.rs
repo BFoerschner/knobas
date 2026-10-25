@@ -269,6 +269,9 @@ impl<E: SyncEvents> SyncEvents for SuggestOnSync<E> {
     fn write_landed(&self, write: &knobas_core::write_queue::QueuedWrite) {
         self.inner.write_landed(write);
     }
+    fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
+        self.inner.refresh_ended(ended);
+    }
 }
 
 impl Inner {

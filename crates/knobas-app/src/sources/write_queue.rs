@@ -226,7 +226,7 @@ pub async fn link_arrivals(
 /// [`link_arrivals`] with the source's declarations read first, best effort:
 /// logged, never raised, since nothing waits on it and the next sync tries
 /// again.
-async fn resolve_arrivals(
+pub(crate) async fn resolve_arrivals(
     pool: &sqlx::PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     source_id: &str,
@@ -296,6 +296,9 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
     }
     fn write_landed(&self, write: &QueuedWrite) {
         self.inner.write_landed(write);
+    }
+    fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
+        self.inner.refresh_ended(ended);
     }
 }
 
@@ -847,15 +850,30 @@ fn role_writes(descriptor: &knobas_source::SourceDescriptor) -> Vec<String> {
 /// flush tick, *Flush now*, *Apply anyway*, an amendment. This is the one
 /// place that decides it; [`FollowLandings`] brings every landed write here.
 ///
-/// For now, a run of the write's source that **began after the write**, waited
-/// for ([`Scheduler::sync_after_write`]), so the mirror shows what was written
-/// without waiting for the next scheduled sync (story 15), and a run already in
-/// flight, which began before the write, does not stand in for it.
+/// First a **refresh** of the item the write made or wrote to
+/// ([`read_back`], ADR-0031), so the mirror holds it as the source does
+/// before any run starts, its links on arrival drawn and the shell told
+/// ([`crate::sources::refresh::refresh`]). A source whose adapter does not
+/// offer the read is not refreshed. Then a run of the write's source that
+/// **began after the write**, waited for ([`Scheduler::sync_after_write`]),
+/// for what the write changed elsewhere (story 15); a run already in flight,
+/// which began before the write, does not stand in for it.
 ///
-/// A failure is logged and dropped: the write **landed**, and reporting the
-/// follow-up read's failure as the write's would tell the user their edit did
-/// not go when it did. The next scheduled sync re-reads the source either way.
+/// A failure of either is logged and dropped: the write **landed**, and
+/// reporting the follow-up read's failure as the write's would tell the user
+/// their edit did not go when it did. A failed refresh still leaves the run,
+/// and the next scheduled sync re-reads the source either way.
 pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
+    let entity = read_back(&scheduler.deps().pool, write).await;
+    if let Err(error) = crate::sources::refresh::refresh(scheduler, &entity, Some(write.id)).await {
+        tracing::warn!(
+            source = %write.source_id,
+            write_id = write.id,
+            entity = %entity,
+            %error,
+            "a write landed but its item could not be refreshed"
+        );
+    }
     if let Err(error) = scheduler.sync_after_write(&write.source_id).await {
         tracing::warn!(
             source = %write.source_id,
@@ -864,6 +882,33 @@ pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
             "a write landed but the mirror could not be re-read for it"
         );
     }
+}
+
+/// The item a landed write is read back by: the one it made, when its op's
+/// receipt names an entity ([`WriteOp::receipt_names_an_entity`]) and the
+/// settle stamped that id on the row, and otherwise the one it was made
+/// against, the queue's target (a comment's ticket or page, a create's
+/// parent).
+async fn read_back(pool: &sqlx::PgPool, write: &QueuedWrite) -> String {
+    let names_what_it_made = serde_json::from_value::<WriteOp>(write.payload.clone())
+        .is_ok_and(|op| op.receipt_names_an_entity());
+    if names_what_it_made {
+        let stamped: Result<Option<Option<String>>, sqlx::Error> =
+            sqlx::query_scalar("select remote_id from knobas.write_queue where id = $1")
+                .bind(write.id)
+                .fetch_optional(pool)
+                .await;
+        match stamped {
+            Ok(Some(Some(remote))) => return format!("{}:{remote}", write.source_id),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(
+                write_id = write.id,
+                %error,
+                "the id the write made could not be read; its target is refreshed instead"
+            ),
+        }
+    }
+    write.entity_id.clone()
 }
 
 /// The scheduler's events, and for every write that lands,
@@ -926,6 +971,9 @@ impl knobas_sync::scheduler::SyncEvents for FollowLandings {
             }
         }
         self.inner.write_landed(write);
+    }
+    fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
+        self.inner.refresh_ended(ended);
     }
 }
 

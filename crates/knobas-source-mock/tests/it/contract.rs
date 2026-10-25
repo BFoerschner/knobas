@@ -226,13 +226,14 @@ async fn fixture_keeps_the_prose_verbatim() {
 /// P12: `Capability::Search` now means "the source supports server-side
 /// search, reserved for a future `Source::search`" -- the mock has no such
 /// entry point, so it declares no Search. It keeps `Write` + `"comment"`,
-/// which is the battery's exercise vehicle for the write path.
+/// which is the battery's exercise vehicle for the write path, and `Refresh`,
+/// the read of one item by id (ADR-0031).
 #[tokio::test]
-async fn descriptor_declares_write_only_and_seven_kinds() {
+async fn descriptor_declares_write_and_refresh_and_seven_kinds() {
     let d = MockSource::new().descriptor();
     assert_eq!(d.id, "mock");
     assert_eq!(d.adapter_kind, "mock");
-    assert_eq!(d.capabilities, [Capability::Write]);
+    assert_eq!(d.capabilities, [Capability::Write, Capability::Refresh]);
     assert_eq!(d.write_ops, ["comment"]);
     // The fixture is the whole world, so a full sync is exhaustive and the
     // engine's sweep may tombstone what it stops emitting.
@@ -1067,4 +1068,112 @@ async fn a_full_sync_reports_its_walk_over_the_fixture_items() {
         .collect();
     assert_eq!(sink.readings, expected);
     assert_eq!(u64::try_from(sink.items.len()).expect("fits"), n);
+}
+
+/// The read of one item by id (ADR-0031): what the full sync emits for that
+/// id, and *gone* for an id it emits deleted or not at all. The battery's
+/// clause 13 holds the first item of each kind; this holds one of every kind.
+#[tokio::test]
+async fn a_refresh_answers_what_the_full_sync_emits_for_the_id() {
+    use knobas_source::RefreshAnswer;
+    let source = MockSource::with_tombstone();
+    let mut sink = VecSink(Vec::new());
+    source.sync(None, &mut sink).await.expect("full sync");
+    let mut kinds = std::collections::BTreeSet::new();
+    for synced in sink.0.iter().filter(|item| !item.deleted) {
+        if !kinds.insert(synced.kind.clone()) {
+            continue;
+        }
+        let id = synced.entity.to_string();
+        match source.refresh(&id).await.expect("a refresh") {
+            RefreshAnswer::Item(read) => {
+                assert_eq!(read.title, synced.title, "{id}");
+                assert_eq!(read.payload, synced.payload, "{id}");
+            }
+            other => panic!("{id} is live and must be answered, got {other:?}"),
+        }
+    }
+    for gone in [
+        format!("mock:{}", knobas_source_mock::TOMBSTONED_KEY),
+        "mock:NOPE-1".to_owned(),
+    ] {
+        assert!(
+            matches!(source.refresh(&gone).await, Ok(RefreshAnswer::Gone)),
+            "{gone} must be gone"
+        );
+    }
+}
+
+/// `"refresh": false` is a mock that offers the run alone: it declares no
+/// `Capability::Refresh`, answers `NotOffered`, and is still a whole adapter.
+#[tokio::test]
+async fn a_mock_configured_without_refresh_offers_none_and_passes_the_battery() {
+    let instance = configured(serde_json::json!({ "refresh": false }));
+    let source = knobas_source_mock::build(instance.clone()).expect("built");
+    assert!(!source.descriptor().refreshes());
+    assert!(matches!(
+        source.refresh("mock:PAY-231").await,
+        Ok(knobas_source::RefreshAnswer::NotOffered)
+    ));
+    assert!(
+        knobas_source_mock::build(configured(serde_json::json!({})))
+            .expect("built")
+            .descriptor()
+            .refreshes()
+    );
+    battery(move |fault| match fault {
+        Fault::None => knobas_source_mock::build(instance.clone()).expect("built"),
+        other => Box::new(MockSource::with_fault(other)) as Box<dyn knobas_source::Source>,
+    })
+    .await;
+}
+
+/// `"files_tickets": true` declares `create_ticket`, answers the ticket's key
+/// as its receipt, and holds the ticket for the next instance of the same id:
+/// its refresh reads it and its full sync emits it.
+#[tokio::test]
+async fn a_filing_mock_names_the_ticket_it_filed_and_reads_it_back() {
+    let mut instance = configured(serde_json::json!({ "files_tickets": true }));
+    instance.id = format!("mockfile{}", std::process::id());
+    let filer = knobas_source_mock::build(instance.clone()).expect("built");
+    assert!(
+        filer
+            .descriptor()
+            .write_ops
+            .iter()
+            .any(|op| op == "create_ticket")
+    );
+    let receipt = filer
+        .write(knobas_source::WriteOp::CreateTicket {
+            entity: format!("{}:PAY-231", instance.id),
+            title: "Retry storm on SEPA".to_owned(),
+            body: "filed from a failed run".to_owned(),
+            ticket_type: "Bug".to_owned(),
+        })
+        .await
+        .expect("filed");
+    let key = receipt.remote_id.expect("a filed ticket is named");
+    let id = format!("{}:{key}", instance.id);
+
+    let reader = knobas_source_mock::build(instance.clone()).expect("built");
+    match reader.refresh(&id).await.expect("a refresh") {
+        knobas_source::RefreshAnswer::Item(item) => {
+            assert_eq!(item.title, "Retry storm on SEPA");
+            assert_eq!(item.kind, "ticket");
+        }
+        other => panic!("the filed ticket must be answered, got {other:?}"),
+    }
+    let mut sink = VecSink(Vec::new());
+    reader.sync(None, &mut sink).await.expect("full sync");
+    assert!(sink.0.iter().any(|item| item.entity.to_string() == id));
+
+    // The plain mock files nothing.
+    let plain = knobas_source_mock::build(configured(serde_json::json!({}))).expect("built");
+    assert!(
+        !plain
+            .descriptor()
+            .write_ops
+            .iter()
+            .any(|op| op == "create_ticket")
+    );
 }

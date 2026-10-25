@@ -230,6 +230,15 @@ pub struct SourceDescriptor {
 }
 
 impl SourceDescriptor {
+    /// Whether this source reads one item by id: it declares
+    /// [`Capability::Refresh`] (ADR-0031). Answered off the descriptor, so a
+    /// caller deciding between *Refresh* and *Sync now*, or between a
+    /// refresh and the run alone after a landed write, calls nothing.
+    #[must_use]
+    pub fn refreshes(&self) -> bool {
+        self.capabilities.contains(&Capability::Refresh)
+    }
+
     /// Does this source declare `op`? `Ok` when [`Self::write_ops`] lists its
     /// [identifier](WriteOp::identifier) and, for a
     /// [source action](WriteOp::SourceAction), [`Self::source_actions`] lists
@@ -393,6 +402,14 @@ pub enum Capability {
     Write,
     Webhooks,
     Import,
+    /// The source reads one item by id ([`Source::refresh`], ADR-0031):
+    /// what a landed write is followed by before its run, and what an item's
+    /// detail offers as *Refresh*. Declared exactly when `refresh` answers
+    /// for some kind; [`contract::battery`] holds the two to each other, as
+    /// it holds `Write` to `write_ops`. Read through
+    /// [`SourceDescriptor::refreshes`], so whether a source can refresh is
+    /// known without calling it.
+    Refresh,
 }
 
 /// How an adapter authenticates against its remote system (spec §3).
@@ -1712,6 +1729,68 @@ impl WriteReceipt {
     }
 }
 
+/// What a source answers when asked for one item by id
+/// ([`Source::refresh`], ADR-0031).
+///
+/// `Item` is unboxed, though it dwarfs the other two: the answer is built
+/// once per read and moved straight into the sink, and every adapter writes
+/// `RefreshAnswer::Item(item)` without a `Box::new` around what its sync
+/// already builds.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone)]
+pub enum RefreshAnswer {
+    /// The item as the source holds it now, in the shape a sync emits it:
+    /// the same entity, kind, title and payload a run would write for it.
+    Item(SyncItem),
+    /// The source no longer has the item. The engine tombstones it, as a
+    /// run's probe would.
+    Gone,
+    /// This adapter does not read this item by id (its kind, or the whole
+    /// adapter). The default, and the answer for every kind of an adapter
+    /// that does not declare [`Capability::Refresh`].
+    NotOffered,
+}
+
+impl WriteOp {
+    /// Whether a [`WriteReceipt::remote_id`] for this op is the **local part
+    /// of an entity id**: the item the write made, which `<source_id>:<remote_id>`
+    /// addresses and a refresh reads after the write lands (ADR-0031). A
+    /// page, a ticket, a pull request, a commit, a queued build, a monitor.
+    ///
+    /// `false` where the id names something inside an entity (a Confluence
+    /// comment, #2074) or outside the mirror (a worklog, #280), and for every
+    /// op that makes nothing: there the write's [`target`](WriteOp::target)
+    /// is the item to read back. No wildcard, so a new op says which it is.
+    #[must_use]
+    pub fn receipt_names_an_entity(&self) -> bool {
+        match self {
+            WriteOp::CreateTicket { .. }
+            | WriteOp::CreatePage { .. }
+            | WriteOp::CreatePullRequest { .. }
+            | WriteOp::CommitFile { .. }
+            | WriteOp::TriggerBuild { .. }
+            | WriteOp::RerunBuild { .. }
+            | WriteOp::RunBuild { .. }
+            | WriteOp::CreateMonitor { .. } => true,
+            WriteOp::Comment { .. }
+            | WriteOp::LogWork { .. }
+            | WriteOp::Transition { .. }
+            | WriteOp::CreateBranch { .. }
+            | WriteOp::Approve { .. }
+            | WriteOp::SubmitReview { .. }
+            | WriteOp::UpdatePage { .. }
+            | WriteOp::PauseMonitor { .. }
+            | WriteOp::ResumeMonitor { .. }
+            | WriteOp::MergePullRequest { .. }
+            | WriteOp::SetParameter { .. }
+            | WriteOp::DeleteBranch { .. }
+            | WriteOp::EditPullRequest { .. }
+            | WriteOp::UpdatePullRequestBranch { .. }
+            | WriteOp::SourceAction { .. } => false,
+        }
+    }
+}
+
 /// The adapter interface. One implementation per configured source instance.
 #[async_trait::async_trait]
 pub trait Source: Send + Sync {
@@ -1764,7 +1843,40 @@ pub trait Source: Send + Sync {
     /// #1754, #1949); a Confluence comment, which its page's payload carries
     /// under that id (#2074). An adapter that has nothing to say answers
     /// `none` rather than inventing an id.
+    ///
+    /// Reading it back is a [`refresh`](Source::refresh) where the adapter
+    /// offers one (ADR-0031): once the write lands, the app reads the item
+    /// the receipt names ([`WriteOp::receipt_names_an_entity`]) or else the
+    /// write's [`target`](WriteOp::target), and then runs the source for what
+    /// the write changed elsewhere. An adapter that offers no refresh gets
+    /// the run alone.
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError>;
+    /// Read one item by id: a **refresh** (`CONTEXT.md`, ADR-0031). `entity`
+    /// is an [`EntityRef`] in string form, in this source's namespace.
+    ///
+    /// The answer is the [`SyncItem`] a sync would emit for that id
+    /// ([`RefreshAnswer::Item`]): the same kind, title and declared paths, so
+    /// the engine writes it through the run's own item write.
+    /// [`RefreshAnswer::Gone`] is an id the source no longer has, which the
+    /// engine tombstones. [`RefreshAnswer::NotOffered`] is the default and
+    /// says this adapter does not read this item's kind by id; the app then
+    /// runs the source instead.
+    ///
+    /// An adapter that answers for any kind declares [`Capability::Refresh`],
+    /// and one that does not declare it answers `NotOffered` for every id.
+    /// [`contract::battery`] clause 13 holds both, and holds each kind it
+    /// answers for to what the sync emitted.
+    ///
+    /// A read and nothing else: no cursor, no sweep. The engine calls it
+    /// under the source's run lock, so it never overlaps a run of the same
+    /// source. A failed read is an error with the same fault classification
+    /// as [`sync`](Source::sync), never `Gone`.
+    ///
+    /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
+    async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
+        let _ = entity;
+        Ok(RefreshAnswer::NotOffered)
+    }
     /// Why this source does not declare `op`, in words a person can act on,
     /// when the adapter knows more than that it does not. An Uptime Kuma with
     /// no account names the account to add (#452).

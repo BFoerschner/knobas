@@ -194,6 +194,7 @@ knobas-app	lib/knobas_app	sources::crud::tests::only_a_unique_violation_reads_as
 knobas-app	lib/knobas_app	sources::crud::tests::only_a_working_credential_releases_the_backoff
 knobas-app	lib/knobas_app	sources::crud::tests::the_conflict_branch_keeps_the_winners_secret
 knobas-app	lib/knobas_app	sources::demo::tests::re_registering_refreshes_the_descriptor_columns_and_keeps_the_cursor
+knobas-app	lib/knobas_app	sources::events::tests::a_refresh_that_ended_reaches_the_shell_with_the_entity_and_the_write
 knobas-app	lib/knobas_app	sources::paths::tests::every_configured_instance_gets_its_kinds_declaration
 knobas-app	lib/knobas_app	sources::registry::tests::a_built_in_kind_is_taken
 knobas-app	lib/knobas_app	sources::registry::tests::a_clone_made_before_an_install_builds_the_installed_adapter
@@ -975,6 +976,14 @@ knobas-app	test/it	protocol_ipc::the_ticket_read_refuses_a_create_whose_shape_is
 knobas-app	test/it	protocol_ipc::the_ticket_read_refuses_a_write_that_files_no_ticket
 knobas-app	test/it	read_plans::every_reshaped_read_plans_without_estimates_on_analyzed_tables
 knobas-app	test/it	read_plans::every_reshaped_read_plans_without_estimates_on_tables_never_analyzed
+knobas-app	test/it	refresh::a_failed_refresh_leaves_the_write_sent_and_the_run_still_starts
+knobas-app	test/it	refresh::a_landed_writes_item_is_mirrored_from_the_mock_before_any_run_starts
+knobas-app	test/it	refresh::a_mock_that_does_not_offer_the_read_gets_the_run_alone
+knobas-app	test/it	refresh::a_refresh_waits_behind_a_run_in_flight_whose_older_payload_does_not_overwrite_it
+knobas-app	test/it	refresh::a_refresh_writes_no_activity_line_and_leaves_the_cursor
+knobas-app	test/it	refresh::a_ticket_filed_from_a_run_is_linked_to_it_before_the_follow_up_run_ends
+knobas-app	test/it	refresh::a_turned_off_sources_item_is_refused_and_nothing_is_read
+knobas-app	test/it	refresh::gone_tombstones_the_item_and_an_answer_brings_it_back
 knobas-app	test/it	refused_writes::a_field_is_answered_as_its_own_ask
 knobas-app	test/it	refused_writes::each_ask_goes_to_its_entitys_source_once_and_the_answers_come_back_together
 knobas-app	test/it	refused_writes::what_is_no_verdict_refuses_nothing_and_the_rest_are_still_answered
@@ -2430,6 +2439,7 @@ knobas-source	lib/knobas_source	contract::tests::accepts_a_ticket_system_claim_i
 knobas-source	lib/knobas_source	contract::tests::accepts_a_wrong_declaration_for_a_kind_the_corpus_never_populates
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_answers_the_read
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_draws_no_view
+knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_reads_its_items_back_as_it_synced_them
 knobas-source	lib/knobas_source	contract::tests::accepts_test_counts_absent_from_runs_without_tests
 knobas-source	lib/knobas_source	contract::tests::every_role_write_is_a_known_write_op
 knobas-source	lib/knobas_source	contract::tests::every_write_op_answers_a_delivery_whose_target_it_carries
@@ -2459,6 +2469,10 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_path_misspelled_befor
 knobas-source	lib/knobas_source	contract::tests::rejects_a_path_that_lands_on_an_object
 knobas-source	lib/knobas_source	contract::tests::rejects_a_pipeline_with_no_name_path
 knobas-source	lib/knobas_source	contract::tests::rejects_a_read_only_ticket_system_that_answers_its_transitions_read
+knobas-source	lib/knobas_source	contract::tests::rejects_a_refresh_that_answers_a_live_item_gone
+knobas-source	lib/knobas_source	contract::tests::rejects_a_refresh_that_disagrees_at_a_declared_path
+knobas-source	lib/knobas_source	contract::tests::rejects_a_refresh_under_another_title
+knobas-source	lib/knobas_source	contract::tests::rejects_a_refresh_without_the_capability
 knobas-source	lib/knobas_source	contract::tests::rejects_a_refusal_that_does_not_name_the_adapter
 knobas-source	lib/knobas_source	contract::tests::rejects_a_response_time_that_is_no_number
 knobas-source	lib/knobas_source	contract::tests::rejects_a_reviewer_entry_key_the_elements_do_not_carry
@@ -2496,6 +2510,7 @@ knobas-source	lib/knobas_source	contract::tests::rejects_one_kinds_payload_paths
 knobas-source	lib/knobas_source	contract::tests::rejects_parent_records_that_lack_the_name_their_children_give_them
 knobas-source	lib/knobas_source	contract::tests::rejects_payload_paths_for_a_kind_the_adapter_does_not_emit
 knobas-source	lib/knobas_source	contract::tests::rejects_source_actions_without_the_source_action_op
+knobas-source	lib/knobas_source	contract::tests::rejects_the_capability_without_a_refresh
 knobas-source	lib/knobas_source	contract::tests::rejects_the_source_action_op_with_no_source_actions
 knobas-source	lib/knobas_source	contract::tests::rejects_write_ops_without_the_write_capability
 knobas-source	lib/knobas_source	diff::tests::a_binary_file_says_so_and_has_no_lines
@@ -3598,13 +3613,16 @@ knobas-source-kuma	test/live_kuma	only_a_source_with_an_account_offers_the_write
 knobas-source-kuma	test/live_kuma	test_connection_reports_the_real_kumas_version_and_roster
 knobas-source-mock	test/it	contract::a_build_item_names_its_triggerer_as_the_author
 knobas-source-mock	test/it	contract::a_cursor_from_an_older_fixture_re_syncs_the_whole_corpus
+knobas-source-mock	test/it	contract::a_filing_mock_names_the_ticket_it_filed_and_reads_it_back
 knobas-source-mock	test/it	contract::a_full_sync_reports_its_walk_over_the_fixture_items
+knobas-source-mock	test/it	contract::a_mock_configured_without_refresh_offers_none_and_passes_the_battery
 knobas-source-mock	test/it	contract::a_page_opens_as_the_headings_and_comments_its_record_holds
+knobas-source-mock	test/it	contract::a_refresh_answers_what_the_full_sync_emits_for_the_id
 knobas-source-mock	test/it	contract::build_honours_the_fault_and_tombstone_in_its_config
 knobas-source-mock	test/it	contract::build_honours_the_instance_id
 knobas-source-mock	test/it	contract::build_refuses_a_config_it_cannot_read
 knobas-source-mock	test/it	contract::build_refuses_an_unusable_instance_id
-knobas-source-mock	test/it	contract::descriptor_declares_write_only_and_seven_kinds
+knobas-source-mock	test/it	contract::descriptor_declares_write_and_refresh_and_seven_kinds
 knobas-source-mock	test/it	contract::every_emitted_item_carries_a_web_url
 knobas-source-mock	test/it	contract::every_path_the_claimed_roles_require_resolves_on_the_corpus
 knobas-source-mock	test/it	contract::faults_reach_test_connection_sync_and_write

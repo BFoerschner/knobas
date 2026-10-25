@@ -161,6 +161,40 @@ pub trait SyncEvents: Send + Sync + 'static {
     ///
     /// Called inside the flush, so it must not block: spawn what it starts.
     fn write_landed(&self, _write: &knobas_core::write_queue::QueuedWrite) {}
+    /// A refresh of one item ended (ADR-0031): what the shell re-reads the
+    /// item on. Told by whoever refreshed (`knobas-app`'s
+    /// `sources::refresh`), once the item and its links on arrival are
+    /// written. A wrapper passes it on; the default hears nothing.
+    fn refresh_ended(&self, _ended: &RefreshEnded) {}
+}
+
+/// The payload of the shell's `item:refreshed` event: a refresh of one item
+/// ended (ADR-0031), and how.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct RefreshEnded {
+    /// The item refreshed.
+    pub entity_id: String,
+    /// The queued write the refresh followed, or `None` for one the reader
+    /// asked for.
+    pub write_id: Option<i64>,
+    /// How it ended.
+    pub ended: RefreshEnd,
+}
+
+/// How a refresh ended. A refresh that was not offered, or refused because
+/// the source is turned off, did not happen and is not told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
+pub enum RefreshEnd {
+    /// The mirror holds the item as the source does.
+    Refreshed,
+    /// The source no longer has it, and it is tombstoned.
+    Gone,
+    /// The read failed and nothing changed. A write it followed stays
+    /// `sent`, and the next run settles it.
+    Failed,
 }
 
 /// Everything a run needs. Cloned into each spawned task via `Arc`.
@@ -1801,6 +1835,21 @@ impl Scheduler {
                 .await
                 .map(Triggered::run_id),
         }
+    }
+
+    /// Refresh one item from its source (ADR-0031): [`crate::refresh::of_entity`]
+    /// over this scheduler's deps. Waits behind a run of the source in
+    /// flight, and holds off the next until it commits. Tells no one: the
+    /// caller tells [`SyncEvents::refresh_ended`] once what follows the
+    /// refresh is written.
+    ///
+    /// # Errors
+    /// [`crate::refresh::RefreshError`].
+    pub async fn refresh(
+        &self,
+        entity_id: &str,
+    ) -> Result<crate::refresh::RefreshOutcome, crate::refresh::RefreshError> {
+        crate::refresh::of_entity(self.deps(), entity_id).await
     }
 
     /// Ask for a manual sync, wait for its ending, and say whether the run was

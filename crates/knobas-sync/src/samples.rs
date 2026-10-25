@@ -314,7 +314,8 @@ struct Live {
 }
 
 /// Every live monitor of a source with its newest sample, if any. `$3` is
-/// [`MIN_INTERVAL_SECONDS`].
+/// [`MIN_INTERVAL_SECONDS`]; `$4`, when not null, narrows the roster to one
+/// monitor (a refresh's, ADR-0031).
 const LIVE_WITH_LAST: &str = "select i.entity_id, i.payload,
             l.id is not null as last_taken, l.state as last_state,
             coalesce(l.taken_at <= now() - make_interval(secs => $3::int), false) as last_old
@@ -323,7 +324,8 @@ const LIVE_WITH_LAST: &str = "select i.entity_id, i.payload,
             select s.id, s.state, s.taken_at from knobas.monitor_sample s
              where s.entity_id = i.entity_id
              order by s.taken_at desc, s.id desc limit 1) l on true
-      where i.source_id = $1 and i.kind = $2";
+      where i.source_id = $1 and i.kind = $2
+        and ($4::text is null or i.entity_id = $4)";
 
 /// Whether this run writes a sample for `row`: never sampled, the *state*
 /// differs from the last sample's (a miss counts as a state of its own), or
@@ -344,6 +346,10 @@ fn is_due(row: &Live, state: Option<&str>) -> bool {
 ///
 /// One `select` and one `insert … select unnest(…)`, whatever the roster size.
 ///
+/// `only` is a **refresh**'s monitor (ADR-0031): a refresh read that one
+/// monitor, so it samples that one alone. A sample says what was seen at its
+/// instant, and the rest of the roster was not seen then.
+///
 /// # Errors
 ///
 /// [`sqlx::Error`] if either statement fails; the caller rolls the run back.
@@ -351,6 +357,7 @@ pub(crate) async fn append(
     tx: &mut Transaction<'_, Postgres>,
     source_id: &str,
     declared: &KindPaths,
+    only: Option<&str>,
 ) -> Result<u64, sqlx::Error> {
     let threshold = THRESHOLD.read(&mut **tx).await?;
 
@@ -358,6 +365,7 @@ pub(crate) async fn append(
         .bind(source_id)
         .bind(KIND)
         .bind(MIN_INTERVAL_SECONDS)
+        .bind(only)
         .fetch_all(&mut **tx)
         .await?;
     if live.is_empty() {
