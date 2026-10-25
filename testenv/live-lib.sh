@@ -157,9 +157,13 @@ LIVE_LOCK_RECLAIMING=""
 
 # _live_lock_describe <target> -- the holder, in words.
 _live_lock_describe() {
-  local pid since recipe tree
+  local pid since recipe tree hint="" product
   read -r pid since recipe tree <<<"$1"
-  echo "'$recipe' in ${tree:-?} (pid $pid, since $(date -r "$since" '+%H:%M:%S' 2>/dev/null || echo "$since"))"
+  case $recipe in live-up-*-kept)
+    product=${recipe#live-up-}
+    hint=", kept for a live-up product: 'just live-down ${product%-kept}' from any worktree frees it" ;;
+  esac
+  echo "'$recipe' in ${tree:-?} (pid $pid, since $(date -r "$since" '+%H:%M:%S' 2>/dev/null || echo "$since")$hint)"
 }
 
 _live_lock_pid_alive() {
@@ -210,6 +214,10 @@ live_lock_hold() {
   if [ -n "${!LIVE_LOCK_HOLDER_VAR:-}" ] && [ "$target" = "${!LIVE_LOCK_HOLDER_VAR}" ] &&
     _live_lock_pid_alive "$target"; then
     echo "live: $recipe runs under the $LIVE_LOCK_LABEL its caller holds"
+    return 0
+  fi
+  if _live_lock_kept_here "$target"; then
+    echo "live: $recipe runs under the $LIVE_LOCK_LABEL this worktree's live-up keeps"
     return 0
   fi
   while :; do
@@ -282,6 +290,108 @@ live_lock_traps() {
   trap 'live_lock_release' EXIT
   trap 'trap - EXIT INT; live_lock_release; kill -INT $$' INT
   trap 'trap - EXIT TERM; live_lock_release; kill -TERM $$' TERM
+}
+
+# A `live-up` JVM PRODUCT KEEPS THE LOCK (#2121). `live up` used to give the
+# lock back once the product was seeded, so a suite run by hand against it
+# (`cargo test ... --test live_confluence_seeded`) held nothing, and a recipe
+# from another worktree took the lock, found the product up and ran beside it
+# on the same seeded pages. So `live_up_held` hands the lock to a keeper: a
+# detached shell holding it as `live-up-<product>-kept` in this worktree while
+# the product is up. This worktree's runs go on under it (`live_lock_hold`
+# lets them through, taking and releasing nothing); every other worktree's
+# run waits, with the 45 minutes and the refusal of any holder. `live_down
+# <product>`, from any worktree, ends the keeper and frees the lock; a product
+# gone some other way frees it at the keeper's next look
+# (`KNOBAS_LIVE_KEEPER_POLL`, default 30 s), as does its worktree's removal or
+# `KNOBAS_LIVE_KEEPER_MAX` (3 h); a killed keeper is a dead holder.
+_live_lock_kept_here() {
+  local pid since recipe tree
+  read -r pid since recipe tree <<<"$1"
+  case $recipe in live-up-*-kept) ;; *) return 1 ;; esac
+  [ "$tree" = "${LIVE_TESTENV%/testenv}" ] && _live_lock_pid_alive "$1"
+}
+
+# _live_lock_keep <product> -- hand the JVM lock this shell holds to a keeper.
+_live_lock_keep() {
+  local product=$1 old=$LIVE_LOCK_MINE kept="" keeper
+  # Let through under this worktree's keeper: that one keeps.
+  [ -n "$old" ] || return 0
+  (
+    trap '' HUP INT
+    trap 'exit 0' TERM
+    LIVE_LOCK_MINE=""
+    trap 'live_lock_release' EXIT
+    me=$(exec sh -c 'echo $PPID')
+    mine="$me $(date +%s) live-up-$product-kept ${LIVE_TESTENV%/testenv}"
+    # Swapped in with a rename, so the lock is never free in between.
+    ln -s "$mine" "$LIVE_LOCK.keep.$me" || exit 1
+    if [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$old" ] &&
+      mv -f "$LIVE_LOCK.keep.$me" "$LIVE_LOCK"; then
+      LIVE_LOCK_MINE=$mine
+      # Two misses in a row, so one `docker ps` hiccup does not free the lock.
+      misses=0 started=$SECONDS max=${KNOBAS_LIVE_KEEPER_MAX:-10800}
+      while [ "$misses" -lt 2 ] && [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$mine" ]; do
+        if live_is_up "$product"; then misses=0; else misses=$((misses + 1)); fi
+        [ "$misses" -lt 2 ] || break
+        # A forgotten `live-down` must not queue every other worktree's JVM
+        # runs for good: the keeper lets go once its worktree is removed (a
+        # merge's cleanup) or after KNOBAS_LIVE_KEEPER_MAX (3 h, the Atlassian
+        # licence's life), the product left up for whoever runs next.
+        [ -d "$LIVE_TESTENV" ] || break
+        [ $((SECONDS - started)) -lt "$max" ] || break
+        sleep "${KNOBAS_LIVE_KEEPER_POLL:-30}" &
+        wait $! || true
+      done
+    fi
+    rm -f "$LIVE_LOCK.keep.$me"
+  ) </dev/null >/dev/null 2>&1 &
+  keeper=$!
+  # Until the keeper has swapped its link in or given up: no timeout, since
+  # this shell's release while the keeper is between its check and its `mv`
+  # would let a third run in and have the `mv` overwrite it.
+  while kept=$(readlink "$LIVE_LOCK" 2>/dev/null || true); [ "$kept" = "$old" ] &&
+    kill -0 "$keeper" 2>/dev/null; do
+    sleep 0.1
+  done
+  if [ -n "$kept" ] && [ "$kept" != "$old" ]; then
+    LIVE_LOCK_MINE=""
+    echo "live: $product stays up and holds the JVM lock until 'just live-down $product'; this worktree's runs go on under it, other worktrees' wait"
+  else
+    echo "live: $product: no keeper took the JVM lock; giving it back" >&2
+  fi
+}
+
+# _live_lock_unkeep <product> -- end the keeper of this product's live-up.
+_live_lock_unkeep() {
+  local target pid since recipe tree i
+  _live_lock_select jvm
+  target=$(readlink "$LIVE_LOCK" 2>/dev/null || true)
+  read -r pid since recipe tree <<<"$target"
+  [ "$recipe" = "live-up-$1-kept" ] || return 0
+  # The keeper's own trap gives the link back; removing it here could remove
+  # a lock another run took a moment after. A keeper that is gone without
+  # doing so left a dead holder, which the next taker takes over.
+  kill "$pid" 2>/dev/null || true
+  for ((i = 0; i < 50; i++)); do
+    [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$target" ] || break
+    sleep 0.1
+  done
+  if [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" != "$target" ]; then
+    echo "live: $1: the JVM lock its live-up kept is free"
+  else
+    echo "live: $1: the keeper of its live-up's JVM lock did not let go; the next run takes it over once pid $pid is gone" >&2
+  fi
+}
+
+# live_up_held <product> -- `testenv/live up`: a JVM product starts and seeds
+# under the JVM lock (#690), which is then kept for its life (#2121).
+live_up_held() {
+  if ! live_is_jvm "$1"; then live_up "$1"; return; fi
+  live_lock_traps
+  live_lock_hold "live-up-$1" || return 1
+  live_up "$1" || return 1
+  _live_lock_keep "$1"
 }
 
 # live_to_put_back <product> -- what a run of this one stops again at its end:
@@ -465,6 +575,7 @@ live_down() {
         jq --arg k "$1" 'del(.[$k])' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
       fi ;;
   esac
+  live_is_jvm "$1" && _live_lock_unkeep "$1"
   echo "live: $1: down"
 }
 

@@ -86,7 +86,7 @@ No merge lands a tree no gate saw. The fresh path merges a head onto the main it
 6. `gh issue view <N> --json state`; if open, close with a comment naming PR and commit.
 7. `git -C /Users/dev/Projects/knobas worktree remove .worktrees/<name>` (the one git command allowed outside your worktree, post-merge only; `target` goes with it). Dirty: **report, never force**. Already gone (`gh pr merge --delete-branch` can remove it) is fine.
 
-8. **Leave nothing running** (Björn, 2026-10-21): quit every app window and process you started (`just demo`/`just dev`/`just live-shot` and the app they open, `vite`, headless Chrome from `just shot`, a live product a recipe left up), also when you stop early. Check `pgrep -fl 'knobas|vite|Google Chrome --headless'`; name in your report any stray you did not start instead of killing it.
+8. **Leave nothing running** (Björn, 2026-10-21): quit every app window and process you started (`just demo`/`just dev`/`just live-shot` and the app they open, `vite`, headless Chrome from `just shot`, a live product a recipe left up; `just live-down <product>` for each `live-up` you ran, whose keeper holds the JVM lock until then, #2121), also when you stop early. Check `pgrep -fl 'knobas|vite|Google Chrome --headless'`; name in your report any stray you did not start instead of killing it.
 
 Scratch files in the scratchpad from your dispatch, PR number in every filename.
 
