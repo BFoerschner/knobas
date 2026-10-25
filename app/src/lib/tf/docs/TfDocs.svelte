@@ -40,7 +40,9 @@
   section's text in place of the old until the page's version moves, a comment
   at the end of the list until the page holds its words, a new page as a muted
   row with no link under its parent until the tree holds its title. Each write
-  is followed: held or refused, the echo goes and a toast offers *Edit and
+  is an echo with the one lifecycle (#2102): *queued*, then *sent* once its
+  write is sent, and gone on the read that shows it, which the end of every
+  run and a refresh naming the write or its page bring. Held or refused, the echo goes and a toast offers *Edit and
   resend*, which opens the section editor, the composer or *New page* again
   with what was typed.
 -->
@@ -68,7 +70,7 @@
     type Reached,
   } from "../../ipc/entity";
   import { drawn } from "../../detail/relations";
-  import { BRIDGE, listenSynced, type PipelinePorts } from "../builds/pipeline-ports";
+  import type { PipelinePorts } from "../builds/pipeline-ports";
   import { writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
@@ -79,7 +81,7 @@
   import { resolveTicket } from "../job/job";
   import TfLinkTo from "../job/TfLinkTo.svelte";
   import type { JobPorts } from "../job/ports";
-  import { askAgain, markQueued, queuedMarks, sameWords, settleQueued, takeAgain, type Mark } from "../queued.svelte";
+  import { askAgain, markQueued, queuedMarks, sameWords, settleQueued, takeAgain, watchEchoes, type Mark } from "../queued.svelte";
   import { jobHash } from "../route";
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
@@ -136,7 +138,7 @@
     copy: (text: string) => Promise<void>;
     /** What the page's source refuses its credential (#2053); the IPC read when omitted. */
     refusedWrites?: RefusedWritesPort;
-    /** Hears `sync:state`, whose run ends read Docs again (#2072); the bridge's when omitted. */
+    /** Hears `sync:state`, whose run ends read Docs again (#2072), and `item:refreshed` (#2102); the bridge's when omitted. */
     listen?: PipelinePorts["listen"];
   }
 
@@ -325,15 +327,20 @@
     return () => void ++pageAsked;
   });
 
-  // A sync run's end reads the tree and the open page again, so what it
-  // brought in settles what Docs queued without Docs being opened again (#2072).
+  // A sync run's end (every run's, #2072) and a refresh naming one of Docs'
+  // echoes (#2102) read the tree and the open page again, so what they brought
+  // in settles what Docs queued without Docs being opened again.
   $effect(() => {
     if (!ready) return;
     return untrack(() =>
-      listenSynced({ listen: io.listen ?? BRIDGE.listen }, null, () => {}, () => {
-        void readTree(true);
-        rereadPage(target);
-      }),
+      watchEchoes(
+        DOCS,
+        () => {
+          void readTree(true);
+          rereadPage(target);
+        },
+        { listen: io.listen, everyRun: true },
+      ),
     );
   });
 
@@ -662,7 +669,10 @@
     }
   }
 
-  // ---- what this page queued (#1424) ----
+  // ---- what this page queued (#1424), its echoes (#2102) ----
+
+  /** The surface Docs' echoes are tagged with, for `watchEchoes`. */
+  const DOCS = "docs";
 
   /** A tree read drops each queued page it holds: a page of that title under that parent. */
   function settlePages(read: DocsTree): void {
@@ -698,7 +708,7 @@
   });
 
   /** The comments queued on the open page that its read does not hold yet. */
-  const queuedComments = $derived(page === null ? [] : queuedMarks(page.entity_id, "comment").map((mark) => mark.text));
+  const queuedComments = $derived(page === null ? [] : queuedMarks(page.entity_id, "comment"));
 
   // *Edit and resend* on a comment: the composer with its words.
   $effect(() => {
@@ -731,6 +741,8 @@
       markQueued(id, kind, text, {
         write,
         base: String(p.version),
+        surface: DOCS,
+        source: p.source_id,
         following: {
           name: `Edit of “${name}” on ${p.title}`,
           resend: () => {
@@ -758,6 +770,8 @@
       markQueued(id, "comment", body, {
         write,
         many: true,
+        surface: DOCS,
+        source: p.source_id,
         following: {
           name: `Comment on ${p.title}`,
           resend: () => {
@@ -791,6 +805,8 @@
       markQueued(next.parent, "page", title, {
         write,
         many: true,
+        surface: DOCS,
+        ...(under ? { source: under.source_id } : {}),
         following: {
           name: `Page ${title}`,
           resend: () => {
@@ -1072,12 +1088,12 @@
                   </div>
                 </div>
               {/each}
-              {#each queuedComments as body, n (n)}
+              {#each queuedComments as mark, n (n)}
                 <div class="tf-msg tf-queued">
                   <span class="tf-av tf-me">{initials(p.me[0] ?? null)}</span>
                   <div class="tf-cmt-body">
-                    <div class="tf-who"><b>You</b> <span class="tf-chip tf-info">queued</span></div>
-                    <p class="tf-cmt-queued">{body}</p>
+                    <div class="tf-who"><b>You</b> <span class="tf-chip tf-info">{mark.state}</span></div>
+                    <p class="tf-cmt-queued">{mark.text}</p>
                   </div>
                 </div>
               {/each}

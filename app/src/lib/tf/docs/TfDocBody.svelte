@@ -13,7 +13,7 @@
   that reason.
 
   A saved section draws its queued text in place of the old, muted and marked
-  *queued* (#1424), until a read of the page has a newer version; *Edit
+  *queued*, then *sent* (#1424, #2102), until a read of the page has a newer version; *Edit
   section* then starts from the queued text, and *Edit and resend* on a held
   or refused save opens the editor with it.
 -->
@@ -80,6 +80,8 @@
 
   /** The text a save of `number` queued, drawn until the page's version moves. */
   const queuedText = (number: number) => queuedMark(entityId, sectionKind(number))?.text ?? null;
+  /** Where that save's write is: `queued` or `sent` (#2102). */
+  const queuedState = (number: number) => queuedMark(entityId, sectionKind(number))?.state ?? null;
 
   function open(number: number) {
     const section = sections.find((s) => s.number === number);
@@ -114,7 +116,7 @@
     <section data-sec={section.number}>
       <h2 id={`s-${section.number}`}>
         <TfDocInlines text={section.heading.text} {onopen} {stems} />
-        {#if queued !== null}<span class="tf-chip tf-info tf-queued-mark">queued</span>{/if}
+        {#if queued !== null}<span class="tf-chip tf-info tf-queued-mark">{queuedState(section.number)}</span>{/if}
         <span class="tf-tools">
           <a href={pageHash(entityId, section.number)} title="Link to this section">#</a>
           {#if editable && said}
