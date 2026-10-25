@@ -7,7 +7,9 @@ use knobas_source::{
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use wasmtime::Store;
-use wasmtime::component::ResourceAny;
+use wasmtime::component::{
+    ComponentExportIndex, ComponentNamedList, Lift, Lower, ResourceAny, TypedFunc,
+};
 
 use crate::bindings::knobas::adapter::{download_sink, log, sink};
 use crate::{HostState, WasmAdapter, bindings, convert, limits, net, new_store, wit};
@@ -264,16 +266,22 @@ macro_rules! call {
 type DownloadParams<'a> = (&'a wit::Instance, &'a str, &'a str);
 type DownloadResults = (Result<bool, wit::SourceError>,);
 
-/// `downloads.download` of a fresh instance of the component in `store`.
-async fn download_func<'a>(
+/// The optional function `name` at `index` (looked up at load by
+/// `optional_export`) of a fresh instance of the component in `store`, typed
+/// as the host calls it: `downloads.download` (1.1.0) and `refresh.refresh`
+/// (1.4.0).
+async fn optional_func<P, R>(
     adapter: &WasmAdapter,
     store: &mut Store<HostState>,
-) -> Result<wasmtime::component::TypedFunc<DownloadParams<'a>, DownloadResults>, SourceError> {
-    let index = adapter
-        .inner
-        .download
-        .as_ref()
-        .ok_or_else(|| SourceError::protocol("the component exports no download"))?;
+    index: Option<&ComponentExportIndex>,
+    name: &str,
+) -> Result<TypedFunc<P, R>, SourceError>
+where
+    P: ComponentNamedList + Lower,
+    R: ComponentNamedList + Lift,
+{
+    let index = index
+        .ok_or_else(|| SourceError::protocol(format!("the component exports no {name}")))?;
     let instance = adapter
         .inner
         .pre
@@ -284,6 +292,14 @@ async fn download_func<'a>(
     instance
         .get_typed_func(&mut *store, index)
         .map_err(|e| failed(adapter, &e))
+}
+
+/// `downloads.download` of a fresh instance of the component in `store`.
+async fn download_func<'a>(
+    adapter: &WasmAdapter,
+    store: &mut Store<HostState>,
+) -> Result<TypedFunc<DownloadParams<'a>, DownloadResults>, SourceError> {
+    optional_func(adapter, store, adapter.inner.download.as_ref(), "download").await
 }
 
 /// `refresh.refresh-answer` (1.4.0, #2101), as the host lifts it: the
@@ -308,32 +324,23 @@ type RefreshResults = (Result<WitRefreshAnswer, wit::SourceError>,);
 async fn refresh_func<'a>(
     adapter: &WasmAdapter,
     store: &mut Store<HostState>,
-) -> Result<wasmtime::component::TypedFunc<RefreshParams<'a>, RefreshResults>, SourceError> {
-    let index = adapter
-        .inner
-        .refresh
-        .as_ref()
-        .ok_or_else(|| SourceError::protocol("the component exports no refresh"))?;
-    let instance = adapter
-        .inner
-        .pre
-        .instance_pre()
-        .instantiate_async(&mut *store)
-        .await
-        .map_err(|e| failed(adapter, &e))?;
-    instance
-        .get_typed_func(&mut *store, index)
-        .map_err(|e| failed(adapter, &e))
+) -> Result<TypedFunc<RefreshParams<'a>, RefreshResults>, SourceError> {
+    optional_func(adapter, store, adapter.inner.refresh.as_ref(), "refresh").await
 }
 
-/// At load: the `refresh` a component exports has the type 1.4.0 gives it.
-pub(crate) async fn check_refresh(adapter: &WasmAdapter) -> Result<(), String> {
-    let mut store = new_store(
+/// A store for a check at load, before any source of the adapter exists.
+fn probe_store(adapter: &WasmAdapter) -> Store<HostState> {
+    new_store(
         adapter,
         crate::PROBE_ID,
         SinkSlot::none(),
         Arc::new(net::Policy::none(crate::PROBE_ID)),
-    );
+    )
+}
+
+/// At load: the `refresh` a component exports has the type 1.4.0 gives it.
+pub(crate) async fn check_refresh(adapter: &WasmAdapter) -> Result<(), String> {
+    let mut store = probe_store(adapter);
     limits::bounded(adapter, async {
         refresh_func(adapter, &mut store).await.map(drop)
     })
@@ -343,12 +350,7 @@ pub(crate) async fn check_refresh(adapter: &WasmAdapter) -> Result<(), String> {
 
 /// At load: the `download` a component exports has the type 1.1.0 gives it.
 pub(crate) async fn check_download(adapter: &WasmAdapter) -> Result<(), String> {
-    let mut store = new_store(
-        adapter,
-        crate::PROBE_ID,
-        SinkSlot::none(),
-        Arc::new(net::Policy::none(crate::PROBE_ID)),
-    );
+    let mut store = probe_store(adapter);
     limits::bounded(adapter, async {
         download_func(adapter, &mut store).await.map(drop)
     })

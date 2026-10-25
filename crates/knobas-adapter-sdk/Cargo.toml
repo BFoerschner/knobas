@@ -30,7 +30,7 @@ wit-bindgen = { version = "=0.62.0", default-features = false, features = ["macr
 # `downloads`, no `query`, no `sink.walked`, so `Adapter` has no `download`
 # or `translate_query`. What the host's hold on 1.0.0 components is tested
 # with (#1205): the fixture's `v1_0` turns it on. An adapter has no use for
-# it, since every knobas that hosts components hosts 1.3.0.
+# it, since every knobas that hosts components hosts the current minor.
 v1_0 = []
 # Build against the frozen 1.3.0 world (`wit-1.3.0/`) instead: no
 # `refresh`, so `Adapter` has no `refresh`. What the host's hold on a
