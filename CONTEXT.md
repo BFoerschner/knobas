@@ -165,6 +165,10 @@ _Avoid_: relation (that is a link's type), reference
 A machine-proposed link with a stated reason. Accepting makes a link; dismissing persists.
 _Avoid_: recommendation
 
+**Backlink**:
+A page whose body links to this page.
+_Avoid_: pages that link here, inbound link
+
 **Context**:
 A working set of entities. Membership = explicit adds + direct links + one hop out; asset membership also counts through ancestors. The rule is fixed, not configurable — the operational reading (seed + direct + hop, computed over confirmed links only) is ADR-0008. (Amended 2026-10-21, the grilling of #1403, #1416, #1427 and #1464: since rooms went with #881 a context is **the working set behind a [job](#job)**, and nothing else. Opening a job promotes its ticket to one; the context is what routes an [alert](#alert) to the inbox, scopes the job's proposals and lists the open jobs; and a reader never sees one by name, adds to one, or makes one. Its one state is **archived**: a ticket's context is archived exactly while the ticket's status is in its source's declared **done-like** set, the same shape as the blocked-like set, and un-archived when the status leaves it — the sync run maintains it, opening the job never touches it, a context first made for a done ticket is born archived, and promoting a done ticket returns its archived context rather than making a second. A done job that is reopened is reading, not working; leaving Done in the source is what revives it. **Ad-hoc contexts are retired**: nothing creates one, *Not a ticket* and R-3.11 go, and time without a ticket is the ⌘T label timer.)
 _Avoid_: workspace, project, room (retired with #881; a [job](#job) is the working view now) — and `project` stays on this list now that [Project](#project) is a term of its own: a project is a source's grouping, a context is a working set, and neither is the other. (ADR-0010)
