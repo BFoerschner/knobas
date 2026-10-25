@@ -389,7 +389,7 @@ verify_confluence() {
     fi
     sleep 5; _waited=$((_waited + 5))
   done
-  [ -n "$_missing$_extra" ] || say "verify: the seeded pages and the home page are all a CQL search of $SPACE_KEY returns (after ${_waited}s)"
+  [ -n "$_missing$_extra" ] || say "verify: a CQL search of $SPACE_KEY returns exactly the seeded pages and the home page (after ${_waited}s)"
 
   # The page with a body, and its first `## ` heading -- from the fixture, so
   # a renamed page in work.json is still what this checks for.
@@ -1037,8 +1037,8 @@ done
 # not from CQL, which is the index and lags a create by seconds. Each one is
 # trashed and then purged, so its title is free for the run that makes it
 # again. The list is flat, every depth at once, so a stray's children are on
-# it beside their parent. A fresh space, and the second seed of every window,
-# deletes nothing.
+# it beside their parent. On a fresh space, and on the second seed of every
+# window, nothing is deleted.
 KEEP=$(printf '%s' "$PAGE_IDS" | jq -c --arg h "$HOME_ID" '[$h] + map(.id)')
 STRAYS=0
 stray=
@@ -1048,7 +1048,7 @@ while :; do
   expect "list the pages of $SPACE_KEY" 200
   stray="$stray $(printf '%s' "$API_BODY" | jq -r --argjson k "$KEEP" \
     '.results[] | select(.id as $i | $k | index($i) | not) | .id')"
-  [ "$(printf '%s' "$API_BODY" | jq '.size')" -ge 100 ] || break
+  [ "$(printf '%s' "$API_BODY" | jq '.size // 0')" -ge 100 ] || break
   start=$((start + 100))
 done
 for id in $stray; do
@@ -1057,8 +1057,8 @@ for id in $stray; do
   conf DELETE "/rest/api/content/$id?status=trashed"
   expect "purge page $id" 204 404
   STRAYS=$((STRAYS + 1))
-  say "deleted page $id: in $SPACE_KEY and not the seed's"
 done
+[ "$STRAYS" -eq 0 ] || say "deleted $STRAYS pages in $SPACE_KEY the seed did not create"
 
 # The argument is a jq PROGRAM: $v is jq's variable, not the shell's.
 # shellcheck disable=SC2016
@@ -1070,4 +1070,4 @@ record '.confluence += {
 fi  # want confluence
 
 say "wrote $STATE"
-say "done: created $CREATED, skipped $SKIPPED, deleted ${STRAYS:-0} stray pages"
+say "done: created $CREATED, skipped $SKIPPED"
