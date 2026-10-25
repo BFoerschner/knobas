@@ -233,7 +233,7 @@
     const seq = ++rereads;
     const current = () => mine === token && seq === rereads;
     const reads: Promise<unknown>[] = [];
-    if (everything) reads.push(readDetail(wanted, () => mine === token));
+    if (everything) reads.push(readDetail(wanted, current));
     // A parameter change waiting to be read (#2104): the settings again too.
     if (everything || untrack(() => echoesOn(wanted).some((echo) => echo.kind.startsWith(paramKind(""))))) {
       const sentBefore = untrack(() => sentWrites(wanted));
@@ -263,7 +263,7 @@
   }
 
   /** The *Refresh*'s read again (#2137): the list's row of the pipeline, then the page's own reads. */
-  async function rereadPipeline() {
+  async function refreshRead() {
     const wanted = id;
     await Promise.allSettled([Promise.resolve().then(() => rereadRow?.()), reread(wanted, true)]);
   }
@@ -559,7 +559,7 @@
     {#if pipeline.web_url !== null}
       <button type="button" class="tf-btn tf-ghost" onclick={openInSource}>Open in {pipeline.source_name}</button>
     {/if}
-    {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={rereadPipeline} />{/if}
+    {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={refreshRead} />{/if}
   </div>
 </header>
 {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}

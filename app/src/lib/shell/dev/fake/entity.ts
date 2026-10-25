@@ -209,7 +209,7 @@ function buildEntry(id: string): (typeof CORPUS)[number] | undefined {
     author: null,
     web_url: null,
     deleted_at: null,
-    payload: { source: "teamcity", path: found.path.split("/").join(" › ") },
+    payload: { source: found.source, path: found.path.split("/").join(" › ") },
   };
 }
 

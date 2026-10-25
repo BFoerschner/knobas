@@ -137,31 +137,30 @@
     );
   });
 
-  // *Sync now*'s runs ended (#2106): the list is read again, kept drawn meanwhile.
+  /** Bumped on every read again of the list, so an older one answering late is dropped. */
+  let listReads = 0;
+  /**
+   * The list read again, kept drawn meanwhile: when *Sync now*'s runs end
+   * (#2106), and on the pipeline page's *Refresh* (#2137), whose row of the
+   * pipeline is among it. A failed read keeps the list and says so.
+   */
+  async function rereadPipelines() {
+    const at = ++listReads;
+    try {
+      const rows = await ports.pipelines();
+      if (at === listReads) all = rows;
+    } catch (error) {
+      if (at === listReads) failed = message(error);
+    }
+  }
+
   let pipelinesAt = untrack(() => syncRevision);
   $effect(() => {
     const at = syncRevision;
     if (!ready || at === pipelinesAt) return;
     pipelinesAt = at;
-    ports.pipelines().then(
-      (rows) => {
-        if (at === pipelinesAt) all = rows;
-      },
-      (error: unknown) => (failed = message(error)),
-    );
+    void untrack(() => rereadPipelines());
   });
-
-  /** The pipeline page's *Refresh* (#2137): the list read again, its row of the pipeline among it, kept drawn meanwhile. */
-  let rowReads = 0;
-  async function rereadPipelines() {
-    const at = ++rowReads;
-    try {
-      const rows = await ports.pipelines();
-      if (at === rowReads) all = rows;
-    } catch {
-      // The list keeps what it drew; the page's banner says why the refresh failed, if it did.
-    }
-  }
 
   // *This job* (#850): on by default while a job is current.
   const scope = $derived<Scope>(job !== null && (filter.scope ?? "job") === "job" ? "job" : "all");
