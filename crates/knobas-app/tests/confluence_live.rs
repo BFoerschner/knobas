@@ -54,6 +54,7 @@
 //! When knobas and the server disagree, **knobas** is wrong.
 
 mod live_digest;
+mod live_refresh;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -64,8 +65,9 @@ use knobas_core::write_queue::WriteState;
 use knobas_live_cleanup::Cleanup;
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
-use knobas_sync::scheduler::{RefreshEnd, RefreshEnded, Scheduler, SchedulerDeps, SyncEvents};
+use knobas_sync::scheduler::{RefreshEnd, Scheduler, SchedulerDeps, SyncEvents};
 use live_digest::{Connections, Quiet, sync};
+use live_refresh::{Snapshots, remote_id};
 use serde_json::json;
 
 /// The source id, which is also the `EntityRef` namespace every mirrored page
@@ -1821,95 +1823,6 @@ async fn a_pasted_address_opens_its_page_in_every_form_confluence_serves() {
 }
 
 // -- a landed write's page, refreshed before the run after it (#2096) --------
-
-/// What the mirror held the moment a refresh ended: the payload of the item
-/// refreshed, and how many runs of its source had started since the write it
-/// followed settled.
-struct Snapshot {
-    ended: RefreshEnded,
-    payload: Option<serde_json::Value>,
-    runs_since_the_write: i64,
-}
-
-/// Hears `item:refreshed` and reads the mirror **inside** the call. It is
-/// told before the run after the write is asked for
-/// (`sources::write_queue::after_landing`), so what it reads is what the
-/// refresh wrote, not what that run did; the run count checks it rather than
-/// trusting the order.
-#[derive(Clone)]
-struct Snapshots {
-    pool: sqlx::PgPool,
-    taken: Arc<std::sync::Mutex<Vec<Snapshot>>>,
-}
-
-impl SyncEvents for Snapshots {
-    fn sync_state(&self, _status: knobas_sync::SourceSyncStatus) {}
-    fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
-    fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
-    fn refresh_ended(&self, ended: &RefreshEnded) {
-        let pool = self.pool.clone();
-        let id = ended.entity_id.clone();
-        let write = ended.write_id;
-        let (payload, runs_since_the_write) = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                let payload: Option<serde_json::Value> =
-                    sqlx::query_scalar("select payload from sync.live_item where entity_id = $1")
-                        .bind(&id)
-                        .fetch_optional(&pool)
-                        .await
-                        .expect("the mirror is readable");
-                let runs: i64 = sqlx::query_scalar(
-                    "select count(*) from knobas.sync_run r, knobas.write_queue w
-                      where w.id = $1 and r.source_id = w.source_id
-                        and r.started_at > w.settled_at",
-                )
-                .bind(write)
-                .fetch_one(&pool)
-                .await
-                .expect("the runs are readable");
-                (payload, runs)
-            })
-        });
-        self.taken.lock().unwrap().push(Snapshot {
-            ended: ended.clone(),
-            payload,
-            runs_since_the_write,
-        });
-    }
-}
-
-impl Snapshots {
-    /// The snapshot of write `id`'s refresh, waited for: the refresh follows
-    /// the send in the background.
-    async fn of(&self, id: i64) -> Snapshot {
-        let deadline = std::time::Instant::now() + Duration::from_secs(60);
-        loop {
-            {
-                let mut taken = self.taken.lock().unwrap();
-                if let Some(at) = taken.iter().position(|s| s.ended.write_id == Some(id)) {
-                    return taken.remove(at);
-                }
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "write {id} landed but no refresh of it ended within a minute"
-            );
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-    }
-}
-
-/// The id Confluence answered write `id` with, as the settle stamped it.
-async fn remote_id(pool: &sqlx::PgPool, id: i64) -> String {
-    sqlx::query_scalar::<_, Option<String>>(
-        "select remote_id from knobas.write_queue where id = $1",
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await
-    .expect("the queue row")
-    .unwrap_or_else(|| panic!("write {id} carries no remote id"))
-}
 
 /// **A section edit, a comment and a new page, each through the write
 /// queue, are in the mirror as Confluence holds them before the run after

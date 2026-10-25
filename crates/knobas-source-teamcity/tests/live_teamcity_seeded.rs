@@ -2143,16 +2143,20 @@ async fn the_opening_probe_from_the_watermark_holds_its_build_and_every_newer_on
     seeded.clear_leftovers().await;
     let ids = seeded.seeded_ids();
     let newest = *ids.last().expect("a seeded build");
-    // A watermark whose predecessor id names no build, from the middle up, so
-    // the page has older builds to leave out and newer ones to hold.
-    let watermark = *ids[ids.len() / 2..]
-        .iter()
-        .find(|&&id| !ids.contains(&(id - 1)))
-        .unwrap_or_else(|| panic!("a seeded id whose predecessor is not seeded: {ids:?}"));
-    let (status, _) = seeded
-        .get(&format!("app/rest/builds/id:{}?fields=id", watermark - 1))
-        .await;
-    assert_eq!(status, 404, "build {} is not on the server", watermark - 1);
+    // A watermark from the middle up, so the page has older builds to leave
+    // out and newer ones to hold: one whose predecessor id names no build
+    // where the seed left a gap, else the middle one. A fresh seed runs its
+    // builds back to back and leaves no gap (#2099), so the predecessor that
+    // names no build is witnessed above the newest build too, below.
+    let middle = &ids[ids.len() / 2..];
+    let gap = middle.iter().copied().find(|&id| !ids.contains(&(id - 1)));
+    let watermark = gap.unwrap_or(middle[0]);
+    if gap.is_some() {
+        let (status, _) = seeded
+            .get(&format!("app/rest/builds/id:{}?fields=id", watermark - 1))
+            .await;
+        assert_eq!(status, 404, "build {} is not on the server", watermark - 1);
+    }
 
     let probe = |w: i64| format!("sinceBuild:(id:{}),defaultFilter:false,count:100", w - 1);
     let mut page = seeded.build_ids(&probe(watermark)).await;
@@ -2167,6 +2171,17 @@ async fn the_opening_probe_from_the_watermark_holds_its_build_and_every_newer_on
         seeded.build_ids(&probe(newest + 1)).await,
         Vec::<i64>::new(),
         "above the newest build the probe page is empty"
+    );
+    // `sinceBuild:(id:newest+1)`: an id that names no build, read as a
+    // number rather than refused.
+    let (status, _) = seeded
+        .get(&format!("app/rest/builds/id:{}?fields=id", newest + 1))
+        .await;
+    assert_eq!(status, 404, "build {} is not on the server", newest + 1);
+    assert_eq!(
+        seeded.build_ids(&probe(newest + 2)).await,
+        Vec::<i64>::new(),
+        "a predecessor that names no build is read as a number"
     );
     println!("SEEDED probe from {watermark}: {page:?}");
 }
@@ -5435,4 +5450,97 @@ async fn a_runner_may_run_and_may_not_override_or_jump_the_queue() {
         serde_json::Value::Bool(false),
         "per-project permissions are put back"
     );
+}
+
+// -- the refresh: one build read by id (ADR-0031, #2099) ---------------------
+
+/// **A queued build is read back by id the moment the trigger lands, as the
+/// sync emits it, and as gone once it is deleted**; a build configuration is
+/// not offered.
+///
+/// The battery's clause 13 holds the finished builds the sync emits to the
+/// refresh, but never asks it of a queued build or a deleted one: the quiet
+/// scope it runs over has nothing in flight, and a run emits no deletions.
+/// This is that half, against the real server: what TeamCity answers
+/// `GET /app/rest/builds/id:{id}` for a build still on the queue, and for
+/// one canceled and deleted.
+///
+/// Parked agents, guards and restore point as in the trigger's case above,
+/// so the build is still queued when the refresh and the sync read it.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_queued_build_reads_back_at_once_as_the_sync_emits_it_and_a_deleted_one_as_gone() {
+    use knobas_source::{RefreshAnswer, WriteOp};
+
+    let seeded = seeded();
+    let mut parked = AgentsParked::new(&seeded);
+    let mut guard = Queued::new(&seeded).await;
+    let source = seeded.scoped_to(&[QUICK_CONFIGURATION]);
+    let before = restore_point(&seeded, "before the refresh").await;
+    parked.park(&seeded).await;
+
+    let receipt = source
+        .write(WriteOp::TriggerBuild {
+            entity: format!("teamcity:buildType:{QUICK_CONFIGURATION}"),
+        })
+        .await
+        .unwrap_or_else(|e| panic!("the trigger is queued: {e:?}"));
+    let id = queued_id(&receipt);
+    guard.adopt(id);
+    let entity = format!("teamcity:build:{id}");
+
+    let item = match source.refresh(&entity).await.expect("the read") {
+        RefreshAnswer::Item(item) => item,
+        other => panic!("a build queued a moment ago reads back, not {other:?}"),
+    };
+    println!("SEEDED refresh of {entity}: {}", item.payload);
+    assert_eq!(item.entity.to_string(), entity);
+    assert_eq!(item.kind, "build");
+    assert_eq!(item.payload["state"], "queued");
+    assert_eq!(item.payload["buildTypeId"], QUICK_CONFIGURATION);
+    assert!(!item.deleted);
+
+    // The sync's in-flight poll emits the same build: the same item.
+    let (items, _) = full(&*source).await;
+    let synced = items
+        .iter()
+        .find(|i| i.entity.to_string() == entity)
+        .unwrap_or_else(|| panic!("the sync emits the queued {entity}: {:?}", keys(&items)));
+    assert_eq!(item.title, synced.title);
+    assert_eq!(item.body_text, synced.body_text);
+    assert_eq!(item.author, synced.author);
+    assert_eq!(item.updated_at, synced.updated_at);
+    assert_eq!(item.web_url, synced.web_url);
+    assert_eq!(item.payload, synced.payload, "the refresh maps as the run");
+
+    let config = source
+        .refresh(&format!("teamcity:buildType:{QUICK_CONFIGURATION}"))
+        .await
+        .expect("answered");
+    assert!(
+        matches!(config, RefreshAnswer::NotOffered),
+        "a build configuration is not offered, not {config:?}"
+    );
+
+    // The same build, out of this source's scope: gone, as no run of a
+    // source configured so would emit it.
+    let other = seeded.fixture_build(1187).build_type.clone();
+    assert_ne!(other, QUICK_CONFIGURATION);
+    let elsewhere = seeded.scoped_to(&[other.as_str()]);
+    let outside = elsewhere.refresh(&entity).await.expect("the read");
+    assert!(
+        matches!(outside, RefreshAnswer::Gone),
+        "a build outside the configured scope is gone, not {outside:?}"
+    );
+
+    drop(guard);
+    let deleted = source.refresh(&entity).await.expect("the read");
+    assert!(
+        matches!(deleted, RefreshAnswer::Gone),
+        "a canceled and deleted build is gone, not {deleted:?}"
+    );
+
+    drop(parked);
+    let after = restore_point(&seeded, "after the refresh").await;
+    assert_eq!(after, before);
 }

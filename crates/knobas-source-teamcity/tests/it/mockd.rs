@@ -106,6 +106,12 @@ impl Source for ViewsExcused {
         self.0.reachable_transitions(entity).await
     }
 
+    /// Delegated: a build's refresh reads `GET /app/rest/builds/id:{id}`
+    /// with the run's own record fields, which mockd serves (#2099).
+    async fn refresh(&self, entity: &str) -> Result<knobas_source::RefreshAnswer, SourceError> {
+        self.0.refresh(entity).await
+    }
+
     async fn view(
         &self,
         entity: &str,
@@ -216,6 +222,34 @@ async fn passes_the_contract_battery() {
     // would be recorded here rather than silently accepted.
     healthy.assert_no_violations();
     denied.assert_no_violations();
+}
+
+/// **The refresh's transport** (#2099): `GET /app/rest/builds/id:{id}`
+/// with the record fields, a 404 read as *gone* and a running build read as
+/// the run's in-flight poll emits it. A regression check of the client's
+/// mapping, not a certificate: that is the seeded suite's
+/// `a_queued_build_reads_back_at_once_as_the_sync_emits_it_and_a_deleted_one_as_gone`.
+#[tokio::test]
+async fn a_refresh_reads_a_build_by_id_and_a_404_as_gone() {
+    use knobas_source::RefreshAnswer;
+    let server = spawn_mock_teamcity().await;
+    let source = adapter(&server.base_url(), serde_json::json!({}));
+    let (id, cfg) = running_build();
+    let (items, _) = sync(source.as_ref(), None).await;
+    let synced = items
+        .iter()
+        .find(|i| i.entity.key == format!("build:{id}"))
+        .expect("the run emits the running build");
+    match source.refresh(&format!("teamcity:build:{id}")).await {
+        Ok(RefreshAnswer::Item(item)) => {
+            assert_eq!(item.payload, synced.payload);
+            assert_eq!(item.payload["buildTypeId"], cfg.as_str());
+        }
+        other => panic!("the running build reads back, not {other:?}"),
+    }
+    let gone = source.refresh("teamcity:build:987654").await;
+    assert!(matches!(gone, Ok(RefreshAnswer::Gone)), "{gone:?}");
+    server.assert_no_violations();
 }
 
 #[tokio::test]

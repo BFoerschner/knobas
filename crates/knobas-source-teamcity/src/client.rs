@@ -12,10 +12,10 @@ use crate::TeamCityConfig;
 use crate::http;
 use crate::rest::{
     ARTIFACT_FIELDS, BUILD_CHANGE_FIELDS, BUILD_CONFIG_VIEW_FIELDS, BUILD_FIELDS, BUILD_ID_FIELDS,
-    BUILD_TYPE_FIELDS, BUILD_VIEW_FIELDS, Build, BuildRecord, BuildType, Changes, ConfigRecord,
-    CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, PARAMETER_FIELDS,
-    PROJECT_FIELDS, PermissionAssignments, Project, Property, RECENT_BUILD_FIELDS, SERVER_FIELDS,
-    Server, TestOccurrences, USER_FIELDS,
+    BUILD_RECORD_FIELDS, BUILD_TYPE_FIELDS, BUILD_VIEW_FIELDS, Build, BuildRecord, BuildType,
+    Changes, ConfigRecord, CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator,
+    PARAMETER_FIELDS, PROJECT_FIELDS, PermissionAssignments, Project, Property,
+    RECENT_BUILD_FIELDS, SERVER_FIELDS, Server, TestOccurrences, USER_FIELDS,
 };
 
 /// One record, kept both as parsed fields and as the JSON it arrived as --
@@ -81,6 +81,14 @@ pub(crate) trait Rest: Send + Sync {
     /// and reading one as the other would accuse an innocent server of having
     /// been replaced.
     async fn build_exists(&self, id: i64) -> Result<bool, SourceError>;
+    /// One build by id, as a run lists it: `GET /app/rest/builds/id:{id}`
+    /// with [`BUILD_RECORD_FIELDS`], kept verbatim for
+    /// [`crate::map::build_item`] (a refresh, ADR-0031).
+    ///
+    /// `None` is TeamCity's 404, a build it no longer has. Every other
+    /// status raises, for [`Self::build_exists`]' reason: a 403 is a build
+    /// the credential may not read, not one that is gone.
+    async fn build(&self, id: i64) -> Result<Option<Rec<Build>>, SourceError>;
 }
 
 /// The real transport.
@@ -203,6 +211,21 @@ impl Rest for HttpRest {
             )
             .await,
         )
+    }
+
+    async fn build(&self, id: i64) -> Result<Option<Rec<Build>>, SourceError> {
+        let path = format!("app/rest/builds/id:{id}");
+        let raw = match self
+            .get_raw(&path, &[("fields", BUILD_RECORD_FIELDS)])
+            .await
+        {
+            Ok(raw) => raw,
+            Err(error) if error.status() == Some(404) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let rec = serde_json::from_value(raw.clone())
+            .map_err(|e| SourceError::protocol(format!("teamcity: {path}: {e}")))?;
+        Ok(Some(Rec { raw, rec }))
     }
 }
 

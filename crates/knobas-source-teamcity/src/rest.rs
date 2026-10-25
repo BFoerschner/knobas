@@ -50,6 +50,22 @@ pub(crate) const USER_FIELDS: &str = "username,name";
 /// should rely on.
 pub(crate) const BUILD_ID_FIELDS: &str = "id";
 
+/// The record half of [`BUILD_FIELDS`], a macro so `concat!` can take it.
+macro_rules! build_record {
+    () => {
+        concat!(
+            "id,number,buildTypeId,state,status,statusText,branchName,",
+            "queuedDate,startDate,finishDate,",
+            "buildType(id,name,projectId,projectName),",
+            "running-info(percentageComplete,currentStageText),",
+            "triggered(type,user(username)),",
+            "agent(name),",
+            "testOccurrences(failed,passed,ignored),",
+            "revisions(revision(version))"
+        )
+    };
+}
+
 /// What `/app/rest/buildTypes` is asked for. Without an explicit `fields=`,
 /// real TeamCity answers a hyperlink stub (`id`, `href`) and mockd answers 400
 /// -- the parameter is mandatory on the collections.
@@ -100,16 +116,13 @@ pub(crate) const PROJECT_FIELDS: &str = "count,nextHref,project(id,name,parentPr
 /// **`testOccurrences(failed,passed,ignored)`** (#1448): the declared test
 /// counts, the summary a run row draws. Named, not left to TeamCity's
 /// default, so a zero is served as `0` rather than left out.
-pub(crate) const BUILD_FIELDS: &str = concat!(
-    "count,nextHref,build(id,number,buildTypeId,state,status,statusText,branchName,",
-    "queuedDate,startDate,finishDate,",
-    "buildType(id,name,projectId,projectName),",
-    "running-info(percentageComplete,currentStageText),",
-    "triggered(type,user(username)),",
-    "agent(name),",
-    "testOccurrences(failed,passed,ignored),",
-    "revisions(revision(version)))"
-);
+pub(crate) const BUILD_FIELDS: &str = concat!("count,nextHref,build(", build_record!(), ")");
+
+/// What one build is asked for by id when it is refreshed (ADR-0031, #2099):
+/// [`BUILD_FIELDS`]' record, without the envelope a single build has not got.
+/// One selector spelled once, so the record a refresh reads is the record a
+/// run lists and `map::build_item` makes the same item of both.
+pub(crate) const BUILD_RECORD_FIELDS: &str = build_record!();
 
 /// What one parameter is asked for when `set_parameter` checks it against
 /// the value the reader edited (#668): what the view draws a parameter from,
@@ -1282,6 +1295,7 @@ mod tests {
         // No whitespace: these go into a query string verbatim.
         for f in [
             BUILD_FIELDS,
+            BUILD_RECORD_FIELDS,
             BUILD_TYPE_FIELDS,
             SERVER_FIELDS,
             USER_FIELDS,
@@ -1416,7 +1430,13 @@ mod tests {
         );
         // ...and no preset: mockd honours only `$long`, and asking for the
         // whole subtree defeats the point of a selector.
-        for f in [BUILD_FIELDS, BUILD_TYPE_FIELDS, SERVER_FIELDS, USER_FIELDS] {
+        for f in [
+            BUILD_FIELDS,
+            BUILD_RECORD_FIELDS,
+            BUILD_TYPE_FIELDS,
+            SERVER_FIELDS,
+            USER_FIELDS,
+        ] {
             assert!(!f.contains('$'), "{f:?} uses a fields= preset");
         }
     }

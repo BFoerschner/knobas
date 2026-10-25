@@ -2,8 +2,8 @@
 
 use knobas_source::instance::SourceInstance;
 use knobas_source::{
-    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, SyncItem, WriteOp,
-    WriteReceipt,
+    ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError, SyncItem,
+    WriteOp, WriteReceipt,
 };
 
 use crate::client::{HttpRest, Rest, connection_info};
@@ -190,6 +190,24 @@ impl Source for TeamCitySource {
             sink,
         )
         .await
+    }
+
+    /// One build read by id ([`sync::refresh`], ADR-0031, #2099): what a
+    /// landed trigger, re-run or custom run is followed by, so the mirror
+    /// holds the queued build its receipt names before the run after the
+    /// write starts.
+    ///
+    /// A build configuration is [`RefreshAnswer::NotOffered`]: the one write
+    /// aimed at it, a parameter set, changes nothing its item carries (the
+    /// listing's id, name, project and description), so the run that follows
+    /// the write is all it needs. An entity of another instance is refused,
+    /// as a write's target is ([`Self::key_of`]).
+    async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
+        if !self.key_of(entity)?.starts_with("build:") {
+            return Ok(RefreshAnswer::NotOffered);
+        }
+        let id = self.build_id(entity)?;
+        sync::refresh(&self.id, &self.base_url, &self.cfg, &self.rest, id).await
     }
 
     /// Perform one of the two writes M2 ratified for TeamCity, or the
@@ -552,7 +570,13 @@ mod tests {
             d.write_ops,
             vec!["trigger_build", "rerun_build", "set_parameter", "run_build"]
         );
-        assert_eq!(d.capabilities, vec![knobas_source::Capability::Write]);
+        assert_eq!(
+            d.capabilities,
+            vec![
+                knobas_source::Capability::Write,
+                knobas_source::Capability::Refresh
+            ]
+        );
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.
         assert!(
@@ -728,5 +752,33 @@ mod tests {
             panic!("a foreign namespace must be refused, got {refused:?}");
         };
         assert!(message.contains("teamcity-us"), "{message}");
+    }
+
+    /// **A build configuration is not offered** (#2099): the app runs the
+    /// source after a parameter set instead, and nothing is asked of the
+    /// server -- this instance's base URL answers nothing.
+    #[tokio::test]
+    async fn a_build_configuration_is_not_offered_a_refresh() {
+        let source = built(instance(json!({})));
+        let answer = source
+            .refresh("teamcity-eu:buildType:Payout_Build")
+            .await
+            .expect("answered without a request");
+        assert!(matches!(answer, RefreshAnswer::NotOffered), "{answer:?}");
+    }
+
+    /// **A refresh of another instance's item, or of a build key that names
+    /// no build, is refused** before anything is read: `build:1187` exists
+    /// on every TeamCity, so trusting the routing would read the wrong one.
+    #[tokio::test]
+    async fn a_refresh_for_another_source_or_a_malformed_build_is_refused() {
+        let source = built(instance(json!({})));
+        for entity in ["teamcity-us:build:1187", "teamcity-eu:build:latest"] {
+            let refused = source.refresh(entity).await;
+            assert!(
+                matches!(refused, Err(SourceError::Protocol { .. })),
+                "{entity}: {refused:?}"
+            );
+        }
     }
 }

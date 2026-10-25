@@ -82,6 +82,7 @@
 //! **One environment, one owner at a time** -- `testenv/README.md`.
 
 mod live_digest;
+mod live_refresh;
 mod live_under;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -91,8 +92,9 @@ use knobas_app::sources::{Registry, SourcesState};
 use knobas_live_cleanup::Cleanup;
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
-use knobas_sync::scheduler::{Scheduler, SchedulerDeps};
+use knobas_sync::scheduler::{RefreshEnd, Scheduler, SchedulerDeps, SyncEvents};
 use live_digest::{Connections, Quiet, day_window, on_digest, sync};
+use live_refresh::{Snapshots, remote_id};
 use serde_json::json;
 
 /// The configured source id, which is also the entity namespace.
@@ -237,7 +239,7 @@ fn seeded_builds() -> Vec<SeededBuild> {
 /// `sync.live_item.author` against. Without it the app knows of nobody and the
 /// digest is empty for everyone.
 async fn app(env: &Env, account: &str) -> SourcesState {
-    app_with(env, account, None).await
+    app_with(env, account, None, None).await
 }
 
 /// The Gitea source a cross-product test adds beside TeamCity (#683): the
@@ -267,8 +269,23 @@ fn gitea_env() -> GiteaEnv {
     }
 }
 
-async fn app_with(env: &Env, account: &str, gitea: Option<&GiteaEnv>) -> SourcesState {
-    let connector = knobas_db::test_util::scratch_database("teamcity_live_digest").await;
+/// The app over the seeded TeamCity, with Gitea beside it when given, and,
+/// given `events`, the app's own scheduler
+/// (`knobas_app::sources::start_scheduler`) telling them: there a landed
+/// write is followed as in the app, by its refresh and then a run (#2099,
+/// ADR-0031).
+async fn app_with(
+    env: &Env,
+    account: &str,
+    gitea: Option<&GiteaEnv>,
+    events: Option<&dyn Fn(sqlx::PgPool) -> Arc<dyn SyncEvents>>,
+) -> SourcesState {
+    let connector = knobas_db::test_util::scratch_database(if events.is_some() {
+        "teamcity_live_refresh"
+    } else {
+        "teamcity_live_digest"
+    })
+    .await;
     let pool = connector
         .pool(4)
         .await
@@ -330,16 +347,25 @@ async fn app_with(env: &Env, account: &str, gitea: Option<&GiteaEnv>) -> Sources
         .expect("the Gitea source row is written");
     }
 
-    let scheduler = Scheduler::start(SchedulerDeps {
+    let deps = |events: Arc<dyn SyncEvents>| SchedulerDeps {
         pool: pool.clone(),
-        connections: Arc::new(Connections(connector)),
+        connections: Arc::new(Connections(connector.clone())),
         registry: Arc::new(Registry::for_process()),
         secrets: secrets.clone(),
-        events: Arc::new(Quiet),
+        events,
         timing: knobas_sync::scheduler::SchedulerTiming::default(),
         quit: knobas_sync::scheduler::Quit::default(),
-    })
-    .await
+    };
+    let scheduler = match events {
+        None => Scheduler::start(deps(Arc::new(Quiet))).await,
+        Some(events) => {
+            knobas_app::sources::start_scheduler(
+                deps(events(pool.clone())),
+                knobas_sync::background::Background::new(),
+            )
+            .await
+        }
+    }
     .expect("a scheduler over the scratch database");
 
     SourcesState {
@@ -735,7 +761,7 @@ async fn a_builds_change_and_its_revision_open_the_mirrored_gitea_commit() {
     let env = env();
     let gitea = gitea_env();
     let account = env.account().await;
-    let state = app_with(&env, &account, Some(&gitea)).await;
+    let state = app_with(&env, &account, Some(&gitea), None).await;
     sync(&state, TEAMCITY).await;
     sync(&state, GITEA).await;
 
@@ -823,4 +849,282 @@ async fn a_builds_change_and_its_revision_open_the_mirrored_gitea_commit() {
     );
 
     state.scheduler.shutdown().await;
+}
+
+// -- a landed write's build, refreshed before the run after it (#2099) -------
+
+/// A bounded client for the guards' own requests.
+fn bounded() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(REQUEST_BUDGET)
+        .build()
+        .expect("a bounded client")
+}
+
+/// Every enabled agent disabled while the guard lives, so the builds the
+/// writes queue stay on the queue, and re-enabled from `Drop` passing or
+/// panicking alike -- `live_teamcity_seeded.rs`'s `AgentsParked`, which this
+/// crate cannot reach. Told each agent the moment it disabled it.
+struct Parked {
+    url: String,
+    token: String,
+    disabled: Vec<i64>,
+}
+
+impl Parked {
+    async fn park(&mut self, env: &Env) {
+        let body = env
+            .get("app/rest/agents?locator=authorized:any&fields=agent(id,enabled)")
+            .await;
+        let agents = body["agent"].as_array().cloned().unwrap_or_default();
+        assert!(!agents.is_empty(), "the server lists an agent: {body}");
+        for agent in agents {
+            if agent["enabled"] == json!(false) {
+                continue;
+            }
+            let id = agent["id"]
+                .as_i64()
+                .unwrap_or_else(|| panic!("an agent's id is a number: {agent}"));
+            self.disabled.push(id);
+            set_agent(&self.url, &self.token, id, false)
+                .await
+                .unwrap_or_else(|e| panic!("{e}"));
+        }
+    }
+}
+
+/// `PUT /app/rest/agents/id:{id}/enabled`, and the failure in words.
+async fn set_agent(url: &str, token: &str, id: i64, enabled: bool) -> Result<(), String> {
+    let status = bounded()
+        .put(format!("{url}/app/rest/agents/id:{id}/enabled"))
+        .header("Content-Type", "text/plain")
+        .header("Accept", "text/plain")
+        .bearer_auth(token)
+        .body(enabled.to_string())
+        .send()
+        .await
+        .map_err(|e| format!("set agent {id} enabled={enabled}: {e}"))?
+        .status();
+    if status.is_success() {
+        Ok(())
+    } else {
+        Err(format!("set agent {id} enabled={enabled} -> {status}"))
+    }
+}
+
+impl Drop for Parked {
+    fn drop(&mut self) {
+        if self.disabled.is_empty() {
+            return;
+        }
+        let (url, token, ids) = (self.url.clone(), self.token.clone(), self.disabled.clone());
+        Cleanup::new(
+            "the live suite did not re-enable the agents it disabled, so no later build will \
+             run (enable them under Agents in TeamCity, or re-seed)",
+            format!("agents {ids:?} may still be disabled"),
+        )
+        .run(move || async move {
+            for id in ids {
+                set_agent(&url, &token, id, true).await?;
+            }
+            Ok(())
+        });
+    }
+}
+
+/// The builds the writes queued, canceled and deleted from `Drop` passing or
+/// panicking alike, and checked gone. What a killed run leaves is the
+/// adapter suite's leftover clearing's, which removes every build the seed
+/// did not record.
+struct QueuedBuilds {
+    url: String,
+    token: String,
+    ids: Arc<std::sync::Mutex<Vec<i64>>>,
+}
+
+impl Drop for QueuedBuilds {
+    fn drop(&mut self) {
+        let ids = std::mem::take(&mut *self.ids.lock().unwrap());
+        if ids.is_empty() {
+            return;
+        }
+        let (url, token) = (self.url.clone(), self.token.clone());
+        Cleanup::new(
+            "the live suite did not remove the builds its writes queued, so the server is no \
+             longer in the plain-seed state",
+            format!(
+                "builds {ids:?} may still be standing; the adapter suite's leftover clearing \
+                 removes them"
+            ),
+        )
+        .run(move || async move {
+            let http = bounded();
+            for id in ids {
+                let at = format!("{url}/app/rest/builds/id:{id}");
+                // Cancels a queued build as well as a running one, which then
+                // finishes canceled and can be deleted.
+                let canceled = http
+                    .post(&at)
+                    .header("Accept", "application/json")
+                    .bearer_auth(&token)
+                    .json(&json!({ "comment": "canceled by the knobas app's TeamCity live suite", "readdIntoQueue": false }))
+                    .send()
+                    .await
+                    .map_err(|e| format!("cancel build {id}: {e}"))?;
+                if !canceled.status().is_success() && canceled.status() != 404 {
+                    return Err(format!("cancel build {id} -> {}", canceled.status()));
+                }
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+                loop {
+                    let state = http
+                        .get(format!("{at}?fields=state"))
+                        .header("Accept", "application/json")
+                        .bearer_auth(&token)
+                        .send()
+                        .await
+                        .map_err(|e| format!("GET build {id}: {e}"))?;
+                    if state.status() == 404 {
+                        break;
+                    }
+                    let body: serde_json::Value = state.json().await.unwrap_or_default();
+                    if body["state"] == "finished" {
+                        let deleted = http
+                            .delete(&at)
+                            .bearer_auth(&token)
+                            .send()
+                            .await
+                            .map_err(|e| format!("DELETE build {id}: {e}"))?
+                            .status();
+                        if !deleted.is_success() && deleted != 404 {
+                            return Err(format!("DELETE build {id} -> {deleted}"));
+                        }
+                    }
+                    if std::time::Instant::now() > deadline {
+                        return Err(format!("build {id} is still there after its delete: {body}"));
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            }
+            Ok(())
+        });
+    }
+}
+
+/// **A trigger and a re-run, each through the write queue, are in the mirror
+/// as the build TeamCity queued, by the key the receipt names, before the
+/// run after the write starts** (#2099, ADR-0031): the refresh reads the
+/// queued build by id, so it needs no run to have listed it.
+///
+/// The agents are parked, so each build is still on the queue when the
+/// refresh reads it and when the test compares it with the server's record;
+/// both builds are canceled and deleted again, and the agents re-enabled.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_landed_trigger_and_rerun_are_mirrored_as_their_queued_build_before_the_run_after_them() {
+    use knobas_app::sources::write_queue;
+    use knobas_core::write_queue::WriteState;
+
+    let env = env();
+    let account = env.account().await;
+    let rerun_of = seeded_build_id();
+    let rerun_config = seeded_builds()
+        .into_iter()
+        .find(|b| b.real_id == rerun_of)
+        .expect("the fixture build")
+        .config;
+    let trigger_config = seeded_builds()
+        .into_iter()
+        .map(|b| b.config)
+        .find(|c| *c != rerun_config)
+        .expect("a second seeded configuration");
+
+    let mut parked = Parked {
+        url: env.url.clone(),
+        token: env.token.clone(),
+        disabled: Vec::new(),
+    };
+    let queued = QueuedBuilds {
+        url: env.url.clone(),
+        token: env.token.clone(),
+        ids: Arc::default(),
+    };
+
+    let taken = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let heard = std::sync::Mutex::new(None);
+    let state = app_with(
+        &env,
+        &account,
+        None,
+        Some(&|pool: sqlx::PgPool| -> Arc<dyn SyncEvents> {
+            let snapshots = Snapshots {
+                pool,
+                taken: Arc::clone(&taken),
+            };
+            *heard.lock().unwrap() = Some(snapshots.clone());
+            Arc::new(snapshots)
+        }),
+    )
+    .await;
+    let snapshots = heard.lock().unwrap().take().expect("the events were built");
+    sync(&state, TEAMCITY).await;
+    parked.park(&env).await;
+
+    for (what, op, config) in [
+        (
+            "a trigger",
+            json!({ "TriggerBuild": { "entity": format!("{TEAMCITY}:buildType:{trigger_config}") } }),
+            &trigger_config,
+        ),
+        (
+            "a re-run",
+            json!({ "RerunBuild": { "entity": format!("{TEAMCITY}:build:{rerun_of}") } }),
+            &rerun_config,
+        ),
+    ] {
+        let sent = write_queue::submit(&state, op)
+            .await
+            .unwrap_or_else(|e| panic!("the queue takes {what}: {e:?}"));
+        let row = knobas_core::write_queue::get(&state.pool, sent.id)
+            .await
+            .expect("the queue row is readable")
+            .expect("the queue row exists");
+        assert_eq!(row.state, WriteState::Sent, "{what}: {:?}", row.detail);
+        let key = remote_id(&state.pool, sent.id).await;
+        let id: i64 = key
+            .strip_prefix("build:")
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("{what}'s receipt names a build: {key:?}"));
+        queued.ids.lock().unwrap().push(id);
+
+        let shot = snapshots.of(sent.id).await;
+        assert_eq!(
+            shot.ended.entity_id,
+            format!("{TEAMCITY}:{key}"),
+            "{what} is refreshed by the build its receipt names"
+        );
+        assert_eq!(shot.ended.ended, RefreshEnd::Refreshed, "{what}");
+        assert_eq!(
+            shot.runs_since_the_write, 0,
+            "{what}: a run started before the refresh ended"
+        );
+        let payload = shot
+            .payload
+            .unwrap_or_else(|| panic!("{what}'s build is mirrored"));
+        let theirs = env
+            .get(&format!(
+                "app/rest/builds/id:{id}?fields=id,state,buildTypeId,branchName,queuedDate"
+            ))
+            .await;
+        println!("SEEDED {what}: mirrored {payload}; TeamCity holds {theirs}");
+        assert_eq!(payload["id"], json!(id), "{what}");
+        assert_eq!(payload["state"], "queued", "{what}: {payload}");
+        assert_eq!(payload["state"], theirs["state"], "{what}");
+        assert_eq!(payload["buildTypeId"], json!(config), "{what}");
+        assert_eq!(payload["branchName"], theirs["branchName"], "{what}");
+        assert_eq!(payload["queuedDate"], theirs["queuedDate"], "{what}");
+    }
+
+    state.scheduler.shutdown().await;
+    drop(queued);
+    drop(parked);
 }
