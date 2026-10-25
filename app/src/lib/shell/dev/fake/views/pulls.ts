@@ -8,7 +8,8 @@
  * PR #142 is prototype-6's: its three checks (each linking the run the corpus
  * holds, so `resolve_url` opens it), one approval of two, the job's three
  * commits and Jonas's question with Mara's answer. Every other pull request
- * in the corpus draws a plain open (or settled) one with one passing check.
+ * in the corpus draws a plain open (or settled) one with one passing check;
+ * fx-rates#88 is read by a token that cannot read its comments (#2065).
  *
  * #842 and #843: *Files* answers PR #142's three files when it is asked for,
  * Jonas's thread on the jitter line and an outdated one of Priya's; *Merge…*
@@ -232,6 +233,38 @@ function view142(): SourceView {
   };
 }
 
+/**
+ * PR #88 of fx-rates, read by a token with `read:repository` and `read:user`
+ * only (#2065): Gitea's view opens *Conversation* on its line saying the
+ * comments cannot be read (`view::muted_line`, #2042), jonas's approval
+ * under it, and draws every write disabled with the scope it lacks (#2043).
+ */
+const READ_ONLY_PR = "mock:fx-rates#88";
+
+const UNREAD_COMMENTS: ViewBlock = {
+  type: "entities",
+  title: null,
+  rows: [
+    {
+      entity_id: null,
+      title: "This token cannot read this pull request's comments: it lacks the read:issue scope",
+      meta: null,
+      tone: "muted",
+      chip: null,
+      url: null,
+    },
+  ],
+};
+
+/** Gitea's refusal for a write this token cannot make: the category's write scope (`grants.rs`). */
+function refusedOnReadOnly(list: ViewAction[]): ViewAction[] {
+  const issue = new Set(["comment", "source_action"]);
+  return list.map((one) => ({
+    ...one,
+    disabled: `This token cannot write: it lacks the ${issue.has(one.write_op) ? "write:issue" : "write:repository"} scope`,
+  }));
+}
+
 /** Any other pull request in the corpus: open or settled, one passing check, its title as its description. */
 function plainView(entityId: string): SourceView | undefined {
   const row = CORPUS.find((candidate) => candidate.entity_id === entityId && candidate.kind === "pr");
@@ -242,6 +275,8 @@ function plainView(entityId: string): SourceView | undefined {
   const state = merged ? fact("State", "merged", "ok") : open ? fact("State", "open", "info") : fact("State", "closed", "muted");
   const author = row.author ?? "someone";
   const description = `${row.title}.`;
+  const readOnly = entityId === READ_ONLY_PR;
+  const drawn = actions(row.title, description, author === "mara", open, false, null, Number(entityId.split("#")[1] ?? 0));
   return {
     sections: [
       section("overview", "Overview", [
@@ -264,9 +299,16 @@ function plainView(entityId: string): SourceView | undefined {
         [{ type: "entities", title: null, rows: [{ entity_id: null, title: row.title, meta: author, tone: null, chip: "5d77e1a0c3", url: null }] }],
         1,
       ),
-      section("conversation", "Conversation", [], 0),
+      readOnly
+        ? section(
+            "conversation",
+            "Conversation",
+            [UNREAD_COMMENTS, { type: "facts", facts: [fact("jonas", "2026-08-22 09:40"), fact("Review", "approved", "ok")] }],
+            1,
+          )
+        : section("conversation", "Conversation", [], 0),
     ],
-    actions: actions(row.title, description, author === "mara", open, false, null, Number(entityId.split("#")[1] ?? 0)),
+    actions: readOnly ? refusedOnReadOnly(drawn) : drawn,
   };
 }
 
