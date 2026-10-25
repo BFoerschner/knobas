@@ -21,7 +21,7 @@
 # branch is gone) ends in the refusal, with Gitea's answer in it.
 
 # gitea_require_open_pr <repo> <index> <title> -- needs the seed's `api`,
-# `die`, `say`, `ORG` and `ADMIN`. Returns 0 when the pull request is open or
+# `expect`, `die`, `say`, `ORG` and `ADMIN`. Returns 0 when the pull request is open or
 # reopens, dies with the remedy otherwise.
 gitea_require_open_pr() {
   api "$ADMIN" GET "/repos/$ORG/$1/pulls/$2"
