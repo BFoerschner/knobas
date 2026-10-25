@@ -177,3 +177,25 @@ test("an ask that fails is no verdict, and is asked again once the hits change (
     ["c:4", "c:5"],
   ]);
 });
+
+test("an answer that lands after the picker is gone announces nothing (#2063)", async () => {
+  let answer: (refused: never[]) => void = () => {};
+  const announced: unknown[] = [];
+  view = mount(PublishTargetPicker, {
+    target,
+    props: {
+      sources: [{ id: "c", name: "Confluence" }],
+      value: { source_id: "c", parent: "c:9" },
+      search,
+      refusedWrites: () => new Promise((resolve) => (answer = resolve)),
+      onchange: (next: unknown) => announced.push(next),
+    },
+  });
+  flushSync();
+  await turns();
+  unmount(view);
+  view = null;
+  answer([]);
+  await turns();
+  expect(announced).toEqual([]);
+});
