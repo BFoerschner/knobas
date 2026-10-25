@@ -34,6 +34,13 @@
   `refused_writes` is asked about the ticket's *Comment* and its move; a
   refused one is drawn disabled with the reason (the status select, Start
   work's move, the comment box's *Comment*) and queues nothing.
+
+  **Refresh (#2134, #2107's pieces).** The ticket's *Refresh* or *Sync now*
+  ends the tab bar, after Connections, so the Map tab, which hides the card,
+  keeps it; its failure line and the withdrawn and turned-off banners sit
+  under the tab bar on every tab. A refresh reads the ticket, its thread, its
+  week and its reach again through the reader (`reread`), over what the page
+  drew, and the echoes settle on those reads as on any other.
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
@@ -98,6 +105,9 @@
   import TfLinkTo from "./TfLinkTo.svelte";
   import TfSection from "./TfSection.svelte";
   import TfStartWork from "./TfStartWork.svelte";
+  import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfDetailRefresh from "../TfDetailRefresh.svelte";
+  import { createDetailRefresh } from "../refresh.svelte";
   import { ago } from "../../shell/time";
 
   let {
@@ -169,6 +179,8 @@
   const health = $derived(reader.health);
   const sync = $derived(reader.sync);
   const repos = $derived(reader.repos);
+  /** The ticket's *Refresh* or *Sync now* (#2134). */
+  const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
   /** The ticket's writes its source's credential cannot make (#2052), asked once per job opened. */
   let refused = $state<RefusedWrite[]>([]);
@@ -201,7 +213,10 @@
     linking = false;
     // Only the address re-opens a job: what the reader reads before its first
     // await is not a reason to read again.
-    untrack(() => reader.open(wanted));
+    untrack(() => {
+      refresh.reset();
+      reader.open(wanted);
+    });
   });
 
   /** *Hide here* (R-7.5): one member off this ticket only, with *Undo*. The set is not touched. */
@@ -529,7 +544,9 @@
             <span class="tf-p">{proposals.length} proposed</span>{/if}
           <kbd>L</kbd>
         </button>
+        <TfDetailRefresh {detail} {refresh} reread={() => reader.reread()} />
       </div>
+      <TfDetailBanners {detail} failed={refresh.failed} />
       <div class="tf-wbody">
         {#if current.id === "work" && inherited !== null}
           <!-- R-4.4: hidden while the Conversation tab is open; the Map draws Dependencies alone, as prototype-6 does. -->

@@ -130,6 +130,14 @@ export interface JobReader {
   rereadThread(): void;
   /** After a clone finished: the checkout line's repository read again, while it has no clone. */
   rereadCheckout(): void;
+  /**
+   * After a *Refresh* (#2134): the ticket and its transitions, its week, its
+   * thread and its reach with the sections, each over what the page drew as
+   * `rereadDetail`, `rereadThread` and `rereadReach` read them (a failed
+   * ticket or thread read keeps what it drew). Settles once those reads have
+   * answered. Nothing is promoted again.
+   */
+  reread(): Promise<void>;
   /** Drops every answer still out. */
   close(): void;
 }
@@ -196,7 +204,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       if (mine !== token) return;
       void readProposals(context.id, id, mine);
       void readReach(id, mine);
-      readSections(id, mine);
+      void readSections(id, mine);
       if (offersStartWork(found.status, isMine(found, listed))) void readRepos(mine);
       await readCode(id, mine);
     } catch (cause) {
@@ -255,20 +263,22 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     }
   }
 
-  /** Builds, Pages and Monitors, each through the reach. */
-  function readSections(id: string, mine: number) {
+  /** Builds, Pages and Monitors, each through the reach; settles once all three have answered. */
+  async function readSections(id: string, mine: number) {
     // Builds asks for the CI role and the mirror answers its run kinds
     // (#1295); the adapters' claims only route a run to its page (#1256).
     void registry.load();
-    void readRows(id, SECTION_READS.builds, mine).then((rows) => {
-      if (mine === token && rows) state.builds = rows;
-    });
-    void readRows(id, SECTION_READS.pages, mine).then((rows) => {
-      if (mine === token && rows) state.pages = rows;
-    });
-    void readRows(id, SECTION_READS.monitors, mine).then((rows) => {
-      if (mine === token && rows) state.monitors = rows;
-    });
+    await Promise.all([
+      readRows(id, SECTION_READS.builds, mine).then((rows) => {
+        if (mine === token && rows) state.builds = rows;
+      }),
+      readRows(id, SECTION_READS.pages, mine).then((rows) => {
+        if (mine === token && rows) state.pages = rows;
+      }),
+      readRows(id, SECTION_READS.monitors, mine).then((rows) => {
+        if (mine === token && rows) state.monitors = rows;
+      }),
+    ]);
   }
 
   /** What the Builds section's warning reads: every source's credential and last run. */
@@ -330,6 +340,38 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       // A tray that cannot be read proposes nothing; the button says connected only.
       if (mine === token) state.proposals = [];
     }
+  }
+
+  /** The ticket again, over what was drawn; a failed read keeps it. */
+  async function readTicketAgain(id: string, mine: number) {
+    try {
+      const again = await ports.getEntity(id);
+      if (mine === token) state.detail = again;
+    } catch {
+      // The card keeps what it has; the next open reads it again.
+    }
+  }
+
+  /** The thread again, keeping the visit it answered; a failed read keeps it. */
+  async function readThreadAgain(id: string, mine: number) {
+    try {
+      const again = await ports.entityThread(id);
+      if (mine === token) state.thread = again;
+    } catch {
+      // The thread keeps what it has; the next open reads it again.
+    }
+  }
+
+  /** The link sets, the reach and every section again, the checkout line kept; settles once all have answered. */
+  async function readReachAgain(id: string, mine: number) {
+    await Promise.allSettled([
+      readInherited(id, mine),
+      readReach(id, mine),
+      readSections(id, mine),
+      readRows(id, SECTION_READS.code, mine).then((rows) => {
+        if (mine === token && rows) state.code = rows;
+      }),
+    ]);
   }
 
   async function readCode(id: string, mine: number) {
@@ -440,37 +482,30 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     },
     rereadReach(id) {
       if (state.detail?.row.entity_id !== id) return;
-      const mine = token;
-      void readInherited(id, mine);
-      void readReach(id, mine);
-      readSections(id, mine);
-      void readRows(id, SECTION_READS.code, mine).then((rows) => {
-        if (mine === token && rows) state.code = rows;
-      });
+      void readReachAgain(id, token);
     },
     rereadDetail(id = state.detail?.row.entity_id) {
       if (id === undefined || state.detail?.row.entity_id !== id) return;
       const mine = token;
-      ports.getEntity(id).then(
-        (again) => {
-          if (mine === token) state.detail = again;
-        },
-        // The card keeps what it has; the next open reads it again.
-        () => {},
-      );
+      void readTicketAgain(id, mine);
       void readWorkflow(id, mine);
     },
     rereadThread() {
       const id = state.detail?.row.entity_id;
       if (id === undefined) return;
+      void readThreadAgain(id, token);
+    },
+    async reread() {
+      const id = state.detail?.row.entity_id;
+      if (id === undefined) return;
       const mine = token;
-      ports.entityThread(id).then(
-        (again) => {
-          if (mine === token) state.thread = again;
-        },
-        // The thread keeps what it has; the next open reads it again.
-        () => {},
-      );
+      await Promise.all([
+        readTicketAgain(id, mine),
+        readWorkflow(id, mine),
+        readWeek(id, mine),
+        readThreadAgain(id, mine),
+        readReachAgain(id, mine),
+      ]);
     },
     rereadCheckout() {
       const of = state.checkoutOf;

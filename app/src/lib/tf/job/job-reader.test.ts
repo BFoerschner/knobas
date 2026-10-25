@@ -66,6 +66,7 @@ function fakes(over: { failing?: string[] } = {}) {
     listEntities: async (filter: EntityFilter) => {
       asked.push(`listEntities ${filter.role} ${filter.reach}`);
       await wait(filter.reach);
+      await wait(`role ${filter.role}`);
       if (over.failing?.includes(filter.role ?? "")) throw { code: "unreachable", message: "down", source_id: null };
       return { rows: [row(filter.role, filter.reach)], total: 1, tally: null, groups: null };
     },
@@ -126,7 +127,7 @@ function fakes(over: { failing?: string[] } = {}) {
       release();
     };
   }
-  return { reader, asked, hold, status };
+  return { reader, asked, hold, status, holdRole: (role: string) => hold(`role ${role}`) };
 }
 
 /** What the reader holds about which ticket, one line a slot. */
@@ -273,4 +274,59 @@ test("a job closed drops every answer still out", async () => {
   await flush();
   expect(reader.detail).toBeUndefined();
   expect(reader.builds).toBeNull();
+});
+
+test("a refresh's reread reads the ticket, its moves, week, thread, link sets, reach and sections, and never visits or promotes again (#2134)", async () => {
+  const { reader, asked, status } = fakes();
+  reader.open("jira:B");
+  await flush();
+  asked.length = 0;
+
+  status.set("jira:B", "In Review");
+  await reader.reread();
+  expect(asked.sort()).toEqual(
+    [
+      "getEntity jira:B",
+      "reachableTransitions jira:B",
+      "weekTimesheet",
+      "entityThread jira:B",
+      "jobLinkSets jira:B",
+      "jobReach jira:B",
+      "listEntities ci jira:B",
+      "listEntities code-host jira:B",
+      "listEntities monitoring jira:B",
+      "listEntities wiki jira:B",
+    ].sort(),
+  );
+  expect(reader.detail?.status).toBe("In Review");
+  expect(slots(reader)).toEqual({ ...B, transitions: ["Done"] });
+});
+
+test("a refresh's reread still out when another job opens lands nothing of the first (#2134)", async () => {
+  const { reader, hold } = fakes();
+  reader.open("jira:A");
+  await flush();
+  const releaseA = hold("jira:A");
+  const out = reader.reread();
+  reader.open("jira:B");
+  await flush();
+  releaseA();
+  await out;
+  await flush();
+  expect(slots(reader)).toEqual(B);
+});
+
+test("a refresh's reread settles only once every section has answered (#2134)", async () => {
+  const { reader, holdRole } = fakes();
+  reader.open("jira:B");
+  await flush();
+  const releaseBuilds = holdRole("ci");
+  let settled = false;
+  void reader.reread().then(() => (settled = true));
+  await flush();
+  expect(settled).toBe(false);
+  releaseBuilds();
+  await flush();
+  expect(settled).toBe(true);
+  expect(slots(reader)).toEqual(B);
 });

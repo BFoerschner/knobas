@@ -6,6 +6,7 @@
  */
 import { getAsset, type AssetDetail } from "../../ipc/assets";
 import type { EchoListen } from "../queued.svelte";
+import type { DetailRefreshPorts } from "../refresh.svelte";
 import {
   createLink,
   entityCheckout,
@@ -87,6 +88,8 @@ export interface JobPorts {
   refusedWrites?: RefusedWritesPort;
   /** Hears `item:refreshed` and `sync:state`, which read the job again for its echoes (#2103); the bridge's when left out. */
   listen?: EchoListen;
+  /** The ticket's *Refresh* or *Sync now* (#2134); the bridge's when left out. */
+  refresh?: DetailRefreshPorts;
 }
 
 /**
