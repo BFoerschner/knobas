@@ -174,7 +174,7 @@
   padding: 0 5px; margin-left: 4px;
 }
 /* Below 1240px the outline is a fold between the actions row and the first section, closed (#2081). */
-.tf-rd-fold { margin-top: 16px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); font-family: var(--sans); }
+.tf-rd-fold { margin: 16px 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); font-family: var(--sans); }
 .tf-rd-fold > summary {
   list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 7px 12px;
   font-size: var(--t-sm); font-weight: 600;
