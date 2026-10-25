@@ -22,14 +22,15 @@ export type { RefusedWrite, WriteAsk };
 /** The read, injectable so a component test needs no Tauri bridge. */
 export type RefusedWritesPort = (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
 
+/** One ask as a string, to tell asks apart by entity and op. */
+const keyOf = (ask: WriteAsk) => JSON.stringify([ask.entity, ask.op]);
+
 /**
  * `asks` sent once each, and the answer; a rejection answers nothing. No
  * ask sends nothing.
  */
 export async function askRefused(asks: readonly WriteAsk[], read?: RefusedWritesPort): Promise<RefusedWrite[]> {
-  const once = asks.filter(
-    (ask, i) => asks.findIndex((other) => other.entity === ask.entity && other.op === ask.op) === i,
-  );
+  const once = asks.filter((ask, i) => asks.findIndex((other) => keyOf(other) === keyOf(ask)) === i);
   if (once.length === 0) return [];
   try {
     // The bridge is reached inside the `try`, so a shell without it answers nothing too.
@@ -61,6 +62,62 @@ export function askInto(
   });
   return () => {
     live = false;
+  };
+}
+
+/** How long a typed-for set stands still before {@link createSettledAsker} asks about it (#2063). */
+export const SETTLE_MS = 250;
+
+/**
+ * Asks for a surface whose drawn set changes as the reader types, such as
+ * the publish-target picker's hits (#2063). {@link askInto} sends one round
+ * per set, and a round is one source read per entity, so a set that changes
+ * per keystroke would ask per keystroke. Here each ask is sent once for the
+ * asker's life, and every answer is handed to `land`, however late, since
+ * it stays true for the entities it names. One that is rejected is
+ * forgotten, so a later `ask` sends it again.
+ *
+ * `ask({ now, settled }, read)` sends `now` at once and `settled` once
+ * {@link SETTLE_MS} pass without another `ask`, and returns the cleanup that
+ * cancels the wait, for an `$effect`. `stop()`, for the surface's teardown,
+ * lands nothing more.
+ */
+export function createSettledAsker(land: (answer: RefusedWrite[]) => void) {
+  const asked = new Set<string>();
+  let stopped = false;
+  const send = (asks: readonly WriteAsk[], read: RefusedWritesPort | undefined) => {
+    const fresh = asks.filter((ask) => {
+      const key = keyOf(ask);
+      if (asked.has(key)) return false;
+      asked.add(key);
+      return true;
+    });
+    if (fresh.length === 0) return;
+    // `then` reaches the bridge, so a shell without it is a rejection too.
+    void Promise.resolve()
+      .then(() => (read ?? refusedWrites)(fresh))
+      .then(
+        (answer) => {
+          if (!stopped) land(answer);
+        },
+        () => {
+          for (const ask of fresh) asked.delete(keyOf(ask));
+        },
+      );
+  };
+  return {
+    ask(
+      { now, settled }: { now: readonly WriteAsk[]; settled: readonly WriteAsk[] },
+      read: RefusedWritesPort | undefined,
+    ): () => void {
+      send(now, read);
+      if (settled.every((ask) => asked.has(keyOf(ask)))) return () => {};
+      const wait = setTimeout(() => send(settled, read), SETTLE_MS);
+      return () => clearTimeout(wait);
+    },
+    stop() {
+      stopped = true;
+    },
   };
 }
 

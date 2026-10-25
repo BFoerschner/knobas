@@ -5,9 +5,10 @@
  * here it is what the section draws and what each control sends.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { CaptureShortcut } from "../../ipc/entity";
+import { SETTLE_MS } from "../../shell/refused-writes";
 import { toasts } from "../../shell/toasts.svelte";
 import type { NotesPorts } from "./notes-ports";
 import TfNotesSection from "./TfNotesSection.svelte";
@@ -269,8 +270,15 @@ async function settle() {
 async function pickAndMove() {
   const find = target.querySelector<HTMLInputElement>('input[aria-label="Parent page"]')!;
   find.value = "archive";
-  find.dispatchEvent(new Event("input", { bubbles: true }));
-  await settle();
+  // The picker asks about its hits once the search stands still (#2063).
+  vi.useFakeTimers();
+  try {
+    find.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+  } finally {
+    vi.useRealTimers();
+  }
   button("Notes archive").click();
   flushSync();
   button("Move 37 notes").click();
