@@ -2815,6 +2815,7 @@ knobas-source-gitea	lib/knobas_source_gitea	config::tests::an_unknown_field_is_r
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::the_form_schema_and_the_parser_describe_the_same_fields
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::the_schema_declares_its_clone_urls
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::the_schema_defaults_are_the_parsers_defaults
+knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::a_commit_catch_up_from_before_its_page_still_parses
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::a_cursor_round_trips
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::a_fresh_cursor_records_when_the_repository_set_was_seen
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::a_refused_allowlist_entry_is_found_whatever_case_the_user_typed
@@ -2976,8 +2977,11 @@ knobas-source-gitea	test/it	sync_moving::a_catch_up_starts_on_the_page_the_budge
 knobas-source-gitea	test/it	sync_moving::a_catch_up_whose_page_lands_below_unread_records_starts_from_the_first_page
 knobas-source-gitea	test/it	sync_moving::a_catch_up_whose_page_moved_starts_from_the_first_page
 knobas-source-gitea	test/it	sync_moving::a_commit_catch_up_finishes_every_branch_and_then_reads_what_moved
+knobas-source-gitea	test/it	sync_moving::a_commit_catch_up_over_a_server_that_ignores_until_starts_on_the_page_it_stopped_on
 knobas-source-gitea	test/it	sync_moving::a_commit_catch_up_over_a_server_that_repeats_its_first_page_stops_at_the_cap
 knobas-source-gitea	test/it	sync_moving::a_commit_catch_up_reads_past_a_page_cap_of_commits_the_server_did_not_bound
+knobas-source-gitea	test/it	sync_moving::a_commit_catch_up_whose_page_starts_below_its_window_reads_on_from_page_two
+knobas-source-gitea	test/it	sync_moving::a_commit_catch_up_with_no_page_reads_from_the_branch_head
 knobas-source-gitea	test/it	sync_moving::a_deletion_during_a_full_sync_branch_walk_hides_no_other_branch
 knobas-source-gitea	test/it	sync_moving::a_deletion_that_empties_page_two_hides_no_branch
 knobas-source-gitea	test/it	sync_moving::a_full_sync_tombstones_no_branch_it_never_emitted
@@ -2987,6 +2991,7 @@ knobas-source-gitea	test/it	sync_moving::a_push_during_the_repository_walk_hides
 knobas-source-gitea	test/it	sync_moving::a_repository_deleted_during_the_listing_hides_no_other
 knobas-source-gitea	test/it	sync_moving::a_repository_emptied_during_its_branch_walk_still_ends_its_walk
 knobas-source-gitea	test/it	sync_moving::a_repository_met_on_two_pages_is_walked_once
+knobas-source-gitea	test/it	sync_moving::an_incremental_commit_walk_over_a_server_that_ignores_since_ends_on_the_page_below_its_watermark
 knobas-source-gitea	test/it	sync_moving::an_incremental_commit_walk_the_budget_stopped_is_continued_by_the_next
 knobas-source-gitea	test/it	sync_moving::an_incremental_run_the_budget_stopped_is_continued_by_the_next
 knobas-source-gitea	test/it	sync_moving::the_run_that_closes_a_catch_up_also_reads_what_changed_since
