@@ -250,7 +250,10 @@ mod tests {
     #[test]
     fn can_refresh_is_the_adapters_declaration() {
         let templates = registry().templates();
-        assert!(refreshes(&registry(), Some("mock")), "the mock reads one item");
+        assert!(
+            refreshes(&registry(), Some("mock")),
+            "the mock reads one item"
+        );
         let quiet = templates.iter().find(|template| !template.refreshes());
         if let Some(quiet) = quiet {
             assert!(

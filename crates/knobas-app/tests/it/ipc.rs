@@ -1732,8 +1732,20 @@ async fn refresh_entity_answers_each_outcome_and_the_detail_says_it_can() {
         .await
         .expect("a pool onto this test's own database");
     mock_source(&pool, "mrf", serde_json::json!({}), true).await;
-    mock_source(&pool, "mrfno", serde_json::json!({ "refresh": false }), true).await;
-    mock_source(&pool, "mrfdown", serde_json::json!({ "fault": "unreachable" }), true).await;
+    mock_source(
+        &pool,
+        "mrfno",
+        serde_json::json!({ "refresh": false }),
+        true,
+    )
+    .await;
+    mock_source(
+        &pool,
+        "mrfdown",
+        serde_json::json!({ "fault": "unreachable" }),
+        true,
+    )
+    .await;
     mock_source(&pool, "mrfoff", serde_json::json!({}), false).await;
 
     let app = tauri::test::mock_builder()
@@ -1779,7 +1791,9 @@ async fn refresh_entity_answers_each_outcome_and_the_detail_says_it_can() {
     }
     let bad = refresh("not an id").await.expect_err("a bad id is refused");
     assert_eq!(bad.code, knobas_app::IpcErrorCode::Invalid, "{bad:?}");
-    let ghost = refresh("ghost:PAY-1").await.expect_err("an unconfigured namespace");
+    let ghost = refresh("ghost:PAY-1")
+        .await
+        .expect_err("an unconfigured namespace");
     assert_eq!(ghost.code, knobas_app::IpcErrorCode::NotFound, "{ghost:?}");
 
     let detail =

@@ -104,6 +104,7 @@ knobas-app	lib/knobas_app	commands::assets::tests::the_relation_a_source_rooms_t
 knobas-app	lib/knobas_app	commands::assets::tests::the_relations_the_panel_walks_are_in_the_frontend_vocabulary
 knobas-app	lib/knobas_app	commands::backup::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::entity::detail::tests::a_declared_kind_resolves_to_the_adapters_own_metadata
+knobas-app	lib/knobas_app	commands::entity::detail::tests::can_refresh_is_the_adapters_declaration
 knobas-app	lib/knobas_app	commands::entity::detail::tests::nothing_declared_resolves_to_none_rather_than_to_a_guess
 knobas-app	lib/knobas_app	commands::entity::detail::tests::two_adapters_declaring_one_kind_do_not_fight
 knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_role_the_mirror_sends
@@ -858,6 +859,7 @@ knobas-app	test/it	ipc::demo_load_passes_the_guard_in_the_demo_profile
 knobas-app	test/it	ipc::every_sources_command_is_registered_and_reachable
 knobas-app	test/it	ipc::frontend_ready_replays_the_current_state
 knobas-app	test/it	ipc::list_adapters_serves_the_lifecycles_registry
+knobas-app	test/it	ipc::refresh_entity_answers_each_outcome_and_the_detail_says_it_can
 knobas-app	test/it	ipc::sync_now_answers_before_the_run_and_reports_it_on_the_event
 knobas-app	test/it	ipc::sync_role_runs_each_enabled_filler_and_joins_a_run_in_flight
 knobas-app	test/it	ipc::the_optional_channel_is_not_a_decodable_argument
