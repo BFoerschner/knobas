@@ -531,7 +531,9 @@ pub(crate) fn send_in_background(state: &crate::sources::SourcesState, source_id
 }
 
 /// [`send_in_background`], and then, once the mirror has been re-read for the
-/// write, `then` -- in the same spawned task (#779).
+/// write, `then` -- in the same spawned task (#779). The re-read is
+/// [`sync_after_write`]'s: the landed write's own follow-up, waited out, so
+/// its refresh is not queued behind a run this task started (#2115).
 ///
 /// For the callers that go looking for what their write made: the standup
 /// protocol's page and an action item's ticket have an address only once a
@@ -921,6 +923,78 @@ pub(crate) struct FollowLandings {
     /// The scheduler these events belong to, set once it has started. Weak,
     /// since the scheduler holds its events.
     scheduler_slot: SchedulerSlot,
+    /// The landed writes whose [`after_landing`] has not ended, counted per
+    /// source: what [`sync_after_write`] waits out (#2115).
+    following: Following,
+}
+
+/// How many landed writes of each source are still being followed: counted up
+/// by [`FollowLandings::write_landed`] **inside the flush that sent the
+/// write**, before the flush returns, and down when that write's
+/// [`after_landing`] ends (or never starts, once the quit has begun). So a
+/// caller whose send has just returned finds its own write counted, with no
+/// moment between the two in which it is not.
+#[derive(Clone, Default)]
+struct Following(
+    std::sync::Arc<tokio::sync::watch::Sender<std::collections::HashMap<String, usize>>>,
+);
+
+impl Following {
+    /// The counter of the scheduler's [`FollowLandings`], or `None` for a
+    /// scheduler not started by [`crate::sources::start_scheduler`], which
+    /// follows nothing.
+    fn of(scheduler: &Scheduler) -> Option<Following> {
+        scheduler
+            .deps()
+            .events
+            .as_any()?
+            .downcast_ref::<FollowLandings>()
+            .map(|events| events.following.clone())
+    }
+
+    /// Count one landed write of `source` as followed until the answer drops.
+    fn enter(&self, source: &str) -> Followed {
+        self.0
+            .send_modify(|counts| *counts.entry(source.to_owned()).or_default() += 1);
+        Followed {
+            following: self.clone(),
+            source: source.to_owned(),
+        }
+    }
+
+    /// Wait until no landed write of `source` is being followed. Answers
+    /// whether one was when this asked.
+    async fn wait_out(&self, source: &str) -> bool {
+        let mut counts = self.0.subscribe();
+        let in_flight = |counts: &std::collections::HashMap<String, usize>| {
+            counts.get(source).is_some_and(|&n| n > 0)
+        };
+        if !in_flight(&counts.borrow_and_update()) {
+            return false;
+        }
+        // This holds a sender (`self`), so the wait ends only on the count.
+        let _ = counts.wait_for(|counts| !in_flight(counts)).await;
+        true
+    }
+}
+
+/// One landed write being followed; counted down when dropped.
+struct Followed {
+    following: Following,
+    source: String,
+}
+
+impl Drop for Followed {
+    fn drop(&mut self) {
+        self.following.0.send_modify(|counts| {
+            if let Some(n) = counts.get_mut(&self.source) {
+                *n -= 1;
+                if *n == 0 {
+                    counts.remove(&self.source);
+                }
+            }
+        });
+    }
 }
 
 /// Where [`FollowLandings`] finds its scheduler once it has started.
@@ -939,6 +1013,7 @@ impl FollowLandings {
             FollowLandings {
                 inner,
                 scheduler_slot,
+                following: Following::default(),
             },
             slot,
         )
@@ -958,11 +1033,15 @@ impl knobas_sync::scheduler::SyncEvents for FollowLandings {
     fn write_landed(&self, write: &QueuedWrite) {
         if let Some(scheduler) = self.scheduler_slot.get().and_then(|weak| weak.upgrade()) {
             let (task, landed) = (scheduler.clone(), write.clone());
-            // Refused once the quit has begun: the next start's scheduled
+            // Counted before the flush that sent it returns, and until the
+            // follow-up ends. Refused once the quit has begun, which drops
+            // the task and the count with it: the next start's scheduled
             // sync reads the source.
-            let spawned = scheduler
-                .background()
-                .spawn(async move { after_landing(&task, &landed).await });
+            let followed = self.following.enter(&write.source_id);
+            let spawned = scheduler.background().spawn(async move {
+                after_landing(&task, &landed).await;
+                drop(followed);
+            });
             if !spawned {
                 tracing::info!(
                     write_id = write.id,
@@ -974,6 +1053,9 @@ impl knobas_sync::scheduler::SyncEvents for FollowLandings {
     }
     fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
         self.inner.refresh_ended(ended);
+    }
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
     }
 }
 
@@ -1065,16 +1147,24 @@ fn check(existing: &knobas_core::write_queue::QueuedWrite, op: &WriteOp) -> Resu
     Ok(())
 }
 
-/// Sync a source and **wait for a run that can see what was just written**
-/// (issue #289).
+/// **Wait until the mirror can hold what was just written** (issue #289): for
+/// a caller about to *look for what its write created*, once its send has
+/// returned.
 ///
-/// [`after_landing`] asks for the same run after every write that lands, on a
-/// task of its own that nobody waits on. A caller that is about to *look for
-/// what its write created* has to wait for it itself, and
+/// **The landed write's own follow-up first** (#2115). Every write that lands
+/// is followed by [`after_landing`]: a refresh of its item, then a run of its
+/// source that began after it. Where a landed write of the source is still
+/// being followed, this waits for that to end ([`Following`]) and starts
+/// nothing: a run of its own beside the follow-up could take the run lock
+/// first, and the refresh, which never overlaps a run (ADR-0031), would wait
+/// that whole run out, its item and links on arrival with it. The write is
+/// counted inside the flush that sent it, so a caller whose send landed it
+/// always finds it here.
+///
+/// **Otherwise a run of its own**, waited for: the write's follow-up had
+/// already ended, the write did not land, or the scheduler follows nothing.
 /// [`Scheduler::sync_after_write`](knobas_sync::scheduler::Scheduler::sync_after_write)
 /// is where that lives -- including the reason one wait is not enough (#358).
-/// The two asking at once cost what one caller after a run in flight does:
-/// the run one of them started, and one more.
 ///
 /// A failure to trigger, or to wait, is **not** an error: it leaves a mirror
 /// that may be behind, which every caller of this already has to handle --
@@ -1083,6 +1173,11 @@ fn check(existing: &knobas_core::write_queue::QueuedWrite, op: &WriteOp) -> Resu
 /// reaches the caller, and a warning is what makes a source that could not be
 /// re-read visible to whoever is reading the log.
 pub(crate) async fn sync_after_write(state: &crate::sources::SourcesState, source_id: &str) {
+    if let Some(following) = Following::of(&state.scheduler)
+        && following.wait_out(source_id).await
+    {
+        return;
+    }
     if let Err(error) = state.scheduler.sync_after_write(source_id).await {
         tracing::warn!(
             source = source_id,
