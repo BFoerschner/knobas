@@ -311,7 +311,7 @@ test("a sync status heard takes its source's place, or joins the list", () => {
 
 test("a run queued before the page's read arrives is based on the pipeline's own recent runs", () => {
   const follower = { follow: () => () => {} };
-  const pipeline = { entity_id: "teamcity:buildType:X", name: "X", recent: [run(7, "ok"), run(6, "ok")] };
+  const pipeline = { entity_id: "teamcity:buildType:X", name: "X", source_id: "teamcity", recent: [run(7, "ok"), run(6, "ok")] };
   echoRun(pipeline, { id: 3 }, null, null, follower);
   echoRun(pipeline, { id: 4 }, "feature/x", [run(8, "ok")], follower);
   expect(echoesOn("teamcity:buildType:X", QUEUED_RUN)).toMatchObject([

@@ -433,9 +433,9 @@
    * one queued; a secret's, which no read draws, by a read asked once the
    * change was sent (`sentBefore`).
    */
-  function paramLanded(answer: PipelineSettings, sentBefore: ReadonlySet<number>): (echo: Echo) => boolean {
+  function paramLanded(answer: PipelineSettings | null, sentBefore: ReadonlySet<number>): (echo: Echo) => boolean {
     return (echo) => {
-      const setting = answer.parameters.find((one) => paramKind(one.name) === echo.kind);
+      const setting = answer?.parameters.find((one) => paramKind(one.name) === echo.kind);
       if (setting === undefined) return false;
       return setting.secret ? echo.write !== null && sentBefore.has(echo.write) : setting.value === echo.text;
     };

@@ -18,15 +18,6 @@ import { createLayers } from "../tf/layers.svelte";
 import { createApps } from "../tf/openin/apps.svelte";
 import { createClones } from "../tf/openin/clones.svelte";
 import { askAgain, forgetEchoes, echoWrite, echoesOn, takeAgain } from "../tf/queued.svelte";
-import {
-  forgetEchoes as forgetRepoEchoes,
-  isDeleteQueued,
-  madeNotListed,
-  markCommit,
-  markDeleted,
-  markMade,
-  queuedCommit,
-} from "../tf/repo/queued.svelte";
 import { createDecisions } from "../tf/review/decisions.svelte";
 import { createTheme } from "../tf/theme.svelte";
 import { createFollower, writeFollower } from "./follow-write";
@@ -334,16 +325,6 @@ test("forgetEchoes stops the write follow an echo started", async () => {
   await flush();
   forgetEchoes();
   expect(unlisten).toHaveBeenCalledTimes(1);
-});
-
-test("the repo's queued names and commits reset through forgetEchoes", () => {
-  markMade("r", "branch-a");
-  markDeleted("r", "branch-b");
-  markCommit("r", "main", "a.md", { message: "m", base: "sha" });
-  forgetRepoEchoes();
-  expect(madeNotListed("r", [])).toEqual([]);
-  expect(isDeleteQueued("r", "branch-b")).toBe(false);
-  expect(queuedCommit("r", "main", "a.md", "sha")).toBeNull();
 });
 
 test("decisions.reset cancels a held write and forgets the verdicts", async () => {

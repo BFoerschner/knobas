@@ -58,9 +58,6 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/queued.svelte.ts#echoes": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#asked": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#follows": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
-  "tf/repo/queued.svelte.ts#commits": async () => (await import("../tf/repo/queued.svelte")).forgetEchoes(),
-  "tf/repo/queued.svelte.ts#deleted": async () => (await import("../tf/repo/queued.svelte")).forgetEchoes(),
-  "tf/repo/queued.svelte.ts#made": async () => (await import("../tf/repo/queued.svelte")).forgetEchoes(),
   "tf/review/decisions.svelte.ts#decisions": async () => (await import("../tf/review/decisions.svelte")).decisions.reset(),
   "tf/theme.svelte.ts#theme": async () => (await import("../tf/theme.svelte")).theme.reset(),
   // Each view's filter, and the set hints *Not now* put away (#1983).

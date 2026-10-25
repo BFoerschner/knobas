@@ -389,7 +389,7 @@
   const STATE_READ = ["merge", "close", "reopen"];
 
   /** Whether the read in `answer` shows `echo` landed; `sentBefore` holds the writes sent when it was asked. */
-  function landedIn(answer: SourceView, echo: Echo, sentBefore: ReadonlySet<number>): boolean {
+  function landedIn(answer: SourceView | null, echo: Echo, sentBefore: ReadonlySet<number>): boolean {
     if (echo.kind === "comment") return conversationOf(answer).some((message) => sameWords(message.body, echo.text));
     if (!STATE_READ.includes(echo.kind)) return echo.write !== null && sentBefore.has(echo.write);
     const state = headerOf(answer).state?.text ?? null;
@@ -405,7 +405,7 @@
 
   /** Echo a write queued as `verb`, followed under `name`. */
   function echoChip(id: string, verb: string, name: string, write: QueuedWrite) {
-    echoWrite(id, verb, verb, { write, base: header.state?.text ?? null, following: { name }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? undefined });
+    echoWrite(id, verb, verb, { write, base: header.state?.text ?? null, following: { name }, follower, surface: PR_SURFACE, ...(detail?.source?.id ? { source: detail.source.id } : {}) });
   }
 
   /**
@@ -425,7 +425,9 @@
   };
 
   /** The chip an echo draws, which is also what holds a button back: `merge queued`, then `merge sent`. */
-  const chipOf = (echo: Echo) => `${echo.text} ${echo.state}`;
+  function chipOf(echo: Echo): string {
+    return `${echo.text} ${echo.state}`;
+  }
 
   /** The chip this session queued that holds the write keyed `key` back, or null while it is live. */
   function heldBy(key: string): string | null {
@@ -470,7 +472,7 @@
         write,
         many: true,
         surface: PR_SURFACE,
-        source: source?.id ?? undefined,
+        ...(source ? { source: source.id } : {}),
         following: {
           name: "Comment",
           resend: () => {

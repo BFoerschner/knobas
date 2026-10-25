@@ -25,6 +25,7 @@
   only adds the `M` marks and the warning on a changed file.
 -->
 <script lang="ts" module>
+  import type { EchoListen } from "../queued.svelte";
   import type {
     CheckoutView,
     ChoiceOption,
@@ -51,6 +52,8 @@
     submitWrite: (payload: WriteOpPayload, linkTo?: string) => Promise<QueuedWrite>;
     /** The header's team and language, and Commits' and Branches' authors (#966, #973, #986). */
     codeFacts: (entityIds: string[]) => Promise<CodeFacts[]>;
+    /** Hears `item:refreshed` and `sync:state`, which read a tab again for its echoes (#2105); the bridge's when left out. */
+    listen?: EchoListen;
   }
 
   /**

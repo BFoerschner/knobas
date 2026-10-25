@@ -18,9 +18,9 @@
   import { push } from "../../shell/toasts.svelte";
   import { resolveTicket } from "../job/job";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { markMade } from "./queued.svelte";
+  import { echoWrite } from "../queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { newBranchName } from "./repo";
+  import { MADE, REPO_BRANCHES, newBranchName } from "./repo";
 
   let {
     repoId,
@@ -72,8 +72,8 @@
         busy = false;
         return;
       }
-      await ports.submitWrite({ CreateBranch: { entity: repoId, name: branch, from_ref: start } }, ticket ?? undefined);
-      markMade(repoId, branch);
+      const write = await ports.submitWrite({ CreateBranch: { entity: repoId, name: branch, from_ref: start } }, ticket ?? undefined);
+      echoWrite(repoId, MADE, branch, { write, many: true, surface: REPO_BRANCHES, ...(source ? { source: source.id } : {}) });
       toastQueued(`create branch ${branch} in ${repoName}`, source);
       onclose();
     } catch (cause) {

@@ -507,7 +507,7 @@
       now={today()}
       {timer}
       queued={statusEcho?.text ?? null}
-      queuedState={statusEcho?.state}
+      queuedState={statusEcho?.state ?? "queued"}
       refused={moveRefused}
       onmove={move}
       onstop={() => ontimer?.()}

@@ -47,6 +47,21 @@ export function headLine(
  * replaces its `NOT_BUILT` entry in `TfRepo.svelte` with an arm drawing its
  * component; the tab row is this list.
  */
+/**
+ * The repository page's echoes (#839, #845, #2105; `tf/queued.svelte.ts`),
+ * all on the repository's entity: a branch being made (`MADE`, its text the
+ * name) or deleted (`DELETED`), drawn on *Branches* until its listing holds
+ * it or no longer does; a file whose commit is on its way (`commitKind`, its
+ * text the message, its base the blob it was made against), drawn on the
+ * file until the source holds a newer blob.
+ */
+export const MADE = "branch";
+export const DELETED = "delete";
+export const commitKind = (branch: string, path: string) => `commit ${branch}\u0000${path}`;
+/** The surfaces they are tagged with, whose re-reads settle them. */
+export const REPO_BRANCHES = "repo-branches";
+export const REPO_FILES = "repo-files";
+
 export const REPO_TABS = [
   { id: "files", label: "Files" },
   { id: "commits", label: "Commits" },
