@@ -57,7 +57,10 @@
     staleLine,
     syncWith,
     triggerLabel,
+    RUN_FIRST_IN_QUEUE,
     RUN_OP,
+    RUN_OVERRIDES,
+    runFieldAsks,
   } from "./pipeline";
   import { RUN_BRIDGE, listenSynced, type RunPorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
@@ -140,13 +143,19 @@
     untrack(() => open(wanted.pipelineId, wanted.runId));
   });
 
-  /** What the source's credential cannot write on the run's pipeline (#2040), asked once per pipeline. */
+  /**
+   * What the source's credential cannot write on the run's pipeline (#2040), and the run's fields
+   * that need more than the run (#2055), asked once per pipeline.
+   */
   let refused = $state<RefusedWrite[]>([]);
   $effect(() => {
     refused = [];
-    return askInto([{ entity: pipelineId, op: RUN_OP }], ports.refusedWrites, (answer) => (refused = answer));
+    const asks = [{ entity: pipelineId, op: RUN_OP }, ...runFieldAsks(pipelineId)];
+    return askInto(asks, ports.refusedWrites, (answer) => (refused = answer));
   });
   const cannotRun = $derived(refusalOf(refused, pipelineId, RUN_OP));
+  const cannotOverride = $derived(refusalOf(refused, pipelineId, RUN_OP, RUN_OVERRIDES));
+  const cannotPutFirst = $derived(refusalOf(refused, pipelineId, RUN_OP, RUN_FIRST_IN_QUEUE));
   function runAgain() {
     if (cannotRun === null) dialog = true;
   }
@@ -612,6 +621,8 @@
       from={run}
       {jobBranch}
       secretNoun={stale?.fix?.secret ?? null}
+      {cannotOverride}
+      {cannotPutFirst}
       {ports}
       onclose={() => (dialog = false)}
       {onrun}

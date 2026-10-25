@@ -22,8 +22,8 @@ export type { RefusedWrite, WriteAsk };
 /** The read, injectable so a component test needs no Tauri bridge. */
 export type RefusedWritesPort = (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
 
-/** One ask as a string, to tell asks apart by entity and op. */
-const keyOf = (ask: WriteAsk) => JSON.stringify([ask.entity, ask.op]);
+/** One ask as a string, to tell asks apart by entity, op and field (#2055). */
+const keyOf = (ask: WriteAsk) => JSON.stringify([ask.entity, ask.op, ask.field ?? null]);
 
 /**
  * `asks` sent once each, and the answer; a rejection answers nothing. No
@@ -40,10 +40,21 @@ export async function askRefused(asks: readonly WriteAsk[], read?: RefusedWrites
   }
 }
 
-/** Why `op` on `entity` cannot be made, by `answer`, or `null`. */
-export function refusalOf(answer: readonly RefusedWrite[], entity: string | null, op: string): string | null {
+/**
+ * Why `op` on `entity` cannot be made, by `answer`, or `null`; with `field`,
+ * why the write cannot carry that field of its payload (#2055: a TeamCity
+ * run's `parameters` and `first_in_queue`).
+ */
+export function refusalOf(
+  answer: readonly RefusedWrite[],
+  entity: string | null,
+  op: string,
+  field: string | null = null,
+): string | null {
   if (entity === null) return null;
-  return answer.find((refused) => refused.entity === entity && refused.op === op)?.reason ?? null;
+  return (
+    answer.find((refused) => refused.entity === entity && refused.op === op && (refused.field ?? null) === field)?.reason ?? null
+  );
 }
 
 /**

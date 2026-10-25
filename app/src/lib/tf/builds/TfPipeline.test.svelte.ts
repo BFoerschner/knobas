@@ -996,6 +996,8 @@ test("writes the source's credential cannot make are drawn disabled saying why, 
     JSON.stringify([
       { entity: PIPELINE.entity_id, op: "run_build" },
       { entity: PIPELINE.entity_id, op: "set_parameter" },
+      { entity: PIPELINE.entity_id, op: "run_build", field: "parameters" },
+      { entity: PIPELINE.entity_id, op: "run_build", field: "first_in_queue" },
     ]),
   ]);
   const runNow = button("Run…")!;
@@ -1042,5 +1044,69 @@ test("a pipeline whose settings name no parameter op is asked about its runs alo
     },
   });
   await settle();
-  expect(asked).toEqual([JSON.stringify([{ entity: PIPELINE.entity_id, op: "run_build" }])]);
+  expect(asked).toEqual([
+    JSON.stringify([
+      { entity: PIPELINE.entity_id, op: "run_build" },
+      { entity: PIPELINE.entity_id, op: "run_build", field: "parameters" },
+      { entity: PIPELINE.entity_id, op: "run_build", field: "first_in_queue" },
+    ]),
+  ]);
+});
+
+const CANNOT_OVERRIDE =
+  "This TeamCity user cannot override parameters for one build in Payouts: it lacks the Customize build parameters permission";
+const CANNOT_PUT_FIRST = "This TeamCity user cannot put a build first in the queue: it lacks the Reorder builds in queue permission";
+
+test("Run… draws the overrides and the queue's top disabled saying why where the credential cannot send them, and sends neither (#2055)", async () => {
+  const asked: string[] = [];
+  const drawn = draw([PIPELINE.entity_id], "PAY-231", {
+    refusedWrites: (asks) => {
+      asked.push(JSON.stringify(asks));
+      const reasons: Record<string, string> = { parameters: CANNOT_OVERRIDE, first_in_queue: CANNOT_PUT_FIRST };
+      return Promise.resolve(
+        asks.flatMap((ask) => (ask.field !== undefined && reasons[ask.field] ? [{ ...ask, reason: reasons[ask.field]! }] : [])),
+      );
+    },
+  });
+  await settle();
+  expect(asked).toEqual([
+    JSON.stringify([
+      { entity: PIPELINE.entity_id, op: "run_build" },
+      { entity: PIPELINE.entity_id, op: "set_parameter" },
+      { entity: PIPELINE.entity_id, op: "run_build", field: "parameters" },
+      { entity: PIPELINE.entity_id, op: "run_build", field: "first_in_queue" },
+    ]),
+  ]);
+  expect(button("Run…")!.getAttribute("aria-disabled")).toBeNull();
+  button("Run…")!.click();
+  await settle();
+
+  expect(dialog()!.querySelector(".tf-run-refused")?.textContent).toBe(CANNOT_OVERRIDE);
+  const env = field<HTMLSelectElement>("env");
+  expect(env.disabled).toBe(true);
+  expect(env.value).toBe("staging");
+  const add = button("Add a parameter")!;
+  expect(add.getAttribute("aria-disabled")).toBe("true");
+  expect(add.title).toBe(CANNOT_OVERRIDE);
+  add.click();
+  flushSync();
+  expect(dialog()!.querySelector('input[aria-label="Name of added parameter 1"]')).toBeNull();
+  const top = [...dialog()!.querySelectorAll<HTMLLabelElement>("label.tf-ck")].find((l) => l.textContent?.includes("Put first in the queue"))!;
+  expect(top.title).toBe(CANNOT_PUT_FIRST);
+  expect(top.querySelector("input")!.disabled).toBe(true);
+  expect(summary()).toBe("On feature/PAY-231-sepa-retry, defaults");
+
+  button("Run")!.click();
+  await settle();
+  expect(drawn.writes).toEqual([
+    {
+      RunBuild: {
+        entity: PIPELINE.entity_id,
+        branch: "feature/PAY-231-sepa-retry",
+        parameters: [],
+        clean_checkout: false,
+        first_in_queue: false,
+      },
+    },
+  ]);
 });

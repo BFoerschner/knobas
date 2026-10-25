@@ -42,6 +42,19 @@ export const QUEUED_RUN = "run";
 /** The op every run here is queued as (`RunBuild`), as `refused_writes` asks about it (#2040). */
 export const RUN_OP = "run_build";
 
+/**
+ * The fields of a run that can need more than the run (#2055), by their
+ * payload names: its parameter overrides and its place at the queue's top.
+ * A TeamCity user may run builds and send neither.
+ */
+export const RUN_OVERRIDES = "parameters";
+export const RUN_FIRST_IN_QUEUE = "first_in_queue";
+
+/** What the Run… dialog asks `refused_writes` about the run's fields on `entity` (#2055). */
+export function runFieldAsks(entity: string): { entity: string; op: string; field: string }[] {
+  return [RUN_OVERRIDES, RUN_FIRST_IN_QUEUE].map((field) => ({ entity, op: RUN_OP, field }));
+}
+
 /** The branch a run write names: `null` for the default, as the Run… dialog sends it (#852). */
 export function runBranch(payload: WriteOpPayload): string | null {
   return "RunBuild" in payload ? payload.RunBuild.branch : null;

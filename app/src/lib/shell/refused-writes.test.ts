@@ -28,3 +28,23 @@ test("a write's reason is the answer's for that entity and op, and nothing else'
   expect(refusalOf(answer, RUN.entity, "rerun_build")).toBeNull();
   expect(refusalOf(answer, null, "rerun_build")).toBeNull();
 });
+
+const OVERRIDES = { ...RUN, field: "parameters" };
+
+test("a field of a write is its own ask, sent once beside the write (#2055)", async () => {
+  const sent: unknown[] = [];
+  const read = (asks: unknown[]) => {
+    sent.push(asks);
+    return Promise.resolve([]);
+  };
+  await askRefused([RUN, OVERRIDES, { ...OVERRIDES }], read);
+  expect(sent).toEqual([[RUN, OVERRIDES]]);
+});
+
+test("a field's reason is the answer's for that field, and the write's is the write's (#2055)", () => {
+  const answer = [{ ...OVERRIDES, reason: "cannot override" }];
+  expect(refusalOf(answer, RUN.entity, "run_build", "parameters")).toBe("cannot override");
+  expect(refusalOf(answer, RUN.entity, "run_build")).toBeNull();
+  expect(refusalOf(answer, RUN.entity, "run_build", "first_in_queue")).toBeNull();
+  expect(refusalOf([{ ...RUN, reason: "cannot run" }], RUN.entity, "run_build", "parameters")).toBeNull();
+});
