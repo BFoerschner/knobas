@@ -33,6 +33,7 @@
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
+  import { onRefreshed } from "./refreshed.svelte";
   import {
     REPO_FILES,
     ancestors,
@@ -61,6 +62,7 @@
     checkoutBranch = null,
     checkout = undefined,
     title = "",
+    refreshed = 0,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -84,6 +86,8 @@
     checkout?: CheckoutView | undefined;
     /** The repository's `owner/name`. */
     title?: string;
+    /** The page's refreshes (#2135): each reads the open directories and the file again over what the tab drew. */
+    refreshed?: number;
   } = $props();
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
@@ -250,11 +254,11 @@
   // file again (#2105); what the reader typed stays.
   $effect(() => untrack(() => watchEchoes(REPO_FILES, rereadFile, { listen: ports.listen })));
 
-  function rereadFile() {
+  function rereadFile(): Promise<void> {
     const section = fileSection;
     const where = at;
-    if (section === null || section === MISSING) return;
-    readSection(section, where).then(
+    if (section === null || section === MISSING) return Promise.resolve();
+    return readSection(section, where).then(
       (read) => {
         if (section !== fileSection || where !== at) return;
         const block = read?.blocks[0];
@@ -266,6 +270,32 @@
       // The file keeps what it drew; the next read tries again.
       () => {},
     );
+  }
+
+  // A refresh of the page reads every directory drawn and the file again,
+  // over what the tab drew; what the reader typed stays.
+  onRefreshed(
+    () => refreshed,
+    () => Promise.all([rereadTree(), rereadFile()]),
+  );
+
+  function rereadTree(): Promise<unknown> {
+    const mine = generation;
+    const reads: Promise<unknown>[] = [];
+    for (const dir of Object.keys(listings)) {
+      const section = dir === "" ? "files" : entryOf(dir)?.section;
+      if (section == null) continue;
+      const read = readSection(section).then(
+        (read) => {
+          const block = read?.blocks[0];
+          if (mine === generation && block?.type === "tree") listings[dir] = block.entries;
+        },
+        // The directory keeps what it drew.
+        () => {},
+      );
+      reads.push(read);
+    }
+    return Promise.all(reads);
   }
 
   function toggle(dir: string) {

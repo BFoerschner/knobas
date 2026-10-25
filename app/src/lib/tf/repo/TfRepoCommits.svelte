@@ -21,6 +21,7 @@
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
+  import { onRefreshed } from "./refreshed.svelte";
   import { commitHash, viewRows, visibleViewRows } from "./repo";
 
   let {
@@ -29,6 +30,7 @@
     at,
     branch,
     defaultBranch,
+    refreshed = 0,
   }: {
     ports: Pick<RepoPorts, "entityView" | "codeFacts">;
     repoId: string;
@@ -36,6 +38,8 @@
     at: string;
     branch: string | null;
     defaultBranch: string | null;
+    /** The page's refreshes (#2135): each reads the commits again over what the tab drew. */
+    refreshed?: number;
   } = $props();
 
   let rows = $state<ViewRow[] | null>(null);
@@ -49,28 +53,42 @@
     rows = null;
     failed = null;
     mine = new Set();
-    ports.entityView(where, "commits").then(
+    readCommits(where, () => live);
+    return () => {
+      live = false;
+    };
+  });
+
+  // A refresh of the page reads the commits again, over what the tab drew.
+  onRefreshed(
+    () => refreshed,
+    () => {
+      const where = at;
+      return readCommits(where, () => at === where, true);
+    },
+  );
+
+  /** The commits at `where`, then whose are mine; `again` keeps what the tab drew when it fails. */
+  function readCommits(where: string, alive: () => boolean, again = false): Promise<unknown> {
+    return ports.entityView(where, "commits").then(
       (view) => {
-        if (!live) return;
+        if (!alive()) return;
         const read = viewRows(view?.sections[0]);
         rows = read;
         const ids = read.flatMap((row) => (row.entity_id === null ? [] : [row.entity_id]));
         if (ids.length === 0) return;
-        ports.codeFacts(ids).then(
+        return ports.codeFacts(ids).then(
           (facts) => {
-            if (live) mine = new Set(facts.filter((entry) => entry.mine).map((entry) => entry.entity_id));
+            if (alive()) mine = new Set(facts.filter((entry) => entry.mine).map((entry) => entry.entity_id));
           },
           () => {},
         );
       },
       (error) => {
-        if (live) failed = ipcErrorMessage(error);
+        if (alive() && !again) failed = ipcErrorMessage(error);
       },
     );
-    return () => {
-      live = false;
-    };
-  });
+  }
 
   const filter = $derived(sessionFilter(`repo-commits:${repoId}`));
   const config = $derived<FilterConfig>({

@@ -16,6 +16,12 @@
     Local changes (#847).
   - The checkout is read again when the window gets focus and when a clone
     finishes (ADR-0021).
+  - **Refresh** (#2135, `tf/refresh.svelte.ts`): *Refresh* or *Sync now* in
+    the header, as the repository's read offers, and the withdrawn and
+    turned-off banners under it. A refresh reads the repository's own reads
+    again, and `refreshed` tells the open tab to read its sections again, each
+    over what it drew; *Refreshing…* holds until the tab's reads have answered
+    too (`refreshed.svelte.ts`).
   - **Writes** go through the write queue (`submit_write`): *New branch…*
     (`CreateBranch`), a branch's *Delete…* (`DeleteBranch`), *Create pull
     request* (`CreatePullRequest`) and an edit's commit (`CommitFile`).
@@ -39,6 +45,7 @@
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { WriteSource } from "../../shell/queued-toast";
   import type { OpenJobPorts } from "../job/open-jobs";
+  import type { DetailRefreshPorts } from "../refresh.svelte";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
   export interface RepoPorts extends OpenJobPorts {
@@ -54,6 +61,8 @@
     codeFacts: (entityIds: string[]) => Promise<CodeFacts[]>;
     /** Hears `item:refreshed` and `sync:state`, which read a tab again for its echoes (#2105); the bridge's when left out. */
     listen?: EchoListen;
+    /** The header's *Refresh* (#2135); the bridge's when left out. */
+    refresh?: DetailRefreshPorts;
   }
 
   /**
@@ -69,6 +78,7 @@
 </script>
 
 <script lang="ts">
+  import { untrack } from "svelte";
   import { ipcErrorMessage } from "../../ipc";
   import {
     codeFacts,
@@ -111,6 +121,10 @@
   import TfRepoLocal from "./TfRepoLocal.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { clones } from "../openin/clones.svelte";
+  import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfDetailRefresh from "../TfDetailRefresh.svelte";
+  import { createDetailRefresh } from "../refresh.svelte";
+  import { provideTabRereads } from "./refreshed.svelte";
 
   let {
     ready,
@@ -152,9 +166,11 @@
   /** How many pull requests the repository's read asks for: every one the mirror holds. */
   const LIMIT = 1000;
 
-  let repo = $state<EntityRow | null>(null);
+  /** The repository's read: its row, its source, and what its *Refresh* offers (#2135). */
+  let detail = $state<EntityDetail | null>(null);
+  const repo = $derived<EntityRow | null>(detail?.row ?? null);
   /** The repository's source: where its writes go, named in their toasts. */
-  let source = $state<WriteSource | null>(null);
+  const source = $derived<WriteSource | null>(detail?.source ?? null);
   let failed = $state<string | null>(null);
   /** `null` while the *Branches* section has not answered. */
   let branches = $state<BranchOption[] | null>(null);
@@ -169,13 +185,19 @@
   let prs = $state<EntityRow[] | null>(null);
   /** The repository's team and language (#973); `undefined` until `code_facts` answers. */
   let facts = $state<CodeFacts | undefined>(undefined);
+  /** The header's *Refresh* or *Sync now* (#2135). */
+  const refresh = createDetailRefresh(untrack(() => ports.refresh));
+  /** How many refreshes the page has read again: a tab reads its own sections again on each (#2135). */
+  let refreshed = $state(0);
+  /** The open tab's re-reads of a refresh: *Refreshing…* waits for them too, as the job page's does (#2134). */
+  const tabRereads = provideTabRereads();
 
   $effect(() => {
     if (!ready || repoId === null) return;
     const id = repoId;
     let live = true;
-    repo = null;
-    source = null;
+    const alive = () => live;
+    detail = null;
     failed = null;
     branches = null;
     branchRefused = null;
@@ -183,66 +205,89 @@
     local = null;
     prs = null;
     facts = undefined;
-    ports.codeFacts([id]).then(
-      (answer) => {
-        if (live) facts = answer.find((entry) => entry.entity_id === id);
-      },
-      () => {},
-    );
-    ports.getEntity(id).then(
-      (detail) => {
-        if (!live) return;
-        repo = detail.row;
-        source = detail.source;
-        const filter: EntityFilter = {
-          sources: [detail.row.source_id],
-          kinds: ["pr"],
-          updated_within_days: null,
-          order: "updated_desc",
-          context: null,
-          project: null,
-          include_deleted: false,
-          reach: null,
-        };
-        readAllRows((offset) => ports.listEntities(filter, LIMIT, offset)).then(
-          (rows) => {
-            if (live) prs = repoPrs(rows, detail.row);
-          },
-          () => {
-            if (live) prs = [];
-          },
-        );
-      },
-      (error) => {
-        if (live) failed = ipcErrorMessage(error);
-      },
-    );
-    // An empty repository has no branches; a source that cannot say reads as
-    // one with only its default branch, which the repository's own view is.
-    ports.entityView(id, "branches").then(
-      (view) => {
-        if (live) branches = branchOptions(view?.sections[0] ?? null);
-      },
-      () => {
-        if (live) branches = [];
-      },
-    );
-    // Whether the source offers a branch here is its toolbar's answer
-    // (ADR-0020 rule 4); a view that does not answer leaves the button be.
-    ports.entityView(id, null).then(
-      (view) => {
-        if (live) branchRefused = toolbarRefusal(view, "create_branch");
-      },
-      () => {},
-    );
-    readCheckout(id, () => live);
-    const again = () => readCheckout(id, () => live);
+    untrack(() => refresh.reset());
+    readRepo(id, alive, false);
+    readCheckout(id, alive);
+    const again = () => readCheckout(id, alive);
     window.addEventListener("focus", again);
     return () => {
       live = false;
       window.removeEventListener("focus", again);
     };
   });
+
+  /**
+   * The repository's own reads: its row, its team and language, its pull
+   * requests, its branches and its toolbar. `again` is a refresh's (#2135):
+   * each read lands over what the page drew, and one that fails keeps it.
+   * Settles once every one of them has answered.
+   */
+  async function readRepo(id: string, alive: () => boolean, again: boolean): Promise<void> {
+    const factsRead = ports.codeFacts([id]).then(
+      (answer) => {
+        if (alive()) facts = answer.find((entry) => entry.entity_id === id);
+      },
+      () => {},
+    );
+    // An empty repository has no branches; a source that cannot say reads as
+    // one with only its default branch, which the repository's own view is.
+    const branchesRead = ports.entityView(id, "branches").then(
+      (view) => {
+        if (alive()) branches = branchOptions(view?.sections[0] ?? null);
+      },
+      () => {
+        if (alive() && !again) branches = [];
+      },
+    );
+    // Whether the source offers a branch here is its toolbar's answer
+    // (ADR-0020 rule 4); a view that does not answer leaves the button be.
+    const toolbarRead = ports.entityView(id, null).then(
+      (view) => {
+        if (alive()) branchRefused = toolbarRefusal(view, "create_branch");
+      },
+      () => {},
+    );
+    await Promise.all([factsRead, branchesRead, toolbarRead, readRow(id, alive, again)]);
+  }
+
+  /** The repository's row, then its pull requests. */
+  async function readRow(id: string, alive: () => boolean, again: boolean): Promise<void> {
+    let found: EntityDetail;
+    try {
+      found = await ports.getEntity(id);
+    } catch (error) {
+      if (alive() && !again) failed = ipcErrorMessage(error);
+      return;
+    }
+    if (!alive()) return;
+    detail = found;
+    const filter: EntityFilter = {
+      sources: [found.row.source_id],
+      kinds: ["pr"],
+      updated_within_days: null,
+      order: "updated_desc",
+      context: null,
+      project: null,
+      include_deleted: false,
+      reach: null,
+    };
+    await readAllRows((offset) => ports.listEntities(filter, LIMIT, offset)).then(
+      (rows) => {
+        if (alive()) prs = repoPrs(rows, found.row);
+      },
+      () => {
+        if (alive() && !again) prs = [];
+      },
+    );
+  }
+
+  /** A refresh's re-read (#2135): the repository's reads and the open tab's, over what the page drew; settles once all have answered. */
+  async function reread(): Promise<void> {
+    const id = repoId;
+    if (id === null) return;
+    refreshed += 1;
+    await Promise.all([readRepo(id, () => repoId === id, true), tabRereads.settled()]);
+  }
 
   /** The checkout, and its diff when it has changes: for the `M` marks. */
   function readCheckout(id: string, alive: () => boolean) {
@@ -374,8 +419,10 @@
           <a class="tf-btn" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
         {/if}
         <TfOpenIn entityId={repoId} title={repo?.title ?? ""} {checkout} size="md" />
+        {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} />{/if}
       </div>
     </header>
+    {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
     <nav class="tf-tabs" aria-label="Repository">
       {#each REPO_TABS as entry (entry.id)}
         {@const count = countOf(entry.id)}
@@ -406,11 +453,12 @@
           {checkout}
           title={repo?.title ?? ""}
           {source}
+          {refreshed}
         />
       {:else if route.tab === "commits" && route.commit !== null}
-        <TfRepoCommit {ports} {repoId} commitId={route.commit} {now} onNewBranch={(from) => (newBranch = { from })} />
+        <TfRepoCommit {ports} {repoId} commitId={route.commit} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />
       {:else if route.tab === "branches"}
-        <TfRepoBranches {ports} {repoId} {source} />
+        <TfRepoBranches {ports} {repoId} {source} {refreshed} />
       {:else if route.tab === "compare"}
         <TfRepoCompare
           {ports}
@@ -419,9 +467,10 @@
           branches={branches}
           head={route.branch ?? proposed}
           defaultBranch={defaultBranch?.name ?? null}
+          {refreshed}
         />
       {:else if route.tab === "commits"}
-        <TfRepoCommits {ports} {repoId} {at} branch={branchName} defaultBranch={defaultBranch?.name ?? null} />
+        <TfRepoCommits {ports} {repoId} {at} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
       {:else if route.tab === "prs"}
         <TfRepoPrs {ports} {repoId} rows={prs} {job} />
       {/if}

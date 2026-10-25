@@ -35,6 +35,7 @@
   import { untrack } from "svelte";
   import { echoWrite, echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
+  import { onRefreshed } from "./refreshed.svelte";
   import {
     DELETED,
     MADE,
@@ -52,11 +53,14 @@
     ports,
     source = null,
     repoId,
+    refreshed = 0,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "codeFacts" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
+    /** The page's refreshes (#2135): each reads the listing again over what the tab drew. */
+    refreshed?: number;
   } = $props();
 
   /** How many branch views are read at once: a source's burst stays small. */
@@ -87,13 +91,22 @@
     return untrack(() => watchEchoes(REPO_BRANCHES, () => readBranches(id, () => repoId === id, true), { listen: ports.listen }));
   });
 
+  // A refresh of the page reads the listing again, over what the tab drew (#2135).
+  onRefreshed(
+    () => refreshed,
+    () => {
+      const id = repoId;
+      return readBranches(id, () => repoId === id, true);
+    },
+  );
+
   /**
    * The listing, then each branch's standing and its tip's author; each echo
    * the listing shows landed goes. `again` keeps what the tab drew when it
    * fails.
    */
-  function readBranches(id: string, alive: () => boolean, again = false) {
-    ports.entityView(id, "branches").then(
+  function readBranches(id: string, alive: () => boolean, again = false): Promise<unknown> {
+    return ports.entityView(id, "branches").then(
       (view) => {
         if (!alive()) return;
         listed = viewRows(view?.sections[0]);
@@ -120,7 +133,7 @@
             }
           }
         };
-        for (let n = 0; n < AT_ONCE; n += 1) void worker();
+        return Promise.all(Array.from({ length: AT_ONCE }, worker));
       },
       (error) => {
         if (alive() && !again) failed = ipcErrorMessage(error);

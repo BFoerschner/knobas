@@ -1400,6 +1400,9 @@ const CASES: Case[] = [
               getEntity: () =>
                 deferred({
                   row: { entity_id: "gitea:tidewater/payout-service", kind: "repo", source_id: "gitea", title: "tidewater/payout-service" },
+                  source: { id: "gitea", display_name: "Tidewater Gitea", adapter_kind: "gitea", enabled: true },
+                  refreshes: true,
+                  deleted_at: null,
                 } as never),
               listEntities: () => deferred({ rows: [], total: 0, tally: null, groups: null }),
               entityView: (_id: string, section: string | null) =>
