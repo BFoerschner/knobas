@@ -2082,6 +2082,93 @@ async fn a_sub_task_names_its_parent_in_fields_parent_and_under_reaches_it() {
     drop(sub_task);
 }
 
+/// **A refresh reads a just-filed issue as a full sync emits it, and answers
+/// it gone once it is deleted** (#2097, ADR-0031).
+///
+/// The battery's clause 13 holds a refresh to the sync for a seeded ticket
+/// and a view; no full sync emits a deleted ticket, so *gone* is witnessed
+/// here, against an issue this test files and deletes. Asked the instant the
+/// create returns, before Jira's search index holds the issue: the refresh
+/// waits for the index rather than answering gone. Then the same issue from a
+/// full sync is the same record, and a source scoped to another project, a
+/// key Jira never issued, and the deleted issue are each gone.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn a_refresh_reads_a_filed_issue_as_the_sync_does_and_a_deleted_one_gone() {
+    use knobas_source::RefreshAnswer;
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let configured = serde_json::json!({ "epic_link_field": seeded.seed.epic_link_field });
+    let source = seeded.source(configured.clone());
+    let mut sub_task = SubTask::file(&seeded, "PAY-219").await;
+    let key = sub_task.key().to_owned();
+    let entity = format!("jira:{key}");
+
+    let read = match source.refresh(&entity).await {
+        Ok(RefreshAnswer::Item(item)) => item,
+        other => panic!("{key} was just filed; its refresh answered {other:?}"),
+    };
+    let deadline = tokio::time::Instant::now() + INDEX_BUDGET;
+    let items = loop {
+        let (items, _) = full(&*source).await;
+        if items.iter().any(|i| i.entity.key == key) {
+            break items;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no full sync named {key}"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+    let synced = item(&items, &key);
+    assert_eq!(read.entity, synced.entity);
+    assert_eq!(read.kind, synced.kind);
+    assert_eq!(read.title, synced.title);
+    assert_eq!(
+        read.updated_at, synced.updated_at,
+        "to the second, as /search keeps it"
+    );
+    assert_eq!(
+        read.payload, synced.payload,
+        "the record a run emits, whole"
+    );
+
+    let elsewhere = seeded.source(serde_json::json!({ "projects": ["OPS"] }));
+    assert!(
+        matches!(elsewhere.refresh(&entity).await, Ok(RefreshAnswer::Gone)),
+        "a source of OPS alone does not hold {key}"
+    );
+    assert!(matches!(
+        source.refresh("jira:PAY-999999").await,
+        Ok(RefreshAnswer::Gone)
+    ));
+    assert!(
+        matches!(
+            source.refresh("jira:board-1").await,
+            Ok(RefreshAnswer::NotOffered)
+        ),
+        "a view is read with the boards"
+    );
+
+    let filed = sub_task.key.take().expect("filed");
+    delete_issue(
+        &client(),
+        &seeded.url,
+        &seeded.user,
+        &seeded.password,
+        &filed,
+        "parent = PAY-219",
+    )
+    .await
+    .expect("the sub-task is deleted");
+    assert!(
+        matches!(source.refresh(&entity).await, Ok(RefreshAnswer::Gone)),
+        "{key} is deleted"
+    );
+    println!("SEEDED refreshed {key} as the full sync emitted it, then gone once deleted");
+}
+
 /// How many status moves [`a_long_history_comes_back_whole_from_search`]
 /// makes: past 100, the cap Jira Cloud puts on a search's changelog (#1083).
 const LONG_HISTORY_MOVES: usize = 120;

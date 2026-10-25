@@ -609,7 +609,7 @@ Chosen contiguous and above the mocked products' own defaults so a real-containe
 
 **Endpoints first** — exactly what M1's read paths need, nothing more:
 
-*Jira DC v2:* `GET /rest/api/2/serverInfo`, `GET /rest/api/2/myself`, `GET /rest/api/2/search` (JQL subset: `updated >= "…"`, `project in (…)`, `ORDER BY updated ASC|DESC`; *`ORDER BY created ASC|DESC` too since #1623, with a trailing `, id ASC` since #1720, see "Amendments from the Jira walk order" below*; honours `startAt`/`maxResults`/`fields`, returns `{startAt,maxResults,total,issues}`), `GET /rest/api/2/issue/{key}`, `.../comment`, `.../worklog`. Errors in the real shape (`{"errorMessages":[…],"errors":{}}`); ~~an invalid/absent Bearer returns **401 + `X-Seraph-LoginReason: AUTHENTICATED_FAILED`**, which is precisely what stream F's 401 → credential-health path needs.~~ — corrected 2026-09-03 (#276 measured it on Jira 10.3.24, #296 struck it): the real product sends that header for a wrong *password* only, which is the scheme that goes through Seraph. A Bearer token the instance cannot resolve never reaches Seraph at all and searches anonymously: `401` with no such header on `/serverInfo`, `/myself` and `/issue/{key}/…`, `200` with `total: 0` on `/search`. mockd still answers every rejection the one Seraph way, on purpose, and `knobas-mockd`'s deviation 14 records the gap. Stream F's 401 → credential-health path is unaffected because it reads the status and not the header (interfaces §4.1: 401 and 403 alike are `Unauthorized`).
+*Jira DC v2:* `GET /rest/api/2/serverInfo`, `GET /rest/api/2/myself`, `GET /rest/api/2/search` (JQL subset: `updated >= "…"`, `project in (…)`, `ORDER BY updated ASC|DESC`; *`ORDER BY created ASC|DESC` too since #1623, with a trailing `, id ASC` since #1720, see "Amendments from the Jira walk order" below*; *`key = KEY` since #2097, see "Amendments from the Jira refresh" below*; honours `startAt`/`maxResults`/`fields`, returns `{startAt,maxResults,total,issues}`), `GET /rest/api/2/issue/{key}`, `.../comment`, `.../worklog`. Errors in the real shape (`{"errorMessages":[…],"errors":{}}`); ~~an invalid/absent Bearer returns **401 + `X-Seraph-LoginReason: AUTHENTICATED_FAILED`**, which is precisely what stream F's 401 → credential-health path needs.~~ — corrected 2026-09-03 (#276 measured it on Jira 10.3.24, #296 struck it): the real product sends that header for a wrong *password* only, which is the scheme that goes through Seraph. A Bearer token the instance cannot resolve never reaches Seraph at all and searches anonymously: `401` with no such header on `/serverInfo`, `/myself` and `/issue/{key}/…`, `200` with `total: 0` on `/search`. mockd still answers every rejection the one Seraph way, on purpose, and `knobas-mockd`'s deviation 14 records the gap. Stream F's 401 → credential-health path is unaffected because it reads the status and not the header (interfaces §4.1: 401 and 403 alike are `Unauthorized`).
 
 *TeamCity:* `GET /app/rest/server`, `GET /app/rest/buildTypes`, `GET /app/rest/projects` (#849: the root and each configuration's project under it), `GET /app/rest/builds` (locator subset: `sinceBuild:(id:n)`, `state:`, `buildType:`, `count:`; honours `fields=`), `GET /app/rest/builds/id:{id}`.
 
@@ -2445,6 +2445,29 @@ second listing's record first where both hold a board. Witnessed by `views::test
 `a_board_renamed_while_the_listing_is_read_hides_no_other` and
 `a_board_renamed_between_the_two_listings_arrives_under_its_new_name`, and `live_jira_seeded`'s
 `the_board_listing_is_in_name_order_and_a_rename_moves_a_row`.
+
+### Amendments from the Jira refresh (2026-10-25, binding) — issue #2097
+
+Ruled by the Opus implementer (`docs/decisions/2026-10-unattended-rulings.md`, "#2097"). The
+change is in `crates/knobas-source-jira/**`, `crates/knobas-mockd/**` and tests, none of which
+§10.8 freezes; `Source::refresh` itself is #2095's entry (`contract/10.8/2095-source-refresh.md`),
+so **no §10.8 entry is owed**; no cursor version moves.
+
+**Jira declares `Capability::Refresh` and reads a ticket by a search on its key**:
+`<scope> AND key = "<KEY>"` through the walk's own `/search` (same `fields`, `expand=changelog`,
+the comment and worklog containers completed as the walk completes them), so the item is the one
+a run emits. A `jira_view` is not offered. Before the search, `GET /rest/api/2/issue/{key}?fields=updated`
+reads the database: a 404, or an issue answering under another key (moved), is *gone*; its
+`updated`, cut to the second, is what the search's record must reach, asked again every 250 ms
+for up to 10 s, since the index lags a write. That GET's record is never the item. An issue the
+index holds fresh outside the scope is *gone*; an index that never catches up is
+`SourceError::Unreachable`. **§4.2's read endpoint** `GET /rest/api/2/issue/{key}`, listed
+since M1 and never called by a run, is now called by a refresh with `fields=updated` alone; **§5 mockd's JQL subset gains `key = KEY`**, as #1623 grew it, so the adapter's
+tests against mockd send the query the adapter sends. Witnessed by `refresh::tests` and
+`jql::tests` in `knobas-source-jira`, mockd's `key_equals_keeps_the_one_issue`, the battery's
+clause 13 against mockd and the seeded Jira, `live_jira_seeded`'s
+`a_refresh_reads_a_filed_issue_as_the_sync_does_and_a_deleted_one_gone`, and `atlassian_live`'s
+`each_landed_write_is_in_the_mirror_as_jira_holds_it_before_its_run`.
 
 ---
 

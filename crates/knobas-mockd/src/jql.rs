@@ -9,6 +9,7 @@
 //! order    := "ORDER" "BY" ( "updated" | "created" ) [ "ASC" | "DESC" ] [ "," "id" "ASC" ]
 //! clause   := "updated" ( ">=" | ">" ) literal
 //!           | "project" ( "=" ident | "IN" "(" ident { "," ident } ")" )
+//!           | "key" "=" ( ident | '"' ident '"' )
 //! literal  := '"' ( "yyyy-MM-dd HH:mm" | "yyyy/MM/dd HH:mm" | "yyyy-MM-dd" | "yyyy/MM/dd" ) '"'
 //! ```
 //!
@@ -19,6 +20,9 @@
 //! for the queries written before it). The `, id ASC` the walk appends since
 //! #1720 is accepted and changes nothing: [`crate::jira`] has always broken a
 //! tie on the first key by id ascending, which is the order it asks for.
+//! `key = "…"` since #2097 is the Jira adapter's refresh, one issue by its
+//! key, as #1623 grew this subset for the walk's order: the adapter's tests
+//! against mockd send the query the adapter sends.
 //!
 //! **Date literals are interpreted in the server's zone**
 //! ([`MockState::server_offset`](crate::state::MockState::server_offset),
@@ -39,6 +43,8 @@ pub struct Jql {
     pub updated_gte: Option<DateTime<Utc>>,
     /// Project keys to keep; empty means every project.
     pub projects: Vec<String>,
+    /// The one issue key to keep (#2097); `None` keeps every issue.
+    pub key: Option<String>,
     /// The field the query sorts by: `updated` unless it said `ORDER BY
     /// created`.
     pub order_by: SortKey,
@@ -61,6 +67,7 @@ impl Default for Jql {
         Self {
             updated_gte: None,
             projects: Vec::new(),
+            key: None,
             order_by: SortKey::Updated,
             desc: true,
         }
@@ -82,7 +89,7 @@ impl std::fmt::Display for JqlError {
             Self::Unsupported(t) => write!(
                 f,
                 "Unsupported JQL near {t:?}: mockd accepts only \
-                 [updated >=|> \"date\"] [AND project =|IN (...)] [ORDER BY updated|created ASC|DESC[, id ASC]]"
+                 [updated >=|> \"date\"] [AND project =|IN (...)] [AND key = KEY] [ORDER BY updated|created ASC|DESC[, id ASC]]"
             ),
             Self::BadDate(t) => write!(
                 f,
@@ -189,7 +196,7 @@ pub fn parse_jql(raw: &str, off: FixedOffset) -> Result<Jql, JqlError> {
 
     // The clause list is optional and may be followed by ORDER BY.
     while i < toks.len() && !is_kw(toks.get(i), "order") {
-        if !jql.projects.is_empty() || jql.updated_gte.is_some() {
+        if !jql.projects.is_empty() || jql.updated_gte.is_some() || jql.key.is_some() {
             // Every clause after the first must be joined with AND.
             if !is_kw(toks.get(i), "and") {
                 return Err(JqlError::Unsupported(toks[i].text.clone()));
@@ -223,6 +230,17 @@ pub fn parse_jql(raw: &str, off: FixedOffset) -> Result<Jql, JqlError> {
                     at += Duration::minutes(1);
                 }
                 jql.updated_gte = Some(at);
+            }
+            "key" => {
+                if !is_kw(toks.get(i), "=") {
+                    return Err(JqlError::Unsupported(unexpected(&toks, i)));
+                }
+                i += 1;
+                let v = toks
+                    .get(i)
+                    .ok_or_else(|| JqlError::Unsupported(unexpected(&toks, i)))?;
+                i += 1;
+                jql.key = Some(v.text.to_ascii_uppercase());
             }
             "project" => {
                 let op = toks

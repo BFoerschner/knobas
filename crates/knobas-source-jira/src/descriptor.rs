@@ -20,8 +20,9 @@ pub fn descriptor_template() -> SourceDescriptor {
         name: "Jira".to_owned(),
         // M2 (issue #43): this adapter writes. `Capability::Search` stays
         // reserved for a future server-side `Source::search` -- knobas'
-        // launcher answers from the mirror either way.
-        capabilities: vec![Capability::Write],
+        // launcher answers from the mirror either way. A ticket is read by
+        // its key (#2097, `crate::refresh`); a view is not.
+        capabilities: vec![Capability::Write, Capability::Refresh],
         adapter_version: crate::ADAPTER_VERSION.to_owned(),
         // Bearer PAT (DC >= 8.14) or Basic user+password (spec §3).
         auth_methods: vec![AuthMethod::Pat, AuthMethod::UserPassword],
@@ -308,7 +309,7 @@ mod tests {
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
         assert_eq!(
             d.capabilities,
-            vec![Capability::Write],
+            vec![Capability::Write, Capability::Refresh],
             "{:?}",
             d.capabilities
         );

@@ -324,6 +324,7 @@ knobas-app	test/atlassian_live	a_revoked_pat_reaches_the_credential_health_surfa
 knobas-app	test/atlassian_live	a_saved_source_without_field_ids_gets_them_at_its_next_sync_and_stores_the_sprint
 knobas-app	test/atlassian_live	a_second_page_with_one_title_in_one_space_is_refused
 knobas-app	test/atlassian_live	a_seeded_days_work_is_what_the_digest_lists_under_yesterday
+knobas-app	test/atlassian_live	each_landed_write_is_in_the_mirror_as_jira_holds_it_before_its_run
 knobas-app	test/atlassian_live	promoting_the_seeded_epic_brings_its_five_children_into_the_context
 knobas-app	test/atlassian_live	test_source_answers_the_configured_arm_once_the_saved_source_names_the_field
 knobas-app	test/atlassian_live	test_source_carries_the_epic_link_note_for_a_draft_and_for_a_saved_source
@@ -2045,6 +2046,7 @@ knobas-mockd	test/it	jira_search::an_empty_jql_returns_every_issue_newest_first_
 knobas-mockd	test/it	jira_search::an_unparseable_date_literal_is_a_400
 knobas-mockd	test/it	jira_search::an_unsupported_jql_clause_is_a_400_and_a_violation
 knobas-mockd	test/it	jira_search::fields_and_expand_are_projected_and_typos_are_refused
+knobas-mockd	test/it	jira_search::key_equals_keeps_the_one_issue
 knobas-mockd	test/it	jira_search::max_results_is_capped_by_the_server_and_the_response_says_so
 knobas-mockd	test/it	jira_search::order_by_created_does_not_move_an_edited_issue
 knobas-mockd	test/it	jira_search::order_by_created_then_id_is_accepted_and_nothing_else_after_it
@@ -3331,6 +3333,7 @@ knobas-source-jira	lib/knobas_source_jira	http::tests::the_credential_rules_spea
 knobas-source-jira	lib/knobas_source_jira	http::tests::the_jira_error_envelope_becomes_the_message
 knobas-source-jira	lib/knobas_source_jira	jql::tests::a_configured_filter_is_parenthesised
 knobas-source-jira	lib/knobas_source_jira	jql::tests::a_full_sync_is_scoped_and_ordered
+knobas-source-jira	lib/knobas_source_jira	jql::tests::a_refresh_searches_the_key_inside_the_walks_scope
 knobas-source-jira	lib/knobas_source_jira	jql::tests::an_incremental_query_carries_the_watermark_in_the_servers_zone
 knobas-source-jira	lib/knobas_source_jira	jql::tests::an_unscoped_full_sync_is_still_valid_jql
 knobas-source-jira	lib/knobas_source_jira	jql::tests::project_keys_are_quoted
@@ -3353,11 +3356,19 @@ knobas-source-jira	lib/knobas_source_jira	map::tests::setting_worklogs_rewrites_
 knobas-source-jira	lib/knobas_source_jira	map::tests::the_namespace_is_the_instance_id_not_the_adapter_kind
 knobas-source-jira	lib/knobas_source_jira	map::tests::the_remaining_responses_parse_into_what_reads_them
 knobas-source-jira	lib/knobas_source_jira	map::tests::unknown_fields_do_not_break_parsing
+knobas-source-jira	lib/knobas_source_jira	refresh::tests::a_key_jira_does_not_hold_is_gone
+knobas-source-jira	lib/knobas_source_jira	refresh::tests::a_stale_index_is_asked_again_until_it_holds_the_write
+knobas-source-jira	lib/knobas_source_jira	refresh::tests::a_ticket_not_yet_indexed_is_waited_for
+knobas-source-jira	lib/knobas_source_jira	refresh::tests::an_index_that_never_catches_up_is_a_failed_read
+knobas-source-jira	lib/knobas_source_jira	refresh::tests::an_issue_is_its_search_record_completed_and_mapped_as_a_run_emits_it
+knobas-source-jira	lib/knobas_source_jira	refresh::tests::an_issue_moved_to_another_key_is_gone_under_the_old_one
+knobas-source-jira	lib/knobas_source_jira	refresh::tests::an_issue_outside_the_sources_scope_is_gone
 knobas-source-jira	lib/knobas_source_jira	source::tests::a_base_url_that_is_not_a_url_is_refused
 knobas-source-jira	lib/knobas_source_jira	source::tests::a_built_source_describes_the_instance_not_the_template
 knobas-source-jira	lib/knobas_source_jira	source::tests::a_create_aimed_at_a_ticket_rather_than_a_project_is_refused
 knobas-source-jira	lib/knobas_source_jira	source::tests::a_source_with_no_secret_is_unauthorized
 knobas-source-jira	lib/knobas_source_jira	source::tests::a_trailing_slash_on_the_base_url_is_trimmed_once
+knobas-source-jira	lib/knobas_source_jira	source::tests::a_views_id_is_not_offered_and_another_sources_is_refused
 knobas-source-jira	lib/knobas_source_jira	source::tests::a_workflow_read_for_another_source_is_refused_rather_than_asked_here
 knobas-source-jira	lib/knobas_source_jira	source::tests::a_write_for_another_source_is_refused_rather_than_posted_here
 knobas-source-jira	lib/knobas_source_jira	source::tests::an_entity_id_that_is_not_one_is_refused
@@ -3490,6 +3501,7 @@ knobas-source-jira	test/live_jira_seeded	a_full_sync_mirrors_every_seeded_issue_
 knobas-source-jira	test/live_jira_seeded	a_jql_id_range_stays_inside_one_project
 knobas-source-jira	test/live_jira_seeded	a_long_history_comes_back_whole_from_search
 knobas-source-jira	test/live_jira_seeded	a_reassignment_through_the_assignee_endpoint_reaches_the_next_incremental_run
+knobas-source-jira	test/live_jira_seeded	a_refresh_reads_a_filed_issue_as_the_sync_does_and_a_deleted_one_gone
 knobas-source-jira	test/live_jira_seeded	a_rejected_credential_is_a_real_401_and_only_basic_auth_carries_the_seraph_header
 knobas-source-jira	test/live_jira_seeded	a_run_reports_its_walk_over_the_real_search_total
 knobas-source-jira	test/live_jira_seeded	a_sub_task_names_its_parent_in_fields_parent_and_under_reaches_it

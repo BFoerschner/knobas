@@ -2,7 +2,8 @@
 
 use knobas_source::instance::SourceInstance;
 use knobas_source::{
-    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp, WriteReceipt,
+    ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError, WriteOp,
+    WriteReceipt,
 };
 
 use crate::api::JiraApi;
@@ -103,6 +104,16 @@ impl JiraSource {
             )));
         }
         Ok(key)
+    }
+
+    /// The read side over this instance: what a sync and a refresh run on.
+    fn reader(&self) -> SyncRun<'_> {
+        SyncRun {
+            api: &self.http,
+            cfg: &self.cfg,
+            source_id: &self.id,
+            base_url: &self.base_url,
+        }
     }
 
     /// This instance's Epic Link custom field id, or `None` where the instance
@@ -278,14 +289,19 @@ impl Source for JiraSource {
         cursor: Option<Cursor>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
-        SyncRun {
-            api: &self.http,
-            cfg: &self.cfg,
-            source_id: &self.id,
-            base_url: &self.base_url,
+        self.reader().run(cursor, sink).await
+    }
+
+    /// One issue, by a search on its key (#2097, [`crate::refresh`]). A
+    /// view's id (`board-3`, `filter-10000`) is not an issue key: a view is
+    /// read with the boards, and is not offered. An id of another source is
+    /// refused, as a write's is.
+    async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
+        let key = self.owned_key(entity)?;
+        if !is_issue_key(&key) {
+            return Ok(RefreshAnswer::NotOffered);
         }
-        .run(cursor, sink)
-        .await
+        self.reader().refresh(&key, crate::refresh::PATIENCE).await
     }
 
     /// Perform one of the three writes M2 ratified for Jira, or refuse.
@@ -531,7 +547,13 @@ mod tests {
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
         assert_eq!(d.name, "Tidewater Jira");
         assert_eq!(d.entity_kinds.len(), 2, "tickets and Jira views (#877)");
-        assert_eq!(d.capabilities, vec![knobas_source::Capability::Write]);
+        assert_eq!(
+            d.capabilities,
+            vec![
+                knobas_source::Capability::Write,
+                knobas_source::Capability::Refresh
+            ]
+        );
         assert_eq!(
             d.write_ops,
             vec!["comment", "transition", "create_ticket", "log_work"]
@@ -808,6 +830,24 @@ mod tests {
             panic!("a create aimed at a ticket must be refused, got {refused:?}");
         };
         assert!(message.contains("not a Jira project"), "{message}");
+    }
+
+    /// A view is not read by id, and no request is made to say so; an id
+    /// of another source is refused before any request too.
+    #[tokio::test]
+    async fn a_views_id_is_not_offered_and_another_sources_is_refused() {
+        let source = built(instance(serde_json::json!({})));
+        for view in ["jira:board-3", "jira:filter-10000"] {
+            assert!(matches!(
+                source.refresh(view).await.unwrap(),
+                RefreshAnswer::NotOffered
+            ));
+        }
+        assert!(matches!(
+            source.refresh("jira-eu:PAY-231").await,
+            Err(SourceError::Protocol { .. })
+        ));
+        assert!(source.descriptor().refreshes());
     }
 
     /// An id that does not parse names nothing, and nothing about waiting makes
