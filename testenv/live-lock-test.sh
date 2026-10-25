@@ -379,13 +379,22 @@ lock_gone "the heir releases the Gitea lock" "$KNOBAS_LIVE_GITEA_LOCK"
 # ran beside it. Now a keeper holds it for the product's life: that worktree's
 # own runs go on under it, every other one waits.
 export KNOBAS_LIVE_KEEPER_POLL=0.2 JIRA_LICENSE_KEY=x CONFLUENCE_LICENSE_KEY=x
-liveup() { # liveup <name> <product> -- `testenv/live up <product>` in the scratch tree
-  (
-    # shellcheck source=testenv/live-lib.sh disable=SC1091
-    . "$here/live-lib.sh"
-    LIVE_TESTENV=${3:-$fake}
-    live_up_held "$2"
-  ) >"$scratch/$1.out" 2>&1 && echo 0 || echo $?
+# A stand-in for testenv/live that sources live-lib.sh from LT_LIB and runs in
+# the tree LT_TREE: the keeper is a fork of it, and `live down` checks the
+# keeper's command line names `live up <product>` before it signals the pid
+# (#2145).
+mkdir -p "$scratch/stand-in"
+cat >"$scratch/stand-in/live" <<'LIVE'
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=testenv/live-lib.sh disable=SC1091
+. "$LT_LIB"
+LIVE_TESTENV=$LT_TREE
+case $1 in up) live_up_held "$2" ;; down) live_down "$2" ;; esac
+LIVE
+liveup() { # liveup <name> <product> [<tree>] -- `testenv/live up <product>` in the scratch tree
+  LT_LIB=$here/live-lib.sh LT_TREE=${3:-$fake} bash "$scratch/stand-in/live" up "$2" \
+    >"$scratch/$1.out" 2>&1 && echo 0 || echo $?
 }
 echo knobas-confluence >"$STUB_RUNNING_FILE"
 rc=$(liveup up1 confluence)
@@ -414,6 +423,8 @@ rc=$( (
   live_down confluence
 ) >"$scratch/down1.out" 2>&1 && echo 0 || echo $?)
 check "live-down from another worktree succeeds" "$rc" "0"
+check "and it signalled the keeper, which gave the lock back" "$(cat "$scratch/down1.out")" "the JVM lock its live-up kept is free"
+check_not "and did not take the keeper for a reused pid" "$(cat "$scratch/down1.out")" "not its keeper"
 lock_gone "live-down, from any worktree, gives the live-up's lock back"
 checks=$((checks + 1))
 for ((i = 0; i < 50; i++)); do _lt_alive "$keeper_lock" || break; sleep 0.1; done
@@ -439,6 +450,55 @@ check "a live-up with a short keeper life succeeds" "$rc" "0"
 check "and its keeper holds the lock" "$(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)" "live-up-confluence-kept $scratch/tree"
 sleep 1
 lock_gone "a keeper lets go after KNOBAS_LIVE_KEEPER_MAX"
+: >"$STUB_RUNNING_FILE"
+
+# --- live-down never signals a pid the keeper no longer has (#2145) ---------
+
+# A keeper killed without giving the lock back leaves its pid in the link;
+# macOS may hand that pid to any process since. `live down` signals the pid
+# only while its command line names `live up <product>` and it started no
+# later than the lock's epoch; any other holder is a dead keeper, whose lock
+# goes and nothing is signalled.
+down_with() { # down_with <name> <target> -- `live down confluence` against a planted lock
+  ln -sfn "$2" "$KNOBAS_LIVE_LOCK"
+  LT_LIB=$here/live-lib.sh LT_TREE=$scratch/elsewhere/testenv \
+    bash "$scratch/stand-in/live" down confluence >"$scratch/$1.out" 2>&1 && echo 0 || echo $?
+}
+# down_spares <name> <pid> <what> -- live-down over a planted lock naming <pid>
+# signalled nothing and freed the lock.
+down_spares() {
+  check "live-down over a $3 succeeds" "$rc" "0"
+  checks=$((checks + 1))
+  kill -0 "$2" 2>/dev/null || fail "live-down signals no $3" "$(cat "$scratch/$1.out")"
+  lock_gone "live-down frees the lock of a $3"
+}
+echo knobas-confluence >"$STUB_RUNNING_FILE"
+# A process that is not a keeper, started before the epoch the lock names.
+sleep 300 &
+other=$!
+pids+=("$other")
+rc=$(down_with reused-cmd "$other $(($(date +%s) + 60)) live-up-confluence-kept $scratch/tree")
+down_spares reused-cmd "$other" "process whose command line is not the keeper's"
+check "and it says the pid is not its keeper" "$(cat "$scratch/reused-cmd.out")" "not its keeper"
+# A process that names `live up confluence` but started after the lock was taken.
+mkdir -p "$scratch/later"
+printf 'while :; do sleep 0.2; done\n' >"$scratch/later/live"
+bash "$scratch/later/live" up confluence &
+later=$!
+pids+=("$later")
+sleep 0.2
+rc=$(down_with reused-late "$later $(($(date +%s) - 120)) live-up-confluence-kept $scratch/tree")
+down_spares reused-late "$later" "process started after the lock's epoch"
+# A dead pid: the lock goes at once, without waiting on a keeper that is gone.
+sh -c 'exit 0' &
+gone=$!
+wait "$gone" || true
+from=$SECONDS
+rc=$(down_with dead "$gone $(date +%s) live-up-confluence-kept $scratch/tree")
+check "live-down over a dead keeper succeeds" "$rc" "0"
+lock_gone "a dead keeper's lock goes"
+[ $((SECONDS - from)) -lt 4 ] || fail "live-down does not wait on a dead keeper" "took $((SECONDS - from)) s"
+checks=$((checks + 1))
 : >"$STUB_RUNNING_FILE"
 
 if [ "$failures" -gt 0 ]; then

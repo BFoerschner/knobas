@@ -154,6 +154,7 @@ LIVE_LOCK_MINE=""
 # Set while this shell is inside a reclaim, so an interrupt there removes the
 # reclaim lock itself instead of leaving it to the minute-old sweep.
 LIVE_LOCK_RECLAIMING=""
+LIVE_LOCK_RECLAIMED=""
 
 # _live_lock_describe <target> -- the holder, in words.
 _live_lock_describe() {
@@ -164,6 +165,21 @@ _live_lock_describe() {
     hint=", kept for a live-up product: 'just live-down ${product%-kept}' from any worktree frees it" ;;
   esac
   echo "'$recipe' in ${tree:-?} (pid $pid, since $(date -r "$since" '+%H:%M:%S' 2>/dev/null || echo "$since")$hint)"
+}
+
+# _live_lock_reclaim <target> -- remove a dead holder's lock, under
+# `mkdir "$lock.reclaim"`, if it still names <target>. Fails when another
+# reclaim is under way; LIVE_LOCK_RECLAIMED says whether this one removed it.
+_live_lock_reclaim() {
+  LIVE_LOCK_RECLAIMED=""
+  mkdir "$LIVE_LOCK.reclaim" 2>/dev/null || return 1
+  LIVE_LOCK_RECLAIMING=1
+  if [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$1" ]; then
+    rm -f "$LIVE_LOCK"
+    LIVE_LOCK_RECLAIMED=1
+  fi
+  rmdir "$LIVE_LOCK.reclaim" 2>/dev/null || true
+  LIVE_LOCK_RECLAIMING=""
 }
 
 _live_lock_pid_alive() {
@@ -243,14 +259,9 @@ live_lock_hold() {
     # Released between the `ln -s` and the `readlink`: free, so try again now.
     [ -n "$target" ] || continue
     if ! _live_lock_pid_alive "$target"; then
-      if mkdir "$LIVE_LOCK.reclaim" 2>/dev/null; then
-        LIVE_LOCK_RECLAIMING=1
-        if [ "$(readlink "$LIVE_LOCK" 2>/dev/null || true)" = "$target" ]; then
-          rm -f "$LIVE_LOCK"
+      if _live_lock_reclaim "$target"; then
+        [ "$LIVE_LOCK_RECLAIMED" != 1 ] ||
           echo "live: $recipe: the $LIVE_LOCK_LABEL was stale -- its holder $(_live_lock_describe "$target") is gone; taking it over"
-        fi
-        rmdir "$LIVE_LOCK.reclaim" 2>/dev/null || true
-        LIVE_LOCK_RECLAIMING=""
         continue
       elif [ -n "$(find "$LIVE_LOCK.reclaim" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
         # A reclaimer that died inside its few milliseconds.
@@ -304,7 +315,8 @@ live_lock_traps() {
 # <product>`, from any worktree, ends the keeper and frees the lock; a product
 # gone some other way frees it at the keeper's next look
 # (`KNOBAS_LIVE_KEEPER_POLL`, default 30 s), as does its worktree's removal or
-# `KNOBAS_LIVE_KEEPER_MAX` (3 h); a killed keeper is a dead holder.
+# `KNOBAS_LIVE_KEEPER_MAX` (3 h); a killed keeper is a dead holder, and
+# `live_down` signals its pid only while that is still the keeper (#2145).
 _live_lock_kept_here() {
   local pid since recipe tree
   read -r pid since recipe tree <<<"$1"
@@ -362,6 +374,24 @@ _live_lock_keep() {
   fi
 }
 
+# _live_lock_is_keeper <pid> <epoch> <product> -- the pid is still the keeper
+# the lock names (#2145): a fork of `testenv/live up <product>`, so its
+# command line says so, started no later than the epoch it stamped. A keeper
+# killed without giving the lock back leaves its pid behind, and macOS may
+# hand that pid to any process since: one started after the epoch, or one
+# running something else, is not the keeper.
+_live_lock_is_keeper() {
+  local cmd start
+  cmd=$(ps -o command= -p "$1" 2>/dev/null) || return 1
+  case $cmd in *"live up $3"*) ;; *) return 1 ;; esac
+  start=$(LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null) || return 1
+  read -r start <<<"$start" # ps pads the field
+  # BSD date (macOS), else GNU's.
+  start=$(LC_ALL=C date -j -f '%a %b %d %T %Y' "$start" +%s 2>/dev/null ||
+    LC_ALL=C date -d "$start" +%s 2>/dev/null) || return 1
+  [ "$start" -le "$2" ]
+}
+
 # _live_lock_unkeep <product> -- end the keeper of this product's live-up.
 _live_lock_unkeep() {
   local target pid since recipe tree i
@@ -369,6 +399,16 @@ _live_lock_unkeep() {
   target=$(readlink "$LIVE_LOCK" 2>/dev/null || true)
   read -r pid since recipe tree <<<"$target"
   [ "$recipe" = "live-up-$1-kept" ] || return 0
+  # A pid that is not the keeper any more is a dead holder: its lock goes,
+  # as a taker's would, and nothing is signalled.
+  if ! _live_lock_is_keeper "$pid" "$since" "$1"; then
+    if _live_lock_reclaim "$target"; then
+      echo "live: $1: pid $pid is not its keeper any more (gone, or reused); the JVM lock its live-up kept is free, nothing signalled"
+    else
+      echo "live: $1: pid $pid is not its keeper any more (gone, or reused); nothing signalled, and the next run takes the lock over"
+    fi
+    return 0
+  fi
   # The keeper's own trap gives the link back; removing it here could remove
   # a lock another run took a moment after. A keeper that is gone without
   # doing so left a dead holder, which the next taker takes over.
