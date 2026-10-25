@@ -1727,12 +1727,13 @@ impl Scheduler {
     /// just written** (issues #289, #358).
     ///
     /// [`trigger`](Self::trigger) starts or joins a run and answers straight
-    /// away, which is right for a write that has just landed: nothing is
-    /// waiting on the mirror, and story 15 only asks that the app stop
-    /// disagreeing with itself within the second.
+    /// away, and a run it joins may have begun before the write. So every
+    /// landed write is followed by this rather than by a trigger (#2094):
+    /// `knobas-app`'s `sources::write_queue::after_landing` asks for it, on a
+    /// task nobody waits on.
     ///
-    /// A caller that is about to *look for what its write created* needs the
-    /// other behaviour, and the reason is `start_work::queue::Queue::refresh`'s
+    /// A caller that is about to *look for what its write created* waits for
+    /// it too, and the reason is `start_work::queue::Queue::refresh`'s
     /// in as many words: what a create made has an entity only once a sync has
     /// seen it (even where its receipt names it, #1949), so the only way to
     /// link one is to read the mirror, and reading it before the run that

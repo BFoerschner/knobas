@@ -508,7 +508,11 @@ async fn a_write_held_refused_or_waiting_starts_no_run() {
         .id;
     assert_eq!(settled(&f.state, landed).await, WriteState::Sent);
     run_after(&f.state, landed).await;
-    assert_eq!(runs(&f.state).await, 1, "only the landed write is followed by a run");
+    assert_eq!(
+        runs(&f.state).await,
+        1,
+        "only the landed write is followed by a run"
+    );
 
     f.answer(Answer::Unreachable);
     let waiting = write_queue::submit(&f.state, on("landing:PAY-4"))

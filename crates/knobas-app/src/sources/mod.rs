@@ -644,11 +644,8 @@ pub async fn start_scheduler(
     mut deps: SchedulerDeps,
     background: knobas_sync::background::Background,
 ) -> Result<Scheduler, sqlx::Error> {
-    let slot = Arc::new(std::sync::OnceLock::new());
-    deps.events = Arc::new(write_queue::FollowLandings {
-        inner: deps.events,
-        scheduler: Arc::clone(&slot),
-    });
+    let (events, slot) = write_queue::FollowLandings::wrap(deps.events);
+    deps.events = Arc::new(events);
     let scheduler = Scheduler::start_with_background(deps, background).await?;
     // Before any flush: the tick's first comes a startup delay after this,
     // and the commands have no scheduler to send through until it returns.

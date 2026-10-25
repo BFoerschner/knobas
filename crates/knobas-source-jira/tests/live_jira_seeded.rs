@@ -2540,7 +2540,7 @@ async fn a_reassignment_through_the_assignee_endpoint_reaches_the_next_increment
 /// stamp *at the only resolution a run can observe*.
 ///
 /// The run in the middle is what made the loss permanent rather than transient.
-/// `knobas_app::sources::write_queue`'s `refresh` fires one after every landed
+/// `knobas_app::sources::write_queue::after_landing` runs one after every landed
 /// write, so *comment through knobas, then reassign in Jira* put the issue into
 /// `seen` at the shared second, and no later run ever reached it -- `updated`
 /// does not move again on its own, so only a backfill recovered it.

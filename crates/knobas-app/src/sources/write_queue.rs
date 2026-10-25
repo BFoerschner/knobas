@@ -872,11 +872,32 @@ pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
 /// [`crate::sources::start_scheduler`], the one way the app starts a
 /// scheduler.
 pub(crate) struct FollowLandings {
-    pub(crate) inner: std::sync::Arc<dyn knobas_sync::scheduler::SyncEvents>,
+    inner: std::sync::Arc<dyn knobas_sync::scheduler::SyncEvents>,
     /// The scheduler these events belong to, set once it has started. Weak,
     /// since the scheduler holds its events.
-    pub(crate) scheduler:
-        std::sync::Arc<std::sync::OnceLock<knobas_sync::scheduler::WeakScheduler>>,
+    scheduler_slot: SchedulerSlot,
+}
+
+/// Where [`FollowLandings`] finds its scheduler once it has started.
+pub(crate) type SchedulerSlot =
+    std::sync::Arc<std::sync::OnceLock<knobas_sync::scheduler::WeakScheduler>>;
+
+impl FollowLandings {
+    /// `inner`, followed, and the slot to put the scheduler in once it has
+    /// started: until then a landed write is followed by nothing.
+    pub(crate) fn wrap(
+        inner: std::sync::Arc<dyn knobas_sync::scheduler::SyncEvents>,
+    ) -> (FollowLandings, SchedulerSlot) {
+        let scheduler_slot = SchedulerSlot::default();
+        let slot = std::sync::Arc::clone(&scheduler_slot);
+        (
+            FollowLandings {
+                inner,
+                scheduler_slot,
+            },
+            slot,
+        )
+    }
 }
 
 impl knobas_sync::scheduler::SyncEvents for FollowLandings {
@@ -890,7 +911,7 @@ impl knobas_sync::scheduler::SyncEvents for FollowLandings {
         self.inner.activity_new(row);
     }
     fn write_landed(&self, write: &QueuedWrite) {
-        if let Some(scheduler) = self.scheduler.get().and_then(|weak| weak.upgrade()) {
+        if let Some(scheduler) = self.scheduler_slot.get().and_then(|weak| weak.upgrade()) {
             let (task, landed) = (scheduler.clone(), write.clone());
             // Refused once the quit has begun: the next start's scheduled
             // sync reads the source.

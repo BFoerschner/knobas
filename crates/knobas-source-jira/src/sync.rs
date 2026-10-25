@@ -1460,7 +1460,7 @@ mod tests {
     /// This is the fix's own test, and its fixture is the sequence a real
     /// installation runs constantly: something changes, a sync records the
     /// issue, and something else changes it again before that second is out.
-    /// `knobas_app::sources::write_queue`'s `refresh` fires a sync after every
+    /// `knobas_app::sources::write_queue::after_landing` runs a sync after every
     /// landed write, so *comment through knobas, then reassign in Jira* is
     /// exactly this shape -- measured on Jira DC 10.3.24 with 88 ms between the
     /// two.
