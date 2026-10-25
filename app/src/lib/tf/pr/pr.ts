@@ -89,7 +89,7 @@ export function headerOf(view: SourceView | null): PrHeader {
   const branches = value("Branches")?.value ?? null;
   const at = branches?.indexOf(" → ") ?? -1;
   const blocks = section(view, "overview")?.blocks ?? [];
-  const checks = blocks.find((block) => block.type === "entities");
+  const checks = blocks.find((block) => block.type === "entities" && lineOf(block) === null);
   const text = blocks.find((block) => block.type === "text");
   return {
     state: state ? { text: state.value, tone: state.tone } : null,
@@ -99,6 +99,39 @@ export function headerOf(view: SourceView | null): PrHeader {
     description: text?.type === "text" ? text.text : null,
     checks: checks?.type === "entities" ? checks.rows : [],
   };
+}
+
+/** What the Overview tab draws, in the source's order: the checks, the description, and a muted line where the source put one. */
+export type OverviewPart = { line: string } | { checks: ViewRow[] } | { description: string };
+
+export function overviewParts(view: SourceView | null): OverviewPart[] {
+  const parts: OverviewPart[] = [];
+  let checks = false;
+  let description = false;
+  for (const block of section(view, "overview")?.blocks ?? []) {
+    const lines = lineOf(block);
+    if (lines !== null) parts.push(...lines.map((line) => ({ line })));
+    else if (block.type === "entities" && !checks) {
+      checks = true;
+      if (block.rows.length > 0) parts.push({ checks: block.rows });
+    } else if (block.type === "text" && !description) {
+      description = true;
+      parts.push({ description: block.text });
+    }
+  }
+  return parts;
+}
+
+/**
+ * The rows *Ready to merge?* reads its checks line from: the checks, else,
+ * where the overview opens its lists on a muted line, that line, which
+ * stands where the checks would (Gitea's `checks::unread`).
+ */
+function checksPlace(view: SourceView | null): ViewRow[] {
+  const checks = headerOf(view).checks;
+  if (checks.length > 0) return checks;
+  const first = (section(view, "overview")?.blocks ?? []).find((block) => block.type === "entities");
+  return first?.type === "entities" && lineOf(first) !== null ? first.rows : [];
 }
 
 /** Each tab's count, from its section; `null` where the source gave none. */
@@ -153,7 +186,7 @@ export function readyLines(view: SourceView | null): ReadyLine[] {
   const all = facts(view);
   const approvals = all.find((fact) => fact.label === "Approvals");
   const conflicts = all.find((fact) => fact.label === "Conflicts");
-  const checks = checksLine(headerOf(view).checks);
+  const checks = checksLine(checksPlace(view));
   const lines: ReadyLine[] = [];
   if (approvals === undefined && conflicts === undefined) {
     const mergeable = all.find((fact) => fact.label === "Mergeable");
@@ -275,8 +308,17 @@ export function conversationOf(view: SourceView | null): PrMessage[] {
   return conversationParts(view).flatMap((part) => ("item" in part ? [part.item] : []));
 }
 
-/** The pull request's commits, as its *Commits* lists them (the note a cut list ends on included). */
-export function commitRows(view: SourceView | null): ViewRow[] {
-  for (const block of section(view, "commits")?.blocks ?? []) if (block.type === "entities") return block.rows;
-  return [];
+/**
+ * What *Commits* draws, in the source's order: the pull request's commits
+ * (the note a cut list ends on included), and a muted line where the source
+ * put one, which is none of them.
+ */
+export function commitParts(view: SourceView | null): Part<ViewRow[]>[] {
+  const parts: Part<ViewRow[]>[] = [];
+  for (const block of section(view, "commits")?.blocks ?? []) {
+    const lines = lineOf(block);
+    if (lines !== null) parts.push(...lines.map((line) => ({ line })));
+    else if (block.type === "entities" && block.rows.length > 0 && !parts.some((part) => "item" in part)) parts.push({ item: block.rows });
+  }
+  return parts;
 }
