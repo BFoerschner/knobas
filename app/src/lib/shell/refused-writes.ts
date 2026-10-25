@@ -22,14 +22,15 @@ export type { RefusedWrite, WriteAsk };
 /** The read, injectable so a component test needs no Tauri bridge. */
 export type RefusedWritesPort = (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
 
+/** One ask as a string, to tell asks apart by entity and op. */
+const keyOf = (ask: WriteAsk) => JSON.stringify([ask.entity, ask.op]);
+
 /**
  * `asks` sent once each, and the answer; a rejection answers nothing. No
  * ask sends nothing.
  */
 export async function askRefused(asks: readonly WriteAsk[], read?: RefusedWritesPort): Promise<RefusedWrite[]> {
-  const once = asks.filter(
-    (ask, i) => asks.findIndex((other) => other.entity === ask.entity && other.op === ask.op) === i,
-  );
+  const once = asks.filter((ask, i) => asks.findIndex((other) => keyOf(other) === keyOf(ask)) === i);
   if (once.length === 0) return [];
   try {
     // The bridge is reached inside the `try`, so a shell without it answers nothing too.
@@ -64,10 +65,8 @@ export function askInto(
   };
 }
 
-/** How long a typed-for set stands still before {@link createAsker} asks about it (#2063). */
+/** How long a typed-for set stands still before {@link createSettledAsker} asks about it (#2063). */
 export const SETTLE_MS = 250;
-
-const keyOf = (ask: WriteAsk) => JSON.stringify([ask.entity, ask.op]);
 
 /**
  * Asks for a surface whose drawn set changes as the reader types, such as
@@ -78,12 +77,12 @@ const keyOf = (ask: WriteAsk) => JSON.stringify([ask.entity, ask.op]);
  * it stays true for the entities it names. One that is rejected is
  * forgotten, so a later `ask` sends it again.
  *
- * `ask(now, settled, read)` sends `now` at once and `settled` once
+ * `ask({ now, settled }, read)` sends `now` at once and `settled` once
  * {@link SETTLE_MS} pass without another `ask`, and returns the cleanup that
  * cancels the wait, for an `$effect`. `stop()`, for the surface's teardown,
  * lands nothing more.
  */
-export function createAsker(land: (answer: RefusedWrite[]) => void) {
+export function createSettledAsker(land: (answer: RefusedWrite[]) => void) {
   const asked = new Set<string>();
   let stopped = false;
   const send = (asks: readonly WriteAsk[], read: RefusedWritesPort | undefined) => {
@@ -107,7 +106,10 @@ export function createAsker(land: (answer: RefusedWrite[]) => void) {
       );
   };
   return {
-    ask(now: readonly WriteAsk[], settled: readonly WriteAsk[], read: RefusedWritesPort | undefined): () => void {
+    ask(
+      { now, settled }: { now: readonly WriteAsk[]; settled: readonly WriteAsk[] },
+      read: RefusedWritesPort | undefined,
+    ): () => void {
       send(now, read);
       if (settled.every((ask) => asked.has(keyOf(ask)))) return () => {};
       const wait = setTimeout(() => send(settled, read), SETTLE_MS);

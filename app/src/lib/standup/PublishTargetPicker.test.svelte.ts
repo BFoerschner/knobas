@@ -44,7 +44,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function render(refuse: (ask: WriteAsk) => string | null, value: PublishTarget | null = null) {
+/** What the port answers: a reason refuses the ask, `null` refuses nothing. */
+type Refuse = (ask: WriteAsk) => string | null;
+
+/** The picker, open on `value`, its port answering by `refuse` or `port` when given. */
+function render(refuse: Refuse, value: PublishTarget | null = null, port?: (asks: WriteAsk[]) => Promise<never[]>) {
   const sent: string[][] = [];
   const announced: (PublishTarget | null)[] = [];
   view = mount(PublishTargetPicker, {
@@ -55,6 +59,7 @@ function render(refuse: (ask: WriteAsk) => string | null, value: PublishTarget |
       search,
       refusedWrites: async (asks: WriteAsk[]) => {
         sent.push(asks.map((ask) => ask.entity));
+        if (port) return port(asks);
         return asks.flatMap((ask) => {
           const reason = refuse(ask);
           return reason === null ? [] : [{ ...ask, reason }];
@@ -150,21 +155,14 @@ test("the stored parent is asked about at once (#2063)", async () => {
 
 test("an ask that fails is no verdict, and is asked again once the hits change (#2063)", async () => {
   let down = true;
-  const sent: string[][] = [];
-  view = mount(PublishTargetPicker, {
-    target,
-    props: {
-      sources: [{ id: "c", name: "Confluence" }],
-      search,
-      refusedWrites: async (asks: WriteAsk[]) => {
-        sent.push(asks.map((ask) => ask.entity));
-        if (down) throw new Error("not ready");
-        return [];
-      },
-      onchange: () => {},
+  const { sent } = render(
+    () => null,
+    null,
+    async () => {
+      if (down) throw new Error("not ready");
+      return [];
     },
-  });
-  flushSync();
+  );
   await type("sta");
   await vi.advanceTimersByTimeAsync(SETTLE_MS);
   expect(hit("c:3").getAttribute("aria-disabled")).toBeNull();
@@ -180,20 +178,9 @@ test("an ask that fails is no verdict, and is asked again once the hits change (
 
 test("an answer that lands after the picker is gone announces nothing (#2063)", async () => {
   let answer: (refused: never[]) => void = () => {};
-  const announced: unknown[] = [];
-  view = mount(PublishTargetPicker, {
-    target,
-    props: {
-      sources: [{ id: "c", name: "Confluence" }],
-      value: { source_id: "c", parent: "c:9" },
-      search,
-      refusedWrites: () => new Promise((resolve) => (answer = resolve)),
-      onchange: (next: unknown) => announced.push(next),
-    },
-  });
-  flushSync();
+  const { announced } = render(() => null, { source_id: "c", parent: "c:9" }, () => new Promise((resolve) => (answer = resolve)));
   await turns();
-  unmount(view);
+  unmount(view!);
   view = null;
   answer([]);
   await turns();

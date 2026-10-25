@@ -43,7 +43,7 @@
   import { onDestroy } from "svelte";
 
   import type { PublishTarget } from "../ipc/entity";
-  import { createAsker, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../shell/refused-writes";
+  import { createSettledAsker, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../shell/refused-writes";
   import { search as realSearch, type SearchHit } from "../ipc/search";
   import type { PublishableSource } from "./protocol";
   import { presumedSource } from "./protocol";
@@ -75,7 +75,7 @@
   let hits = $state<SearchHit[]>([]);
 
   let refused = $state<RefusedWrite[]>([]);
-  const asker = createAsker((answer) => {
+  const asker = createSettledAsker((answer) => {
     refused = [...refused, ...answer];
     announce();
   });
@@ -88,7 +88,7 @@
   $effect(() => {
     const [chosen, shown] = JSON.parse(askKey) as [string | null, string[]];
     const ask = (entity: string): WriteAsk => ({ entity, op: "create_page" });
-    return asker.ask(chosen === null ? [] : [ask(chosen)], shown.map(ask), refusedWrites);
+    return asker.ask({ now: chosen === null ? [] : [ask(chosen)], settled: shown.map(ask) }, refusedWrites);
   });
   /** Why no page can be added under `page`, or `null`. */
   const why = (page: string | null) => refusalOf(refused, page, "create_page");
