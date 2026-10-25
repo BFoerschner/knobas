@@ -1511,9 +1511,7 @@ async fn a_commit_catch_up_whose_page_is_past_the_end_reads_on_from_page_two() {
     );
     // Rewritten to the five newest, the seven `pushed(14..=20)` below the
     // resume point `pushed(21)`, and the start: thirteen, three pages.
-    let kept = |id: &str| {
-        id == sha(1) || (14..=20).chain(36..=40).any(|k| pushed(k).0 == id)
-    };
+    let kept = |id: &str| id == sha(1) || (14..=20).chain(36..=40).any(|k| pushed(k).0 == id);
     moving.with(|world| {
         let history = world
             .commits
