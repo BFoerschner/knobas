@@ -1419,7 +1419,9 @@ fn a_command_through_the_real_pipeline_is_timed_by_name() {
 /// The run is held in flight by the test itself: the source's advisory lock,
 /// taken on a connection of the test's own, is what every run of `mock` waits
 /// on before it reads a thing. So "in flight" is a fact here, not a race the
-/// fast mock adapter would win.
+/// fast mock adapter would win. The run says Started before it reaches that
+/// lock, so whether the join hears the Started is a race, and the test allows
+/// either (#2117).
 ///
 /// The command is called as the function `generate_handler!` dispatches to,
 /// with a `Channel` whose far end is this test: a mock webview has no
