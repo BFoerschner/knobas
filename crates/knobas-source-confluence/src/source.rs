@@ -2,7 +2,8 @@
 
 use knobas_source::instance::SourceInstance;
 use knobas_source::{
-    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp, WriteReceipt,
+    ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError, WriteOp,
+    WriteReceipt,
 };
 
 use crate::api::ConfluenceApi;
@@ -159,6 +160,24 @@ impl Source for ConfluenceSource {
             base_url: &self.base_url,
         }
         .run(cursor, sink)
+        .await
+    }
+
+    /// One page read by id ([`SyncRun::refresh`], ADR-0031): what a landed
+    /// write is followed by, so the mirror holds the page as Confluence does
+    /// before the run after the write starts.
+    ///
+    /// The id is unwrapped as a write's target is ([`Self::content_id`]): an
+    /// entity of another instance is refused, never read here.
+    async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
+        let id = self.content_id(entity)?;
+        SyncRun {
+            api: &self.http,
+            cfg: &self.cfg,
+            source_id: &self.id,
+            base_url: &self.base_url,
+        }
+        .refresh(&id)
         .await
     }
 
@@ -372,7 +391,8 @@ mod tests {
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
         assert_eq!(d.name, "Tidewater Confluence");
         assert_eq!(d.entity_kinds.len(), 1);
-        assert_eq!(d.capabilities, vec![knobas_source::Capability::Write]);
+        assert!(d.refreshes(), "a page is read back by id (ADR-0031)");
+        assert!(d.capabilities.contains(&knobas_source::Capability::Write));
         assert_eq!(d.write_ops, vec!["comment", "update_page", "create_page"]);
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.

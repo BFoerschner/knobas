@@ -666,6 +666,64 @@ impl SyncRun<'_> {
         Ok(emitted)
     }
 
+    /// **A refresh** (ADR-0031, #2096): the page with content id `id`, read
+    /// by id and mapped as a run maps it.
+    ///
+    /// The same three steps the comment walk takes for the page a comment led
+    /// to: `GET /rest/api/content/{id}` with [`EXPAND`], the comments it did
+    /// not expand completed, the mentions' users looked up. And the same
+    /// identity first, for the reason the run asks it first: a mention is
+    /// resolved against the credential's own key, and a read made as nobody
+    /// must fail rather than answer a page mapped without one.
+    ///
+    /// By id and not by CQL, which is what lets it follow a write at once:
+    /// the search index lags a write, the content endpoint does not.
+    ///
+    /// * `404` is [`Gone`](knobas_source::RefreshAnswer::Gone): deleted, or out
+    ///   of the account's sight, which no run would deliver either. So is a
+    ///   page whose status is not `current` (in the trash, a draft) and one in
+    ///   a space this source is not configured for: a run's `type = page`
+    ///   search answers neither, and a full sync would tombstone it.
+    /// * A record that is not a page (a blog post, a comment) is
+    ///   [`NotOffered`](knobas_source::RefreshAnswer::NotOffered): this
+    ///   adapter emits one kind.
+    /// * Every other failure is the error, never `Gone`.
+    pub(crate) async fn refresh(
+        &self,
+        id: &str,
+    ) -> Result<knobas_source::RefreshAnswer, SourceError> {
+        use knobas_source::RefreshAnswer;
+        let whoami = self.api.current_user().await?;
+        let me = whoami.username.as_deref().map(|username| Account {
+            username,
+            user_key: whoami.user_key.as_deref(),
+        });
+        let mut raw = match self.api.content(id, EXPAND).await {
+            Ok(raw) => raw,
+            Err(error) if error.status() == Some(404) => return Ok(RefreshAnswer::Gone),
+            Err(error) => return Err(error),
+        };
+        if raw.content.content_type.as_deref() != Some("page") {
+            return Ok(RefreshAnswer::NotOffered);
+        }
+        let current = raw.raw["status"].as_str().is_none_or(|s| s == "current");
+        let in_scope = self.cfg.spaces.is_empty()
+            || raw.raw["space"]["key"]
+                .as_str()
+                .is_some_and(|key| self.cfg.spaces.iter().any(|s| s.eq_ignore_ascii_case(key)));
+        if !current || !in_scope {
+            return Ok(RefreshAnswer::Gone);
+        }
+        self.complete(&mut raw).await?;
+        Directory::new(&whoami).annotate(self.api, &mut raw).await;
+        Ok(RefreshAnswer::Item(map::to_sync_item(
+            self.source_id,
+            self.base_url,
+            &raw,
+            me,
+        )))
+    }
+
     /// The run-start probe: the newest page in this source's scope, and the
     /// zone this instance renders timestamps in.
     ///
@@ -1132,7 +1190,10 @@ mod tests {
             let mut row = pages
                 .into_iter()
                 .find(|p| p["id"] == json!(id))
-                .ok_or_else(|| SourceError::protocol(format!("no content {id}")))?;
+                .ok_or_else(|| SourceError::Protocol {
+                    status: Some(404),
+                    message: format!("No content found with id: {id}"),
+                })?;
             if !expand.contains("children.comment")
                 && let Some(object) = row.as_object_mut()
             {
@@ -2596,5 +2657,163 @@ mod tests {
         let (items, _) = run(&fake, &cfg(json!({})), None).await.unwrap();
         assert_eq!(ids(&items), vec!["1", "2"]);
         assert_eq!(user_calls(&fake), vec!["user k-a"]);
+    }
+
+    // -- the refresh: one page read by id (ADR-0031, #2096) -------------------
+
+    async fn refresh_of(
+        fake: &Fake,
+        cfg: &ConfluenceConfig,
+        id: &str,
+    ) -> Result<knobas_source::RefreshAnswer, SourceError> {
+        SyncRun {
+            api: fake,
+            cfg,
+            source_id: "confluence",
+            base_url: "http://127.0.0.1:8090",
+        }
+        .refresh(id)
+        .await
+    }
+
+    fn refreshed(answer: knobas_source::RefreshAnswer) -> SyncItem {
+        match answer {
+            knobas_source::RefreshAnswer::Item(item) => item,
+            other => panic!("expected the page, got {other:?}"),
+        }
+    }
+
+    /// **A refreshed page is the item a run emits for it**, field for field:
+    /// its comments completed where the read did not expand them, and its
+    /// mentions named, by the same mapping.
+    #[tokio::test]
+    async fn a_refreshed_page_is_the_item_a_run_emits_for_it() {
+        let mut p = page_saying(
+            "104",
+            "2026-08-22T10:40:00.000Z",
+            &format!("<p>ask {}</p>", mention("k-mara")),
+        );
+        p.as_object_mut().unwrap().remove("children");
+        let mut fake = Fake::new(vec![p, page("105", "Other", "2026-08-23T00:00:00.000Z", 1)]);
+        fake.users.insert(
+            "k-mara".to_owned(),
+            json!({ "type": "known", "userKey": "k-mara", "username": "mara", "displayName": "Mara Lind" }),
+        );
+        fake.detached_comments.lock().unwrap().insert(
+            "104".to_owned(),
+            vec![json!({
+                "id": "98320",
+                "type": "comment",
+                "body": { "storage": { "value": "<p>can you add the SLA?</p>" } },
+                "version": { "number": 1, "when": "2026-08-23T09:00:00.000Z", "by": { "username": "mara" } }
+            })],
+        );
+        let cfg = cfg(json!({}));
+        let (items, _) = run(&fake, &cfg, None).await.unwrap();
+        let synced = items.iter().find(|i| i.entity.key == "104").unwrap();
+
+        let item = refreshed(refresh_of(&fake, &cfg, "104").await.unwrap());
+        assert_eq!(item.entity, synced.entity);
+        assert_eq!(item.kind, synced.kind);
+        assert_eq!(item.title, synced.title);
+        assert_eq!(item.body_text, synced.body_text);
+        assert_eq!(item.author, synced.author);
+        assert_eq!(item.updated_at, synced.updated_at);
+        assert_eq!(item.web_url, synced.web_url);
+        assert_eq!(item.payload, synced.payload);
+        assert!(!item.deleted);
+        assert_eq!(
+            item.payload["children"]["comment"]["results"][0]["id"],
+            "98320",
+            "the comment the read did not expand is completed"
+        );
+        assert_eq!(mention_names(&item), vec![Some("Mara Lind".to_owned())]);
+    }
+
+    /// **One read by id**, not a search: a page nobody's index has caught up
+    /// with yet is read as Confluence holds it (CQL lags a write, the content
+    /// endpoint does not).
+    #[tokio::test]
+    async fn a_refresh_reads_the_page_by_id_and_searches_nothing() {
+        let fake = Fake::new(a_corpus());
+        refreshed(refresh_of(&fake, &cfg(json!({})), "104").await.unwrap());
+        assert_eq!(fake.calls(), vec!["current_user", "content 104"]);
+    }
+
+    /// **A page Confluence answers `404` for is gone**: deleted, or out of
+    /// the account's sight, which a run would not deliver either.
+    #[tokio::test]
+    async fn a_page_confluence_answers_404_for_is_gone() {
+        let fake = Fake::new(a_corpus());
+        let answer = refresh_of(&fake, &cfg(json!({})), "999").await.unwrap();
+        assert!(
+            matches!(answer, knobas_source::RefreshAnswer::Gone),
+            "{answer:?}"
+        );
+    }
+
+    /// **A page in the trash is gone**: no run's `type = page` search answers
+    /// one, so the mirror must not hold it either.
+    #[tokio::test]
+    async fn a_trashed_page_is_gone() {
+        let mut p = page("104", "SEPA payout retry design", "2026-08-22T10:40:00.000Z", 3);
+        p["status"] = json!("trashed");
+        let fake = Fake::new(vec![p]);
+        let answer = refresh_of(&fake, &cfg(json!({})), "104").await.unwrap();
+        assert!(
+            matches!(answer, knobas_source::RefreshAnswer::Gone),
+            "{answer:?}"
+        );
+    }
+
+    /// **A page moved out of the configured spaces is gone**, as a full sync
+    /// would tombstone it; the same page with no space list is the page.
+    #[tokio::test]
+    async fn a_page_outside_the_configured_spaces_is_gone() {
+        let fake = Fake::new(a_corpus());
+        let answer = refresh_of(&fake, &cfg(json!({ "spaces": ["OPS"] })), "104")
+            .await
+            .unwrap();
+        assert!(
+            matches!(answer, knobas_source::RefreshAnswer::Gone),
+            "{answer:?}"
+        );
+        refreshed(
+            refresh_of(&fake, &cfg(json!({ "spaces": ["OPS", "ENG"] })), "104")
+                .await
+                .unwrap(),
+        );
+    }
+
+    /// **A record that is not a page is not offered**: this adapter emits one
+    /// kind, and a blog post or a comment is not an item of it.
+    #[tokio::test]
+    async fn a_record_that_is_not_a_page_is_not_offered() {
+        let mut p = page("300", "Release notes", "2026-08-22T10:40:00.000Z", 1);
+        p["type"] = json!("blogpost");
+        let fake = Fake::new(vec![p]);
+        let answer = refresh_of(&fake, &cfg(json!({})), "300").await.unwrap();
+        assert!(
+            matches!(answer, knobas_source::RefreshAnswer::NotOffered),
+            "{answer:?}"
+        );
+    }
+
+    /// **A failed read is an error, never gone** (SPI doc on
+    /// `Source::refresh`): a refused credential tombstones nothing.
+    #[tokio::test]
+    async fn a_failed_read_is_an_error_and_never_gone() {
+        let mut fake = Fake::new(a_corpus());
+        fake.fault = Some(SourceError::Unauthorized { status: Some(401) });
+        let error = refresh_of(&fake, &cfg(json!({})), "104").await.unwrap_err();
+        assert!(matches!(error, SourceError::Unauthorized { .. }), "{error:?}");
+
+        let mut fake = Fake::new(a_corpus());
+        fake.fault = Some(SourceError::Protocol {
+            status: Some(500),
+            message: "HTTP 500".into(),
+        });
+        let error = refresh_of(&fake, &cfg(json!({})), "104").await.unwrap_err();
+        assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
     }
 }
