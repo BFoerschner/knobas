@@ -154,9 +154,9 @@ pub(crate) struct Content {
     /// survives a rename, a move and a space change, which is the whole reason
     /// the criterion names it rather than the title.
     pub id: String,
-    /// `page` or `comment`. Read by the mention walk and nowhere else: a
+    /// `page` or `comment`. Read by the comment walk and nowhere else: a
     /// comment's [`container`](Self::container) is the page it hangs off,
-    /// while a **page's** container is its *space* -- so the mention walk must
+    /// while a **page's** container is its *space* -- so the comment walk must
     /// know which record it is holding before it reads a container id, or it
     /// would follow a space id as though it were a page's.
     #[serde(default, rename = "type")]
@@ -185,10 +185,14 @@ pub(crate) struct Container {
     /// A [`Value`] and not a `String`, and this is not fussiness: a **page's**
     /// container is its space, and a space's `id` comes back as a JSON
     /// *number*. Typed as a string, that record would fail to deserialize and
-    /// take the whole mention walk's response down with it -- an adapter that
+    /// take the whole comment walk's response down with it -- an adapter that
     /// refuses a run because a page has a space.
     #[serde(default)]
     pub id: Option<Value>,
+    /// `page`, `blogpost` or `space`. A comment on a blog post hangs off the
+    /// post, and the comment walk (#2073) asks for every comment.
+    #[serde(default, rename = "type")]
+    pub content_type: Option<String>,
 }
 
 impl Container {
@@ -201,7 +205,7 @@ impl Container {
 
 impl Content {
     /// Which page this record is *on*, or `None` for one nothing can place --
-    /// the mention walk's only reader.
+    /// the comment walk's only reader.
     ///
     /// **The type is read first, and that is the whole point.** A comment's
     /// [`container`](Self::container) is the page it hangs off; a **page's**
@@ -211,14 +215,16 @@ impl Content {
     /// worse, mirror something that is not the page.
     ///
     /// A record whose type this adapter never asked for -- a blog post, an
-    /// attachment, a type a later Confluence adds -- is placed nowhere: the
-    /// adapter emits one kind, and the alternative is inventing a page for
-    /// something that has none.
+    /// attachment, a type a later Confluence adds -- is placed nowhere, and
+    /// so is a comment whose container is not a page (one on a blog post):
+    /// the adapter emits one kind, and the alternative is inventing a page
+    /// for something that has none.
     pub(crate) fn page_it_is_on(&self) -> Option<String> {
         match self.content_type.as_deref() {
             Some("comment") => self
                 .container
                 .as_ref()
+                .filter(|c| c.content_type.as_deref() == Some("page"))
                 .and_then(Container::content_id)
                 .map(str::to_owned),
             Some("page") => Some(self.id.clone()),
@@ -495,7 +501,7 @@ mod tests {
         assert!(more.truncated());
     }
 
-    /// The mention walk's two fields, and the trap they exist for: a
+    /// The comment walk's two fields, and the trap they exist for: a
     /// comment's container is the **page**, a page's container is its
     /// **space**, and the ids are from different namespaces. Reading a
     /// container without reading the type would follow a space id as a page's.

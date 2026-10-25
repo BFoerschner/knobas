@@ -25,7 +25,7 @@
 //! filter needs, but it is not what identity is decided on.
 
 use chrono::{DateTime, Utc};
-use knobas_source::watermark::{self, Advanced, Bounds, Cql, Entry};
+use knobas_source::watermark::{self, Advanced, Bounds, Cql, Entry, MinuteLiteral};
 
 /// Bump when the envelope's shape changes: an unrecognised version reads as
 /// "no cursor", which is a full sync. Bumped to 2 by #860, whose `body_text`
@@ -39,6 +39,25 @@ pub(crate) const CURSOR_VERSION: u8 = 3;
 // `knobas_source::watermark`'s (#1622), shared with Jira: CQL's
 // `lastmodified` takes a `"yyyy-MM-dd HH:mm"` literal and resolves to the
 // minute, exactly as JQL's `updated` does.
+
+/// How many of the comment walk's records the envelope remembers, apart from
+/// the page walk's [`SEEN_CAP`](knobas_source::watermark::SEEN_CAP) (#2073).
+///
+/// A comment is newer than the watermark it was found under -- the comment
+/// walk never moves the watermark -- so it stays in the window until a page
+/// edit carries the watermark past it, and a busy discussion piles up entries
+/// for as long as nobody edits a page. In one shared cap those would win (the
+/// cap keeps the newest), push the page walk's entries out and re-deliver
+/// their pages on every poll. Past this cap the oldest comments' pages are
+/// re-delivered instead, which costs a request and an upsert each, never an
+/// edit. About 60 bytes an entry, so a full cap adds ~120 kB to the cursor.
+pub(crate) const COMMENT_SEEN_CAP: usize = 2_000;
+
+/// `seen`'s total order: newest first, the id breaking a tie, so one window
+/// always encodes to the same bytes (`knobas_source::watermark::advanced`).
+fn newest_first(a: &Seen, b: &Seen) -> std::cmp::Ordering {
+    b.u.cmp(&a.u).then_with(|| a.i.cmp(&b.i))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ConfluenceCursor {
@@ -174,6 +193,11 @@ impl ConfluenceCursor {
     ///
     /// This is why the parameter is not called `delivered`.
     ///
+    /// `comments_seen` is the comment walk's share of the window, kept under
+    /// [`COMMENT_SEEN_CAP`] rather than the page walk's cap: the two are
+    /// filtered and ordered alike and stored as one list, so the envelope's
+    /// shape is what it was.
+    ///
     /// `bounds` carries the previous watermark and the run-start ceiling; the
     /// clamp, the floor, the order and the cap are
     /// [`knobas_source::watermark::advanced`]'s, shared with Jira.
@@ -182,9 +206,26 @@ impl ConfluenceCursor {
         newest: DateTime<Utc>,
         tz_offset_secs: i32,
         seen_in_window: &[Seen],
+        comments_seen: &[Seen],
     ) -> Self {
-        let Advanced { watermark, seen } =
-            watermark::advanced::<Cql, Seen>(bounds, newest, tz_offset_secs, seen_in_window);
+        let Advanced {
+            watermark,
+            mut seen,
+        } = watermark::advanced::<Cql, Seen>(bounds, newest, tz_offset_secs, seen_in_window);
+        // The comments' share: the same band and order, under its own cap.
+        let floor = Cql::floor(
+            watermark - chrono::Duration::minutes(watermark::OVERLAP_MINUTES),
+            tz_offset_secs,
+        );
+        let mut comments: Vec<Seen> = comments_seen
+            .iter()
+            .filter(|s| s.u >= floor)
+            .cloned()
+            .collect();
+        comments.sort_by(newest_first);
+        comments.truncate(COMMENT_SEEN_CAP);
+        seen.extend(comments);
+        seen.sort_by(newest_first);
         Self {
             v: CURSOR_VERSION,
             modified_to: Some(watermark),
@@ -221,6 +262,7 @@ mod tests {
             utc("2026-08-22T10:40:00Z"),
             7200,
             &[seen("98307", 3, "2026-08-22T10:40:00Z")],
+            &[],
         );
         let encoded = good.encode();
         // The stored bytes, literally: the shared watermark (#1622) moved the
@@ -259,8 +301,13 @@ mod tests {
     /// that shares the watermark's minute.
     #[test]
     fn the_next_query_starts_before_the_watermark() {
-        let cursor =
-            ConfluenceCursor::advanced(Bounds::default(), utc("2026-08-22T10:40:00Z"), 7200, &[]);
+        let cursor = ConfluenceCursor::advanced(
+            Bounds::default(),
+            utc("2026-08-22T10:40:00Z"),
+            7200,
+            &[],
+            &[],
+        );
         assert_eq!(cursor.since(7200), Some(utc("2026-08-22T10:38:00Z")));
         // A source that never delivered anything has no lower bound at all,
         // which is what makes its first run a full sync.
@@ -272,8 +319,13 @@ mod tests {
     /// and the zone the next query is read in.
     #[test]
     fn a_changed_offset_widens_the_window_for_one_run() {
-        let cursor =
-            ConfluenceCursor::advanced(Bounds::default(), utc("2026-10-25T10:40:00Z"), 7200, &[]);
+        let cursor = ConfluenceCursor::advanced(
+            Bounds::default(),
+            utc("2026-10-25T10:40:00Z"),
+            7200,
+            &[],
+            &[],
+        );
         assert_eq!(cursor.since(3600), Some(utc("2026-10-25T09:35:00Z")));
         assert!(
             cursor.since(3600).unwrap() < cursor.since(7200).unwrap(),
@@ -291,6 +343,7 @@ mod tests {
             utc("2026-08-22T10:40:00Z"),
             7200,
             &[seen("98307", 3, "2026-08-22T10:40:00Z")],
+            &[],
         );
         assert!(cursor.already_delivered("98307", Some(3)));
         // The same page, edited again inside the same second: a new version,
@@ -320,6 +373,7 @@ mod tests {
                 seen("in-band", 1, "2026-08-22T10:38:30Z"),
                 seen("out-of-band", 1, "2026-08-22T10:37:00Z"),
             ],
+            &[],
         );
         let ids: Vec<&str> = cursor.seen.iter().map(|s| s.i.as_str()).collect();
         assert_eq!(
@@ -344,8 +398,9 @@ mod tests {
             watermark,
             0,
             &[a.clone(), b.clone(), c.clone()],
+            &[],
         );
-        let two = ConfluenceCursor::advanced(Bounds::default(), watermark, 0, &[c, a, b]);
+        let two = ConfluenceCursor::advanced(Bounds::default(), watermark, 0, &[c, a, b], &[]);
         assert_eq!(one.encode(), two.encode());
         // Newest first, with the id breaking a tie -- a total order, which is
         // what makes the bytes stable rather than merely usually equal.
@@ -370,9 +425,44 @@ mod tests {
                 u: base - chrono::Duration::milliseconds(i as i64),
             })
             .collect();
-        let cursor = ConfluenceCursor::advanced(Bounds::default(), base, 0, &records);
+        let cursor = ConfluenceCursor::advanced(Bounds::default(), base, 0, &records, &[]);
         assert_eq!(cursor.seen.len(), knobas_source::watermark::SEEN_CAP);
         assert_eq!(cursor.seen[0].i, "000000", "the newest survives");
         assert!(cursor.already_delivered("000000", Some(1)));
+    }
+
+    /// The comment walk's entries are capped apart (#2073): a window holding
+    /// more comments than both caps keeps the page walk's entries whole and
+    /// the newest [`COMMENT_SEEN_CAP`] comments, all of them newer than every
+    /// page, in one newest-first list.
+    #[test]
+    fn comments_past_the_page_cap_push_out_no_page_entry() {
+        let base = utc("2026-08-22T10:40:00Z");
+        let pages: Vec<Seen> = (0..3)
+            .map(|i| Seen {
+                i: format!("page-{i}"),
+                n: Some(1),
+                u: base - chrono::Duration::milliseconds(i),
+            })
+            .collect();
+        let comments: Vec<Seen> = (0..COMMENT_SEEN_CAP + 10)
+            .map(|i| Seen {
+                i: format!("{i:06}"),
+                n: Some(1),
+                u: base + chrono::Duration::milliseconds(1 + i as i64),
+            })
+            .collect();
+        let cursor = ConfluenceCursor::advanced(Bounds::default(), base, 0, &pages, &comments);
+        assert_eq!(cursor.seen.len(), COMMENT_SEEN_CAP + 3);
+        for page in &pages {
+            assert!(cursor.already_delivered(&page.i, Some(1)), "{}", page.i);
+        }
+        let newest = format!("{:06}", COMMENT_SEEN_CAP + 9);
+        assert_eq!(cursor.seen[0].i, newest, "newest first across both walks");
+        assert!(
+            !cursor.already_delivered("000000", Some(1)),
+            "the oldest comments go"
+        );
+        assert_eq!(cursor.seen[COMMENT_SEEN_CAP].i, "page-0");
     }
 }

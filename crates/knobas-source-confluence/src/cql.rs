@@ -57,34 +57,34 @@ pub(crate) fn build_cql(
     render_query("type = page", cfg, since, offset_secs, order_by)
 }
 
-/// `mention = currentUser() AND type in (page, comment) [AND space in (…)]
-/// [AND lastmodified >= "…"] ORDER BY lastmodified asc`.
+/// `type = comment [AND space in (…)] [AND lastmodified >= "…"] order by
+/// lastmodified asc` -- the **comment walk** (#2073).
 ///
 /// **Why a second query and not a filter on the first.** The page walk is
 /// bounded by a *page's* `lastmodified`, and a comment is separate content in
-/// Confluence: posting one does not touch the page it hangs off. So a comment
-/// that names you on a page nobody has edited in a year is invisible to the
-/// page walk for ever -- and a comment is where a mention usually lives. This
-/// query is bounded by the **comment's own** `lastmodified`, which is what
-/// reaches it.
+/// Confluence: posting or editing one does not touch the page it hangs off
+/// (measured on Data Center 9.2.21, #2073). So a comment on a page nobody has
+/// edited in a year is invisible to the page walk for ever. This query is
+/// bounded by the **comment's own** `lastmodified`, which is what reaches it.
 ///
-/// **Why `mention = currentUser()` and not a text match.** A mention is stored
-/// as a user *key*; only the server can resolve one to the credential's
-/// account, and `currentUser()` is it asking itself. It also needs no
-/// escaping and no username in the query, so a rename at the source cannot
-/// silently narrow the scope to nobody.
+/// **Every comment, not only the ones that name the account.** Until #2073
+/// this was `mention = currentUser() AND type in (page, comment)`, so a
+/// comment anybody else was sent, and an edit to one, waited for the next
+/// page edit or full sync. The inbox finds a mention in the page payload the
+/// mirror stores (`knobas_core::inbox`), not by which walk delivered the
+/// page, and a mention in a page body moves the page's `lastmodified`, so the
+/// page walk reaches that one; nothing needed the narrower scope.
 ///
-/// `type in (page, comment)` is both places a mention can be: a page body and
-/// a comment on one. Blog posts and attachments stay out for the reason
-/// [`build_cql`] gives -- this adapter emits one kind, and the entity a
-/// mention produces is the page (`crate::sync`).
-pub(crate) fn build_mention_cql(
+/// Blog posts and attachments stay out for the reason [`build_cql`] gives --
+/// this adapter emits one kind, and the entity a comment produces is the page
+/// it is on (`crate::sync`).
+pub(crate) fn build_comment_cql(
     cfg: &ConfluenceConfig,
     since: Option<DateTime<Utc>>,
     offset_secs: i32,
 ) -> String {
     render_query(
-        "mention = currentUser() AND type in (page, comment)",
+        "type = comment",
         cfg,
         since,
         offset_secs,
@@ -139,7 +139,7 @@ fn scoped(scope: &str, cfg: &ConfluenceConfig) -> Vec<String> {
 /// ordering.
 ///
 /// One renderer so the space list and the watermark literal cannot come out
-/// differently for the two walks: the mention walk reads the *same* cursor,
+/// differently for the two walks: the comment walk reads the *same* cursor,
 /// so a bound rendered in another zone there would be a bound two hours wrong.
 fn render_query(
     scope: &str,
@@ -242,41 +242,38 @@ mod tests {
         );
     }
 
-    /// The mention walk's scope, in full: the server resolves the identity,
-    /// both kinds a mention can live in are in it, and the space list narrows
-    /// it exactly as it narrows the page walk.
+    /// The comment walk's scope, with and without a space list: every
+    /// comment, whoever wrote it and whoever it names (#2073). The space list
+    /// narrows it exactly as it narrows the page walk.
     #[test]
-    fn the_mention_query_asks_the_server_who_the_credential_is() {
+    fn the_comment_query_asks_for_every_comment_in_scope() {
         assert_eq!(
-            build_mention_cql(&cfg(json!({ "spaces": ["ENG"] })), None, 7200),
-            "mention = currentUser() AND type in (page, comment) AND space in (\"ENG\") \
-             order by lastmodified asc"
+            build_comment_cql(&cfg(json!({ "spaces": ["ENG", "OPS"] })), None, 7200),
+            "type = comment AND space in (\"ENG\", \"OPS\") order by lastmodified asc"
         );
         assert_eq!(
-            build_mention_cql(&cfg(json!({})), None, 0),
-            "mention = currentUser() AND type in (page, comment) order by lastmodified asc"
+            build_comment_cql(&cfg(json!({})), None, 0),
+            "type = comment order by lastmodified asc"
         );
     }
 
-    /// **The cursor bound, and the reason the mention walk exists.** A comment
+    /// **The cursor bound, and the reason the comment walk exists.** A comment
     /// is separate content, so its `lastmodified` is its own -- the bound has
-    /// to be here or every run would re-walk every mention the account has
-    /// ever had, and a corpus that grew past the page cap would fail the run.
-    /// It is rendered in the instance's zone by the same code path the page
-    /// walk uses, so the two walks read one cursor the same way.
+    /// to be here or every run would re-walk every comment in the wiki, and a
+    /// corpus that grew past the page cap would fail the run. It is rendered
+    /// in the instance's zone by the same code path the page walk uses, so the
+    /// two walks read one cursor the same way.
     #[test]
-    fn the_mention_query_is_bounded_by_the_cursor_in_the_instances_zone() {
+    fn the_comment_query_is_bounded_by_the_cursor_in_the_instances_zone() {
         let since = utc("2026-08-22T10:38:00Z");
-        let bounded = build_mention_cql(&cfg(json!({ "spaces": ["ENG"] })), Some(since), 7200);
         assert_eq!(
-            bounded,
-            "mention = currentUser() AND type in (page, comment) AND space in (\"ENG\") \
-             AND lastmodified >= \"2026-08-22 12:38\" order by lastmodified asc"
+            build_comment_cql(&cfg(json!({ "spaces": ["ENG"] })), Some(since), 7200),
+            "type = comment AND space in (\"ENG\") AND lastmodified >= \"2026-08-22 12:38\" \
+             order by lastmodified asc"
         );
         assert_eq!(
-            build_mention_cql(&cfg(json!({})), Some(since), 0),
-            "mention = currentUser() AND type in (page, comment) AND lastmodified >= \
-             \"2026-08-22 10:38\" order by lastmodified asc"
+            build_comment_cql(&cfg(json!({})), Some(since), 0),
+            "type = comment AND lastmodified >= \"2026-08-22 10:38\" order by lastmodified asc"
         );
     }
 
@@ -306,15 +303,5 @@ mod tests {
             build_ids_cql(&["360460", "1) OR (type = blogpost", ""]),
             "type = page AND id in (360460)"
         );
-    }
-
-    /// Ascending: the mention walk pages by offset too, and a descending walk
-    /// over the field it orders by would duplicate rows ahead of the cursor
-    /// rather than behind it. It stays on `lastmodified`: it delivers no
-    /// kind of its own, and the page walk is what a full sync's sweep reads.
-    #[test]
-    fn the_mention_query_walks_ascending() {
-        let q = build_mention_cql(&cfg(json!({})), None, 0);
-        assert!(q.ends_with("order by lastmodified asc"), "{q}");
     }
 }
