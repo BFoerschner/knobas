@@ -235,7 +235,7 @@ export function createdBy(page: DocPage): { who: string; at: string | null } | n
  * `knobas_app::docs`'s `BACKLINKS` query): at this many there may be more, so
  * *Linked from* says `50+`.
  */
-export const BACKLINK_LIMIT = 50;
+const BACKLINK_LIMIT = 50;
 
 /** *Linked from*'s heading: the number of backlinks, `50+` at the backend's limit (#2080). */
 export function linkedFromHeading(count: number): string {

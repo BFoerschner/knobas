@@ -412,6 +412,11 @@ const RICH: DocPage = {
   writes: ["comment", "update_page", "create_page"],
 };
 
+/** Draws the handbook as `page`, in place of whatever is mounted. */
+function drawPage(page: DocPage, over: Partial<DocsPorts> = {}): Promise<DocsPorts> {
+  return redraw(["confluence:2"], ports({ docsPage: vi.fn(async () => page), ...over }));
+}
+
 test("the margin holds only the outline (#2080)", async () => {
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
   const margin = target.querySelector("aside[aria-label='On this page']")!;
@@ -433,18 +438,18 @@ const LINKED: DocPage["backlinks"] = [
 /** The tree, with another source's TEAM: a backlink's space is named from the page's own source only. */
 const TREE_ELSEWHERE: DocsTree = { ...TREE, spaces: [...TREE.spaces, { source_id: "wiki", key: "TEAM", name: "Not this one", pages: [] }] };
 
-const foot = () => target.querySelector(".tf-rd-page")!;
-const linkedHeading = () => [...foot().querySelectorAll("h3")].find((h) => h.textContent?.startsWith("Linked from"));
+const article = () => target.querySelector(".tf-rd-page")!;
+const linkedHeading = () => [...article().querySelectorAll("h3")].find((h) => h.textContent?.startsWith("Linked from"));
 const groups = () =>
-  [...foot().querySelectorAll("details")].map((d) => ({
+  [...article().querySelectorAll("details")].map((d) => ({
     summary: d.querySelector("summary")!.textContent,
     open: d.open,
     pages: [...d.querySelectorAll("li a")].map((a) => [a.textContent, a.getAttribute("href")]),
   }));
 
 test("the page foot: Work it belongs to, then Linked from by space, after the body and before the comments (#2080)", async () => {
-  await draw(["confluence:2"], ports({ docsTree: vi.fn(async () => TREE_ELSEWHERE), docsPage: vi.fn(async () => ({ ...RICH, backlinks: LINKED })) }));
-  const page = foot();
+  await drawPage({ ...RICH, backlinks: LINKED }, { docsTree: vi.fn(async () => TREE_ELSEWHERE) });
+  const page = article();
   expect([...page.querySelectorAll("h3, .tf-cmts h2")].map((h) => h.textContent?.trim())).toEqual([
     "Work it belongs to",
     "Linked from 5 pages",
@@ -474,13 +479,11 @@ test("the page foot: Work it belongs to, then Linked from by space, after the bo
 
 test("the page foot leaves out what is empty: no work, no backlinks, no Other pages (#2080)", async () => {
   await draw(["confluence:2"]);
-  expect(foot().textContent).not.toContain("Work it belongs to");
+  expect(article().textContent).not.toContain("Work it belongs to");
   expect(linkedHeading()).toBeUndefined();
-  expect(foot().querySelector("details")).toBeNull();
+  expect(article().querySelector("details")).toBeNull();
 
-  if (view) unmount(view);
-  target.innerHTML = "";
-  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, backlinks: LINKED.filter((l) => l.space_key !== null) })) }));
+  await drawPage({ ...PAGE, backlinks: LINKED.filter((l) => l.space_key !== null) });
   expect(linkedHeading()?.textContent).toBe("Linked from 4 pages");
   expect(groups().map((g) => g.summary)).toEqual(["ENG Engineering1", "OPS Operations2", "TEAM1"]);
 });
@@ -488,13 +491,11 @@ test("the page foot leaves out what is empty: no work, no backlinks, no Other pa
 test("Linked from says 50+ when the backend's 50 arrive, and the count below that (#2080)", async () => {
   const many = (n: number): DocPage["backlinks"] =>
     Array.from({ length: n }, (_, i) => ({ entity_id: `confluence:${100 + i}`, title: `Page ${100 + i}`, space_key: "OPS" }));
-  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, backlinks: many(50) })) }));
+  await drawPage({ ...PAGE, backlinks: many(50) });
   expect(linkedHeading()?.textContent).toBe("Linked from 50+ pages");
   expect(groups().map((g) => g.summary)).toEqual(["OPS Operations50"]);
 
-  if (view) unmount(view);
-  target.innerHTML = "";
-  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, backlinks: many(49) })) }));
+  await drawPage({ ...PAGE, backlinks: many(49) });
   expect(linkedHeading()?.textContent).toBe("Linked from 49 pages");
 });
 
@@ -503,7 +504,7 @@ test("every Linked from group is closed again when another page opens (#2080)", 
   const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage }) });
   view = mount(TfDocs, { target, props });
   await settle();
-  for (const d of foot().querySelectorAll("details")) d.open = true;
+  for (const d of article().querySelectorAll("details")) d.open = true;
   expect(groups().every((g) => g.open)).toBe(true);
   props.rest = ["confluence:1"];
   await settle();
@@ -513,12 +514,7 @@ test("every Linked from group is closed again when another page opens (#2080)", 
 
 test("the meta line names who created the page: version 1's entry, else the editor of a first version, else nobody (#2080)", async () => {
   const meta = () => [...target.querySelectorAll(".tf-rd-meta > *")].map((m) => m.textContent?.trim());
-  const redraw = async (page: DocPage) => {
-    if (view) unmount(view);
-    target.innerHTML = "";
-    await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => page) }));
-  };
-  await redraw(RICH);
+  await drawPage(RICH);
   expect(meta()).toEqual([
     "Tomasz Wójcik edited 2026-07-02",
     "Created by you, 2026-01-02",
@@ -527,9 +523,9 @@ test("the meta line names who created the page: version 1's entry, else the edit
     "ops",
     "on-call",
   ]);
-  await redraw({ ...PAGE, version: 1 });
+  await drawPage({ ...PAGE, version: 1 });
   expect(meta()).toContain("Created by Tomasz, 2026-07-02");
-  await redraw(PAGE);
+  await drawPage(PAGE);
   expect(meta().filter((m) => m?.startsWith("Created"))).toEqual([]);
 });
 
