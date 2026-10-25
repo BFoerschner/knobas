@@ -1126,3 +1126,68 @@ test("a sync run's re-read of the open page keeps the find bar on the match the 
   expect(cur).toEqual([false, true]);
   location.hash = "";
 });
+
+test("a sync run's page re-read that answers after another page was opened does not replace it (#2072)", async () => {
+  const sync = syncEvents();
+  const OTHER: DocPage = { ...PAGE, entity_id: "confluence:1", title: "Ops home", ancestors: [] };
+  let late: (page: DocPage) => void = () => {};
+  const docsPage = vi.fn(async (id: string) => {
+    if (id === "confluence:1") return OTHER;
+    if (docsPage.mock.calls.length === 1) return PAGE;
+    return new Promise<DocPage>((resolve) => (late = resolve));
+  });
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage, listen: sync.listen }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  await sync.ended();
+  expect(docsPage).toHaveBeenCalledTimes(2);
+
+  // The reader opens another page while the re-read is out.
+  props.rest = ["confluence:1"];
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+  late({ ...PAGE, title: "Stale handbook" });
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+});
+
+test("a sync run's re-read that fails leaves the last tree and page on screen (#2072)", async () => {
+  const sync = syncEvents();
+  let fail = false;
+  const io = ports({
+    docsTree: vi.fn(async () => (fail ? Promise.reject(new Error("database is locked")) : TREE)),
+    docsPage: vi.fn(async () => (fail ? Promise.reject(new Error("database is locked")) : RICH)),
+    listen: sync.listen,
+  });
+  await draw(["confluence:2"], io);
+  fail = true;
+  await sync.ended();
+  expect(io.docsTree).toHaveBeenCalledTimes(2);
+  expect(io.docsPage).toHaveBeenCalledTimes(2);
+  expect(target.textContent).not.toContain("database is locked");
+  expect(squash(target.querySelector("nav[aria-label='Docs']"))).toContain("On-call handbook");
+  expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
+});
+
+test("Link to <job>'s page re-read that answers after another page was opened does not replace it (#2072)", async () => {
+  const OTHER: DocPage = { ...PAGE, entity_id: "confluence:1", title: "Ops home", ancestors: [] };
+  let late: (page: DocPage) => void = () => {};
+  const docsPage = vi.fn(async (id: string) => {
+    if (id === "confluence:1") return OTHER;
+    if (docsPage.mock.calls.length === 1) return RICH;
+    return new Promise<DocPage>((resolve) => (late = resolve));
+  });
+  const props = $state({ ready: true, rest: ["confluence:2"], job: "PAY-231", ports: ports({ docsPage }), linkPorts: linkPorts() as never });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  button("Link to PAY-231")!.click();
+  await settle();
+  expect(docsPage).toHaveBeenCalledTimes(2);
+
+  props.rest = ["confluence:1"];
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+  late({ ...RICH, title: "Stale handbook" });
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Ops home");
+});

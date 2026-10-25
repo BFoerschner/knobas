@@ -280,6 +280,14 @@
     );
   }
 
+  /**
+   * Read the open page `id` again, after a link or a sync run: no visit, and
+   * nothing once the reader has opened another page (#2072).
+   */
+  function rereadPage(id: string | null): void {
+    if (id !== null && id === target) readPage(id, true);
+  }
+
   $effect(() => {
     if (!ready) return;
     untrack(() => void readTree(false));
@@ -301,7 +309,7 @@
     return untrack(() =>
       listenSynced({ listen: io.listen ?? BRIDGE.listen }, null, () => {}, () => {
         void readTree(true);
-        if (target !== null) readPage(target, true);
+        rereadPage(target);
       }),
     );
   });
@@ -558,7 +566,7 @@
       const row = drawn(LINK_RELATION, p.entity_id, ticket);
       await linkPorts!.createLink(row.fromId, row.toId, row.relation);
       push({ text: `Linked to ${key}` });
-      page = await io.docsPage(p.entity_id);
+      rereadPage(p.entity_id);
     } catch (cause) {
       push({ text: `Could not link it: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -988,7 +996,7 @@
     onlinked={() => {
       linking = false;
       push({ text: "Linked in knobas" });
-      void io.docsPage(p.entity_id).then((answer) => (page = answer));
+      rereadPage(p.entity_id);
     }}
   />
 {/if}
