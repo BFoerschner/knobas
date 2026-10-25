@@ -70,7 +70,7 @@ pub(crate) fn for_instance(id: &str, name: &str, writes: bool) -> SourceDescript
         // source that offers nothing, ops without `Write` is a source that
         // reads as read-only. Both grow here or neither does.
         capabilities: if writes {
-            vec![Capability::Write]
+            [vec![Capability::Write], template.capabilities.clone()].concat()
         } else {
             template.capabilities.clone()
         },
@@ -92,7 +92,10 @@ pub fn descriptor_template() -> SourceDescriptor {
         id: crate::ADAPTER_KIND.to_owned(),
         adapter_kind: crate::ADAPTER_KIND.to_owned(),
         name: "Uptime Kuma".to_owned(),
-        // **None**, and the template is the honest place for that: `Search` is
+        // **`Refresh` alone** (#2100, ADR-0031): one monitor is read back out
+        // of `/metrics`, which the API key alone reads, so every instance
+        // refreshes, with or without an account (`crate::refresh`). Nothing
+        // else, and the template is the honest place for that: `Search` is
         // reserved for a server-side `Source::search` the SPI does not have,
         // `Webhooks` for a receiver knobas does not have, and `Write` must be
         // accompanied by the ops it offers. A *template* describes the adapter
@@ -101,7 +104,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // instance has an account (issue #452). So the template declares the
         // read-only shape, and [`for_instance`] is where the write half is
         // added for the instances that have earned it.
-        capabilities: Vec::new(),
+        capabilities: vec![Capability::Refresh],
         adapter_version: crate::ADAPTER_VERSION.to_owned(),
         // **One method, and the account is not a second one** (issue #452).
         // `/metrics` accepts one thing -- an API key, sent as HTTP Basic with
@@ -268,7 +271,7 @@ mod tests {
         assert_eq!(d.id, crate::ADAPTER_KIND);
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
         assert_eq!(d.name, "Uptime Kuma");
-        assert!(d.capabilities.is_empty(), "{:?}", d.capabilities);
+        assert_eq!(d.capabilities, vec![Capability::Refresh]);
         assert!(d.write_ops.is_empty(), "{:?}", d.write_ops);
         assert_eq!(d.adapter_version, crate::ADAPTER_VERSION);
         assert_eq!(d.auth_methods, vec![AuthMethod::ApiToken]);
@@ -442,7 +445,7 @@ mod tests {
         // Compared as JSON because that is the shape both cross the bridge in,
         // and `KindInfo` has no `PartialEq` to compare them by.
         let without_writes = |mut d: SourceDescriptor| {
-            d.capabilities = Vec::new();
+            d.capabilities.retain(|c| *c != Capability::Write);
             d.write_ops = Vec::new();
             serde_json::to_value(d).expect("a descriptor serializes")
         };

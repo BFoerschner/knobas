@@ -1,4 +1,5 @@
-//! The Uptime Kuma adapter: `/metrics` with an API key, read-only.
+//! The Uptime Kuma adapter: `/metrics` with an API key, and socket.io with an
+//! account for the writes and the refresh's one question ([`refresh`]).
 //!
 //! Monitors arrive as items of kind [`KIND_MONITOR`], each carrying Kuma's own
 //! monitor id, name, type, address, current state, response time, uptime ratios
@@ -50,6 +51,7 @@ mod http;
 mod map;
 mod metrics;
 mod model;
+mod refresh;
 mod socket;
 mod source;
 

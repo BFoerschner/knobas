@@ -533,7 +533,7 @@ A fifth block for the same reason D is one. **The departures are the substance h
 | key form | the **monitor id**: `kuma:8`. `monitor_id` is a label on every series a v2 Kuma publishes, and it is the only stable identity `/metrics` carries — a monitor renamed keeps it |
 | auth | **API key only** (`AuthMethod::ApiToken`), sent as HTTP Basic with an empty username, which is what Uptime Kuma's `/metrics` accepts. There is no account password to offer and `Pat` is refused by name at `build` |
 | test_connection | `GET /metrics` — the same and only request a sync makes. `server_version` from the `app_version` gauge's `version` label; `account` is `None` (an API key belongs to the instance, and `/metrics` never says whose it is); `detail` is the roster size; `discovered` is empty |
-| read endpoints | `GET /metrics`, and nothing else. **Uptime Kuma v2 has no other door an API key opens**: the dashboard is socket.io, and a key authenticates exactly this one HTTP endpoint. So the read path is a Prometheus exposition parse, not a REST walk, and the four `monitor_*` gauge families that carry fields are folded by `monitor_id` into one monitor each (`model.rs` names the two that are not read and why) |
+| read endpoints | `GET /metrics`, and nothing else. **Uptime Kuma v2 has no other door an API key opens**: the dashboard is socket.io, and a key authenticates exactly this one HTTP endpoint. So the read path is a Prometheus exposition parse, not a REST walk, and the four `monitor_*` gauge families that carry fields are folded by `monitor_id` into one monitor each (`model.rs` names the two that are not read and why). *Since #2100 a refresh reads the same document for one monitor and, on an instance with an account, asks `getMonitor` over socket.io about one the document omits; see "Amendments from the Uptime Kuma refresh".* |
 | write endpoints | none. `write_ops` is empty and `Source::write` refuses every op by name. Pause, resume and create are socket.io and are their own ticket (spec #427, story 81) |
 | paging | none — `/metrics` is one document with no continuation, so every run reads the whole roster |
 | cursor | `{"version":1,"monitors":{"<id>":{"name":"…","digest":"…"}}}` — **a digest of the last corpus, not a position.** `/metrics` carries no timestamp, no paging and no "changed since", so there is nothing to resume from; the cursor exists because battery clause 2 requires an idle incremental run to emit nothing and hand its cursor back. An unchanged Kuma emits nothing; any difference re-emits **every** monitor, which is what keeps "every run is full" and `full_sync_exhaustive` honest. Departs from #442's and spec #427's literal "the cursor is none" — argued in §9 |
@@ -2471,6 +2471,34 @@ clause 13 against mockd and the seeded Jira, `live_jira_seeded`'s
 
 ---
 
+### Amendments from the Uptime Kuma refresh (2026-10-25, binding) — issue #2100
+
+Ruled by the Opus implementer (`docs/decisions/2026-10-unattended-rulings.md`, "#2100"). The
+change is in `crates/knobas-source-kuma/**`, one public check in `knobas_source::contract` and
+tests. `Source::refresh` itself is #2095's entry (`contract/10.8/2095-source-refresh.md`); the new
+public check is in `crates/knobas-source/src/**`, which §10.8 freezes, and is its own entry
+(`contract/10.8/2100-kuma-refresh-clause-13-alone.md`, merge-manager ruling); no cursor version
+moves.
+
+**Every Uptime Kuma instance declares `Capability::Refresh`**, the template included: the read
+needs only the API key. A refresh of `kuma:<id>` reads `GET /metrics` as a run does and emits the
+monitor through the run's own mapping. A monitor the document publishes is the item. One it omits
+is *gone* to an instance with only its key, as its sync reads it (paused and deleted are one
+observation through `/metrics`). An instance with an account asks first, over the socket.io
+session its writes hold, **`getMonitor`** with the monitor id (the one read on that channel):
+`ok: false` (not there, or not the account's) or `monitor.active` false is *gone*; active is a
+monitor whose first heartbeat has not published a series yet (measured on 2.5.3: 0.27 s after a
+create's ack, 0.1 s after a resume's, sixteen seconds for a check of a host that never answers),
+and `/metrics` is read again every 250 ms for up to 30 s, then `SourceError::Unreachable`. The
+roster a create targets (`kuma:monitors`) is `NotOffered`; another instance's id is
+`SourceError::Protocol`. **`knobas_source::contract::refreshes_as_it_syncs`** runs battery clause
+13 alone over a batch the caller's sync emitted, for a live suite whose server moves under clause
+2. Witnessed by `refresh::tests` and `tests/it/refresh.rs` in `knobas-source-kuma`, the battery
+against the recording, `live_kuma`'s
+`the_refresh_reads_a_monitor_as_the_run_does_and_a_paused_or_deleted_one_as_gone` and
+`a_refresh_waits_for_a_created_monitors_first_heartbeat`, and `kuma_write_live`'s
+`each_landed_write_refreshes_its_monitor_before_the_run_after_it`.
+
 ## 10. As built — the contract PR (2026-08-24)
 
 *The task brief called this section §9. §9 was taken by the plan-authoring amendments before this ran, so the as-built record is §10; "§9 of the interfaces doc" in `plan-02-contract` means this section.*
@@ -2946,6 +2974,7 @@ the entries are no longer in this file, so a line number in `docs/contract.md` s
 - [#2095](contract/10.8/2095-item-refreshed-event.md) — The event schema: `item:refreshed` — issue #2095 (2026-10-25), ADR-0031. Parent spec #2085. No command, no ...
 - [#2095](contract/10.8/2095-source-refresh.md) — `crates/knobas-source/src/**`: `Source::refresh`, an optional read of one item by id — issue #2095 ...
 - [#2098](contract/10.8/2098-gitea-refresh.md) — Gitea's descriptor declares `Capability::Refresh`, and a pull request's stored payload writes ...
+- [#2100](contract/10.8/2100-kuma-refresh-clause-13-alone.md) — `crates/knobas-source/src/**`: `contract::refreshes_as_it_syncs`, battery clause 13 alone — issue #2100 ...
 - [#2106](contract/10.8/2106-sync-role.md) — One new command, `sync_role` — issue #2106 (2026-10-25): *Sync now* in every role view's header. Parent spec ...
 
 <!-- 10.8-index:end -->

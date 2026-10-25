@@ -60,7 +60,9 @@ use std::time::{Duration, Instant};
 
 use knobas_source::contract::VecSink;
 use knobas_source::instance::{Account, SourceInstance};
-use knobas_source::{AuthMethod, Capability, Source, SourceError, SyncItem, WriteOp};
+use knobas_source::{
+    AuthMethod, Capability, RefreshAnswer, Source, SourceError, SyncItem, WriteOp,
+};
 
 /// The monitor this suite owns, and the only thing in Kuma that is its own.
 ///
@@ -669,6 +671,96 @@ async fn only_a_source_with_an_account_offers_the_write_ops() {
     assert_eq!(names(&with), names(&without));
 }
 
+/// **The refresh against the real server (#2100, ADR-0031)**: the contract
+/// battery's clause 13 over a run's batch that carries a paused monitor's
+/// tombstone, then the resume and the delete read back at once.
+///
+/// The batch is a poll from a cursor taken while the scratch monitor ran, so
+/// it holds every live monitor and the tombstone: the clause asks one live
+/// monitor, which must read as the run emitted it, and the paused one, which
+/// must be gone. Through both sources: the one with an account asks Kuma
+/// whether the omitted monitor runs (`getMonitor`, inactive), the one with
+/// only its key has the document alone.
+///
+/// The resume is read back the moment Kuma acknowledges it, before its first
+/// heartbeat has published a series: the source with an account waits for
+/// it, and answers the monitor rather than gone. The delete is gone to both.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn the_refresh_reads_a_monitor_as_the_run_does_and_a_paused_or_deleted_one_as_gone() {
+    let env = env();
+    let source = env.writable();
+    let key_only = env.source();
+    let scratch = Scratch::add();
+    until(
+        source.as_ref(),
+        "the scratch monitor is published",
+        |items| items.iter().any(|item| item.title == SCRATCH),
+    )
+    .await;
+    let (present, mut cursor) = full_sync(source.as_ref()).await;
+    let entity = entity_of(&present, SCRATCH);
+
+    source
+        .write(WriteOp::PauseMonitor {
+            entity: entity.clone(),
+        })
+        .await
+        .expect("the account pauses its own monitor");
+    let paused = until_from(
+        source.as_ref(),
+        &mut cursor,
+        "the paused monitor is tombstoned",
+        |items| {
+            items
+                .iter()
+                .any(|item| item.title == SCRATCH && item.deleted)
+        },
+    )
+    .await;
+    assert!(
+        paused.iter().any(|item| !item.deleted),
+        "the batch carries the live monitors beside the tombstone"
+    );
+    knobas_source::contract::refreshes_as_it_syncs(source.as_ref(), &paused).await;
+    knobas_source::contract::refreshes_as_it_syncs(key_only.as_ref(), &paused).await;
+
+    source
+        .write(WriteOp::ResumeMonitor {
+            entity: entity.clone(),
+        })
+        .await
+        .expect("the account resumes its own monitor");
+    match source
+        .refresh(&entity)
+        .await
+        .expect("the refresh after the resume")
+    {
+        RefreshAnswer::Item(item) => {
+            assert_eq!(item.entity.to_string(), entity);
+            assert!(!item.deleted);
+            assert!(
+                item.payload.get("state").is_some_and(|s| !s.is_null()),
+                "a resumed monitor is read with a state: {:?}",
+                item.payload
+            );
+        }
+        other => panic!("a resumed monitor is not gone to its refresh: {other:?}"),
+    }
+
+    drop(scratch);
+    for (which, reader) in [("with an account", &source), ("with its key", &key_only)] {
+        let answer = reader
+            .refresh(&entity)
+            .await
+            .expect("the refresh after the delete");
+        assert!(
+            matches!(answer, RefreshAnswer::Gone),
+            "a deleted monitor is gone to the source {which}: {answer:?}"
+        );
+    }
+}
+
 /// **Pause it, poll it, resume it** -- issue #452's second criterion, end to
 /// end against the real Kuma.
 ///
@@ -950,6 +1042,20 @@ async fn a_monitor_created_through_the_write_op_is_published_under_the_id_it_ans
         "a monitor id is a number in Kuma's own spelling: {minted:?}"
     );
 
+    // **Read back at once (#2100)**, as the write queue's refresh reads it the
+    // moment the create lands: before its first heartbeat Kuma publishes no
+    // series for it, and the refresh waits for one rather than answer gone.
+    let refreshed = match source
+        .refresh(&format!("kuma:{minted}"))
+        .await
+        .expect("the refresh of the monitor just created")
+    {
+        RefreshAnswer::Item(item) => item,
+        other => panic!("a monitor just created is not gone to its refresh: {other:?}"),
+    };
+    assert_eq!(refreshed.title, CREATED);
+    assert!(!refreshed.deleted);
+
     let items = until(
         source.as_ref(),
         "the created monitor is published",
@@ -1061,6 +1167,67 @@ async fn a_tcp_check_is_published_as_a_port_monitor() {
         tcp.get("type").and_then(|v| v.as_str()),
         Some("port"),
         "{tcp:?}"
+    );
+}
+
+/// **A refresh waits out a created monitor's first heartbeat (#2100).** The
+/// monitor checks a host that accepts the connection and never answers, so
+/// Kuma publishes no series for it until the check times out, sixteen
+/// seconds on: the refresh asked the moment the create lands reads a
+/// document without it, asks Kuma whether it runs, and reads the document
+/// again until it is there. Answered gone, the mirror would tombstone a
+/// monitor Kuma is running.
+///
+/// The stalled host is the witness the other creates cannot be: a check of a
+/// host that answers lands in a third of a second, often inside the
+/// refresh's first read of `/metrics`, and a refresh that never waited
+/// passes them.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn a_refresh_waits_for_a_created_monitors_first_heartbeat() {
+    const STALLED: &str = "knobas-live-created-stalled";
+    let env = env();
+    let source = env.writable();
+    let _litter = Scratch::removing(STALLED);
+    kuma_monitor(&["delete", STALLED]);
+
+    // Accepts every connection and holds it unanswered for the test's life.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a local port");
+    let port = listener.local_addr().expect("its address").port();
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in listener.incoming().flatten() {
+            held.push(stream);
+        }
+    });
+
+    let receipt = source
+        .write(WriteOp::CreateMonitor {
+            entity: knobas_source::monitor_target("kuma"),
+            name: STALLED.to_owned(),
+            url: format!("http://host.docker.internal:{port}/"),
+            kind: knobas_source::MonitorKind::Http,
+        })
+        .await
+        .expect("the account creates a monitor");
+    let minted = receipt.remote_id.expect("Kuma names the monitor it minted");
+    let asked = Instant::now();
+    let answer = source
+        .refresh(&format!("kuma:{minted}"))
+        .await
+        .expect("the refresh of the monitor just created");
+    let waited = asked.elapsed();
+    println!("LIVE refresh of a stalled create answered after {waited:?}");
+    match answer {
+        RefreshAnswer::Item(item) => {
+            assert_eq!(item.title, STALLED);
+            assert!(!item.deleted);
+        }
+        other => panic!("a running monitor is not gone to its refresh: {other:?}"),
+    }
+    assert!(
+        waited > Duration::from_secs(5),
+        "the stalled check published at once, so this witnessed no wait: {waited:?}"
     );
 }
 
