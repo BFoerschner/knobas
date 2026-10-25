@@ -19,7 +19,7 @@ vi.mock("../../ipc/sources", async (original) => ({
 vi.mock("../../ipc/entity", async (original) => ({
   ...(await original<typeof import("../../ipc/entity")>()),
   // The run and pipeline pages read their own item too, for *Refresh* (#2137).
-  // A TeamCity build or build configuration is that kind; any other id, the ticket *This job* resolves.
+  // A run's id answers a run (`build`), a pipeline's a pipeline (`build_config`), any other the ticket *This job* resolves.
   getEntity: vi.fn(async (id: string) =>
     (await import("../refresh.fixture")).detailOf(id, {}, id.includes(":build:") ? "build" : id.includes(":buildType:") ? "build_config" : "ticket"),
   ),
