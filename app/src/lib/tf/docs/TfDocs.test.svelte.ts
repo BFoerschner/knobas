@@ -1010,3 +1010,68 @@ test("a held or refused write drops its echo and toasts; Edit and resend reopens
   expect(dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")?.value).toBe("Retry metrics");
   expect(dialog.querySelector<HTMLTextAreaElement>("textarea[aria-label='Page text']")?.value).toBe("## Dashboards");
 });
+
+// ---- a sync run's end reads Docs again (#2072) ----
+
+/** A `listen` port the test raises `sync:state` through, as the backend reports a run. */
+function syncEvents() {
+  const heard: ((event: { payload: unknown }) => void)[] = [];
+  return {
+    listen: vi.fn(async (event: string, handler: (event: { payload: unknown }) => void) => {
+      if (event === "sync:state") heard.push(handler);
+      return () => heard.splice(heard.indexOf(handler), 1);
+    }) as unknown as NonNullable<DocsPorts["listen"]>,
+    /** `source`'s run ends, as `sync:state` says it. */
+    async ended(source = "confluence") {
+      for (const handler of [...heard]) handler({ payload: { source_id: source, running: false } });
+      await settle();
+    },
+  };
+}
+
+test("a queued page's row drops once a sync run ends and the tree read then holds it, Docs not mounted again (#2072)", async () => {
+  const sync = syncEvents();
+  let read = TREE;
+  const io = ports({ docsPage: vi.fn(async () => RICH), docsTree: vi.fn(async () => read), listen: sync.listen });
+  await draw(["confluence:2"], io);
+  await createPage("Retry metrics", "## Dashboards");
+  expect(queuedPages()).toHaveLength(1);
+
+  read = {
+    ...TREE,
+    spaces: [
+      { ...TREE.spaces[0]!, pages: [...TREE.spaces[0]!.pages, { entity_id: "confluence:30", title: "Retry metrics", parent: "confluence:2" }] },
+      TREE.spaces[1]!,
+    ],
+  };
+  await sync.ended();
+  expect(queuedPages()).toEqual([]);
+  expect(squash(target.querySelector("nav[aria-label='Docs']"))).toContain("Retry metrics");
+});
+
+test("a queued section edit and comment drop once a sync run ends and the open page's read then holds them (#2072)", async () => {
+  const sync = syncEvents();
+  let read = RICH;
+  const io = ports({ docsPage: vi.fn(async () => read), listen: sync.listen });
+  await draw(["confluence:2"], io);
+  await saveSection("Ask Priya.");
+  await sendComment("Done.");
+  expect(section().querySelector(".tf-sec-queued")).not.toBeNull();
+  expect(queuedComments()).toHaveLength(1);
+
+  // A run that brought neither in: both still on their way.
+  await sync.ended();
+  expect(section().querySelector(".tf-sec-queued")).not.toBeNull();
+  expect(queuedComments()).toHaveLength(1);
+
+  read = {
+    ...RICH,
+    version: 33,
+    sections: [{ number: 1, text: "Ask Priya.", refusal: null }],
+    comments: [...RICH.comments, { author: "mara", author_name: "Mara Lindqvist", at: "2026-10-25T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Done.")] }] }],
+  };
+  await sync.ended();
+  expect(section().querySelector(".tf-sec-queued")).toBeNull();
+  expect(queuedComments()).toEqual([]);
+  expect(squash(target.querySelector(".tf-rd-meta"))).toContain("version 33");
+});

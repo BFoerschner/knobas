@@ -60,6 +60,7 @@
     type Reached,
   } from "../../ipc/entity";
   import { drawn } from "../../detail/relations";
+  import { BRIDGE, listenSynced, type PipelinePorts } from "../builds/pipeline-ports";
   import { writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
@@ -122,6 +123,8 @@
     copy: (text: string) => Promise<void>;
     /** What the page's source refuses its credential (#2053); the IPC read when omitted. */
     refusedWrites?: RefusedWritesPort;
+    /** Hears `sync:state`, whose run ends read Docs again (#2072); the bridge's when omitted. */
+    listen?: PipelinePorts["listen"];
   }
 
   type LinkPorts = Pick<JobPorts, "listSources" | "getEntity" | "createLink" | "search" | "launcherHome">;
@@ -240,41 +243,67 @@
   const place = $derived(placeOf(rest));
   const target = $derived(tree === null ? null : pageToOpen(place, tree));
 
-  async function readTree() {
+  /** The reads asked so far; an answer to an older one than the last is dropped. */
+  let treeAsked = 0;
+  let pageAsked = 0;
+
+  /** Read the tree; a `quiet` read (a sync run's, #2072) that fails leaves the tree as drawn. */
+  async function readTree(quiet: boolean) {
+    const mine = ++treeAsked;
     try {
       const read = await io.docsTree();
+      if (mine !== treeAsked) return;
       tree = read;
       treeError = null;
       settlePages(read);
     } catch (cause) {
-      treeError = ipcErrorMessage(cause);
+      if (mine === treeAsked && !quiet) treeError = ipcErrorMessage(cause);
     }
+  }
+
+  /**
+   * Read page `id`. Opening it records the visit; a `quiet` read (a sync
+   * run's, #2072) records none, and one that fails leaves the page as drawn.
+   */
+  function readPage(id: string, quiet: boolean): void {
+    const mine = ++pageAsked;
+    void io.docsPage(id).then(
+      (answer) => {
+        if (mine !== pageAsked) return;
+        page = answer;
+        pageError = null;
+        if (!quiet) void io.visitEntity(id).catch(() => {});
+      },
+      (cause: unknown) => {
+        if (mine === pageAsked && !quiet) pageError = ipcErrorMessage(cause);
+      },
+    );
   }
 
   $effect(() => {
     if (!ready) return;
-    untrack(() => void readTree());
+    untrack(() => void readTree(false));
   });
 
   $effect(() => {
     const id = target;
     if (!ready || id === null) return;
     pageError = null;
-    let live = true;
-    void io.docsPage(id).then(
-      (answer) => {
-        if (!live) return;
-        page = answer;
-        pageError = null;
-        void io.visitEntity(id).catch(() => {});
-      },
-      (cause: unknown) => {
-        if (live) pageError = ipcErrorMessage(cause);
-      },
+    untrack(() => readPage(id, false));
+    // Another page, or none: the read asked for this one is dropped.
+    return () => void ++pageAsked;
+  });
+
+  // A sync run's end reads the tree and the open page again, so what it
+  // brought in settles what Docs queued without Docs being opened again (#2072).
+  $effect(() => {
+    if (!ready) return;
+    return untrack(() =>
+      listenSynced({ listen: io.listen ?? BRIDGE.listen }, null, () => {}, () => {
+        void readTree(true);
+        if (target !== null) readPage(target, true);
+      }),
     );
-    return () => {
-      live = false;
-    };
   });
 
   const pageSpace = $derived(tree && page ? spaceOfPage(tree, page.entity_id) : undefined);
