@@ -406,6 +406,7 @@ knobas-app	test/it	assets_ipc::a_reading_is_drawn_only_where_its_source_declares
 knobas-app	test/it	assets_ipc::a_recreated_container_keeps_its_asset
 knobas-app	test/it	assets_ipc::a_refused_token_is_unauthorized_and_not_an_internal_fault
 knobas-app	test/it	assets_ipc::a_rename_is_its_own_line_and_moves_the_entity_title
+knobas-app	test/it	assets_ipc::a_roster_row_says_whether_its_adapter_reads_one_monitor
 knobas-app	test/it	assets_ipc::a_route_is_an_entity_in_the_namespace_knobas_reserves
 knobas-app	test/it	assets_ipc::a_route_is_deleted_and_its_entity_row_is_tombstoned
 knobas-app	test/it	assets_ipc::a_route_is_renamed_re_pointed_and_re_classified_one_line_each
