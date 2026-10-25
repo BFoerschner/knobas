@@ -1283,9 +1283,233 @@ async fn a_commit_catch_up_over_a_server_that_repeats_its_first_page_stops_at_th
     .await
     .expect("the walk ends at the cap");
     assert!(emitted(&second, "commit").is_empty(), "{second:?}");
+    // All but the page it stopped on (#2039): the cap's, here.
+    let waiting = |cursor: &str| {
+        let mut catch_up = position(cursor, PAYOUT)["commits_catching_up"].clone();
+        catch_up.as_object_mut().expect("a catch-up").remove("page");
+        catch_up
+    };
     assert_eq!(
-        position(&after, PAYOUT)["commits_catching_up"],
-        position(&cursor, PAYOUT)["commits_catching_up"],
+        waiting(&after),
+        waiting(&cursor),
         "the catch-up waits for a server that pages"
     );
+}
+
+/// A Forgejo-like server (`until=` and `since=` ignored, five to a page) with
+/// one commit on `main`, synced in full, and then `pushed(1..=n)` on top of it,
+/// `pushed(n)` the head. The cursor is the full sync's.
+async fn forgejo_with_a_push(
+    n: u64,
+    budget: u32,
+) -> (MockServer, Moving, Box<dyn Source>, String) {
+    let key = format!("{PAYOUT}@main");
+    let world = World {
+        cap: Some(5),
+        ignores_bounds: true,
+        repos: vec![repository(1, "payout-service", &at(0))],
+        branches: BTreeMap::from([(
+            PAYOUT.to_owned(),
+            vec![support::branch("main", &sha(1), "start", &at(0))],
+        )]),
+        commits: BTreeMap::from([(key.clone(), vec![support::commit(&sha(1), "start", &at(0))])]),
+        ..World::default()
+    };
+    let (server, moving) = Moving::start(world).await;
+    let gitea = gitea(
+        &server,
+        json!({ "prs_per_repo": 0, "commits_per_repo": budget }),
+    );
+    let (_, cursor) = run(&*gitea, None).await;
+    moving.with(|world| {
+        let history = world.commits.get_mut(&key).expect("main has history");
+        for k in 1..=n {
+            let (id, when) = pushed(k);
+            history.insert(0, support::commit(&id, "work", &when));
+        }
+        let (head, when) = pushed(n);
+        world.branches.insert(
+            PAYOUT.to_owned(),
+            vec![support::branch("main", &head, "work", &when)],
+        );
+    });
+    (server, moving, gitea, cursor)
+}
+
+fn pushed(k: u64) -> (String, String) {
+    (sha(1000 + k), at(60 * seconds(k)))
+}
+
+/// The commit listing pages one run asked for, in order.
+fn commit_pages(moving: &Moving) -> Vec<u32> {
+    let prefix = format!("repos/{PAYOUT}/commits?page=");
+    moving.with(|world| {
+        let pages = world
+            .served
+            .iter()
+            .filter_map(|s| s.strip_prefix(&prefix).and_then(|p| p.parse().ok()))
+            .collect();
+        world.served.clear();
+        pages
+    })
+}
+
+/// Runs from `cursor` until the commit catch-up is closed (at most `runs`),
+/// and returns every commit emitted on the way and the cursor it ended on.
+async fn catch_up(gitea: &dyn Source, mut cursor: String, runs: usize) -> (Vec<String>, String) {
+    let mut all = Vec::new();
+    for _ in 0..runs {
+        let (items, next) = run(gitea, Some(&cursor)).await;
+        all.extend(emitted(&items, "commit"));
+        cursor = next;
+        if position(&cursor, PAYOUT).get("commits_catching_up").is_none() {
+            break;
+        }
+    }
+    all.sort();
+    (all, cursor)
+}
+
+fn every_pushed(n: u64) -> Vec<String> {
+    let mut all: Vec<String> = (1..=n)
+        .map(|k| format!("gitea:{PAYOUT}@{}", pushed(k).0))
+        .collect();
+    all.sort();
+    all
+}
+
+/// #2039: on a server that lists commits whatever `until=` says (Forgejo 17),
+/// a catch-up starts on the page the walk it continues stopped on, rather
+/// than re-reading from the branch head everything it already delivered. A
+/// push of 40 against a budget of 10, five to a page: each run delivers two
+/// pages. The third run reads page 1, which shows the server listing above
+/// the window, then the page the second run stopped on and the two below it:
+/// not pages 2 and 3, which the first two runs delivered.
+#[tokio::test]
+async fn a_commit_catch_up_over_a_server_that_ignores_until_starts_on_the_page_it_stopped_on() {
+    let (_server, moving, gitea, cursor) = forgejo_with_a_push(40, 10).await;
+    let (first, cursor) = run(&*gitea, Some(&cursor)).await;
+    assert_eq!(
+        position(&cursor, PAYOUT)["commits_catching_up"]["page"],
+        json!(2),
+        "the cut fell on page 2"
+    );
+    let (second, cursor) = run(&*gitea, Some(&cursor)).await;
+    assert_eq!(
+        position(&cursor, PAYOUT)["commits_catching_up"]["page"],
+        json!(4)
+    );
+
+    commit_pages(&moving);
+    let (third, cursor) = run(&*gitea, Some(&cursor)).await;
+    assert_eq!(commit_pages(&moving), vec![1, 4, 5, 6]);
+
+    let (rest, cursor) = catch_up(&*gitea, cursor, 5).await;
+    let mut all = rest;
+    for items in [&first, &second, &third] {
+        all.extend(emitted(items, "commit"));
+    }
+    all.sort();
+    assert_eq!(all, every_pushed(40), "all 40, once each");
+    let (idle, same) = run(&*gitea, Some(&cursor)).await;
+    assert!(idle.is_empty(), "{idle:?}");
+    assert_eq!(same, cursor);
+}
+
+/// A commit catch-up written before #2039 has no page, and is read from the
+/// branch head as it always was: the same catch-up as above with its page
+/// taken out reads every page from 1 down to the window, and still finishes.
+#[tokio::test]
+async fn a_commit_catch_up_with_no_page_reads_from_the_branch_head() {
+    let (_server, moving, gitea, cursor) = forgejo_with_a_push(40, 10).await;
+    let (first, cursor) = run(&*gitea, Some(&cursor)).await;
+    let (second, cursor) = run(&*gitea, Some(&cursor)).await;
+    let mut old: Value = serde_json::from_str(&cursor).expect("JSON");
+    old["repos"][PAYOUT]["commits_catching_up"]
+        .as_object_mut()
+        .expect("a catch-up")
+        .remove("page");
+    let cursor = old.to_string();
+
+    commit_pages(&moving);
+    let (third, cursor) = run(&*gitea, Some(&cursor)).await;
+    assert_eq!(commit_pages(&moving), vec![1, 2, 3, 4, 5, 6]);
+
+    let (rest, _) = catch_up(&*gitea, cursor, 5).await;
+    let mut all = rest;
+    for items in [&first, &second, &third] {
+        all.extend(emitted(items, "commit"));
+    }
+    all.sort();
+    assert_eq!(all, every_pushed(40), "all 40, once each");
+}
+
+/// A catch-up's page is a hint, checked before it is trusted: the branch is
+/// force-pushed to a shorter history between two runs, so the page the cut
+/// fell on now starts below the window. The run reads on from page 2.
+#[tokio::test]
+async fn a_commit_catch_up_whose_page_starts_below_its_window_reads_on_from_page_two() {
+    let (_server, moving, gitea, cursor) = forgejo_with_a_push(40, 10).await;
+    let (_, cursor) = run(&*gitea, Some(&cursor)).await;
+    let (_, cursor) = run(&*gitea, Some(&cursor)).await;
+    // Rewritten: the eight newest go, so page 4 now starts at `pushed(17)`,
+    // below the resume point `pushed(21)`.
+    moving.with(|world| {
+        let history = world
+            .commits
+            .get_mut(&format!("{PAYOUT}@main"))
+            .expect("main");
+        history.drain(..8);
+        let (head, when) = pushed(32);
+        world.branches.insert(
+            PAYOUT.to_owned(),
+            vec![support::branch("main", &head, "work", &when)],
+        );
+    });
+
+    commit_pages(&moving);
+    let (third, _) = run(&*gitea, Some(&cursor)).await;
+    let pages = commit_pages(&moving);
+    assert_eq!(pages[..3], [1, 4, 2], "{pages:?}");
+    let mut got = emitted(&third, "commit");
+    got.sort();
+    let mut expected: Vec<String> = (11..=20)
+        .map(|k| format!("gitea:{PAYOUT}@{}", pushed(k).0))
+        .collect();
+    expected.sort();
+    assert_eq!(got, expected, "the ten below the resume point, none skipped");
+}
+
+/// #2039: on the same server an incremental walk ends on the page that
+/// reaches below its watermark, rather than reading one more page of old
+/// history to find nothing new on it.
+#[tokio::test]
+async fn an_incremental_commit_walk_over_a_server_that_ignores_since_ends_on_the_page_below_its_watermark()
+ {
+    let (_server, moving, gitea, cursor) = forgejo_with_a_push(20, 100).await;
+    let (_, cursor) = run(&*gitea, Some(&cursor)).await;
+    let key = format!("{PAYOUT}@main");
+    moving.with(|world| {
+        let history = world.commits.get_mut(&key).expect("main");
+        for k in 21..=23 {
+            let (id, when) = pushed(k);
+            history.insert(0, support::commit(&id, "work", &when));
+        }
+        let (head, when) = pushed(23);
+        world.branches.insert(
+            PAYOUT.to_owned(),
+            vec![support::branch("main", &head, "work", &when)],
+        );
+    });
+
+    commit_pages(&moving);
+    let (items, _) = run(&*gitea, Some(&cursor)).await;
+    assert_eq!(commit_pages(&moving), vec![1]);
+    let mut got = emitted(&items, "commit");
+    got.sort();
+    let mut expected: Vec<String> = (21..=23)
+        .map(|k| format!("gitea:{PAYOUT}@{}", pushed(k).0))
+        .collect();
+    expected.sort();
+    assert_eq!(got, expected);
 }
