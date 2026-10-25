@@ -893,8 +893,8 @@ sections: Array<DocSection>,
  */
 history: Array<DocVersion>, 
 /**
- * The live pages of the same source whose body links to this one, by
- * title (#861, *Pages that link here*).
+ * The page's backlinks: the live pages of the same source whose body
+ * links to this one, by title (#861, *Linked from*).
  */
 backlinks: Array<DocBacklink>, 
 /**

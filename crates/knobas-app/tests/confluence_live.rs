@@ -1100,7 +1100,7 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
 /// link to the seeded parent and a comment, syncs into a `body_text` whose
 /// section heading sits beside its words and whose page link is extracted.
 /// So the search's snippet names its section (and a comment's author), the
-/// parent reads the new page under *Pages that link here*, and the plain
+/// parent reads the new page as a backlink under *Linked from*, and the plain
 /// section reads as editable while the linking one is refused.
 ///
 /// What Confluence normalises (the storage format it hands back, the comment's
@@ -1219,7 +1219,7 @@ async fn a_synced_page_keeps_its_sections_and_links_for_search_and_backlinks() {
     );
 
     // The link to the parent was extracted at sync: the parent reads the new
-    // page under *Pages that link here*.
+    // page as a backlink under *Linked from*.
     let parent_page = knobas_app::commands::entity::docs_page_inner(
         &state.pool,
         &Registry::for_process(),

@@ -60,7 +60,8 @@ pub struct DocContent {
     #[serde(default)]
     pub sections: Vec<DocSection>,
     /// The versions the record names, newest first: at least the one it is
-    /// (R-10.15's *History*). Comparing them is out of scope.
+    /// (read for *Created by* in R-10.10's meta line). Comparing them is out
+    /// of scope.
     #[serde(default)]
     pub history: Vec<DocVersion>,
 }
@@ -349,13 +350,13 @@ fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
 ///
 /// `body_text` is what full-text search indexes, and the Docs search needs
 /// two things the words alone lose: the section a snippet comes from ("Backoff
-/// policy: …", "Comment by Priya: …") and, for *Pages that link here*, which
-/// pages a page links to. Re-projecting every hit's markup per keystroke would
-/// put the adapter's parse on the search's hot path, so the adapter writes
-/// both once, when it syncs, as **lines that open with a control character**.
-/// The characters are not words: `to_tsvector` and `ts_headline` read them as
-/// separators, so the index holds what it held before, plus the titles of the
-/// linked pages.
+/// policy: …", "Comment by Priya: …") and, for the backlinks under *Linked
+/// from*, which pages a page links to. Re-projecting every hit's markup per
+/// keystroke would put the adapter's parse on the search's hot path, so the
+/// adapter writes both once, when it syncs, as **lines that open with a
+/// control character**. The characters are not words: `to_tsvector` and
+/// `ts_headline` read them as separators, so the index holds what it held
+/// before, plus the titles of the linked pages.
 ///
 /// The lines, in the order a source writes them:
 ///

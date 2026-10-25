@@ -124,8 +124,8 @@ pub struct DocPage {
     pub sections: Vec<knobas_source::docs::DocSection>,
     /// The versions the record names, newest first (#861).
     pub history: Vec<knobas_source::docs::DocVersion>,
-    /// The live pages of the same source whose body links to this one, by
-    /// title (#861, *Pages that link here*).
+    /// The page's backlinks: the live pages of the same source whose body
+    /// links to this one, by title (#861, *Linked from*).
     pub backlinks: Vec<DocBacklink>,
     /// The tickets the page references or is linked to in knobas, with their
     /// status now (#861, *Work it belongs to*).
