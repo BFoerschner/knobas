@@ -1142,6 +1142,7 @@ function roleSyncHarness() {
       asked.push(role);
       return Promise.resolve([{ source_id: "mock", run_id: 40 + asked.length }]);
     },
+    syncNow: () => Promise.reject(new Error("a role view never runs one source")),
     syncStatus: () => Promise.resolve([]),
     listen: (_event, handler) => {
       handlers.add(handler);

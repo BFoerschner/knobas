@@ -12,11 +12,13 @@
  * Nothing here decides who fills a role: the answer's runs are the runs.
  */
 import { EVENTS, ipcErrorMessage } from "../ipc";
-import { syncRole, syncStatus, type RoleRun, type SourceSyncStatus } from "../ipc/sources";
+import { syncNow, syncRole, syncStatus, type RoleRun, type SourceSyncStatus } from "../ipc/sources";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
 export interface RoleSyncPorts {
   syncRole: (role: string) => Promise<RoleRun[]>;
+  /** One source's run, started or joined: a detail's *Sync now* (#2107). */
+  syncNow: (sourceId: string) => Promise<number>;
   syncStatus: () => Promise<SourceSyncStatus[]>;
   listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
 }
@@ -46,18 +48,35 @@ export interface RoleSyncs {
 /** The bridge's ports. */
 export const ROLE_SYNC_BRIDGE: RoleSyncPorts = {
   syncRole: (role) => syncRole(role),
+  syncNow: (sourceId) => syncNow(sourceId),
   syncStatus: () => syncStatus(),
   listen: (event, handler) => tauriListen(event, handler),
 };
 
 export function createRoleSyncs(ports: RoleSyncPorts): RoleSyncs {
+  return createSyncs(ports, (role) => ports.syncRole(role));
+}
+
+/**
+ * A detail's *Sync now* (#2107), for an item whose adapter does not read one
+ * item: the item's source's run, held by source id the way a role's runs are
+ * held by role, so every detail of one source shows the one run going.
+ * `sync_now` joins a run already in flight rather than starting a second.
+ * {@link RoleSync.role} is the source's id here.
+ */
+export function createSourceSyncs(ports: RoleSyncPorts): RoleSyncs {
+  return createSyncs(ports, async (sourceId) => [{ source_id: sourceId, run_id: await ports.syncNow(sourceId) }]);
+}
+
+/** The runs asked for under one name, the same ones each time it is asked for. */
+function createSyncs(ports: RoleSyncPorts, ask: (name: string) => Promise<RoleRun[]>): RoleSyncs {
   const held = new Map<string, RoleSync>();
   return {
-    of(role) {
-      let sync = held.get(role);
+    of(name) {
+      let sync = held.get(name);
       if (sync === undefined) {
-        sync = createRoleSync(ports, role);
-        held.set(role, sync);
+        sync = createRoleSync(ports, name, () => ask(name));
+        held.set(name, sync);
       }
       return sync;
     },
@@ -67,7 +86,7 @@ export function createRoleSyncs(ports: RoleSyncPorts): RoleSyncs {
   };
 }
 
-function createRoleSync(ports: RoleSyncPorts, role: string): RoleSync {
+function createRoleSync(ports: RoleSyncPorts, role: string, ask: () => Promise<RoleRun[]>): RoleSync {
   const state = $state<{ asking: boolean; pending: Record<string, number>; revision: number; failed: string | null }>({
     asking: false,
     pending: {},
@@ -117,7 +136,7 @@ function createRoleSync(ports: RoleSyncPorts, role: string): RoleSync {
         // Listening first, so an ending sent while the answer travels is heard.
         const off = await ports.listen(EVENTS.syncState, ({ payload }) => heard(payload as SourceSyncStatus));
         stop = off;
-        const runs = await ports.syncRole(role);
+        const runs = await ask();
         state.pending = Object.fromEntries(runs.map((run) => [run.source_id, run.run_id]));
         state.asking = false;
         if (runs.length === 0) {
@@ -137,3 +156,6 @@ function createRoleSync(ports: RoleSyncPorts, role: string): RoleSync {
 
 /** The window's. */
 export const roleSyncs = createRoleSyncs(ROLE_SYNC_BRIDGE);
+
+/** The window's, by source: the details' *Sync now* (#2107). */
+export const sourceSyncs = createSourceSyncs(ROLE_SYNC_BRIDGE);

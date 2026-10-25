@@ -7,7 +7,9 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { EntityDetail, SourceView, ViewAction } from "../../ipc/entity";
-import type { WriteOpPayload } from "../../ipc/sources";
+import type { EntityRefresh, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
+import { createSourceSyncs } from "../role-sync.svelte";
+import type { DetailRefreshPorts } from "../refresh.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import TfItem, { type ItemPorts } from "./TfItem.svelte";
 
@@ -20,6 +22,7 @@ function detail(over: Partial<EntityDetail> = {}): EntityDetail {
     row: { entity_id: ID, kind: "survey", source_id: "surveys", title: "Quay crane 4 inspection", updated_at: null, synced_at: "", path: null, state: null },
     source: { id: "surveys", display_name: "Harbour surveys", adapter_kind: "wasm-fixture", enabled: true },
     kind_info: { label: "Survey", plural: "Surveys", monogram: "SV" },
+    refreshes: true,
     body_text: BODY,
     author: "harbourmaster",
     payload: { key: "survey-1", title: "<b>never drawn</b>" },
@@ -80,6 +83,9 @@ beforeEach(() => {
   target = document.createElement("div");
   document.body.appendChild(target);
   writes = [];
+  refreshed = [];
+  synced = [];
+  refreshAnswer = () => Promise.resolve({ outcome: "refreshed" });
   toasts.items = [];
 });
 
@@ -94,9 +100,37 @@ async function settle() {
   flushSync();
 }
 
+/** What the page asked to refresh, and the source runs its *Sync now* asked for. */
+let refreshed: string[] = [];
+let synced: string[] = [];
+/** Sends `sync:state` to the page's *Sync now*. */
+let sendStatus: (row: SourceSyncStatus) => void = () => {};
+/** What `refresh_entity` answers next. */
+let refreshAnswer: () => Promise<EntityRefresh> = () => Promise.resolve({ outcome: "refreshed" });
+
+function refreshPorts(): DetailRefreshPorts {
+  const handlers = new Set<(event: { payload: unknown }) => void>();
+  sendStatus = (row) => {
+    for (const handler of [...handlers]) handler({ payload: row });
+  };
+  return {
+    refreshEntity: (entityId) => (refreshed.push(entityId), refreshAnswer()),
+    syncs: createSourceSyncs({
+      syncRole: () => Promise.reject(new Error("a detail never syncs a role")),
+      syncNow: (sourceId) => (synced.push(sourceId), Promise.resolve(77)),
+      syncStatus: () => Promise.resolve([]),
+      listen: (_event, handler) => {
+        handlers.add(handler);
+        return Promise.resolve(() => handlers.delete(handler));
+      },
+    }),
+  };
+}
+
 /** The page's reads as given; its writes land in {@link writes}. */
 async function open(reads: Omit<ItemPorts, "submitWrite">, id = ID, job: string | null = null) {
   const ports: ItemPorts = {
+    refresh: refreshPorts(),
     ...reads,
     submitWrite: (payload) => {
       writes.push(payload);
@@ -113,7 +147,7 @@ function surveyView(actions: ViewAction[], extra: SourceView["sections"][number]
   return { sections: [{ ...survey!, blocks: [...survey!.blocks, ...extra] }], actions };
 }
 
-const toolbar = () => [...target.querySelectorAll(".tf-fhead .tf-acts button")].map((button) => button.textContent?.trim());
+const toolbar = () => [...target.querySelectorAll(".tf-fhead .tf-acts button:not(.tf-refresh)")].map((button) => button.textContent?.trim());
 
 test("an item opens the block view its source answers: its facts and its text", async () => {
   const asked: [string, string | null][] = [];
@@ -291,4 +325,119 @@ test("an item the mirror cannot read still draws the breadcrumb, named for an it
   }, "surveys:gone");
 
   expect(target.querySelector('nav[aria-label="Breadcrumb"] strong')?.textContent).toBe("Item");
+});
+
+// -- Refresh (#2107) -----------------------------------------------------------
+
+const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-fhead .tf-refresh");
+const banners = () => [...target.querySelectorAll(".tf-banner")].map((banner) => banner.textContent?.trim() ?? "");
+
+/** Reads that answer `first`, then each of `later` in turn, counting the detail reads. */
+function reads(first: EntityDetail, ...later: EntityDetail[]) {
+  const answers = [first, ...later];
+  const count = { detail: 0, view: 0 };
+  return {
+    count,
+    ports: {
+      getEntity: () => Promise.resolve(answers[Math.min(count.detail++, answers.length - 1)]!),
+      entityView: () => (count.view++, Promise.resolve(SURVEY_VIEW)),
+    },
+  };
+}
+
+test("Refresh reads the item, says Refreshing… meanwhile, and settles without blanking", async () => {
+  const { ports, count } = reads(detail(), detail({ row: { ...detail().row, title: "Quay crane 4 inspection, signed off" } }));
+  await open(ports);
+  let answer!: (value: EntityRefresh) => void;
+  refreshAnswer = () => new Promise((resolve) => (answer = resolve));
+
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  refreshButton()!.click();
+  flushSync();
+  expect(refreshed).toEqual([ID]);
+  expect(refreshButton()?.textContent).toBe("Refreshing…");
+  expect(refreshButton()?.disabled).toBe(true);
+  // The detail stays drawn while the read is out.
+  expect(target.querySelector("h1")?.textContent).toBe("Quay crane 4 inspection");
+  expect(target.querySelector(".tf-item-text")?.textContent).toBe(BODY);
+
+  answer({ outcome: "refreshed" });
+  await settle();
+  expect(count.detail).toBe(2);
+  expect(count.view).toBe(2);
+  expect(target.querySelector("h1")?.textContent).toBe("Quay crane 4 inspection, signed off");
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(target.querySelector(".tf-cfail")).toBeNull();
+});
+
+test("a tombstoned item keeps Refresh, and one that comes back loses the withdrawn banner", async () => {
+  const gone = detail({ deleted_at: "2026-10-25T08:00:00Z" });
+  await open(reads(gone, detail()).ports);
+  expect(banners().some((line) => line.startsWith("Withdrawn upstream"))).toBe(true);
+  expect(refreshButton()?.textContent).toBe("Refresh");
+
+  refreshButton()!.click();
+  await settle();
+  expect(refreshed).toEqual([ID]);
+  expect(banners()).toEqual([]);
+});
+
+test("gone draws the withdrawn banner over the detail", async () => {
+  await open(reads(detail(), detail({ deleted_at: "2026-10-25T08:00:00Z" })).ports);
+  expect(banners()).toEqual([]);
+  refreshAnswer = () => Promise.resolve({ outcome: "gone" });
+
+  refreshButton()!.click();
+  await settle();
+  expect(banners().some((line) => line.startsWith("Withdrawn upstream"))).toBe(true);
+  expect(target.querySelector("h1")?.textContent).toBe("Quay crane 4 inspection");
+});
+
+test("a failed refresh says why in one line and keeps the detail as it was", async () => {
+  const { ports, count } = reads(detail());
+  await open(ports);
+  refreshAnswer = () => Promise.resolve({ outcome: "failed", reason: "connection refused" });
+
+  refreshButton()!.click();
+  await settle();
+  expect(target.querySelector(".tf-cfail")?.textContent).toBe("Couldn't refresh: connection refused");
+  expect(count.detail).toBe(1);
+  expect(target.querySelector("h1")?.textContent).toBe("Quay crane 4 inspection");
+  expect(target.querySelector(".tf-item-text")?.textContent).toBe(BODY);
+  expect(refreshButton()?.textContent).toBe("Refresh");
+});
+
+test("an adapter that does not read one item offers Sync now, which runs the item's source", async () => {
+  const { ports, count } = reads(detail({ refreshes: false }));
+  await open(ports);
+  expect(refreshButton()?.textContent).toBe("Sync now");
+
+  refreshButton()!.click();
+  await settle();
+  expect(synced).toEqual(["surveys"]);
+  expect(refreshed).toEqual([]);
+  expect(refreshButton()?.textContent).toBe("Syncing…");
+
+  sendStatus({ source_id: "surveys", running: false, run_id: 77, started_at: null, last_finished_at: null, last_outcome: "ok", next_run_at: null, backoff_until: null, last_changed: null });
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Sync now");
+  expect(count.detail).toBe(2);
+});
+
+test("an instance that answers not offered gets its source's run, and Sync now from then", async () => {
+  await open(reads(detail()).ports);
+  refreshAnswer = () => Promise.resolve({ outcome: "not_offered" });
+
+  refreshButton()!.click();
+  await settle();
+  expect(synced).toEqual(["surveys"]);
+  expect(refreshButton()?.textContent).toBe("Syncing…");
+});
+
+test("a turned-off source's item draws neither button, and its banner names the remedy", async () => {
+  await open(reads(detail({ source: { ...detail().source, enabled: false } })).ports);
+  expect(refreshButton()).toBeNull();
+  expect(banners()).toEqual([
+    "Its source is turned off: Harbour surveys is disabled, so this item is hidden everywhere else. Re-enable the source to bring it back.",
+  ]);
 });

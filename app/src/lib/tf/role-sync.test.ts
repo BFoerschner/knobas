@@ -7,7 +7,7 @@ import { expect, test } from "vitest";
 
 import type { RoleRun, SourceSyncStatus } from "../ipc/sources";
 import { EVENTS } from "../ipc";
-import { createRoleSyncs, type RoleSyncPorts } from "./role-sync.svelte";
+import { createRoleSyncs, createSourceSyncs, type RoleSyncPorts } from "./role-sync.svelte";
 
 function status(source_id: string, run_id: number, running: boolean): SourceSyncStatus {
   return {
@@ -31,6 +31,10 @@ function harness(runs: RoleRun[], statuses: SourceSyncStatus[] = []) {
     syncRole: (role) => {
       asked.push(role);
       return Promise.resolve(runs);
+    },
+    syncNow: (sourceId) => {
+      asked.push(`source ${sourceId}`);
+      return Promise.resolve(runs.find((run) => run.source_id === sourceId)?.run_id ?? 1);
     },
     syncStatus: () => Promise.resolve(statuses),
     listen: (event, handler) => {
@@ -114,4 +118,22 @@ test("a refused ask comes back as not running and says why", async () => {
   await sync.start();
   expect(sync.running).toBe(false);
   expect(sync.failed).toBe("starting");
+});
+
+test("a detail's Sync now runs its one source, held by source id, until that run ends (#2107)", async () => {
+  const { asked, ports, send } = harness([{ source_id: "kuma", run_id: 12 }]);
+  const syncs = createSourceSyncs(ports);
+  const sync = syncs.of("kuma");
+  expect(syncs.of("kuma")).toBe(sync);
+
+  await sync.start();
+  expect(asked).toEqual(["source kuma"]);
+  expect(sync.running).toBe(true);
+  // Pressed again while it runs: nothing more is asked.
+  await sync.start();
+  expect(asked).toEqual(["source kuma"]);
+
+  send(status("kuma", 12, false));
+  expect(sync.running).toBe(false);
+  expect(sync.revision).toBe(1);
 });
