@@ -141,9 +141,8 @@ fn refreshed_monitor(source_id: &str, entity: &str) -> Result<Option<i64>, Sourc
 
 /// `entity` parsed, or the protocol fault that names it.
 fn entity_ref(entity: &str) -> Result<knobas_core::entity::EntityRef, SourceError> {
-    knobas_core::entity::EntityRef::parse(entity).map_err(|error| {
-        SourceError::protocol(format!("{entity:?} is not an entity id: {error}"))
-    })
+    knobas_core::entity::EntityRef::parse(entity)
+        .map_err(|error| SourceError::protocol(format!("{entity:?} is not an entity id: {error}")))
 }
 
 /// Check that a create's target is **this** source's own.
@@ -694,4 +693,3 @@ mod tests {
         assert_eq!(trimmed_base_url("http://x:3001"), "http://x:3001");
     }
 }
-

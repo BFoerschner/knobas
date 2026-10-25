@@ -228,7 +228,9 @@ mod tests {
     async fn an_active_monitor_never_published_is_an_error_not_gone() {
         let started = tokio::time::Instant::now();
         let script = Script::new(None, Some(true));
-        let error = read(&script, 8, FIRST_BEAT).await.expect_err("never published");
+        let error = read(&script, 8, FIRST_BEAT)
+            .await
+            .expect_err("never published");
         assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
         assert!(started.elapsed() >= FIRST_BEAT);
         assert!(started.elapsed() < FIRST_BEAT + REREAD * 2);
@@ -236,12 +238,16 @@ mod tests {
 
     #[test]
     fn active_is_read_off_the_monitor_record() {
-        let answered = |active| serde_json::json!({ "ok": true, "monitor": { "id": 8, "active": active } });
+        let answered =
+            |active| serde_json::json!({ "ok": true, "monitor": { "id": 8, "active": active } });
         assert!(active_of(&answered(serde_json::json!(true))).unwrap());
         assert!(!active_of(&answered(serde_json::json!(false))).unwrap());
         assert!(active_of(&answered(serde_json::json!(1))).unwrap());
         assert!(!active_of(&answered(serde_json::json!(0))).unwrap());
         let moved = active_of(&serde_json::json!({ "ok": true, "monitor": { "id": 8 } }));
-        assert!(matches!(moved, Err(SourceError::Protocol { .. })), "{moved:?}");
+        assert!(
+            matches!(moved, Err(SourceError::Protocol { .. })),
+            "{moved:?}"
+        );
     }
 }

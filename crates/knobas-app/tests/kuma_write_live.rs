@@ -436,23 +436,39 @@ async fn each_landed_write_refreshes_its_monitor_before_the_run_after_it() {
     .await
     .expect("the scratch monitor is in the mirror");
 
-    let paused = sent(&state, json!({ "PauseMonitor": { "entity": entity.clone() } })).await;
+    let paused = sent(
+        &state,
+        json!({ "PauseMonitor": { "entity": entity.clone() } }),
+    )
+    .await;
     let shot = snapshots.of(paused).await;
     assert_eq!(shot.ended.entity_id, entity);
     assert_eq!(shot.ended.ended, RefreshEnd::Gone, "the pause");
-    assert_eq!(shot.runs_since_the_write, 0, "the pause: a run started first");
+    assert_eq!(
+        shot.runs_since_the_write, 0,
+        "the pause: a run started first"
+    );
     assert!(
         shot.payload.is_none(),
         "the paused monitor is tombstoned, so the roster draws it Paused: {:?}",
         shot.payload
     );
 
-    let resumed = sent(&state, json!({ "ResumeMonitor": { "entity": entity.clone() } })).await;
+    let resumed = sent(
+        &state,
+        json!({ "ResumeMonitor": { "entity": entity.clone() } }),
+    )
+    .await;
     let shot = snapshots.of(resumed).await;
     assert_eq!(shot.ended.entity_id, entity);
     assert_eq!(shot.ended.ended, RefreshEnd::Refreshed, "the resume");
-    assert_eq!(shot.runs_since_the_write, 0, "the resume: a run started first");
-    let payload = shot.payload.expect("the resumed monitor is live in the mirror");
+    assert_eq!(
+        shot.runs_since_the_write, 0,
+        "the resume: a run started first"
+    );
+    let payload = shot
+        .payload
+        .expect("the resumed monitor is live in the mirror");
     assert!(
         payload.get("state").is_some_and(|s| !s.is_null()),
         "a resumed monitor is mirrored with a state: {payload}"
@@ -477,7 +493,10 @@ async fn each_landed_write_refreshes_its_monitor_before_the_run_after_it() {
         "the create is refreshed by the id Kuma minted"
     );
     assert_eq!(shot.ended.ended, RefreshEnd::Refreshed, "the create");
-    assert_eq!(shot.runs_since_the_write, 0, "the create: a run started first");
+    assert_eq!(
+        shot.runs_since_the_write, 0,
+        "the create: a run started first"
+    );
     let payload = shot.payload.expect("the created monitor is in the mirror");
     println!("LIVE create {minted}: mirrored {payload}");
     assert_eq!(payload["name"], CREATED);

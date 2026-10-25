@@ -731,7 +731,11 @@ async fn the_refresh_reads_a_monitor_as_the_run_does_and_a_paused_or_deleted_one
         })
         .await
         .expect("the account resumes its own monitor");
-    match source.refresh(&entity).await.expect("the refresh after the resume") {
+    match source
+        .refresh(&entity)
+        .await
+        .expect("the refresh after the resume")
+    {
         RefreshAnswer::Item(item) => {
             assert_eq!(item.entity.to_string(), entity);
             assert!(!item.deleted);
@@ -746,7 +750,10 @@ async fn the_refresh_reads_a_monitor_as_the_run_does_and_a_paused_or_deleted_one
 
     drop(scratch);
     for (which, reader) in [("with an account", &source), ("with its key", &key_only)] {
-        let answer = reader.refresh(&entity).await.expect("the refresh after the delete");
+        let answer = reader
+            .refresh(&entity)
+            .await
+            .expect("the refresh after the delete");
         assert!(
             matches!(answer, RefreshAnswer::Gone),
             "a deleted monitor is gone to the source {which}: {answer:?}"
