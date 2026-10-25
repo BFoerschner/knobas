@@ -607,9 +607,14 @@ pub async fn sync_role<R: tauri::Runtime>(
     role: String,
 ) -> Result<Vec<crate::sources::RoleRun>, IpcError> {
     let state = crate::sources::state(&app)?;
-    crud::sync_role(&state.pool, state.registry.as_ref(), &state.scheduler, &role)
-        .await
-        .map_err(|error| to_ipc(&error, None))
+    crud::sync_role(
+        &state.pool,
+        state.registry.as_ref(),
+        &state.scheduler,
+        &role,
+    )
+    .await
+    .map_err(|error| to_ipc(&error, None))
 }
 
 /// What every source is doing, and when it goes next.

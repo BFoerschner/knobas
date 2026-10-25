@@ -1607,7 +1607,10 @@ async fn sync_role_runs_each_enabled_filler_and_joins_a_run_in_flight() {
         "one run per enabled wiki filler, the turned-off one and the non-filler skipped"
     );
     assert_eq!(runs[0].run_id, in_flight, "the run in flight is joined");
-    assert_ne!(runs[1].run_id, in_flight, "an idle filler gets a run of its own");
+    assert_ne!(
+        runs[1].run_id, in_flight,
+        "an idle filler gets a run of its own"
+    );
 
     // Asked again while both are going: both are joined, none is doubled.
     let again = knobas_app::commands::sources::sync_role(
@@ -1619,7 +1622,11 @@ async fn sync_role_runs_each_enabled_filler_and_joins_a_run_in_flight() {
     let rows = knobas_sync::run_log::list(&pool, None, 50).await.unwrap();
     let started = |source: &str| rows.iter().filter(|row| row.source_id == source).count();
     let rejoined: Vec<i64> = again.iter().map(|run| run.run_id).collect();
-    assert_eq!(rejoined, [in_flight, runs[1].run_id], "a second ask joins both runs");
+    assert_eq!(
+        rejoined,
+        [in_flight, runs[1].run_id],
+        "a second ask joins both runs"
+    );
     assert_eq!(started("mock-b"), 1, "a second ask doubled mock-b's run");
 
     // Incremental: `Manual`, never a backfill's cursor-less read.
@@ -1640,7 +1647,10 @@ async fn sync_role_runs_each_enabled_filler_and_joins_a_run_in_flight() {
         if status.iter().all(|row| !row.running) {
             break;
         }
-        assert!(std::time::Instant::now() < deadline, "the runs never ended: {status:?}");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the runs never ended: {status:?}"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
 }
