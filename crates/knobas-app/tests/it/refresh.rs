@@ -959,8 +959,7 @@ async fn a_landed_write_on_an_external_source_is_refreshed_across_the_boundary()
         .id;
     assert_eq!(settled(&state, id).await, WriteState::Sent);
     run_after(&state.pool, "surveys", id).await;
-    let (written, run_started) =
-        written_and_run_started(&state.pool, "surveys:survey-1", id).await;
+    let (written, run_started) = written_and_run_started(&state.pool, "surveys:survey-1", id).await;
     assert!(
         written < run_started,
         "the refresh wrote it ({written}) before the run began ({run_started})"
@@ -1002,7 +1001,11 @@ async fn a_landed_write_on_a_1_3_0_external_source_gets_the_run_alone() {
         .id;
     assert_eq!(settled(&state, id).await, WriteState::Sent);
     run_after(&state.pool, "surveys", id).await;
-    assert_eq!(held(&state.pool).await, Vec::<String>::new(), "nothing was refreshed");
+    assert_eq!(
+        held(&state.pool).await,
+        Vec::<String>::new(),
+        "nothing was refreshed"
+    );
     assert!(heard.0.lock().unwrap().is_empty(), "no refresh happened");
     state.scheduler.shutdown().await;
 }

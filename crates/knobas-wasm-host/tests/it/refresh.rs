@@ -57,7 +57,10 @@ fn install(artifact: &std::path::Path, interface: &str) -> WasmAdapter {
 
 async fn synced(source: &dyn Source) -> Vec<knobas_source::SyncItem> {
     let mut sink = VecSink(Vec::new());
-    source.sync(None, &mut sink).await.expect("the fixture syncs");
+    source
+        .sync(None, &mut sink)
+        .await
+        .expect("the fixture syncs");
     sink.0
 }
 
@@ -88,12 +91,18 @@ async fn a_refresh_crosses_as_the_item_the_sync_emits_for_that_id() {
 async fn a_refresh_of_an_item_deleted_at_the_source_answers_gone() {
     let adapter = load_fixture();
     let before = synced(build(&adapter, serde_json::json!({})).as_ref()).await;
-    assert!(before.iter().any(|i| i.entity.to_string() == "surveys:survey-2"));
+    assert!(
+        before
+            .iter()
+            .any(|i| i.entity.to_string() == "surveys:survey-2")
+    );
 
     let source = build(&adapter, serde_json::json!({ "deleted": "survey-2" }));
     let after = synced(source.as_ref()).await;
     assert!(
-        after.iter().all(|i| i.entity.to_string() != "surveys:survey-2"),
+        after
+            .iter()
+            .all(|i| i.entity.to_string() != "surveys:survey-2"),
         "the sync no longer emits it"
     );
     let gone = source.refresh("surveys:survey-2").await;
@@ -105,7 +114,10 @@ async fn a_refresh_of_an_item_deleted_at_the_source_answers_gone() {
 /// A read that fails crosses as the sync's fault, never as *gone*.
 #[tokio::test]
 async fn a_failed_refresh_is_an_error_not_gone() {
-    let source = build(&load_fixture(), serde_json::json!({ "fault": "unauthorized" }));
+    let source = build(
+        &load_fixture(),
+        serde_json::json!({ "fault": "unauthorized" }),
+    );
     let answer = source.refresh("surveys:survey-1").await;
     assert!(
         matches!(
@@ -139,7 +151,10 @@ async fn a_1_3_0_component_installs_syncs_and_answers_not_offered() {
     for item in &items {
         let id = item.entity.to_string();
         let answer = source.refresh(&id).await;
-        assert!(matches!(answer, Ok(RefreshAnswer::NotOffered)), "{id}: {answer:?}");
+        assert!(
+            matches!(answer, Ok(RefreshAnswer::NotOffered)),
+            "{id}: {answer:?}"
+        );
     }
 }
 

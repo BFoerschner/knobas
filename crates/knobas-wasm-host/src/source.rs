@@ -1,8 +1,8 @@
 //! [`WasmSource`]: the `Source` trait, forwarded across the WIT boundary.
 
 use knobas_source::{
-    Capability, ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor,
-    SourceError, SyncItem, WriteOp, WriteReceipt, pipeline, run, view,
+    Capability, ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError,
+    SyncItem, WriteOp, WriteReceipt, pipeline, run, view,
 };
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -378,7 +378,9 @@ pub(crate) async fn descriptor(
             .map_err(|e| failed(adapter, &e))?;
         let mut descriptor: SourceDescriptor = convert::json(&text, "descriptor")?;
         if !adapter.refreshes() {
-            descriptor.capabilities.retain(|c| *c != Capability::Refresh);
+            descriptor
+                .capabilities
+                .retain(|c| *c != Capability::Refresh);
         }
         Ok(descriptor)
     })
