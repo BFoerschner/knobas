@@ -65,8 +65,9 @@ fn repository(at: RepoRef<'_>) -> Value {
 }
 
 /// The record verbatim, plus the [`repository`] it sits in where the record
-/// does not already name one. The one departure from §3a's "payload =
-/// the raw record verbatim", and the one ADR-0018 asks for by name.
+/// does not already name one. A departure from §3a's "payload = the raw
+/// record verbatim", the one ADR-0018 asks for by name; a pull request's
+/// reviewers are the other (`with_reviewers_listed`, #2098).
 fn with_repository(raw: &Value, at: RepoRef<'_>) -> Value {
     let mut payload = raw.clone();
     if let Some(record) = payload.as_object_mut() {
@@ -235,10 +236,29 @@ pub(crate) fn pr_item(
         ),
         author: pr.user.as_ref().and_then(|u| non_blank(u.login.as_deref())),
         updated_at: real_time(pr.updated_at).or_else(|| real_time(pr.created_at)),
-        payload: raw.clone(),
+        payload: with_reviewers_listed(raw),
         web_url: non_blank(pr.html_url.as_deref()),
         deleted: false,
     }
+}
+
+/// A pull request's record with `requested_reviewers: null` written as `[]`
+/// (#2098, its §10.8 entry `2098-gitea-refresh.md`).
+///
+/// For a pull request nobody was asked to review, Gitea 1.27.3's `/pulls`
+/// listing answers `null` and its read of the one pull request `[]`;
+/// Forgejo 17 answers `[]` to both (measured by the live battery's clause
+/// 13). The run reads the listing and a refresh the one pull request, so
+/// without this the stored record, at a path the descriptor declares, would
+/// depend on which read brought it. Both say "nobody".
+fn with_reviewers_listed(raw: &Value) -> Value {
+    let mut payload = raw.clone();
+    if let Some(reviewers) = payload.get_mut("requested_reviewers")
+        && reviewers.is_null()
+    {
+        *reviewers = Value::Array(Vec::new());
+    }
+    payload
 }
 
 /// The scope of the label an issue's priority is read from (#1206), as

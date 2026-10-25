@@ -550,6 +550,12 @@ impl Fake {
         fake
     }
 
+    /// The server itself, for a test that mounts an answer of its own over
+    /// the state's.
+    pub fn server(&self) -> &MockServer {
+        &self.server
+    }
+
     pub fn base_url(&self) -> String {
         self.server.uri()
     }
@@ -761,6 +767,18 @@ impl Fake {
                         .and(query_param("page", index.to_string().as_str())),
                 )
                 .respond_with(ok(json!(chunk)))
+                .mount(&self.server)
+                .await;
+            }
+            // One pull request read whole, as Gitea's `GET /pulls/{index}`
+            // answers the record the listing serves (#2098's refresh).
+            for record in pulls {
+                let number = &record["number"];
+                authed(
+                    Mock::given(method("GET"))
+                        .and(path(format!("/api/v1/repos/{full_name}/pulls/{number}"))),
+                )
+                .respond_with(ok(record.clone()))
                 .mount(&self.server)
                 .await;
             }

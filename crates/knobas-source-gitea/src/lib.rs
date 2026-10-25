@@ -76,6 +76,7 @@ mod fingerprint;
 mod grants;
 mod map;
 mod model;
+mod refresh;
 mod source;
 mod sync;
 mod view;
@@ -231,8 +232,9 @@ pub fn descriptor_template() -> SourceDescriptor {
         name: "Gitea".to_owned(),
         // M2 (issue #43): this adapter writes. `Capability::Search` stays
         // absent -- it is reserved for a server-side `Source::search` the SPI
-        // does not have.
-        capabilities: vec![Capability::Write],
+        // does not have. It reads a pull request and an issue by id
+        // (`Capability::Refresh`, #2098), and no other kind.
+        capabilities: vec![Capability::Write, Capability::Refresh],
         adapter_version: ADAPTER_VERSION.to_owned(),
         auth_methods: vec![AuthMethod::Pat],
         // One credential. The second one of envelope version 2 is Uptime
@@ -564,7 +566,7 @@ mod tests {
             (ADAPTER_KIND, ADAPTER_KIND)
         );
         assert_eq!(d.name, "Gitea");
-        assert_eq!(d.capabilities, vec![Capability::Write]);
+        assert_eq!(d.capabilities, vec![Capability::Write, Capability::Refresh]);
         assert_eq!(
             d.write_ops,
             vec![

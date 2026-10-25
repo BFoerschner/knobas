@@ -7,7 +7,8 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 
 use knobas_source::instance::{SourceInstance, validate_instance_id};
 use knobas_source::{
-    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp, WriteReceipt,
+    ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError, WriteOp,
+    WriteReceipt,
 };
 
 use crate::client::{self, GiteaClient};
@@ -288,6 +289,12 @@ impl Source for GiteaSource {
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
         crate::sync::run(self, cursor, sink).await
+    }
+
+    /// A pull request or an issue read by number, as a run emits it;
+    /// `NotOffered` for the other kinds (`crate::refresh`, #2098).
+    async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
+        crate::refresh::refresh(self, entity).await
     }
 
     /// Perform one of the four writes M2 ratified for Gitea, the merge the

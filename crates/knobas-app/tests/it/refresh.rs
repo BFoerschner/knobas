@@ -679,6 +679,12 @@ async fn a_ticket_filed_from_a_run_is_linked_to_it_before_the_follow_up_run_ends
             == 1
     })
     .await;
+    // The link is written before `refresh_ended` is told, so a loaded machine
+    // can see the link with the event still to come.
+    until("the shell is told the refresh ended", || async {
+        !f.heard().is_empty()
+    })
+    .await;
     assert_eq!(
         finished_runs(&f.state.pool, SOURCE).await,
         runs_before,

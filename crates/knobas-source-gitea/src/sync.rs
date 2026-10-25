@@ -1399,11 +1399,27 @@ async fn fetch_comments(
 
 /// Whose discussion [`discussion`] reads: which read confirms it is gone.
 #[derive(Debug, Clone, Copy)]
-enum Thread {
+pub(crate) enum Thread {
     Pull,
     /// An issue's (#1206), read under the same `include_pr_comments`: Gitea
     /// keeps both on the issue endpoint, and one switch turns that off.
     Issue,
+}
+
+/// [`discussion`] for a refresh (#2098, `crate::refresh`): the one item's
+/// discussion read as a run reads it, `None` for an item deleted since its
+/// own read, and a failure the [`SourceError`] it carries, a refused read
+/// costing the discussion and nothing else as it does in a run.
+pub(crate) async fn discussion_of(
+    source: &crate::GiteaSource,
+    at: RepoRef<'_>,
+    number: u64,
+    count: u64,
+    of: Thread,
+) -> Result<Option<Vec<model::Comment>>, SourceError> {
+    discussion(source, at, number, count, of)
+        .await
+        .map_err(|(RepoError::Fatal(error) | RepoError::Skip(error))| error)
 }
 
 /// [`fetch_comments`]'s reading, for a pull request or an issue `number`
