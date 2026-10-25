@@ -1036,33 +1036,28 @@ done
 # leftover of a suite not written yet goes too. Read from the content list,
 # not from CQL, which is the index and lags a create by seconds. Each one is
 # trashed and then purged, so its title is free for the run that makes it
-# again; a deleted page's children move up to its parent and are deleted on
-# the next pass, so this repeats until a pass finds nothing. A fresh space,
-# and the second seed of every window, deletes nothing.
+# again. The list is flat, every depth at once, so a stray's children are on
+# it beside their parent. A fresh space, and the second seed of every window,
+# deletes nothing.
 KEEP=$(printf '%s' "$PAGE_IDS" | jq -c --arg h "$HOME_ID" '[$h] + map(.id)')
 STRAYS=0
+stray=
+start=0
 while :; do
-  stray=
-  start=0
-  while :; do
-    conf GET "/rest/api/content?spaceKey=$SPACE_KEY&type=page&limit=100&start=$start"
-    expect "list the pages of $SPACE_KEY" 200
-    stray="$stray $(printf '%s' "$API_BODY" | jq -r --argjson k "$KEEP" \
-      '.results[] | select(.id as $i | $k | index($i) | not) | .id')"
-    [ "$(printf '%s' "$API_BODY" | jq '.size')" -ge 100 ] || break
-    start=$((start + 100))
-  done
-  # shellcheck disable=SC2086 # word-split on purpose: a list of ids
-  set -- $stray
-  [ "$#" -gt 0 ] || break
-  for id in "$@"; do
-    conf DELETE "/rest/api/content/$id"
-    expect "trash page $id" 204 404
-    conf DELETE "/rest/api/content/$id?status=trashed"
-    expect "purge page $id" 204 404
-    STRAYS=$((STRAYS + 1))
-    say "deleted page $id: in $SPACE_KEY and not the seed's"
-  done
+  conf GET "/rest/api/content?spaceKey=$SPACE_KEY&type=page&limit=100&start=$start"
+  expect "list the pages of $SPACE_KEY" 200
+  stray="$stray $(printf '%s' "$API_BODY" | jq -r --argjson k "$KEEP" \
+    '.results[] | select(.id as $i | $k | index($i) | not) | .id')"
+  [ "$(printf '%s' "$API_BODY" | jq '.size')" -ge 100 ] || break
+  start=$((start + 100))
+done
+for id in $stray; do
+  conf DELETE "/rest/api/content/$id"
+  expect "trash page $id" 204 404
+  conf DELETE "/rest/api/content/$id?status=trashed"
+  expect "purge page $id" 204 404
+  STRAYS=$((STRAYS + 1))
+  say "deleted page $id: in $SPACE_KEY and not the seed's"
 done
 
 # The argument is a jq PROGRAM: $v is jq's variable, not the shell's.
