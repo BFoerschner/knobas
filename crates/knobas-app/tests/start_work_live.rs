@@ -1968,8 +1968,8 @@ async fn a_commit_over_a_file_that_moved_is_held_with_both_versions_at_gitea() {
 
 /// The scheduler's events, holding each refresh's end until the test has
 /// read the mirror: [`knobas_app::sources::refresh::refresh`] tells it before
-/// `after_landing` starts the follow-up run, so while it waits no run of the
-/// source has begun, and what the mirror holds then is the refresh's alone.
+/// `after_landing` starts the follow-up run, so while it waits that run has
+/// not begun.
 struct HoldsRefreshes {
     told: tokio::sync::mpsc::UnboundedSender<knobas_sync::scheduler::RefreshEnded>,
     go: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
@@ -1982,12 +1982,17 @@ impl knobas_sync::scheduler::SyncEvents for HoldsRefreshes {
     fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
         let _ = self.told.send(ended.clone());
         // Bounded, so a test that panicked before its ack cannot hang the
-        // scheduler's quit.
-        let _ = self
-            .go
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .recv_timeout(std::time::Duration::from_secs(120));
+        // scheduler's quit. In place, so the worker's queued tasks move to
+        // another thread while this one waits: a plain blocking wait strands
+        // the task in its LIFO slot, which no other worker steals, and the
+        // test's own queries stalled behind it until the wait timed out.
+        tokio::task::block_in_place(|| {
+            let _ = self
+                .go
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .recv_timeout(std::time::Duration::from_secs(120));
+        });
     }
 }
 
@@ -2215,15 +2220,22 @@ async fn sent_and_refreshed(
         .unwrap()
         .expect("the write is on the queue");
     assert_eq!(row.state, WriteState::Sent, "{row:?}");
-    let runs_since: i64 = sqlx::query_scalar(
-        "select count(*) from knobas.sync_run r, knobas.write_queue w
+    // While this refresh's end is held, `after_landing` has not started the
+    // follow-up run, so no run of the source has begun since the write was
+    // sent and what the mirror holds for the item is the refresh's.
+    let runs: Vec<(String, Option<String>)> = sqlx::query_as(
+        "select r.started_at::text, r.finished_at::text
+           from knobas.sync_run r, knobas.write_queue w
           where w.id = $1 and r.source_id = w.source_id and r.started_at > w.settled_at",
     )
     .bind(queued.id)
-    .fetch_one(&state.pool)
+    .fetch_all(&state.pool)
     .await
     .unwrap();
-    assert_eq!(runs_since, 0, "no run began before the refresh ended");
+    assert!(
+        runs.is_empty(),
+        "a run began after write {row:?} was sent and before its refresh ended: {runs:?}"
+    );
     let mirrored: (String, String, serde_json::Value) = sqlx::query_as(
         "select title, body_text, payload from sync.live_item where entity_id = $1",
     )
