@@ -411,30 +411,35 @@ impl Seeded {
     /// It was the walk's own query until #1976 moved the walk to `order by
     /// created asc, id asc`, which no write moves. It is no longer a copy of
     /// `cql::build_cql`; the full syncs below are what send that form.
-    ///
-    /// Sent through `query` rather than `Seeded::get`'s pre-built path,
-    /// because a CQL string carries spaces, quotes and an `=`, and this is the
-    /// one call in the file that needs them encoded rather than hand-escaped.
     async fn index_order(&self) -> Vec<String> {
-        let cql = format!(
+        self.search_ids(&format!(
             "type = page AND space in (\"{}\") order by lastmodified asc",
             self.seed.space
-        );
+        ))
+        .await
+    }
+
+    /// The ids one CQL content search answers, in its order, from one page
+    /// of 50: the index's view, where `content` reads the record's.
+    ///
+    /// Sent through `query` rather than `Seeded::get`'s pre-built path,
+    /// because a CQL string carries spaces, quotes and an `=`, which this
+    /// encodes rather than hand-escapes.
+    async fn search_ids(&self, cql: &str) -> Vec<String> {
         let response = self
             .http
             .get(format!("{}/rest/api/content/search", self.url))
             .header("Accept", "application/json")
             .basic_auth(&self.user, Some(&self.password))
-            .query(&[("cql", cql.as_str()), ("limit", "50")])
+            .query(&[("cql", cql), ("limit", "50")])
             .send()
             .await
-            .unwrap_or_else(|e| panic!("the index-order probe ({cql}): {e}"));
+            .unwrap_or_else(|e| panic!("the search ({cql}): {e}"));
         let status = response.status().as_u16();
         let text = response.text().await.unwrap_or_default();
-        assert_eq!(status, 200, "the index-order probe ({cql}): {text}");
-        let body: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|e| {
-            panic!("the index-order probe ({cql}): unreadable body {text}: {e}")
-        });
+        assert_eq!(status, 200, "the search ({cql}): {text}");
+        let body: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("the search ({cql}): unreadable body {text}: {e}"));
         body["results"]
             .as_array()
             .unwrap_or_else(|| panic!("a content search answers `results`: {body}"))
@@ -555,24 +560,7 @@ impl Seeded {
         let deadline = std::time::Instant::now() + INDEX_BUDGET;
         let started = std::time::Instant::now();
         loop {
-            let response = self
-                .http
-                .get(format!("{}/rest/api/content/search", self.url))
-                .header("Accept", "application/json")
-                .basic_auth(&self.user, Some(&self.password))
-                .query(&[("cql", cql.as_str()), ("limit", "50")])
-                .send()
-                .await
-                .unwrap_or_else(|e| panic!("the title probe ({cql}): {e}"));
-            let status = response.status().as_u16();
-            let text = response.text().await.unwrap_or_default();
-            assert_eq!(status, 200, "the title probe ({cql}): {text}");
-            let body: serde_json::Value = serde_json::from_str(&text)
-                .unwrap_or_else(|e| panic!("the title probe ({cql}): unreadable body {text}: {e}"));
-            let found = body["results"]
-                .as_array()
-                .is_some_and(|rs| rs.iter().any(|r| r["id"].as_str() == Some(id)));
-            if found {
+            if self.search_ids(&cql).await.iter().any(|found| found == id) {
                 println!(
                     "SEEDED index serves {id} as {title:?} after {:?}",
                     started.elapsed()
@@ -1863,7 +1851,7 @@ async fn a_run_reports_its_walk_over_the_real_pages() {
     assert_eq!(idle_unit, "pages");
     assert!(
         idle_done > done,
-        "the sweep's {done} pages, then the window on top, the rename of {} in it: {idle_done}",
+        "the full run's {done} pages, then the window on top, the rename of {} in it: {idle_done}",
         target.id
     );
     assert_eq!(idle_of, of.map(|_| idle_done), "it ends at its own total");
