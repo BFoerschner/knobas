@@ -1210,3 +1210,32 @@ test("a link that answers after another page was opened reads nothing back over 
   expect(docsPage.mock.calls.map(([id]) => id)).toEqual(["confluence:2", "confluence:1"]);
   expect(target.querySelector("h1")?.textContent).toBe("Ops home");
 });
+
+test("a sync run that ends while the open page's first read is out still opens it: the visit is recorded (#2072)", async () => {
+  const sync = syncEvents();
+  let first: (page: DocPage) => void = () => {};
+  const docsPage = vi.fn(async () => (docsPage.mock.calls.length === 1 ? new Promise<DocPage>((resolve) => (first = resolve)) : PAGE));
+  const io = ports({ docsPage, listen: sync.listen });
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: io } });
+  await settle();
+  await sync.ended();
+  first(PAGE);
+  await settle();
+  expect(docsPage).toHaveBeenCalledTimes(2);
+  expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
+  expect(io.visitEntity).toHaveBeenCalledWith("confluence:2");
+});
+
+test("a sync run's re-read that fails before Docs drew anything shows the error (#2072)", async () => {
+  const sync = syncEvents();
+  let first: (tree: DocsTree) => void = () => {};
+  const docsTree = vi.fn(async () =>
+    docsTree.mock.calls.length === 1 ? new Promise<DocsTree>((resolve) => (first = resolve)) : Promise.reject(new Error("database is locked")),
+  );
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsTree, listen: sync.listen }) } });
+  await settle();
+  await sync.ended();
+  first(TREE);
+  await settle();
+  expect(target.textContent).toContain("Could not read the page tree: database is locked");
+});

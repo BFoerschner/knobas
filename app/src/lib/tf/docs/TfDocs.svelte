@@ -247,7 +247,11 @@
   let treeAsked = 0;
   let pageAsked = 0;
 
-  /** Read the tree; a `quiet` read (a sync run's, #2072) that fails leaves the tree as drawn. */
+  /**
+   * Read the tree; a `quiet` read (a sync run's, #2072) that fails leaves the
+   * tree as drawn. With none drawn yet it stands in for the first read it
+   * dropped, so its error shows.
+   */
   async function readTree(quiet: boolean) {
     const mine = ++treeAsked;
     try {
@@ -257,25 +261,28 @@
       treeError = null;
       settlePages(read);
     } catch (cause) {
-      if (mine === treeAsked && !quiet) treeError = ipcErrorMessage(cause);
+      if (mine === treeAsked && (!quiet || tree === null)) treeError = ipcErrorMessage(cause);
     }
   }
 
   /**
    * Read page `id`. Opening it records the visit; a `quiet` read (a sync
    * run's, #2072) records none, and one that fails leaves the page as drawn.
+   * A quiet read that dropped the opening read before `id` was drawn opens it
+   * in that read's place: visit and error as an opening read.
    */
   function readPage(id: string, quiet: boolean): void {
     const mine = ++pageAsked;
     void io.docsPage(id).then(
       (answer) => {
         if (mine !== pageAsked) return;
+        const opens = !quiet || page?.entity_id !== id;
         page = answer;
         pageError = null;
-        if (!quiet) void io.visitEntity(id).catch(() => {});
+        if (opens) void io.visitEntity(id).catch(() => {});
       },
       (cause: unknown) => {
-        if (mine === pageAsked && !quiet) pageError = ipcErrorMessage(cause);
+        if (mine === pageAsked && (!quiet || page?.entity_id !== id)) pageError = ipcErrorMessage(cause);
       },
     );
   }
