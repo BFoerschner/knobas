@@ -249,3 +249,15 @@ test("the refresh event naming an echo's write says it landed: the echo reads se
   bridge.emit(EVENTS.itemRefreshed, refreshed("gitea:pr/1", 40));
   expect(seen).toEqual(["sent", "queued"]);
 });
+
+test("a surface that re-reads on its own source's run ends hears only the refresh event (#2104)", async () => {
+  const bridge = fakeListen();
+  let reads = 0;
+  watchEchoes("pipeline", () => void (reads += 1), { listen: bridge.listen, runEnds: false });
+  await Promise.resolve();
+  echoWrite("tc:bt/1", "run", "", { many: true, write: { id: 50 }, surface: "pipeline", source: "teamcity" });
+  bridge.emit(EVENTS.syncState, runEnded("teamcity"));
+  expect(reads).toBe(0);
+  bridge.emit(EVENTS.itemRefreshed, refreshed("tc:bt/1", 50));
+  expect(reads).toBe(1);
+});

@@ -40,6 +40,12 @@ export function isStartedHere(run: RunRow): boolean {
  */
 export const QUEUED_RUN = "run";
 
+/** The surface a pipeline's echoes are tagged with, for `watchEchoes` (#2104). */
+export const PIPELINE_SURFACE = "pipeline";
+
+/** The kind of echo a parameter change is on its pipeline (#2104): its text the new value (`""` for a secret's), its base the old. */
+export const paramKind = (name: string) => `param ${name}`;
+
 /** The op every run here is queued as (`RunBuild`), as `refused_writes` asks about it (#2040). */
 export const RUN_OP = "run_build";
 
@@ -79,7 +85,7 @@ export function runBranch(payload: WriteOpPayload): string | null {
  * before its read arrives, the pipeline's own recent runs stand in.
  */
 export function echoRun(
-  pipeline: Pick<PipelineRow, "entity_id" | "name" | "recent">,
+  pipeline: Pick<PipelineRow, "entity_id" | "name" | "recent" | "source_id">,
   write: Pick<QueuedWrite, "id">,
   branch: string | null,
   held: readonly RunRow[] | null,
@@ -91,6 +97,8 @@ export function echoRun(
     many: true,
     following: { name: `Run of ${pipeline.name}` },
     follower,
+    surface: PIPELINE_SURFACE,
+    source: pipeline.source_id,
   });
 }
 
@@ -100,7 +108,7 @@ export function queuedRunRows(marks: readonly Echo[], fallback: string | null): 
     .map((mark, at): RunRow => ({
       entity_id: startedHere(mark.write ?? -1 - at),
       number: null,
-      state: { text: "queued", tone: "info" },
+      state: { text: mark.state, tone: "info" },
       branch: mark.text !== "" ? mark.text : fallback,
       started: null,
       finished: null,

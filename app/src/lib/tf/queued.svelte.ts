@@ -140,6 +140,8 @@ export interface EchoWatch {
   listen?: EchoListen | undefined;
   /** Re-read on the end of every run of every source, for a surface that reads again on each anyway (Docs, #2072). */
   everyRun?: boolean;
+  /** `false` for a surface that re-reads on its own source's run ends already (a pipeline, #1450): the refresh event only. */
+  runEnds?: boolean;
 }
 
 /**
@@ -168,7 +170,7 @@ export function watchEchoes(surface: string, reread: () => void, how: EchoWatch 
   });
   hear(EVENTS.syncState, (payload) => {
     const row = payload as SourceSyncStatus;
-    if (row.running) return;
+    if (row.running || how.runEnds === false) return;
     if (how.everyRun || mine().some(({ m }) => m.source === null || m.source === row.source_id)) reread();
   });
   return () => {

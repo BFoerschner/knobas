@@ -12,6 +12,7 @@ import type { PipelineRow, PipelineSettings, RunRow } from "../../ipc/entity";
 import type { QueuedWrite, SourceDescriptor, SourceSummary, WriteOpPayload } from "../../ipc/sources";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
+import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes, echoWrite, echoesOn } from "../queued.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
@@ -1128,4 +1129,45 @@ test("Run… draws the overrides and the queue's top disabled saying why where t
       },
     },
   ]);
+});
+
+// -- the echo's one lifecycle: queued, sent, gone on the refresh's read (#2104) --
+
+test("a run queued here says queued, then sent, and goes on the refresh event's read that holds it (#2104)", async () => {
+  const events = echoEvents(settle);
+  const { follower, sent } = echoFollower();
+  const drawn = draw(undefined, "PAY-231", { listen: events.listen, follower: () => follower });
+  await settle();
+  button("Run on feature/PAY-231-sepa-retry")!.click();
+  await settle();
+  expect(runNos()[0]).toBe("queued");
+  sent(41);
+  expect(runNos()[0]).toBe("sent");
+  drawn.next = [run(1188, "ok", today(0, 30), { finished: null, duration_seconds: null, trigger: "person", started_by_me: true, branch: "feature/PAY-231-sepa-retry" }), ...RUNS];
+  await events.refreshed(PIPELINE.entity_id, 41);
+  expect(runNos().slice(0, 2)).toEqual(["#1188", "#1187"]);
+});
+
+test("a parameter change says queued, then sent, and goes once the read shows the new value, the page still mounted (#2104)", async () => {
+  const events = echoEvents(settle);
+  const { follower, sent } = echoFollower();
+  let read = KINDS;
+  draw([PIPELINE.entity_id, "params"], "PAY-231", { settings: () => Promise.resolve(read), listen: events.listen, follower: () => follower });
+  await settle();
+  paramRows()[0]!.querySelector<HTMLButtonElement>("button")!.click();
+  flushSync();
+  choose(target.querySelector<HTMLSelectElement>("select[aria-label='New default for env']")!, "prod-dryrun");
+  button("Save")!.click();
+  await settle();
+  const chip = () => paramRows()[0]!.querySelector("td:nth-child(2) .tf-chip")?.textContent ?? null;
+  expect(chip()).toBe("queued");
+  sent(41);
+  expect(chip()).toBe("sent");
+  // A run's end whose read still holds the old value keeps it.
+  await events.ended("teamcity");
+  expect(chip()).toBe("sent");
+  read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "prod-dryrun" } : p)) };
+  await events.refreshed(PIPELINE.entity_id, 41);
+  expect(chip()).toBeNull();
+  expect(paramRows()[0]!.textContent).toContain("prod-dryrun");
 });
