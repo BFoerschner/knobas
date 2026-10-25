@@ -437,6 +437,35 @@ test("Conversation: each entry's who, when and verdict, then a comment queued an
   expect(toasts.items.at(-1)!.action?.label).toBe("Show queue");
 });
 
+/** The view with one section's blocks replaced, as a source that wrote something else there would send it. */
+function withBlocks(id: string, blocks: SourceView["sections"][number]["blocks"], from: SourceView = prView()): SourceView {
+  return { ...from, sections: from.sections.map((section) => (section.id === id ? { ...section, blocks } : section)) };
+}
+
+/** A muted line, as Gitea's `view::muted_line` writes one: an untitled list of one muted row with no entity (#2065). */
+const mutedLine = (title: string) => ({ type: "entities" as const, title: null, rows: [vrow(null, title, null, "muted")] });
+
+const UNREAD = "This token cannot read this pull request's comments: it lacks the read:issue scope";
+
+test("Conversation opens on the source's line where it cannot read the comments, the reviews under it (#2065)", async () => {
+  const pr = withBlocks("conversation", [
+    mutedLine(UNREAD),
+    { type: "facts", facts: [fact("priya.nair", "2026-08-22 09:30"), fact("Review", "approved", "ok")] },
+  ]);
+  await draw([PR, "conversation"], ports({ pr }));
+  const convo = [...target.querySelectorAll(".tf-convo > *")].map((node) => node.textContent?.replace(/\s+/g, " ").trim());
+  expect(convo[0]).toBe(UNREAD);
+  expect(convo[1]).toBe("PN priya.nair2026-08-22 09:30 approved");
+  expect(target.querySelector(".tf-convo .tf-prline")!.classList.contains("tf-dim")).toBe(true);
+});
+
+test("with no reviews either, Conversation is the source's line and never says No comments yet. (#2065)", async () => {
+  await draw([PR, "conversation"], ports({ pr: withBlocks("conversation", [mutedLine(UNREAD)]) }));
+  expect(text(".tf-convo .tf-prline")).toBe(UNREAD);
+  expect(target.querySelector(".tf-convo .tf-msg")).toBeNull();
+  expect(target.querySelector(".tf-convo .tf-empty")).toBeNull();
+});
+
 test("a source that offers no comment draws no comment box", async () => {
   await draw([PR, "conversation"], ports({ pr: prView([EDIT]) }));
   expect(target.querySelector(".tf-compose")).toBeNull();

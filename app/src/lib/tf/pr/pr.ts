@@ -11,7 +11,7 @@
  * (`repo.ts`'s `branchStanding`); the sentences the source wrote are drawn as
  * it wrote them.
  */
-import type { SourceView, Tone, ViewAction, ViewRow, ViewSection } from "../../ipc/entity";
+import type { SourceView, Tone, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../ipc/entity";
 
 /** The page's tabs, in prototype-6's order; *Files changed* is #842's. */
 export const PR_TABS = [
@@ -46,6 +46,20 @@ export function prHash(prId: string, tab: PrTab = "overview"): string {
 
 function section(view: SourceView | null, id: string): ViewSection | undefined {
   return view?.sections.find((candidate) => candidate.id === id);
+}
+
+/**
+ * A muted line (#2065): what a source writes where something could not be
+ * read, or to say what a list leaves out, as Gitea's `view::muted_line` does,
+ * an untitled list whose every row is muted and names no entity and no chip.
+ * The page draws it as a line where the source put it, never as a check, a
+ * commit or a message. A list's own last note (a cut list's *The first 250
+ * of 312*) sits in a list of what it lists, so it stays in that list.
+ */
+function lineOf(block: ViewBlock): string[] | null {
+  if (block.type !== "entities" || block.title !== null || block.rows.length === 0) return null;
+  const quiet = block.rows.every((row) => row.tone === "muted" && row.entity_id === null && row.chip === null);
+  return quiet ? block.rows.map((row) => row.title) : null;
 }
 
 /** The overview's facts, in order. */
@@ -222,29 +236,43 @@ export interface PrMessage {
   body: string;
 }
 
+/** What a tab draws of its section, in the source's order: a muted line, or one of the tab's own things. */
+export type Part<T> = { line: string } | { item: T };
+
 /**
  * The conversation, oldest first: the source writes each entry as a facts
  * block (who, when, and a review's *Review* verdict) and then its words, if
- * it has any.
+ * it has any; a muted line (comments the token may not read, #2042) stands
+ * where the source put it.
  */
-export function conversationOf(view: SourceView | null): PrMessage[] {
-  const messages: PrMessage[] = [];
+export function conversationParts(view: SourceView | null): Part<PrMessage>[] {
+  const parts: Part<PrMessage>[] = [];
   for (const block of section(view, "conversation")?.blocks ?? []) {
+    const last = parts.at(-1);
     if (block.type === "facts") {
       const [said, ...rest] = block.facts;
       if (!said) continue;
       const review = rest.find((fact) => fact.label === "Review");
-      messages.push({
-        who: said.label,
-        at: said.value,
-        verdict: review ? { text: review.value, tone: review.tone } : null,
-        body: "",
+      parts.push({
+        item: {
+          who: said.label,
+          at: said.value,
+          verdict: review ? { text: review.value, tone: review.tone } : null,
+          body: "",
+        },
       });
-    } else if (block.type === "text" && messages.length > 0) {
-      messages[messages.length - 1]!.body = block.text;
+    } else if (block.type === "text" && last !== undefined && "item" in last) {
+      last.item.body = block.text;
+    } else {
+      for (const line of lineOf(block) ?? []) parts.push({ line });
     }
   }
-  return messages;
+  return parts;
+}
+
+/** The conversation's messages alone, oldest first. */
+export function conversationOf(view: SourceView | null): PrMessage[] {
+  return conversationParts(view).flatMap((part) => ("item" in part ? [part.item] : []));
 }
 
 /** The pull request's commits, as its *Commits* lists them (the note a cut list ends on included). */

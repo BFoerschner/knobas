@@ -90,6 +90,7 @@
     PR_TABS,
     commitRows,
     conversationOf,
+    conversationParts,
     headerOf,
     prHash,
     readPrRoute,
@@ -271,7 +272,7 @@
   const readyRows = $derived(readyLines(view ?? null));
   const number = $derived(prId === null ? null : prNumber(prId));
   const title = $derived(detail?.row.title ?? "");
-  const messages = $derived(conversationOf(view ?? null));
+  const conversation = $derived(conversationParts(view ?? null));
   const commits = $derived(commitRows(view ?? null));
   const actions = $derived(view?.actions ?? []);
   const name = $derived(number === null ? "PR" : `PR ${number}`);
@@ -576,7 +577,11 @@
             {/if}
           {:else if tab === "conversation"}
             <div class="tf-convo">
-              {#each messages as message, n (n)}
+              {#each conversation as part, n (n)}
+                {#if "line" in part}
+                  <p class="tf-dim tf-prline">{part.line}</p>
+                {:else}
+                {@const message = part.item}
                 {@const own = me !== null && message.who === me}
                 <article class="tf-msg">
                   <span class="tf-av" class:tf-me={own} aria-hidden="true">{initials(message.who)}</span>
@@ -588,6 +593,7 @@
                     {#if message.body !== ""}<p>{message.body}</p>{/if}
                   </div>
                 </article>
+                {/if}
               {/each}
               {#each queuedComments as body, n (n)}
                 <article class="tf-msg tf-queued">
@@ -598,7 +604,7 @@
                   </div>
                 </article>
               {/each}
-              {#if messages.length === 0 && queuedComments.length === 0}
+              {#if conversation.length === 0 && queuedComments.length === 0}
                 <div class="tf-empty">No comments yet.</div>
               {/if}
               {#if comment !== null}
