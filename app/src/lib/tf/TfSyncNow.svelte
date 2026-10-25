@@ -23,7 +23,8 @@
 </script>
 
 {#if sourceRoles.syncs(sync.role)}
-  <button type="button" class="tf-btn tf-sm" disabled={sync.running} {title} onclick={() => void start()}
+  <button type="button" class="tf-btn tf-sm tf-syncnow" disabled={sync.running} {title} onclick={() => void start()}
     >{sync.running ? "Syncing…" : "Sync now"}</button
   >
 {/if}
+

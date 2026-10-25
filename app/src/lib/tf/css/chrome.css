@@ -88,6 +88,8 @@
 .tf-fhead { padding: 16px 22px 12px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
 .tf-fhead h1 { font-size: var(--t-3xl); line-height: 1.15; font-weight: 700; font-variation-settings: "wdth" 85; }
 .tf-fhead .tf-sub { color: var(--ink-2); margin-top: 4px; font-size: var(--t-sm); }
+/* A role view's *Sync now* (#2106): its own width in a column head (the Docs tree's, the Builds rail's). */
+.tf-syncnow { align-self: flex-start; }
 
 /* An empty state: centred, says what would fill it, offers the action. */
 .tf-empty { padding: 22px; color: var(--ink-2); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
