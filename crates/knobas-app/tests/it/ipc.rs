@@ -228,6 +228,7 @@ fn invoke_managing(
             knobas_app::commands::sources::db_stats,
             knobas_app::commands::sources::reindex_fts,
             knobas_app::commands::sources::watch_sync,
+            knobas_app::commands::sources::sync_role,
             shapes::without_progress,
             shapes::with_progress
         ])
@@ -381,6 +382,7 @@ fn every_sources_command_is_registered_and_reachable() {
             "watch_sync",
             serde_json::json!({ "sourceId": "mock", "progress": "__CHANNEL__:1" }),
         ),
+        ("sync_role", serde_json::json!({ "role": "wiki" })),
     ] {
         let rejection = invoke(cmd, args).expect_err("no SourcesState is managed");
         assert!(
@@ -1528,4 +1530,117 @@ async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
             .await
             .expect("watch_sync answers after the run");
     assert_eq!(after, None, "a run that has ended is not joined");
+}
+
+// ---------------------------------------------------------------------------
+// 9. `sync_role`, a role view's *Sync now* (#2106).
+// ---------------------------------------------------------------------------
+
+/// A view's *Sync now* asks for its role, and the mirror answers who fills it:
+/// one incremental run per **enabled** source that fills the role, started or
+/// joined. A turned-off filler is skipped, a source that fills another role
+/// only is not asked, and a run already in flight is joined rather than doubled.
+///
+/// Three sources of the mock adapter, which claims the wiki (#1229): `mock`
+/// from the demo load, whose run the test holds in flight on its advisory
+/// lock; `mock-b`, idle; `mock-off`, turned off. A Jira source claims the
+/// ticket system alone, so it fills no wiki.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_role_runs_each_enabled_filler_and_joins_a_run_in_flight() {
+    let db = knobas_db::test_util::scratch_database("sync_role_runs").await;
+    let pool = db
+        .pool(5)
+        .await
+        .expect("a pool onto this test's own database");
+    knobas_app::sources::demo::demo_load_inner(&pool)
+        .await
+        .unwrap();
+    let config = serde_json::json!({});
+    crate::support::source_config(&pool, "mock-b", "mock", "Mock B", &config).await;
+    crate::support::source_config(&pool, "mock-off", "mock", "Mock off", &config).await;
+    crate::support::source_config(&pool, "jira-t", "jira", "Jira", &config).await;
+    sqlx::query("update knobas.source_config set enabled = false where id = 'mock-off'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("mock app");
+    app.manage(ready_over(pool.clone()));
+    let state = sources_state(&app, db, pool.clone());
+    let scheduler = state.scheduler.clone();
+    app.manage(state);
+
+    // A role nobody fills starts nothing.
+    let none =
+        knobas_app::commands::sources::sync_role(app.handle().clone(), "nobody:desk".to_owned())
+            .await
+            .expect("sync_role answers for a role nobody fills");
+    assert!(none.is_empty(), "a role nobody fills started {none:?}");
+
+    // Hold both fillers' runs before they read anything, so each stays in
+    // flight until the test lets go.
+    let mut holder = pool.begin().await.unwrap();
+    for source in ["mock", "mock-b"] {
+        sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+            .bind(source)
+            .execute(&mut *holder)
+            .await
+            .unwrap();
+    }
+    let in_flight = scheduler
+        .trigger("mock", knobas_sync::SyncTrigger::Manual, None)
+        .await
+        .expect("a run starts");
+
+    let runs = knobas_app::commands::sources::sync_role(
+        app.handle().clone(),
+        knobas_source::role::WIKI.to_owned(),
+    )
+    .await
+    .expect("sync_role answers");
+    let sources: Vec<&str> = runs.iter().map(|run| run.source_id.as_str()).collect();
+    assert_eq!(
+        sources,
+        ["mock", "mock-b"],
+        "one run per enabled wiki filler, the turned-off one and the non-filler skipped"
+    );
+    assert_eq!(runs[0].run_id, in_flight, "the run in flight is joined");
+    assert_ne!(runs[1].run_id, in_flight, "an idle filler gets a run of its own");
+
+    // Asked again while both are going: both are joined, none is doubled.
+    let again = knobas_app::commands::sources::sync_role(
+        app.handle().clone(),
+        knobas_source::role::WIKI.to_owned(),
+    )
+    .await
+    .expect("sync_role answers again");
+    let rows = knobas_sync::run_log::list(&pool, None, 50).await.unwrap();
+    let started = |source: &str| rows.iter().filter(|row| row.source_id == source).count();
+    let rejoined: Vec<i64> = again.iter().map(|run| run.run_id).collect();
+    assert_eq!(rejoined, [in_flight, runs[1].run_id], "a second ask joins both runs");
+    assert_eq!(started("mock-b"), 1, "a second ask doubled mock-b's run");
+
+    // Incremental: `Manual`, never a backfill's cursor-less read.
+    for run in &runs {
+        let row = rows
+            .iter()
+            .find(|row| row.id == run.run_id)
+            .expect("the answered run is in the log");
+        assert_eq!(row.trigger, knobas_sync::SyncTrigger::Manual, "{row:?}");
+    }
+    assert_eq!(started("mock-off"), 0, "the turned-off filler ran");
+    assert_eq!(started("jira-t"), 0, "a source that fills no wiki ran");
+
+    holder.rollback().await.unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let status = knobas_sync::scheduler::status_all(&pool).await.unwrap();
+        if status.iter().all(|row| !row.running) {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "the runs never ended: {status:?}");
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
 }

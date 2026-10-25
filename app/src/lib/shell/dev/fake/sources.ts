@@ -4,8 +4,8 @@
  */
 import { GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "../../../sources/fixtures";
 import type { AdapterPreview, AdapterStatus, AuthMethod, AuthState, KindPaths, SourceDescriptor, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../../ipc/sources";
-import type { Handlers } from "../fake-tauri";
-import { keepSeed } from "../fake-seed";
+import type { FakeBridge, Handlers } from "../fake-tauri";
+import { keepSeed, onFakeReset } from "../fake-seed";
 import { CORPUS, ROLE_CLAIMERS, SYNCED_AT } from "./corpus";
 
 // -- the sources cockpit's fixture -------------------------------------------
@@ -530,6 +530,44 @@ function uninstallOne(args: Record<string, unknown>) {
   return null;
 }
 
+let bridge: FakeBridge | null = null;
+
+/** Hold the bridge, so a role view's *Sync now* can end its runs (#2106). */
+export function attach(installed: FakeBridge): void {
+  bridge = installed;
+}
+onFakeReset(() => {
+  bridge = null;
+});
+
+/**
+ * `sync_role` (#2106): one run per enabled fixture source that fills `role`
+ * (claims it and missed none of its paths), id order, as the mirror answers.
+ * Each run ends on `sync:state` a moment later, so *Syncing…* gives way to
+ * *Sync now* again. `?fake-sync-held` keeps them going, for a screenshot.
+ */
+function syncRole(args: Record<string, unknown>): { source_id: string; run_id: number }[] {
+  const role = String(args["role"] ?? "");
+  const runs = FIXTURE_SOURCES.filter(
+    (source) =>
+      source.enabled &&
+      source.roles.some((claim) => claim.role === role) &&
+      !source.role_misses.some((miss) => miss.role === role),
+  )
+    .map((source) => source.id)
+    .sort()
+    .map((source_id, index) => ({ source_id, run_id: 191 + index }));
+  if (!new URLSearchParams(location.search).has("fake-sync-held")) {
+    setTimeout(() => {
+      for (const run of runs) {
+        const source = FIXTURE_SOURCES.find((row) => row.id === run.source_id)!;
+        bridge?.emit("sync:state", { ...fakeStatus(source), run_id: run.run_id });
+      }
+    }, 1500);
+  }
+  return runs;
+}
+
 /** This feature's commands. */
 export function handlers(): Handlers {
   return {
@@ -556,6 +594,7 @@ export function handlers(): Handlers {
     // and the channel hears nothing, as on an idle source (#1384).
     watch_sync: () => null,
     sync_all: () => FIXTURE_SOURCES.map((_, index) => 91 + index),
+    sync_role: (args) => syncRole(args),
     reindex_fts: () => null,
     delete_source: () => null,
     // Answered, never stored: the row the page draws next is the fixture's

@@ -259,6 +259,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     // sources.ts
     knobas_source::SourceDescriptor::export_all(cfg)?;
     crate::sources::SourceSummary::export_all(cfg)?;
+    crate::sources::RoleRun::export_all(cfg)?;
     crate::sources::NewSource::export_all(cfg)?;
     crate::sources::SourcePatch::export_all(cfg)?;
     crate::sources::SourceDraft::export_all(cfg)?;
