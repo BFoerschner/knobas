@@ -40,6 +40,7 @@
   } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { SourceFacts } from "../job/job";
+  import type { DetailRefreshPorts } from "../refresh.svelte";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
   export interface PrPorts {
@@ -57,6 +58,8 @@
     setPrFileViewed: (prId: string, path: string, viewed: boolean) => Promise<string[]>;
     /** Hears `item:refreshed` and `sync:state`, which read the live view again for the page's echoes (#2103); the bridge's when left out. */
     listen?: EchoListen;
+    /** The header's *Refresh* (#2107); the bridge's when left out. */
+    refresh?: DetailRefreshPorts;
   }
 </script>
 
@@ -105,6 +108,9 @@
   } from "./pr";
   import { askAgain, echoWrite, echoOn, echoesOn, sameWords, sentWrites, settleEchoes, takeAgain, watchEchoes, type Echo, type EchoListen } from "../queued.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
+  import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfDetailRefresh from "../TfDetailRefresh.svelte";
+  import { createDetailRefresh, DETAIL_REFRESH_BRIDGE } from "../refresh.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfPrFiles from "./TfPrFiles.svelte";
   import TfPrMerge from "./TfPrMerge.svelte";
@@ -168,6 +174,8 @@
   let runs = $state<Record<string, UrlMatch>>({});
   /** The proposal waiting on each commit, by the commit's entity id. */
   let proposals = $state<Record<string, string>>({});
+  /** The header's *Refresh* or *Sync now* (#2107). */
+  const refresh = createDetailRefresh(untrack(() => ports.refresh ?? DETAIL_REFRESH_BRIDGE));
 
   $effect(() => {
     if (!ready || prId === null) return;
@@ -183,6 +191,7 @@
     me = null;
     runs = {};
     proposals = {};
+    untrack(() => refresh.reset());
     ports.getEntity(id).then(
       (found) => {
         if (!live) return;
@@ -272,6 +281,22 @@
       ),
     );
   });
+
+  /**
+   * A refresh's re-read (#2107): the pull request's row and its live view,
+   * over what the page drew; a failed read keeps it.
+   */
+  async function reread() {
+    const id = prId;
+    if (id === null) return;
+    readView(id, () => prId === id, true);
+    try {
+      const found = await ports.getEntity(id);
+      if (prId === id) detail = found;
+    } catch {
+      // The page keeps the row it drew.
+    }
+  }
 
   /** The repository the pull request is under: its declared parent, `owner/name`, in its source. */
   function readRepo(row: EntityRow, live: () => boolean) {
@@ -570,8 +595,11 @@
             }}>Merge…</button
           >
         {/if}
+        {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} />{/if}
       </div>
     </header>
+    {#if detail !== null}<TfDetailBanners {detail} />{/if}
+    {#if refresh.failed !== null}<p class="tf-cfail" role="alert">{refresh.failed}</p>{/if}
     <nav class="tf-tabs" aria-label="Pull request">
       {#each PR_TABS as entry (entry.id)}
         {@const count = counts[entry.id]}

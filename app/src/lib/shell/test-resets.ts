@@ -46,6 +46,7 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "shell/timer.svelte.ts#timer": async () => (await import("./timer.svelte")).timer.reset(),
   "tf/badges.svelte.ts#badges": async () => (await import("../tf/badges.svelte")).badges.reset(),
   "tf/role-sync.svelte.ts#roleSyncs": async () => (await import("../tf/role-sync.svelte")).roleSyncs.forget(),
+  "tf/role-sync.svelte.ts#sourceSyncs": async () => (await import("../tf/role-sync.svelte")).sourceSyncs.forget(),
   "tf/deps/views.svelte.ts#depViewState": async () => (await import("../tf/deps/views.svelte")).depViewState.reset(),
   // Three stores in one file, each cleared through its own public door.
   "tf/job/current.svelte.ts#entityId": async () => void (await import("../tf/job/current.svelte")).currentJob.set(null),

@@ -89,6 +89,7 @@ const DETAIL: EntityDetail = {
   row: ROW,
   source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true },
   kind_info: null,
+  refreshes: true,
   body_text: "body",
   author: "mara",
   payload: { key: "PAY-231" },
@@ -385,6 +386,9 @@ const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
 const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
 const TfItem = (await import("../tf/item/TfItem.svelte")).default;
+const TfDetailRefresh = (await import("../tf/TfDetailRefresh.svelte")).default;
+const { createDetailRefresh } = await import("../tf/refresh.svelte");
+const { createSourceSyncs } = await import("../tf/role-sync.svelte");
 const TfCodeRow = (await import("../tf/code-row/TfCodeRow.svelte")).default;
 const TfNote = (await import("../tf/note/TfNote.svelte")).default;
 const { createPendingComments } = await import("../detail/view/pending-comments.svelte");
@@ -1454,6 +1458,9 @@ const CASES: Case[] = [
             getEntity: () =>
               deferred({
                 row: { entity_id: "gitea:tidewater/payout-service#142", kind: "pr", source_id: "gitea", title: "Retry", path: "tidewater/payout-service" },
+                source: { id: "gitea", display_name: "Tidewater Gitea", adapter_kind: "gitea", enabled: true },
+                refreshes: true,
+                deleted_at: null,
                 author: "mara",
               } as never),
             entityView: () =>
@@ -1554,8 +1561,10 @@ const CASES: Case[] = [
             getEntity: () =>
               deferred({
                 row: { entity_id: "surveys:survey-1", kind: "survey", source_id: "surveys", title: "Quay crane 4 inspection" },
-                source: { id: "surveys", display_name: "Harbour surveys" },
+                source: { id: "surveys", display_name: "Harbour surveys", enabled: true },
                 kind_info: null,
+                refreshes: true,
+                deleted_at: null,
                 body_text: "",
                 web_url: null,
               } as never),
@@ -1570,6 +1579,35 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  // A detail's *Sync now* (#2107): its source's run, listened for on `sync:state`, which never ends here.
+  {
+    name: "TfDetailRefresh",
+    source: "lib/tf/TfDetailRefresh.svelte",
+    open: (target) => ({
+      app: mount(TfDetailRefresh, {
+        target,
+        props: {
+          detail: {
+            row: { entity_id: "kuma:1", kind: "monitor", source_id: "kuma", title: "payout-api" },
+            source: { id: "kuma", display_name: "Tidewater Kuma", adapter_kind: "kuma", enabled: true },
+            refreshes: false,
+            deleted_at: null,
+          } as never,
+          refresh: createDetailRefresh({
+            refreshEntity: () => deferred({ outcome: "refreshed" } as never),
+            syncs: createSourceSyncs({
+              syncRole: () => deferred([] as never),
+              syncNow: () => deferred(5 as never),
+              syncStatus: () => deferred([] as never),
+              listen: () => deferred((() => {}) as never),
+            }),
+          }),
+          reread: () => {},
+        },
+      }),
+    }),
+    exercise: (target) => target.querySelector<HTMLButtonElement>("button")?.click(),
   },
   // *Files changed* (#842): the deferred Files read and the viewed ticks, answering late.
   {

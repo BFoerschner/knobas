@@ -99,6 +99,7 @@ function ticket(over: Partial<EntityDetail> = {}): EntityDetail {
     },
     source: { id: "jira", display_name: "Jira", adapter_kind: "jira", enabled: true },
     kind_info: null,
+    refreshes: true,
     body_text: "Payouts to two SEPA banks fail with a 409 on retry.",
     author: null,
     payload: {},

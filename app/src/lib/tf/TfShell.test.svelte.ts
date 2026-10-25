@@ -57,6 +57,7 @@ vi.mock("../ipc/entity", async (importOriginal) => ({
           row: { entity_id: id, kind: "survey", source_id: "surveys", title: "Quay crane 4 inspection", updated_at: null, synced_at: "", path: null, state: null },
           source: { id: "surveys", display_name: "Harbour surveys", adapter_kind: "wasm-fixture", enabled: true },
           kind_info: { id: "survey", label: "Survey", plural: "Surveys", monogram: "SV", full_sync_exhaustive: true },
+          refreshes: true,
           body_text: "",
           web_url: null,
         })
@@ -138,6 +139,7 @@ const JOB_PORTS: JobPorts = {
           row: { entity_id: id, kind: "ticket", source_id: "jira", title: "Retry failed SEPA payouts", updated_at: null, synced_at: "", path: null, state: null },
           source: { id: "jira", display_name: "Jira", adapter_kind: "jira", enabled: true },
           kind_info: null,
+          refreshes: true,
           body_text: "",
           author: null,
           payload: {},
