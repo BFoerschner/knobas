@@ -280,8 +280,8 @@ where
     P: ComponentNamedList + Lower,
     R: ComponentNamedList + Lift,
 {
-    let index = index
-        .ok_or_else(|| SourceError::protocol(format!("the component exports no {name}")))?;
+    let index =
+        index.ok_or_else(|| SourceError::protocol(format!("the component exports no {name}")))?;
     let instance = adapter
         .inner
         .pre
