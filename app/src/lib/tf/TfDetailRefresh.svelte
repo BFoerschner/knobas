@@ -1,6 +1,7 @@
 <!--
   An item's detail's *Refresh* or *Sync now* (#2107), drawn in the detail's
-  header toolbar, or at the end of the job page's tab bar (#2134)
+  header toolbar, at the end of the job page's tab bar (#2134), or in a
+  monitor's roster row (#2138)
   (`tf/refresh.svelte.ts`). *Refresh* reads the one item and
   says *Refreshing…* meanwhile; *Sync now* runs the item's source, shared with
   every detail of it, and the detail is read again once that run ends. Neither
@@ -8,8 +9,7 @@
 -->
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { EntityDetail } from "../ipc/entity";
-  import type { DetailRefresh } from "./refresh.svelte";
+  import type { DetailRefresh, RefreshSubject } from "./refresh.svelte";
   import { push } from "../shell/toasts.svelte";
 
   let {
@@ -17,7 +17,7 @@
     refresh,
     reread,
   }: {
-    detail: EntityDetail;
+    detail: RefreshSubject;
     refresh: DetailRefresh;
     /** Read the detail again, over what it drew. */
     reread: () => Promise<void> | void;

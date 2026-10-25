@@ -341,6 +341,8 @@ export function fakeMonitorRoster() {
       // too: the paused monitor is the one offered *Resume*. A fixture that
       // offered both on every row would photograph a tab that cannot exist.
       actions: [tombstoned ? "resume_monitor" : "pause_monitor"],
+      // Uptime Kuma reads one monitor (#2100), so every row draws *Refresh* (#2138).
+      refreshes: true,
       samples,
     };
   });

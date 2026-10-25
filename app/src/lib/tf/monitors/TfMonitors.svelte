@@ -28,6 +28,16 @@
     anything is on its way so does the end of every sync, which is when a
     sent one's monitor arrives.
 
+  **Refresh (#2138, #2107's pieces).** Monitors has no page of one monitor,
+  so a monitor's *Refresh*, or *Sync now* where its source does not read one
+  item (`MonitorRow.refreshes`), ends its row's actions, after *Ack* and
+  *Pause* or *Resume*; its failure is a full-width line under that row. A
+  refresh reads the roster again over what it drew, and the pause and resume
+  echoes settle on that read as on any other. The roster holds only enabled
+  sources' monitors, so no row is turned off; a tombstoned monitor is drawn
+  *Paused* (#2100), so no row is withdrawn either: the two banners have
+  nothing to say here.
+
   Over `monitor_roster`, `open_alerts` (only for each down row's `acked_at`, so
   an ack outlives the visit; the tab draws no alert of its own, #1296), `ack_alert`, `submit_write` (`PauseMonitor`,
   `ResumeMonitor`, `CreateMonitor`), `unmonitored_assets`, `get_asset` and
@@ -51,6 +61,7 @@
   import type { WriteFollower } from "../../shell/follow-write";
   import { counted } from "../counted";
   import type { OpenJobPorts } from "../job/open-jobs";
+  import type { DetailRefreshPorts } from "../refresh.svelte";
 
   /** The reads and writes this page makes, injectable so a test needs no bridge. */
   export interface MonitorPorts extends OpenJobPorts {
@@ -67,6 +78,8 @@
     listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
     /** What follows a pending create in the queue. */
     follower: () => WriteFollower;
+    /** A row's *Refresh* and *Sync now* (#2138); the bridge's when left out. */
+    refresh?: DetailRefreshPorts;
   }
 </script>
 
@@ -107,6 +120,8 @@
     visibleMonitors,
   } from "./monitors";
   import TfCreateMonitor from "./TfCreateMonitor.svelte";
+  import TfDetailRefresh from "../TfDetailRefresh.svelte";
+  import { createDetailRefresh, type DetailRefresh, type RefreshSubject } from "../refresh.svelte";
 
   let {
     ready,
@@ -167,20 +182,29 @@
 
   /** Bumped to read both lists again. */
   let revision = $state(0);
+  /** The refreshes waiting on the next roster read (#2138). */
+  let rereads: (() => void)[] = [];
 
   $effect(() => {
     if (!ready) return;
     void revision;
+    const waiting = rereads;
+    rereads = [];
     let live = true;
     failed = null;
     const fail = (error: unknown) => {
       if (live) failed = ipcErrorMessage(error);
     };
-    ports.monitorRoster().then((rows) => {
-      if (!live) return;
-      roster = rows;
-      settleRoster(rows);
-    }, fail);
+    ports
+      .monitorRoster()
+      .then((rows) => {
+        if (!live) return;
+        roster = rows;
+        settleRoster(rows);
+      }, fail)
+      .finally(() => {
+        for (const done of waiting) done();
+      });
     ports.openAlerts().then(
       (alerts) => {
         if (!live) return;
@@ -365,6 +389,36 @@
     return `${counted(roster.length, "check", "checks")}${from}${synced}. Each one watches an asset. Bars cover the last 24 hours in half-hours.`;
   });
 
+  // -- a row's Refresh (#2138) -----------------------------------------------
+
+  /** Each monitor's own *Refresh*, so one row's *Refreshing…* is not another's. */
+  const refreshers = new Map<string, DetailRefresh>();
+  function refresherOf(id: string): DetailRefresh {
+    let refresher = refreshers.get(id);
+    if (refresher === undefined) {
+      refresher = createDetailRefresh(untrack(() => ports.refresh));
+      refreshers.set(id, refresher);
+    }
+    return refresher;
+  }
+
+  /** What a row's *Refresh* reads: the roster holds only enabled sources' monitors. */
+  function subjectOf(row: MonitorRow): RefreshSubject {
+    return {
+      refreshes: row.refreshes,
+      row: { entity_id: row.entity_id },
+      source: { id: row.source_id, display_name: sourceNames[row.source_id] ?? row.source_id, enabled: true },
+    };
+  }
+
+  /** Read the roster again over what it drew; settles once that read answers. */
+  function reread(): Promise<void> {
+    return new Promise((resolve) => {
+      rereads.push(resolve);
+      revision += 1;
+    });
+  }
+
   // -- the row actions -------------------------------------------------------
 
   async function ack(row: MonitorRow) {
@@ -520,6 +574,7 @@
             {@const chip = stateChip(row, now)}
             {@const down = chip.tone === "err" && !row.tombstoned}
             {@const toggled = echoOn(row.entity_id, TOGGLE)}
+            {@const refresher = refresherOf(row.entity_id)}
             <tr>
               <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
               <td><span class="tf-chip" class:tf-ok={chip.tone === "ok"} class:tf-warn={chip.tone === "warn"} class:tf-err={chip.tone === "err"} class:tf-info={chip.tone === "info"}>{chip.label}</span></td>
@@ -551,8 +606,14 @@
                     <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
                   {/each}
                 {/if}
+                <TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} />
               </td>
             </tr>
+            {#if refresher.failed !== null}
+              <tr class="tf-mon-failed">
+                <td colspan="7"><div class="tf-banner tf-err tf-refresh-failed" role="alert">{refresher.failed}</div></td>
+              </tr>
+            {/if}
           {/each}
         </tbody>
       </table>
