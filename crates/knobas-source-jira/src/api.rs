@@ -21,7 +21,7 @@
 //! | [`comments`](JiraApi::comments) | `api/2/issue/{key}/comment` | `startAt`, `maxResults`, `orderBy`, `expand` | `startAt`, `maxResults` |
 //! | [`worklogs`](JiraApi::worklogs) | `api/2/issue/{key}/worklog` | **none at all** | *(none)* |
 //! | [`my_permissions`](JiraApi::my_permissions) | `api/2/mypermissions` | `projectKey`, `projectId`, `issueKey`, `issueId` | `projectKey` (#2052) |
-//! | — | `api/2/issue/{key}` | `fields`, `expand`, `properties`, `updateHistory` | **unused in M1** |
+//! | [`issue_stamp`](JiraApi::issue_stamp) | `api/2/issue/{key}` | `fields`, `expand`, `properties`, `updateHistory` | `fields=updated`, a refresh's probe only (#2097) |
 //!
 //! Two consequences worth naming:
 //!
@@ -38,9 +38,11 @@
 //!   the webview. `description` and comment bodies in REST v2 are wiki markup
 //!   -- plain text, which is what FTS wants and what the §3a generic detail
 //!   view can project safely.
-//! * **`GET /rest/api/2/issue/{key}` is not called.** `/search` already
-//!   returns `fields`, so a per-issue GET would be an N+1 for nothing. It
-//!   stays in mockd's set for M2's write-back re-read.
+//! * **`GET /rest/api/2/issue/{key}` is never a sync's read.** `/search`
+//!   already returns `fields`, so a per-issue GET would be an N+1 for
+//!   nothing. A refresh (#2097) asks it for `updated` alone, to learn whether
+//!   the issue exists and whether the search index has caught up with it;
+//!   the item it answers is still the search's ([`crate::refresh`]).
 //! * **`api/2/field` is read by `test_connection` and by nothing else** (#297).
 //!   It is the whole field table of the instance, which is a big answer to a
 //!   small question, and the question is asked once per *Test connection* --
@@ -51,7 +53,7 @@
 use knobas_source::SourceError;
 
 use crate::http::get_json;
-use crate::model::{CommentPage, FieldMeta, Myself, SearchPage, ServerInfo, WorklogPage};
+use crate::model::{CommentPage, FieldMeta, Issue, Myself, SearchPage, ServerInfo, WorklogPage};
 
 #[async_trait::async_trait]
 pub(crate) trait JiraApi: Send + Sync {
@@ -83,6 +85,14 @@ pub(crate) trait JiraApi: Send + Sync {
     /// `GET /rest/api/2/issue/{key}/worklog` -- no parameters exist on this
     /// resource, so there is no paging to do.
     async fn worklogs(&self, key: &str) -> Result<WorklogPage, SourceError>;
+    /// `GET /rest/api/2/issue/{key}?fields=updated`: the issue's current key
+    /// and `updated` as the **database** holds them, or `None` for a key Jira
+    /// answers 404 (deleted, or not this account's to see). A refresh's probe
+    /// ([`crate::refresh`], #2097), never its item: the item is the search's.
+    /// A sync run's fakes model no probe, so the default answers none.
+    async fn issue_stamp(&self, _key: &str) -> Result<Option<Issue>, SourceError> {
+        Err(SourceError::protocol("this Jira answers no issue read"))
+    }
 
     // ---- Jira views (#877): Jira Software's Agile REST, read-only ----
     //
@@ -249,6 +259,20 @@ impl JiraApi for crate::http::HttpClient {
     async fn worklogs(&self, key: &str) -> Result<WorklogPage, SourceError> {
         // No parameters: the WADL declares none on this resource.
         get_json(self, &format!("rest/api/2/issue/{key}/worklog"), &[]).await
+    }
+
+    async fn issue_stamp(&self, key: &str) -> Result<Option<Issue>, SourceError> {
+        match get_json(
+            self,
+            &format!("rest/api/2/issue/{key}"),
+            &[("fields", "updated".to_owned())],
+        )
+        .await
+        {
+            Ok(issue) => Ok(Some(issue)),
+            Err(error) if error.status() == Some(404) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     async fn boards(

@@ -143,6 +143,29 @@ async fn project_in_filters() {
     s.assert_no_violations();
 }
 
+/// One issue by its key, the Jira adapter's refresh (#2097), inside a
+/// project scope or alone; a key in no listed project matches nothing.
+#[tokio::test]
+async fn key_equals_keeps_the_one_issue() {
+    let s = spawn_mock_jira().await;
+    let base = s.base_url();
+    let (_, v) = search(&base, "jql=key%20%3D%20%22PAY-231%22").await;
+    assert_eq!(keys(&v), vec!["PAY-231"]);
+    let (_, v) = search(
+        &base,
+        "jql=project%20in%20(%22PAY%22)%20AND%20key%20%3D%20%22PAY-231%22",
+    )
+    .await;
+    assert_eq!(keys(&v), vec!["PAY-231"]);
+    let (_, v) = search(
+        &base,
+        "jql=project%20in%20(OPS)%20AND%20key%20%3D%20PAY-231",
+    )
+    .await;
+    assert_eq!(v["total"], 0);
+    s.assert_no_violations();
+}
+
 #[tokio::test]
 async fn updated_gte_reads_literals_in_the_server_zone() {
     let s = spawn_mock_jira().await;

@@ -671,6 +671,7 @@ async fn search(State(s): State<Arc<MockState>>, req: Request) -> Response {
         .into_iter()
         .filter(|i| jql.updated_gte.is_none_or(|t| i.updated >= t))
         .filter(|i| jql.projects.is_empty() || jql.projects.contains(&i.project))
+        .filter(|i| jql.key.as_ref().is_none_or(|k| *k == i.key))
         .collect();
     // Ties broken by id so a page boundary is never ambiguous: the `, id ASC`
     // the Jira walk sends since #1720, and the order every other query gets.

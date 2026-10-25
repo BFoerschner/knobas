@@ -382,7 +382,7 @@ impl SyncRun<'_> {
     /// ignored `fields=comment` must not be read as "this issue has no
     /// comments" -- that would silently drop the discussion out of the search
     /// corpus.
-    async fn complete(&self, raw: &mut RawIssue) -> Result<(), SourceError> {
+    pub(crate) async fn complete(&self, raw: &mut RawIssue) -> Result<(), SourceError> {
         let key = raw.issue.key.clone();
 
         let comments_truncated = match &raw.issue.fields.comment {
@@ -417,7 +417,7 @@ impl SyncRun<'_> {
         Ok(())
     }
 
-    fn fields(&self) -> String {
+    pub(crate) fn fields(&self) -> String {
         let mut fields = BASE_FIELDS.to_owned();
         for extra in self
             .cfg

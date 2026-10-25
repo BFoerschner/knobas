@@ -59,6 +59,25 @@ pub(crate) fn build_ceiling_jql(cfg: &JiraConfig) -> String {
     }
 }
 
+/// A refresh's search for one issue (#2097): `<scope> AND key = "<key>"`,
+/// or the key alone when `scoped` is false or the source has no scope. The
+/// scope is the walk's, so the issue is read only where a run would read it.
+///
+/// `key` is one `JiraSource::issue_key`'s grammar passed
+/// (`[A-Z][A-Z0-9_]*-\d+`), so it holds no quote to escape.
+pub(crate) fn build_key_jql(cfg: &JiraConfig, key: &str, scoped: bool) -> String {
+    let by_key = format!("key = \"{key}\"");
+    match scope(cfg).filter(|_| scoped) {
+        Some(scope) => format!("{scope} AND {by_key}"),
+        None => by_key,
+    }
+}
+
+/// Whether this source narrows what it reads: a filter or projects.
+pub(crate) fn is_scoped(cfg: &JiraConfig) -> bool {
+    scope(cfg).is_some()
+}
+
 /// The source's scope clause: its filter, else its projects, else nothing.
 fn scope(cfg: &JiraConfig) -> Option<String> {
     if let Some(filter) = &cfg.jql_filter {
@@ -89,6 +108,35 @@ mod tests {
 
     fn watermark() -> chrono::DateTime<chrono::Utc> {
         crate::time::parse_jira_time("2026-08-22T11:46:00.000+0000").unwrap()
+    }
+
+    /// A refresh reads one issue inside the walk's scope, a filter
+    /// parenthesised as the walk's is, and outside it when asked to.
+    #[test]
+    fn a_refresh_searches_the_key_inside_the_walks_scope() {
+        let projects = cfg(json!({ "projects": ["PAY", "OPS"] }));
+        assert_eq!(
+            build_key_jql(&projects, "PAY-231", true),
+            r#"project in ("PAY", "OPS") AND key = "PAY-231""#
+        );
+        assert_eq!(
+            build_key_jql(&projects, "PAY-231", false),
+            r#"key = "PAY-231""#
+        );
+        assert_eq!(
+            build_key_jql(
+                &cfg(json!({ "jql_filter": "a = 1 OR b = 2" })),
+                "PAY-1",
+                true
+            ),
+            r#"(a = 1 OR b = 2) AND key = "PAY-1""#
+        );
+        assert_eq!(
+            build_key_jql(&cfg(json!({})), "PAY-1", true),
+            r#"key = "PAY-1""#
+        );
+        assert!(is_scoped(&projects));
+        assert!(!is_scoped(&cfg(json!({}))));
     }
 
     /// The ceiling probe reads the walk's scope, newest first. One row, so

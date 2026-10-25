@@ -30,6 +30,7 @@ mod http;
 mod jql;
 mod map;
 mod model;
+mod refresh;
 mod source;
 mod sync;
 mod time;
