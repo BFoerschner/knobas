@@ -163,7 +163,9 @@ impl Grants {
         };
         let holds = self.global.contains(permission.id())
             || if permission == Permission::ReorderQueue {
-                self.on_project.values().any(|ids| ids.contains(permission.id()))
+                self.on_project
+                    .values()
+                    .any(|ids| ids.contains(permission.id()))
             } else {
                 held(ROOT) || held(project) || self.tree.path(project).iter().any(|p| held(&p.id))
             };

@@ -98,10 +98,14 @@ impl Source for Narrow {
                 .map(|(a, field)| RefusedWrite::of(a, format!("{} may not send {field}", self.id))),
         );
         // A field nobody asked about, on a write that was asked about.
-        out.extend(asks.iter().filter(|a| a.field.is_none()).map(|a| RefusedWrite {
-            field: Some("parameters".into()),
-            ..RefusedWrite::of(a, "nobody asked about its parameters")
-        }));
+        out.extend(
+            asks.iter()
+                .filter(|a| a.field.is_none())
+                .map(|a| RefusedWrite {
+                    field: Some("parameters".into()),
+                    ..RefusedWrite::of(a, "nobody asked about its parameters")
+                }),
+        );
         out.push(RefusedWrite {
             entity: format!("{}:unasked", self.id),
             op: "rerun_build".into(),
@@ -242,6 +246,9 @@ async fn a_field_is_answered_as_its_own_ask() {
     let answer = refused(&f, &asks).await;
     assert_eq!(
         answer,
-        [RefusedWrite::of(&asks[1], format!("{a} may not send first_in_queue"))]
+        [RefusedWrite::of(
+            &asks[1],
+            format!("{a} may not send first_in_queue")
+        )]
     );
 }

@@ -271,8 +271,7 @@ async fn an_entity_whose_project_cannot_be_read_is_no_verdict() {
 
 const CANNOT_OVERRIDE: &str = "This TeamCity user cannot override parameters for one build in \
      Payout: it lacks the Customize build parameters permission";
-const CANNOT_PUT_FIRST: &str =
-    "This TeamCity user cannot put a build first in the queue: it lacks the Reorder builds in \
+const CANNOT_PUT_FIRST: &str = "This TeamCity user cannot put a build first in the queue: it lacks the Reorder builds in \
      queue permission";
 
 fn field(entity: &str, op: &str, field: &str) -> WriteAsk {
@@ -353,7 +352,10 @@ async fn overrides_follow_the_project_and_the_queue_top_is_not_refused_on_a_gues
         .await
         .expect("the permissions read");
     assert_eq!(
-        refused.iter().map(|r| r.reason.as_str()).collect::<Vec<_>>(),
+        refused
+            .iter()
+            .map(|r| r.reason.as_str())
+            .collect::<Vec<_>>(),
         [CANNOT_OVERRIDE]
     );
 }
@@ -448,7 +450,10 @@ async fn the_views_run_offers_overrides_only_to_a_user_who_may_send_them() {
         .expect("the read")
         .expect("drawn");
     let run = &view.actions[0];
-    assert_eq!((run.write_op.as_str(), run.disabled.as_deref()), ("run_build", None));
+    assert_eq!(
+        (run.write_op.as_str(), run.disabled.as_deref()),
+        ("run_build", None)
+    );
     assert!(!run.with_settings, "{run:?}");
     assert_eq!(
         run.confirm.as_deref(),

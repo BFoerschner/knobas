@@ -66,7 +66,11 @@ impl WriteAsk {
 
     /// The ask about `op` on `entity` carrying `field` set.
     #[must_use]
-    pub fn with_field(entity: impl Into<String>, op: impl Into<String>, field: impl Into<String>) -> Self {
+    pub fn with_field(
+        entity: impl Into<String>,
+        op: impl Into<String>,
+        field: impl Into<String>,
+    ) -> Self {
         Self {
             field: Some(field.into()),
             ..Self::new(entity, op)
