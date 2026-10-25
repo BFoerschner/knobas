@@ -98,7 +98,7 @@ async function settle() {
 }
 
 /** The page's *Refresh* and *Sync now*, and what they were asked. */
-let probe: RefreshProbe = refreshProbe();
+let probe: RefreshProbe;
 
 /** The page's reads as given; its writes land in {@link writes}. */
 async function open(reads: Omit<ItemPorts, "submitWrite">, id = ID, job: string | null = null) {

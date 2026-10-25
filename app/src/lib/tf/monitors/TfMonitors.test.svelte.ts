@@ -92,7 +92,7 @@ let acks: string[];
 /** The write follows the page holds, by write id: a test tells each what the queue says. */
 let heard: Map<number, Hear>;
 /** The page's `sync:state` listeners. */
-let synced: Set<(event: { payload: unknown }) => void>;
+let syncListeners: Set<(event: { payload: unknown }) => void>;
 /** The page's `item:refreshed` listeners (#2105). */
 let refreshes: Set<(event: { payload: unknown }) => void>;
 /** The rows' *Refresh* and *Sync now* (#2138): the monitors read from their source, the sources run. */
@@ -105,7 +105,7 @@ beforeEach(() => {
   routeEdits = [];
   acks = [];
   heard = new Map();
-  synced = new Set();
+  syncListeners = new Set();
   refreshes = new Set();
   probe = refreshProbe();
   target = document.createElement("div");
@@ -157,8 +157,8 @@ function ports(over: Partial<MonitorPorts> = {}): MonitorPorts {
         return () => refreshes.delete(handler);
       }
       if (event !== EVENTS.syncState) return () => {};
-      synced.add(handler);
-      return () => synced.delete(handler);
+      syncListeners.add(handler);
+      return () => syncListeners.delete(handler);
     },
     follower: () => ({
       follow(id, hear) {
@@ -366,7 +366,7 @@ function withCreate(going: () => QueuedWrite | null): Pick<MonitorPorts, "unmoni
 const lastCell = (tr: Element) => text([...tr.querySelectorAll("td")].at(-1)!);
 
 function syncEnds(source_id = "kuma") {
-  for (const handler of synced) handler({ payload: { source_id, running: false } });
+  for (const handler of syncListeners) handler({ payload: { source_id, running: false } });
 }
 
 test("after a reload, a create on its way draws Monitor queued on its row and offers no Create monitor there", async () => {
@@ -503,7 +503,7 @@ test("a sent create reads Monitor sent until the end of the sync that brings its
   syncEnds();
   await settle();
   expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["Gitea"]);
-  expect(synced.size).toBe(0);
+  expect(syncListeners.size).toBe(0);
 });
 
 // -- the echo's one lifecycle: queued, sent, gone on the roster's read (#2105) --
