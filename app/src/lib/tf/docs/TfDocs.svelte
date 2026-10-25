@@ -611,9 +611,9 @@
     const version = String(p.version);
     const said = p.comments.map((c) => c.blocks.map(blockWords).join(" "));
     const held = new Set(p.comments.flatMap((c) => (c.id === null ? [] : [c.id])));
-    const given = new Map(p.sent_comments.map((s) => [s.write_id, s.comment_id]));
+    const commentOfWrite = new Map(p.sent_comments.map((s) => [s.write_id, s.comment_id]));
     const holds = (mark: Mark) => {
-      const id = mark.write === null ? undefined : given.get(mark.write);
+      const id = mark.write === null ? undefined : commentOfWrite.get(mark.write);
       return id === undefined ? said.some((words) => sameWords(words, mark.text)) : held.has(id);
     };
     untrack(() =>

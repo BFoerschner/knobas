@@ -149,13 +149,6 @@ pub struct DocSentComment {
     pub comment_id: String,
 }
 
-/// The comment writes to `page` that settled with a stamped id. Read off the
-/// `comment` op alone, so a comment id is never taken for an entity's.
-const SENT_COMMENTS: &str = "select id as write_id, remote_id as comment_id
-  from knobas.write_queue
- where entity_id = $1 and op = 'comment' and state = 'sent' and remote_id is not null
- order by id";
-
 /// A page that links to the one being read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
@@ -480,6 +473,13 @@ const LINKED_TICKETS: &str = concat!(
       where (l.from_id = $1 or l.to_id = $1) and i.kind = 'ticket' \
       order by l.created_at, i.entity_id"
 );
+
+/// The comment writes to the page `$1` that settled with a stamped id. Read off the
+/// `comment` op alone, so a comment id is never taken for an entity's.
+const SENT_COMMENTS: &str = "select id as write_id, remote_id as comment_id
+  from knobas.write_queue
+ where entity_id = $1 and op = 'comment' and state = 'sent' and remote_id is not null
+ order by id";
 
 /// The live pages of one source whose `body_text` carries a link line to
 /// this page (`knobas_source::docs::indexed::link_line`, written at sync).

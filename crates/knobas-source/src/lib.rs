@@ -1686,10 +1686,8 @@ pub struct WriteReceipt {
     /// the mirror holds in that entity's payload rather than as an entity of
     /// its own: a Confluence comment's id, which the page's comment carries
     /// as `DocComment::id` (#2074). `<source_id>:<remote_id>` is then **not**
-    /// an entity id, and every reader of `knobas.write_queue.remote_id` that
-    /// builds one reads it off the ops whose id is an entity's: by op
-    /// (`docs::created_page`, `protocol::publication_of`, the assets' *on its
-    /// way* read) or by kind (`entity_named`).
+    /// an entity id, so a reader of `knobas.write_queue.remote_id` that builds
+    /// one reads it only off an op, or an entity kind, whose id is an entity's.
     ///
     /// A create whose answer names what it made answers it here rather than
     /// dropping it. `None` when the op creates nothing addressable, or when
