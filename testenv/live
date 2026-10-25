@@ -9,7 +9,8 @@
 #
 # <product> is gitea, forgejo (#1195), teamcity, jira or confluence. `up` of a JVM product
 # waits for the machine-wide JVM lock a live run holds (issue #690), then
-# refuses a second JVM product while one is up, naming it. `just live-up` /
+# refuses a second JVM product while one is up, naming it, and keeps the
+# lock until `down` (#2121). `just live-up` /
 # `just live-down` are these; the `just *-live` recipes do both around their
 # suites themselves.
 set -euo pipefail
@@ -23,12 +24,8 @@ case "${1:-}" in
     [ $# -eq 2 ] || usage
     # A JVM product's start and seed take the JVM lock (issue #690), so a
     # hand `live-up teamcity` queues behind a live run instead of starting
-    # under it; it is released when the product is up, which then stays up.
-    if live_is_jvm "$2"; then
-      live_lock_traps
-      live_lock_hold "live-up-$2"
-    fi
-    live_up "$2" ;;
+    # under it; a keeper then holds it until `live down` (#2121).
+    live_up_held "$2" ;;
   down) [ $# -eq 2 ] || usage; live_down "$2" ;;
   status)
     [ $# -eq 1 ] || usage

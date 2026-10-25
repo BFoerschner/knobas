@@ -32,7 +32,7 @@ mkdir -p "$scratch/bin"
 cat >"$scratch/bin/docker" <<'STUB'
 #!/usr/bin/env bash
 case "${1:-} ${2:-}" in
-  "ps "*) for n in ${STUB_RUNNING:-}; do echo "$n"; done ;;
+  "ps "*) for n in ${STUB_RUNNING:-} $(cat "$STUB_RUNNING_FILE" 2>/dev/null); do echo "$n"; done ;;
   "context show") echo orbstack ;;
   *) if [ -L "$KNOBAS_LIVE_LOCK" ]; then l=held; else l=free; fi
      if [ -L "$KNOBAS_LIVE_GITEA_LOCK" ]; then g=held; else g=free; fi
@@ -48,7 +48,7 @@ exit 0
 ' >"$scratch/bin/curl"
 chmod +x "$scratch/bin/curl"
 
-export PATH="$scratch/bin:$PATH" STUB_LOG="$scratch/docker.log"
+export PATH="$scratch/bin:$PATH" STUB_LOG="$scratch/docker.log" STUB_RUNNING_FILE="$scratch/running"
 export KNOBAS_LIVE_LOCK="$scratch/knobas-live-jvm.lock"
 export KNOBAS_LIVE_GITEA_LOCK="$scratch/knobas-live-gitea.lock"
 export KNOBAS_LIVE_LOCK_POLL=0.1
@@ -61,7 +61,7 @@ unset KNOBAS_LIVE_LOCK_HOLDER KNOBAS_LIVE_GITEA_LOCK_HOLDER
 # A scratch testenv/ whose seeds do nothing, so `live_session` can run whole.
 fake=$scratch/tree/testenv
 mkdir -p "$fake"
-for s in seed-gitea.sh seed-teamcity.sh seed; do
+for s in seed-gitea.sh seed-teamcity.sh seed-atlassian.sh seed-atlassian-content.sh seed; do
   printf '#!/usr/bin/env bash\nexit 0\n' >"$fake/$s"
   chmod +x "$fake/$s"
 done
@@ -134,7 +134,7 @@ taker() {
     for kv in "$@"; do export "${kv?}"; done
     # shellcheck source=testenv/live-lib.sh disable=SC1091
     . "$here/live-lib.sh"
-    LIVE_TESTENV=$fake
+    LIVE_TESTENV=${TAKER_TREE:-$fake}
     trap 'live_lock_release' EXIT
     if live_lock_hold "$name"; then
       echo "held by $name"
@@ -371,6 +371,59 @@ out=$(cat "$scratch/giteaheir.out")
 check "a Gitea lock whose holder was killed is taken over" "$rc" "0"
 check "the takeover says the Gitea lock was stale and names the holder" "$out" "the Gitea lock was stale -- its holder 'giteakilled'"
 lock_gone "the heir releases the Gitea lock" "$KNOBAS_LIVE_GITEA_LOCK"
+
+# --- a `live-up` product keeps the JVM lock until it is down (#2121) ----------
+
+# `live up confluence` used to let the lock go once the product was seeded, so
+# a suite run by hand against it held nothing and another worktree's recipe
+# ran beside it. Now a keeper holds it for the product's life: that worktree's
+# own runs go on under it, every other one waits.
+export KNOBAS_LIVE_KEEPER_POLL=0.2 JIRA_LICENSE_KEY=x CONFLUENCE_LICENSE_KEY=x
+liveup() { # liveup <name> <product> -- `testenv/live up <product>` in the scratch tree
+  (
+    # shellcheck source=testenv/live-lib.sh disable=SC1091
+    . "$here/live-lib.sh"
+    LIVE_TESTENV=$fake
+    live_up_held "$2"
+  ) >"$scratch/$1.out" 2>&1 && echo 0 || echo $?
+}
+echo knobas-confluence >"$STUB_RUNNING_FILE"
+rc=$(liveup up1 confluence)
+check "live-up of a JVM product succeeds" "$rc" "0"
+keeper=$(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)
+check "after live-up the JVM lock is still held, by live-up" "$keeper" " live-up-confluence-kept $scratch/tree"
+checks=$((checks + 1))
+_lt_alive() { [ -n "$1" ] && kill -0 "${1%% *}" 2>/dev/null; }
+_lt_alive "$keeper" || fail "the lock's holder outlives the live-up that started it" "$keeper"
+check "live-up says the product keeps the lock" "$(cat "$scratch/up1.out")" "holds the JVM lock until"
+taker otherworktree TAKER_TREE="$scratch/elsewhere/testenv" KNOBAS_LIVE_LOCK_WAIT=1
+rc=$(wait_rc otherworktree)
+check_not "another worktree's run waits on a live-up product, then refuses" "$rc" "0"
+check "and names the live-up holding it" "$(cat "$scratch/otherworktree.out")" "'live-up-confluence-kept' in $scratch/tree"
+check "and says how to free it" "$(cat "$scratch/otherworktree.out")" "'just live-down confluence' from any worktree frees it)"
+taker sameworktree KNOBAS_LIVE_LOCK_WAIT=1
+rc=$(wait_rc sameworktree)
+check "the live-up's own worktree runs under its lock" "$rc" "0"
+sleep 0.3
+check "and leaves the lock with the keeper" "$(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)" "$keeper"
+mkdir -p "$scratch/elsewhere/testenv"
+rc=$( (
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  LIVE_TESTENV=$scratch/elsewhere/testenv
+  live_down confluence
+) >"$scratch/down1.out" 2>&1 && echo 0 || echo $?)
+check "live-down from another worktree succeeds" "$rc" "0"
+lock_gone "live-down, from any worktree, gives the live-up's lock back"
+checks=$((checks + 1))
+for ((i = 0; i < 50; i++)); do _lt_alive "$keeper" || break; sleep 0.1; done
+! _lt_alive "$keeper" || fail "live-down ends the keeper" "$keeper"
+# A product that goes away without live-down (removed by hand, a VM restart)
+# frees the lock too, at the keeper's next look.
+rc=$(liveup up2 confluence)
+check "a second live-up succeeds" "$rc" "0"
+: >"$STUB_RUNNING_FILE"
+lock_gone "a live-up product that is gone frees the lock"
 
 if [ "$failures" -gt 0 ]; then
   echo "live-lock-test: $failures of $checks checks failed" >&2
