@@ -315,8 +315,8 @@ test("a run queued before the page's read arrives is based on the pipeline's own
   markQueuedRun(pipeline, { id: 3 }, null, null, follower);
   markQueuedRun(pipeline, { id: 4 }, "feature/x", [run(8, "ok")], follower);
   expect(queuedMarks("teamcity:buildType:X", QUEUED_RUN)).toMatchObject([
-    { write: 3, kind: QUEUED_RUN, text: "", base: "teamcity:build:7" },
-    { write: 4, kind: QUEUED_RUN, text: "feature/x", base: "teamcity:build:8" },
+    { write: 3, kind: QUEUED_RUN, text: "", base: "teamcity:build:7", state: "queued" },
+    { write: 4, kind: QUEUED_RUN, text: "feature/x", base: "teamcity:build:8", state: "queued" },
   ]);
   forgetQueued();
 });
