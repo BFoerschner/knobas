@@ -38,6 +38,9 @@
 }
 /* The page: nothing in it is capped in width (#2081). */
 .tf-rd-page { min-width: 0; }
+/* The breadcrumb row: below 900px the Pages button that opens the tree drawer starts it (#2084). */
+.tf-rd-crumbrow { display: flex; align-items: center; gap: 10px; }
+.tf-rd-pages svg { width: 15px; height: 15px; }
 .tf-rd-crumb { font-size: var(--t-sm); color: var(--ink-2); }
 .tf-rd-crumb a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .tf-rd-crumb a.tf-jobchip { text-decoration: none; padding: 1px 6px; }
@@ -161,9 +164,16 @@
 }
 .tf-findbar .tf-findx { margin-left: auto; }
 .tf mark.tf-cur { outline: 2px solid var(--card-ink); }
-.tf-rd-outline { position: sticky; top: 0; padding-top: 30px; font-size: var(--t-sm); }
-/* The find bar sticks to the top of the same scroll, so the outline sticks below it. */
-.tf-findbar ~ .tf-rd-sheet .tf-rd-outline { top: 38px; }
+/*
+  No taller than the window, with a scroll of its own, so a long outline's last section is in reach
+  at any scroll (#2091): the window less the shell's top bar and status bar (about 76px) and a margin.
+*/
+.tf-rd-outline {
+  position: sticky; top: 0; padding-top: 30px; font-size: var(--t-sm);
+  max-height: calc(100vh - 96px); overflow-y: auto;
+}
+/* The find bar sticks to the top of the same scroll, so the outline sticks below it, as much shorter. */
+.tf-findbar ~ .tf-rd-sheet .tf-rd-outline { top: 38px; max-height: calc(100vh - 134px); }
 .tf .tf-rd-outline h3 { font-size: var(--t-sm); font-weight: 600; color: var(--ink); margin: 0 0 8px; }
 .tf-toc a {
   display: block; padding: 5px 0 5px 12px; border-left: 2px solid var(--rule); text-decoration: none;
@@ -225,10 +235,28 @@
   .tf-rd { grid-template-columns: 220px minmax(0, 1fr); }
   .tf-rd-sheet { grid-template-columns: minmax(0, 1fr); }
 }
-@media (max-width: 900px) {
-  .tf-rd { grid-template-columns: minmax(0, 1fr); height: auto; }
-  .tf-rd-tree { display: none; }
+/*
+  The band `READER_DRAWER` (docs/docs.ts) names: the tree leaves the grid and is a drawer that slides
+  over the page from the left, above a dimmed backdrop, so the page does not reflow (#2084). The reader
+  keeps its height, so the drawer is as tall as the window and the page still scrolls in `.tf-rd-main`.
+*/
+@media (max-width: 899px) {
+  .tf-rd { grid-template-columns: minmax(0, 1fr); position: relative; }
+  .tf-rd-tree {
+    position: absolute; top: 0; bottom: 0; left: 0; z-index: 6; width: min(320px, 86vw);
+    box-shadow: var(--shadow); transform: translateX(-100%); visibility: hidden;
+    transition: transform .18s ease-out, visibility 0s .18s;
+  }
+  .tf-rd-drawer .tf-rd-tree { transform: none; visibility: visible; transition: transform .18s ease-out; }
+  .tf-rd-backdrop {
+    position: absolute; inset: 0; z-index: 5; background: rgba(10, 14, 18, .45); animation: tf-fade .15s ease-out;
+  }
   .tf-rd-sheet { padding: 18px 16px 60px; }
   .tf .tf-rd-title { font-size: 30px; }
+}
+/* Under reduced motion the drawer appears and goes without sliding, and the backdrop without fading. */
+@media (prefers-reduced-motion: reduce) {
+  .tf-rd .tf-rd-tree, .tf-rd.tf-rd-drawer .tf-rd-tree { transition: none; }
+  .tf-rd-backdrop { animation: none; }
 }
 

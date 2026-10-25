@@ -102,7 +102,7 @@ The top bar and the filter bar stay put, and the content under them scrolls. A b
 Motion answers something the person did, and there's very little of it.
 
 - A running build or timer pulses its dot (1.4 s, opacity to 35 %). That's the only motion nobody started.
-- The drawer slides in from the right and its scrim fades in 0.15 s.
+- The Connections drawer slides in from the right (R-6.1), the Docs tree's drawer below 900 px from the left (R-10.9, #2084), and a drawer's scrim fades in 0.15 s.
 - A toast rises 20 px into place.
 - A dependency tile you navigated to flashes a focus-coloured ring once (1.6 s), so you can find it in the graph.
 - Row actions fade in on hover and on focus within the row.

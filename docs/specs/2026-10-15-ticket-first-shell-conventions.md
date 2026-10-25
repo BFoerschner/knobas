@@ -12,6 +12,8 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - A dialog of its own width passes `className` to `tf/settings/TfDialog.svelte` (the view editor's `tf-vw-dialog`), never a second dialog shell. (#814)
 - A selected card is `aria-current="true"` with the `tf-card` class, so the focus ring follows the design system's `--card-ink` rule. Not `aria-selected` on a button. (#810, PR #895)
 - A component that draws something else on a narrow window reads the stylesheet's own query: one exported constant (the Docs reader's `READER_NARROW`) handed to Svelte's `MediaQuery`, the same text in the `@media` rule, and a `tf-css.test.ts` check that the rule exists. Written as `max-width`, so the test setup's `matchMedia` stub (every query false) draws the wide layout. (#2081)
+- A sticky side column (a tree, an outline, a rail, a file list) is no taller than the window and scrolls on its own: `max-height: calc(100vh - <px>)` with `overflow: auto` (or `overflow-y`), as `.tf-ftree` first did. `tf-css.test.ts` checks every `position: sticky` rule except the one-row bars it names in `STICKY_BARS`; a new bar joins that list. (#2091)
+- A drawer (the Connections drawer, the Docs tree below 900px) registers as a `drawer` on the shell's `layers` while open, so `Esc` closes it wherever focus is, and focus goes back to what opened it when it closes. (#820, #2084)
 
 ## Mounting and the shell switch
 

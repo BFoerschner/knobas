@@ -9,9 +9,10 @@ import type { DocPage, DocsTree, Reached, RefusedWrite, WriteAsk } from "../../i
 import type { QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
+import { createLayers } from "../layers.svelte";
 import { forgetQueued } from "../queued.svelte";
 import { parseTfHash } from "../route";
-import { READER_NARROW } from "./docs";
+import { READER_DRAWER, READER_NARROW } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -440,25 +441,30 @@ const OUTLINED: DocPage = {
   ],
 };
 
-/** What the reader's `matchMedia` answers: the window is narrower than 1240px, or not. */
-let windowNarrow: (narrow: boolean) => void = () => {};
+/**
+ * What the reader's `matchMedia` answers for a window `width` pixels wide:
+ * only the reader's own thresholds, as the stylesheet writes them, answer
+ * (#2081, #2084). `resize` moves the window and tells every listener.
+ */
+let resize: (width: number) => void = () => {};
 let media: MockInstance<typeof window.matchMedia> | null = null;
-function windowWidth(narrow: boolean): void {
+function windowWidth(width: number): void {
   const heard = new Set<(event: Event) => void>();
+  const bands = new Map([READER_NARROW, READER_DRAWER].map((q) => [q, Number(/max-width: (\d+)px/.exec(q)![1])]));
   media = vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
     const list = {
       media: query,
-      // Only the reader's own threshold, as the stylesheet writes it, answers.
       get matches() {
-        return query === READER_NARROW && narrow;
+        const max = bands.get(query);
+        return max !== undefined && width <= max;
       },
       addEventListener: (_: string, hear: (event: Event) => void) => heard.add(hear),
       removeEventListener: (_: string, hear: (event: Event) => void) => heard.delete(hear),
     };
     return list as unknown as MediaQueryList;
   });
-  windowNarrow = (now) => {
-    narrow = now;
+  resize = (now) => {
+    width = now;
     for (const hear of heard) hear(new Event("change"));
   };
 }
@@ -482,7 +488,7 @@ async function findOnPage(word: string): Promise<void> {
 }
 
 test("a wide window puts the outline in the page's right column, with match counts while finding (#2081)", async () => {
-  windowWidth(false);
+  windowWidth(1300);
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => OUTLINED), docsSearch: vi.fn(async () => HITS) }));
   const aside = margin()!;
   // The page's own column, inside what scrolls, beside the page's content.
@@ -503,7 +509,7 @@ test("a wide window puts the outline in the page's right column, with match coun
 });
 
 test("a narrow window folds the outline between the actions row and the first section, closed, counting sections and matches (#2081)", async () => {
-  windowWidth(true);
+  windowWidth(1100);
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => OUTLINED), docsSearch: vi.fn(async () => HITS) }));
   expect(margin()).toBeNull();
   const f = fold()!;
@@ -534,13 +540,13 @@ test("a narrow window folds the outline between the actions row and the first se
 });
 
 test("the outline moves between the margin and the fold as the window crosses 1240px, and the fold opens closed on every page (#2081)", async () => {
-  windowWidth(false);
+  windowWidth(1300);
   const docsPage = vi.fn(async (id: string) => (id === "confluence:1" ? { ...OUTLINED, entity_id: id, title: "Ops home" } : OUTLINED));
   const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage }) });
   view = mount(TfDocs, { target, props });
   await settle();
   expect(margin()).not.toBeNull();
-  windowNarrow(true);
+  resize(1100);
   await settle();
   expect(margin()).toBeNull();
   fold()!.open = true;
@@ -548,10 +554,181 @@ test("the outline moves between the margin and the fold as the window crosses 12
   await settle();
   expect(target.querySelector("h1")?.textContent).toBe("Ops home");
   expect(fold()!.open).toBe(false);
-  windowNarrow(false);
+  resize(1300);
   await settle();
   expect(fold()).toBeNull();
   expect(margin()).not.toBeNull();
+});
+
+// -- below 900px the tree is a drawer over the page (#2084) --
+
+const tree = () => target.querySelector<HTMLElement>("nav[aria-label='Docs']")!;
+const pages = () => target.querySelector<HTMLButtonElement>(".tf-rd-crumbrow button.tf-rd-pages");
+const drawerOpen = () => target.querySelector(".tf-rd")!.classList.contains("tf-rd-drawer");
+const searchField = () => target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!;
+
+test("below 900px a Pages button starts the breadcrumb row, naming the tree it opens; at 900px there is none (#2084)", async () => {
+  windowWidth(899);
+  await draw(["confluence:2"]);
+  const button = pages()!;
+  expect(button.textContent?.trim()).toBe("Pages");
+  expect(button.querySelector("svg")).not.toBeNull();
+  expect(button.nextElementSibling?.classList.contains("tf-rd-crumb")).toBe(true);
+  expect(button.getAttribute("aria-controls")).toBe(tree().id);
+  expect(tree().id).not.toBe("");
+  expect(button.getAttribute("aria-expanded")).toBe("false");
+  expect(drawerOpen()).toBe(false);
+
+  button.click();
+  await settle();
+  expect(button.getAttribute("aria-expanded")).toBe("true");
+  expect(drawerOpen()).toBe(true);
+  expect(target.querySelector(".tf-rd-backdrop")).not.toBeNull();
+  expect(document.activeElement).toBe(searchField());
+
+  if (view) unmount(view);
+  media?.mockRestore();
+  windowWidth(900);
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: ports() } });
+  await settle();
+  expect(pages()).toBeNull();
+  expect(target.querySelector(".tf-rd-backdrop")).toBeNull();
+});
+
+const press = (key: string, at: EventTarget = window) =>
+  at.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+
+test("Esc, a click on the backdrop and a page picked close the drawer, and focus goes back to the Pages button (#2084)", async () => {
+  windowWidth(800);
+  await draw(["confluence:2"]);
+  const open = async () => {
+    pages()!.focus();
+    pages()!.click();
+    await settle();
+    expect(drawerOpen()).toBe(true);
+  };
+
+  await open();
+  const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  searchField().dispatchEvent(esc);
+  await settle();
+  expect(esc.defaultPrevented, "the shell's Esc ladder goes no further").toBe(true);
+  expect(drawerOpen()).toBe(false);
+  expect(pages()!.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(pages());
+
+  await open();
+  target.querySelector<HTMLElement>(".tf-rd-backdrop")!.click();
+  await settle();
+  expect(drawerOpen()).toBe(false);
+  expect(target.querySelector(".tf-rd-backdrop")).toBeNull();
+  expect(document.activeElement).toBe(pages());
+
+  await open();
+  // Opening a fold of the tree is not a pick.
+  tree().querySelector<HTMLElement>("details > summary")!.click();
+  await settle();
+  expect(drawerOpen()).toBe(true);
+  [...tree().querySelectorAll<HTMLAnchorElement>("a")].find((a) => a.textContent === "On-call handbook")!.click();
+  await settle();
+  expect(drawerOpen()).toBe(false);
+  expect(document.activeElement).toBe(pages());
+  location.hash = "";
+});
+
+test("the open drawer is a layer of the shell's, so Esc closes it with focus anywhere (#2084)", async () => {
+  windowWidth(800);
+  const layers = createLayers();
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: ports(), layers } });
+  await settle();
+  expect(layers.open).toEqual([]);
+  pages()!.focus();
+  pages()!.click();
+  await settle();
+  expect(layers.open.map((l) => l.kind)).toEqual(["drawer"]);
+  layers.open[0]!.close();
+  await settle();
+  expect(drawerOpen()).toBe(false);
+  expect(layers.open).toEqual([]);
+  expect(document.activeElement).toBe(pages());
+});
+
+test("below 900px / opens the drawer with the cursor in the search, and a field still keeps its /; focus goes back on Esc (#2084)", async () => {
+  windowWidth(800);
+  await draw(["confluence:2"]);
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']");
+  const typing = box ?? searchField();
+  typing.focus();
+  expect(press("/", typing)).toBe(true);
+  await settle();
+  expect(drawerOpen()).toBe(false);
+
+  const more = button("More")!;
+  more.focus();
+  expect(press("/")).toBe(false);
+  await settle();
+  expect(drawerOpen()).toBe(true);
+  expect(pages()!.getAttribute("aria-expanded")).toBe("true");
+  expect(document.activeElement).toBe(searchField());
+  press("Escape", searchField());
+  await settle();
+  expect(drawerOpen()).toBe(false);
+  expect(document.activeElement).toBe(more);
+});
+
+test("below 900px a label chip opens the drawer with the label in the search; Esc gives the chip focus back (#2084)", async () => {
+  windowWidth(800);
+  const io = await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS) }));
+  const chip = [...target.querySelectorAll<HTMLButtonElement>(".tf-rd-meta .tf-chip")].find((c) => c.textContent === "on-call")!;
+  chip.focus();
+  chip.click();
+  await settle();
+  expect(drawerOpen()).toBe(true);
+  expect(searchField().value).toBe("on-call");
+  expect(document.activeElement).toBe(searchField());
+  expect(io.docsSearch).toHaveBeenLastCalledWith("on-call", { source_id: "confluence", key: "OPS" });
+  // A hit picked in the drawer is a page picked.
+  tree().querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
+  await settle();
+  expect(drawerOpen()).toBe(false);
+  expect(document.activeElement).toBe(chip);
+  location.hash = "";
+});
+
+test("at 900px and wider, / and a label chip focus the search as before, with no drawer (#2084)", async () => {
+  windowWidth(900);
+  const layers = createLayers();
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: ports(), layers } });
+  await settle();
+  expect(press("/")).toBe(false);
+  expect(document.activeElement).toBe(searchField());
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-rd-meta .tf-chip")].find((c) => c.textContent === "ops")!.click();
+  await settle();
+  expect(searchField().value).toBe("ops");
+  expect(document.activeElement).toBe(searchField());
+  expect(drawerOpen()).toBe(false);
+  expect(target.querySelector(".tf-rd-backdrop")).toBeNull();
+  expect(layers.open).toEqual([]);
+});
+
+test("widening the window past 900px with the drawer open resets it, and narrowing again keeps it closed (#2084)", async () => {
+  windowWidth(800);
+  const layers = createLayers();
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: ports(), layers } });
+  await settle();
+  pages()!.click();
+  await settle();
+  expect(drawerOpen()).toBe(true);
+  resize(900);
+  await settle();
+  expect(drawerOpen()).toBe(false);
+  expect(pages()).toBeNull();
+  expect(target.querySelector(".tf-rd-backdrop")).toBeNull();
+  expect(layers.open).toEqual([]);
+  resize(800);
+  await settle();
+  expect(drawerOpen()).toBe(false);
+  expect(pages()!.getAttribute("aria-expanded")).toBe("false");
 });
 
 const LINKED: DocPage["backlinks"] = [
