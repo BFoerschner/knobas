@@ -1105,3 +1105,24 @@ test("a sync run's re-read keeps the picked space, the search, an open section e
   // A re-read is not a visit: the page was opened once.
   expect(io.visitEntity).toHaveBeenCalledTimes(1);
 });
+
+test("a sync run's re-read of the open page keeps the find bar on the match the reader stepped to (#2072)", async () => {
+  const sync = syncEvents();
+  const twice: DocPage = { ...RICH, blocks: [{ type: "paragraph", text: [text("The ledger, and the ledger again.")] }] };
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => twice), docsSearch: vi.fn(async () => HITS), listen: sync.listen }));
+  const input = type("ledger");
+  await settle();
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await settle();
+  const bar = () => target.querySelector(".tf-findbar")!;
+  expect(bar().textContent).toContain("1 of 2");
+  bar().querySelector<HTMLButtonElement>("button[aria-label='Next']")!.click();
+  await settle();
+  expect(bar().textContent).toContain("2 of 2");
+
+  await sync.ended();
+  expect(bar().textContent).toContain("2 of 2");
+  const cur = [...target.querySelectorAll(".tf-rd-page mark")].map((m) => m.classList.contains("tf-cur"));
+  expect(cur).toEqual([false, true]);
+  location.hash = "";
+});

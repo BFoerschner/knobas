@@ -433,13 +433,27 @@
     all[at]?.scrollIntoView?.({ block: "center" });
   }
 
+  /** The page and the query the find bar last started on. */
+  let started: { id: string; stems: string[] } | null = null;
+
   // A page drawn with a query marks its first match, unless the address names
-  // a section, which is scrolled to instead.
+  // a section, which is scrolled to instead. The same page read again (a sync
+  // run's, #2072) stays where the reader is, on the match they stepped to.
   $effect(() => {
     const p = page;
-    void stems;
+    const now = stems;
     if (p === null) return;
+    const again = started?.id === p.entity_id && started.stems === now;
+    started = { id: p.entity_id, stems: now };
     void tick().then(() => {
+      if (again) {
+        const all = article ? [...article.querySelectorAll("mark")] : [];
+        marks = all.length;
+        at = Math.min(at, all.length - 1);
+        all.forEach((m, i) => m.classList.toggle("tf-cur", i === at));
+        follow();
+        return;
+      }
       at = -1;
       if (place.kind === "page" && place.section !== null) {
         document.getElementById(`s-${place.section}`)?.scrollIntoView?.();
