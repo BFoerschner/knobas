@@ -217,7 +217,10 @@ and frees the lock, from any worktree; a product gone some other way (removed
 by hand, a VM restart) frees it at the keeper's next look
 (`KNOBAS_LIVE_KEEPER_POLL`, 30 s); a killed keeper is a dead holder, taken
 over. So run `just live-down <product>` when the session is over: until then
-the other worktrees' JVM runs queue behind it.
+the other worktrees' JVM runs queue behind it. A forgotten one is bounded:
+the keeper also lets go once its worktree is removed, or after
+`KNOBAS_LIVE_KEEPER_MAX` (3 hours, the Atlassian licence's life), leaving
+the product up for the next run.
 
 **Gitea runs take turns on a lock of their own (#724).** Two `just
 gitea-live` runs from two worktrees broke each other: one run's cleanup
