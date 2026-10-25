@@ -5677,7 +5677,12 @@ async fn an_issue_and_a_pull_request_are_refreshed_as_gitea_holds_them_and_gone_
         .unwrap_or_else(|| panic!("the run did not emit {ticket}"));
     assert_eq!(
         (&read.kind, &read.title, &read.body_text, &read.payload),
-        (&synced.kind, &synced.title, &synced.body_text, &synced.payload),
+        (
+            &synced.kind,
+            &synced.title,
+            &synced.body_text,
+            &synced.payload
+        ),
         "the refresh of {ticket} is the item the run emits"
     );
 

@@ -7162,7 +7162,7 @@ The merge-manager's rulings (Opus):
   asserts `CREDENTIAL_RULES.methods` equals `descriptor_template().auth_methods`, as Jira's does.
   The deleted tests asserted the same indirectly by refusing the two undeclared methods.
   *Reversing:* one test per adapter.
-- **No §10.8 entry.** The transport's surface does not change. The #1310 entry already names
+- **The §10.8 entry.** *Fork:* the diff adds no IPC and no migration, but it changes what the shell reads off Gitea's descriptor (`capabilities`) and amends §4.1's "payload = the raw record verbatim" for one field (the standards review). *Ruling:* a dated entry, `2098-gitea-refresh.md`, recording both. *Reasoning:* a departure from a frozen rule belongs where a reader of the contract looks, not only in a doc comment. *Cost of reversing:* one file.
   #1311 as needing none beyond it. *Reversing:* n/a.
 
 The merge-manager's rulings (Opus):

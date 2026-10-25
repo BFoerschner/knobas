@@ -5,8 +5,8 @@
 //! **A pull request and an issue, and no other kind.** Each is read by
 //! number (`GET /pulls/{n}`, `GET /issues/{n}`) plus its discussion, through
 //! the reads and the mappers a run uses, so the item is the one a run would
-//! emit for it: the record verbatim as the payload, the discussion in
-//! `body_text`. Those are what the writes this adapter declares change, a
+//! emit for it: the payload a run stores (`map::pr_item`,
+//! `map::ticket_item`), the discussion in `body_text`. Those are what the writes this adapter declares change, a
 //! merge, a comment, a review, an edit, a transition, and what they make, a
 //! ticket and a pull request.
 //!
@@ -41,65 +41,93 @@ pub(crate) async fn refresh(
     source: &crate::GiteaSource,
     entity: &str,
 ) -> Result<RefreshAnswer, SourceError> {
-    let (owner, repo, number, of) = match source.key_of(entity)? {
+    match source.key_of(entity)? {
         GiteaKey::Pr {
             owner,
             repo,
             number,
-        } => (owner, repo, number, Thread::Pull),
+        } => pull(source, &owner, &repo, number, entity).await,
         GiteaKey::Issue {
             owner,
             repo,
             number,
-        } => (owner, repo, number, Thread::Issue),
+        } => ticket(source, &owner, &repo, number, entity).await,
         GiteaKey::Repo { .. } | GiteaKey::Branch { .. } | GiteaKey::Commit { .. } => {
-            return Ok(RefreshAnswer::NotOffered);
+            Ok(RefreshAnswer::NotOffered)
         }
+    }
+}
+
+/// One pull request, `GET /pulls/{n}` and its discussion.
+async fn pull(
+    source: &crate::GiteaSource,
+    owner: &str,
+    repo: &str,
+    number: u64,
+    entity: &str,
+) -> Result<RefreshAnswer, SourceError> {
+    let Some(raw) = unless_gone(source.client.pull(owner, repo, number).await)? else {
+        return Ok(RefreshAnswer::Gone);
     };
-    let read = match of {
-        Thread::Pull => source.client.pull(&owner, &repo, number).await,
-        Thread::Issue => source.client.issue(&owner, &repo, number).await,
-    };
-    let raw = match read {
-        Ok(raw) => raw,
-        Err(error) if error.status() == Some(404) => return Ok(RefreshAnswer::Gone),
-        Err(error) => return Err(error),
-    };
+    let pr: model::PullRequest = parse(&raw, entity)?;
     let full_name = format!("{owner}/{repo}");
-    // Only the owner and the name are read for a pull request or a ticket:
-    // the browser URL and the default branch are a branch's and a
-    // repository's.
-    let at = RepoRef {
-        owner: &owner,
-        name: &repo,
-        full_name: &full_name,
+    let at = repo_ref(owner, repo, &full_name);
+    let Some(comments) = discussion_of(source, at, number, pr.comments, Thread::Pull).await? else {
+        return Ok(RefreshAnswer::Gone);
+    };
+    Ok(RefreshAnswer::Item(map::pr_item(
+        &source.id, &raw, at, &pr, &comments,
+    )))
+}
+
+/// One issue, `GET /issues/{n}` and its discussion.
+async fn ticket(
+    source: &crate::GiteaSource,
+    owner: &str,
+    repo: &str,
+    number: u64,
+    entity: &str,
+) -> Result<RefreshAnswer, SourceError> {
+    let Some(raw) = unless_gone(source.client.issue(owner, repo, number).await)? else {
+        return Ok(RefreshAnswer::Gone);
+    };
+    let issue: model::Issue = parse(&raw, entity)?;
+    // Gitea answers a pull request's number on the issue endpoint too. The
+    // run never emits it as a ticket, so no ticket of that id exists.
+    if issue.pull_request.is_some() {
+        return Ok(RefreshAnswer::Gone);
+    }
+    let full_name = format!("{owner}/{repo}");
+    let at = repo_ref(owner, repo, &full_name);
+    let Some(comments) = discussion_of(source, at, number, issue.comments, Thread::Issue).await?
+    else {
+        return Ok(RefreshAnswer::Gone);
+    };
+    Ok(RefreshAnswer::Item(map::ticket_item(
+        &source.id, &raw, at, &issue, &comments,
+    )))
+}
+
+/// The item's own read, `None` for Gitea's 404.
+fn unless_gone(read: Result<Value, SourceError>) -> Result<Option<Value>, SourceError> {
+    match read {
+        Ok(raw) => Ok(Some(raw)),
+        Err(error) if error.status() == Some(404) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// The repository a pull request or an issue is in, as its mapper reads it:
+/// the owner and the name alone. The browser URL and the default branch are
+/// a branch's and a repository's.
+fn repo_ref<'a>(owner: &'a str, name: &'a str, full_name: &'a str) -> RepoRef<'a> {
+    RepoRef {
+        owner,
+        name,
+        full_name,
         html_url: None,
         default_branch: None,
-    };
-    let item = match of {
-        Thread::Pull => {
-            let pr: model::PullRequest = parse(&raw, entity)?;
-            let Some(comments) = discussion_of(source, at, number, pr.comments, of).await? else {
-                return Ok(RefreshAnswer::Gone);
-            };
-            map::pr_item(&source.id, &raw, at, &pr, &comments)
-        }
-        Thread::Issue => {
-            let issue: model::Issue = parse(&raw, entity)?;
-            // Gitea answers a pull request's number on the issue endpoint
-            // too. The run never emits it as a ticket, so no ticket of
-            // that id exists.
-            if issue.pull_request.is_some() {
-                return Ok(RefreshAnswer::Gone);
-            }
-            let Some(comments) = discussion_of(source, at, number, issue.comments, of).await?
-            else {
-                return Ok(RefreshAnswer::Gone);
-            };
-            map::ticket_item(&source.id, &raw, at, &issue, &comments)
-        }
-    };
-    Ok(RefreshAnswer::Item(item))
+    }
 }
 
 /// The record read as the run reads its listing's: one it cannot read is a
@@ -107,6 +135,8 @@ pub(crate) async fn refresh(
 /// no other item to go on to.
 fn parse<T: serde::de::DeserializeOwned>(raw: &Value, entity: &str) -> Result<T, SourceError> {
     serde_json::from_value(raw.clone()).map_err(|error| {
-        SourceError::protocol(format!("gitea: {entity:?} answered a record this adapter cannot read: {error}"))
+        SourceError::protocol(format!(
+            "gitea: {entity:?} answered a record this adapter cannot read: {error}"
+        ))
     })
 }

@@ -49,7 +49,12 @@ async fn a_pull_request_and_an_issue_are_read_back_as_the_sync_emits_them() {
         let synced = emitted(&items, id);
         assert_eq!(
             (&read.entity, &read.kind, &read.title, &read.body_text),
-            (&synced.entity, &synced.kind, &synced.title, &synced.body_text),
+            (
+                &synced.entity,
+                &synced.kind,
+                &synced.title,
+                &synced.body_text
+            ),
             "{id}"
         );
         assert_eq!(read.payload, synced.payload, "{id}");
@@ -85,7 +90,9 @@ async fn an_item_gitea_answers_404_is_gone() {
     ] {
         Mock::given(method("GET"))
             .and(path(route))
-            .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })))
+            .respond_with(
+                ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })),
+            )
             .with_priority(1)
             .mount(fake.server())
             .await;
@@ -112,18 +119,15 @@ async fn a_pull_request_deleted_before_its_discussion_is_read_is_gone() {
     // The first read finds it; the confirming read after the 500 does not.
     Mock::given(method("GET"))
         .and(path("/api/v1/repos/tidewater/payout-service/pulls/142"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(
-            &state.pulls["tidewater/payout-service"][1],
-        ))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(&state.pulls["tidewater/payout-service"][1]),
+        )
         .up_to_n_times(1)
         .with_priority(1)
         .mount(fake.server())
         .await;
     let source = source(fake.base_url(), json!({}));
-    assert!(matches!(
-        source.refresh(PR).await,
-        Ok(RefreshAnswer::Gone)
-    ));
+    assert!(matches!(source.refresh(PR).await, Ok(RefreshAnswer::Gone)));
 }
 
 /// A fault is never *gone*: the engine would tombstone an item that is
@@ -209,6 +213,10 @@ async fn a_pull_request_nobody_was_asked_to_review_is_stored_alike_by_a_run_and_
         let synced = emitted(&items, PR);
         let read = item(source.refresh(PR).await.expect("the read succeeds"), PR);
         assert_eq!(read.payload, synced.payload, "listed as {listed_as}");
-        assert_eq!(synced.payload["requested_reviewers"], json!([]), "listed as {listed_as}");
+        assert_eq!(
+            synced.payload["requested_reviewers"],
+            json!([]),
+            "listed as {listed_as}"
+        );
     }
 }

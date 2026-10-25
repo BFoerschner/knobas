@@ -2003,7 +2003,10 @@ struct FiledIssue(std::sync::Mutex<Option<u64>>);
 
 impl Drop for FiledIssue {
     fn drop(&mut self) {
-        let Some(number) = *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        let Some(number) = *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
         else {
             return;
         };
@@ -2120,12 +2123,17 @@ async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_
     // -- A created ticket --------------------------------------------------
     let filed = FiledIssue(std::sync::Mutex::new(None));
     let title = format!("knobas-ticket-i2098-{pid}");
-    let (ticket, (mirror_title, _, payload)) = sent_and_refreshed(&state, &mut heard, &ack, json!({ "CreateTicket": {
+    let (ticket, (mirror_title, _, payload)) = sent_and_refreshed(
+        &state,
+        &mut heard,
+        &ack,
+        json!({ "CreateTicket": {
         "entity": format!("{GITEA}:{repo}"),
         "title": title,
         "body": "Filed through the queue to be refreshed.",
         "ticket_type": "Task",
-    } }))
+    } }),
+    )
     .await;
     let number: u64 = ticket
         .rsplit_once("/issues/")
@@ -2133,7 +2141,11 @@ async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_
         .unwrap_or_else(|| panic!("{ticket} names no issue"));
     *filed.0.lock().unwrap() = Some(number);
     let at_gitea = env
-        .api(reqwest::Method::GET, &format!("/repos/{repo}/issues/{number}"), None)
+        .api(
+            reqwest::Method::GET,
+            &format!("/repos/{repo}/issues/{number}"),
+            None,
+        )
         .await;
     assert_eq!(mirror_title, title);
     assert_eq!(payload["state"], at_gitea["state"]);
@@ -2141,10 +2153,15 @@ async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_
 
     // -- A comment on it ----------------------------------------------------
     let words = format!("refreshed before the run, {pid}");
-    let (refreshed, (_, body_text, payload)) = sent_and_refreshed(&state, &mut heard, &ack, comment_on(&ticket, &words)).await;
+    let (refreshed, (_, body_text, payload)) =
+        sent_and_refreshed(&state, &mut heard, &ack, comment_on(&ticket, &words)).await;
     assert_eq!(refreshed, ticket);
     let at_gitea = env
-        .api(reqwest::Method::GET, &format!("/repos/{repo}/issues/{number}"), None)
+        .api(
+            reqwest::Method::GET,
+            &format!("/repos/{repo}/issues/{number}"),
+            None,
+        )
         .await;
     assert!(body_text.contains(&words), "{body_text:?}");
     assert_eq!(payload["comments"], at_gitea["comments"]);
@@ -2152,13 +2169,18 @@ async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_
 
     // -- A created pull request ----------------------------------------------
     let pr_title = format!("knobas i2098 {pid}");
-    let (pull, (mirror_title, _, payload)) = sent_and_refreshed(&state, &mut heard, &ack, json!({ "CreatePullRequest": {
+    let (pull, (mirror_title, _, payload)) = sent_and_refreshed(
+        &state,
+        &mut heard,
+        &ack,
+        json!({ "CreatePullRequest": {
         "entity": format!("{GITEA}:{repo}"),
         "title": pr_title,
         "body": "Opened through the queue to be refreshed.",
         "head": head,
         "base": base,
-    } }))
+    } }),
+    )
     .await;
     let number: u64 = pull
         .rsplit_once('#')
@@ -2172,15 +2194,24 @@ async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_
     assert_eq!(payload["base"]["ref"], base.as_str());
 
     // -- Its merge -----------------------------------------------------------
-    let (refreshed, (_, _, payload)) = sent_and_refreshed(&state, &mut heard, &ack, json!({ "MergePullRequest": {
+    let (refreshed, (_, _, payload)) = sent_and_refreshed(
+        &state,
+        &mut heard,
+        &ack,
+        json!({ "MergePullRequest": {
         "entity": pull,
         "style": "merge",
         "delete_branch": false,
-    } }))
+    } }),
+    )
     .await;
     assert_eq!(refreshed, pull);
     let at_gitea = env
-        .api(reqwest::Method::GET, &format!("/repos/{repo}/pulls/{number}"), None)
+        .api(
+            reqwest::Method::GET,
+            &format!("/repos/{repo}/pulls/{number}"),
+            None,
+        )
         .await;
     assert_eq!(at_gitea["merged"], true, "{at_gitea}");
     assert_eq!(payload["merged"], at_gitea["merged"]);
@@ -2236,14 +2267,13 @@ async fn sent_and_refreshed(
         runs.is_empty(),
         "a run began after write {row:?} was sent and before its refresh ended: {runs:?}"
     );
-    let mirrored: (String, String, serde_json::Value) = sqlx::query_as(
-        "select title, body_text, payload from sync.live_item where entity_id = $1",
-    )
-    .bind(&ended.entity_id)
-    .fetch_optional(&state.pool)
-    .await
-    .unwrap()
-    .unwrap_or_else(|| panic!("{} is not in the mirror", ended.entity_id));
+    let mirrored: (String, String, serde_json::Value) =
+        sqlx::query_as("select title, body_text, payload from sync.live_item where entity_id = $1")
+            .bind(&ended.entity_id)
+            .fetch_optional(&state.pool)
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("{} is not in the mirror", ended.entity_id));
     ack.send(()).expect("the refresh is waiting");
     settled(state, queued.id).await;
     until_run_after(&state.pool, queued.id).await;

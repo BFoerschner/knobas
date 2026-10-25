@@ -65,8 +65,9 @@ fn repository(at: RepoRef<'_>) -> Value {
 }
 
 /// The record verbatim, plus the [`repository`] it sits in where the record
-/// does not already name one. The one departure from §3a's "payload =
-/// the raw record verbatim", and the one ADR-0018 asks for by name.
+/// does not already name one. A departure from §3a's "payload = the raw
+/// record verbatim", the one ADR-0018 asks for by name; a pull request's
+/// reviewers are the other (`with_reviewers_listed`, #2098).
 fn with_repository(raw: &Value, at: RepoRef<'_>) -> Value {
     let mut payload = raw.clone();
     if let Some(record) = payload.as_object_mut() {
@@ -241,8 +242,8 @@ pub(crate) fn pr_item(
     }
 }
 
-/// A pull request's record with `requested_reviewers: null` written as `[]`,
-/// the one departure from the record verbatim a pull request has (#2098).
+/// A pull request's record with `requested_reviewers: null` written as `[]`
+/// (#2098, its §10.8 entry `2098-gitea-refresh.md`).
 ///
 /// For a pull request nobody was asked to review, Gitea 1.27.3's `/pulls`
 /// listing answers `null` and its read of the one pull request `[]`;

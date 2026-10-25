@@ -566,10 +566,7 @@ mod tests {
             (ADAPTER_KIND, ADAPTER_KIND)
         );
         assert_eq!(d.name, "Gitea");
-        assert_eq!(
-            d.capabilities,
-            vec![Capability::Write, Capability::Refresh]
-        );
+        assert_eq!(d.capabilities, vec![Capability::Write, Capability::Refresh]);
         assert_eq!(
             d.write_ops,
             vec![
