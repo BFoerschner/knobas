@@ -11,6 +11,7 @@ pub mod install;
 pub mod installed;
 pub mod paths;
 pub mod progress;
+pub mod refresh;
 pub mod registry;
 pub mod remote;
 pub mod write_queue;

@@ -38,6 +38,9 @@ impl<R: tauri::Runtime> SyncEvents for TauriEvents<R> {
     fn activity_new(&self, row: ActivityRow) {
         self.emit(crate::events::ACTIVITY_NEW, row);
     }
+    fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
+        self.emit(crate::events::ITEM_REFRESHED, ended);
+    }
 }
 
 impl<R: tauri::Runtime> crate::notify::NotificationEvents for TauriEvents<R> {

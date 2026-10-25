@@ -269,6 +269,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::sources::installed::UpdatePreview::export_all(cfg)?;
     crate::sources::installed::Removal::export_all(cfg)?;
     knobas_sync::SyncReport::export_all(cfg)?;
+    knobas_sync::scheduler::RefreshEnded::export_all(cfg)?;
     knobas_sync::progress::SyncProgress::export_all(cfg)?;
     knobas_sync::run_log::SourceSyncStatus::export_all(cfg)?;
     knobas_sync::stats::DbStats::export_all(cfg)?;
