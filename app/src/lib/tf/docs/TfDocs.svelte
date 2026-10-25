@@ -8,7 +8,10 @@
   searching), the search field that names its scope (`/` focuses it), its
   one line of syntax, and under it *For you* and the page tree, or, with text
   in the field, the hits (R-10.1 to R-10.4, R-10.8). *New page* is at the
-  bottom.
+  bottom. Below 900px (`READER_DRAWER`, through `MediaQuery`) it is a drawer
+  over the page (#2084, R-10.9): *Pages* at the start of the breadcrumb row,
+  `/` and a label chip open it; `Esc` (it is a `drawer` layer), the backdrop
+  and a page picked in it close it, and focus goes back to what opened it.
 
   **Right**, the page in the reading face, nothing in it capped in width
   (#2081, R-10.9): the breadcrumb, the title, who edited it when, who created it (#2080), the
