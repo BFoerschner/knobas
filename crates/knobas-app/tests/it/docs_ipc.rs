@@ -890,7 +890,7 @@ async fn ticket(pool: &sqlx::PgPool, title: &str, status: &str) -> (String, Stri
 /// links, with status), the history and the sections; and the writes the
 /// source takes.
 #[tokio::test]
-async fn a_page_reads_with_its_rail_and_sections() {
+async fn a_page_reads_with_its_context_and_sections() {
     let pool = pool().await;
     let src = confluence(&pool).await;
     let (chip, chip_key) = ticket(&pool, "Retry failed payouts", "In Progress").await;
