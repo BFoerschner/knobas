@@ -1,11 +1,13 @@
 - **`knobas_core::payload` (four `KindPaths` fields), `crates/knobas-source/src/**` (the
-  ticket-system minimum's saved view, `KindMinimum::optional_paths`, battery clauses 6 and the
-  frame check) and the `sources.ts` mirror — issue #2050 (2026-10-25): a saved view's query,
-  board type, sub-query and sprint are declared paths, and the projection reads no key named
-  after Jira.** No migration, no new command, no `commands/` or `ipc/` module, no `WriteOp`, no
-  WIT version, no IPC type changed. Parent spec #1192, stories 2 and 7 (ADR-0029). Follows the
-  #1207 entry, whose saved view had no required paths. Ruled by the implementer on Opus (`## #2050`
-  in `docs/decisions/2026-10-unattended-rulings.md`).
+  ticket-system minimum's saved view, `KindMinimum::optional_paths`, battery clauses 6 and 10 and
+  the frame check), the IPC schema of `list_adapters` and the `sources.ts` mirror — issue #2050
+  (2026-10-25): a saved view's query, board type, sub-query and sprint are declared paths, and the
+  projection reads no key named after Jira.** No migration, no new command, no `commands/` or
+  `ipc/` module, no `WriteOp`, no WIT version, no new IPC type: `list_adapters` answers the four
+  fields inside each descriptor's `KindPaths`, and `SavedViewSource`'s doc comments now say where
+  its fields are read. Parent spec #1192, stories 2 and 7 (ADR-0029). Follows the #1207 entry,
+  whose saved view had no required paths. Ruled by the implementer on Opus (`## #2050` in
+  `docs/decisions/2026-10-unattended-rulings.md`).
 
   **The declarations** (`knobas_core::payload`, re-exported by `knobas_source`). `KindPaths`
   gains `source_query`, `board_type` and `sub_query` (each a string) and `sprint` (a JSON
@@ -21,7 +23,8 @@
   `saved_view`) now **requires** `source_query` (`Field::SourceQuery`) and lists `board_type`,
   `sub_query` and `sprint` (`Field::BoardType`, `Field::SubQuery`, `Field::Sprint`) as optional
   paths. A ticket system that emits no saved view is still not asked. The role data check (#1199)
-  weighs a query, board type and sub-query as strings and a sprint as an object. Every other
+  weighs required kinds only, as before, so it does not weigh a saved view; `role::data` maps the
+  four fields for `Field::declared_in` (a sprint as an object). Every other
   row of the 1193 and 1224 entries is unchanged.
 
   **The battery.** Clause 10 refuses a ticket-system claim whose saved-view kind declares no

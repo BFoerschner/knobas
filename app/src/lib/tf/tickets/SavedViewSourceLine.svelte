@@ -1,7 +1,7 @@
 <!--
   Where a saved view comes from (#879, R-3.22, R-3.23), under the board head,
   in prototype-6's words (`vwSrcLine`): board or filter, its type, the active
-  sprint and its end, its query (and a Kanban board's sub-filter) when it has one, when the
+  sprint and its end, its query and a Kanban board's sub-filter (each only when it has one), when the
   last sync read it, and *Open in Jira*, naming the view's own ticket system
   (`system`, #2032). Then, per project the source does not
   sync that holds tickets on it, a warn line with *Sync <project> too*, which

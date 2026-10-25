@@ -67,7 +67,6 @@ use sqlx::{Postgres, Transaction};
 /// the name their groups are made from. `None` when it declares none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedViewKinds {
-    kinds: Vec<String>,
     /// Each kind's declaration: where its views' query, board type,
     /// sub-query and sprint are (#2050).
     paths: Vec<knobas_core::payload::KindPaths>,
@@ -97,7 +96,6 @@ pub fn declared(descriptor: &SourceDescriptor) -> Option<SavedViewKinds> {
         .collect();
     let first = saved.first()?;
     Some(SavedViewKinds {
-        kinds: saved.iter().map(|p| p.kind.clone()).collect(),
         paths: saved.iter().map(|p| (*p).clone()).collect(),
         source_name: first
             .system_name
@@ -216,18 +214,19 @@ pub async fn project(
     source_id: &str,
     declared: &SavedViewKinds,
 ) -> Result<(), sqlx::Error> {
+    let kinds: Vec<&str> = declared.paths.iter().map(|p| p.kind.as_str()).collect();
     let paths = knobas_core::payload::Declarations::empty()
         .with(source_id, declared.paths.clone())
         .as_param();
     sqlx::query(UPSERT_VIEWS)
         .bind(source_id)
-        .bind(&declared.kinds)
+        .bind(&kinds)
         .bind(paths)
         .execute(&mut **tx)
         .await?;
     sqlx::query(DROP_GONE_VIEWS)
         .bind(source_id)
-        .bind(&declared.kinds)
+        .bind(&kinds)
         .execute(&mut **tx)
         .await?;
     for statement in [DROP_MEMBERS, INSERT_MEMBERS] {
