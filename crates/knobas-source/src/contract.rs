@@ -575,6 +575,18 @@ async fn check_refresh(
     );
 }
 
+/// Clause 13 alone, over the items `source`'s own sync emitted (#2100).
+///
+/// For a live suite whose server moves under the rest of the battery: Uptime
+/// Kuma writes a new response time on every heartbeat, so clause 2's idle
+/// sync is a coin toss against the real container, and its suite runs the
+/// battery against a recording. The refresh is what that recording cannot
+/// witness, a monitor paused or deleted on the real server among it, so the
+/// suite hands this check the batch one of its runs emitted.
+pub async fn refreshes_as_it_syncs(source: &dyn crate::Source, items: &[crate::SyncItem]) {
+    check_refresh(source, &source.descriptor(), items).await;
+}
+
 /// Every payload path a kind's declaration names, read off its serialized
 /// form so a path added to [`crate::KindPaths`] is held by clause 13 without
 /// a line here: each list of strings in it is a path, but the two lists of
