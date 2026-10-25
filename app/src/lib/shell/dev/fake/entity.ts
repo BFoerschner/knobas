@@ -188,8 +188,8 @@ function refreshEntity(args: Record<string, unknown>): EntityRefresh {
   const id = String(args["entityId"] ?? "");
   // The Monitors roster's monitors (`fake/monitors.ts`, #2138) are Kuma's,
   // which reads one, and are not in the corpus `get_entity` answers from.
-  const monitor = id.startsWith("kuma:") && !CORPUS.some((entry) => entry.entity_id === id);
-  if (!monitor) {
+  const rosterMonitor = id.startsWith("kuma:") && !CORPUS.some((entry) => entry.entity_id === id);
+  if (!rosterMonitor) {
     const detail = getEntity(args);
     if (!detail.source.enabled) return { outcome: "turned_off" };
     if (!REFRESHING_ADAPTERS.has(detail.source.adapter_kind)) return { outcome: "not_offered" };

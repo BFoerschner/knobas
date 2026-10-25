@@ -607,14 +607,15 @@ test("a pause and a resume each draw a row echo queued, then sent, gone once the
 
 // -- Refresh (#2138) ----------------------------------------------------------
 
+const rowNamed = (name: string) => rows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
+
 test("a row whose source reads one monitor draws Refresh, one whose source does not draws Sync now (#2138)", async () => {
   const roster = [monitor("kuma:1", "payouts /health"), monitor("other:9", "edge ping", { source_id: "other", refreshes: false })];
   await draw([], null, ports({ monitorRoster: async () => roster }));
-  const row = (name: string) => rows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
-  expect(text(row("payouts /health").querySelector(".tf-mon-acts .tf-refresh"))).toBe("Refresh");
-  expect(text(row("edge ping").querySelector(".tf-mon-acts .tf-refresh"))).toBe("Sync now");
+  expect(text(rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-refresh"))).toBe("Refresh");
+  expect(text(rowNamed("edge ping").querySelector(".tf-mon-acts .tf-refresh"))).toBe("Sync now");
 
-  row("edge ping").querySelector<HTMLButtonElement>(".tf-refresh")!.click();
+  rowNamed("edge ping").querySelector<HTMLButtonElement>(".tf-refresh")!.click();
   await settle();
   expect(ranSources).toEqual(["other"]);
   expect(refreshAsked).toEqual([]);
@@ -636,39 +637,37 @@ test("Refresh reads the monitor from its source, then the roster again over what
     },
   });
   await draw([], null, stand);
-  const row = (name: string) => rows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
-  button(row("payouts /health"), "Pause")!.click();
+  button(rowNamed("payouts /health"), "Pause")!.click();
   await settle();
   heard.get(40)!(undefined);
   await settle();
-  expect(row("payouts /health").querySelector(".tf-mon-acts .tf-chip")?.textContent).toBe("sent");
+  expect(rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-chip")?.textContent).toBe("sent");
   const before = reads;
 
-  const refresh = row("payouts /health").querySelector<HTMLButtonElement>(".tf-refresh")!;
+  const refresh = rowNamed("payouts /health").querySelector<HTMLButtonElement>(".tf-refresh")!;
   refresh.click();
   await settle();
   expect(refreshAsked).toEqual(["kuma:1"]);
   expect(reads).toBe(before + 1);
   // The roster stays drawn while its read is out, the button saying so.
   expect(rows()).toHaveLength(4);
-  expect(text(row("payouts /health").querySelector(".tf-refresh"))).toBe("Refreshing…");
+  expect(text(rowNamed("payouts /health").querySelector(".tf-refresh"))).toBe("Refreshing…");
 
   roster = ROSTER.map((one) => (one.entity_id === "kuma:1" ? { ...one, tombstoned: true, actions: ["resume_monitor"] } : one));
   answer(roster);
   await settle();
-  expect(text(row("payouts /health").querySelector(".tf-refresh"))).toBe("Refresh");
-  expect(row("payouts /health").querySelector(".tf-mon-acts .tf-chip")).toBeNull();
-  expect(button(row("payouts /health"), "Resume")).toBeDefined();
+  expect(text(rowNamed("payouts /health").querySelector(".tf-refresh"))).toBe("Refresh");
+  expect(rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-chip")).toBeNull();
+  expect(button(rowNamed("payouts /health"), "Resume")).toBeDefined();
 });
 
 test("a monitor whose refresh failed keeps the roster and says why under its row (#2138)", async () => {
   await draw([], null, ports({ refresh: refreshPorts(async () => ({ outcome: "failed", reason: "Unreachable" })) }));
-  const row = (name: string) => rows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
-  row("pg-payments").querySelector<HTMLButtonElement>(".tf-refresh")!.click();
+  rowNamed("pg-payments").querySelector<HTMLButtonElement>(".tf-refresh")!.click();
   await settle();
   const failed = target.querySelector(".tf-refresh-failed");
   expect(text(failed)).toBe("Couldn't refresh: Unreachable");
-  expect(failed!.closest("tr")!.previousElementSibling).toBe(row("pg-payments"));
-  expect(text(row("payouts /health").querySelector(".tf-refresh"))).toBe("Refresh");
+  expect(failed!.closest("tr")!.previousElementSibling).toBe(rowNamed("pg-payments"));
+  expect(text(rowNamed("payouts /health").querySelector(".tf-refresh"))).toBe("Refresh");
   expect(rows().filter((tr) => tr.querySelector(".tf-mbar"))).toHaveLength(4);
 });

@@ -9,7 +9,7 @@
   `EntityDetail.refreshes` is (#2107's entry), through the one helper both now share,
   `knobas_app::sources::refresh::template_refreshes`. The roster reads the kind with one more column
   of the read it already makes (`source_config.kind`), so it builds no source and reads no keychain.
-  `false` for an adapter kind no template answers. A turned-off source's monitors are not on the
+  `false` for a source with no configuration row or an adapter kind no template answers. A turned-off source's monitors are not on the
   roster, as before.
 
   **TypeScript:** no new call; the Monitors roster draws a row's *Refresh* or *Sync now* from it

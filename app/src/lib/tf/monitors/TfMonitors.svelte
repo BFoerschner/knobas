@@ -42,6 +42,7 @@
   an ack outlives the visit; the tab draws no alert of its own, #1296), `ack_alert`, `submit_write` (`PauseMonitor`,
   `ResumeMonitor`, `CreateMonitor`), `unmonitored_assets`, `get_asset` and
   `edit_asset` for the create, `list_sources` for the header's source name,
+  `refresh_entity` and the source's run for a row's *Refresh* or *Sync now*,
   and `job_reach` (`job/open-jobs.ts`) for the scopes. Knobas reads monitors
   here; monitoring stays Uptime Kuma's.
 -->
@@ -199,11 +200,14 @@
       .monitorRoster()
       .then((rows) => {
         if (!live) return;
+        keepRefreshers(rows);
         roster = rows;
         settleRoster(rows);
       }, fail)
       .finally(() => {
-        for (const done of waiting) done();
+        // A read a newer one replaced hands its refreshes to that one.
+        if (live) for (const done of waiting) done();
+        else rereads.push(...waiting);
       });
     ports.openAlerts().then(
       (alerts) => {
@@ -391,15 +395,12 @@
 
   // -- a row's Refresh (#2138) -----------------------------------------------
 
-  /** Each monitor's own *Refresh*, so one row's *Refreshing…* is not another's. */
+  /** Each monitor's own *Refresh*, so one row's *Refreshing…* is not another's; made as the roster is read. */
   const refreshers = new Map<string, DetailRefresh>();
-  function refresherOf(id: string): DetailRefresh {
-    let refresher = refreshers.get(id);
-    if (refresher === undefined) {
-      refresher = createDetailRefresh(untrack(() => ports.refresh));
-      refreshers.set(id, refresher);
-    }
-    return refresher;
+  function keepRefreshers(rows: readonly MonitorRow[]) {
+    const ids = new Set(rows.map((row) => row.entity_id));
+    for (const id of refreshers.keys()) if (!ids.has(id)) refreshers.delete(id);
+    for (const id of ids) if (!refreshers.has(id)) refreshers.set(id, createDetailRefresh(untrack(() => ports.refresh)));
   }
 
   /** What a row's *Refresh* reads: the roster holds only enabled sources' monitors. */
@@ -574,7 +575,7 @@
             {@const chip = stateChip(row, now)}
             {@const down = chip.tone === "err" && !row.tombstoned}
             {@const toggled = echoOn(row.entity_id, TOGGLE)}
-            {@const refresher = refresherOf(row.entity_id)}
+            {@const refresher = refreshers.get(row.entity_id)}
             <tr>
               <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
               <td><span class="tf-chip" class:tf-ok={chip.tone === "ok"} class:tf-warn={chip.tone === "warn"} class:tf-err={chip.tone === "err"} class:tf-info={chip.tone === "info"}>{chip.label}</span></td>
@@ -606,10 +607,10 @@
                     <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
                   {/each}
                 {/if}
-                <TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} />
+                {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} />{/if}
               </td>
             </tr>
-            {#if refresher.failed !== null}
+            {#if refresher && refresher.failed !== null}
               <tr class="tf-mon-failed">
                 <td colspan="7"><div class="tf-banner tf-err tf-refresh-failed" role="alert">{refresher.failed}</div></td>
               </tr>
