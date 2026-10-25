@@ -163,11 +163,11 @@ function sourceRef(id: string) {
 }
 
 /**
- * The adapters that read one item by id on main (#2095-#2099), so the
- * detail's `refreshes` matches what their descriptors declare; Kuma (#2100),
- * the WASM fixture and Kestrel offer *Sync now*.
+ * The adapters that read one item by id on main (#2095-#2101), so the
+ * detail's `refreshes` matches what their descriptors declare; Kestrel, and
+ * a WASM component built against a world before 1.4.0, offer *Sync now*.
  */
-const REFRESHING_ADAPTERS = new Set(["mock", "jira", "confluence", "teamcity", "gitea"]);
+const REFRESHING_ADAPTERS = new Set(["mock", "jira", "confluence", "teamcity", "gitea", "kuma", "wasm-fixture"]);
 
 let bridge: FakeBridge | null = null;
 
