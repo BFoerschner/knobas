@@ -66,6 +66,8 @@ export type {
   PullRequestState,
   QueueCounts,
   QueuedWrite,
+  RefreshEnd,
+  RefreshEnded,
   Removal,
   ReviewComment,
   ReviewSide,

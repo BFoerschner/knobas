@@ -57,3 +57,43 @@ impl<R: tauri::Runtime> crate::checkout::clone::CloneEvents for TauriEvents<R> {
         self.emit(crate::events::CLONE_PROGRESS, event);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tauri::Listener;
+
+    use super::*;
+
+    /// A refresh's end reaches the shell as `item:refreshed`, naming the item,
+    /// the write it followed, and how it ended (#2095), in the shape
+    /// `RefreshEnded` is mirrored in.
+    #[test]
+    fn a_refresh_that_ended_reaches_the_shell_with_the_entity_and_the_write() {
+        let app = tauri::test::mock_app();
+        let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+        let recorder = std::sync::Arc::clone(&heard);
+        app.listen(crate::events::ITEM_REFRESHED, move |event| {
+            recorder
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(event.payload()).expect("a JSON payload"));
+        });
+
+        TauriEvents::new(app.handle().clone()).refresh_ended(
+            &knobas_sync::scheduler::RefreshEnded {
+                entity_id: "jira:PAY-1".to_owned(),
+                write_id: Some(7),
+                ended: knobas_sync::scheduler::RefreshEnd::Gone,
+            },
+        );
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while heard.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            *heard.lock().unwrap(),
+            [serde_json::json!({ "entity_id": "jira:PAY-1", "write_id": 7, "ended": "gone" })]
+        );
+    }
+}
