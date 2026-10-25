@@ -184,7 +184,7 @@ function ports(over: Partial<RepoPorts> = {}): RepoPorts {
       if (id === REPO)
         return {
           row: row(REPO, "repo", "tidewater/payout-service"),
-          source: { id: "gitea", display_name: "Gitea" },
+          source: { id: "gitea", display_name: "Gitea", enabled: true },
           author: null,
         } as unknown as EntityDetail;
       if (id === "gitea:PAY-231")
@@ -806,7 +806,7 @@ describe("a repository whose source is not Gitea", () => {
       ...base,
       getEntity: async (id) => {
         const detail = await base.getEntity(id);
-        return id === REPO ? ({ ...detail, source: { id: "forgejo", display_name: "Forgejo" } } as EntityDetail) : detail;
+        return id === REPO ? ({ ...detail, source: { id: "forgejo", display_name: "Forgejo", enabled: true } } as EntityDetail) : detail;
       },
     };
   };

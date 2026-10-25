@@ -61,6 +61,7 @@
     checkoutBranch = null,
     checkout = undefined,
     title = "",
+    refreshed = 0,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -84,6 +85,8 @@
     checkout?: CheckoutView | undefined;
     /** The repository's `owner/name`. */
     title?: string;
+    /** The page's refreshes (#2135): each reads the open directories and the file again over what the tab drew. */
+    refreshed?: number;
   } = $props();
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
@@ -266,6 +269,34 @@
       // The file keeps what it drew; the next read tries again.
       () => {},
     );
+  }
+
+  // A refresh of the page reads every directory drawn and the file again,
+  // over what the tab drew; what the reader typed stays.
+  let seenRefresh: number | null = null;
+  $effect(() => {
+    const n = refreshed;
+    if (seenRefresh !== null && n !== seenRefresh) untrack(() => {
+        rereadTree();
+        rereadFile();
+      });
+    seenRefresh = n;
+  });
+
+  function rereadTree() {
+    const mine = generation;
+    for (const dir of Object.keys(listings)) {
+      const section = dir === "" ? "files" : entryOf(dir)?.section;
+      if (section == null) continue;
+      readSection(section).then(
+        (read) => {
+          const block = read?.blocks[0];
+          if (mine === generation && block?.type === "tree") listings[dir] = block.entries;
+        },
+        // The directory keeps what it drew.
+        () => {},
+      );
+    }
   }
 
   function toggle(dir: string) {

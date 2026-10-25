@@ -52,11 +52,14 @@
     ports,
     source = null,
     repoId,
+    refreshed = 0,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "codeFacts" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
+    /** The page's refreshes (#2135): each reads the listing again over what the tab drew. */
+    refreshed?: number;
   } = $props();
 
   /** How many branch views are read at once: a source's burst stays small. */
@@ -85,6 +88,17 @@
   $effect(() => {
     const id = repoId;
     return untrack(() => watchEchoes(REPO_BRANCHES, () => readBranches(id, () => repoId === id, true), { listen: ports.listen }));
+  });
+
+  // A refresh of the page reads the listing again, over what the tab drew (#2135).
+  let seenRefresh: number | null = null;
+  $effect(() => {
+    const n = refreshed;
+    if (seenRefresh !== null && n !== seenRefresh) untrack(() => {
+        const id = repoId;
+        readBranches(id, () => repoId === id, true);
+      });
+    seenRefresh = n;
   });
 
   /**

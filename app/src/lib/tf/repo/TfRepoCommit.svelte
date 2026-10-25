@@ -14,6 +14,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { ChoiceOption, DiffFile, EntityDetail } from "../../ipc/entity";
   import TfDiff from "../code/TfDiff.svelte";
+  import { untrack } from "svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { branchFrom, repoHash, shaOf } from "./repo";
 
@@ -23,6 +24,7 @@
     commitId,
     now,
     onNewBranch,
+    refreshed = 0,
   }: {
     ports: Pick<RepoPorts, "entityView" | "getEntity">;
     repoId: string;
@@ -30,6 +32,8 @@
     now: Date;
     /** Open *New branch…* starting at this commit: its whole sha the value, its short one the label. */
     onNewBranch: (from: ChoiceOption) => void;
+    /** The page's refreshes (#2135): each reads the commit again over what the tab drew. */
+    refreshed?: number;
   } = $props();
 
   let detail = $state<EntityDetail | null>(null);
@@ -44,23 +48,37 @@
     files = null;
     start = null;
     failed = null;
+    readCommit(id, () => live);
+    return () => {
+      live = false;
+    };
+  });
+
+  // A refresh of the page reads the commit again, over what the tab drew.
+  let seenRefresh: number | null = null;
+  $effect(() => {
+    const n = refreshed;
+    if (seenRefresh !== null && n !== seenRefresh) untrack(() => readCommit(commitId, () => true, true));
+    seenRefresh = n;
+  });
+
+  /** The commit's row and its diff; `again` keeps what the tab drew when a read fails. */
+  function readCommit(id: string, alive: () => boolean, again = false) {
+    const mine = () => alive() && commitId === id;
     const fail = (error: unknown) => {
-      if (live) failed = ipcErrorMessage(error);
+      if (mine() && !again) failed = ipcErrorMessage(error);
     };
     ports.getEntity(id).then((answer) => {
-      if (live) detail = answer;
+      if (mine()) detail = answer;
     }, fail);
     ports.entityView(id, null).then((view) => {
-      if (!live) return;
+      if (!mine()) return;
       const diff = view?.sections.find((candidate) => candidate.id === "diff");
       const block = diff?.blocks.find((candidate) => candidate.type === "diff");
       files = block?.type === "diff" ? block.files : [];
       start = branchFrom(view);
     }, fail);
-    return () => {
-      live = false;
-    };
-  });
+  }
 
   const sha = $derived(shaOf(commitId));
 

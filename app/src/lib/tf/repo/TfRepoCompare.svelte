@@ -50,6 +50,7 @@
     branches,
     head,
     defaultBranch,
+    refreshed = 0,
   }: {
     ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -59,6 +60,8 @@
     /** The branch proposed, from the address. */
     head: string | null;
     defaultBranch: string | null;
+    /** The page's refreshes (#2135): each reads the branch's standing and diff again over what the page drew. */
+    refreshed?: number;
   } = $props();
 
   const listed = $derived(branches.find((option) => option.name === head) ?? null);
@@ -83,21 +86,37 @@
     files = null;
     failed = null;
     if (id === null) return;
-    const fail = (error: unknown) => {
-      if (live) failed = ipcErrorMessage(error);
-    };
-    ports.entityView(id, null).then((view) => {
-      if (live) standing = branchStanding(view);
-    }, fail);
-    ports.entityView(id, "diff").then((view) => {
-      if (!live) return;
-      const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
-      files = block?.type === "diff" ? block.files : [];
-    }, fail);
+    readBranch(id, () => live);
     return () => {
       live = false;
     };
   });
+
+  // A refresh of the page reads the branch again, over what the page drew.
+  let seenRefresh: number | null = null;
+  $effect(() => {
+    const n = refreshed;
+    if (seenRefresh !== null && n !== seenRefresh) untrack(() => {
+        const id = listed?.entityId ?? null;
+        if (id !== null) readBranch(id, () => (listed?.entityId ?? null) === id, true);
+      });
+    seenRefresh = n;
+  });
+
+  /** The branch's standing and its diff; `again` keeps what the page drew when a read fails. */
+  function readBranch(id: string, alive: () => boolean, again = false) {
+    const fail = (error: unknown) => {
+      if (alive() && !again) failed = ipcErrorMessage(error);
+    };
+    ports.entityView(id, null).then((view) => {
+      if (alive()) standing = branchStanding(view);
+    }, fail);
+    ports.entityView(id, "diff").then((view) => {
+      if (!alive()) return;
+      const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
+      files = block?.type === "diff" ? block.files : [];
+    }, fail);
+  }
 
   // The form, proposed for each branch: from its ticket where it names one.
   // Only a new branch proposes anew; nothing else may wipe what was typed.
