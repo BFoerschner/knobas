@@ -215,6 +215,20 @@ secret_expires_at: string | null, };
 export type DbStats = { db_bytes: number, entity_count: number, item_count: number, per_source: Array<SourceCount>, oldest_synced_at: string | null, newest_synced_at: string | null, };
 
 /**
+ * How the reader's *Refresh* on an item's detail ended (#2107): what
+ * `refresh_entity` answers once the refresh is over.
+ *
+ * `{ "outcome": "refreshed" }` and its siblings on the wire, `failed`
+ * carrying the source's reason, which the detail draws as *Couldn't
+ * refresh: <reason>*.
+ */
+export type EntityRefresh = { "outcome": "refreshed" } | { "outcome": "gone" } | { "outcome": "not_offered" } | { "outcome": "turned_off" } | { "outcome": "failed", 
+/**
+ * The source's own reason.
+ */
+reason: string, };
+
+/**
  * Which part of a shell-owned frame a kind is: the Builds frame (ADR-0022,
  * #848), or a ticket system's saved views (ADR-0029, #1207).
  *

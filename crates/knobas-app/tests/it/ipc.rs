@@ -229,6 +229,7 @@ fn invoke_managing(
             knobas_app::commands::sources::reindex_fts,
             knobas_app::commands::sources::watch_sync,
             knobas_app::commands::sources::sync_role,
+            knobas_app::commands::sources::refresh_entity,
             shapes::without_progress,
             shapes::with_progress
         ])
@@ -383,6 +384,10 @@ fn every_sources_command_is_registered_and_reachable() {
             serde_json::json!({ "sourceId": "mock", "progress": "__CHANNEL__:1" }),
         ),
         ("sync_role", serde_json::json!({ "role": "wiki" })),
+        (
+            "refresh_entity",
+            serde_json::json!({ "entityId": "mock:PAY-231" }),
+        ),
     ] {
         let rejection = invoke(cmd, args).expect_err("no SourcesState is managed");
         assert!(
@@ -1678,4 +1683,109 @@ async fn sync_role_runs_each_enabled_filler_and_joins_a_run_in_flight() {
         );
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
+}
+
+// ---------------------------------------------------------------------------
+// 10. `refresh_entity`, a detail's *Refresh* (#2107).
+// ---------------------------------------------------------------------------
+
+/// A mock source over `pool` that needs no credential, never due, so no run
+/// of it writes while the test reads.
+async fn mock_source(pool: &sqlx::PgPool, id: &str, config: serde_json::Value, enabled: bool) {
+    knobas_sync::config::insert(
+        pool,
+        &knobas_sync::config::InsertConfig {
+            id: id.to_owned(),
+            adapter_kind: "mock".to_owned(),
+            display_name: id.to_owned(),
+            base_url: String::new(),
+            auth_kind: knobas_sync::config::AuthKind::None,
+            config,
+            sync_interval_secs: 86_400,
+            enabled,
+        },
+    )
+    .await
+    .expect("the source row is written");
+    sqlx::query(
+        "insert into knobas.sync_run (source_id, trigger, started_at, finished_at, outcome)
+         values ($1, 'schedule', now(), now(), 'ok')",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .expect("the source is not due");
+}
+
+/// The refresh command answers once the refresh ended, with each of its five
+/// outcomes against the mock: refreshed, gone, not offered by an instance
+/// configured without the read, refused for a turned-off source, and failed
+/// with the source's own reason. A bad id is `invalid` and an unconfigured
+/// namespace `not_found`, as `get_entity` answers them. Then the detail's read
+/// says the mock's source can refresh.
+#[tokio::test(flavor = "multi_thread")]
+async fn refresh_entity_answers_each_outcome_and_the_detail_says_it_can() {
+    use knobas_app::sources::refresh::EntityRefresh;
+    let db = knobas_db::test_util::scratch_database("refresh_entity_outcomes").await;
+    let pool = db
+        .pool(5)
+        .await
+        .expect("a pool onto this test's own database");
+    mock_source(&pool, "mrf", serde_json::json!({}), true).await;
+    mock_source(&pool, "mrfno", serde_json::json!({ "refresh": false }), true).await;
+    mock_source(&pool, "mrfdown", serde_json::json!({ "fault": "unreachable" }), true).await;
+    mock_source(&pool, "mrfoff", serde_json::json!({}), false).await;
+
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("mock app");
+    app.manage(ready_over(pool.clone()));
+    let state = sources_state(&app, db, pool.clone());
+    let scheduler = state.scheduler.clone();
+    let registry = state.registry.clone();
+    app.manage(state);
+    let refresh = |id: &str| {
+        knobas_app::commands::sources::refresh_entity(app.handle().clone(), id.to_owned())
+    };
+
+    assert_eq!(
+        refresh("mrf:PAY-231").await.expect("answers"),
+        EntityRefresh::Refreshed
+    );
+    let title: Option<String> =
+        sqlx::query_scalar("select title from sync.item where entity_id = 'mrf:PAY-231'")
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+    assert!(title.is_some(), "the refreshed item is in the mirror");
+    assert_eq!(
+        refresh("mrf:PAY-99999").await.expect("answers"),
+        EntityRefresh::Gone
+    );
+    assert_eq!(
+        refresh("mrfno:PAY-231").await.expect("answers"),
+        EntityRefresh::NotOffered
+    );
+    assert_eq!(
+        refresh("mrfoff:PAY-231").await.expect("answers"),
+        EntityRefresh::TurnedOff
+    );
+    match refresh("mrfdown:PAY-231").await.expect("answers") {
+        EntityRefresh::Failed { reason } => assert!(
+            reason.contains("simulated: connection refused"),
+            "a failure carries the source's reason: {reason:?}"
+        ),
+        other => panic!("an unreachable mock answered {other:?}"),
+    }
+    let bad = refresh("not an id").await.expect_err("a bad id is refused");
+    assert_eq!(bad.code, knobas_app::IpcErrorCode::Invalid, "{bad:?}");
+    let ghost = refresh("ghost:PAY-1").await.expect_err("an unconfigured namespace");
+    assert_eq!(ghost.code, knobas_app::IpcErrorCode::NotFound, "{ghost:?}");
+
+    let detail =
+        knobas_app::commands::entity::get_entity_inner(&pool, registry.as_ref(), "mrf:PAY-231")
+            .await
+            .expect("the refreshed item's detail");
+    assert!(detail.refreshes, "the mock's adapter reads one item");
+    scheduler.shutdown().await;
 }

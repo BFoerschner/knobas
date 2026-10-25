@@ -622,6 +622,8 @@ pub fn run() {
             // #2106's *Sync now* for a role view, appended at the foot: the
             // list is append-only (§10.8).
             commands::sources::sync_role,
+            // #2107's *Refresh* on an item's detail, appended at the foot.
+            commands::sources::refresh_entity,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
