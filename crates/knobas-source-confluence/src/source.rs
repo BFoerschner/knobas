@@ -60,6 +60,16 @@ impl ConfluenceSource {
         }
         Ok(parsed.key)
     }
+
+    /// This instance's reads, the run's and the refresh's.
+    fn sync_run(&self) -> SyncRun<'_> {
+        SyncRun {
+            api: &self.http,
+            cfg: &self.cfg,
+            source_id: &self.id,
+            base_url: &self.base_url,
+        }
+    }
 }
 
 /// The base URL as `SyncItem::web_url` is built from it: trimmed of
@@ -153,14 +163,7 @@ impl Source for ConfluenceSource {
         cursor: Option<Cursor>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
-        SyncRun {
-            api: &self.http,
-            cfg: &self.cfg,
-            source_id: &self.id,
-            base_url: &self.base_url,
-        }
-        .run(cursor, sink)
-        .await
+        self.sync_run().run(cursor, sink).await
     }
 
     /// One page read by id ([`SyncRun::refresh`], ADR-0031): what a landed
@@ -171,14 +174,7 @@ impl Source for ConfluenceSource {
     /// entity of another instance is refused, never read here.
     async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
         let id = self.content_id(entity)?;
-        SyncRun {
-            api: &self.http,
-            cfg: &self.cfg,
-            source_id: &self.id,
-            base_url: &self.base_url,
-        }
-        .refresh(&id)
-        .await
+        self.sync_run().refresh(&id).await
     }
 
     /// The three writes this adapter declares, and a refusal by name for
@@ -391,8 +387,13 @@ mod tests {
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
         assert_eq!(d.name, "Tidewater Confluence");
         assert_eq!(d.entity_kinds.len(), 1);
-        assert!(d.refreshes(), "a page is read back by id (ADR-0031)");
-        assert!(d.capabilities.contains(&knobas_source::Capability::Write));
+        assert_eq!(
+            d.capabilities,
+            vec![
+                knobas_source::Capability::Write,
+                knobas_source::Capability::Refresh
+            ]
+        );
         assert_eq!(d.write_ops, vec!["comment", "update_page", "create_page"]);
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.

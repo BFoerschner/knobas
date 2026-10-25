@@ -2324,9 +2324,16 @@ async fn a_new_page_reads_back_at_once_and_a_deleted_one_reads_as_gone() {
     );
 
     let (status, answer) = seeded
-        .request(reqwest::Method::DELETE, &format!("rest/api/content/{id}"), None)
+        .request(
+            reqwest::Method::DELETE,
+            &format!("rest/api/content/{id}"),
+            None,
+        )
         .await;
-    assert!(status == 200 || status == 204, "deleting {id}: {status} {answer}");
+    assert!(
+        status == 200 || status == 204,
+        "deleting {id}: {status} {answer}"
+    );
     let in_the_trash = source.refresh(&entity).await.expect("the read");
     assert!(
         matches!(in_the_trash, RefreshAnswer::Gone),

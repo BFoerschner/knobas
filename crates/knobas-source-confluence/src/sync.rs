@@ -296,10 +296,7 @@ impl SyncRun<'_> {
         // `test_connection` fills the configuration in from this same call, so
         // the two agree by construction.
         let whoami = self.api.current_user().await?;
-        let me = whoami.username.as_deref().map(|username| Account {
-            username,
-            user_key: whoami.user_key.as_deref(),
-        });
+        let me = account(&whoami);
         // Who each mention key names, asked once per key for the whole run
         // (`crate::users`, #953).
         let mut users = Directory::new(&whoami);
@@ -396,9 +393,7 @@ impl SyncRun<'_> {
                 {
                     continue;
                 }
-                self.complete(&mut raw).await?;
-                users.annotate(self.api, &mut raw).await;
-                let item = map::to_sync_item(self.source_id, self.base_url, &raw, me);
+                let item = self.mapped(&mut raw, me, &mut users).await?;
                 // Sink failures are never swallowed (SPI doc on `Source::sync`).
                 delivered.insert(raw.content.id.clone());
                 sent_threads.insert(raw.content.id.clone(), thread(&raw));
@@ -564,9 +559,7 @@ impl SyncRun<'_> {
                     if !delivered.insert(raw.content.id.clone()) {
                         continue;
                     }
-                    self.complete(&mut raw).await?;
-                    users.annotate(self.api, &mut raw).await;
-                    let item = map::to_sync_item(self.source_id, self.base_url, &raw, me);
+                    let item = self.mapped(&mut raw, me, users).await?;
                     sink.item(item).await?;
                     emitted += 1;
                 }
@@ -656,9 +649,7 @@ impl SyncRun<'_> {
                     continue;
                 }
                 let mut target = self.api.content(&page_id, EXPAND).await?;
-                self.complete(&mut target).await?;
-                users.annotate(self.api, &mut target).await;
-                let item = map::to_sync_item(self.source_id, self.base_url, &target, window.me);
+                let item = self.mapped(&mut target, window.me, users).await?;
                 sink.item(item).await?;
                 emitted += 1;
             }
@@ -694,10 +685,7 @@ impl SyncRun<'_> {
     ) -> Result<knobas_source::RefreshAnswer, SourceError> {
         use knobas_source::RefreshAnswer;
         let whoami = self.api.current_user().await?;
-        let me = whoami.username.as_deref().map(|username| Account {
-            username,
-            user_key: whoami.user_key.as_deref(),
-        });
+        let me = account(&whoami);
         let mut raw = match self.api.content(id, EXPAND).await {
             Ok(raw) => raw,
             Err(error) if error.status() == Some(404) => return Ok(RefreshAnswer::Gone),
@@ -706,6 +694,10 @@ impl SyncRun<'_> {
         if raw.content.content_type.as_deref() != Some("page") {
             return Ok(RefreshAnswer::NotOffered);
         }
+        // A record that names no status is read as current, as the run reads
+        // every search row it is handed; a space key is matched without
+        // case, so a key typed `eng` that CQL scopes to `ENG` is not read as
+        // gone -- the wrong way, a page wrongly gone is a page tombstoned.
         let current = raw.raw["status"].as_str().is_none_or(|s| s == "current");
         let in_scope = self.cfg.spaces.is_empty()
             || raw.raw["space"]["key"]
@@ -714,14 +706,25 @@ impl SyncRun<'_> {
         if !current || !in_scope {
             return Ok(RefreshAnswer::Gone);
         }
-        self.complete(&mut raw).await?;
-        Directory::new(&whoami).annotate(self.api, &mut raw).await;
-        Ok(RefreshAnswer::Item(map::to_sync_item(
-            self.source_id,
-            self.base_url,
-            &raw,
-            me,
-        )))
+        let item = self
+            .mapped(&mut raw, me, &mut Directory::new(&whoami))
+            .await?;
+        Ok(RefreshAnswer::Item(item))
+    }
+
+    /// One page record as the item every path emits it: its comments
+    /// completed, its mentions' users looked up, mapped. The page walk, the
+    /// re-read of moved pages, the comment walk and the refresh all pass
+    /// here, so the four cannot map one page four ways.
+    async fn mapped(
+        &self,
+        raw: &mut RawContent,
+        me: Option<Account<'_>>,
+        users: &mut Directory,
+    ) -> Result<knobas_source::SyncItem, SourceError> {
+        self.complete(raw).await?;
+        users.annotate(self.api, raw).await;
+        Ok(map::to_sync_item(self.source_id, self.base_url, raw, me))
     }
 
     /// The run-start probe: the newest page in this source's scope, and the
@@ -790,6 +793,15 @@ impl SyncRun<'_> {
         raw.set_comments(all);
         Ok(())
     }
+}
+
+/// The credential's own account as a mention is resolved against it
+/// ([`Account`]), or `None` for a server that would not say its username.
+fn account(whoami: &crate::model::CurrentUser) -> Option<Account<'_>> {
+    whoami.username.as_deref().map(|username| Account {
+        username,
+        user_key: whoami.user_key.as_deref(),
+    })
 }
 
 /// Each page the page walk sent, by id, with the comments its copy carried
@@ -2683,6 +2695,13 @@ mod tests {
         }
     }
 
+    fn gone(answer: knobas_source::RefreshAnswer) {
+        assert!(
+            matches!(answer, knobas_source::RefreshAnswer::Gone),
+            "expected gone, got {answer:?}"
+        );
+    }
+
     /// **A refreshed page is the item a run emits for it**, field for field:
     /// its comments completed where the read did not expand them, and its
     /// mentions named, by the same mapping.
@@ -2723,8 +2742,7 @@ mod tests {
         assert_eq!(item.payload, synced.payload);
         assert!(!item.deleted);
         assert_eq!(
-            item.payload["children"]["comment"]["results"][0]["id"],
-            "98320",
+            item.payload["children"]["comment"]["results"][0]["id"], "98320",
             "the comment the read did not expand is completed"
         );
         assert_eq!(mention_names(&item), vec![Some("Mara Lind".to_owned())]);
@@ -2746,24 +2764,23 @@ mod tests {
     async fn a_page_confluence_answers_404_for_is_gone() {
         let fake = Fake::new(a_corpus());
         let answer = refresh_of(&fake, &cfg(json!({})), "999").await.unwrap();
-        assert!(
-            matches!(answer, knobas_source::RefreshAnswer::Gone),
-            "{answer:?}"
-        );
+        gone(answer);
     }
 
     /// **A page in the trash is gone**: no run's `type = page` search answers
     /// one, so the mirror must not hold it either.
     #[tokio::test]
     async fn a_trashed_page_is_gone() {
-        let mut p = page("104", "SEPA payout retry design", "2026-08-22T10:40:00.000Z", 3);
+        let mut p = page(
+            "104",
+            "SEPA payout retry design",
+            "2026-08-22T10:40:00.000Z",
+            3,
+        );
         p["status"] = json!("trashed");
         let fake = Fake::new(vec![p]);
         let answer = refresh_of(&fake, &cfg(json!({})), "104").await.unwrap();
-        assert!(
-            matches!(answer, knobas_source::RefreshAnswer::Gone),
-            "{answer:?}"
-        );
+        gone(answer);
     }
 
     /// **A page moved out of the configured spaces is gone**, as a full sync
@@ -2774,10 +2791,7 @@ mod tests {
         let answer = refresh_of(&fake, &cfg(json!({ "spaces": ["OPS"] })), "104")
             .await
             .unwrap();
-        assert!(
-            matches!(answer, knobas_source::RefreshAnswer::Gone),
-            "{answer:?}"
-        );
+        gone(answer);
         refreshed(
             refresh_of(&fake, &cfg(json!({ "spaces": ["OPS", "ENG"] })), "104")
                 .await
@@ -2806,7 +2820,10 @@ mod tests {
         let mut fake = Fake::new(a_corpus());
         fake.fault = Some(SourceError::Unauthorized { status: Some(401) });
         let error = refresh_of(&fake, &cfg(json!({})), "104").await.unwrap_err();
-        assert!(matches!(error, SourceError::Unauthorized { .. }), "{error:?}");
+        assert!(
+            matches!(error, SourceError::Unauthorized { .. }),
+            "{error:?}"
+        );
 
         let mut fake = Fake::new(a_corpus());
         fake.fault = Some(SourceError::Protocol {

@@ -424,9 +424,10 @@ async fn app(name: &str, env: &Env) -> SourcesState {
     app_with(name, env, None).await
 }
 
-/// [`app`], with `events` heard and, when they are given, the scheduler the
-/// app itself starts (`knobas_app::sources::start_scheduler`): what follows a
-/// landed write runs, its refresh and the run after it (#2094, ADR-0031).
+/// [`app`], or, given `events`, the app's own scheduler
+/// (`knobas_app::sources::start_scheduler`) telling them: there a landed
+/// write is followed as in the app, by its refresh and then a run (#2094,
+/// ADR-0031).
 async fn app_with(
     name: &str,
     env: &Env,
@@ -1823,7 +1824,7 @@ async fn a_pasted_address_opens_its_page_in_every_form_confluence_serves() {
 
 /// What the mirror held the moment a refresh ended: the payload of the item
 /// refreshed, and how many runs of its source had started since the write it
-/// followed was sent.
+/// followed settled.
 struct Snapshot {
     ended: RefreshEnded,
     payload: Option<serde_json::Value>,
@@ -1851,13 +1852,12 @@ impl SyncEvents for Snapshots {
         let write = ended.write_id;
         let (payload, runs_since_the_write) = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
-                let payload: Option<serde_json::Value> = sqlx::query_scalar(
-                    "select payload from sync.live_item where entity_id = $1",
-                )
-                .bind(&id)
-                .fetch_optional(&pool)
-                .await
-                .expect("the mirror is readable");
+                let payload: Option<serde_json::Value> =
+                    sqlx::query_scalar("select payload from sync.live_item where entity_id = $1")
+                        .bind(&id)
+                        .fetch_optional(&pool)
+                        .await
+                        .expect("the mirror is readable");
                 let runs: i64 = sqlx::query_scalar(
                     "select count(*) from knobas.sync_run r, knobas.write_queue w
                       where w.id = $1 and r.source_id = w.source_id
@@ -1970,12 +1970,18 @@ async fn a_landed_writes_page_is_mirrored_as_confluence_holds_it_before_the_run_
     let shot = snapshots.of(sent.id).await;
     assert_eq!(shot.ended.entity_id, page_entity);
     assert_eq!(shot.ended.ended, RefreshEnd::Refreshed);
-    assert_eq!(shot.runs_since_the_write, 0, "a run started before the refresh ended");
+    assert_eq!(
+        shot.runs_since_the_write, 0,
+        "a run started before the refresh ended"
+    );
     let (held, held_version) = env.body_and_version(&edited.id).await;
     let payload = shot.payload.expect("the edited page is mirrored");
     assert_eq!(payload["version"]["number"].as_i64(), Some(held_version));
     assert_eq!(held_version, base_version + 1);
-    assert_eq!(payload["body"]["storage"]["value"].as_str(), Some(held.as_str()));
+    assert_eq!(
+        payload["body"]["storage"]["value"].as_str(),
+        Some(held.as_str())
+    );
     assert_eq!(held, whole, "Confluence holds the body the edit sent");
 
     // -- a comment -----------------------------------------------------------
@@ -1991,9 +1997,15 @@ async fn a_landed_writes_page_is_mirrored_as_confluence_holds_it_before_the_run_
     let comment_id = remote_id(&state.pool, commented.id).await;
     litter.created.push(comment_id.clone());
     let shot = snapshots.of(commented.id).await;
-    assert_eq!(shot.ended.entity_id, page_entity, "a comment refreshes its page");
+    assert_eq!(
+        shot.ended.entity_id, page_entity,
+        "a comment refreshes its page"
+    );
     assert_eq!(shot.ended.ended, RefreshEnd::Refreshed);
-    assert_eq!(shot.runs_since_the_write, 0, "a run started before the refresh ended");
+    assert_eq!(
+        shot.runs_since_the_write, 0,
+        "a run started before the refresh ended"
+    );
     let thread = shot.payload.expect("the page is mirrored")["children"]["comment"]["results"]
         .as_array()
         .cloned()
@@ -2035,7 +2047,10 @@ async fn a_landed_writes_page_is_mirrored_as_confluence_holds_it_before_the_run_
         "a created page is refreshed by the id its receipt names"
     );
     assert_eq!(shot.ended.ended, RefreshEnd::Refreshed);
-    assert_eq!(shot.runs_since_the_write, 0, "a run started before the refresh ended");
+    assert_eq!(
+        shot.runs_since_the_write, 0,
+        "a run started before the refresh ended"
+    );
     let payload = shot.payload.expect("the new page is mirrored");
     let theirs = env.content(&new_id, "ancestors,body.storage,version").await;
     assert_eq!(payload["title"], json!(title));
