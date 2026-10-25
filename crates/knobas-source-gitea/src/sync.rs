@@ -1785,11 +1785,11 @@ async fn walk_commits(
         let mut above: HashSet<String> = HashSet::new();
         let mut passing_above = false;
         // The walk has gone to a catch-up's page and not yet checked it (#2039).
-        let mut on_hint = false;
+        let mut unchecked_hint = false;
         loop {
             let batch = match walk.next().await {
                 Ok(Walked::Page(batch)) => batch,
-                Ok(Walked::End) if !on_hint => break,
+                Ok(Walked::End) if !unchecked_hint => break,
                 // A catch-up's page past the end of the listing: not trusted,
                 // as any page that does not start above the window (below).
                 Ok(Walked::End) => Vec::new(),
@@ -1836,8 +1836,8 @@ async fn walk_commits(
                 Err(error) => return Err(RepoError::from(error)),
             };
             page += 1;
-            if on_hint {
-                on_hint = false;
+            if unchecked_hint {
+                unchecked_hint = false;
                 // Unread commits can sit above the page only where the
                 // branch lost history since (a force-push): its first commit
                 // is then at or below the window's top, and the walk reads on
@@ -1948,7 +1948,7 @@ async fn walk_commits(
             {
                 page = hint - 1;
                 walk = walk_from(page);
-                on_hint = true;
+                unchecked_hint = true;
             }
         }
     }

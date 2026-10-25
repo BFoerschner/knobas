@@ -1160,11 +1160,12 @@ async fn a_commit_catch_up_finishes_every_branch_and_then_reads_what_moved() {
 }
 
 /// #2034: on a server that lists commits whatever `until=` says (Forgejo 17),
-/// a catch-up re-reads from the branch head everything it delivered before
-/// its window, and that can be more than one walk's page cap. Five to a page,
-/// so the 100 above the window fill the 20 pages a walk may read; the run
-/// must read on past them to the 50 below, not stop there and leave the same
-/// catch-up for every run after.
+/// a catch-up with no page to start on (one written before #2039) re-reads
+/// from the branch head everything it delivered before its window, and that
+/// can be more than one walk's page cap. Five to a page, so the 100 above the
+/// window fill the 20 pages a walk may read; the run must read on past them
+/// to the 50 below, not stop there and leave the same catch-up for every run
+/// after. The page is taken out of the cursor so the walk meets the cap.
 #[tokio::test]
 async fn a_commit_catch_up_reads_past_a_page_cap_of_commits_the_server_did_not_bound() {
     let key = format!("{PAYOUT}@main");
@@ -1206,6 +1207,13 @@ async fn a_commit_catch_up_reads_past_a_page_cap_of_commits_the_server_did_not_b
         100,
         "the budget bounds the run"
     );
+    let mut old: Value = serde_json::from_str(&cursor).expect("JSON");
+    old["repos"][PAYOUT]["commits_catching_up"]
+        .as_object_mut()
+        .expect("a catch-up")
+        .remove("page")
+        .expect("the cut's page, taken out");
+    let cursor = old.to_string();
 
     let (second, cursor) = run(&*gitea, Some(&cursor)).await;
     let mut rest = emitted(&second, "commit");
@@ -1299,10 +1307,7 @@ async fn a_commit_catch_up_over_a_server_that_repeats_its_first_page_stops_at_th
 /// A Forgejo-like server (`until=` and `since=` ignored, five to a page) with
 /// one commit on `main`, synced in full, and then `pushed(1..=n)` on top of it,
 /// `pushed(n)` the head. The cursor is the full sync's.
-async fn forgejo_with_a_push(
-    n: u64,
-    budget: u32,
-) -> (MockServer, Moving, Box<dyn Source>, String) {
+async fn forgejo_with_a_push(n: u64, budget: u32) -> (MockServer, Moving, Box<dyn Source>, String) {
     let key = format!("{PAYOUT}@main");
     let world = World {
         cap: Some(5),
@@ -1362,7 +1367,10 @@ async fn catch_up(gitea: &dyn Source, mut cursor: String, runs: usize) -> (Vec<S
         let (items, next) = run(gitea, Some(&cursor)).await;
         all.extend(emitted(&items, "commit"));
         cursor = next;
-        if position(&cursor, PAYOUT).get("commits_catching_up").is_none() {
+        if position(&cursor, PAYOUT)
+            .get("commits_catching_up")
+            .is_none()
+        {
             break;
         }
     }
@@ -1482,7 +1490,10 @@ async fn a_commit_catch_up_whose_page_starts_below_its_window_reads_on_from_page
         .map(|k| format!("gitea:{PAYOUT}@{}", pushed(k).0))
         .collect();
     expected.sort();
-    assert_eq!(got, expected, "the ten below the resume point, none skipped");
+    assert_eq!(
+        got, expected,
+        "the ten below the resume point, none skipped"
+    );
 }
 
 /// #2039: on the same server an incremental walk ends on the page that
