@@ -24,7 +24,7 @@ export interface PagePress {
 
 export interface PageRefresh {
   /** Register a drawn button; the answer takes it off. */
-  add(press: PagePress): () => void;
+  add(button: PagePress): () => void;
   /** Press the page's button: the newest detail's, else the newest role view's; nothing when none is drawn. */
   press(): void;
   /** Tests only: forget every button without pressing it. */
@@ -34,10 +34,10 @@ export interface PageRefresh {
 export function createPageRefresh(): PageRefresh {
   let drawn: PagePress[] = [];
   return {
-    add(press) {
-      drawn = [...drawn, press];
+    add(button) {
+      drawn = [...drawn, button];
       return () => {
-        drawn = drawn.filter((candidate) => candidate !== press);
+        drawn = drawn.filter((candidate) => candidate !== button);
       };
     },
     press() {
@@ -60,13 +60,9 @@ export const pageRefresh = createPageRefresh();
  * the key is held down. Inside a text field too: a field has no ⌘R of its own.
  * The answer says whether the key was ⌘R.
  */
-export function onRefreshKey(
-  event: KeyboardEvent,
-  overlayOpen: boolean,
-  registry: PageRefresh = pageRefresh,
-): boolean {
+export function onRefreshKey(event: KeyboardEvent, overlayOpen: boolean): boolean {
   if (!refreshKey(event)) return false;
   event.preventDefault();
-  if (!overlayOpen && !event.repeat) registry.press();
+  if (!overlayOpen && !event.repeat) pageRefresh.press();
   return true;
 }
