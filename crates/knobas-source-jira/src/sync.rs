@@ -1045,6 +1045,27 @@ mod tests {
         assert_eq!(again, after);
     }
 
+    /// #2181: a scope change that brings nothing still records the new scope,
+    /// or every later run would walk it in full again.
+    #[tokio::test]
+    async fn a_scope_change_that_emits_nothing_still_records_the_scope() {
+        let api = FakeApi {
+            issues: five_issues(),
+            ..FakeApi::default()
+        };
+        let quiet = |projects: &[&str]| {
+            cfg(serde_json::json!({
+                "projects": projects, "boards": "none", "favourite_filters": false
+            }))
+        };
+        let (_, cursor) = keys_of(&api, &quiet(&["PAY"]), None).await;
+        let (none, after) = keys_of(&api, &quiet(&["NEW"]), Some(cursor.clone())).await;
+        assert!(none.is_empty(), "{none:?}");
+        assert_ne!(after, cursor);
+        let recorded = crate::cursor::JiraCursor::parse(&after).unwrap().scope;
+        assert_eq!(recorded.as_deref(), Some("project in (\"NEW\")"));
+    }
+
     /// #2181, the same for a changed JQL filter: the filter is the scope.
     #[tokio::test]
     async fn a_changed_jql_filter_walks_the_new_filter_in_full() {
