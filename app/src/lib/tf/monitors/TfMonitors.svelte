@@ -608,7 +608,7 @@
                     <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
                   {/each}
                 {/if}
-                {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} />{/if}
+                {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} page={false} />{/if}
               </td>
             </tr>
             {#if refresher && refresher.failed !== null}

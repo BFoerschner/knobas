@@ -15,7 +15,7 @@ import { forgetEchoes, echoesOn } from "../queued.svelte";
 import type { RunPorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
 import TfRun from "./TfRun.svelte";
-import { detailOf, refreshProbe } from "../refresh.fixture";
+import { detailOf, pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import type { WriteAsk } from "../../shell/refused-writes";
 
 let target: HTMLElement;
@@ -1268,4 +1268,27 @@ test("a run whose item cannot be read keeps its page and draws no Refresh", asyn
   await settle();
   expect(target.querySelector("h1")?.textContent).toContain("#1187");
   expect(refreshButton()).toBeNull();
+});
+
+test("⌘R on a run runs its Refresh, as a click does (#2156)", async () => {
+  const probe = refreshProbe();
+  draw("teamcity:build:1187", undefined, { refresh: probe.ports, getEntity: (id) => Promise.resolve(detailOf(id)) });
+  await settle();
+  expect(pressRefreshKey().defaultPrevented).toBe(true);
+  await settle();
+  expect(probe.refreshed).toEqual(["teamcity:build:1187"]);
+});
+
+test("⌘R on a run of a turned-off source, which draws no button, asks nothing (#2156)", async () => {
+  const probe = refreshProbe();
+  draw("teamcity:build:1187", undefined, {
+    refresh: probe.ports,
+    getEntity: (id) =>
+      Promise.resolve(detailOf(id, { source: { id: "teamcity", display_name: "Tidewater CI", adapter_kind: "teamcity", enabled: false } })),
+  });
+  await settle();
+  expect(refreshButton()).toBeNull();
+  expect(pressRefreshKey().defaultPrevented).toBe(true);
+  await settle();
+  expect([probe.refreshed, probe.synced]).toEqual([[], []]);
 });

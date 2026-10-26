@@ -15,7 +15,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import type { MonitorPorts } from "./TfMonitors.svelte";
 import TfMonitors from "./TfMonitors.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
-import { refreshProbe, type RefreshProbe } from "../refresh.fixture";
+import { pressRefreshKey, refreshProbe, type RefreshProbe } from "../refresh.fixture";
 
 const NOW = new Date("2026-10-16T14:00:00Z");
 
@@ -682,4 +682,12 @@ test("a refresh whose roster read a second refresh's read replaced settles on th
   await settle();
   expect(text(rowNamed("payouts /health").querySelector(".tf-refresh"))).toBe("Refresh");
   expect(text(rowNamed("pg-payments").querySelector(".tf-refresh"))).toBe("Refresh");
+});
+
+test("⌘R on the roster presses no row's Refresh: the page's is the header's Sync now (#2156)", async () => {
+  await draw([], null, ports({ monitorRoster: async () => ROSTER }));
+  expect(rowNamed("payouts /health").querySelector(".tf-refresh")).not.toBeNull();
+  expect(pressRefreshKey().defaultPrevented).toBe(true);
+  await settle();
+  expect([probe.refreshed, probe.synced]).toEqual([[], []]);
 });

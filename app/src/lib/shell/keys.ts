@@ -45,3 +45,13 @@ export function inTextField(target: EventTarget | null): boolean {
     target.type,
   );
 }
+
+/**
+ * Whether a key press is ⌘R (Ctrl+R off the Mac), the page's *Refresh* or
+ * *Sync now* (#2156; `tf/page-refresh.svelte.ts`). With ⇧ or ⌥ too: those are
+ * the webview's other reloads, and none of them may happen. In a text field
+ * as well, which has no ⌘R of its own.
+ */
+export function refreshKey(event: KeyboardEvent): boolean {
+  return (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "r";
+}

@@ -11,16 +11,24 @@
   import { untrack } from "svelte";
   import type { DetailRefresh, RefreshSubject } from "./refresh.svelte";
   import { push } from "../shell/toasts.svelte";
+  import { pageRefresh } from "./page-refresh.svelte";
 
   let {
     detail,
     refresh,
     reread,
+    page = true,
   }: {
     detail: RefreshSubject;
     refresh: DetailRefresh;
     /** Read the detail again, over what it drew. */
     reread: () => Promise<void> | void;
+    /**
+     * Whether this is the page's own button, which ⌘R presses while it is
+     * drawn (#2156). A monitor's roster row is not: its page's is the header's
+     * *Sync now*.
+     */
+    page?: boolean;
   } = $props();
 
   const offer = $derived(refresh.offer(detail));
@@ -39,6 +47,19 @@
     await run.start();
     if (run.failed !== null) push({ text: `Could not sync: ${run.failed}`, tone: "err" });
   }
+
+  /** What a click runs, and ⌘R: nothing while the button is disabled. */
+  function press() {
+    if (offer === "refresh") {
+      if (!refresh.reading) void refresh.refresh(detail, reread);
+    } else if (sync !== null && !sync.running) void syncNow(sync);
+  }
+
+  const drawn = $derived(offer === "refresh" || sync !== null);
+  // While drawn, ⌘R presses it.
+  $effect(() => {
+    if (page && drawn) return untrack(() => pageRefresh.add({ kind: "detail", press }));
+  });
 </script>
 
 {#if offer === "refresh"}
@@ -47,7 +68,7 @@
     class="tf-btn tf-refresh"
     disabled={refresh.reading}
     title="Read this item from {detail.source.display_name} again"
-    onclick={() => void refresh.refresh(detail, reread)}>{refresh.reading ? "Refreshing…" : "Refresh"}</button
+    onclick={press}>{refresh.reading ? "Refreshing…" : "Refresh"}</button
   >
 {:else if sync !== null}
   <button
@@ -55,6 +76,6 @@
     class="tf-btn tf-refresh"
     disabled={sync.running}
     title="Sync {detail.source.display_name}, which this item is from"
-    onclick={() => void syncNow(sync)}>{sync.running ? "Syncing…" : "Sync now"}</button
+    onclick={press}>{sync.running ? "Syncing…" : "Sync now"}</button
   >
 {/if}

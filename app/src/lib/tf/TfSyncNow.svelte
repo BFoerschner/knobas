@@ -6,9 +6,11 @@
   source fills.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
   import type { RoleSync } from "./role-sync.svelte";
   import { sourceRoles } from "./roles.svelte";
   import { push } from "../shell/toasts.svelte";
+  import { pageRefresh } from "./page-refresh.svelte";
 
   let { sync }: { sync: RoleSync } = $props();
 
@@ -20,10 +22,21 @@
     await sync.start();
     if (sync.failed !== null) push({ text: `Could not sync: ${sync.failed}`, tone: "err" });
   }
+
+  /** What a click runs, and ⌘R (#2156): nothing while it says *Syncing…*. */
+  function press() {
+    if (!sync.running) void start();
+  }
+
+  const drawn = $derived(sourceRoles.syncs(sync.role));
+  // While drawn, ⌘R presses it, unless the page draws a detail's own.
+  $effect(() => {
+    if (drawn) return untrack(() => pageRefresh.add({ kind: "role", press }));
+  });
 </script>
 
-{#if sourceRoles.syncs(sync.role)}
-  <button type="button" class="tf-btn tf-sm tf-syncnow" disabled={sync.running} {title} onclick={() => void start()}
+{#if drawn}
+  <button type="button" class="tf-btn tf-sm tf-syncnow" disabled={sync.running} {title} onclick={press}
     >{sync.running ? "Syncing…" : "Sync now"}</button
   >
 {/if}

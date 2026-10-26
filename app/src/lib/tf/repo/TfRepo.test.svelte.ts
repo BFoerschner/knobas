@@ -23,7 +23,7 @@ import type {
   ViewRow,
 } from "../../ipc/entity";
 import TfRepo, { type RepoPorts } from "./TfRepo.svelte";
-import { refreshProbe } from "../refresh.fixture";
+import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
 const REPO = "gitea:tidewater/payout-service";
@@ -637,4 +637,13 @@ test("Refreshing… holds until the open tab's re-read has answered too, as the 
   answer();
   await settle();
   expect(refreshButton()?.textContent).toBe("Refresh");
+});
+
+test("⌘R on a repository runs its Refresh, as a click does (#2156)", async () => {
+  const probe = refreshProbe();
+  await draw([REPO], ports({ getEntity: repoDetail(), refresh: probe.ports }));
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(pressRefreshKey().defaultPrevented).toBe(true);
+  await settle();
+  expect(probe.refreshed).toEqual([REPO]);
 });
