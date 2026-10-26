@@ -4,14 +4,18 @@
 //!
 //! The witness is [`Held`], which holds each repository's first request
 //! (`/teams`, read for a repository the run writes) open until the test lets
-//! it go, so "in flight together" is counted, not timed.
+//! it go, so "in flight together" is counted, not timed. Each arrival is
+//! stamped with how many repositories the run had finished by then (its walk
+//! reading, #1379), so a walk that began before a slot was free is caught
+//! whatever the machine's speed: at N at once, the i-th repository to begin
+//! may only begin once i - N + 1 have finished.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::support::held::Held;
 use crate::support::{Fake, State, repo, source};
-use knobas_source::contract::VecSink;
-use knobas_source::{Source, SourceError};
+use knobas_source::{Sink, Source, SourceError, SyncItem};
 
 /// A deadline on waits that should end at once, so a regression fails instead
 /// of hanging. Nothing is measured against it.
@@ -40,16 +44,39 @@ async fn within<T>(what: &str, work: impl Future<Output = T>) -> T {
         .unwrap_or_else(|_| panic!("{what} did not happen"))
 }
 
+/// Collects what a run emits and tells [`Held`] each walk reading.
+struct Stamping {
+    held: Arc<Held>,
+    items: Vec<SyncItem>,
+}
+
+#[async_trait::async_trait]
+impl Sink for Stamping {
+    async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
+        self.items.push(item);
+        Ok(())
+    }
+
+    async fn walked(&mut self, done: u64, _of: Option<u64>, _unit: &str) {
+        self.held.finished(done);
+    }
+}
+
 /// Start a full sync of `source` on a task of its own, returning the repo
 /// entities it emitted, sorted, or its error.
 fn spawn_full(
     source: Box<dyn Source>,
+    held: &Arc<Held>,
 ) -> tokio::task::JoinHandle<Result<Vec<String>, SourceError>> {
+    let held = Arc::clone(held);
     tokio::spawn(async move {
-        let mut sink = VecSink(Vec::new());
+        let mut sink = Stamping {
+            held,
+            items: Vec::new(),
+        };
         source.sync(None, &mut sink).await?;
         let mut repos: Vec<String> = sink
-            .0
+            .items
             .iter()
             .filter(|item| item.kind == "repo")
             .map(|item| item.entity.to_string())
@@ -57,6 +84,19 @@ fn spawn_full(
         repos.sort();
         Ok(repos)
     })
+}
+
+/// No repository's walk began before enough others had finished to free a
+/// slot for it.
+fn assert_never_more_than(held: &Held, at_once: usize) {
+    for (i, (name, finished)) in held.arrivals().into_iter().enumerate() {
+        let needed = u64::try_from((i + 1).saturating_sub(at_once)).expect("fits");
+        assert!(
+            finished >= needed,
+            "{name} began walk {} with {finished} finished; at {at_once} at once that needs {needed}",
+            i + 1
+        );
+    }
 }
 
 /// Release the held repositories one at a time, each time waiting for the
@@ -83,10 +123,13 @@ async fn up_to_concurrent_repos_repositories_are_walked_at_once() {
     let names = ["r1", "r2", "r3", "r4", "r5", "r6", "r7"];
     let fake = Fake::start(&repositories(&names)).await;
     let held = Held::start(fake.base_url(), teams).await;
-    let run = spawn_full(source(
-        held.base_url(),
-        serde_json::json!({ "concurrent_repos": 3 }),
-    ));
+    let run = spawn_full(
+        source(
+            held.base_url(),
+            serde_json::json!({ "concurrent_repos": 3 }),
+        ),
+        &held,
+    );
 
     within(
         "three repositories in flight",
@@ -101,7 +144,8 @@ async fn up_to_concurrent_repos_repositories_are_walked_at_once() {
         .map(|name| format!("gitea:tidewater/{name}"))
         .collect();
     assert_eq!(repos, expected, "every repository is mirrored once");
-    assert_eq!(held.most(), 3, "three at once, and never a fourth");
+    assert_eq!(held.most(), 3, "three at once");
+    assert_never_more_than(&held, 3);
 }
 
 /// At 1 the run is today's: one repository at a time, in name order.
@@ -110,10 +154,13 @@ async fn at_one_the_repositories_are_walked_one_after_another_in_name_order() {
     let names = ["r1", "r2", "r3", "r4"];
     let fake = Fake::start(&repositories(&names)).await;
     let held = Held::start(fake.base_url(), teams).await;
-    let run = spawn_full(source(
-        held.base_url(),
-        serde_json::json!({ "concurrent_repos": 1 }),
-    ));
+    let run = spawn_full(
+        source(
+            held.base_url(),
+            serde_json::json!({ "concurrent_repos": 1 }),
+        ),
+        &held,
+    );
 
     within(
         "the first repository",
@@ -124,6 +171,7 @@ async fn at_one_the_repositories_are_walked_one_after_another_in_name_order() {
 
     within("the run", run).await.expect("joins").expect("syncs");
     assert_eq!(held.most(), 1);
+    assert_never_more_than(&held, 1);
     assert_eq!(held.arrived(), names.map(str::to_owned));
 }
 
@@ -138,10 +186,13 @@ async fn a_fatal_error_in_one_repository_ends_the_run_and_every_other_walk() {
     state.revoked.insert("tidewater/alpha".to_owned());
     let fake = Fake::start(&state).await;
     let held = Held::start(fake.base_url(), teams).await;
-    let run = spawn_full(source(
-        held.base_url(),
-        serde_json::json!({ "concurrent_repos": 3 }),
-    ));
+    let run = spawn_full(
+        source(
+            held.base_url(),
+            serde_json::json!({ "concurrent_repos": 3 }),
+        ),
+        &held,
+    );
 
     within(
         "all three in flight",

@@ -29,6 +29,10 @@ struct Seen {
     most: usize,
     /// Every key ever held, in arrival order.
     arrived: Vec<String>,
+    /// Beside each arrival, what [`Held::finished`] last said.
+    stamps: Vec<u64>,
+    /// How many units the run under test says it has finished.
+    finished: u64,
     /// Keys whose client hung up while the request was held.
     abandoned: Vec<String>,
 }
@@ -69,6 +73,24 @@ impl Held {
     /// The most requests held open at the same time.
     pub fn most(&self) -> usize {
         self.seen().most
+    }
+
+    /// Every key held so far with how many units the run had finished when
+    /// it arrived, in arrival order.
+    pub fn arrivals(&self) -> Vec<(String, u64)> {
+        let seen = self.seen();
+        seen.arrived
+            .iter()
+            .cloned()
+            .zip(seen.stamps.iter().copied())
+            .collect()
+    }
+
+    /// Record that the run under test has finished `done` units: a sink's
+    /// walk reading, which each later arrival is stamped with.
+    pub fn finished(&self, done: u64) {
+        self.seen().finished = done;
+        self.changed.notify_waiters();
     }
 
     /// Every key held so far, in the order the requests arrived.
@@ -131,6 +153,8 @@ impl Held {
                 let mut seen = self.seen();
                 seen.held.insert(key.clone(), go);
                 seen.arrived.push(key.clone());
+                let finished = seen.finished;
+                seen.stamps.push(finished);
                 seen.most = seen.most.max(seen.held.len());
             }
             self.changed.notify_waiters();
