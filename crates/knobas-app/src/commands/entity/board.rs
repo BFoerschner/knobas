@@ -234,9 +234,9 @@ pub async fn saved_view_board(
     saved_view_board_laned(pool, registry, view, per_column, query, None).await
 }
 
-/// [`saved_view_board`] in lanes (#939): the whole view put in lanes after it
-/// is read ([`knobas_core::mini_board::in_lanes`]), each lane's column in
-/// the source's order and capped at `per_column`.
+/// [`saved_view_board`] in lanes (#939): each lane's column in the
+/// source's order and capped at `per_column`, the lanes ranked as
+/// [`knobas_core::mini_board::in_lanes`] ranks them.
 ///
 /// # Errors
 ///
@@ -249,10 +249,6 @@ pub async fn saved_view_board_laned(
     query: Option<&str>,
     lanes: Option<knobas_core::mini_board::Lanes>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
-    let (per_column, lanes_cap) = match lanes {
-        Some(_) => (None, per_column),
-        None => (per_column, None),
-    };
     let Some(layout) = crate::ticket_views::saved_view_layout(pool, view).await? else {
         return Err(IpcError::not_found(format!(
             "no Jira view is called {view}"
@@ -265,28 +261,52 @@ pub async fn saved_view_board_laned(
         only.retain(|id| matched.contains(id));
     }
     let declarations = declared_paths(pool, registry).await?;
-    let Some(lanes) = lanes else {
-        return cut_before_read(pool, &layout, &only, &identity, &declarations, per_column).await;
-    };
-    let whole = knobas_core::mini_board::read_scoped(
+    let statuses = knobas_core::mini_board::statuses_of(
         pool,
-        knobas_core::mini_board::Scope {
-            only: Some(&only),
-            identity: &identity,
-            ..knobas_core::mini_board::Scope::default()
-        },
+        &only,
         &declarations,
-        None,
+        lanes.map(|lanes| lanes.by),
     )
     .await?;
-    let by_status = whole
-        .columns
+    let Some(lanes) = lanes else {
+        let arranged = layout.arrange(statuses.columns, placed_id, per_column);
+        return read_kept(pool, arranged, &statuses.sources, &identity, &declarations).await;
+    };
+    let arranged = layout.arrange(statuses.columns, placed_id, None);
+    let (kept, more_lanes) = knobas_core::mini_board::lanes_of(
+        arranged
+            .iter()
+            .map(|(status, tickets, _)| (status, tickets.as_slice())),
+        |ticket| {
+            (
+                ticket.entity_id.as_str(),
+                ticket.lane.as_str(),
+                ticket.updated_at,
+            )
+        },
+        lanes,
+        per_column,
+    );
+    let in_a_lane = knobas_core::mini_board::in_a_lane(&kept);
+    let arranged = arranged
         .into_iter()
-        .map(|column| (column.status, column.cards))
+        .map(|(status, tickets, total)| {
+            let tickets = tickets
+                .into_iter()
+                .filter(|ticket| in_a_lane.contains(ticket.entity_id.as_str()))
+                .collect();
+            (status, tickets, total)
+        })
         .collect();
-    let columns = layout.arrange(by_status, |card| card.entity_id.as_str(), None);
-    let board = unlaned(columns, whole.sources);
-    Ok(knobas_core::mini_board::in_lanes(board, lanes, lanes_cap))
+    let mut board = read_kept(pool, arranged, &statuses.sources, &identity, &declarations).await?;
+    board.lanes = kept;
+    board.more_lanes = more_lanes;
+    Ok(board)
+}
+
+/// A placed ticket's id, which a saved view's order ranks it by.
+fn placed_id(ticket: &knobas_core::mini_board::Placed) -> &str {
+    &ticket.entity_id
 }
 
 /// A board of `columns`, each its status, its cards and its total, with no
@@ -316,26 +336,25 @@ fn unlaned(
     }
 }
 
-/// An unlaned saved view's board (Björn, 2026-10-26): each of `only`'s
-/// statuses read first, the view's columns cut in the source's order, and
-/// only the cards kept read through the card statement. It read every
-/// ticket on the view as a card and cut after: 0.6 s for a board of 2,250
-/// tickets and 1.1 s for a filter of 4,500, eight a column drawn. The answer
-/// is the same: the totals are the statuses', and the sources' statuses
-/// are read again only when the cut left a source with no card.
-async fn cut_before_read(
+/// A saved view's board from its columns already cut (Björn, 2026-10-26;
+/// #2183): each ticket's status, and its lane, were read first
+/// ([`knobas_core::mini_board::statuses_of`]), the view's columns and lanes
+/// cut in the source's order, and only the tickets kept are read here
+/// through the card statement. It read every ticket on the view as a card
+/// and cut after: 0.6 s for a board of 2,250 tickets and 1.1 s for a filter
+/// of 4,500, eight a column drawn. The answer is the same: the totals are
+/// the statuses', and the sources' statuses are read again only when the
+/// cut left one of `sources` with no card.
+async fn read_kept(
     pool: &PgPool,
-    layout: &crate::ticket_views::SavedViewLayout,
-    only: &[String],
+    arranged: Vec<(Option<String>, Vec<knobas_core::mini_board::Placed>, u32)>,
+    sources: &std::collections::BTreeSet<String>,
     identity: &[String],
     declarations: &knobas_core::payload::Declarations,
-    per_column: Option<u32>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
-    let statuses = knobas_core::mini_board::statuses_of(pool, only, declarations).await?;
-    let arranged = layout.arrange(statuses.columns, String::as_str, per_column);
     let kept: Vec<String> = arranged
         .iter()
-        .flat_map(|(_, ids, _)| ids.iter().cloned())
+        .flat_map(|(_, tickets, _)| tickets.iter().map(|ticket| ticket.entity_id.clone()))
         .collect();
     let read = knobas_core::mini_board::read_scoped(
         pool,
@@ -359,16 +378,19 @@ async fn cut_before_read(
     let sources = if read_from
         .iter()
         .copied()
-        .eq(statuses.sources.iter().map(String::as_str))
+        .eq(sources.iter().map(String::as_str))
     {
         read.sources
     } else {
-        knobas_core::mini_board::observed_statuses(pool, &statuses.sources, declarations).await?
+        knobas_core::mini_board::observed_statuses(pool, sources, declarations).await?
     };
     let columns = arranged
         .into_iter()
-        .map(|(status, ids, total)| {
-            let cards = ids.iter().filter_map(|id| cards.remove(id)).collect();
+        .map(|(status, tickets, total)| {
+            let cards = tickets
+                .iter()
+                .filter_map(|ticket| cards.remove(&ticket.entity_id))
+                .collect();
             (status, cards, total)
         })
         .collect();

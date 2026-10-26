@@ -10,7 +10,7 @@
 //! a board id nothing else holds.
 
 use knobas_app::IpcErrorCode;
-use knobas_app::commands::entity::saved_view_board;
+use knobas_app::commands::entity::{saved_view_board, saved_view_board_laned};
 use knobas_app::sources::Registry;
 use knobas_app::ticket_views::{self, TicketViewDraft, TicketViewRow};
 use serde_json::{Value, json};
@@ -686,19 +686,32 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Record {
 }
 
 /// The most rows the board's card statement (the one that reads each card's
-/// parent title) sent back while `view`'s board was read with `per_column`.
-/// Read on this thread's subscriber; a first registration that straddles
-/// another thread's is looked at again, as `command_statements.rs` does.
-async fn cards_sent(pool: &sqlx::PgPool, view: &str, per_column: Option<u32>) -> u64 {
+/// parent title) sent back while `view`'s board was read with `per_column`
+/// and `lanes`. Read on this thread's subscriber; a first registration that
+/// straddles another thread's is looked at again, as `command_statements.rs`
+/// does.
+async fn cards_sent(
+    pool: &sqlx::PgPool,
+    view: &str,
+    per_column: Option<u32>,
+    lanes: Option<knobas_core::mini_board::Lanes>,
+) -> u64 {
     use tracing_subscriber::layer::SubscriberExt;
     for _ in 0..3 {
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let guard = tracing::subscriber::set_default(
             tracing_subscriber::registry().with(Record(seen.clone())),
         );
-        saved_view_board(pool, &Registry::for_process(), view, per_column, None)
-            .await
-            .expect("the board");
+        saved_view_board_laned(
+            pool,
+            &Registry::for_process(),
+            view,
+            per_column,
+            None,
+            lanes,
+        )
+        .await
+        .expect("the board");
         drop(guard);
         let seen = seen.lock().unwrap();
         if let Some(rows) = seen
@@ -847,15 +860,115 @@ async fn a_jira_views_board_reads_only_the_cards_it_draws() {
 
         // The count is read off a named field of sqlx's event; were that
         // field gone it would read 0 and the cap below pass on any code.
-        let uncapped = cards_sent(&pool, &view, None).await;
+        let uncapped = cards_sent(&pool, &view, None, None).await;
         assert!(
             uncapped > 8 * columns as u64,
             "{view}: the uncapped card statement sent {uncapped} rows, so the count is read"
         );
-        let sent = cards_sent(&pool, &view, Some(8)).await;
+        let sent = cards_sent(&pool, &view, Some(8), None).await;
         assert!(
             sent <= 8 * columns as u64,
             "{view}: the card statement sent {sent} rows for {columns} columns of eight"
+        );
+    }
+}
+
+/// One ticket with the fields a lane reads: an assignee, labels and an epic,
+/// each missing on some tickets (`n` picks which).
+async fn laned_issue(pool: &sqlx::PgPool, p: &str, n: usize, status: &str) -> String {
+    let key = format!("{p}-{n}");
+    let mut fields = json!({
+        "summary": "Settle the ledger",
+        "status": { "name": status },
+        "issuetype": { "name": (["Story", "Bug", "Task"][n % 3]) },
+        "priority": { "name": (["High", "Low", "Medium", "Lowest"][n % 4]) },
+        "project": { "key": p, "name": "Payments" },
+    });
+    if !n.is_multiple_of(7) {
+        fields["assignee"] = json!({ "name": (["mara", "jon", "li", "ana"][n % 4]) });
+    }
+    if !n.is_multiple_of(5) {
+        fields["labels"] = json!([(["payments", "ops", " ", "web"][n % 4]), "second"]);
+    }
+    if !n.is_multiple_of(3) {
+        fields["parent"] = json!({ "key": format!("{p}-EPIC{}", n % 4) });
+    }
+    item(
+        pool,
+        &key,
+        "ticket",
+        "Settle the ledger",
+        json!({ "key": key, "fields": fields }),
+    )
+    .await;
+    key
+}
+
+/// A Jira view's board in lanes reads only the cards its lanes keep (#2183),
+/// with the answer it gave when it read the whole view as cards and laned it
+/// after: [`knobas_core::mini_board::in_lanes`] over the whole board.
+#[tokio::test]
+async fn a_laned_jira_views_board_reads_only_the_cards_it_draws() {
+    use knobas_core::mini_board::{LaneField, Lanes, in_lanes};
+    let pool = pool().await;
+    let p = project();
+    let statuses = ["To Do", "In Progress", "In Review", "Done", "Blocked"];
+    let mut keys = Vec::new();
+    for n in 1..=200 {
+        keys.push(laned_issue(&pool, &p, n, statuses[n % statuses.len()]).await);
+    }
+    keys.reverse();
+    let (_, view) = board(&pool, &p, &keys).await;
+    let registry = Registry::for_process();
+    let whole = saved_view_board(&pool, &registry, &view, None, None)
+        .await
+        .unwrap();
+    for by in [
+        LaneField::Epic,
+        LaneField::Assignee,
+        LaneField::Priority,
+        LaneField::IssueType,
+        LaneField::Label,
+    ] {
+        let lanes = Lanes { by, first: Some(2) };
+        let expected = in_lanes(whole.clone(), lanes, Some(3));
+        let laned = saved_view_board_laned(&pool, &registry, &view, Some(3), None, Some(lanes))
+            .await
+            .unwrap();
+        assert_eq!(drawn(&laned), drawn(&expected), "{by:?}: the columns");
+        let lanes_of = |board: &knobas_core::mini_board::MiniBoard| {
+            board
+                .lanes
+                .iter()
+                .map(|lane| {
+                    (
+                        lane.key.clone(),
+                        lane.count,
+                        lane.columns
+                            .iter()
+                            .map(|c| (c.status.clone(), c.ids.clone(), c.total))
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(lanes_of(&laned), lanes_of(&expected), "{by:?}: the lanes");
+        assert_eq!(
+            laned.more_lanes, expected.more_lanes,
+            "{by:?}: the lanes past"
+        );
+        assert!(expected.more_lanes > 0, "{by:?}: some lanes are left out");
+
+        let kept: usize = expected
+            .lanes
+            .iter()
+            .flat_map(|lane| &lane.columns)
+            .map(|c| c.ids.len())
+            .sum();
+        let sent = cards_sent(&pool, &view, Some(3), Some(lanes)).await;
+        assert!(
+            sent <= kept as u64,
+            "{by:?}: the card statement sent {sent} rows for {kept} cards drawn"
         );
     }
 }
