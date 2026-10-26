@@ -845,6 +845,13 @@ async fn a_jira_views_board_reads_only_the_cards_it_draws() {
             "{view}: the sources' statuses"
         );
 
+        // The count is read off a named field of sqlx's event; were that
+        // field gone it would read 0 and the cap below pass on any code.
+        let uncapped = cards_sent(&pool, &view, None).await;
+        assert!(
+            uncapped > 8 * columns as u64,
+            "{view}: the uncapped card statement sent {uncapped} rows, so the count is read"
+        );
         let sent = cards_sent(&pool, &view, Some(8)).await;
         assert!(
             sent <= 8 * columns as u64,
