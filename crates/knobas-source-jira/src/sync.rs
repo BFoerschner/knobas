@@ -1790,6 +1790,51 @@ mod tests {
         );
     }
 
+    /// **The first run after the upgrade that dropped the changelog re-delivers
+    /// the overlap window once, and nothing more** (#2166, spec #2163).
+    ///
+    /// A cursor recorded before #2165 holds fingerprints of records that
+    /// carried `changelog`; the same tickets now arrive without it. The ones
+    /// inside the overlap window fingerprint differently and are delivered
+    /// again, once. The ones outside it are never asked for, so the run is an
+    /// incremental one, and the poll after it is idle and hands the cursor
+    /// back byte-identically. The version a cursor from before the upgrade
+    /// carries is still read: `cursor::tests::a_v4_envelope_without_the_board_read_stamp_decodes`
+    /// pins `CURSOR_VERSION` at 4.
+    #[tokio::test]
+    async fn the_run_after_the_changelog_left_redelivers_only_its_overlap_window() {
+        let mut issues = five_issues();
+        issues.push(issue("PAY-232", "2026-08-22T11:47:30.000+0000", 0, 0));
+        for raw in &mut issues {
+            raw["changelog"] = serde_json::json!({
+                "startAt": 0, "total": 1,
+                "histories": [{"id": "1", "items": [{"field": "status", "toString": "Done"}]}]
+            });
+        }
+        let mut api = FakeApi {
+            issues,
+            ..FakeApi::default()
+        };
+        let config = cfg(serde_json::json!({}));
+        let (full, before) = keys_of(&api, &config, None).await;
+        assert_eq!(full.len(), 6, "the run before the upgrade delivers all six");
+
+        for raw in &mut api.issues {
+            raw.as_object_mut().unwrap().remove("changelog");
+        }
+        let (mut keys, after) = keys_of(&api, &config, Some(before)).await;
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec!["PAY-231", "PAY-232"],
+            "only the two tickets inside the two-minute overlap come back"
+        );
+
+        let (idle, settled) = keys_of(&api, &config, Some(after.clone())).await;
+        assert!(idle.is_empty(), "the next poll is idle: {idle:?}");
+        assert_eq!(settled, after, "byte-identical");
+    }
+
     /// The watermark is `max(previous, newest emitted)`, never just "newest
     /// emitted".
     ///

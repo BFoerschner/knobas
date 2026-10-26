@@ -2920,3 +2920,147 @@ async fn zero_fifty_nine_caps_the_mirror_search_pending_list() {
         "{again} pages pending after the migration, over the 256 kB limit"
     );
 }
+
+/// The rows `0061`'s tests seed, wound back to an install that predates it:
+/// a Jira source and a Gitea one, a Jira ticket carrying its changelog, a
+/// Jira view (the adapter's other kind) and a Gitea ticket whose payload
+/// also has a `changelog` key.
+const ZERO_SIXTY_ONE_SEED: &str = r#"
+    delete from public._sqlx_migrations where version = 61;
+    insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+    values ('work', 'jira', 'Work', 'http://127.0.0.1:1', 'pat'),
+           ('forge', 'gitea', 'Forge', 'http://127.0.0.1:1', 'pat');
+    insert into knobas.entity (id, kind, title)
+    values ('work:PAY-1', 'ticket', 'Retry the payment'),
+           ('work:PAY-2', 'ticket', 'Refund the payment'),
+           ('work:board-7', 'jira_view', 'PAY board'),
+           ('forge:shop/web#3', 'ticket', 'Checkout button');
+    insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+    values ('work:PAY-1', 'work', 'ticket', 'Retry the payment', 'Retry it',
+            '{"key": "PAY-1", "fields": {"status": {"name": "Done"}},
+              "changelog": {"startAt": 0, "total": 1, "histories": [{"id": "10", "items": [{"field": "status", "toString": "Done"}]}]}}'),
+           ('work:PAY-2', 'work', 'ticket', 'Refund the payment', 'Refund it',
+            '{"key": "PAY-2", "fields": {"status": {"name": "Open"}}}'),
+           ('work:board-7', 'work', 'jira_view', 'PAY board', '',
+            '{"name": "PAY board", "changelog": "a view keeps every key"}'),
+           ('forge:shop/web#3', 'forge', 'ticket', 'Checkout button', '',
+            '{"number": 3, "changelog": ["a gitea ticket keeps every key"]}');
+"#;
+
+/// Every seeded row as text, by id, minus the generated `fts`.
+async fn zero_sixty_one_rows(pool: &sqlx::PgPool) -> Vec<(String, String)> {
+    sqlx::query_as(
+        "select entity_id, (to_jsonb(i) - 'fts')::text from sync.item i
+          where source_id in ('work', 'forge') order by entity_id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// Migration `0061` (#2166): a mirrored Jira ticket keeps no `changelog`.
+/// Only that key of only that item goes; the Jira ticket without one, the
+/// Jira view, the Gitea ticket and every other key and column of the first
+/// ticket are what they were.
+#[tokio::test]
+async fn zero_sixty_one_strips_the_changelog_from_a_jira_ticket_and_nothing_else() {
+    let pool = knobas_db::test_util::scratch_database("jira-changelog-61")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    sqlx::raw_sql(ZERO_SIXTY_ONE_SEED)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let before = zero_sixty_one_rows(&pool).await;
+
+    migrate::run(&pool).await.unwrap();
+
+    let after = zero_sixty_one_rows(&pool).await;
+    let ticket = |rows: &[(String, String)]| -> serde_json::Value {
+        let row = rows.iter().find(|(id, _)| id == "work:PAY-1").unwrap();
+        serde_json::from_str(&row.1).unwrap()
+    };
+    let mut expected = ticket(&before);
+    expected["payload"] = serde_json::json!({
+        "key": "PAY-1",
+        "fields": {"status": {"name": "Done"}},
+    });
+    assert_eq!(
+        ticket(&after),
+        expected,
+        "only the changelog left the Jira ticket"
+    );
+    let others = |rows: &[(String, String)]| -> Vec<(String, String)> {
+        rows.iter()
+            .filter(|(id, _)| id != "work:PAY-1")
+            .cloned()
+            .collect()
+    };
+    assert_eq!(
+        others(&after),
+        others(&before),
+        "the view, the Gitea ticket and the Jira ticket without a changelog are untouched"
+    );
+}
+
+/// Every seeded row's `xmin`, by id: it moves when a row is rewritten, even
+/// to the same value.
+async fn zero_sixty_one_xmins(pool: &sqlx::PgPool) -> Vec<(String, String)> {
+    sqlx::query_as(
+        "select entity_id, xmin::text from sync.item
+          where source_id in ('work', 'forge') order by entity_id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// `0061` leaves a row with no changelog to strip unrewritten (its `xmin`
+/// stays), so a second run changes and rewrites nothing.
+#[tokio::test]
+async fn zero_sixty_one_leaves_a_payload_without_a_changelog_alone() {
+    let pool = knobas_db::test_util::scratch_database("jira-changelog-61-again")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    sqlx::raw_sql(ZERO_SIXTY_ONE_SEED)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let without_changelog = |xmins: Vec<(String, String)>| -> Vec<(String, String)> {
+        xmins
+            .into_iter()
+            .filter(|(id, _)| id != "work:PAY-1")
+            .collect()
+    };
+    let seeded = without_changelog(zero_sixty_one_xmins(&pool).await);
+
+    migrate::run(&pool).await.unwrap();
+    let rows_once = zero_sixty_one_rows(&pool).await;
+    let xmins_once = zero_sixty_one_xmins(&pool).await;
+    assert_eq!(
+        without_changelog(xmins_once.clone()),
+        seeded,
+        "a row with no changelog to strip is not rewritten"
+    );
+
+    sqlx::raw_sql("delete from public._sqlx_migrations where version = 61")
+        .execute(&pool)
+        .await
+        .unwrap();
+    migrate::run(&pool).await.unwrap();
+
+    assert_eq!(
+        zero_sixty_one_rows(&pool).await,
+        rows_once,
+        "a second run changes nothing"
+    );
+    assert_eq!(
+        zero_sixty_one_xmins(&pool).await,
+        xmins_once,
+        "a second run rewrites no row"
+    );
+}
