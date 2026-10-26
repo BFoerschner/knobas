@@ -24,7 +24,7 @@
 //! There is no normalized status model. Contract §4.1 normalizes four fields
 //! and a status is not one of them, so a status and a priority can only come
 //! out of the [payload][crate], in the source's own shape (the database keeps
-//! the status as that read answers it, `sync.item_field`, migration `0062`,
+//! the status as that read answers it, `sync.item_field`, migration `0063`,
 //! #2184, and the board reads it from there where it can) -- which makes both of them **payload reads outside an
 //! adapter**, governed by ADR-0007.
 //!

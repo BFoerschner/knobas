@@ -1,12 +1,13 @@
--- 0062_the_fields_a_ticket_is_read_by.sql -- `sync.item_field`, the status,
+-- 0063_the_fields_a_ticket_is_read_by.sql -- `sync.item_field`, the status,
 -- assignee and project each item declares, kept by the database beside
--- `sync.item_parent`, `sync.item_revision` and `sync.item_project` (#2184,
+-- `sync.item_parent`, `sync.item_revision`, `sync.item_project` and
+-- `sync.item_pipeline` (#2184,
 -- ADR-0019's pattern).
 --
 -- Single-writer, like every migration: a stream that needs more schema
--- requests 0063 and never edits this file or its predecessors -- sqlx
+-- requests 0064 and never edits this file or its predecessors -- sqlx
 -- checksums applied migrations. Recorded in
--- `docs/contract/10.8/2184-migration-0062-item-field.md`.
+-- `docs/contract/10.8/2184-migration-0063-item-field.md`.
 --
 -- ## Why
 --
@@ -52,8 +53,8 @@
 --
 -- ## When it is recomputed
 --
--- Exactly when the other three tables are, in the same trigger functions,
--- which this file restates (from `0032`, unchanged otherwise):
+-- Exactly when the other four tables are, in the same trigger functions,
+-- which this file restates (from `0062`, unchanged otherwise):
 --
 -- * **A write to `sync.item`**: the rows a statement inserted, and the rows
 --   an update changed `source_id`, `kind` or `payload` of. A delete cascades.
@@ -133,7 +134,7 @@ language sql as $fn$
   select sync.resolve_item_fields(array(select i.entity_id from sync.item i))
 $fn$;
 
--- `0032`'s item triggers, restated to resolve all four tables over the same
+-- `0062`'s item triggers, restated to resolve all five tables over the same
 -- ids.
 create or replace function sync.item_inserted() returns trigger
 language plpgsql as $fn$
@@ -145,6 +146,7 @@ begin
   perform sync.resolve_item_parents(ids);
   perform sync.resolve_item_revisions(ids);
   perform sync.resolve_item_projects(ids);
+  perform sync.resolve_item_pipelines(ids);
   perform sync.resolve_item_fields(ids);
   return null;
 end
@@ -166,9 +168,10 @@ begin
   perform sync.resolve_item_parents(ids);
   perform sync.resolve_item_revisions(ids);
   perform sync.resolve_item_projects(ids);
+  perform sync.resolve_item_pipelines(ids);
   perform sync.resolve_item_fields(ids);
-  -- Every other updated row keeps its parents and its project and gets its
-  -- new time. Only a row whose time moved is written.
+  -- Every other updated row keeps its parents, its project and its pipeline
+  -- and gets its new time. Only a row whose time moved is written.
   update sync.item_parent p
      set at = coalesce(n.item_updated_at, n.synced_at)
     from new_rows n
@@ -179,11 +182,16 @@ begin
     from new_rows n
    where p.entity_id = n.entity_id
      and p.at is distinct from coalesce(n.item_updated_at, n.synced_at);
+  update sync.item_pipeline p
+     set at = n.item_updated_at
+    from new_rows n
+   where p.entity_id = n.entity_id
+     and p.at is distinct from n.item_updated_at;
   return null;
 end
 $fn$;
 
--- `0032`'s declaration trigger, restated: the same early return and the same
+-- `0062`'s declaration trigger, restated: the same early return and the same
 -- exclusive key, then each table's kinds recomputed from the touched rows' old
 -- and new declarations.
 create or replace function sync.parent_declaration_changed() returns trigger
@@ -201,6 +209,7 @@ begin
     perform sync.resolve_all_item_parents();
     perform sync.resolve_all_item_revisions();
     perform sync.resolve_all_item_projects();
+    perform sync.resolve_all_item_pipelines();
     perform sync.resolve_all_item_fields();
   elsif tg_op = 'INSERT' then
     perform sync.resolve_kind_parents(array(
@@ -209,6 +218,8 @@ begin
       select unnest(sync.revision_kinds_reached(n.payload_paths)) from new_rows n));
     perform sync.resolve_kind_projects(array(
       select unnest(sync.project_kinds_reached(n.payload_paths)) from new_rows n));
+    perform sync.resolve_kind_pipelines(array(
+      select unnest(sync.pipeline_kinds_reached(n.payload_paths)) from new_rows n));
     perform sync.resolve_kind_fields(array(
       select unnest(sync.field_kinds_reached(n.payload_paths)) from new_rows n));
   elsif tg_op = 'DELETE' then
@@ -218,6 +229,8 @@ begin
       select unnest(sync.revision_kinds_reached(o.payload_paths)) from old_rows o));
     perform sync.resolve_kind_projects(array(
       select unnest(sync.project_kinds_reached(o.payload_paths)) from old_rows o));
+    perform sync.resolve_kind_pipelines(array(
+      select unnest(sync.pipeline_kinds_reached(o.payload_paths)) from old_rows o));
     perform sync.resolve_kind_fields(array(
       select unnest(sync.field_kinds_reached(o.payload_paths)) from old_rows o));
   else
@@ -233,6 +246,10 @@ begin
       select unnest(sync.project_kinds_reached(n.payload_paths)) from new_rows n
       union
       select unnest(sync.project_kinds_reached(o.payload_paths)) from old_rows o));
+    perform sync.resolve_kind_pipelines(array(
+      select unnest(sync.pipeline_kinds_reached(n.payload_paths)) from new_rows n
+      union
+      select unnest(sync.pipeline_kinds_reached(o.payload_paths)) from old_rows o));
     perform sync.resolve_kind_fields(array(
       select unnest(sync.field_kinds_reached(n.payload_paths)) from new_rows n
       union

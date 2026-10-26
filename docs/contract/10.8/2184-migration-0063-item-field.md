@@ -1,4 +1,4 @@
-- **Migration `0062` — issue #2184 (2026-10-26): each item's status, assignee and project are
+- **Migration `0063` — issue #2184 (2026-10-26): each item's status, assignee and project are
   stored, and the Tickets screen's reads probe them instead of walking every ticket's payload.**
   Ruled by the implementer on Opus; the rulings are in
   `docs/decisions/2026-10-unattended-rulings.md` under `## #2183 and #2184`. It follows `0028`,
@@ -7,7 +7,7 @@
   `crates/knobas-source/src/**`, `crates/knobas-http/**`, `error.rs` or `profile.rs`, no new module
   in either barrel or in `commands/`.
 
-  **Migration `0062`: one table with its primary key, five functions, three restated functions.**
+  **Migration `0063`: one table with its primary key, five functions, three restated functions.**
   No trigger is added or dropped, and no other index.
   - `sync.item_field (entity_id, field, paths, value)`, `entity_id` (`collate "C"`) referencing
     `sync.item` `on delete cascade`, primary key `(entity_id, field, paths)` (the readers' join and
@@ -23,8 +23,8 @@
     `{<source_id>: {<kind>: {"f": <paths>}}}`; `knobas-app`'s
     `tests/it/item_field.rs::the_stored_resolver_is_the_macros_expansion` holds it to the macro.
   - `sync.item_inserted()`, `sync.item_updated()` and `sync.parent_declaration_changed()` are
-    restated from `0032` to resolve the fourth table over the same ids and kinds; nothing else in
-    them changes. The lock is `0028`'s, unchanged.
+    restated from `0062` (#2185) to resolve the fifth table over the same ids and kinds; nothing
+    else in them changes. The lock is `0028`'s, unchanged.
   - The last statement resolves every mirrored item, taking no lock, as `0032`'s did.
 
   **The readers** (`knobas_core::stored_join!` and `stored_or!` in a statement over many tickets,

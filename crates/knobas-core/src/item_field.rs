@@ -1,4 +1,4 @@
-//! A declared field read through `sync.item_field` (#2184, migration `0062`,
+//! A declared field read through `sync.item_field` (#2184, migration `0063`,
 //! ADR-0019's pattern): the database keeps each item's status, assignee
 //! and project as [`crate::declared_string!`] reads them, and a read that
 //! would walk every ticket's payload for one of them probes that table by

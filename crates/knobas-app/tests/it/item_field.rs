@@ -1,4 +1,4 @@
-//! `sync.item_field` (#2184, migration `0062`): each item's status, assignee
+//! `sync.item_field` (#2184, migration `0063`): each item's status, assignee
 //! and project as the database keeps them, held to the walk they replace,
 //! and the reads that probe them instead of walking every ticket's payload.
 
