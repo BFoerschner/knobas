@@ -787,7 +787,17 @@ async fn a_jira_views_board_reads_only_the_cards_it_draws() {
     tx.commit().await.unwrap();
     let without_columns = format!("jira:{filter}");
 
-    for (view, columns) in [(with_columns, 3), (without_columns, 5)] {
+    let filter_columns = ["To Do", "In Progress", "In Review", "Done", "Blocked"];
+    for (view, columns) in [
+        (
+            with_columns,
+            vec![("To Do", 60), ("Doing", 120), ("Done", 60)],
+        ),
+        (
+            without_columns,
+            filter_columns.map(|status| (status, 60)).to_vec(),
+        ),
+    ] {
         let registry = Registry::for_process();
         let whole = saved_view_board(&pool, &registry, &view, None, None)
             .await
@@ -799,7 +809,16 @@ async fn a_jira_views_board_reads_only_the_cards_it_draws() {
         for column in &mut cut {
             column.1.truncate(8);
         }
-        assert_eq!(cut.len(), columns, "{view}: {cut:?}");
+        let named: Vec<(Option<String>, u32)> = cut.iter().map(|c| (c.0.clone(), c.2)).collect();
+        let expected: Vec<(Option<String>, u32)> = columns
+            .iter()
+            .map(|(name, total)| (Some((*name).to_owned()), *total))
+            .collect();
+        assert_eq!(
+            named, expected,
+            "{view}: the columns in the board's order, each counted whole"
+        );
+        let columns = columns.len();
         assert_eq!(
             drawn(&capped),
             (cut, sources),
