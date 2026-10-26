@@ -3240,26 +3240,36 @@ mod tests {
     /// is a finished one. Its run is held until the limit has passed, and the
     /// signal goes out once it has exited, as a late one does under load.
     /// Its directory is complete, so it is reported finished for
-    /// [`initialise`] to mark, never failed and left unmarked.
+    /// [`initialise`] to mark, never failed and left unmarked. So is one
+    /// that finishes in the grace after a signal that could not be sent.
     #[cfg(unix)]
     #[tokio::test]
     async fn an_initdb_that_finishes_as_it_is_stopped_is_a_finished_one() {
-        let dir = tempfile::tempdir().unwrap();
-        let (settings, initdb) = initdb_for(dir.path()).await;
-        let hold = tempfile::tempdir().unwrap();
-        let hold_dir = hold.path().to_path_buf();
-        let initdb = held_initdb(&hold_dir, &initdb, KillPoint::BeforeBootstrap);
+        for signalled in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let (settings, initdb) = initdb_for(dir.path()).await;
+            let hold = tempfile::tempdir().unwrap();
+            let hold_dir = hold.path().to_path_buf();
+            let initdb = held_initdb(&hold_dir, &initdb, KillPoint::BeforeBootstrap);
 
-        let (held, running) = (hold_dir.clone(), initdb.clone());
-        let stop = move |pid| {
-            write(&held, "release", "");
-            block_until("initdb did not finish", || pids_running(&running).is_empty());
-            terminate(pid)
-        };
-        run_initdb_stopping(&initdb, &settings, LIMIT, INITDB_GRACE, stop)
-            .await
-            .expect("initdb finished before the signal reached it");
-        assert_eq!(shape(&settings.data_dir), Shape::HoldsDatabase);
+            let (held, running) = (hold_dir.clone(), initdb.clone());
+            let stop = move |pid| {
+                write(&held, "release", "");
+                if !signalled {
+                    return false;
+                }
+                block_until("initdb did not finish", || pids_running(&running).is_empty());
+                terminate(pid)
+            };
+            run_initdb_stopping(&initdb, &settings, LIMIT, INITDB_GRACE, stop)
+                .await
+                .unwrap_or_else(|error| panic!("signalled: {signalled}: {error}"));
+            assert_eq!(
+                shape(&settings.data_dir),
+                Shape::HoldsDatabase,
+                "signalled: {signalled}"
+            );
+        }
     }
 
     /// #2161: a timed-out `initdb` the signal does not reach (no `kill`, or

@@ -1772,6 +1772,8 @@ knobas-db	lib/knobas_db	embedded::tests::adopt_treats_a_stranger_on_the_recorded
 knobas-db	lib/knobas_db	embedded::tests::an_absent_password_file_leaves_the_invented_password_alone
 knobas-db	lib/knobas_db	embedded::tests::an_empty_or_absent_data_directory_is_not_initialised
 knobas-db	lib/knobas_db	embedded::tests::an_empty_password_file_leaves_the_invented_password_alone
+knobas-db	lib/knobas_db	embedded::tests::an_initdb_that_finishes_as_it_is_stopped_is_a_finished_one
+knobas-db	lib/knobas_db	embedded::tests::an_initdb_the_signal_misses_leaves_an_unfinished_directory
 knobas-db	lib/knobas_db	embedded::tests::an_unfinished_directory_is_kept_only_while_a_postmaster_answers_for_it
 knobas-db	lib/knobas_db	embedded::tests::build_settings_does_not_create_the_installation_dir
 knobas-db	lib/knobas_db	embedded::tests::build_settings_keeps_the_binaries_out_of_the_root_dir
