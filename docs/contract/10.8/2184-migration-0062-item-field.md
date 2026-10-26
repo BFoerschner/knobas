@@ -7,15 +7,15 @@
   `crates/knobas-source/src/**`, `crates/knobas-http/**`, `error.rs` or `profile.rs`, no new module
   in either barrel or in `commands/`.
 
-  **Migration `0062`: one table, one index, five functions, three restated functions.** No trigger
-  is added or dropped.
-  - `sync.item_field (entity_id, adapter_kind, field, paths, value)`, `entity_id` (`collate "C"`)
-    referencing `sync.item` `on delete cascade`. One row per item, per entry of a stored adapter's
-    `payload_paths` for the item's kind, per field of `sync.item_field_names()` (`status_name`,
-    `assignee`, `project_key`, `project_name`) that entry declares: `paths` is the entry's
-    candidates for the field, `value` is `knobas_core::declared_string!` over them (null on a
-    miss). Indexed on `(entity_id, field)` (`item_field_entity_idx`, the readers' probe and the
-    resolver's delete).
+  **Migration `0062`: one table with its primary key, five functions, three restated functions.**
+  No trigger is added or dropped, and no other index.
+  - `sync.item_field (entity_id, field, paths, value)`, `entity_id` (`collate "C"`) referencing
+    `sync.item` `on delete cascade`, primary key `(entity_id, field, paths)` (the readers' join and
+    probe, and the resolver's delete). One row per item, per field of `sync.item_field_names()`
+    (`status_name`, `assignee`, `project_key`, `project_name`), per distinct set of candidates a
+    stored adapter's `payload_paths` entry for the item's kind declares for it: `paths` is those
+    candidates, `value` is `knobas_core::declared_string!` over them (null on a miss). Two adapters
+    declaring the same candidates share one row.
   - `sync.item_field_names()`, `sync.field_kinds_reached(jsonb)`,
     `sync.resolve_item_fields(text[])`, `sync.resolve_kind_fields(text[])` and
     `sync.resolve_all_item_fields()`: `0032`'s project functions' counterparts. The resolver
@@ -27,9 +27,10 @@
     them changes. The lock is `0028`'s, unchanged.
   - The last statement resolves every mirrored item, taking no lock, as `0032`'s did.
 
-  **The readers** (`knobas_core::stored_string!`): a row is read only where its `paths` equal the
-  candidates the statement's bound declarations give the item's source and kind; otherwise the
-  payload is walked as before. So the stored value is the walk's answer by construction, and a read
+  **The readers** (`knobas_core::stored_join!` and `stored_or!` in a statement over many tickets,
+  `knobas_core::stored_string!` per row): a row is read only where its `paths` equal the candidates
+  the statement's bound declarations give the item's source and kind; otherwise the payload is
+  walked as before. So the stored value is the walk's answer by construction, and a read
   binding declarations the database never stored answers as it did. No join on
   `knobas.source_config`. Read through it: the board's status (`knobas_core::mini_board`'s card,
   status and observed-status statements) and its assignee lane, and the search's `status:`,

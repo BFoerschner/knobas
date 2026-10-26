@@ -17,8 +17,8 @@
 -- tickets* board's status per ticket, a Jira view's statuses. Each read of a
 -- field detoasts the payload, about 8 µs a ticket for a 2.3 kB compressed
 -- record, more for the walk over the declared paths, and grows with the
--- record. The answer is stored, one row per item and field, and those reads
--- probe it by the item's id.
+-- record. The answer is stored, one row per item, field and declared paths,
+-- and those reads join it on the item's id.
 --
 -- ## What is stored, and what it depends on
 --
