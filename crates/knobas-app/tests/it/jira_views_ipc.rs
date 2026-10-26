@@ -806,6 +806,16 @@ async fn a_jira_views_board_reads_only_the_cards_it_draws() {
             "{view}: the capped board is the whole one cut"
         );
 
+        // A cut that keeps no card still answers for the view's source.
+        let none = saved_view_board(&pool, &registry, &view, Some(0), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            drawn(&none).1,
+            drawn(&whole).1,
+            "{view}: the sources' statuses"
+        );
+
         let sent = cards_sent(&pool, &view, Some(8)).await;
         assert!(
             sent <= 8 * columns as u64,
