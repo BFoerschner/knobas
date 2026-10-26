@@ -94,7 +94,8 @@ pub struct SyncReport {
     /// Rows a **full** sync tombstoned because this run did not see them
     /// (hard-delete reconciliation). Counts only rows of a kind that declared
     /// `full_sync_exhaustive` *and* emitted something this run, so it is 0 for
-    /// an incremental run, for a kind that did not declare the flag, and for a
+    /// an incremental run (unless its adapter walked a kind whole, #2186), for
+    /// a kind that did not declare the flag, and for a
     /// kind that declared it and emitted nothing -- see [`SWEEP`].
     ///
     /// A run over a source with both kinds of kind reports one number for the
@@ -237,6 +238,15 @@ fn check_source_id(id: &str) -> Result<(), SyncError> {
 /// data*, and little else. A repository deleted upstream is therefore retired
 /// the next time that source syncs in full and emits a repository (case 2) --
 /// which, absent a cleared cursor, may be never.
+///
+/// **Since #2186 a run handed a position may reconcile a kind it walked
+/// whole.** An adapter whose scope changed reads the new scope in full though
+/// it was handed a cursor (#2181), and says so per kind through
+/// [`Sink::walked_whole`]; that kind is then swept as after a cursor-less run,
+/// (1), (2) and the backfill exemption still applying. That is how a project
+/// taken out of a Jira source's scope, or a space out of a Confluence
+/// source's, is retired from the mirror. A run that walked nothing whole
+/// stays under (3).
 ///
 /// # Errors
 ///
@@ -690,7 +700,7 @@ async fn run_locked(
     let role_check = (!role_check.is_empty() && role_check::wanted(&role_check, &kept_roles))
         .then_some(role_check);
 
-    let (cursor, upserted, deleted, emitted, role_check) = {
+    let (cursor, upserted, deleted, emitted, whole, role_check) = {
         let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check);
         let cursor = source.sync(cursor, &mut sink).await?;
         // The adapter is done, so whatever is still buffered belongs to this
@@ -701,6 +711,7 @@ async fn run_locked(
             sink.upserted,
             sink.deleted,
             sink.emitted,
+            sink.whole,
             sink.roles,
         )
     };
@@ -715,7 +726,10 @@ async fn run_locked(
     // the writes, so a failure rolls the tombstones back with them.
     //
     // Four conditions, and dropping any one of them alone is a bug:
-    //  * `full_sync` -- an incremental run has not seen the whole source;
+    //  * `full_sync` -- an incremental run has not seen the whole source.
+    //    Read **per kind** since #2186: an adapter handed a position that
+    //    walked a kind whole anyway (its scope changed, #2181) says so through
+    //    `Sink::walked_whole`, and that kind counts as fully synced;
     //  * `may_sweep` -- a **backfill** is a cursor-less run that must not
     //    reconcile. It has seen the whole source, so `full_sync` cannot stand
     //    in for this: the reason is that reconciling is not what was asked for,
@@ -738,14 +752,19 @@ async fn run_locked(
     // operator that is safe in both directions: `exhaustive` alone drops the
     // emptiness guard, `emitted` alone drops the gate and sweeps budgeted
     // kinds, and a union is both bugs at once.
-    let sweep_kinds: Vec<String> = emitted.intersection(&exhaustive).cloned().collect();
+    let walked_whole = |kind: &String| full_sync || whole.contains(kind);
+    let sweep_kinds: Vec<String> = emitted
+        .intersection(&exhaustive)
+        .filter(|kind| walked_whole(kind))
+        .cloned()
+        .collect();
     // `!sweep_kinds.is_empty()` is a **saved round trip, not a safety check**,
     // and no test covers it -- `i.kind = any('{}')` matches nothing, so
     // dropping it changes only whether an empty statement is issued. Every
     // correctness property here rests on the intersection above; a reader
     // looking for what stops the sweep firing should look there and not at
     // this condition.
-    let swept = if full_sync && may_sweep && !sweep_kinds.is_empty() {
+    let swept = if may_sweep && !sweep_kinds.is_empty() {
         sqlx::query(SWEEP)
             .bind(source_id)
             .bind(&sweep_kinds)
@@ -946,6 +965,10 @@ struct PgSink<'t, 'c> {
     /// arrive" -- and it is bounded by the descriptor's kind list, unlike
     /// `seen`.
     emitted: HashSet<String>,
+    /// Every kind the adapter said it walked whole although it was handed a
+    /// position (`Sink::walked_whole`, #2186). The sweep reads it as it
+    /// reads `cursor.is_none()`, per kind.
+    whole: HashSet<String>,
     /// The role data check (#1199), fed every item this run accepts, or
     /// `None` when the run does not judge roles.
     roles: Option<knobas_source::role::data::DataCheck>,
@@ -967,6 +990,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
             buf: Vec::new(),
             seen: HashMap::new(),
             emitted: HashSet::new(),
+            whole: HashSet::new(),
             roles,
             upserted: 0,
             deleted: 0,
@@ -1218,6 +1242,13 @@ impl Sink for PgSink<'_, '_> {
             self.flush().await?;
         }
         Ok(())
+    }
+
+    /// Kept for the sweep (`run_locked`), which alone decides what it
+    /// licenses: a kind the descriptor does not declare exhaustive, or that
+    /// emitted nothing, is not swept whatever the adapter says.
+    async fn walked_whole(&mut self, kind: &str) {
+        self.whole.insert(kind.to_owned());
     }
 }
 

@@ -505,4 +505,9 @@ impl Sink for Counting<'_> {
             self.emit();
         }
     }
+
+    /// Handed on: the sweep reads it from the engine's sink (#2186).
+    async fn walked_whole(&mut self, kind: &str) {
+        self.inner.walked_whole(kind).await;
+    }
 }

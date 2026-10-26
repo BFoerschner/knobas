@@ -522,3 +522,62 @@ fn the_recorder_would_notice_a_fan_out_that_reached_nobody() {
     watchers.close(a_message(SyncPhase::Finished));
     assert_eq!(live.seen().len(), 1);
 }
+
+/// An adapter that says it walked its one kind whole, and pushes nothing.
+struct Whole;
+
+#[async_trait::async_trait]
+impl Source for Whole {
+    async fn view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        Flood(0).view(entity, section).await
+    }
+    fn descriptor(&self) -> SourceDescriptor {
+        Flood(0).descriptor()
+    }
+    async fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
+        Ok(ConnectionInfo::default())
+    }
+    async fn sync(
+        &self,
+        _c: Option<Cursor>,
+        sink: &mut (dyn Sink + Send),
+    ) -> Result<Cursor, SourceError> {
+        sink.walked_whole("ticket").await;
+        Ok("done".into())
+    }
+    async fn write(&self, op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
+        Flood(0).write(op).await
+    }
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        Flood(0).reachable_transitions(entity).await
+    }
+}
+
+/// A sink that keeps the kinds it heard were walked whole.
+#[derive(Default)]
+struct HearsWhole(Vec<String>);
+
+#[async_trait::async_trait]
+impl Sink for HearsWhole {
+    async fn item(&mut self, _item: SyncItem) -> Result<(), SourceError> {
+        Ok(())
+    }
+    async fn walked_whole(&mut self, kind: &str) {
+        self.0.push(kind.to_owned());
+    }
+}
+
+/// The engine's sweep reads a kind walked whole off its own sink (#2186), so
+/// the progress decorator that the scheduler wraps every run in hands it on.
+#[tokio::test]
+async fn the_decorator_hands_on_a_kind_walked_whole() {
+    let recorder: Arc<dyn ProgressSink> = Arc::new(Recorder::default());
+    let observed = Observed::new(&Whole, "flood", 8, Instant::now(), recorder);
+    let mut sink = HearsWhole::default();
+    observed.sync(Some("at".into()), &mut sink).await.unwrap();
+    assert_eq!(sink.0, ["ticket"]);
+}

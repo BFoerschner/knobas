@@ -2188,6 +2188,29 @@ pub trait Sink {
     async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
         let _ = (done, of, unit);
     }
+
+    /// Say that this run emitted every item of `kind` the source's current
+    /// scope holds, as a run handed no cursor would. Issue #2186.
+    ///
+    /// The engine reconciles a kind only after a run that saw all of it, and
+    /// it knows that for itself only when it handed the adapter no cursor. An
+    /// adapter that was handed one and walked a kind whole anyway (its scope
+    /// changed, so the position no longer applied, #2181) says so here, and
+    /// the engine then sweeps that kind as after a cursor-less run: what the
+    /// run did not emit is tombstoned. Everything else still gates the sweep
+    /// (ADR-0003): the kind's `full_sync_exhaustive`, the run having emitted
+    /// something of it, and the run not being a backfill.
+    ///
+    /// It is a declaration, not a read: the sink still answers nothing, so an
+    /// adapter cannot ask what the mirror holds. Call it only for a walk that
+    /// ended, and only when the run returns `Ok`; a failed run sweeps nothing.
+    /// Saying it of a walk that stopped early tombstones what it never reached.
+    ///
+    /// The default does nothing, so a sink that ignores it leaves the run
+    /// incremental. A sink that wraps another forwards it.
+    async fn walked_whole(&mut self, kind: &str) {
+        let _ = kind;
+    }
 }
 
 #[cfg(test)]
