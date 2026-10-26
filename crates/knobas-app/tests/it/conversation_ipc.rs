@@ -225,20 +225,13 @@ async fn a_payload_of_another_shape_reads_as_no_comments() {
     ] {
         let id = issue(&pool, payload.clone()).await;
         assert!(
-            thread(&pool, &id)
-                .await
-                .unwrap()
-                .comments
-                .is_empty(),
+            thread(&pool, &id).await.unwrap().comments.is_empty(),
             "{payload}"
         );
     }
     let missing = format!("jira:{}", key());
     assert_eq!(
-        thread(&pool, &missing)
-            .await
-            .unwrap_err()
-            .code,
+        thread(&pool, &missing).await.unwrap_err().code,
         knobas_app::IpcErrorCode::NotFound
     );
 }

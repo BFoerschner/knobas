@@ -2,10 +2,10 @@
   The job's Conversation tab (#819, R-5.2 to R-5.4): `#/job/<key>/conversation`.
 
   The whole thread, oldest first, under the filter bar: words, a chip per
-  person who commented, and *Mentions me* and *New since …*. The thread is the
-  ticket's comments and nothing else (#2163). Unfiltered, the old part folds behind *Show N earlier
-  entries* and a blue rule marks where the reader's last visit ends. New
-  comments are edged blue, mentions edged yellow with a chip and the `@name` in
+  person who commented, and *Mentions me* and *New since …*. The thread is
+  the ticket's comments and nothing else (#2163). Unfiltered, the old part
+  folds behind *Show N earlier entries* and a blue rule marks where the
+  reader's last visit ends. New comments are edged blue, mentions edged yellow with a chip and the `@name` in
   blue. The rules are `conversation.ts`'s; this draws them.
 
   The comment box at the end queues a `Comment` write (BUILT): the box clears

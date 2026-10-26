@@ -112,8 +112,9 @@ export function drawThread(
 ): Drawn {
   const people = filter.chips["who"] ?? [];
   const only = filter.chips["only"] ?? [];
-  const narrowing = isFiltering(filter);
-  let entries = thread.comments.map((comment) => ({ comment, fresh: isNew(comment, lastVisit) })).filter((entry) => {
+  const filtering = isFiltering(filter);
+  const all: Entry[] = thread.comments.map((comment) => ({ comment, fresh: isNew(comment, lastVisit) }));
+  let entries = all.filter((entry) => {
     const comment = entry.comment;
     if (!matchesAll(`${comment.body} ${comment.author ?? ""}`, filter.text)) return false;
     if (people.length > 0 && !people.includes(comment.author ?? "")) return false;
@@ -125,7 +126,7 @@ export function drawThread(
 
   let folded = 0;
   let foldedFrom: string | null = null;
-  if (!narrowing && !expanded) {
+  if (!filtering && !expanded) {
     const keep = entries.filter((entry, index) => index >= entries.length - KEEP || entry.fresh);
     folded = entries.length - keep.length;
     if (folded > 0) {
@@ -135,7 +136,7 @@ export function drawThread(
     }
     entries = keep;
   }
-  const firstNew = narrowing ? -1 : entries.findIndex((entry) => entry.fresh);
+  const firstNew = filtering ? -1 : entries.findIndex((entry) => entry.fresh);
   return { entries, folded, foldedFrom, newAt: firstNew === -1 ? null : firstNew, shown };
 }
 
