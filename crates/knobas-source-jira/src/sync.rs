@@ -8,6 +8,8 @@
 //!    scope, `ORDER BY updated DESC` -- the newest `updated` this source's
 //!    corpus held when the run started.
 //! 3. Read the cursor. Unreadable or absent ⇒ full sync (interfaces §4.1).
+//!    Taken under another ticket scope (`projects` / `jql_filter`) ⇒ a full
+//!    walk of this one, the views kept (#2181).
 //! 4. Query `updated >= watermark − 2 minutes ORDER BY created ASC, id ASC`,
 //!    paging with `startAt` until `total` is reached -- ordered by keys an
 //!    edit cannot move (`id` breaks ties on `created`, #1720), each page
@@ -191,7 +193,14 @@ impl SyncRun<'_> {
         let server: ServerInfo = self.api.server_info().await?;
         let offset = server.offset_secs();
         let ceiling = self.ceiling().await?;
-        let previous = cursor.as_deref().and_then(JiraCursor::parse);
+        let parsed = cursor.as_deref().and_then(JiraCursor::parse);
+        // A cursor taken under another ticket scope walks this one in full
+        // (#2181); one written under this scope is the cursor as it was.
+        let scope = crate::jql::scope_key(self.cfg);
+        let scope_moved = parsed
+            .as_ref()
+            .is_some_and(|c| c.scope.as_deref() != Some(scope.as_str()));
+        let previous = parsed.map(|c| c.under(&scope));
         let since = previous.as_ref().and_then(|c| c.since(offset));
         let jql = build_jql(self.cfg, since, offset);
         let fields = self.fields();
@@ -369,6 +378,7 @@ impl SyncRun<'_> {
         if emitted == 0
             && views_emitted == 0
             && !stamp_moved
+            && !scope_moved
             && let Some(cursor) = cursor
         {
             return Ok(cursor);
@@ -392,6 +402,7 @@ impl SyncRun<'_> {
         };
         next.views = now;
         next.board_read = board_read;
+        next.scope = Some(scope);
         Ok(next.encode())
     }
 
@@ -653,6 +664,21 @@ mod tests {
             .map(|t| t.with_timezone(&chrono::Utc))
     }
 
+    /// Whether `issue` is inside the query's `project in (…)` clause, as Jira
+    /// reads it: a query without one names every project.
+    fn in_projects(jql: &str, issue: &serde_json::Value) -> bool {
+        let Some(rest) = jql.split("project in (").nth(1) else {
+            return true;
+        };
+        let list = rest.split(')').next().unwrap_or_default();
+        let project = issue["key"]
+            .as_str()
+            .and_then(|key| key.split('-').next())
+            .unwrap_or_default();
+        list.split(", ")
+            .any(|quoted| quoted.trim_matches('"') == project)
+    }
+
     #[async_trait::async_trait]
     impl JiraApi for FakeApi {
         async fn server_info(&self) -> Result<ServerInfo, SourceError> {
@@ -726,7 +752,11 @@ mod tests {
             // sequences below read as the walk alone.
             if jql.ends_with("ORDER BY updated DESC") {
                 self.calls.lock().unwrap().push("ceiling".to_owned());
-                let newest = self.issues.iter().max_by_key(|i| {
+                let newest = self
+                    .issues
+                    .iter()
+                    .filter(|i| in_projects(jql, i))
+                    .max_by_key(|i| {
                     i["fields"]["updated"]
                         .as_str()
                         .and_then(crate::time::parse_jira_time)
@@ -755,6 +785,7 @@ mod tests {
             let matching: Vec<serde_json::Value> = self
                 .issues
                 .iter()
+                .filter(|i| in_projects(jql, i))
                 .filter(|i| {
                     let updated = i["fields"]["updated"]
                         .as_str()
@@ -986,6 +1017,98 @@ mod tests {
         )
         .await;
         assert!(api.count("boards") > first);
+    }
+
+    /// #2181: a project added to the scope brings in its tickets older than
+    /// the watermark. The cursor records the scope it was taken under, and a
+    /// run under another scope walks the new one in full.
+    #[tokio::test]
+    async fn a_project_added_to_the_scope_brings_its_older_tickets() {
+        let api = FakeApi {
+            issues: five_issues(),
+            ..FakeApi::default()
+        };
+        let pay = cfg(serde_json::json!({ "projects": ["PAY"] }));
+        let (first, cursor) = keys_of(&api, &pay, None).await;
+        assert!(!first.contains(&"OPS-77".to_owned()), "{first:?}");
+        let (idle, _) = keys_of(&api, &pay, Some(cursor.clone())).await;
+        assert!(idle.is_empty(), "{idle:?}");
+
+        let both = cfg(serde_json::json!({ "projects": ["PAY", "OPS"] }));
+        let (widened, after) = keys_of(&api, &both, Some(cursor)).await;
+        assert!(
+            widened.contains(&"OPS-77".to_owned()),
+            "OPS-77 is older than the watermark: {widened:?}"
+        );
+        let (idle, again) = keys_of(&api, &both, Some(after.clone())).await;
+        assert!(idle.is_empty(), "settled under the new scope: {idle:?}");
+        assert_eq!(again, after);
+    }
+
+    /// #2181, the same for a changed JQL filter: the filter is the scope.
+    #[tokio::test]
+    async fn a_changed_jql_filter_walks_the_new_filter_in_full() {
+        let api = FakeApi {
+            issues: five_issues(),
+            ..FakeApi::default()
+        };
+        let (_, cursor) = keys_of(&api, &cfg(serde_json::json!({ "jql_filter": "a" })), None).await;
+        let (again, _) = keys_of(
+            &api,
+            &cfg(serde_json::json!({ "jql_filter": "b" })),
+            Some(cursor),
+        )
+        .await;
+        assert_eq!(again.len(), 5, "{again:?}");
+    }
+
+    /// #2181: an edit that leaves the scope alone keeps the incremental
+    /// position -- the rate, the page size and the *Boards and filters*
+    /// setting are not the ticket scope.
+    #[tokio::test]
+    async fn an_edit_outside_the_scope_keeps_the_position() {
+        let api = FakeApi {
+            issues: five_issues(),
+            ..FakeApi::default()
+        };
+        let (_, cursor) = keys_of(&api, &cfg(serde_json::json!({ "projects": ["PAY"] })), None).await;
+        let edited = cfg(serde_json::json!({
+            "projects": ["PAY"], "rate_per_sec": 3, "page_size": 50, "favourite_filters": false
+        }));
+        let (idle, _) = keys_of(&api, &edited, Some(cursor)).await;
+        assert!(idle.is_empty(), "{idle:?}");
+    }
+
+    /// #2181, ruled: narrowing the scope walks what is left in full and says
+    /// nothing of what was taken out. The removed project's tickets stay in
+    /// the mirror as last seen -- this run emits no tombstone for them, and
+    /// the engine sweeps only a cursor-less run (ADR-0003).
+    #[tokio::test]
+    async fn a_project_taken_out_of_the_scope_is_neither_read_nor_tombstoned() {
+        let api = FakeApi {
+            issues: five_issues(),
+            ..FakeApi::default()
+        };
+        let both = cfg(serde_json::json!({ "projects": ["PAY", "OPS"] }));
+        let (_, cursor) = keys_of(&api, &both, None).await;
+        let pay = cfg(serde_json::json!({ "projects": ["PAY"] }));
+        let mut sink = VecSink(Vec::new());
+        let after = run(&api, &pay, Some(cursor), &mut sink).await.unwrap();
+        let keys: Vec<(&str, bool)> = sink
+            .0
+            .iter()
+            .map(|i| (i.entity.key.as_str(), i.deleted))
+            .collect();
+        assert!(
+            !keys.iter().any(|(k, _)| k.starts_with("OPS-")),
+            "{keys:?}"
+        );
+        assert!(
+            keys.contains(&("PAY-219", false)),
+            "the rest is walked in full: {keys:?}"
+        );
+        let (idle, _) = keys_of(&api, &pay, Some(after)).await;
+        assert!(idle.is_empty(), "{idle:?}");
     }
 
     /// Each page after the first is asked from the last issue read, one row
