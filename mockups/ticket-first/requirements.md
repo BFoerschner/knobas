@@ -261,13 +261,12 @@ Björn found Map 1 hard to use: lines cross, names get cut off, and a problem do
 
 ## 5. Conversation
 
-- **R-5.1** The job card's conversation summary: "20 comments, 2 new since 09:00, 2 mention you", the latest comment, and *Read the conversation*. Status changes do not count as comments.
-- **R-5.2** The Conversation tab shows the whole thread, oldest first, with the filter bar:
+- **R-5.1** The conversation is the ticket's comments (#2163, `docs/decisions/2026-10-26-conversation-comments-only.md`). The job card's conversation summary: "20 comments, 2 new since 09:00, 2 mention you", the latest comment, and *Read the conversation*.
+- **R-5.2** The conversation is the ticket's comments: the Conversation tab shows them all, oldest first, and no status change or PR event (#2163). It has the filter bar:
   - text;
   - person chips (everyone who commented);
   - *Mentions me*;
-  - *New since 09:00*;
-  - *Include changes*, on by default, which interleaves status changes and PR events as quiet one-line entries.
+  - *New since 09:00*.
 - **R-5.3** With no filter, the thread folds its old part behind "Show 17 earlier entries, from 2026-08-12". It keeps the last 6 entries and everything new. A blue rule marks "New since your last visit". New comments have a blue edge. Comments that mention you have a yellow edge, a *mentions you* chip, and the `@name` in blue.
 - **R-5.4** A comment box at the end. *Comment* goes through the write queue. BUILT (`Comment` op).
 - **R-5.5** Data: Jira comments are BUILT (mirrored). Two pieces are LOW. *Last visit* needs a per-entity "last opened" time, which can come from the activity stream or passive observations. *Mentions me* is a match of the account's display name in the comment body, as a named payload read (ADR-0007).
