@@ -259,6 +259,10 @@ impl Source for Synthetic {
                         "number": i.to_string(),
                         "status": if i % 7 == 0 { "FAILURE" } else { "SUCCESS" },
                         "state": "finished",
+                        // What the CI role requires of a run (ADR-0029), so
+                        // the source fills it and the Builds list draws it.
+                        "startDate": "20260822T100500+0000",
+                        "finishDate": "20260822T100917+0000",
                         "branchName": if i % 10 == 0 { format!("feature/{}", i % 50) } else { "main".to_owned() },
                     }),
                 ),
@@ -630,7 +634,7 @@ fn samples() -> u64 {
 async fn seed_samples(pool: &PgPool) {
     let made = sqlx::query(
         "insert into knobas.monitor_sample (entity_id, taken_at, state, response_time_ms)
-         select 'kuma:monitor:' || m, now() - make_interval(mins => n + 1),
+         select 'kuma:monitor:' || m, now() - make_interval(mins => (n + 1)::int),
                 case when n % 50 = 49 or (m = 0 and n = 0) then 'down' else 'up' end, 120
            from generate_series(0, $1 - 1) m
           cross join generate_series(0, $2 / $1 - 1) n",
