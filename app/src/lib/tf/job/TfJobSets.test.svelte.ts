@@ -132,7 +132,7 @@ function ports(applying: JobLinkSets["sets"] = []): JobPorts {
     entityCheckout: reject,
     weekTimesheet: () => Promise.resolve({ days: [], rows: [], past_horizon: [] }),
     visitEntity: () => Promise.resolve(null),
-    entityThread: () => Promise.resolve({ comments: [], changes: [], me: [] }),
+    entityThread: () => Promise.resolve({ comments: [], me: [] }),
     createLink: reject,
     unlink: reject,
     roomSuggestions: () => Promise.resolve({ rows: [], total: 0, more: [] }),

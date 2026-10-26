@@ -477,15 +477,12 @@ function fixtureTime(said: string): string {
   return at.toISOString();
 }
 
-/** A thread change with nothing said yet (#929): each line fills in its own. */
-const QUIET = { status: null, from: null, by: null, mine: false, number: null, repo: null };
-
 function entityThread(args: Record<string, unknown>): Thread {
   const id = String(args["entityId"] ?? "");
   if (!CORPUS.some((candidate) => candidate.entity_id === id)) {
     throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
   }
-  if (id !== "mock:PAY-231") return { comments: [], changes: [], me: ["mara"] };
+  if (id !== "mock:PAY-231") return { comments: [], me: ["mara"] };
   return {
     comments: PAY_231_THREAD.map(([who, at, body]) => ({
       author: PEOPLE[who] ?? who,
@@ -494,19 +491,6 @@ function entityThread(args: Record<string, unknown>): Thread {
       mine: who === "ML",
       mentions_me: /@mara(?![\p{L}\p{N}_.-])/u.test(body),
     })),
-    changes: [
-      { ...QUIET, at: fixtureTime("2026-08-14 16:20"), kind: "opened", number: "142", repo: "payout-service" },
-      { ...QUIET, at: fixtureTime("2026-08-18 09:05"), kind: "status", status: "In Progress", mine: true },
-      {
-        ...QUIET,
-        at: fixtureTime("2026-08-19 11:40"),
-        kind: "status",
-        status: "In Review",
-        from: "In Progress",
-        by: "Priya Nair",
-      },
-      { ...QUIET, at: fixtureTime("2026-08-20 15:10"), kind: "merged", number: "57", repo: "psp-client" },
-    ],
     me: ["mara"],
   };
 }

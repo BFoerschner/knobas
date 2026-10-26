@@ -5,11 +5,11 @@
  *
  * **New** is a comment somebody else wrote after the reader's last visit. A
  * comment the source did not date is never new, and with no earlier visit
- * nothing is: a first look has nothing to compare against. **Status changes
- * are never comments** (R-5.1): they are entries of their own, counted
- * nowhere and drawn only while *Include changes* is on.
+ * nothing is: a first look has nothing to compare against. The conversation
+ * is the ticket's comments and nothing else (#2163): no status-move or
+ * pull-request lines.
  */
-import type { Thread, ThreadChange, ThreadComment } from "../../ipc/entity";
+import type { Thread, ThreadComment } from "../../ipc/entity";
 import { isFiltering, matchesAll, type FilterState } from "../filter/filter";
 import { dayKey } from "../../time/day";
 import { stampLabel } from "../../time/format";
@@ -20,7 +20,6 @@ export const KEEP = 6;
 /** The *Show* chips' values. Their labels are the view's. */
 export const MENTIONS = "mentions";
 export const NEW = "new";
-export const CHANGES = "changes";
 
 /** Whether `comment` is new to the reader: somebody else's, after `lastVisit`. */
 export function isNew(comment: ThreadComment, lastVisit: string | null): boolean {
@@ -77,26 +76,11 @@ export function firstName(author: string | null): string {
   return author.trim().split(/\s+/)[0] ?? author;
 }
 
-/**
- * A change as its quiet line says it (#929): who moved the ticket, from what
- * to what, or a linked pull request's opening or merge, named by number and
- * repository as far as the record knows them.
- */
-export function changeLine(change: ThreadChange): string {
-  if (change.kind === "status") {
-    const who = change.mine ? "You" : firstName(change.by);
-    const from = change.from === null ? "" : ` from ${change.from}`;
-    return `${who} moved this${from} to ${change.status ?? "another status"}`;
-  }
-  const pr = change.number === null ? "A pull request" : `PR #${change.number}`;
-  const repo = change.repo === null ? "" : ` in ${change.repo}`;
-  return change.kind === "opened" ? `${pr} opened${repo}` : `${pr}${repo} merged`;
-}
-
 /** One line of the thread. */
-export type Entry =
-  | { kind: "comment"; comment: ThreadComment; fresh: boolean }
-  | { kind: "change"; change: ThreadChange };
+export interface Entry {
+  comment: ThreadComment;
+  fresh: boolean;
+}
 
 /** What the tab draws. */
 export interface Drawn {
@@ -111,27 +95,11 @@ export interface Drawn {
   shown: number;
 }
 
-/** Comments and changes in one time line; a comment with no time keeps its place. */
-function interleave(thread: Thread, lastVisit: string | null): Entry[] {
-  const entries: Entry[] = [];
-  const changes = [...thread.changes];
-  for (const comment of thread.comments) {
-    while (comment.at !== null && changes.length > 0 && Date.parse(changes[0]!.at) <= Date.parse(comment.at)) {
-      entries.push({ kind: "change", change: changes.shift()! });
-    }
-    entries.push({ kind: "comment", comment, fresh: isNew(comment, lastVisit) });
-  }
-  for (const change of changes) entries.push({ kind: "change", change });
-  return entries;
-}
-
 /**
  * The tab's entries under `filter` (R-5.2, R-5.3).
  *
  * Words must all appear in a comment's text or author; person chips keep any of
- * the people on; *Mentions me* and *New since…* keep only those comments. A
- * change shows only with *Include changes* on and nothing else filtering, as
- * in prototype-6: a filtered thread is a search over what people wrote.
+ * the people on; *Mentions me* and *New since…* keep only those comments.
  *
  * Unfiltered and not expanded, the old part folds: the last {@link KEEP}
  * entries and every new one stay.
@@ -144,9 +112,8 @@ export function drawThread(
 ): Drawn {
   const people = filter.chips["who"] ?? [];
   const only = filter.chips["only"] ?? [];
-  const narrowing = narrows(filter);
-  let entries = interleave(thread, lastVisit).filter((entry) => {
-    if (entry.kind === "change") return only.includes(CHANGES) && !narrowing;
+  const narrowing = isFiltering(filter);
+  let entries = thread.comments.map((comment) => ({ comment, fresh: isNew(comment, lastVisit) })).filter((entry) => {
     const comment = entry.comment;
     if (!matchesAll(`${comment.body} ${comment.author ?? ""}`, filter.text)) return false;
     if (people.length > 0 && !people.includes(comment.author ?? "")) return false;
@@ -154,28 +121,22 @@ export function drawThread(
     if (only.includes(NEW) && !entry.fresh) return false;
     return true;
   });
-  const shown = entries.filter((entry) => entry.kind === "comment").length;
+  const shown = entries.length;
 
   let folded = 0;
   let foldedFrom: string | null = null;
   if (!narrowing && !expanded) {
-    const keep = entries.filter((entry, index) => index >= entries.length - KEEP || (entry.kind === "comment" && entry.fresh));
+    const keep = entries.filter((entry, index) => index >= entries.length - KEEP || entry.fresh);
     folded = entries.length - keep.length;
     if (folded > 0) {
       const first = entries.find((entry) => !keep.includes(entry));
-      const at = first?.kind === "comment" ? first.comment.at : (first?.change.at ?? null);
+      const at = first?.comment.at ?? null;
       foldedFrom = at === null ? null : dayKey(new Date(at));
     }
     entries = keep;
   }
-  const firstNew = narrowing ? -1 : entries.findIndex((entry) => entry.kind === "comment" && entry.fresh);
+  const firstNew = narrowing ? -1 : entries.findIndex((entry) => entry.fresh);
   return { entries, folded, foldedFrom, newAt: firstNew === -1 ? null : firstNew, shown };
-}
-
-/** Whether the filter narrows the thread beyond *Include changes*. */
-export function narrows(filter: FilterState): boolean {
-  const only = filter.chips["only"] ?? [];
-  return isFiltering({ ...filter, chips: { ...filter.chips, only: only.filter((value) => value !== CHANGES) } });
 }
 
 /** A run of a comment's body, and whether it names the reader. */
