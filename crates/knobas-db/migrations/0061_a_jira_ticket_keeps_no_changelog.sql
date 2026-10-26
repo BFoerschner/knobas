@@ -45,8 +45,7 @@
 -- Untouched. A Jira cursor's overlap window recognises a record by the
 -- fingerprint of the raw `/search` record (#345), which since #2165 has no
 -- changelog. The first incremental run after the upgrade re-delivers once
--- the tickets in its overlap window, whatever this migration does, and no
--- cursor version is bumped.
+-- the tickets in its overlap window, and no cursor version is bumped.
 --
 -- ## Disk
 --
