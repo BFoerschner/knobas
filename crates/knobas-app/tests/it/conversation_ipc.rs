@@ -7,8 +7,7 @@
 //! takes a database of its own ([`scratch`], #1907). The identity `@me` resolves to is `mara`, the one username any source
 //! here is configured with.
 
-use knobas_app::conversation::{ChangeKind, thread, visit};
-use knobas_app::sources::Registry;
+use knobas_app::conversation::{thread, visit};
 use knobas_core::entity::EntityRef;
 
 async fn pool() -> sqlx::PgPool {
@@ -191,7 +190,7 @@ async fn a_jira_thread_reads_its_comments_with_mine_and_mentions() {
     )
     .await;
 
-    let read = thread(&pool, &Registry::for_process(), &id).await.unwrap();
+    let read = thread(&pool, &id).await.unwrap();
     assert_eq!(read.me, ["mara"]);
     let lines: Vec<_> = read
         .comments
@@ -211,7 +210,6 @@ async fn a_jira_thread_reads_its_comments_with_mine_and_mentions() {
         Some("2026-08-12T07:14:00Z".parse().unwrap())
     );
     assert_eq!(read.comments[1].body, "Yes. [~mara] can you pick this up?");
-    assert!(read.changes.is_empty());
 }
 
 /// **Failure direction** (ADR-0007): a payload of another shape, and a comment
@@ -227,7 +225,7 @@ async fn a_payload_of_another_shape_reads_as_no_comments() {
     ] {
         let id = issue(&pool, payload.clone()).await;
         assert!(
-            thread(&pool, &Registry::for_process(), &id)
+            thread(&pool, &id)
                 .await
                 .unwrap()
                 .comments
@@ -237,208 +235,12 @@ async fn a_payload_of_another_shape_reads_as_no_comments() {
     }
     let missing = format!("jira:{}", key());
     assert_eq!(
-        thread(&pool, &Registry::for_process(), &missing)
+        thread(&pool, &missing)
             .await
             .unwrap_err()
             .code,
         knobas_app::IpcErrorCode::NotFound
     );
-}
-
-/// **Status changes never count as comments** (R-5.1): a move knobas delivered
-/// is a change on the thread, beside the comments and not among them; one
-/// still waiting in the queue is not drawn as made.
-#[tokio::test]
-async fn a_status_move_knobas_sent_is_a_change_and_not_a_comment() {
-    let pool = pool().await;
-    let id = issue(
-        &pool,
-        serde_json::json!({ "fields": { "comment": { "comments": [
-            comment("lena", "Lena Hoffmann", "2026-08-12T09:14:00.000+0200", "Finance asks."),
-        ] } } }),
-    )
-    .await;
-    let entity = EntityRef::parse(&id).unwrap();
-    let mut queued = Vec::new();
-    for status in ["In Review", "Done"] {
-        let op = knobas_source::WriteOp::Transition {
-            entity: id.clone(),
-            status: status.to_owned(),
-        };
-        let row = knobas_core::write_queue::queue(
-            &pool,
-            "jira",
-            &entity,
-            "transition",
-            serde_json::to_value(&op).unwrap(),
-            serde_json::json!({}),
-        )
-        .await
-        .unwrap();
-        queued.push(row.id);
-    }
-    knobas_core::write_queue::sent(&pool, queued[0], None)
-        .await
-        .unwrap()
-        .unwrap();
-
-    let read = thread(&pool, &Registry::for_process(), &id).await.unwrap();
-    assert_eq!(read.comments.len(), 1);
-    assert_eq!(
-        read.changes
-            .iter()
-            .map(|c| (c.kind, c.status.as_deref(), c.mine))
-            .collect::<Vec<_>>(),
-        [(ChangeKind::Status, Some("In Review"), true)]
-    );
-}
-
-/// One entry of Jira's changelog as `/search` with `expand=changelog` writes
-/// it (WADL: *Change History*): who, when, and the fields it moved.
-fn history(
-    name: &str,
-    display: &str,
-    created: &str,
-    items: serde_json::Value,
-) -> serde_json::Value {
-    serde_json::json!({
-        "id": uuid::Uuid::new_v4().to_string(),
-        "author": { "name": name, "displayName": display, "active": true },
-        "created": created,
-        "items": items,
-    })
-}
-
-fn status_item(from: &str, to: &str) -> serde_json::Value {
-    serde_json::json!({ "field": "status", "fieldtype": "jira",
-                        "from": "1", "fromString": from, "to": "3", "toString": to })
-}
-
-/// **A status change made in Jira** (R-5.2): the changelog's status items are
-/// changes, each with who moved it, from what and to what, at its time; a
-/// history that moved another field is not one, and none of them is a
-/// comment (R-5.1). A move knobas sent that the changelog already holds is
-/// drawn once, as Jira records it; one Jira does not hold yet is still drawn.
-#[tokio::test]
-async fn a_status_change_made_in_jira_is_a_change_with_who_from_and_to() {
-    let pool = pool().await;
-    let id = issue(
-        &pool,
-        serde_json::json!({
-            "fields": { "comment": { "comments": [
-                comment("lena", "Lena Hoffmann", "2026-08-12T09:14:00.000+0200", "Finance asks."),
-            ] } },
-            "changelog": { "startAt": 0, "maxResults": 4, "total": 4, "histories": [
-                // A move to Done long before knobas queued its own: not that move.
-                history("priya", "Priya Nair", "2026-08-12T09:20:00.000+0200",
-                        serde_json::json!([status_item("Backlog", "Done")])),
-                history("priya", "Priya Nair", "2026-08-12T09:30:00.000+0200",
-                        serde_json::json!([status_item("To Do", "In Progress")])),
-                history("priya", "Priya Nair", "2026-08-12T09:31:00.000+0200",
-                        serde_json::json!([{ "field": "assignee", "fromString": null, "toString": "Mara" }])),
-                history("mara", "Mara Lindqvist", "2099-01-01T10:00:00.000+0000",
-                        serde_json::json!([status_item("In Progress", "In Review")])),
-            ] },
-        }),
-    )
-    .await;
-    let entity = EntityRef::parse(&id).unwrap();
-    for status in ["In Review", "Done"] {
-        let op = knobas_source::WriteOp::Transition {
-            entity: id.clone(),
-            status: status.to_owned(),
-        };
-        let row = knobas_core::write_queue::queue(
-            &pool,
-            "jira",
-            &entity,
-            "transition",
-            serde_json::to_value(&op).unwrap(),
-            serde_json::json!({}),
-        )
-        .await
-        .unwrap();
-        knobas_core::write_queue::sent(&pool, row.id, None)
-            .await
-            .unwrap()
-            .unwrap();
-    }
-
-    let read = thread(&pool, &Registry::for_process(), &id).await.unwrap();
-    assert_eq!(read.comments.len(), 1, "a status change is never a comment");
-    let lines: Vec<_> = read
-        .changes
-        .iter()
-        .map(|c| {
-            (
-                c.kind,
-                c.by.as_deref(),
-                c.from.as_deref(),
-                c.status.as_deref(),
-                c.mine,
-            )
-        })
-        .collect();
-    assert_eq!(
-        lines,
-        [
-            (
-                ChangeKind::Status,
-                Some("Priya Nair"),
-                Some("Backlog"),
-                Some("Done"),
-                false
-            ),
-            (
-                ChangeKind::Status,
-                Some("Priya Nair"),
-                Some("To Do"),
-                Some("In Progress"),
-                false
-            ),
-            (ChangeKind::Status, None, None, Some("Done"), true),
-            (
-                ChangeKind::Status,
-                Some("Mara Lindqvist"),
-                Some("In Progress"),
-                Some("In Review"),
-                true
-            ),
-        ],
-        "oldest first; the knobas move to In Review is Jira's own line, the one to Done is not \
-         in the changelog yet (its older move to Done is another move)"
-    );
-    assert_eq!(
-        read.changes[1].at,
-        "2026-08-12T07:30:00Z"
-            .parse::<chrono::DateTime<chrono::Utc>>()
-            .unwrap()
-    );
-}
-
-/// **Failure direction of the changelog read** (ADR-0007): a changelog of
-/// another shape, and a status item with no new status or an entry with no
-/// time, are no line -- never an error and never a guess.
-#[tokio::test]
-async fn a_changelog_of_another_shape_reads_as_no_moves() {
-    let pool = pool().await;
-    for changelog in [
-        serde_json::json!("three"),
-        serde_json::json!({ "histories": { "status": "Done" } }),
-        serde_json::json!({ "histories": [
-            history("priya", "Priya Nair", "2026-08-12T09:30:00.000+0200",
-                    serde_json::json!([{ "field": "status", "fromString": "To Do" }])),
-            history("priya", "Priya Nair", "yesterday",
-                    serde_json::json!([status_item("To Do", "Done")])),
-            history("priya", "Priya Nair", "2026-08-12T09:30:00.000+0200",
-                    serde_json::json!({ "field": "status", "toString": "Done" })),
-        ] }),
-    ] {
-        let id = issue(&pool, serde_json::json!({ "changelog": changelog.clone() })).await;
-        let read = thread(&pool, &Registry::for_process(), &id).await.unwrap();
-        assert!(read.changes.is_empty(), "{changelog}");
-        assert!(read.comments.is_empty(), "{changelog}");
-    }
 }
 
 /// A Gitea pull request as the adapter stores it: Gitea's own record.
@@ -485,14 +287,48 @@ async fn confirmed(pool: &sqlx::PgPool, from: &str, to: &str) {
     .unwrap();
 }
 
-/// **Pull-request events** (R-5.2): a linked pull request's opening, and its
-/// merge when it has one, are lines on the thread, named by number and
-/// repository, read through the times Gitea declares. A pull request only
-/// proposed, not confirmed, is not on the thread, and none of it is a comment.
+/// **The conversation is the ticket's comments** (R-5.1, R-5.2; #2163): a
+/// ticket whose payload still holds a Jira changelog, with a status move knobas
+/// sent and a confirm-linked merged pull request, answers its comments and
+/// nothing else -- no status move from either record and no pull-request line.
 #[tokio::test]
-async fn a_linked_pull_requests_opening_and_merge_are_lines() {
+async fn the_thread_is_the_comments_and_nothing_else() {
     let pool = pool().await;
-    let ticket = issue(&pool, serde_json::json!({})).await;
+    let ticket = issue(
+        &pool,
+        serde_json::json!({
+            "fields": { "comment": { "comments": [
+                comment("lena", "Lena Hoffmann", "2026-08-12T09:14:00.000+0200", "Finance asks."),
+            ] } },
+            "changelog": { "startAt": 0, "maxResults": 1, "total": 1, "histories": [{
+                "id": "10001",
+                "author": { "name": "priya", "displayName": "Priya Nair", "active": true },
+                "created": "2026-08-12T09:30:00.000+0200",
+                "items": [{ "field": "status", "fieldtype": "jira", "from": "1",
+                            "fromString": "To Do", "to": "3", "toString": "In Progress" }],
+            }] },
+        }),
+    )
+    .await;
+    let entity = EntityRef::parse(&ticket).unwrap();
+    let op = knobas_source::WriteOp::Transition {
+        entity: ticket.clone(),
+        status: "In Review".to_owned(),
+    };
+    let row = knobas_core::write_queue::queue(
+        &pool,
+        "jira",
+        &entity,
+        "transition",
+        serde_json::to_value(&op).unwrap(),
+        serde_json::json!({}),
+    )
+    .await
+    .unwrap();
+    knobas_core::write_queue::sent(&pool, row.id, None)
+        .await
+        .unwrap()
+        .unwrap();
     let merged = pull_request(
         &pool,
         57,
@@ -500,59 +336,18 @@ async fn a_linked_pull_requests_opening_and_merge_are_lines() {
         Some("2026-08-13T15:00:00+02:00"),
     )
     .await;
-    let open = pull_request(&pool, 142, "2026-08-14T08:00:00Z", None).await;
-    let stranger = pull_request(&pool, 9, "2026-08-11T08:00:00Z", None).await;
     confirmed(&pool, &ticket, &merged).await;
-    confirmed(&pool, &open, &ticket).await;
-    sqlx::query(
-        "insert into knobas.link (from_id, to_id, relation, origin, created_by, confirmed_at,
-                                  rule, rule_class, reason)
-         values ($1, $2, 'related', 'suggested', 'user', null,
-                 'key_mention', 'exact_key', 'only proposed')",
-    )
-    .bind(&ticket)
-    .bind(&stranger)
-    .execute(&pool)
-    .await
-    .unwrap();
 
-    let read = thread(&pool, &Registry::for_process(), &ticket)
-        .await
-        .unwrap();
-    assert!(read.comments.is_empty());
-    let lines: Vec<_> = read
-        .changes
-        .iter()
-        .map(|c| {
-            (
-                c.at.to_rfc3339(),
-                c.kind,
-                c.number.as_deref(),
-                c.repo.as_deref(),
-            )
-        })
-        .collect();
+    let read = thread(&pool, &ticket).await.unwrap();
+    let wire = serde_json::to_value(&read).unwrap();
+    let mut keys: Vec<_> = wire.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(keys, ["comments", "me"], "the answer carries comments only");
     assert_eq!(
-        lines,
-        [
-            (
-                "2026-08-12T07:00:00+00:00".to_owned(),
-                ChangeKind::Opened,
-                Some("57"),
-                Some("payout-service")
-            ),
-            (
-                "2026-08-13T13:00:00+00:00".to_owned(),
-                ChangeKind::Merged,
-                Some("57"),
-                Some("payout-service")
-            ),
-            (
-                "2026-08-14T08:00:00+00:00".to_owned(),
-                ChangeKind::Opened,
-                Some("142"),
-                Some("payout-service")
-            ),
-        ]
+        read.comments
+            .iter()
+            .map(|c| (c.author.as_deref(), c.body.as_str()))
+            .collect::<Vec<_>>(),
+        [(Some("Lena Hoffmann"), "Finance asks.")]
     );
 }
