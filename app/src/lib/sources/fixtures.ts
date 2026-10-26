@@ -57,7 +57,7 @@
  *   `request_timeout_secs`.
  * - Gitea: `commits_per_repo`, `prs_per_repo`, `include_pr_comments`,
  *   `rate_limit_per_sec`, `concurrent_repos`.
- * - TeamCity: `rate_limit_per_sec`.
+ * - TeamCity: `rate_limit_per_sec`, `concurrent_configs`.
  *
  * The one that does cost coverage is Gitea's `include_pr_comments`: it is the
  * only boolean any M1 adapter declares, so with it absent every `toggle` test
