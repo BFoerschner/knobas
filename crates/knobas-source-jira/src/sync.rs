@@ -166,6 +166,14 @@ const WORKLOG_READS_IN_FLIGHT: usize = 8;
 /// The unit of the walk reading: the UI prints "120 of 300 issues".
 const ISSUES: &str = "issues";
 
+/// One issue of a page, read: whether the run delivers it (the overlap
+/// re-delivered it if not) and its `updated`, the watermark's input.
+struct PageIssue {
+    raw: RawIssue,
+    deliver: bool,
+    updated: Option<DateTime<Utc>>,
+}
+
 pub(crate) struct SyncRun<'a> {
     pub api: &'a (dyn JiraApi + 'a),
     pub cfg: &'a JiraConfig,
@@ -225,8 +233,7 @@ impl SyncRun<'_> {
                 }
             };
             total = page.total;
-            // What the page delivers, and what the overlap re-delivered.
-            let mut read: Vec<(RawIssue, bool, Option<DateTime<Utc>>)> = Vec::new();
+            let mut page_issues: Vec<PageIssue> = Vec::new();
             for raw in page.issues {
                 let updated = raw
                     .issue
@@ -250,17 +257,26 @@ impl SyncRun<'_> {
                 let deliver = !previous
                     .as_ref()
                     .is_some_and(|c| c.already_delivered(&raw.issue.key, &fingerprint));
-                read.push((raw, deliver, updated));
+                page_issues.push(PageIssue {
+                    raw,
+                    deliver,
+                    updated,
+                });
             }
             // Before any of the page reaches the sink, so one that fails
             // fails the run with nothing after it pushed (#2167).
-            let mut due: Vec<&mut RawIssue> = read
+            let mut due: Vec<&mut RawIssue> = page_issues
                 .iter_mut()
-                .filter(|(_, deliver, _)| *deliver)
-                .map(|(raw, _, _)| raw)
+                .filter(|issue| issue.deliver)
+                .map(|issue| &mut issue.raw)
                 .collect();
             self.complete_worklogs(&mut due).await?;
-            for (mut raw, deliver, updated) in read {
+            for PageIssue {
+                mut raw,
+                deliver,
+                updated,
+            } in page_issues
+            {
                 // Before each issue, over the search's own total, so an
                 // incremental run that pushes nothing still moves the bar.
                 // A total that shrank under the run never reads below `done`.
@@ -437,18 +453,15 @@ impl SyncRun<'_> {
         let due: Vec<(usize, String)> = raws
             .iter()
             .enumerate()
-            .filter(|(_, raw)| match &raw.issue.fields.worklog {
-                None => true,
-                Some(w) => w.total.unwrap_or(0) as usize > w.worklogs.len(),
-            })
+            .filter(|(_, raw)| worklogs_truncated(raw))
             .map(|(at, raw)| (at, raw.issue.key.clone()))
             .collect();
+        // Collected first: a stream holding the `map` closure across an
+        // await is not provably `Send` to the `Source::sync` future.
         // No paging: the WADL declares no query parameters on this
         // resource. What the server returns is what M1 records;
         // `fields.worklog.total` keeps the truth visible. M3's time work
         // uses /rest/api/2/worklog/updated + /worklog/list instead.
-        // Collected first: a stream holding the `map` closure across an
-        // await is not provably `Send` to the `Source::sync` future.
         let reads: Vec<_> = due.iter().map(|(_, key)| self.api.worklogs(key)).collect();
         let pages: Vec<_> = stream::iter(reads)
             .buffered(WORKLOG_READS_IN_FLIGHT)
@@ -484,6 +497,16 @@ impl SyncRun<'_> {
             fields.push_str(extra);
         }
         fields
+    }
+}
+
+/// Whether a record's worklog container needs reading whole: it carries
+/// fewer than its `total`, or it is absent, which is never read as "no
+/// worklogs" (see [`SyncRun::complete`]).
+fn worklogs_truncated(raw: &RawIssue) -> bool {
+    match &raw.issue.fields.worklog {
+        None => true,
+        Some(w) => w.total.unwrap_or(0) as usize > w.worklogs.len(),
     }
 }
 
@@ -791,13 +814,16 @@ mod tests {
         async fn worklogs(&self, key: &str) -> Result<WorklogPage, SourceError> {
             self.calls.lock().unwrap().push(format!("worklogs:{key}"));
             let now = self.worklogs_in_flight.fetch_add(1, Ordering::SeqCst) + 1;
-            self.most_worklogs_in_flight.fetch_max(now, Ordering::SeqCst);
+            self.most_worklogs_in_flight
+                .fetch_max(now, Ordering::SeqCst);
             if let Some(ms) = self.worklog_ms.get(key) {
                 tokio::time::sleep(std::time::Duration::from_millis(*ms)).await;
             }
             self.worklogs_in_flight.fetch_sub(1, Ordering::SeqCst);
             if self.failing_worklogs == Some(key) {
-                return Err(SourceError::Unreachable(format!("{key}'s worklogs timed out")));
+                return Err(SourceError::Unreachable(format!(
+                    "{key}'s worklogs timed out"
+                )));
             }
             let all = self.worklogs.get(key).cloned().unwrap_or_default();
             Ok(serde_json::from_value(serde_json::json!({
@@ -1232,8 +1258,16 @@ mod tests {
         assert_eq!(keys, walk_order);
         for item in &sink.0 {
             let worklog = &item.payload["fields"]["worklog"];
-            assert_eq!(worklog["worklogs"].as_array().unwrap().len(), 25, "{}", item.entity.key);
-            assert_eq!(worklog["worklogs"][24]["id"], format!("{}-w24", item.entity.key));
+            assert_eq!(
+                worklog["worklogs"].as_array().unwrap().len(),
+                25,
+                "{}",
+                item.entity.key
+            );
+            assert_eq!(
+                worklog["worklogs"][24]["id"],
+                format!("{}-w24", item.entity.key)
+            );
         }
     }
 

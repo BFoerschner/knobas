@@ -8,7 +8,7 @@
   server that asks for gentler clients lowers them in its form; a source that saved the old values
   keeps them. Pinned by `config::tests::an_empty_object_is_the_datacenter_default` and
   `descriptor::tests::the_form_offers_twenty_a_second_with_a_burst_of_forty`. Per the issue
-  tracker's note on limiter refills, a count of requests in a time window at this default counts
+  tracker's note on limiter refills (#1737, `docs/agents/issue-tracker.md`), a count of requests in a time window at this default counts
   the burst within one refill interval (50 ms).
 
   **Why, and what rides on it.** Data Center inlines at most 20 worklogs per issue in `/search`,

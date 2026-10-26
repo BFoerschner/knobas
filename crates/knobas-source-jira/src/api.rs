@@ -181,8 +181,9 @@ fn no_agile() -> SourceError {
 /// What a sync run's `/search` sends.
 ///
 /// A refresh asks the same query (`crate::refresh`). No `expand` (#2165):
-/// `changelog` is a ticket's whole edit history, which no reader wants and
-/// which outgrew the transport's response cap (module docs), and
+/// `changelog` is a ticket's whole edit history, which the conversation
+/// stops reading (#2163) and which outgrew the transport's response cap
+/// (module docs), and
 /// `renderedFields` would give us HTML (gotcha 7). `validateQuery` stays at
 /// its default.
 fn search_query(

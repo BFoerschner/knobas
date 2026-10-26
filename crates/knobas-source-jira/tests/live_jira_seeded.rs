@@ -2188,7 +2188,7 @@ async fn a_long_history_syncs_without_its_changelog() {
     let source = seeded.source(serde_json::json!({}));
     let deadline = tokio::time::Instant::now() + INDEX_BUDGET;
     let items = loop {
-        let started = std::time::Instant::now();
+        let sync_started = std::time::Instant::now();
         let mut sink = VecSink(Vec::new());
         if let Err(e) = source.sync(None, &mut sink).await {
             panic!(
@@ -2196,7 +2196,10 @@ async fn a_long_history_syncs_without_its_changelog() {
                  which is what a page over the transport's size cap does: {e}"
             );
         }
-        println!("MEASURED full sync with {key}: {:?}", started.elapsed());
+        println!(
+            "MEASURED full sync with {key}: {:?}",
+            sync_started.elapsed()
+        );
         let caught_up = sink.0.iter().any(|i| {
             i.entity.key == key
                 && i.payload["fields"]["description"].as_str() == Some(last.as_str())
@@ -2215,7 +2218,7 @@ async fn a_long_history_syncs_without_its_changelog() {
     assert!(
         stored.get("changelog").is_none(),
         "{key}'s stored record carries a changelog: {}",
-        &stored["changelog"]
+        stored["changelog"]
     );
     let bytes = |v: &serde_json::Value| serde_json::to_vec(v).expect("JSON").len();
     println!("MEASURED {key}: stored payload {} B", bytes(stored));
@@ -2239,7 +2242,7 @@ async fn a_long_history_syncs_without_its_changelog() {
     assert!(
         refreshed.payload.get("changelog").is_none(),
         "{key}'s refresh answers a changelog: {}",
-        &refreshed.payload["changelog"]
+        refreshed.payload["changelog"]
     );
     drop(sub_task);
 }
@@ -2325,7 +2328,10 @@ async fn an_issue_with_more_than_twenty_worklogs_comes_back_with_all_of_them() {
         assert_eq!(code, 200, "{key}: {body}");
         let inline = &body["issues"][0]["fields"]["worklog"];
         assert_eq!(
-            (inline["worklogs"].as_array().map(Vec::len), inline["total"].as_u64()),
+            (
+                inline["worklogs"].as_array().map(Vec::len),
+                inline["total"].as_u64()
+            ),
             (Some(20), Some(MANY_WORKLOGS as u64)),
             "{key}: /search no longer cuts worklogs at 20, so this test completes nothing"
         );
@@ -2336,7 +2342,10 @@ async fn an_issue_with_more_than_twenty_worklogs_comes_back_with_all_of_them() {
             .map(|w| w["comment"].as_str().unwrap_or_default())
             .collect();
         let logged: Vec<String> = (0..MANY_WORKLOGS).map(|n| comment(key, n)).collect();
-        assert_eq!(stored, logged, "{key}: every worklog, in the order it was logged");
+        assert_eq!(
+            stored, logged,
+            "{key}: every worklog, in the order it was logged"
+        );
     }
     println!("SEEDED {keys:?}: {MANY_WORKLOGS} worklogs each, all stored");
     drop(sub_tasks);
