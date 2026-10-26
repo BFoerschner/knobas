@@ -48,11 +48,14 @@
     if (run.failed !== null) push({ text: `Could not sync: ${run.failed}`, tone: "err" });
   }
 
-  /** What a click runs, and ⌘R: nothing while the button is disabled. */
+  /** *Refreshing…* or *Syncing…*: the button is disabled, and ⌘R presses nothing. */
+  const busy = $derived(offer === "refresh" ? refresh.reading : sync?.running === true);
+
+  /** What a click runs, and ⌘R. */
   function press() {
-    if (offer === "refresh") {
-      if (!refresh.reading) void refresh.refresh(detail, reread);
-    } else if (sync !== null && !sync.running) void syncNow(sync);
+    if (busy) return;
+    if (offer === "refresh") void refresh.refresh(detail, reread);
+    else if (sync !== null) void syncNow(sync);
   }
 
   const drawn = $derived(offer === "refresh" || sync !== null);
@@ -66,7 +69,7 @@
   <button
     type="button"
     class="tf-btn tf-refresh"
-    disabled={refresh.reading}
+    disabled={busy}
     title="Read this item from {detail.source.display_name} again"
     onclick={press}>{refresh.reading ? "Refreshing…" : "Refresh"}</button
   >
@@ -74,7 +77,7 @@
   <button
     type="button"
     class="tf-btn tf-refresh"
-    disabled={sync.running}
+    disabled={busy}
     title="Sync {detail.source.display_name}, which this item is from"
     onclick={press}>{sync.running ? "Syncing…" : "Sync now"}</button
   >
