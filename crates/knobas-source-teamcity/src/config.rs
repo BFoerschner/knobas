@@ -293,7 +293,11 @@ mod tests {
         let schema = &config_schema()["properties"]["concurrent_configs"];
         assert_eq!(
             (&schema["minimum"], &schema["maximum"], &schema["default"]),
-            (&serde_json::json!(1), &serde_json::json!(32), &serde_json::json!(8))
+            (
+                &serde_json::json!(1),
+                &serde_json::json!(32),
+                &serde_json::json!(8)
+            )
         );
     }
 

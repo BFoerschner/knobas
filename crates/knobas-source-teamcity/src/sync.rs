@@ -20,7 +20,7 @@
 //! server-wide, so one query covers every configuration -- narrowing to the
 //! scope client-side. The per-configuration queries run up to
 //! `concurrent_configs` at once (#2176), in the run's own task; see
-//! [`per_config`].
+//! [`ask_each_config`].
 //!
 //! Those two are the run's **item-producing** queries, and both carry
 //! `canceled:any,failedToStart:any` (issue #105) and `branch:default:any`
@@ -141,14 +141,14 @@ pub(crate) async fn execute(
     //    First, because step 4 is not instantaneous. A full sync issues one
     //    request per configuration, and at the default 5 req/s two hundred
     //    configurations put ~40 s between the two queries, however many of
-    //    them are in flight at once (#2176): the limiter sets the rate. A build that is
-    //    running when this poll executes and has finished by the time the
-    //    finished query runs is, in this order, in **both** sets: emitted from
-    //    the finished one, and the watermark may pass it because it was
-    //    emitted. In the other order it would be in **neither** -- excluded by
-    //    `state:finished` at the start and by `state:(queued:true,running:true)`
-    //    at the end -- with nothing holding the watermark below it and nothing
-    //    emitting it. `sinceBuild` would then never offer it again.
+    //    them are in flight at once (#2176): the limiter sets the rate. A
+    //    build that is running when this poll executes and has finished by
+    //    the time the finished query runs is, in this order, in **both** sets:
+    //    emitted from the finished one, and the watermark may pass it because
+    //    it was emitted. In the other order it would be in **neither** --
+    //    excluded by `state:finished` at the start and by
+    //    `state:(queued:true,running:true)` at the end -- with nothing holding
+    //    the watermark below it and nothing emitting it. `sinceBuild` would then never offer it again.
     //
     //    The two loss classes are disjoint, which is why this order is a fix
     //    and the ceiling is a second one: this order saves builds *in flight
@@ -179,8 +179,8 @@ pub(crate) async fn execute(
             listed = true;
             let ids: Vec<String> = configs.keys().cloned().collect();
             // The walk reading (#1382): `0` before the first configuration's
-            // builds are read, then one reading as each one's arrive.
-            per_config(&ids, cfg.concurrent_configs, Some(&mut *sink), |id| {
+            // builds are read, then one as each configuration's builds arrive.
+            ask_each_config(&ids, cfg.concurrent_configs, Some(&mut *sink), |id| {
                 window(rest, id, cfg.builds_per_config)
             })
             .await?
@@ -198,7 +198,7 @@ pub(crate) async fn execute(
             }
             listed = true;
             let ids: Vec<String> = configs.keys().cloned().collect();
-            per_config(&ids, cfg.concurrent_configs, None, |id| {
+            ask_each_config(&ids, cfg.concurrent_configs, None, |id| {
                 since(rest, Some(id), state.since_build_id)
             })
             .await?
@@ -949,7 +949,7 @@ async fn scope(
 ///
 /// With a `walk`, the run's walk reading over configurations (#1382): `0`
 /// before the first query, then the number finished as each one finishes.
-async fn per_config<'a, F, Q>(
+async fn ask_each_config<'a, F, Q>(
     ids: &'a [String],
     at_once: u32,
     mut walk: Option<&mut (dyn Sink + Send + '_)>,

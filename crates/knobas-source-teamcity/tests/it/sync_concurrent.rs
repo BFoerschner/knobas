@@ -43,7 +43,7 @@ fn build_of(n: usize) -> i64 {
 /// A wiremock TeamCity with configurations `Cfg1` to `Cfg<count>` in project
 /// `P`, each with one finished build; `revoked` answers its build query 401.
 async fn teamcity(count: usize, revoked: Option<&str>) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let ids: Vec<String> = (1..=count).map(|n| format!("Cfg{n}")).collect();
     Mock::given(method("GET"))
         .and(path("/app/rest/projects"))
@@ -83,7 +83,10 @@ async fn teamcity(count: usize, revoked: Option<&str>) -> MockServer {
         };
         Mock::given(method("GET"))
             .and(path("/app/rest/builds"))
-            .and(query_param_contains("locator", format!("buildType:(id:{id})")))
+            .and(query_param_contains(
+                "locator",
+                format!("buildType:(id:{id})"),
+            ))
             .respond_with(answer)
             .with_priority(1)
             .mount(&server)
@@ -274,7 +277,11 @@ async fn a_full_sync_asks_about_up_to_concurrent_configs_configurations_at_once(
     release_all(&held, 7, 3).await;
 
     let keys = within("the run", run).await.expect("joins").expect("syncs");
-    assert_eq!(keys, everything(7, true), "every configuration and build once");
+    assert_eq!(
+        keys,
+        everything(7, true),
+        "every configuration and build once"
+    );
     assert_eq!(held.most(), 3, "three at once");
     assert_never_more_than(&held, 3, true);
 }
@@ -336,7 +343,11 @@ async fn a_configuration_lists_incremental_run_asks_up_to_concurrent_configs_at_
     release_all(&held, 5, 2).await;
 
     let keys = within("the run", run).await.expect("joins").expect("syncs");
-    assert_eq!(keys, everything(5, true), "every build, and its configuration");
+    assert_eq!(
+        keys,
+        everything(5, true),
+        "every build, and its configuration"
+    );
     assert_eq!(held.most(), 2, "two at once");
     assert_never_more_than(&held, 2, false);
 }
