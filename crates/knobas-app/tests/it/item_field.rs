@@ -275,3 +275,38 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
         .unwrap();
     assert_eq!(read(&pool).await, walked, "nothing stored: the payload is walked");
 }
+
+/// A read whose declarations put the field elsewhere than the stored ones
+/// walks the payload by its own: a stored value is never read for paths
+/// it was not resolved over.
+#[tokio::test]
+async fn a_read_binding_other_paths_walks_them() {
+    use knobas_core::payload::{KindPaths, PayloadPath};
+    let pool = pool().await;
+    let source = jira(&pool).await;
+    upsert(
+        &pool,
+        &source,
+        &[(
+            "T-1",
+            serde_json::json!({ "fields": {
+                "status": { "name": "In Progress" },
+                "other": "Elsewhere" } }),
+        )],
+    )
+    .await;
+    let other = knobas_core::payload::Declarations::empty().with(
+        source.clone(),
+        vec![KindPaths {
+            kind: "ticket".to_owned(),
+            status_name: vec![PayloadPath::of(["fields", "other"])],
+            ..KindPaths::default()
+        }],
+    );
+    let id = format!("{source}:T-1");
+    let statuses = knobas_core::mini_board::statuses_of(&pool, &[id], &other, None)
+        .await
+        .unwrap();
+    let read: Vec<Option<String>> = statuses.columns.into_iter().map(|(s, _)| s).collect();
+    assert_eq!(read, vec![Some("Elsewhere".to_owned())]);
+}
