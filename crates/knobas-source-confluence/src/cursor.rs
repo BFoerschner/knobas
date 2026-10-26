@@ -80,6 +80,14 @@ pub(crate) struct ConfluenceCursor {
     /// the same places always encode to the same bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub positions: Option<Positions>,
+    /// The space list the watermark was taken under (#2181): the CQL clause
+    /// `spaces` renders to, empty for none. A cursor under another list --
+    /// a space added -- is read as no cursor, because the watermark says
+    /// nothing about pages the old list never asked for. Optional, so the
+    /// version stays 3; an envelope written before the field matches no
+    /// list, so every source syncs in full once after the upgrade.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 /// Content id to its place among its siblings (#1138).
@@ -120,7 +128,14 @@ impl ConfluenceCursor {
             tz_offset_secs,
             seen: Vec::new(),
             positions: Some(Positions::new()),
+            scope: None,
         }
+    }
+
+    /// This cursor, recording `scope` as the space list it was taken under.
+    pub(crate) fn with_scope(mut self, scope: String) -> Self {
+        self.scope = Some(scope);
+        self
     }
 
     /// This cursor, recording `positions` as the places the mirror now holds.
@@ -236,6 +251,7 @@ impl ConfluenceCursor {
             tz_offset_secs,
             seen,
             positions: None,
+            scope: None,
         }
     }
 }

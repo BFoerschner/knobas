@@ -120,6 +120,12 @@ pub(crate) fn build_ids_cql(ids: &[&str]) -> String {
     format!("type = page AND id in ({list})")
 }
 
+/// The space list as a cursor records it (#2181): the clause, or empty for
+/// a source that reads every space it can see.
+pub(crate) fn scope_key(cfg: &ConfluenceConfig) -> String {
+    scoped("", cfg).into_iter().nth(1).unwrap_or_default()
+}
+
 /// The scope, then the space list when one is configured.
 fn scoped(scope: &str, cfg: &ConfluenceConfig) -> Vec<String> {
     let mut clauses = vec![scope.to_owned()];
