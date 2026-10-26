@@ -86,13 +86,13 @@ pub(crate) fn is_scoped(cfg: &JiraConfig) -> bool {
     scope(cfg).is_some()
 }
 
-/// The source's scope clause: its filter, else its projects, else nothing.
 /// The scope as a cursor records it (#2181): the clause, or empty for a
 /// source that reads everything its credential sees.
 pub(crate) fn scope_key(cfg: &JiraConfig) -> String {
     scope(cfg).unwrap_or_default()
 }
 
+/// The source's scope clause: its filter, else its projects, else nothing.
 fn scope(cfg: &JiraConfig) -> Option<String> {
     if let Some(filter) = &cfg.jql_filter {
         // Parenthesised: a filter of `a OR b` would otherwise bind looser than

@@ -306,10 +306,11 @@ impl SyncRun<'_> {
         // A cursor taken under another space list is no cursor (#2181): the
         // run syncs this list in full, as it does an unreadable one.
         let scope = crate::cql::scope_key(self.cfg);
-        let cursor = cursor.filter(|raw| {
-            ConfluenceCursor::parse(raw).is_some_and(|c| c.scope.as_deref() == Some(scope.as_str()))
-        });
-        let previous = cursor.as_deref().and_then(ConfluenceCursor::parse);
+        let previous = cursor
+            .as_deref()
+            .and_then(ConfluenceCursor::parse)
+            .filter(|c| c.scope.as_deref() == Some(scope.as_str()));
+        let cursor = cursor.filter(|_| previous.is_some());
         let since = previous.as_ref().and_then(|c| c.since(offset));
         let cql = build_cql(self.cfg, since, offset, Order::Ascending);
         // The positions sweep goes **before** the walk, so the places the

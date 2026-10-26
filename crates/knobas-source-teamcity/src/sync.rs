@@ -112,12 +112,14 @@ pub(crate) async fn execute(
     cursor_in: Option<Cursor>,
     sink: &mut (dyn Sink + Send),
 ) -> Result<Cursor, SourceError> {
-    // A cursor taken under another scope is no cursor (#2181): this run is a
-    // full sync of the scope as it is now.
+    // A cursor taken under another scope is no cursor (#2181): this run reads
+    // the scope as it is now the way a first run does.
     let scope_now = cursor::scope(cfg);
-    let cursor_in =
-        cursor_in.filter(|raw| cursor::parse(raw).is_some_and(|p| p.scope == scope_now));
-    let previous = cursor_in.as_deref().and_then(cursor::parse);
+    let previous = cursor_in
+        .as_deref()
+        .and_then(cursor::parse)
+        .filter(|p| p.scope == scope_now);
+    let cursor_in = cursor_in.filter(|_| previous.is_some());
     let before = previous.as_ref().map_or(0, |p| p.since_build_id);
     let mut configs: BTreeMap<String, Rec<BuildType>> = BTreeMap::new();
     // The project tree (#849): read at most once a run, and only by a run
@@ -1973,7 +1975,7 @@ mod tests {
 
     /// #2181: a configuration or project added to the scope brings in its
     /// builds older than the watermark. The cursor records the scope it was
-    /// taken under, and a run under another one is a full sync of the new
+    /// taken under, and a run under another one reads the new scope as a first run does,
     /// scope: each configuration's newest `builds_per_config`.
     #[tokio::test]
     async fn a_configuration_added_to_the_scope_brings_its_older_builds() {

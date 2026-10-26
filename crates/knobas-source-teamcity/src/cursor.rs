@@ -23,11 +23,12 @@ pub(crate) struct CursorState {
     pub since_build_id: i64,
     /// The scope the watermark was taken under (#2181), as [`scope`] writes
     /// it; absent for an unscoped source. A run under another scope -- a
-    /// configuration or project added -- is a full sync, because the
+    /// configuration or project added -- reads the new scope as a first run
+    /// does (each configuration's window), because the
     /// watermark says nothing about builds the old scope never asked for.
     /// Optional, so the version stays 2 and an unscoped source keeps the
     /// bytes it had; a scoped source's cursor written before the field reads
-    /// as unscoped, so it syncs in full once after the upgrade.
+    /// as unscoped, so it reads its window again once after the upgrade.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
 }
