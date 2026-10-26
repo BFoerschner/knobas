@@ -265,6 +265,9 @@ pub async fn saved_view_board_laned(
         only.retain(|id| matched.contains(id));
     }
     let declarations = declared_paths(pool, registry).await?;
+    let Some(lanes) = lanes else {
+        return cut_before_read(pool, &layout, &only, &identity, &declarations, per_column).await;
+    };
     let whole = knobas_core::mini_board::read_scoped(
         pool,
         knobas_core::mini_board::Scope {
@@ -276,9 +279,92 @@ pub async fn saved_view_board_laned(
         None,
     )
     .await?;
-    let board = layout.board(whole, per_column);
-    Ok(match lanes {
-        Some(lanes) => knobas_core::mini_board::in_lanes(board, lanes, lanes_cap),
-        None => board,
+    let by_status = whole
+        .columns
+        .into_iter()
+        .map(|column| (column.status, column.cards))
+        .collect();
+    let board = knobas_core::mini_board::MiniBoard {
+        columns: layout
+            .arrange(by_status, |card| card.entity_id.as_str(), None)
+            .into_iter()
+            .map(
+                |(status, cards, total)| knobas_core::mini_board::MiniBoardColumn {
+                    status,
+                    cards,
+                    total,
+                },
+            )
+            .collect(),
+        sources: whole.sources,
+        lanes: Vec::new(),
+        more_lanes: 0,
+    };
+    Ok(knobas_core::mini_board::in_lanes(board, lanes, lanes_cap))
+}
+
+/// An unlaned saved view's board (Björn, 2026-10-26): each of `only`'s
+/// statuses read first, the view's columns cut in the source's order, and
+/// only the cards kept read through the card statement. It read every
+/// ticket on the view as a card and cut after: 0.6 s for a board of 2,250
+/// tickets and 1.1 s for a filter of 4,500, eight a column drawn. The answer
+/// is the same: the totals are the statuses', and the sources' statuses
+/// are read again only when the cut left a source with no card.
+async fn cut_before_read(
+    pool: &PgPool,
+    layout: &crate::ticket_views::SavedViewLayout,
+    only: &[String],
+    identity: &[String],
+    declarations: &knobas_core::payload::Declarations,
+    per_column: Option<u32>,
+) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    let statuses = knobas_core::mini_board::statuses_of(pool, only, declarations).await?;
+    let arranged = layout.arrange(statuses.columns, String::as_str, per_column);
+    let kept: Vec<String> = arranged
+        .iter()
+        .flat_map(|(_, ids, _)| ids.iter().cloned())
+        .collect();
+    let read = knobas_core::mini_board::read_scoped(
+        pool,
+        knobas_core::mini_board::Scope {
+            only: Some(&kept),
+            identity,
+            ..knobas_core::mini_board::Scope::default()
+        },
+        declarations,
+        None,
+    )
+    .await?;
+    let mut cards: std::collections::HashMap<String, knobas_core::mini_board::MiniBoardCard> = read
+        .columns
+        .into_iter()
+        .flat_map(|column| column.cards)
+        .map(|card| (card.entity_id.clone(), card))
+        .collect();
+    let read_from: std::collections::BTreeSet<&str> =
+        read.sources.iter().map(|s| s.source_id.as_str()).collect();
+    let sources = if read_from
+        .iter()
+        .copied()
+        .eq(statuses.sources.iter().map(String::as_str))
+    {
+        read.sources
+    } else {
+        knobas_core::mini_board::sources_statuses(pool, &statuses.sources, declarations).await?
+    };
+    Ok(knobas_core::mini_board::MiniBoard {
+        columns: arranged
+            .into_iter()
+            .map(
+                |(status, ids, total)| knobas_core::mini_board::MiniBoardColumn {
+                    status,
+                    cards: ids.iter().filter_map(|id| cards.remove(id)).collect(),
+                    total,
+                },
+            )
+            .collect(),
+        sources,
+        lanes: Vec::new(),
+        more_lanes: 0,
     })
 }
