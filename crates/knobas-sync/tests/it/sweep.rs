@@ -427,7 +427,9 @@ async fn a_backfill_that_walked_a_kind_whole_sweeps_nothing() {
         .connect()
         .await
         .expect("a connection outside every pool");
-    let backfill = knobas_sync::run_backfill(&mut conn, &pool, &src).await.unwrap();
+    let backfill = knobas_sync::run_backfill(&mut conn, &pool, &src)
+        .await
+        .unwrap();
 
     assert_eq!(backfill.swept, 0);
     assert!(deleted_at(&pool, &format!("{id}:V-2")).await.is_none());

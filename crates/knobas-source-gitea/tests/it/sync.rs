@@ -2272,13 +2272,21 @@ async fn an_owner_taken_out_of_the_scope_leaves_the_repositories_walked_whole() 
     let both = source(fake.base_url(), serde_json::json!({}));
     let mut first = Walking::default();
     let cursor = both.sync(None, &mut first).await.expect("full sync");
-    assert_eq!(first.whole, ["repo", "branch"], "a full sync walks both whole");
+    assert_eq!(
+        first.whole,
+        ["repo", "branch"],
+        "a full sync walks both whole"
+    );
 
     let mut idle = Walking::default();
     both.sync(Some(cursor.clone()), &mut idle)
         .await
         .expect("idle sync");
-    assert!(idle.items.is_empty() && idle.whole.is_empty(), "{:?}", idle.whole);
+    assert!(
+        idle.items.is_empty() && idle.whole.is_empty(),
+        "{:?}",
+        idle.whole
+    );
 
     let narrowed = source(
         fake.base_url(),
@@ -2289,7 +2297,10 @@ async fn an_owner_taken_out_of_the_scope_leaves_the_repositories_walked_whole() 
         .sync(Some(cursor), &mut run)
         .await
         .expect("narrowed sync");
-    assert_eq!(ids(&run.items, "repo"), vec!["gitea:tidewater/payout-service"]);
+    assert_eq!(
+        ids(&run.items, "repo"),
+        vec!["gitea:tidewater/payout-service"]
+    );
     assert!(
         run.items
             .iter()
@@ -2299,7 +2310,10 @@ async fn an_owner_taken_out_of_the_scope_leaves_the_repositories_walked_whole() 
     );
     assert_eq!(run.whole, ["repo", "branch"]);
     let position: serde_json::Value = serde_json::from_str(&after).unwrap();
-    assert!(position["repos"].get("elsewhere/unrelated").is_none(), "{after}");
+    assert!(
+        position["repos"].get("elsewhere/unrelated").is_none(),
+        "{after}"
+    );
 
     let mut settled = Walking::default();
     narrowed
