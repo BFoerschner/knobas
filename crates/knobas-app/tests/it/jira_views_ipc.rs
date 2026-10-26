@@ -763,6 +763,15 @@ async fn a_jira_views_board_reads_only_the_cards_it_draws() {
         .await;
         keys.push(key);
     }
+    // A ticket on the view that is gone from the mirror is never counted.
+    let gone = format!("{p}-301");
+    issue(&pool, &gone, "To Do", "Gone").await;
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(format!("jira:{gone}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    keys.push(gone);
     keys.reverse();
     let (_, with_columns) = board(&pool, &p, &keys).await;
     let filter = format!("filter-{}", p.to_lowercase());
