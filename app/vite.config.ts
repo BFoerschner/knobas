@@ -106,7 +106,7 @@ export default defineConfig(({ mode }) => ({
     maxWorkers: 4,
     // Three times Vitest's default on a machine with a core for each of
     // `just check`'s threads, more on one with fewer (`test-budget.ts`: four
-    // times on the two-core `check.yml` runner, #2044). The suite shares the
+    // times on the `check.yml` runner, #2044). The suite shares the
     // machine with up to two gates and their agents' cargo builds; the tests
     // that failed under that load in October (#609, #782, #968, #1060) had
     // each finished in well under a second idle, so a 5 s budget measured the
