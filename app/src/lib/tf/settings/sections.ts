@@ -103,6 +103,7 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["⌘T", "Anywhere", "Stop or start the timer"],
   ["⌘,", "Anywhere", "Settings"],
   ["⌘[ ⌘] ⌘← ⌘→", "Anywhere", "Back and forward through what you opened; the mouse's buttons too"],
+  ["⌘R", "A detail or a role view", "Refresh, or Sync now"],
   ["/", "A list", "Focus the filter"],
   ["Esc", "Anywhere", "Back one step: dialog, drawer, filter, view, job"],
   ["J K ↑ ↓", "Tickets", "Move the selection"],
