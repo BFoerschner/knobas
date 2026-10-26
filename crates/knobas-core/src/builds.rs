@@ -193,11 +193,18 @@ macro_rules! run_columns {
 /// timestamp, newest first. `$3` is the CI role's fillers (#1295): a
 /// pipeline of any other source is not drawn, and a run is drawn only under
 /// a drawn pipeline.
-const PIPELINES: &str = concat!(
+///
+/// Each CTE is `materialized` and read once: inlined, the runs were
+/// re-derived for every pipeline, pipelines × runs (2.5 s at 130 × 3,000).
+/// The runs are ranked on their `pipeline` alone and only the last
+/// [`PIPELINE_RECENT`] of each are read through every declaration.
+///
+/// Public so the app's `tests/it/builds_list_plan.rs` can read its plan.
+pub const PIPELINES: &str = concat!(
     "with ",
     frame_kinds_cte!(),
     ",
-p as (
+p as materialized (
   select i.entity_id, i.source_id, i.web_url, coalesce(c.display_name, i.source_id) as source_name, ",
     crate::declared_string!("$1", "name"),
     " as name, ",
@@ -224,32 +231,44 @@ pins as (
     from knobas.setting
    where key = 'builds.pins' and jsonb_typeof(value) = 'array'
 ),
-r as (
-  select x.*, row_number() over (partition by x.source_id, x.pkey
-                                 order by x.item_updated_at desc nulls last, x.entity_id desc) as rn
-    from (select ",
-    run_columns!(),
+ranked as materialized (
+  select x.entity_id, x.rn
+    from (select i.entity_id, ",
+    crate::declared_string!("$1", "pipeline"),
+    " as pkey, row_number() over (partition by i.source_id, ",
+    crate::declared_string!("$1", "pipeline"),
     "
+                                 order by i.item_updated_at desc nulls last, i.entity_id desc) as rn
             from frames f
             join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
            where f.frame = 'run') x
-   where x.pkey is not null
+   where x.pkey is not null and x.rn <= $2
+),
+r as materialized (
+  select k.rn, ",
+    run_columns!(),
+    "
+    from ranked k
+    join sync.live_item i on i.entity_id = k.entity_id
+),
+recent as materialized (
+  select r.source_id, r.pkey, jsonb_agg(jsonb_build_object(
+           'entity_id', r.entity_id, 'number', r.number, 'state', r.state,
+           'branch', r.branch, 'started', r.started, 'finished', r.finished,
+           'updated_at', r.item_updated_at, 'web_url', r.web_url,
+           'trigger', r.trig, 'started_by', r.started_by,
+           'agent', r.agent, 'current_step', r.current_step,
+           'tests_failed', r.tests_failed, 'tests_passed', r.tests_passed,
+           'tests_ignored', r.tests_ignored,
+           'revision', r.revision) order by r.rn) as runs
+    from r
+   group by r.source_id, r.pkey
 )
 select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path,
        exists (select 1 from pins where pins.id = p.entity_id) as pinned,
-       coalesce((select jsonb_agg(jsonb_build_object(
-                   'entity_id', r.entity_id, 'number', r.number, 'state', r.state,
-                   'branch', r.branch, 'started', r.started, 'finished', r.finished,
-                   'updated_at', r.item_updated_at, 'web_url', r.web_url,
-                   'trigger', r.trig, 'started_by', r.started_by,
-                   'agent', r.agent, 'current_step', r.current_step,
-                   'tests_failed', r.tests_failed, 'tests_passed', r.tests_passed,
-                   'tests_ignored', r.tests_ignored,
-                   'revision', r.revision) order by r.rn)
-                   from r
-                  where r.source_id = p.source_id and r.pkey = p.pkey and r.rn <= $2),
-                '[]'::jsonb) as recent
+       coalesce(rc.runs, '[]'::jsonb) as recent
   from p
+  left join recent rc on rc.source_id = p.source_id and rc.pkey = p.pkey
  where p.pkey is not null and p.name is not null
  order by lower(p.name), p.entity_id
 "

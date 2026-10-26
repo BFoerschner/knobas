@@ -20,6 +20,7 @@ mod backup;
 mod backup_ipc;
 mod bring_up;
 mod builds_ipc;
+mod builds_list_plan;
 mod builds_of_a_commit;
 mod builds_of_a_commit_perf;
 mod capture_ipc;
