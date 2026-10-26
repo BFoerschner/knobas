@@ -4,7 +4,11 @@
 //! A table, not an assertion. The mirror is seeded into a scratch database --
 //! three Jira-shaped sources of `RP_TICKETS` tickets each (default 5,000), one
 //! Confluence-shaped source of `RP_PAGES` pages (2,000), one TeamCity-shaped
-//! source of `RP_BUILDS` builds (5,000) -- and, when `KNOBAS_GITEA_URL` and
+//! source of `RP_BUILDS` builds (5,000) over `RP_PIPELINES` build
+//! configurations (130, the last five of them quiet: no run in the mirror),
+//! one Uptime-Kuma-shaped source of `RP_MONITORS` monitors (30) with
+//! `RP_SAMPLES` samples between them (600,000), and a link set whose members
+//! are every configuration (#2185) -- and, when `KNOBAS_GITEA_URL` and
 //! `KNOBAS_GITEA_TOKEN` are set (`eval "$(testenv/seed --env)"`), the seeded
 //! Gitea is synced too and its views are read live. Each read is made once
 //! cold and `RP_RUNS` times warm (default 7), against the app's own
@@ -146,8 +150,20 @@ impl Rng {
     }
 }
 
+/// How many build configurations a `build` source holds besides its builds
+/// (#2185): `RP_PIPELINES`, 130 by default, the sweep's size.
+pub(crate) fn pipelines() -> u64 {
+    env("RP_PIPELINES", 130)
+}
+
+/// The configurations at the end of [`pipelines`] that no build ran (#2185):
+/// paused, archived or never built, the members whose state walked every run.
+pub(crate) const QUIET_PIPELINES: u64 = 5;
+
 /// A synthetic source of one adapter's shape: `kind` items, `count` of them.
-/// `read_plans.rs` seeds its mirror with these too.
+/// A `build` source holds [`pipelines`] configurations too, and its builds
+/// are spread over all but the [`QUIET_PIPELINES`]. `read_plans.rs` seeds its
+/// mirror with these too.
 pub(crate) struct Synthetic {
     pub(crate) descriptor: SourceDescriptor,
     pub(crate) kind: &'static str,
@@ -187,6 +203,31 @@ impl Source for Synthetic {
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ id.len() as u64 ^ self.count);
         let prefix = id.to_uppercase().replace('-', "");
         let now = chrono::Utc::now();
+        // A build source's configurations (#2185), TeamCity-shaped: the
+        // pipelines its builds run under, in one project.
+        if self.kind == "build" {
+            for n in 0..pipelines() {
+                sink.item(SyncItem {
+                    entity: knobas_core::entity::EntityRef::new(id, &format!("buildType:Cfg_{n}")),
+                    kind: "build_config".into(),
+                    title: format!("Build {n}"),
+                    body_text: String::new(),
+                    author: None,
+                    updated_at: Some(now),
+                    payload: serde_json::json!({
+                        "id": format!("Cfg_{n}"),
+                        "name": format!("Build {n}"),
+                        "projectId": "Payments",
+                        "projectName": "Payments",
+                        "projectPath": [{"id": "Payments", "name": "Payments"}],
+                    }),
+                    web_url: None,
+                    deleted: false,
+                })
+                .await?;
+            }
+        }
+        let active = pipelines().saturating_sub(QUIET_PIPELINES).max(1);
         for i in 0..self.count {
             let key = format!("{prefix}-{i}");
             let (entity_key, payload) = match self.kind {
@@ -208,16 +249,32 @@ impl Source for Synthetic {
                     format!("build:{i}"),
                     serde_json::json!({
                         "id": i,
+                        "buildTypeId": format!("Cfg_{}", i % active),
                         "buildType": {
-                            "id": format!("Cfg_{}", i % 40),
-                            "name": format!("Build {}", i % 40),
+                            "id": format!("Cfg_{}", i % active),
+                            "name": format!("Build {}", i % active),
                             "projectId": "Payments",
                             "projectName": "Payments",
                         },
                         "number": i.to_string(),
                         "status": if i % 7 == 0 { "FAILURE" } else { "SUCCESS" },
                         "state": "finished",
-                        "branchName": "main",
+                        // What the CI role requires of a run (ADR-0029), so
+                        // the source fills it and the Builds list draws it.
+                        "startDate": "20260822T100500+0000",
+                        "finishDate": "20260822T100917+0000",
+                        "branchName": if i % 10 == 0 { format!("feature/{}", i % 50) } else { "main".to_owned() },
+                    }),
+                ),
+                // An Uptime Kuma monitor (#2185): its samples are seeded
+                // beside it ([`seed_samples`]), not read from the payload.
+                "monitor" => (
+                    format!("monitor:{i}"),
+                    serde_json::json!({
+                        "id": i,
+                        "name": format!("monitor {i}"),
+                        "type": "http",
+                        "active": true,
                     }),
                 ),
                 // A pull request (#939), Gitea-shaped: two in three open,
@@ -500,12 +557,22 @@ async fn seed(
         kind: "pr",
         count: prs,
     });
+    synthetic.push(Synthetic {
+        descriptor: SourceDescriptor {
+            id: "kuma".to_owned(),
+            ..knobas_source_kuma::descriptor_template()
+        },
+        kind: "monitor",
+        count: monitors(),
+    });
     for source in &synthetic {
         knobas_app::sources::demo::load_mirror_of(pool, source)
             .await
             .unwrap();
     }
     confirm_links(pool, tickets, builds, prs).await;
+    seed_samples(pool).await;
+    seed_link_set(pool).await;
 
     // The seeded Gitea, synced through its real adapter. Its views are the
     // live reads the detail makes.
@@ -546,6 +613,74 @@ async fn seed(
             panic!("{}", gitea_sync_failure(&error));
         }
     }
+}
+
+/// How many monitors the Kuma-shaped source holds (#2185): `RP_MONITORS`.
+fn monitors() -> u64 {
+    env("RP_MONITORS", 30)
+}
+
+/// How many samples the monitors hold between them (#2185): `RP_SAMPLES`,
+/// 600,000 at the full size and scaled with `RP_ITEMS` -- at 30 monitors,
+/// two weeks of one a minute each, a sixth of the 90-day retention.
+fn samples() -> u64 {
+    env("RP_SAMPLES", 600_000 * env("RP_ITEMS", 22_000) / 22_000)
+}
+
+/// [`samples`] samples, spread evenly over the monitors, one a minute back
+/// from now: one in fifty `down`, the rest `up`. Every monitor's newest
+/// sample is `up` but the first's, which is `down`, so the reconcile has an
+/// alert to keep open and many monitors to leave alone.
+async fn seed_samples(pool: &PgPool) {
+    let made = sqlx::query(
+        "insert into knobas.monitor_sample (entity_id, taken_at, state, response_time_ms)
+         select 'kuma:monitor:' || m, now() - make_interval(mins => (n + 1)::int),
+                case when n % 50 = 49 or (m = 0 and n = 0) then 'down' else 'up' end, 120
+           from generate_series(0, $1 - 1) m
+          cross join generate_series(0, $2 / $1 - 1) n",
+    )
+    .bind(i64::try_from(monitors()).unwrap())
+    .bind(i64::try_from(samples()).unwrap())
+    .execute(pool)
+    .await
+    .unwrap();
+    println!(
+        "RP-SAMPLES monitors={} samples={}",
+        monitors(),
+        made.rows_affected()
+    );
+}
+
+/// The link set the Link sets reads open (#2185): every configuration a
+/// pipeline member, the quiet ones included, one pipeline pattern, and a
+/// project rule that puts it on every ticket of `JIRA00`.
+async fn seed_link_set(pool: &PgPool) {
+    let members = (0..pipelines())
+        .map(|n| knobas_app::link_sets::LinkSetMember {
+            kind: "pipeline".to_owned(),
+            entity_id: format!("ci:buildType:Cfg_{n}"),
+        })
+        .collect();
+    knobas_app::link_sets::save(
+        pool,
+        &Registry::for_process(),
+        knobas_app::link_sets::LinkSetDraft {
+            id: None,
+            name: "Payments CI".to_owned(),
+            description: String::new(),
+            members,
+            patterns: vec![knobas_app::link_sets::LinkSetPattern {
+                kind: "pipeline".to_owned(),
+                query: "project:Payments".to_owned(),
+            }],
+            rules: vec![knobas_app::link_sets::LinkSetRule {
+                kind: "project".to_owned(),
+                value: "jira0:JIRA00".to_owned(),
+            }],
+        },
+    )
+    .await
+    .unwrap();
 }
 
 /// What the seeding sync's failure says. A token the seeded Gitea no longer
@@ -753,6 +888,11 @@ async fn what_the_reader_waits_on() {
         // A page's body and marks (#860): a seed of the shape before them is
         // another seed.
         ("page_shape", "storage-and-marks".to_owned()),
+        // Configurations, quiet ones, monitors with samples and a link set
+        // (#2185).
+        ("pipelines", format!("{}-{QUIET_PIPELINES}", pipelines())),
+        ("monitors", format!("{}x{}", monitors(), samples())),
+        ("link_set", "2185".to_owned()),
         (
             "gitea",
             gitea_env
@@ -1167,6 +1307,85 @@ async fn what_the_reader_waits_on() {
         .await;
     }
 
+    // -- Builds, link sets and the alert reconcile (#2185) --------------------
+    // The reads that walked every run of a pipeline's source through the
+    // declared `pipeline` path, and the reconcile that sorted every sample.
+    let builds_view = "open Builds";
+    time(builds_view, "pipelines (Builds list)", runs, || {
+        knobas_app::commands::entity::pipelines_inner(pool, &registry)
+    })
+    .await;
+    for (which, id) in [
+        ("active", "ci:buildType:Cfg_7".to_owned()),
+        ("quiet", format!("ci:buildType:Cfg_{}", pipelines() - 1)),
+    ] {
+        time(
+            "open a pipeline",
+            &format!("pipeline_runs ({which}, 100)"),
+            runs,
+            || knobas_app::commands::entity::pipeline_runs_inner(pool, &registry, &id, None),
+        )
+        .await;
+    }
+    // A ticket of `JIRA00`, so the seeded link set's project rule puts its
+    // members and its pattern's hits in the job's reach.
+    let job = "jira0:JIRA0-40";
+    time("Builds: This job", "job_pipelines", runs, || {
+        knobas_app::commands::entity::job_pipelines_inner(pool, &registry, job)
+    })
+    .await;
+    time("job with a pattern set", "reach", runs, || {
+        knobas_core::reach::reach(pool, job)
+    })
+    .await;
+    time("open Dependencies", "dependencies", runs, || {
+        knobas_app::assets::dependencies::read(pool, &registry)
+    })
+    .await;
+    time("open Link sets", "link_sets (list)", runs, || {
+        knobas_app::link_sets::list(pool, &registry)
+    })
+    .await;
+    time("open Link sets", "link_set_hints", runs, || {
+        knobas_app::link_sets::hints(pool, &registry)
+    })
+    .await;
+    for query in ["project:Payments", "name:Build_1*"] {
+        let pattern = knobas_app::link_sets::LinkSetPattern {
+            kind: "pipeline".to_owned(),
+            query: query.to_owned(),
+        };
+        time(
+            "type a link-set pattern",
+            &format!("preview_link_set_pattern {query:?}"),
+            runs,
+            || knobas_app::link_sets::preview_pattern(pool, &registry, &pattern),
+        )
+        .await;
+    }
+    // Inside a transaction rolled back, so every run reconciles the same
+    // samples and leaves no alert behind.
+    time(
+        &format!("monitor sync ({} samples)", samples()),
+        "alerts::reconcile",
+        runs,
+        || async {
+            let mut tx = pool.begin().await?;
+            knobas_sync::alerts::reconcile(&mut tx, "kuma").await?;
+            tx.rollback().await?;
+            Ok::<_, sqlx::Error>(())
+        },
+    )
+    .await;
+    time("paste a URL", "resolve_url", runs, || {
+        knobas_app::commands::entity::resolve_url_inner(
+            pool,
+            &registry,
+            "https://jira.example.com/browse/JIRA0-42",
+        )
+    })
+    .await;
+
     // -- Gitea views, live ---------------------------------------------------
     if gitea {
         let pick = |kind: &'static str| async move {
@@ -1238,6 +1457,29 @@ async fn what_the_reader_waits_on() {
     } else {
         println!("RP-NOTE KNOBAS_GITEA_URL/TOKEN unset: no live Gitea views read");
     }
+
+    // -- a full sync, and the smart lists right after it (#2185) -------------
+    // One Jira source synced whole again, every row rewritten as a full sync
+    // rewrites it, then the launcher's smart lists, cold, on what it left.
+    let again = Synthetic {
+        descriptor: SourceDescriptor {
+            id: "jira0".to_owned(),
+            ..knobas_source_jira::descriptor_template()
+        },
+        kind: "ticket",
+        count: tickets,
+    };
+    time(
+        &format!("full sync ({tickets} tickets)"),
+        "run_once",
+        runs.min(2),
+        || knobas_sync::run_once(pool, &again, None),
+    )
+    .await;
+    time("after a sync", "smart_lists", runs, || {
+        smart_lists_inner(pool, &registry)
+    })
+    .await;
 
     // Last: the writes queue sends and trigger post-write runs, and nothing
     // read above should be measured over what they leave.

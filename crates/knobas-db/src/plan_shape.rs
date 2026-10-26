@@ -50,9 +50,18 @@ pub async fn never_analyzed(pool: &PgPool) {
 /// row. Empty for a plan that holds.
 #[must_use]
 pub fn findings(explain: &serde_json::Value, small: &[&str]) -> Vec<String> {
+    let hashed = hashed_subplans(explain);
+    let mut found = Vec::new();
+    walk(&explain[0]["Plan"], &hashed, small, &[], &mut found);
+    found
+}
+
+/// The names of the subplans `explain` runs hashed (`SubPlan 3` of
+/// `hashed SubPlan 3`): computed once, so never a read per row.
+fn hashed_subplans(explain: &serde_json::Value) -> Vec<String> {
     let mut texts = Vec::new();
     strings(explain, &mut texts);
-    let hashed: Vec<String> = texts
+    texts
         .iter()
         .flat_map(|t| {
             t.match_indices("hashed SubPlan ")
@@ -63,10 +72,7 @@ pub fn findings(explain: &serde_json::Value, small: &[&str]) -> Vec<String> {
                 .take_while(|c| c.is_alphanumeric() || *c == ' ')
                 .collect::<String>()
         })
-        .collect();
-    let mut found = Vec::new();
-    walk(&explain[0]["Plan"], &hashed, small, &mut found);
-    found
+        .collect()
 }
 
 /// Every string anywhere in `value`.
@@ -227,12 +233,26 @@ fn linked_only_by_a_range(
 }
 
 /// Every per-row scan and every anti-join hashed without the pair's ids.
-fn walk(node: &serde_json::Value, hashed: &[String], small: &[&str], out: &mut Vec<String>) {
+///
+/// `enclosing` is the aliases of the outer sides of the nested loops `node`
+/// sits on the inner side of: their rows are parameters inside it too, so
+/// a probe keyed by one of them is linked even though the loop right above it
+/// does not name it -- the planner substitutes an equal column from further
+/// out (`i.entity_id = (r.id)` for `i.entity_id = ip.entity_id`, #2185).
+fn walk(
+    node: &serde_json::Value,
+    hashed: &[String],
+    small: &[&str],
+    enclosing: &[String],
+    out: &mut Vec<String>,
+) {
+    let mut inside = enclosing.to_vec();
     if node["Node Type"] == "Nested Loop" {
-        let mut outer_aliases = Vec::new();
+        let mut outer_aliases = enclosing.to_vec();
         for outer in children(node).filter(|c| c["Parent Relationship"] == "Outer") {
             aliases(outer, &mut outer_aliases);
         }
+        inside.clone_from(&outer_aliases);
         for inner in children(node).filter(|c| c["Parent Relationship"] == "Inner") {
             let mut scans = Vec::new();
             scans_per_row(inner, hashed, small, &mut scans);
@@ -288,7 +308,12 @@ fn walk(node: &serde_json::Value, hashed: &[String], small: &[&str], out: &mut V
         }
     }
     for child in children(node) {
-        walk(child, hashed, small, out);
+        let params = if child["Parent Relationship"] == "Inner" {
+            inside.as_slice()
+        } else {
+            enclosing
+        };
+        walk(child, hashed, small, params, out);
     }
 }
 
@@ -335,4 +360,93 @@ fn seq_scans(node: &serde_json::Value, relation: &str) -> bool {
                 )
             })
             .any(|c| seq_scans(c, relation))
+}
+
+/// Every read of `relation` that runs once per row of an outer side -- the
+/// inner side of a nested loop, or a subplan that is not hashed -- and
+/// filters what it reads on the item's `payload`, or through a subplan,
+/// which is how a declared read is planned (#2185): a declared read tested
+/// per row, so the index it walks narrows to the key it was probed by and
+/// the payload decides the rest. Such a read is a scan per row the checks
+/// in [`findings`] cannot see, since its index condition links it to the
+/// outer row by equality: a link-set member walked its source's every run
+/// through the declared `pipeline` path that way, about 100 ms a quiet
+/// member at 30,000 runs. A probe of the table's primary key reads one row
+/// whatever its filter, and is not one.
+#[must_use]
+pub fn filtered_per_row(explain: &serde_json::Value, relation: &str) -> Vec<String> {
+    let hashed = hashed_subplans(explain);
+    let mut found = Vec::new();
+    per_row_filters(&explain[0]["Plan"], &hashed, relation, false, &mut found);
+    found
+}
+
+fn per_row_filters(
+    node: &serde_json::Value,
+    hashed: &[String],
+    relation: &str,
+    per_row: bool,
+    out: &mut Vec<String>,
+) {
+    if per_row
+        && node["Relation Name"] == relation
+        && !node["Index Name"]
+            .as_str()
+            .is_some_and(|index| index.ends_with("_pkey"))
+        && node["Filter"]
+            .as_str()
+            .is_some_and(|filter| filter.contains("payload") || filter.contains("SubPlan"))
+    {
+        out.push(format!(
+            "{} using {} filters the payload once per outer row",
+            describe(node),
+            node["Index Name"].as_str().unwrap_or("no index")
+        ));
+    }
+    let loop_ = node["Node Type"] == "Nested Loop";
+    for child in children(node) {
+        let relationship = child["Parent Relationship"].as_str();
+        let child_per_row = match relationship {
+            Some("InitPlan") => false,
+            Some("SubPlan") => !is_hashed(child, hashed) || per_row,
+            Some("Inner") if loop_ => true,
+            _ => per_row,
+        };
+        per_row_filters(child, hashed, relation, child_per_row, out);
+    }
+}
+
+/// Every read of `relation` in `explain` that no `Limit` bounds (#2185): a
+/// scan, or an index range, read to its end rather than stopped at the rows
+/// a `Limit` above it asks for. A `Sort`, a hash, an aggregate or a bitmap
+/// between the `Limit` and the read reads everything first, so it does not
+/// bound it. What "one bounded lookup" means for a table that grows with the
+/// source's history: the alert reconcile joined every kept sample of every
+/// monitor and sorted them to keep the newest (148 ms at 600,000 samples),
+/// where the head of each monitor's index range is one row.
+#[must_use]
+pub fn unbounded_reads(explain: &serde_json::Value, relation: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    unbounded(&explain[0]["Plan"], relation, false, &mut found);
+    found
+}
+
+fn unbounded(node: &serde_json::Value, relation: &str, limited: bool, out: &mut Vec<String>) {
+    let kind = node["Node Type"].as_str().unwrap_or("");
+    let limited = match kind {
+        "Limit" => true,
+        "Sort" | "Hash" | "Aggregate" | "WindowAgg" | "Materialize" | "Unique" | "SetOp"
+        | "Bitmap Heap Scan" => false,
+        _ => limited,
+    };
+    if node["Relation Name"] == relation && !limited {
+        out.push(format!(
+            "{} using {} is read to its end, no Limit above it",
+            describe(node),
+            node["Index Name"].as_str().unwrap_or("no index")
+        ));
+    }
+    for child in children(node) {
+        unbounded(child, relation, limited, out);
+    }
 }

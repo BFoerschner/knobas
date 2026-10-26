@@ -130,25 +130,33 @@ pub fn decide(newest: Option<&str>, already_open: bool) -> Reconciled {
 /// The newest sample of every live monitor of one source, and whether that
 /// monitor already has an alert open.
 ///
-/// `distinct on` with the index's own order — `(entity_id, taken_at desc)` is
-/// `monitor_sample_entity_idx` — so the newest row per monitor costs an index
-/// scan and not a sort of the timeseries. `id desc` breaks the tie two samples
-/// of the same poll would have; there is only ever one per poll, and a tie
-/// resolved by insertion order is the honest one if that ever stops being
-/// true.
+/// One lookup per monitor bounded to one row, on `monitor_sample_entity_idx`
+/// (`(entity_id, taken_at desc)`): the head of that monitor's range is its
+/// newest sample, the shape `samples::LIVE_WITH_LAST` reads it by. Its
+/// `distinct on` predecessor joined every kept sample of every monitor and
+/// sorted them to keep the newest: 148 ms at 600,000 samples against 2 ms,
+/// inside the sync's transaction, growing with the 90-day retention (#2185).
+/// A monitor never sampled has no row, as the inner join had none. `id desc`
+/// breaks the tie two samples of the same poll would have; there is only ever
+/// one per poll, and a tie resolved by insertion order is the honest one if
+/// that ever stops being true.
 ///
 /// Through `sync.live_item` and not `sync.item`, which is what makes *"a
 /// paused monitor is left alone"* a property of the view: a tombstoned monitor
 /// and a monitor of a source the reader disabled are both absent from the
 /// roster, so neither is decided about and neither's alert is touched.
-const ROSTER: &str = "select distinct on (i.entity_id)
-            i.entity_id, s.state,
+///
+/// Public so `knobas-app`'s `tests/it/read_plans.rs` can read its plan.
+pub const ROSTER: &str = "select i.entity_id, s.state,
             exists (select 1 from knobas.monitor_alert a
                      where a.entity_id = i.entity_id and a.closed_at is null) as already_open
        from sync.live_item i
-       join knobas.monitor_sample s on s.entity_id = i.entity_id
+       cross join lateral (
+            select ms.state from knobas.monitor_sample ms
+             where ms.entity_id = i.entity_id
+             order by ms.taken_at desc, ms.id desc limit 1) s
       where i.source_id = $1 and i.kind = $2
-      order by i.entity_id, s.taken_at desc, s.id desc";
+      order by i.entity_id";
 
 /// Every asset a recovering monitor watches, with the monitor's own name.
 ///

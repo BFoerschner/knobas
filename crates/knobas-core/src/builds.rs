@@ -186,6 +186,39 @@ macro_rules! run_columns {
     };
 }
 
+/// A pipeline's newest live runs, by the stored rows (#2185, migration
+/// `0062`): `sync.item_pipeline` keeps each run's declared `pipeline` as the
+/// database writes the run, and `item_pipeline_runs_idx` holds one
+/// pipeline's runs in the order every reader draws them, so the newest `n`
+/// are the head of one index range whatever the source's history holds. The
+/// outer row is `$pipeline` with `source_id`, `pkey` and `adapter_kind` (the
+/// source's configured adapter, which the stored rows are matched to); a
+/// tombstoned run's row is passed over inside the range.
+///
+/// Exported at the crate root, as [`frame_kinds_cte!`] is, so the app's
+/// link-set member rows read a pipeline's newest run by the same range.
+#[macro_export]
+macro_rules! newest_runs {
+    ($pipeline:literal, $limit:literal) => {
+        concat!(
+            "(select ip.entity_id from sync.item_pipeline ip
+       where ip.source_id = ",
+            $pipeline,
+            ".source_id and ip.pkey = ",
+            $pipeline,
+            ".pkey and ip.adapter_kind = ",
+            $pipeline,
+            ".adapter_kind
+         and exists (select 1 from knobas.entity e
+                      where e.id = ip.entity_id and e.deleted_at is null)
+       order by ip.at desc nulls last, ip.entity_id desc
+       limit ",
+            $limit,
+            ")"
+        )
+    };
+}
+
 /// Every live pipeline, by name, each with its last [`PIPELINE_RECENT`] runs
 /// as a jsonb array newest first. A run sits under the pipeline of its own
 /// source whose declared `pipeline` equals its own; a pipeline whose name or
@@ -194,12 +227,15 @@ macro_rules! run_columns {
 /// pipeline of any other source is not drawn, and a run is drawn only under
 /// a drawn pipeline.
 ///
-/// Each CTE is `materialized` and read once: inlined, the runs were
-/// re-derived for every pipeline, pipelines × runs (2.5 s at 130 × 3,000),
-/// and a pipeline's declarations for every pair of pipelines the final join
-/// compares (1.35 s against 0.59 s at 400 × 30,000). The runs are ranked on
-/// their `pipeline` alone and only the last [`PIPELINE_RECENT`] of each are
-/// read through every declaration.
+/// Each pipeline's runs are the head of its range of the stored rows
+/// (`newest_runs!`, #2185), and only those are read through every
+/// declaration. Before #2160 the runs were re-derived for every pipeline,
+/// pipelines × runs (2.5 s at 130 × 3,000); #2160 ranked every run once on
+/// its derived `pipeline` (140 ms, growing with the runs); the stored rows
+/// make it the pipelines × twelve, whatever TeamCity's history holds. The
+/// pipelines are `materialized` and read once: inlined, a pipeline's
+/// declarations were read for every pair of pipelines the final join
+/// compared (1.35 s against 0.59 s at 400 × 30,000).
 ///
 /// Public so the app's `tests/it/builds_list_plan.rs` can read its plan.
 pub const PIPELINES: &str = concat!(
@@ -207,7 +243,8 @@ pub const PIPELINES: &str = concat!(
     frame_kinds_cte!(),
     ",
 p as materialized (
-  select i.entity_id, i.source_id, i.web_url, coalesce(c.display_name, i.source_id) as source_name, ",
+  select i.entity_id, i.source_id, i.web_url, coalesce(c.display_name, i.source_id) as source_name,
+         c.kind as adapter_kind, ",
     crate::declared_string!("$1", "name"),
     " as name, ",
     crate::declared_string!("$1", "group"),
@@ -233,28 +270,19 @@ pins as (
     from knobas.setting
    where key = 'builds.pins' and jsonb_typeof(value) = 'array'
 ),
-ranked as materialized (
-  select x.entity_id, x.rn
-    from (select i.entity_id, ",
-    crate::declared_string!("$1", "pipeline"),
-    " as pkey, row_number() over (partition by i.source_id, ",
-    crate::declared_string!("$1", "pipeline"),
-    "
-                                 order by i.item_updated_at desc nulls last, i.entity_id desc) as rn
-            from frames f
-            join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
-           where f.frame = 'run') x
-   where x.pkey is not null and x.rn <= $2
-),
 r as materialized (
-  select k.rn, ",
+  select p.entity_id as pipeline, ",
     run_columns!(),
     "
-    from ranked k
-    join sync.live_item i on i.entity_id = k.entity_id
+    from p
+    cross join lateral ",
+    crate::newest_runs!("p", "$2"),
+    " k
+    join sync.item i on i.entity_id = k.entity_id
+   where p.pkey is not null and p.name is not null
 ),
 recent as materialized (
-  select r.source_id, r.pkey, jsonb_agg(jsonb_build_object(
+  select r.pipeline, jsonb_agg(jsonb_build_object(
            'entity_id', r.entity_id, 'number', r.number, 'state', r.state,
            'branch', r.branch, 'started', r.started, 'finished', r.finished,
            'updated_at', r.item_updated_at, 'web_url', r.web_url,
@@ -262,31 +290,35 @@ recent as materialized (
            'agent', r.agent, 'current_step', r.current_step,
            'tests_failed', r.tests_failed, 'tests_passed', r.tests_passed,
            'tests_ignored', r.tests_ignored,
-           'revision', r.revision) order by r.rn) as runs
+           'revision', r.revision)
+           order by r.item_updated_at desc nulls last, r.entity_id desc) as runs
     from r
-   group by r.source_id, r.pkey
+   group by r.pipeline
 )
 select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path,
        exists (select 1 from pins where pins.id = p.entity_id) as pinned,
        coalesce(rc.runs, '[]'::jsonb) as recent
   from p
-  left join recent rc on rc.source_id = p.source_id and rc.pkey = p.pkey
+  left join recent rc on rc.pipeline = p.entity_id
  where p.pkey is not null and p.name is not null
  order by lower(p.name), p.entity_id
 "
 );
 
-/// The runs of the pipeline `$2`, newest first, at most `$3`.
+/// The runs of the pipeline `$2`, newest first, at most `$3`: the head of its
+/// range of the stored rows (`newest_runs!`, #2185), each read through its
+/// kind's declarations.
 const PIPELINE_RUNS_OF: &str = concat!(
     "with ",
     frame_kinds_cte!(),
     ",
 target as (
-  select i.source_id, ",
+  select i.source_id, s.kind as adapter_kind, ",
     crate::declared_string!("$1", "pipeline"),
     " as pkey
     from frames f
     join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+    left join knobas.source_config s on s.id = i.source_id
    where f.frame = 'pipeline' and i.entity_id = $2
 )
 select t.pkey is not null as found, x.* from target t
@@ -294,16 +326,29 @@ select t.pkey is not null as found, x.* from target t
     select ",
     run_columns!(),
     "
-      from frames f
-      join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
-     where f.frame = 'run' and f.source_id = t.source_id
-       and ",
-    crate::declared_string!("$1", "pipeline"),
-    " = t.pkey
-     order by i.item_updated_at desc nulls last, i.entity_id desc
-     limit $3) x on true
+      from ",
+    crate::newest_runs!("t", "$3"),
+    " k
+      join sync.item i on i.entity_id = k.entity_id
+     order by i.item_updated_at desc nulls last, i.entity_id desc) x on true
 "
 );
+
+/// One pipeline's runs statement, for the app's plan test
+/// (`tests/it/read_plans.rs`, #2185). It binds what [`pipeline_runs`] binds.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_pipeline_runs() -> &'static str {
+    PIPELINE_RUNS_OF
+}
+
+/// *This job*'s statement, for the app's plan test
+/// (`tests/it/read_plans.rs`, #2185). It binds what [`job_pipelines`] binds.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_job_pipelines() -> &'static str {
+    JOB_PIPELINES
+}
 
 /// A run as it leaves a statement or a `recent` array: the declared times
 /// still in the source's spelling.
@@ -698,7 +743,14 @@ pub struct JobPipeline {
 /// three arrays: what is reached, the first step of its path, and its
 /// origin. Every field is a declared one (ADR-0007): a run's `branch` and
 /// `pipeline`, a pull request's `head` and `commit`, a run's revisions as
-/// `sync.item_revision` keeps them (#732). A branch's name is its title,
+/// `sync.item_revision` keeps them (#732). A run's `pipeline` is read from
+/// `sync.item_pipeline` (#2185, migration `0062`), which the database keeps as
+/// the run is written, and a run reached by id or by a commit is found
+/// through its index. Only a branch has no index: when the job reaches one,
+/// every run's `branch` is read once, through `branch_paths` (its source's
+/// candidates resolved once a statement rather than the declarations walked
+/// per run), and kept only where it names one of the job's; a job that
+/// reaches no branch reads no run's. A branch's name is its title,
 /// which is what Gitea titles a branch with and what a pull request's `head`
 /// names (#712). A run built on `refs/heads/<name>` counts as `<name>`.
 const JOB_PIPELINES: &str = concat!(
@@ -718,14 +770,14 @@ names as (
     "
     from reached r join sync.live_item i on i.entity_id = r.id
 ),
-heads as (
+heads as materialized (
   select r.id as pr, ",
     crate::declared_string!("$1", "commit"),
     " as sha
     from reached r join sync.live_item i on i.entity_id = r.id
    where i.kind = 'pr'
 ),
-p as (
+p as materialized (
   select i.entity_id, i.source_id, ",
     crate::declared_string!("$1", "pipeline"),
     " as pkey
@@ -733,39 +785,77 @@ p as (
     join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
    where f.frame = 'pipeline'
 ),
-x as (
-  select i.entity_id, i.source_id, ",
-    crate::declared_string!("$1", "pipeline"),
-    " as pkey, ",
-    crate::declared_string!("$1", "branch"),
-    " as branch
+branch_paths as materialized (
+  select f.source_id, f.kind, c.segs, c.ord
     from frames f
-    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+   cross join lateral (select ",
+    crate::declared_segments!("t.p"),
+    " as segs, t.ord
+      from jsonb_array_elements(case when jsonb_typeof($1::jsonb #> array[f.source_id, f.kind, 'branch']) = 'array'
+                                     then $1::jsonb #> array[f.source_id, f.kind, 'branch'] else '[]'::jsonb end)
+           with ordinality as t(p, ord)) c
    where f.frame = 'run'
 ),
-reasons as (
-  select p.entity_id as pipeline, 1 as ord, 'branch' as kind, n.name as value, null::text as origin
-    from x
-    join p on p.source_id = x.source_id and p.pkey = x.pkey
-    join names n on n.name is not null
-                and (x.branch = n.name or x.branch = 'refs/heads/' || n.name)
-  union
-  select p.entity_id, 2, 'pr_check', h.pr, null
+named as (
+  select array(select n.name from names n where n.name is not null) as names
+),
+run as not materialized (
+  select ip.entity_id, ip.source_id, ip.pkey, ip.adapter_kind
+    from sync.item_pipeline ip
+    join knobas.source_config s on s.id = ip.source_id and s.kind = ip.adapter_kind
+    join sync.live_item i on i.entity_id = ip.entity_id
+),
+on_branches as materialized (
+  select distinct run.source_id, run.pkey, c.name
+    from run
+    join sync.item i on i.entity_id = run.entity_id
+   cross join lateral (select ",
+    crate::first_string_of!(
+        "(select b.segs, b.ord from branch_paths b where b.source_id = i.source_id and b.kind = i.kind)"
+    ),
+    " as branch offset 0) b
+   cross join lateral (select b.branch as name
+                       union all
+                       select substr(b.branch, 12) where b.branch like 'refs/heads/%') c
+   where (select cardinality(n.names) from named n) > 0
+     and c.name = any((select n.names from named n)::text[])
+),
+checked as materialized (
+  select h.pr, k.source_id, k.pkey
     from heads h
-    join sync.item_revision rv on rv.revision = h.sha
-    join x on x.entity_id = rv.entity_id
-    join knobas.source_config s on s.id = x.source_id and s.kind = rv.adapter_kind
-    join p on p.source_id = x.source_id and p.pkey = x.pkey
-  union
-  select p.entity_id,
-         case when se.kind = 'pr' and r.origin = 'own' then 2 else 3 end,
-         case when se.kind = 'pr' and r.origin = 'own' then 'pr_check' else 'linked' end,
-         r.step,
-         case when se.kind = 'pr' and r.origin = 'own' then null else r.origin end
+   cross join lateral (
+     select run.source_id, run.pkey
+       from sync.item_revision rv
+       join run on run.entity_id = rv.entity_id and run.adapter_kind = rv.adapter_kind
+      where rv.revision = h.sha
+     offset 0) k
+),
+reached_runs as materialized (
+  select r.step, r.origin, k.source_id, k.pkey
     from reached r
-    left join x on x.entity_id = r.id
-    join p on p.entity_id = r.id or (p.source_id = x.source_id and p.pkey = x.pkey)
-    left join knobas.entity se on se.id = r.step
+   cross join lateral (
+     select run.source_id, run.pkey from run where run.entity_id = r.id offset 0) k
+),
+reasons as (
+  select p.entity_id as pipeline, 1 as ord, 'branch' as kind, b.name as value, null::text as origin
+    from on_branches b
+    join p on p.source_id = b.source_id and p.pkey = b.pkey
+  union
+  select p.entity_id, 2, 'pr_check', c.pr, null
+    from checked c
+    join p on p.source_id = c.source_id and p.pkey = c.pkey
+  union
+  select l.pipeline,
+         case when se.kind = 'pr' and l.origin = 'own' then 2 else 3 end,
+         case when se.kind = 'pr' and l.origin = 'own' then 'pr_check' else 'linked' end,
+         l.step,
+         case when se.kind = 'pr' and l.origin = 'own' then null else l.origin end
+    from (select p.entity_id as pipeline, r.step, r.origin
+            from reached r join p on p.entity_id = r.id
+          union all
+          select p.entity_id, r.step, r.origin
+            from reached_runs r join p on p.source_id = r.source_id and p.pkey = r.pkey) l
+    left join knobas.entity se on se.id = l.step
 )
 select pipeline, kind, value, origin from reasons order by pipeline, ord, value
 "

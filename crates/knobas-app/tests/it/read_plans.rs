@@ -37,6 +37,9 @@ const SMALL: &[&str] = &[
     "label_paths",
     "state_paths",
     "assignee_paths",
+    // *This job*'s run branch candidates, one row per source and run kind
+    // (#2185).
+    "branch_paths",
 ];
 
 /// The inbox rules whose whole statement #778 and #785 reshaped. Not here,
@@ -66,9 +69,11 @@ const RESHAPED_RULES: &[knobas_core::inbox::Category] = &[
 ];
 
 /// A probe-shaped mirror, a third of its size: three Jira-shaped sources of
-/// 1,500 tickets, a TeamCity-shaped one of 1,500 builds, a Confluence-shaped
-/// one of 500 pages, synced through the real sink so the stored parents and
-/// projects are what a sync leaves. Three bodies in four carry the probe's
+/// 1,500 tickets, a TeamCity-shaped one of 1,500 builds over 130
+/// configurations (five quiet), an Uptime-Kuma-shaped one of ten monitors
+/// with 20,000 samples, a Confluence-shaped one of 500 pages, synced through
+/// the real sink so the stored parents, projects and pipelines are what a
+/// sync leaves, and a link set of every configuration (#2185). Three bodies in four carry the probe's
 /// common word (#1849), as the probe's do: a heavier load of trigrams, which
 /// left `item_body_trgm_idx` 411 pages of pending list that the planner
 /// charged a random read each until `0057` capped the list (#1864).
@@ -98,6 +103,15 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
         kind: "build",
         count: 1_500,
     });
+    // Uptime Kuma's monitors (#2185), whose samples are seeded below.
+    sources.push(Synthetic {
+        descriptor: SourceDescriptor {
+            id: "kuma".to_owned(),
+            ..knobas_source_kuma::descriptor_template()
+        },
+        kind: "monitor",
+        count: 10,
+    });
     sources.push(Synthetic {
         descriptor: SourceDescriptor {
             id: "wiki".to_owned(),
@@ -111,6 +125,47 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
             .await
             .unwrap();
     }
+    // Monitor history (#2185): 2,000 samples of each of the ten monitors, a
+    // minute apart, so a read that sorts them all has rows to sort.
+    sqlx::query(
+        "insert into knobas.monitor_sample (entity_id, taken_at, state)
+         select 'kuma:monitor:' || m, now() - make_interval(mins => n),
+                case when n % 50 = 0 then 'down' else 'up' end
+           from generate_series(0, 9) m cross join generate_series(1, 2000) n",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // A link set whose members are every configuration (#2185), the quiet
+    // ones included, on the tickets of `JIRA00`.
+    knobas_app::link_sets::save(
+        &pool,
+        &Registry::for_process(),
+        knobas_app::link_sets::LinkSetDraft {
+            id: None,
+            name: "Payments CI".to_owned(),
+            description: String::new(),
+            members: pipeline_members(),
+            patterns: Vec::new(),
+            rules: vec![knobas_app::link_sets::LinkSetRule {
+                kind: "project".to_owned(),
+                value: "jira0:JIRA00".to_owned(),
+            }],
+        },
+    )
+    .await
+    .unwrap();
+    // A revision on every build (#2185), so *This job*'s pull-request
+    // check has stored commits to look its runs up by.
+    sqlx::query(
+        "update sync.item
+            set payload = payload || jsonb_build_object('revisions', jsonb_build_object(
+                  'revision', jsonb_build_array(jsonb_build_object('version', md5(entity_id) || 'abcdabcd'))))
+          where source_id = 'ci' and kind = 'build'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     // A tombstone and a disabled source, so both exclusion sets hold a row.
     sqlx::query("update knobas.entity set deleted_at = now() where id = 'jira0:JIRA0-7'")
         .execute(&pool)
@@ -478,6 +533,80 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
         wrong.extend(shapes(name, &plan));
     }
 
+    // The reads that walked a pipeline's runs, and the alert roster (#2185):
+    // through the stored rows' index, each pipeline's head of range, never a
+    // run's payload tested per pipeline or per member; every sample read
+    // under a `Limit` of one row per monitor.
+    let fillers = vec!["ci".to_owned()];
+    let builds = explain(&pool, knobas_core::builds::PIPELINES, |q| {
+        q.bind(declared.clone())
+            .bind(knobas_core::builds::PIPELINE_RECENT)
+            .bind(fillers.clone())
+    })
+    .await;
+    let mut runs_reads = vec![("builds list", builds)];
+    for pipeline in ["ci:buildType:Cfg_7", "ci:buildType:Cfg_129"] {
+        let plan = explain(&pool, knobas_core::builds::planned_pipeline_runs(), |q| {
+            q.bind(declared.clone()).bind(pipeline).bind(100_i64)
+        })
+        .await;
+        runs_reads.push(("pipeline runs", plan));
+    }
+    let members: Vec<String> = pipeline_members()
+        .into_iter()
+        .map(|m| m.entity_id)
+        .collect();
+    let plan = explain(&pool, knobas_app::link_sets::planned_member_rows(), |q| {
+        q.bind(declared.clone()).bind(members.clone())
+    })
+    .await;
+    runs_reads.push(("link-set member rows", plan));
+    for (name, plan) in &runs_reads {
+        wrong.extend(corpus_shapes(name, plan));
+        wrong.extend(
+            knobas_db::plan_shape::filtered_per_row(plan, "item")
+                .into_iter()
+                .chain(whole_reads(&plan[0]["Plan"], "item_pipeline"))
+                .map(|f| format!("{name}: {f}")),
+        );
+    }
+    let reached = knobas_core::reach::reach(&pool, "jira0:JIRA0-40")
+        .await
+        .unwrap();
+    assert!(
+        reached.len() > 100,
+        "the job reaches the link set's pipelines: {}",
+        reached.len()
+    );
+    let plan = explain(&pool, knobas_core::builds::planned_job_pipelines(), |q| {
+        q.bind(declared.clone())
+            .bind(
+                reached
+                    .iter()
+                    .map(|r| r.entity_id.clone())
+                    .collect::<Vec<_>>(),
+            )
+            .bind(reached.iter().map(|r| r.step.clone()).collect::<Vec<_>>())
+            .bind(vec!["link_set".to_owned(); reached.len()])
+    })
+    .await;
+    wrong.extend(corpus_shapes("this job", &plan));
+    wrong.extend(
+        knobas_db::plan_shape::filtered_per_row(&plan, "item")
+            .into_iter()
+            .map(|f| format!("this job: {f}")),
+    );
+    let plan = explain(&pool, knobas_sync::alerts::ROSTER, |q| {
+        q.bind("kuma").bind(knobas_sync::samples::KIND)
+    })
+    .await;
+    wrong.extend(corpus_shapes("alert roster", &plan));
+    wrong.extend(
+        knobas_db::plan_shape::unbounded_reads(&plan, "monitor_sample")
+            .into_iter()
+            .map(|f| format!("alert roster: {f}")),
+    );
+
     let state = if analyzed {
         "analyzed"
     } else {
@@ -494,6 +623,50 @@ async fn every_reshaped_read_plans_without_estimates_on_tables_never_analyzed() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_reshaped_read_plans_without_estimates_on_analyzed_tables() {
     assert_every_read_plans_without_estimates(true).await;
+}
+
+/// Every configuration of the mirror's CI source as a pipeline member: the
+/// probe's [`pipelines`](crate::responsiveness_probe::pipelines), the quiet
+/// ones included.
+fn pipeline_members() -> Vec<knobas_app::link_sets::LinkSetMember> {
+    (0..crate::responsiveness_probe::pipelines())
+        .map(|n| knobas_app::link_sets::LinkSetMember {
+            kind: "pipeline".to_owned(),
+            entity_id: format!("ci:buildType:Cfg_{n}"),
+        })
+        .collect()
+}
+
+/// What `plan_shape` finds in one of #2185's plans that reaches the run
+/// corpus or the samples: a per-row read of `sync.item` or a table kept
+/// beside it (`item_pipeline`, `item_revision`), or of
+/// `knobas.monitor_sample`. *This job*'s `on_branches` is not the corpus: it
+/// is read once, and holds a pipeline and a branch name per row, so it is
+/// the size of the pipelines times the job's branches whatever the runs. What else these statements
+/// read -- a job's reach, the pins, the assets, the open alerts -- is theirs
+/// from before #2185, small or keyed, and not what this asserts.
+fn corpus_shapes(name: &str, plan: &serde_json::Value) -> Vec<String> {
+    shapes(name, plan)
+        .into_iter()
+        .filter(|f| {
+            [" on item", " on monitor_sample"]
+                .iter()
+                .any(|on| f.contains(on))
+        })
+        .collect()
+}
+
+/// Every sequential scan of `relation` (#2185): the stored rows read whole,
+/// where a pipeline's runs are one keyed range of `item_pipeline_runs_idx`.
+fn whole_reads(node: &serde_json::Value, relation: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    if node["Node Type"] == "Seq Scan" && node["Relation Name"] == relation {
+        found.push(format!("reads {relation} whole"));
+    }
+    for child in node["Plans"].as_array().into_iter().flatten() {
+        found.extend(whole_reads(child, relation));
+    }
+    found
 }
 
 /// What `plan_shape` finds in one plan, named.

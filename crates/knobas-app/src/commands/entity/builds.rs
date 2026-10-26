@@ -21,6 +21,10 @@ pub async fn pipelines_inner(
     pool: &PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
 ) -> Result<Vec<PipelineRow>, IpcError> {
+    // A pipeline's runs are read from `sync.item_pipeline`, resolved from the
+    // stored declarations, which every command that reads it writes first
+    // (#2185, as the census does, #759).
+    crate::commands::search::declare(pool, registry).await?;
     let declarations = declared_paths(pool, registry).await?;
     let identity = identity_of(pool).await?;
     let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::CI).await?;
@@ -88,6 +92,8 @@ async fn runs_of_pipeline(
     limit: Option<u32>,
 ) -> Result<Vec<RunRow>, IpcError> {
     let entity = EntityRef::parse(pipeline_id).map_err(IpcError::invalid)?;
+    // As [`pipelines_inner`]: the stored rows follow the stored declarations.
+    crate::commands::search::declare(pool, registry).await?;
     let declarations = declared_paths(pool, registry).await?;
     let identity = identity_of(pool).await?;
     let Some(mut runs) =
@@ -883,6 +889,8 @@ pub async fn job_pipelines_inner(
     ticket_id: &str,
 ) -> Result<Vec<JobPipeline>, IpcError> {
     let reached = knobas_core::reach::reach(pool, ticket_id).await?;
+    // As [`pipelines_inner`]: the stored rows follow the stored declarations.
+    crate::commands::search::declare(pool, registry).await?;
     let declarations = declared_paths(pool, registry).await?;
     Ok(knobas_core::builds::job_pipelines(pool, &declarations, &reached).await?)
 }
