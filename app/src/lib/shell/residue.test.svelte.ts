@@ -1084,7 +1084,7 @@ const CASES: Case[] = [
             openCheckout: () => deferred(undefined),
             weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
             visitEntity: () => deferred(null),
-            entityThread: () => deferred({ comments: [], changes: [], me: [] }),
+            entityThread: () => deferred({ comments: [], me: [] }),
             createLink: () => new Promise(() => {}),
             unlink: () => new Promise(() => {}),
             roomSuggestions: () => deferred({ rows: [], total: 0, more: [] }),

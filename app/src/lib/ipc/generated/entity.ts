@@ -264,17 +264,6 @@ name: string, };
 export type ChainStepRow = { pipeline_id: string, name: string, run: RunRow | null, };
 
 /**
- * What a [`ThreadChange`] says happened.
- *
- * - `status`: The ticket was moved to another status.
- * - `opened`: A linked pull request was opened.
- * - `merged`: A linked pull request was merged.
- *
- * Issue #929.
- */
-export type ChangeKind = "status" | "opened" | "merged";
-
-/**
  * One application on the *Open in…* menu.
  *
  * Issue #844, R-8.21. Its commands take `{path}`, `{file}`, `{line}` and
@@ -3459,51 +3448,10 @@ export type Thread = {
  */
 comments: Array<ThreadComment>, 
 /**
- * Status moves and pull-request events, oldest first; never comments.
- */
-changes: Array<ThreadChange>, 
-/**
  * The accounts `@me` resolves to, so the shell can mark `@name` in a body
  * by the same identity this read matched.
  */
 me: Array<string>, };
-
-/**
- * One change, drawn between the comments when *Include changes* is on.
- *
- * Issues #819 and #929: a status move made in Jira or sent by knobas, or a
- * linked pull request's opening or merge.
- */
-export type ThreadChange = { at: string, kind: ChangeKind, 
-/**
- * A status move's new status. `None` for a pull-request line.
- */
-status: string | null, 
-/**
- * A status move's old status, as Jira's changelog names it. `None` for a
- * move knobas sent (the queue records only where it went) and for a
- * pull-request line.
- */
-from: string | null, 
-/**
- * Who moved it, as the source names them to a person (Jira's
- * `displayName`), else their account. `None` for a move knobas sent
- * (the reader, `mine`) and for a pull-request line.
- */
-by: string | null, 
-/**
- * The reader made it: a move knobas sent, or a changelog entry whose
- * author's account is one of the identity's.
- */
-mine: boolean, 
-/**
- * A pull request's number, the `#N` its key ends in, without the `#`.
- */
-number: string | null, 
-/**
- * A pull request's repository, the shortest name it is declared under.
- */
-repo: string | null, };
 
 /**
  * One comment of a thread.

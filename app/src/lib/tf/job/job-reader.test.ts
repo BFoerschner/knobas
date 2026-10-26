@@ -91,7 +91,7 @@ function fakes(over: { failing?: string[] } = {}) {
     entityThread: async (id) => {
       asked.push(`entityThread ${id}`);
       await wait(id);
-      return { comments: [], changes: [], me: [id] };
+      return { comments: [], me: [id] };
     },
     roomSuggestions: async (_sources, context) => {
       asked.push(`roomSuggestions ${context}`);

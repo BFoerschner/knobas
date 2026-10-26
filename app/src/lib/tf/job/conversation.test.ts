@@ -4,13 +4,11 @@
  */
 import { expect, test } from "vitest";
 
-import type { Thread, ThreadChange, ThreadComment } from "../../ipc/entity";
+import type { Thread, ThreadComment } from "../../ipc/entity";
 import { emptyFilter } from "../filter/filter";
 import {
-  CHANGES,
   MENTIONS,
   NEW,
-  changeLine,
   drawThread,
   isNew,
   mentionRuns,
@@ -26,7 +24,7 @@ function said(author: string, at: string | null, body: string, over: Partial<Thr
   return { author, at, body, mine: false, mentions_me: false, ...over };
 }
 
-/** Eight old comments, then two new ones, one naming the reader, and one move in the middle. */
+/** Eight old comments, then the reader's own and two new ones, one naming the reader. */
 function thread(): Thread {
   const old = Array.from({ length: 8 }, (_, n) =>
     said(n % 2 ? "Priya Nair" : "Lena Hoffmann", `2026-08-${12 + n}T08:00:00Z`, `old ${n}`),
@@ -38,30 +36,9 @@ function thread(): Thread {
       said("Jonas Becker", "2026-10-15T08:00:00Z", "left a note"),
       said("Lena Hoffmann", "2026-10-15T09:00:00Z", "[~mara] will it get an SLA?", { mentions_me: true }),
     ],
-    changes: [moved("In Progress", { at: "2026-08-15T09:00:00Z" })],
     me: ["mara"],
   };
 }
-
-function moved(status: string, over: Partial<ThreadChange> = {}): ThreadChange {
-  return { at: VISIT, kind: "status", status, from: null, by: null, mine: true, number: null, repo: null, ...over };
-}
-
-test("a change reads as who moved it from what to what, or as a pull request's opening or merge (#929)", () => {
-  expect(changeLine(moved("Done"))).toBe("You moved this to Done");
-  expect(changeLine(moved("Done", { from: "In Review", by: "Mara Lindqvist" }))).toBe(
-    "You moved this from In Review to Done",
-  );
-  expect(changeLine(moved("In Progress", { from: "To Do", by: "Priya Nair", mine: false }))).toBe(
-    "Priya moved this from To Do to In Progress",
-  );
-  const pr = { status: null, mine: false, number: "142", repo: "payout-service" };
-  expect(changeLine(moved("", { ...pr, kind: "opened" }))).toBe("PR #142 opened in payout-service");
-  expect(changeLine(moved("", { ...pr, kind: "merged", number: "57", repo: "psp-client" }))).toBe(
-    "PR #57 in psp-client merged",
-  );
-  expect(changeLine(moved("", { ...pr, kind: "merged", number: null, repo: null }))).toBe("A pull request merged");
-});
 
 test("new is somebody else's comment after the last visit, and nothing is new on a first look", () => {
   const [mine, theirs] = thread().comments.slice(8);
@@ -73,45 +50,39 @@ test("new is somebody else's comment after the last visit, and nothing is new on
   expect(isNew(said("x", "2026-10-15T08:00:00Z", "y"), null)).toBe(false);
 });
 
-test("the summary counts comments only, never status changes", () => {
+test("the summary counts the comments", () => {
   const read = summary(thread(), VISIT);
   expect(read).toMatchObject({ comments: 11, fresh: 2, mentions: 1 });
   expect(read.latest?.body).toBe("[~mara] will it get an SLA?");
-  const changes = [moved("Done"), moved("", { kind: "opened", number: "142", status: null })];
-  expect(summary({ comments: [], changes, me: [] }, VISIT).comments).toBe(0);
+  expect(summary({ comments: [], me: [] }, VISIT)).toMatchObject({ comments: 0, fresh: 0, mentions: 0, latest: null });
 });
 
 test("unfiltered, the old part folds: the last six entries and every new comment stay", () => {
   const filter = emptyFilter();
-  filter.chips["only"] = [CHANGES];
   const drawn = drawThread(thread(), VISIT, filter, false);
-  // 11 comments and 1 change; the last six are kept.
-  expect(drawn.folded).toBe(6);
+  // 11 comments; the last six are kept.
+  expect(drawn.folded).toBe(5);
   expect(drawn.foldedFrom).toBe("2026-08-12");
   expect(drawn.entries).toHaveLength(6);
   // The rule goes before the first new comment, not before the reader's own.
   const at = drawn.newAt!;
-  expect(drawn.entries[at]).toMatchObject({ kind: "comment", comment: { body: "left a note" } });
+  expect(drawn.entries[at]).toMatchObject({ comment: { body: "left a note" } });
 
   const all = drawThread(thread(), VISIT, filter, true);
   expect(all.folded).toBe(0);
-  expect(all.entries).toHaveLength(12);
-  expect(all.entries[4]).toMatchObject({ kind: "change", change: { status: "In Progress" } });
+  expect(all.entries.map((entry) => entry.comment.body)).toEqual(thread().comments.map((comment) => comment.body));
 });
 
 test("a new comment older than the last six still stays above the fold", () => {
   const read = thread();
   read.comments.splice(1, 0, said("Tomasz", "2026-10-15T08:30:00Z", "late but new"));
   const drawn = drawThread(read, VISIT, emptyFilter(), false);
-  expect(drawn.entries.map((entry) => (entry.kind === "comment" ? entry.comment.body : ""))).toContain("late but new");
+  expect(drawn.entries.map((entry) => entry.comment.body)).toContain("late but new");
 });
 
-test("without Include changes the moves go; a filter shows comments only, and folds nothing", () => {
-  const off = drawThread(thread(), VISIT, emptyFilter(), true);
-  expect(off.entries.some((entry) => entry.kind === "change")).toBe(false);
-
+test("a filter keeps the comments it matches, and folds nothing", () => {
   const mentions = emptyFilter();
-  mentions.chips["only"] = [CHANGES, MENTIONS];
+  mentions.chips["only"] = [MENTIONS];
   const drawn = drawThread(thread(), VISIT, mentions, false);
   expect(drawn.entries).toHaveLength(1);
   expect(drawn.shown).toBe(1);

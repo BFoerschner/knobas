@@ -2,10 +2,10 @@
   The job's Conversation tab (#819, R-5.2 to R-5.4): `#/job/<key>/conversation`.
 
   The whole thread, oldest first, under the filter bar: words, a chip per
-  person who commented, and *Mentions me*, *New since …* and *Include changes*
-  (on by default). Unfiltered, the old part folds behind *Show N earlier
-  entries* and a blue rule marks where the reader's last visit ends. New
-  comments are edged blue, mentions edged yellow with a chip and the `@name` in
+  person who commented, and *Mentions me* and *New since …*. The thread is
+  the ticket's comments and nothing else (#2163). Unfiltered, the old part
+  folds behind *Show N earlier entries* and a blue rule marks where the
+  reader's last visit ends. New comments are edged blue, mentions edged yellow with a chip and the `@name` in
   blue. The rules are `conversation.ts`'s; this draws them.
 
   The comment box at the end queues a `Comment` write (BUILT): the box clears
@@ -25,7 +25,7 @@
   import { refusedAttrs } from "../../shell/refused-writes";
   import { takeAgain, type Echo } from "../queued.svelte";
   import { initials } from "../tickets/tickets";
-  import { CHANGES, MENTIONS, NEW, changeLine, drawThread, firstName, mentionRuns, since, stamp } from "./conversation";
+  import { MENTIONS, NEW, drawThread, firstName, mentionRuns, since, stamp } from "./conversation";
 
   let {
     jobKey,
@@ -60,8 +60,6 @@
   // once: the job's own, kept for the session (R-2.6).
   // svelte-ignore state_referenced_locally
   const filter = sessionFilter(`convo-${jobKey}`);
-  // *Include changes* starts on (R-5.2), once per session.
-  if (filter.chips["only"] === undefined) filter.chips["only"] = [CHANGES];
 
   let expanded = $state(false);
   let draft = $state("");
@@ -90,7 +88,6 @@
         options: [
           { value: MENTIONS, label: "Mentions me" },
           ...(lastVisit === null ? [] : [{ value: NEW, label: `New since ${since(lastVisit, now)}` }]),
-          { value: CHANGES, label: "Include changes" },
         ],
       },
     ],
@@ -126,26 +123,22 @@
       >
     {/if}
     {#each drawn.entries as entry, index (index)}
+      {@const comment = entry.comment}
       {#if index === drawn.newAt && lastVisit !== null}
         <div class="tf-newline">New since your last visit, {since(lastVisit, now)}</div>
       {/if}
-      {#if entry.kind === "change"}
-        <div class="tf-msg tf-event"><span></span><span>{changeLine(entry.change)}, {stamp(entry.change.at, now)}</span></div>
-      {:else}
-        {@const comment = entry.comment}
-        <article class="tf-msg" class:tf-new={entry.fresh} class:tf-mention={comment.mentions_me}>
-          <span class="tf-av" class:tf-me={comment.mine} aria-hidden="true">{initials(comment.author)}</span>
-          <div class="tf-msg-body">
-            <div class="tf-who">
-              <b>{comment.mine ? "You" : firstName(comment.author)}</b>{stamp(comment.at, now)}
-              {#if comment.mentions_me}<span class="tf-chip tf-chip-mention">mentions you</span>{/if}
-            </div>
-            <p>
-              {#each mentionRuns(comment.body, thread.me) as run, at (at)}{#if run.at}<span class="tf-at">{run.text}</span>{:else}<Marked text={run.text} typed={filter.text} />{/if}{/each}
-            </p>
+      <article class="tf-msg" class:tf-new={entry.fresh} class:tf-mention={comment.mentions_me}>
+        <span class="tf-av" class:tf-me={comment.mine} aria-hidden="true">{initials(comment.author)}</span>
+        <div class="tf-msg-body">
+          <div class="tf-who">
+            <b>{comment.mine ? "You" : firstName(comment.author)}</b>{stamp(comment.at, now)}
+            {#if comment.mentions_me}<span class="tf-chip tf-chip-mention">mentions you</span>{/if}
           </div>
-        </article>
-      {/if}
+          <p>
+            {#each mentionRuns(comment.body, thread.me) as run, at (at)}{#if run.at}<span class="tf-at">{run.text}</span>{:else}<Marked text={run.text} typed={filter.text} />{/if}{/each}
+          </p>
+        </div>
+      </article>
     {/each}
     {#if drawn.entries.length === 0 && queued.length === 0}
       <div class="tf-empty">{thread.comments.length === 0 ? "No comments yet." : "No comments match."}</div>

@@ -8,7 +8,8 @@
 //!   activity stream and answers the one before it, so "new since your last
 //!   visit" means since the reader last opened this ticket in knobas. The
 //!   stream is the record (R-5.5 names it); there is no table of visits.
-//! * [`thread`] -- the **comments** and the **changes**. The comments are a
+//! * [`thread`] -- the **comments**, and nothing else (#2163: the status-move
+//!   and pull-request lines of #819 and #929 are retired). The comments are a
 //!   named payload read (ADR-0007), [`COMMENTS`]; *mentions me* is matched in
 //!   each body against the identity `@me` resolves to.
 //!
@@ -19,28 +20,6 @@
 //! (`time::worklog`'s `NOT_WORK`), and so does the activity read the history
 //! panel and the status bar draw from (`knobas_core::activity::recent`):
 //! a line per opened job would push every real change off both.
-//!
-//! # What *changes* are
-//!
-//! *Include changes* interleaves quiet lines between the comments (R-5.2),
-//! from three records, none of them a comment (R-5.1):
-//!
-//! * **Status moves made anywhere** (#929): the Jira adapter asks `/search`
-//!   for `expand=changelog`, so the stored payload carries Jira's
-//!   `changelog.histories`; each history item on the `status` field is a line
-//!   with who moved it, from what and to what. A named payload read,
-//!   [`HISTORIES`], as [`COMMENTS`] is.
-//! * **Status moves knobas delivered** (#819): a `transition` write the queue
-//!   settled as `sent`. Jira's changelog holds the same move once the mirror
-//!   has synced after it, so a knobas move is drawn only while the changelog
-//!   has no move to the same status from around its queueing on
-//!   ([`SKEW`]) -- and for a record with no changelog at all (the mock
-//!   adapter, or a ticket not synced since the adapter started asking).
-//! * **Pull-request events** (#929): the opening and the merge of every pull
-//!   request confirm-linked to the ticket, read through the `opened` and
-//!   `merged_at` times its source declares (ADR-0007), named by the `#N` its
-//!   key ends in (the signals' rule) and its repository's shortest declared
-//!   name.
 use chrono::{DateTime, Utc};
 use knobas_core::entity::EntityRef;
 use sqlx::{PgPool, Row};
@@ -122,50 +101,6 @@ pub struct ThreadComment {
     pub mentions_me: bool,
 }
 
-/// What a [`ThreadChange`] says happened.
-///
-/// - `status`: The ticket was moved to another status.
-/// - `opened`: A linked pull request was opened.
-/// - `merged`: A linked pull request was merged.
-///
-/// Issue #929.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(export_to = "entity.ts")]
-pub enum ChangeKind {
-    Status,
-    Opened,
-    Merged,
-}
-
-/// One change, drawn between the comments when *Include changes* is on.
-///
-/// Issues #819 and #929: a status move made in Jira or sent by knobas, or a
-/// linked pull request's opening or merge.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
-#[ts(export_to = "entity.ts")]
-pub struct ThreadChange {
-    pub at: DateTime<Utc>,
-    pub kind: ChangeKind,
-    /// A status move's new status. `None` for a pull-request line.
-    pub status: Option<String>,
-    /// A status move's old status, as Jira's changelog names it. `None` for a
-    /// move knobas sent (the queue records only where it went) and for a
-    /// pull-request line.
-    pub from: Option<String>,
-    /// Who moved it, as the source names them to a person (Jira's
-    /// `displayName`), else their account. `None` for a move knobas sent
-    /// (the reader, `mine`) and for a pull-request line.
-    pub by: Option<String>,
-    /// The reader made it: a move knobas sent, or a changelog entry whose
-    /// author's account is one of the identity's.
-    pub mine: bool,
-    /// A pull request's number, the `#N` its key ends in, without the `#`.
-    pub number: Option<String>,
-    /// A pull request's repository, the shortest name it is declared under.
-    pub repo: Option<String>,
-}
-
 /// A ticket's thread, oldest first.
 ///
 /// Issue #819.
@@ -174,8 +109,6 @@ pub struct ThreadChange {
 pub struct Thread {
     /// In the source's order, oldest first.
     pub comments: Vec<ThreadComment>,
-    /// Status moves and pull-request events, oldest first; never comments.
-    pub changes: Vec<ThreadChange>,
     /// The accounts `@me` resolves to, so the shell can mark `@name` in a body
     /// by the same identity this read matched.
     pub me: Vec<String>,
@@ -199,91 +132,6 @@ const COMMENTS: &str = "select coalesce(
        '[]'::jsonb) as comments
   from sync.item
  where entity_id = $1";
-
-/// A knobas-delivered status move on `$1`: a settled `transition` write.
-///
-/// `payload` is `knobas_source::WriteOp`'s serde shape, externally tagged
-/// (`{"Transition": {"entity", "status"}}`); a drifted shape misses and the
-/// move is not drawn, which is the safe direction for a quiet line. Pinned by
-/// `a_status_move_knobas_sent_is_a_change_and_not_a_comment`.
-const MOVES: &str = "select coalesce(settled_at, queued_at) as at, queued_at,
-       payload #>> '{Transition,status}' as status
-  from knobas.write_queue
- where entity_id = $1 and op = 'transition' and state = 'sent'
-   and jsonb_typeof(payload #> '{Transition,status}') = 'string'
- order by at, id";
-
-/// **Jira's status history, the second named payload read** (ADR-0007):
-/// `changelog.histories`, which `/search` carries since the adapter asks for
-/// `expand=changelog` (#929). `None` when the record has no such array --
-/// another adapter, or a ticket the mirror has not synced since -- and then
-/// the knobas-sent moves stand alone. [`moves_of`] reads each entry.
-///
-/// Failure direction as [`COMMENTS`]': a drifted shape is no line, never a
-/// wrong one. Pinned by `a_changelog_of_another_shape_reads_as_no_moves`.
-const HISTORIES: &str =
-    "select case when jsonb_typeof(payload #> '{changelog,histories}') = 'array'
-            then payload #> '{changelog,histories}' end as histories
-  from sync.item
- where entity_id = $1";
-
-/// The pull requests confirm-linked to `$1`, either direction, with the times
-/// their source declares (`$2`, the declarations): one row each, live ones
-/// only. The number is the `#N` the key ends in, as the signals read it.
-const PULLS: &str = concat!(
-    "select substring(i.entity_id from '#([0-9]+)$') as num, (select n.name from ",
-    knobas_core::declared_parent_names!("$2"),
-    " n order by length(n.name), n.name limit 1) as repo, ",
-    knobas_core::declared_string!("$2", "opened"),
-    " as opened, ",
-    knobas_core::declared_string!("$2", "merged_at"),
-    " as merged from sync.item i
- where i.kind = 'pr' and ",
-    knobas_core::live_by_key!("i"),
-    " and i.entity_id in (select l.to_id from knobas.confirmed_link l where l.from_id = $1
-                       union select l.from_id from knobas.confirmed_link l where l.to_id = $1)"
-);
-
-/// How far before its queueing a changelog move to the same status still
-/// counts as Jira's record of a move knobas sent: the two clocks are the
-/// server's and this machine's.
-const SKEW: chrono::TimeDelta = chrono::TimeDelta::minutes(2);
-
-/// The status moves of a changelog's `histories`, oldest first: every item on
-/// the `status` field of every entry that has a time and a new status.
-fn moves_of(histories: &serde_json::Value, me: &[String]) -> Vec<ThreadChange> {
-    let mut moves: Vec<ThreadChange> = histories
-        .as_array()
-        .into_iter()
-        .flatten()
-        .flat_map(|entry| {
-            let at = text_at(entry, &["created"]).and_then(stamp);
-            let account =
-                text_at(entry, &["author", "name"]).or_else(|| text_at(entry, &["author", "key"]));
-            let by = text_at(entry, &["author", "displayName"]).or(account);
-            entry
-                .get("items")
-                .and_then(serde_json::Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter(|item| text_at(item, &["field"]) == Some("status"))
-                .filter_map(move |item| {
-                    Some(ThreadChange {
-                        at: at?,
-                        kind: ChangeKind::Status,
-                        status: Some(text_at(item, &["toString"])?.to_owned()),
-                        from: text_at(item, &["fromString"]).map(str::to_owned),
-                        by: by.map(str::to_owned),
-                        mine: account.is_some_and(|a| me.iter().any(|name| name == a)),
-                        number: None,
-                        repo: None,
-                    })
-                })
-        })
-        .collect();
-    moves.sort_by_key(|change| change.at);
-    moves
-}
 
 /// The string at `key` of `value`, trimmed, or `None` (blank and non-strings
 /// miss, ADR-0007).
@@ -357,19 +205,13 @@ async fn identity(pool: &PgPool) -> Result<Vec<String>, IpcError> {
 
 /// The thread of `entity_id`: its comments in the source's order, which both
 /// spellings write oldest first (Jira's comment list is ordered by `created`,
-/// and the Jira adapter reads it so), and its changes oldest first: status
-/// moves from Jira's changelog and from the queue, and the opening and merge
-/// of each linked pull request (the module's *What changes are*).
+/// and the Jira adapter reads it so).
 ///
 /// # Errors
 ///
 /// `invalid` for something that is not an entity id, `not_found` for one the
 /// mirror does not hold, `internal` for a query failure.
-pub async fn thread(
-    pool: &PgPool,
-    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
-    entity_id: &str,
-) -> Result<Thread, IpcError> {
+pub async fn thread(pool: &PgPool, entity_id: &str) -> Result<Thread, IpcError> {
     let entity = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
     let id = entity.to_string();
     let row = sqlx::query(COMMENTS)
@@ -388,72 +230,7 @@ pub async fn thread(
                 .collect()
         })
         .unwrap_or_default();
-    let histories: Option<serde_json::Value> = sqlx::query_scalar(HISTORIES)
-        .bind(&id)
-        .fetch_one(pool)
-        .await?;
-    let mut changes = histories
-        .as_ref()
-        .map(|histories| moves_of(histories, &me))
-        .unwrap_or_default();
-    let recorded = changes.clone();
-    for row in sqlx::query(MOVES).bind(&id).fetch_all(pool).await? {
-        let queued: DateTime<Utc> = row.get("queued_at");
-        let status: String = row.get("status");
-        let in_jira = recorded
-            .iter()
-            .any(|m| m.status.as_deref() == Some(status.as_str()) && m.at >= queued - SKEW);
-        if !in_jira {
-            changes.push(ThreadChange {
-                at: row.get("at"),
-                kind: ChangeKind::Status,
-                status: Some(status),
-                from: None,
-                by: None,
-                mine: true,
-                number: None,
-                repo: None,
-            });
-        }
-    }
-    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
-    for row in sqlx::query(PULLS)
-        .bind(&id)
-        .bind(declarations.as_param())
-        .fetch_all(pool)
-        .await?
-    {
-        let number: Option<String> = row.get("num");
-        let repo: Option<String> = row.get("repo");
-        for (kind, column) in [
-            (ChangeKind::Opened, "opened"),
-            (ChangeKind::Merged, "merged"),
-        ] {
-            let at = row
-                .get::<Option<String>, _>(column)
-                .as_deref()
-                .and_then(knobas_core::payload::parse_instant);
-            if let Some(at) = at {
-                changes.push(ThreadChange {
-                    at,
-                    kind,
-                    status: None,
-                    from: None,
-                    by: None,
-                    mine: false,
-                    number: number.clone(),
-                    repo: repo.clone(),
-                });
-            }
-        }
-    }
-    // Stable: same-instant lines keep the order they were gathered in.
-    changes.sort_by_key(|change| change.at);
-    Ok(Thread {
-        comments,
-        changes,
-        me,
-    })
+    Ok(Thread { comments, me })
 }
 
 #[cfg(test)]

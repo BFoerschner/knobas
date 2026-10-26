@@ -128,8 +128,8 @@ pub async fn visit_entity(
 }
 
 /// A ticket's thread (#819, R-5.2): its comments in the source's order, each
-/// marked when it is the reader's own or mentions them, and the status moves
-/// knobas delivered on it.
+/// marked when it is the reader's own or mentions them, and nothing else
+/// (#2163).
 ///
 /// # Errors
 ///
@@ -145,7 +145,7 @@ pub async fn entity_thread(
     entity_id: String,
 ) -> Result<crate::conversation::Thread, IpcError> {
     let pool = lifecycle.pool()?;
-    crate::conversation::thread(&pool, lifecycle.registry(), &entity_id).await
+    crate::conversation::thread(&pool, &entity_id).await
 }
 
 // -- opening a checkout (#501) ----------------------------------------------

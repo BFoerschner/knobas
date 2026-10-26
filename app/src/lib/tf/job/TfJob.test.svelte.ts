@@ -226,7 +226,7 @@ function ports(
       calls.visits.push(id);
       return Promise.resolve(null);
     },
-    entityThread: () => Promise.resolve({ comments: [], changes: [], me: ["mara"] }),
+    entityThread: () => Promise.resolve({ comments: [], me: ["mara"] }),
     createLink: (from, to, relation) => {
       calls.links.push([from, to, relation]);
       return Promise.resolve({} as never);
@@ -380,7 +380,7 @@ test("on a job a key two sources hold, every link to the job's own tabs names it
   expect(section("assets").querySelector("a.tf-open")?.getAttribute("href")).toBe("#/job/gitea%3APAY-231/map");
 
   unmount(job!);
-  open("gitea:PAY-231", { ports: { ...twoHolders(), entityThread: () => Promise.resolve({ comments: [said], changes: [], me: ["mara"] }) } });
+  open("gitea:PAY-231", { ports: { ...twoHolders(), entityThread: () => Promise.resolve({ comments: [said], me: ["mara"] }) } });
   await settle();
   expect(target.querySelector(".tf-cbtn")?.textContent?.trim()).toBe("Read the conversation");
   expect(hrefs(".tf-cbtn")).toEqual(["#/job/gitea%3APAY-231/conversation"]);
@@ -1431,7 +1431,7 @@ test("a comment's echo says queued, then sent, and goes on the refresh event's r
   const { follower, sent } = echoFollower();
   let said: { author: string; at: string; body: string; mine: boolean; mentions_me: boolean }[] = [];
   const io = ports({
-    entityThread: () => Promise.resolve({ comments: said, changes: [], me: ["mara"] }),
+    entityThread: () => Promise.resolve({ comments: said, me: ["mara"] }),
     submitWrite: () => Promise.resolve({ id: 72 } as never),
     listen: sync.listen,
   });
@@ -1472,7 +1472,7 @@ test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… me
     entityThread: async () => {
       threads++;
       await threadGate;
-      return { comments: [], changes: [], me: ["mara"] };
+      return { comments: [], me: ["mara"] };
     },
     jobReach: () => (reaches++, Promise.resolve([])),
     refresh: probe.ports,
@@ -1570,7 +1570,7 @@ test("a move's echo goes on a Refresh's read of the ticket, and a comment's on i
   let next = 80;
   const io = ports({
     getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status })) : Promise.reject({ code: "not_found" })),
-    entityThread: () => Promise.resolve({ comments: said, changes: [], me: ["mara"] }),
+    entityThread: () => Promise.resolve({ comments: said, me: ["mara"] }),
     submitWrite: () => Promise.resolve({ id: next++ } as never),
     refresh: probe.ports,
   });

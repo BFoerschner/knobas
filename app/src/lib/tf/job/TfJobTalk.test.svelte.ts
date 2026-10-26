@@ -125,18 +125,6 @@ function thread(): Thread {
       { author: "Jonas Becker", at: "2026-10-15T08:00:00Z", body: "Left a comment on the PR.", mine: false, mentions_me: false },
       { author: "Lena Hoffmann", at: "2026-10-15T10:45:00Z", body: "[~mara] will the queue get an SLA?", mine: false, mentions_me: true },
     ],
-    changes: [
-      {
-        at: "2026-08-15T09:00:00Z",
-        kind: "status",
-        status: "In Progress",
-        from: null,
-        by: null,
-        mine: true,
-        number: null,
-        repo: null,
-      },
-    ],
     me: ["mara"],
   };
 }
@@ -223,7 +211,7 @@ function squash(node: Element | null | undefined): string {
 }
 
 function messages(): string[] {
-  return [...target.querySelectorAll(".tf-convo .tf-msg:not(.tf-event) p")].map((p) => squash(p));
+  return [...target.querySelectorAll(".tf-convo .tf-msg p")].map((p) => squash(p));
 }
 
 function chip(label: string): HTMLButtonElement {
@@ -245,23 +233,8 @@ test("the card says how many comments, how many are new since the visit and how 
   expect(squash(tab)).toBe("Conversation 11 2 new");
 });
 
-test("a ticket nobody commented on says so, and a status change is not a comment", async () => {
-  open(null, { ports: ports({ entityThread: () => Promise.resolve({ comments: [], changes: [
-            {
-              at: VISIT,
-              kind: "status",
-              status: "Done",
-              from: null,
-              by: null,
-              mine: true,
-              number: null,
-              repo: null,
-            },
-          ],
-          me: [],
-        }),
-    }),
-  });
+test("a ticket nobody commented on says so", async () => {
+  open(null, { ports: ports({ entityThread: () => Promise.resolve({ comments: [], me: [] }) }) });
   await settle();
   const card = target.querySelector("[aria-label='Job card']")!;
   expect(squash(card)).toContain("No comments yet.");
@@ -274,7 +247,7 @@ test("the tab folds the old part, marks the last visit, edges new comments and m
   open("conversation");
   await settle();
   const fold = target.querySelector<HTMLButtonElement>(".tf-fold")!;
-  expect(squash(fold)).toBe("Show 6 earlier entries, from 2026-08-12");
+  expect(squash(fold)).toBe("Show 5 earlier entries, from 2026-08-12");
   expect(squash(target.querySelector(".tf-newline"))).toBe("New since your last visit, 09:00");
   // The rule sits right above the first new comment, not above the reader's own.
   expect(target.querySelector(".tf-newline + .tf-msg p")?.textContent).toBe("Left a comment on the PR.");
@@ -290,7 +263,10 @@ test("the tab folds the old part, marks the last visit, edges new comments and m
   fold.click();
   flushSync();
   expect(messages()).toHaveLength(11);
-  expect(squash(target.querySelector(".tf-event"))).toBe("You moved this to In Progress, 2026-08-15 11:00");
+  // The conversation is the comments (#2163): every entry drawn is one.
+  const drawnEntries = [...target.querySelectorAll(".tf-convo > .tf-msg")];
+  expect(drawnEntries).toHaveLength(11);
+  expect(drawnEntries.every((entry) => entry.tagName === "ARTICLE")).toBe(true);
 });
 
 test("a tab change is not a visit: the job records one and keeps what is new", async () => {
@@ -318,10 +294,12 @@ test("a tab change is not a visit: the job records one and keeps what is new", a
   expect(squash(target.querySelector(".tf-newline"))).toBe("New since your last visit, 09:00");
 });
 
-test("Include changes starts on; Mentions me keeps only the mentions; the count follows", async () => {
+test("no Include changes chip; Mentions me keeps only the mentions; the count follows", async () => {
   open("conversation");
   await settle();
-  expect(chip("Include changes").getAttribute("aria-pressed")).toBe("true");
+  const labels = [...target.querySelectorAll(".tf-fchips button")].map((b) => squash(b));
+  expect(labels).toContain("Mentions me");
+  expect(labels).not.toContain("Include changes");
   expect(squash(target.querySelector(".tf-fcount"))).toBe("11 comments");
 
   chip("Mentions me").click();
@@ -335,12 +313,6 @@ test("Include changes starts on; Mentions me keeps only the mentions; the count 
   chip("New since 09:00").click();
   flushSync();
   expect(messages()).toEqual(["Left a comment on the PR.", "[~mara] will the queue get an SLA?"]);
-
-  chip("New since 09:00").click();
-  chip("Include changes").click();
-  target.querySelector<HTMLButtonElement>(".tf-fold")?.click();
-  flushSync();
-  expect(target.querySelector(".tf-event")).toBeNull();
 });
 
 test("a person chip per commenter, by first name", async () => {

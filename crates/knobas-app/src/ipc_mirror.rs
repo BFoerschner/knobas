@@ -163,8 +163,6 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::capture::ShortcutView::export_all(cfg)?;
     crate::capture::Recorded::export_all(cfg)?;
     crate::conversation::ThreadComment::export_all(cfg)?;
-    crate::conversation::ChangeKind::export_all(cfg)?;
-    crate::conversation::ThreadChange::export_all(cfg)?;
     crate::conversation::Thread::export_all(cfg)?;
     crate::notes_export::NotesExport::export_all(cfg)?;
     crate::docs::DocsTree::export_all(cfg)?;

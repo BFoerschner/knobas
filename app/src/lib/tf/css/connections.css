@@ -15,7 +15,6 @@
 .tf-msg.tf-new .tf-msg-body { border-color: var(--info); box-shadow: inset 3px 0 0 var(--info); }
 .tf-msg.tf-mention .tf-msg-body { box-shadow: inset 3px 0 0 var(--card-2); }
 .tf-chip.tf-chip-mention, .tf-chip.tf-chip-job { background: var(--card); color: var(--card-ink); }
-.tf-msg.tf-event { grid-template-columns: 28px 1fr; font-size: var(--t-sm); color: var(--ink-2); align-items: center; }
 .tf-at { font-weight: 600; color: var(--info); }
 .tf-fold {
   align-self: flex-start; margin-left: 38px; border: 1px dashed var(--rule); background: none; border-radius: 4px;
