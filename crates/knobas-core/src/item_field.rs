@@ -42,3 +42,54 @@ macro_rules! stored_string {
         )
     };
 }
+
+/// [`stored_string!`] for a statement that reads one field of many tickets:
+/// the same answer, joined rather than probed per row (#2184). On a mirror
+/// of small records the per-row probe cost what the walk it replaced did
+/// (2 µs a ticket on 15,000 records of a few hundred bytes), where a hash
+/// join costs a fraction of it.
+///
+/// After `from sync.item i`: the stored row of `i`'s `$field` whose `paths`
+/// are the candidates `$decl` gives `i`'s source and kind, as `$alias`
+/// (`sync.item_field` holds at most one per item, field and paths). Read it
+/// through [`stored_or!`].
+#[macro_export]
+macro_rules! stored_join {
+    ($alias:literal, $decl:literal, $field:literal) => {
+        concat!(
+            " left join sync.item_field ",
+            $alias,
+            " on ",
+            $alias,
+            ".entity_id = i.entity_id and ",
+            $alias,
+            ".field = '",
+            $field,
+            "' and ",
+            $alias,
+            ".paths = (",
+            $decl,
+            "::jsonb #> array[i.source_id, i.kind, '",
+            $field,
+            "']) "
+        )
+    };
+}
+
+/// [`stored_join!`]'s value where there is a row, `$walk` -- the read the
+/// statement made before, [`crate::first_string_of!`]'s rule over the same
+/// candidates -- where there is none.
+#[macro_export]
+macro_rules! stored_or {
+    ($alias:literal, $($walk:tt)+) => {
+        concat!(
+            "(case when ",
+            $alias,
+            ".entity_id is null then ",
+            $($walk)+,
+            " else ",
+            $alias,
+            ".value end)"
+        )
+    };
+}

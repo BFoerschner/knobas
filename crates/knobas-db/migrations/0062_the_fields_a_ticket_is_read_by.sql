@@ -22,12 +22,13 @@
 --
 -- ## What is stored, and what it depends on
 --
--- For each item, each stored adapter declaration of the item's kind
--- (`sync.parent_declaration.payload_paths`, one entry per kind) and each of
--- `sync.item_field_names()` that entry declares (a non-empty array), one row:
--- `paths`, the field's declared candidates as that entry holds them, and
--- `value`, what `knobas_core::declared_string!` yields over them (null on a
--- miss: a path that leads to nothing, a non-string, a blank). The read is
+-- For each item, each field of `sync.item_field_names()` and each distinct
+-- set of candidates a stored adapter declaration of the item's kind
+-- (`sync.parent_declaration.payload_paths`) gives that field (a non-empty
+-- array), one row: `paths`, those candidates, and `value`, what
+-- `knobas_core::declared_string!` yields over them (null on a miss: a path
+-- that leads to nothing, a non-string, a blank). Two adapters declaring the
+-- same paths share the row, which is what lets a reader join on the paths. The read is
 -- pasted below as its expansion with `$decl` = `dd.decl`, `dd.decl` being
 -- `{<the item's source_id>: {<its kind>: {"f": <paths>}}}` and the field
 -- `f`; `knobas-app`'s `tests/it/item_field.rs` holds the stored text to the
@@ -35,7 +36,8 @@
 --
 -- **A reader uses a row only where `paths` equals the candidates the
 -- declarations it binds give that item's source and kind**, and walks the
--- payload as before where none does (`knobas_core::stored_string!`). So a
+-- payload as before where none does (`knobas_core::stored_string!` per row,
+-- `knobas_core::stored_join!` for a statement over many tickets). So a
 -- stored value is the walk's answer by construction -- one expression over
 -- the same paths and the same record -- whichever adapter the source is
 -- configured with, and a read that binds declarations the database never
@@ -68,14 +70,12 @@
 -- archive (§16.12), and the re-sync's inserts resolve themselves.
 
 create table sync.item_field (
-  entity_id    text collate "C" not null references sync.item (entity_id) on delete cascade,
-  adapter_kind text not null,
-  field        text not null,
-  paths        jsonb not null,
-  value        text
+  entity_id text collate "C" not null references sync.item (entity_id) on delete cascade,
+  field     text not null,
+  paths     jsonb not null,
+  value     text,
+  primary key (entity_id, field, paths)
 );
--- The readers': one probe per item and field.
-create index item_field_entity_idx on sync.item_field (entity_id, field);
 
 -- The fields stored: what the Tickets screen reads of every ticket.
 create function sync.item_field_names() returns text[]
@@ -101,8 +101,9 @@ create function sync.resolve_item_fields(ids text[]) returns void
 language plpgsql as $fn$
 begin
   delete from sync.item_field f using unnest(ids) as u(id) where f.entity_id = u.id;
-  insert into sync.item_field (entity_id, adapter_kind, field, paths, value)
-  select i.entity_id, d.adapter_kind, fl.field, kp.p->fl.field,
+  insert into sync.item_field (entity_id, field, paths, value)
+  select distinct on (i.entity_id, fl.field, kp.p->fl.field)
+         i.entity_id, fl.field, kp.p->fl.field,
          (select nullif(btrim(i.payload #>> c.segs), '') from (select array(select jsonb_array_elements_text(case when jsonb_typeof(p) = 'array' then p else '[]'::jsonb end)) as segs, ord from jsonb_array_elements(case when jsonb_typeof(dd.decl::jsonb #> array[i.source_id, i.kind, 'f']) = 'array' then dd.decl::jsonb #> array[i.source_id, i.kind, 'f'] else '[]'::jsonb end) with ordinality as t(p, ord)) c where jsonb_typeof(i.payload #> c.segs) = 'string' and nullif(btrim(i.payload #>> c.segs), '') is not null order by c.ord limit 1)
     from unnest(ids) as u(id)
     join sync.item i on i.entity_id = u.id

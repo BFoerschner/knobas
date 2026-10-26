@@ -87,6 +87,14 @@ macro_rules! status_paths {
     };
 }
 
+/// After `from sync.item i`: the ticket's stored status row as `sst`, which
+/// [`status_of_ticket!`] reads ([`crate::stored_join!`], #2184).
+macro_rules! status_join {
+    ($decl:literal) => {
+        $crate::stored_join!("sst", $decl, "status_name")
+    };
+}
+
 /// The lane a ticket stands in (#939), read once a row like its status:
 /// the field `$lane` names (`epic`, `assignee`, `priority`, `issuetype`,
 /// `label`), and `''` where the ticket has none of it or `$lane` is `null`.
@@ -178,9 +186,9 @@ macro_rules! lane_paths {
 /// A ticket's status, at the path its own source declares (#277), through
 /// `status_paths` ([`status_paths!`]): [`crate::declared_string!`]'s rule,
 /// [`crate::first_string_of!`] being the one spelling both share. Read off
-/// `sync.item_field` where the database stored it for the declarations
-/// `$decl` binds ([`crate::stored_string!`], #2184): on 2,500 Jira tickets
-/// the walk cost about 20 µs a ticket, a probe of the stored row 2 µs.
+/// `sync.item_field` where the database stored it for the declarations the
+/// statement binds, joined as `sst` ([`status_join!`], #2184): on 2,500 Jira
+/// tickets the walk cost about 20 µs a ticket.
 ///
 /// **Failure direction (ADR-0007 requirement 3, unchanged by the growth): a
 /// miss is visible, never a guess.** A ticket whose source declares no status
@@ -190,10 +198,9 @@ macro_rules! lane_paths {
 /// `a_ticket_with_no_recognizable_status_lands_in_the_terminal_group` in
 /// `knobas-core/tests/it/mini_board.rs`.
 macro_rules! status_of_ticket {
-    ($decl:literal) => {
-        $crate::stored_string!(
-            $decl,
-            "status_name",
+    () => {
+        $crate::stored_or!(
+            "sst",
             $crate::first_string_of!(
                 "(select p.segs, p.ord from status_paths p where p.source_id = i.source_id)"
             )
@@ -274,11 +281,13 @@ const CARDS: &str = concat!(
     ",
      scoped as materialized (
        select i.entity_id, coalesce(i.item_updated_at, i.synced_at) as at, ",
-    status_of_ticket!("$4"),
+    status_of_ticket!(),
     " as status, ",
     lane_of_ticket!("$4", "$6"),
     " as lane
-       from sync.item i
+       from sync.item i",
+    status_join!("$4"),
+    "
       where i.kind = 'ticket'
         and ",
     crate::live_by_exclusion!("i"),
@@ -397,9 +406,11 @@ const OBSERVED_STATUSES: &str = concat!(
     ",
      observed as materialized (
        select i.source_id, ",
-    status_of_ticket!("$2"),
+    status_of_ticket!(),
     " as status
-         from sync.item i
+         from sync.item i",
+    status_join!("$2"),
+    "
         where i.kind = 'ticket'
           and i.source_id = any($1)
           and ",
@@ -927,11 +938,13 @@ const STATUSES: &str = concat!(
     lane_paths!("$2", "$3"),
     "
      select i.entity_id, i.source_id, ",
-    status_of_ticket!("$2"),
+    status_of_ticket!(),
     " as status, ",
     lane_of_ticket!("$2", "$3"),
     " as lane, i.item_updated_at
-       from sync.item i
+       from sync.item i",
+    status_join!("$2"),
+    "
       where i.kind = 'ticket'
         and ",
     crate::live_by_exclusion!("i"),
