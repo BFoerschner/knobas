@@ -88,6 +88,16 @@ pub(crate) struct JiraCursor {
     /// envelope written before the field reads as "never read".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board_read: Option<BoardRead>,
+    /// The ticket scope the watermark was taken under (#2181): the JQL
+    /// clause `projects` or `jql_filter` render to, empty for none. A run
+    /// under another scope -- a project added, a filter changed -- walks the
+    /// new one in full, because the watermark says nothing about tickets the
+    /// old scope never asked for. Optional, so `CURSOR_VERSION` stays 4; an
+    /// envelope written before the field has no recorded scope and matches
+    /// none, so every source walks in full once after the upgrade, which also
+    /// brings in what a scope widened before this build missed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 /// When the boards were last read, and under which *Boards and filters*
@@ -140,7 +150,21 @@ impl JiraCursor {
             seen: Vec::new(),
             views: Vec::new(),
             board_read: None,
+            scope: None,
         }
+    }
+
+    /// This cursor's issue half, kept only when it was taken under `scope`
+    /// (#2181): under another, the watermark and the overlap's `seen` are
+    /// dropped so the run walks the scope in full. The views and the board
+    /// stamp stay -- they carry their own setting.
+    pub(crate) fn under(mut self, scope: &str) -> Self {
+        if self.scope.as_deref() != Some(scope) {
+            self.updated_to = None;
+            self.seen.clear();
+            self.scope = Some(scope.to_owned());
+        }
+        self
     }
 
     /// `None` for anything this version does not recognise -- which the caller
@@ -244,6 +268,7 @@ impl JiraCursor {
             seen,
             views: Vec::new(),
             board_read: None,
+            scope: None,
         }
     }
 }
@@ -294,6 +319,27 @@ mod tests {
         assert_eq!(cursor.board_read, None);
         assert_eq!(cursor.views.len(), 1);
         assert_eq!(cursor.encode(), old, "and re-encodes without inventing it");
+    }
+
+    /// #2181: a cursor keeps its issue half only under the scope it was
+    /// taken under. One written before the field records none, so it matches
+    /// no scope -- the "everything" scope included -- and the views survive.
+    #[test]
+    fn a_cursor_under_another_scope_drops_its_watermark_and_keeps_its_views() {
+        let old = r#"{"v":4,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[{"k":"PAY-1","u":"2026-08-22T11:48:00Z","h":"x"}],"views":[{"k":"board-1","h":"x"}]}"#;
+        let legacy = JiraCursor::parse(old).expect("a v4 envelope without the field reads");
+        assert_eq!(legacy.scope, None);
+        let walked = legacy.clone().under("");
+        assert_eq!((walked.updated_to, walked.seen.len()), (None, 0));
+        assert_eq!(walked.views, legacy.views);
+        assert_eq!(walked.scope.as_deref(), Some(""));
+
+        let same = walked.clone().under("");
+        assert_eq!(same, walked);
+        let mut kept = legacy;
+        kept.scope = Some("project in (\"PAY\")".to_owned());
+        assert_eq!(kept.clone().under("project in (\"PAY\")"), kept);
+        assert_eq!(kept.under("project in (\"PAY\", \"OPS\")").updated_to, None);
     }
 
     #[test]

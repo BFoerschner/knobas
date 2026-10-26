@@ -303,7 +303,14 @@ impl SyncRun<'_> {
 
         let witnessed = self.run_start().await?;
         let offset = witnessed.offset_secs;
-        let previous = cursor.as_deref().and_then(ConfluenceCursor::parse);
+        // A cursor taken under another space list is no cursor (#2181): the
+        // run syncs this list in full, as it does an unreadable one.
+        let scope = crate::cql::scope_key(self.cfg);
+        let previous = cursor
+            .as_deref()
+            .and_then(ConfluenceCursor::parse)
+            .filter(|c| c.scope.as_deref() == Some(scope.as_str()));
+        let cursor = cursor.filter(|_| previous.is_some());
         let since = previous.as_ref().and_then(|c| c.since(offset));
         let cql = build_cql(self.cfg, since, offset, Order::Ascending);
         // The positions sweep goes **before** the walk, so the places the
@@ -464,6 +471,7 @@ impl SyncRun<'_> {
             (0, _) => Ok(cursor.unwrap_or_else(|| {
                 ConfluenceCursor::empty(offset)
                     .with_positions(positions)
+                    .with_scope(scope)
                     .encode()
             })),
             // Items arrived, but neither they nor the previous cursor carry a
@@ -473,6 +481,7 @@ impl SyncRun<'_> {
             (_, None) => Ok(previous
                 .unwrap_or_else(|| ConfluenceCursor::empty(offset))
                 .with_positions(positions)
+                .with_scope(scope)
                 .encode()),
             // The ceiling clamp and the never-backwards floor are the shared
             // watermark's (#1622): an edit made *during* the walk does not
@@ -487,6 +496,7 @@ impl SyncRun<'_> {
                 Ok(
                     ConfluenceCursor::advanced(bounds, w, offset, &seen_in_window, &comments_seen)
                         .with_positions(positions)
+                        .with_scope(scope)
                         .encode(),
                 )
             }
@@ -1014,8 +1024,22 @@ mod tests {
                     .map(|id| id.trim().to_owned())
                     .collect()
             });
+            // A space list, as the server reads it: a row outside it is not
+            // answered. A row naming no space (a comment hit) is left in.
+            let spaces: Option<Vec<String>> = cql.split_once("space in (").map(|(_, rest)| {
+                rest.split(')')
+                    .next()
+                    .unwrap_or_default()
+                    .split(", ")
+                    .map(|key| key.trim_matches('"').to_owned())
+                    .collect()
+            });
             let mut rows: Vec<Value> = pages
                 .into_iter()
+                .filter(|p| match (&spaces, p["space"]["key"].as_str()) {
+                    (Some(keys), Some(key)) => keys.iter().any(|k| k == key),
+                    _ => true,
+                })
                 .filter(|p| {
                     named
                         .as_ref()
@@ -2328,6 +2352,91 @@ mod tests {
                 "the ceiling probe is scoped like the walk, or the clamp never binds: {search}"
             );
         }
+    }
+
+    /// [`page`] in the space `key`.
+    fn page_in(key: &str, id: &str, when: &str) -> Value {
+        let mut p = page(id, &format!("{key} {id}"), when, 1);
+        p["space"]["key"] = json!(key);
+        p
+    }
+
+    /// Two old pages, one per space, and a newer one in ENG.
+    fn two_spaces() -> Vec<Value> {
+        vec![
+            page_in("ENG", "101", "2026-08-18T10:00:00.000Z"),
+            page_in("OPS", "102", "2026-08-19T10:00:00.000Z"),
+            page_in("ENG", "103", "2026-08-22T11:48:00.000Z"),
+        ]
+    }
+
+    /// #2181: a space added to the scope brings in its pages older than the
+    /// watermark. The cursor records the space list it was taken under, and
+    /// a run under another one syncs the new scope in full.
+    #[tokio::test]
+    async fn a_space_added_to_the_scope_brings_its_older_pages() {
+        let fake = Fake::new(two_spaces());
+        let eng = cfg(json!({ "spaces": ["ENG"] }));
+        let (first, cursor) = run(&fake, &eng, None).await.unwrap();
+        assert_eq!(ids(&first), ["101", "103"]);
+        let (idle, _) = run(&fake, &eng, Some(cursor.clone())).await.unwrap();
+        assert!(idle.is_empty(), "{:?}", ids(&idle));
+
+        let both = cfg(json!({ "spaces": ["ENG", "OPS"] }));
+        let (widened, after) = run(&fake, &both, Some(cursor)).await.unwrap();
+        assert!(
+            ids(&widened).contains(&"102".to_owned()),
+            "102 is older than the watermark: {:?}",
+            ids(&widened)
+        );
+        let (idle, again) = run(&fake, &both, Some(after.clone())).await.unwrap();
+        assert!(idle.is_empty(), "{:?}", ids(&idle));
+        assert_eq!(again, after);
+    }
+
+    /// #2181: a cursor written before it recorded a space list matches none,
+    /// so the first run after the upgrade syncs in full -- which is what
+    /// brings in a space added before this build.
+    #[tokio::test]
+    async fn a_cursor_without_a_recorded_space_list_syncs_in_full() {
+        let fake = Fake::new(two_spaces());
+        let every = cfg(json!({}));
+        let (_, cursor) = run(&fake, &every, None).await.unwrap();
+        let mut legacy: Value = serde_json::from_str(&cursor).unwrap();
+        assert_eq!(legacy["scope"], json!(""));
+        legacy.as_object_mut().unwrap().remove("scope");
+        let (again, _) = run(&fake, &every, Some(legacy.to_string())).await.unwrap();
+        assert_eq!(ids(&again), ["101", "102", "103"]);
+    }
+
+    /// #2181: an edit outside the space list keeps the incremental position.
+    #[tokio::test]
+    async fn an_edit_outside_the_space_list_keeps_the_position() {
+        let fake = Fake::new(two_spaces());
+        let (_, cursor) = run(&fake, &cfg(json!({ "spaces": ["ENG"] })), None)
+            .await
+            .unwrap();
+        let edited = cfg(json!({ "spaces": ["ENG"], "rate_per_sec": 2, "page_size": 10 }));
+        let (idle, again) = run(&fake, &edited, Some(cursor.clone())).await.unwrap();
+        assert!(idle.is_empty(), "{:?}", ids(&idle));
+        assert_eq!(again, cursor);
+    }
+
+    /// #2181, ruled: a space taken out of the list is neither read nor
+    /// tombstoned. Its pages stay in the mirror as last seen; the engine
+    /// sweeps only a cursor-less run (ADR-0003).
+    #[tokio::test]
+    async fn a_space_taken_out_of_the_list_is_neither_read_nor_tombstoned() {
+        let fake = Fake::new(two_spaces());
+        let (_, cursor) = run(&fake, &cfg(json!({ "spaces": ["ENG", "OPS"] })), None)
+            .await
+            .unwrap();
+        let eng = cfg(json!({ "spaces": ["ENG"] }));
+        let (narrowed, after) = run(&fake, &eng, Some(cursor)).await.unwrap();
+        assert_eq!(ids(&narrowed), ["101", "103"], "the rest, in full");
+        assert!(narrowed.iter().all(|i| !i.deleted));
+        let (idle, _) = run(&fake, &eng, Some(after)).await.unwrap();
+        assert!(idle.is_empty(), "{:?}", ids(&idle));
     }
 
     /// Sink failures are the sink's to raise and the adapter's to propagate:

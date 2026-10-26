@@ -120,19 +120,30 @@ pub(crate) fn build_ids_cql(ids: &[&str]) -> String {
     format!("type = page AND id in ({list})")
 }
 
-/// The scope, then the space list when one is configured.
-fn scoped(scope: &str, cfg: &ConfluenceConfig) -> Vec<String> {
-    let mut clauses = vec![scope.to_owned()];
-    if !cfg.spaces.is_empty() {
+/// The space list as a cursor records it (#2181): the clause, or empty for
+/// a source that reads every space it can see.
+pub(crate) fn scope_key(cfg: &ConfluenceConfig) -> String {
+    space_clause(cfg).unwrap_or_default()
+}
+
+/// `space in (…)`, when a space list is configured.
+fn space_clause(cfg: &ConfluenceConfig) -> Option<String> {
+    (!cfg.spaces.is_empty()).then(|| {
         let list = cfg
             .spaces
             .iter()
             .map(|s| format!("\"{s}\""))
             .collect::<Vec<_>>()
             .join(", ");
-        clauses.push(format!("space in ({list})"));
-    }
-    clauses
+        format!("space in ({list})")
+    })
+}
+
+/// The scope, then the space list when one is configured.
+fn scoped(scope: &str, cfg: &ConfluenceConfig) -> Vec<String> {
+    std::iter::once(scope.to_owned())
+        .chain(space_clause(cfg))
+        .collect()
 }
 
 /// One CQL string: the scope, then the two clauses every walk shares, then the

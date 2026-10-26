@@ -2786,6 +2786,7 @@ knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_comment_pos
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_comment_record_the_walk_cannot_place_contributes_nothing
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_comment_that_mentions_me_delivers_the_page_it_is_on
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_commented_page_the_walk_already_sent_is_not_sent_twice
+knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_cursor_without_a_recorded_space_list_syncs_in_full
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_cursor_without_places_re_reads_the_placed_pages_once
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_delivered_comment_settles_and_the_next_poll_returns_the_same_bytes
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_drag_after_the_walk_delivered_the_page_reaches_the_next_run
@@ -2808,8 +2809,11 @@ knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_run_over_a_
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_run_reports_its_walk_over_the_total_size_even_when_it_pushes_nothing
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_search_that_answers_emptily_to_a_refused_credential_still_ends_in_an_error
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_sink_failure_abandons_the_run
+knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_space_added_to_the_scope_brings_its_older_pages
+knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_space_taken_out_of_the_list_is_neither_read_nor_tombstoned
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_trashed_page_is_gone
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_walk_that_never_ends_is_refused_after_max_pages
+knobas-source-confluence	lib/knobas_source_confluence	sync::tests::an_edit_outside_the_space_list_keeps_the_position
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::an_empty_corpus_syncs_to_nothing_and_still_answers_a_cursor
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::an_expanded_comment_container_is_not_fetched_again
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::an_idle_incremental_run_emits_nothing_and_returns_the_same_bytes
@@ -3314,6 +3318,7 @@ knobas-source-jira	lib/knobas_source_jira	config::tests::project_keys_must_look_
 knobas-source-jira	lib/knobas_source_jira	config::tests::projects_and_a_filter_are_mutually_exclusive
 knobas-source-jira	lib/knobas_source_jira	config::tests::the_cloud_flavor_is_refused_by_name
 knobas-source-jira	lib/knobas_source_jira	config::tests::the_epic_link_field_must_be_a_bare_field_id
+knobas-source-jira	lib/knobas_source_jira	cursor::tests::a_cursor_under_another_scope_drops_its_watermark_and_keeps_its_views
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::a_cursor_with_no_watermark_asks_for_everything
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::a_record_that_changed_within_one_second_is_not_the_one_already_delivered
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::a_v4_envelope_without_the_board_read_stamp_decodes
@@ -3413,18 +3418,23 @@ knobas-source-jira	lib/knobas_source_jira	source::tests::the_connection_note_is_
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_ceiling_below_the_previous_watermark_does_not_move_it_back
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_changed_boards_setting_is_read_at_once
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_changed_issue_is_the_only_thing_the_next_run_emits
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_changed_jql_filter_walks_the_new_filter_in_full
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_deletion_that_empties_the_next_page_hides_no_unread_one
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_failing_worklog_completion_fails_the_run_and_stops_the_page
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_full_sync_walks_the_whole_total_not_just_the_first_page
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_listing_emptied_under_the_walk_ends_it
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_page_with_nothing_past_the_walk_ends_it_while_total_still_claims_more
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_pages_truncated_worklogs_are_completed_eight_at_a_time_in_walk_order
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_project_added_to_the_scope_brings_its_older_tickets
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_project_taken_out_of_the_scope_is_neither_read_nor_tombstoned
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_run_that_emitted_an_issue_reads_the_boards
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_scope_change_that_emits_nothing_still_records_the_scope
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_sink_failure_aborts_the_run
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_step_back_answered_short_of_the_walk_ends_nothing
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_total_that_grew_between_pages_is_read_to_its_end
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_walk_that_hits_the_page_cap_fails_instead_of_reporting_a_completed_sync
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_auth_failure_mid_sync_keeps_its_classification
+knobas-source-jira	lib/knobas_source_jira	sync::tests::an_edit_outside_the_scope_keeps_the_position
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_empty_page_ends_the_run
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_incremental_emits_nothing_and_returns_the_same_cursor
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_poll_does_not_reach_back_further_than_the_overlap
@@ -3828,6 +3838,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_build_teamcity_
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_build_that_failed_to_start_after_it_was_mirrored_as_queued_does_not_stay_queued
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_build_that_finishes_late_is_still_picked_up
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_build_that_finishes_mid_run_is_not_lost_between_the_two_queries
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_configuration_added_to_the_scope_brings_its_older_builds
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_configuration_carries_its_project_path
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_configuration_is_emitted_once_per_run
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_configured_project_takes_in_its_subprojects_at_every_depth
@@ -3843,6 +3854,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_paged_build_con
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_personal_build_is_witnessed_by_the_ceiling_and_never_mirrored
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_position_from_before_the_test_counts_is_read_again_from_the_top
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_probe_that_misses_the_watermark_is_confirmed_by_id_and_holds_it_where_it_stands
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_project_taken_out_of_the_scope_is_neither_read_nor_tombstoned
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_query_that_exactly_fills_a_server_s_ceiling_is_refused_though_it_fitted
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_refreshed_build_is_the_item_a_run_emits_for_it
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_run_whose_pages_reach_the_watermark_asks_nothing_by_id
@@ -3856,6 +3868,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_short_page_from
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_sink_failure_aborts_the_run
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_watermark_behind_an_unordered_page_is_witnessed_by_the_probe
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_watermark_whose_build_is_gone_is_refused_as_a_replaced_server
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::an_edit_outside_the_scope_keeps_the_position
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::an_idle_incremental_run_emits_nothing_and_returns_the_same_cursor
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::an_in_scope_running_build_still_clamps_the_watermark
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::an_incremental_run_mirrors_a_feature_branch_build_that_finished
