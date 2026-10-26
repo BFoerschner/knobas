@@ -416,7 +416,11 @@ async fn a_watermark_at_the_top_of_a_page_does_not_wedge_the_next_run() {
     let mut sink = VecSink(Vec::new());
     let cursor = source
         .sync(
-            Some(format!(r#"{{"v":2,"since_build_id":{watermark}}}"#)),
+            // The scope the source runs under (#2181), or the run is a full
+            // sync and resumes from nothing.
+            Some(format!(
+                r#"{{"v":2,"since_build_id":{watermark},"scope":"projects:|build_types:{build_type}"}}"#
+            )),
             &mut sink,
         )
         .await

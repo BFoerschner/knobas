@@ -332,7 +332,11 @@ async fn a_configuration_lists_incremental_run_asks_up_to_concurrent_configs_at_
             json!({ "concurrent_configs": 2, "build_type_ids": ids }),
         ),
         &held,
-        Some(r#"{"v":2,"since_build_id":50}"#.to_owned()),
+        // Under the source's own scope (#2181), or the run is a full sync.
+        Some(format!(
+            r#"{{"v":2,"since_build_id":50,"scope":"projects:|build_types:{}"}}"#,
+            ids.join(",")
+        )),
     );
 
     within(

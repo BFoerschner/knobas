@@ -16,22 +16,44 @@
 /// The engine holds a position for that run, so it does not sweep.
 const VERSION: u32 = 2;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CursorState {
     /// Field order is the serialized order: `{"v":…,"since_build_id":…}`.
     pub v: u32,
     pub since_build_id: i64,
+    /// The scope the watermark was taken under (#2181), as [`scope`] writes
+    /// it; absent for an unscoped source. A run under another scope -- a
+    /// configuration or project added -- is a full sync, because the
+    /// watermark says nothing about builds the old scope never asked for.
+    /// Optional, so the version stays 2 and an unscoped source keeps the
+    /// bytes it had; a scoped source's cursor written before the field reads
+    /// as unscoped, so it syncs in full once after the upgrade.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
-pub(crate) fn new(since_build_id: i64) -> CursorState {
+pub(crate) fn new(since_build_id: i64, scope: Option<String>) -> CursorState {
     CursorState {
         v: VERSION,
         since_build_id,
+        scope,
     }
 }
 
-pub(crate) fn render(state: CursorState) -> String {
-    serde_json::to_string(&state).expect("a two-field struct of numbers always serializes")
+/// What a cursor records of `cfg`'s scope: the project ids, then the
+/// configuration ids, or `None` for a source that reads everything.
+pub(crate) fn scope(cfg: &crate::config::TeamCityConfig) -> Option<String> {
+    (!cfg.project_ids.is_empty() || !cfg.build_type_ids.is_empty()).then(|| {
+        format!(
+            "projects:{}|build_types:{}",
+            cfg.project_ids.join(","),
+            cfg.build_type_ids.join(",")
+        )
+    })
+}
+
+pub(crate) fn render(state: &CursorState) -> String {
+    serde_json::to_string(state).expect("a struct of numbers and a string always serializes")
 }
 
 /// `None` means "this position is not one this adapter wrote" -- an older
@@ -170,9 +192,16 @@ mod tests {
     /// "exactly" is compared as a string by the contract battery.
     #[test]
     fn the_envelope_is_the_documented_shape() {
-        assert_eq!(render(new(412)), r#"{"v":2,"since_build_id":412}"#);
-        assert_eq!(render(new(0)), r#"{"v":2,"since_build_id":0}"#);
-        assert_eq!(parse(&render(new(412))), Some(new(412)));
+        assert_eq!(render(&new(412, None)), r#"{"v":2,"since_build_id":412}"#);
+        assert_eq!(render(&new(0, None)), r#"{"v":2,"since_build_id":0}"#);
+        assert_eq!(parse(&render(&new(412, None))), Some(new(412, None)));
+        // #2181: a scoped source's cursor names its scope.
+        let scoped = new(412, Some("projects:Payout|build_types:".to_owned()));
+        assert_eq!(
+            render(&scoped),
+            r#"{"v":2,"since_build_id":412,"scope":"projects:Payout|build_types:"}"#
+        );
+        assert_eq!(parse(&render(&scoped)), Some(scoped));
     }
 
     /// An unrecognised version means "full sync" (interfaces §4.1), not a

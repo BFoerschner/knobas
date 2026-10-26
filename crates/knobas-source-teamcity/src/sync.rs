@@ -112,8 +112,13 @@ pub(crate) async fn execute(
     cursor_in: Option<Cursor>,
     sink: &mut (dyn Sink + Send),
 ) -> Result<Cursor, SourceError> {
+    // A cursor taken under another scope is no cursor (#2181): this run is a
+    // full sync of the scope as it is now.
+    let scope_now = cursor::scope(cfg);
+    let cursor_in =
+        cursor_in.filter(|raw| cursor::parse(raw).is_some_and(|p| p.scope == scope_now));
     let previous = cursor_in.as_deref().and_then(cursor::parse);
-    let before = previous.map_or(0, |p| p.since_build_id);
+    let before = previous.as_ref().map_or(0, |p| p.since_build_id);
     let mut configs: BTreeMap<String, Rec<BuildType>> = BTreeMap::new();
     // The project tree (#849): read at most once a run, and only by a run
     // that needs it -- one that lists configurations, or a scoped one that
@@ -166,7 +171,7 @@ pub(crate) async fn execute(
     refuse_a_replaced_server(rest, ceiling, before).await?;
 
     // 4. The finished builds this run is responsible for.
-    let finished = match previous {
+    let finished = match &previous {
         None => {
             // Full sync: the whole scope, newest `builds_per_config` each. The
             // listing doubles as the source of the `build_config` items.
@@ -320,16 +325,19 @@ pub(crate) async fn execute(
         // Battery clause 2: a run that emitted nothing hands back the cursor
         // it was given, byte for byte. The engine reads "same cursor, no
         // items" as "nothing happened" and writes no activity line.
-        return Ok(cursor_in.unwrap_or_else(|| cursor::render(cursor::new(0))));
+        return Ok(cursor_in.unwrap_or_else(|| cursor::render(&cursor::new(0, scope_now))));
     }
-    Ok(cursor::render(cursor::new(cursor::advance(
-        before,
-        cursor::Seen {
-            max_finished,
-            min_unfinished,
-            ceiling,
-        },
-    ))))
+    Ok(cursor::render(&cursor::new(
+        cursor::advance(
+            before,
+            cursor::Seen {
+                max_finished,
+                min_unfinished,
+                ceiling,
+            },
+        ),
+        scope_now,
+    )))
 }
 
 /// Whether a page just answered is the whole of its query.
@@ -1963,6 +1971,79 @@ mod tests {
         );
     }
 
+    /// #2181: a configuration or project added to the scope brings in its
+    /// builds older than the watermark. The cursor records the scope it was
+    /// taken under, and a run under another one is a full sync of the new
+    /// scope: each configuration's newest `builds_per_config`.
+    #[tokio::test]
+    async fn a_configuration_added_to_the_scope_brings_its_older_builds() {
+        let config = |value: serde_json::Value| TeamCityConfig::from_json(&value).expect("config");
+        for (before, after) in [
+            (
+                config(serde_json::json!({ "build_type_ids": ["Payout_IntegrationTests"] })),
+                config(serde_json::json!({
+                    "build_type_ids": ["Payout_IntegrationTests", "Ledger_Deploy_Staging"]
+                })),
+            ),
+            (
+                config(serde_json::json!({ "project_ids": ["Payout"] })),
+                config(serde_json::json!({ "project_ids": ["Payout", "Ledger"] })),
+            ),
+        ] {
+            let rest = tidewater();
+            let (items, cursor) = run(&rest, &before, None).await;
+            assert!(!keys(&items).contains(&"build:412".to_owned()));
+            let (widened, next) = run(&rest, &after, Some(cursor)).await;
+            assert!(
+                keys(&widened).contains(&"build:412".to_owned()),
+                "412 is below the watermark: {:?}",
+                keys(&widened)
+            );
+            let (_, again) = run(&rest, &after, Some(next.clone())).await;
+            assert_eq!(again, next, "settled under the new scope");
+        }
+    }
+
+    /// #2181: an edit outside the scope keeps the incremental position, and
+    /// an unscoped source's cursor stays the bytes it always was.
+    #[tokio::test]
+    async fn an_edit_outside_the_scope_keeps_the_position() {
+        let rest = tidewater();
+        let (_, cursor) = run(&rest, &TeamCityConfig::default(), None).await;
+        assert_eq!(cursor, r#"{"v":2,"since_build_id":1187}"#);
+        let edited = TeamCityConfig::from_json(&serde_json::json!({
+            "builds_per_config": 5, "rate_limit_per_sec": 2
+        }))
+        .expect("config");
+        let (items, _) = run(&rest, &edited, Some(cursor)).await;
+        assert!(
+            !items.iter().any(|i| i.kind == crate::KIND_BUILD_CONFIG
+                && i.entity.key == "buildType:Ledger_Deploy_Staging"),
+            "an incremental run, not a full one: {:?}",
+            keys(&items)
+        );
+    }
+
+    /// #2181, ruled: a project taken out of the scope is neither read nor
+    /// tombstoned. Its builds stay in the mirror as last seen, as every
+    /// TeamCity build past its window does (`full_sync_exhaustive: false`).
+    #[tokio::test]
+    async fn a_project_taken_out_of_the_scope_is_neither_read_nor_tombstoned() {
+        let rest = tidewater();
+        let both = TeamCityConfig::from_json(&serde_json::json!({ "project_ids": ["Payout", "Ledger"] }))
+            .expect("config");
+        let (_, cursor) = run(&rest, &both, None).await;
+        let payout = TeamCityConfig::from_json(&serde_json::json!({ "project_ids": ["Payout"] }))
+            .expect("config");
+        let (items, _) = run(&rest, &payout, Some(cursor)).await;
+        assert!(
+            items.iter().all(|i| !i.entity.key.contains("Ledger") && !i.deleted),
+            "{:?}",
+            keys(&items)
+        );
+        assert!(keys(&items).contains(&"build:1187".to_owned()), "the rest in full");
+    }
+
     /// A nested TeamCity (#849): `Payments` holds `Payouts`, which holds
     /// `Deploy`, and `Data` sits beside it.
     fn nested() -> FakeRest {
@@ -2078,7 +2159,7 @@ mod tests {
         let (items, first) = run(&rest, &cfg, None).await;
         assert_eq!(keys(&items), ["buildType:Payout_Build", "build:200"]);
         assert_eq!(
-            first, r#"{"v":2,"since_build_id":200}"#,
+            first, r#"{"v":2,"since_build_id":200,"scope":"projects:Payout|build_types:"}"#,
             "a foreign running build must not clamp the watermark"
         );
 
@@ -2102,7 +2183,7 @@ mod tests {
         let (items, second) = run(&rest, &cfg, Some(first)).await;
         assert_eq!(keys(&items), ["buildType:Payout_Build", "build:300"]);
         assert_eq!(
-            second, r#"{"v":2,"since_build_id":400}"#,
+            second, r#"{"v":2,"since_build_id":400,"scope":"projects:Payout|build_types:"}"#,
             "400 is foreign and finished: the run saw it and will never want it again, so \
              leaving the watermark at 300 would re-fetch it on every poll for good"
         );
@@ -2122,7 +2203,7 @@ mod tests {
         let cfg = TeamCityConfig::from_json(&serde_json::json!({ "project_ids": ["Payout"] }))
             .expect("config");
         let (_, cursor) = run(&rest, &cfg, None).await;
-        assert_eq!(cursor, r#"{"v":2,"since_build_id":99}"#);
+        assert_eq!(cursor, r#"{"v":2,"since_build_id":99,"scope":"projects:Payout|build_types:"}"#);
     }
 
     /// A configuration two builds share is emitted once, not twice.
@@ -2263,7 +2344,7 @@ mod tests {
         let (items, cursor) = run(
             &rest,
             &cfg,
-            Some(r#"{"v":2,"since_build_id":0}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":0,"scope":"projects:|build_types:Payout_Build,Payout_IntegrationTests,Gone_Config"}"#.to_owned()),
         )
         .await;
         let built: Vec<String> = keys(&items)
@@ -2272,7 +2353,7 @@ mod tests {
             .collect();
         assert_eq!(built.len(), 20, "the twenty in scope: {built:?}");
         assert_eq!(
-            cursor, r#"{"v":2,"since_build_id":1500}"#,
+            cursor, r#"{"v":2,"since_build_id":1500,"scope":"projects:|build_types:Payout_Build,Payout_IntegrationTests,Gone_Config"}"#,
             "the newest build in scope"
         );
         // Side by side (#2176), so in any order: compared sorted.
@@ -2323,7 +2404,7 @@ mod tests {
             TEST_BASE_URL,
             &cfg,
             &rest,
-            Some(r#"{"v":2,"since_build_id":0}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":0,"scope":"projects:|build_types:Payout_Build"}"#.to_owned()),
             &mut sink,
         )
         .await
@@ -3441,7 +3522,7 @@ mod tests {
             TEST_BASE_URL,
             &cfg,
             &rest,
-            Some(r#"{"v":2,"since_build_id":1187}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":1187,"scope":"projects:|build_types:Payout_Build,Ledger_Deploy"}"#.to_owned()),
             &mut sink,
         )
         .await
@@ -3452,7 +3533,7 @@ mod tests {
             "R finished inside the run and is emitted; Q is in no set this run saw"
         );
         assert_eq!(
-            cursor, r#"{"v":2,"since_build_id":1187}"#,
+            cursor, r#"{"v":2,"since_build_id":1187,"scope":"projects:|build_types:Payout_Build,Ledger_Deploy"}"#,
             "Q was queued after the in-flight poll and still runs, so the watermark may not pass \
              1187, the newest build the run witnessed when it opened"
         );
@@ -3479,7 +3560,7 @@ mod tests {
             "Q is emitted, and R once more"
         );
         assert_eq!(
-            next, r#"{"v":2,"since_build_id":1191}"#,
+            next, r#"{"v":2,"since_build_id":1191,"scope":"projects:|build_types:Payout_Build,Ledger_Deploy"}"#,
             "the probe witnessed both, so the watermark moves past them"
         );
     }
@@ -3526,7 +3607,7 @@ mod tests {
             TEST_BASE_URL,
             &cfg,
             &rest,
-            Some(r#"{"v":2,"since_build_id":900}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":900,"scope":"projects:Payout|build_types:"}"#.to_owned()),
             &mut sink,
         )
         .await
@@ -3537,7 +3618,7 @@ mod tests {
             "1100 is foreign and is not emitted"
         );
         assert_eq!(
-            cursor, r#"{"v":2,"since_build_id":1100}"#,
+            cursor, r#"{"v":2,"since_build_id":1100,"scope":"projects:Payout|build_types:"}"#,
             "1100 existed when the run opened, so the ceiling is 1100 and the foreign build it \
              saw finish is free to move the watermark"
         );

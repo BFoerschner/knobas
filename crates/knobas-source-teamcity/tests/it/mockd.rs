@@ -633,7 +633,11 @@ async fn the_watermark_advances_on_a_finished_build_and_then_stands_still() {
     );
     assert_eq!(
         cursor,
-        format!(r#"{{"v":2,"since_build_id":{}}}"#, quiet_newest_build())
+        format!(
+            r#"{{"v":2,"since_build_id":{},"scope":"projects:|build_types:{}"}}"#,
+            quiet_newest_build(),
+            quiet_build_type()
+        )
     );
 
     let (idle_items, idle) = sync(source.as_ref(), Some(cursor.clone())).await;
@@ -711,7 +715,7 @@ async fn a_newly_finished_build_arrives_incrementally_and_then_the_source_is_idl
     );
     assert_eq!(
         after,
-        format!(r#"{{"v":2,"since_build_id":{running}}}"#),
+        format!(r#"{{"v":2,"since_build_id":{running},"scope":"projects:|build_types:{cfg}"}}"#),
         "a finished build is exactly what moves the watermark"
     );
     assert_ne!(after, cursor, "and it did move");
@@ -785,7 +789,7 @@ async fn a_build_canceled_after_it_was_mirrored_running_is_re_emitted_as_cancele
     );
     assert_eq!(
         after,
-        format!(r#"{{"v":2,"since_build_id":{running}}}"#),
+        format!(r#"{{"v":2,"since_build_id":{running},"scope":"projects:|build_types:{cfg}"}}"#),
         "and nothing holds the watermark back any more"
     );
     server.assert_no_violations();
@@ -805,7 +809,11 @@ async fn a_newly_queued_build_arrives_and_holds_the_watermark_below_itself() {
     let (_, cursor) = sync(source.as_ref(), None).await;
     assert_eq!(
         cursor,
-        format!(r#"{{"v":2,"since_build_id":{}}}"#, quiet_newest_build())
+        format!(
+            r#"{{"v":2,"since_build_id":{},"scope":"projects:|build_types:{}"}}"#,
+            quiet_newest_build(),
+            quiet_build_type()
+        )
     );
 
     let queued = server.state().queue_build(&cfg, "main");
@@ -844,7 +852,7 @@ async fn a_newly_queued_build_arrives_and_holds_the_watermark_below_itself() {
         "the same build, now finished; got {:?}",
         keys(&items)
     );
-    assert_eq!(done, format!(r#"{{"v":2,"since_build_id":{queued}}}"#));
+    assert_eq!(done, format!(r#"{{"v":2,"since_build_id":{queued},"scope":"projects:|build_types:{cfg}"}}"#));
     server.assert_no_violations();
 }
 
