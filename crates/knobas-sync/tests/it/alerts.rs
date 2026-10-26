@@ -604,6 +604,72 @@ async fn age_samples(pool: &PgPool) {
         .unwrap();
 }
 
+/// Every monitor of `source` gets `count` samples older than any it has, a
+/// minute apart, each `state` -- months of history behind the newest one.
+async fn backfill(pool: &PgPool, entity_id: &str, count: i32, state: &str) {
+    sqlx::query(
+        "insert into knobas.monitor_sample (entity_id, taken_at, state, response_time_ms)
+         select $1, (select min(taken_at) from knobas.monitor_sample where entity_id = $1)
+                    - make_interval(mins => n), $3, 35
+           from generate_series(1, $2) n",
+    )
+    .bind(entity_id)
+    .bind(count)
+    .bind(state)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// **The newest sample decides, however many older ones there are** (#2185).
+///
+/// The roster reads each monitor's newest sample as the head of its index
+/// range rather than sorting every kept sample; the answer must not change.
+/// `gitea`'s history is all `up` and `canary`'s all `down`, two thousand
+/// samples each, and each run's newest says the opposite: `gitea` opens on
+/// its newest `down` and closes on its newest `up`, and `canary`, whose
+/// newest is `up` throughout, opens nothing.
+#[tokio::test]
+async fn the_newest_sample_decides_over_a_long_history() {
+    let pool = pool("the_newest_sample_decides").await;
+    let id = "kuma".to_owned();
+    let (src, corpus) = source(&id, &[Monitor::up("gitea"), Monitor::up("canary")]);
+    let gitea = format!("{id}:gitea");
+    let canary = format!("{id}:canary");
+
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    backfill(&pool, &gitea, 2_000, "up").await;
+    backfill(&pool, &canary, 2_000, "down").await;
+    publishes(&corpus, Monitor::down("gitea"));
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(
+        alerts(&pool, &gitea).await,
+        vec![Alert {
+            state: "down".to_owned(),
+            closed: false
+        }],
+        "the newest `down` opened one over two thousand `up`s"
+    );
+    assert!(
+        alerts(&pool, &canary).await.is_empty(),
+        "two thousand old `down`s behind a newest `up` open nothing"
+    );
+
+    age_samples(&pool).await;
+    backfill(&pool, &gitea, 2_000, "down").await;
+    publishes(&corpus, Monitor::up("gitea"));
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(
+        alerts(&pool, &gitea).await,
+        vec![Alert {
+            state: "down".to_owned(),
+            closed: true
+        }],
+        "the newest `up` closed it over two thousand older `down`s"
+    );
+    assert!(alerts(&pool, &canary).await.is_empty());
+}
+
 // --- the two structural claims ----------------------------------------------
 
 /// **A monitor that is already down the first time knobas looks opens an

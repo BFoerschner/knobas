@@ -344,7 +344,11 @@ fn fits(member_kind: &str, entity_kind: &str) -> bool {
 /// and owner (#1020), its project, its parent chain, its own state, and for a
 /// pipeline (the Builds frame) the state of its newest run,
 /// a run of its source whose declared `pipeline` is its own -- the rule
-/// `entity::pipelines` reads runs by. An asset's type and environment are its
+/// `entity::pipelines` reads runs by. That run is the head of the pipeline's
+/// range of `sync.item_pipeline` (#2185, migration `0062`), one index probe
+/// a member, so a quiet pipeline costs what an active one does: walking the
+/// source's runs through the declared path cost about 100 ms a quiet member
+/// at 30,000 runs. An asset's type and environment are its
 /// columns; its health is [`crate::assets`]' rollup, added by [`member_rows`].
 const MEMBER_ROWS: &str = concat!(
     "with m as (
@@ -375,7 +379,11 @@ const MEMBER_ROWS: &str = concat!(
          a.type_id, a.environment
     from unnest($2::text[]) with ordinality as u(id, ord)
     left join knobas.entity e on e.id = u.id
-    left join sync.live_item i on i.entity_id = u.id
+    -- `sync.live_item`'s rule, probed by the member's id: planned as the
+    -- view, the live mirror was read whole before tables were analyzed.
+    left join sync.item i on i.entity_id = u.id and e.deleted_at is null
+          and not exists (select 1 from knobas.source_config sc
+                           where sc.id = i.source_id and not sc.enabled)
     left join knobas.asset a on a.id = u.id
 )
 select m.id, m.kind, m.title, m.project, m.parents, m.groups, m.type_id, m.environment,
@@ -383,16 +391,25 @@ select m.id, m.kind, m.title, m.project, m.parents, m.groups, m.type_id, m.envir
        case when m.frame = 'pipeline' and m.pkey is not null then
          (select ",
     knobas_core::declared_state!("$1"),
-    " from sync.live_item i
-           where i.source_id = m.source_id
-             and ($1::jsonb #>> array[i.source_id, i.kind, 'frame']) = 'run'
-             and ",
-    knobas_core::declared_string!("$1", "pipeline"),
-    " = m.pkey
-           order by i.item_updated_at desc nulls last, i.entity_id desc limit 1)
+    " from (select ip.entity_id from sync.item_pipeline ip
+                  where ip.source_id = m.source_id and ip.pkey = m.pkey
+                    and ip.adapter_kind = (select s.kind from knobas.source_config s
+                                            where s.id = m.source_id)
+                    and exists (select 1 from knobas.entity e
+                                 where e.id = ip.entity_id and e.deleted_at is null)
+                  order by ip.at desc nulls last, ip.entity_id desc limit 1) n
+           join sync.item i on i.entity_id = n.entity_id)
        else m.own_state end as state
   from m order by m.ord"
 );
+
+/// The member rows' statement, for the plan test (`tests/it/read_plans.rs`,
+/// #2185). It binds what `member_rows` binds.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_member_rows() -> &'static str {
+    MEMBER_ROWS
+}
 
 /// The line a member row draws beside its name, from [`MEMBER_ROWS`]'
 /// columns: an asset's `type, environment`; a mirrored item's chain of
