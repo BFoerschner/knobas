@@ -552,6 +552,7 @@ knobas-app	test/it	builds_ipc::runs_carry_their_test_summary_and_a_run_without_t
 knobas-app	test/it	builds_ipc::runs_carry_their_trigger_who_started_them_and_their_commit
 knobas-app	test/it	builds_ipc::runs_of_something_that_is_no_pipeline_are_refused
 knobas-app	test/it	builds_ipc::settings_name_the_mirrored_repository_by_its_id
+knobas-app	test/it	builds_list_plan::the_builds_list_reads_the_runs_once
 knobas-app	test/it	builds_of_a_commit::a_commits_builds_are_the_walk_after_every_change
 knobas-app	test/it	builds_of_a_commit::the_stored_resolver_is_the_macros_expansion
 knobas-app	test/it	builds_of_a_commit_perf::a_commits_builds_are_an_index_lookup
