@@ -2260,3 +2260,51 @@ async fn a_run_reports_its_walk_over_the_selected_repositories_even_when_it_push
     let of_one = |done| (done, Some(1), "repositories".to_owned());
     assert_eq!(one.readings, vec![of_one(0), of_one(1)]);
 }
+
+/// #2186: an owner taken out of `owners[]` leaves repositories in the cursor
+/// the narrowed scope no longer holds. The run walks what is left in full and
+/// says it walked the repositories and branches whole, so the engine retires
+/// the removed owner's rows; it reads nothing of that owner. An idle run under
+/// the same scope says nothing, and a full sync says it too.
+#[tokio::test]
+async fn an_owner_taken_out_of_the_scope_leaves_the_repositories_walked_whole() {
+    let fake = Fake::start(&State::tidewater().with_elsewhere()).await;
+    let both = source(fake.base_url(), serde_json::json!({}));
+    let mut first = Walking::default();
+    let cursor = both.sync(None, &mut first).await.expect("full sync");
+    assert_eq!(first.whole, ["repo", "branch"], "a full sync walks both whole");
+
+    let mut idle = Walking::default();
+    both.sync(Some(cursor.clone()), &mut idle)
+        .await
+        .expect("idle sync");
+    assert!(idle.items.is_empty() && idle.whole.is_empty(), "{:?}", idle.whole);
+
+    let narrowed = source(
+        fake.base_url(),
+        serde_json::json!({ "owners": ["tidewater"] }),
+    );
+    let mut run = Walking::default();
+    let after = narrowed
+        .sync(Some(cursor), &mut run)
+        .await
+        .expect("narrowed sync");
+    assert_eq!(ids(&run.items, "repo"), vec!["gitea:tidewater/payout-service"]);
+    assert!(
+        run.items
+            .iter()
+            .all(|i| i.entity.key.starts_with("tidewater/") && !i.deleted),
+        "{:?}",
+        run.items
+    );
+    assert_eq!(run.whole, ["repo", "branch"]);
+    let position: serde_json::Value = serde_json::from_str(&after).unwrap();
+    assert!(position["repos"].get("elsewhere/unrelated").is_none(), "{after}");
+
+    let mut settled = Walking::default();
+    narrowed
+        .sync(Some(after), &mut settled)
+        .await
+        .expect("idle sync");
+    assert!(settled.items.is_empty() && settled.whole.is_empty());
+}

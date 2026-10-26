@@ -2029,6 +2029,10 @@ mod tests {
     /// #2181, ruled: a project taken out of the scope is neither read nor
     /// tombstoned. Its builds stay in the mirror as last seen, as every
     /// TeamCity build past its window does (`full_sync_exhaustive: false`).
+    /// #2186 leaves it so: a run under the new scope reads each window in
+    /// full but does not say it walked a kind whole (`Sink::walked_whole`),
+    /// because a window is not the whole kind and the engine would not sweep
+    /// a non-exhaustive kind anyway (ADR-0003).
     #[tokio::test]
     async fn a_project_taken_out_of_the_scope_is_neither_read_nor_tombstoned() {
         let rest = tidewater();
