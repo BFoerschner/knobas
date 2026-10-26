@@ -309,6 +309,20 @@ macro_rules! field_of {
 }
 pub(crate) use field_of;
 
+/// [`field_of!`], read off `sync.item_field` where the database stored the
+/// field for the declarations the statement binds (#2184,
+/// `knobas_core::stored_string!`): a probe by the row's id rather than a
+/// walk of its payload, with the same answer.
+macro_rules! stored_field_of {
+    ($field:literal) => {
+        knobas_core::stored_string!(
+            "(select fdecl.d from fdecl)",
+            $field,
+            $crate::corpus::field_of!($field)
+        )
+    };
+}
+
 /// A row's declared list values for one field, through `lp`.
 macro_rules! list_of {
     ($field:literal) => {
@@ -344,9 +358,9 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
             FieldKey::Project,
             concat!(
                 "(lower(",
-                field_of!("project_key"),
+                stored_field_of!("project_key"),
                 ") = any(fd.v) or lower(",
-                field_of!("project_name"),
+                stored_field_of!("project_name"),
                 ") = any(fd.v) or exists (select 1 from sync.item_project ip \
                    join knobas.source_config s on s.id = ip.source_id and s.kind = ip.adapter_kind \
                    where ip.entity_id = i.entity_id and ",
@@ -356,7 +370,7 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
         ),
         (
             FieldKey::Status,
-            concat!("lower(", field_of!("status_name"), ") = any(fd.v)"),
+            concat!("lower(", stored_field_of!("status_name"), ") = any(fd.v)"),
         ),
         (
             FieldKey::IssueType,
@@ -368,7 +382,7 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
         ),
         (
             FieldKey::Assignee,
-            concat!("lower(", field_of!("assignee"), ") = any(fd.v)"),
+            concat!("lower(", stored_field_of!("assignee"), ") = any(fd.v)"),
         ),
         (
             FieldKey::Label,
@@ -390,7 +404,7 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
             FieldKey::Assigned,
             concat!(
                 "(lower(",
-                field_of!("assignee"),
+                stored_field_of!("assignee"),
                 ") = any(fd.v) and i.item_updated_at >= now() - make_interval(days => fd.n))"
             ),
         ),

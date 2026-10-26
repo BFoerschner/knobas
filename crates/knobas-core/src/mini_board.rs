@@ -96,6 +96,8 @@ macro_rules! status_paths {
 /// ([`lane_paths!`]), resolved once a source as the status is; the first
 /// label through `label_paths`, in the order [`crate::declared_list!`]
 /// yields the card's labels; the epic through [`crate::path_line_read!`].
+/// The assignee is read off `sync.item_field` where the database stored it
+/// ([`crate::stored_string!`], #2184), as the status is.
 macro_rules! lane_of_ticket {
     ($decl:literal, $lane:literal) => {
         concat!(
@@ -114,7 +116,7 @@ macro_rules! lane_of_ticket {
                   and nullif(btrim(e.elem #>> c.entry_segs), '') is not null
                 order by c.ord, e.pos limit 1), '')
                when 'assignee' then coalesce(",
-            lane_string!(),
+            $crate::stored_string!($decl, "assignee", lane_string!()),
             ", '') when 'priority' then coalesce(",
             lane_string!(),
             ", '') when 'issuetype' then coalesce(",
@@ -175,7 +177,10 @@ macro_rules! lane_paths {
 
 /// A ticket's status, at the path its own source declares (#277), through
 /// `status_paths` ([`status_paths!`]): [`crate::declared_string!`]'s rule,
-/// [`crate::first_string_of!`] being the one spelling both share.
+/// [`crate::first_string_of!`] being the one spelling both share. Read off
+/// `sync.item_field` where the database stored it for the declarations
+/// `$decl` binds ([`crate::stored_string!`], #2184): on 2,500 Jira tickets
+/// the walk cost about 20 µs a ticket, a probe of the stored row 2 µs.
 ///
 /// **Failure direction (ADR-0007 requirement 3, unchanged by the growth): a
 /// miss is visible, never a guess.** A ticket whose source declares no status
@@ -185,9 +190,13 @@ macro_rules! lane_paths {
 /// `a_ticket_with_no_recognizable_status_lands_in_the_terminal_group` in
 /// `knobas-core/tests/it/mini_board.rs`.
 macro_rules! status_of_ticket {
-    () => {
-        $crate::first_string_of!(
-            "(select p.segs, p.ord from status_paths p where p.source_id = i.source_id)"
+    ($decl:literal) => {
+        $crate::stored_string!(
+            $decl,
+            "status_name",
+            $crate::first_string_of!(
+                "(select p.segs, p.ord from status_paths p where p.source_id = i.source_id)"
+            )
         )
     };
 }
@@ -265,7 +274,7 @@ const CARDS: &str = concat!(
     ",
      scoped as materialized (
        select i.entity_id, coalesce(i.item_updated_at, i.synced_at) as at, ",
-    status_of_ticket!(),
+    status_of_ticket!("$4"),
     " as status, ",
     lane_of_ticket!("$4", "$6"),
     " as lane
@@ -388,7 +397,7 @@ const OBSERVED_STATUSES: &str = concat!(
     ",
      observed as materialized (
        select i.source_id, ",
-    status_of_ticket!(),
+    status_of_ticket!("$2"),
     " as status
          from sync.item i
         where i.kind = 'ticket'
@@ -918,7 +927,7 @@ const STATUSES: &str = concat!(
     lane_paths!("$2", "$3"),
     "
      select i.entity_id, i.source_id, ",
-    status_of_ticket!(),
+    status_of_ticket!("$2"),
     " as status, ",
     lane_of_ticket!("$2", "$3"),
     " as lane, i.item_updated_at
