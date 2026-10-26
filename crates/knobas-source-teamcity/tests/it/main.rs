@@ -11,6 +11,8 @@ mod grants;
 mod mockd;
 mod run;
 mod run_reads;
+mod support;
+mod sync_concurrent;
 mod view;
 mod view_build;
 mod write;

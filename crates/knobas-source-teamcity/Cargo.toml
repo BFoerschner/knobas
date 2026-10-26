@@ -10,6 +10,9 @@ license.workspace = true
 async-trait.workspace = true
 base64 = "0.22"
 chrono.workspace = true
+# `FuturesUnordered`, the configurations a sync asks about side by side in
+# its one task (#2176). Already in the tree through `reqwest`, at this version.
+futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
 knobas-core = { path = "../knobas-core" }
 knobas-http = { path = "../knobas-http" }
 knobas-source = { path = "../knobas-source" }
@@ -34,7 +37,9 @@ knobas-source-mock = { path = "../knobas-source-mock" }
 # `cargo tree -i reqwest` stays at one copy.
 reqwest.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+# `net`, `io-util` and `sync` for `support::held`, the proxy that holds a
+# request open until a test lets it go (#2176).
+tokio = { workspace = true, features = ["net", "io-util", "sync"] }
 # The docker-free stand-in for the source-view tests (`tests/it/view.rs`,
 # #664): mockd serves the sync contract and knows nothing of parameters,
 # steps or triggers. Every shape it serves there is re-asserted against the

@@ -18,7 +18,9 @@
 //! configuration for a source scoped to a configuration list, off the same
 //! listing (#1626), and otherwise once, globally -- build ids are
 //! server-wide, so one query covers every configuration -- narrowing to the
-//! scope client-side.
+//! scope client-side. The per-configuration queries run up to
+//! `concurrent_configs` at once (#2176), in the run's own task; see
+//! [`per_config`].
 //!
 //! Those two are the run's **item-producing** queries, and both carry
 //! `canceled:any,failedToStart:any` (issue #105) and `branch:default:any`
@@ -49,6 +51,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use knobas_source::{Cursor, Sink, SourceError, SyncItem};
 
 use crate::client::{Page, Rec, Rest};
@@ -137,7 +140,8 @@ pub(crate) async fn execute(
     //
     //    First, because step 4 is not instantaneous. A full sync issues one
     //    request per configuration, and at the default 5 req/s two hundred
-    //    configurations put ~40 s between the two queries. A build that is
+    //    configurations put ~40 s between the two queries, however many of
+    //    them are in flight at once (#2176): the limiter sets the rate. A build that is
     //    running when this poll executes and has finished by the time the
     //    finished query runs is, in this order, in **both** sets: emitted from
     //    the finished one, and the watermark may pass it because it was
@@ -174,54 +178,12 @@ pub(crate) async fn execute(
             }
             listed = true;
             let ids: Vec<String> = configs.keys().cloned().collect();
-            let mut out = Vec::new();
-            // The walk reading (#1382): before each configuration's builds are
-            // read and once after the last, over the scope just resolved.
-            let of = count(ids.len());
-            for (done, id) in (0u64..).zip(ids) {
-                sink.walked(done, Some(of), BUILD_CONFIGURATIONS).await;
-                // The one query in the run that is a **window** rather than
-                // a set: `builds_per_config` is the newest N this full sync
-                // wants, so a page filled to it is the answer and a
-                // `nextHref` past it is the older history the descriptor
-                // already declares non-exhaustive. Nothing here reads
-                // `Page::more` for that reason -- see
-                // `descriptor_template`.
-                out.extend(
-                    rest.builds(&Locator {
-                        build_type_id: Some(id),
-                        state: Some(StateFilter::Finished),
-                        // One of the run's two **item-producing** locators, and
-                        // both carry the two dimensions: a build the mirror
-                        // never stores is a build no later run can heal. See
-                        // [`since`].
-                        //
-                        // The cost here is *eviction*, not the overflow
-                        // `all_of` refuses -- this query is never walked. A
-                        // canceled or failed-to-start build now occupies a
-                        // slot in a fixed newest-N window, so the window
-                        // reaches correspondingly less far back in ordinary
-                        // builds, and a configuration with many cancellations
-                        // heals fewer stale `running` rows per full sync.
-                        // `builds_per_config` is the lever.
-                        canceled_any: true,
-                        failed_to_start_any: true,
-                        // And the branch facet, the third one the same
-                        // filter closes -- the fixture's failed build on
-                        // `feature/PAY-231-sepa-retry` came back from
-                        // neither item-producing query on a real server
-                        // until this was measured (issue #266). See
-                        // [`since`].
-                        branch_any: true,
-                        count: cfg.builds_per_config,
-                        ..Locator::default()
-                    })
-                    .await?
-                    .items,
-                );
-            }
-            sink.walked(of, Some(of), BUILD_CONFIGURATIONS).await;
-            out
+            // The walk reading (#1382): `0` before the first configuration's
+            // builds are read, then one reading as each one's arrive.
+            per_config(&ids, cfg.concurrent_configs, Some(&mut *sink), |id| {
+                window(rest, id, cfg.builds_per_config)
+            })
+            .await?
         }
         // A source scoped to a configuration list asks once per configuration
         // (#1626): the global query carries every build the whole server
@@ -235,11 +197,11 @@ pub(crate) async fn execute(
                 configs.insert(t.rec.id.clone(), t);
             }
             listed = true;
-            let mut out = Vec::new();
-            for id in configs.keys() {
-                out.extend(since(rest, Some(id), state.since_build_id).await?);
-            }
-            out
+            let ids: Vec<String> = configs.keys().cloned().collect();
+            per_config(&ids, cfg.concurrent_configs, None, |id| {
+                since(rest, Some(id), state.since_build_id)
+            })
+            .await?
         }
         // Unscoped, or scoped by project only: build ids are server-wide and
         // monotonic, so one query covers every configuration and the scope is
@@ -974,6 +936,95 @@ async fn scope(
         .collect())
 }
 
+/// One query per configuration in `ids`, up to `at_once` of them in flight
+/// (#2176), every build they return collected.
+///
+/// The queries run as a `FuturesUnordered` in the run's own task: nothing is
+/// spawned, so the first error returns from here and drops every query still
+/// in flight, and the shared per-origin limiter stays the one bound on the
+/// request rate. Each configuration's own query is unchanged, and the order
+/// the builds arrive in costs nothing: step 5 keys every build by its id, and
+/// a build belongs to one configuration, so no query's answer can overwrite
+/// another's. At 1 the queries go one after another in `ids`' order.
+///
+/// With a `walk`, the run's walk reading over configurations (#1382): `0`
+/// before the first query, then the number finished as each one finishes.
+async fn per_config<'a, F, Q>(
+    ids: &'a [String],
+    at_once: u32,
+    mut walk: Option<&mut (dyn Sink + Send + '_)>,
+    query: F,
+) -> Result<Vec<Rec<Build>>, SourceError>
+where
+    F: Fn(&'a str) -> Q,
+    Q: Future<Output = Result<Vec<Rec<Build>>, SourceError>>,
+{
+    let of = Some(count(ids.len()));
+    if let Some(sink) = walk.as_deref_mut() {
+        sink.walked(0, of, BUILD_CONFIGURATIONS).await;
+    }
+    let at_once = usize::try_from(at_once).unwrap_or(usize::MAX).max(1);
+    let mut waiting = ids.iter();
+    let mut asking = FuturesUnordered::new();
+    let mut out = Vec::new();
+    let mut done = 0u64;
+    loop {
+        while asking.len() < at_once {
+            let Some(id) = waiting.next() else { break };
+            asking.push(query(id));
+        }
+        let Some(builds) = asking.next().await else {
+            return Ok(out);
+        };
+        out.extend(builds?);
+        done += 1;
+        if let Some(sink) = walk.as_deref_mut() {
+            sink.walked(done, of, BUILD_CONFIGURATIONS).await;
+        }
+    }
+}
+
+/// A full sync's query for one configuration: its newest `builds_per_config`
+/// finished builds.
+///
+/// The one query in the run that is a **window** rather than a set:
+/// `builds_per_config` is the newest N this full sync wants, so a page filled
+/// to it is the answer and a `nextHref` past it is the older history the
+/// descriptor already declares non-exhaustive. Nothing here reads
+/// `Page::more` for that reason -- see `descriptor_template`.
+async fn window(
+    rest: &dyn Rest,
+    build_type_id: &str,
+    builds_per_config: u32,
+) -> Result<Vec<Rec<Build>>, SourceError> {
+    let page = rest
+        .builds(&Locator {
+            build_type_id: Some(build_type_id.to_owned()),
+            state: Some(StateFilter::Finished),
+            // One of the run's two **item-producing** locators, and both carry
+            // the two dimensions: a build the mirror never stores is a build
+            // no later run can heal. See [`since`].
+            //
+            // The cost here is *eviction*, not the overflow `all_of` refuses
+            // -- this query is never walked. A canceled or failed-to-start
+            // build now occupies a slot in a fixed newest-N window, so the
+            // window reaches correspondingly less far back in ordinary builds,
+            // and a configuration with many cancellations heals fewer stale
+            // `running` rows per full sync. `builds_per_config` is the lever.
+            canceled_any: true,
+            failed_to_start_any: true,
+            // And the branch facet, the third one the same filter closes --
+            // the fixture's failed build on `feature/PAY-231-sepa-retry` came
+            // back from neither item-producing query on a real server until
+            // this was measured (issue #266). See [`since`].
+            branch_any: true,
+            count: builds_per_config,
+            ..Locator::default()
+        })
+        .await?;
+    Ok(page.items)
+}
+
 fn type_id_of(b: &Build) -> Option<&str> {
     b.build_type_id
         .as_deref()
@@ -1659,9 +1710,13 @@ mod tests {
         // per-configuration queries, which can take ~40 s to walk. See
         // `a_build_that_finishes_mid_run_is_not_lost_between_the_two_queries`
         // and `a_build_queued_after_the_opening_poll_is_not_skipped` for what
-        // the order buys; this pins the requests themselves.
+        // the order buys; this pins the requests themselves. The
+        // per-configuration queries run side by side (#2176) and finish in
+        // any order, so they are compared as a set, sorted.
+        let mut calls = rest.calls();
+        calls[4..].sort();
         assert_eq!(
-            rest.calls(),
+            calls,
             [
                 "defaultFilter:false,count:100",
                 "state:(queued:true,running:true),count:100",
@@ -2219,11 +2274,13 @@ mod tests {
             cursor, r#"{"v":2,"since_build_id":1500}"#,
             "the newest build in scope"
         );
-        let asked: Vec<String> = rest
+        // Side by side (#2176), so in any order: compared sorted.
+        let mut asked: Vec<String> = rest
             .calls()
             .into_iter()
             .filter(|c| c.contains("sinceBuild"))
             .collect();
+        asked.sort();
         assert_eq!(
             asked,
             [
