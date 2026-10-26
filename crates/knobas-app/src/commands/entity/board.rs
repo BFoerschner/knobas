@@ -284,9 +284,23 @@ pub async fn saved_view_board_laned(
         .into_iter()
         .map(|column| (column.status, column.cards))
         .collect();
-    let board = knobas_core::mini_board::MiniBoard {
-        columns: layout
-            .arrange(by_status, |card| card.entity_id.as_str(), None)
+    let columns = layout.arrange(by_status, |card| card.entity_id.as_str(), None);
+    let board = unlaned(columns, whole.sources);
+    Ok(knobas_core::mini_board::in_lanes(board, lanes, lanes_cap))
+}
+
+/// A board of `columns`, each its status, its cards and its total, with no
+/// lanes.
+fn unlaned(
+    columns: Vec<(
+        Option<String>,
+        Vec<knobas_core::mini_board::MiniBoardCard>,
+        u32,
+    )>,
+    sources: Vec<knobas_core::mini_board::SourceStatuses>,
+) -> knobas_core::mini_board::MiniBoard {
+    knobas_core::mini_board::MiniBoard {
+        columns: columns
             .into_iter()
             .map(
                 |(status, cards, total)| knobas_core::mini_board::MiniBoardColumn {
@@ -296,11 +310,10 @@ pub async fn saved_view_board_laned(
                 },
             )
             .collect(),
-        sources: whole.sources,
+        sources,
         lanes: Vec::new(),
         more_lanes: 0,
-    };
-    Ok(knobas_core::mini_board::in_lanes(board, lanes, lanes_cap))
+    }
 }
 
 /// An unlaned saved view's board (Björn, 2026-10-26): each of `only`'s
@@ -350,21 +363,14 @@ async fn cut_before_read(
     {
         read.sources
     } else {
-        knobas_core::mini_board::sources_statuses(pool, &statuses.sources, declarations).await?
+        knobas_core::mini_board::observed_statuses(pool, &statuses.sources, declarations).await?
     };
-    Ok(knobas_core::mini_board::MiniBoard {
-        columns: arranged
-            .into_iter()
-            .map(
-                |(status, ids, total)| knobas_core::mini_board::MiniBoardColumn {
-                    status,
-                    cards: ids.iter().filter_map(|id| cards.remove(id)).collect(),
-                    total,
-                },
-            )
-            .collect(),
-        sources,
-        lanes: Vec::new(),
-        more_lanes: 0,
-    })
+    let columns = arranged
+        .into_iter()
+        .map(|(status, ids, total)| {
+            let cards = ids.iter().filter_map(|id| cards.remove(id)).collect();
+            (status, cards, total)
+        })
+        .collect();
+    Ok(unlaned(columns, sources))
 }

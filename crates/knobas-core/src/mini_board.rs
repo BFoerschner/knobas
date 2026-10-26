@@ -921,7 +921,9 @@ const STATUSES: &str = concat!(
 /// come from, the ones [`MiniBoard::sources`] would answer for.
 #[derive(Clone, Debug, Default)]
 pub struct Statuses {
+    /// Per status (`None` for none), its tickets' entity ids, newest first.
     pub columns: Vec<(Option<String>, Vec<String>)>,
+    /// The source ids those tickets come from.
     pub sources: BTreeSet<String>,
 }
 
@@ -957,19 +959,6 @@ pub async fn statuses_of(
     out.columns
         .sort_by_key(|(status, _)| column_rank(status.as_deref()));
     Ok(out)
-}
-
-/// What these sources' corpora show, as [`MiniBoard::sources`] answers it.
-///
-/// # Errors
-///
-/// [`CoreError::Db`] if the query fails.
-pub async fn sources_statuses(
-    pool: &PgPool,
-    sources: &BTreeSet<String>,
-    declarations: &crate::payload::Declarations,
-) -> Result<Vec<SourceStatuses>, CoreError> {
-    observed_statuses(pool, sources, declarations).await
 }
 
 impl MiniBoardCard {
@@ -1099,8 +1088,13 @@ async fn signals_of(
     Ok(out)
 }
 
-/// The second half of the grant: what each of these sources' corpora show.
-async fn observed_statuses(
+/// The second half of the grant: what each of these sources' corpora show,
+/// as [`MiniBoard::sources`] answers it.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn observed_statuses(
     pool: &PgPool,
     sources: &BTreeSet<String>,
     declarations: &crate::payload::Declarations,

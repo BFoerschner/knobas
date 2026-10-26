@@ -715,12 +715,13 @@ async fn cards_sent(pool: &sqlx::PgPool, view: &str, per_column: Option<u32>) ->
 
 /// A Jira view's board as drawn: per column its name, its cards' keys and
 /// its total, and the statuses its sources show.
-fn drawn(
-    board: &knobas_core::mini_board::MiniBoard,
-) -> (
+type Drawn = (
     Vec<(Option<String>, Vec<String>, u32)>,
     Vec<(String, Vec<String>)>,
-) {
+);
+
+/// [`Drawn`] of `board`.
+fn drawn(board: &knobas_core::mini_board::MiniBoard) -> Drawn {
     (
         board
             .columns
