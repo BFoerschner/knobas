@@ -2165,7 +2165,8 @@ fn terminate(pid: u32) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// No signal but the kill a drop sends, so there is nothing to wait for.
+/// No signal but the kill a drop sends: [`run_initdb`] waits the grace
+/// for `initdb` to exit on its own.
 #[cfg(not(unix))]
 fn terminate(_pid: u32) -> bool {
     false
@@ -3218,7 +3219,7 @@ mod tests {
             write(&held, "release", "");
             sent
         };
-        let error = run_initdb_stopping(&initdb, &settings, LIMIT, INITDB_GRACE, stop)
+        let error = run_initdb_stopping(&initdb, &settings, HELD_INITDB_LIMIT, INITDB_GRACE, stop)
             .await
             .expect_err("a held initdb outlives its limit");
         assert!(
@@ -3258,10 +3259,12 @@ mod tests {
                 if !signalled {
                     return false;
                 }
-                block_until("initdb did not finish", || pids_running(&running).is_empty());
+                block_until("initdb did not finish", || {
+                    pids_running(&running).is_empty()
+                });
                 terminate(pid)
             };
-            run_initdb_stopping(&initdb, &settings, LIMIT, INITDB_GRACE, stop)
+            run_initdb_stopping(&initdb, &settings, HELD_INITDB_LIMIT, INITDB_GRACE, stop)
                 .await
                 .unwrap_or_else(|error| panic!("signalled: {signalled}: {error}"));
             assert_eq!(
@@ -3278,6 +3281,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn an_initdb_the_signal_misses_leaves_an_unfinished_directory() {
+        use std::sync::Arc;
         use std::sync::atomic::{AtomicU32, Ordering};
         let dir = tempfile::tempdir().unwrap();
         let (settings, initdb) = initdb_for(dir.path()).await;
@@ -3285,7 +3289,7 @@ mod tests {
         let hold_dir = hold.path().to_path_buf();
         let initdb = held_initdb(&hold_dir, &initdb, KillPoint::AfterBootstrap);
 
-        let stopped = std::sync::Arc::new(AtomicU32::new(0));
+        let stopped = Arc::new(AtomicU32::new(0));
         let (held, seen) = (hold_dir.clone(), stopped.clone());
         let stop = move |pid| {
             block_until("initdb was not held", || held.join("held").exists());
@@ -3293,7 +3297,7 @@ mod tests {
             false
         };
         let grace = Duration::from_millis(200);
-        let error = run_initdb_stopping(&initdb, &settings, LIMIT, grace, stop)
+        let error = run_initdb_stopping(&initdb, &settings, HELD_INITDB_LIMIT, grace, stop)
             .await
             .expect_err("a held initdb outlives its limit and its grace");
         assert!(
@@ -3318,7 +3322,7 @@ mod tests {
     /// The limit the timed-out `initdb` tests give: it passes while `initdb`
     /// is held, however short.
     #[cfg(unix)]
-    const LIMIT: Duration = Duration::from_millis(10);
+    const HELD_INITDB_LIMIT: Duration = Duration::from_millis(10);
 
     /// [`wait_until`] for a blocking thread: a `stop` the timeout runs.
     #[cfg(unix)]
