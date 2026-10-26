@@ -1006,6 +1006,8 @@ knobas-app	test/it	responsiveness_probe::a_refused_gitea_token_names_the_seed
 knobas-app	test/it	responsiveness_probe::fixed_keys::every_fixed_key_exists_at_the_smallest_supported_size
 knobas-app	test/it	responsiveness_probe::fixed_keys::the_default_size_keeps_the_start_work_tickets_it_always_had
 knobas-app	test/it	responsiveness_probe::what_the_reader_waits_on
+knobas-app	test/it	run_pipeline::a_pipelines_runs_are_the_walk_after_every_change
+knobas-app	test/it	run_pipeline::the_stored_resolver_is_the_macros_expansion
 knobas-app	test/it	run_presets_ipc::a_preset_that_could_never_run_is_refused
 knobas-app	test/it	run_presets_ipc::a_saved_preset_reads_back_on_its_pipeline_alone
 knobas-app	test/it	run_presets_ipc::removing_a_preset_drops_that_pipelines_preset_alone
@@ -4108,6 +4110,7 @@ knobas-sync	test/it	alerts::down_then_up_across_three_runs_opens_and_closes_one_
 knobas-sync	test/it	alerts::pending_and_maintenance_neither_open_an_alert_nor_close_one
 knobas-sync	test/it	alerts::recovery_writes_a_history_line_on_the_asset_and_opening_writes_none
 knobas-sync	test/it	alerts::the_database_refuses_a_second_open_alert
+knobas-sync	test/it	alerts::the_newest_sample_decides_over_a_long_history
 knobas-sync	test/it	alerts::the_recovery_line_lands_only_on_the_assets_the_monitor_is_confirmed_to_watch
 knobas-sync	test/it	alerts::the_threshold_decides_which_polls_open_a_warn_alert
 knobas-sync	test/it	alerts::two_down_polls_open_one_alert

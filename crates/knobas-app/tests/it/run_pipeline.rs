@@ -240,7 +240,12 @@ async fn a_pipelines_runs_are_the_walk_after_every_change() {
             ("build", "build:2", run("A".into(), "FAILURE"), 40),
             ("build", "build:3", run("B".into(), "SUCCESS"), 30),
             // A miss twice: no `pipeline` value, and one that is no string.
-            ("build", "build:4", run(serde_json::Value::Null, "FAILURE"), 1),
+            (
+                "build",
+                "build:4",
+                run(serde_json::Value::Null, "FAILURE"),
+                1,
+            ),
             ("build", "build:5", run(7.into(), "FAILURE"), 1),
         ],
     )
@@ -375,10 +380,7 @@ async fn a_pipelines_runs_are_the_walk_after_every_change() {
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(
-        agree(&pool, &pipelines, "a delete").await,
-        [id("build:3")]
-    );
+    assert_eq!(agree(&pool, &pipelines, "a delete").await, [id("build:3")]);
     assert_eq!(stored_count(&pool, &id("build:2")).await, 0);
 }
 

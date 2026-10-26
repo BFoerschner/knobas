@@ -644,7 +644,11 @@ async fn seed_samples(pool: &PgPool) {
     .execute(pool)
     .await
     .unwrap();
-    println!("RP-SAMPLES monitors={} samples={}", monitors(), made.rows_affected());
+    println!(
+        "RP-SAMPLES monitors={} samples={}",
+        monitors(),
+        made.rows_affected()
+    );
 }
 
 /// The link set the Link sets reads open (#2185): every configuration a
@@ -1313,10 +1317,7 @@ async fn what_the_reader_waits_on() {
     .await;
     for (which, id) in [
         ("active", "ci:buildType:Cfg_7".to_owned()),
-        (
-            "quiet",
-            format!("ci:buildType:Cfg_{}", pipelines() - 1),
-        ),
+        ("quiet", format!("ci:buildType:Cfg_{}", pipelines() - 1)),
     ] {
         time(
             "open a pipeline",
@@ -1376,18 +1377,13 @@ async fn what_the_reader_waits_on() {
         },
     )
     .await;
-    time(
-        "paste a URL",
-        "resolve_url",
-        runs,
-        || {
-            knobas_app::commands::entity::resolve_url_inner(
-                pool,
-                &registry,
-                "https://jira.example.com/browse/JIRA0-42",
-            )
-        },
-    )
+    time("paste a URL", "resolve_url", runs, || {
+        knobas_app::commands::entity::resolve_url_inner(
+            pool,
+            &registry,
+            "https://jira.example.com/browse/JIRA0-42",
+        )
+    })
     .await;
 
     // -- Gitea views, live ---------------------------------------------------

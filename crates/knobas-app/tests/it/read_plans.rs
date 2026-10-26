@@ -580,7 +580,12 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     );
     let plan = explain(&pool, knobas_core::builds::planned_job_pipelines(), |q| {
         q.bind(declared.clone())
-            .bind(reached.iter().map(|r| r.entity_id.clone()).collect::<Vec<_>>())
+            .bind(
+                reached
+                    .iter()
+                    .map(|r| r.entity_id.clone())
+                    .collect::<Vec<_>>(),
+            )
             .bind(reached.iter().map(|r| r.step.clone()).collect::<Vec<_>>())
             .bind(vec!["link_set".to_owned(); reached.len()])
     })
