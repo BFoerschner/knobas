@@ -93,7 +93,7 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
             },
             kind: "ticket",
             count: 1_500,
-            dated: None,
+            newest_updated_at: None,
         });
     }
     sources.push(Synthetic {
@@ -103,7 +103,7 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
         },
         kind: "build",
         count: 1_500,
-        dated: None,
+        newest_updated_at: None,
     });
     // Uptime Kuma's monitors (#2185), whose samples are seeded below.
     sources.push(Synthetic {
@@ -113,7 +113,7 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
         },
         kind: "monitor",
         count: 10,
-        dated: None,
+        newest_updated_at: None,
     });
     sources.push(Synthetic {
         descriptor: SourceDescriptor {
@@ -122,7 +122,7 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
         },
         kind: "page",
         count: 500,
-        dated: None,
+        newest_updated_at: None,
     });
     for source in &sources {
         knobas_app::sources::demo::load_mirror_of(&pool, source)

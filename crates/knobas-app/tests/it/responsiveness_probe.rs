@@ -170,7 +170,7 @@ pub(crate) struct Synthetic {
     pub(crate) count: u64,
     /// When its newest item changed: `None` is now. A re-sync given the
     /// date the seed stored emits every item exactly as stored (#2189).
-    pub(crate) dated: Option<chrono::DateTime<chrono::Utc>>,
+    pub(crate) newest_updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[async_trait::async_trait]
@@ -205,7 +205,7 @@ impl Source for Synthetic {
         let id = &self.descriptor.id;
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ id.len() as u64 ^ self.count);
         let prefix = id.to_uppercase().replace('-', "");
-        let now = self.dated.unwrap_or_else(chrono::Utc::now);
+        let now = self.newest_updated_at.unwrap_or_else(chrono::Utc::now);
         // A build source's configurations (#2185), TeamCity-shaped: the
         // pipelines its builds run under, in one project.
         if self.kind == "build" {
@@ -534,7 +534,7 @@ async fn seed(
             },
             kind: "ticket",
             count: tickets,
-            dated: None,
+            newest_updated_at: None,
         });
     }
     synthetic.push(Synthetic {
@@ -544,7 +544,7 @@ async fn seed(
         },
         kind: "page",
         count: pages,
-        dated: None,
+        newest_updated_at: None,
     });
     synthetic.push(Synthetic {
         descriptor: SourceDescriptor {
@@ -553,7 +553,7 @@ async fn seed(
         },
         kind: "build",
         count: builds,
-        dated: None,
+        newest_updated_at: None,
     });
     synthetic.push(Synthetic {
         descriptor: SourceDescriptor {
@@ -562,7 +562,7 @@ async fn seed(
         },
         kind: "pr",
         count: prs,
-        dated: None,
+        newest_updated_at: None,
     });
     synthetic.push(Synthetic {
         descriptor: SourceDescriptor {
@@ -571,7 +571,7 @@ async fn seed(
         },
         kind: "monitor",
         count: monitors(),
-        dated: None,
+        newest_updated_at: None,
     });
     for source in &synthetic {
         knobas_app::sources::demo::load_mirror_of(pool, source)
@@ -1471,12 +1471,11 @@ async fn what_the_reader_waits_on() {
     // seed: every item emitted as stored, dated as stored (#2189), as a
     // scheduled full sync of a quiet Jira finds it. Then the launcher's smart
     // lists, cold, on what it left.
-    let (dated,): (Option<chrono::DateTime<chrono::Utc>>,) = sqlx::query_as(
-        "select max(item_updated_at) from sync.item where source_id = 'jira0'",
-    )
-    .fetch_one(pool)
-    .await
-    .unwrap();
+    let (newest_updated_at,): (Option<chrono::DateTime<chrono::Utc>>,) =
+        sqlx::query_as("select max(item_updated_at) from sync.item where source_id = 'jira0'")
+            .fetch_one(pool)
+            .await
+            .unwrap();
     let again = Synthetic {
         descriptor: SourceDescriptor {
             id: "jira0".to_owned(),
@@ -1484,7 +1483,7 @@ async fn what_the_reader_waits_on() {
         },
         kind: "ticket",
         count: tickets,
-        dated,
+        newest_updated_at,
     };
     time(
         &format!("full sync ({tickets} tickets)"),

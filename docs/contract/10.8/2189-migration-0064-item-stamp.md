@@ -16,8 +16,8 @@
     or `payload`, and rewrites `at` in `sync.item_parent`, `sync.item_project` and
     `sync.item_pipeline` only for the rows whose `coalesce(item_updated_at, synced_at)` or
     `item_updated_at` moved, reading their new time from `sync.item` by key. Its two joins of the
-    transition tables are `execute`d, so each is planned on the statement's row counts. What it
-    writes is what `0063`'s wrote.
+    transition tables are `execute`d, so each is planned on the statement's row counts. While the
+    side tables hold their item's time, it writes what `0063`'s wrote.
 
   **The writer** (`knobas-sync`, no frozen surface): `ENTITY_UPSERT` and `ITEM_UPSERT` leave out a
   row whose stored columns already hold what arrived, and `ITEM_STAMP` sets `synced_at = now()` on
@@ -27,5 +27,6 @@
 
   Pinned by `knobas-sync`'s `tests::a_resync_of_an_unchanged_item_only_stamps_it` (every row the
   run saw carries its time, and every unchanged row's write is heap-only) and
-  `tests::the_upserts_leave_an_unchanged_row_alone`; the sweep and the side tables' `at` by the
-  existing `tests/it/sweep.rs` and the item-parent, project and pipeline suites.
+  `tests::the_upserts_leave_an_unchanged_row_alone`; the trigger's moved rows by `knobas-search`'s
+  `item_parent::an_undated_items_parents_take_its_new_sync_time`; the sweep and the side tables'
+  `at` by the existing `tests/it/sweep.rs` and the item-parent, project and pipeline suites.

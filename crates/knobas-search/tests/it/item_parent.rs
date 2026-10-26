@@ -794,11 +794,13 @@ async fn an_undated_items_parents_take_its_new_sync_time() {
         )
         .await;
     }
-    sqlx::query("update sync.item set item_updated_at = timestamptz '2026-01-01' where entity_id = $1")
-        .bind(format!("{g}:dated"))
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "update sync.item set item_updated_at = timestamptz '2026-01-01' where entity_id = $1",
+    )
+    .bind(format!("{g}:dated"))
+    .execute(&pool)
+    .await
+    .unwrap();
 
     // The writer's stamp: one statement, both rows, only `synced_at`.
     sqlx::query(

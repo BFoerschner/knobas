@@ -916,8 +916,8 @@ async fn per_item_work(
 /// No `last_seen_at` column is needed, and adding one would be a second truth:
 /// `ITEM_UPSERT` writes `synced_at = now()` on a row that changed and
 /// `ITEM_STAMP` on every other row the run saw, and `now()` is the
-/// **transaction** timestamp -- one value for every row this run saw. So inside this very
-/// transaction, `synced_at < now()` is precisely "this run did not touch it".
+/// **transaction** timestamp -- one value for every row this run saw. So
+/// inside this very transaction, `synced_at < now()` is precisely "this run did not touch it".
 /// (The M0 carry-over already records that property, as an accepted consequence
 /// of long runs stamping every item with the run's start.)
 ///
@@ -1254,7 +1254,8 @@ select i.id, $9, i.kind, i.title, i.body_text, i.author,
 /// `synced_at` -- what the sweep (`SWEEP`) reads "this run saw it" from. A row
 /// [`ITEM_UPSERT`] wrote has it already; the rest are the rows it left alone
 /// because nothing in them changed. Only `synced_at` is set, so no generated
-/// column is recomputed and no index entry is added (#2189).
+/// column is recomputed, and where the row's page has room for its next
+/// version (migration `0064`) no index entry is added either (#2189).
 const ITEM_STAMP: &str = r#"
 update sync.item
    set synced_at = now()
@@ -1474,7 +1475,12 @@ mod tests {
         let pool = knobas_db::test_util::test_pool().await;
         knobas_db::migrate::run(&pool).await.unwrap();
         let source_id = format!("unit-{}", uuid::Uuid::new_v4());
-        run_over(&pool, &source_id, (0..2).map(|i| sized_item(&source_id, i)).collect()).await;
+        run_over(
+            &pool,
+            &source_id,
+            (0..2).map(|i| sized_item(&source_id, i)).collect(),
+        )
+        .await;
 
         let items: Vec<SyncItem> = (0..2)
             .map(|i| {

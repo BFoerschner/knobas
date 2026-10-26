@@ -44,8 +44,10 @@
 --   row**, and **`sync.item_updated()`** calls the resolvers only when some
 --   row changed `source_id`, `kind` or `payload`, and rewrites `at` only on
 --   the rows whose time moved, found by joining the statement's old and new
---   rows and then read through each table's `entity_id` index. What it
---   writes is unchanged: the same rows get the same `at`.
+--   rows and then read through each table's `entity_id` index. While the
+--   side tables hold the time their item had (every write to them keeps
+--   it), that writes what `0063`'s did: `0063` would also have mended a
+--   side row whose time had drifted from an unmoved item's.
 --
 -- Both functions are restated from `0063`, unchanged otherwise.
 
