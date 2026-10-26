@@ -15,6 +15,10 @@ thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 async-trait = "0.1"
+# `StreamExt::buffered`, a bounded set of reads in flight that answer in
+# the order they were asked (the Jira walk's worklog completion, #2167).
+# Already in the tree through reqwest and sqlx; no new crate.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # The generated IPC mirror (#1325, contract §2.6 as amended): the TypeScript
 # shape of every type that crosses the bridge, written by
 # `knobas-app`'s `ipc_mirror` test. Pinned exactly: a new ts-rs can change the

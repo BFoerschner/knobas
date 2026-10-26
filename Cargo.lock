@@ -3335,6 +3335,7 @@ version = "3.1.2"
 dependencies = [
  "async-trait",
  "chrono",
+ "futures-util",
  "knobas-core",
  "knobas-http",
  "knobas-live-cleanup",
