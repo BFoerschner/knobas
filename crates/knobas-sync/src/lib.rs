@@ -914,9 +914,10 @@ async fn per_item_work(
 /// every commit past `commits_per_repo` on every full sync (ADR-0003).
 ///
 /// No `last_seen_at` column is needed, and adding one would be a second truth:
-/// `ITEM_UPSERT` stamps `synced_at = now()`, and `now()` is the **transaction**
-/// timestamp -- one value for every row this run wrote. So inside this very
-/// transaction, `synced_at < now()` is precisely "this run did not touch it".
+/// `ITEM_UPSERT` writes `synced_at = now()` on a row that changed and
+/// `ITEM_STAMP` on every other row the run saw, and `now()` is the
+/// **transaction** timestamp -- one value for every row this run saw. So
+/// inside this very transaction, `synced_at < now()` is precisely "this run did not touch it".
 /// (The M0 carry-over already records that property, as an accepted consequence
 /// of long runs stamping every item with the run's start.)
 ///
@@ -1058,7 +1059,8 @@ impl<'t, 'c> PgSink<'t, 'c> {
             .map_err(|e| SourceError::Sink(e.to_string()))
     }
 
-    /// One batch, as two array-valued upserts.
+    /// One batch, as two array-valued upserts and the stamp of what they left
+    /// alone.
     async fn write_batch(&mut self) -> Result<(), sqlx::Error> {
         if self.buf.is_empty() {
             return Ok(());
@@ -1116,6 +1118,10 @@ impl<'t, 'c> PgSink<'t, 'c> {
             .bind(&self.source_id)
             .execute(&mut **self.tx)
             .await?;
+        sqlx::query(ITEM_STAMP)
+            .bind(&ids)
+            .execute(&mut **self.tx)
+            .await?;
 
         // Counted only once the rows are actually in the transaction.
         for (id, tombstoned) in ids.iter().zip(&deleted) {
@@ -1162,6 +1168,10 @@ impl<'t, 'c> PgSink<'t, 'c> {
 ///   sources do resurrect things, and a stale tombstone would hide a live
 ///   entity.
 ///
+/// A row whose every column would be written back as it is stored is left out
+/// of the insert, so a re-sync of an unchanged item writes nothing here
+/// (#2189).
+///
 /// Reading the old row and writing the new one is only atomic because
 /// [`run_once`] holds the source's advisory lock: same-source runs cannot
 /// interleave, and no other source may write this namespace.
@@ -1177,6 +1187,10 @@ select i.id, i.kind, i.title,
        case when i.deleted then coalesce(old.deleted_at, now()) end
   from incoming i
        left join knobas.entity old on old.id = i.id
+ where old.id is null
+    or (old.kind, old.title, old.updated_at, old.deleted_at) is distinct from
+       (i.kind, i.title, coalesce(i.updated_at, old.updated_at),
+        case when i.deleted then coalesce(old.deleted_at, now()) end)
     on conflict (id) do update set
        kind       = excluded.kind,
        title      = excluded.title,
@@ -1199,6 +1213,13 @@ select i.id, i.kind, i.title,
 /// `item_updated_at`: an adapter that stops reporting a URL is reporting that
 /// there is no page, and the two timestamps coalesce only because they hold the
 /// same fact as `knobas.entity.updated_at`.
+///
+/// **A row whose stored columns already hold what arrived is left out** and
+/// only stamped, by [`ITEM_STAMP`] (#2189): a rewrite of `sync.item` adds an
+/// entry to every one of its indexes, the two GIN indexes one per term, and
+/// costs a re-sync of an unchanged mirror what a first sync costs, while the
+/// stamp of `synced_at` alone is a heap-only update (migration `0064` leaves
+/// half of each page free for it).
 const ITEM_UPSERT: &str = r#"
 with incoming as (
   select *
@@ -1213,6 +1234,10 @@ select i.id, $9, i.kind, i.title, i.body_text, i.author,
        coalesce(i.item_updated_at, old.item_updated_at), now(), i.payload, i.web_url
   from incoming i
        left join sync.item old on old.entity_id = i.id
+ where (old.source_id, old.kind, old.title, old.body_text, old.author,
+        old.item_updated_at, old.payload, old.web_url) is distinct from
+       ($9, i.kind, i.title, i.body_text, i.author,
+        coalesce(i.item_updated_at, old.item_updated_at), i.payload, i.web_url)
     on conflict (entity_id) do update set
        source_id       = excluded.source_id,
        kind            = excluded.kind,
@@ -1223,6 +1248,19 @@ select i.id, $9, i.kind, i.title, i.body_text, i.author,
        synced_at       = excluded.synced_at,
        payload         = excluded.payload,
        web_url         = excluded.web_url
+"#;
+
+/// `sync.item`: this run saw every row of the batch, so each gets the run's
+/// `synced_at` -- what the sweep (`SWEEP`) reads "this run saw it" from. A row
+/// [`ITEM_UPSERT`] wrote has it already; the rest are the rows it left alone
+/// because nothing in them changed. Only `synced_at` is set, so no generated
+/// column is recomputed, and where the row's page has room for its next
+/// version (migration `0064`) no index entry is added either (#2189).
+const ITEM_STAMP: &str = r#"
+update sync.item
+   set synced_at = now()
+ where entity_id = any($1::text[])
+   and synced_at <> now()
 "#;
 
 #[async_trait::async_trait]
@@ -1345,5 +1383,150 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(after, 0);
+    }
+
+    /// An item of about the size of a mirrored ticket, dated, so that a
+    /// second run emitting it again emits exactly what is stored.
+    fn sized_item(source_id: &str, n: usize) -> SyncItem {
+        SyncItem {
+            body_text: format!("word{n} ").repeat(150),
+            updated_at: Some(chrono::DateTime::from_timestamp(1_790_000_000, 0).unwrap()),
+            payload: serde_json::json!({"key": format!("U-{n}"), "fields": {"summary": "x".repeat(200)}}),
+            ..unit_item(source_id, n)
+        }
+    }
+
+    /// One run over `items`, committed.
+    async fn run_over(pool: &PgPool, source_id: &str, items: Vec<SyncItem>) {
+        let mut tx = pool.begin().await.unwrap();
+        let kinds = HashSet::from(["ticket".to_owned()]);
+        let mut sink = PgSink::new(&mut tx, source_id.to_owned(), kinds, None);
+        for item in items {
+            sink.item(item).await.unwrap();
+        }
+        sink.flush().await.unwrap();
+        tx.commit().await.unwrap();
+    }
+
+    /// A re-sync of an item that did not change stamps its `synced_at` and
+    /// nothing else (#2189): every row this run saw carries the run's time, as
+    /// the sweep reads it, and the stamp is a heap-only update -- no new
+    /// index entry -- where a rewrite of the row added one to every index.
+    /// The one item whose title changed is rewritten, as before.
+    #[tokio::test]
+    async fn a_resync_of_an_unchanged_item_only_stamps_it() {
+        let pool = knobas_db::test_util::test_pool().await;
+        knobas_db::migrate::run(&pool).await.unwrap();
+        let source_id = format!("unit-{}", uuid::Uuid::new_v4());
+        let n = 24;
+        let items = |changed: bool| {
+            (0..n)
+                .map(|i| {
+                    let mut item = sized_item(&source_id, i);
+                    if changed && i == 0 {
+                        item.title = "renamed".to_owned();
+                    }
+                    item
+                })
+                .collect::<Vec<_>>()
+        };
+        run_over(&pool, &source_id, items(false)).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        let kinds = HashSet::from(["ticket".to_owned()]);
+        let mut sink = PgSink::new(&mut tx, source_id.clone(), kinds, None);
+        for item in items(true) {
+            sink.item(item).await.unwrap();
+        }
+        sink.flush().await.unwrap();
+        let (stamped, title): (i64, String) = sqlx::query_as(
+            "select count(*) filter (where synced_at = now()),
+                    max(title) filter (where entity_id like '%:U-0')
+               from sync.item where source_id = $1",
+        )
+        .bind(&source_id)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+        assert_eq!(stamped, n as i64, "every row this run saw carries its time");
+        assert_eq!(title, "renamed");
+        let (updated, hot): (i64, i64) = sqlx::query_as(
+            "select n_tup_upd, n_tup_hot_upd from pg_stat_xact_user_tables
+              where schemaname = 'sync' and relname = 'item'",
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+        assert_eq!(updated, n as i64, "one write a row");
+        assert_eq!(
+            hot,
+            n as i64 - 1,
+            "every unchanged row is stamped in place, the renamed one rewritten"
+        );
+        tx.rollback().await.unwrap();
+    }
+
+    /// The two upserts leave out a row they would write back as it is
+    /// stored (#2189): what they skip, `ITEM_STAMP` stamps, and a row the
+    /// upsert rewrote would cost the generated columns and the resolvers
+    /// again.
+    #[tokio::test]
+    async fn the_upserts_leave_an_unchanged_row_alone() {
+        let pool = knobas_db::test_util::test_pool().await;
+        knobas_db::migrate::run(&pool).await.unwrap();
+        let source_id = format!("unit-{}", uuid::Uuid::new_v4());
+        run_over(
+            &pool,
+            &source_id,
+            (0..2).map(|i| sized_item(&source_id, i)).collect(),
+        )
+        .await;
+
+        let items: Vec<SyncItem> = (0..2)
+            .map(|i| {
+                let mut item = sized_item(&source_id, i);
+                if i == 1 {
+                    item.payload = serde_json::json!({"key": "U-1", "moved": true});
+                    item.title = "moved".to_owned();
+                }
+                item
+            })
+            .collect();
+        let ids: Vec<String> = items.iter().map(|i| i.entity.to_string()).collect();
+        let kinds: Vec<&str> = items.iter().map(|i| i.kind.as_str()).collect();
+        let titles: Vec<&str> = items.iter().map(|i| i.title.as_str()).collect();
+        let bodies: Vec<&str> = items.iter().map(|i| i.body_text.as_str()).collect();
+        let authors: Vec<Option<String>> = items.iter().map(|i| i.author.clone()).collect();
+        let updated: Vec<_> = items.iter().map(|i| i.updated_at).collect();
+        let deleted: Vec<bool> = items.iter().map(|i| i.deleted).collect();
+        let payloads: Vec<_> = items.iter().map(|i| i.payload.clone()).collect();
+        let urls: Vec<Option<String>> = items.iter().map(|i| i.web_url.clone()).collect();
+
+        let mut tx = pool.begin().await.unwrap();
+        let entities = sqlx::query(ENTITY_UPSERT)
+            .bind(&ids)
+            .bind(&kinds)
+            .bind(&titles)
+            .bind(&updated)
+            .bind(&deleted)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let rows = sqlx::query(ITEM_UPSERT)
+            .bind(&ids)
+            .bind(&kinds)
+            .bind(&titles)
+            .bind(&bodies)
+            .bind(&authors)
+            .bind(&updated)
+            .bind(&payloads)
+            .bind(&urls)
+            .bind(&source_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(entities.rows_affected(), 1, "only the retitled entity");
+        assert_eq!(rows.rows_affected(), 1, "only the changed mirror row");
+        tx.rollback().await.unwrap();
     }
 }

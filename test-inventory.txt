@@ -2289,6 +2289,7 @@ knobas-search	test/it	home::the_board_drops_a_source_the_user_turned_off
 knobas-search	test/it	home::the_board_is_smart_lists_and_the_newest_of_every_kind
 knobas-search	test/it	item_parent::a_declaration_change_during_an_item_write_reaches_the_item
 knobas-search	test/it	item_parent::an_item_written_during_a_declaration_change_resolves_against_it
+knobas-search	test/it	item_parent::an_undated_items_parents_take_its_new_sync_time
 knobas-search	test/it	item_parent::every_row_of_one_statement_is_resolved
 knobas-search	test/it	item_parent::the_stored_function_is_the_macros_expansion
 knobas-search	test/it	item_parent::the_stored_parents_are_the_walk_after_every_change
@@ -4101,7 +4102,9 @@ knobas-sync	lib/knobas_sync	scheduler::tests::an_emits_identity_comes_from_its_r
 knobas-sync	lib/knobas_sync	scheduler::tests::the_default_timing_is_the_production_timing
 knobas-sync	lib/knobas_sync	scheduler::tests::the_states_with_no_next_run_are_spelled_the_way_the_enum_spells_them
 knobas-sync	lib/knobas_sync	tests::a_full_batch_is_written_while_the_adapter_is_still_running
+knobas-sync	lib/knobas_sync	tests::a_resync_of_an_unchanged_item_only_stamps_it
 knobas-sync	lib/knobas_sync	tests::a_source_id_must_be_usable_as_a_namespace
+knobas-sync	lib/knobas_sync	tests::the_upserts_leave_an_unchanged_row_alone
 knobas-sync	lib/knobas_sync	write_queue::tests::a_refusal_and_a_blip_are_told_apart_by_status
 knobas-sync	lib/knobas_sync	write_queue::tests::an_unreachable_wait_is_owed_on_the_ladder_and_a_refused_one_never
 knobas-sync	lib/knobas_sync	write_queue::tests::the_quotas_mark_waits_out_only_a_status_less_protocol
