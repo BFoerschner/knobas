@@ -595,7 +595,7 @@
             }}>Merge…</button
           >
         {/if}
-        {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} />{/if}
+        {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
       </div>
     </header>
     {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}

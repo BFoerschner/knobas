@@ -559,7 +559,7 @@
     {#if pipeline.web_url !== null}
       <button type="button" class="tf-btn tf-ghost" onclick={openInSource}>Open in {pipeline.source_name}</button>
     {/if}
-    {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={refreshRead} />{/if}
+    {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={refreshRead} page />{/if}
   </div>
 </header>
 {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}

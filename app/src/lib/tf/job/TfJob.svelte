@@ -544,7 +544,7 @@
             <span class="tf-p">{proposals.length} proposed</span>{/if}
           <kbd>L</kbd>
         </button>
-        <TfDetailRefresh {detail} {refresh} reread={() => reader.reread()} />
+        <TfDetailRefresh {detail} {refresh} reread={() => reader.reread()} page />
       </div>
       <TfDetailBanners {detail} failed={refresh.failed} />
       <div class="tf-wbody">

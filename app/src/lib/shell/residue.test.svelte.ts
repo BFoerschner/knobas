@@ -389,6 +389,9 @@ const TfItem = (await import("../tf/item/TfItem.svelte")).default;
 const TfDetailRefresh = (await import("../tf/TfDetailRefresh.svelte")).default;
 const { createDetailRefresh } = await import("../tf/refresh.svelte");
 const { refreshProbe } = await import("../tf/refresh.fixture");
+const TfSyncNow = (await import("../tf/TfSyncNow.svelte")).default;
+const { createRoleSyncs } = await import("../tf/role-sync.svelte");
+const { sourceRoles } = await import("../tf/roles.svelte");
 const TfCodeRow = (await import("../tf/code-row/TfCodeRow.svelte")).default;
 const TfNote = (await import("../tf/note/TfNote.svelte")).default;
 const { createPendingComments } = await import("../detail/view/pending-comments.svelte");
@@ -1599,9 +1602,32 @@ const CASES: Case[] = [
           } as never,
           refresh: createDetailRefresh(refreshProbe({ hold: deferred }).ports),
           reread: () => {},
+          page: true,
         },
       }),
     }),
+    exercise: (target) => target.querySelector<HTMLButtonElement>("button")?.click(),
+  },
+  // A role view's *Sync now* (#2106), registered for ⌘R while drawn (#2156): its runs, listened for, which never end here.
+  {
+    name: "TfSyncNow",
+    source: "lib/tf/TfSyncNow.svelte",
+    open: (target) => {
+      sourceRoles.take([{ id: "kuma", display_name: "Tidewater Kuma", enabled: true, roles: [{ role: "monitoring", reads: [] }], role_misses: [] }] as never);
+      return {
+        app: mount(TfSyncNow, {
+          target,
+          props: {
+            sync: createRoleSyncs({
+              syncRole: () => deferred([{ source_id: "kuma", run_id: 7 }]),
+              syncNow: () => deferred(7),
+              syncStatus: () => deferred([]),
+              listen: () => deferred(() => {}),
+            }).of("monitoring"),
+          },
+        }),
+      };
+    },
     exercise: (target) => target.querySelector<HTMLButtonElement>("button")?.click(),
   },
   // *Files changed* (#842): the deferred Files read and the viewed ticks, answering late.

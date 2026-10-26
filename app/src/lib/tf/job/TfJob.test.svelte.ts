@@ -20,7 +20,7 @@ import type {
   StateChip,
 } from "../../ipc/entity";
 import type { CredentialHealth, EntityRefresh, SourceSyncStatus, SourceDescriptor, WriteOpPayload } from "../../ipc/sources";
-import { refreshProbe } from "../refresh.fixture";
+import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import type { WriteAsk } from "../../shell/refused-writes";
 import type { RunningTimer, Week } from "../../ipc/time";
 import { health } from "../../shell/health.svelte";
@@ -1593,4 +1593,37 @@ test("a move's echo goes on a Refresh's read of the ticket, and a comment's on i
   await settle();
   expect(statusShown()).toEqual(["In Review", false, null]);
   expect(echoed()).toEqual([]);
+});
+
+test("⌘R on the job runs its Refresh, as a click does, and its Sync now when that is drawn (#2156)", async () => {
+  const probe = refreshProbe({ answer: () => new Promise(() => {}) });
+  open("PAY-231", { ports: ports({ refresh: probe.ports }) });
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(pressRefreshKey().defaultPrevented).toBe(true);
+  await settle();
+  expect(probe.refreshed).toEqual([ID]);
+  // Refreshing…: disabled, so a second ⌘R asks nothing.
+  pressRefreshKey();
+  await settle();
+  expect(probe.refreshed).toEqual([ID]);
+});
+
+test("⌘R on a job whose ticket's adapter reads no one item runs its Sync now (#2156)", async () => {
+  const probe = refreshProbe();
+  open("PAY-231", {
+    ports: ports({
+      getEntity: (id) => (id === ID ? Promise.resolve(ticket({ refreshes: false })) : Promise.reject({ code: "not_found" })),
+      refresh: probe.ports,
+    }),
+  });
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Sync now");
+  pressRefreshKey();
+  await settle();
+  expect(probe.synced).toEqual(["jira"]);
+  expect(refreshButton()?.textContent).toBe("Syncing…");
+  pressRefreshKey();
+  await settle();
+  expect(probe.synced).toEqual(["jira"]);
 });

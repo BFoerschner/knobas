@@ -479,7 +479,7 @@
       {#if run.web_url !== null}
         <button type="button" class="tf-btn tf-ghost" onclick={() => openExternal(run.web_url)}>Open in {pipeline.source_name}</button>
       {/if}
-      {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={rereadRun} />{/if}
+      {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={rereadRun} page />{/if}
     </div>
   </header>
   {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}

@@ -27,6 +27,17 @@ import { sourceFacts } from "./job/source-facts.fixture";
 const created = vi.hoisted(() => [] as unknown[]);
 /** How many times the Tickets board was read (#2106). */
 const boardReads = vi.hoisted(() => ({ n: 0 }));
+/** Every item `refresh_entity` was asked to read (#2156). */
+const refreshed = vi.hoisted(() => [] as string[]);
+
+// An item's *Refresh* reads the bridge's `refresh_entity` (#2107).
+vi.mock("../ipc/sources", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../ipc/sources")>()),
+  refreshEntity: (id: string) => {
+    refreshed.push(id);
+    return new Promise(() => {});
+  },
+}));
 
 // The Day tab reads the real bridge; its one read here is an open stretch.
 vi.mock("../ipc/time", async (importOriginal) => ({
@@ -90,6 +101,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  refreshed.length = 0;
   if (shell) unmount(shell);
   shell = null;
   target.remove();
@@ -1227,4 +1239,101 @@ test("a view not re-read on a run's end reads again when its Sync now runs end",
   end(41);
   await settle();
   expect(boardReads.n).toBeGreaterThan(before);
+});
+
+// ---- ⌘R presses the page's Refresh or Sync now (#2156) ----
+
+/** ⌘R, from the focused element as the webview sends it. */
+function cmdR(options: KeyboardEventInit = {}) {
+  return press("r", { metaKey: true, ...options });
+}
+
+test("⌘R on every role view runs its header's Sync now, as a click does, and the webview never reloads", async () => {
+  const { asked, syncs } = roleSyncHarness();
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }], roleSyncs: syncs });
+  for (const view of ROLE_VIEWS) {
+    await at(view);
+    expect(cmdR().defaultPrevented, view).toBe(true);
+    await settle();
+  }
+  expect(asked).toEqual(["ticket-system", "wiki", "ci", "monitoring", "code-host"]);
+  // Ctrl+R off the Mac, and ⇧⌘R, the webview's other reload.
+  await at("#/tickets");
+  expect(press("r", { ctrlKey: true }).defaultPrevented).toBe(true);
+  expect(press("R", { metaKey: true, shiftKey: true }).defaultPrevented).toBe(true);
+});
+
+test("⌘R while Sync now says Syncing… runs nothing more, and a held key presses once", async () => {
+  const { asked, syncs, end } = roleSyncHarness();
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }], roleSyncs: syncs });
+  await at("#/docs");
+  cmdR();
+  await settle();
+  expect(syncButton()?.disabled).toBe(true);
+  expect(cmdR().defaultPrevented).toBe(true);
+  await settle();
+  expect(asked).toEqual(["wiki"]);
+
+  end(41);
+  await settle();
+  cmdR({ repeat: true });
+  await settle();
+  expect(asked).toEqual(["wiki"]);
+});
+
+test("⌘R where no button is drawn does nothing, and still never reloads", async () => {
+  const { asked, syncs } = roleSyncHarness();
+  start({
+    sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: false }],
+    roleSyncs: syncs,
+  });
+  for (const view of ["#/docs", "#/settings", "#/time/2026-08-22", "#/inbox"]) {
+    await at(view);
+    expect(syncButton(), view).toBeNull();
+    expect(cmdR().defaultPrevented, view).toBe(true);
+    await settle();
+  }
+  expect(asked).toEqual([]);
+});
+
+test("⌘R with the launcher or a dialog open does nothing, and runs again once it closes", async () => {
+  const { asked, syncs } = roleSyncHarness();
+  const layers = createLayers();
+  const offDialog = layers.add({ kind: "dialog", close: () => offDialog() });
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }], roleSyncs: syncs, layers });
+  await at("#/builds");
+  expect(cmdR().defaultPrevented).toBe(true);
+  await settle();
+  expect(asked).toEqual([]);
+
+  offDialog();
+  cmdR();
+  await settle();
+  expect(asked).toEqual(["ci"]);
+});
+
+test("⌘R in a text field still presses the page's button", async () => {
+  const { asked, syncs } = roleSyncHarness();
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }], roleSyncs: syncs });
+  await at("#/code");
+  const field = filterField("payments");
+  expect(cmdR().defaultPrevented).toBe(true);
+  await settle();
+  expect(asked).toEqual(["code-host"]);
+  expect(field.value).toBe("payments");
+});
+
+test("⌘R on an item's page runs its Refresh, as a click does", async () => {
+  start({ sources: [{ id: "surveys", display_name: "Harbour surveys", roles: [{ role: "wasm-fixture:survey-desk", reads: [] }] }] });
+  await at(entityAddress("survey", "surveys:survey-1"));
+  const button = [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Refresh");
+  expect(button).toBeDefined();
+  expect(cmdR().defaultPrevented).toBe(true);
+  await settle();
+  expect(refreshed).toEqual(["surveys:survey-1"]);
+  expect(button?.textContent?.trim()).toBe("Refreshing…");
+  // Disabled while it reads: a second press asks nothing more.
+  cmdR();
+  await settle();
+  expect(refreshed).toEqual(["surveys:survey-1"]);
 });

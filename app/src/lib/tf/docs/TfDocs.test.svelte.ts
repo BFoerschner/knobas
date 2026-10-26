@@ -11,7 +11,7 @@ import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import { forgetEchoes } from "../queued.svelte";
-import { refreshProbe } from "../refresh.fixture";
+import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import { parseTfHash } from "../route";
 import { READER_DRAWER, READER_NARROW } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
@@ -2038,4 +2038,20 @@ test("a refresh whose row re-read fails keeps the button and the banners drawn (
   expect(getEntity).toHaveBeenCalledTimes(2);
   expect(refreshButton()?.textContent).toBe("Refresh");
   expect(docBanners()).toHaveLength(1);
+});
+
+test("⌘R in the composer runs the page's Refresh, and the composer keeps its text (#2156)", async () => {
+  const r = refreshProbe();
+  const io = ports({ docsPage: vi.fn(async () => RICH), getEntity: vi.fn(async () => pageDetail()), refresh: r.ports });
+  await draw(["confluence:2"], io);
+  const composer = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!;
+  fill(composer, "Half said");
+  composer.focus();
+  await settle();
+
+  expect(pressRefreshKey().defaultPrevented).toBe(true);
+  await settle();
+  expect(r.refreshed).toEqual(["confluence:2"]);
+  expect(io.docsPage).toHaveBeenCalledTimes(2);
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!.value).toBe("Half said");
 });

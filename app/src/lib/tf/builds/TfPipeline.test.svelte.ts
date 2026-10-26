@@ -17,7 +17,7 @@ import { forgetEchoes, echoWrite, echoesOn } from "../queued.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
 import TfPipeline from "./TfPipeline.svelte";
-import { detailOf, refreshProbe } from "../refresh.fixture";
+import { detailOf, pressRefreshKey, refreshProbe } from "../refresh.fixture";
 
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
@@ -1284,4 +1284,14 @@ test("a parameter change's echo goes on a refresh's read of the settings that sh
   await settle();
   expect(chip()).toBeNull();
   expect(paramRows()[0]!.textContent).toContain("prod-dryrun");
+});
+
+test("⌘R on a pipeline runs its Refresh, as a click does (#2156)", async () => {
+  const probe = refreshProbe();
+  draw([PIPELINE.entity_id], "PAY-231", { refresh: probe.ports, getEntity: (id) => Promise.resolve(detailOf(id)) });
+  await settle();
+  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(pressRefreshKey().defaultPrevented).toBe(true);
+  await settle();
+  expect(probe.refreshed).toEqual([PIPELINE.entity_id]);
 });

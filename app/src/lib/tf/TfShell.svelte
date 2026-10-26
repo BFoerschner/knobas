@@ -54,6 +54,7 @@
   import { badges as sharedBadges, type Badges } from "./badges.svelte";
   import { escStep } from "./escape";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
+  import { onRefreshKey } from "./page-refresh.svelte";
   import { parseTfHash, sectionOf } from "./route";
   import { theme as sharedTheme, type Theme } from "./theme.svelte";
   import { sourceReadings } from "./status";
@@ -376,6 +377,9 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    // ⌘R presses the page's *Refresh* or *Sync now* (#2156), and the webview
+    // never reloads; an overlay owns the keyboard, as it does history's keys.
+    if (onRefreshKey(event, dialogOpen())) return;
     const travel = historyStep(event);
     if (travel !== null) {
       event.preventDefault();

@@ -27,7 +27,7 @@ import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes } from "../queued.svelte";
 import TfPr, { type PrPorts } from "./TfPr.svelte";
-import { refreshProbe } from "../refresh.fixture";
+import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 
 const REPO = "gitea:tidewater/payout-service";
 const PR = `${REPO}#142`;
@@ -1140,4 +1140,12 @@ test("a pull request whose refresh failed keeps its page and says why", async ()
   expect(text(".tf-refresh-failed")).toBe("Couldn't refresh: 502 Bad Gateway");
   expect(text("h1")).toContain("SEPA retry with exponential backoff");
   expect(target.querySelector(".tf-cbody")?.textContent).not.toBe("");
+});
+
+test("⌘R on a pull request runs its Refresh, as a click does (#2156)", async () => {
+  const probe = refreshProbe();
+  await draw([PR], ports({ refresh: probe.ports }));
+  expect(pressRefreshKey().defaultPrevented).toBe(true);
+  await settle();
+  expect(probe.refreshed).toEqual([PR]);
 });

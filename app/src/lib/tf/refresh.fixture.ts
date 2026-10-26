@@ -11,6 +11,7 @@ import type { EntityDetail, EntityRow } from "../ipc/entity";
 import type { EntityRefresh, SourceSyncStatus } from "../ipc/sources";
 import type { DetailRefreshPorts } from "./refresh.svelte";
 import { createSourceSyncs } from "./role-sync.svelte";
+import { onRefreshKey } from "./page-refresh.svelte";
 
 /** The run id `sync_now` answers unless a test says otherwise, and the one {@link RefreshProbe.end} ends. */
 const RUN = 77;
@@ -92,4 +93,21 @@ export function refreshProbe(options: RefreshProbeOptions = {}): RefreshProbe {
     },
   };
   return probe;
+}
+
+/**
+ * ⌘R as the shell answers it (#2156): sent from the focused element and handed
+ * to the shell's own `onRefreshKey`, with no overlay open, for a page test that
+ * mounts no shell. The answer is the event, prevented when it was ⌘R.
+ */
+export function pressRefreshKey(): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", { key: "r", metaKey: true, bubbles: true, cancelable: true });
+  const shell = (key: KeyboardEvent) => void onRefreshKey(key, false);
+  window.addEventListener("keydown", shell);
+  try {
+    (document.activeElement ?? window).dispatchEvent(event);
+  } finally {
+    window.removeEventListener("keydown", shell);
+  }
+  return event;
 }

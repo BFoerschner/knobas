@@ -53,6 +53,7 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/job/current.svelte.ts#crumb": async () => (await import("../tf/job/current.svelte")).breadcrumbJob.set(null),
   "tf/job/current.svelte.ts#asked": async () => (await import("../tf/job/current.svelte")).linkRequest.drop(),
   "tf/layers.svelte.ts#layers": async () => (await import("../tf/layers.svelte")).layers.reset(),
+  "tf/page-refresh.svelte.ts#pageRefresh": async () => (await import("../tf/page-refresh.svelte")).pageRefresh.reset(),
   "tf/openin/apps.svelte.ts#apps": async () => (await import("../tf/openin/apps.svelte")).apps.reset(),
   "tf/openin/clones.svelte.ts#clones": async () => (await import("../tf/openin/clones.svelte")).clones.reset(),
   // `forgetEchoes` also stops the follows an echo started.
