@@ -757,10 +757,10 @@ mod tests {
                     .iter()
                     .filter(|i| in_projects(jql, i))
                     .max_by_key(|i| {
-                    i["fields"]["updated"]
-                        .as_str()
-                        .and_then(crate::time::parse_jira_time)
-                });
+                        i["fields"]["updated"]
+                            .as_str()
+                            .and_then(crate::time::parse_jira_time)
+                    });
                 return Ok(serde_json::from_value(serde_json::json!({
                     "startAt": 0, "maxResults": max_results,
                     "total": self.issues.len(), "issues": newest.into_iter().collect::<Vec<_>>()
@@ -1092,7 +1092,8 @@ mod tests {
             issues: five_issues(),
             ..FakeApi::default()
         };
-        let (_, cursor) = keys_of(&api, &cfg(serde_json::json!({ "projects": ["PAY"] })), None).await;
+        let (_, cursor) =
+            keys_of(&api, &cfg(serde_json::json!({ "projects": ["PAY"] })), None).await;
         let edited = cfg(serde_json::json!({
             "projects": ["PAY"], "rate_per_sec": 3, "page_size": 50, "favourite_filters": false
         }));
@@ -1120,10 +1121,7 @@ mod tests {
             .iter()
             .map(|i| (i.entity.key.as_str(), i.deleted))
             .collect();
-        assert!(
-            !keys.iter().any(|(k, _)| k.starts_with("OPS-")),
-            "{keys:?}"
-        );
+        assert!(!keys.iter().any(|(k, _)| k.starts_with("OPS-")), "{keys:?}");
         assert!(
             keys.contains(&("PAY-219", false)),
             "the rest is walked in full: {keys:?}"

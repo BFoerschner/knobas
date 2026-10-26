@@ -2032,18 +2032,24 @@ mod tests {
     #[tokio::test]
     async fn a_project_taken_out_of_the_scope_is_neither_read_nor_tombstoned() {
         let rest = tidewater();
-        let both = TeamCityConfig::from_json(&serde_json::json!({ "project_ids": ["Payout", "Ledger"] }))
-            .expect("config");
+        let both =
+            TeamCityConfig::from_json(&serde_json::json!({ "project_ids": ["Payout", "Ledger"] }))
+                .expect("config");
         let (_, cursor) = run(&rest, &both, None).await;
         let payout = TeamCityConfig::from_json(&serde_json::json!({ "project_ids": ["Payout"] }))
             .expect("config");
         let (items, _) = run(&rest, &payout, Some(cursor)).await;
         assert!(
-            items.iter().all(|i| !i.entity.key.contains("Ledger") && !i.deleted),
+            items
+                .iter()
+                .all(|i| !i.entity.key.contains("Ledger") && !i.deleted),
             "{:?}",
             keys(&items)
         );
-        assert!(keys(&items).contains(&"build:1187".to_owned()), "the rest in full");
+        assert!(
+            keys(&items).contains(&"build:1187".to_owned()),
+            "the rest in full"
+        );
     }
 
     /// A nested TeamCity (#849): `Payments` holds `Payouts`, which holds
@@ -2205,7 +2211,10 @@ mod tests {
         let cfg = TeamCityConfig::from_json(&serde_json::json!({ "project_ids": ["Payout"] }))
             .expect("config");
         let (_, cursor) = run(&rest, &cfg, None).await;
-        assert_eq!(cursor, r#"{"v":2,"since_build_id":99,"scope":"projects:Payout|build_types:"}"#);
+        assert_eq!(
+            cursor,
+            r#"{"v":2,"since_build_id":99,"scope":"projects:Payout|build_types:"}"#
+        );
     }
 
     /// A configuration two builds share is emitted once, not twice.
@@ -2355,7 +2364,8 @@ mod tests {
             .collect();
         assert_eq!(built.len(), 20, "the twenty in scope: {built:?}");
         assert_eq!(
-            cursor, r#"{"v":2,"since_build_id":1500,"scope":"projects:|build_types:Payout_Build,Payout_IntegrationTests,Gone_Config"}"#,
+            cursor,
+            r#"{"v":2,"since_build_id":1500,"scope":"projects:|build_types:Payout_Build,Payout_IntegrationTests,Gone_Config"}"#,
             "the newest build in scope"
         );
         // Side by side (#2176), so in any order: compared sorted.
@@ -2406,7 +2416,10 @@ mod tests {
             TEST_BASE_URL,
             &cfg,
             &rest,
-            Some(r#"{"v":2,"since_build_id":0,"scope":"projects:|build_types:Payout_Build"}"#.to_owned()),
+            Some(
+                r#"{"v":2,"since_build_id":0,"scope":"projects:|build_types:Payout_Build"}"#
+                    .to_owned(),
+            ),
             &mut sink,
         )
         .await
@@ -3535,7 +3548,8 @@ mod tests {
             "R finished inside the run and is emitted; Q is in no set this run saw"
         );
         assert_eq!(
-            cursor, r#"{"v":2,"since_build_id":1187,"scope":"projects:|build_types:Payout_Build,Ledger_Deploy"}"#,
+            cursor,
+            r#"{"v":2,"since_build_id":1187,"scope":"projects:|build_types:Payout_Build,Ledger_Deploy"}"#,
             "Q was queued after the in-flight poll and still runs, so the watermark may not pass \
              1187, the newest build the run witnessed when it opened"
         );
@@ -3562,7 +3576,8 @@ mod tests {
             "Q is emitted, and R once more"
         );
         assert_eq!(
-            next, r#"{"v":2,"since_build_id":1191,"scope":"projects:|build_types:Payout_Build,Ledger_Deploy"}"#,
+            next,
+            r#"{"v":2,"since_build_id":1191,"scope":"projects:|build_types:Payout_Build,Ledger_Deploy"}"#,
             "the probe witnessed both, so the watermark moves past them"
         );
     }
@@ -3609,7 +3624,9 @@ mod tests {
             TEST_BASE_URL,
             &cfg,
             &rest,
-            Some(r#"{"v":2,"since_build_id":900,"scope":"projects:Payout|build_types:"}"#.to_owned()),
+            Some(
+                r#"{"v":2,"since_build_id":900,"scope":"projects:Payout|build_types:"}"#.to_owned(),
+            ),
             &mut sink,
         )
         .await

@@ -339,10 +339,7 @@ mod tests {
         let mut kept = legacy;
         kept.scope = Some("project in (\"PAY\")".to_owned());
         assert_eq!(kept.clone().under("project in (\"PAY\")"), kept);
-        assert_eq!(
-            kept.under("project in (\"PAY\", \"OPS\")").updated_to,
-            None
-        );
+        assert_eq!(kept.under("project in (\"PAY\", \"OPS\")").updated_to, None);
     }
 
     #[test]

@@ -852,7 +852,10 @@ async fn a_newly_queued_build_arrives_and_holds_the_watermark_below_itself() {
         "the same build, now finished; got {:?}",
         keys(&items)
     );
-    assert_eq!(done, format!(r#"{{"v":2,"since_build_id":{queued},"scope":"projects:|build_types:{cfg}"}}"#));
+    assert_eq!(
+        done,
+        format!(r#"{{"v":2,"since_build_id":{queued},"scope":"projects:|build_types:{cfg}"}}"#)
+    );
     server.assert_no_violations();
 }
 
