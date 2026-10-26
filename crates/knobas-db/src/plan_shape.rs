@@ -236,7 +236,7 @@ fn linked_only_by_a_range(
 ///
 /// `enclosing` is the aliases of the outer sides of the nested loops `node`
 /// sits on the inner side of: their rows are parameters inside it too, so
-/// a probe keyed by one of them is linked though the loop right above it
+/// a probe keyed by one of them is linked even though the loop right above it
 /// does not name it -- the planner substitutes an equal column from further
 /// out (`i.entity_id = (r.id)` for `i.entity_id = ip.entity_id`, #2185).
 fn walk(
@@ -367,12 +367,12 @@ fn seq_scans(node: &serde_json::Value, relation: &str) -> bool {
 /// filters what it reads on the item's `payload`, or through a subplan,
 /// which is how a declared read is planned (#2185): a declared read tested
 /// per row, so the index it walks narrows to the key it was probed by and
-/// the payload decides the rest. A probe of the table's primary key reads
-/// one row whatever its filter, and is not one. That is a scan per row the checks
+/// the payload decides the rest. Such a read is a scan per row the checks
 /// in [`findings`] cannot see, since its index condition links it to the
 /// outer row by equality: a link-set member walked its source's every run
 /// through the declared `pipeline` path that way, about 100 ms a quiet
-/// member at 30,000 runs.
+/// member at 30,000 runs. A probe of the table's primary key reads one row
+/// whatever its filter, and is not one.
 #[must_use]
 pub fn filtered_per_row(explain: &serde_json::Value, relation: &str) -> Vec<String> {
     let hashed = hashed_subplans(explain);

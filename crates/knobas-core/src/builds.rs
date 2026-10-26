@@ -194,6 +194,10 @@ macro_rules! run_columns {
 /// outer row is `$pipeline` with `source_id`, `pkey` and `adapter_kind` (the
 /// source's configured adapter, which the stored rows are matched to); a
 /// tombstoned run's row is passed over inside the range.
+///
+/// Exported at the crate root, as [`frame_kinds_cte!`] is, so the app's
+/// link-set member rows read a pipeline's newest run by the same range.
+#[macro_export]
 macro_rules! newest_runs {
     ($pipeline:literal, $limit:literal) => {
         concat!(
@@ -272,7 +276,7 @@ r as materialized (
     "
     from p
     cross join lateral ",
-    newest_runs!("p", "$2"),
+    crate::newest_runs!("p", "$2"),
     " k
     join sync.item i on i.entity_id = k.entity_id
    where p.pkey is not null and p.name is not null
@@ -323,7 +327,7 @@ select t.pkey is not null as found, x.* from target t
     run_columns!(),
     "
       from ",
-    newest_runs!("t", "$3"),
+    crate::newest_runs!("t", "$3"),
     " k
       join sync.item i on i.entity_id = k.entity_id
      order by i.item_updated_at desc nulls last, i.entity_id desc) x on true
@@ -795,11 +799,16 @@ branch_paths as materialized (
 named as (
   select array(select n.name from names n where n.name is not null) as names
 ),
-on_branches as materialized (
-  select distinct ip.source_id, ip.pkey, c.name
+run as not materialized (
+  select ip.entity_id, ip.source_id, ip.pkey, ip.adapter_kind
     from sync.item_pipeline ip
     join knobas.source_config s on s.id = ip.source_id and s.kind = ip.adapter_kind
     join sync.live_item i on i.entity_id = ip.entity_id
+),
+on_branches as materialized (
+  select distinct run.source_id, run.pkey, c.name
+    from run
+    join sync.item i on i.entity_id = run.entity_id
    cross join lateral (select ",
     crate::first_string_of!(
         "(select b.segs, b.ord from branch_paths b where b.source_id = i.source_id and b.kind = i.kind)"
@@ -810,12 +819,6 @@ on_branches as materialized (
                        select substr(b.branch, 12) where b.branch like 'refs/heads/%') c
    where (select cardinality(n.names) from named n) > 0
      and c.name = any((select n.names from named n)::text[])
-),
-run as not materialized (
-  select ip.entity_id, ip.source_id, ip.pkey, ip.adapter_kind
-    from sync.item_pipeline ip
-    join knobas.source_config s on s.id = ip.source_id and s.kind = ip.adapter_kind
-    join sync.live_item i on i.entity_id = ip.entity_id
 ),
 checked as materialized (
   select h.pr, k.source_id, k.pkey

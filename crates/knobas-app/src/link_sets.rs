@@ -353,7 +353,8 @@ fn fits(member_kind: &str, entity_kind: &str) -> bool {
 const MEMBER_ROWS: &str = concat!(
     "with m as (
   select u.id, u.ord, e.kind, e.title, i.source_id,
-         ($1::jsonb #>> array[i.source_id, i.kind, 'frame']) as frame, ",
+         ($1::jsonb #>> array[i.source_id, i.kind, 'frame']) as frame,
+         (select sc.kind from knobas.source_config sc where sc.id = i.source_id) as adapter_kind, ",
     knobas_core::declared_string!("$1", "pipeline"),
     " as pkey, ",
     knobas_core::project_key_read!("$1"),
@@ -391,13 +392,9 @@ select m.id, m.kind, m.title, m.project, m.parents, m.groups, m.type_id, m.envir
        case when m.frame = 'pipeline' and m.pkey is not null then
          (select ",
     knobas_core::declared_state!("$1"),
-    " from (select ip.entity_id from sync.item_pipeline ip
-                  where ip.source_id = m.source_id and ip.pkey = m.pkey
-                    and ip.adapter_kind = (select s.kind from knobas.source_config s
-                                            where s.id = m.source_id)
-                    and exists (select 1 from knobas.entity e
-                                 where e.id = ip.entity_id and e.deleted_at is null)
-                  order by ip.at desc nulls last, ip.entity_id desc limit 1) n
+    " from ",
+    knobas_core::newest_runs!("m", "1"),
+    " n
            join sync.item i on i.entity_id = n.entity_id)
        else m.own_state end as state
   from m order by m.ord"

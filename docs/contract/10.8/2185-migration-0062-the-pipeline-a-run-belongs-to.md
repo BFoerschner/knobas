@@ -13,7 +13,8 @@
   `sync.pipeline_adapters`, `sync.resolve_item_pipelines`, `sync.resolve_kind_pipelines`,
   `sync.resolve_all_item_pipelines`. Three restated, each with one addition and otherwise `0032`'s
   text: `sync.item_inserted` and `sync.item_updated` also resolve the pipelines of the ids they
-  already resolve, and `sync.item_updated` refreshes `at` where `item_updated_at` moved alone;
+  already resolve, and `sync.item_updated` rewrites `at` on every updated row whose stored `at`
+  differs from its `item_updated_at`;
   `sync.parent_declaration_changed` also recomputes the kinds a changed declaration makes a run
   with a pipeline. The lock (`627, 0`) is unchanged. The last statement fills the table from the
   stored declarations, taking no lock, as `0032`'s did.
