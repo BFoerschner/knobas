@@ -1,9 +1,14 @@
 //! One sync run.
 //!
-//! Order is fixed and deterministic -- repository, its branches, its pull
-//! requests, its commits, repositories sorted by full name, branches by
-//! `walk_order` -- so a test can assert on what came out and a budget spends
-//! itself the same way twice.
+//! Order is fixed **within one repository** -- the repository, its branches,
+//! its pull requests, its issues, its commits, branches by `walk_order` -- so a
+//! budget spends itself the same way twice and each walk's watermark sees its
+//! own pages in order. **Across repositories it is not** (#2159): up to
+//! `concurrent_repos` of them are walked side by side, started in full-name
+//! order, and each one's items reach the sink when that repository finishes.
+//! Nothing downstream reads that order: the engine writes a run in one
+//! transaction and sorts each batch by entity id, every budget and page cap is
+//! per repository, and the cursor is a map written at the end of the run.
 //!
 //! # Why every kind has a change gate
 //!
@@ -134,6 +139,8 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc};
+use futures_util::StreamExt;
+use futures_util::stream::FuturesUnordered;
 use knobas_http::{PageNumber, PageWalk, Walked};
 use knobas_source::{Cursor, Sink, SourceError, SyncItem};
 use serde_json::Value;
@@ -377,43 +384,56 @@ pub(crate) async fn run(
     // having no branch memory, can tombstone nothing deleted in between.
     carry_skipped_forward(&previous, &skipped, &mut next);
 
-    // The walk reading (#1379): before each repository and once after the
-    // last, over the selection just made, so an unchanged run that pushes no
-    // item still moves the bar. A `usize` always fits a `u64` here.
+    // Up to `concurrent_repos` repositories walked side by side (#2159), all
+    // in this one task: nothing is spawned, so returning drops every walk
+    // still in flight, and the shared limiter stays the one bound on the
+    // request rate. Each walk buffers its own items, and they reach the sink
+    // when that repository finishes, in the order the walks finish: the
+    // engine writes the run in one transaction and sorts each batch itself,
+    // and every budget, page cap and watermark is per repository.
+    //
+    // The walk reading (#1379) counts finished repositories, over the
+    // selection just made, so an unchanged run that pushes no item still moves
+    // the bar. A `usize` always fits a `u64` here.
     let of = u64::try_from(walk.len()).unwrap_or(u64::MAX);
-    for (done, selected) in (0u64..).zip(&walk) {
-        sink.walked(done, Some(of), REPOSITORIES).await;
-        let before = previous.repo(&selected.full_name);
-        let mut after = before.clone();
-        match sync_repo(source, selected, &before, &mut after, sink, &mut emitted).await {
-            Ok(()) => {
+    let at_once = usize::try_from(source.config.concurrent_repos)
+        .unwrap_or(usize::MAX)
+        .max(1);
+    let mut queued = walk.iter();
+    let mut in_flight = FuturesUnordered::new();
+    let mut done = 0u64;
+    sink.walked(done, Some(of), REPOSITORIES).await;
+    loop {
+        while in_flight.len() < at_once
+            && let Some(selected) = queued.next()
+        {
+            in_flight.push(walk_repo(
+                source,
+                selected,
+                previous.repo(&selected.full_name),
+                full_sync,
+            ));
+        }
+        let Some((selected, before, outcome)) = in_flight.next().await else {
+            break;
+        };
+        match outcome {
+            Outcome::Walked(after, items) => {
+                for item in items {
+                    push(sink, item, &mut emitted).await?;
+                }
                 walked += 1;
                 next.repos.insert(selected.full_name.clone(), after);
             }
-            Err(RepoError::Fatal(error)) => return Err(in_repository(&selected.full_name, error)),
-            // Listed a moment ago and deleted since: ruling B4 as amended by
-            // #728 (module docs). It holds no position; its row is the next
-            // sweep's to retire.
-            Err(RepoError::Skip(error))
-                if selected.listed
-                    && error.status() == Some(404)
-                    && repo_is_gone(source, selected).await =>
-            {
+            Outcome::Fatal(error) => return Err(in_repository(&selected.full_name, error)),
+            Outcome::Gone(error) => {
                 tracing::info!(
                     repository = %selected.full_name,
                     %error,
                     "gitea: repository deleted since the listing; skipping it"
                 );
             }
-            // A cursor-less run may not report success over a hole: see the
-            // module docs.
-            Err(RepoError::Skip(error)) if full_sync => {
-                return Err(in_repository(&selected.full_name, error));
-            }
-            Err(RepoError::Skip(error)) => {
-                // A 403 or a 404, and nothing else: a revoked credential
-                // answers 401, which `is_repo_scoped` reads as fatal and this
-                // arm therefore never sees (ADR-0004).
+            Outcome::Skipped(error) => {
                 tracing::warn!(
                     repository = %selected.full_name,
                     %error,
@@ -427,9 +447,9 @@ pub(crate) async fn run(
                 next.repos.insert(selected.full_name.clone(), before);
             }
         }
+        done += 1;
+        sink.walked(done, Some(of), REPOSITORIES).await;
     }
-
-    sink.walked(of, Some(of), REPOSITORIES).await;
 
     // One repository refusing us is a fact about that repository. *Every*
     // repository refusing us is a fact about the token's scope, and reporting
@@ -450,6 +470,74 @@ pub(crate) async fn run(
         return Ok(unchanged);
     }
     Ok(next.to_json())
+}
+
+/// How one repository's walk ended.
+enum Outcome {
+    /// Walked: its position for the next run and the items it emitted, in
+    /// the order its walk emitted them.
+    Walked(RepoCursor, Vec<SyncItem>),
+    /// Ends the run.
+    Fatal(SourceError),
+    /// Listed a moment ago and deleted since: ruling B4 as amended by #728
+    /// (module docs). It holds no position; its row is the next sweep's to
+    /// retire.
+    Gone(SourceError),
+    /// A 403 or a 404 on an incremental run, and nothing else: a revoked
+    /// credential answers 401, which `is_repo_scoped` reads as fatal and so
+    /// never arrives here (ADR-0004). The run keeps its stored position.
+    Skipped(SourceError),
+}
+
+/// The items one repository's walk emits, held until that walk finishes and
+/// the run hands them to its sink (#2159).
+struct Buffered(Vec<SyncItem>);
+
+#[async_trait::async_trait]
+impl Sink for Buffered {
+    async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
+        self.0.push(item);
+        Ok(())
+    }
+}
+
+/// Walk one repository into a buffer of its own and say how it ended, the
+/// skip rules applied: what a 403 or 404 means depends on the repository
+/// (`listed`) and on the run (`full_sync`), never on the other walks.
+async fn walk_repo<'a>(
+    source: &crate::GiteaSource,
+    selected: &'a Selected,
+    before: RepoCursor,
+    full_sync: bool,
+) -> (&'a Selected, RepoCursor, Outcome) {
+    let mut after = before.clone();
+    let mut buffer = Buffered(Vec::new());
+    let mut emitted = 0;
+    let outcome = match sync_repo(
+        source,
+        selected,
+        &before,
+        &mut after,
+        &mut buffer,
+        &mut emitted,
+    )
+    .await
+    {
+        Ok(()) => Outcome::Walked(after, buffer.0),
+        Err(RepoError::Fatal(error)) => Outcome::Fatal(error),
+        Err(RepoError::Skip(error))
+            if selected.listed
+                && error.status() == Some(404)
+                && repo_is_gone(source, selected).await =>
+        {
+            Outcome::Gone(error)
+        }
+        // A cursor-less run may not report success over a hole: see the
+        // module docs.
+        Err(RepoError::Skip(error)) if full_sync => Outcome::Fatal(error),
+        Err(RepoError::Skip(error)) => Outcome::Skipped(error),
+    };
+    (selected, before, outcome)
 }
 
 /// Which repositories this run walks, and what was refused while deciding.

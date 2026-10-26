@@ -22,12 +22,17 @@ serde_json.workspace = true
 # merge Gitea answered "Please try again later" and the next (#721; the
 # workspace's `time` feature). It spawns nothing.
 tokio = { workspace = true, features = ["macros"] }
+# `FuturesUnordered`, the repositories a sync walks side by side in its one
+# task (#2159). Already in the tree through `reqwest`, at this version.
+futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
 tracing = "0.1"
 
 [dev-dependencies]
 serde_json.workspace = true
-# `test-util` for the paused clock the merge-patience test runs on (#1925).
-tokio = { workspace = true, features = ["test-util"] }
+# `test-util` for the paused clock the merge-patience test runs on (#1925);
+# `net`, `io-util` and `sync` for `support::held`, the proxy that holds a
+# request open until a test lets it go (#2159).
+tokio = { workspace = true, features = ["test-util", "net", "io-util", "sync"] }
 # The cleanup runner `live_env::Litter`'s `Drop` calls (#1913), shared with
 # every other live suite: a thread and runtime of its own, a bound, a report.
 knobas-live-cleanup = { path = "../knobas-live-cleanup" }

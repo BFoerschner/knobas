@@ -3316,6 +3316,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "flate2",
+ "futures-util",
  "knobas-core",
  "knobas-http",
  "knobas-live-cleanup",

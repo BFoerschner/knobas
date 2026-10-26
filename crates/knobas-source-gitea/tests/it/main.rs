@@ -16,6 +16,7 @@ mod grants;
 mod refresh;
 mod source_action;
 mod sync;
+mod sync_concurrent;
 mod sync_moving;
 mod tickets;
 mod view;

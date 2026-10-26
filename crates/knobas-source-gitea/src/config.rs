@@ -312,8 +312,8 @@ mod tests {
     fn concurrent_repos_runs_from_one_to_thirty_two() {
         assert_eq!(GiteaConfig::default().concurrent_repos, 8);
         for good in [1, 8, 32] {
-            let cfg = GiteaConfig::from_json(&serde_json::json!({ "concurrent_repos": good }))
-                .unwrap();
+            let cfg =
+                GiteaConfig::from_json(&serde_json::json!({ "concurrent_repos": good })).unwrap();
             assert_eq!(cfg.concurrent_repos, good);
         }
         for bad in [0, 33] {
@@ -325,7 +325,10 @@ mod tests {
             );
         }
         let schema = &config_schema()["properties"]["concurrent_repos"];
-        assert_eq!((&schema["minimum"], &schema["maximum"]), (&serde_json::json!(1), &serde_json::json!(32)));
+        assert_eq!(
+            (&schema["minimum"], &schema["maximum"]),
+            (&serde_json::json!(1), &serde_json::json!(32))
+        );
     }
 
     /// The Add-source form is *generated* from `config_schema` (spec §3a), so a

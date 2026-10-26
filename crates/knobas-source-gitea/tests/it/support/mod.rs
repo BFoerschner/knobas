@@ -16,6 +16,8 @@
 // to call.
 #![allow(dead_code)]
 
+pub mod held;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

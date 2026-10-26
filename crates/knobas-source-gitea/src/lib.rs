@@ -24,16 +24,26 @@
 //! # What one run costs
 //!
 //! Gitea's branch listing has no incremental filter, so a run costs one
-//! identity request, `ceil(repos / 50)` listing requests, two per repository
-//! (branches and pulls), one commit page per branch that moved -- **and one
-//! more for each of those walks**, the empty page it ends on, since nothing
-//! here reads a page shorter than the `limit` it asked for as the end of a
-//! listing (issue #81). Plus **one** per emitted pull request that has
-//! comments: that endpoint is not paged, so however long the discussion there
-//! is no second page to ask for (issue #131). Twenty repositories on the
-//! default five-minute schedule is roughly eighty requests a run at 10 req/s.
-//! The `owners`/`repos` allowlist is the lever when that is too much, and
-//! `include_pr_comments` is the one that costs a discussion.
+//! identity request, `ceil(repos / 50)` listing requests, and per repository
+//! five on an idle run: branches, pulls and issues (#1206), and the empty page the
+//! branch and issue walks end on, since nothing here reads a page shorter
+//! than the `limit` it asked for as the end of a listing (issue #81). On top
+//! of that: the repository's teams when its record changed (#966), one commit
+//! page per branch that moved and the empty page after it, one more page per
+//! further page of pulls or issues that changed, and **one** per emitted pull
+//! request that has comments: that endpoint is not paged, so however long the
+//! discussion there is no second page to ask for (issue #131). An idle run
+//! over 300 repositories is therefore about 1,500 requests.
+//!
+//! **What bounds the time is the rate, then the round trip.** Every request
+//! goes through the per-origin limiter (`rate_limit_per_sec`, 10 req/s by
+//! default), so those 1,500 take two and a half minutes at the default. Inside
+//! one repository the walk is one request after another, and up to
+//! `concurrent_repos` repositories (default 8) are walked side by side
+//! (#2159), so a raised rate is not capped by one round trip at a time; at 1
+//! the run walks them one after another. The `owners`/`repos` allowlist is the
+//! lever when the request count is too much, and `include_pr_comments` is the
+//! one that costs a discussion.
 //!
 //! **A refusal costs no extra request** (ADR-0004). It used to cost one
 //! identity probe per skipped repository and per refused discussion, because
