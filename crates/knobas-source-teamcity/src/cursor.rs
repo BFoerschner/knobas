@@ -1,5 +1,5 @@
-//! The incremental position: `{"v":2,"since_build_id":N}` (interfaces §4.2;
-//! version 2 since #1448).
+//! The incremental position: `{"v":2,"since_build_id":N}`, plus `"scope"` for a
+//! scoped source (#2181) (interfaces §4.2; version 2 since #1448).
 //!
 //! Opaque to everything outside this crate, versioned so a later shape change
 //! is detectable, and byte-stable so an idle run can hand back exactly what it
