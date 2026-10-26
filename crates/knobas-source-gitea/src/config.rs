@@ -5,6 +5,10 @@
 
 use knobas_source::SourceError;
 
+/// The most repositories one run walks at once (#2159): the top of the range
+/// the Add-source form offers.
+pub(crate) const MAX_CONCURRENT_REPOS: u32 = 32;
+
 /// Everything a Gitea source is configured with. Secrets excluded, always.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -37,6 +41,13 @@ pub struct GiteaConfig {
     pub include_pr_comments: bool,
     /// Per-instance request rate. Interfaces §4.1 default: 10 req/s.
     pub rate_limit_per_sec: u32,
+    /// How many repositories one run walks at once (#2159), 1 to
+    /// [`MAX_CONCURRENT_REPOS`]. Inside a repository the walk stays one
+    /// request after another; this only lets repositories overlap, and the
+    /// shared limiter `rate_limit_per_sec` sets stays the one bound on the
+    /// request rate. 1 walks them one after another, for an instance that
+    /// cannot take more than one request at a time.
+    pub concurrent_repos: u32,
     /// Other addresses CI clones this server from (#683): a URL prefix such
     /// as `http://gitea:3000`, or an scp-like remote such as `git@gitea:`.
     /// The SPI's [`knobas_source::clone_urls`] key, declared in
@@ -56,6 +67,7 @@ impl Default for GiteaConfig {
             prs_per_repo: 200,
             include_pr_comments: true,
             rate_limit_per_sec: 10,
+            concurrent_repos: 8,
             clone_urls: Vec::new(),
         }
     }
@@ -69,7 +81,7 @@ impl GiteaConfig {
     ///
     /// [`SourceError::Protocol`] for a blob this adapter's schema does not
     /// describe, a `repos[]` entry that is not `owner/name`, or a rate limit
-    /// of zero.
+    /// of zero, or a `concurrent_repos` outside 1 to [`MAX_CONCURRENT_REPOS`].
     pub fn from_json(value: &serde_json::Value) -> Result<Self, SourceError> {
         let config: Self = serde_json::from_value(value.clone())
             .map_err(|e| SourceError::protocol(format!("gitea: invalid source config: {e}")))?;
@@ -101,6 +113,11 @@ impl GiteaConfig {
             return Err(SourceError::protocol(
                 "gitea: rate_limit_per_sec must be at least 1".to_owned(),
             ));
+        }
+        if !(1..=MAX_CONCURRENT_REPOS).contains(&self.concurrent_repos) {
+            return Err(SourceError::protocol(format!(
+                "gitea: concurrent_repos must be 1 to {MAX_CONCURRENT_REPOS}"
+            )));
         }
         Ok(())
     }
@@ -156,6 +173,11 @@ pub fn config_schema() -> serde_json::Value {
                 "type": "integer", "minimum": 1, "maximum": 100, "default": 10,
                 "title": "Requests per second",
                 "description": "Per-source request rate."
+            },
+            "concurrent_repos": {
+                "type": "integer", "minimum": 1, "maximum": MAX_CONCURRENT_REPOS, "default": 8,
+                "title": "Repositories at once",
+                "description": "How many repositories a sync walks at the same time. Set 1 for an instance that struggles with parallel requests."
             },
             "clone_urls": {
                 "type": "array", "items": { "type": "string" }, "default": [],
@@ -280,6 +302,30 @@ mod tests {
                 .rate_limit_per_sec,
             1
         );
+    }
+
+    /// #2159: how many repositories a run walks at once. 1 is today's walk,
+    /// one repository after another, for an instance that cannot take more;
+    /// 32 is the top of the range, and the schema offers the same range the
+    /// parser accepts.
+    #[test]
+    fn concurrent_repos_runs_from_one_to_thirty_two() {
+        assert_eq!(GiteaConfig::default().concurrent_repos, 8);
+        for good in [1, 8, 32] {
+            let cfg = GiteaConfig::from_json(&serde_json::json!({ "concurrent_repos": good }))
+                .unwrap();
+            assert_eq!(cfg.concurrent_repos, good);
+        }
+        for bad in [0, 33] {
+            let err = GiteaConfig::from_json(&serde_json::json!({ "concurrent_repos": bad }))
+                .unwrap_err();
+            assert!(
+                matches!(err, SourceError::Protocol { ref message, .. } if message.contains("concurrent_repos")),
+                "{bad} -> {err:?}"
+            );
+        }
+        let schema = &config_schema()["properties"]["concurrent_repos"];
+        assert_eq!((&schema["minimum"], &schema["maximum"]), (&serde_json::json!(1), &serde_json::json!(32)));
     }
 
     /// The Add-source form is *generated* from `config_schema` (spec §3a), so a
