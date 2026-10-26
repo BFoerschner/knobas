@@ -4026,6 +4026,7 @@ knobas-spi-types	lib/knobas_spi_types	payload::tests::a_list_keeps_the_usable_st
 knobas-spi-types	lib/knobas_spi_types	payload::tests::a_list_that_is_not_an_array_yields_nothing
 knobas-spi-types	lib/knobas_spi_types	payload::tests::a_miss_is_a_miss_however_the_source_spelled_it
 knobas-spi-types	lib/knobas_spi_types	payload::tests::a_number_is_the_first_candidate_that_lands_on_one
+knobas-spi-types	lib/knobas_spi_types	payload::tests::a_peer_that_still_declares_pull_request_times_decodes_without_them
 knobas-spi-types	lib/knobas_spi_types	payload::tests::a_trigger_reads_the_source_word_through_its_map
 knobas-spi-types	lib/knobas_spi_types	payload::tests::a_value_that_is_not_a_usable_string_is_passed_over
 knobas-spi-types	lib/knobas_spi_types	payload::tests::an_instant_reads_in_the_basic_and_the_extended_spelling
