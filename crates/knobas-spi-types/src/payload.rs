@@ -500,18 +500,6 @@ pub struct KindPaths {
     /// for every kind that is not a monitor.
     #[serde(default)]
     pub monitor_type: Vec<PayloadPath>,
-    /// When a pull request was opened (#929), an ISO 8601 instant as
-    /// [`started`](Self::started) is written: Gitea's `created_at`. The
-    /// conversation draws it as a line on the tickets the pull request is
-    /// linked to.
-    #[serde(default)]
-    pub opened: Vec<PayloadPath>,
-    /// When a pull request was merged (#929), as [`opened`](Self::opened) is
-    /// written: Gitea's `merged_at`, absent until it is. The instant beside
-    /// the [`merged`](Self::merged) flag, a second fact and not a second
-    /// candidate for it.
-    #[serde(default)]
-    pub merged_at: Vec<PayloadPath>,
     /// How long a monitor's last check took, **in milliseconds** (#1224):
     /// Uptime Kuma's `response_time_ms`, as its `map` writes it. A JSON
     /// number, read by [`resolve_number`]; what knobas' samples are taken
@@ -736,8 +724,6 @@ pub mod field {
     pub const TEAMS: &str = "teams";
     pub const OWNER: &str = "owner";
     pub const MONITOR_TYPE: &str = "monitor_type";
-    pub const OPENED: &str = "opened";
-    pub const MERGED_AT: &str = "merged_at";
     pub const RESPONSE_TIME: &str = "response_time";
     pub const BASE: &str = "base";
     pub const SOURCE_QUERY: &str = "source_query";
@@ -791,8 +777,6 @@ pub mod field {
         TEAMS,
         OWNER,
         MONITOR_TYPE,
-        OPENED,
-        MERGED_AT,
         RESPONSE_TIME,
         BASE,
         SOURCE_QUERY,
@@ -1832,6 +1816,26 @@ mod tests {
         expected.push("system_name");
         expected.sort_unstable();
         assert_eq!(keys, expected);
+    }
+
+    /// `opened` and `merged_at` were declared for the conversation's
+    /// pull-request lines (#929) and retired with them (#2173). An adapter
+    /// built before the retirement still sends both: its descriptor decodes,
+    /// keeps every other declaration, and carries neither on the way out.
+    #[test]
+    fn a_peer_that_still_declares_pull_request_times_decodes_without_them() {
+        let older = serde_json::json!({
+            "kind": "pr",
+            "merged": [["merged"]],
+            "opened": [["created_at"]],
+            "merged_at": [["merged_at"]],
+        });
+        let paths: KindPaths = serde_json::from_value(older).unwrap();
+        assert_eq!(paths.merged, vec![PayloadPath::of(["merged"])]);
+        let wire = serde_json::to_value(&paths).unwrap();
+        let wire = wire.as_object().unwrap();
+        assert!(!wire.contains_key("opened"), "{wire:?}");
+        assert!(!wire.contains_key("merged_at"), "{wire:?}");
     }
 
     /// A monitor's response time (#1224) is the first candidate that lands on

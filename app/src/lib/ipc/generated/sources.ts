@@ -645,20 +645,6 @@ owner: Array<PayloadPath>,
  */
 monitor_type: Array<PayloadPath>, 
 /**
- * When a pull request was opened (#929), an ISO 8601 instant as
- * [`started`](Self::started) is written: Gitea's `created_at`. The
- * conversation draws it as a line on the tickets the pull request is
- * linked to.
- */
-opened: Array<PayloadPath>, 
-/**
- * When a pull request was merged (#929), as [`opened`](Self::opened) is
- * written: Gitea's `merged_at`, absent until it is. The instant beside
- * the [`merged`](Self::merged) flag, a second fact and not a second
- * candidate for it.
- */
-merged_at: Array<PayloadPath>, 
-/**
  * How long a monitor's last check took, **in milliseconds** (#1224):
  * Uptime Kuma's `response_time_ms`, as its `map` writes it. A JSON
  * number, read by [`resolve_number`]; what knobas' samples are taken

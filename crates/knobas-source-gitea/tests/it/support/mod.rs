@@ -204,7 +204,7 @@ pub fn pull(number: u64, title: &str, body: &str, updated: &str, comments: u64) 
     json!({
         "number": number, "title": title, "body": body, "state": "open",
         // Gitea writes `merged_at` on every pull request, `null` until it is
-        // merged: where `merged_at` is declared (#929).
+        // merged; the pull-request view reads its merge time from there.
         "draft": false, "merged": false, "merged_at": null, "comments": comments,
         "requested_reviewers": [{ "login": "tom", "id": 8 }],
         "user": { "login": "mara", "id": 7 },

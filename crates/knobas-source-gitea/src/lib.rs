@@ -343,10 +343,10 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// * `merged` is Gitea's boolean, which is what the start-work merge pass
 ///   follows. `merged_at` is the same fact as a timestamp and is deliberately
 ///   not a second candidate: a flag is a boolean here (see
-///   [`knobas_source::KindPaths::merged`]). It is declared as its own
-///   field, `merged_at`, beside `opened` at `created_at`: the times a
-///   ticket's conversation draws a linked pull request's opening and merge
-///   at (#929).
+///   [`knobas_source::KindPaths::merged`]). No path-driven read wants a pull
+///   request's opening or merge time since the conversation went
+///   comments-only (#2164), so neither is declared (#2173); the pull-request
+///   view reads `merged_at` from its own fetch.
 ///
 /// * `parent` is the repo, for a branch, a pull request and a commit
 ///   (ADR-0018, #595). It answers to `full_name` first -- the name a path line
@@ -426,8 +426,6 @@ fn payload_paths() -> Vec<KindPaths> {
             base: vec![PayloadPath::of(["base", "ref"])],
             commit: vec![PayloadPath::of(["head", "sha"])],
             head_repo: vec![PayloadPath::of(["head", "repo", "full_name"])],
-            opened: vec![PayloadPath::of(["created_at"])],
-            merged_at: vec![PayloadPath::of(["merged_at"])],
             ..KindPaths::default()
         },
         KindPaths {
