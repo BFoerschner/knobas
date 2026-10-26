@@ -9,7 +9,9 @@
 //! stamped with how many configurations the run had finished by then (its
 //! walk reading, #1382), so a query that began before a slot was free is
 //! caught whatever the machine's speed: at N at once, the i-th configuration
-//! to be asked about may only be asked once i - N + 1 have finished.
+//! to be asked about may only be asked once i - N + 1 have finished. An
+//! incremental run reports no walk over configurations, so there the stamp is
+//! how many held queries the proxy had begun to answer.
 //!
 //! The fake answers every other build query (the opening probe, the in-flight
 //! poll) with an empty page, so the run's only builds are the one each
@@ -217,9 +219,14 @@ fn everything(count: usize, configs: bool) -> Vec<String> {
 }
 
 /// No configuration was asked about before enough others had finished to
-/// free a slot for it.
-fn assert_never_more_than(held: &Held, at_once: usize) {
-    for (i, (id, finished)) in held.arrivals().into_iter().enumerate() {
+/// free a slot for it: by the run's own walk reading where it reports one,
+/// and by the answers the proxy had begun to send either way.
+fn assert_never_more_than(held: &Held, at_once: usize, walk: bool) {
+    let mut stamps = vec![held.arrivals_answered()];
+    if walk {
+        stamps.push(held.arrivals());
+    }
+    for (i, (id, finished)) in stamps.into_iter().flat_map(|s| s.into_iter().enumerate()) {
         let needed = u64::try_from((i + 1).saturating_sub(at_once)).expect("fits");
         assert!(
             finished >= needed,
@@ -269,7 +276,7 @@ async fn a_full_sync_asks_about_up_to_concurrent_configs_configurations_at_once(
     let keys = within("the run", run).await.expect("joins").expect("syncs");
     assert_eq!(keys, everything(7, true), "every configuration and build once");
     assert_eq!(held.most(), 3, "three at once");
-    assert_never_more_than(&held, 3);
+    assert_never_more_than(&held, 3, true);
 }
 
 /// At 1 the run is today's: one configuration at a time, in id order.
@@ -293,7 +300,7 @@ async fn at_one_the_configurations_are_asked_about_one_after_another_in_id_order
     let keys = within("the run", run).await.expect("joins").expect("syncs");
     assert_eq!(keys, everything(4, true));
     assert_eq!(held.most(), 1);
-    assert_never_more_than(&held, 1);
+    assert_never_more_than(&held, 1, true);
     assert_eq!(held.arrived(), ["Cfg1", "Cfg2", "Cfg3", "Cfg4"]);
 }
 
@@ -331,6 +338,7 @@ async fn a_configuration_lists_incremental_run_asks_up_to_concurrent_configs_at_
     let keys = within("the run", run).await.expect("joins").expect("syncs");
     assert_eq!(keys, everything(5, true), "every build, and its configuration");
     assert_eq!(held.most(), 2, "two at once");
+    assert_never_more_than(&held, 2, false);
 }
 
 /// A fatal error in one configuration ends the run with that error, and the

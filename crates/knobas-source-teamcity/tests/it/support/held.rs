@@ -38,6 +38,10 @@ struct Seen {
     arrived: Vec<(String, u64)>,
     /// How many units the run under test says it has finished.
     finished: u64,
+    /// How many held requests this proxy has begun to answer.
+    answered: u64,
+    /// Beside each entry of `arrived`, `answered` when it arrived.
+    answered_at: Vec<u64>,
     /// Keys whose client hung up while the request was held.
     abandoned: Vec<String>,
 }
@@ -84,6 +88,20 @@ impl Held {
     /// it arrived, in arrival order.
     pub fn arrivals(&self) -> Vec<(String, u64)> {
         self.seen().arrived.clone()
+    }
+
+    /// Every key held so far with how many held requests this proxy had
+    /// begun to answer when it arrived, in arrival order: the stamp for a run
+    /// that reports no walk reading (#2176). Counted before the answer is
+    /// written, so it can run ahead of what the client has read, which can
+    /// hide an overshoot but never invent one.
+    pub fn arrivals_answered(&self) -> Vec<(String, u64)> {
+        let seen = self.seen();
+        seen.arrived
+            .iter()
+            .zip(&seen.answered_at)
+            .map(|((key, _), answered)| (key.clone(), *answered))
+            .collect()
     }
 
     /// Record that the run under test has finished `done` units: a sink's
@@ -151,13 +169,16 @@ impl Held {
             .unwrap_or("/")
             .to_owned();
         let (path, query) = target.split_once('?').unwrap_or((target.as_str(), ""));
-        if let Some(key) = rule(path, query) {
+        let held = rule(path, query);
+        if let Some(key) = held.clone() {
             let (go, wait) = oneshot::channel();
             {
                 let mut seen = self.seen();
                 seen.held.insert(key.clone(), go);
                 let finished = seen.finished;
                 seen.arrived.push((key.clone(), finished));
+                let answered = seen.answered;
+                seen.answered_at.push(answered);
                 seen.most = seen.most.max(seen.held.len());
             }
             self.changed.notify_waiters();
@@ -207,6 +228,9 @@ impl Held {
             "content-length: {}\r\nconnection: close\r\n\r\n",
             body.len()
         ));
+        if held.is_some() {
+            self.seen().answered += 1;
+        }
         let _ = socket.write_all(out.as_bytes()).await;
         let _ = socket.write_all(&body).await;
         let _ = socket.shutdown().await;
