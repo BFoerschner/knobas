@@ -126,11 +126,16 @@ async fn walked(pool: &PgPool, pipeline: &str) -> Vec<String> {
 
 /// What the pipeline page draws: its runs, newest first.
 async fn drawn(pool: &PgPool, pipeline: &str) -> Vec<String> {
+    drawn_at_most(pool, pipeline, None).await
+}
+
+/// The pipeline page's runs at most `limit`: the head of the stored range.
+async fn drawn_at_most(pool: &PgPool, pipeline: &str, limit: Option<u32>) -> Vec<String> {
     knobas_app::commands::entity::pipeline_runs_inner(
         pool,
         &Registry::for_process(),
         pipeline,
-        None,
+        limit,
     )
     .await
     .unwrap()
@@ -196,6 +201,11 @@ async fn agree(pool: &PgPool, pipelines: &[String], step: &str) -> Vec<String> {
             "after {step}: {pipeline}'s page is not the walk"
         );
         assert_eq!(
+            drawn_at_most(pool, pipeline, Some(1)).await,
+            walk.iter().take(1).cloned().collect::<Vec<_>>(),
+            "after {step}: {pipeline}'s newest run is not the walk's"
+        );
+        assert_eq!(
             listed(pool, pipeline).await,
             walk.iter().take(12).cloned().collect::<Vec<_>>(),
             "after {step}: {pipeline}'s Builds row is not the walk"
@@ -236,7 +246,7 @@ async fn a_pipelines_runs_are_the_walk_after_every_change() {
             ("build_config", "buildType:A", config("A"), 0),
             ("build_config", "buildType:B", config("B"), 0),
             ("build_config", "buildType:Q", config("Q"), 0),
-            ("build", "build:1", run("A".into(), "SUCCESS"), 50),
+            ("build", "build:1", run("A".into(), "UNKNOWN"), 50),
             ("build", "build:2", run("A".into(), "FAILURE"), 40),
             ("build", "build:3", run("B".into(), "SUCCESS"), 30),
             // A miss twice: no `pipeline` value, and one that is no string.
@@ -303,7 +313,7 @@ async fn a_pipelines_runs_are_the_walk_after_every_change() {
     );
     assert_eq!(
         member_states(&pool, &pipelines).await[0].as_deref(),
-        Some("SUCCESS"),
+        Some("UNKNOWN"),
         "the member's state is its newest run's"
     );
 
