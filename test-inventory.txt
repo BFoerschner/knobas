@@ -3720,6 +3720,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::the_next_href_a
 knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::the_server_and_user_records_become_a_connection_report
 knobas-source-teamcity	lib/knobas_source_teamcity	config::tests::an_empty_config_is_all_defaults
 knobas-source-teamcity	lib/knobas_source_teamcity	config::tests::an_unknown_key_is_rejected
+knobas-source-teamcity	lib/knobas_source_teamcity	config::tests::concurrent_configs_runs_from_one_to_thirty_two
 knobas-source-teamcity	lib/knobas_source_teamcity	config::tests::every_schema_property_is_a_config_field
 knobas-source-teamcity	lib/knobas_source_teamcity	config::tests::out_of_range_values_are_rejected
 knobas-source-teamcity	lib/knobas_source_teamcity	config::tests::the_burst_is_twice_the_rate_and_never_below_the_default
@@ -3929,6 +3930,10 @@ knobas-source-teamcity	test/it	run_reads::each_download_streams_its_url_under_th
 knobas-source-teamcity	test/it	run_reads::past_the_cap_the_failed_tests_are_read_on_their_own_so_none_is_left_out
 knobas-source-teamcity	test/it	run_reads::tests_come_back_failed_first_with_their_module_details_and_id
 knobas-source-teamcity	test/it	run_reads::the_whole_log_is_streamed_and_only_the_range_asked_for_is_answered
+knobas-source-teamcity	test/it	sync_concurrent::a_configuration_lists_incremental_run_asks_up_to_concurrent_configs_at_once
+knobas-source-teamcity	test/it	sync_concurrent::a_fatal_error_in_one_configuration_ends_the_run_and_every_other_query
+knobas-source-teamcity	test/it	sync_concurrent::a_full_sync_asks_about_up_to_concurrent_configs_configurations_at_once
+knobas-source-teamcity	test/it	sync_concurrent::at_one_the_configurations_are_asked_about_one_after_another_in_id_order
 knobas-source-teamcity	test/it	view::a_build_configuration_opens_on_its_overview_with_one_tab_per_part
 knobas-source-teamcity	test/it	view::a_configuration_id_that_is_not_one_is_refused_unsent
 knobas-source-teamcity	test/it	view::a_configuration_the_server_does_not_know_is_its_404
