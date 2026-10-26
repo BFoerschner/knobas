@@ -2867,6 +2867,7 @@ knobas-source-gitea	lib/knobas_source_gitea	config::tests::a_repository_entry_mu
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::a_zero_rate_limit_is_refused
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::an_empty_object_is_the_default_configuration
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::an_unknown_field_is_refused
+knobas-source-gitea	lib/knobas_source_gitea	config::tests::concurrent_repos_runs_from_one_to_thirty_two
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::the_form_schema_and_the_parser_describe_the_same_fields
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::the_schema_declares_its_clone_urls
 knobas-source-gitea	lib/knobas_source_gitea	config::tests::the_schema_defaults_are_the_parsers_defaults
@@ -3033,6 +3034,9 @@ knobas-source-gitea	test/it	sync::the_owner_filter_ignores_case
 knobas-source-gitea	test/it	sync::the_position_after_one_change_is_itself_idle_stable
 knobas-source-gitea	test/it	sync::the_pull_request_budget_keeps_the_newest
 knobas-source-gitea	test/it	sync::two_pull_requests_on_the_same_second_are_delivered_once_each
+knobas-source-gitea	test/it	sync_concurrent::a_fatal_error_in_one_repository_ends_the_run_and_every_other_walk
+knobas-source-gitea	test/it	sync_concurrent::at_one_the_repositories_are_walked_one_after_another_in_name_order
+knobas-source-gitea	test/it	sync_concurrent::up_to_concurrent_repos_repositories_are_walked_at_once
 knobas-source-gitea	test/it	sync_moving::a_branch_a_push_moved_off_the_listing_is_re_read_and_not_tombstoned
 knobas-source-gitea	test/it	sync_moving::a_branch_met_twice_with_two_heads_is_mirrored_at_the_head_remembered
 knobas-source-gitea	test/it	sync_moving::a_branch_the_server_no_longer_has_is_tombstoned

@@ -2177,13 +2177,15 @@ async fn a_refusal_that_ends_a_full_sync_names_the_repository() {
             if m.contains("elsewhere/unrelated") && m.contains("not found")),
         "{error:?}"
     );
-    // Selection read it, and the walk is where it ended: the repository row is
-    // step 1 of that walk.
-    assert_eq!(
-        ids(&sink.0, "repo"),
-        vec!["gitea:elsewhere/unrelated"],
-        "{:?}",
-        sink.0
+    // Selection read it, and the walk is where it ended: its branch listing,
+    // step 2 of that walk, was asked. (A failed walk's items never reach the
+    // sink since #2159, so the sink cannot say this.)
+    let asked = fake.paths().await;
+    assert!(
+        asked
+            .iter()
+            .any(|p| p == "/api/v1/repos/elsewhere/unrelated/branches"),
+        "{asked:?}"
     );
 }
 
