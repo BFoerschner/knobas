@@ -4288,8 +4288,8 @@ knobas-sync	test/it	sweep::a_resurrected_item_loses_its_tombstone_again
 knobas-sync	test/it	sweep::a_run_sweeps_its_exhaustive_kinds_and_spares_its_budgeted_ones
 knobas-sync	test/it	sweep::a_source_may_not_mirror_a_kind_knobas_owns
 knobas-sync	test/it	sweep::a_source_whose_full_sync_is_bounded_is_never_swept
-knobas-sync	test/it	sweep::an_incremental_run_never_sweeps
 knobas-sync	test/it	sweep::an_incremental_run_that_walked_a_kind_whole_sweeps_it
+knobas-sync	test/it	sweep::an_incremental_run_that_walked_nothing_whole_never_sweeps
 knobas-sync	test/it	sweep::the_sweep_does_not_restamp_an_existing_tombstone
 knobas-sync	test/it	sweep::the_sweep_only_touches_its_own_source
 knobas-sync	test/it	sweep::walking_a_kind_whole_keeps_the_other_gates

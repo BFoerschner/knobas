@@ -14,9 +14,9 @@
 
   An adapter calls it to say that this run emitted every item of `kind` its current scope holds,
   as a cursor-less run would. It returns nothing, reads nothing (the sink stays write-only,
-  ADR-0003) and cannot fail a sync. `VecSink`, `FailingSink`, the battery and every existing `Sink`
-  are unchanged; `contract::Walking` keeps the kinds in a new `whole` field. A sink that wraps
-  another forwards it; the engine's progress decorator does.
+  ADR-0003) and cannot fail a sync. `VecSink`, `FailingSink` and the battery are unchanged;
+  `contract::Walking` keeps the kinds in a new `whole` field, and the engine's `PgSink` keeps them
+  for the sweep. A sink that wraps another forwards it; the engine's progress decorator does.
 
   **The engine's sweep:** a kind is swept when the run was cursor-less **or** the adapter said it
   walked that kind whole, and, as before, the kind declares `full_sync_exhaustive`, the run emitted

@@ -130,8 +130,8 @@ use crate::walk::ContentWalk;
 /// Reaching it is a **failure**, never a quiet end to the walk. The one kind
 /// this adapter emits claims `full_sync_exhaustive: true`, which is the
 /// engine's licence to tombstone every row a `cursor: None` run did not
-/// return, and since #2186 every row a walk under a changed space list did
-/// not return -- so a truncated walk reported as `Ok` authorises deleting whatever
+/// return, and since #2186 every row any walk from no watermark did not
+/// return (a changed space list, an unreadable cursor) -- so a truncated walk reported as `Ok` authorises deleting whatever
 /// fell off the end. The walk is `order by created asc`, so what falls off
 /// the end is the *most recently created* work: the pages someone is reading
 /// today.

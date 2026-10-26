@@ -230,8 +230,9 @@ fn check_source_id(id: &str) -> Result<(), SyncError> {
 /// token change. A stale row is the cheap error; a wiped corpus is not.
 ///
 /// **(3) An incremental run reconciles nothing, of any kind.** The sweep is
-/// gated on `cursor.is_none()`, and a run that resumed from a position has not
-/// seen the whole source. This bounds (1) and (2) rather than adding to them,
+/// gated on `cursor.is_none()`, or on the adapter saying it walked a kind whole
+/// (below), and a run that resumed from a position has not seen the whole
+/// source. This bounds (1) and (2) rather than adding to them,
 /// but it is the one that decides how often any of this happens at all:
 /// scheduled runs go through [`run_from_stored_cursor`], so in a running
 /// installation a cursor-less run is a source's *first* sync and *Load demo
@@ -244,8 +245,8 @@ fn check_source_id(id: &str) -> Result<(), SyncError> {
 /// it was handed a cursor (#2181), and says so per kind through
 /// [`Sink::walked_whole`]; that kind is then swept as after a cursor-less run,
 /// (1), (2) and the backfill exemption still applying. That is how a project
-/// taken out of a Jira source's scope, or a space out of a Confluence
-/// source's, is retired from the mirror. A run that walked nothing whole
+/// taken out of a Jira source's scope, a space out of a Confluence source's,
+/// or an owner out of a Gitea source's is retired from the mirror. A run that walked nothing whole
 /// stays under (3).
 ///
 /// # Errors
@@ -434,11 +435,12 @@ enum CursorSource {
 
 impl CursorSource {
     /// Whether a run started this way is allowed to tombstone what it did not
-    /// return -- assuming it also turns out to be cursor-less, which is
-    /// checked separately in `run_locked`.
+    /// return -- assuming it also turns out to be cursor-less, or its adapter
+    /// walked the kind whole (#2186), which is checked separately in
+    /// `run_locked`.
     ///
-    /// Both conditions, never one: dropping the cursor-less half sweeps on an
-    /// incremental run, and dropping this half sweeps on a backfill. The
+    /// Both conditions, never one: dropping the walked-whole half sweeps on
+    /// an incremental run, and dropping this half sweeps on a backfill. The
     /// reasons they exist are different and neither implies the other, which
     /// is why they are two expressions and not one flag.
     fn may_sweep(&self) -> bool {
@@ -748,14 +750,15 @@ async fn run_locked(
     //    the branch walk succeeded would otherwise pass a source-wide test.
     //
     // The two sets are intersected rather than checked in sequence, so a kind
-    // only reaches the sweep on both counts at once. Intersection is the only
+    // only reaches the sweep on both counts at once; walked whole (the first
+    // condition) then narrows what the intersection left. Intersection is the only
     // operator that is safe in both directions: `exhaustive` alone drops the
     // emptiness guard, `emitted` alone drops the gate and sweeps budgeted
     // kinds, and a union is both bugs at once.
-    let walked_whole = |kind: &String| full_sync || whole.contains(kind);
+    let seen_all_of = |kind: &String| full_sync || whole.contains(kind);
     let sweep_kinds: Vec<String> = emitted
         .intersection(&exhaustive)
-        .filter(|kind| walked_whole(kind))
+        .filter(|kind| seen_all_of(kind))
         .cloned()
         .collect();
     // `!sweep_kinds.is_empty()` is a **saved round trip, not a safety check**,

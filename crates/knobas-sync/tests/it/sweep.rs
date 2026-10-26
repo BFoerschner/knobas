@@ -318,7 +318,7 @@ async fn a_full_sync_that_fails_after_emitting_sweeps_nothing() {
 }
 
 #[tokio::test]
-async fn an_incremental_run_never_sweeps() {
+async fn an_incremental_run_that_walked_nothing_whole_never_sweeps() {
     let pool = pool().await;
     let id = unique();
     let (src, keys) = source(&id, &["B-1", "B-2"]);

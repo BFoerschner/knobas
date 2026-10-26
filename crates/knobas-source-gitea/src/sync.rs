@@ -133,8 +133,9 @@
 //! One consequence worth stating plainly, because it looks like a bug and is
 //! not: narrowing `owners[]`/`repos[]` retires the repositories that fell out
 //! of scope. Since #2186 the next scheduled run does it: a position holding a
-//! repository the scope no longer admits makes that run a full sync. They are no longer part of this
-//! source's corpus, and `deleted_at` on the entity is the mirror saying so --
+//! repository the scope no longer admits makes that run a full sync. They are
+//! no longer part of this source's corpus, and `deleted_at` on the entity is
+//! the mirror saying so --
 //! the row, its links and its notes all survive. The other reading of an
 //! incomplete walk -- a repository *skipped* rather than deselected -- cannot
 //! reach the sweep at all, because a skip during a cursor-less run is fatal
@@ -495,11 +496,11 @@ pub(crate) async fn run(
 
     // Interfaces §4.1: a run that emitted nothing returns the cursor it was
     // handed, byte-identical. Re-serialising would be *equal* but not
-    // *identical* -- `repos_listed_at` alone would move on every poll. A
-    // narrowed run returns the narrowed position, or every run after it
-    // would find the same stray repository and walk in full again.
+    // *identical* -- `repos_listed_at` alone would move on every poll. That
+    // holds for a narrowed run too: one that emitted nothing (a scope
+    // narrowed to owners holding no repository) keeps the old position, and
+    // the next run lists again and walks nothing, which costs the listing.
     if emitted == 0
-        && !narrowed
         && let Some(unchanged) = cursor
     {
         return Ok(unchanged);

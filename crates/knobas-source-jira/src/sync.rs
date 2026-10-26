@@ -135,8 +135,8 @@ comment,worklog";
 /// Reaching it is a **failure**, never a quiet end to the walk. The one kind
 /// this adapter emits claims `full_sync_exhaustive: true`, which is the
 /// engine's licence to tombstone every row a `cursor: None` run did not
-/// return, and since #2186 every row a walk under a changed scope did not
-/// return -- so a truncated walk reported as `Ok` authorises deleting whatever
+/// return, and since #2186 every row any walk from no watermark did not
+/// return (a changed scope, an unreadable cursor) -- so a truncated walk reported as `Ok` authorises deleting whatever
 /// fell off the end. The query is `ORDER BY created ASC`, so what falls off
 /// the end is the *most recently filed* work: the tickets someone is looking
 /// at today. And it is not a first-sync-only hazard, because any later
