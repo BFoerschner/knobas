@@ -770,3 +770,58 @@ async fn a_declaration_change_during_an_item_write_reaches_the_item() {
         "the declaration change never waited on the item write's key"
     );
 }
+
+/// **An undated item's parents take its new sync time** (#2189). A source
+/// that reports no `updated` dates its rows by `synced_at`, so a re-sync that
+/// only stamps the row moves the time its parents are ordered by, and the
+/// update trigger has to find that row although no column it resolves from
+/// changed -- and leave a dated row's alone when only its stamp moved.
+#[tokio::test]
+async fn an_undated_items_parents_take_its_new_sync_time() {
+    let pool = pool().await;
+    let t = format!("u{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+    let gitea = format!("gitea-{t}");
+    let g = format!("g{t}");
+    store_declaration(&pool, &gitea, &gitea_paths()).await;
+    configure(&pool, &g, &gitea).await;
+    for key in ["undated", "dated"] {
+        item(
+            &pool,
+            &g,
+            "pr",
+            key,
+            serde_json::json!({ "base": { "repo": { "full_name": "tide/payout", "name": "payout" } } }),
+        )
+        .await;
+    }
+    sqlx::query("update sync.item set item_updated_at = timestamptz '2026-01-01' where entity_id = $1")
+        .bind(format!("{g}:dated"))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // The writer's stamp: one statement, both rows, only `synced_at`.
+    sqlx::query(
+        "update sync.item set synced_at = timestamptz '2030-01-01' where entity_id like $1 || '%'",
+    )
+    .bind(format!("{g}:"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let at: Vec<(String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "select distinct entity_id, at from sync.item_parent where entity_id like $1 || '%' order by 1",
+    )
+    .bind(format!("{g}:"))
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let day = |s: &str| s.parse::<chrono::DateTime<chrono::Utc>>().unwrap();
+    assert_eq!(
+        at,
+        vec![
+            (format!("{g}:dated"), day("2026-01-01T00:00:00Z")),
+            (format!("{g}:undated"), day("2030-01-01T00:00:00Z")),
+        ]
+    );
+}
