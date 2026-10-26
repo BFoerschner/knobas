@@ -1857,8 +1857,8 @@ const INITDB_FINISHED: &str = "knobas-initdb-finished";
 /// Name of the placeholder data directory [`install`] hands `setup()`.
 const INSTALL_ONLY: &str = ".install-only";
 
-/// How long a timed-out `initdb` gets to clean up after `SIGTERM` before
-/// it is killed.
+/// How long a timed-out `initdb` gets to exit after `SIGTERM`, or after a
+/// signal that could not be sent, before it is killed.
 const INITDB_GRACE: Duration = Duration::from_secs(10);
 
 /// Initialise `settings.data_dir` with an `initdb` of our own, unless it
@@ -2045,14 +2045,40 @@ const LIBC_LOCALE: &str = if cfg!(windows) { "en-US" } else { "C.UTF-8" };
 ///
 /// **A timeout terminates it first**: `SIGTERM` makes `initdb` remove what it
 /// made, the whole data directory when it created it, so the next launch
-/// starts from nothing. `SIGKILL`, which `kill_on_drop` sends, leaves a
-/// directory with no marker, with `PG_VERSION` or, when it cuts that cleanup
-/// short, without (#1985); the next launch's [`recover_or_mark`] removes
-/// either. It is the fallback once [`INITDB_GRACE`] has passed.
+/// starts from nothing. `initdb` acts on it **at its next phase boundary**,
+/// not on arrival: its handler sets a flag, and the `check_ok` that ends the
+/// phase reports `caught signal`, removes the directory and exits 1. A
+/// signal that lands after the last phase, or after `initdb` has exited,
+/// removes nothing (#2161).
+///
+/// **An `initdb` that exits 0 within the grace is a finished one**, signal
+/// or none: its directory is complete, so this returns `Ok` and
+/// [`initialise`] marks it, rather than failing with a complete directory
+/// left unmarked (#2161).
+///
+/// **With no signal sent** (no `kill` to spawn, or Windows), it still gets
+/// the grace to exit. Past [`INITDB_GRACE`] the drop's `SIGKILL` ends it,
+/// which leaves a directory with no marker, with `PG_VERSION` or, when it
+/// cuts the cleanup short, without (#1985). [`recover_or_mark`] classes
+/// either as unfinished, so the next launch removes it; a kill after
+/// `initdb` wrote its last file leaves a complete directory, which it marks.
 ///
 /// A failure reads as the crate's did: `DatabaseInitializationError` with the
 /// command's output, or *deadline has elapsed*.
 async fn run_initdb(initdb: &Path, settings: &Settings, limit: Duration) -> Result<(), DbError> {
+    run_initdb_stopping(initdb, settings, limit, INITDB_GRACE, terminate).await
+}
+
+/// [`run_initdb`], with how a timed-out `initdb` is stopped given: `stop`
+/// asks it to terminate and says whether the signal went out, and `grace`
+/// bounds the wait for it to exit after that.
+async fn run_initdb_stopping(
+    initdb: &Path,
+    settings: &Settings,
+    limit: Duration,
+    grace: Duration,
+    stop: impl FnOnce(u32) -> bool + Send + 'static,
+) -> Result<(), DbError> {
     let failed = |message: String| {
         DbError::Embedded(postgresql_embedded::Error::DatabaseInitializationError(
             message,
@@ -2096,15 +2122,23 @@ async fn run_initdb(initdb: &Path, settings: &Settings, limit: Duration) -> Resu
             // Its own cleanup runs before it exits. A drop past the grace
             // kills it.
             let sent = match pid {
-                Some(pid) => tokio::task::spawn_blocking(move || terminate(pid))
+                Some(pid) => tokio::task::spawn_blocking(move || stop(pid))
                     .await
                     .unwrap_or(false),
                 None => false,
             };
-            if sent {
-                let _ = tokio::time::timeout(INITDB_GRACE, &mut output).await;
+            if !sent {
+                tracing::warn!(?pid, "could not signal initdb: waiting for it to exit");
             }
-            return Err(failed("deadline has elapsed".to_owned()));
+            // Waited for even with no signal sent: an `initdb` that exits
+            // within the grace is not left for the drop's kill (#2161).
+            match tokio::time::timeout(grace, &mut output).await {
+                Ok(Ok(output)) if output.status.success() => {
+                    tracing::warn!(?pid, "initdb finished as it was stopped: keeping its run");
+                    return Ok(());
+                }
+                _ => return Err(failed("deadline has elapsed".to_owned())),
+            }
         }
     };
     if output.status.success() {
@@ -2131,7 +2165,8 @@ fn terminate(pid: u32) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// No signal but the kill a drop sends, so there is nothing to wait for.
+/// No signal but the kill a drop sends: [`run_initdb`] waits the grace
+/// for `initdb` to exit on its own.
 #[cfg(not(unix))]
 fn terminate(_pid: u32) -> bool {
     false
@@ -3164,14 +3199,29 @@ mod tests {
     /// the data directory it made on the way out, so the next launch starts
     /// from nothing rather than from a directory with `PG_VERSION` in it that
     /// nothing recovers.
+    ///
+    /// **The signal lands while `initdb` is held** in its first probe
+    /// (#2161): a 150 ms limit against a real run sometimes fired after the
+    /// last phase under load, and `initdb` then removed nothing.
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_timed_out_initdb_is_stopped_and_removes_what_it_made() {
         let dir = tempfile::tempdir().unwrap();
         let (settings, initdb) = initdb_for(dir.path()).await;
+        let hold = tempfile::tempdir().unwrap();
+        let hold_dir = hold.path().to_path_buf();
+        let initdb = held_initdb(&hold_dir, &initdb, KillPoint::BeforeBootstrap);
 
-        let error = run_initdb(&initdb, &settings, Duration::from_millis(150))
+        let held = hold_dir.clone();
+        let stop = move |pid| {
+            block_until("initdb was not held", || held.join("held").exists());
+            let sent = terminate(pid);
+            write(&held, "release", "");
+            sent
+        };
+        let error = run_initdb_stopping(&initdb, &settings, HELD_INITDB_LIMIT, INITDB_GRACE, stop)
             .await
-            .expect_err("a full initdb takes longer than 150 ms");
+            .expect_err("a held initdb outlives its limit");
         assert!(
             error.to_string().contains("deadline has elapsed"),
             "{error}"
@@ -3180,8 +3230,108 @@ mod tests {
             !settings.data_dir.exists(),
             "initdb removed the data directory it made"
         );
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        wait_until("the held child had not exited", || {
+            hold_dir.join("done").exists()
+        })
+        .await;
         assert!(!settings.data_dir.exists(), "and nothing wrote it again");
+    }
+
+    /// #2161: an `initdb` that has finished by the time its timeout stops it
+    /// is a finished one. Its run is held until the limit has passed, and the
+    /// signal goes out once it has exited, as a late one does under load.
+    /// Its directory is complete, so it is reported finished for
+    /// [`initialise`] to mark, never failed and left unmarked. So is one
+    /// that finishes in the grace after a signal that could not be sent.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_initdb_that_finishes_as_it_is_stopped_is_a_finished_one() {
+        for signalled in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let (settings, initdb) = initdb_for(dir.path()).await;
+            let hold = tempfile::tempdir().unwrap();
+            let hold_dir = hold.path().to_path_buf();
+            let initdb = held_initdb(&hold_dir, &initdb, KillPoint::BeforeBootstrap);
+
+            let (held, running) = (hold_dir.clone(), initdb.clone());
+            let stop = move |pid| {
+                write(&held, "release", "");
+                if !signalled {
+                    return false;
+                }
+                block_until("initdb did not finish", || {
+                    pids_running(&running).is_empty()
+                });
+                terminate(pid)
+            };
+            run_initdb_stopping(&initdb, &settings, HELD_INITDB_LIMIT, INITDB_GRACE, stop)
+                .await
+                .unwrap_or_else(|error| panic!("signalled: {signalled}: {error}"));
+            assert_eq!(
+                shape(&settings.data_dir),
+                Shape::HoldsDatabase,
+                "signalled: {signalled}"
+            );
+        }
+    }
+
+    /// #2161: a timed-out `initdb` the signal does not reach (no `kill`, or
+    /// none on Windows) is killed once the grace has passed, and what that
+    /// leaves is unfinished: the next launch removes it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_initdb_the_signal_misses_leaves_an_unfinished_directory() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let dir = tempfile::tempdir().unwrap();
+        let (settings, initdb) = initdb_for(dir.path()).await;
+        let hold = tempfile::tempdir().unwrap();
+        let hold_dir = hold.path().to_path_buf();
+        let initdb = held_initdb(&hold_dir, &initdb, KillPoint::AfterBootstrap);
+
+        let stopped = Arc::new(AtomicU32::new(0));
+        let (held, seen) = (hold_dir.clone(), stopped.clone());
+        let stop = move |pid| {
+            block_until("initdb was not held", || held.join("held").exists());
+            seen.store(pid, Ordering::SeqCst);
+            false
+        };
+        let grace = Duration::from_millis(200);
+        let error = run_initdb_stopping(&initdb, &settings, HELD_INITDB_LIMIT, grace, stop)
+            .await
+            .expect_err("a held initdb outlives its limit and its grace");
+        assert!(
+            error.to_string().contains("deadline has elapsed"),
+            "{error}"
+        );
+        let pid = stopped.load(Ordering::SeqCst);
+        assert_ne!(pid, 0, "the timeout tried to stop initdb");
+        wait_until("initdb outlived its kill", || !process_alive(pid)).await;
+        write(&hold_dir, "release", "");
+        wait_until("the held child had not exited", || {
+            hold_dir.join("done").exists()
+        })
+        .await;
+
+        let data = &settings.data_dir;
+        assert_eq!(shape(data), Shape::Unfinished);
+        recover_or_mark(data).unwrap();
+        assert!(!data.exists(), "the next launch removes it");
+    }
+
+    /// The limit the timed-out `initdb` tests give: it passes while `initdb`
+    /// is held, however short.
+    #[cfg(unix)]
+    const HELD_INITDB_LIMIT: Duration = Duration::from_millis(10);
+
+    /// [`wait_until`] for a blocking thread: a `stop` the timeout runs.
+    #[cfg(unix)]
+    fn block_until(what: &str, done: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while !done() {
+            assert!(std::time::Instant::now() < deadline, "{what} after 30 s");
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     /// #1637: a half-written data directory that is a symlink loses the link,
