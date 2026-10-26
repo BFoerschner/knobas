@@ -13,6 +13,9 @@
 //!    corpus was when the run started (the ceiling), and which UTC offset this
 //!    instance renders timestamps in (the zone every CQL literal is read in).
 //! 3. Read the cursor. Unreadable or absent ⇒ full sync (contract §4.1).
+//!    Taken under another space list ⇒ the same (#2181), and a walk from no
+//!    watermark tells the sink it walked the pages whole, so the engine
+//!    retires what it did not return: a space taken out of the list (#2186).
 //! 4. **The positions sweep** ([`SyncRun::positions_sweep`], incremental runs
 //!    only): every page's place among its siblings (#1138). A reorder makes
 //!    no new version, so step 5 never sees it. Sent before the walk, so the
@@ -127,7 +130,8 @@ use crate::walk::ContentWalk;
 /// Reaching it is a **failure**, never a quiet end to the walk. The one kind
 /// this adapter emits claims `full_sync_exhaustive: true`, which is the
 /// engine's licence to tombstone every row a `cursor: None` run did not
-/// return -- so a truncated walk reported as `Ok` authorises deleting whatever
+/// return, and since #2186 every row a walk under a changed space list did
+/// not return -- so a truncated walk reported as `Ok` authorises deleting whatever
 /// fell off the end. The walk is `order by created asc`, so what falls off
 /// the end is the *most recently created* work: the pages someone is reading
 /// today.
@@ -460,6 +464,13 @@ impl SyncRun<'_> {
                     .collect()
             }
         };
+
+        // A walk from no watermark read every page in scope, whatever the
+        // engine handed us: say so, so it reconciles the pages this walk did
+        // not return (#2186) -- a space taken out of the list among them.
+        if since.is_none() {
+            sink.walked_whole(crate::KIND_PAGE).await;
+        }
 
         match (emitted, watermark) {
             // Battery clause 2: nothing happened, so the position did not
@@ -2422,21 +2433,43 @@ mod tests {
         assert_eq!(again, cursor);
     }
 
-    /// #2181, ruled: a space taken out of the list is neither read nor
-    /// tombstoned. Its pages stay in the mirror as last seen; the engine
-    /// sweeps only a cursor-less run (ADR-0003).
+    /// [`run`], keeping what the run said it walked whole.
+    async fn run_whole(
+        fake: &Fake,
+        cfg: &ConfluenceConfig,
+        cursor: Option<String>,
+    ) -> (Vec<SyncItem>, Vec<String>, String) {
+        let mut sink = Walking::default();
+        let next = SyncRun {
+            api: fake,
+            cfg,
+            source_id: "confluence",
+            base_url: "http://127.0.0.1:8090",
+        }
+        .run(cursor, &mut sink)
+        .await
+        .expect("run succeeds");
+        (sink.items, sink.whole, next)
+    }
+
+    /// #2186: a space taken out of the list is not read, and the run walks
+    /// the rest in full and says so, so the engine sweeps the pages it did
+    /// not return -- the removed space's among them. An incremental run
+    /// under the same list says nothing.
     #[tokio::test]
-    async fn a_space_taken_out_of_the_list_is_neither_read_nor_tombstoned() {
+    async fn a_space_taken_out_of_the_list_leaves_the_pages_walked_whole() {
         let fake = Fake::new(two_spaces());
         let (_, cursor) = run(&fake, &cfg(json!({ "spaces": ["ENG", "OPS"] })), None)
             .await
             .unwrap();
         let eng = cfg(json!({ "spaces": ["ENG"] }));
-        let (narrowed, after) = run(&fake, &eng, Some(cursor)).await.unwrap();
+        let (narrowed, whole, after) = run_whole(&fake, &eng, Some(cursor)).await;
         assert_eq!(ids(&narrowed), ["101", "103"], "the rest, in full");
         assert!(narrowed.iter().all(|i| !i.deleted));
-        let (idle, _) = run(&fake, &eng, Some(after)).await.unwrap();
+        assert_eq!(whole, [crate::KIND_PAGE]);
+        let (idle, whole, _) = run_whole(&fake, &eng, Some(after)).await;
         assert!(idle.is_empty(), "{:?}", ids(&idle));
+        assert!(whole.is_empty(), "{whole:?}");
     }
 
     /// Sink failures are the sink's to raise and the adapter's to propagate:
