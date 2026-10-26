@@ -50,9 +50,18 @@ pub async fn never_analyzed(pool: &PgPool) {
 /// row. Empty for a plan that holds.
 #[must_use]
 pub fn findings(explain: &serde_json::Value, small: &[&str]) -> Vec<String> {
+    let hashed = hashed_subplans(explain);
+    let mut found = Vec::new();
+    walk(&explain[0]["Plan"], &hashed, small, &[], &mut found);
+    found
+}
+
+/// The names of the subplans `explain` runs hashed (`SubPlan 3` of
+/// `hashed SubPlan 3`): computed once, so never a read per row.
+fn hashed_subplans(explain: &serde_json::Value) -> Vec<String> {
     let mut texts = Vec::new();
     strings(explain, &mut texts);
-    let hashed: Vec<String> = texts
+    texts
         .iter()
         .flat_map(|t| {
             t.match_indices("hashed SubPlan ")
@@ -63,10 +72,7 @@ pub fn findings(explain: &serde_json::Value, small: &[&str]) -> Vec<String> {
                 .take_while(|c| c.is_alphanumeric() || *c == ' ')
                 .collect::<String>()
         })
-        .collect();
-    let mut found = Vec::new();
-    walk(&explain[0]["Plan"], &hashed, small, &[], &mut found);
-    found
+        .collect()
 }
 
 /// Every string anywhere in `value`.
@@ -369,20 +375,7 @@ fn seq_scans(node: &serde_json::Value, relation: &str) -> bool {
 /// member at 30,000 runs.
 #[must_use]
 pub fn filtered_per_row(explain: &serde_json::Value, relation: &str) -> Vec<String> {
-    let mut texts = Vec::new();
-    strings(explain, &mut texts);
-    let hashed: Vec<String> = texts
-        .iter()
-        .flat_map(|t| {
-            t.match_indices("hashed SubPlan ")
-                .map(|(i, _)| &t[i + "hashed ".len()..])
-        })
-        .map(|rest| {
-            rest.chars()
-                .take_while(|c| c.is_alphanumeric() || *c == ' ')
-                .collect::<String>()
-        })
-        .collect();
+    let hashed = hashed_subplans(explain);
     let mut found = Vec::new();
     per_row_filters(&explain[0]["Plan"], &hashed, relation, false, &mut found);
     found

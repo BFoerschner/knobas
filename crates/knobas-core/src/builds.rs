@@ -842,23 +842,17 @@ reasons as (
     from checked c
     join p on p.source_id = c.source_id and p.pkey = c.pkey
   union
-  select p.entity_id,
-         case when se.kind = 'pr' and r.origin = 'own' then 2 else 3 end,
-         case when se.kind = 'pr' and r.origin = 'own' then 'pr_check' else 'linked' end,
-         r.step,
-         case when se.kind = 'pr' and r.origin = 'own' then null else r.origin end
-    from reached r
-    join p on p.entity_id = r.id
-    left join knobas.entity se on se.id = r.step
-  union
-  select p.entity_id,
-         case when se.kind = 'pr' and r.origin = 'own' then 2 else 3 end,
-         case when se.kind = 'pr' and r.origin = 'own' then 'pr_check' else 'linked' end,
-         r.step,
-         case when se.kind = 'pr' and r.origin = 'own' then null else r.origin end
-    from reached_runs r
-    join p on p.source_id = r.source_id and p.pkey = r.pkey
-    left join knobas.entity se on se.id = r.step
+  select l.pipeline,
+         case when se.kind = 'pr' and l.origin = 'own' then 2 else 3 end,
+         case when se.kind = 'pr' and l.origin = 'own' then 'pr_check' else 'linked' end,
+         l.step,
+         case when se.kind = 'pr' and l.origin = 'own' then null else l.origin end
+    from (select p.entity_id as pipeline, r.step, r.origin
+            from reached r join p on p.entity_id = r.id
+          union all
+          select p.entity_id, r.step, r.origin
+            from reached_runs r join p on p.source_id = r.source_id and p.pkey = r.pkey) l
+    left join knobas.entity se on se.id = l.step
 )
 select pipeline, kind, value, origin from reasons order by pipeline, ord, value
 "
