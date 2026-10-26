@@ -28,7 +28,7 @@
 //! * **`expand=changelog` is not sent** (#2165, retiring #929's adapter
 //!   half). It put each issue's history in the stored record for the
 //!   conversation's *Include changes*, which the conversation no longer
-//!   draws (#2163). Data Center returns that history whole, with no paged or
+//!   draws (#2164). Data Center returns that history whole, with no paged or
 //!   status-only endpoint
 //!   (`/issue/{key}/changelog` answers 404), and a description edit's old and
 //!   new text whole: 10 issues with 1000 edits each made one page 54 MB and
@@ -182,7 +182,7 @@ fn no_agile() -> SourceError {
 ///
 /// A refresh asks the same query (`crate::refresh`). No `expand` (#2165):
 /// `changelog` is a ticket's whole edit history, which the conversation
-/// stops reading (#2163) and which outgrew the transport's response cap
+/// no longer reads (#2164) and which outgrew the transport's response cap
 /// (module docs), and
 /// `renderedFields` would give us HTML (gotcha 7). `validateQuery` stays at
 /// its default.

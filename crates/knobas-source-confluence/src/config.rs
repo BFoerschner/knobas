@@ -52,8 +52,9 @@ pub struct ConfluenceConfig {
     pub username: Option<String>,
     /// Results per `/rest/api/content/search` page, at most [`MAX_PAGE_SIZE`].
     pub page_size: u32,
-    /// Per-instance rate limit (contract §4.1 shape; Confluence is the same
-    /// class of product as Jira, so the same 5 req/s burst 10).
+    /// Per-instance rate limit (contract §4.1 shape): 5 req/s burst 10, the
+    /// default Jira had before #2167 raised its own to 20 and 40 for its
+    /// worklog completions, which Confluence has no counterpart of.
     pub rate_per_sec: u32,
     pub rate_burst: u32,
     pub connect_timeout_secs: u64,

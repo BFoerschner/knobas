@@ -18,7 +18,7 @@
 
   **What a stored record holds.** A Jira ticket item's `payload` written from now on has no
   `changelog` key; records already stored keep theirs until #2166's migration strips them. The
-  conversation reads a record with no changelog as no Jira moves, so nothing waits on that
+  conversation no longer reads the changelog at all (#2164), so nothing waits on that
   migration. The record shrinks, so its fingerprint changes and the first incremental run after
   the upgrade re-delivers the tickets in its overlap window once; no cursor version bump.
 
