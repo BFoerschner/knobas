@@ -1797,8 +1797,10 @@ mod tests {
     /// carried `changelog`; the same tickets now arrive without it. The ones
     /// inside the overlap window fingerprint differently and are delivered
     /// again, once. The ones outside it are never asked for, so the run is an
-    /// incremental one: the cursor's version is still accepted, and the poll
-    /// after it is idle and hands the cursor back byte-identically.
+    /// incremental one, and the poll after it is idle and hands the cursor
+    /// back byte-identically. The version a cursor from before the upgrade
+    /// carries is still read: `cursor::tests::a_v4_envelope_without_the_board_read_stamp_decodes`
+    /// pins `CURSOR_VERSION` at 4.
     #[tokio::test]
     async fn the_run_after_the_changelog_left_redelivers_only_its_overlap_window() {
         let mut issues = five_issues();
@@ -1826,11 +1828,6 @@ mod tests {
             keys,
             vec!["PAY-231", "PAY-232"],
             "only the two tickets inside the two-minute overlap come back"
-        );
-        assert_eq!(
-            crate::cursor::JiraCursor::parse(&after).map(|c| c.v),
-            Some(crate::cursor::CURSOR_VERSION),
-            "no cursor version bump"
         );
 
         let (idle, settled) = keys_of(&api, &config, Some(after.clone())).await;
