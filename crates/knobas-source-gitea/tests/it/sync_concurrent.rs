@@ -58,7 +58,7 @@ impl Sink for Stamping {
     }
 
     async fn walked(&mut self, done: u64, _of: Option<u64>, _unit: &str) {
-        self.held.finished(done);
+        self.held.walked(done);
     }
 }
 

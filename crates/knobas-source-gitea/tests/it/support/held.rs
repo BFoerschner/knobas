@@ -27,10 +27,9 @@ struct Seen {
     held: BTreeMap<String, oneshot::Sender<()>>,
     /// The most held at the same time.
     most: usize,
-    /// Every key ever held, in arrival order.
-    arrived: Vec<String>,
-    /// Beside each arrival, what [`Held::finished`] last said.
-    stamps: Vec<u64>,
+    /// Every key ever held, in arrival order, beside what [`Held::walked`]
+    /// last said when it arrived.
+    arrived: Vec<(String, u64)>,
     /// How many units the run under test says it has finished.
     finished: u64,
     /// Keys whose client hung up while the request was held.
@@ -78,24 +77,23 @@ impl Held {
     /// Every key held so far with how many units the run had finished when
     /// it arrived, in arrival order.
     pub fn arrivals(&self) -> Vec<(String, u64)> {
-        let seen = self.seen();
-        seen.arrived
-            .iter()
-            .cloned()
-            .zip(seen.stamps.iter().copied())
-            .collect()
+        self.seen().arrived.clone()
     }
 
     /// Record that the run under test has finished `done` units: a sink's
     /// walk reading, which each later arrival is stamped with.
-    pub fn finished(&self, done: u64) {
+    pub fn walked(&self, done: u64) {
         self.seen().finished = done;
         self.changed.notify_waiters();
     }
 
     /// Every key held so far, in the order the requests arrived.
     pub fn arrived(&self) -> Vec<String> {
-        self.seen().arrived.clone()
+        self.seen()
+            .arrived
+            .iter()
+            .map(|(key, _)| key.clone())
+            .collect()
     }
 
     /// Keys whose request the client gave up on while it was held.
@@ -152,9 +150,8 @@ impl Held {
             {
                 let mut seen = self.seen();
                 seen.held.insert(key.clone(), go);
-                seen.arrived.push(key.clone());
                 let finished = seen.finished;
-                seen.stamps.push(finished);
+                seen.arrived.push((key.clone(), finished));
                 seen.most = seen.most.max(seen.held.len());
             }
             self.changed.notify_waiters();

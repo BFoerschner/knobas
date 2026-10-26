@@ -242,8 +242,10 @@ enum RepoError {
 }
 
 impl From<SourceError> for RepoError {
-    /// Sink failures and connectivity failures abort the run (battery clause
-    /// 6); a refusal or an absence is about this repository alone.
+    /// Connectivity failures abort the run (battery clause 6); a refusal or an
+    /// absence is about this repository alone. A walk's sink is its own
+    /// buffer, which never refuses; a refusal from the run's sink arrives
+    /// where `run` pushes the buffer, and aborts the run there.
     fn from(error: SourceError) -> Self {
         if is_repo_scoped(&error) {
             RepoError::Skip(error)
@@ -396,6 +398,8 @@ pub(crate) async fn run(
     // selection just made, so an unchanged run that pushes no item still moves
     // the bar. A `usize` always fits a `u64` here.
     let of = u64::try_from(walk.len()).unwrap_or(u64::MAX);
+    // `GiteaConfig::validate` keeps the setting in 1..=32; the clamp only
+    // keeps a zero, which would never start a walk, from reading as success.
     let at_once = usize::try_from(source.config.concurrent_repos)
         .unwrap_or(usize::MAX)
         .max(1);
@@ -414,7 +418,7 @@ pub(crate) async fn run(
                 full_sync,
             ));
         }
-        let Some((selected, before, outcome)) = in_flight.next().await else {
+        let Some((selected, outcome)) = in_flight.next().await else {
             break;
         };
         match outcome {
@@ -433,7 +437,7 @@ pub(crate) async fn run(
                     "gitea: repository deleted since the listing; skipping it"
                 );
             }
-            Outcome::Skipped(error) => {
+            Outcome::Skipped(error, before) => {
                 tracing::warn!(
                     repository = %selected.full_name,
                     %error,
@@ -485,8 +489,9 @@ enum Outcome {
     Gone(SourceError),
     /// A 403 or a 404 on an incremental run, and nothing else: a revoked
     /// credential answers 401, which `is_repo_scoped` reads as fatal and so
-    /// never arrives here (ADR-0004). The run keeps its stored position.
-    Skipped(SourceError),
+    /// never arrives here (ADR-0004). It carries the position the run came
+    /// in with, which the run keeps.
+    Skipped(SourceError, RepoCursor),
 }
 
 /// The items one repository's walk emits, held until that walk finishes and
@@ -509,9 +514,10 @@ async fn walk_repo<'a>(
     selected: &'a Selected,
     before: RepoCursor,
     full_sync: bool,
-) -> (&'a Selected, RepoCursor, Outcome) {
+) -> (&'a Selected, Outcome) {
     let mut after = before.clone();
     let mut buffer = Buffered(Vec::new());
+    // `run` counts what it pushes to its own sink; this count is the buffer's.
     let mut emitted = 0;
     let outcome = match sync_repo(
         source,
@@ -535,9 +541,9 @@ async fn walk_repo<'a>(
         // A cursor-less run may not report success over a hole: see the
         // module docs.
         Err(RepoError::Skip(error)) if full_sync => Outcome::Fatal(error),
-        Err(RepoError::Skip(error)) => Outcome::Skipped(error),
+        Err(RepoError::Skip(error)) => Outcome::Skipped(error, before),
     };
-    (selected, before, outcome)
+    (selected, outcome)
 }
 
 /// Which repositories this run walks, and what was refused while deciding.
