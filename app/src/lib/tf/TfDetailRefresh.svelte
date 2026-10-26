@@ -17,7 +17,7 @@
     detail,
     refresh,
     reread,
-    page = true,
+    page = false,
   }: {
     detail: RefreshSubject;
     refresh: DetailRefresh;
@@ -25,8 +25,8 @@
     reread: () => Promise<void> | void;
     /**
      * Whether this is the page's own button, which ⌘R presses while it is
-     * drawn (#2156). A monitor's roster row is not: its page's is the header's
-     * *Sync now*.
+     * drawn (#2156): a detail page's header or tab bar says so. A monitor's
+     * roster row does not; that page's is the header's *Sync now*.
      */
     page?: boolean;
   } = $props();

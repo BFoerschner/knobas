@@ -419,7 +419,7 @@
           <a class="tf-btn" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
         {/if}
         <TfOpenIn entityId={repoId} title={repo?.title ?? ""} {checkout} size="md" />
-        {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} />{/if}
+        {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
       </div>
     </header>
     {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}

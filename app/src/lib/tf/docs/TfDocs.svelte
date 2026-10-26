@@ -1094,7 +1094,7 @@
             {#if p.readable}
               <TfDocMore onexport={() => exportMarkdown(p)} />
             {/if}
-            {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} />{/if}
+            {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
           </div>
           {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
           {#if narrow.current}
