@@ -109,7 +109,8 @@ pub struct JiraConfig {
     pub favourite_filters: bool,
     /// `maxResults` per `/search` page (interfaces §4.1 default: 100).
     pub page_size: u32,
-    /// Per-instance rate limit (interfaces §4.1 default: 5 req/s, burst 10).
+    /// Per-instance rate limit (interfaces §4.1 default: 20 req/s, burst 40,
+    /// #2167).
     pub rate_per_sec: u32,
     pub rate_burst: u32,
     pub connect_timeout_secs: u64,
@@ -128,8 +129,8 @@ impl Default for JiraConfig {
             boards: BoardScope::Synced,
             favourite_filters: true,
             page_size: 100,
-            rate_per_sec: 5,
-            rate_burst: 10,
+            rate_per_sec: 20,
+            rate_burst: 40,
             connect_timeout_secs: 10,
             request_timeout_secs: 30,
         }
@@ -290,14 +291,14 @@ mod tests {
     }
 
     /// The Add-source form can submit an empty object; the defaults are the
-    /// Data Center dialect and the interfaces doc's tuning (§4.1: 5 req/s,
-    /// burst 10, page size 100).
+    /// Data Center dialect and the interfaces doc's tuning (§4.1: 20 req/s,
+    /// burst 40 since #2167, page size 100).
     #[test]
     fn an_empty_object_is_the_datacenter_default() {
         let cfg = JiraConfig::from_json(&json!({})).unwrap();
         assert_eq!(cfg.flavor, Flavor::Datacenter);
         assert_eq!(cfg.page_size, 100);
-        assert_eq!((cfg.rate_per_sec, cfg.rate_burst), (5, 10));
+        assert_eq!((cfg.rate_per_sec, cfg.rate_burst), (20, 40));
         assert_eq!(
             (cfg.connect_timeout_secs, cfg.request_timeout_secs),
             (10, 30)
