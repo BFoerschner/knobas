@@ -21,10 +21,11 @@
 //! ticket the source deleted off the board while the rule still counts it a
 //! member.
 //!
-//! There is no normalized status model and no migration behind any of this.
-//! Contract §4.1 normalizes four fields and a status is not one of them, so a
-//! status and a priority can only come out of the [payload][crate], in the
-//! source's own shape -- which makes both of them **payload reads outside an
+//! There is no normalized status model. Contract §4.1 normalizes four fields
+//! and a status is not one of them, so a status and a priority can only come
+//! out of the [payload][crate], in the source's own shape (the database keeps
+//! the status as that read answers it, `sync.item_field`, migration `0062`,
+//! #2184, and the board reads it from there where it can) -- which makes both of them **payload reads outside an
 //! adapter**, governed by ADR-0007.
 //!
 //! Since #277 they are **declared** reads: the source says where its status
@@ -928,9 +929,10 @@ pub async fn read_scoped(
 /// The live tickets among `$1`, each with its source, its status as
 /// [`CARDS`] reads it, its lane by the field `$3` names as [`CARDS`] reads
 /// it (`''` for none, or when `$3` is `null`), and when the source last
-/// changed it, newest first as [`CARDS`] orders them. Only the status and
-/// the lane are read off each payload, which is what lets a saved view's
-/// board choose the cards it draws before it reads them ([`statuses_of`]).
+/// changed it, newest first as [`CARDS`] orders them. Only the status
+/// (stored where it can be, [`status_of_ticket!`]) and the lane are read,
+/// which is what lets a saved view's board choose the cards it draws before
+/// it reads them ([`statuses_of`]).
 const STATUSES: &str = concat!(
     "with ",
     status_paths!("$2"),
@@ -1036,9 +1038,10 @@ impl MiniBoardCard {
     }
 }
 
-/// A whole board put in lanes after it was read (#939): what a board in an
-/// order of its own (a Jira view's) does where [`read_scoped`] cannot, with
-/// the same answer. Each lane's column keeps its first `per_column` cards in
+/// A whole board put in lanes after it was read (#939), with the answer
+/// [`read_scoped`] gives in lanes; a Jira view's board lays its tickets in
+/// lanes the same way before it reads them ([`lanes_of`], #2183). Each
+/// lane's column keeps its first `per_column` cards in
 /// the column's order and counts them all; lanes rank biggest first, a tie
 /// to the lane with the newer ticket, then by key; only the first
 /// `lanes.first` are kept. The columns keep their totals and the kept cards.
@@ -1053,11 +1056,7 @@ pub fn in_lanes(mut board: MiniBoard, lanes: Lanes, per_column: Option<u32>) -> 
         lanes,
         per_column,
     );
-    let ids: std::collections::HashSet<&str> = kept
-        .iter()
-        .flat_map(|lane| lane.columns.iter().flat_map(|cell| &cell.ids))
-        .map(String::as_str)
-        .collect();
+    let ids = in_a_lane(&kept);
     for column in &mut board.columns {
         column
             .cards
@@ -1066,6 +1065,16 @@ pub fn in_lanes(mut board: MiniBoard, lanes: Lanes, per_column: Option<u32>) -> 
     board.more_lanes = more_lanes;
     board.lanes = kept;
     board
+}
+
+/// The ids of the cards `lanes` keep.
+#[must_use]
+pub fn in_a_lane(lanes: &[MiniBoardLane]) -> std::collections::HashSet<&str> {
+    lanes
+        .iter()
+        .flat_map(|lane| lane.columns.iter().flat_map(|cell| &cell.ids))
+        .map(String::as_str)
+        .collect()
 }
 
 /// [`in_lanes`]' lanes over any tickets, each read as its id, its lane and

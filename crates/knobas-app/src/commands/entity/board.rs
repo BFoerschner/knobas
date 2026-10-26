@@ -287,11 +287,7 @@ pub async fn saved_view_board_laned(
         lanes,
         per_column,
     );
-    let in_a_lane: std::collections::HashSet<&str> = kept
-        .iter()
-        .flat_map(|lane| lane.columns.iter().flat_map(|cell| &cell.ids))
-        .map(String::as_str)
-        .collect();
+    let in_a_lane = knobas_core::mini_board::in_a_lane(&kept);
     let arranged = arranged
         .into_iter()
         .map(|(status, tickets, total)| {

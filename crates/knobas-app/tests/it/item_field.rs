@@ -3,6 +3,7 @@
 //! and the reads that probe them instead of walking every ticket's payload.
 
 use knobas_app::sources::Registry;
+use knobas_search::Reading;
 use sqlx::PgPool;
 
 async fn pool() -> PgPool {
@@ -229,13 +230,7 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
             format!("project:{project} assignee:mara"),
         ];
         let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
-        let counts: Vec<String> = searcher
-            .readings(&texts, "ticket")
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|reading| format!("{reading:?}"))
-            .collect();
+        let counts = searcher.readings(&texts, "ticket").await.unwrap();
         (
             statuses
                 .columns
@@ -249,7 +244,7 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
     let walked = (
         vec![(Some("In Progress".to_owned()), "mara".to_owned())],
         vec!["In Progress".to_owned()],
-        vec!["Count(1)".to_owned(), "Count(1)".to_owned()],
+        vec![Reading::Count(1), Reading::Count(1)],
     );
     assert_eq!(read(&pool).await, walked, "stored as the walk reads it");
 
@@ -263,7 +258,7 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
         (
             vec![(Some("Stored".to_owned()), "Stored".to_owned())],
             vec!["Stored".to_owned()],
-            vec!["Count(0)".to_owned(), "Count(0)".to_owned()],
+            vec![Reading::Count(0), Reading::Count(0)],
         ),
         "the reads take the stored value"
     );
