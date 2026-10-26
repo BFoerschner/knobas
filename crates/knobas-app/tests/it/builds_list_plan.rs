@@ -114,7 +114,9 @@ async fn the_builds_list_reads_the_runs_once() {
         .iter()
         .max_by(|a, b| a.1.total_cmp(&b.1))
         .expect("a plan");
-    println!("the Builds list at {PIPELINES} pipelines and {RUNS} runs: at most {most} rows in {node}");
+    println!(
+        "the Builds list at {PIPELINES} pipelines and {RUNS} runs: at most {most} rows in {node}"
+    );
     assert!(
         *most < f64::from(PIPELINES) * f64::from(RUNS) / 10.0,
         "{node} handles {most} rows for {RUNS} runs: the list reads the runs once per pipeline"

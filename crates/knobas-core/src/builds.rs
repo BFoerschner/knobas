@@ -195,9 +195,11 @@ macro_rules! run_columns {
 /// a drawn pipeline.
 ///
 /// Each CTE is `materialized` and read once: inlined, the runs were
-/// re-derived for every pipeline, pipelines × runs (2.5 s at 130 × 3,000).
-/// The runs are ranked on their `pipeline` alone and only the last
-/// [`PIPELINE_RECENT`] of each are read through every declaration.
+/// re-derived for every pipeline, pipelines × runs (2.5 s at 130 × 3,000),
+/// and a pipeline's declarations for every pair of pipelines the final join
+/// compares (1.35 s against 0.59 s at 400 × 30,000). The runs are ranked on
+/// their `pipeline` alone and only the last [`PIPELINE_RECENT`] of each are
+/// read through every declaration.
 ///
 /// Public so the app's `tests/it/builds_list_plan.rs` can read its plan.
 pub const PIPELINES: &str = concat!(

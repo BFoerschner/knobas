@@ -17350,3 +17350,7 @@ The merge-manager's rulings (Opus):
 ## v3.1.1: the release number (implementer, Opus, 2026-10-26)
 
 - **Which number the ⌘R release takes.** *Ruling:* `3.1.1`, named by Björn directly on 2026-10-26 for the release carrying #2157 (⌘R presses the page's Refresh or Sync now, #2156), not an agent's fork. The workspace, `Cargo.lock` and `tauri.conf.json` carry `3.1.1`, and `bundle.windows.wix.version` goes from `3.1.0` to `3.1.1`, above the v3.1.0 tag's, so a Windows install of 3.1.0 upgrades. *Cost of reversing:* the release PR's five files, before the tag.
+
+## The Builds list reads the runs once (session, Opus, 2026-10-26)
+
+- **How the regression is pinned.** *Fork:* a wall-clock budget, an `#[ignore]`d reading with its own `just` recipe, or a plan assertion in the gate. *Ruling:* a plan assertion in the gate (`tests/it/builds_list_plan.rs`). *Reasoning:* the repo keeps wall-clock out of the gate (`builds_of_a_commit_perf.rs`), and the defect is a plan shape, the runs read once per pipeline, which the row counts show on any machine. Two of the four `materialized` CTEs only cost time, which the plan assertion cannot see; their readings are in the PR. *Cost of reversing:* one test file.
