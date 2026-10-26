@@ -88,7 +88,7 @@ const TRANSCRIBED = [
     // spellings draw as text, so a Jira that drifted to this one would look
     // perfectly legal to a rule that only asked whether the form can fill it.
     usernameType: "string",
-    absent: ["rate_limit_per_sec"],
+    absent: ["rate_limit_per_sec", "concurrent_configs"],
   },
 ] as const;
 

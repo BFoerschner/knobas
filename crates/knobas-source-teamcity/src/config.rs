@@ -15,6 +15,11 @@ const DEFAULT_RATE_LIMIT: u32 = 5;
 const DEFAULT_BURST: u32 = 10;
 /// Interfaces §4.1's TeamCity page size.
 pub(crate) const DEFAULT_BUILDS_PER_CONFIG: u32 = 100;
+/// How many configurations a sync asks about at once by default (#2176).
+const DEFAULT_CONCURRENT_CONFIGS: u32 = 8;
+/// The most configurations one run asks about at once (#2176): the top of the
+/// range the Add-source form offers.
+const MAX_CONCURRENT_CONFIGS: u32 = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -38,6 +43,15 @@ pub struct TeamCityConfig {
     pub username: Option<String>,
     /// Per-instance request budget (interfaces §4.1 default: 5 req/s).
     pub rate_limit_per_sec: u32,
+    /// How many build configurations one run asks about at once (#2176), 1 to
+    /// [`MAX_CONCURRENT_CONFIGS`]: a full sync's per-configuration builds, and
+    /// a configuration-list source's per-configuration incremental query.
+    /// Each configuration's own query stays one request after another; this
+    /// only lets configurations overlap, and the shared limiter
+    /// `rate_limit_per_sec` sets stays the one bound on the request rate. 1
+    /// asks them one after another, for a server that cannot take more than
+    /// one request at a time.
+    pub concurrent_configs: u32,
 }
 
 impl Default for TeamCityConfig {
@@ -48,6 +62,7 @@ impl Default for TeamCityConfig {
             builds_per_config: DEFAULT_BUILDS_PER_CONFIG,
             username: None,
             rate_limit_per_sec: DEFAULT_RATE_LIMIT,
+            concurrent_configs: DEFAULT_CONCURRENT_CONFIGS,
         }
     }
 }
@@ -95,6 +110,12 @@ impl TeamCityConfig {
                 "teamcity config: rate_limit_per_sec must be at least 1".to_owned(),
             ));
         }
+        if !(1..=MAX_CONCURRENT_CONFIGS).contains(&self.concurrent_configs) {
+            return Err(SourceError::protocol(format!(
+                "teamcity config: concurrent_configs must be 1..={MAX_CONCURRENT_CONFIGS}, got {}",
+                self.concurrent_configs
+            )));
+        }
         Ok(())
     }
 }
@@ -139,6 +160,14 @@ pub fn config_schema() -> serde_json::Value {
                 "default": DEFAULT_RATE_LIMIT,
                 "title": "Requests per second",
                 "description": "Per-instance request budget."
+            },
+            "concurrent_configs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": MAX_CONCURRENT_CONFIGS,
+                "default": DEFAULT_CONCURRENT_CONFIGS,
+                "title": "Configurations at once",
+                "description": "How many build configurations a sync asks about at the same time. Set 1 for a server that struggles with parallel requests."
             }
         }
     })
@@ -239,6 +268,37 @@ mod tests {
             ..TeamCityConfig::default()
         };
         assert_eq!(huge.burst(), u32::MAX, "saturating, never wrapping to zero");
+    }
+
+    /// #2176: how many configurations a sync asks about at once. 1 is the
+    /// walk one configuration after another, for a server that cannot take
+    /// more; 32 is the top of the range, and the schema offers the range the
+    /// parser accepts.
+    #[test]
+    fn concurrent_configs_runs_from_one_to_thirty_two() {
+        assert_eq!(TeamCityConfig::default().concurrent_configs, 8);
+        for good in [1, 8, 32] {
+            let cfg = TeamCityConfig::from_json(&serde_json::json!({ "concurrent_configs": good }))
+                .expect("inside the range");
+            assert_eq!(cfg.concurrent_configs, good);
+        }
+        for bad in [0, 33] {
+            let err = TeamCityConfig::from_json(&serde_json::json!({ "concurrent_configs": bad }))
+                .expect_err("outside the range");
+            assert!(
+                matches!(&err, SourceError::Protocol { message, .. } if message.contains("concurrent_configs")),
+                "{bad} -> {err:?}"
+            );
+        }
+        let schema = &config_schema()["properties"]["concurrent_configs"];
+        assert_eq!(
+            (&schema["minimum"], &schema["maximum"], &schema["default"]),
+            (
+                &serde_json::json!(1),
+                &serde_json::json!(32),
+                &serde_json::json!(8)
+            )
+        );
     }
 
     /// The schema's declared defaults are the ones the struct actually uses:
