@@ -1,6 +1,7 @@
 /** What ⌘R presses when a page draws more than one button (#2156). */
 import { expect, test } from "vitest";
 
+import { refreshKey } from "../shell/keys";
 import { createPageRefresh } from "./page-refresh.svelte";
 
 function pressed() {
@@ -36,4 +37,16 @@ test("of two of a kind, the newest is pressed", () => {
   registry.add({ kind: "detail", press: as("run") });
   registry.press();
   expect(log).toEqual(["run"]);
+});
+
+test("⌘R is R with ⌘ or Ctrl, ⇧ and ⌥ too, though ⌥R types ® on the Mac", () => {
+  const key = (init: KeyboardEventInit) => refreshKey(new KeyboardEvent("keydown", init));
+  expect(key({ key: "r", metaKey: true })).toBe(true);
+  expect(key({ key: "r", ctrlKey: true })).toBe(true);
+  expect(key({ key: "R", metaKey: true, shiftKey: true })).toBe(true);
+  expect(key({ key: "®", code: "KeyR", metaKey: true, altKey: true })).toBe(true);
+  expect(key({ key: "‰", code: "KeyR", metaKey: true, altKey: true, shiftKey: true })).toBe(true);
+  expect(key({ key: "r" })).toBe(false);
+  expect(key({ key: "®", code: "KeyR", altKey: true })).toBe(false);
+  expect(key({ key: "p", code: "KeyR", metaKey: true })).toBe(false);
 });
