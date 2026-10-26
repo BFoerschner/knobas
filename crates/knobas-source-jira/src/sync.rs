@@ -14,7 +14,9 @@
 //!    asked from the last issue read so one that left the listing under the
 //!    walk cannot hide another ([`crate::walk`], #1979).
 //! 5. Drop what the overlap re-delivered, complete truncated comment/worklog
-//!    containers, push the rest into the sink.
+//!    containers, push the rest into the sink. A page's worklog completions
+//!    run [`WORKLOG_READS_IN_FLIGHT`] at a time once the page is read; its
+//!    items still reach the sink in walk order.
 //! 6. If nothing was pushed, hand back the cursor byte-identically. Otherwise
 //!    advance the watermark to `max(previous, min(newest updated emitted,
 //!    ceiling))` ([`knobas_source::watermark::advanced`]) -- never to `now()`,
@@ -67,6 +69,7 @@
 //! needed no such coincidence.
 
 use chrono::{DateTime, Utc};
+use futures_util::{StreamExt, TryStreamExt, stream};
 use knobas_http::{Offset, PageWalk, Walked};
 use knobas_source::watermark::Bounds;
 use knobas_source::{Sink, SourceError};
@@ -152,8 +155,24 @@ comment,worklog";
 /// which is what the message says.
 const MAX_PAGES: u32 = 5_000;
 
+/// How many `GET /issue/{key}/worklog` a page's completion has in flight at
+/// once (#2167). Data Center inlines at most 20 worklogs per issue in
+/// `/search`, so every issue with more costs one read; one at a time, each
+/// waiting its turn at the limiter, 200 such issues took a 1500-issue run
+/// from 8.1 s to 45.2 s (#2163). Eight keeps the reads inside the default
+/// burst of 40 (interfaces §4.1) with room for the walk's own pages.
+const WORKLOG_READS_IN_FLIGHT: usize = 8;
+
 /// The unit of the walk reading: the UI prints "120 of 300 issues".
 const ISSUES: &str = "issues";
+
+/// One issue of a page, read: whether the run delivers it (the overlap
+/// re-delivered it if not) and its `updated`, the watermark's input.
+struct PageIssue {
+    raw: RawIssue,
+    deliver: bool,
+    updated: Option<DateTime<Utc>>,
+}
 
 pub(crate) struct SyncRun<'a> {
     pub api: &'a (dyn JiraApi + 'a),
@@ -214,13 +233,8 @@ impl SyncRun<'_> {
                 }
             };
             total = page.total;
-            for mut raw in page.issues {
-                // Before each issue, over the search's own total, so an
-                // incremental run that pushes nothing still moves the bar.
-                // A total that shrank under the run never reads below `done`.
-                sink.walked(walked, Some(u64::from(total).max(walked)), ISSUES)
-                    .await;
-                walked += 1;
+            let mut page_issues: Vec<PageIssue> = Vec::new();
+            for raw in page.issues {
                 let updated = raw
                     .issue
                     .fields
@@ -240,13 +254,39 @@ impl SyncRun<'_> {
                 }
                 // The overlap exists so nothing is missed; this is what keeps
                 // it from also meaning "everything arrives twice".
-                if previous
+                let deliver = !previous
                     .as_ref()
-                    .is_some_and(|c| c.already_delivered(&raw.issue.key, &fingerprint))
-                {
+                    .is_some_and(|c| c.already_delivered(&raw.issue.key, &fingerprint));
+                page_issues.push(PageIssue {
+                    raw,
+                    deliver,
+                    updated,
+                });
+            }
+            // Before any of the page reaches the sink, so one that fails
+            // fails the run with nothing after it pushed (#2167).
+            let mut due: Vec<&mut RawIssue> = page_issues
+                .iter_mut()
+                .filter(|issue| issue.deliver)
+                .map(|issue| &mut issue.raw)
+                .collect();
+            self.complete_worklogs(&mut due).await?;
+            for PageIssue {
+                mut raw,
+                deliver,
+                updated,
+            } in page_issues
+            {
+                // Before each issue, over the search's own total, so an
+                // incremental run that pushes nothing still moves the bar.
+                // A total that shrank under the run never reads below `done`.
+                sink.walked(walked, Some(u64::from(total).max(walked)), ISSUES)
+                    .await;
+                walked += 1;
+                if !deliver {
                     continue;
                 }
-                self.complete(&mut raw).await?;
+                self.complete_comments(&mut raw).await?;
                 let item = self.item_of(&raw);
                 // Sink failures are never swallowed (SPI doc on `Source::sync`).
                 sink.item(item).await?;
@@ -377,6 +417,13 @@ impl SyncRun<'_> {
     /// comments" -- that would silently drop the discussion out of the search
     /// corpus.
     pub(crate) async fn complete(&self, raw: &mut RawIssue) -> Result<(), SourceError> {
+        self.complete_comments(raw).await?;
+        self.complete_worklogs(&mut [raw]).await
+    }
+
+    /// [`complete`](Self::complete)'s comment half, one issue at a time:
+    /// Data Center inlines every comment, so it rarely asks anything.
+    async fn complete_comments(&self, raw: &mut RawIssue) -> Result<(), SourceError> {
         let key = raw.issue.key.clone();
 
         let comments_truncated = match &raw.issue.fields.comment {
@@ -395,18 +442,33 @@ impl SyncRun<'_> {
             }
             raw.set_comments(all);
         }
+        Ok(())
+    }
 
-        let worklogs_truncated = match &raw.issue.fields.worklog {
-            None => true,
-            Some(w) => w.total.unwrap_or(0) as usize > w.worklogs.len(),
-        };
-        if worklogs_truncated {
-            // No paging: the WADL declares no query parameters on this
-            // resource. What the server returns is what M1 records;
-            // `fields.worklog.total` keeps the truth visible. M3's time work
-            // uses /rest/api/2/worklog/updated + /worklog/list instead.
-            let page = self.api.worklogs(&key).await?;
-            raw.set_worklogs(page.worklogs);
+    /// [`complete`](Self::complete)'s worklog half, for a page of issues at
+    /// once: every truncated or absent container is read,
+    /// [`WORKLOG_READS_IN_FLIGHT`] at a time (#2167). The first failure in
+    /// walk order is the answer, and the reads still in flight are dropped.
+    async fn complete_worklogs(&self, raws: &mut [&mut RawIssue]) -> Result<(), SourceError> {
+        let due: Vec<(usize, String)> = raws
+            .iter()
+            .enumerate()
+            .filter(|(_, raw)| worklogs_truncated(raw))
+            .map(|(at, raw)| (at, raw.issue.key.clone()))
+            .collect();
+        // Collected first: a stream holding the `map` closure across an
+        // await is not provably `Send` to the `Source::sync` future.
+        // No paging: the WADL declares no query parameters on this
+        // resource. What the server returns is what M1 records;
+        // `fields.worklog.total` keeps the truth visible. M3's time work
+        // uses /rest/api/2/worklog/updated + /worklog/list instead.
+        let reads: Vec<_> = due.iter().map(|(_, key)| self.api.worklogs(key)).collect();
+        let pages: Vec<_> = stream::iter(reads)
+            .buffered(WORKLOG_READS_IN_FLIGHT)
+            .try_collect()
+            .await?;
+        for ((at, _), page) in due.iter().zip(pages) {
+            raws[*at].set_worklogs(page.worklogs);
         }
         Ok(())
     }
@@ -438,6 +500,16 @@ impl SyncRun<'_> {
     }
 }
 
+/// Whether a record's worklog container needs reading whole: it carries
+/// fewer than its `total`, or it is absent, which is never read as "no
+/// worklogs" (see [`SyncRun::complete`]).
+fn worklogs_truncated(raw: &RawIssue) -> bool {
+    match &raw.issue.fields.worklog {
+        None => true,
+        Some(w) => w.total.unwrap_or(0) as usize > w.worklogs.len(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,6 +519,7 @@ mod tests {
     use knobas_source::contract::VecSink;
     use std::collections::HashMap;
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// An issue as `/search` would return it, with a comment container that may
     /// claim more comments than it carries.
@@ -490,6 +563,14 @@ mod tests {
         /// page after the first, so an issue the walk has not reached yet
         /// arrives edited and one it already passed does not.
         edited_mid_walk: Vec<(&'static str, &'static str)>,
+        /// Milliseconds a key's worklog read takes, so reads can overlap and
+        /// finish out of walk order.
+        worklog_ms: HashMap<String, u64>,
+        /// The key whose worklog read fails.
+        failing_worklogs: Option<&'static str>,
+        /// Worklog reads under way now, and the most there ever were.
+        worklogs_in_flight: AtomicUsize,
+        most_worklogs_in_flight: AtomicUsize,
         calls: Mutex<Vec<String>>,
     }
 
@@ -505,6 +586,10 @@ mod tests {
                 endless: false,
                 unauthorized: false,
                 edited_mid_walk: Vec::new(),
+                worklog_ms: HashMap::new(),
+                failing_worklogs: None,
+                worklogs_in_flight: AtomicUsize::new(0),
+                most_worklogs_in_flight: AtomicUsize::new(0),
                 calls: Mutex::new(Vec::new()),
             }
         }
@@ -728,6 +813,18 @@ mod tests {
 
         async fn worklogs(&self, key: &str) -> Result<WorklogPage, SourceError> {
             self.calls.lock().unwrap().push(format!("worklogs:{key}"));
+            let now = self.worklogs_in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.most_worklogs_in_flight
+                .fetch_max(now, Ordering::SeqCst);
+            if let Some(ms) = self.worklog_ms.get(key) {
+                tokio::time::sleep(std::time::Duration::from_millis(*ms)).await;
+            }
+            self.worklogs_in_flight.fetch_sub(1, Ordering::SeqCst);
+            if self.failing_worklogs == Some(key) {
+                return Err(SourceError::Unreachable(format!(
+                    "{key}'s worklogs timed out"
+                )));
+            }
             let all = self.worklogs.get(key).cloned().unwrap_or_default();
             Ok(serde_json::from_value(serde_json::json!({
                 "startAt": 0, "maxResults": all.len(), "total": all.len(), "worklogs": all
@@ -1102,6 +1199,99 @@ mod tests {
             sink.0[0].payload["fields"]["worklog"]["worklogs"][0]["id"],
             "w0"
         );
+    }
+
+    /// `n` issues on one page whose worklog containers inline 20 of 25, the
+    /// Data Center cut (#2167); each key's read takes longer the earlier it
+    /// is in the walk, so reads finish in the reverse of walk order.
+    fn truncated_worklogs(n: usize) -> FakeApi {
+        let keys: Vec<String> = (0..n).map(|i| format!("PAY-{}", 300 + i)).collect();
+        let worklog = |key: &str, i: usize| serde_json::json!({ "id": format!("{key}-w{i}") });
+        FakeApi {
+            issues: keys
+                .iter()
+                .enumerate()
+                .map(|(i, key)| {
+                    let mut raw = issue(key, &format!("2026-08-22T11:{i:02}:00.000+0000"), 0, 0);
+                    raw["fields"]["worklog"] = serde_json::json!({
+                        "startAt": 0, "maxResults": 20, "total": 25,
+                        "worklogs": (0..20).map(|w| worklog(key, w)).collect::<Vec<_>>()
+                    });
+                    raw
+                })
+                .collect(),
+            worklogs: keys
+                .iter()
+                .map(|key| (key.clone(), (0..25).map(|w| worklog(key, w)).collect()))
+                .collect(),
+            worklog_ms: keys
+                .iter()
+                .enumerate()
+                .map(|(i, key)| (key.clone(), 2 * (n - i) as u64))
+                .collect(),
+            ..FakeApi::default()
+        }
+    }
+
+    /// A page's truncated worklog containers are completed concurrently,
+    /// never more than eight at a time, and its items still reach the sink
+    /// whole and in walk order (#2167). One at a time, 200 such tickets took
+    /// a 1500-ticket run from 8.1 s to 45.2 s (#2163).
+    #[tokio::test]
+    async fn a_pages_truncated_worklogs_are_completed_eight_at_a_time_in_walk_order() {
+        let api = truncated_worklogs(12);
+        let walk_order: Vec<String> = api
+            .issues
+            .iter()
+            .map(|i| i["key"].as_str().unwrap().to_owned())
+            .collect();
+        let mut sink = VecSink(Vec::new());
+        run(&api, &cfg(serde_json::json!({})), None, &mut sink)
+            .await
+            .unwrap();
+
+        let most = api.most_worklogs_in_flight.load(Ordering::SeqCst);
+        assert!(most > 1, "the worklog reads never overlapped");
+        assert!(most <= 8, "{most} worklog reads were in flight at once");
+        assert_eq!(api.count("worklogs:"), 12);
+        let keys: Vec<&str> = sink.0.iter().map(|i| i.entity.key.as_str()).collect();
+        assert_eq!(keys, walk_order);
+        for item in &sink.0 {
+            let worklog = &item.payload["fields"]["worklog"];
+            assert_eq!(
+                worklog["worklogs"].as_array().unwrap().len(),
+                25,
+                "{}",
+                item.entity.key
+            );
+            assert_eq!(
+                worklog["worklogs"][24]["id"],
+                format!("{}-w24", item.entity.key)
+            );
+        }
+    }
+
+    /// One worklog completion that fails fails the run with its own error,
+    /// and nothing after it on the page reaches the sink (#2167).
+    #[tokio::test]
+    async fn a_failing_worklog_completion_fails_the_run_and_stops_the_page() {
+        let mut api = truncated_worklogs(10);
+        api.failing_worklogs = Some("PAY-303");
+        let mut sink = VecSink(Vec::new());
+        let err = run(&api, &cfg(serde_json::json!({})), None, &mut sink)
+            .await
+            .expect_err("a failed completion fails the run");
+        assert!(
+            matches!(&err, SourceError::Unreachable(m) if m == "PAY-303's worklogs timed out"),
+            "{err:?}"
+        );
+        let after: Vec<&str> = sink
+            .0
+            .iter()
+            .map(|i| i.entity.key.as_str())
+            .filter(|key| *key >= "PAY-303")
+            .collect();
+        assert!(after.is_empty(), "{after:?} reached the sink");
     }
 
     /// Battery clause 2, and the reason the cursor carries a `seen` set: the

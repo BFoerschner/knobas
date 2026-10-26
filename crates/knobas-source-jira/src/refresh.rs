@@ -1,6 +1,6 @@
 //! A **refresh** (`CONTEXT.md`, ADR-0031, #2097): one issue read by a search
 //! on its key, so the item is the one a run's walk would emit for it -- the
-//! same `/search` record, the same `expand=changelog`, the same completed
+//! same `/search` record (no `expand`, #2165), the same completed
 //! comment and worklog containers, the same `updated` to the second.
 //!
 //! # Why `/issue/{key}` is asked, and what it is not asked for

@@ -15,6 +15,10 @@ thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 async-trait = "0.1"
+# Reads side by side in one task: Gitea's repositories (`FuturesUnordered`,
+# #2159) and the Jira walk's worklog completion (`StreamExt::buffered`,
+# #2167). Already in the tree through reqwest; no new crate.
+futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
 # The generated IPC mirror (#1325, contract §2.6 as amended): the TypeScript
 # shape of every type that crosses the bridge, written by
 # `knobas-app`'s `ipc_mirror` test. Pinned exactly: a new ts-rs can change the

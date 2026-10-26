@@ -17,22 +17,25 @@
 //! | [`server_info`](JiraApi::server_info) | `api/2/serverInfo` | `doHealthCheck` | *(none)* |
 //! | [`myself`](JiraApi::myself) | `api/2/myself` | *(none)* | *(none)* |
 //! | [`fields`](JiraApi::fields) | `api/2/field` | *(none)* | *(none)* |
-//! | [`search`](JiraApi::search) | `api/2/search` | `jql`, `startAt`, `maxResults`, `validateQuery`, `fields`, `expand` | `jql`, `startAt`, `maxResults`, `fields`, `expand=changelog` (#929) |
+//! | [`search`](JiraApi::search) | `api/2/search` | `jql`, `startAt`, `maxResults`, `validateQuery`, `fields`, `expand` | `jql`, `startAt`, `maxResults`, `fields` |
 //! | [`comments`](JiraApi::comments) | `api/2/issue/{key}/comment` | `startAt`, `maxResults`, `orderBy`, `expand` | `startAt`, `maxResults` |
 //! | [`worklogs`](JiraApi::worklogs) | `api/2/issue/{key}/worklog` | **none at all** | *(none)* |
 //! | [`my_permissions`](JiraApi::my_permissions) | `api/2/mypermissions` | `projectKey`, `projectId`, `issueKey`, `issueId` | `projectKey` (#2052) |
 //! | [`issue_stamp`](JiraApi::issue_stamp) | `api/2/issue/{key}` | `fields`, `expand`, `properties`, `updateHistory` | `fields=updated`, a refresh's probe only (#2097) |
 //!
-//! Two consequences worth naming:
+//! Consequences worth naming:
 //!
-//! * **`expand=changelog` is sent on `/search`, and nothing else.** It puts
-//!   each issue's status history in the stored record for the conversation's
-//!   *Include changes* (#929). Data Center returns the history whole there:
-//!   123 histories of 123 on one issue, `maxResults` equal to `total`
-//!   (`live_jira_seeded::a_long_history_comes_back_whole_from_search`,
-//!   #1083), so nothing pages the rest through `issue/{key}`. It costs about
-//!   0.8 KB of stored payload per status move, and a description edit's old
-//!   and new text whole.
+//! * **`expand=changelog` is not sent** (#2165, retiring #929's adapter
+//!   half). It put each issue's history in the stored record for the
+//!   conversation's *Include changes*, which the conversation no longer
+//!   draws (#2164). Data Center returns that history whole, with no paged or
+//!   status-only endpoint
+//!   (`/issue/{key}/changelog` answers 404), and a description edit's old and
+//!   new text whole: 10 issues with 1000 edits each made one page 54 MB and
+//!   2.5–3.1 s where the same page without it was 237 KB and under 50 ms,
+//!   over the transport's 32 MiB cap, so the run failed. A ticket's current
+//!   status is a field and still arrives as one
+//!   (`live_jira_seeded::a_long_history_syncs_without_its_changelog`).
 //! * **`expand=renderedFields` is deliberately not sent.** It returns Jira's
 //!   HTML rendering, and roadmap §4 gotcha 7 is exactly about HTML reaching
 //!   the webview. `description` and comment bodies in REST v2 are wiki markup
@@ -177,23 +180,23 @@ fn no_agile() -> SourceError {
 
 /// What a sync run's `/search` sends.
 ///
-/// `expand=changelog` (#929) puts each issue's status history in the record,
-/// so `SyncItem::payload` carries `changelog.histories` and a ticket's
-/// conversation can draw a move made in Jira's own UI -- with no request per
-/// issue. `validateQuery` stays at its default, and `expand` names nothing
-/// else: `renderedFields` would give us HTML (gotcha 7).
+/// A refresh asks the same query (`crate::refresh`). No `expand` (#2165):
+/// `changelog` is a ticket's whole edit history, which the conversation
+/// no longer reads (#2164) and which outgrew the transport's response cap
+/// (module docs), and
+/// `renderedFields` would give us HTML (gotcha 7). `validateQuery` stays at
+/// its default.
 fn search_query(
     jql: &str,
     start_at: u32,
     max_results: u32,
     fields: &str,
-) -> [(&'static str, String); 5] {
+) -> [(&'static str, String); 4] {
     [
         ("jql", jql.to_owned()),
         ("startAt", start_at.to_string()),
         ("maxResults", max_results.to_string()),
         ("fields", fields.to_owned()),
-        ("expand", "changelog".to_owned()),
     ]
 }
 
@@ -439,18 +442,14 @@ mod tests {
         jira.assert_no_violations();
     }
 
-    /// A sync run's search asks for the changelog and for nothing else that
-    /// `expand` can name (#929): the status history a ticket's conversation
-    /// draws, never `renderedFields`' HTML.
+    /// A sync run's search, and so a refresh's, sends no `expand` at all
+    /// (#2165): not `changelog`, whose whole history made one 10-issue page
+    /// 54 MB (#2163), and not `renderedFields`' HTML (gotcha 7).
     #[test]
-    fn the_search_expands_the_changelog_and_nothing_else() {
+    fn the_search_sends_no_expand() {
         let query = search_query("ORDER BY updated ASC", 0, 50, "summary");
-        let expand: Vec<&str> = query
-            .iter()
-            .filter(|(name, _)| *name == "expand")
-            .map(|(_, value)| value.as_str())
-            .collect();
-        assert_eq!(expand, ["changelog"]);
+        let names: Vec<&str> = query.iter().map(|(name, _)| *name).collect();
+        assert_eq!(names, ["jql", "startAt", "maxResults", "fields"]);
     }
 
     /// The sixth call's path and its (empty) parameter set, against the same

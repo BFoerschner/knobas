@@ -282,10 +282,10 @@ fn config_schema() -> serde_json::Value {
                 "title": "Issues per request"
             },
             "rate_per_sec": {
-                "type": "integer", "minimum": 1, "default": 5, "title": "Requests per second"
+                "type": "integer", "minimum": 1, "default": 20, "title": "Requests per second"
             },
             "rate_burst": {
-                "type": "integer", "minimum": 1, "default": 10, "title": "Request burst"
+                "type": "integer", "minimum": 1, "default": 40, "title": "Request burst"
             },
             "connect_timeout_secs": {
                 "type": "integer", "minimum": 1, "default": 10, "title": "Connect timeout (s)"
@@ -457,6 +457,16 @@ mod tests {
             );
         }
         crate::JiraConfig::from_json(&serde_json::Value::Object(object)).unwrap();
+    }
+
+    /// The form offers interfaces §4.1's Jira rate (#2167): 20 requests a
+    /// second with a burst of 40, so a page's worklog completions are not
+    /// spaced 200 ms apart. Both stay settings a source can lower.
+    #[test]
+    fn the_form_offers_twenty_a_second_with_a_burst_of_forty() {
+        let props = &descriptor_template().config_schema["properties"];
+        assert_eq!(props["rate_per_sec"]["default"], 20);
+        assert_eq!(props["rate_burst"]["default"], 40);
     }
 
     /// A ticket sits in its epic or parent issue (ADR-0018, #598), read off

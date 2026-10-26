@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
+futures-util.workspace = true
 knobas-core = { path = "../knobas-core" }
 knobas-http = { path = "../knobas-http" }
 knobas-source = { path = "../knobas-source" }
