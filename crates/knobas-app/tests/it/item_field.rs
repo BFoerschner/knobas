@@ -72,29 +72,42 @@ async fn the_stored_resolver_is_the_macros_expansion() {
     );
 }
 
-/// Per ticket of `source`, per stored field, the walk's answer and the
-/// stored one: `(key, field, walked, stored)`, `stored` `None` where no row
-/// has the paths the declarations bind.
-async fn both(pool: &PgPool, source: &str) -> Vec<(String, String, Option<String>, Option<Option<String>>)> {
+/// One ticket's field read both ways: `(entity id, field, walked, stored)`,
+/// `stored` `None` where no row has the paths the declarations bind.
+type Both = (String, String, Option<String>, Option<Option<String>>);
+
+/// One row of [`both`]'s statement: the id, the walk's answer, and every
+/// stored value with the bound paths.
+type BothRow = (String, Option<String>, Option<Vec<Option<String>>>);
+
+/// [`Both`] per ticket of `source`, per stored field.
+async fn both(pool: &PgPool, source: &str) -> Vec<Both> {
     let declarations = knobas_app::sources::paths::declared_paths(pool, &Registry::for_process())
         .await
         .unwrap();
     let mut out = Vec::new();
     for (field, walk) in [
-        ("status_name", knobas_core::declared_string!("$1", "status_name")),
+        (
+            "status_name",
+            knobas_core::declared_string!("$1", "status_name"),
+        ),
         ("assignee", knobas_core::declared_string!("$1", "assignee")),
-        ("project_key", knobas_core::declared_string!("$1", "project_key")),
-        ("project_name", knobas_core::declared_string!("$1", "project_name")),
+        (
+            "project_key",
+            knobas_core::declared_string!("$1", "project_key"),
+        ),
+        (
+            "project_name",
+            knobas_core::declared_string!("$1", "project_name"),
+        ),
     ] {
-        let rows: Vec<(String, Option<String>, Option<Vec<Option<String>>>)> = sqlx::query_as(
-            sqlx::AssertSqlSafe(format!(
-                "select i.entity_id, {walk},
+        let rows: Vec<BothRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "select i.entity_id, {walk},
                         (select array_agg(f.value) from sync.item_field f
                           where f.entity_id = i.entity_id and f.field = $3
                             and f.paths = ($1::jsonb #> array[i.source_id, i.kind, $3]))
                    from sync.item i where i.source_id = $2 order by i.entity_id"
-            )),
-        )
+        )))
         .bind(declarations.as_param())
         .bind(source)
         .bind(field)
@@ -157,12 +170,15 @@ async fn a_stored_field_is_the_walks_answer() {
             "{id} {field}: the stored value is the walk's"
         );
     }
-    let found = |read: &[(String, String, Option<String>, Option<Option<String>>)], key: &str, field: &str| {
+    let found = |read: &[Both], key: &str, field: &str| {
         read.iter()
             .find(|(id, f, _, _)| id.ends_with(key) && f == field)
             .and_then(|(_, _, walked, _)| walked.clone())
     };
-    assert_eq!(found(&read, ":PAY-1", "status_name").as_deref(), Some("In Progress"));
+    assert_eq!(
+        found(&read, ":PAY-1", "status_name").as_deref(),
+        Some("In Progress")
+    );
     assert_eq!(found(&read, ":PAY-2", "assignee").as_deref(), Some("jon"));
     assert_eq!(found(&read, ":PAY-2", "status_name"), None);
     assert_eq!(found(&read, ":PAY-3", "status_name"), None);
@@ -178,9 +194,16 @@ async fn a_stored_field_is_the_walks_answer() {
     .await;
     let read = both(&pool, &source).await;
     for (id, field, walked, stored) in &read {
-        assert_eq!(stored.as_ref(), Some(walked), "{id} {field}: after the rewrite");
+        assert_eq!(
+            stored.as_ref(),
+            Some(walked),
+            "{id} {field}: after the rewrite"
+        );
     }
-    assert_eq!(found(&read, ":PAY-1", "status_name").as_deref(), Some("Done"));
+    assert_eq!(
+        found(&read, ":PAY-1", "status_name").as_deref(),
+        Some("Done")
+    );
 }
 
 /// The board's statuses and a view's count read the stored value, not the
@@ -268,7 +291,11 @@ async fn the_tickets_reads_probe_the_stored_fields_and_walk_without_them() {
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(read(&pool).await, walked, "nothing stored: the payload is walked");
+    assert_eq!(
+        read(&pool).await,
+        walked,
+        "nothing stored: the payload is walked"
+    );
 }
 
 /// A read whose declarations put the field elsewhere than the stored ones

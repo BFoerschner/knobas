@@ -884,16 +884,23 @@ async fn laned_issue(pool: &sqlx::PgPool, p: &str, n: usize, status: &str) -> St
         "priority": { "name": (["High", "Low", "Medium", "Lowest"][n % 4]) },
         "project": { "key": p, "name": "Payments" },
     });
-    if n % 7 != 0 {
+    if !n.is_multiple_of(7) {
         fields["assignee"] = json!({ "name": (["mara", "jon", "li", "ana"][n % 4]) });
     }
-    if n % 5 != 0 {
+    if !n.is_multiple_of(5) {
         fields["labels"] = json!([(["payments", "ops", " ", "web"][n % 4]), "second"]);
     }
-    if n % 3 != 0 {
+    if !n.is_multiple_of(3) {
         fields["parent"] = json!({ "key": format!("{p}-EPIC{}", n % 4) });
     }
-    item(pool, &key, "ticket", "Settle the ledger", json!({ "key": key, "fields": fields })).await;
+    item(
+        pool,
+        &key,
+        "ticket",
+        "Settle the ledger",
+        json!({ "key": key, "fields": fields }),
+    )
+    .await;
     key
 }
 
@@ -923,10 +930,7 @@ async fn a_laned_jira_views_board_reads_only_the_cards_it_draws() {
         LaneField::IssueType,
         LaneField::Label,
     ] {
-        let lanes = Lanes {
-            by,
-            first: Some(2),
-        };
+        let lanes = Lanes { by, first: Some(2) };
         let expected = in_lanes(whole.clone(), lanes, Some(3));
         let laned = saved_view_board_laned(&pool, &registry, &view, Some(3), None, Some(lanes))
             .await
@@ -949,7 +953,10 @@ async fn a_laned_jira_views_board_reads_only_the_cards_it_draws() {
                 .collect::<Vec<_>>()
         };
         assert_eq!(lanes_of(&laned), lanes_of(&expected), "{by:?}: the lanes");
-        assert_eq!(laned.more_lanes, expected.more_lanes, "{by:?}: the lanes past");
+        assert_eq!(
+            laned.more_lanes, expected.more_lanes,
+            "{by:?}: the lanes past"
+        );
         assert!(expected.more_lanes > 0, "{by:?}: some lanes are left out");
 
         let kept: usize = expected

@@ -994,7 +994,13 @@ pub async fn statuses_of(
     declarations: &crate::payload::Declarations,
     lane: Option<LaneField>,
 ) -> Result<Statuses, CoreError> {
-    type Row = (String, String, Option<String>, String, Option<DateTime<Utc>>);
+    type Row = (
+        String,
+        String,
+        Option<String>,
+        String,
+        Option<DateTime<Utc>>,
+    );
     let rows: Vec<Row> = sqlx::query_as(STATUSES)
         .persistent(false)
         .bind(only)
@@ -1052,7 +1058,13 @@ pub fn in_lanes(mut board: MiniBoard, lanes: Lanes, per_column: Option<u32>) -> 
             .columns
             .iter()
             .map(|column| (&column.status, column.cards.as_slice())),
-        |card| (card.entity_id.as_str(), card.lane(lanes.by), card.updated_at),
+        |card| {
+            (
+                card.entity_id.as_str(),
+                card.lane(lanes.by),
+                card.updated_at,
+            )
+        },
         lanes,
         per_column,
     );
@@ -1096,20 +1108,14 @@ pub fn lanes_of<'a, T: 'a>(
     for (status, tickets) in columns {
         for ticket in tickets {
             let (id, key, updated_at) = read(ticket);
-            let lane = gathered
-                .entry(key.to_owned())
-                .or_insert_with(|| Gathered {
-                    count: 0,
-                    newest: None,
-                    cells: Vec::new(),
-                });
+            let lane = gathered.entry(key.to_owned()).or_insert_with(|| Gathered {
+                count: 0,
+                newest: None,
+                cells: Vec::new(),
+            });
             lane.count += 1;
             lane.newest = lane.newest.max(updated_at);
-            if lane
-                .cells
-                .last()
-                .is_none_or(|cell| &cell.status != status)
-            {
+            if lane.cells.last().is_none_or(|cell| &cell.status != status) {
                 lane.cells.push(LaneColumn {
                     status: status.clone(),
                     ids: Vec::new(),
