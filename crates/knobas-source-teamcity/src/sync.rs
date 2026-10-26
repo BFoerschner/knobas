@@ -148,7 +148,8 @@ pub(crate) async fn execute(
     //    it was emitted. In the other order it would be in **neither** --
     //    excluded by `state:finished` at the start and by
     //    `state:(queued:true,running:true)` at the end -- with nothing holding
-    //    the watermark below it and nothing emitting it. `sinceBuild` would then never offer it again.
+    //    the watermark below it and nothing emitting it. `sinceBuild` would
+    //    then never offer it again.
     //
     //    The two loss classes are disjoint, which is why this order is a fix
     //    and the ceiling is a second one: this order saves builds *in flight
