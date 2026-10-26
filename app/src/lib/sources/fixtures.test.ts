@@ -71,7 +71,13 @@ const TRANSCRIBED = [
     schema: GITEA_SCHEMA as unknown,
     present: ["owners", "repos", "username"],
     usernameType: ["string", "null"],
-    absent: ["commits_per_repo", "prs_per_repo", "include_pr_comments", "rate_limit_per_sec"],
+    absent: [
+      "commits_per_repo",
+      "prs_per_repo",
+      "include_pr_comments",
+      "rate_limit_per_sec",
+      "concurrent_repos",
+    ],
   },
   {
     name: "TEAMCITY_SCHEMA",
