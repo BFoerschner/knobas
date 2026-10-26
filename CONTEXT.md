@@ -116,7 +116,7 @@ A cap on how much of a kind a full sync emits per container (e.g. commits per re
 _Avoid_: limit, cap
 
 **Sweep**:
-The engine pass that tombstones items of an exhaustive kind that a full sync no longer emitted.
+The engine pass that tombstones items of an exhaustive kind that a full sync no longer emitted. A run handed a position sweeps a kind too when its adapter walked that kind whole anyway, as after a scope change, and says so (#2186).
 _Avoid_: cleanup, purge, garbage collection
 
 **Purge**:

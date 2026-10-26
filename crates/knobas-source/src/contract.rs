@@ -29,7 +29,8 @@ impl crate::Sink for VecSink {
 }
 
 /// An in-memory [`Sink`](crate::Sink) that keeps the items and every
-/// [`walked`](crate::Sink::walked) reading, in the order they arrived.
+/// [`walked`](crate::Sink::walked) reading, in the order they arrived, and
+/// every kind the run said it [walked whole](crate::Sink::walked_whole).
 ///
 /// `readings_before_item[i]` is how many readings had arrived when item `i`
 /// did, so a test can say where in the walk an item came, not only that it did.
@@ -38,6 +39,7 @@ pub struct Walking {
     pub items: Vec<crate::SyncItem>,
     pub readings: Vec<(u64, Option<u64>, String)>,
     pub readings_before_item: Vec<usize>,
+    pub whole: Vec<String>,
 }
 
 #[async_trait::async_trait]
@@ -50,6 +52,10 @@ impl crate::Sink for Walking {
 
     async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
         self.readings.push((done, of, unit.to_owned()));
+    }
+
+    async fn walked_whole(&mut self, kind: &str) {
+        self.whole.push(kind.to_owned());
     }
 }
 

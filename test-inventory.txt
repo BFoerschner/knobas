@@ -2812,7 +2812,7 @@ knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_run_reports
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_search_that_answers_emptily_to_a_refused_credential_still_ends_in_an_error
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_sink_failure_abandons_the_run
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_space_added_to_the_scope_brings_its_older_pages
-knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_space_taken_out_of_the_list_is_neither_read_nor_tombstoned
+knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_space_taken_out_of_the_list_leaves_the_pages_walked_whole
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_trashed_page_is_gone
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_walk_that_never_ends_is_refused_after_max_pages
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::an_edit_outside_the_space_list_keeps_the_position
@@ -3033,6 +3033,7 @@ knobas-source-gitea	test/it	sync::an_idle_run_does_not_ask_for_the_teams
 knobas-source-gitea	test/it	sync::an_idle_run_emits_nothing_and_returns_the_same_bytes
 knobas-source-gitea	test/it	sync::an_incremental_run_returns_only_the_pull_request_that_moved
 knobas-source-gitea	test/it	sync::an_owner_filter_drops_everything_else
+knobas-source-gitea	test/it	sync::an_owner_taken_out_of_the_scope_leaves_the_repositories_walked_whole
 knobas-source-gitea	test/it	sync::an_unreadable_comment_is_dropped_without_reading_as_a_truncation
 knobas-source-gitea	test/it	sync::branch_listings_are_paged
 knobas-source-gitea	test/it	sync::commits_are_not_re_walked_while_the_branch_head_stands_still
@@ -3428,7 +3429,7 @@ knobas-source-jira	lib/knobas_source_jira	sync::tests::a_listing_emptied_under_t
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_page_with_nothing_past_the_walk_ends_it_while_total_still_claims_more
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_pages_truncated_worklogs_are_completed_eight_at_a_time_in_walk_order
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_project_added_to_the_scope_brings_its_older_tickets
-knobas-source-jira	lib/knobas_source_jira	sync::tests::a_project_taken_out_of_the_scope_is_neither_read_nor_tombstoned
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_project_taken_out_of_the_scope_leaves_the_tickets_walked_whole
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_run_that_emitted_an_issue_reads_the_boards
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_scope_change_that_emits_nothing_still_records_the_scope
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_sink_failure_aborts_the_run
@@ -4199,6 +4200,7 @@ knobas-sync	test/it	progress::a_walk_reading_reaches_the_progress_sink_on_the_it
 knobas-sync	test/it	progress::an_adapter_that_never_reports_its_walk_sends_no_reading
 knobas-sync	test/it	progress::progress_is_throttled_rather_than_one_message_per_item
 knobas-sync	test/it	progress::the_decorator_forwards_every_item_untouched_and_returns_the_adapters_cursor
+knobas-sync	test/it	progress::the_decorator_hands_on_a_kind_walked_whole
 knobas-sync	test/it	progress::the_ending_reaches_every_sink_enrolled_after_one_that_panics
 knobas-sync	test/it	progress::the_mocks_walk_reaches_the_progress_sink_and_the_wrapped_sink
 knobas-sync	test/it	progress::the_phases_cross_the_bridge_as_snake_case
@@ -4276,6 +4278,7 @@ knobas-sync	test/it	scheduler_run::the_terminal_state_names_the_run_that_ended_n
 knobas-sync	test/it	stats::db_stats_reports_a_size_counts_and_a_per_source_breakdown
 knobas-sync	test/it	stats::reindexing_leaves_the_fts_index_usable
 knobas-sync	test/it	stats::the_index_it_rebuilds_is_the_one_the_schema_declares
+knobas-sync	test/it	sweep::a_backfill_that_walked_a_kind_whole_sweeps_nothing
 knobas-sync	test/it	sweep::a_full_sync_that_emitted_nothing_sweeps_nothing
 knobas-sync	test/it	sweep::a_full_sync_that_fails_after_emitting_sweeps_nothing
 knobas-sync	test/it	sweep::a_full_sync_that_sweeps_cannot_reach_a_note
@@ -4285,9 +4288,11 @@ knobas-sync	test/it	sweep::a_resurrected_item_loses_its_tombstone_again
 knobas-sync	test/it	sweep::a_run_sweeps_its_exhaustive_kinds_and_spares_its_budgeted_ones
 knobas-sync	test/it	sweep::a_source_may_not_mirror_a_kind_knobas_owns
 knobas-sync	test/it	sweep::a_source_whose_full_sync_is_bounded_is_never_swept
-knobas-sync	test/it	sweep::an_incremental_run_never_sweeps
+knobas-sync	test/it	sweep::an_incremental_run_that_walked_a_kind_whole_sweeps_it
+knobas-sync	test/it	sweep::an_incremental_run_that_walked_nothing_whole_never_sweeps
 knobas-sync	test/it	sweep::the_sweep_does_not_restamp_an_existing_tombstone
 knobas-sync	test/it	sweep::the_sweep_only_touches_its_own_source
+knobas-sync	test/it	sweep::walking_a_kind_whole_keeps_the_other_gates
 knobas-sync	test/it	write_activity::an_unchanged_wait_is_one_activity_line_not_one_per_attempt
 knobas-sync	test/it	write_choke_point::only_the_write_queue_may_send_to_a_source
 knobas-sync	test/it	write_choke_point::the_rule_actually_rejects_a_second_call_site

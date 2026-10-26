@@ -1519,7 +1519,8 @@ deleted: number,
  * Rows a **full** sync tombstoned because this run did not see them
  * (hard-delete reconciliation). Counts only rows of a kind that declared
  * `full_sync_exhaustive` *and* emitted something this run, so it is 0 for
- * an incremental run, for a kind that did not declare the flag, and for a
+ * an incremental run (unless its adapter walked a kind whole, #2186), for
+ * a kind that did not declare the flag, and for a
  * kind that declared it and emitted nothing -- see [`SWEEP`].
  *
  * A run over a source with both kinds of kind reports one number for the

@@ -9,7 +9,9 @@
 //!    corpus held when the run started.
 //! 3. Read the cursor. Unreadable or absent ⇒ full sync (interfaces §4.1).
 //!    Taken under another ticket scope (`projects` / `jql_filter`) ⇒ a full
-//!    walk of this one, the views kept (#2181).
+//!    walk of this one, the views kept (#2181). A walk from no watermark
+//!    tells the sink it walked the tickets whole, so the engine retires what
+//!    it did not return: a project taken out of the scope (#2186).
 //! 4. Query `updated >= watermark − 2 minutes ORDER BY created ASC, id ASC`,
 //!    paging with `startAt` until `total` is reached -- ordered by keys an
 //!    edit cannot move (`id` breaks ties on `created`, #1720), each page
@@ -133,7 +135,8 @@ comment,worklog";
 /// Reaching it is a **failure**, never a quiet end to the walk. The one kind
 /// this adapter emits claims `full_sync_exhaustive: true`, which is the
 /// engine's licence to tombstone every row a `cursor: None` run did not
-/// return -- so a truncated walk reported as `Ok` authorises deleting whatever
+/// return, and since #2186 every row any walk from no watermark did not
+/// return (a changed scope, an unreadable cursor) -- so a truncated walk reported as `Ok` authorises deleting whatever
 /// fell off the end. The query is `ORDER BY created ASC`, so what falls off
 /// the end is the *most recently filed* work: the tickets someone is looking
 /// at today. And it is not a first-sync-only hazard, because any later
@@ -368,6 +371,15 @@ impl SyncRun<'_> {
             )
         };
 
+        // A walk from no watermark read the whole ticket scope, whatever the
+        // engine handed us: say so, so it reconciles the tickets this walk
+        // did not return (#2186) -- a project taken out of the scope, a
+        // ticket the new filter no longer matches. The views are read against
+        // what was delivered, not walked whole, and say nothing.
+        if since.is_none() {
+            sink.walked_whole(crate::KIND_TICKET).await;
+        }
+
         // Battery clause 2: nothing happened, so the position did not move.
         // Returning the *input string* rather than a re-encoded struct makes
         // that byte-identical by construction.
@@ -527,7 +539,7 @@ mod tests {
     // `super::*` already brings in Sink, SourceError, JiraApi, SearchPage and
     // ServerInfo; the fake also has to answer the other three calls.
     use crate::model::{CommentPage, Myself, WorklogPage};
-    use knobas_source::contract::VecSink;
+    use knobas_source::contract::{VecSink, Walking};
     use std::collections::HashMap;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1101,12 +1113,13 @@ mod tests {
         assert!(idle.is_empty(), "{idle:?}");
     }
 
-    /// #2181, ruled: narrowing the scope walks what is left in full and says
-    /// nothing of what was taken out. The removed project's tickets stay in
-    /// the mirror as last seen -- this run emits no tombstone for them, and
-    /// the engine sweeps only a cursor-less run (ADR-0003).
+    /// #2186: narrowing the scope walks what is left in full and says so, so
+    /// the engine sweeps the tickets the walk did not return -- the removed
+    /// project's among them. The run itself reads nothing of the removed
+    /// project and emits no tombstone for it; the views are not walked whole.
+    /// An incremental run under an unchanged scope says nothing.
     #[tokio::test]
-    async fn a_project_taken_out_of_the_scope_is_neither_read_nor_tombstoned() {
+    async fn a_project_taken_out_of_the_scope_leaves_the_tickets_walked_whole() {
         let api = FakeApi {
             issues: five_issues(),
             ..FakeApi::default()
@@ -1114,10 +1127,10 @@ mod tests {
         let both = cfg(serde_json::json!({ "projects": ["PAY", "OPS"] }));
         let (_, cursor) = keys_of(&api, &both, None).await;
         let pay = cfg(serde_json::json!({ "projects": ["PAY"] }));
-        let mut sink = VecSink(Vec::new());
+        let mut sink = Walking::default();
         let after = run(&api, &pay, Some(cursor), &mut sink).await.unwrap();
         let keys: Vec<(&str, bool)> = sink
-            .0
+            .items
             .iter()
             .map(|i| (i.entity.key.as_str(), i.deleted))
             .collect();
@@ -1126,8 +1139,12 @@ mod tests {
             keys.contains(&("PAY-219", false)),
             "the rest is walked in full: {keys:?}"
         );
-        let (idle, _) = keys_of(&api, &pay, Some(after)).await;
-        assert!(idle.is_empty(), "{idle:?}");
+        assert_eq!(sink.whole, [crate::KIND_TICKET]);
+
+        let mut idle = Walking::default();
+        run(&api, &pay, Some(after), &mut idle).await.unwrap();
+        assert!(idle.items.is_empty(), "{:?}", idle.items);
+        assert!(idle.whole.is_empty(), "{:?}", idle.whole);
     }
 
     /// Each page after the first is asked from the last issue read, one row

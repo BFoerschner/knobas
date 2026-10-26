@@ -123,13 +123,19 @@
 //!   run. A stale row is the cheap side of that trade; sweeping would tombstone
 //!   everything past the cap on every full sync.
 //! * **An incremental run reconciles nothing**, for any kind: the engine sweeps
-//!   only after a cursor-less run, and this adapter's own diff only sees a
-//!   branch that a *walked* repository stopped listing.
+//!   only after a run that walked the kind whole, and this adapter's own diff
+//!   only sees a branch that a *walked* repository stopped listing. A run this
+//!   adapter makes a full sync although it was handed a cursor (an unreadable
+//!   one, one naming no repository, a narrowed scope) is not incremental: it
+//!   says it walked `repo` and `branch` whole (`Sink::walked_whole`, #2186),
+//!   and the engine sweeps them as after a cursor-less run.
 //!
 //! One consequence worth stating plainly, because it looks like a bug and is
-//! not: narrowing `owners[]`/`repos[]` and then running a full sync retires the
-//! repositories that fell out of scope. They are no longer part of this
-//! source's corpus, and `deleted_at` on the entity is the mirror saying so --
+//! not: narrowing `owners[]`/`repos[]` retires the repositories that fell out
+//! of scope. Since #2186 the next scheduled run does it: a position holding a
+//! repository the scope no longer admits makes that run a full sync. They are
+//! no longer part of this source's corpus, and `deleted_at` on the entity is
+//! the mirror saying so --
 //! the row, its links and its notes all survive. The other reading of an
 //! incomplete walk -- a repository *skipped* rather than deselected -- cannot
 //! reach the sweep at all, because a skip during a cursor-less run is fatal
@@ -363,7 +369,20 @@ pub(crate) async fn run(
     // are the case ruling B4's extension was ratified for -- there is no stored
     // state for a skipped repository to fall back on, so the skip would be the
     // only record it was ever in scope.
+    //
+    // **A narrowed scope is a full sync too (#2186).** A position holding a
+    // repository that `owners[]` or `repos[]` no longer admits was taken
+    // under a wider scope, and only a run that walks the narrowed one whole
+    // can tell the engine to retire what fell out of it. Its positions are
+    // dropped, so every repository and branch left is emitted again.
     let recovered = GiteaCursor::parse(cursor.as_deref());
+    let narrowed = recovered.as_ref().is_some_and(|position| {
+        position
+            .repos
+            .keys()
+            .any(|name| !in_scope(&source.config, name))
+    });
+    let recovered = recovered.filter(|_| !narrowed);
     let full_sync = recovered
         .as_ref()
         .is_none_or(|position| position.repos.is_empty());
@@ -465,9 +484,22 @@ pub(crate) async fn run(
         return Err(error);
     }
 
+    // A full sync emitted every repository and every branch of every walked
+    // one (module docs), whatever the engine handed us: say so, so the
+    // engine retires the rows this run did not return (#2186) -- a
+    // repository deleted upstream, or one a narrowed scope left out. The
+    // budgeted kinds were not walked whole and say nothing.
+    if full_sync {
+        sink.walked_whole(crate::KIND_REPO).await;
+        sink.walked_whole(crate::KIND_BRANCH).await;
+    }
+
     // Interfaces §4.1: a run that emitted nothing returns the cursor it was
     // handed, byte-identical. Re-serialising would be *equal* but not
-    // *identical* -- `repos_listed_at` alone would move on every poll.
+    // *identical* -- `repos_listed_at` alone would move on every poll. That
+    // holds for a narrowed run too: one that emitted nothing (a scope
+    // narrowed to owners holding no repository) keeps the old position, and
+    // the next run lists again and walks nothing, which costs the listing.
     if emitted == 0
         && let Some(unchanged) = cursor
     {
@@ -650,20 +682,7 @@ fn push_selected(
         );
         return;
     };
-    if !config.owners.is_empty()
-        && !config
-            .owners
-            .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(owner))
-    {
-        return;
-    }
-    if !config.repos.is_empty()
-        && !config
-            .repos
-            .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(&repo.full_name))
-    {
+    if !admits(config, owner, &repo.full_name) {
         return;
     }
     out.push(Selected {
@@ -672,6 +691,30 @@ fn push_selected(
         repo,
         listed,
     });
+}
+
+/// Whether `owners[]` and `repos[]` admit the repository `full_name` of
+/// `owner`, case-insensitively as Gitea names them. An empty list admits all.
+fn admits(config: &crate::config::GiteaConfig, owner: &str, full_name: &str) -> bool {
+    let owner_ok = config.owners.is_empty()
+        || config
+            .owners
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(owner));
+    let repo_ok = config.repos.is_empty()
+        || config
+            .repos
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(full_name));
+    owner_ok && repo_ok
+}
+
+/// [`admits`] for a name the cursor keeps, `owner/name`. A key without an
+/// owner part is not this adapter's to judge and counts as in scope.
+fn in_scope(config: &crate::config::GiteaConfig, full_name: &str) -> bool {
+    full_name
+        .split_once('/')
+        .is_none_or(|(owner, _)| admits(config, owner, full_name))
 }
 
 async fn sync_repo(

@@ -39,6 +39,10 @@ struct Shrinking {
     /// Fail the run after emitting, the way an adapter refuses a walk it
     /// cannot vouch for (a reached page cap, #1623).
     fails: bool,
+    /// The kinds the run says it walked whole (`Sink::walked_whole`, #2186),
+    /// said after its items: what an adapter whose scope changed says of a
+    /// walk it took in full although it was handed a position.
+    whole: Vec<&'static str>,
 }
 
 #[async_trait]
@@ -109,6 +113,9 @@ impl Source for Shrinking {
                 deleted: false,
             })
             .await?;
+        }
+        for kind in &self.whole {
+            sink.walked_whole(kind).await;
         }
         if self.fails {
             return Err(SourceError::protocol(
@@ -190,6 +197,7 @@ fn source_of(
             keys: Arc::clone(&corpus),
             kinds: kinds.to_vec(),
             fails: false,
+            whole: Vec::new(),
         },
         corpus,
     )
@@ -310,7 +318,7 @@ async fn a_full_sync_that_fails_after_emitting_sweeps_nothing() {
 }
 
 #[tokio::test]
-async fn an_incremental_run_never_sweeps() {
+async fn an_incremental_run_that_walked_nothing_whole_never_sweeps() {
     let pool = pool().await;
     let id = unique();
     let (src, keys) = source(&id, &["B-1", "B-2"]);
@@ -330,6 +338,101 @@ async fn an_incremental_run_never_sweeps() {
         deleted_at(&pool, &format!("{id}:B-2")).await.is_none(),
         "only a full sync knows that something is gone"
     );
+}
+
+/// A run handed a position that walked a kind whole -- an adapter whose scope
+/// changed reads its new scope in full (#2181) -- reconciles that kind as a
+/// cursor-less run would (#2186): a project taken out of the scope stops
+/// being returned, and its rows are retired.
+#[tokio::test]
+async fn an_incremental_run_that_walked_a_kind_whole_sweeps_it() {
+    let pool = pool().await;
+    let id = unique();
+    let (mut src, keys) = source(&id, &["W-1", "W-2"]);
+    let first = knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    *keys.lock().unwrap() = tickets(&["W-1"]);
+    src.whole = vec!["ticket"];
+    a_moment_passes().await;
+    let narrowed = knobas_sync::run_once(&pool, &src, Some(first.cursor))
+        .await
+        .unwrap();
+
+    assert_eq!(narrowed.swept, 1, "the kind was walked whole");
+    assert!(deleted_at(&pool, &format!("{id}:W-2")).await.is_some());
+    assert!(deleted_at(&pool, &format!("{id}:W-1")).await.is_none());
+}
+
+/// Saying a kind was walked whole licenses its sweep and nothing else: the
+/// declaration (ADR-0003) and the emptiness guard still hold, and a kind the
+/// run did not name is not reconciled.
+#[tokio::test]
+async fn walking_a_kind_whole_keeps_the_other_gates() {
+    let pool = pool().await;
+    let id = unique();
+    let (mut src, keys) = source_of(
+        &id,
+        &[("repo", true), ("branch", true), ("commit", false)],
+        &[
+            ("repo", "X-repo-1"),
+            ("repo", "X-repo-2"),
+            ("branch", "X-br-1"),
+            ("branch", "X-br-2"),
+            ("commit", "X-sha-1"),
+            ("commit", "X-sha-2"),
+        ],
+    );
+    let first = knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    // `branch` is walked whole but emits nothing; `commit` is walked whole but
+    // is budgeted; `repo` emits one of two but is not named.
+    *keys.lock().unwrap() = vec![("repo", "X-repo-1"), ("commit", "X-sha-1")];
+    src.whole = vec!["branch", "commit"];
+    a_moment_passes().await;
+    let run = knobas_sync::run_once(&pool, &src, Some(first.cursor))
+        .await
+        .unwrap();
+
+    assert_eq!(run.swept, 0);
+    for key in ["X-repo-2", "X-br-1", "X-br-2", "X-sha-2"] {
+        assert!(
+            deleted_at(&pool, &format!("{id}:{key}")).await.is_none(),
+            "{key} was swept"
+        );
+    }
+}
+
+/// A backfill does not reconcile (`run_backfill`), and a kind its adapter says
+/// it walked whole does not change that.
+#[tokio::test]
+async fn a_backfill_that_walked_a_kind_whole_sweeps_nothing() {
+    let pool = pool().await;
+    let id = unique();
+    let (mut src, keys) = source(&id, &["V-1", "V-2"]);
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ($1, 'shrinking', 'Shrinking', '', 'none')",
+    )
+    .bind(&id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    *keys.lock().unwrap() = tickets(&["V-1"]);
+    src.whole = vec!["ticket"];
+    a_moment_passes().await;
+    let mut conn = knobas_db::test_util::test_connector()
+        .await
+        .connect()
+        .await
+        .expect("a connection outside every pool");
+    let backfill = knobas_sync::run_backfill(&mut conn, &pool, &src)
+        .await
+        .unwrap();
+
+    assert_eq!(backfill.swept, 0);
+    assert!(deleted_at(&pool, &format!("{id}:V-2")).await.is_none());
 }
 
 /// A full sync that emitted **nothing** is indistinguishable from an adapter
