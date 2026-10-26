@@ -895,6 +895,72 @@ pub async fn read_scoped(
     })
 }
 
+/// The live tickets among `$1`, each with its source and its status as
+/// [`CARDS`] reads it, newest first as [`CARDS`] orders them. Only the status
+/// is read off each payload, which is what lets a saved view's board choose
+/// the cards it draws before it reads them ([`statuses_of`]).
+const STATUSES: &str = concat!(
+    "with ",
+    status_paths!("$2"),
+    "
+     select i.entity_id, i.source_id, ",
+    status_of_ticket!(),
+    " as status
+       from sync.item i
+      where i.kind = 'ticket'
+        and ",
+    crate::live_by_exclusion!("i"),
+    "
+        and i.entity_id in (select unnest($1::text[]))
+      order by coalesce(i.item_updated_at, i.synced_at) desc, i.entity_id"
+);
+
+/// The statuses of the live tickets among `only`, grouped as
+/// [`read_scoped`] groups its columns: one per status, in the board's order,
+/// each column's ids newest first. `sources` are the sources those tickets
+/// come from, the ones [`MiniBoard::sources`] would answer for.
+#[derive(Clone, Debug, Default)]
+pub struct Statuses {
+    /// Per status (`None` for none), its tickets' entity ids, newest first.
+    pub columns: Vec<(Option<String>, Vec<String>)>,
+    /// The source ids those tickets come from.
+    pub sources: BTreeSet<String>,
+}
+
+/// [`Statuses`] of `only`: what a board of exactly those tickets would put in
+/// each column, without reading the cards (Björn, 2026-10-26). A saved view's
+/// board cuts its columns in the source's order and then reads only the
+/// cards it kept through [`read_scoped`].
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn statuses_of(
+    pool: &PgPool,
+    only: &[String],
+    declarations: &crate::payload::Declarations,
+) -> Result<Statuses, CoreError> {
+    let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(STATUSES)
+        .persistent(false)
+        .bind(only)
+        .bind(declarations.as_param())
+        .fetch_all(pool)
+        .await?;
+    let mut at: HashMap<Option<String>, usize> = HashMap::new();
+    let mut out = Statuses::default();
+    for (id, source, status) in rows {
+        out.sources.insert(source);
+        let index = *at.entry(status.clone()).or_insert_with(|| {
+            out.columns.push((status, Vec::new()));
+            out.columns.len() - 1
+        });
+        out.columns[index].1.push(id);
+    }
+    out.columns
+        .sort_by_key(|(status, _)| column_rank(status.as_deref()));
+    Ok(out)
+}
+
 impl MiniBoardCard {
     /// The lane this card stands in when a board is laned `by` (R-3.5): the
     /// field as the card carries it, `""` for none. [`CARDS`]' `lane` is
@@ -1022,8 +1088,13 @@ async fn signals_of(
     Ok(out)
 }
 
-/// The second half of the grant: what each of these sources' corpora show.
-async fn observed_statuses(
+/// The second half of the grant: what each of these sources' corpora show,
+/// as [`MiniBoard::sources`] answers it.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn observed_statuses(
     pool: &PgPool,
     sources: &BTreeSet<String>,
     declarations: &crate::payload::Declarations,

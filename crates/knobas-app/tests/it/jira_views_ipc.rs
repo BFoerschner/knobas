@@ -650,3 +650,212 @@ async fn a_saved_view_names_its_ticket_system_not_its_source() {
         "the ticket system, not the source's name"
     );
 }
+
+/// What one statement sent back, off sqlx's `sqlx::query` event: its text and
+/// its row count. `command_statements.rs` counts the same events.
+#[derive(Default)]
+struct Sent {
+    statement: String,
+    rows: u64,
+}
+
+impl tracing::field::Visit for Sent {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "db.statement" {
+            value.clone_into(&mut self.statement);
+        }
+    }
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        if field.name() == "rows_returned" {
+            self.rows = value;
+        }
+    }
+    fn record_debug(&mut self, _: &tracing::field::Field, _: &dyn std::fmt::Debug) {}
+}
+
+struct Record(std::sync::Arc<std::sync::Mutex<Vec<Sent>>>);
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Record {
+    fn on_event(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) {
+        if event.metadata().target() == "sqlx::query" {
+            let mut sent = Sent::default();
+            event.record(&mut sent);
+            self.0.lock().unwrap().push(sent);
+        }
+    }
+}
+
+/// The most rows the board's card statement (the one that reads each card's
+/// parent title) sent back while `view`'s board was read with `per_column`.
+/// Read on this thread's subscriber; a first registration that straddles
+/// another thread's is looked at again, as `command_statements.rs` does.
+async fn cards_sent(pool: &sqlx::PgPool, view: &str, per_column: Option<u32>) -> u64 {
+    use tracing_subscriber::layer::SubscriberExt;
+    for _ in 0..3 {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let guard = tracing::subscriber::set_default(
+            tracing_subscriber::registry().with(Record(seen.clone())),
+        );
+        saved_view_board(pool, &Registry::for_process(), view, per_column, None)
+            .await
+            .expect("the board");
+        drop(guard);
+        let seen = seen.lock().unwrap();
+        if let Some(rows) = seen
+            .iter()
+            .filter(|sent| sent.statement.contains("parent_title"))
+            .map(|sent| sent.rows)
+            .max()
+        {
+            return rows;
+        }
+    }
+    panic!("the card statement was never seen");
+}
+
+/// A Jira view's board as drawn: per column its name, its cards' keys and
+/// its total, and the statuses its sources show.
+type Drawn = (
+    Vec<(Option<String>, Vec<String>, u32)>,
+    Vec<(String, Vec<String>)>,
+);
+
+/// [`Drawn`] of `board`.
+fn drawn(board: &knobas_core::mini_board::MiniBoard) -> Drawn {
+    (
+        board
+            .columns
+            .iter()
+            .map(|c| {
+                (
+                    c.status.clone(),
+                    c.cards.iter().map(|card| card.key.clone()).collect(),
+                    c.total,
+                )
+            })
+            .collect(),
+        board
+            .sources
+            .iter()
+            .map(|s| (s.source_id.clone(), s.statuses.clone()))
+            .collect(),
+    )
+}
+
+/// A Jira view's board reads only the cards it draws (Björn, 2026-10-26):
+/// it read every ticket on the view through the whole card statement and
+/// cut each column after, 0.6 s for a board of 2,250 tickets and 1.1 s for a
+/// filter of 4,500, where eight a column are drawn. The capped answer is the
+/// uncapped one cut, for a board with columns and a filter without.
+#[tokio::test]
+async fn a_jira_views_board_reads_only_the_cards_it_draws() {
+    let pool = pool().await;
+    let p = project();
+    let statuses = ["To Do", "In Progress", "In Review", "Done", "Blocked"];
+    let mut keys = Vec::new();
+    for n in 1..=300 {
+        let key = format!("{p}-{n}");
+        issue(
+            &pool,
+            &key,
+            statuses[n % statuses.len()],
+            "Settle the ledger",
+        )
+        .await;
+        keys.push(key);
+    }
+    // A ticket on the view that is gone from the mirror is never counted.
+    let gone = format!("{p}-301");
+    issue(&pool, &gone, "To Do", "Gone").await;
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(format!("jira:{gone}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    keys.push(gone);
+    keys.reverse();
+    let (_, with_columns) = board(&pool, &p, &keys).await;
+    let filter = format!("filter-{}", p.to_lowercase());
+    item(
+        &pool,
+        &filter,
+        "jira_view",
+        &format!("{p} filter"),
+        json!({
+            "kind": "filter", "id": p, "type": null, "name": format!("{p} filter"), "filter_id": p,
+            "jql": format!("project = {p}"), "sub_query": null, "query": format!("project = {p}"),
+            "columns": [], "sprint": null, "keys": keys,
+        }),
+    )
+    .await;
+    let mut tx = pool.begin().await.unwrap();
+    let declared = knobas_sync::saved_views::declared(&knobas_source_jira::descriptor_template())
+        .expect("Jira declares saved views");
+    knobas_sync::saved_views::project(&mut tx, "jira", &declared)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let without_columns = format!("jira:{filter}");
+
+    let filter_columns = ["To Do", "In Progress", "In Review", "Done", "Blocked"];
+    for (view, columns) in [
+        (
+            with_columns,
+            vec![("To Do", 60), ("Doing", 120), ("Done", 60)],
+        ),
+        (
+            without_columns,
+            filter_columns.map(|status| (status, 60)).to_vec(),
+        ),
+    ] {
+        let registry = Registry::for_process();
+        let whole = saved_view_board(&pool, &registry, &view, None, None)
+            .await
+            .unwrap();
+        let capped = saved_view_board(&pool, &registry, &view, Some(8), None)
+            .await
+            .unwrap();
+        let (mut cut, sources) = drawn(&whole);
+        for column in &mut cut {
+            column.1.truncate(8);
+        }
+        let named: Vec<(Option<String>, u32)> = cut.iter().map(|c| (c.0.clone(), c.2)).collect();
+        let expected: Vec<(Option<String>, u32)> = columns
+            .iter()
+            .map(|(name, total)| (Some((*name).to_owned()), *total))
+            .collect();
+        assert_eq!(
+            named, expected,
+            "{view}: the columns in the board's order, each counted whole"
+        );
+        let columns = columns.len();
+        assert_eq!(
+            drawn(&capped),
+            (cut, sources),
+            "{view}: the capped board is the whole one cut"
+        );
+
+        // A cut that keeps no card still answers for the view's source.
+        let none = saved_view_board(&pool, &registry, &view, Some(0), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            drawn(&none).1,
+            drawn(&whole).1,
+            "{view}: the sources' statuses"
+        );
+
+        // The count is read off a named field of sqlx's event; were that
+        // field gone it would read 0 and the cap below pass on any code.
+        let uncapped = cards_sent(&pool, &view, None).await;
+        assert!(
+            uncapped > 8 * columns as u64,
+            "{view}: the uncapped card statement sent {uncapped} rows, so the count is read"
+        );
+        let sent = cards_sent(&pool, &view, Some(8)).await;
+        assert!(
+            sent <= 8 * columns as u64,
+            "{view}: the card statement sent {sent} rows for {columns} columns of eight"
+        );
+    }
+}
