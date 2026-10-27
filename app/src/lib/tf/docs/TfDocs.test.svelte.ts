@@ -269,11 +269,13 @@ test("a 4,000-page space draws its tree in one pass over the pages, and a closed
   expect(closed.length).toBeGreaterThan(0);
   expect(closed.every((d) => d.querySelector(":scope > .tf-fold-in a") === null)).toBe(true);
 
-  // Opening a closed fold draws its rows.
+  // Opening a closed fold draws its rows, from the index the tree already holds.
   const fold = closed.find((d) => d.querySelector("summary a")?.textContent === "Page 00001")!;
+  const before = reads.parent;
   fold.open = true;
   fold.dispatchEvent(new Event("toggle"));
   await settle();
+  expect(reads.parent - before).toBeLessThan(4000);
   expect([...fold.querySelectorAll(":scope > .tf-fold-in > a, :scope > .tf-fold-in > details > summary a")].map((a) => a.textContent)).toEqual(
     Array.from({ length: 8 }, (_, k) => `Page ${String(28 + k).padStart(5, "0")}`),
   );
