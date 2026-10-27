@@ -279,9 +279,6 @@ for (const [space, tops] of Object.entries(TREE)) {
 /** The key of the space `?fake-docs-pages=<n>` adds (#2200). */
 const BIG = "BULK";
 const BULK_NAME = "Bulk pages";
-/** The pages of that space: none unless the page was opened with the switch. */
-let bulk: FakePage[] = [];
-
 /**
  * `?fake-docs-pages=<n>` (#2200): one more space, *BULK*, of `n` generated
  * pages, the size a real Confluence space reaches (Björn's held 4,000). Twenty
@@ -394,7 +391,7 @@ function generic(page: FakePage, by: string): Body {
  * fillers as the server's is (#1296), so with Confluence filling no wiki the
  * tree holds no space, no page read last and no *For you*.
  */
-function tree(): DocsTree {
+function tree(bulk: FakePage[]): DocsTree {
   if (!wikiFilled()) return { spaces: [], last_read: null, for_you: [] };
   const spaces: DocSpace[] = Object.entries(SPACES).map(([key, name]) => ({
     source_id: SOURCE,
@@ -506,7 +503,7 @@ function backlinks(title: string): DocPage["backlinks"] {
   }).map((p) => ({ entity_id: p.id, title: p.title, space_key: p.space }));
 }
 
-function page(args: Record<string, unknown>): DocPage {
+function page(args: Record<string, unknown>, bulk: FakePage[] = []): DocPage {
   const id = String(args["entityId"] ?? "");
   const found = PAGES.find((p) => p.id === id) ?? bulk.find((p) => p.id === id);
   if (!found) throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
@@ -579,7 +576,7 @@ function parse(q: string): { need: string[]; not: string[]; by?: string; updated
   return out;
 }
 
-function search(args: Record<string, unknown>): DocsHits | null {
+function search(args: Record<string, unknown>, bulk: FakePage[]): DocsHits | null {
   const started = performance.now();
   const q = parse(String(args["query"] ?? ""));
   const scope = args["space"] as { key: string } | null | undefined;
@@ -684,11 +681,12 @@ function queued(op: string, entity: string, payload: WriteOpPayload): QueuedWrit
 
 /** This feature's commands. */
 export function handlers(params: URLSearchParams): Handlers {
-  bulk = bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
+  // The bulk space's pages, none unless the page was opened with the switch.
+  const bulk = bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
   return {
-    docs_tree: () => tree(),
-    docs_page: (args) => page(args),
-    docs_search: (args) => search(args),
+    docs_tree: () => tree(bulk),
+    docs_page: (args) => page(args, bulk),
+    docs_search: (args) => search(args, bulk),
     docs_export_markdown: (args) => {
       const found = PAGES.find((p) => p.id === String(args["entityId"] ?? ""));
       const file = `${(found?.title ?? "untitled").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "")}.md`;

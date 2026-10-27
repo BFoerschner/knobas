@@ -391,6 +391,22 @@ test("docs: the tree and the search read the wiki's fillers alone, so a recorded
   expect((h["docs_tree"]!({}) as Tree).spaces).toHaveLength(tree.spaces.length);
 });
 
+test("docs: ?fake-docs-pages=<n> adds a BULK space of n pages folded under each other, searched by title (#2200)", () => {
+  const h = demoHandlers(new URLSearchParams("fake-docs-pages=100")) as Calls;
+  type Node = { entity_id: string; title: string; parent: string | null };
+  const spaces = (h["docs_tree"]!({}) as { spaces: { key: string; pages: Node[] }[] }).spaces;
+  const bulk = spaces.find((space) => space.key === "BULK")!;
+  expect(bulk.pages).toHaveLength(100);
+  expect(bulk.pages.filter((p) => p.parent === null)).toHaveLength(20);
+  expect(bulk.pages[20]).toMatchObject({ title: "Booking release 21", parent: bulk.pages[0]!.entity_id });
+  const found = h["docs_search"]!({ query: "booking release", space: { source_id: "confluence", key: "BULK" } }) as { hits: { title: string }[] };
+  expect(found.hits.map((hit) => hit.title)).toContain("Booking release 21");
+  expect((h["docs_page"]!({ entityId: bulk.pages[20]!.entity_id }) as { space: { key: string } }).space.key).toBe("BULK");
+  // Without the switch there is no such space.
+  const plain = (demoHandlers() as Calls)["docs_tree"]!({}) as { spaces: { key: string }[] };
+  expect(plain.spaces.map((space) => space.key)).not.toContain("BULK");
+});
+
 test("monitors: the roster reads monitoring's fillers alone, paused one included, and a recorded miss takes Kuma's off (#1297)", () => {
   const h = demoHandlers() as Calls;
   type Row = { source_id: string; tombstoned: boolean };
