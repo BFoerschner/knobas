@@ -6,9 +6,15 @@
  * ```svelte
  * const win = new Windowed({ count: () => rows.length, key: (i) => rows[i].id, estimate: 63, gap: 6 });
  *
- * <div class="list" {@attach win.list} style:padding-top="{win.before}px" style:padding-bottom="{win.after}px">
+ * <div class="list" {@attach win.list}>
  *   {#each win.slice(rows) as row (row.id)}<div {@attach win.row(row.id)}>…</div>{/each}
  * </div>
+ *
+ * <tbody {@attach win.list}>
+ *   {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach win.room("before")}></td></tr>{/if}
+ *   {#each win.slice(rows) as row (row.id)}<tr {@attach win.row(row.id)}>…</tr>{/each}
+ *   {#if win.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach win.room("after")}></td></tr>{/if}
+ * </tbody>
  * ```
  *
  * - `list` goes on the element that holds the rows (a `tbody` too). It reads
@@ -20,9 +26,11 @@
  *   stands for rows never drawn, and the row on screen is held where it was
  *   through each redraw (a row above drawn at other than its estimate, a
  *   table's columns widening), so scrolling never jumps.
- * - `before`/`after` are the undrawn rows' room: padding on a flex column
- *   (`gap` is its gap), or spacer rows in a table (`gap` 0; draw a spacer
- *   only when its room is above 0, so `:last-child` rules hold).
+ * - `before`/`after` are the undrawn rows' room. `list` pads a flex column
+ *   with them itself (`gap` is the column's gap). A table draws spacer rows
+ *   (`tr.tf-wgap`, `gap` 0) only while their room is above 0, so
+ *   `:last-child` rules hold, and `room(side)` sizes each one's cell. Both
+ *   go through the CSSOM: CSP refuses inline styles in markup.
  * - `slice(items)` is what to draw; `start` is its first index.
  * - `reveal(index)` scrolls an undrawn row near enough to draw; `flushSync`,
  *   then focus or `scrollIntoView` it as for any row (`j`/`k` past the window).
@@ -52,13 +60,13 @@ export interface WindowedOptions<K> {
 const ALL: Span = { start: 0, end: 0, before: 0, after: 0 };
 
 export class Windowed<K = string> {
-  readonly #o: Required<WindowedOptions<K>>;
-  readonly #h: Heights<K>;
+  readonly #options: Required<WindowedOptions<K>>;
+  readonly #heights: Heights<K>;
   /** The viewport, in the list's pixels: its top, and its height. */
-  #top = $state(0);
-  #height = $state(typeof window === "undefined" ? 0 : window.innerHeight);
-  /** Bumped when a measurement moves a row. */
-  #measured = $state(0);
+  #viewTop = $state(0);
+  #viewHeight = $state(typeof window === "undefined" ? 0 : window.innerHeight);
+  /** Bumped when a measurement moves a row, so the span is worked out again. */
+  #remeasured = $state(0);
   /** The list's ancestors that clip it, nearest first. */
   #clips: HTMLElement[] = [];
   #synced: readonly K[] | null = null;
@@ -67,21 +75,21 @@ export class Windowed<K = string> {
   readonly #drawn = new Set<HTMLElement>();
   /** A drawn row on screen and its top, taken at each scroll, held still through the redraw it causes. */
   #anchor: { el: HTMLElement; y: number } | null = null;
-  readonly #rows: ResizeObserver | null;
+  readonly #sizes: ResizeObserver | null;
 
   readonly #keys = $derived.by(() => {
-    const n = this.#o.count();
+    const n = this.#options.count();
     const keys = new Array<K>(n);
-    for (let i = 0; i < n; i++) keys[i] = this.#o.key(i);
+    for (let i = 0; i < n; i++) keys[i] = this.#options.key(i);
     return keys;
   });
 
   readonly #span = $derived.by((): Span & { on: boolean } => {
     const keys = this.#keys;
-    if (keys.length < this.#o.from) return { ...ALL, end: keys.length, on: false };
-    void this.#measured;
+    if (keys.length < this.#options.from) return { ...ALL, end: keys.length, on: false };
+    void this.#remeasured;
     this.#sync(keys);
-    return { ...this.#h.span(this.#top, this.#height, this.#o.overscan), on: true };
+    return { ...this.#heights.span(this.#viewTop, this.#viewHeight, this.#options.overscan), on: true };
   });
 
   /** Whether the list is long enough to window. */
@@ -92,9 +100,9 @@ export class Windowed<K = string> {
   readonly after = $derived(this.#span.after);
 
   constructor(options: WindowedOptions<K>) {
-    this.#o = { gap: 0, overscan: 600, from: 300, ...options };
-    this.#h = new Heights<K>(this.#o.estimate, this.#o.gap);
-    this.#rows = typeof ResizeObserver === "undefined" ? null : new ResizeObserver((entries) => this.#measure(entries));
+    this.#options = { gap: 0, overscan: 600, from: 300, ...options };
+    this.#heights = new Heights<K>(this.#options.estimate, this.#options.gap);
+    this.#sizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver((entries) => this.#measure(entries));
   }
 
   /** The rows to draw out of `items` (the list's rows, in the same order). */
@@ -110,6 +118,12 @@ export class Windowed<K = string> {
     $effect(() => {
       node.style.overflowAnchor = this.on ? "none" : "";
     });
+    // A flex column's room is its own padding; a table's is its spacer rows (`room`).
+    if (!(node instanceof HTMLTableSectionElement))
+      $effect(() => {
+        pad(node, "padding-top", this.before);
+        pad(node, "padding-bottom", this.after);
+      });
     // A table sizes its columns from the rows it draws, so drawing others
     // would re-wrap the rows on screen, and that changes which rows draw.
     // While windowed, its columns keep the widths the first drawn rows gave.
@@ -139,8 +153,8 @@ export class Windowed<K = string> {
         top = Math.max(top, box.top + clip.clientTop);
         bottom = Math.min(bottom, box.top + clip.clientTop + clip.clientHeight);
       }
-      this.#top = Math.max(0, top - node.getBoundingClientRect().top);
-      this.#height = Math.max(0, bottom - top);
+      this.#viewTop = Math.max(0, top - node.getBoundingClientRect().top);
+      this.#viewHeight = Math.max(0, bottom - top);
       this.#pin(top);
     };
     read();
@@ -158,14 +172,19 @@ export class Windowed<K = string> {
     };
   };
 
+  /** On a table's spacer cell: the room of the undrawn rows above (`before`) or below (`after`). */
+  room = (side: "before" | "after") => (node: HTMLElement) => {
+    $effect(() => pad(node, "height", this[side]));
+  };
+
   /** On each drawn row, with its key. */
   row = (key: K) => (node: HTMLElement) => {
     this.#keyOf.set(node, key);
     this.#drawn.add(node);
-    this.#rows?.observe(node);
+    this.#sizes?.observe(node);
     return () => {
       this.#drawn.delete(node);
-      this.#rows?.unobserve(node);
+      this.#sizes?.unobserve(node);
     };
   };
 
@@ -173,12 +192,12 @@ export class Windowed<K = string> {
   reveal(index: number) {
     if (!this.on || index < 0 || index >= this.#keys.length) return;
     this.#sync(this.#keys);
-    const top = this.#h.reveal(index, this.#top, this.#height);
-    if (top === this.#top) return;
+    const top = this.#heights.reveal(index, this.#viewTop, this.#viewHeight);
+    if (top === this.#viewTop) return;
     // The reader moved on purpose: nothing on screen is held where it was.
     this.#anchor = null;
-    this.#scrollBy(top - this.#top);
-    this.#top = top;
+    this.#scrollBy(top - this.#viewTop);
+    this.#viewTop = top;
   }
 
   /** Holds the first drawn row on screen at `top` (client pixels) and where it is. */
@@ -203,7 +222,7 @@ export class Windowed<K = string> {
   #sync(keys: readonly K[]) {
     if (keys === this.#synced) return;
     this.#synced = keys;
-    this.#h.keys(keys);
+    this.#heights.keys(keys);
   }
 
   #measure(entries: ResizeObserverEntry[]) {
@@ -211,7 +230,7 @@ export class Windowed<K = string> {
     for (const entry of entries) {
       const key = this.#keyOf.get(entry.target);
       const px = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
-      if (key !== undefined && px !== 0 && this.#h.set(key, px)) moved = true;
+      if (key !== undefined && px !== 0 && this.#heights.set(key, px)) moved = true;
     }
     // A row drawn above the screen at other than its estimate, or a table
     // whose columns widen for a new row, moves what the reader is looking
@@ -222,11 +241,17 @@ export class Windowed<K = string> {
       const off = anchor.el.getBoundingClientRect().top - anchor.y;
       if (Math.abs(off) >= 0.5) {
         this.#scrollBy(off);
-        this.#top += off;
+        this.#viewTop += off;
       }
     }
-    if (moved) this.#measured++;
+    if (moved) this.#remeasured++;
   }
+}
+
+/** Sets `px` of room through the CSSOM (CSP refuses inline styles in markup), none when 0. */
+function pad(node: HTMLElement, property: string, px: number) {
+  if (px > 0) node.style.setProperty(property, `${px}px`);
+  else node.style.removeProperty(property);
 }
 
 /** The ancestors whose overflow clips `node`, nearest first. */

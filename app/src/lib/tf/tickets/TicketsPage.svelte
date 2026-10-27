@@ -788,7 +788,7 @@
           </thead>
           <tbody {@attach win.list}>
             {#if win.before > 0}
-              <tr class="tf-wgap" aria-hidden="true"><td colspan={listColumns.length} style:height="{win.before}px"></td></tr>
+              <tr class="tf-wgap" aria-hidden="true"><td colspan={listColumns.length} {@attach win.room("before")}></td></tr>
             {/if}
             {#each win.slice(rows) as { card } (card.entity_id)}
               <tr
@@ -832,7 +832,7 @@
               </tr>
             {/each}
             {#if win.after > 0}
-              <tr class="tf-wgap" aria-hidden="true"><td colspan={listColumns.length} style:height="{win.after}px"></td></tr>
+              <tr class="tf-wgap" aria-hidden="true"><td colspan={listColumns.length} {@attach win.room("after")}></td></tr>
             {/if}
           </tbody>
         </table>

@@ -26,7 +26,6 @@ export class Heights<K = string> {
   /** `offsets[i]` is row i's top; `offsets[n]` is the end of the last slot (its gap included). */
   #offsets = new Float64Array(1);
   #stale = false;
-  #index: Map<K, number> | null = null;
 
   constructor(estimate: number, gap = 0) {
     this.#estimate = estimate;
@@ -37,7 +36,6 @@ export class Heights<K = string> {
   keys(keys: readonly K[]) {
     this.#keys = keys;
     this.#stale = true;
-    this.#index = null;
   }
 
   /** Records a drawn row's height; `true` when that moves anything. */
@@ -52,12 +50,6 @@ export class Heights<K = string> {
   /** A row's measured height, else the estimate. */
   heightOf(key: K): number {
     return this.#measured.get(key) ?? this.#estimate;
-  }
-
-  /** Where a key sits in the list, or -1. */
-  indexOf(key: K): number {
-    if (this.#index === null) this.#index = new Map(this.#keys.map((k, i) => [k, i]));
-    return this.#index.get(key) ?? -1;
   }
 
   /** Row `index`'s top. */

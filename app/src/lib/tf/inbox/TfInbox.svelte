@@ -236,12 +236,7 @@
   {#if inbox.error !== null}
     <p class="tf-ifail">{inbox.error}</p>
   {/if}
-  <div
-    class="tf-inbox"
-    {@attach win.list}
-    style:padding-top={win.before > 0 ? `${win.before}px` : null}
-    style:padding-bottom={win.after > 0 ? `${win.after}px` : null}
-  >
+  <div class="tf-inbox" {@attach win.list}>
     {#each win.slice(rows) as entry (entry.item.key)}
       {@const item = entry.item}
       {@const open = opener(item)}
