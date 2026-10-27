@@ -10,8 +10,9 @@
   `⌖` or `T` shows only what it touches; the arrow keys move between tiles.
   *Find* dims what does not match and opens the folds that hold a match;
   `Enter` jumps to the next, and opens a group's "N more, K found" when the
-  next match waits behind it (#2212). The toolbar holds the view menu, the environment
-  chips, *Problems and what they touch* and *Layers…* (`TfDepsLayers.svelte`).
+  next match waits behind it (#2212). The toolbar holds the view menu, the
+  environment chips, *Problems and what they touch* and *Layers…*
+  (`TfDepsLayers.svelte`).
 
   The reader's gestures (Find, the trace, folds opened by hand) hold for the
   page; the view's draft holds for the session (`views.svelte.ts`).

@@ -131,21 +131,28 @@ export function matcher(read: Dependencies, query: string): (item: DepItem) => b
 }
 
 /** The read's items in tile order (problems first, then by name), sorted once per read: a keystroke need not sort them again (#2212). */
-const sorted = new WeakMap<Dependencies, DepItem[]>();
+const sortedByRead = new WeakMap<Dependencies, DepItem[]>();
 function sortedOf(read: Dependencies): DepItem[] {
-  let items = sorted.get(read);
+  let items = sortedByRead.get(read);
   if (items === undefined) {
     items = [...read.items].sort(
       (a, b) => ORDER.indexOf(stateOf(a).tone) - ORDER.indexOf(stateOf(b).tone) || a.name.localeCompare(b.name),
     );
-    sorted.set(read, items);
+    sortedByRead.set(read, items);
   }
   return items;
 }
 
 /** What *Find* searches in each item, kept per read so a keystroke does not build it again (#2212). */
-const searched = new WeakMap<Dependencies, WeakMap<DepItem, string>>();
-const textsOf = (read: Dependencies) => searched.get(read) ?? searched.set(read, new WeakMap()).get(read)!;
+const searchedByRead = new WeakMap<Dependencies, WeakMap<DepItem, string>>();
+function textsOf(read: Dependencies): WeakMap<DepItem, string> {
+  let texts = searchedByRead.get(read);
+  if (texts === undefined) {
+    texts = new WeakMap();
+    searchedByRead.set(read, texts);
+  }
+  return texts;
+}
 
 /** Which items the view, the trace and the filters leave. */
 export function visibleOf(read: Dependencies, graph: Graph, settings: DepViewSettings, trace: string | null): (item: DepItem) => boolean {
