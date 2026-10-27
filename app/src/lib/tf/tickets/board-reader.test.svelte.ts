@@ -194,6 +194,18 @@ test("the list's Show N more reads every column whole and the board keeps its ca
   expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([8, 3]);
 });
 
+// #2200's class: the list's Show N more reads every ticket, and a deep proxy
+// over thousands of cards made each draw subscribe to every field it read.
+test("the board drawn is the answer as read, not a reactive copy of each card", async () => {
+  const { reader, reads } = fakes();
+  reader.open(ALL, NO_WORDS);
+  const answer = board(column("To Do", 12), column("Done", 5));
+  reads[0]!.answer(answer);
+  await flush();
+  expect(reader.board).toBe(answer);
+  expect(reader.bands[0]!.drawn[0]!.cards[0]).toBe(answer.columns[0]!.cards[0]);
+});
+
 test("the total is counted once per base: from a base answer, or one count read for a filter", async () => {
   const { reader, reads, asked } = fakes();
   // Coming back to a view with words typed: the whole is counted once, apart.

@@ -200,8 +200,13 @@ export interface BoardReaderOptions {
 
 export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderOptions): BoardReader {
   const { typingPause, sessions } = options;
+  /**
+   * The last answer, replaced whole and never changed in place: `$state.raw`,
+   * since the list's *Show N more* reads every ticket and a deep proxy over
+   * thousands of cards made each draw subscribe to every field it read (#2200's cause).
+   */
+  let board = $state.raw<MiniBoard | null>(null);
   const state = $state({
-    board: null as MiniBoard | null,
     total: null as number | null,
     failed: null as string | null,
     lanesShown: LANES_AT_FIRST,
@@ -229,9 +234,9 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   const laned = $derived(layout === "board" && lanes !== "none");
   const typing = $derived(state.filter.words);
   /** The board's columns as the view's own columns gather them (R-3.15). */
-  const cols = $derived(viewColumns(state.board?.columns ?? [], view.columns));
+  const cols = $derived(viewColumns(board?.columns ?? [], view.columns));
   const bands = $derived(
-    boardLanes(state.board ?? emptyBoard(), laned ? lanes : "none", (columns) => viewColumns(columns, view.columns)).map(
+    boardLanes(board ?? emptyBoard(), laned ? lanes : "none", (columns) => viewColumns(columns, view.columns)).map(
       (lane) => ({
         lane,
         drawn: lane.columns.map((column) => {
@@ -253,13 +258,13 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
    */
   function capFor(): number | null {
     const cap = typing ? TYPED_CAP : COLUMN_CAP;
-    const board = state.board;
-    if ((expanded.length === 0 && !listAll) || board === null) return cap;
+    const read = board;
+    if ((expanded.length === 0 && !listAll) || read === null) return cap;
     const wanted = laned
       ? bands.flatMap(({ lane, drawn }) =>
           drawn.filter(({ column }) => expanded.includes(expandKey(lane, column))).map(({ column }) => column.total),
         )
-      : (listAll ? board.columns : cols.filter((column) => expanded.includes(columnKey(column)))).map(
+      : (listAll ? read.columns : cols.filter((column) => expanded.includes(columnKey(column)))).map(
           (column) => column.total,
         );
     return Math.max(cap, ...wanted);
@@ -286,7 +291,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       .board(capFor(), query === "" ? null : query, savedView, lanesAsked(), TICKET_SYSTEM)
       .then((answer) => {
         if (mine !== reading) return;
-        state.board = answer;
+        board = answer;
         state.failed = null;
         if (query === base) state.total = sum(answer);
       })
@@ -307,7 +312,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
 
   return {
     get board() {
-      return state.board;
+      return board;
     },
     get total() {
       return state.total;
@@ -316,7 +321,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       return state.failed;
     },
     get shown() {
-      return state.board === null ? null : sum(state.board);
+      return board === null ? null : sum(board);
     },
     get expanded() {
       return expanded;
@@ -349,7 +354,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       return state.around;
     },
     open(scope, filter) {
-      state.board = null;
+      board = null;
       state.total = null;
       state.failed = null;
       reading += 1;
