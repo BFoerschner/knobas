@@ -62,7 +62,8 @@
     rereads?: number;
   } = $props();
 
-  let log = $state<RunLog | null>(null);
+  /** Raw: 20,000 lines behind a deep proxy made every read of them a proxy trap (#2211). The log is only ever replaced. */
+  let log = $state.raw<RunLog | null>(null);
   let readFailed = $state<string | null>(null);
   let typed = $state("");
   let errorsOnly = $state(false);
