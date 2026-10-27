@@ -159,12 +159,13 @@
               <button
                 type="button"
                 class="tf-dp-more"
+                class:tf-dp-hit={group.more.hits > 0}
                 class:tf-dp-dim={dim(group.more.el)}
                 class:tf-dp-lit={glow(group.more.el)}
                 data-el={group.more.el}
                 onclick={() => onmore(group.key)}
               >
-                {moreLine(group.more.count, group.more.wrong)}
+                {moreLine(group.more.count, group.more.wrong, group.more.hits)}
               </button>
             {/if}
           </div>

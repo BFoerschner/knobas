@@ -258,6 +258,34 @@ test("Find dims what does not match and counts the matches (R-11.18)", async () 
   expect(document.activeElement).toBe(tile("asset:payouts").querySelector("a"));
 });
 
+test("Enter steps past the drawn matches into the group's more, which opens on the next match (#2212)", async () => {
+  const services = Array.from({ length: 40 }, (_, n) =>
+    item({ id: `asset:s${n}`, kind: "service", name: `svc-${String(n).padStart(2, "0")}`, health: "ok" }),
+  );
+  render({ ...READ, items: services, relations: [] });
+  await settle();
+  const find = target.querySelector<HTMLInputElement>("input[aria-label='Find']")!;
+  find.value = "svc";
+  find.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(target.querySelector(".tf-dp-qn")!.textContent).toBe("40 found, Enter for the next");
+  expect(target.querySelectorAll(".tf-dp-t")).toHaveLength(24);
+  const more = target.querySelector<HTMLButtonElement>(".tf-dp-more")!;
+  expect(more.textContent!.trim()).toBe("16 more, 16 found");
+  expect(more.classList.contains("tf-dp-hit")).toBe(true);
+  const enter = async () => {
+    find.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await settle();
+  };
+  for (let n = 0; n < 24; n++) await enter();
+  expect(document.activeElement).toBe(tile("asset:s23").querySelector("a"));
+  await enter();
+  expect(target.querySelector(".tf-dp-more")).toBeNull();
+  expect(document.activeElement).toBe(tile("asset:s24").querySelector("a"));
+  await enter();
+  expect(document.activeElement).toBe(tile("asset:s25").querySelector("a"));
+});
+
 test("the environment chips and the problems toggle change the view's draft", async () => {
   const state = render();
   await settle();
