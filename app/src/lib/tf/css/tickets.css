@@ -68,6 +68,8 @@
 .tf-tbl .tf-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
 .tf .tf-nowrap { white-space: nowrap; }
 .tf-list-more { align-self: flex-start; padding: 5px 12px; }
+/* A windowed list's room for its undrawn rows (#2209). */
+.tf-tbl .tf-wgap td { padding: 0; border: 0; }
 .tf-preview {
   border-left: 1px solid var(--rule); background: var(--sheet); overflow: auto; padding: 18px;
   display: flex; flex-direction: column; gap: 14px; min-height: 0;
