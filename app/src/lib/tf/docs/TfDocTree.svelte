@@ -41,9 +41,14 @@
   const open = $derived(opened ?? own);
   const nodes = $derived(index.get(parent) ?? []);
 
-  function toggled(id: string, now: boolean): void {
-    if (now) open.add(id);
-    else open.delete(id);
+  /**
+   * The reader opened or closed fold `id`. A fold opening because it holds the
+   * open page is not kept, so it closes again when the reader moves on, as it
+   * did; one the reader opened stays open when the fold around it is opened again.
+   */
+  function toggled(id: string, now: boolean, starts: boolean): void {
+    if (now && !starts) open.add(id);
+    else if (!now) open.delete(id);
   }
 </script>
 
@@ -51,7 +56,7 @@
   {@const queued = echoesOn(node.entity_id, "page")}
   {@const starts = queued.length > 0 || holding.has(node.entity_id)}
   {#if index.has(node.entity_id) || queued.length > 0}
-    <details open={starts} ontoggle={(event) => toggled(node.entity_id, event.currentTarget.open)}>
+    <details open={starts || open.has(node.entity_id)} ontoggle={(event) => toggled(node.entity_id, event.currentTarget.open, starts)}>
       <summary class:tf-cur={node.entity_id === current}
         ><a class="tf-sl" href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}
           >{node.title}</a

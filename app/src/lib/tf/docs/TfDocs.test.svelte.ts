@@ -279,6 +279,20 @@ test("a 4,000-page space draws its tree in one pass over the pages, and a closed
   expect([...fold.querySelectorAll(":scope > .tf-fold-in > a, :scope > .tf-fold-in > details > summary a")].map((a) => a.textContent)).toEqual(
     Array.from({ length: 8 }, (_, k) => `Page ${String(28 + k).padStart(5, "0")}`),
   );
+
+  // A fold the reader opened inside it is open again, rows and all, when it is opened again.
+  const toggle = async (d: HTMLDetailsElement, open: boolean) => {
+    d.open = open;
+    d.dispatchEvent(new Event("toggle"));
+    await settle();
+  };
+  const inner = () => [...fold.querySelectorAll<HTMLDetailsElement>("details")].find((d) => d.querySelector("summary a")?.textContent === "Page 00028")!;
+  await toggle(inner(), true);
+  await toggle(fold, false);
+  expect(fold.querySelector(":scope > .tf-fold-in a")).toBeNull();
+  await toggle(fold, true);
+  expect(inner().open).toBe(true);
+  expect(inner().querySelectorAll(":scope > .tf-fold-in > a, :scope > .tf-fold-in > details > summary a")).toHaveLength(8);
 });
 
 test("the body: a live ticket chip, my mention in yellow, a page link, code with its language, a table, the placeholder", async () => {
@@ -394,7 +408,7 @@ function type(value: string): HTMLInputElement {
 
 const button = (label: string) => [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
 
-test("the search names its scope, searches on every keystroke in the picker's space and lists the hits", async () => {
+test("the search names its scope, searches in the picker's space and lists the hits", async () => {
   const io = await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS) }));
   const input = target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!;
   expect(input.placeholder).toBe("Search Operations");
