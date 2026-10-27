@@ -148,11 +148,13 @@ function snoozed(): InboxEntry[] {
   return [row("jira", "Tidewater Jira", "Thursday 3 Sep 2026"), row("gitea", "Tidewater Gitea", "Monday 31 Aug 2026")];
 }
 
-/** Whether an alert row's monitor has been acked (`monitors.ts` keeps the ack). */
-function acked(entry: InboxEntry): boolean {
-  if (entry.item.category !== "alert") return false;
-  const monitor = entry.item.key.slice("alert:".length);
-  return fakeOpenAlerts().some((alert) => alert.monitor_id === monitor && alert.acked_at !== null);
+/**
+ * Whether an alert row's monitor has been acked (`monitors.ts` keeps the ack),
+ * as a test made once per read: the alerts are read once, not once per row.
+ */
+function ackedNow(): (entry: InboxEntry) => boolean {
+  const acked = new Set(fakeOpenAlerts().filter((alert) => alert.acked_at !== null).map((alert) => alert.monitor_id));
+  return (entry) => entry.item.category === "alert" && acked.has(entry.item.key.slice("alert:".length));
 }
 
 /**
@@ -197,10 +199,14 @@ export function handlers(params: URLSearchParams): Handlers {
 
   return {
     inbox_items: (args) => {
+      const acked = ackedNow();
       live = live.filter((candidate) => !acked(candidate));
       return (args["shelf"] as InboxShelf) === "snoozed" ? later.slice() : live.slice();
     },
-    inbox_count: () => live.filter((candidate) => !acked(candidate)).length,
+    inbox_count: () => {
+      const acked = ackedNow();
+      return live.filter((candidate) => !acked(candidate)).length;
+    },
     snooze_inbox_item: (args) => {
       const moved = take(args["itemKey"]);
       moved.item.snoozed_until = String(args["until"]);
