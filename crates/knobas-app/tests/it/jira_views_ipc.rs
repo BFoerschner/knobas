@@ -185,6 +185,23 @@ async fn a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws() {
     );
 }
 
+/// A ticket withdrawn from the mirror leaves its view's count (#2193, the
+/// count read live off `sync.item` rather than `sync.live_item`). A member
+/// is its view's own source's ticket, and a view whose source is turned off
+/// is not listed, so the tombstone is the half of live a count can meet.
+#[tokio::test]
+async fn a_jira_view_counts_only_the_tickets_the_mirror_holds_live() {
+    let pool = pool().await;
+    let (p, id, _) = seeded(&pool).await;
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(format!("jira:{p}-2"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let row = listed(&pool, &id).await.expect("the Jira view is listed");
+    assert_eq!(row.count, Some(3), "{p}-1, {p}-3 and {p}-4");
+}
+
 #[tokio::test]
 async fn a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns() {
     let pool = pool().await;

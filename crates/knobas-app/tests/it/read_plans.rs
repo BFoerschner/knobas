@@ -40,6 +40,11 @@ const SMALL: &[&str] = &[
     // *This job*'s run branch candidates, one row per source and run kind
     // (#2185).
     "branch_paths",
+    // `ticket_views`' saved views by project and liveness (#2193): one row
+    // per view, project its members name and live or not, so bounded by the
+    // user's views times the projects one view spans, never the members,
+    // which are read once.
+    "view_projects",
 ];
 
 /// The inbox rules whose whole statement #778 and #785 reshaped. Not here,
@@ -170,6 +175,7 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
     .execute(&pool)
     .await
     .unwrap();
+    saved_views(&pool).await;
     // A tombstone and a disabled source, so both exclusion sets hold a row.
     sqlx::query("update knobas.entity set deleted_at = now() where id = 'jira0:JIRA0-7'")
         .execute(&pool)
@@ -210,6 +216,95 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
         .await
         .unwrap();
     (pool, declarations)
+}
+
+/// Three Jira views, projected as a sync projects them (#2193), in #2182's
+/// shape: a board of every ticket of `jira0`, a sprint of 60 of
+/// `jira1`'s, and a filter of every ticket of `jira2` with three keys of a
+/// project that source does not sync, which names its projects so the
+/// view's `unsynced` has a project to count.
+async fn saved_views(pool: &PgPool) {
+    sqlx::query("update knobas.source_config set config = config || '{\"projects\": [\"JIRA2\"]}' where id = 'jira2'")
+        .execute(pool)
+        .await
+        .unwrap();
+    for (source, name, cap, extra, view) in [
+        (
+            "jira0",
+            "board-1",
+            100_000_i64,
+            &[][..],
+            serde_json::json!({
+                "kind": "board", "id": 1, "type": "kanban", "jql": "project = JIRA0",
+                "query": "(project = JIRA0)", "sprint": null,
+                "columns": [{ "name": "To Do", "statuses": ["To Do"], "limit": null }],
+            }),
+        ),
+        (
+            "jira1",
+            "board-2",
+            60,
+            &[][..],
+            serde_json::json!({
+                "kind": "board", "id": 2, "type": "scrum", "jql": "project = JIRA1",
+                "query": "(project = JIRA1)",
+                "sprint": { "id": 9, "name": "Sprint 9", "end_date": null },
+                "columns": [{ "name": "To Do", "statuses": ["To Do"], "limit": null }],
+            }),
+        ),
+        (
+            "jira2",
+            "filter-3",
+            100_000,
+            &["WEB-1", "WEB-2", "WEB-3"][..],
+            serde_json::json!({
+                "kind": "filter", "id": 3, "type": null, "jql": "project = JIRA2",
+                "query": "(project = JIRA2)", "sub_query": null,
+            }),
+        ),
+    ] {
+        let id = format!("{source}:{name}");
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'jira_view', $2)")
+            .bind(&id)
+            .bind(name)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+             select $1, $2, 'jira_view', $3, $3,
+                    $4 || jsonb_build_object('keys', (
+                      select to_jsonb(array_agg(k order by k)) from (
+                        (select substring(entity_id from ':(.*)$') as k from sync.item
+                          where source_id = $2 and kind = 'ticket'
+                          order by entity_id limit $5)
+                        union all select unnest($6::text[])) keys)),
+                    now()",
+        )
+        .bind(&id)
+        .bind(source)
+        .bind(name)
+        .bind(view)
+        .bind(cap)
+        .bind(extra)
+        .execute(pool)
+        .await
+        .unwrap();
+        let declared =
+            knobas_sync::saved_views::declared(&knobas_source_jira::descriptor_template())
+                .expect("Jira declares saved views");
+        let mut tx = pool.begin().await.unwrap();
+        knobas_sync::saved_views::project(&mut tx, source, &declared)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+    }
+    let members: i64 = sqlx::query_scalar("select count(*) from sync.saved_view_member")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    // `mirror`'s 1,500 tickets a source, the sprint's 60, the three keys.
+    assert_eq!(members, 1_500 + 60 + 1_503, "every view holds its members");
 }
 
 /// `explain (format json)` of `sql`, bound with what `bind` adds.
@@ -609,6 +704,27 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
         knobas_db::plan_shape::unbounded_reads(&plan, "monitor_sample")
             .into_iter()
             .map(|f| format!("alert roster: {f}")),
+    );
+
+    // `ticket_views`' counts of the three Jira views (#2193): live by the
+    // tombstones read once, as the board's are, never a probe of
+    // `knobas.entity` per member.
+    let views = vec![
+        "jira0:board-1".to_owned(),
+        "jira1:board-2".to_owned(),
+        "jira2:filter-3".to_owned(),
+    ];
+    let plan = explain(
+        &pool,
+        knobas_app::ticket_views::planned_saved_view_sources(),
+        |q| q.bind(views.clone()),
+    )
+    .await;
+    wrong.extend(shapes("ticket_views counts", &plan));
+    wrong.extend(
+        entity_probes(&plan[0]["Plan"])
+            .into_iter()
+            .map(|f| format!("ticket_views counts: {f}")),
     );
 
     let state = if analyzed {
