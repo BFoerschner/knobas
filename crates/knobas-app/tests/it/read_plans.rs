@@ -40,8 +40,10 @@ const SMALL: &[&str] = &[
     // *This job*'s run branch candidates, one row per source and run kind
     // (#2185).
     "branch_paths",
-    // `ticket_views`' saved views by project and liveness, one row per view,
-    // project and live or not, its members read once (#2193).
+    // `ticket_views`' saved views by project and liveness (#2193): one row
+    // per view, project its members name and live or not, so bounded by the
+    // user's views times the projects one view spans, never the members,
+    // which are read once.
     "view_projects",
 ];
 
@@ -217,7 +219,7 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
 }
 
 /// Three Jira views, projected as a sync projects them (#2193), in #2182's
-/// proportions: a board of every ticket of `jira0`, a sprint of 60 of
+/// shape: a board of every ticket of `jira0`, a sprint of 60 of
 /// `jira1`'s, and a filter of every ticket of `jira2` with three keys of a
 /// project that source does not sync, which names its projects so the
 /// view's `unsynced` has a project to count.
@@ -301,6 +303,7 @@ async fn saved_views(pool: &PgPool) {
         .fetch_one(pool)
         .await
         .unwrap();
+    // `mirror`'s 1,500 tickets a source, the sprint's 60, the three keys.
     assert_eq!(members, 1_500 + 60 + 1_503, "every view holds its members");
 }
 
