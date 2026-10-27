@@ -172,7 +172,7 @@ export class Windowed<K = string> {
     // Scroll events do not bubble; a capturing listener hears every box's.
     document.addEventListener("scroll", read, { capture: true, passive: true });
     window.addEventListener("resize", read, { passive: true });
-    const resized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(read);
+    const resized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => read());
     resized?.observe(node);
     for (const clip of clips) resized?.observe(clip);
     return () => {
