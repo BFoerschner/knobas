@@ -55,3 +55,32 @@ test("a windowed table with no header row freezes its columns at its first drawn
   expect(table.querySelector("colgroup")).toBeNull();
   stop();
 });
+
+test("a list that scrolls itself reads the viewport from its own scroll, keeps its own padding around the room, and says where an undrawn row sits (#2210)", () => {
+  // jsdom lays nothing out: the list is a 300 px box at the top of the window.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({ width: 200, height: 300, top: 0, bottom: 300, left: 0, right: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect,
+  );
+  document.body.innerHTML = '<ol style="overflow-y: auto; padding-top: 6px; padding-bottom: 6px"></ol>';
+  const list = document.querySelector("ol")!;
+  let scrolled = 0;
+  Object.defineProperty(list, "scrollTop", { get: () => scrolled, set: (px: number) => (scrolled = px) });
+  Object.defineProperty(list, "clientHeight", { value: 300 });
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20, overscan: 0 });
+  const stop = $effect.root(() => {
+    win.list(list);
+  });
+  flushSync();
+  expect([win.start, win.end]).toEqual([0, 15]);
+  expect(list.style.paddingTop).toBe("");
+
+  // Scrolled 2,000 px into itself: its 6 px of padding come first, so row 99 is the first on screen.
+  scrolled = 2000;
+  list.dispatchEvent(new Event("scroll"));
+  flushSync();
+  expect([win.start, win.end]).toEqual([99, 115]);
+  expect(list.style.paddingTop).toBe(`${6 + 99 * 20}px`);
+  expect(list.style.paddingBottom).toBe(`${6 + (1000 - 115) * 20}px`);
+  expect(win.offsetOf(500)).toBe(500 * 20);
+  stop();
+});
