@@ -11,11 +11,15 @@
  * </div>
  * ```
  *
- * - `list` goes on the element that holds the rows (a `tbody` too). It finds
- *   the nearest scrolling ancestor itself, so the view's layout decides.
+ * - `list` goes on the element that holds the rows (a `tbody` too). It reads
+ *   what of the list is on screen from the boxes around it, so the view's
+ *   layout decides. On a `tbody`, while windowed, the table's columns keep
+ *   the widths its first drawn rows gave (`table-layout: fixed`): columns
+ *   sized by whichever rows are drawn would re-wrap the rows on screen.
  * - `row(key)` goes on each drawn row: its height is measured, the estimate
- *   stands for rows never drawn, and a row measured above the viewport moves
- *   the scroll by its error, so scrolling up never jumps.
+ *   stands for rows never drawn, and the row on screen is held where it was
+ *   through each redraw (a row above drawn at other than its estimate, a
+ *   table's columns widening), so scrolling never jumps.
  * - `before`/`after` are the undrawn rows' room: padding on a flex column
  *   (`gap` is its gap), or spacer rows in a table (`gap` 0; draw a spacer
  *   only when its room is above 0, so `:last-child` rules hold).
@@ -59,6 +63,10 @@ export class Windowed<K = string> {
   #clips: HTMLElement[] = [];
   #synced: readonly K[] | null = null;
   readonly #keyOf = new WeakMap<Element, K>();
+  /** The rows in the DOM now. */
+  readonly #drawn = new Set<HTMLElement>();
+  /** A drawn row on screen and its top, taken at each scroll, held still through the redraw it causes. */
+  #anchor: { el: HTMLElement; y: number } | null = null;
   readonly #rows: ResizeObserver | null;
 
   readonly #keys = $derived.by(() => {
@@ -102,6 +110,24 @@ export class Windowed<K = string> {
     $effect(() => {
       node.style.overflowAnchor = this.on ? "none" : "";
     });
+    // A table sizes its columns from the rows it draws, so drawing others
+    // would re-wrap the rows on screen, and that changes which rows draw.
+    // While windowed, its columns keep the widths the first drawn rows gave.
+    const table = node instanceof HTMLTableSectionElement ? node.closest("table") : null;
+    if (table !== null)
+      $effect(() => {
+        if (!this.on) return;
+        const width = table.getBoundingClientRect().width;
+        const heads = [...(table.tHead?.rows[0]?.cells ?? [])];
+        if (width === 0 || heads.length === 0) return;
+        const shares = heads.map((head) => (head.getBoundingClientRect().width / width) * 100);
+        heads.forEach((head, i) => (head.style.width = `${shares[i]}%`));
+        table.style.tableLayout = "fixed";
+        return () => {
+          for (const head of heads) head.style.width = "";
+          table.style.tableLayout = "";
+        };
+      });
     // What of the list is on screen: the window cut by every ancestor that
     // clips, so a layout whose scrolling box changes with the width (Tickets
     // below 900 px) needs nothing from the view.
@@ -115,6 +141,7 @@ export class Windowed<K = string> {
       }
       this.#top = Math.max(0, top - node.getBoundingClientRect().top);
       this.#height = Math.max(0, bottom - top);
+      this.#pin(top);
     };
     read();
     // Scroll events do not bubble; a capturing listener hears every box's.
@@ -134,8 +161,12 @@ export class Windowed<K = string> {
   /** On each drawn row, with its key. */
   row = (key: K) => (node: HTMLElement) => {
     this.#keyOf.set(node, key);
+    this.#drawn.add(node);
     this.#rows?.observe(node);
-    return () => this.#rows?.unobserve(node);
+    return () => {
+      this.#drawn.delete(node);
+      this.#rows?.unobserve(node);
+    };
   };
 
   /** Brings row `index` into the drawn rows, scrolling as little as it can. */
@@ -144,8 +175,20 @@ export class Windowed<K = string> {
     this.#sync(this.#keys);
     const top = this.#h.reveal(index, this.#top, this.#height);
     if (top === this.#top) return;
+    // The reader moved on purpose: nothing on screen is held where it was.
+    this.#anchor = null;
     this.#scrollBy(top - this.#top);
     this.#top = top;
+  }
+
+  /** Holds the first drawn row on screen at `top` (client pixels) and where it is. */
+  #pin(top: number) {
+    let best: { el: HTMLElement; y: number } | null = null;
+    for (const el of this.#drawn) {
+      const box = el.getBoundingClientRect();
+      if (box.bottom > top && (best === null || box.top < best.y)) best = { el, y: box.top };
+    }
+    this.#anchor = best;
   }
 
   /** Scrolls the nearest box that has something to scroll, else the page. */
@@ -164,27 +207,25 @@ export class Windowed<K = string> {
   }
 
   #measure(entries: ResizeObserverEntry[]) {
-    let shift = 0;
     let moved = false;
     for (const entry of entries) {
       const key = this.#keyOf.get(entry.target);
       const px = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
-      if (key === undefined || px === 0) continue;
-      const was = this.#h.heightOf(key);
-      const at = this.on ? this.#h.indexOf(key) : -1;
-      const above = at >= 0 && this.#h.offsetOf(at) < this.#top;
-      if (!this.#h.set(key, px)) continue;
-      moved = true;
-      if (above) shift += px - was;
+      if (key !== undefined && px !== 0 && this.#h.set(key, px)) moved = true;
     }
-    if (!moved) return;
-    // A row above the viewport drawn taller or shorter than its estimate
-    // would push what is on screen; scroll by the difference instead.
-    if (shift !== 0) {
-      this.#scrollBy(shift);
-      this.#top += shift;
+    // A row drawn above the screen at other than its estimate, or a table
+    // whose columns widen for a new row, moves what the reader is looking
+    // at; scroll it back to where it was before the rows changed. WebKit
+    // has no CSS scroll anchoring to do this.
+    const anchor = this.#anchor;
+    if (this.on && anchor !== null && anchor.el.isConnected) {
+      const off = anchor.el.getBoundingClientRect().top - anchor.y;
+      if (Math.abs(off) >= 0.5) {
+        this.#scrollBy(off);
+        this.#top += off;
+      }
     }
-    this.#measured++;
+    if (moved) this.#measured++;
   }
 }
 
