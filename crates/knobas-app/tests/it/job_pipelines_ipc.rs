@@ -195,6 +195,14 @@ async fn a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link() {
     let elsewhere = config(&pool, &tc, "Elsewhere").await;
     run(&pool, &tc, 4, "Elsewhere", "feature/PAY-1-x-other", "ccc").await;
     run(&pool, &tc, 5, "Elsewhere", "main", "ddd").await;
+    // A run on the job's branch that has since been deleted at the source.
+    let gone = config(&pool, &tc, "Gone").await;
+    let gone_run = run(&pool, &tc, 6, "Gone", "feature/PAY-1-x", "eee").await;
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&gone_run)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let all = job_pipelines_inner(
         &pool,
@@ -226,6 +234,7 @@ async fn a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link() {
         )
     );
     assert_eq!(reasons(&all, &elsewhere), None);
+    assert_eq!(reasons(&all, &gone), None, "a tombstoned run builds nothing");
     assert_eq!(all.len(), 4, "each pipeline once: {all:?}");
 
     // A run's branch is stored as the run is written (#2192): a later sync
