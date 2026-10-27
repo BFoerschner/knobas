@@ -5,6 +5,7 @@
   newest first: the time, the item as one sentence (an err dot for a failure),
   its actions, and a second line with its kind and the job it belongs to as a
   link. The snoozed shelf is one line under the list, with return dates.
+  A long inbox draws only the rows near the viewport (`shell/windowed.svelte.ts`, #2209).
 
   Over the inbox store the rooms UI already uses (`inbox/inbox.svelte.ts`:
   `inbox_items`, `inbox_count`, `snooze_inbox_item`, `complete_inbox_item`,
@@ -34,6 +35,7 @@
   import { toastQueued } from "../../shell/queued-toast";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
+  import { Windowed } from "../../shell/windowed.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
@@ -112,6 +114,8 @@
     visible(inbox.stream, { scope, job, kinds: filter.chips["kind"] ?? [], text: filter.text }, index),
   );
   const shelf = $derived(snoozedLine(inbox.snoozed));
+  /** Thousands of rows draw only those near the viewport (#2209); `.tf-ib` is 63 px, 84 wrapped, 6 apart. */
+  const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.item.key, estimate: 63, gap: 6 });
 
   $effect(() => {
     if (!ready) return;
@@ -232,13 +236,18 @@
   {#if inbox.error !== null}
     <p class="tf-ifail">{inbox.error}</p>
   {/if}
-  <div class="tf-inbox">
-    {#each rows as entry (entry.item.key)}
+  <div
+    class="tf-inbox"
+    {@attach win.list}
+    style:padding-top={win.before > 0 ? `${win.before}px` : null}
+    style:padding-bottom={win.after > 0 ? `${win.after}px` : null}
+  >
+    {#each win.slice(rows) as entry (entry.item.key)}
       {@const item = entry.item}
       {@const open = opener(item)}
       {@const belongs = index.jobOf(item)}
       {@const belongsId = index.jobIdOf(item)}
-      <div class="tf-ib">
+      <div class="tf-ib" {@attach win.row(item.key)}>
         <time datetime={item.occurred_at}>{clockLabel(item.occurred_at, now, true)}</time>
         <div class="tf-what">
           {#if failed(item)}<span class="tf-dot tf-err"></span>{" "}{/if}<Marked text={sentence(item)} typed={filter.text} />

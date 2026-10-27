@@ -4,8 +4,6 @@
 .tf-ib {
   display: grid; grid-template-columns: 108px minmax(0, 1fr) auto; gap: 2px 14px; padding: 10px 14px;
   background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; align-items: center;
-  /* A row off screen skips style and layout (the perf audit after #2200: 20,000 rows took up to 3.6 s a keystroke). */
-  content-visibility: auto; contain-intrinsic-size: auto 62px;
 }
 .tf-ib time { white-space: nowrap; font-size: var(--t-xs); color: var(--ink-2); grid-row: 1 / span 2; font-variant-numeric: tabular-nums; }
 .tf-ib .tf-what { font-weight: 600; }

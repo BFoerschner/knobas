@@ -405,10 +405,8 @@ test("the changed files list sticks: its box is as tall as the diffs beside it (
   expect(block(code, ".tf-prfiles-nav")).toMatch(/align-self:\s*stretch/);
 });
 
-test("an Inbox row off screen skips style and layout, so thousands of rows filter without a stall (perf audit after #2200)", () => {
-  const row = block(code, ".tf-ib");
-  expect(row).toContain("content-visibility: auto;");
-  expect(row).toMatch(/contain-intrinsic-size: auto \d+px;/);
+test("an Inbox row has no content-visibility: the windowed list measures drawn rows, and a skipped row measures as its placeholder (#2209)", () => {
+  expect(block(code, ".tf-ib")).not.toContain("content-visibility");
 });
 
 test("the Tickets page's row is bounded by the page, so a preview change does not re-lay out the list; stacked below 900px it is content-high (perf audit after #2200)", () => {
