@@ -691,8 +691,33 @@ function inForce<T>(
  * whichever order the array happened to hold them, and a QA screenshot would
  * disagree with the app for a reason nobody would look for.
  */
+/**
+ * `?fake-assets=<n>` (perf audit, #2200's class): a top-level *Bulk rack*
+ * holding `n` VMs, every twentieth one down, added at load. Its column is
+ * answered from rows built once, so the fake's own walk stays out of a
+ * measurement.
+ */
+const BULK_RACK = "asset:bulk-rack";
+function bulkAssets(n: number): FixtureAsset[] {
+  if (n <= 0) return [];
+  const rack: FixtureAsset = { id: BULK_RACK, parent_id: null, type_id: "host", type_label: "Host", monogram: "HO", name: "Bulk rack", status: "warn", environment: "prod", owner: null, properties: [], monitors: [] };
+  return [
+    rack,
+    ...Array.from({ length: n }, (_, i): FixtureAsset => ({
+      id: `asset:bulk-${i}`, parent_id: BULK_RACK, type_id: "vm", type_label: "VM", monogram: "VM", name: `bulk-vm-${String(i).padStart(5, "0")}`,
+      status: i % 20 === 0 ? "down" : "up", environment: null, owner: null, properties: [], monitors: [],
+    })),
+  ];
+}
+const BULK_ASSETS = bulkAssets(Number(new URLSearchParams(globalThis.location?.search).get("fake-assets") ?? 0) || 0);
+FIXTURE_ESTATE.push(...BULK_ASSETS);
+const BULK_COLUMN = BULK_ASSETS.slice(1).map(
+  ({ properties: _properties, monitors: _monitors, ...vm }) => ({ ...vm, monitors: [], has_children: false, health: vm.status, inside: "none", problems_inside: 0, linked_work: 0 }) as unknown as AssetRow,
+);
+
 function assetColumn(args: Record<string, unknown>) {
   const parent = (args.parentId as string | null) ?? null;
+  if (parent === BULK_RACK && BULK_COLUMN.length > 0) return BULK_COLUMN;
   return FIXTURE_ESTATE.filter((asset) => asset.parent_id === parent)
     .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
     .map(assetRow);
@@ -719,7 +744,7 @@ function assetDetail(args: Record<string, unknown>) {
     effective_environment: inForce(asset, heldBy, (row) => row.environment),
     effective_owner: inForce(asset, heldBy, (row) => row.owner),
     held_by: heldBy.map(assetRow),
-    holds: FIXTURE_ESTATE.filter((row) => row.parent_id === asset.id).map(assetRow),
+    holds: asset.id === BULK_RACK && BULK_COLUMN.length > 0 ? BULK_COLUMN : FIXTURE_ESTATE.filter((row) => row.parent_id === asset.id).map(assetRow),
     exposes: FIXTURE_ROUTES.filter((route) => route.asset_id === asset.id).map(routeRow),
     reachable_via: routesReaching(asset, heldBy),
     // Empty for the mirror detail's reason: this fixture has no link graph,

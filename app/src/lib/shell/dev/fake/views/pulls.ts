@@ -339,9 +339,37 @@ function files142(): DiffFile[] {
 }
 
 /** A pull request's *Files*, read on its own: PR #142's change, or one small file for any other. */
+/**
+ * `?fake-pr-lines=<n>` (perf audit, #2200's class): PR #142 changes `n` lines,
+ * twenty to a file, every fourth one added.
+ */
+function bulkFiles(n: number): DiffFile[] {
+  return Array.from({ length: Math.ceil(n / 20) }, (_, f): DiffFile => {
+    const lines = Array.from({ length: Math.min(20, n - f * 20) }, (_, i) =>
+      i % 4 === 3
+        ? { kind: "add" as const, old: null, new: i + 1, text: `    let added_${i} = retry(${f});` }
+        : { kind: "context" as const, old: i + 1, new: i + 1, text: `    call_${i}(payout, ${f});` },
+    );
+    const additions = lines.filter((l) => l.kind === "add").length;
+    return {
+      path: `src/bulk/module_${String(f).padStart(4, "0")}.rs`,
+      old_path: null,
+      change: "modified",
+      additions,
+      deletions: 0,
+      hunks: [{ header: `@@ -1,${lines.length - additions} +1,${lines.length} @@`, lines }],
+      truncated: false,
+      threads: [],
+    };
+  });
+}
+
 function filesSection(entityId: string, title: string): ViewSection {
+  const bulk = Number(new URLSearchParams(location.search).get("fake-pr-lines") ?? 0) || 0;
   const files: DiffFile[] =
-    entityId === PR_142
+    entityId === PR_142 && bulk > 0
+      ? bulkFiles(bulk)
+      : entityId === PR_142
       ? files142()
       : [
           {

@@ -348,8 +348,21 @@ export function fakeMonitorRoster() {
   });
 }
 
+/**
+ * `?fake-monitors=<n>` (perf audit, #2200's class): the roster's monitors
+ * repeated to `n` rows, each under its own id and name.
+ */
+function bulkRoster(n: number): ReturnType<typeof fakeMonitorRoster> {
+  const base = fakeMonitorRoster();
+  return Array.from({ length: n }, (_, i) => {
+    const row = base[i % base.length]!;
+    return { ...row, entity_id: `kuma:bulk-${i}`, name: `${row.name} ${i}` };
+  });
+}
+
 /** This feature's commands. */
-export function handlers(): Handlers {
+export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
+  const bulk = Number(params.get("fake-monitors") ?? 0) || 0;
   return {
     // The Monitors tab (#448). Derived from the seed's monitor list and the
     // estate file's names -- see `fakeMonitorRoster` -- so the roster a
@@ -359,7 +372,7 @@ export function handlers(): Handlers {
     // fillers by source, tombstones kept, as the server's does (#1297).
     monitor_roster: () => {
       const fillers = new Set(fakeRoleScope(MONITORING_ROLE).sources);
-      return fakeMonitorRoster().filter((row) => fillers.has(row.source_id));
+      return (bulk > 0 ? bulkRoster(bulk) : fakeMonitorRoster()).filter((row) => fillers.has(row.source_id));
     },
     // The Monitors tab's Pause / Resume (#452). Answers the queued row the
     // real command answers, and remembers nothing: `?fake-ipc` has no Kuma
