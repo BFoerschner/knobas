@@ -5,7 +5,7 @@
 import { expect, test, vi } from "vitest";
 
 import type { AdHocBlock, DayBlock, OpenStretch } from "../../ipc/time";
-import type { EntityDetail, EntityPage, SourceView } from "../../ipc/entity";
+import type { EntityDetail, EntityPage, RunRow, SourceView } from "../../ipc/entity";
 import { repoOfRow, underRepoHash } from "../../tf/repo/repo";
 import { dayRows, offerRuns } from "../../tf/time/day-view";
 import { demoHandlers } from "./fake-tauri";
@@ -757,4 +757,40 @@ test("a Monitors roster row says it refreshes, and refresh_entity reads its moni
   expect(roster.length).toBeGreaterThan(0);
   expect(roster.every((row) => row.refreshes)).toBe(true);
   expect(h["refresh_entity"]!({ entityId: roster[0]!.entity_id })).toEqual({ outcome: "refreshed" });
+});
+
+// -- the Builds history, worked out once a day (#2218) ------------------------
+
+test("the Builds fake answers repeated reads without working its history out again (#2218)", () => {
+  const h = demoHandlers() as Calls;
+  const read = () => h["job_pipelines"]!({ entityId: "jira:PAY-231" }) as { pipeline_id: string }[];
+  const first = read();
+  expect(first.length).toBeGreaterThan(0);
+  // Each read built 59 configurations' 34 runs, twice: 200 reads took about two seconds.
+  const t0 = performance.now();
+  for (let i = 0; i < 200; i += 1) expect(read()).toEqual(first);
+  expect(performance.now() - t0).toBeLessThan(700);
+});
+
+test("the Builds fake's runs move with the day, and a changed answer leaves the next read alone (#2218)", () => {
+  vi.useFakeTimers();
+  try {
+    const h = demoHandlers() as Calls;
+    const runs = () => h["pipeline_runs"]!({ pipelineId: "teamcity:buildType:Payout_Build" }) as RunRow[];
+    vi.setSystemTime(new Date(2026, 9, 17, 9, 0, 0));
+    const morning = runs();
+    // The story's run is `today 14:32`'s kind: a time of day on the reading day.
+    expect(new Date(morning[0]!.started!).getDate()).toBe(17);
+    morning[0]!.branch = "changed by a caller";
+    vi.setSystemTime(new Date(2026, 9, 17, 23, 59, 0));
+    const evening = runs();
+    expect(evening[0]!.branch).not.toBe("changed by a caller");
+    expect(evening.map((run) => run.started)).toEqual(morning.map((run) => run.started));
+    vi.setSystemTime(new Date(2026, 9, 18, 0, 1, 0));
+    const next = runs();
+    expect(next.map((run) => run.entity_id)).toEqual(morning.map((run) => run.entity_id));
+    expect(Date.parse(next[0]!.started!) - Date.parse(morning[0]!.started!)).toBe(24 * 3_600_000);
+  } finally {
+    vi.useRealTimers();
+  }
 });
