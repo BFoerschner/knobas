@@ -26,13 +26,15 @@ trap cleanup EXIT
 trap 'cleanup; trap - INT; kill -INT $$' INT
 trap 'cleanup; trap - TERM; kill -TERM $$' TERM
 
-# The docker stub: `ps` prints $STUB_RUNNING, `context show` prints orbstack,
-# and every other call is logged with whether the lock existed at that moment.
+# The docker stub: `ps` prints $STUB_RUNNING and logs what the JVM lock named
+# at that moment to $STUB_PS_LOG, `context show` prints orbstack, and every
+# other call is logged with whether the lock existed at that moment.
 mkdir -p "$scratch/bin"
 cat >"$scratch/bin/docker" <<'STUB'
 #!/usr/bin/env bash
 case "${1:-} ${2:-}" in
-  "ps "*) for n in ${STUB_RUNNING:-} $(cat "$STUB_RUNNING_FILE" 2>/dev/null); do echo "$n"; done ;;
+  "ps "*) echo "ps [lock $(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)]" >>"$STUB_PS_LOG"
+     for n in ${STUB_RUNNING:-} $(cat "$STUB_RUNNING_FILE" 2>/dev/null); do echo "$n"; done ;;
   "context show") echo orbstack ;;
   *) if [ -L "$KNOBAS_LIVE_LOCK" ]; then l=held; else l=free; fi
      if [ -L "$KNOBAS_LIVE_GITEA_LOCK" ]; then g=held; else g=free; fi
@@ -49,6 +51,7 @@ exit 0
 chmod +x "$scratch/bin/curl"
 
 export PATH="$scratch/bin:$PATH" STUB_LOG="$scratch/docker.log" STUB_RUNNING_FILE="$scratch/running"
+export STUB_PS_LOG="$scratch/ps.log"
 export KNOBAS_LIVE_LOCK="$scratch/knobas-live-jvm.lock"
 export KNOBAS_LIVE_GITEA_LOCK="$scratch/knobas-live-gitea.lock"
 export KNOBAS_LIVE_LOCK_POLL=0.1
@@ -445,9 +448,15 @@ check "a live-up in a worktree to be removed succeeds" "$rc" "0"
 check "and its keeper holds the lock" "$(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)" "live-up-confluence-kept $scratch/gone/tree"
 rm -r "$scratch/gone/tree"
 lock_gone "a live-up whose worktree is removed frees the lock"
+# The keeper may have let go before `live up` returns under load (#2207), so
+# the lock itself is not read: the keeper's first look at the product, a
+# `docker ps`, runs while it holds the lock, and the stub logged what that was.
+: >"$STUB_PS_LOG"
 rc=$(KNOBAS_LIVE_KEEPER_MAX=1 liveup up4 confluence)
 check "a live-up with a short keeper life succeeds" "$rc" "0"
-check "and its keeper holds the lock" "$(readlink "$KNOBAS_LIVE_LOCK" 2>/dev/null || true)" "live-up-confluence-kept $scratch/tree"
+checks=$((checks + 1))
+wait_for "$STUB_PS_LOG" " live-up-confluence-kept $scratch/tree]" ||
+  fail "and its keeper took the lock" "wanted a docker ps under: live-up-confluence-kept $scratch/tree" "$(cat "$STUB_PS_LOG")"
 sleep 1
 lock_gone "a keeper lets go after KNOBAS_LIVE_KEEPER_MAX"
 : >"$STUB_RUNNING_FILE"
