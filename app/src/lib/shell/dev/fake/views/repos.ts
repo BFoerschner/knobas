@@ -266,9 +266,27 @@ function sideDiff(name: string): DiffFile[] {
   return [];
 }
 
+/**
+ * `?fake-branches=<n>` (perf audit, #2200's class): `payout-service` has `n`
+ * more branches, `bulk/branch-0000` on, each one commit ahead and no PR.
+ */
+let bulkHeld: { n: number; list: (typeof PAYOUT_BRANCHES)[number][] } | null = null;
+function bulkBranches(): (typeof PAYOUT_BRANCHES)[number][] {
+  const n = Number(new URLSearchParams(globalThis.location?.search ?? "").get("fake-branches") ?? 0) || 0;
+  if (bulkHeld?.n === n) return bulkHeld.list;
+  bulkHeld = { n, list: Array.from({ length: n }, (_, i) => ({
+    name: `bulk/branch-${String(i).padStart(4, "0")}`,
+    ahead: 1,
+    behind: i % 7,
+    pr: null,
+    tip: [`b${String(i).padStart(11, "0")}`, `Bulk change ${i}`, i % 3 ? "jonas" : "mara", "2026-08-20T09:00:00Z"] as [string, string, string, string],
+  })) };
+  return bulkHeld.list;
+}
+
 /** A branch of `payout-service`'s whole view, or one of its sections. */
 function branchView(name: string, sectionId: string | null): SourceView | undefined {
-  const branch = PAYOUT_BRANCHES.find((candidate) => candidate.name === name);
+  const branch = PAYOUT_BRANCHES.find((candidate) => candidate.name === name) ?? bulkBranches().find((candidate) => candidate.name === name);
   if (branch === undefined) return undefined;
   const isJob = name === FEATURE_NAME;
   const carried = isJob
@@ -371,7 +389,7 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
     const rows: ViewRow[] = [
       { entity_id: `${repoId}@refs/heads/main`, title: "main", meta: "5d77e1a2c3 · 1 day ago", tone: "muted", chip: "default", url: null },
       ...(repoId === PAYOUT
-        ? PAYOUT_BRANCHES.map(({ name, tip }) => ({
+        ? [...PAYOUT_BRANCHES, ...bulkBranches()].map(({ name, tip }) => ({
             entity_id: `${PAYOUT}@refs/heads/${name}`,
             title: name,
             meta: `${tip[0].slice(0, 10)} · ${age(tip[3])}`,
