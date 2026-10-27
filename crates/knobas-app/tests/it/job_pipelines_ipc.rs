@@ -234,7 +234,11 @@ async fn a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link() {
         )
     );
     assert_eq!(reasons(&all, &elsewhere), None);
-    assert_eq!(reasons(&all, &gone), None, "a tombstoned run builds nothing");
+    assert_eq!(
+        reasons(&all, &gone),
+        None,
+        "a tombstoned run builds nothing"
+    );
     assert_eq!(all.len(), 4, "each pipeline once: {all:?}");
 
     // A run's branch is stored as the run is written (#2192): a later sync

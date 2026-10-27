@@ -13,7 +13,8 @@
   `sync.pipeline_adapters` keeps each run kind's `branch` candidates beside its `pipeline` ones,
   and `sync.resolve_item_pipelines` stores `branch` in the row it already writes. No trigger
   function is restated: the item and declaration triggers already call the resolver whenever a
-  run's row can change (`0062`, `0063`, `0064`). The lock (`627, 0`) is unchanged. The last
+  run's row can change (`0062`, `0063`, `0064`), so no function that takes the lock (`627, 0`) is
+  restated. The last
   statement refills the table from the stored declarations, taking no lock, as `0062`'s did.
 
   **What the column is.** `knobas_core::declared_string!(…, "branch")` with `$decl` bound as

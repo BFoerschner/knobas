@@ -135,7 +135,10 @@ const PIPELINE_RUNS: i64 = 100;
 /// than every row's declaration being looked up.
 ///
 /// Exported at the crate root so a statement spells it `crate::frame_kinds_cte!()`
-/// inside a `concat!`; [`JOB_PIPELINES`] joins the frame's kinds too.
+/// inside a `concat!`; [`JOB_PIPELINES`] joins the frame's kinds too, as
+/// `frame_kinds_cte!(materialized)`: a statement that reads `frames` once gets
+/// it inlined otherwise, and on tables never analyzed the planner then cannot
+/// count it (#2192). `(@body)` is the shared text, not for callers.
 #[macro_export]
 macro_rules! frame_kinds_cte {
     () => {
@@ -804,6 +807,8 @@ on_branches as materialized (
   select distinct k.source_id, k.pkey, n.name
     from names n
    cross join lateral (values (n.name), ('refs/heads/' || n.name)) as q(branch)
+   -- Its own joins, not `run`'s: fenced here, each spelling is one probe of
+   -- `item_pipeline_branch_idx`, where `run` inlined would read the table.
    cross join lateral (
      select ib.source_id, ib.pkey
        from sync.item_pipeline ib

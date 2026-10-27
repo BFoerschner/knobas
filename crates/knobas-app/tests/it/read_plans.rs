@@ -678,16 +678,16 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     // on: the runs on it are a keyed lookup of the stored rows, never every
     // run's `branch` read through the declarations.
     let branch = job_branch(&pool, "feature/10").await;
-    for (name, extra) in [("this job", None), ("this job on a branch", Some(&branch))] {
+    for (name, reached_branch) in [("this job", None), ("this job on a branch", Some(&branch))] {
         let ids: Vec<String> = reached
             .iter()
             .map(|r| r.entity_id.clone())
-            .chain(extra.cloned())
+            .chain(reached_branch.cloned())
             .collect();
         let steps: Vec<String> = reached
             .iter()
             .map(|r| r.step.clone())
-            .chain(extra.cloned())
+            .chain(reached_branch.cloned())
             .collect();
         let plan = explain(&pool, knobas_core::builds::planned_job_pipelines(), |q| {
             q.bind(declared.clone())
@@ -793,9 +793,9 @@ fn pipeline_members() -> Vec<knobas_app::link_sets::LinkSetMember> {
 /// What `plan_shape` finds in one of #2185's plans that reaches the run
 /// corpus or the samples: a per-row read of `sync.item` or a table kept
 /// beside it (`item_pipeline`, `item_revision`), or of
-/// `knobas.monitor_sample`. What else these statements
-/// read -- a job's reach, the pins, the assets, the open alerts -- is theirs
-/// from before #2185, small or keyed, and not what this asserts.
+/// `knobas.monitor_sample`. What else these statements read -- a job's
+/// reach, the pins, the assets, the open alerts -- is theirs from before
+/// #2185, small or keyed, and not what this asserts.
 fn corpus_shapes(name: &str, plan: &serde_json::Value) -> Vec<String> {
     shapes(name, plan)
         .into_iter()
