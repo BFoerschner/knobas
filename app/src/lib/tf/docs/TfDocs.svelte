@@ -208,7 +208,7 @@
    * role, so nothing here keeps spaces by source (#1296, ADR-0029 as amended
    * on 2026-10-19). The search is narrowed the same way.
    */
-  let tree = $state<DocsTree | null>(null);
+  let tree = $state.raw<DocsTree | null>(null);
   let treeError = $state<string | null>(null);
   let page = $state<DocPage | null>(null);
   let pageError = $state<string | null>(null);

@@ -231,6 +231,52 @@ test("the tree folds under the top page, opens around the open page and marks it
   expect(current?.textContent).toBe("On-call handbook");
 });
 
+/**
+ * A space of `n` pages the size Björn's held (#2200): twenty at the top, every
+ * later page under an earlier one, eight to a fold. Each node counts the reads
+ * of its `parent` into `reads.parent`, which is what a walk of the tree costs.
+ */
+function bulkTree(n: number, reads: { parent: number }): DocsTree {
+  const pages = Array.from({ length: n }, (_, i) => {
+    const node = { entity_id: `bulk:${i}`, title: `Page ${String(i).padStart(5, "0")}`, parent: i < 20 ? null : `bulk:${Math.floor((i - 20) / 8)}` };
+    return new Proxy(node, {
+      get(t, key, r) {
+        if (key === "parent") reads.parent++;
+        return Reflect.get(t, key, r);
+      },
+    });
+  });
+  return { spaces: [{ source_id: "confluence", key: "BULK", name: "Bulk", pages }], last_read: null, for_you: [] };
+}
+
+test("a 4,000-page space draws its tree in one pass over the pages, and a closed fold draws nothing under it (#2200)", async () => {
+  const reads = { parent: 0 };
+  // bulk:3000 sits three folds down: under bulk:372, under bulk:44, under bulk:3 at the top.
+  await draw(["bulk:3000"], ports({ docsTree: vi.fn(async () => bulkTree(4000, reads)), docsPage: vi.fn(async () => ({ ...PAGE, entity_id: "bulk:3000", title: "Page 03000" })) }));
+  // Linear in the pages: a handful of passes (about five as drawn), never a
+  // pass per node drawn, which was 16M reads at 4,000 pages.
+  expect(reads.parent).toBeLessThan(10 * 4000);
+  const nav = target.querySelector("nav[aria-label='Docs'] .tf-dl-body")!;
+  const titles = [...nav.querySelectorAll("a")].map((a) => a.textContent);
+  expect(nav.querySelector("[aria-current='true']")?.textContent).toBe("Page 03000");
+  // The twenty at the top, and the folds open around the open page with their rows; nothing else.
+  const open = [...nav.querySelectorAll<HTMLDetailsElement>("details[open] > summary a")].map((a) => a.textContent);
+  expect(open).toEqual(["Page 00003", "Page 00044", "Page 00372"]);
+  expect(titles).toHaveLength(20 + 8 * 3);
+  const closed = [...nav.querySelectorAll<HTMLDetailsElement>("details:not([open])")];
+  expect(closed.length).toBeGreaterThan(0);
+  expect(closed.every((d) => d.querySelector(":scope > .tf-fold-in a") === null)).toBe(true);
+
+  // Opening a closed fold draws its rows.
+  const fold = closed.find((d) => d.querySelector("summary a")?.textContent === "Page 00001")!;
+  fold.open = true;
+  fold.dispatchEvent(new Event("toggle"));
+  await settle();
+  expect([...fold.querySelectorAll(":scope > .tf-fold-in > a, :scope > .tf-fold-in > details > summary a")].map((a) => a.textContent)).toEqual(
+    Array.from({ length: 8 }, (_, k) => `Page ${String(28 + k).padStart(5, "0")}`),
+  );
+});
+
 test("the body: a live ticket chip, my mention in yellow, a page link, code with its language, a table, the placeholder", async () => {
   await draw(["confluence:2"]);
   const doc = target.querySelector(".tf-doc")!;

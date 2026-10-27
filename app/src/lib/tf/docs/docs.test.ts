@@ -3,7 +3,8 @@ import { expect, test } from "vitest";
 
 import type { DocBlock, DocPage, DocsTree } from "../../ipc/entity";
 import {
-  holds,
+  childrenByParent,
+  foldsHolding,
   mentionText,
   pageToOpen,
   placeOf,
@@ -86,11 +87,29 @@ test("a key holding a colon still opens by the bare address", () => {
   expect(pageToOpen(placeOf(["space", "a:b"]), odd)).toBe("wiki:1");
 });
 
-test("a fold holds every page below it, so the one around the open page starts open", () => {
+test("a fold holds every page below it, so the ones around the open page start open", () => {
   const eng = TREE.spaces[0]!;
-  const home = eng.pages[1]!;
-  expect(holds(eng, home, "confluence:3")).toBe(true);
-  expect(holds(eng, eng.pages[0]!, "confluence:9")).toBe(false);
+  expect([...foldsHolding(eng, "confluence:3")].sort()).toEqual(["confluence:2", "confluence:3", "confluence:9"]);
+  expect([...foldsHolding(eng, "confluence:9")]).toEqual(["confluence:9"]);
+  // A page of another space, or none, opens no fold here.
+  expect(foldsHolding(eng, "confluence:5").size).toBe(0);
+  expect(foldsHolding(eng, null).size).toBe(0);
+});
+
+test("a parent loop the backend let through still ends the walk up", () => {
+  const loop = { ...TREE.spaces[0]!, pages: [
+    { entity_id: "a", title: "A", parent: "b" },
+    { entity_id: "b", title: "B", parent: "a" },
+  ] };
+  expect([...foldsHolding(loop, "a")].sort()).toEqual(["a", "b"]);
+});
+
+test("the pages under each parent, in the space's order, from one pass", () => {
+  const under = childrenByParent(TREE.spaces[0]!);
+  expect(under.get(null)?.map((p) => p.title)).toEqual(["Engineering home"]);
+  expect(under.get("confluence:9")?.map((p) => p.title)).toEqual(["Payments"]);
+  expect(under.get("confluence:2")?.map((p) => p.title)).toEqual(["SEPA payout retry design"]);
+  expect(under.get("confluence:3")).toBeUndefined();
 });
 
 test("the first heading opens section 1, as prototype-6 numbers them", () => {

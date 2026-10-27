@@ -125,18 +125,35 @@ export function spaceLabel(space: DocSpace): string {
   return `${space.key} ${space.name ?? ""}`.trim() + ` (${space.pages.length})`;
 }
 
-/** The pages directly under `parent` (`null` for the top of the space). */
-export function childrenOf(space: DocSpace, parent: string | null): DocNode[] {
-  return space.pages.filter((p) => p.parent === parent);
+/**
+ * A space's pages by parent (`null` for the top of the space), in the order
+ * the space lists them: built in one pass, so a tree drawn from it costs the
+ * page count once rather than once per node (#2200: a 4,000-page space drew
+ * 16M comparisons a draw through a filter per node).
+ */
+export function childrenByParent(space: DocSpace): Map<string | null, DocNode[]> {
+  const under = new Map<string | null, DocNode[]>();
+  for (const page of space.pages) {
+    const list = under.get(page.parent);
+    if (list === undefined) under.set(page.parent, [page]);
+    else list.push(page);
+  }
+  return under;
 }
 
-/** Whether `entityId` is `node` or below it, so the fold holding it opens. */
-export function holds(space: DocSpace, node: DocNode, entityId: string, seen = new Set<string>()): boolean {
-  if (node.entity_id === entityId) return true;
-  // The backend breaks parent loops; a set here keeps a bad answer from recursing forever.
-  if (seen.has(node.entity_id)) return false;
-  seen.add(node.entity_id);
-  return childrenOf(space, node.entity_id).some((child) => holds(space, child, entityId, seen));
+/**
+ * The folds that hold `entityId`, so they start open: the page itself and
+ * every page above it, walked up its parents once (#2200; a walk down every
+ * fold's subtree cost the space's page count per node).
+ */
+export function foldsHolding(space: DocSpace, entityId: string | null): Set<string> {
+  const held = new Set<string>();
+  if (entityId === null) return held;
+  const parentOf = new Map(space.pages.map((p) => [p.entity_id, p.parent]));
+  if (!parentOf.has(entityId)) return held;
+  // The backend breaks parent loops; the set stops the walk on a bad answer all the same.
+  for (let at: string | null | undefined = entityId; at != null && !held.has(at); at = parentOf.get(at)) held.add(at);
+  return held;
 }
 
 /** The words of a run of inlines. */
