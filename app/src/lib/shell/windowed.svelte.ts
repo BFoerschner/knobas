@@ -144,19 +144,20 @@ export class Windowed<K = string> {
     // A table sizes its columns from the rows it draws, so drawing others
     // would re-wrap the rows on screen, and that changes which rows draw.
     // While windowed, its columns keep the widths the first drawn rows gave.
-    const table = node instanceof HTMLTableSectionElement ? node.closest("table") : null;
+    const body = node instanceof HTMLTableSectionElement ? node : null;
+    const table = body?.closest("table") ?? null;
     // A header cell added or removed (the view's columns changed) freezes the widths again.
     let heading = $state(0);
     const headings = table?.tHead ? new MutationObserver(() => heading++) : null;
     if (table?.tHead) headings?.observe(table.tHead, { childList: true, subtree: true });
-    if (table !== null)
+    if (table !== null && body !== null)
       $effect(() => {
         void heading;
         if (!this.on) return;
         const width = table.getBoundingClientRect().width;
         const heads = [...(table.tHead?.rows[0]?.cells ?? [])];
         if (width === 0) return;
-        if (heads.length === 0) return freezeCols(table, node, width);
+        if (heads.length === 0) return freezeCols(table, body, width);
         const shares = heads.map((head) => (head.getBoundingClientRect().width / width) * 100);
         heads.forEach((head, i) => (head.style.width = `${shares[i]}%`));
         table.style.tableLayout = "fixed";
