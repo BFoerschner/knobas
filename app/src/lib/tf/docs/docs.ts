@@ -156,6 +156,12 @@ export function foldsHolding(space: DocSpace, entityId: string | null): Set<stri
   return held;
 }
 
+/**
+ * How long the search waits for a pause in typing before it asks (#2200): a
+ * word typed at a steady pace is one search, not one per key.
+ */
+export const SEARCH_PAUSE_MS = 150;
+
 /** The words of a run of inlines. */
 export function inlineWords(text: DocInline[]): string {
   return text

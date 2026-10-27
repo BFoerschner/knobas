@@ -13,7 +13,7 @@ import { createLayers } from "../layers.svelte";
 import { forgetEchoes } from "../queued.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import { parseTfHash } from "../route";
-import { READER_DRAWER, READER_NARROW } from "./docs";
+import { READER_DRAWER, READER_NARROW, SEARCH_PAUSE_MS } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -128,6 +128,8 @@ function ports(over: Partial<DocsPorts> = {}): DocsPorts {
     getEntity: vi.fn(async (id: string) => Promise.reject({ code: "not_found", message: `${id} is not in the mirror`, source_id: null })),
     openExternal: vi.fn(async () => {}),
     copy: vi.fn(async () => {}),
+    // Every keystroke searches at once here; the pause has its own test (#2200).
+    searchPause: 0,
     ...over,
   };
 }
@@ -412,6 +414,42 @@ test("the search names its scope, searches on every keystroke in the picker's sp
   button("Search all spaces")!.click();
   await settle();
   expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", null);
+});
+
+test("the search waits for a pause in typing and asks once, for what was typed last (#2200)", async () => {
+  vi.useFakeTimers();
+  try {
+    const io = await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS), searchPause: undefined }));
+    for (const typed of ["l", "le", "led", "ledg"]) {
+      type(typed);
+      await settle();
+      vi.advanceTimersByTime(SEARCH_PAUSE_MS - 10);
+    }
+    expect(io.docsSearch).not.toHaveBeenCalled();
+    type("ledger");
+    await settle();
+    vi.advanceTimersByTime(SEARCH_PAUSE_MS);
+    await settle();
+    expect(vi.mocked(io.docsSearch).mock.calls).toEqual([["ledger", { source_id: "confluence", key: "OPS" }]]);
+    expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("an answer to an older keystroke than the last is dropped", async () => {
+  const answers: Record<string, (hits: typeof HITS) => void> = {};
+  const docsSearch = vi.fn((query: string) => new Promise<typeof HITS>((resolve) => (answers[query] = resolve)));
+  await draw(["confluence:2"], ports({ docsSearch }));
+  type("led");
+  await settle();
+  type("ledger");
+  await settle();
+  answers["ledger"]!({ ...HITS, hits: HITS.hits.slice(0, 1), total: 1 });
+  await settle();
+  answers["led"]!(HITS);
+  await settle();
+  expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(1);
 });
 
 test("no hit explains the AND rule; an empty field brings the tree back", async () => {
