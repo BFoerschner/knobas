@@ -288,6 +288,23 @@ test("a fold the reader closes stays closed as the list redraws", async () => {
   expect(fold("Data").open).toBe(false);
 });
 
+test("a closed fold draws nothing under it until the reader opens it, so a big CI draws only what is open (#2200's class)", async () => {
+  drawTree();
+  await settle();
+  const infra = fold("Platform › Infra");
+  expect(infra.open).toBe(false);
+  expect(infra.querySelectorAll(".tf-pi")).toHaveLength(0);
+  infra.open = true;
+  infra.dispatchEvent(new Event("toggle"));
+  flushSync();
+  expect([...fold("Platform › Infra").querySelectorAll(".tf-pi .tf-pi-nm")].map((n) => n.textContent)).toEqual(["Terraform_Plan"]);
+  const again = fold("Platform › Infra");
+  again.open = false;
+  again.dispatchEvent(new Event("toggle"));
+  flushSync();
+  expect(fold("Platform › Infra").querySelectorAll(".tf-pi")).toHaveLength(0);
+});
+
 test("Pin and Unpin on the selected pipeline write the pin and move it in and out of Pinned", async () => {
   const pins: [string, boolean][] = [];
   drawTree({ rest: ["teamcity:buildType:Payout_Lint"], pins });
@@ -338,7 +355,10 @@ test("This job is on by default with a job: the tree pruned to its pipelines, ea
 
   target.querySelector<HTMLButtonElement>(".tf-scope-note button")!.click();
   flushSync();
-  expect(names()).toHaveLength(6);
+  // Every pipeline is back (Payout_Build twice, pinned and in its fold); the
+  // closed fold holds its one, undrawn until opened.
+  expect(names()).toHaveLength(5);
+  expect(summaries()).toContain("Platform › Infra|1|");
   expect(target.querySelector(".tf-scope-note")).toBeNull();
   expect(target.querySelector(".tf-pi-why")).toBeNull();
 });
@@ -367,6 +387,12 @@ test("Builds draws every pipeline the read answers and drops none by the source 
   page = mount(TfBuilds, { target, props: { ready: true, head: "builds", rest: [], job: null, ports } });
   await settle();
 
+  // Relay's one pipeline sits in its closed *Payout* fold, drawn once opened.
+  expect([...target.querySelectorAll(".tf-pl h3")].map((h) => h.textContent)).toContain("Relay CI");
+  const relayFold = [...target.querySelectorAll<HTMLDetailsElement>(".tf-pl-fold")].at(-1)!;
+  relayFold.open = true;
+  relayFold.dispatchEvent(new Event("toggle"));
+  flushSync();
   expect(names()).toHaveLength(LIST.length + 1);
   expect(names()).toContain("Rocket_Build");
 });
