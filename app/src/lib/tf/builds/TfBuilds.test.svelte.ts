@@ -248,6 +248,16 @@ const summaries = () =>
   [...target.querySelectorAll<HTMLElement>(".tf-pl-fold > summary")].map((s) =>
     [s.firstChild?.textContent?.trim(), s.querySelector(".tf-count")?.textContent, s.querySelector(".tf-chip")?.textContent ?? ""].join("|"),
   );
+/** The `n` rows after a fold's summary, each as its indent and name. */
+const after = (from: Element, n: number) => {
+  const out: string[] = [];
+  for (let at = from.nextElementSibling; at !== null && out.length < n; at = at.nextElementSibling) {
+    const summary = at.querySelector(":scope > summary");
+    const indent = [...(summary ?? at).classList].find((c) => /^tf-d\d$/.test(c)) ?? "tf-d0";
+    out.push(`${indent} ${summary ? summary.firstChild?.textContent?.trim() : at.querySelector(".tf-pi-nm")?.textContent}`);
+  }
+  return out;
+};
 const fold = (name: string) =>
   [...target.querySelectorAll<HTMLDetailsElement>(".tf-pl-fold")].find((d) => d.querySelector(":scope > summary")?.textContent?.startsWith(name))!;
 
@@ -258,13 +268,10 @@ test("All: Pinned first, then the tree as deep as it goes, with counts, failures
   expect(headers).toEqual(["Pinned", "TeamCity"]);
   const pinned = target.querySelector(".tf-pl h3 + .tf-pi .tf-pi-nm")?.textContent;
   expect(pinned).toBe("Payout_Build");
+  // A fold's rows follow its summary, one level deeper (#2211).
   expect(summaries()).toEqual(["Data|1|1 failing", "Payments › Payouts|3|1 failing", "Deploy|1|1 failing", "Platform › Infra|1|"]);
   // Own pipelines before the subgroup.
-  const payouts = fold("Payments › Payouts");
-  const inner = [...payouts.querySelectorAll(":scope > .tf-fold-in > *")].map((el) =>
-    el.classList.contains("tf-pi") ? el.querySelector(".tf-pi-nm")?.textContent : "fold",
-  );
-  expect(inner).toEqual(["Payout_Build", "Payout_Lint", "fold"]);
+  expect(after(fold("Payments › Payouts"), 3)).toEqual(["tf-d1 Payout_Build", "tf-d1 Payout_Lint", "tf-d1 Deploy"]);
   // Open on a failure (and the selection, the first failing one); closed otherwise.
   expect(fold("Data").open).toBe(true);
   expect(fold("Platform › Infra").open).toBe(false);
@@ -293,16 +300,16 @@ test("a closed fold draws nothing under it until the reader opens it, so a big C
   await settle();
   const infra = fold("Platform › Infra");
   expect(infra.open).toBe(false);
-  expect(infra.querySelectorAll(".tf-pi")).toHaveLength(0);
+  expect(names()).not.toContain("Terraform_Plan");
   infra.open = true;
   infra.dispatchEvent(new Event("toggle"));
   flushSync();
-  expect([...fold("Platform › Infra").querySelectorAll(".tf-pi .tf-pi-nm")].map((n) => n.textContent)).toEqual(["Terraform_Plan"]);
+  expect(after(fold("Platform › Infra"), 1)).toEqual(["tf-d1 Terraform_Plan"]);
   const again = fold("Platform › Infra");
   again.open = false;
   again.dispatchEvent(new Event("toggle"));
   flushSync();
-  expect(fold("Platform › Infra").querySelectorAll(".tf-pi")).toHaveLength(0);
+  expect(names()).not.toContain("Terraform_Plan");
 });
 
 test("Pin and Unpin on the selected pipeline write the pin and move it in and out of Pinned", async () => {
@@ -315,8 +322,14 @@ test("Pin and Unpin on the selected pipeline write the pin and move it in and ou
   await settle();
   expect(pins).toEqual([["teamcity:buildType:Payout_Lint", true]]);
   expect(button().textContent).toBe("Unpin");
-  const pinnedNames = () =>
-    [...target.querySelectorAll(".tf-pl-list > .tf-pi .tf-pi-nm")].map((n) => n.textContent);
+  // The rows under the *Pinned* heading, up to the next heading.
+  const pinnedNames = () => {
+    const out: (string | null | undefined)[] = [];
+    const head = [...target.querySelectorAll(".tf-pl h3")].find((h) => h.textContent === "Pinned");
+    for (let at = head?.nextElementSibling; at?.classList.contains("tf-pi"); at = at.nextElementSibling)
+      out.push(at.querySelector(".tf-pi-nm")?.textContent);
+    return out;
+  };
   expect(pinnedNames()).toEqual(["Payout_Build", "Payout_Lint"]);
   button().click();
   await settle();
@@ -461,4 +474,42 @@ test("a read again of the list that answers takes away the note an earlier faile
   target.querySelector<HTMLButtonElement>(".tf-bhead .tf-refresh")!.click();
   await settle();
   expect(target.querySelector(".tf-pl-note")).toBeNull();
+});
+
+test("a filter that opens every fold of a big CI draws only the rows near the viewport, the selection among them (#2211)", async () => {
+  const many = Array.from({ length: 1000 }, (_, i) => {
+    const name = `Bulk_${String(i).padStart(4, "0")}`;
+    return { ...pipeline(name, name, [run(`teamcity:build:${i}`, "ok")]), path: [`Area ${i % 10}`, `Service ${Math.floor(i / 8)}`] };
+  });
+  const open = () =>
+    mount(TfBuilds, {
+      target,
+      props: {
+        ready: true,
+        head: "builds",
+        rest: [many[997]!.entity_id],
+        job: null,
+        ports: { pipelines: () => Promise.resolve(many), runs: () => Promise.resolve([]) },
+      },
+    });
+  page = open();
+  await settle();
+  const type = (text: string) => {
+    const field = target.querySelector<HTMLInputElement>("[data-filter]")!;
+    field.value = text;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+  };
+  type("bulk");
+  expect([...target.querySelectorAll<HTMLDetailsElement>(".tf-pl-fold")].every((d) => d.open)).toBe(true);
+  expect(names().length).toBeGreaterThan(5);
+  expect(names().length).toBeLessThan(200);
+  expect(names()[0]).toBe("Bulk_0000");
+  // Back on the page with the filter kept: the selected pipeline, far below the first rows, is drawn and marked.
+  unmount(page);
+  page = open();
+  await settle();
+  expect(target.querySelector('.tf-pi[aria-current="true"] .tf-pi-nm')?.textContent).toBe("Bulk_0997");
+  expect(names()).not.toContain("Bulk_0000");
+  type("");
 });

@@ -98,7 +98,8 @@
 .tf-pl-top { padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--rule-2); }
 .tf-pl-top .tf-fsearch { max-width: none; flex: none; }
 .tf-pl-list { overflow: auto; flex: 1; padding: 4px 0 16px; }
-.tf-pl h3 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 12px 14px 4px; }
+/* Padding, not margin: a windowed row is measured by its box, which a margin is outside of (#2211). */
+.tf-pl h3 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 0; padding: 12px 14px 4px; }
 .tf-pl-note { font-size: var(--t-sm); color: var(--ink-2); padding: 12px 14px; }
 .tf-pi {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; align-items: center;

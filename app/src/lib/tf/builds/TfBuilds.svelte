@@ -17,7 +17,9 @@
     pipeline by name, in err tone when its latest run failed, the time of
     that run, and a strip of the last twelve runs newest right. A hover
     gives its groups and name. The selected one is drawn inverted and kept
-    in view.
+    in view. The list is windowed (#2211) over its flattened rows
+    (`listRows`): headings, pipelines and the summaries of folds, a fold's
+    rows following its summary while it is open.
   - **Right**, the selected pipeline's page (#851, `TfPipeline.svelte`):
     header with *Pin*, history chart, and the Runs, Parameters and Triggers
     tabs.
@@ -54,7 +56,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount, tick, untrack } from "svelte";
+  import { flushSync, onMount, tick, untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
 
   import {
@@ -68,6 +70,7 @@
   import { listSources } from "../../ipc/sources";
   import { resolveTicket } from "../job/job";
   import { inTextField } from "../../shell/keys";
+  import { Windowed } from "../../shell/windowed.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import { jobHash } from "../route";
@@ -82,6 +85,7 @@
     isFailing,
     keptPipelines,
     latestTime,
+    listRows,
     pipelineHash,
     pipelineOf,
     pinnedOf,
@@ -226,6 +230,17 @@
   const trees = $derived(treeOf(kept));
   /** Whether anything narrows the list, which opens every fold. */
   const narrowed = $derived(filter.text.trim() !== "" || chips.length > 0 || scope === "job");
+  /** What the list draws, flattened: the windowed list's rows. */
+  const rows = $derived(
+    listRows(
+      pinned,
+      trees,
+      (tree, at) => (scope === "all" ? tree.source : at === 0 ? "By project" : null),
+      (f) => foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed),
+    ),
+  );
+  // A pipeline with its strip is about 36 px; headings and summaries are measured once drawn.
+  const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.key, estimate: 36 });
 
   /** The job's key resolved to its ticket, then its pipelines (#850). */
   async function jobPipelinesByKey(key: string) {
@@ -272,7 +287,13 @@
   // The selected pipeline stays in view as the list scrolls on its own (R-9.4a).
   $effect(() => {
     if (selected === null || list === undefined) return;
-    void tick().then(() => list?.querySelector('[aria-current="true"]')?.scrollIntoView?.({ block: "nearest" }));
+    const id = selected.entity_id;
+    void tick().then(() => {
+      // Drawn first if the window left it out.
+      win.reveal(rows.findIndex((row) => row.kind === "pipeline" && row.pipeline.entity_id === id));
+      flushSync();
+      list?.querySelector('[aria-current="true"]')?.scrollIntoView?.({ block: "nearest" });
+    });
   });
 
   onMount(() => {
@@ -308,7 +329,7 @@
   </nav>
 {/snippet}
 
-{#snippet item(pipeline: PipelineRow, depth: number)}
+{#snippet item(pipeline: PipelineRow, depth: number, key: string)}
   {@const strip = stripOf(pipeline)}
   {@const why = scope === "job" ? reasonsLine(reasons?.get(pipeline.entity_id) ?? [], job ?? "") : ""}
   <a
@@ -316,6 +337,7 @@
     href={pipelineHash(pipeline.entity_id)}
     aria-current={pipeline.entity_id === selected?.entity_id}
     title={[...groupsOf(pipeline), pipeline.name].join(" › ")}
+    {@attach win.row(key)}
   >
     <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)}><Marked text={pipeline.name} typed={filter.text} /></span>
     <span class="tf-pi-when">{latestTime(pipeline)}</span>
@@ -332,20 +354,13 @@
   </a>
 {/snippet}
 
-{#snippet foldView(f: Fold, depth: number)}
-  {@const open = foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed)}
-  <details class="tf-pl-fold" {open} ontoggle={(event) => rememberFold(f, event)}>
+{#snippet foldView(f: Fold, depth: number, open: boolean, key: string)}
+  <!-- The summary alone: a fold's rows follow it while it is open, and a closed one has none (#2200's class, #2211). -->
+  <details class="tf-pl-fold" {open} ontoggle={(event) => rememberFold(f, event)} {@attach win.row(key)}>
     <summary class={indent(depth)}
       >{f.name} <span class="tf-count">{f.count}</span>{#if f.failing > 0}<span class="tf-chip tf-err">{f.failing} failing</span
         >{/if}</summary
     >
-    <!-- A closed fold draws nothing under it: a CI of thousands draws only what is open (#2200's class). -->
-    <div class="tf-fold-in">
-      {#if open}
-        {#each f.pipelines as pipeline (pipeline.entity_id)}{@render item(pipeline, depth + 1)}{/each}
-        {#each f.folds as kid (kid.key)}{@render foldView(kid, depth + 1)}{/each}
-      {/if}
-    </div>
   </details>
 {/snippet}
 
@@ -397,16 +412,17 @@
           {#if scope === "job"}<button type="button" class="tf-linkish" onclick={() => setScope("all")}>Search all pipelines</button>{/if}
         </p>
       {/if}
-      {#if pinned.length > 0}
-        <h3>Pinned</h3>
-        {#each pinned as pipeline (pipeline.entity_id)}{@render item(pipeline, 0)}{/each}
-      {/if}
-      {#if scope === "job" && trees.length > 0}<h3>By project</h3>{/if}
-      {#each trees as tree (tree.sourceId)}
-        {#if scope === "all"}<h3>{tree.source}</h3>{/if}
-        {#each tree.pipelines as pipeline (pipeline.entity_id)}{@render item(pipeline, 0)}{/each}
-        {#each tree.folds as f (f.key)}{@render foldView(f, 0)}{/each}
-      {/each}
+      <div class="tf-pl-rows" {@attach win.list}>
+        {#each win.slice(rows) as row (row.key)}
+          {#if row.kind === "head"}
+            <h3 {@attach win.row(row.key)}>{row.text}</h3>
+          {:else if row.kind === "pipeline"}
+            {@render item(row.pipeline, row.depth, row.key)}
+          {:else}
+            {@render foldView(row.fold, row.depth, row.open, row.key)}
+          {/if}
+        {/each}
+      </div>
     </div>
   </nav>
   <section class="tf-bmain">
