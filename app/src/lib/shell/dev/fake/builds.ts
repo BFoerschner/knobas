@@ -35,9 +35,10 @@ import type {
   ViewSection,
 } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
-import { keepSeed } from "../fake-seed";
+import { keepSeed, onFakeReset } from "../fake-seed";
 import { fakeRoleScope } from "./corpus";
 import { keyOf } from "../../../time/format";
+import { dayKey } from "../../../time/day";
 
 /** The role `pipelines` is read for, as `knobas_source::role::CI` spells it. */
 const CI_ROLE = "ci";
@@ -255,8 +256,35 @@ function startOf(config: string, no: number): Pick<RunRow, "trigger" | "started_
   return { trigger: chained ? "chain" : "person", started_by: pick, started_by_me: pick === READER, revision };
 }
 
-/** Each configuration's runs, newest first: its story, then 33 more. */
+/**
+ * Each configuration's runs, newest first: its story, then 33 more. Built once
+ * per calendar day of `now` (#2218): {@link instant} reads only the day, so a
+ * history built earlier the same day is the same history. Each read gets its
+ * own rows (and test counts; `state` is one shared table's, as it always was),
+ * so a caller that changes one cannot change the next read.
+ */
 function history(now: Date): Map<string, RunRow[]> {
+  const day = dayKey(now);
+  if (built?.day !== day) {
+    built = { day, runs: buildHistory(now) };
+    historyBuilds += 1;
+  }
+  const own = (run: RunRow): RunRow => ({ ...run, tests: run.tests && { ...run.tests } });
+  return new Map([...built.runs].map(([config, runs]) => [config, runs.map(own)]));
+}
+
+/** The last history {@link history} built, and the day it was built for. */
+let built: { day: string; runs: Map<string, RunRow[]> } | null = null;
+
+/** How many times {@link history} has built a history: a test's witness that reads reuse it. */
+export let historyBuilds = 0;
+
+onFakeReset(() => {
+  built = null;
+});
+
+/** {@link history} built from scratch, from the seed, for the day of `now`. */
+function buildHistory(now: Date): Map<string, RunRow[]> {
   const random = seeded(7);
   const out = new Map<string, RunRow[]>();
   let index = 0;
