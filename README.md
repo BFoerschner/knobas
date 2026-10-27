@@ -9,8 +9,8 @@ Postgres and searches all of them from one box. On top of that mirror it keeps
 what no single source owns: links, notes, contexts, an inbox, assets and time
 tracking that turns into worklogs.
 
-**Status:** every planned milestone, M0 through v1.5, is closed. `v3.2.4` is
-the latest release (2026-10-27), and the manifests carry `3.2.4`.
+**Status:** every planned milestone, M0 through v1.5, is closed. `v3.2.5` is
+the latest release (2026-10-27), and the manifests carry `3.2.5`.
 Ongoing work is tracked in [GitHub Issues](https://github.com/BFoerschner/knobas/issues).
 
 ## How it works
