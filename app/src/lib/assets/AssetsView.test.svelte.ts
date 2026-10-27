@@ -1609,3 +1609,41 @@ test("an asset with no monitors draws no monitoring section at all", async () =>
   expect(text()).not.toContain("Monitoring");
 });
 
+// -- a long column (#2210) -----------------------------------------------------
+
+/** `n` VMs under the site, named so they sort before `vm-app-02` and push it far down its column. */
+const bulkUnderSite = (n: number) =>
+  Array.from({ length: n }, (_, at) =>
+    row({ id: `asset:bulk-${at}`, parent_id: SITE.id, type_id: "vm", monogram: "VM", name: `bulk-${String(at).padStart(4, "0")}`, has_children: false }),
+  );
+
+test("a long column draws the rows near the viewport, and a wire to a row it has not drawn still lands (#2210)", async () => {
+  render("#/asset/asset:gitea-db", [...ESTATE, ...bulkUnderSite(2000)], { stripWidth: 780 });
+
+  await waitFor(() => expect(wires()).toEqual(["via:route:gitea → asset:vm-app-02 dashed"]));
+  const long = [...target.querySelectorAll("ol.col")].find((column) => column.querySelector('[data-asset="asset:bulk-0"]'))!;
+  expect(long.querySelectorAll("button.row").length).toBeGreaterThan(5);
+  expect(long.querySelectorAll("button.row").length).toBeLessThan(100);
+  expect(long.querySelector('button.row[data-asset="asset:vm-app-02"]')).toBeNull();
+});
+
+test("a search hit deep in a long column is drawn, selected and focused (#2210)", async () => {
+  const { nav, searched } = render("#/assets/tree", [...ESTATE, ...bulkUnderSite(2000)]);
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
+
+  await type(searched, "bulk-1999");
+  press("Enter", box());
+
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: "asset:bulk-1999" });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "bulk-1999"]));
+  await waitFor(() => expect(document.activeElement?.getAttribute("data-asset")).toBe("asset:bulk-1999"));
+});
+
+test("a pane that holds thousands draws the Holds lines near the viewport (#2210)", async () => {
+  render("#/asset/asset:hel1", [...ESTATE, ...bulkUnderSite(2000)]);
+
+  await waitFor(() => expect(text()).toContain("bulk-0000"));
+  const holds = [...target.querySelectorAll("aside.pane section.grp")].find((group) => group.querySelector("h3")?.textContent?.trim() === "Holds")!;
+  expect(holds.querySelectorAll("li").length).toBeGreaterThan(5);
+  expect(holds.querySelectorAll("li").length).toBeLessThan(100);
+});
