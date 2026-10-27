@@ -410,3 +410,9 @@ test("an Inbox row off screen skips style and layout, so thousands of rows filte
   expect(row).toContain("content-visibility: auto;");
   expect(row).toMatch(/contain-intrinsic-size: auto \d+px;/);
 });
+
+test("the Tickets page's row is bounded by the page, so a preview change does not re-lay out the list; stacked below 900px it is content-high (perf audit after #2200)", () => {
+  expect(block(code, ".tf-tickets")).toMatch(/grid-template-rows:\s*minmax\(0, 1fr\);/);
+  const narrow = code.slice(code.indexOf("@media (max-width: 900px) {\n  .tf-tickets"));
+  expect(block(narrow, "  .tf-tickets")).toMatch(/grid-template-rows:\s*none;[^}]*height:\s*auto;/);
+});

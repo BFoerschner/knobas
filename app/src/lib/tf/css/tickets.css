@@ -1,5 +1,7 @@
 /* ---------- Tickets (#810): views, the ticket board or list, the preview ---------- */
-.tf-tickets { display: grid; grid-template-columns: 230px minmax(0, 1fr) 340px; height: 100%; }
+/* One row bounded by the page, never sized by its content: an `auto` row made any text
+   change in the preview re-lay out the whole list table (perf audit after #2200). */
+.tf-tickets { display: grid; grid-template-columns: 230px minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr); height: 100%; }
 .tf-views { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-vlist { overflow: auto; padding: 12px 10px 14px; flex: 1; }
 .tf-views h2 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 12px 8px 4px; }
@@ -95,7 +97,7 @@
   .tf-tickets .tf-preview { display: none; }
 }
 @media (max-width: 900px) {
-  .tf-tickets { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .tf-tickets { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; height: auto; }
   .tf-views { border-right: 0; border-bottom: 1px solid var(--rule); }
   .tf-fbar, .tf-board-head, .tf-lane, .tf-list { padding-left: 16px; padding-right: 16px; }
 }

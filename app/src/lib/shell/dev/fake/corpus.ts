@@ -1010,4 +1010,5 @@ export function handlers(): Handlers {
   };
 }
 
-keepSeed(FAKE_CONTEXTS);
+// The corpus too: `ticket-views.ts`'s `seed` adds `?fake-tickets=<n>`'s tickets to it.
+keepSeed(FAKE_CONTEXTS, CORPUS);

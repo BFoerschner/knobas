@@ -16,6 +16,10 @@
  *   four views, and the layer and view writes with the refusals the backend
  *   makes (a taken or blank name, the last view).
  *
+ * - `?fake-dep-items=<n>` adds `n` generated containers and services to the
+ *   read, to measure Dependencies at a real estate's size
+ *   (`&fake-dep-items=5000`).
+ *
  * A restatement, which certifies nothing: the read is witnessed in
  * `crates/knobas-app/tests/it/dependencies_ipc.rs`. The estate here is the
  * testenv one, not prototype-6's Tidewater; the screenshot comparison names
@@ -173,7 +177,49 @@ function fakeDependencies(): Dependencies {
     if (known.has(link.from) && known.has(link.to)) relations.push(link);
   }
 
+  const extra = bulkItems(bulk);
+  items.push(...extra.items);
+  relations.push(...extra.relations);
   return { layers: layers.map((layer) => ({ ...layer, kinds: [...layer.kinds] })), kinds: KINDS, items, relations };
+}
+
+/** How many items `?fake-dep-items=<n>` adds; read by {@link seed}. */
+let bulk = 0;
+
+/** Reads `?fake-dep-items=<n>` before the bridge is installed. */
+export function seed(params: URLSearchParams): void {
+  bulk = Number(params.get("fake-dep-items") ?? 0) || 0;
+}
+
+/**
+ * `?fake-dep-items=<n>`: `n` items, nine in ten a container and the rest a
+ * service, half in prod and half in staging, one in fifty broken and one in
+ * twenty warning. A name is a word and its number, from sixteen words, so a
+ * word finds a sixteenth of them. Each container is inside one of the first
+ * fifty services, and every service inside the estate's Docker engine, so the
+ * engine and what holds it hold them all.
+ */
+function bulkItems(n: number): { items: DepItem[]; relations: DepRelation[] } {
+  const words = ["payout", "ledger", "carrier", "customs", "booking", "retry", "invoice", "tracking", "refund", "settlement", "runbook", "design", "review", "onboarding", "platform", "release"];
+  const items: DepItem[] = [];
+  const relations: DepRelation[] = [];
+  for (let i = 0; i < n; i++) {
+    const service = i % 10 === 0;
+    const id = `asset:bulk-${i + 1}`;
+    items.push({
+      id,
+      kind: service ? "service" : "container",
+      name: `${words[i % words.length]}-${service ? "svc" : "ct"}-${i + 1}`,
+      health: i % 50 === 7 ? "err" : i % 20 === 3 ? "warn" : "ok",
+      state: null,
+      monitors: i % 20 === 3 ? 1 : 0,
+      environment: i % 2 === 0 ? "prod" : "staging",
+      owner: null,
+    });
+    const holder = service ? "asset:orbstack-docker" : `asset:bulk-${((i % 50) * 10) % n + 1}`;
+    relations.push({ from: id, to: holder, relation: "inside" });
+  }
+  return { items, relations };
 }
 
 // -- #873: the layers and the views, for the session --------------------------

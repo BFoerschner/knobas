@@ -9,7 +9,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { PublishTarget, WriteAsk } from "../ipc/entity";
 import type { search as realSearch } from "../ipc/search";
 import { SETTLE_MS } from "../shell/refused-writes";
-import PublishTargetPicker from "./PublishTargetPicker.svelte";
+import PublishTargetPicker, { SEARCH_PAUSE_MS } from "./PublishTargetPicker.svelte";
 
 /** The hits each query finds, by the text typed. */
 const PAGES: Record<string, string[]> = {
@@ -77,7 +77,7 @@ async function turns() {
   flushSync();
 }
 
-/** Type `text` into an empty box one key after another, each search landing before the next key. */
+/** Type `text` into an empty box one key after another, then let its one search land. */
 async function type(text: string) {
   const box = target.querySelector<HTMLInputElement>('input[aria-label="Parent page"]')!;
   for (let end = 1; end <= text.length; end += 1) {
@@ -85,6 +85,8 @@ async function type(text: string) {
     box.dispatchEvent(new Event("input", { bubbles: true }));
     await turns();
   }
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+  await turns();
 }
 
 const hit = (entity: string) =>
@@ -109,6 +111,7 @@ test("a page already answered is not asked about again for the picker's life (#2
   const box = target.querySelector<HTMLInputElement>('input[aria-label="Parent page"]')!;
   box.value = "sta";
   box.dispatchEvent(new Event("input", { bubbles: true }));
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
   await turns();
   await vi.advanceTimersByTimeAsync(SETTLE_MS);
 
@@ -185,4 +188,47 @@ test("an answer that lands after the picker is gone announces nothing (#2063)", 
   answer([]);
   await turns();
   expect(announced).toEqual([]);
+});
+
+/** The picker on a search that answers when the test says so; each call's text is kept. */
+function renderHeld() {
+  const asked: { raw: string; answer: () => void }[] = [];
+  const held = ((query: { raw: string }) =>
+    new Promise((resolve) => asked.push({ raw: query.raw, answer: () => resolve(search(query as Parameters<typeof search>[0])) }))) as unknown as typeof realSearch;
+  view = mount(PublishTargetPicker, {
+    target,
+    props: { sources: [{ id: "c", name: "Confluence" }], search: held, refusedWrites: async () => [], onchange: () => {} },
+  });
+  flushSync();
+  const box = target.querySelector<HTMLInputElement>('input[aria-label="Parent page"]')!;
+  const key = (text: string) => {
+    box.value = text;
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  return { asked, key };
+}
+
+// #2200's class: a search on every key, with no pause, and the last to answer drawn.
+test("the keys typed inside the search pause are one search of the whole text", async () => {
+  const { asked, key } = renderHeld();
+  for (const text of ["s", "st", "sta", "stan"]) {
+    key(text);
+    await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS - 1);
+  }
+  expect(asked.map((one) => one.raw)).toEqual([]);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(asked.map((one) => one.raw)).toEqual(["stan"]);
+});
+
+test("an answer for text since typed over is never drawn", async () => {
+  const { asked, key } = renderHeld();
+  key("st");
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+  key("standup");
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+  asked[1]!.answer();
+  await turns();
+  asked[0]!.answer();
+  await turns();
+  expect([...target.querySelectorAll(".hits button")].map((b) => b.textContent?.trim())).toEqual(["Page c:5"]);
 });

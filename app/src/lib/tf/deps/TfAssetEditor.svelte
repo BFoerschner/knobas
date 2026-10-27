@@ -35,7 +35,7 @@
     type AssetForm,
   } from "./asset-edit";
   import { kindOf } from "./deps";
-  import { assetPaths } from "./estate-paths";
+  import { assetPaths, placesOutside } from "./estate-paths";
   import { ENVIRONMENTS } from "./views";
   import type { EditorPorts } from "./ports";
 
@@ -104,9 +104,7 @@
   void readBreaks();
 
   const paths = $derived(assetPaths(read));
-  const places = $derived(
-    paths.places.filter((place) => place.id !== assetId && !paths.under(assetId).has(place.id)),
-  );
+  const places = $derived(placesOutside(paths, assetId));
   const type = $derived(detail ? types.find((t) => t.id === detail!.asset.type_id) : undefined);
   const kind = $derived(detail ? kindOf(read.kinds, detail.asset.type_id) : null);
   const dependsOn = $derived(
