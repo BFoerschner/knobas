@@ -9,7 +9,8 @@
   and fades the rest; click or `Enter` opens it (an asset opens its editor);
   `⌖` or `T` shows only what it touches; the arrow keys move between tiles.
   *Find* dims what does not match and opens the folds that hold a match;
-  `Enter` jumps to the next. The toolbar holds the view menu, the environment
+  `Enter` jumps to the next, and opens a group's "N more, K found" when the
+  next match waits behind it (#2212). The toolbar holds the view menu, the environment
   chips, *Problems and what they touch* and *Layers…* (`TfDepsLayers.svelte`).
 
   The reader's gestures (Find, the trace, folds opened by hand) hold for the
@@ -492,15 +493,31 @@
     return () => window.removeEventListener("keydown", onkey);
   });
 
-  function findKey(event: KeyboardEvent) {
+  /** The matches drawn as tiles and the "more" lines that hold matches, in page order. */
+  const findStops = () => [...(bandsEl?.querySelectorAll<HTMLElement>(".tf-dp-t.tf-dp-hit .tf-dp-open, .tf-dp-more.tf-dp-hit") ?? [])];
+
+  /** `Enter` in *Find*: the next match; a group's "more" that holds matches opens, and its first hidden match is next (#2212). */
+  async function findKey(event: KeyboardEvent) {
     if (event.key !== "Enter") return;
     event.preventDefault();
-    const hits = [...(bandsEl?.querySelectorAll<HTMLElement>(".tf-dp-t.tf-dp-hit .tf-dp-open") ?? [])];
-    if (hits.length === 0) return;
-    jump = (jump + 1) % hits.length;
-    const tile = hits[jump]!;
-    tile.scrollIntoView?.({ block: "center" });
-    tile.focus();
+    let stops = findStops();
+    if (stops.length === 0) return;
+    jump = (jump + 1) % stops.length;
+    let stop = stops[jump]!;
+    if (stop.classList.contains("tf-dp-more")) {
+      const tiles = stop.parentElement!;
+      const drawn = new Set([...tiles.querySelectorAll<HTMLElement>(".tf-dp-t.tf-dp-hit")].map((tile) => tile.dataset.id));
+      stop.click();
+      await tick();
+      const next = [...tiles.querySelectorAll<HTMLElement>(".tf-dp-t.tf-dp-hit")].find((tile) => !drawn.has(tile.dataset.id));
+      const open = next?.querySelector<HTMLElement>(".tf-dp-open");
+      if (!open) return;
+      stops = findStops();
+      jump = stops.indexOf(open);
+      stop = open;
+    }
+    stop.scrollIntoView?.({ block: "center" });
+    stop.focus();
   }
 
   function scrollTo(layer: string) {

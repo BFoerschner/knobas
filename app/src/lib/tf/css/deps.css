@@ -126,7 +126,7 @@
 .tf-dp-pin:focus-visible { opacity: 1; outline: 2px solid var(--focus); }
 .tf-dp-t.tf-dp-c .tf-dp-pin { top: 2px; right: 16px; }
 .tf-dp-t.tf-dp-err .tf-dp-pin { color: var(--sheet); }
-.tf-dp-t.tf-dp-hit { box-shadow: 0 0 0 2px var(--mark), 0 0 0 3px var(--ink-2); }
+.tf-dp-t.tf-dp-hit, .tf-dp-more.tf-dp-hit { box-shadow: 0 0 0 2px var(--mark), 0 0 0 3px var(--ink-2); }
 .tf-dp-t.tf-dp-miss { opacity: .4; }
 .tf-dp-t.tf-dp-dim, .tf-dp-chip.tf-dp-dim, .tf-dp-more.tf-dp-dim { opacity: .18; }
 .tf-dp-chip.tf-dp-lit, .tf-dp-more.tf-dp-lit { box-shadow: 0 0 0 2px var(--ink-2); }

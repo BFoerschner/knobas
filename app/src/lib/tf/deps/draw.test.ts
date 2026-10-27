@@ -7,7 +7,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { Dependencies, DepItem, DepRelation } from "../../ipc/assets";
-import { drawOf, graphOf, hitsLine, moreLine, nextTile, NO_GESTURES, tileEl, touches, type Gestures } from "./draw";
+import { drawOf, FIND_SHOWS, graphOf, hitsLine, moreLine, nextTile, NO_GESTURES, tileEl, touches, type Gestures } from "./draw";
 import { settingsOf } from "./views";
 
 function item(over: Partial<DepItem> & Pick<DepItem, "id" | "kind">): DepItem {
@@ -157,6 +157,40 @@ describe("Find (R-11.18)", () => {
     expect(hitsLine("vm7", vm.hits)).toBe(`${vm.hits} found, Enter for the next`);
     expect(hitsLine("nothing-like-it", 0)).toBe("none found");
     expect(hitsLine("  ", 0)).toBe("");
+  });
+
+  test("a group with one match draws the match and its usual few, not every member (#2212)", () => {
+    const team12 = (drawn: ReturnType<typeof drawOf>) =>
+      drawn.bands.find((band) => band.id === "services")!.open.find((group) => group.name === "team-12")!;
+    const found = drawOf(BIG, byOwner, gestures({ query: "svc-0012" }));
+    const group = team12(found);
+    // Compact and big: a cap of six, the match first.
+    expect(group.tiles).toHaveLength(6);
+    expect(group.tiles[0]!.id).toBe("s12");
+    expect(group.more).toMatchObject({ count: 44, wrong: "" });
+    const member = group.more && BIG.items.find((i) => i.owner === "team-12" && !group.tiles.includes(i))!;
+    expect(found.where.get(member!.id)).toBe(group.more!.el);
+
+    // The group's own "more" still draws the rest.
+    expect(team12(drawOf(BIG, byOwner, gestures({ query: "svc-0012", more: new Set(["services|team-12"]) }))).tiles).toHaveLength(50);
+  });
+
+  test("a group's first matches are tiles; the rest are counted on its more (#2212)", () => {
+    // `team-12` matches each of the group's 50 by its owner.
+    const found = drawOf(BIG, byOwner, gestures({ query: "team-12" }));
+    expect(found.hits).toBe(50);
+    const group = found.bands.find((band) => band.id === "services")!.open.find((g) => g.name === "team-12")!;
+    expect(group.tiles).toHaveLength(FIND_SHOWS);
+    expect(group.more).toMatchObject({ count: 50 - FIND_SHOWS, hits: 50 - FIND_SHOWS });
+    expect(moreLine(group.more!.count, group.more!.wrong, group.more!.hits)).toBe("26 more, 26 found");
+    expect(moreLine(40, "2 broken", 3)).toBe("40 more, 3 found, 2 broken");
+    expect(moreLine(40, "", 0)).toBe("40 more, all fine");
+    for (const service of BIG.items.filter((i) => i.owner === "team-12"))
+      expect([tileEl(service.id), group.more!.el]).toContain(found.where.get(service.id));
+  });
+
+  test("an empty Find draws what it drew before (#2212)", () => {
+    for (const blank of ["", "  "]) expect(drawOf(BIG, byOwner, gestures({ query: blank })).bands).toEqual(drawOf(BIG, byOwner, NO_GESTURES).bands);
   });
 });
 

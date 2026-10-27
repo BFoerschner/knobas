@@ -13,7 +13,9 @@
  * - **Folding**: problems never fold; a group with no problem folds into a
  *   chip once its layer holds more than the view's fold count; an open group
  *   shows its problems and a few more, then "N more, all fine"; a layer folds
- *   to its summary. *Find* opens every fold that holds a match.
+ *   to its summary. *Find* opens every fold that holds a match; an open
+ *   group draws its first `FIND_SHOWS` matches before the few more, and its
+ *   "N more, K found" holds the rest (#2212).
  * - Every item drawn is somewhere: its own tile, or the "more" button, chip
  *   or folded band that stands for it. `where` maps an item to that element,
  *   so a line to a folded item lands on its fold.
@@ -114,14 +116,36 @@ const words = (query: string) => query.toLowerCase().split(/\s+/).filter(Boolean
 export function matcher(read: Dependencies, query: string): (item: DepItem) => boolean {
   const want = words(query);
   if (want.length === 0) return () => false;
+  const texts = textsOf(read);
   return (item) => {
-    const text = [item.name, kindOf(read.kinds, item.kind).label, item.state, item.environment, item.owner]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
+    let text = texts.get(item);
+    if (text === undefined) {
+      text = [item.name, kindOf(read.kinds, item.kind).label, item.state, item.environment, item.owner]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      texts.set(item, text);
+    }
     return want.every((word) => text.includes(word));
   };
 }
+
+/** The read's items in tile order (problems first, then by name), sorted once per read: a keystroke need not sort them again (#2212). */
+const sorted = new WeakMap<Dependencies, DepItem[]>();
+function sortedOf(read: Dependencies): DepItem[] {
+  let items = sorted.get(read);
+  if (items === undefined) {
+    items = [...read.items].sort(
+      (a, b) => ORDER.indexOf(stateOf(a).tone) - ORDER.indexOf(stateOf(b).tone) || a.name.localeCompare(b.name),
+    );
+    sorted.set(read, items);
+  }
+  return items;
+}
+
+/** What *Find* searches in each item, kept per read so a keystroke does not build it again (#2212). */
+const searched = new WeakMap<Dependencies, WeakMap<DepItem, string>>();
+const textsOf = (read: Dependencies) => searched.get(read) ?? searched.set(read, new WeakMap()).get(read)!;
 
 /** Which items the view, the trace and the filters leave. */
 export function visibleOf(read: Dependencies, graph: Graph, settings: DepViewSettings, trace: string | null): (item: DepItem) => boolean {
@@ -189,8 +213,12 @@ export interface OpenGroup {
   count: number;
   wrong: string;
   tiles: DepItem[];
-  more: { el: string; count: number; wrong: string } | null;
+  /** The rest: how many, what is wrong with them, and how many *Find* matches among them. */
+  more: { el: string; count: number; wrong: string; hits: number } | null;
 }
+
+/** How many of a group's matches *Find* draws as tiles; the rest wait behind its "more" (#2212). */
+export const FIND_SHOWS = 24;
 
 /** A group folded into a chip. */
 export interface ShutGroup {
@@ -258,10 +286,11 @@ export function drawOf(read: Dependencies, settings: DepViewSettings, gestures: 
 
   const byLayer = new Map<string, DepItem[]>(read.layers.map((layer) => [layer.id, []]));
   const unplaced: DepItem[] = [];
-  for (const item of read.items) {
+  for (const item of read.items) if (!layerOfKind.has(item.kind)) unplaced.push(item);
+  // In tile order already: each layer's items keep it.
+  for (const item of sortedOf(read)) {
     const layer = layerOfKind.get(item.kind);
-    if (layer === undefined) unplaced.push(item);
-    else if (visible(item)) byLayer.get(layer.id)!.push(item);
+    if (layer !== undefined && visible(item)) byLayer.get(layer.id)!.push(item);
   }
 
   const where = new Map<string, string>();
@@ -270,13 +299,11 @@ export function drawOf(read: Dependencies, settings: DepViewSettings, gestures: 
   };
   let hits = 0;
   const bands: DrawnBand[] = [];
-  const sortTiles = (a: DepItem, b: DepItem) =>
-    ORDER.indexOf(stateOf(a).tone) - ORDER.indexOf(stateOf(b).tone) || a.name.localeCompare(b.name);
 
   for (const layer of read.layers) {
     const shown = layerIn(settings, layer.id);
     if (shown.hidden) continue;
-    const items = [...byLayer.get(layer.id)!].sort(sortTiles);
+    const items = byLayer.get(layer.id)!;
     const anyHit = items.some((item) => hit(item) || item.id === gestures.reveal);
     const folded = (gestures.fold.get(layer.id) ?? shown.folded) && !anyHit;
     const compact = compactFor(settings.tiles, items.length);
@@ -326,11 +353,25 @@ export function drawOf(read: Dependencies, settings: DepViewSettings, gestures: 
         band.shut.push({ key, el, name, count: members.length, wrong: wrongOf(members), mix: mixOf(members) });
         continue;
       }
-      const all = gestures.more.has(key) || matched;
-      const lead = members.filter((item) => isProblem(item) || hit(item) || item.id === gestures.reveal);
-      const rest = members.filter((item) => !lead.includes(item));
-      const tiles = all ? members : [...lead, ...rest.slice(0, Math.max(0, cap - lead.length))];
-      const left = members.filter((item) => !tiles.includes(item));
+      // Problems and the revealed item always, then the first `FIND_SHOWS`
+      // matches, then the usual few; the rest, matches included, behind the
+      // group's own "more" (#2212).
+      let tiles = members;
+      let left: DepItem[] = [];
+      if (!gestures.more.has(key)) {
+        const lead: DepItem[] = [];
+        const rest: DepItem[] = [];
+        let found = 0;
+        for (const item of members) {
+          if (isProblem(item) || item.id === gestures.reveal || (hit(item) && found++ < FIND_SHOWS)) lead.push(item);
+          else rest.push(item);
+        }
+        const room = Math.max(0, cap - lead.length);
+        const fill = rest.filter((item) => !hit(item)).slice(0, room);
+        const filled = new Set(fill);
+        tiles = [...lead, ...fill];
+        left = rest.filter((item) => !filled.has(item));
+      }
       for (const tile of tiles) where.set(tile.id, tileEl(tile.id));
       const more = moreEl(key);
       put(left, more);
@@ -340,7 +381,7 @@ export function drawOf(read: Dependencies, settings: DepViewSettings, gestures: 
         count: members.length,
         wrong: wrongOf(members),
         tiles,
-        more: left.length > 0 ? { el: more, count: left.length, wrong: wrongOf(left) } : null,
+        more: left.length > 0 ? { el: more, count: left.length, wrong: wrongOf(left), hits: left.filter(hit).length } : null,
       });
     }
     band.shutLabel = band.open.length > 0 ? "Folded, all fine" : "All fine, folded";
@@ -374,9 +415,11 @@ export function hitsLine(query: string, hits: number): string {
   return hits === 1 ? "1 found" : `${hits.toLocaleString("en")} found, Enter for the next`;
 }
 
-/** "N more, all fine" or "N more, 2 broken". */
-export function moreLine(count: number, wrong: string): string {
-  return `${count.toLocaleString("en")} more, ${wrong || "all fine"}`;
+/** "N more, all fine" or "N more, 2 broken"; with *Find*'s matches among them, "N more, 3 found" (#2212). */
+export function moreLine(count: number, wrong: string, hits = 0): string {
+  const more = `${count.toLocaleString("en")} more`;
+  if (hits > 0) return `${more}, ${hits.toLocaleString("en")} found${wrong ? `, ${wrong}` : ""}`;
+  return `${more}, ${wrong || "all fine"}`;
 }
 
 /** A tile's place on screen, for the arrow keys. */
