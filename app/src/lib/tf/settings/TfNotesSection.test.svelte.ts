@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { CaptureShortcut } from "../../ipc/entity";
 import { SETTLE_MS } from "../../shell/refused-writes";
+import { SEARCH_PAUSE_MS } from "../../standup/PublishTargetPicker.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import type { NotesPorts } from "./notes-ports";
 import TfNotesSection from "./TfNotesSection.svelte";
@@ -270,10 +271,12 @@ async function settle() {
 async function pickAndMove() {
   const find = target.querySelector<HTMLInputElement>('input[aria-label="Parent page"]')!;
   find.value = "archive";
-  // The picker asks about its hits once the search stands still (#2063).
+  // The picker searches once the keys pause, and asks about its hits once
+  // the search stands still (#2063).
   vi.useFakeTimers();
   try {
     find.dispatchEvent(new Event("input", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
     await settle();
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
   } finally {

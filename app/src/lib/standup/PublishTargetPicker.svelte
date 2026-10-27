@@ -39,6 +39,14 @@
   once while the picker is open (#2063). A hit picked before its answer
   lands is asked about at once, and is announced until a refusal says why.
 -->
+<script module lang="ts">
+  /**
+   * How long, in ms, the parent search waits for the next key before it
+   * searches, #2201's pause: a word typed at speed is one search, not one a letter.
+   */
+  export const SEARCH_PAUSE_MS = 150;
+</script>
+
 <script lang="ts">
   import { onDestroy } from "svelte";
 
@@ -102,16 +110,33 @@
     // The parent belonged to the old instance; keeping it would offer a
     // publish into a wiki that cannot see the page.
     parent = null;
+    clearTimeout(pausing);
+    searching += 1;
     hits = [];
     announce();
   }
 
-  async function find(text: string) {
+  /** The search waiting for the keys to pause, and the generation an answer must carry to land. */
+  let pausing: ReturnType<typeof setTimeout> | undefined;
+  let searching = 0;
+  onDestroy(() => {
+    clearTimeout(pausing);
+    searching += 1;
+  });
+
+  function find(text: string) {
     query = text;
+    clearTimeout(pausing);
+    const mine = ++searching;
     if (sourceId === null || text.trim() === "") {
       hits = [];
       return;
     }
+    pausing = setTimeout(() => void searchFor(text, mine), SEARCH_PAUSE_MS);
+  }
+
+  /** One search; its answer is drawn only if no key was typed since. */
+  async function searchFor(text: string, mine: number) {
     try {
       const found = await search({
         raw: text,
@@ -124,13 +149,14 @@
           authors: [],
         },
       });
+      if (mine !== searching) return;
       hits = found.groups
         .flatMap((group) => group.hits)
         .filter((hit) => hit.kind === "page" && hit.source_id === sourceId);
     } catch {
       // A search that failed is no results; the reader types again. It is the
       // one read here that is not a claim about anything.
-      hits = [];
+      if (mine === searching) hits = [];
     }
   }
 </script>
@@ -165,7 +191,7 @@
       placeholder="Standup protocols"
       disabled={sourceId === null}
       value={query}
-      oninput={(event) => void find(event.currentTarget.value)}
+      oninput={(event) => find(event.currentTarget.value)}
     />
   </label>
 
