@@ -36,6 +36,44 @@ export function logBlocks(log: RunLog): LogBlock[] {
   return blocks;
 }
 
+/** A step's block. */
+export type StepBlock = Extract<LogBlock, { kind: "step" }>;
+
+/**
+ * One row of the log as the windowed list draws it (#2211): a step's
+ * summary, a shown line, or the edges of a run of loose lines (the rule and
+ * padding their wrapper drew). `key` is unique: a line's number, else below 0.
+ */
+export type LogRow =
+  | { kind: "line"; key: number; line: LogLine }
+  | { kind: "step"; key: number; block: StepBlock }
+  | { kind: "loose-top" | "loose-end"; key: number };
+
+/**
+ * The blocks flattened into the rows drawn, in order: each step's summary,
+ * then its shown lines while it is `open`; each loose run's shown lines
+ * between its edges.
+ */
+export function logRows(blocks: readonly LogBlock[], open: (block: StepBlock) => boolean, shown: (line: LogLine) => boolean): LogRow[] {
+  const rows: LogRow[] = [];
+  // Block `b`'s own rows take the three keys -1 - 3b (a step's summary),
+  // -2 - 3b and -3 - 3b (a loose run's edges): below 0, apart from every line.
+  const lines = (list: readonly LogLine[]) => {
+    for (const line of list) if (shown(line)) rows.push({ kind: "line", key: line.number, line });
+  };
+  blocks.forEach((block, b) => {
+    if (block.kind === "loose") {
+      rows.push({ kind: "loose-top", key: -2 - 3 * b });
+      lines(block.lines);
+      rows.push({ kind: "loose-end", key: -3 - 3 * b });
+      return;
+    }
+    rows.push({ kind: "step", key: -1 - 3 * b, block });
+    if (open(block)) lines(block.lines);
+  });
+  return rows;
+}
+
 /** How a step reads in its fold's summary: `err`, `run` or `ok`. */
 export type StepState = "err" | "run" | "ok";
 

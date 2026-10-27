@@ -224,6 +224,49 @@ export function foldOpen(remembered: boolean | undefined, f: Fold, selected: str
   return narrowed || f.failing > 0 || foldHolds(f, selected);
 }
 
+/**
+ * One row of the pipeline list as the windowed list draws it (#2211): a
+ * heading, a pipeline at its depth, or a fold's summary. `key` is unique: a
+ * pinned pipeline is also in its fold.
+ */
+export type ListRow =
+  | { kind: "head"; key: string; text: string }
+  | { kind: "pipeline"; key: string; pipeline: PipelineRow; depth: number }
+  | { kind: "fold"; key: string; fold: Fold; depth: number; open: boolean };
+
+/**
+ * The list flattened into the rows drawn, in order: *Pinned* and its
+ * pipelines, then each tree under its source's name (`scope` *all*) or all
+ * of them under one *By project* (*This job*), its own pipelines before its
+ * folds, and under each fold's summary its rows only while `open` says so.
+ */
+export function listRows(
+  pinned: readonly PipelineRow[],
+  trees: readonly SourceTree[],
+  scope: Scope,
+  open: (f: Fold) => boolean,
+): ListRow[] {
+  const rows: ListRow[] = [];
+  if (pinned.length > 0) {
+    rows.push({ kind: "head", key: "head:pinned", text: "Pinned" });
+    for (const pipeline of pinned) rows.push({ kind: "pipeline", key: `pin:${pipeline.entity_id}`, pipeline, depth: 0 });
+  }
+  const walk = (pipelines: readonly PipelineRow[], folds: readonly Fold[], depth: number) => {
+    for (const pipeline of pipelines) rows.push({ kind: "pipeline", key: `tree:${pipeline.entity_id}`, pipeline, depth });
+    for (const f of folds) {
+      const isOpen = open(f);
+      rows.push({ kind: "fold", key: `fold:${f.key}`, fold: f, depth, open: isOpen });
+      if (isOpen) walk(f.pipelines, f.folds, depth + 1);
+    }
+  };
+  trees.forEach((tree, at) => {
+    const text = scope === "all" ? tree.source : at === 0 ? "By project" : null;
+    if (text !== null) rows.push({ kind: "head", key: `head:${tree.sourceId}:${text}`, text });
+    walk(tree.pipelines, tree.folds, 0);
+  });
+  return rows;
+}
+
 /** The pinned pipelines among `list`, in its order. */
 export function pinnedOf(list: readonly PipelineRow[]): PipelineRow[] {
   return list.filter((pipeline) => pipeline.pinned);

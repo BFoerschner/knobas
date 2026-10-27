@@ -178,3 +178,56 @@ test("past the cap the line under the log says which part it holds", async () =>
   await settle();
   expect(target.querySelector(".tf-logfoot")?.textContent).toBe("The last 8 of 31,402 lines. Download log has all of them.");
 });
+
+/** One failed step of `n` lines between a loose first and last line: the step opens by itself. */
+function longLog(n: number, text: (number: number) => string = (number) => `  Running payout-service check ${number}`): RunLog {
+  const lines = [line(1, null, "TeamCity server version is 2026.1.3")];
+  for (let number = 2; number <= n + 1; number += 1) lines.push({ ...line(number, 0, text(number)), time: "10:05:58" });
+  lines.push(line(n + 2, null, "Build finished"));
+  return { total: n + 2, steps: [{ name: "Test", first: 2, last: n + 1, seconds: 30, tone: "err" }], lines };
+}
+
+test("a long open step draws only the lines near the viewport and keeps the room of the rest (#2211)", async () => {
+  draw(longLog(5000));
+  await settle();
+  expect(folds().map((d) => d.open)).toEqual([true]);
+  const drawn = shown();
+  expect(drawn.length).toBeGreaterThan(5);
+  expect(drawn.length).toBeLessThan(200);
+  expect(drawn.slice(0, 3)).toEqual([1, 2, 3]);
+  expect(target.querySelector<HTMLElement>(".tf-logv")!.style.paddingBottom).not.toBe("");
+});
+
+test("find moves to a hit in an undrawn line: it is drawn, marked current and scrolled to (#2211)", async () => {
+  const scrolled: string[] = [];
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this.closest(".tf-ll")?.getAttribute("data-n") ?? this.tagName);
+  };
+  draw(longLog(5000, (number) => (number === 10 || number === 4000 ? `needle at ${number}` : `hay ${number}`)));
+  await settle();
+  find("needle");
+  expect(count()).toBe("1 of 2");
+  enter();
+  expect(count()).toBe("2 of 2");
+  expect(target.querySelector("mark.tf-curm")?.closest(".tf-ll")?.getAttribute("data-n")).toBe("4000");
+  expect(scrolled.at(-1)).toBe("4000");
+  enter();
+  expect(target.querySelector("mark.tf-curm")?.closest(".tf-ll")?.getAttribute("data-n")).toBe("10");
+  expect(scrolled.at(-1)).toBe("10");
+});
+
+test("Jump to the first error reaches an error line far below the drawn ones (#2211)", async () => {
+  const scrolled: string[] = [];
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this.getAttribute("data-n") ?? this.tagName);
+  };
+  const log = longLog(5000);
+  log.lines[4900] = { ...log.lines[4900]!, tone: "err", text: "error: test failed" };
+  draw(log);
+  await settle();
+  expect(shown()).not.toContain(4901);
+  button("Jump to the first error")!.click();
+  await settle();
+  expect(target.querySelector('.tf-ll[data-n="4901"]')?.classList.contains("tf-e")).toBe(true);
+  expect(scrolled.at(-1)).toBe("4901");
+});
