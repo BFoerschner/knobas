@@ -5,7 +5,8 @@
 
   A failed test opens to its assertion as the source wrote it, *Show in
   log*, and how often it failed in the last 10 runs (`test_history`, read
-  when it opens). The first five failed tests start open.
+  when it opens). The first five failed tests start open. A long run draws
+  only the rows near the viewport (`shell/windowed.svelte.ts`, #2210).
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -16,6 +17,7 @@
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
   import { sessionFilter } from "../filter/filter-state.svelte";
+  import { Windowed } from "../../shell/windowed.svelte";
   import type { RunPorts } from "./pipeline-ports";
   import { RESULT_CHIPS, historyLine, keptTests, modulesOf, testTime } from "./run-reads";
 
@@ -116,6 +118,15 @@
     }
   });
 
+  /** The drawn rows in order: each test, and an open failed test's assertion under it. */
+  const entries = $derived(shown.flatMap((test) => (isOpen(test) ? [{ test, detail: false }, { test, detail: true }] : [{ test, detail: false }])));
+  /** Thousands of tests draw only those near the viewport (#2210); a `.tf-trow` is 33 px. */
+  const win = new Windowed({ count: () => entries.length, key: (i) => entryKey(entries[i]!), estimate: 33 });
+
+  function entryKey(entry: { test: RunTest; detail: boolean }): string {
+    return entry.detail ? `${entry.test.name}\u0000detail` : entry.test.name;
+  }
+
   function historyText(test: RunTest): string | null {
     if (test.id === null) return null;
     const history = histories[test.name];
@@ -133,26 +144,28 @@
 {:else if read === null}
   <p class="tf-dim">Reading the tests…</p>
 {:else}
-  <div class="tf-atree tf-tres">
-    {#each shown as test (test.name)}
-      {@const open = isOpen(test)}
-      {@const time = testTime(test.duration_ms)}
-      <div class="tf-trow">
-        <span class={`tf-dot ${test.status === "failed" ? "tf-err" : test.status === "passed" ? "tf-ok" : ""}`}></span>
-        <span class="tf-nm"
-          >{#if test.status === "failed"}<button type="button" aria-label={test.name} aria-expanded={open} onclick={() => (opened[test.name] = !open)}
-              ><Marked text={test.name} typed={filter.text} /></button
-            >{:else}<Marked text={test.name} typed={filter.text} />{/if}</span
-        >
-        <span class="tf-dim">{time ?? ""}</span>
-        <span
-          >{#if test.status === "failed"}<span class="tf-chip tf-err">{test.muted ? "failed, muted" : "failed"}</span
-            >{:else}<span class="tf-dim">{test.status}</span>{/if}</span
-        >
-      </div>
-      {#if open}
+  <div class="tf-atree tf-tres" {@attach win.list}>
+    {#each win.slice(entries) as entry (entryKey(entry))}
+      {@const test = entry.test}
+      {#if !entry.detail}
+        {@const open = isOpen(test)}
+        {@const time = testTime(test.duration_ms)}
+        <div class="tf-trow" {@attach win.row(entryKey(entry))}>
+          <span class={`tf-dot ${test.status === "failed" ? "tf-err" : test.status === "passed" ? "tf-ok" : ""}`}></span>
+          <span class="tf-nm"
+            >{#if test.status === "failed"}<button type="button" aria-label={test.name} aria-expanded={open} onclick={() => (opened[test.name] = !open)}
+                ><Marked text={test.name} typed={filter.text} /></button
+              >{:else}<Marked text={test.name} typed={filter.text} />{/if}</span
+          >
+          <span class="tf-dim">{time ?? ""}</span>
+          <span
+            >{#if test.status === "failed"}<span class="tf-chip tf-err">{test.muted ? "failed, muted" : "failed"}</span
+              >{:else}<span class="tf-dim">{test.status}</span>{/if}</span
+          >
+        </div>
+      {:else}
         {@const line = historyText(test)}
-        <div class="tf-tdetail">
+        <div class="tf-tdetail" {@attach win.row(entryKey(entry))}>
           {#if test.details !== null}<pre>{test.details.trimEnd()}</pre>{/if}
           <div class="tf-tacts">
             <a class="tf-btn tf-sm" href={logHref}>Show in log</a>
