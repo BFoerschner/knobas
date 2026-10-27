@@ -32,3 +32,26 @@ test("a windowed table freezes its columns again when its header cells change (#
   expect(widths()).toEqual(["25%", "25%", "25%"]);
   stop();
 });
+
+test("a windowed table with no header row freezes its columns at its first drawn row's cells, and lets go when it stops windowing (#2210)", () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const width = this.tagName === "TABLE" ? 400 : this.classList.contains("wide") ? 300 : 100;
+    return { width, height: 20, top: 0, bottom: 20, left: 0, right: width, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+  });
+  document.body.innerHTML = '<table><tbody><tr><td class="wide">a</td><td>b</td></tr></tbody></table>';
+  const table = document.querySelector("table")!;
+  let count = $state(400);
+  const win = new Windowed({ count: () => count, key: (i) => i, estimate: 20 });
+  const stop = $effect.root(() => {
+    win.list(table.tBodies[0]!);
+  });
+  flushSync();
+  expect(table.style.tableLayout).toBe("fixed");
+  expect([...table.querySelectorAll("colgroup > col")].map((col) => (col as HTMLElement).style.width)).toEqual(["75%", "25%"]);
+
+  count = 10;
+  flushSync();
+  expect(table.style.tableLayout).toBe("");
+  expect(table.querySelector("colgroup")).toBeNull();
+  stop();
+});

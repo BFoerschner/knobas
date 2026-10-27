@@ -21,7 +21,8 @@
  *   what of the list is on screen from the boxes around it, so the view's
  *   layout decides. On a `tbody`, while windowed, the table's columns keep
  *   the widths its first drawn rows gave (`table-layout: fixed`): columns
- *   sized by whichever rows are drawn would re-wrap the rows on screen.
+ *   sized by whichever rows are drawn would re-wrap the rows on screen. With
+ *   no header row, the first drawn row's cells give them, held by a `colgroup`.
  * - `row(key)` goes on each drawn row: its height is measured, the estimate
  *   stands for rows never drawn, and the row on screen is held where it was
  *   through each redraw (a row above drawn at other than its estimate, a
@@ -140,7 +141,8 @@ export class Windowed<K = string> {
         if (!this.on) return;
         const width = table.getBoundingClientRect().width;
         const heads = [...(table.tHead?.rows[0]?.cells ?? [])];
-        if (width === 0 || heads.length === 0) return;
+        if (width === 0) return;
+        if (heads.length === 0) return freezeCols(table, node, width);
         const shares = heads.map((head) => (head.getBoundingClientRect().width / width) * 100);
         heads.forEach((head, i) => (head.style.width = `${shares[i]}%`));
         table.style.tableLayout = "fixed";
@@ -268,6 +270,25 @@ export class Windowed<K = string> {
     }
     if (moved) this.#remeasured++;
   }
+}
+
+/**
+ * A table with no header row: its first drawn row's cells give the widths,
+ * held by a `colgroup` while it windows (#2210). A first row with a spanning
+ * cell gives none, and the columns stay sized by the drawn rows.
+ */
+function freezeCols(table: HTMLTableElement, body: HTMLTableSectionElement, width: number) {
+  const first = [...body.rows].find((tr) => !tr.classList.contains("tf-wgap"));
+  const cells = [...(first?.cells ?? [])];
+  if (cells.length === 0 || cells.some((cell) => cell.colSpan > 1)) return;
+  const cols = document.createElement("colgroup");
+  for (const cell of cells) cols.appendChild(document.createElement("col")).style.width = `${(cell.getBoundingClientRect().width / width) * 100}%`;
+  table.insertBefore(cols, table.caption?.nextSibling ?? table.firstChild);
+  table.style.tableLayout = "fixed";
+  return () => {
+    cols.remove();
+    table.style.tableLayout = "";
+  };
 }
 
 /** Sets `px` of room through the CSSOM (CSP refuses inline styles in markup), none when 0. */
