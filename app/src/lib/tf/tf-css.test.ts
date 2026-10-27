@@ -404,3 +404,9 @@ test("the changed files list sticks: its box is as tall as the diffs beside it (
   // A sticky element moves only inside its parent, and a grid item kept to its content's height leaves it no room.
   expect(block(code, ".tf-prfiles-nav")).toMatch(/align-self:\s*stretch/);
 });
+
+test("an Inbox row off screen skips style and layout, so thousands of rows filter without a stall (perf audit after #2200)", () => {
+  const row = block(code, ".tf-ib");
+  expect(row).toContain("content-visibility: auto;");
+  expect(row).toMatch(/contain-intrinsic-size: auto \d+px;/);
+});

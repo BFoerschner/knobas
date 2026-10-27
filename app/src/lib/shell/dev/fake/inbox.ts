@@ -37,6 +37,9 @@
  *   default"), so a screenshot of the empty state needs the toggles clicked off.
  * - *Done* removes a row for the session, and a snooze moves it to the
  *   snoozed shelf until `until`. Neither survives a reload.
+ * - `?fake-inbox-items=<n>` appends `n` generated rows after prototype-6's,
+ *   a minute apart and cycling the five kinds the chips name, to measure the
+ *   Inbox at size (`&fake-inbox-items=4000`).
  */
 import type { Handlers } from "../fake-tauri";
 import { CORPUS } from "./corpus";
@@ -145,16 +148,46 @@ function snoozed(): InboxEntry[] {
   return [row("jira", "Tidewater Jira", "Thursday 3 Sep 2026"), row("gitea", "Tidewater Gitea", "Monday 31 Aug 2026")];
 }
 
-/** Whether an alert row's monitor has been acked (`monitors.ts` keeps the ack). */
-function acked(entry: InboxEntry): boolean {
-  if (entry.item.category !== "alert") return false;
-  const monitor = entry.item.key.slice("alert:".length);
-  return fakeOpenAlerts().some((alert) => alert.monitor_id === monitor && alert.acked_at !== null);
+/**
+ * Whether an alert row's monitor has been acked (`monitors.ts` keeps the ack),
+ * as a test made once per read: the alerts are read once, not once per row.
+ */
+function ackedNow(): (entry: InboxEntry) => boolean {
+  const acked = new Set(fakeOpenAlerts().filter((alert) => alert.acked_at !== null).map((alert) => alert.monitor_id));
+  return (entry) => entry.item.category === "alert" && acked.has(entry.item.key.slice("alert:".length));
+}
+
+/**
+ * `?fake-inbox-items=<n>`: `n` generated rows, older than prototype-6's, each
+ * about a pull request, ticket, build or monitored asset of its own.
+ */
+function bulkItems(n: number): InboxEntry[] {
+  const made: InboxEntry[] = [];
+  for (let i = 0; i < n; i++) {
+    const minutes = 2_000 + i;
+    switch (i % 5) {
+      case 0:
+        made.push(entry(`review_request:mock:bulk#${i}`, "review_request", "mock", `mock:bulk#${i}`, "pr", `Bulk change ${i}`, "jonas asked for your review", minutes, ["approve", "comment"]));
+        break;
+      case 1:
+        made.push(entry(`mention:mock:BULK-${i}`, "mention", "mock", `mock:BULK-${i}`, "ticket", `Bulk ticket ${i}`, "you are mentioned here", minutes, ["comment"]));
+        break;
+      case 2:
+        made.push(entry(`failed_build:teamcity:build:Bulk-${i}`, "failed_build", "teamcity", `teamcity:build:Bulk-${i}`, "build", `Bulk #${i}`, "this build failed: Tests failed: 1", minutes, ["rerun_build"]));
+        break;
+      case 3:
+        made.push(entry(`new_assignment:mock:BULK-${i}`, "new_assignment", "mock", `mock:BULK-${i}`, "ticket", `Bulk ticket ${i}`, "assigned to you", minutes, []));
+        break;
+      default:
+        made.push(entry(`alert:kuma:bulk-${i}`, "alert", "kuma", `asset:bulk-${i}`, "asset", `bulk-${i}`, `bulk host ${i} is down`, minutes, []));
+    }
+  }
+  return made;
 }
 
 /** This feature's commands. */
-export function handlers(): Handlers {
-  let live = stream();
+export function handlers(params: URLSearchParams): Handlers {
+  let live = [...stream(), ...bulkItems(Number(params.get("fake-inbox-items") ?? 0) || 0)];
   let later = snoozed();
   let kinds: InboxCategory[] = KINDS.slice();
 
@@ -166,10 +199,14 @@ export function handlers(): Handlers {
 
   return {
     inbox_items: (args) => {
+      const acked = ackedNow();
       live = live.filter((candidate) => !acked(candidate));
       return (args["shelf"] as InboxShelf) === "snoozed" ? later.slice() : live.slice();
     },
-    inbox_count: () => live.filter((candidate) => !acked(candidate)).length,
+    inbox_count: () => {
+      const acked = ackedNow();
+      return live.filter((candidate) => !acked(candidate)).length;
+    },
     snooze_inbox_item: (args) => {
       const moved = take(args["itemKey"]);
       moved.item.snoozed_until = String(args["until"]);

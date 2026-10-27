@@ -391,6 +391,30 @@ test("docs: the tree and the search read the wiki's fillers alone, so a recorded
   expect((h["docs_tree"]!({}) as Tree).spaces).toHaveLength(tree.spaces.length);
 });
 
+test("inbox: ?fake-inbox-items=<n> adds n rows after prototype-6's, oldest last, across the five chip kinds", () => {
+  type Entry = { item: { key: string; category: string; occurred_at: string } };
+  const plain = ((demoHandlers() as Calls)["inbox_items"]!({ shelf: "stream" }) as Entry[]).length;
+  const rows = (demoHandlers(new URLSearchParams("fake-inbox-items=50")) as Calls)["inbox_items"]!({ shelf: "stream" }) as Entry[];
+  expect(rows).toHaveLength(plain + 50);
+  expect(new Set(rows.map((row) => row.item.key)).size).toBe(rows.length);
+  expect(new Set(rows.slice(plain).map((row) => row.item.category))).toEqual(
+    new Set(["review_request", "mention", "failed_build", "new_assignment", "alert"]),
+  );
+  expect(rows.at(-1)!.item.occurred_at < rows[plain]!.item.occurred_at).toBe(true);
+});
+
+test("docs: ?fake-docs-long=<n> repeats the SEPA design page's body and comments n times, headings numbered", () => {
+  type Page = { blocks: { type: string; text?: unknown }[]; comments: unknown[]; sections: unknown[] };
+  const read = (query: string) =>
+    (demoHandlers(new URLSearchParams(query)) as Calls)["docs_page"]!({ entityId: "confluence:sepa" }) as Page;
+  const plain = read("");
+  const long = read("fake-docs-long=3");
+  expect(long.blocks).toHaveLength(plain.blocks.length * 3);
+  expect(long.comments).toHaveLength(plain.comments.length * 3);
+  expect(long.sections).toHaveLength(plain.sections.length * 3);
+  expect(JSON.stringify(long.blocks.filter((b) => b.type === "heading"))).toContain("Rollout 3");
+});
+
 test("docs: ?fake-docs-pages=<n> adds a BULK space of n pages folded under each other, searched by title (#2200)", () => {
   const h = demoHandlers(new URLSearchParams("fake-docs-pages=100")) as Calls;
   type Node = { entity_id: string; title: string; parent: string | null };

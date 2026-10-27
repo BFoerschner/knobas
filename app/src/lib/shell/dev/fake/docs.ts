@@ -37,6 +37,9 @@
  *   pages four or five folds deep, to measure Docs at a real space's size
  *   (#2200: `&fake-docs-pages=4000`). Its pages carry the generic body and
  *   the search matches them by title only.
+ * - `?fake-docs-long=<n>` draws *SEPA payout retry design* with its body
+ *   and its comments repeated `n` times, each heading numbered, to measure a
+ *   very long page (`&fake-docs-long=200`: 4,000 blocks, 400 comments).
  * - *For you* is prototype-6's mention on *SEPA payout retry design* only;
  *   its *Manual review queue* "SLA section is empty" is a reason no source
  *   declares, so it is not here.
@@ -503,12 +506,24 @@ function backlinks(title: string): DocPage["backlinks"] {
   }).map((p) => ({ entity_id: p.id, title: p.title, space_key: p.space }));
 }
 
-function page(args: Record<string, unknown>, bulk: FakePage[] = []): DocPage {
+/** `?fake-docs-long=<n>`: `body` repeated `n` times, each heading numbered by its round. */
+function lengthened(body: Body, n: number): Body {
+  if (n <= 1) return body;
+  const rounds = Array.from({ length: n }, (_, round) => round + 1);
+  return {
+    ...body,
+    blocks: rounds.flatMap((round) => body.blocks.map((b) => ("h" in b ? { h: `${b.h} ${round}` } : b))),
+    comments: rounds.flatMap(() => body.comments),
+  };
+}
+
+function page(args: Record<string, unknown>, bulk: FakePage[] = [], long = 0): DocPage {
   const id = String(args["entityId"] ?? "");
   const found = PAGES.find((p) => p.id === id) ?? bulk.find((p) => p.id === id);
   if (!found) throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
   const [by, when] = META[found.title] ?? ["JB", "2026-08-10 09:00"];
-  const body = BODIES[found.title] ?? generic(found, by);
+  const written = BODIES[found.title] ?? generic(found, by);
+  const body = found.title === "SEPA payout retry design" ? lengthened(written, long) : written;
   return {
     entity_id: found.id,
     source_id: "confluence",
@@ -685,7 +700,7 @@ export function handlers(params: URLSearchParams): Handlers {
   const bulk = bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
   return {
     docs_tree: () => tree(bulk),
-    docs_page: (args) => page(args, bulk),
+    docs_page: (args) => page(args, bulk, Number(params.get("fake-docs-long") ?? 0) || 0),
     docs_search: (args) => search(args, bulk),
     docs_export_markdown: (args) => {
       const found = [...PAGES, ...bulk].find((p) => p.id === String(args["entityId"] ?? ""));
