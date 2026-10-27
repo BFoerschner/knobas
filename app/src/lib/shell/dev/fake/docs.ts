@@ -33,6 +33,10 @@
  *   word must appear (prototype-6's stemming), `"…"`, `-word`, `by:`,
  *   `updated:` and `space:` as the grammar reads them; ranking is title
  *   first, then the number of matches.
+ * - `?fake-docs-pages=<n>` adds a sixth space, *BULK*, of `n` generated
+ *   pages four or five folds deep, to measure Docs at a real space's size
+ *   (#2200: `&fake-docs-pages=4000`). Its pages carry the generic body and
+ *   the search matches them by title only.
  * - *For you* is prototype-6's mention on *SEPA payout retry design* only;
  *   its *Manual review queue* "SLA section is empty" is a reason no source
  *   declares, so it is not here.
@@ -272,6 +276,30 @@ for (const [space, tops] of Object.entries(TREE)) {
   }
 }
 
+/** The key of the space `?fake-docs-pages=<n>` adds (#2200). */
+const BIG = "BULK";
+const BULK_NAME = "Bulk pages";
+/** The pages of that space: none unless the page was opened with the switch. */
+let bulk: FakePage[] = [];
+
+/**
+ * `?fake-docs-pages=<n>` (#2200): one more space, *BULK*, of `n` generated
+ * pages, the size a real Confluence space reaches (Björn's held 4,000). Twenty
+ * pages at its top and every later page under an earlier one, eight to a
+ * fold, so the tree is four or five folds deep. A title is two words and its
+ * number, from sixteen words each, so a word finds a sixteenth of the space.
+ */
+function bulkPages(n: number): FakePage[] {
+  const words = ["Payout", "Ledger", "Carrier", "Customs", "Booking", "Retry", "Invoice", "Tracking", "Refund", "Settlement", "Runbook", "Design", "Review", "Onboarding", "Platform", "Release"];
+  const out: FakePage[] = [];
+  for (let i = 0; i < n; i++) {
+    const title = `${words[i % 16]} ${words[(i * 7 + 3) % 16]!.toLowerCase()} ${i + 1}`;
+    const up = i < 20 ? null : out[Math.floor((i - 20) / 8)]!;
+    out.push({ id: `confluence:bulk-${i + 1}`, title, space: BIG, parent: up?.id ?? null, parentTitle: up?.title ?? null });
+  }
+  return out;
+}
+
 /** A prototype time (`today 10:40`, `2026-08-19 09:00`) on the page's own clock. */
 function at(said: string): string {
   const [day, clock] = said.split(" ") as [string, string];
@@ -376,6 +404,13 @@ function tree(): DocsTree {
       .map((p) => ({ entity_id: p.id, title: p.title, parent: p.parent }))
       .sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase())),
   }));
+  if (bulk.length > 0)
+    spaces.push({
+      source_id: SOURCE,
+      key: BIG,
+      name: BULK_NAME,
+      pages: bulk.map((p) => ({ entity_id: p.id, title: p.title, parent: p.parent })),
+    });
   return {
     spaces,
     last_read: "confluence:sepa",
@@ -473,7 +508,7 @@ function backlinks(title: string): DocPage["backlinks"] {
 
 function page(args: Record<string, unknown>): DocPage {
   const id = String(args["entityId"] ?? "");
-  const found = PAGES.find((p) => p.id === id);
+  const found = PAGES.find((p) => p.id === id) ?? bulk.find((p) => p.id === id);
   if (!found) throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
   const [by, when] = META[found.title] ?? ["JB", "2026-08-10 09:00"];
   const body = BODIES[found.title] ?? generic(found, by);
@@ -482,7 +517,7 @@ function page(args: Record<string, unknown>): DocPage {
     source_id: "confluence",
     source_name: "Confluence",
     title: found.title,
-    space: { key: found.space, name: SPACES[found.space] ?? null },
+    space: { key: found.space, name: SPACES[found.space] ?? (found.space === BIG ? BULK_NAME : null) },
     ancestors: found.parent === null ? [] : [{ title: found.parentTitle ?? "", entity_id: found.parent }],
     editor: PEOPLE[by]?.[0] ?? null,
     editor_name: PEOPLE[by]?.[1] ?? null,
@@ -598,6 +633,25 @@ function search(args: Record<string, unknown>): DocsHits | null {
       score: stems.reduce((n, s) => n + count(doc.title, s) * 8, 0) + matches,
     });
   }
+  // The bulk space's pages match on their titles alone, so the stand-in costs
+  // the reader's main thread no more than the backend's answer does (#2200).
+  for (const p of wikiFilled() && !q.by && days === undefined ? bulk : []) {
+    if (space && p.space.toLowerCase() !== space) continue;
+    if (q.not.some((n) => count(p.title, stem(n)) > 0) || stems.some((s) => count(p.title, s) === 0)) continue;
+    const matches = stems.reduce((n, s) => n + count(p.title, s), 0);
+    hits.push({
+      entity_id: p.id,
+      title: p.title,
+      space: { key: BIG, name: BULK_NAME },
+      path: p.parentTitle,
+      snippet: { section: null, comment_by: null, segments: [{ text: p.title, hit: false }] },
+      matches,
+      editor: "jonas",
+      editor_name: "Jonas Becker",
+      updated_at: null,
+      score: matches * 8,
+    });
+  }
   hits.sort((a, b) => b.score - a.score);
   return {
     total: hits.length,
@@ -629,7 +683,8 @@ function queued(op: string, entity: string, payload: WriteOpPayload): QueuedWrit
 }
 
 /** This feature's commands. */
-export function handlers(): Handlers {
+export function handlers(params: URLSearchParams): Handlers {
+  bulk = bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
   return {
     docs_tree: () => tree(),
     docs_page: (args) => page(args),
