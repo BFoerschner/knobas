@@ -37,9 +37,6 @@ const SMALL: &[&str] = &[
     "label_paths",
     "state_paths",
     "assignee_paths",
-    // *This job*'s run branch candidates, one row per source and run kind
-    // (#2185).
-    "branch_paths",
     // `ticket_views`' saved views by project and liveness (#2193): one row
     // per view, project its members name and live or not, so bounded by the
     // user's views times the projects one view spans, never the members,
@@ -677,24 +674,36 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
         "the job reaches the link set's pipelines: {}",
         reached.len()
     );
-    let plan = explain(&pool, knobas_core::builds::planned_job_pipelines(), |q| {
-        q.bind(declared.clone())
-            .bind(
-                reached
-                    .iter()
-                    .map(|r| r.entity_id.clone())
-                    .collect::<Vec<_>>(),
-            )
-            .bind(reached.iter().map(|r| r.step.clone()).collect::<Vec<_>>())
-            .bind(vec!["link_set".to_owned(); reached.len()])
-    })
-    .await;
-    wrong.extend(corpus_shapes("this job", &plan));
-    wrong.extend(
-        knobas_db::plan_shape::filtered_per_row(&plan, "item")
-            .into_iter()
-            .map(|f| format!("this job: {f}")),
-    );
+    // And a branch the job reaches (#2192), one the mirror's runs were built
+    // on: the runs on it are a keyed lookup of the stored rows, never every
+    // run's `branch` read through the declarations.
+    let branch = job_branch(&pool, "feature/10").await;
+    for (name, extra) in [("this job", None), ("this job on a branch", Some(&branch))] {
+        let ids: Vec<String> = reached
+            .iter()
+            .map(|r| r.entity_id.clone())
+            .chain(extra.cloned())
+            .collect();
+        let steps: Vec<String> = reached
+            .iter()
+            .map(|r| r.step.clone())
+            .chain(extra.cloned())
+            .collect();
+        let plan = explain(&pool, knobas_core::builds::planned_job_pipelines(), |q| {
+            q.bind(declared.clone())
+                .bind(ids.clone())
+                .bind(steps.clone())
+                .bind(vec!["link_set".to_owned(); ids.len()])
+        })
+        .await;
+        wrong.extend(corpus_shapes(name, &plan));
+        wrong.extend(
+            knobas_db::plan_shape::filtered_per_row(&plan, "item")
+                .into_iter()
+                .chain(whole_reads(&plan[0]["Plan"], "item_pipeline"))
+                .map(|f| format!("{name}: {f}")),
+        );
+    }
     let plan = explain(&pool, knobas_sync::alerts::ROSTER, |q| {
         q.bind("kuma").bind(knobas_sync::samples::KIND)
     })
@@ -745,6 +754,29 @@ async fn every_reshaped_read_plans_without_estimates_on_analyzed_tables() {
     assert_every_read_plans_without_estimates(true).await;
 }
 
+/// A Gitea-shaped branch titled `name`, of a source of its own (#2192): what
+/// *This job* reaches when a ticket is linked to a branch.
+async fn job_branch(pool: &PgPool, name: &str) -> String {
+    crate::support::source_config(pool, "git", "gitea", "gitea", &serde_json::json!({})).await;
+    let id = format!("git:acme/svc@refs/heads/{name}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'branch', $2)")
+        .bind(&id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1, 'git', 'branch', $2, '', jsonb_build_object('name', $2::text))",
+    )
+    .bind(&id)
+    .bind(name)
+    .execute(pool)
+    .await
+    .unwrap();
+    id
+}
+
 /// Every configuration of the mirror's CI source as a pipeline member: the
 /// probe's [`pipelines`](crate::responsiveness_probe::pipelines), the quiet
 /// ones included.
@@ -760,9 +792,7 @@ fn pipeline_members() -> Vec<knobas_app::link_sets::LinkSetMember> {
 /// What `plan_shape` finds in one of #2185's plans that reaches the run
 /// corpus or the samples: a per-row read of `sync.item` or a table kept
 /// beside it (`item_pipeline`, `item_revision`), or of
-/// `knobas.monitor_sample`. *This job*'s `on_branches` is not the corpus: it
-/// is read once, and holds a pipeline and a branch name per row, so it is
-/// the size of the pipelines times the job's branches whatever the runs. What else these statements
+/// `knobas.monitor_sample`. What else these statements
 /// read -- a job's reach, the pins, the assets, the open alerts -- is theirs
 /// from before #2185, small or keyed, and not what this asserts.
 fn corpus_shapes(name: &str, plan: &serde_json::Value) -> Vec<String> {

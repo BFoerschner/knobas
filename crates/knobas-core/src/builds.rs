@@ -746,13 +746,11 @@ pub struct JobPipeline {
 /// `sync.item_revision` keeps them (#732). A run's `pipeline` is read from
 /// `sync.item_pipeline` (#2185, migration `0062`), which the database keeps as
 /// the run is written, and a run reached by id or by a commit is found
-/// through its index. Only a branch has no index: when the job reaches one,
-/// every run's `branch` is read once, through `branch_paths` (its source's
-/// candidates resolved once a statement rather than the declarations walked
-/// per run), and kept only where it names one of the job's; a job that
-/// reaches no branch reads no run's. A branch's name is its title,
-/// which is what Gitea titles a branch with and what a pull request's `head`
-/// names (#712). A run built on `refs/heads/<name>` counts as `<name>`.
+/// through its index. A run's `branch` is stored beside its pipeline (#2192,
+/// migration `0065`), so the runs on a branch the job reaches are an index
+/// lookup per name, `item_pipeline_branch_idx`, whatever the runs number.
+/// A branch's name is its title, which is what Gitea titles a branch with and
+/// what a pull request's `head` names (#712). A run built on `refs/heads/<name>` counts as `<name>`.
 const JOB_PIPELINES: &str = concat!(
     "with ",
     crate::frame_kinds_cte!(),
@@ -785,20 +783,6 @@ p as materialized (
     join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
    where f.frame = 'pipeline'
 ),
-branch_paths as materialized (
-  select f.source_id, f.kind, c.segs, c.ord
-    from frames f
-   cross join lateral (select ",
-    crate::declared_segments!("t.p"),
-    " as segs, t.ord
-      from jsonb_array_elements(case when jsonb_typeof($1::jsonb #> array[f.source_id, f.kind, 'branch']) = 'array'
-                                     then $1::jsonb #> array[f.source_id, f.kind, 'branch'] else '[]'::jsonb end)
-           with ordinality as t(p, ord)) c
-   where f.frame = 'run'
-),
-named as (
-  select array(select n.name from names n where n.name is not null) as names
-),
 run as not materialized (
   select ip.entity_id, ip.source_id, ip.pkey, ip.adapter_kind
     from sync.item_pipeline ip
@@ -806,19 +790,17 @@ run as not materialized (
     join sync.live_item i on i.entity_id = ip.entity_id
 ),
 on_branches as materialized (
-  select distinct run.source_id, run.pkey, c.name
-    from run
-    join sync.item i on i.entity_id = run.entity_id
-   cross join lateral (select ",
-    crate::first_string_of!(
-        "(select b.segs, b.ord from branch_paths b where b.source_id = i.source_id and b.kind = i.kind)"
-    ),
-    " as branch offset 0) b
-   cross join lateral (select b.branch as name
-                       union all
-                       select substr(b.branch, 12) where b.branch like 'refs/heads/%') c
-   where (select cardinality(n.names) from named n) > 0
-     and c.name = any((select n.names from named n)::text[])
+  select distinct k.source_id, k.pkey, n.name
+    from names n
+   cross join lateral (values (n.name), ('refs/heads/' || n.name)) as q(branch)
+   cross join lateral (
+     select ib.source_id, ib.pkey
+       from sync.item_pipeline ib
+       join knobas.source_config s on s.id = ib.source_id and s.kind = ib.adapter_kind
+       join sync.live_item i on i.entity_id = ib.entity_id
+      where ib.branch = q.branch
+     offset 0) k
+   where n.name is not null
 ),
 checked as materialized (
   select h.pr, k.source_id, k.pkey
