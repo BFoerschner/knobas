@@ -701,6 +701,7 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
             knobas_db::plan_shape::filtered_per_row(&plan, "item")
                 .into_iter()
                 .chain(whole_reads(&plan[0]["Plan"], "item_pipeline"))
+                .chain(cte_driven_from(&plan[0]["Plan"], "CTE p", "entity"))
                 .map(|f| format!("{name}: {f}")),
         );
     }
@@ -815,6 +816,28 @@ fn whole_reads(node: &serde_json::Value, relation: &str) -> Vec<String> {
     }
     for child in node["Plans"].as_array().into_iter().flatten() {
         found.extend(whole_reads(child, relation));
+    }
+    found
+}
+
+/// `plan_shape::driven_from` inside the CTE `cte` of `node` (#2192), which
+/// the checker itself does not look into. *This job*'s pipelines (`CTE p`),
+/// planned from `frames` inlined, were found by probing every live item from
+/// `knobas.entity` on tables never analyzed, where a pipeline kind's items are
+/// one range of the item's source-and-kind index.
+fn cte_driven_from(node: &serde_json::Value, cte: &str, relation: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for child in node["Plans"].as_array().into_iter().flatten() {
+        if child["Subplan Name"] == cte {
+            let one = serde_json::json!([{ "Plan": child }]);
+            found.extend(
+                knobas_db::plan_shape::driven_from(&one, relation)
+                    .into_iter()
+                    .map(|f| format!("{cte}: {f}")),
+            );
+        } else {
+            found.extend(cte_driven_from(child, cte, relation));
+        }
     }
     found
 }

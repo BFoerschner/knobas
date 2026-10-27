@@ -139,7 +139,15 @@ const PIPELINE_RUNS: i64 = 100;
 #[macro_export]
 macro_rules! frame_kinds_cte {
     () => {
-        "frames as (
+        concat!("frames as ", $crate::frame_kinds_cte!(@body))
+    };
+    // Kept as a table of its own whatever the statement reads it by, for a
+    // statement that reads it once and must not have it inlined (#2192).
+    (materialized) => {
+        concat!("frames as materialized ", $crate::frame_kinds_cte!(@body))
+    };
+    (@body) => {
+        "(
   select s.key as source_id, k.key as kind, k.value->>'frame' as frame
     from jsonb_each($1::jsonb) s
     cross join lateral jsonb_each(case when jsonb_typeof(s.value) = 'object' then s.value else '{}'::jsonb end) k
@@ -750,10 +758,13 @@ pub struct JobPipeline {
 /// migration `0065`), so the runs on a branch the job reaches are an index
 /// lookup per name, `item_pipeline_branch_idx`, whatever the runs number.
 /// A branch's name is its title, which is what Gitea titles a branch with and
-/// what a pull request's `head` names (#712). A run built on `refs/heads/<name>` counts as `<name>`.
+/// what a pull request's `head` names (#712). `frames` is materialized: read
+/// once here, PostgreSQL would inline it into `p` as a function scan it cannot
+/// count, and on tables never analyzed it then probed every live item to find
+/// the pipelines (#2192). A run built on `refs/heads/<name>` counts as `<name>`.
 const JOB_PIPELINES: &str = concat!(
     "with ",
-    crate::frame_kinds_cte!(),
+    crate::frame_kinds_cte!(materialized),
     ",
 reached as (
   select * from unnest($2::text[], $3::text[], $4::text[]) as r(id, step, origin)
