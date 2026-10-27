@@ -9,6 +9,7 @@ import type { EntityDetail, EntityPage, RunRow, SourceView } from "../../ipc/ent
 import { repoOfRow, underRepoHash } from "../../tf/repo/repo";
 import { dayRows, offerRuns } from "../../tf/time/day-view";
 import { demoHandlers } from "./fake-tauri";
+import { historyBuilds } from "./fake/builds";
 import { fakeRoleScope } from "./fake/corpus";
 import { FIXTURE_SOURCES } from "./fake/sources";
 
@@ -766,25 +767,29 @@ test("the Builds fake answers repeated reads without working its history out aga
   const read = () => h["job_pipelines"]!({ entityId: "jira:PAY-231" }) as { pipeline_id: string }[];
   const first = read();
   expect(first.length).toBeGreaterThan(0);
-  // Each read built 59 configurations' 34 runs, twice: 200 reads took about two seconds.
-  const t0 = performance.now();
-  for (let i = 0; i < 200; i += 1) expect(read()).toEqual(first);
-  expect(performance.now() - t0).toBeLessThan(700);
+  // Each read built 59 configurations' 34 runs, twice: a preview's `j` cost 400 ms.
+  const before = historyBuilds;
+  for (let i = 0; i < 5; i += 1) expect(read()).toEqual(first);
+  h["pipelines"]!({});
+  h["pipeline_runs"]!({ pipelineId: "teamcity:buildType:Payout_Build" });
+  expect(historyBuilds).toBe(before);
 });
 
 test("the Builds fake's runs move with the day, and a changed answer leaves the next read alone (#2218)", () => {
   vi.useFakeTimers();
   try {
     const h = demoHandlers() as Calls;
-    const runs = () => h["pipeline_runs"]!({ pipelineId: "teamcity:buildType:Payout_Build" }) as RunRow[];
+    const runs = () => h["pipeline_runs"]!({ pipelineId: "teamcity:buildType:Payout_IntegrationTests" }) as RunRow[];
     vi.setSystemTime(new Date(2026, 9, 17, 9, 0, 0));
     const morning = runs();
     // The story's run is `today 14:32`'s kind: a time of day on the reading day.
     expect(new Date(morning[0]!.started!).getDate()).toBe(17);
     morning[0]!.branch = "changed by a caller";
+    morning[0]!.tests!.passed = -1;
     vi.setSystemTime(new Date(2026, 9, 17, 23, 59, 0));
     const evening = runs();
     expect(evening[0]!.branch).not.toBe("changed by a caller");
+    expect(evening[0]!.tests!.passed).toBeGreaterThan(0);
     expect(evening.map((run) => run.started)).toEqual(morning.map((run) => run.started));
     vi.setSystemTime(new Date(2026, 9, 18, 0, 1, 0));
     const next = runs();
