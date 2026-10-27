@@ -133,6 +133,7 @@
   // what a create can honestly say now is that knobas asked, and a toast is
   // where this app says that.
   import { push } from "../shell/toasts.svelte";
+  import { Windowed } from "../shell/windowed.svelte";
   import { hashFor } from "../shell/router";
   import { entityAddress } from "../tf/address";
   import { deleteConfirm } from "../tf/deps/asset-edit";
@@ -724,6 +725,34 @@
     return rows.find((row) => row.id === chosen) ?? rows[0] ?? null;
   }
 
+  // -- a long column (#2210) --------------------------------------------------
+
+  /**
+   * Each open column's rows, windowed: a column of thousands draws only the
+   * rows near its own scroll. One per column position, made as the column
+   * first opens; the rows are measured by id, so a column that shows another
+   * asset's children keeps nothing wrong. A row is `--row`, 1 apart.
+   */
+  const ROW_PX = 30;
+  const columnWindows = new Map<number, Windowed>();
+  function windowOf(index: number): Windowed {
+    let win = columnWindows.get(index);
+    if (win === undefined) {
+      win = new Windowed({ count: () => columns[index]?.length ?? 0, key: (at) => columns[index]![at]!.id, estimate: ROW_PX, gap: 1, scrolls: true });
+      columnWindows.set(index, win);
+    }
+    return win;
+  }
+
+  /** The pane's two lists that run to thousands, *Holds* and *Depends on this*, windowed the same way; a line is 18 px, 2 apart. */
+  const holdsWindow = new Windowed({ count: () => detail?.holds.length ?? 0, key: (at) => detail!.holds[at]!.id, estimate: 18, gap: 2 });
+  const dependsWindow = new Windowed({
+    count: () => dependsOn?.assets.length ?? 0,
+    key: (at) => dependsOn!.assets[at]!.asset.id,
+    estimate: 18,
+    gap: 2,
+  });
+
   // -- the wires (story 31) -------------------------------------------------
 
   /** The pane, whose left edge is where every wire starts. */
@@ -824,10 +853,7 @@
       // id from a source system would turn a wire into a thrown
       // `SyntaxError` inside an effect, which takes the whole Tree with it.
       const from = pane.querySelector(`li[data-wire=${CSS.escape(wire.key)}]`);
-      const to =
-        wire.rowId === null
-          ? cols.querySelector(`button.spine[data-spine="${wire.column}"]`)
-          : cols.querySelector(`button.row[data-asset=${CSS.escape(wire.rowId)}]`);
+      const to = landing(cols, wire);
       if (from === null || to === null) continue;
 
       const fromBox = from.getBoundingClientRect();
@@ -836,10 +862,9 @@
       // see (#1460).
       if (laid && (fromBox.bottom < seenTop + 2 || fromBox.top > seenBottom - 2)) continue;
 
-      const toBox = to.getBoundingClientRect();
       // The band the far end may be drawn in: the column's own scrolling list,
       // or the spine, which scrolls with nothing.
-      const band = (to.closest("ol.col") ?? to).getBoundingClientRect();
+      const { box: toBox, band } = to;
       const wanted = {
         x: toBox.right - box.left - 2,
         y: toBox.top - box.top + toBox.height / 2,
@@ -881,6 +906,27 @@
       });
     }
     drawnWires = next;
+  }
+
+  /**
+   * Where a wire lands, and the band it may be drawn in: the spine, the
+   * row in its column's list, or, for a row its long column has not drawn
+   * (#2210), where that row would be. That row is outside the drawn ones, so
+   * off the column's screen, and the band holds the wire at the column's
+   * edge, dashed, as it would a row scrolled away.
+   */
+  function landing(cols: HTMLElement, wire: Wire): { box: Pick<DOMRect, "top" | "right" | "height">; band: DOMRect } | null {
+    if (wire.rowId === null) {
+      const spine = cols.querySelector(`button.spine[data-spine="${wire.column}"]`);
+      return spine === null ? null : { box: spine.getBoundingClientRect(), band: spine.getBoundingClientRect() };
+    }
+    const drawn = cols.querySelector(`button.row[data-asset=${CSS.escape(wire.rowId)}]`);
+    if (drawn !== null) return { box: drawn.getBoundingClientRect(), band: (drawn.closest("ol.col") ?? drawn).getBoundingClientRect() };
+    const list = cols.querySelector(`ol.col[data-col="${wire.column}"]`);
+    const at = columns[wire.column]?.findIndex((row) => row.id === wire.rowId) ?? -1;
+    if (list === null || at < 0) return null;
+    const band = list.getBoundingClientRect();
+    return { box: { top: windowOf(wire.column).topOf(at), right: band.right, height: ROW_PX }, band };
   }
 
   /**
@@ -960,7 +1006,21 @@
     // the dependency this effect exists to have.
     const drawn = columns;
     if (!wantFocus || drawn.length === 0) return;
-    const row = tree?.querySelector('.cols button.row[aria-current="true"]') ?? null;
+    // The deepest marked row: every column marks the path's row in it, and
+    // the selection is the last. A long column draws only the rows near its
+    // scroll (#2210), so the selection is brought into its drawn rows first,
+    // and this runs again once they are redrawn with it.
+    let row: Element | null = null;
+    for (let index = drawn.length - 1; index >= 0; index -= 1) {
+      const chosen = selectionIn(path, index);
+      const at = chosen === null ? -1 : (drawn[index]?.findIndex((one) => one.id === chosen) ?? -1);
+      if (chosen === null || at < 0) continue;
+      const win = windowOf(index);
+      win.reveal(at);
+      void win.start;
+      row = tree?.querySelector(`.cols button.row[data-asset=${CSS.escape(chosen)}]`) ?? null;
+      break;
+    }
     // Kept, not cleared, while the row is missing. The columns are redrawn
     // twice on the way to a new selection — once emptied while the pane's read
     // is out, once with the answer — and a flag cleared on the first of those
@@ -1659,6 +1719,7 @@
               <span class="vn">{step?.name ?? "top level"}</span>
             </button>
           {:else}
+            {@const win = windowOf(index)}
             <div class="colw">
               <!--
                 Story 34: a plus on **every** column header, so creating at that
@@ -1679,11 +1740,12 @@
                   +
                 </button>
               </header>
-              <ol class="col">
-                {#each column as row (row.id)}
+              <ol class="col" data-col={index} {@attach win.list}>
+                {#if win.before > 0}<li class="tf-wgap" aria-hidden="true" {@attach win.room("before")}></li>{/if}
+                {#each win.slice(column) as row (row.id)}
                   {@const badge = problemBadge(row)}
                   {@const work = workBadge(row)}
-                  <li>
+                  <li {@attach win.row(row.id)}>
                     <button
                       class="row {chosen === row.id ? 'on' : ''}"
                       aria-current={chosen === row.id ? "true" : undefined}
@@ -1729,6 +1791,7 @@
                     </button>
                   </li>
                 {/each}
+                {#if win.after > 0}<li class="tf-wgap" aria-hidden="true" {@attach win.room("after")}></li>{/if}
               </ol>
             </div>
           {/if}
@@ -2032,9 +2095,9 @@
           {#if detail.holds.length === 0}
             <p class="empty">Nothing.</p>
           {:else}
-            <ul class="lst">
-              {#each detail.holds as held (held.id)}
-                <li>
+            <ul class="lst" {@attach holdsWindow.list}>
+              {#each holdsWindow.slice(detail.holds) as held (held.id)}
+                <li {@attach holdsWindow.row(held.id)}>
                   <button class="link" onclick={() => select(held)}>{held.name}</button>
                   <span class="faint">{held.type_label}</span>
                 </li>
@@ -2200,9 +2263,9 @@
           {:else if dependsOn.assets.length === 0}
             <p class="empty">Nothing depends on this.</p>
           {:else}
-            <ul class="lst">
-              {#each dependsOn.assets as row (row.asset.id)}
-                <li>
+            <ul class="lst" {@attach dependsWindow.list}>
+              {#each dependsWindow.slice(dependsOn.assets) as row (row.asset.id)}
+                <li {@attach dependsWindow.row(row.asset.id)}>
                   <button class="link" onclick={() => goToSource(addressOf(row.asset))}>
                     {row.asset.name}
                   </button>
@@ -2895,6 +2958,11 @@
     — changing one without the other makes the strip overflow the pane the
     collapse exists to protect, and that test is what says so.
   */
+  /* A long column's room for the rows it has not drawn (#2210): never shrunk to fit the column. */
+  .col > li.tf-wgap {
+    flex: none;
+  }
+
   .col.spine {
     width: 30px;
     flex: none;

@@ -21,7 +21,8 @@
  *   what of the list is on screen from the boxes around it, so the view's
  *   layout decides. On a `tbody`, while windowed, the table's columns keep
  *   the widths its first drawn rows gave (`table-layout: fixed`): columns
- *   sized by whichever rows are drawn would re-wrap the rows on screen.
+ *   sized by whichever rows are drawn would re-wrap the rows on screen. With
+ *   no header row, the first drawn row's cells give them, held by a `colgroup`.
  * - `row(key)` goes on each drawn row: its height is measured, the estimate
  *   stands for rows never drawn, and the row on screen is held where it was
  *   through each redraw (a row above drawn at other than its estimate, a
@@ -32,6 +33,11 @@
  *   `:last-child` rules hold, and `room(side)` sizes each one's cell. Both
  *   go through the CSSOM: CSP refuses inline styles in markup.
  * - `slice(items)` is what to draw; `start` is its first index.
+ * - `topOf(index)` is where row `index` sits on screen, drawn or not.
+ * - A list that scrolls itself (`scrolls: true`) reads the
+ *   viewport from its own scroll and, as a table does, draws spacers
+ *   (`.tf-wgap`, `room(side)`) while their room is above 0: a scroller is
+ *   never smaller than its own padding.
  * - `reveal(index)` scrolls an undrawn row near enough to draw; `flushSync`,
  *   then focus or `scrollIntoView` it as for any row (`j`/`k` past the window).
  * - Under `from` rows (300) everything draws and `before`/`after` are 0, so a
@@ -55,6 +61,12 @@ export interface WindowedOptions<K> {
   overscan?: number;
   /** Lists shorter than this draw every row. */
   from?: number;
+  /**
+   * The list scrolls itself (an asset column), so its rows move by its own
+   * scroll. Not read from `overflow-y`: a list that clips only sideways (the
+   * run log's `overflow: auto`) computes `auto` too, yet grows with its rows.
+   */
+  scrolls?: boolean;
 }
 
 const ALL: Span = { start: 0, end: 0, before: 0, after: 0 };
@@ -77,6 +89,8 @@ export class Windowed<K = string> {
   #anchor: { el: HTMLElement; y: number } | null = null;
   /** The box this list last scrolled itself and where it left it, so the scroll event that raises is not taken for the reader's. */
   #scrolled: { box: Element; top: number } | null = null;
+  /** Where row 0 sits on screen, once `list` is attached. */
+  #origin = () => 0;
   readonly #sizes: ResizeObserver | null;
 
   readonly #keys = $derived.by(() => {
@@ -88,10 +102,18 @@ export class Windowed<K = string> {
 
   readonly #span = $derived.by((): Span & { on: boolean } => {
     const keys = this.#keys;
-    if (keys.length < this.#options.from) return { ...ALL, end: keys.length, on: false };
+    if (keys.length < this.#options.from)
+      return { ...ALL, end: keys.length, on: false };
     void this.#remeasured;
     this.#sync(keys);
-    return { ...this.#heights.span(this.#viewTop, this.#viewHeight, this.#options.overscan), on: true };
+    return {
+      ...this.#heights.span(
+        this.#viewTop,
+        this.#viewHeight,
+        this.#options.overscan,
+      ),
+      on: true,
+    };
   });
 
   /** Whether the list is long enough to window. */
@@ -102,9 +124,18 @@ export class Windowed<K = string> {
   readonly after = $derived(this.#span.after);
 
   constructor(options: WindowedOptions<K>) {
-    this.#options = { gap: 0, overscan: 600, from: 300, ...options };
+    this.#options = {
+      gap: 0,
+      overscan: 600,
+      from: 300,
+      scrolls: false,
+      ...options,
+    };
     this.#heights = new Heights<K>(this.#options.estimate, this.#options.gap);
-    this.#sizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver((entries) => this.#measure(entries));
+    this.#sizes =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver((entries) => this.#measure(entries));
   }
 
   /** The rows to draw out of `items` (the list's rows, in the same order). */
@@ -114,34 +145,51 @@ export class Windowed<K = string> {
 
   /** On the element that holds the rows. */
   list = (node: HTMLElement) => {
-    const clips = clipsOf(node);
+    // A list that scrolls itself (an asset column) is its own first clip, and its rows move by its scroll.
+    const style = getComputedStyle(node);
+    const own = this.#options.scrolls;
+    const clips = own ? [node, ...clipsOf(node)] : clipsOf(node);
     this.#clips = clips;
+    // The list's own padding: row 0 sits under it, and the room is inside it.
+    const base = {
+      top: parseFloat(style.paddingTop) || 0,
+      bottom: parseFloat(style.paddingBottom) || 0,
+    };
     // The browser's own scroll anchoring would correct a row's height a second time.
     $effect(() => {
       node.style.overflowAnchor = this.on ? "none" : "";
     });
-    // A flex column's room is its own padding; a table's is its spacer rows (`room`).
-    if (!(node instanceof HTMLTableSectionElement))
+    // A flex column's room is its own padding. A table's is its spacer rows
+    // (`room`), and so is a list's that scrolls itself: a scroller is never
+    // smaller than its padding, so padded it would grow to the whole list.
+    if (!(node instanceof HTMLTableSectionElement) && !own)
       $effect(() => {
-        pad(node, "padding-top", this.before);
-        pad(node, "padding-bottom", this.after);
+        pad(node, "padding-top", this.before && base.top + this.before);
+        pad(node, "padding-bottom", this.after && base.bottom + this.after);
       });
     // A table sizes its columns from the rows it draws, so drawing others
     // would re-wrap the rows on screen, and that changes which rows draw.
     // While windowed, its columns keep the widths the first drawn rows gave.
-    const table = node instanceof HTMLTableSectionElement ? node.closest("table") : null;
+    const body = node instanceof HTMLTableSectionElement ? node : null;
+    const table = body?.closest("table") ?? null;
     // A header cell added or removed (the view's columns changed) freezes the widths again.
     let heading = $state(0);
-    const headings = table?.tHead ? new MutationObserver(() => heading++) : null;
-    if (table?.tHead) headings?.observe(table.tHead, { childList: true, subtree: true });
-    if (table !== null)
+    const headings = table?.tHead
+      ? new MutationObserver(() => heading++)
+      : null;
+    if (table?.tHead)
+      headings?.observe(table.tHead, { childList: true, subtree: true });
+    if (table !== null && body !== null)
       $effect(() => {
         void heading;
         if (!this.on) return;
         const width = table.getBoundingClientRect().width;
         const heads = [...(table.tHead?.rows[0]?.cells ?? [])];
-        if (width === 0 || heads.length === 0) return;
-        const shares = heads.map((head) => (head.getBoundingClientRect().width / width) * 100);
+        if (width === 0) return;
+        if (heads.length === 0) return freezeCols(table, body, width);
+        const shares = heads.map(
+          (head) => (head.getBoundingClientRect().width / width) * 100,
+        );
         heads.forEach((head, i) => (head.style.width = `${shares[i]}%`));
         table.style.tableLayout = "fixed";
         return () => {
@@ -152,6 +200,12 @@ export class Windowed<K = string> {
     // What of the list is on screen: the window cut by every ancestor that
     // clips, so a layout whose scrolling box changes with the width (Tickets
     // below 900 px) needs nothing from the view.
+    // Where row 0 would sit: under the list's padding, moved up by its own scroll.
+    const origin = () =>
+      node.getBoundingClientRect().top +
+      base.top +
+      (own ? node.clientTop - node.scrollTop : 0);
+    this.#origin = origin;
     const read = (event?: Event) => {
       let top = 0;
       let bottom = window.innerHeight;
@@ -160,19 +214,23 @@ export class Windowed<K = string> {
         top = Math.max(top, box.top + clip.clientTop);
         bottom = Math.min(bottom, box.top + clip.clientTop + clip.clientHeight);
       }
-      this.#viewTop = Math.max(0, top - node.getBoundingClientRect().top);
+      this.#viewTop = Math.max(0, top - origin());
       this.#viewHeight = Math.max(0, bottom - top);
       // The reader scrolled: hold the row on screen now. Not on a scroll this
       // list made to hold a row, nor on a resize: those arrive after a redraw
       // may have moved the rows, and pinning them there would keep the move
       // (#2211: a summary 5 px under its estimate shifted the list 5 px).
-      if (event?.type === "scroll" && !this.#selfScroll(event.target)) this.#pin(top);
+      if (event?.type === "scroll" && !this.#selfScroll(event.target))
+        this.#pin(top);
     };
     read();
     // Scroll events do not bubble; a capturing listener hears every box's.
     document.addEventListener("scroll", read, { capture: true, passive: true });
     window.addEventListener("resize", read, { passive: true });
-    const resized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => read());
+    const resized =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => read());
     resized?.observe(node);
     for (const clip of clips) resized?.observe(clip);
     return () => {
@@ -184,9 +242,15 @@ export class Windowed<K = string> {
     };
   };
 
-  /** On a table's spacer cell: the room of the undrawn rows above (`before`) or below (`after`). */
+  /**
+   * On a spacer (a table's cell, or a row of a list that scrolls itself): the
+   * room of the undrawn rows above (`before`) or below (`after`), less the
+   * gap the list puts beside the spacer itself.
+   */
   room = (side: "before" | "after") => (node: HTMLElement) => {
-    $effect(() => pad(node, "height", this[side]));
+    $effect(() =>
+      pad(node, "height", this[side] && this[side] - this.#options.gap),
+    );
   };
 
   /** On each drawn row, with its key. */
@@ -212,12 +276,19 @@ export class Windowed<K = string> {
     this.#viewTop = top;
   }
 
+  /** Row `index`'s top on screen (client pixels), drawn or not: where a line to an undrawn row points. */
+  topOf(index: number): number {
+    this.#sync(this.#keys);
+    return this.#origin() + this.#heights.offsetOf(index);
+  }
+
   /** Holds the first drawn row on screen at `top` (client pixels) and where it is. */
   #pin(top: number) {
     let best: { el: HTMLElement; y: number } | null = null;
     for (const el of this.#drawn) {
       const box = el.getBoundingClientRect();
-      if (box.bottom > top && (best === null || box.top < best.y)) best = { el, y: box.top };
+      if (box.bottom > top && (best === null || box.top < best.y))
+        best = { el, y: box.top };
     }
     this.#anchor = best;
   }
@@ -225,7 +296,9 @@ export class Windowed<K = string> {
   /** Scrolls the nearest box that has something to scroll, else the page. */
   #scrollBy(px: number) {
     // jsdom has no `scrollingElement`.
-    const box = this.#clips.find((clip) => clip.scrollHeight > clip.clientHeight) ?? document.scrollingElement;
+    const box =
+      this.#clips.find((clip) => clip.scrollHeight > clip.clientHeight) ??
+      document.scrollingElement;
     if (!box) return;
     box.scrollTop += px;
     this.#scrolled = { box, top: box.scrollTop };
@@ -251,8 +324,10 @@ export class Windowed<K = string> {
     let moved = false;
     for (const entry of entries) {
       const key = this.#keyOf.get(entry.target);
-      const px = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
-      if (key !== undefined && px !== 0 && this.#heights.set(key, px)) moved = true;
+      const px =
+        entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+      if (key !== undefined && px !== 0 && this.#heights.set(key, px))
+        moved = true;
     }
     // A row drawn above the screen at other than its estimate, or a table
     // whose columns widen for a new row, moves what the reader is looking
@@ -270,6 +345,31 @@ export class Windowed<K = string> {
   }
 }
 
+/**
+ * A table with no header row: its first drawn row's cells give the widths,
+ * held by a `colgroup` while it windows (#2210). A first row with a spanning
+ * cell gives none, and the columns stay sized by the drawn rows.
+ */
+function freezeCols(
+  table: HTMLTableElement,
+  body: HTMLTableSectionElement,
+  width: number,
+) {
+  const first = [...body.rows].find((tr) => !tr.classList.contains("tf-wgap"));
+  const cells = [...(first?.cells ?? [])];
+  if (cells.length === 0 || cells.some((cell) => cell.colSpan > 1)) return;
+  const cols = document.createElement("colgroup");
+  for (const cell of cells)
+    cols.appendChild(document.createElement("col")).style.width =
+      `${(cell.getBoundingClientRect().width / width) * 100}%`;
+  table.insertBefore(cols, table.caption?.nextSibling ?? table.firstChild);
+  table.style.tableLayout = "fixed";
+  return () => {
+    cols.remove();
+    table.style.tableLayout = "";
+  };
+}
+
 /** Sets `px` of room through the CSSOM (CSP refuses inline styles in markup), none when 0. */
 function pad(node: HTMLElement, property: string, px: number) {
   if (px > 0) node.style.setProperty(property, `${px}px`);
@@ -279,7 +379,11 @@ function pad(node: HTMLElement, property: string, px: number) {
 /** The ancestors whose overflow clips `node`, nearest first. */
 function clipsOf(node: HTMLElement): HTMLElement[] {
   const clips: HTMLElement[] = [];
-  for (let at = node.parentElement; at !== null && at !== document.body; at = at.parentElement)
+  for (
+    let at = node.parentElement;
+    at !== null && at !== document.body;
+    at = at.parentElement
+  )
     if (getComputedStyle(at).overflowY !== "visible") clips.push(at);
   return clips;
 }

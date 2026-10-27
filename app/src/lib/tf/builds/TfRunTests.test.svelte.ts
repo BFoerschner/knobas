@@ -49,7 +49,7 @@ const TESTS: RunTest[] = [
 
 const o = (status: TestOutcome["status"], branch: string): TestOutcome => ({ run: "r", number: null, branch, status });
 
-function draw(): string[] {
+function draw(tests: RunTest[] = TESTS): string[] {
   const asked: string[] = [];
   page = mount(TfRunTests, {
     target,
@@ -58,7 +58,7 @@ function draw(): string[] {
       branch: FEATURE,
       logHref: "#/build/p/r/log",
       ports: {
-        tests: () => Promise.resolve({ tests: TESTS, truncated: false }),
+        tests: () => Promise.resolve({ tests, truncated: false }),
         history: (_run, id) => {
           asked.push(id);
           return Promise.resolve([o("failed", FEATURE), o("passed", "main"), o("failed", FEATURE), ...Array.from({ length: 7 }, () => o("passed", "main"))]);
@@ -126,4 +126,32 @@ test("the tests filter draws no / hint: / belongs to the page's pipeline filter 
   await settle();
   expect(target.querySelector(".tf-fbar")).not.toBeNull();
   expect(target.querySelector(".tf-fbar kbd")).toBeNull();
+});
+
+test("a long run draws the tests near the viewport, open failures with their assertion, and the room of the rest below (#2210)", async () => {
+  const failed = Array.from({ length: 3 }, (_, i) => t(`f${i}`, `bulk::failing_${i}`, "failed", "bulk", `assertion ${i} failed`));
+  const passed = Array.from({ length: 2000 }, (_, i) => t(`p${i}`, `bulk::case_${i}`, "passed", "bulk"));
+  draw([...failed, ...passed]);
+  await settle();
+  const drawn = names().length;
+  expect(drawn).toBeGreaterThan(5);
+  expect(drawn).toBeLessThan(100);
+  expect(names().slice(0, 4)).toEqual(["bulk::failing_0", "bulk::failing_1", "bulk::failing_2", "bulk::case_0"]);
+  expect([...target.querySelectorAll(".tf-tdetail pre")].map((pre) => pre.textContent)).toEqual([
+    "assertion 0 failed",
+    "assertion 1 failed",
+    "assertion 2 failed",
+  ]);
+  expect(target.textContent).toContain("2003 tests");
+  const list = target.querySelector<HTMLElement>(".tf-tres")!;
+  expect(list.style.getPropertyValue("padding-top")).toBe("");
+  expect(list.style.getPropertyValue("padding-bottom")).not.toBe("");
+
+  // A filter that keeps one test draws it alone, with no room around it.
+  const input = target.querySelector<HTMLInputElement>("input")!;
+  input.value = "case_1999";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(names()).toEqual(["bulk::case_1999"]);
+  expect(list.style.getPropertyValue("padding-bottom")).toBe("");
 });

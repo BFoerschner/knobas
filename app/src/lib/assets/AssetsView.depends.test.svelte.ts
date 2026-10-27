@@ -360,3 +360,13 @@ test("a route's name is left-aligned and its URL wraps beneath it (#1606)", asyn
   expect(rule(".breaks .lst li.rt .mono")).toMatch(/font-variant-ligatures:\s*none/);
   expect(source).toMatch(/<li class="rt">\s*<button class="link" onclick=\{\(\) => openRoute/);
 });
+
+test("a long Depends on this list draws the lines near the viewport and counts them all (#2210)", async () => {
+  const many = Array.from({ length: 2000 }, (_, at) => ({ asset: row(`asset:bulk-${at}`, `bulk-${at}`, null), path: null, relation: null }));
+  render("#/asset/asset:knobas-gitea", { [GITEA.id]: { assets: many, routes: [] } });
+
+  await waitFor(() => expect(count()).toBe("2000"));
+  expect(lines().length).toBeGreaterThan(5);
+  expect(lines().length).toBeLessThan(100);
+  expect(lines()[0]).toBe("bulk-0 inside");
+});

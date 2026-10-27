@@ -98,6 +98,7 @@
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { ago } from "../../shell/time";
   import { push } from "../../shell/toasts.svelte";
+  import { Windowed } from "../../shell/windowed.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig, FilterScope } from "../filter/filter";
@@ -404,6 +405,20 @@
     for (const id of ids) if (!refreshers.has(id)) refreshers.set(id, createDetailRefresh(untrack(() => ports.refresh)));
   }
 
+  /** The roster's table rows in order: each monitor, and under it the reason its refresh failed. */
+  const entries = $derived(
+    rows.flatMap((row) => {
+      const failed = refreshers.get(row.entity_id)?.failed ?? null;
+      return failed === null ? [{ row, failed }] : [{ row, failed: null }, { row, failed }];
+    }),
+  );
+  /** Thousands of monitors draw only those near the viewport (#2210); a row is 42 px. */
+  const win = new Windowed({ count: () => entries.length, key: (i) => entryKey(entries[i]!), estimate: 42 });
+
+  function entryKey(entry: { row: MonitorRow; failed: string | null }): string {
+    return entry.failed === null ? entry.row.entity_id : `${entry.row.entity_id}\u0000failed`;
+  }
+
   /** What a row's *Refresh* reads: the roster holds only enabled sources' monitors. */
   function subjectOf(row: MonitorRow): RefreshSubject {
     return {
@@ -571,52 +586,56 @@
         <thead>
           <tr><th>Monitor</th><th>State</th><th>Last 24 h</th><th>Response</th><th>30 days</th><th>Watches</th><th><span class="tf-sr">Actions</span></th></tr>
         </thead>
-        <tbody>
-          {#each rows as row (row.entity_id)}
-            {@const chip = stateChip(row, now)}
-            {@const down = chip.tone === "err" && !row.tombstoned}
-            {@const toggled = echoOn(row.entity_id, TOGGLE)}
-            {@const refresher = refreshers.get(row.entity_id)}
-            <tr>
-              <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
-              <td><span class="tf-chip" class:tf-ok={chip.tone === "ok"} class:tf-warn={chip.tone === "warn"} class:tf-err={chip.tone === "err"} class:tf-info={chip.tone === "info"}>{chip.label}</span></td>
-              <td>
-                <span class="tf-mbar" role="img" aria-label="Last 24 hours of {row.name}">
-                  {#each segments(row, now.getTime()) as segment, at (at)}<i class="tf-seg-{segment}"></i>{/each}
-                </span>
-              </td>
-              <td class="tf-num">{responseText(row.response_time_ms)}</td>
-              <td class="tf-num">{uptimeText(row)}</td>
-              <td>
-                {#each row.assets as asset (asset.id)}
-                  <div><a class="tf-mono tf-mon-asset" href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={filter.text} /></a>{" "}<span class="tf-dim tf-mon-type">{asset.type_label}</span></div>
-                {:else}
-                  <span class="tf-dim">no asset</span>
-                {/each}
-              </td>
-              <td class="tf-mon-acts">
-                {#if down}
-                  <button type="button" class="tf-btn tf-sm" disabled={row.entity_id in acked} title={row.entity_id in acked ? `Acked ${acked[row.entity_id]}` : undefined} onclick={() => void ack(row)}
-                    >{row.entity_id in acked ? "Acked" : "Ack"}</button
-                  >
-                {/if}
-                {#if toggled !== null}
-                  <!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. -->
-                  <span class="tf-chip tf-info tf-queued-mark">{toggled.state}</span>
-                {:else}
-                  {#each row.actions.filter((op) => op in ROW_OPS) as op (op)}
-                    <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
+        <tbody {@attach win.list}>
+          {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("before")}></td></tr>{/if}
+          {#each win.slice(entries) as entry (entryKey(entry))}
+            {@const row = entry.row}
+            {#if entry.failed !== null}
+              <tr class="tf-mon-failed" {@attach win.row(entryKey(entry))}>
+                <td colspan="7"><div class="tf-banner tf-err tf-refresh-failed" role="alert">{entry.failed}</div></td>
+              </tr>
+            {:else}
+              {@const chip = stateChip(row, now)}
+              {@const down = chip.tone === "err" && !row.tombstoned}
+              {@const toggled = echoOn(row.entity_id, TOGGLE)}
+              {@const refresher = refreshers.get(row.entity_id)}
+              <tr {@attach win.row(entryKey(entry))}>
+                <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
+                <td><span class="tf-chip" class:tf-ok={chip.tone === "ok"} class:tf-warn={chip.tone === "warn"} class:tf-err={chip.tone === "err"} class:tf-info={chip.tone === "info"}>{chip.label}</span></td>
+                <td>
+                  <span class="tf-mbar" role="img" aria-label="Last 24 hours of {row.name}">
+                    {#each segments(row, now.getTime()) as segment, at (at)}<i class="tf-seg-{segment}"></i>{/each}
+                  </span>
+                </td>
+                <td class="tf-num">{responseText(row.response_time_ms)}</td>
+                <td class="tf-num">{uptimeText(row)}</td>
+                <td>
+                  {#each row.assets as asset (asset.id)}
+                    <div><a class="tf-mono tf-mon-asset" href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={filter.text} /></a>{" "}<span class="tf-dim tf-mon-type">{asset.type_label}</span></div>
+                  {:else}
+                    <span class="tf-dim">no asset</span>
                   {/each}
-                {/if}
-                {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} />{/if}
-              </td>
-            </tr>
-            {#if refresher && refresher.failed !== null}
-              <tr class="tf-mon-failed">
-                <td colspan="7"><div class="tf-banner tf-err tf-refresh-failed" role="alert">{refresher.failed}</div></td>
+                </td>
+                <td class="tf-mon-acts">
+                  {#if down}
+                    <button type="button" class="tf-btn tf-sm" disabled={row.entity_id in acked} title={row.entity_id in acked ? `Acked ${acked[row.entity_id]}` : undefined} onclick={() => void ack(row)}
+                      >{row.entity_id in acked ? "Acked" : "Ack"}</button
+                    >
+                  {/if}
+                  {#if toggled !== null}
+                    <!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. -->
+                    <span class="tf-chip tf-info tf-queued-mark">{toggled.state}</span>
+                  {:else}
+                    {#each row.actions.filter((op) => op in ROW_OPS) as op (op)}
+                      <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
+                    {/each}
+                  {/if}
+                  {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} />{/if}
+                </td>
               </tr>
             {/if}
           {/each}
+          {#if win.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("after")}></td></tr>{/if}
         </tbody>
       </table>
     {:else if roster.length === 0}

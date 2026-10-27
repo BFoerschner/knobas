@@ -691,3 +691,20 @@ test("⌘R on the roster presses no row's Refresh: the page's is the header's Sy
   await settle();
   expect([probe.refreshed, probe.synced]).toEqual([[], []]);
 });
+
+test("a long roster draws the monitors near the viewport, spacer rows standing for the rest below (#2210)", async () => {
+  const bulk = Array.from({ length: 2000 }, (_, i) => monitor(`kuma:bulk-${i}`, `api-${i} /health`));
+  await draw([], null, ports({ monitorRoster: async () => [...ROSTER, ...bulk] }));
+  const drawn = target.querySelectorAll(".tf-mon tbody tr:not(.tf-wgap)").length;
+  expect(drawn).toBeGreaterThan(5);
+  expect(drawn).toBeLessThan(100);
+  expect(text(target.querySelector(".tf-mon tbody tr td"))).toBe("flows-stage HTTP");
+  expect(target.querySelectorAll(".tf-mon tbody tr.tf-wgap")).toHaveLength(1);
+  expect(target.querySelector<HTMLElement>(".tf-mon tbody tr.tf-wgap:last-child td")!.style.getPropertyValue("height")).not.toBe("");
+
+  const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
+  field.value = "api-1999";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["api-1999 /health HTTP"]);
+});

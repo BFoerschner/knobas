@@ -292,5 +292,49 @@ test("a mirror of more than 1000 repositories is read on to its total, not cut a
     }),
   );
   expect(offsets).toEqual([0, 1000]);
-  expect(target.querySelectorAll("tbody tr").length).toBeGreaterThan(1000);
+  expect(text(target.querySelector(".tf-tabs a"))).toBe("Repositories 1200");
+});
+
+const drawn = (table: Element) => table.querySelectorAll("tbody tr:not(.tf-wgap)").length;
+
+test("a long Repositories tab draws the repositories near the viewport, spacer rows standing for the rest (#2210)", async () => {
+  const many = Array.from({ length: 2000 }, (_, n) => repo(`bulk-${n}`, "2026-08-01T10:00:00Z"));
+  await draw(["repos"], null, ports({ listEntities: async (filter) => page(filter.kinds.includes("repo") ? many : []) }));
+  const table = target.querySelector(".tf-tbl")!;
+  expect(drawn(table)).toBeGreaterThan(5);
+  expect(drawn(table)).toBeLessThan(100);
+  expect(table.querySelectorAll("tbody tr.tf-wgap")).toHaveLength(1);
+
+  const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
+  field.value = "bulk-1999";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect([...target.querySelectorAll(".tf-tbl tbody tr")].map((tr) => cells(tr)[0])).toEqual(["tidewater/bulk-1999"]);
+});
+
+test("a long Pull requests tab draws each group's pull requests near the viewport (#2210)", async () => {
+  const many = Array.from({ length: 2000 }, (_, n) => pr(5000 + n, `Bulk change ${n}`, "open"));
+  await draw(
+    ["prs"],
+    null,
+    ports({
+      listEntities: async (filter) => {
+        if (filter.kinds.includes("repo")) return page(REPOS);
+        if (filter.kinds.includes("branch")) return page([]);
+        if (filter.order === "attention") return page(many, [{ group: "open_pull_requests", count: many.length }]);
+        return page([...many, ...SETTLED]);
+      },
+    }),
+  );
+  const tables = [...target.querySelectorAll(".tf-cprs")];
+  const rows = tables.reduce((sum, table) => sum + drawn(table), 0);
+  expect(rows).toBeGreaterThan(5);
+  expect(rows).toBeLessThan(100);
+  expect(text(target.querySelector(".tf-tabs a:last-child"))).toBe("Pull requests 2001");
+
+  const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
+  field.value = "Bulk change 1999";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect([...target.querySelectorAll(".tf-cprs tbody tr")].map((tr) => cells(tr)[0])).toEqual(["#6999"]);
 });

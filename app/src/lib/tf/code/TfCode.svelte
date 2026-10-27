@@ -20,7 +20,9 @@
   `code_facts` (#966), read once for every row the two lists hold. The other
   reads are `list_entities`, `entity_checkout`, `list_sources`,
   `list_contexts`, `get_entity` and `job_reach`. Rows open
-  `#/repo/<entity id>` and `#/pr/<entity id>`.
+  `#/repo/<entity id>` and `#/pr/<entity id>`. A long list draws only the
+  rows near the viewport (`shell/windowed.svelte.ts`, #2210), each group of
+  pull requests on its own.
 -->
 <script lang="ts" module>
   import type { RoleFrameProps } from "../page-entry";
@@ -51,6 +53,7 @@
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { clones } from "../openin/clones.svelte";
+  import { Windowed } from "../../shell/windowed.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { itemHash, keyOf } from "../job/job";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
@@ -143,15 +146,16 @@
     return { ...first.page!, rows };
   }
 
-  let repos = $state<EntityPage | null>(null);
-  let attention = $state<EntityPage | null>(null);
-  let everyPr = $state<EntityPage | null>(null);
+  // Replaced whole on each read, never changed in place: raw, so 10,000 rows are not proxied row by row (#2210).
+  let repos = $state.raw<EntityPage | null>(null);
+  let attention = $state.raw<EntityPage | null>(null);
+  let everyPr = $state.raw<EntityPage | null>(null);
   let branches = $state<EntityRow[]>([]);
   let sources = $state<Pick<SourceSummary, "id" | "base_url">[]>([]);
   let failed = $state<string | null>(null);
   let checkouts = $state<Record<string, CheckoutView>>({});
   let jobs = $state<OpenJob[]>([]);
-  let facts = $state<CodeFacts[]>([]);
+  let facts = $state.raw<CodeFacts[]>([]);
 
   $effect(() => {
     if (!ready) return;
@@ -353,6 +357,16 @@
     return out;
   });
 
+  /** Thousands of rows draw only those near the viewport (#2210); a repository row is 42 px, a pull request's 51. */
+  const repoWin = new Windowed({ count: () => shownRepos.length, key: (i) => shownRepos[i]!.entity_id, estimate: 42 });
+  const linesOf = (name: PrGroup | "open") => groups.find((kept) => (kept.group ?? "open") === name)?.lines ?? [];
+  const prWins = new Map(
+    (["open", ...GROUP_ORDER] as const).map((name) => [
+      name,
+      new Windowed({ count: () => linesOf(name).length, key: (i) => linesOf(name)[i]!.row.entity_id, estimate: 51 }),
+    ]),
+  );
+
   const prTotal = $derived(lines?.length ?? null);
   const filter = $derived(tab === "prs" ? prFilter : repoFilter);
   const searchAll = () => {
@@ -420,12 +434,13 @@
             ></tr
           >
         </thead>
-        <tbody>
-          {#each shownRepos as row (row.entity_id)}
+        <tbody {@attach repoWin.list}>
+          {#if repoWin.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach repoWin.room("before")}></td></tr>{/if}
+          {#each repoWin.slice(shownRepos) as row (row.entity_id)}
             {@const count = openCount(openCounts, row)}
             {@const local = checkoutLine(checkouts[row.entity_id])}
             {@const fact = known.get(row.entity_id)}
-            <tr class="tf-row" onclick={(event) => open(event, itemHash(row))}>
+            <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach repoWin.row(row.entity_id)}>
               <td
                 ><a class="tf-mono" href={itemHash(row)}><Marked text={row.title} typed={repoFilter.text} /></a
                 >{#if job !== null && held(row.entity_id)}{" "}<span class="tf-chip tf-chip-job">{job}</span>{/if}</td
@@ -438,6 +453,7 @@
               <td class="tf-nowrap"><TfOpenIn entityId={row.entity_id} title={row.title} checkout={checkouts[row.entity_id]} variant="ghost" /></td>
             </tr>
           {/each}
+          {#if repoWin.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach repoWin.room("after")}></td></tr>{/if}
         </tbody>
       </table>
     {:else if repos !== null}
@@ -448,11 +464,13 @@
       {#if group !== null}
         <h2 class="tf-cgroup-h">{GROUP_LABEL[group]} <span class="tf-count">{kept.length}</span></h2>
       {/if}
+      {@const win = prWins.get(group ?? "open")!}
       <table class="tf-tbl tf-cprs">
-        <tbody>
-          {#each kept as { row, number, idle, author } (row.entity_id)}
+        <tbody {@attach win.list}>
+          {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach win.room("before")}></td></tr>{/if}
+          {#each win.slice(kept) as { row, number, idle, author } (row.entity_id)}
             {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
-            <tr class="tf-row" onclick={(event) => open(event, itemHash(row))}>
+            <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach win.row(row.entity_id)}>
               <td class="tf-mono"><Marked text={number ?? ""} typed={prFilter.text} /></td>
               <td
                 ><a href={itemHash(row)}><Marked text={row.title} typed={prFilter.text} /></a><span class="tf-sub"
@@ -468,6 +486,7 @@
               <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
             </tr>
           {/each}
+          {#if win.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach win.room("after")}></td></tr>{/if}
         </tbody>
       </table>
     {:else}
