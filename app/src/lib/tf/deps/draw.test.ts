@@ -99,6 +99,16 @@ describe("folding a large estate (R-11.17)", () => {
     expect(drawn.where.get(member.id)).toBe(chip.el);
   });
 
+  test("tiles run problems first, then by name, whatever order the read holds them in", () => {
+    const read: Dependencies = {
+      ...BIG,
+      items: [item({ id: "b", kind: "vm" }), item({ id: "c", kind: "vm", health: "err" }), item({ id: "a", kind: "vm" })],
+      relations: [],
+    };
+    const machines = drawOf(read, settingsOf({}), NO_GESTURES).bands.find((band) => band.id === "machines")!;
+    expect(machines.open[0]!.tiles.map((tile) => tile.id)).toEqual(["c", "a", "b"]);
+  });
+
   test("below the fold count every group stays open", () => {
     const roomy = drawOf(BIG, { ...byOwner, fold_at: 5000 }, NO_GESTURES).bands.find((b) => b.id === "services")!;
     expect(roomy.shut).toHaveLength(0);
