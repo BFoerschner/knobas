@@ -277,7 +277,7 @@ for (const [space, tops] of Object.entries(TREE)) {
 }
 
 /** The key of the space `?fake-docs-pages=<n>` adds (#2200). */
-const BIG = "BULK";
+const BULK_KEY = "BULK";
 const BULK_NAME = "Bulk pages";
 /**
  * `?fake-docs-pages=<n>` (#2200): one more space, *BULK*, of `n` generated
@@ -290,9 +290,9 @@ function bulkPages(n: number): FakePage[] {
   const words = ["Payout", "Ledger", "Carrier", "Customs", "Booking", "Retry", "Invoice", "Tracking", "Refund", "Settlement", "Runbook", "Design", "Review", "Onboarding", "Platform", "Release"];
   const out: FakePage[] = [];
   for (let i = 0; i < n; i++) {
-    const title = `${words[i % 16]} ${words[(i * 7 + 3) % 16]!.toLowerCase()} ${i + 1}`;
+    const title = `${words[i % words.length]} ${words[(i * 7 + 3) % words.length]!.toLowerCase()} ${i + 1}`;
     const up = i < 20 ? null : out[Math.floor((i - 20) / 8)]!;
-    out.push({ id: `confluence:bulk-${i + 1}`, title, space: BIG, parent: up?.id ?? null, parentTitle: up?.title ?? null });
+    out.push({ id: `confluence:bulk-${i + 1}`, title, space: BULK_KEY, parent: up?.id ?? null, parentTitle: up?.title ?? null });
   }
   return out;
 }
@@ -404,7 +404,7 @@ function tree(bulk: FakePage[]): DocsTree {
   if (bulk.length > 0)
     spaces.push({
       source_id: SOURCE,
-      key: BIG,
+      key: BULK_KEY,
       name: BULK_NAME,
       pages: bulk.map((p) => ({ entity_id: p.id, title: p.title, parent: p.parent })),
     });
@@ -514,7 +514,7 @@ function page(args: Record<string, unknown>, bulk: FakePage[] = []): DocPage {
     source_id: "confluence",
     source_name: "Confluence",
     title: found.title,
-    space: { key: found.space, name: SPACES[found.space] ?? (found.space === BIG ? BULK_NAME : null) },
+    space: { key: found.space, name: SPACES[found.space] ?? (found.space === BULK_KEY ? BULK_NAME : null) },
     ancestors: found.parent === null ? [] : [{ title: found.parentTitle ?? "", entity_id: found.parent }],
     editor: PEOPLE[by]?.[0] ?? null,
     editor_name: PEOPLE[by]?.[1] ?? null,
@@ -639,7 +639,7 @@ function search(args: Record<string, unknown>, bulk: FakePage[]): DocsHits | nul
     hits.push({
       entity_id: p.id,
       title: p.title,
-      space: { key: BIG, name: BULK_NAME },
+      space: { key: BULK_KEY, name: BULK_NAME },
       path: p.parentTitle,
       snippet: { section: null, comment_by: null, segments: [{ text: p.title, hit: false }] },
       matches,
@@ -688,7 +688,7 @@ export function handlers(params: URLSearchParams): Handlers {
     docs_page: (args) => page(args, bulk),
     docs_search: (args) => search(args, bulk),
     docs_export_markdown: (args) => {
-      const found = PAGES.find((p) => p.id === String(args["entityId"] ?? ""));
+      const found = [...PAGES, ...bulk].find((p) => p.id === String(args["entityId"] ?? ""));
       const file = `${(found?.title ?? "untitled").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "")}.md`;
       return { file, folder: "/Users/you/Downloads" };
     },

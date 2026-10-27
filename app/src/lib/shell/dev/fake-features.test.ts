@@ -402,6 +402,7 @@ test("docs: ?fake-docs-pages=<n> adds a BULK space of n pages folded under each 
   const found = h["docs_search"]!({ query: "booking release", space: { source_id: "confluence", key: "BULK" } }) as { hits: { title: string }[] };
   expect(found.hits.map((hit) => hit.title)).toContain("Booking release 21");
   expect((h["docs_page"]!({ entityId: bulk.pages[20]!.entity_id }) as { space: { key: string } }).space.key).toBe("BULK");
+  expect((h["docs_export_markdown"]!({ entityId: bulk.pages[20]!.entity_id }) as { file: string }).file).toBe("booking-release-21.md");
   // Without the switch there is no such space.
   const plain = (demoHandlers() as Calls)["docs_tree"]!({}) as { spaces: { key: string }[] };
   expect(plain.spaces.map((space) => space.key)).not.toContain("BULK");
