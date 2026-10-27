@@ -48,3 +48,13 @@ test("a field's reason is the answer's for that field, and the write's is the wr
   expect(refusalOf(answer, RUN.entity, "run_build", "first_in_queue")).toBeNull();
   expect(refusalOf([{ ...RUN, reason: "cannot run" }], RUN.entity, "run_build", "parameters")).toBeNull();
 });
+
+test("twenty thousand asks are told apart in one pass, not each against all (a 20,000-row inbox spent 626 ms here, #2209)", async () => {
+  const asks = Array.from({ length: 20_000 }, (_, i) => ({ entity: `tc:build:${i}`, op: "rerun_build" }));
+  let sent = 0;
+  await askRefused([...asks, ...asks], (once) => {
+    sent = once.length;
+    return Promise.resolve([]);
+  });
+  expect(sent).toBe(20_000);
+}, 2_000);

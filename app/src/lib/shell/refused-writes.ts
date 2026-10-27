@@ -35,7 +35,13 @@ const keyOf = (ask: WriteAsk) => JSON.stringify([ask.entity, ask.op, ask.field ?
  * ask sends nothing.
  */
 export async function askRefused(asks: readonly WriteAsk[], read?: RefusedWritesPort): Promise<RefusedWrite[]> {
-  const once = asks.filter((ask, i) => asks.findIndex((other) => keyOf(other) === keyOf(ask)) === i);
+  const seen = new Set<string>();
+  const once = asks.filter((ask) => {
+    const key = keyOf(ask);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   if (once.length === 0) return [];
   try {
     // The bridge is reached inside the `try`, so a shell without it answers nothing too.
