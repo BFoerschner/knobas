@@ -258,13 +258,13 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
    */
   function capFor(): number | null {
     const cap = typing ? TYPED_CAP : COLUMN_CAP;
-    const read = board;
-    if ((expanded.length === 0 && !listAll) || read === null) return cap;
+    const answered = board;
+    if ((expanded.length === 0 && !listAll) || answered === null) return cap;
     const wanted = laned
       ? bands.flatMap(({ lane, drawn }) =>
           drawn.filter(({ column }) => expanded.includes(expandKey(lane, column))).map(({ column }) => column.total),
         )
-      : (listAll ? read.columns : cols.filter((column) => expanded.includes(columnKey(column)))).map(
+      : (listAll ? answered.columns : cols.filter((column) => expanded.includes(columnKey(column)))).map(
           (column) => column.total,
         );
     return Math.max(cap, ...wanted);

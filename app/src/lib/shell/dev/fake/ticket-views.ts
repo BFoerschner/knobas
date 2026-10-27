@@ -323,7 +323,7 @@ function slug(name: string): string {
  * minute older than the last. A title is two words and its number, from
  * sixteen words each, so a word finds a sixteenth of them.
  */
-export function bulkTickets(n: number): (typeof CORPUS)[number][] {
+function bulkTickets(n: number): (typeof CORPUS)[number][] {
   const words = ["Payout", "Ledger", "Carrier", "Customs", "Booking", "Retry", "Invoice", "Tracking", "Refund", "Settlement", "Runbook", "Design", "Review", "Onboarding", "Platform", "Release"];
   const statuses = ["To Do", "In Progress", "In Review", "Done"];
   const people = ["mara", "jonas", "priya", "tomasz", null];

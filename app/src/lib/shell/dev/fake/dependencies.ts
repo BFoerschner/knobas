@@ -199,7 +199,7 @@ export function seed(params: URLSearchParams): void {
  * fifty services, and every service inside the estate's Docker engine, so the
  * engine and what holds it hold them all.
  */
-export function bulkItems(n: number): { items: DepItem[]; relations: DepRelation[] } {
+function bulkItems(n: number): { items: DepItem[]; relations: DepRelation[] } {
   const words = ["payout", "ledger", "carrier", "customs", "booking", "retry", "invoice", "tracking", "refund", "settlement", "runbook", "design", "review", "onboarding", "platform", "release"];
   const items: DepItem[] = [];
   const relations: DepRelation[] = [];

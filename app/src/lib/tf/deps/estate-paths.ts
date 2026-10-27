@@ -13,7 +13,13 @@ export interface Place {
   path: string;
 }
 
-export function assetPaths(read: Dependencies): { places: Place[]; under: (id: string) => Set<string> } {
+/** Every place, and what sits under each. */
+export interface EstatePaths {
+  places: Place[];
+  under: (id: string) => Set<string>;
+}
+
+export function assetPaths(read: Dependencies): EstatePaths {
   const assets = read.items.filter((item) => isAsset(item.kind));
   const name = new Map(assets.map((item) => [item.id, item.name]));
   const parent = new Map<string, string>();
@@ -49,7 +55,7 @@ export function assetPaths(read: Dependencies): { places: Place[]; under: (id: s
  * holds. What it holds is walked once, not once a place (#2200's class: an
  * engine holding 5,000 containers took a second to open its editor).
  */
-export function placesOutside(paths: { places: Place[]; under: (id: string) => Set<string> }, id: string): Place[] {
+export function placesOutside(paths: EstatePaths, id: string): Place[] {
   const held = paths.under(id);
   return paths.places.filter((place) => place.id !== id && !held.has(place.id));
 }
