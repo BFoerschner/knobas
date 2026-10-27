@@ -43,3 +43,13 @@ export function assetPaths(read: Dependencies): { places: Place[]; under: (id: s
   };
   return { places, under };
 }
+
+/**
+ * The places an asset may move into: every one but the asset and what it
+ * holds. What it holds is walked once, not once a place (#2200's class: an
+ * engine holding 5,000 containers took a second to open its editor).
+ */
+export function placesOutside(paths: { places: Place[]; under: (id: string) => Set<string> }, id: string): Place[] {
+  const held = paths.under(id);
+  return paths.places.filter((place) => place.id !== id && !held.has(place.id));
+}
