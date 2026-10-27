@@ -128,8 +128,13 @@ export class Windowed<K = string> {
     // would re-wrap the rows on screen, and that changes which rows draw.
     // While windowed, its columns keep the widths the first drawn rows gave.
     const table = node instanceof HTMLTableSectionElement ? node.closest("table") : null;
+    // A header cell added or removed (the view's columns changed) freezes the widths again.
+    let heading = $state(0);
+    const headings = table?.tHead ? new MutationObserver(() => heading++) : null;
+    if (table?.tHead) headings?.observe(table.tHead, { childList: true, subtree: true });
     if (table !== null)
       $effect(() => {
+        void heading;
         if (!this.on) return;
         const width = table.getBoundingClientRect().width;
         const heads = [...(table.tHead?.rows[0]?.cells ?? [])];
@@ -168,6 +173,7 @@ export class Windowed<K = string> {
       document.removeEventListener("scroll", read, { capture: true });
       window.removeEventListener("resize", read);
       resized?.disconnect();
+      headings?.disconnect();
       if (this.#clips === clips) this.#clips = [];
     };
   };
