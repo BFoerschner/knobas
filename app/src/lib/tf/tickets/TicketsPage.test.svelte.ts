@@ -1904,3 +1904,40 @@ test("with no source filling the ticket system the board is read, empty, and say
     "No tickets synced yet. Add a ticket system in Settings and they appear here.",
   );
 });
+
+test("a long list draws the rows near the viewport, and j/k walk past them, drawing and focusing each row they reach (#2209)", async () => {
+  const many = Array.from({ length: 1000 }, (_, i) => ({
+    status: "To Do",
+    card: card(`PAY-${String(i + 1).padStart(4, "0")}`, `Ticket ${i + 1}`),
+  }));
+  await open(harness([], [], many));
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
+  await settle();
+  target.querySelector<HTMLButtonElement>(".tf-list-more")!.click();
+  await settle();
+  const drawn = () => [...target.querySelectorAll(".tf-tbl tbody tr[data-entity]")].map((row) => row.getAttribute("data-entity"));
+  const gaps = () => [...target.querySelectorAll<HTMLElement>(".tf-tbl tbody tr.tf-wgap td")].map((td) => td.style.height);
+  const first = drawn();
+  expect(first.length).toBeGreaterThan(5);
+  expect(first.length).toBeLessThan(100);
+  expect(first[0]).toBe("jira:PAY-0001");
+  // Only room below, every undrawn row at its 52 px estimate.
+  expect(gaps()).toEqual([`${(1000 - first.length) * 52}px`]);
+
+  // Past the last drawn row: the next is drawn, selected and focused.
+  for (let step = 0; step < first.length + 20; step += 1) press("j");
+  const at = `PAY-${String(first.length + 21).padStart(4, "0")}`;
+  expect(selectedKey()).toBe(at);
+  expect(document.activeElement?.getAttribute("data-entity")).toBe(`jira:${at}`);
+  expect(drawn()).not.toContain("jira:PAY-0001");
+  expect(gaps()).toHaveLength(2);
+  // The preview follows the selection to a row that was not drawn.
+  await settle();
+  expect(preview().textContent).toContain(at);
+
+  // And back to the top.
+  for (let step = 0; step < first.length + 20; step += 1) press("k");
+  expect(selectedKey()).toBe("PAY-0001");
+  expect(document.activeElement?.getAttribute("data-entity")).toBe("jira:PAY-0001");
+  expect(drawn()[0]).toBe("jira:PAY-0001");
+});

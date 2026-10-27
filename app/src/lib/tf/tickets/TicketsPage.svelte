@@ -24,7 +24,8 @@
   **Keys** (R-3.10): `j`/`k` and the arrows move the selection through the
   cards on screen in reading order (lane by lane, column by column, top to
   bottom; the list's rows as sorted), and focus the card. `Enter` and a
-  double click open the job.
+  double click open the job. A long list draws only the rows near the
+  viewport (`shell/windowed.svelte.ts`, #2209); `j`/`k` draws the next first.
 
   **The *Board / List* and *Lanes* switches hold for the session** (R-3.3):
   module state, never written anywhere, so a restart forgets them. Each view
@@ -105,6 +106,7 @@
   import { openExternal } from "../../shell/open-external";
   import { push } from "../../shell/toasts.svelte";
   import { inTextField } from "../../shell/keys";
+  import { Windowed } from "../../shell/windowed.svelte";
   import { isFiltering, toQuery, type FilterConfig, type FilterOption } from "../filter/filter";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -440,6 +442,8 @@
       statusOrder(boardColumns),
     ),
   );
+  /** The list after *Show N more* draws only the rows near the viewport (#2209); a row is 51 to 53 px, 70 when its summary wraps. */
+  const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.card.entity_id, estimate: 52 });
   /** The keys two sources' cards hold (#1476): those cards name their source and open by it. */
   const shared = $derived(sharedKeys(boardColumns));
   /** A card's source name when its key is shared, else `null`. */
@@ -516,8 +520,11 @@
   function step(by: 1 | -1) {
     if (visible.length === 0) return;
     const at = current === null ? 0 : visible.findIndex((entry) => entry.card.entity_id === current.card.entity_id);
-    const next = visible[Math.min(visible.length - 1, Math.max(0, at + by))]!;
+    const to = Math.min(visible.length - 1, Math.max(0, at + by));
+    const next = visible[to]!;
     session.selected = next.card.entity_id;
+    // A list row past the drawn ones is drawn first; the board's cards are all drawn.
+    if (showing.layout !== "board") win.reveal(to);
     flushSync();
     const element = document.querySelector<HTMLElement>(`.tf-tickets [data-entity="${CSS.escape(next.card.entity_id)}"]`);
     element?.focus();
@@ -779,9 +786,13 @@
               {/each}
             </tr>
           </thead>
-          <tbody>
-            {#each rows as { card } (card.entity_id)}
+          <tbody {@attach win.list}>
+            {#if win.before > 0}
+              <tr class="tf-wgap" aria-hidden="true"><td colspan={listColumns.length} {@attach win.room("before")}></td></tr>
+            {/if}
+            {#each win.slice(rows) as { card } (card.entity_id)}
               <tr
+                {@attach win.row(card.entity_id)}
                 class="tf-row"
                 class:tf-card={current?.card.entity_id === card.entity_id}
                 aria-current={current?.card.entity_id === card.entity_id ? "true" : undefined}
@@ -820,6 +831,9 @@
                 {/each}
               </tr>
             {/each}
+            {#if win.after > 0}
+              <tr class="tf-wgap" aria-hidden="true"><td colspan={listColumns.length} {@attach win.room("after")}></td></tr>
+            {/if}
           </tbody>
         </table>
         {#if listCut && !reader.typing}

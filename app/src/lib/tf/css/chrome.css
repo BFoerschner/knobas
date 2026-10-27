@@ -126,4 +126,5 @@
 .tf-run-start { display: flex; align-items: center; gap: 12px; }
 .tf-run-start select { flex: 1; min-width: 0; }
 .tf-run-remove { color: var(--err); white-space: nowrap; }
-
+/* A windowed table's room for its undrawn rows (`shell/windowed.svelte.ts`, #2209): no padding or rule of its own. */
+tr.tf-wgap > td { padding: 0; border: 0; }

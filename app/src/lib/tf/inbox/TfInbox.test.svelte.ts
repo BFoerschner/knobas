@@ -445,3 +445,35 @@ test("an inbox left open across midnight ticks its clock: a row reads yesterday 
     vi.useRealTimers();
   }
 });
+
+/** `n` older review requests, the oldest last. */
+const many = (n: number) =>
+  Array.from({ length: n }, (_, i) =>
+    entry({ key: `review_request:bulk#${i}`, entity_id: `gitea:bulk#${i}`, title: `Bulk change ${i}`, occurred_at: at(9, 0, 20) }),
+  );
+const room = (side: "top" | "bottom") => target.querySelector<HTMLElement>(".tf-inbox")!.style.getPropertyValue(`padding-${side}`);
+
+test("a long inbox draws the rows near the viewport and keeps the room of the rest below them (#2209)", async () => {
+  await open({ extra: many(2000) });
+  const drawn = rows().length;
+  expect(drawn).toBeGreaterThan(5);
+  expect(drawn).toBeLessThan(100);
+  expect(whats()[0]).toContain("Idempotent retry window");
+  expect(room("top")).toBe("");
+  // Every undrawn row at its estimate: 63 px and the 6 px gap before it.
+  expect(room("bottom")).toBe(`${(2004 - drawn) * 69}px`);
+
+  // A filter that keeps few rows draws them all, with no room around them.
+  const field = target.querySelector<HTMLInputElement>(".tf-fsearch input")!;
+  field.value = "Bulk change 1999";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(whats()).toEqual(["jonas asked for your review: Bulk change 1999"]);
+  expect(room("bottom")).toBe("");
+});
+
+test("an inbox under 300 rows draws every row, as before windowing (#2209)", async () => {
+  await open({ extra: many(250) });
+  expect(rows()).toHaveLength(254);
+  expect(target.querySelector<HTMLElement>(".tf-inbox")!.getAttribute("style")).toBeNull();
+});
