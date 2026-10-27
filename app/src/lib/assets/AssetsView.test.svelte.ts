@@ -964,6 +964,18 @@ test("the walk carries focus to the row it selected", async () => {
   await waitFor(() => expect(document.activeElement).toBe(on));
 });
 
+/** A step into a deeper column carries focus to the row selected there, not to the path's row in the first column (#2210). */
+test("the walk carries focus to the row it selected in a deeper column", async () => {
+  render("#/assets/tree");
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  press("ArrowDown");
+  await waitFor(() => expect(marked()).toEqual(["hel1", null]));
+  press("ArrowRight");
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-app-02", null]));
+
+  await waitFor(() => expect(document.activeElement?.getAttribute("data-asset")).toBe(SIBLING.id));
+});
+
 /**
  * **A reader who asked for less motion is scrolled without any.**
  *
@@ -1596,3 +1608,4 @@ test("an asset with no monitors draws no monitoring section at all", async () =>
   expect(target.querySelector(".named")).toBeNull();
   expect(text()).not.toContain("Monitoring");
 });
+

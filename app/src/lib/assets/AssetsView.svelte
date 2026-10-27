@@ -960,7 +960,8 @@
     // the dependency this effect exists to have.
     const drawn = columns;
     if (!wantFocus || drawn.length === 0) return;
-    const row = tree?.querySelector('.cols button.row[aria-current="true"]') ?? null;
+    // The deepest column's: every column marks the path's row in it, and the selection is the last.
+    const row = [...(tree?.querySelectorAll('.cols button.row[aria-current="true"]') ?? [])].at(-1) ?? null;
     // Kept, not cleared, while the row is missing. The columns are redrawn
     // twice on the way to a new selection — once emptied while the pane's read
     // is out, once with the answer — and a flag cleared on the first of those
