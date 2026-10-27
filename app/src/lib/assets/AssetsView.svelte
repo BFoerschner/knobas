@@ -738,7 +738,7 @@
   function windowOf(index: number): Windowed {
     let win = columnWindows.get(index);
     if (win === undefined) {
-      win = new Windowed({ count: () => columns[index]?.length ?? 0, key: (at) => columns[index]![at]!.id, estimate: ROW_PX, gap: 1 });
+      win = new Windowed({ count: () => columns[index]?.length ?? 0, key: (at) => columns[index]![at]!.id, estimate: ROW_PX, gap: 1, scrolls: true });
       columnWindows.set(index, win);
     }
     return win;
