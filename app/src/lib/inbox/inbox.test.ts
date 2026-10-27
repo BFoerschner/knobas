@@ -195,8 +195,8 @@ test("the stream is not an answer until a read has succeeded", async () => {
 
 /**
  * The perf audit after #2200: both shelves are held as read, not as deep
- * state. A proxy over 20,000 rows subscribed every field each row draws read,
- * and tore those reactions down one by one on the next keystroke (1.7 s for
+ * state. A proxy over 20,000 rows subscribed every field each row draws, and
+ * tore those reactions down one by one on the next keystroke (1.7 s for
  * one *Done*). Every answer replaces a shelf whole, so nothing needs the
  * proxy.
  */

@@ -398,7 +398,7 @@ test("inbox: ?fake-inbox-items=<n> adds n rows after prototype-6's, oldest last,
   expect(rows).toHaveLength(plain + 50);
   expect(new Set(rows.map((row) => row.item.key)).size).toBe(rows.length);
   expect(new Set(rows.slice(plain).map((row) => row.item.category))).toEqual(
-    new Set(["review_request", "mention", "failed_build", "new_assignment"]),
+    new Set(["review_request", "mention", "failed_build", "new_assignment", "alert"]),
   );
   expect(rows.at(-1)!.item.occurred_at < rows[plain]!.item.occurred_at).toBe(true);
 });

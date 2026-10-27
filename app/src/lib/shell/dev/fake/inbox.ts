@@ -157,7 +157,7 @@ function acked(entry: InboxEntry): boolean {
 
 /**
  * `?fake-inbox-items=<n>`: `n` generated rows, older than prototype-6's, each
- * about a ticket, pull request, build, page or monitor of its own.
+ * about a pull request, ticket, build or monitored asset of its own.
  */
 function bulkItems(n: number): InboxEntry[] {
   const made: InboxEntry[] = [];
@@ -177,14 +177,14 @@ function bulkItems(n: number): InboxEntry[] {
         made.push(entry(`new_assignment:mock:BULK-${i}`, "new_assignment", "mock", `mock:BULK-${i}`, "ticket", `Bulk ticket ${i}`, "assigned to you", minutes, []));
         break;
       default:
-        made.push(entry(`mention:confluence:bulk-${i}`, "mention", "confluence", `confluence:bulk-${i}`, "page", `Bulk page ${i}`, "you are mentioned here", minutes, ["comment"]));
+        made.push(entry(`alert:kuma:bulk-${i}`, "alert", "kuma", `asset:bulk-${i}`, "asset", `bulk-${i}`, `bulk host ${i} is down`, minutes, []));
     }
   }
   return made;
 }
 
 /** This feature's commands. */
-export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
+export function handlers(params: URLSearchParams): Handlers {
   let live = [...stream(), ...bulkItems(Number(params.get("fake-inbox-items") ?? 0) || 0)];
   let later = snoozed();
   let kinds: InboxCategory[] = KINDS.slice();
