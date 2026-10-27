@@ -73,8 +73,10 @@ export class Windowed<K = string> {
   readonly #keyOf = new WeakMap<Element, K>();
   /** The rows in the DOM now. */
   readonly #drawn = new Set<HTMLElement>();
-  /** A drawn row on screen and its top, taken at each scroll, held still through the redraw it causes. */
+  /** A drawn row on screen and its top, taken at each scroll the reader makes, held still through the redraws it causes. */
   #anchor: { el: HTMLElement; y: number } | null = null;
+  /** The box this list last scrolled itself and where it left it, so the scroll event that raises is not taken for the reader's. */
+  #own: { box: Element; top: number } | null = null;
   readonly #sizes: ResizeObserver | null;
 
   readonly #keys = $derived.by(() => {
@@ -150,7 +152,7 @@ export class Windowed<K = string> {
     // What of the list is on screen: the window cut by every ancestor that
     // clips, so a layout whose scrolling box changes with the width (Tickets
     // below 900 px) needs nothing from the view.
-    const read = () => {
+    const read = (event?: Event) => {
       let top = 0;
       let bottom = window.innerHeight;
       for (const clip of clips) {
@@ -160,7 +162,11 @@ export class Windowed<K = string> {
       }
       this.#viewTop = Math.max(0, top - node.getBoundingClientRect().top);
       this.#viewHeight = Math.max(0, bottom - top);
-      this.#pin(top);
+      // The reader scrolled: hold the row on screen now. Not on a scroll this
+      // list made to hold a row, nor on a resize: those arrive after a redraw
+      // may have moved the rows, and pinning them there would keep the move
+      // (#2211: a summary 5 px under its estimate shifted the list 5 px).
+      if (event?.type === "scroll" && !this.#ownScroll(event.target)) this.#pin(top);
     };
     read();
     // Scroll events do not bubble; a capturing listener hears every box's.
@@ -218,10 +224,20 @@ export class Windowed<K = string> {
 
   /** Scrolls the nearest box that has something to scroll, else the page. */
   #scrollBy(px: number) {
-    const box = this.#clips.find((clip) => clip.scrollHeight > clip.clientHeight);
-    if (box !== undefined) box.scrollTop += px;
     // jsdom has no `scrollingElement`.
-    else if (document.scrollingElement) document.scrollingElement.scrollTop += px;
+    const box = this.#clips.find((clip) => clip.scrollHeight > clip.clientHeight) ?? document.scrollingElement;
+    if (!box) return;
+    box.scrollTop += px;
+    this.#own = { box, top: box.scrollTop };
+  }
+
+  /** Whether the scroll event from `target` is the one {@link #scrollBy} raised, and only that. */
+  #ownScroll(target: EventTarget | null): boolean {
+    const own = this.#own;
+    const box = target === document ? document.scrollingElement : target;
+    if (own === null || box !== own.box) return false;
+    this.#own = null;
+    return own.box.scrollTop === own.top;
   }
 
   /** Hands the rows to the arithmetic when they changed (a new array), not on every scroll. */
