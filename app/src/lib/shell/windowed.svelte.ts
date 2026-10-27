@@ -76,7 +76,7 @@ export class Windowed<K = string> {
   /** A drawn row on screen and its top, taken at each scroll the reader makes, held still through the redraws it causes. */
   #anchor: { el: HTMLElement; y: number } | null = null;
   /** The box this list last scrolled itself and where it left it, so the scroll event that raises is not taken for the reader's. */
-  #own: { box: Element; top: number } | null = null;
+  #scrolled: { box: Element; top: number } | null = null;
   readonly #sizes: ResizeObserver | null;
 
   readonly #keys = $derived.by(() => {
@@ -166,7 +166,7 @@ export class Windowed<K = string> {
       // list made to hold a row, nor on a resize: those arrive after a redraw
       // may have moved the rows, and pinning them there would keep the move
       // (#2211: a summary 5 px under its estimate shifted the list 5 px).
-      if (event?.type === "scroll" && !this.#ownScroll(event.target)) this.#pin(top);
+      if (event?.type === "scroll" && !this.#selfScroll(event.target)) this.#pin(top);
     };
     read();
     // Scroll events do not bubble; a capturing listener hears every box's.
@@ -228,15 +228,15 @@ export class Windowed<K = string> {
     const box = this.#clips.find((clip) => clip.scrollHeight > clip.clientHeight) ?? document.scrollingElement;
     if (!box) return;
     box.scrollTop += px;
-    this.#own = { box, top: box.scrollTop };
+    this.#scrolled = { box, top: box.scrollTop };
   }
 
   /** Whether the scroll event from `target` is the one {@link #scrollBy} raised, and only that. */
-  #ownScroll(target: EventTarget | null): boolean {
-    const own = this.#own;
+  #selfScroll(target: EventTarget | null): boolean {
+    const own = this.#scrolled;
     const box = target === document ? document.scrollingElement : target;
     if (own === null || box !== own.box) return false;
-    this.#own = null;
+    this.#scrolled = null;
     return own.box.scrollTop === own.top;
   }
 

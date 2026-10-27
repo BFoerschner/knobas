@@ -235,7 +235,7 @@
     listRows(
       pinned,
       trees,
-      (tree, at) => (scope === "all" ? tree.source : at === 0 ? "By project" : null),
+      scope,
       (f) => foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed),
     ),
   );

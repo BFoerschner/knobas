@@ -236,14 +236,14 @@ export type ListRow =
 
 /**
  * The list flattened into the rows drawn, in order: *Pinned* and its
- * pipelines, then each tree under its heading (`heading` names it, or `null`
- * for none), its own pipelines before its folds, and under each fold's
- * summary its rows only while `open` says so.
+ * pipelines, then each tree under its source's name (`scope` *all*) or all
+ * of them under one *By project* (*This job*), its own pipelines before its
+ * folds, and under each fold's summary its rows only while `open` says so.
  */
 export function listRows(
   pinned: readonly PipelineRow[],
   trees: readonly SourceTree[],
-  heading: (tree: SourceTree, at: number) => string | null,
+  scope: Scope,
   open: (f: Fold) => boolean,
 ): ListRow[] {
   const rows: ListRow[] = [];
@@ -260,7 +260,7 @@ export function listRows(
     }
   };
   trees.forEach((tree, at) => {
-    const text = heading(tree, at);
+    const text = scope === "all" ? tree.source : at === 0 ? "By project" : null;
     if (text !== null) rows.push({ kind: "head", key: `head:${tree.sourceId}:${text}`, text });
     walk(tree.pipelines, tree.folds, 0);
   });

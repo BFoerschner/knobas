@@ -188,7 +188,7 @@
   const download = () => downloadAndSay(ports.download, runId, { kind: "log" }, "the log");
 </script>
 
-{#snippet logRow(line: LogLine)}
+{#snippet logRow(line: LogLine, key: number)}
   {@const start = hits.first.get(line.number)}
   {@const runs = start === undefined ? null : marks(line.text, typed)}
   <div
@@ -196,7 +196,7 @@
     class:tf-e={line.tone === "err"}
     class:tf-w={line.tone === "warn"}
     data-n={line.number}
-    {@attach win.row(line.number)}
+    {@attach win.row(key)}
   >
     <span class="tf-no">{line.number}</span><span class="tf-ts">{line.time ?? ""}</span><span
       >{#if runs === null || start === undefined}{line.text || " "}{:else}{#each runs as run, at (at)}{#if run.hit}{@const n =
@@ -248,7 +248,7 @@
     {#key errorsOnly}
     {#each win.slice(rows) as row (row.key)}
       {#if row.kind === "line"}
-        {@render logRow(row.line)}
+        {@render logRow(row.line, row.key)}
       {:else if row.kind === "step"}
         {@const block = row.block}
         {@const st = states[block.index] ?? "ok"}

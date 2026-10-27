@@ -56,6 +56,8 @@ export type LogRow =
  */
 export function logRows(blocks: readonly LogBlock[], open: (block: StepBlock) => boolean, shown: (line: LogLine) => boolean): LogRow[] {
   const rows: LogRow[] = [];
+  // Block `b`'s own rows take the three keys -1 - 3b (a step's summary),
+  // -2 - 3b and -3 - 3b (a loose run's edges): below 0, apart from every line.
   const lines = (list: readonly LogLine[]) => {
     for (const line of list) if (shown(line)) rows.push({ kind: "line", key: line.number, line });
   };
