@@ -123,11 +123,11 @@ export class Windowed<K = string> {
   /** On the element that holds the rows. */
   list = (node: HTMLElement) => {
     // A list that scrolls itself (an asset column) is its own first clip, and its rows move by its scroll.
-    const own = getComputedStyle(node).overflowY !== "visible";
+    const style = getComputedStyle(node);
+    const own = style.overflowY !== "visible";
     const clips = own ? [node, ...clipsOf(node)] : clipsOf(node);
     this.#clips = clips;
     // The list's own padding: row 0 sits under it, and the room is inside it.
-    const style = getComputedStyle(node);
     const base = { top: parseFloat(style.paddingTop) || 0, bottom: parseFloat(style.paddingBottom) || 0 };
     // The browser's own scroll anchoring would correct a row's height a second time.
     $effect(() => {

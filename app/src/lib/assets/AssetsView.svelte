@@ -731,13 +731,14 @@
    * Each open column's rows, windowed: a column of thousands draws only the
    * rows near its own scroll. One per column position, made as the column
    * first opens; the rows are measured by id, so a column that shows another
-   * asset's children keeps nothing wrong. A row is `--row` (30 px), 1 apart.
+   * asset's children keeps nothing wrong. A row is `--row`, 1 apart.
    */
+  const ROW_PX = 30;
   const columnWindows = new Map<number, Windowed>();
   function windowOf(index: number): Windowed {
     let win = columnWindows.get(index);
     if (win === undefined) {
-      win = new Windowed({ count: () => columns[index]?.length ?? 0, key: (at) => columns[index]![at]!.id, estimate: 30, gap: 1 });
+      win = new Windowed({ count: () => columns[index]?.length ?? 0, key: (at) => columns[index]![at]!.id, estimate: ROW_PX, gap: 1 });
       columnWindows.set(index, win);
     }
     return win;
@@ -745,7 +746,7 @@
 
   /** The pane's two lists that run to thousands, *Holds* and *Depends on this*, windowed the same way; a line is 18 px, 2 apart. */
   const holdsWindow = new Windowed({ count: () => detail?.holds.length ?? 0, key: (at) => detail!.holds[at]!.id, estimate: 18, gap: 2 });
-  const breaksWindow = new Windowed({
+  const dependsWindow = new Windowed({
     count: () => dependsOn?.assets.length ?? 0,
     key: (at) => dependsOn!.assets[at]!.asset.id,
     estimate: 18,
@@ -852,7 +853,7 @@
       // id from a source system would turn a wire into a thrown
       // `SyntaxError` inside an effect, which takes the whole Tree with it.
       const from = pane.querySelector(`li[data-wire=${CSS.escape(wire.key)}]`);
-      const to = wire.rowId === null ? cols.querySelector(`button.spine[data-spine="${wire.column}"]`) : landing(cols, wire.column, wire.rowId);
+      const to = landing(cols, wire);
       if (from === null || to === null) continue;
 
       const fromBox = from.getBoundingClientRect();
@@ -861,10 +862,9 @@
       // see (#1460).
       if (laid && (fromBox.bottom < seenTop + 2 || fromBox.top > seenBottom - 2)) continue;
 
-      const toBox = to instanceof Element ? to.getBoundingClientRect() : to;
       // The band the far end may be drawn in: the column's own scrolling list,
       // or the spine, which scrolls with nothing.
-      const band = (to instanceof Element ? (to.closest("ol.col") ?? to) : to.list).getBoundingClientRect();
+      const { box: toBox, band } = to;
       const wanted = {
         x: toBox.right - box.left - 2,
         y: toBox.top - box.top + toBox.height / 2,
@@ -909,18 +909,24 @@
   }
 
   /**
-   * Where a wire to an asset row lands: the row, or, for a row its long
-   * column has not drawn (#2210), where that row would be. It is outside the
-   * drawn rows, so off the column's screen, and the band holds the wire at
-   * the column's edge, dashed, as it would a row scrolled away.
+   * Where a wire lands, and the band it may be drawn in: the spine, the
+   * row in its column's list, or, for a row its long column has not drawn
+   * (#2210), where that row would be. That row is outside the drawn ones, so
+   * off the column's screen, and the band holds the wire at the column's
+   * edge, dashed, as it would a row scrolled away.
    */
-  function landing(cols: HTMLElement, column: number, rowId: string): Element | { top: number; right: number; height: number; list: Element } | null {
-    const drawn = cols.querySelector(`button.row[data-asset=${CSS.escape(rowId)}]`);
-    if (drawn !== null) return drawn;
-    const list = cols.querySelector(`ol.col[data-col="${column}"]`);
-    const at = columns[column]?.findIndex((row) => row.id === rowId) ?? -1;
+  function landing(cols: HTMLElement, wire: Wire): { box: Pick<DOMRect, "top" | "right" | "height">; band: DOMRect } | null {
+    if (wire.rowId === null) {
+      const spine = cols.querySelector(`button.spine[data-spine="${wire.column}"]`);
+      return spine === null ? null : { box: spine.getBoundingClientRect(), band: spine.getBoundingClientRect() };
+    }
+    const drawn = cols.querySelector(`button.row[data-asset=${CSS.escape(wire.rowId)}]`);
+    if (drawn !== null) return { box: drawn.getBoundingClientRect(), band: (drawn.closest("ol.col") ?? drawn).getBoundingClientRect() };
+    const list = cols.querySelector(`ol.col[data-col="${wire.column}"]`);
+    const at = columns[wire.column]?.findIndex((row) => row.id === wire.rowId) ?? -1;
     if (list === null || at < 0) return null;
-    return { top: windowOf(column).topOf(at), right: list.getBoundingClientRect().right, height: 30, list };
+    const band = list.getBoundingClientRect();
+    return { box: { top: windowOf(wire.column).topOf(at), right: band.right, height: ROW_PX }, band };
   }
 
   /**
@@ -2257,9 +2263,9 @@
           {:else if dependsOn.assets.length === 0}
             <p class="empty">Nothing depends on this.</p>
           {:else}
-            <ul class="lst" {@attach breaksWindow.list}>
-              {#each breaksWindow.slice(dependsOn.assets) as row (row.asset.id)}
-                <li {@attach breaksWindow.row(row.asset.id)}>
+            <ul class="lst" {@attach dependsWindow.list}>
+              {#each dependsWindow.slice(dependsOn.assets) as row (row.asset.id)}
+                <li {@attach dependsWindow.row(row.asset.id)}>
                   <button class="link" onclick={() => goToSource(addressOf(row.asset))}>
                     {row.asset.name}
                   </button>
