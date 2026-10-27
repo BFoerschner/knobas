@@ -976,6 +976,30 @@ function codeFacts(args: Record<string, unknown>): CodeFacts[] {
  */
 export const CODE_FACTS: ((ids: ReadonlySet<string>) => CodeFacts[])[] = [];
 
+/**
+ * `?fake-code-rows=<n>` (perf audit, #2200's class): `n` more pull requests
+ * over `n / 10` more repositories, one in ten open, the rest merged. Added at
+ * load, so they are part of the seed.
+ */
+function bulkCode(n: number): (typeof CORPUS)[number][] {
+  if (n <= 0) return [];
+  const repos = Math.ceil(n / 10);
+  const name = (r: number) => `tidewater/bulk-${String(r).padStart(4, "0")}`;
+  return [
+    ...Array.from({ length: repos }, (_, r) =>
+      row(`mock:${name(r)}`, "repo", name(r), `2026-07-${String(1 + (r % 28)).padStart(2, "0")}T10:00:00Z`, "jonas", { teams: [`Team ${r % 12}`], language: r % 2 ? "Rust" : "Go" }),
+    ),
+    ...Array.from({ length: n }, (_, i) =>
+      row(`mock:bulk-${i % repos}#${i}`, "pr", `Bulk change ${i}`, `2026-0${1 + (i % 8)}-${String(1 + (i % 28)).padStart(2, "0")}T09:00:00Z`, i % 3 ? "jonas" : "mara", {
+        num: i,
+        chip: i % 10 === 0 ? { text: "open", tone: "info" } : { text: "merged", tone: "ok" },
+        path: name(i % repos),
+      }),
+    ),
+  ];
+}
+CORPUS.push(...bulkCode(Number(new URLSearchParams(globalThis.location?.search).get("fake-code-rows") ?? 0) || 0));
+
 /** This feature's commands. */
 export function handlers(): Handlers {
   return {

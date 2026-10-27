@@ -194,6 +194,13 @@ function proposalEvidence(args: Record<string, unknown>): ProposalEvidence {
   return { link_id: id, reason: link.reason, excerpts, support, against };
 }
 
+/** `?fake-suggestions=<n>` (perf audit, #2200's class): `n` more proposals of PAY-231's one commit, added at load. */
+FAKE_SUGGESTIONS.push(
+  ...Array.from({ length: Number(new URLSearchParams(globalThis.location?.search).get("fake-suggestions") ?? 0) || 0 }, (_, i) =>
+    proposal(1000 + i, "mock:9f2c1ab", "mock:PAY-231", "similar_text", "similarity", `both mention payout ${i}`, "2026-08-01T10:00:00Z"),
+  ),
+);
+
 /** This feature's commands. */
 export function handlers(): Handlers {
   return {

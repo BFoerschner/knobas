@@ -156,7 +156,12 @@
           entityId: row.entity_id,
           isDefault: row.chip === "default",
           meta: row.meta,
-          standing: row.entity_id !== null ? (standings[row.entity_id] ?? null) : null,
+          // Read where it is drawn, not here: each standing that lands then
+          // redraws its own row, not every row (#2200's class: a thousand
+          // branches rebuilt the list a thousand times).
+          get standing() {
+            return row.entity_id !== null ? (standings[row.entity_id] ?? null) : null;
+          },
           author: row.entity_id !== null ? (facts[row.entity_id]?.author ?? null) : null,
           mine: row.entity_id !== null && facts[row.entity_id]?.mine === true,
         }),

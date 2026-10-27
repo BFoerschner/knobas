@@ -656,7 +656,41 @@ function configOf(id: string): string {
   return config;
 }
 
-export function handlers(): Handlers {
+/**
+ * `?fake-pipelines=<n>` (perf audit, #2200's class): `n` more configurations
+ * on a second CI, *Bulk CI*, in projects of eight under twenty areas, each
+ * with twelve runs, one in fifty failing last. Ids start `bulk:`.
+ */
+export function bulkPipelines(n: number, now: Date = new Date()): PipelineRow[] {
+  const out: PipelineRow[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const area = `Area ${String(i % 20).padStart(2, "0")}`;
+    const project = `Service ${String(Math.floor(i / 8)).padStart(4, "0")}`;
+    const config = `Bulk_${String(i).padStart(5, "0")}`;
+    const recent: RunRow[] = [];
+    for (let r = 0; r < 12; r += 1) {
+      const st = r === 0 && i % 50 === 7 ? "failed" : "success";
+      const row = runRow(config, 500 - r, st, "main", new Date(now.getTime() - (r * 90 + (i % 60)) * 60_000), 240);
+      recent.push({ ...row, entity_id: `bulk:build:${config}-${500 - r}` });
+    }
+    out.push({
+      entity_id: `bulk:buildType:${config}`,
+      source_id: "bulk",
+      source_name: "Bulk CI",
+      name: config,
+      group: project,
+      path: [area, project],
+      pinned: false,
+      web_url: null,
+      recent,
+    });
+  }
+  return out;
+}
+
+export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
+  const bulk = bulkPipelines(Number(params.get("fake-pipelines") ?? 0) || 0);
+  const bulkById = new Map(bulk.map((p) => [p.entity_id, p]));
   return {
     older_pipeline_runs: (args) => {
       const config = configOf(String(args["pipelineId"] ?? ""));
@@ -696,7 +730,7 @@ export function handlers(): Handlers {
     // CI's read by definition, so it narrows itself to the role's fillers, as the server's does (#1295).
     pipelines: () => {
       const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
-      return fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id));
+      return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk];
     },
     set_pipeline_pinned: (args) => {
       const id = String(args["pipelineId"] ?? "");
@@ -707,6 +741,8 @@ export function handlers(): Handlers {
     job_pipelines: (args) => fakeJobPipelines(String(args["entityId"] ?? "")),
     pipeline_runs: (args) => {
       const id = String(args["pipelineId"] ?? "");
+      const bulkRow = bulkById.get(id);
+      if (bulkRow !== undefined) return bulkRow.recent;
       const config = id.replace(`${SOURCE}:buildType:`, "");
       const runs = history(new Date()).get(config);
       if (!id.startsWith(`${SOURCE}:buildType:`) || runs === undefined) {

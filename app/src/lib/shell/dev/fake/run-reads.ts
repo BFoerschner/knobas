@@ -173,11 +173,44 @@ function entries(config: string, st: string, path: string): ArtifactEntry[] | un
   return folder === undefined ? undefined : files(folder.d, folder.f);
 }
 
-export function handlers(): Handlers {
+/**
+ * `?fake-log-lines=<n>` (perf audit, #2200's class): every run's log is `n`
+ * lines in four steps, the third failing and holding most of them.
+ */
+function bulkLog(n: number): { lines: LogLine[]; steps: LogStep[]; total: number } {
+  const lines: LogLine[] = [];
+  const share = [0.05, 0.15, 0.75, 0.05];
+  share.forEach((part, step) => {
+    const count = Math.max(1, Math.round(n * part));
+    for (let j = 0; j < count; j += 1) {
+      const number = lines.length + 1;
+      const err = step === 2 && j === count - 1;
+      lines.push({ number, time: "10:05:58", text: err ? "error: test failed" : `  Running payout-service check ${number}`, tone: err ? "err" : null, step });
+    }
+  });
+  const steps: LogStep[] = ["Checkout", "Build", "Test", "Publish"].map((name, step) => {
+    const mine = lines.filter((l) => l.step === step);
+    return { name, first: mine[0]!.number, last: mine.at(-1)!.number, seconds: 30, tone: step === 2 ? "err" : null };
+  });
+  return { lines, steps, total: lines.length };
+}
+
+/** `?fake-tests=<n>` (perf audit): every run ran `n` tests, one in a hundred failing. */
+function bulkTests(n: number): RunTest[] {
+  return Array.from({ length: n }, (_, i): RunTest => {
+    const fails = i % 100 === 3;
+    const module = `module_${String(Math.floor(i / 40)).padStart(3, "0")}`;
+    return { id: String(90_000 + i), name: `${module}::case_${i}`, module, status: fails ? "failed" : "passed", muted: false, new_failure: false, duration_ms: 40 + (i % 900), details: fails ? DETAILS : null };
+  }).sort((a, b) => Number(b.status === "failed") - Number(a.status === "failed"));
+}
+
+export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
+  const bulkLines = Number(params.get("fake-log-lines") ?? 0) || 0;
+  const bulkTestCount = Number(params.get("fake-tests") ?? 0) || 0;
   return {
     run_log: (args) => {
       const run = runOf(args);
-      const log = fakeLog(run.config, run.no, run.st);
+      const log = bulkLines > 0 ? bulkLog(bulkLines) : fakeLog(run.config, run.no, run.st);
       const count = typeof args["count"] === "number" ? args["count"] : 20_000;
       const from = typeof args["from"] === "number" ? args["from"] : null;
       const lines = from === null ? log.lines.slice(-count) : log.lines.slice(from - 1, from - 1 + count);
@@ -185,6 +218,7 @@ export function handlers(): Handlers {
     },
     run_tests: (args) => {
       const run = runOf(args);
+      if (bulkTestCount > 0) return { tests: bulkTests(bulkTestCount), truncated: false };
       return { tests: testsOf(run.config, run.st === "failed"), truncated: false };
     },
     test_history: (args) => {

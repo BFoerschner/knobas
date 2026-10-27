@@ -126,7 +126,7 @@
    * narrows it to the CI role's fillers and the page drops nothing (#1295,
    * ADR-0029 as amended on 2026-10-19).
    */
-  let all = $state<PipelineRow[] | null>(null);
+  let all = $state.raw<PipelineRow[] | null>(null);
   let failed = $state<string | null>(null);
 
   $effect(() => {
@@ -333,18 +333,18 @@
 {/snippet}
 
 {#snippet foldView(f: Fold, depth: number)}
-  <details
-    class="tf-pl-fold"
-    open={foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed)}
-    ontoggle={(event) => rememberFold(f, event)}
-  >
+  {@const open = foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed)}
+  <details class="tf-pl-fold" {open} ontoggle={(event) => rememberFold(f, event)}>
     <summary class={indent(depth)}
       >{f.name} <span class="tf-count">{f.count}</span>{#if f.failing > 0}<span class="tf-chip tf-err">{f.failing} failing</span
         >{/if}</summary
     >
+    <!-- A closed fold draws nothing under it: a CI of thousands draws only what is open (#2200's class). -->
     <div class="tf-fold-in">
-      {#each f.pipelines as pipeline (pipeline.entity_id)}{@render item(pipeline, depth + 1)}{/each}
-      {#each f.folds as kid (kid.key)}{@render foldView(kid, depth + 1)}{/each}
+      {#if open}
+        {#each f.pipelines as pipeline (pipeline.entity_id)}{@render item(pipeline, depth + 1)}{/each}
+        {#each f.folds as kid (kid.key)}{@render foldView(kid, depth + 1)}{/each}
+      {/if}
     </div>
   </details>
 {/snippet}

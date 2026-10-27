@@ -17,6 +17,19 @@ vi.mock("../../shell/follow-write", async (importOriginal) => {
   return { ...real, writeFollower: () => followed.follower ?? real.writeFollower() };
 });
 
+// How often Branches filters its rows (#2200's class): a standing landing
+// must not filter, or rebuild, every row again.
+const filtered = vi.hoisted(() => ({ calls: 0 }));
+vi.mock("./repo", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./repo")>();
+  return {
+    ...real,
+    visibleBranches: (...args: Parameters<typeof real.visibleBranches>) => {
+      filtered.calls += 1;
+      return real.visibleBranches(...args);
+    },
+  };
+});
 import type { EntityDetail, EntityRow, SourceView, ViewAction, ViewBlock, ViewRow } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { health } from "../../shell/health.svelte";
@@ -290,6 +303,29 @@ function type(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
 }
 
 // ---------------------------------------------------------------- Branches (#839)
+
+test("each branch's standing that lands redraws its own row, not the whole list (#2200's class)", async () => {
+  // Four standings land one by one; the old rows rebuilt and refiltered
+  // every row for each, a thousand times on a thousand branches.
+  const held: (() => void)[] = [];
+  const base = ports();
+  const stand = ports({
+    entityView: async (id, section) => {
+      if (section === null && id !== REPO) await new Promise<void>((release) => held.push(release));
+      return base.entityView(id, section);
+    },
+  });
+  await draw([REPO, "branches"], null, stand);
+  expect(held).toHaveLength(4);
+  filtered.calls = 0;
+  for (const release of held) {
+    release();
+    await settle();
+  }
+  expect(text(rowOf("chore/").querySelectorAll("td")[1])).toBe("merged");
+  expect(text(rowOf("spike/").querySelectorAll("td")[1])).toBe("2 ahead, 9 behind");
+  expect(filtered.calls).toBe(0);
+});
 
 test("Branches lists main as default, then each branch with ahead and behind or merged, its PR and when", async () => {
   await draw([REPO, "branches"]);
