@@ -419,7 +419,9 @@ test("the search names its scope, searches on every keystroke in the picker's sp
 test("the search waits for a pause in typing and asks once, for what was typed last (#2200)", async () => {
   vi.useFakeTimers();
   try {
-    const io = await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS), searchPause: undefined }));
+    // The pause as it ships: these ports name none.
+    const { searchPause: _immediate, ...paused } = ports({ docsSearch: vi.fn(async () => HITS) });
+    const io = await draw(["confluence:2"], paused);
     for (const typed of ["l", "le", "led", "ledg"]) {
       type(typed);
       await settle();
