@@ -121,6 +121,7 @@
     reachedPages,
     readingMinutes,
     scopeName,
+    SEARCH_PAUSE_MS,
     sectionKind,
     sectionsOf,
     spaceHash,
@@ -156,6 +157,8 @@
     refusedWrites?: RefusedWritesPort;
     /** Hears `sync:state`, whose run ends read Docs again (#2072), and `item:refreshed` (#2102); the bridge's when omitted. */
     listen?: PipelinePorts["listen"];
+    /** The pause in typing the search waits for, in ms (#2200); `SEARCH_PAUSE_MS` when omitted, 0 asks on every keystroke. */
+    searchPause?: number;
   }
 
   type LinkPorts = Pick<JobPorts, "listSources" | "getEntity" | "createLink" | "search" | "launcherHome">;
@@ -208,7 +211,7 @@
    * role, so nothing here keeps spaces by source (#1296, ADR-0029 as amended
    * on 2026-10-19). The search is narrowed the same way.
    */
-  let tree = $state<DocsTree | null>(null);
+  let tree = $state.raw<DocsTree | null>(null);
   let treeError = $state<string | null>(null);
   let page = $state<DocPage | null>(null);
   let pageError = $state<string | null>(null);
@@ -420,7 +423,8 @@
   const searching = $derived(query.trim() !== "");
   const forYou = $derived(forYouIn(tree?.for_you ?? [], shownSpace));
 
-  // Every keystroke searches; an answer to an older keystroke is dropped.
+  // The search asks once typing pauses (#2200), for what was typed last; an
+  // answer to an older keystroke is dropped.
   let asked = 0;
   $effect(() => {
     const text = query;
@@ -431,16 +435,25 @@
       return;
     }
     const mine = ++asked;
-    void io.docsSearch(text, scope).then(
-      (answer) => {
-        if (mine !== asked) return;
-        found = answer;
-        searchError = null;
-      },
-      (cause: unknown) => {
-        if (mine === asked) searchError = ipcErrorMessage(cause);
-      },
-    );
+    const search = io.docsSearch;
+    const ask = () =>
+      void search(text, scope).then(
+        (answer) => {
+          if (mine !== asked) return;
+          found = answer;
+          searchError = null;
+        },
+        (cause: unknown) => {
+          if (mine === asked) searchError = ipcErrorMessage(cause);
+        },
+      );
+    const pause = io.searchPause ?? SEARCH_PAUSE_MS;
+    if (pause <= 0) {
+      ask();
+      return;
+    }
+    const timer = setTimeout(ask, pause);
+    return () => clearTimeout(timer);
   });
 
   /** The hits as read, kept to the job's pages while *This job* is on. */

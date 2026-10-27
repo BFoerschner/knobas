@@ -13,7 +13,7 @@ import { createLayers } from "../layers.svelte";
 import { forgetEchoes } from "../queued.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import { parseTfHash } from "../route";
-import { READER_DRAWER, READER_NARROW } from "./docs";
+import { READER_DRAWER, READER_NARROW, SEARCH_PAUSE_MS } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -128,6 +128,8 @@ function ports(over: Partial<DocsPorts> = {}): DocsPorts {
     getEntity: vi.fn(async (id: string) => Promise.reject({ code: "not_found", message: `${id} is not in the mirror`, source_id: null })),
     openExternal: vi.fn(async () => {}),
     copy: vi.fn(async () => {}),
+    // Every keystroke searches at once here; the pause has its own test (#2200).
+    searchPause: 0,
     ...over,
   };
 }
@@ -229,6 +231,68 @@ test("the tree folds under the top page, opens around the open page and marks it
   expect(fold.querySelector("summary a")?.textContent).toBe("Ops home");
   const current = nav.querySelector("[aria-current='true']");
   expect(current?.textContent).toBe("On-call handbook");
+});
+
+/**
+ * A space of `n` pages the size Björn's held (#2200): twenty at the top, every
+ * later page under an earlier one, eight to a fold. Each node counts the reads
+ * of its `parent` into `reads.parent`, which is what a walk of the tree costs.
+ */
+function bulkTree(n: number, reads: { parent: number }): DocsTree {
+  const pages = Array.from({ length: n }, (_, i) => {
+    const node = { entity_id: `bulk:${i}`, title: `Page ${String(i).padStart(5, "0")}`, parent: i < 20 ? null : `bulk:${Math.floor((i - 20) / 8)}` };
+    return new Proxy(node, {
+      get(t, key, r) {
+        if (key === "parent") reads.parent++;
+        return Reflect.get(t, key, r);
+      },
+    });
+  });
+  return { spaces: [{ source_id: "confluence", key: "BULK", name: "Bulk", pages }], last_read: null, for_you: [] };
+}
+
+test("a 4,000-page space draws its tree in one pass over the pages, and a closed fold draws nothing under it (#2200)", async () => {
+  const reads = { parent: 0 };
+  // bulk:3000 sits three folds down: under bulk:372, under bulk:44, under bulk:3 at the top.
+  await draw(["bulk:3000"], ports({ docsTree: vi.fn(async () => bulkTree(4000, reads)), docsPage: vi.fn(async () => ({ ...PAGE, entity_id: "bulk:3000", title: "Page 03000" })) }));
+  // Linear in the pages: a handful of passes (about five as drawn), never a
+  // pass per node drawn, which was 16M reads at 4,000 pages.
+  expect(reads.parent).toBeLessThan(10 * 4000);
+  const nav = target.querySelector("nav[aria-label='Docs'] .tf-dl-body")!;
+  const titles = [...nav.querySelectorAll("a")].map((a) => a.textContent);
+  expect(nav.querySelector("[aria-current='true']")?.textContent).toBe("Page 03000");
+  // The twenty at the top, and the folds open around the open page with their rows; nothing else.
+  const open = [...nav.querySelectorAll<HTMLDetailsElement>("details[open] > summary a")].map((a) => a.textContent);
+  expect(open).toEqual(["Page 00003", "Page 00044", "Page 00372"]);
+  expect(titles).toHaveLength(20 + 8 * 3);
+  const closed = [...nav.querySelectorAll<HTMLDetailsElement>("details:not([open])")];
+  expect(closed.length).toBeGreaterThan(0);
+  expect(closed.every((d) => d.querySelector(":scope > .tf-fold-in a") === null)).toBe(true);
+
+  // Opening a closed fold draws its rows, from the index the tree already holds.
+  const fold = closed.find((d) => d.querySelector("summary a")?.textContent === "Page 00001")!;
+  const before = reads.parent;
+  fold.open = true;
+  fold.dispatchEvent(new Event("toggle"));
+  await settle();
+  expect(reads.parent - before).toBeLessThan(4000);
+  expect([...fold.querySelectorAll(":scope > .tf-fold-in > a, :scope > .tf-fold-in > details > summary a")].map((a) => a.textContent)).toEqual(
+    Array.from({ length: 8 }, (_, k) => `Page ${String(28 + k).padStart(5, "0")}`),
+  );
+
+  // A fold the reader opened inside it is open again, rows and all, when it is opened again.
+  const toggle = async (d: HTMLDetailsElement, open: boolean) => {
+    d.open = open;
+    d.dispatchEvent(new Event("toggle"));
+    await settle();
+  };
+  const inner = () => [...fold.querySelectorAll<HTMLDetailsElement>("details")].find((d) => d.querySelector("summary a")?.textContent === "Page 00028")!;
+  await toggle(inner(), true);
+  await toggle(fold, false);
+  expect(fold.querySelector(":scope > .tf-fold-in a")).toBeNull();
+  await toggle(fold, true);
+  expect(inner().open).toBe(true);
+  expect(inner().querySelectorAll(":scope > .tf-fold-in > a, :scope > .tf-fold-in > details > summary a")).toHaveLength(8);
 });
 
 test("the body: a live ticket chip, my mention in yellow, a page link, code with its language, a table, the placeholder", async () => {
@@ -344,7 +408,7 @@ function type(value: string): HTMLInputElement {
 
 const button = (label: string) => [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
 
-test("the search names its scope, searches on every keystroke in the picker's space and lists the hits", async () => {
+test("the search names its scope, searches in the picker's space and lists the hits", async () => {
   const io = await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS) }));
   const input = target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!;
   expect(input.placeholder).toBe("Search Operations");
@@ -366,6 +430,44 @@ test("the search names its scope, searches on every keystroke in the picker's sp
   button("Search all spaces")!.click();
   await settle();
   expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", null);
+});
+
+test("the search waits for a pause in typing and asks once, for what was typed last (#2200)", async () => {
+  vi.useFakeTimers();
+  try {
+    // The pause as it ships: these ports name none.
+    const { searchPause: _immediate, ...paused } = ports({ docsSearch: vi.fn(async () => HITS) });
+    const io = await draw(["confluence:2"], paused);
+    for (const typed of ["l", "le", "led", "ledg"]) {
+      type(typed);
+      await settle();
+      vi.advanceTimersByTime(SEARCH_PAUSE_MS - 10);
+    }
+    expect(io.docsSearch).not.toHaveBeenCalled();
+    type("ledger");
+    await settle();
+    vi.advanceTimersByTime(SEARCH_PAUSE_MS);
+    await settle();
+    expect(vi.mocked(io.docsSearch).mock.calls).toEqual([["ledger", { source_id: "confluence", key: "OPS" }]]);
+    expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("an answer to an older keystroke than the last is dropped", async () => {
+  const answers: Record<string, (hits: typeof HITS) => void> = {};
+  const docsSearch = vi.fn((query: string) => new Promise<typeof HITS>((resolve) => (answers[query] = resolve)));
+  await draw(["confluence:2"], ports({ docsSearch }));
+  type("led");
+  await settle();
+  type("ledger");
+  await settle();
+  answers["ledger"]!({ ...HITS, hits: HITS.hits.slice(0, 1), total: 1 });
+  await settle();
+  answers["led"]!(HITS);
+  await settle();
+  expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(1);
 });
 
 test("no hit explains the AND rule; an empty field brings the tree back", async () => {
