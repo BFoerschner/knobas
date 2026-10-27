@@ -1921,8 +1921,8 @@ test("a long list draws the rows near the viewport, and j/k walk past them, draw
   expect(first.length).toBeGreaterThan(5);
   expect(first.length).toBeLessThan(100);
   expect(first[0]).toBe("jira:PAY-0001");
-  // Only room below, every undrawn row at its 37 px estimate.
-  expect(gaps()).toEqual([`${(1000 - first.length) * 37}px`]);
+  // Only room below, every undrawn row at its 52 px estimate.
+  expect(gaps()).toEqual([`${(1000 - first.length) * 52}px`]);
 
   // Past the last drawn row: the next is drawn, selected and focused.
   for (let step = 0; step < first.length + 20; step += 1) press("j");

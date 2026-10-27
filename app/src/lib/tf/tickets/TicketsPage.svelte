@@ -442,8 +442,8 @@
       statusOrder(boardColumns),
     ),
   );
-  /** The list after *Show N more* draws only the rows near the viewport (#2209). */
-  const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.card.entity_id, estimate: 37 });
+  /** The list after *Show N more* draws only the rows near the viewport (#2209); a row is 51 to 53 px, 70 when its summary wraps. */
+  const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.card.entity_id, estimate: 52 });
   /** The keys two sources' cards hold (#1476): those cards name their source and open by it. */
   const shared = $derived(sharedKeys(boardColumns));
   /** A card's source name when its key is shared, else `null`. */
