@@ -15,13 +15,16 @@
  * prototype-6's *Assigned to me today* (`assigned:today`) and *Mine with a
  * failing build* read through keys the matcher passes over, so their counts
  * here are wider than the real ones would be. *Blocked* is `has:blocker`.
+ *
+ * `?fake-tickets=<n>` adds `n` generated tickets to the corpus, project
+ * *BULK*, to measure Tickets at a real mirror's size (`&fake-tickets=20000`).
  */
 import type { LaneColumn, LaneField, MiniBoardCard, MiniBoardLane, SourceStatuses } from "../../../ipc/entity";
 import type { QueryKey, QueryTranslation, SavedViewSource, ViewLanes, CardField, ListColumn, ListSort } from "../../../ipc/search";
 import { laneOf } from "../../../tf/tickets/tickets";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed } from "../fake-seed";
-import { fakeTicketCount, fakeTicketKeys } from "./corpus";
+import { CORPUS, fakeTicketCount, fakeTicketKeys } from "./corpus";
 
 type LanedCard = Pick<
   MiniBoardCard,
@@ -312,6 +315,49 @@ function unreadable(query: string): string | null {
 
 function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "view";
+}
+
+/**
+ * `?fake-tickets=<n>`: `n` generated tickets, `BULK-1` to `BULK-n`, spread over
+ * the board's four leading statuses, five assignees and four epics, one a
+ * minute older than the last. A title is two words and its number, from
+ * sixteen words each, so a word finds a sixteenth of them.
+ */
+export function bulkTickets(n: number): (typeof CORPUS)[number][] {
+  const words = ["Payout", "Ledger", "Carrier", "Customs", "Booking", "Retry", "Invoice", "Tracking", "Refund", "Settlement", "Runbook", "Design", "Review", "Onboarding", "Platform", "Release"];
+  const statuses = ["To Do", "In Progress", "In Review", "Done"];
+  const people = ["mara", "jonas", "priya", "tomasz", null];
+  const priorities = ["High", "Medium", "Low", "Normal"];
+  const start = Date.parse("2026-08-22T12:00:00Z");
+  return Array.from({ length: n }, (_, i) => {
+    const key = `BULK-${i + 1}`;
+    const title = `${words[i % words.length]} ${words[(i * 7 + 3) % words.length]!.toLowerCase()} ${i + 1}`;
+    return {
+      entity_id: `mock:${key}`,
+      kind: "ticket",
+      title,
+      updated_at: new Date(start - i * 60_000).toISOString(),
+      body_text: title,
+      author: "mara",
+      web_url: null,
+      deleted_at: null,
+      payload: {
+        key,
+        fields: { project: { key: "BULK", name: "Bulk tickets" } },
+        status: statuses[i % statuses.length],
+        priority: priorities[i % priorities.length],
+        assignee: people[i % people.length],
+        type: i % 3 === 0 ? "Bug" : "Story",
+        epic: `PAY-${200 + (i % 4)}`,
+        labels: i % 2 === 0 ? ["bulk"] : [],
+      },
+    };
+  });
+}
+
+/** Reads `?fake-tickets=<n>` before the bridge is installed. */
+export function seed(params: URLSearchParams): void {
+  CORPUS.push(...bulkTickets(Number(params.get("fake-tickets") ?? 0) || 0));
 }
 
 /** This feature's commands. */
