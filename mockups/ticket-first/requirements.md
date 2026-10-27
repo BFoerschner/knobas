@@ -711,9 +711,9 @@ Björn liked Map 4 (Layers) best and asked why it could not be the asset page. D
 - **R-11.18** **Lots of items without confusion.** These rules apply together:
   - Problems never fold.
   - In a layer above the fold count, a group with no problem folds into a chip ("Booking 24", with a small health bar). Groups with problems stay open, problems first.
-  - In such a layer, an open group shows its problems and a few others, then "37 more, all fine".
+  - In such a layer, an open group shows its problems and a few others, then "37 more, all fine". While *Find* has text, it shows its first 24 matches too, and its *more* counts the matches it holds ("37 more, 12 found").
   - A layer can fold to its summary line.
-  - A search opens whatever holds a match.
+  - A search opens whatever holds a match: layer folds and chips open. A group keeps its *more*, so every match is drawn as a tile or counted on its group's *more*, which *Find*'s `Enter` opens on the next match. A short query can match half the estate, and drawing each match would break the 100 ms keystroke budget (#2214).
   - Counts use thousands separators.
 
   The prototype's *Try it with about 1 700 more made-up items* shows 2 106 items this way.
