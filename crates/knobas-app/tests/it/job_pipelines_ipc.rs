@@ -104,6 +104,23 @@ async fn run(pool: &PgPool, tc: &str, n: i64, config: &str, branch: &str, sha: &
     .await
 }
 
+/// Move run `n` of `tc` onto `branch`, as a later sync would, and read the
+/// job's pipelines again.
+async fn rebranch(pool: &PgPool, tc: &str, n: i64, branch: &str, job: &str) -> Vec<JobPipeline> {
+    sqlx::query(
+        "update sync.item set payload = jsonb_set(payload, '{branchName}', to_jsonb($1::text))
+          where entity_id = $2",
+    )
+    .bind(branch)
+    .bind(EntityRef::new(tc, &format!("build:{n}")).to_string())
+    .execute(pool)
+    .await
+    .unwrap();
+    job_pipelines_inner(pool, &Registry::for_process(), job)
+        .await
+        .unwrap()
+}
+
 fn reasons(all: &[JobPipeline], id: &str) -> Option<serde_json::Value> {
     all.iter()
         .find(|p| p.pipeline_id == id)
@@ -178,6 +195,14 @@ async fn a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link() {
     let elsewhere = config(&pool, &tc, "Elsewhere").await;
     run(&pool, &tc, 4, "Elsewhere", "feature/PAY-1-x-other", "ccc").await;
     run(&pool, &tc, 5, "Elsewhere", "main", "ddd").await;
+    // A run on the job's branch that has since been deleted at the source.
+    let gone = config(&pool, &tc, "Gone").await;
+    let gone_run = run(&pool, &tc, 6, "Gone", "feature/PAY-1-x", "eee").await;
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&gone_run)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let all = job_pipelines_inner(
         &pool,
@@ -209,7 +234,24 @@ async fn a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link() {
         )
     );
     assert_eq!(reasons(&all, &elsewhere), None);
+    assert_eq!(
+        reasons(&all, &gone),
+        None,
+        "a tombstoned run builds nothing"
+    );
     assert_eq!(all.len(), 4, "each pipeline once: {all:?}");
+
+    // A run's branch is stored as the run is written (#2192): a later sync
+    // that moves a run onto the job's branch puts its pipeline on the job,
+    // and moving it off again takes it away.
+    let moved = rebranch(&pool, &tc, 4, "refs/heads/feature/PAY-1-x", &ticket).await;
+    assert_eq!(
+        reasons(&moved, &elsewhere),
+        Some(serde_json::json!([{ "kind": "branch", "branch": "feature/PAY-1-x" }])),
+        "a run moved onto the job's branch: {moved:?}"
+    );
+    let back = rebranch(&pool, &tc, 4, "feature/PAY-1-x-other", &ticket).await;
+    assert_eq!(reasons(&back, &elsewhere), None, "and off it again");
 
     // A ticket that reaches nothing has no pipelines.
     let lone = item(

@@ -395,8 +395,9 @@ async fn a_pipelines_runs_are_the_walk_after_every_change() {
 }
 
 /// The resolver carries `declared_string!`'s expansion as text, because a
-/// migration is SQL and cannot call it. This holds that text to what the
-/// macro expands to **now**: change the macro and this fails until a new
+/// migration is SQL and cannot call it, once for a run's `pipeline` and once
+/// for its `branch` (#2192, migration `0065`). This holds that text to what
+/// the macro expands to **now**: change the macro and this fails until a new
 /// migration restates `sync.resolve_item_pipelines`.
 #[tokio::test]
 async fn the_stored_resolver_is_the_macros_expansion() {
@@ -409,10 +410,14 @@ async fn the_stored_resolver_is_the_macros_expansion() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    let expansion = knobas_core::declared_string!("dd.decl", "pipeline");
-    assert!(
-        source.contains(expansion),
-        "sync.resolve_item_pipelines no longer carries declared_string!'s expansion; \
-         restate it in a new migration:\n{expansion}"
-    );
+    for expansion in [
+        knobas_core::declared_string!("dd.decl", "pipeline"),
+        knobas_core::declared_string!("dd.decl", "branch"),
+    ] {
+        assert!(
+            source.contains(expansion),
+            "sync.resolve_item_pipelines no longer carries declared_string!'s expansion; \
+             restate it in a new migration:\n{expansion}"
+        );
+    }
 }
