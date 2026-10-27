@@ -395,6 +395,78 @@ pub async fn list(
         .collect())
 }
 
+/// What [`saved_view_sources`] reads, per saved view among `$1`.
+///
+/// Every member of the views is read once, live by
+/// [`knobas_core::live_by_exclusion!`] over `sync.item` rather than through
+/// `sync.live_item` (#2193): on tables never analyzed the view's join probed
+/// `knobas.entity` once per member, about 700 ms for #2182's 4,500 tickets on
+/// three views. `view_projects` is what is left of them, one row per view,
+/// project and liveness, which `n` and `unsynced` read per view.
+///
+/// `unsynced` reads the member's entity id, `<source>:<KEY>-<n>`: the
+/// project is what sits between the source's colon and the last hyphen.
+/// ADR-0007's direction: an id of any other shape is a miss, never a
+/// guess, and is left out of the count.
+const SAVED_VIEW_SOURCES: &str = concat!(
+    "with view_projects as (
+       select m.view_id, substring(m.entity_id from ':([^:]+)-[^-]*$') as project,
+              t.entity_id is not null as live, count(*) as n
+         from sync.saved_view_member m
+         left join sync.item t on t.entity_id = m.entity_id and t.kind = 'ticket'
+                              and ",
+    knobas_core::live_by_exclusion!("t"),
+    "
+        where m.view_id = any($1)
+        group by 1, 2, 3)
+     select v.entity_id, v.ref_kind, v.board_type, v.source_query, v.sub_query, v.sprint,
+            v.last_read, i.web_url, tv.hidden, tv.is_new, c.kind as adapter_kind,
+            coalesce(nullif(btrim(c.display_name), ''), v.source_id) as source_name,
+            (select coalesce(sum(p.n), 0)::bigint from view_projects p
+              where p.view_id = v.entity_id and p.live) as n,
+            -- R-3.23: the keys Jira returned minus the tickets knobas
+            -- has, per project; a project the source syncs is left
+            -- out, as a sync still to come rather than one not made.
+            -- The Jira adapter's config (`JiraConfig::projects`) is read
+            -- here and nowhere else in this crate. Only a
+            -- source that names its projects leaves any out: an empty
+            -- `projects` syncs everything the credential sees, and a
+            -- `jql_filter` source has none (the two are exclusive), so
+            -- adding a project there would narrow it or be refused.
+            -- Failure direction (ADR-0007): a `projects` that is missing,
+            -- empty or not an array counts nothing -- a warn line lost,
+            -- never a *Sync WEB too* that narrows the source.
+            (select coalesce(jsonb_agg(jsonb_build_object('project', u.project, 'count', u.n)
+                                       order by u.n desc, u.project), '[]'::jsonb)
+               from view_projects u
+              where u.view_id = v.entity_id and not u.live
+                and u.project is not null
+                and exists (
+                      select 1 from knobas.source_config c
+                       where c.id = v.source_id
+                         and jsonb_typeof(c.config->'projects') = 'array'
+                         and jsonb_array_length(c.config->'projects') > 0)
+                and not exists (
+                      select 1 from knobas.source_config c
+                       cross join lateral jsonb_array_elements_text(
+                             case when jsonb_typeof(c.config->'projects') = 'array'
+                                  then c.config->'projects' else '[]'::jsonb end) p(key)
+                       where c.id = v.source_id and upper(p.key) = u.project)) as unsynced
+       from sync.saved_view v
+       join sync.item i on i.entity_id = v.entity_id
+       join knobas.ticket_view tv on tv.saved_view = v.entity_id
+       left join knobas.source_config c on c.id = v.source_id
+      where v.entity_id = any($1)"
+);
+
+/// [`SAVED_VIEW_SOURCES`], for the plan test (`tests/it/read_plans.rs`,
+/// #2193). It binds what `saved_view_sources` binds: the saved views' ids.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_saved_view_sources() -> &'static str {
+    SAVED_VIEW_SOURCES
+}
+
 /// Per saved view among `views`: how many of the tickets its source put on it
 /// the mirror holds live, and where it comes from (#877). A view whose
 /// `saved_view` names no saved view is absent, and is counted by its text like
@@ -411,60 +483,10 @@ async fn saved_view_sources(
     if refs.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
-    // `unsynced` reads the member's entity id, `<source>:<KEY>-<n>`: the
-    // project is what sits between the source's colon and the last hyphen.
-    // ADR-0007's direction: an id of any other shape is a miss, never a
-    // guess, and is left out of the count.
-    let rows = sqlx::query(
-        "select v.entity_id, v.ref_kind, v.board_type, v.source_query, v.sub_query, v.sprint,
-                v.last_read, i.web_url, tv.hidden, tv.is_new, c.kind as adapter_kind,
-                coalesce(nullif(btrim(c.display_name), ''), v.source_id) as source_name,
-                (select count(*) from sync.saved_view_member m
-                   join sync.live_item t on t.entity_id = m.entity_id and t.kind = 'ticket'
-                  where m.view_id = v.entity_id) as n,
-                -- R-3.23: the keys Jira returned minus the tickets knobas
-                -- has, per project; a project the source syncs is left
-                -- out, as a sync still to come rather than one not made.
-                -- The Jira adapter's config (`JiraConfig::projects`) is read
-                -- here and nowhere else in this crate. Only a
-                -- source that names its projects leaves any out: an empty
-                -- `projects` syncs everything the credential sees, and a
-                -- `jql_filter` source has none (the two are exclusive), so
-                -- adding a project there would narrow it or be refused.
-                -- Failure direction (ADR-0007): a `projects` that is missing,
-                -- empty or not an array counts nothing -- a warn line lost,
-                -- never a *Sync WEB too* that narrows the source.
-                (select coalesce(jsonb_agg(jsonb_build_object('project', u.project, 'count', u.n)
-                                           order by u.n desc, u.project), '[]'::jsonb)
-                   from (select substring(m.entity_id from ':([^:]+)-[^-]*$') as project,
-                                count(*) as n
-                           from sync.saved_view_member m
-                          where m.view_id = v.entity_id
-                            and not exists (select 1 from sync.live_item l
-                                             where l.entity_id = m.entity_id
-                                               and l.kind = 'ticket')
-                          group by 1) u
-                  where u.project is not null
-                    and exists (
-                          select 1 from knobas.source_config c
-                           where c.id = v.source_id
-                             and jsonb_typeof(c.config->'projects') = 'array'
-                             and jsonb_array_length(c.config->'projects') > 0)
-                    and not exists (
-                          select 1 from knobas.source_config c
-                           cross join lateral jsonb_array_elements_text(
-                                 case when jsonb_typeof(c.config->'projects') = 'array'
-                                      then c.config->'projects' else '[]'::jsonb end) p(key)
-                           where c.id = v.source_id and upper(p.key) = u.project)) as unsynced
-           from sync.saved_view v
-           join sync.item i on i.entity_id = v.entity_id
-           join knobas.ticket_view tv on tv.saved_view = v.entity_id
-           left join knobas.source_config c on c.id = v.source_id
-          where v.entity_id = any($1)",
-    )
-    .bind(&refs)
-    .fetch_all(pool)
-    .await?;
+    let rows = sqlx::query(SAVED_VIEW_SOURCES)
+        .bind(&refs)
+        .fetch_all(pool)
+        .await?;
     // Once, not once per row: `descriptors()` builds every template.
     let templates = registry.descriptors();
     let system = |adapter_kind: Option<String>, source_name: String| {
