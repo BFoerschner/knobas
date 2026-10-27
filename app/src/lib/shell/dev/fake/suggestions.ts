@@ -194,7 +194,6 @@ function proposalEvidence(args: Record<string, unknown>): ProposalEvidence {
   return { link_id: id, reason: link.reason, excerpts, support, against };
 }
 
-/** This feature's commands. */
 /** `?fake-suggestions=<n>` (perf audit, #2200's class): `n` more proposals of PAY-231's one commit, added at load. */
 FAKE_SUGGESTIONS.push(
   ...Array.from({ length: Number(new URLSearchParams(globalThis.location?.search).get("fake-suggestions") ?? 0) || 0 }, (_, i) =>
@@ -202,6 +201,7 @@ FAKE_SUGGESTIONS.push(
   ),
 );
 
+/** This feature's commands. */
 export function handlers(): Handlers {
   return {
 

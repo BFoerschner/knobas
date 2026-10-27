@@ -338,7 +338,6 @@ function files142(): DiffFile[] {
   return [{ ...retry!, threads }, ...rest];
 }
 
-/** A pull request's *Files*, read on its own: PR #142's change, or one small file for any other. */
 /**
  * `?fake-pr-lines=<n>` (perf audit, #2200's class): PR #142 changes `n` lines,
  * twenty to a file, every fourth one added.
@@ -364,8 +363,9 @@ function bulkFiles(n: number): DiffFile[] {
   });
 }
 
+/** A pull request's *Files*, read on its own: PR #142's change, or one small file for any other. */
 function filesSection(entityId: string, title: string): ViewSection {
-  const bulk = Number(new URLSearchParams(location.search).get("fake-pr-lines") ?? 0) || 0;
+  const bulk = Number(new URLSearchParams(globalThis.location?.search).get("fake-pr-lines") ?? 0) || 0;
   const files: DiffFile[] =
     entityId === PR_142 && bulk > 0
       ? bulkFiles(bulk)

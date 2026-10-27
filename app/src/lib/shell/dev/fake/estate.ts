@@ -684,14 +684,6 @@ function inForce<T>(
 }
 
 /**
- * `asset_tree`: what one asset holds, or the top of the estate.
- *
- * `name` then `id`, which is `assets::CHILDREN`'s `order by a.name asc, a.id
- * asc`: without the tiebreak two siblings sharing a name would come back in
- * whichever order the array happened to hold them, and a QA screenshot would
- * disagree with the app for a reason nobody would look for.
- */
-/**
  * `?fake-assets=<n>` (perf audit, #2200's class): a top-level *Bulk rack*
  * holding `n` VMs, every twentieth one down, added at load. Its column is
  * answered from rows built once, so the fake's own walk stays out of a
@@ -715,6 +707,14 @@ const BULK_COLUMN = BULK_ASSETS.slice(1).map(
   ({ properties: _properties, monitors: _monitors, ...vm }) => ({ ...vm, monitors: [], has_children: false, health: vm.status, inside: "none", problems_inside: 0, linked_work: 0 }) as unknown as AssetRow,
 );
 
+/**
+ * `asset_tree`: what one asset holds, or the top of the estate.
+ *
+ * `name` then `id`, which is `assets::CHILDREN`'s `order by a.name asc, a.id
+ * asc`: without the tiebreak two siblings sharing a name would come back in
+ * whichever order the array happened to hold them, and a QA screenshot would
+ * disagree with the app for a reason nobody would look for.
+ */
 function assetColumn(args: Record<string, unknown>) {
   const parent = (args.parentId as string | null) ?? null;
   if (parent === BULK_RACK && BULK_COLUMN.length > 0) return BULK_COLUMN;
