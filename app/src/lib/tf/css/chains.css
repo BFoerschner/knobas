@@ -25,8 +25,10 @@
 .tf-logacts { margin-left: auto; display: flex; gap: 6px; }
 .tf-logv { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; font: var(--t-xs)/1.55 var(--mono); font-variant-ligatures: none; overflow: auto; }
 .tf-logv details { border-top: 1px solid var(--rule-2); }
-.tf-logv > :first-child { border-top: 0; }
-.tf-logloose { border-top: 1px solid var(--rule-2); padding: 4px 0; }
+/* The log's rows are flat (#2211): a loose run's rule and padding are rows of their own, and the first row is marked, since a windowed list's first child is any row. */
+.tf-logv > .tf-l0 { border-top: 0; }
+.tf-logloose { border-top: 1px solid var(--rule-2); padding-top: 4px; }
+.tf-logloose-end { padding-bottom: 4px; }
 .tf-logv summary { list-style: none; cursor: pointer; padding: 6px 12px; display: flex; gap: 10px; align-items: center; font-family: var(--sans); font-size: var(--t-sm); background: var(--sheet-2); }
 .tf-logv summary::-webkit-details-marker { display: none; }
 .tf-logv summary::before { content: "▸"; font-size: 10px; color: var(--ink-2); }

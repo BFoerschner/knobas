@@ -14,12 +14,17 @@
     scrolls into view once the log is read.
   - A fold holds its lines only while it is open, so 20,000 lines in
     closed steps cost their summaries.
+  - The log is a windowed list (#2211) of its flattened rows (`logRows`):
+    each step's summary, the shown lines of an open one, the loose lines.
+    Only the rows near the viewport are drawn; find and *Jump to the first
+    error* reveal a line before scrolling to it.
 -->
 <script lang="ts">
-  import { tick, untrack } from "svelte";
+  import { flushSync, tick, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { LogLine, RunLog } from "../../ipc/entity";
+  import { Windowed } from "../../shell/windowed.svelte";
   import { marks } from "../filter/filter";
   import type { RunPorts } from "./pipeline-ports";
   import {
@@ -29,10 +34,12 @@
     logBlocks,
     downloadAndSay,
     logLine,
+    logRows,
     stepMatch,
     stepOpens,
     stepState,
     stepSummary,
+    type StepBlock,
   } from "./run-reads";
 
   let {
@@ -106,7 +113,11 @@
     if (wanted === null || log === null || wanted.seq === lastSeq) return;
     lastSeq = wanted.seq;
     untrack(() => (toggled[wanted.step] = true));
-    void tick().then(() => viewer?.querySelector(`details[data-s="${wanted.step}"]`)?.scrollIntoView({ block: "start" }));
+    void tick().then(() => {
+      win.reveal(rows.findIndex((row) => row.kind === "step" && row.block.index === wanted.step));
+      flushSync();
+      viewer?.querySelector(`details[data-s="${wanted.step}"]`)?.scrollIntoView({ block: "start" });
+    });
   });
 
   const blocks = $derived(log === null ? [] : logBlocks(log));
@@ -128,9 +139,14 @@
   });
   const firstError = $derived(log?.lines.find((l) => l.tone === "err") ?? null);
 
-  function isOpen(index: number, block: Extract<(typeof blocks)[number], { kind: "step" }>): boolean {
-    return toggled[index] ?? stepOpens(block, states[index] ?? "ok", typed, errorsOnly);
+  function isOpen(block: StepBlock): boolean {
+    return toggled[block.index] ?? stepOpens(block, states[block.index] ?? "ok", typed, errorsOnly);
   }
+
+  /** What is drawn, flattened: the windowed list's rows. */
+  const rows = $derived(logRows(blocks, isOpen, (line) => lineShown(line, typed, errorsOnly)));
+  // A line is 12 px at 1.55; a summary and a loose run's edges are measured once drawn.
+  const win = new Windowed<number>({ count: () => rows.length, key: (i) => rows[i]!.key, estimate: 18.6 });
 
   function ontoggle(index: number, event: Event) {
     const open = (event.currentTarget as HTMLDetailsElement).open;
@@ -144,9 +160,12 @@
     toggled = {};
   }
 
-  async function show(selector: string, line: LogLine) {
+  /** Opens `line`'s step, draws the line if the window left it out, and scrolls `selector` to the middle. */
+  function show(selector: string, line: LogLine) {
     if (line.step !== null) toggled[line.step] = true;
-    await tick();
+    flushSync();
+    win.reveal(rows.findIndex((row) => row.kind === "line" && row.line.number === line.number));
+    flushSync();
     viewer?.querySelector(selector)?.scrollIntoView({ block: "center" });
   }
 
@@ -156,7 +175,7 @@
     let line: number | undefined;
     for (const [number, at] of hits.first) if (at <= current) line = number;
     const found = log.lines.find((l) => l.number === line);
-    if (found) void show("mark.tf-curm", found);
+    if (found) show("mark.tf-curm", found);
   }
 
   function keys(event: KeyboardEvent) {
@@ -168,20 +187,22 @@
   const download = () => downloadAndSay(ports.download, runId, { kind: "log" }, "the log");
 </script>
 
-{#snippet lines(list: LogLine[])}
-  {#each list as line (line.number)}
-    {#if lineShown(line, typed, errorsOnly)}
-      {@const start = hits.first.get(line.number)}
-      {@const runs = start === undefined ? null : marks(line.text, typed)}
-      <div class="tf-ll" class:tf-e={line.tone === "err"} class:tf-w={line.tone === "warn"} data-n={line.number}>
-        <span class="tf-no">{line.number}</span><span class="tf-ts">{line.time ?? ""}</span><span
-          >{#if runs === null || start === undefined}{line.text || " "}{:else}{#each runs as run, at (at)}{#if run.hit}{@const n =
-                  start + runs.slice(0, at).filter((r) => r.hit).length}<mark class:tf-curm={n === current}>{run.text}</mark
-                >{:else}{run.text}{/if}{/each}{/if}</span
-        >
-      </div>
-    {/if}
-  {/each}
+{#snippet logRow(line: LogLine)}
+  {@const start = hits.first.get(line.number)}
+  {@const runs = start === undefined ? null : marks(line.text, typed)}
+  <div
+    class="tf-ll"
+    class:tf-e={line.tone === "err"}
+    class:tf-w={line.tone === "warn"}
+    data-n={line.number}
+    {@attach win.row(line.number)}
+  >
+    <span class="tf-no">{line.number}</span><span class="tf-ts">{line.time ?? ""}</span><span
+      >{#if runs === null || start === undefined}{line.text || " "}{:else}{#each runs as run, at (at)}{#if run.hit}{@const n =
+              start + runs.slice(0, at).filter((r) => r.hit).length}<mark class:tf-curm={n === current}>{run.text}</mark
+            >{:else}{run.text}{/if}{/each}{/if}</span
+    >
+  </div>
 {/snippet}
 
 <div class="tf-logbar">
@@ -221,21 +242,29 @@
 {:else if log.total === 0}
   <div class="tf-empty"><p>{inFlight ? "The run has written no log yet." : "This run has no log."}</p></div>
 {:else}
-  <div class="tf-logv" class:tf-wrap={wrap} class:tf-nots={!stamps} bind:this={viewer}>
+  <div class="tf-logv" class:tf-wrap={wrap} class:tf-nots={!stamps} bind:this={viewer} {@attach win.list}>
     <!-- Drawn anew when *Errors and warnings only* turns: dropping 15,000 lines one at a time took 3 s (#2200's class). -->
     {#key errorsOnly}
-    {#each blocks as block, b (b)}
-      {#if block.kind === "loose"}
-        <div class="tf-logloose">{@render lines(block.lines)}</div>
-      {:else}
+    {#each win.slice(rows) as row (row.key)}
+      {#if row.kind === "line"}
+        {@render logRow(row.line)}
+      {:else if row.kind === "step"}
+        {@const block = row.block}
         {@const st = states[block.index] ?? "ok"}
-        {@const open = isOpen(block.index, block)}
-        <details data-s={block.index} {open} ontoggle={(event) => ontoggle(block.index, event)}>
+        <!-- The summary alone: the step's lines are the rows after it, so a long step windows like the rest. -->
+        <details
+          class:tf-l0={row === rows[0]}
+          data-s={block.index}
+          open={isOpen(block)}
+          ontoggle={(event) => ontoggle(block.index, event)}
+          {@attach win.row(row.key)}
+        >
           <summary
             ><span class={`tf-dot tf-${st}`}></span>{block.step.name}<span class="tf-d">{stepSummary(block.step, st)}</span></summary
           >
-          {#if open}{@render lines(block.lines)}{/if}
         </details>
+      {:else}
+        <div class={row.kind === "loose-top" ? "tf-logloose" : "tf-logloose-end"} class:tf-l0={row === rows[0]} {@attach win.row(row.key)}></div>
       {/if}
     {/each}
     {/key}
