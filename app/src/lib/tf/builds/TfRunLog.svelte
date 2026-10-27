@@ -222,6 +222,8 @@
   <div class="tf-empty"><p>{inFlight ? "The run has written no log yet." : "This run has no log."}</p></div>
 {:else}
   <div class="tf-logv" class:tf-wrap={wrap} class:tf-nots={!stamps} bind:this={viewer}>
+    <!-- Drawn anew when *Errors and warnings only* turns: dropping 15,000 lines one at a time took 3 s (#2200's class). -->
+    {#key errorsOnly}
     {#each blocks as block, b (b)}
       {#if block.kind === "loose"}
         <div class="tf-logloose">{@render lines(block.lines)}</div>
@@ -236,6 +238,7 @@
         </details>
       {/if}
     {/each}
+    {/key}
   </div>
   <p class="tf-dim tf-logfoot">{logLine(log)}</p>
 {/if}

@@ -141,6 +141,21 @@ test("errors and warnings only, wrap and timestamps are toggles on the toolbar",
   expect([viewer.classList.contains("tf-wrap"), viewer.classList.contains("tf-nots")]).toEqual([true, true]);
 });
 
+test("Errors and warnings only draws the log anew instead of dropping its lines one at a time (#2200's class)", async () => {
+  // Dropping 15,000 lines of an open step one by one took 3 s on the main
+  // thread; drawing the steps anew drops each fold whole.
+  draw();
+  await settle();
+  const before = folds();
+  button("Errors and warnings only")!.click();
+  flushSync();
+  expect(before.some((fold) => fold.isConnected)).toBe(false);
+  expect(shown()).toEqual([5, 6]);
+  button("Errors and warnings only")!.click();
+  flushSync();
+  expect(shown()).toEqual([1, 4, 5, 6, 7, 8]);
+});
+
 test("Jump to the first error is on a failed run only; Download log saves through knobas and says where", async () => {
   const downloads = draw();
   await settle();
