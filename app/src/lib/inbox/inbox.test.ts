@@ -193,6 +193,23 @@ test("the stream is not an answer until a read has succeeded", async () => {
   expect(inbox.answered).toBe(true);
 });
 
+/**
+ * The perf audit after #2200: both shelves are held as read, not as deep
+ * state. A proxy over 20,000 rows subscribed every field each row draws read,
+ * and tore those reactions down one by one on the next keystroke (1.7 s for
+ * one *Done*). Every answer replaces a shelf whole, so nothing needs the
+ * proxy.
+ */
+test("the shelves hold the backend's rows as read, not a deep proxy of them", async () => {
+  const inbox = createInbox();
+  stream = [entry()];
+  snoozed = [entry({ key: "mention:jira:PAY-231", snoozed_until: "2026-09-01T07:00:00Z" })];
+  count = 1;
+  await inbox.refresh();
+  expect(inbox.stream[0]).toBe(stream[0]);
+  expect(inbox.snoozed[0]).toBe(snoozed[0]);
+});
+
 // -- snooze presets ----------------------------------------------------------
 
 /**

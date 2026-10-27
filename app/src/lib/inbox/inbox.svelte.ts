@@ -147,14 +147,17 @@ export function createInbox(ports?: InboxPorts): Inbox {
     listen: (event, handler) => tauriListen(event, () => handler()),
   };
 
+  // The shelves are raw (the perf audit after #2200): every answer replaces
+  // one whole, and a deep proxy over thousands of rows subscribed each field
+  // a row draws, then tore those reactions down one by one on the next change.
+  let streamRows = $state.raw<InboxEntry[]>([]);
+  let snoozedRows = $state.raw<InboxEntry[]>([]);
   const state = $state<{
-    stream: InboxEntry[];
-    snoozed: InboxEntry[];
     count: number;
     error: string | null;
     busy: boolean;
     answered: boolean;
-  }>({ stream: [], snoozed: [], count: 0, error: null, busy: false, answered: false });
+  }>({ count: 0, error: null, busy: false, answered: false });
 
   let live = false;
   let stopLive: (() => void) | null = null;
@@ -186,8 +189,8 @@ export function createInbox(ports?: InboxPorts): Inbox {
       // A read that started before an answer was drawn or landed is older
       // than that read, whichever of the two comes back first.
       if (inFlight > 0 || seen !== answers) return;
-      state.stream = stream;
-      state.snoozed = snoozed;
+      streamRows = stream;
+      snoozedRows = snoozed;
       state.count = count;
       state.error = null;
       // Last, and only on the way through: `answered` is what tells the
@@ -242,10 +245,10 @@ export function createInbox(ports?: InboxPorts): Inbox {
 
   /** Take the entry for `key` off either shelf, and answer it. */
   function take(key: string): InboxEntry | undefined {
-    const streamed = state.stream.find((e) => e.item.key === key);
-    const shelved = state.snoozed.find((e) => e.item.key === key);
-    state.stream = state.stream.filter((e) => e.item.key !== key);
-    state.snoozed = state.snoozed.filter((e) => e.item.key !== key);
+    const streamed = streamRows.find((e) => e.item.key === key);
+    const shelved = snoozedRows.find((e) => e.item.key === key);
+    streamRows = streamRows.filter((e) => e.item.key !== key);
+    snoozedRows = snoozedRows.filter((e) => e.item.key !== key);
     if (streamed) state.count = Math.max(0, state.count - 1);
     return streamed ?? shelved;
   }
@@ -255,19 +258,19 @@ export function createInbox(ports?: InboxPorts): Inbox {
     const entry = take(key);
     if (!entry) return;
     if (until.getTime() <= Date.now()) {
-      state.stream = [{ ...entry, item: { ...entry.item, snoozed_until: null } }, ...state.stream];
+      streamRows = [{ ...entry, item: { ...entry.item, snoozed_until: null } }, ...streamRows];
       state.count += 1;
     } else {
-      state.snoozed = [...state.snoozed, { ...entry, item: { ...entry.item, snoozed_until: until.toISOString() } }];
+      snoozedRows = [...snoozedRows, { ...entry, item: { ...entry.item, snoozed_until: until.toISOString() } }];
     }
   }
 
   return {
     get stream() {
-      return state.stream;
+      return streamRows;
     },
     get snoozed() {
-      return state.snoozed;
+      return snoozedRows;
     },
     get count() {
       return state.count;
@@ -328,8 +331,8 @@ export function createInbox(ports?: InboxPorts): Inbox {
     reset() {
       stopLive?.();
       stopLive = null;
-      state.stream = [];
-      state.snoozed = [];
+      streamRows = [];
+      snoozedRows = [];
       state.count = 0;
       state.error = null;
       state.busy = false;
