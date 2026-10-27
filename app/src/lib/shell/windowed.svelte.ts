@@ -33,9 +33,11 @@
  *   `:last-child` rules hold, and `room(side)` sizes each one's cell. Both
  *   go through the CSSOM: CSP refuses inline styles in markup.
  * - `slice(items)` is what to draw; `start` is its first index.
- * - `offsetOf(index)` is where row `index` sits, drawn or not.
+ * - `topOf(index)` is where row `index` sits on screen, drawn or not.
  * - A list that scrolls itself (`overflow-y` not `visible`) reads the
- *   viewport from its own scroll, and its own padding stays around the room.
+ *   viewport from its own scroll and, as a table does, draws spacers
+ *   (`.tf-wgap`, `room(side)`) while their room is above 0: a scroller is
+ *   never smaller than its own padding.
  * - `reveal(index)` scrolls an undrawn row near enough to draw; `flushSync`,
  *   then focus or `scrollIntoView` it as for any row (`j`/`k` past the window).
  * - Under `from` rows (300) everything draws and `before`/`after` are 0, so a
@@ -81,6 +83,8 @@ export class Windowed<K = string> {
   #anchor: { el: HTMLElement; y: number } | null = null;
   /** The box this list last scrolled itself and where it left it, so the scroll event that raises is not taken for the reader's. */
   #scrolled: { box: Element; top: number } | null = null;
+  /** Where row 0 sits on screen, once `list` is attached. */
+  #origin = () => 0;
   readonly #sizes: ResizeObserver | null;
 
   readonly #keys = $derived.by(() => {
@@ -122,15 +126,17 @@ export class Windowed<K = string> {
     const own = getComputedStyle(node).overflowY !== "visible";
     const clips = own ? [node, ...clipsOf(node)] : clipsOf(node);
     this.#clips = clips;
-    // The list's own padding stays around the room the undrawn rows take.
+    // The list's own padding: row 0 sits under it, and the room is inside it.
     const style = getComputedStyle(node);
     const base = { top: parseFloat(style.paddingTop) || 0, bottom: parseFloat(style.paddingBottom) || 0 };
     // The browser's own scroll anchoring would correct a row's height a second time.
     $effect(() => {
       node.style.overflowAnchor = this.on ? "none" : "";
     });
-    // A flex column's room is its own padding; a table's is its spacer rows (`room`).
-    if (!(node instanceof HTMLTableSectionElement))
+    // A flex column's room is its own padding. A table's is its spacer rows
+    // (`room`), and so is a list's that scrolls itself: a scroller is never
+    // smaller than its padding, so padded it would grow to the whole list.
+    if (!(node instanceof HTMLTableSectionElement) && !own)
       $effect(() => {
         pad(node, "padding-top", this.before && base.top + this.before);
         pad(node, "padding-bottom", this.after && base.bottom + this.after);
@@ -162,6 +168,9 @@ export class Windowed<K = string> {
     // What of the list is on screen: the window cut by every ancestor that
     // clips, so a layout whose scrolling box changes with the width (Tickets
     // below 900 px) needs nothing from the view.
+    // Where row 0 would sit: under the list's padding, moved up by its own scroll.
+    const origin = () => node.getBoundingClientRect().top + base.top + (own ? node.clientTop - node.scrollTop : 0);
+    this.#origin = origin;
     const read = (event?: Event) => {
       let top = 0;
       let bottom = window.innerHeight;
@@ -170,9 +179,7 @@ export class Windowed<K = string> {
         top = Math.max(top, box.top + clip.clientTop);
         bottom = Math.min(bottom, box.top + clip.clientTop + clip.clientHeight);
       }
-      // Where row 0 would sit: under the list's padding, moved up by its own scroll.
-      const origin = node.getBoundingClientRect().top + base.top + (own ? node.clientTop - node.scrollTop : 0);
-      this.#viewTop = Math.max(0, top - origin);
+      this.#viewTop = Math.max(0, top - origin());
       this.#viewHeight = Math.max(0, bottom - top);
       // The reader scrolled: hold the row on screen now. Not on a scroll this
       // list made to hold a row, nor on a resize: those arrive after a redraw
@@ -196,9 +203,13 @@ export class Windowed<K = string> {
     };
   };
 
-  /** On a table's spacer cell: the room of the undrawn rows above (`before`) or below (`after`). */
+  /**
+   * On a spacer (a table's cell, or a row of a list that scrolls itself): the
+   * room of the undrawn rows above (`before`) or below (`after`), less the
+   * gap the list puts beside the spacer itself.
+   */
   room = (side: "before" | "after") => (node: HTMLElement) => {
-    $effect(() => pad(node, "height", this[side]));
+    $effect(() => pad(node, "height", this[side] && this[side] - this.#options.gap));
   };
 
   /** On each drawn row, with its key. */
@@ -224,10 +235,10 @@ export class Windowed<K = string> {
     this.#viewTop = top;
   }
 
-  /** Row `index`'s top in the list's pixels (under its own padding), drawn or not: where a line to an undrawn row points. */
-  offsetOf(index: number): number {
+  /** Row `index`'s top on screen (client pixels), drawn or not: where a line to an undrawn row points. */
+  topOf(index: number): number {
     this.#sync(this.#keys);
-    return this.#heights.offsetOf(index);
+    return this.#origin() + this.#heights.offsetOf(index);
   }
 
   /** Holds the first drawn row on screen at `top` (client pixels) and where it is. */

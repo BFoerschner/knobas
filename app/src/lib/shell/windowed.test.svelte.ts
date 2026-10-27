@@ -56,31 +56,36 @@ test("a windowed table with no header row freezes its columns at its first drawn
   stop();
 });
 
-test("a list that scrolls itself reads the viewport from its own scroll, keeps its own padding around the room, and says where an undrawn row sits (#2210)", () => {
+test("a list that scrolls itself reads the viewport from its own scroll, keeps its padding, sizes spacer rows for the room, and says where an undrawn row sits (#2210)", () => {
   // jsdom lays nothing out: the list is a 300 px box at the top of the window.
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
     () => ({ width: 200, height: 300, top: 0, bottom: 300, left: 0, right: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect,
   );
-  document.body.innerHTML = '<ol style="overflow-y: auto; padding-top: 6px; padding-bottom: 6px"></ol>';
+  document.body.innerHTML = '<ol style="overflow-y: auto; padding-top: 6px; padding-bottom: 6px"><li class="before"></li><li class="after"></li></ol>';
   const list = document.querySelector("ol")!;
   let scrolled = 0;
   Object.defineProperty(list, "scrollTop", { get: () => scrolled, set: (px: number) => (scrolled = px) });
   Object.defineProperty(list, "clientHeight", { value: 300 });
-  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20, overscan: 0 });
+  // Rows of 20 px, 1 px apart: a slot is 21 px.
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20, gap: 1, overscan: 0 });
   const stop = $effect.root(() => {
     win.list(list);
+    win.room("before")(list.querySelector<HTMLElement>(".before")!);
+    win.room("after")(list.querySelector<HTMLElement>(".after")!);
   });
   flushSync();
   expect([win.start, win.end]).toEqual([0, 15]);
-  expect(list.style.paddingTop).toBe("");
 
-  // Scrolled 2,000 px into itself: its 6 px of padding come first, so row 99 is the first on screen.
+  // Scrolled 2,000 px into itself: its 6 px of padding come first, so row 94 is the first drawn.
   scrolled = 2000;
   list.dispatchEvent(new Event("scroll"));
   flushSync();
-  expect([win.start, win.end]).toEqual([99, 115]);
-  expect(list.style.paddingTop).toBe(`${6 + 99 * 20}px`);
-  expect(list.style.paddingBottom).toBe(`${6 + (1000 - 115) * 20}px`);
-  expect(win.offsetOf(500)).toBe(500 * 20);
+  expect([win.start, win.end]).toEqual([94, 110]);
+  // A scroller is never smaller than its padding, so the room is spacer rows, the gap beside each left out.
+  expect(list.getAttribute("style")).toBe("overflow-y: auto; padding-top: 6px; padding-bottom: 6px; overflow-anchor: none;");
+  expect(list.querySelector<HTMLElement>(".before")!.style.height).toBe(`${94 * 21 - 1}px`);
+  expect(list.querySelector<HTMLElement>(".after")!.style.height).toBe(`${(1000 - 110) * 21 - 1}px`);
+  // Row 500 is 10,500 px down the list: under the 6 px of padding, less the 2,000 scrolled.
+  expect(win.topOf(500)).toBe(6 + 500 * 21 - 2000);
   stop();
 });
