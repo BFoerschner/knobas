@@ -4,7 +4,7 @@
   command, module, migration, event or `WriteOp`, nothing under `crates/knobas-source/src/**`.
   The one generated-mirror change is the doc comment on `DependsOnThis.routes` in
   `app/src/lib/ipc/generated/assets.ts`, regenerated. Ruled by the implementer on Opus; the ruling
-  is in `docs/decisions/2026-10-unattended-rulings.md` under `## #1553`.
+  is in `docs/archive/2026-10-unattended-rulings.md` under `## #1553`.
 
   `DependsOnThis.routes` was the routes whose `target_id` is the asset. It is now the routes whose
   `target_id` is the asset **or any asset in `DependsOnThis.assets`** (the closure over

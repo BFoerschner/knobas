@@ -1,6 +1,6 @@
 - **`crates/knobas-http/**` — issue #722 (2026-10-13): an optional 403 reader, so a Gitea 403
   that refuses the write is a refusal and not a dead credential.** The deputy's ruling on #722
-  (option (a), recorded in `docs/decisions/2026-10-unattended-rulings.md`), signed off under
+  (option (a), recorded in `docs/archive/2026-10-unattended-rulings.md`), signed off under
   Björn's 2026-10-13 delegation. The argument is measured (Gitea 1.27.3, 2026-10-13): a bad
   token is a **401** (*invalid username, password or token*); Gitea answers **403** for writes no
   token can fix -- *Git Repository is a mirror.*, *branch protected*, *can not delete default or

@@ -1,6 +1,6 @@
 - **Gitea `config_schema` (§4.2) — issue #683 (2026-10-13): `clone_urls`, the other addresses CI
   clones the server from; read by the app for commit hints.** Ruled by the orchestrator under
-  Björn's #660 delegation (`docs/decisions/2026-10-unattended-rulings.md`, #683). A TeamCity root
+  Björn's #660 delegation (`docs/archive/2026-10-unattended-rulings.md`, #683). A TeamCity root
   usually names its repository by an internal hostname or an SSH remote, while the mirrored
   commit's page carries the server's own URL, so #665's exact match misses on every real
   deployment of that shape.

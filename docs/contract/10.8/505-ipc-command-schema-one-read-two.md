@@ -5,7 +5,7 @@
   nothing else, and #505's own third acceptance criterion asks for this entry by name. **Björn
   keeps the gate for frozen contracts and this entry is flagged for his review — ratified in his
   absence by the deputy's ruling of 2026-09-08 on #505
-  (`docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the command,
+  (`docs/archive/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the command,
   on the two DTOs as the read's own shape, and on the one barrel line.** The argument is
   in this entry rather than in a §9 section of its own, the treatment #499 took: nothing here
   corrects an existing record, measures a source system or moves a §4.2 row.

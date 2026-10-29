@@ -6,7 +6,7 @@
   shape changed, nothing added to either append-only barrel (`app/src/lib/ipc/index.ts` and
   `lib.rs`'s handler list are untouched). The restore path is untouched: the change is derives and
   doc comments. Ratified by the implementer on Opus under Björn's 2026-10-18 reserved-steps rule;
-  the rulings are in `docs/decisions/2026-10-unattended-rulings.md` under `## #1331`.
+  the rulings are in `docs/archive/2026-10-unattended-rulings.md` under `## #1331`.
 
   **Crates that gain a derive.** One, `knobas-app`, which already depends on `ts-rs`, so no
   `Cargo.toml` changes: `backup::policy::BackupSchedule`, `backup::share::ShareParts`,

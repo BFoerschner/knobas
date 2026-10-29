@@ -3,7 +3,7 @@
   no IPC schema change, no event, no DTO field, no `WriteOp`, nothing in
   `crates/knobas-source/src/**`, `crates/knobas-http/**`, `error.rs` or `profile.rs`, no new module
   in either barrel or in `commands/`. Every command keeps its arguments and its answer. Ruled by
-  the implementer on Opus; the rulings are in `docs/decisions/2026-10-unattended-rulings.md` under
+  the implementer on Opus; the rulings are in `docs/archive/2026-10-unattended-rulings.md` under
   `## #2192`.
 
   **The migration** (`0065_the_branch_a_run_was_built_on.sql`). No earlier migration edited.

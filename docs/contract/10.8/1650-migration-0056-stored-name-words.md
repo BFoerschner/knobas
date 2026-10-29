@@ -4,7 +4,7 @@
   or `profile.rs`, nothing added to either append-only barrel or to `commands/` / `ipc/`. Ratified
   by the implementer on Opus under Björn's 2026-10-18 reserved-steps rule and ruled again on the
   merge head by the merge-manager on Opus under his 2026-10-22 waiver; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1650 and #1653`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1650 and #1653`.
 
   **The migration** (`0056_a_title_keeps_the_words_it_is_named_by.sql`). On `sync.item`, each
   `text[] generated always as (...) stored`: `title_words`

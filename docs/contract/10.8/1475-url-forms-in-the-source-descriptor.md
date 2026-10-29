@@ -6,7 +6,7 @@
   nothing under `crates/knobas-http/**`, no new module in `commands/` or `ipc/`. The core crate's
   web-URL normalisation (`knobas_core::web_url`) and migration `0023`'s index are unchanged.
   Reserved for Björn, ruled by the implementer on Opus: the sign-off; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1475`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1475`.
 
   **`crates/knobas-source/src/**` — additive.** A new module `url_forms` with one declaration type,
   exported to the generated `sources.ts` beside `SourceDescriptor`:

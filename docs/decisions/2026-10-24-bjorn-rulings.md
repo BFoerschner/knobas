@@ -15,7 +15,7 @@ offers the create?
 **Ruling: yes.** A create held as `Unconfirmed` counts as on its way (*Monitor queued* / *Ticket
 queued*, and `submit_write` refuses a second create) until the reader sends it again or discards
 it. A drift hold still offers the create. This supersedes the #1951, #1953 and #1959 rulings
-(`docs/decisions/2026-10-unattended-rulings.md`) for the unconfirmed case only; what they ruled for
+(`docs/archive/2026-10-unattended-rulings.md`) for the unconfirmed case only; what they ruled for
 a drift hold, a refusal and a withdrawal stands.
 
 **Why.** If the first create landed, offering it again makes two Uptime Kuma monitors of one name

@@ -110,6 +110,6 @@
   (wiremock), `knobas-app`'s `tests/it/run_reads_ipc.rs` and, on the seeded TeamCity, by
   `live_teamcity_seeded.rs`'s `a_seeded_runs_log_tests_and_artifacts_read_whole`.
 
-  **Not here, by ruling** (`docs/decisions/2026-10-unattended-rulings.md`, #854 to #856): a run's
+  **Not here, by ruling** (`docs/archive/2026-10-unattended-rulings.md`, #854 to #856): a run's
   steps as a declared run field (the steps bar, #1003), and a streaming send with a stall timeout
   for large downloads (#1012).

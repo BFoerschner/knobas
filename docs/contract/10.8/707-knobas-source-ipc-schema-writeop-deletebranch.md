@@ -2,7 +2,7 @@
   DeleteBranch` and `ViewAction.entity`; a branch's life from its views.** Spec #701 workflows 2,
   4 and 10. Its delegation (Björn, 2026-10-13) signs off `delete_branch` by name; `ViewAction.
   entity` is the deputy ruling of 2026-10-13 on #707 (option (c), recorded in
-  `docs/decisions/2026-10-unattended-rulings.md`), signed off under the same delegation. This is
+  `docs/archive/2026-10-unattended-rulings.md`), signed off under the same delegation. This is
   the entry for both (ADR-0006, ADR-0020).
 
   1. **`WriteOp::DeleteBranch { entity: String }`**, identifier `delete_branch` (`identifier()`

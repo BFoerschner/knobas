@@ -5,7 +5,7 @@
   field, no `WriteOp` change, no migration, no new command, DTO, event or module in `commands/` or
   `ipc/`; the generated mirror does not change. Reserved for Björn, ruled by the implementer on
   Opus and confirmed by the merge-manager on Opus (`## #1949` in
-  `docs/decisions/2026-10-unattended-rulings.md`); the issue has no parent spec. It extends #1754's rule to the creates that rule left out.
+  `docs/archive/2026-10-unattended-rulings.md`); the issue has no parent spec. It extends #1754's rule to the creates that rule left out.
 
   1. **The receipt's contents.**
      - Gitea's `create_pull_request` answers `WriteReceipt::id(owner/repo#<n>)` (`keys::pr_key`),

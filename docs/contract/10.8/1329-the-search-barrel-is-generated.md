@@ -6,7 +6,7 @@
   barrel (`app/src/lib/ipc/index.ts` and `lib.rs`'s handler list are untouched). Ratified by the
   implementer on Opus under Björn's 2026-10-18 reserved-steps rule and checked against the merge
   head by the merge-manager on Opus; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1329`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1329`.
 
   **Crates that gain a derive.** Three: `knobas-search`, `knobas-source` (only `query.rs`) and
   `knobas-app`, listed type by type below. None gains a dependency: all three already had

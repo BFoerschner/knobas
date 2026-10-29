@@ -3,7 +3,7 @@
   depends on it instead of `knobas-core`, so the SPI builds for `wasm32-wasip2`.** No migration,
   no new command, no `commands/` or `ipc/` module, no `WriteOp`, no `KindPaths` field, no battery
   clause, no WIT version. Parent spec #1192 (ADR-0028). Ratified by the merge-manager on Opus;
-  the ruling is in `docs/decisions/2026-10-unattended-rulings.md`.
+  the ruling is in `docs/archive/2026-10-unattended-rulings.md`.
 
   **The move.** `payload.rs`, `entity.rs` and `tone.rs` moved from `crates/knobas-core/src/` to
   `crates/knobas-spi-types/src/` unchanged apart from doc links, so every type's serde form is the

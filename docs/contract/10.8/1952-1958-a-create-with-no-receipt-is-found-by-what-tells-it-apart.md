@@ -1,6 +1,6 @@
 - **IPC command semantics, issues #1952 and #1958 (2026-10-24): a create that named nothing in its
   receipt is found by what tells it apart, a pull request by its head and base, a ticket by one
-  title rule.** Ruled by the implementer on Opus (`docs/decisions/2026-10-unattended-rulings.md`,
+  title rule.** Ruled by the implementer on Opus (`docs/archive/2026-10-unattended-rulings.md`,
   `## #1952, #1958`). No signature change on a command, no new type, no migration, no event, no
   new module in `commands/` or `ipc/`; the generated mirror does not change. It narrows two reads
   #1754 and #1949 left as the fallback for a receiptless create.

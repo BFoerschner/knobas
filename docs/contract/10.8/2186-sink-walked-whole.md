@@ -3,7 +3,7 @@
   adapters walk a changed scope in full under a stored cursor. No migration, no event, no command
   added, removed or renamed, no argument or IPC field changed, no `WriteOp`, nothing under
   `crates/knobas-http/**`, no new module in `commands/` or `ipc/`, no WIT change, no cursor
-  version moved. The rulings are in `docs/decisions/2026-10-unattended-rulings.md` under `## #2186`.
+  version moved. The rulings are in `docs/archive/2026-10-unattended-rulings.md` under `## #2186`.
 
   **`crates/knobas-source/src/**` — additive:** `Sink` gains one method with a default body that
   does nothing.

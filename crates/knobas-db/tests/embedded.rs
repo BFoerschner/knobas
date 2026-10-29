@@ -45,7 +45,7 @@ async fn starts_answers_and_survives_restart() {
 /// `PG_VERSION` before `postgresql.conf` and its own cleanup after a failure
 /// removes `PG_VERSION` first, so this shape is an `initdb` cleanup that was
 /// itself cut short (the evidence is under #1637 in
-/// `docs/decisions/2026-10-unattended-rulings.md`). The fixture is the
+/// `docs/archive/2026-10-unattended-rulings.md`). The fixture is the
 /// directory such a cut left: its subdirectories, emptied, and the
 /// configuration files.
 #[tokio::test]
@@ -92,7 +92,7 @@ async fn a_data_directory_an_interrupted_initdb_left_is_initialised_again() {
 /// file (PostgreSQL's `rmtree` defers them, #2007): 40 of 40 runs that
 /// sent `SIGTERM` and then `SIGKILL` once `postgresql.conf` was gone left the
 /// second and third fixture (evidence under #1985 in
-/// `docs/decisions/2026-10-unattended-rulings.md`).
+/// `docs/archive/2026-10-unattended-rulings.md`).
 #[tokio::test]
 async fn a_data_directory_an_initdb_killed_before_pg_version_left_is_initialised_again() {
     for subdirs in [
@@ -139,7 +139,7 @@ async fn a_data_directory_an_initdb_killed_before_pg_version_left_is_initialised
 /// removes the top level's files in `readdir` order before any directory.
 /// Every ext4 tried, which lists by name hash, and tmpfs left these
 /// fixtures, six Linux filesystems of seven (evidence under #2007 in
-/// `docs/decisions/2026-10-unattended-rulings.md`).
+/// `docs/archive/2026-10-unattended-rulings.md`).
 #[tokio::test]
 async fn a_data_directory_an_initdb_cleanup_cut_short_after_pg_version_left_is_initialised_again() {
     for files in [

@@ -150,7 +150,7 @@ fn days_ago(n: i64) -> DateTime<Utc> {
 /// **A route's body is its URL.** Migration `0018` weighted a route's name and
 /// its URL both at A, so a route named for the word and a route that only
 /// carried it in its URL tied and recency decided. The deputy's ruling on #592
-/// (`docs/decisions/2026-10-unattended-rulings.md`) made the URL the body, and
+/// (`docs/archive/2026-10-unattended-rulings.md`) made the URL the body, and
 /// `0026` moved it to B; the route pair below is that migration's witness.
 #[tokio::test]
 async fn a_title_match_ranks_above_a_body_match_in_every_kind() {

@@ -3,7 +3,7 @@
   #1192 (ADR-0028 *The checks*, glossary **External adapter**). No change to
   `crates/knobas-source/src/**`, `crates/knobas-http/**`, `error.rs` or `profile.rs`; no event; no
   new module in `commands/` or `ipc/`. Ratified by the implementer on Opus under Björn's
-  2026-10-18 reserved-steps rule; the ruling is in `docs/decisions/2026-10-unattended-rulings.md`.
+  2026-10-18 reserved-steps rule; the ruling is in `docs/archive/2026-10-unattended-rulings.md`.
 
   **The migration.** `knobas.external_adapter`, one row per installed adapter, keyed by
   `adapter_kind`: `adapter_version`, `interface_version`, `source_url` (a local manifest's

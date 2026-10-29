@@ -4,7 +4,7 @@
   other adapters are #1380–#1384, and build on this surface unchanged. No migration, no event, no
   command added, removed or renamed, no argument changed, no `WriteOp`, nothing under
   `crates/knobas-http/**`, no new module in `commands/` or `ipc/`. Reserved for Björn, ruled by the
-  implementer on Opus: the rulings are in `docs/decisions/2026-10-unattended-rulings.md` under
+  implementer on Opus: the rulings are in `docs/archive/2026-10-unattended-rulings.md` under
   `## #1379`.
 
   **`crates/knobas-source/src/**` — additive:** `Sink` gains one method with a default body that

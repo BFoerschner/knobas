@@ -8,11 +8,11 @@
   of. Written with the implementing PR, per #454's, #455's and #506's pattern. **Björn keeps the
   gate for frozen contracts and this entry is flagged for his review.** In his absence the v1.5
   loop's deputy is what exercises that gate, and its ruling is recorded on the issue and appended to
-  `docs/decisions/2026-09-v1-5-unattended-rulings.md` by the PR that acts on it; **no ruling had
+  `docs/archive/2026-09-v1-5-unattended-rulings.md` by the PR that acts on it; **no ruling had
   been posted on #507 when this entry was written**, so this sentence records the flag and claims no
   ratification — **ratified in his absence by the deputy's ruling of 2026-09-08 on #507**
   ([comment](https://github.com/BFoerschner/knobas/issues/507#issuecomment-5579888742),
-  `docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the field, on
+  `docs/archive/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the field, on
   the criterion's second clause, on both decisions taken rather than forked and on the disclosed
   walk. The two sentences stand side by side rather than the first being rewritten, the treatment
   §10.8 gives every sentence it supersedes.

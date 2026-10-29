@@ -57,7 +57,7 @@
   `tests/it/builds_ipc.rs` and, on the seeded TeamCity, by `live_teamcity_seeded.rs`'s
   `the_seeded_records_fill_the_builds_frame` and the battery.
 
-  **Not declared here, by ruling** (`docs/decisions/2026-10-unattended-rulings.md`, #947): a run's
+  **Not declared here, by ruling** (`docs/archive/2026-10-unattended-rulings.md`, #947): a run's
   agent (#1004), its steps (`run_log`'s steps, #854, #1003) and its test summary (`run_tests`,
   #855).
 

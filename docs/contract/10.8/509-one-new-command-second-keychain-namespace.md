@@ -11,11 +11,11 @@
   produce command and the namespace"*). **Björn keeps the gate for frozen contracts and this
   entry is flagged for his review.** In his absence the v1.5 loop's deputy is what exercises that
   gate, and its ruling is recorded on the issue and appended to
-  `docs/decisions/2026-09-v1-5-unattended-rulings.md` by the PR that acts on it; **no ruling had
+  `docs/archive/2026-09-v1-5-unattended-rulings.md` by the PR that acts on it; **no ruling had
   been posted on #509 when this entry was written**, so this sentence records the flag and claims
   no ratification — **ratified in his absence by the deputy's ruling of 2026-09-08 on #509**
   ([comment](https://github.com/BFoerschner/knobas/issues/509#issuecomment-5579197449),
-  `docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the command,
+  `docs/archive/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the command,
   on the `importer` flag and on the keychain namespace, **and its `Landing` argument by the second
   ruling of 2026-09-08**
   ([comment](https://github.com/BFoerschner/knobas/issues/509#issuecomment-5579926452), same file,
@@ -219,6 +219,6 @@
   `the_real_project_round_trips_through_the_importer` — produce, apply, produce again over whatever
   the real project holds, all known with no changes, at a server count `ESTATE_LIVE_HCLOUD_SERVERS`
   declares. The witness paragraph above is history; ADR-0015's amended consequence and
-  `docs/decisions/2026-10-unattended-rulings.md` (`## #634`) are the current statement. No command,
+  `docs/archive/2026-10-unattended-rulings.md` (`## #634`) are the current statement. No command,
   type or wire shape in this entry changes.
 

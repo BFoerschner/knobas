@@ -23,9 +23,8 @@ export CARGO_BUILD_JOBS := env("CARGO_BUILD_JOBS", "4")
 # half; the point of capturing each half to its own file is that a red still
 # reads as one recipe's output.
 #
-# Each half writes to a per-invocation `mktemp` file (the inventory recipe
-# below says why a shared path is not an option on a machine with several
-# worktrees on it). A half that passes is reported as its summary; a half
+# Each half writes to a per-invocation `mktemp` file: several worktrees run
+# gates on this machine at once, so a shared path would be read half-written. A half that passes is reported as its summary; a half
 # that fails is reported as its captured output in full, and every one that
 # fails is -- running them together must not cost a signal the serial run
 # had. No half is cut short by another failing, for the same reason, and the
@@ -34,7 +33,7 @@ export CARGO_BUILD_JOBS := env("CARGO_BUILD_JOBS", "4")
 # through `deps`: a missing `app/node_modules` is installed, and if that
 # cannot happen the frontend half is a red, not a skip.
 #
-# The traps are the inventory recipe's: `INT` and `TERM` stop whatever is
+# The traps: `INT` and `TERM` stop whatever is
 # left of every half and remove the scratch files before re-raising, so a
 # cancelled gate leaves no cargo or vitest running under nobody and nothing in
 # `$TMPDIR`. The kill is explicit because the halves cannot be relied on to
@@ -68,7 +67,7 @@ check:
     # cargo or reads `target/`, and in the cargo chain their 23 s (warm,
     # quiet, 2026-10-15) were paid in full ahead of `clippy`.
     script_recipes=(shell test-layout witness-unit conflict-markers)
-    cargo_recipes=(fmt clippy clippy-libs inventory ipc-mirror test)
+    cargo_recipes=(fmt clippy clippy-libs test-build ipc-mirror test)
     descendants() {
         local p
         for p in $(pgrep -P "$1" || true); do descendants "$p"; done
@@ -294,133 +293,14 @@ gate base="origin/main":
         fi
     fi
 
-# The test inventory: every test this workspace defines, by name, committed.
-#
-# `just check` going green is not evidence that the tests you wrote still
-# exist. A test that is *deleted* takes its own failure with it, so the suite
-# reports success on what is left and the count moves in whatever direction the
-# rest of the commit pushed it. This has happened here: a mis-scoped splice
-# removed four tests in one commit while three were added in the same commit,
-# so the file-level count *rose*; the loss was found only because a mutation
-# that used to die stopped dying, and two of the four survived a name-by-name
-# audit because an audit can only look for names someone already suspects.
-#
-# Diffing the names is the check that does not depend on suspicion. A deleted
-# test cannot hide behind an added one, because both are lines.
-#
-# This does not forbid deleting a test -- retiring one is often right. It makes
-# the deletion *visible*: `just inventory-update` turns it into a `-` line in
-# the PR diff, where a reviewer sees it and asks why, instead of it being
-# invisible against a green suite.
-#
-# Scope: unit and integration tests, keyed by package, target and test name, so
-# two crates that both have `tests/mockd.rs` stay distinct and a test that moves
-# between crates reads as one removal plus one addition. Doctests are not listed
-# -- cargo builds no binary for them, so there is nothing to enumerate; they are
-# still run by `test`. Nor are the tests named in
-# `test-inventory-conditional.txt`: a `#[cfg(target_os = ...)]` test exists on
-# one platform and not another, and the file is written on macOS and checked on
-# `ubuntu-latest`, so it cannot be pinned by a list that has to match on both.
-# Each line there costs the gate one test and is argued for in place.
-#
-# The scratch file is per-invocation, from `mktemp`. It used to be a fixed
-# `/tmp` path, which two `just check` runs on one machine -- the parallel
-# worktrees this repo is worked in -- wrote at the same time, so the `diff`
-# read a half-written or foreign file and the gate failed on lines belonging to
-# nobody's tree. A gate that can fail for reasons unconnected to its own diff
-# is one everybody learns to re-run, which is how a real `-` line gets waved
-# through; that is the failure this recipe exists to prevent, so its scratch
-# file cannot be shared. The atomic write below removes the *torn* read, not the
-# *foreign* one -- a shared path would still hand this `diff` another worktree's
-# perfectly complete inventory -- so `mktemp` here is not redundant.
-#
-# Both recipes trap `INT` and `TERM` as well as `EXIT`, because bash does not run
-# an `EXIT` trap when a signal it has no handler for terminates the shell: a
-# `SIGTERM`ed run was observed leaving its scratch file in `$TMPDIR`. Each signal
-# trap cleans up, restores the default disposition and re-raises, so the recipe
-# still dies of the signal it was sent rather than reporting a tidy exit 0.
-#
-# `inventory-update` writes `test-inventory.txt` in place -- that path is inside
-# the worktree, so no two worktrees share it -- and the write is atomic:
-# `_inventory-write` builds into a sibling temp file and `mv`s it over, so a
-# reader sees the whole old inventory or the whole new one. It used to be a
-# plain redirect, which truncates the destination the instant the pipeline
-# starts, and the first stage of that pipeline is a full cargo build. The
-# committed file therefore sat *empty* for the minutes that build ran: a
-# `just check` in the same worktree diffed against nothing, and an interrupted
-# `inventory-update` left an empty file behind to be committed. An empty
-# inventory is the worst state this file can be in -- it makes every test read
-# as deleted, which is the exact failure the gate exists to make visible.
-inventory:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    actual=$(mktemp "${TMPDIR:-/tmp}/knobas-inventory-actual.XXXXXX")
-    trap 'rm -f "$actual"' EXIT
-    trap 'rm -f "$actual"; trap - INT; kill -INT $$' INT
-    trap 'rm -f "$actual"; trap - TERM; kill -TERM $$' TERM
-    just _inventory-write "$actual"
-    if ! diff -u test-inventory.txt "$actual"; then
-        echo >&2
-        echo "error: the test inventory does not match test-inventory.txt." >&2
-        echo "  '-' lines are tests that no longer exist. If that is deliberate," >&2
-        echo "  run 'just inventory-update' and commit it, so the removal shows up" >&2
-        echo "  in the diff a reviewer reads." >&2
-        exit 1
-    fi
-
-# Regenerate `test-inventory.txt`. Run this whenever you add or remove a test,
-# and commit the result alongside the change that caused it.
-inventory-update:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just _inventory-write test-inventory.txt
-    echo "test-inventory.txt: $(wc -l < test-inventory.txt | tr -d ' ') tests"
-
-# Enumerate the workspace's tests into the file named by $1.
-#
-# The binaries come from `_test-executables` below (one build, one
-# enumeration, shared with `test`); asking each binary to `--list` itself is
-# what makes the result the *harness's* answer rather than a guess parsed out
-# of the source. `--list` enumerates, it does not execute, so nothing here
-# starts a database. LC_ALL=C keeps the sort byte-wise, so the file does not
-# churn when a machine's locale differs.
-#
-# `test-inventory-conditional.txt` is subtracted here rather than at diff time,
-# so `test-inventory.txt` means one thing on every machine: the tests that exist
-# everywhere. Filtering only the *actual* side would leave the committed file
-# platform-shaped, and filtering both sides at the diff would still let
-# `inventory-update` write a file whose contents depend on who ran it.
-#
-# The result is assembled in a temp file and `mv`d onto `$1`, because `$1` may
-# be the committed `test-inventory.txt` and a redirect would empty it for the
-# length of the build above. The temp file is a *sibling* of the destination on
-# purpose: `mv` is atomic only within one filesystem, and a `$TMPDIR` that is a
-# different mount would silently turn it back into copy-then-delete, i.e. a
-# destination that is observably partial again. Nothing ever reads the temp
-# file, so its only obligation is not to outlive the recipe -- hence the trap,
-# which covers the interrupt that used to be what left a truncated inventory in
-# the tree.
-#
-# The temp file is seeded from the destination first, for its *mode* and not its
-# contents: `mktemp` creates 0600 and `mv` carries the temp file's permissions
-# onto the destination, so a bare rename would tighten `test-inventory.txt` from
-# 0644 to 0600 on every `inventory-update` -- silently, because git tracks only
-# the exec bit, so neither the gate nor the diff would ever show it. Copying the
-# destination over the temp first makes the replacement inherit the mode it
-# replaces, which is what the redirect did.
-_inventory-write FILE:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    tmp=$(mktemp "{{FILE}}.XXXXXX")
-    trap 'rm -f "$tmp"' EXIT
-    trap 'rm -f "$tmp"; trap - INT; kill -INT $$' INT
-    trap 'rm -f "$tmp"; trap - TERM; kill -TERM $$' TERM
-    if [ -e "{{FILE}}" ]; then cp -p "{{FILE}}" "$tmp"; fi
-    just _test-executables \
-      | scripts/inventory-list.sh \
-      | grep -vxF -f <(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' test-inventory-conditional.txt) \
-      | LC_ALL=C sort > "$tmp"
-    mv "$tmp" "{{FILE}}"
+# The gate's test build. Until 2026-10-29 this slot was `inventory`, which
+# also diffed every test's name against a committed `test-inventory.txt`;
+# Björn retired that file because every PR inserted into it and the rebases
+# conflicted. What stays is the build: every test binary compiled ahead of
+# `test`, so a gate waiting for the slot has compiled before it holds it and
+# `test`'s own build is a no-op.
+test-build:
+    just _test-executables >/dev/null
 
 # Build the workspace's test executables and name them, one per line:
 #
@@ -435,7 +315,7 @@ _inventory-write FILE:
 # no runtime `CARGO_*` read, no relative filesystem path in a test), which is
 # why it is a column here and not a workaround anywhere else.
 #
-# `inventory` and `test` both consume this: one enumeration expression, kept
+# `test-build` and `test` both consume this: one enumeration expression, kept
 # in one place, so the two recipes cannot drift apart on
 # what a test executable is (before #415 each carried its own copy). Within a
 # recipe it is the only cargo call before the binaries run -- `test` used to
@@ -578,9 +458,7 @@ witness-unit:
     scripts/bash-guard-test.sh
     scripts/shot-test.sh
     scripts/test-layout-test.sh
-    scripts/inventory-list-test.sh
     scripts/ipc-mirror-check-test.sh
-    scripts/append-only-merge-test.sh
     scripts/test-prefix-guard-test.sh
     scripts/test-prefix-guard.sh
     scripts/merge-tail-lock-test.sh
@@ -596,7 +474,7 @@ witness-unit:
 
 # The step before every `just check` (issue #736): the mechanical misses that
 # failed gates in the #701 wave, found in about a minute instead of a gate's.
-# It FIXES what is mechanical (`cargo fmt --all`, `inventory-update`), runs the
+# It FIXES what is mechanical (`cargo fmt --all`, the IPC mirror), runs the
 # fast table tests that fail first -- the `$effect` cleanup table
 # (`residue.test.svelte.ts`: a new component with an effect must be in it) and
 # the write-op count (`every_op_has_its_own_snake_case_identifier`: a new
@@ -641,7 +519,6 @@ pre-gate:
     just conflict-markers
     npm --prefix app run build
     env -u RUSTUP_TOOLCHAIN cargo fmt --all
-    just inventory-update
     just contract-index
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source --lib every_op_has_its_own_snake_case_identifier
     # The generated IPC mirror (#1325): written here so a Rust change arrives
@@ -682,28 +559,6 @@ conflict-markers:
 # disk, not with `git ls-files`, because cargo compiles an untracked one too.
 test-layout:
     scripts/test-layout.sh guard
-
-# The rename check a crate's merge PR runs (issue #573): the working tree's
-# `test-inventory.txt` must be BASE's with every test of CRATES' merged files
-# moved from `test/<file>` to `test/it` as `<file>::<name>`, byte for byte, and
-# nothing else changed. Run `just inventory-update` first.
-#
-#     just inventory-rename knobas-search
-#
-# BASE defaults to the merge-base with `main`, not `main` itself: a sibling PR
-# that lands while this one is open changes `main`'s inventory, and those lines
-# are not this merge's. On a branch rebased onto `main` the two are the same.
-inventory-rename +CRATES:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    base=${BASE:-$(git merge-base HEAD main)}
-    old=$(mktemp "${TMPDIR:-/tmp}/knobas-inventory-base.XXXXXX")
-    trap 'rm -f "$old"' EXIT
-    trap 'rm -f "$old"; trap - INT; kill -INT $$' INT
-    trap 'rm -f "$old"; trap - TERM; kill -TERM $$' TERM
-    git show "$base:test-inventory.txt" >"$old"
-    echo "inventory-rename: old inventory from $(git rev-parse --short "$base")"
-    scripts/test-layout.sh rename "$old" test-inventory.txt {{CRATES}}
 
 fmt:
     env -u RUSTUP_TOOLCHAIN cargo fmt --all --check
@@ -767,7 +622,7 @@ clippy-libs *PKGS:
 # a fifo it reads, and closing that fd is the shutdown. The traps close it on
 # EXIT and, because bash runs no EXIT trap when a signal it has no handler for
 # kills the shell, on INT and TERM too -- each restoring the default
-# disposition and re-raising, as `inventory` does -- so a cancelled gate leaves
+# disposition and re-raising -- so a cancelled gate leaves
 # no postmaster behind. The server also stops itself on SIGINT/SIGTERM, which a
 # Ctrl-C delivers to it directly; either route ends in the same `pg_ctl stop`.
 #
@@ -782,8 +637,8 @@ clippy-libs *PKGS:
 # stops feeding on an exit of 255 and reports 123 for anything else non-zero,
 # and neither tells which binary it was; a red must never cut the others
 # short or hide behind them. Doc-tests (`cargo test --workspace --doc`, 14
-# short binaries, not in the inventory because cargo builds no executable for
-# them) run alongside the pool with their output captured the same way.
+# short binaries, which `_test-executables` cannot name because cargo builds
+# no executable for them) run alongside the pool with their output captured the same way.
 # Binaries run without `--ignored`, so the live suites stay ignored.
 #
 # JOBS. `N` is bounded to the core count (`getconf _NPROCESSORS_ONLN`, which
@@ -1134,7 +989,7 @@ test:
 # and once after the last test, and leaves the judgement of whether those
 # numbers are a *reading* to the reader under the #533 re-run standard, which
 # is quoted where it belongs -- `docs/agents/working-model.md`, this recipe's
-# entry, off `docs/decisions/2026-09-v1-5-unattended-rulings.md`'s `## #533`.
+# entry, off `docs/archive/2026-09-v1-5-unattended-rulings.md`'s `## #533`.
 # Two marks rather than one because that standard asks for the average at
 # start *and* at end, and because a sibling that arrived mid-run is exactly
 # what a once-sampled average misses.
@@ -1156,10 +1011,8 @@ search-perf:
     #!/usr/bin/env bash
     set -euo pipefail
     # How many tests the two targets are pinned to run under `--ignored`: six
-    # in `tests/perf.rs` and one in `tests/coverage.rs`. It is a pin like the
-    # inventory's, and moving it is the price of adding a benchmark --
-    # `test-inventory.txt`'s `knobas-search<TAB>test/perf` and
-    # `test/coverage` lines are where the names themselves live.
+    # in `tests/perf.rs` and one in `tests/coverage.rs`. Moving it is the
+    # price of adding a benchmark.
     expected=7
     log=
     # shellcheck source=scripts/gate-slot.sh disable=SC1091
@@ -1226,7 +1079,7 @@ search-perf:
     fi
     echo "search-perf: these are timings; whether they are a reading is the #533"
     echo "search-perf: re-run standard's question, not this recipe's --"
-    echo "search-perf: docs/decisions/2026-09-v1-5-unattended-rulings.md, '## #533'."
+    echo "search-perf: docs/archive/2026-09-v1-5-unattended-rulings.md, '## #533'."
     exit "$status"
 
 # Like `search-perf` it takes a gate slot (it starts a postmaster), prints the
@@ -1734,14 +1587,14 @@ gitea-live forge="gitea":
 #
 # The uncap runs from `live_session`'s traps (`live_on_exit`), which put the
 # product back (Gitea itself stays up, #698), and those traps are `INT` and `TERM` as
-# well as `EXIT`, the rule `inventory` above states and `check-ports.sh`
+# well as `EXIT`, the rule `test` above states and `check-ports.sh`
 # follows: bash need not run an `EXIT` trap when a signal it has no handler for
 # terminates the shell, and this recipe's slow live run is
 # one somebody will Ctrl-C. Each signal trap **clears the `EXIT` trap first**,
 # then restores, then re-raises -- so the container is uncapped exactly once and
 # the recipe still dies of the signal it was sent rather than reporting a tidy
-# exit 0. (`inventory` can let both fire because its handler is an idempotent
-# `rm -f`; this one is a `docker compose up`.) The trap is belt-and-braces
+# exit 0. (`test` can let both fire because its handlers are idempotent;
+# this one is a `docker compose up`.) The trap is belt-and-braces
 # either way: the real containment is the `MAX_RESPONSE_ITEMS: "50"` pin in
 # docker-compose.yml, which uncaps on the next `docker compose up` whatever
 # happened to this shell.
@@ -2318,7 +2171,7 @@ estate-live:
 # It runs the lib test binary `_test-executables` names, from its package
 # directory as `test` does, rather than `cargo test -p knobas-app`: `-p`
 # resolves features for one package, so it would build a second copy of the
-# crate's test binary beside the workspace one `inventory` has just built
+# crate's test binary beside the workspace one `test-build` has just built
 # (25 s, measured 2026-10-19).
 ipc-mirror:
     #!/usr/bin/env bash

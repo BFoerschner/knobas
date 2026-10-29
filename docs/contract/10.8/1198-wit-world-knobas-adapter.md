@@ -4,7 +4,7 @@
   `crates/knobas-source/src/**` (no `WriteOp`, no `KindPaths` field, no battery clause), no change
   to `crates/knobas-app/src/error.rs`. Parent spec #1192 (ADR-0028, glossary **External
   adapter**, **Adapter standard**). Ratified by the implementer on Opus under Björn's 2026-10-18
-  reserved-steps rule; the ruling is in `docs/decisions/2026-10-unattended-rulings.md`.
+  reserved-steps rule; the ruling is in `docs/archive/2026-10-unattended-rulings.md`.
 
   **What is frozen.** The file, from 1.0.0 on. A knobas release hosts one major version. A minor
   version only adds (a new `knobas:adapter` interface the host provides or reads; WASI 0.2's

@@ -4,7 +4,7 @@
   memory and went at exit. No new command, no argument changed, no migration, no event, no
   `WriteOp`, nothing under `crates/knobas-source/src/**`, no `commands/` or `ipc/` module, nothing
   added to either append-only barrel, nothing in `error.rs` or `profile.rs`. Ruled by the
-  implementer on Opus; the ruling is in `docs/decisions/2026-10-unattended-rulings.md` under
+  implementer on Opus; the ruling is in `docs/archive/2026-10-unattended-rulings.md` under
   `## #1585`.
 
   **The IPC schema.** `app_status`'s `AppStatus` gains `secrets_in_memory: bool`, additive: `true`

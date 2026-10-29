@@ -326,7 +326,7 @@ and `release` are all `workflow_dispatch:` and nothing else, and `check`/`testen
 are `active` again — enabled, because a disabled workflow cannot be dispatched at
 all. **No push, pull request, merge or tag starts anything.** This supersedes the
 2026-08-29 `disabled_manually` state (a billing outage), which is still the
-history recorded in `docs/decisions/2026-08-29-unattended-batch-plan.md`.
+history recorded in `docs/archive/2026-08-29-unattended-batch-plan.md`.
 
 **Why:** the triggers used to sit in the files behind the disable switch, so
 `gh workflow enable check` would have put a full build back on every PR. The
@@ -486,7 +486,7 @@ The loop runs unattended; one prompt stalls it until Björn is back. Never: chai
 
 ## Decisions
 
-**You decide the forks that come up while implementing**; nobody waits for another agent or for Björn. Record each ruling in the PR under **Rulings** (fork / ruling / reasoning / cost of reversing) and append it to `docs/decisions/<yyyy-mm>-unattended-rulings.md` in the same PR (create it in the shape of `docs/decisions/2026-08-29-unattended-batch-rulings.md`). A ruling may not contradict a ticket, spec, ADR or the glossary: where the work shows one of them wrong, do what the document says, file a `ready-for-agent` follow-up naming the conflict, and say so in your report.
+**You decide the forks that come up while implementing**; nobody waits for another agent or for Björn. Record each ruling in the PR under **Rulings** (fork / ruling / reasoning / cost of reversing) and append it to `docs/decisions/<yyyy-mm>-unattended-rulings.md` in the same PR (create it in the shape of `docs/archive/2026-08-29-unattended-batch-rulings.md`). A ruling may not contradict a ticket, spec, ADR or the glossary: where the work shows one of them wrong, do what the document says, file a `ready-for-agent` follow-up naming the conflict, and say so in your report.
 
 A step the ticket **reserves for Björn** (sign-off, approval, a choice): on Opus, rule it, headed "Reserved for Björn, ruled by implementer on Opus", tick the criterion and name the ruling beside it. On Sonnet, do everything else and name the step in your report; never rule it.
 
@@ -943,7 +943,7 @@ Björn, 2026-10-11: change `/v15-next` "into an implement step for all the next 
 - `.claude/commands/v15-next.md` (name kept, so `/loop /v15-next` still works) now loops over **every open `ready-for-agent` issue**, in any milestone or none. Issues with no `## Blocked by` section count as free. It stops when the tracker is empty.
 - **The deputy runs on `model: "opus"`.** That supersedes the 2026-09-07 Fable-deputy rule (memory deleted) and the Fable triage in [[loop-triages-and-runs-to-empty]]. Every Agent call in the loop is Opus.
 - **Björn's gates:** closing specs and milestones, tags and releases stay his, and the loop never does them. A frozen-contract (§10.8) change that the **ticket itself names** is already signed off by approving the ticket: for #594 he said "merge already gets my sign off, it's fine". Only an *unnamed* frozen-surface touch goes to the deputy.
-- Rulings go to `docs/decisions/2026-10-unattended-rulings.md`.
+- Rulings go to `docs/archive/2026-10-unattended-rulings.md`.
 
 **Why:** Fable credit is too expensive for routine rulings.
 **How to apply:** never pass `model: "fable"` in the loop; if an older note says the deputy must be Fable, this one wins.

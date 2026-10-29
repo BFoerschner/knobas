@@ -1,6 +1,6 @@
 - **Migration `0064` — issue #2189 (2026-10-26): a re-sync of an unchanged mirror row stamps its
   `synced_at` in place, and the triggers on `sync.item` do no work for rows nothing moved in.**
-  Ruled by the implementer on Opus; the rulings are in `docs/decisions/2026-10-unattended-rulings.md`
+  Ruled by the implementer on Opus; the rulings are in `docs/archive/2026-10-unattended-rulings.md`
   under `## #2189`. It edits no earlier migration. No command, no IPC schema change, no event, no
   DTO field, no `WriteOp`, nothing in `crates/knobas-source/src/**`, `crates/knobas-http/**`,
   `error.rs` or `profile.rs`, no new module in either barrel or in `commands/`.

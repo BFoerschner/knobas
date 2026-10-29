@@ -5,7 +5,7 @@
   behaviour change, no new command, no event, no new module in either barrel or in `commands/`,
   nothing in `crates/knobas-source/src/**`, `crates/knobas-http/**`, `error.rs` or `profile.rs`.
   Ratified by the implementer on Opus under Björn's 2026-10-18 reserved-steps rule; the rulings
-  are in `docs/decisions/2026-10-unattended-rulings.md`.
+  are in `docs/archive/2026-10-unattended-rulings.md`.
 
   **The migration** (`0053_saved_views_keep_no_jira_name.sql`). Renames only:
   `sync.jira_view` → `sync.saved_view`, `sync.jira_view_member` → `sync.saved_view_member`,

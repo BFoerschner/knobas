@@ -11,7 +11,7 @@
   says three, and story 58 (*"rename and delete a saved list"*) is why the ticket's count is the
   operative one. Björn keeps the gate for frozen contracts and this entry is flagged for his
   review — ratified in his absence by the deputy's ruling of 2026-09-08 on #506
-  (`docs/decisions/2026-09-v1-5-unattended-rulings.md`).
+  (`docs/archive/2026-09-v1-5-unattended-rulings.md`).
 
   **Migration `0025` — one table, and nothing else.** `knobas.smart_list (id, label, query,
   created_at, updated_at)`, with three check constraints: the id is a slug `list:` can name

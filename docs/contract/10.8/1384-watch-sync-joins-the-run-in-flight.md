@@ -5,7 +5,7 @@
   existing command, no new module in `commands/` or `ipc/`, nothing under
   `crates/knobas-source/src/**` or `crates/knobas-http/**`, no change to `error.rs` or
   `profile.rs`. Reserved for Björn, ruled by the implementer on Opus (Björn, 2026-10-20: Opus may
-  amend without him); the ruling is in `docs/decisions/2026-10-unattended-rulings.md` under
+  amend without him); the ruling is in `docs/archive/2026-10-unattended-rulings.md` under
   `## #1384`.
 
   **The command**, in `crates/knobas-app/src/commands/sources.rs`, appended at the foot of

@@ -6,7 +6,7 @@
   (`app/src/lib/ipc/index.ts` and `lib.rs`'s handler list are untouched). Ratified by the
   implementer on Opus under Björn's 2026-10-18 reserved-steps rule and checked against the merge
   head by the merge-manager on Opus; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1327`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1327`.
 
   **Crates that gain a derive.** Five: `knobas-source`, `knobas-spi-types`, `knobas-core`,
   `knobas-sync` and `knobas-app`, listed type by type below. Only `knobas-sync` gains a

@@ -5,7 +5,7 @@
   `crates/knobas-wasm-host/wit/adapter.wit` (`knobas:adapter@1.0.0` is untouched), no change to
   `crates/knobas-app/src/error.rs`. Parent spec #1192 (ADR-0023, ADR-0029). Ratified by the
   implementer on Opus under Björn's 2026-10-18 reserved-steps rule; the ruling is in
-  `docs/decisions/2026-10-unattended-rulings.md`.
+  `docs/archive/2026-10-unattended-rulings.md`.
 
   **The read.** The code-host minimum (`knobas_source::role::MINIMUMS`) gains the required read
   `clone_urls` (`role::CLONE_URLS`). It is answered by a declaration, not by a `Source` method,

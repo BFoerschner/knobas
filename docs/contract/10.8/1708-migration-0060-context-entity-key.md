@@ -4,7 +4,7 @@
   field, no `WriteOp`, no grammar key, nothing in `crates/knobas-source/src/**`,
   `crates/knobas-http/**`, `error.rs` or `profile.rs`, no new module in either barrel or in
   `commands/`. Ruled by the implementer on Opus under Björn's 2026-10-22 waiver; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1708`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1708`.
 
   **The migration** (`0060_the_ids_0050_missed_compare_bytewise_and_a_context_is_an_entity.sql`).
   No earlier migration edited. Transactional.

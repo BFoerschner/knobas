@@ -5,7 +5,7 @@
   changed, no migration, no event, no `WriteOp`, nothing under `crates/knobas-source/src/**`, no
   `commands/` or `ipc/` module, nothing added to either append-only barrel. Ratified by the
   implementer on Opus under Björn's 2026-10-21 delegation at triage; the ruling is in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1423`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1423`.
 
   **The IPC schema.** `mini_board`'s `MiniBoardCard` gains `status: Option<String>`, additive: the
   ticket's own status in the source's words, the one it stands in on `read_scoped`'s board (the

@@ -2,7 +2,7 @@
   and `ActionItemTicket` gains `title: String`.** No new command, event, migration or module in
   `commands/` or `ipc/`; the generated mirror (`app/src/lib/ipc/generated/entity.ts`) is
   regenerated for the two fields. Reserved for Björn, ruled by the implementer on Opus
-  (`## #1951` in `docs/decisions/2026-10-unattended-rulings.md`); the issue has no parent spec.
+  (`## #1951` in `docs/archive/2026-10-unattended-rulings.md`); the issue has no parent spec.
 
   1. **`Protocol.owed_tickets`**, answered by `standup_protocol` and every command that answers a
      `Protocol` (`publish_standup_protocol`). The creates the protocol's action items filed that

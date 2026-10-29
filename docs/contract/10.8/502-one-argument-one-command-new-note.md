@@ -10,7 +10,7 @@
   the gate for frozen contracts and this entry is flagged for his review.** What `captured-from`
   names when no detail is open was a fork, and the deputy's ruling of 2026-09-08 on #502
   ([comment](https://github.com/BFoerschner/knobas/issues/502#issuecomment-5576885970),
-  `docs/decisions/2026-09-v1-5-unattended-rulings.md`) ratifies the reading recorded here --- the
+  `docs/archive/2026-09-v1-5-unattended-rulings.md`) ratifies the reading recorded here --- the
   defined term, not the ticket's narrower phrasing of its first rung.
 
   **The IPC schema — one argument and one input DTO, on a command that already exists:**

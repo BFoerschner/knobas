@@ -4,7 +4,7 @@
   No migration, no event, no `WriteOp`, nothing under `crates/knobas-source/src/**`, no new
   command, no new module in either barrel or in `commands/`. Ratified by the implementer on Opus
   under Björn's 2026-10-18 reserved-steps rule; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1294`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1294`.
 
   **Which sources fill a role** is one function, `knobas_app::sources::crud::fillers` (with
   `role_scope`, which adds the role's kinds): the configured sources whose adapter's template

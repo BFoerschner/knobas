@@ -3,7 +3,7 @@
   migration, no event, no new IPC type, no new module in `commands/` or `ipc/`. The command sits
   in the existing `commands/entity/links.rs`, beside `submit_write` whose `link_to` it reads back,
   and is appended at the foot of the handler list, after `watch_sync`. Reserved for Björn, ruled
-  by the implementer on Opus (`## #1953` in `docs/decisions/2026-10-unattended-rulings.md`); the
+  by the implementer on Opus (`## #1953` in `docs/archive/2026-10-unattended-rulings.md`); the
   issue has no parent spec.
 
   ```rust

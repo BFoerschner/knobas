@@ -2,7 +2,7 @@
   256 kB.** No IPC change, no command, no event, nothing in `crates/knobas-source/src/**`,
   `crates/knobas-http/**`, `error.rs` or `profile.rs`, nothing added to either append-only barrel
   or to `commands/` / `ipc/`. Ruled by the implementer on Opus under Björn's 2026-10-22 waiver;
-  the ruling is in `docs/decisions/2026-10-unattended-rulings.md` under `## #1864`.
+  the ruling is in `docs/archive/2026-10-unattended-rulings.md` under `## #1864`.
 
   **The migration** (`0057_a_mention_index_keeps_a_short_pending_list.sql`). `alter index
   sync.item_body_trgm_idx set (gin_pending_list_limit = 256)`, then

@@ -5,7 +5,7 @@
   no IPC change (the install note reads `InstalledAdapter.hosts`, which #1202's entry already
   holds), no change to `crates/knobas-source/src/**`, `crates/knobas-http/**` or `error.rs`.
   Parent spec #1192 (ADR-0028 *The sandbox*). Ratified by the implementer on Opus under Björn's
-  2026-10-18 reserved-steps rule; the ruling is in `docs/decisions/2026-10-unattended-rulings.md`.
+  2026-10-18 reserved-steps rule; the ruling is in `docs/archive/2026-10-unattended-rulings.md`.
 
   **Why this is not a new interface version.** #1198's entry gives the component WASI 0.2 beside
   the world and names #1203 as the one that adds network access. `wasi:http` 0.2 is part of WASI

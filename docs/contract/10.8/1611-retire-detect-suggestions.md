@@ -58,4 +58,4 @@
   invokes, and every barrel command is answered or on its `UNANSWERED` record) and by
   `wiring.rs`' `bring_up_builds_one_suggestion_pass_for_the_scheduler`, and for #1612 by
   `knobas-core`'s `a_sources_offered_statuses_are_its_live_corpus_in_the_boards_order`. The
-  rulings are in `docs/decisions/2026-10-unattended-rulings.md` under `## #1611` and `## #1612`.
+  rulings are in `docs/archive/2026-10-unattended-rulings.md` under `## #1611` and `## #1612`.

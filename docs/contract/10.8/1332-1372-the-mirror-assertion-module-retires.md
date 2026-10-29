@@ -5,7 +5,7 @@
   command added, removed or renamed, no argument changed, no field added, removed or renamed, no
   wire shape changed, nothing added to `lib.rs`'s handler list. Ratified by the implementer on
   Opus under Björn's 2026-10-18 reserved-steps rule, with the orchestrator's go-ahead for the
-  `index.ts` edit; the rulings are in `docs/decisions/2026-10-unattended-rulings.md` under
+  `index.ts` edit; the rulings are in `docs/archive/2026-10-unattended-rulings.md` under
   `## #1332 and #1372`.
 
   **`app/src/lib/ipc/index.ts`, a non-append edit.** The hand-written `IpcErrorCode` union is

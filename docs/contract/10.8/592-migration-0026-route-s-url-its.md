@@ -6,7 +6,7 @@
   `0018` put a route's name and its URL both at weight A, so a route named for the word and a
   route that only carried it in its URL tied, and recency decided. **Ratified under #592's "What
   to build" by the deputy's ruling of 2026-10-11 on that issue**
-  (`docs/decisions/2026-10-unattended-rulings.md`), which chose this migration over leaving `0018`
+  (`docs/archive/2026-10-unattended-rulings.md`), which chose this migration over leaving `0018`
   as it was. Migration additions have been ratified by the orchestrator under the ticket's own
   criterion since the #42 entry; Björn keeps the gate for frozen contracts and this entry is
   flagged for his review.

@@ -1,7 +1,7 @@
 - **IPC command semantics, issues #1944 and #1946 (2026-10-24): a write pressed while the
   keychain is locked is queued, a credential save releases a write waiting on the keychain, and
   a keychain error says `keychain:` once.** Ruled by the implementer on Opus
-  (`docs/decisions/2026-10-unattended-rulings.md`, #1944/#1946). No signature change, no new
+  (`docs/archive/2026-10-unattended-rulings.md`, #1944/#1946). No signature change, no new
   variant, no migration, no event, no new module in `commands/` or `ipc/`. The generated
   `sources.ts` changes only in the doc comment on `WaitReason`.
   `knobas_sync::write_queue::release_unauthorized` and its `knobas_core` statement are renamed

@@ -23,8 +23,8 @@ test-util = ["tokio/signal", "dep:serde_json"]
 # every build that does not turn `test-util` on: `cargo build -p knobas-app`,
 # `tauri build` and `clippy --workspace --lib` never see it, and `cargo test`
 # builds it only because the self-dev-dependency below enables the feature.
-# `test = false`: it has no tests of its own, so no harness for it enters the
-# inventory.
+# `test = false`: it has no tests of its own, so no harness for it runs under
+# `test`.
 [[bin]]
 name = "knobas-test-server"
 path = "src/bin/knobas_test_server.rs"

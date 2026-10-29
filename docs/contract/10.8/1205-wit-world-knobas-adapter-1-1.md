@@ -5,7 +5,7 @@
   `crates/knobas-source/src/**`, `crates/knobas-http/**` or `error.rs`. Parent spec #1192
   (ADR-0028 *The interface*, *Every call has a deadline and a memory cap*). Ratified by the
   implementer on Opus under Björn's 2026-10-18 reserved-steps rule; the ruling is in
-  `docs/decisions/2026-10-unattended-rulings.md`.
+  `docs/archive/2026-10-unattended-rulings.md`.
 
   **What 1.1.0 adds, and only adds.**
   - `interface download-sink { start: func(file-name: string) -> result<_, source-error>; write:

@@ -1,7 +1,7 @@
 - **`crates/knobas-source/src/**` (through `knobas-spi-types`) and the IPC schema — issue #1501
   (2026-10-21): `KindPaths` gains `done_statuses`, and a ticket's job context is archived exactly
   while the ticket is done.** The lifecycle the grilling of 2026-10-21 ruled for #1427 (spec #1498,
-  `docs/decisions/2026-10-unattended-rulings.md`, "Archived follows the ticket's status, and only
+  `docs/archive/2026-10-unattended-rulings.md`, "Archived follows the ticket's status, and only
   that"; "Done-like is a `done_statuses` name list beside `blocked_statuses`"). No migration, no
   event, no command added, removed or renamed, no argument changed, no `WriteOp`, nothing under
   `crates/knobas-http/**`, no new module in `commands/` or `ipc/`. Reserved for Björn, ruled by the

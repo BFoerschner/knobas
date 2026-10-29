@@ -15,7 +15,7 @@
   - #501's `checkout_commands() -> Vec<OpenCommandView>` and `set_checkout_command(action,
     template)`, with `OpenCommandView` (mirrored as `CheckoutCommand`), and #844–846's bullet that
     kept the two "as a view over the list". #844's ruling that kept them
-    (`docs/decisions/2026-10-unattended-rulings.md`) names its reversal, "retire both once the
+    (`docs/archive/2026-10-unattended-rulings.md`) names its reversal, "retire both once the
     rooms UI goes", and that is met: #881 removed the rooms UI, and the desktop witness's
     open-in-editor driver writes the list through Settings › Checkouts and Open in…
     (`checkout_settings`, `set_checkout_applications`). #501's three stored templates
@@ -48,4 +48,4 @@
   invokes, and every barrel command is answered or on its `UNANSWERED` record), `ipc_mirror` (the
   generated barrel is current), and `checkout_ipc.rs`, whose opening tests now write the list
   with `set_applications` where they used #501's write. The rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1481`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1481`.

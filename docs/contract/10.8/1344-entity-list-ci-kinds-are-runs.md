@@ -3,7 +3,7 @@
   amended on 2026-10-19. No wire change: no field, argument, command, module, migration, event or
   `WriteOp`, nothing under `crates/knobas-source/src/**`. Ratified by the implementer on Opus under
   Björn's 2026-10-18 reserved-steps rule; the ruling is in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1344`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1344`.
 
   A built-in role's kinds on the entity list (`knobas_app::sources::crud::role_scope`) are still
   its minimum's, required and optional, named by id or declared by a filler on a frame the minimum

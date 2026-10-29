@@ -26,7 +26,7 @@ runs three halves side by side:
 
 - `front`: `svelte-check`, the Vitest suite and `vite build`.
 - the scripts: `shell`, `test-layout`, `witness-unit` and `conflict-markers`.
-- the cargo chain: `fmt`, `clippy`, `clippy-libs`, `inventory`, `ipc-mirror`
+- the cargo chain: `fmt`, `clippy`, `clippy-libs`, `test-build`, `ipc-mirror`
   and `test`. `test` takes a slot under `$TMPDIR/knobas-gate-slots` (one test
   run at a time since #1892, four libtest threads per binary) and starts its
   tests against one shared test server, not a Postgres per test.
@@ -40,7 +40,7 @@ contract-index and doc-list checks, the conflict-marker scan, `svelte-check`, th
 (`just front-changed`) and `vite build`.
 
 `just front` alone is the fast loop for frontend work. `just pre-gate` formats,
-refreshes the inventory and the contract index, and runs a few quick checks.
+refreshes the IPC mirror and the contract index, and runs a few quick checks.
 It does not replace the gate. `just docs-check` is the three cheap checks alone
 (contract index, doc lists, conflict markers) for a docs-only change.
 

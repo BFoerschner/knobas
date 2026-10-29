@@ -3,7 +3,7 @@
   requirement R-9.11 (*Create ticket* on a failed run's Overview). No new command, no migration, no
   grammar key, no `WriteOp` or `WriteOp` field, no new DTO, no `KindPaths` field, no `commands/` or
   `ipc/` module. Reserved for Björn, ruled by implementer on Opus (`## #1451` in
-  `docs/decisions/2026-10-unattended-rulings.md`).
+  `docs/archive/2026-10-unattended-rulings.md`).
 
   1. **`WriteOp::CreateTicket`'s `delivery()` gains `link: Some(ArrivalLink::Related)`**
      (`crates/knobas-source/src/lib.rs`). Its projection, resend and unclaimed answers are

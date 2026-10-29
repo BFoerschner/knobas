@@ -5,7 +5,7 @@
   change to `crates/knobas-http/**` or `error.rs`. Parent spec #1192 (story 40, ADR-0028 *The
   checks*, glossary **Adapter standard**). Recorded because the crate is the guest half of a frozen
   surface. Ratified by the implementer on Opus; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md`.
+  `docs/archive/2026-10-unattended-rulings.md`.
 
   **What the crate is.** `crates/knobas-adapter-sdk` generates the guest bindings of `world
   adapter` (wit-bindgen 0.62.0) and keeps them `#[doc(hidden)]`. An adapter implements one trait,

@@ -5,7 +5,7 @@
   `WriteOp`, nothing under `crates/knobas-source/src/**`, no file added to or removed from
   `commands/` or `app/src/lib/ipc/`.
   Amends where the #1196 and #1199 entries type the mirror. Ratified by the implementer on Opus under
-  Björn's 2026-10-22 waiver; the ruling is in `docs/decisions/2026-10-unattended-rulings.md`
+  Björn's 2026-10-22 waiver; the ruling is in `docs/archive/2026-10-unattended-rulings.md`
   under `## #1664`.
 
   **The IPC schema.** `knobas_app::sources::SourceSummary` loses its two

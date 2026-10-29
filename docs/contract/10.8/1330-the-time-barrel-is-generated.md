@@ -8,7 +8,7 @@
   what else the switch did to the barrel, as #1328's merge-manager ruled every switch owes one.
   Ruled by the implementer on Opus under Björn's 2026-10-18 reserved-steps rule and checked
   against the merge head by the merge-manager on Opus; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1330`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1330`.
 
   **Crates that gain a derive.** One, which already depends on `ts-rs`, so no `Cargo.toml`
   changes:

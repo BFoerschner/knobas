@@ -1,6 +1,6 @@
 - **IPC command semantics, issue #1932 (2026-10-24): the quit waits for a send a command waits
   on, and a send it cuts is held.** Ruled by the implementer on Opus
-  (`docs/decisions/2026-10-unattended-rulings.md`, #1932). No signature change, no new variant,
+  (`docs/archive/2026-10-unattended-rulings.md`, #1932). No signature change, no new variant,
   no migration, no event, no new module in `commands/` or `ipc/`. The generated mirror does not
   change. `knobas_sync::background::Background` gains `try_spawn` and `running`, crate functions,
   not commands.

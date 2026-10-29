@@ -7,7 +7,7 @@
   append-only barrel. The column the rule reads is migration `0055`, recorded in its own entry
   (`1571-migration-0055-auth-failing-since.md`). Ratified by the implementer on Opus under
   Björn's 2026-10-18 reserved-steps rule; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1571`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1571`.
 
   **The wire change, in full.** One union grows and no DTO does:
 

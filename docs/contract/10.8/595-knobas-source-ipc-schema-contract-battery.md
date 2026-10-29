@@ -66,7 +66,7 @@
   `knobas-core` is not on the frozen list; this paragraph is here because the ruling's condition is.
   The pair stands by the deputy's second ruling of 2026-10-11 on #595
   ([comment](https://github.com/BFoerschner/knobas/issues/595#issuecomment-6113509745);
-  `docs/decisions/2026-10-unattended-rulings.md`), which reads #594's "every `under:` read goes
+  `docs/archive/2026-10-unattended-rulings.md`), which reads #594's "every `under:` read goes
   through these two" as every read of a child's parent objects. It adds no descriptor field, but it
   puts one obligation on the already-frozen `ParentPath.names`: the names must also resolve on the
   parent kind's own records. The ruling's condition is that the battery certifies that obligation,
@@ -80,7 +80,7 @@
   The spec calls the descriptor change "the one frozen-contract touch", and this variant is a second
   one the spec's own coverage requirement brings with it. Ratified by the deputy's ruling of
   2026-10-11 on #595 as required by that ticket's coverage criterion
-  (`docs/decisions/2026-10-unattended-rulings.md`); flagged for Björn's review.
+  (`docs/archive/2026-10-unattended-rulings.md`); flagged for Björn's review.
   The answer is read off the declaration, not measured on the corpus: `answered` for a source
   declaring a parent for any kind, `no_values` otherwise, and the same "which sources put rows in
   this query's corpus" probe decides who is listed, so one round trip serves both dimensions.

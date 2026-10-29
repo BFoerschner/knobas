@@ -7,7 +7,7 @@
   At 100,000 items the unknown-token lookup took 335 ms, and the scoped statement about as much,
   against spec §14's 100 ms. The ticket allows a migration with *"a §10.8 entry and Björn's
   sign-off before it merges"*. **The deputy's two rulings of 2026-10-12 on #627 decide its shape**
-  (`docs/decisions/2026-10-unattended-rulings.md`). The second ruling moved the source-to-adapter
+  (`docs/archive/2026-10-unattended-rulings.md`). The second ruling moved the source-to-adapter
   match to read time, after a trigger on `knobas.source_config` deadlocked `delete_source`. Neither
   ruling stood in for the sign-off. ADR-0019 records the decision, accepted with the sign-off.
 

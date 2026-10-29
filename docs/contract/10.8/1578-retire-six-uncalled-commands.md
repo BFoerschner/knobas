@@ -66,4 +66,4 @@
 
   Pinned by `fake-tauri.test.ts`'s census (every command the fake answers is one the barrel
   invokes, and every barrel command is answered or on its `UNANSWERED` record) and `ipc_mirror` (the generated barrel is current). The rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1578`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1578`.

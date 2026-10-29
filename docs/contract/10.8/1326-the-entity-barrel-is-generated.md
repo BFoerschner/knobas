@@ -4,7 +4,7 @@
   changed, no field added, removed or renamed, no wire shape changed, nothing added to either
   append-only barrel (`app/src/lib/ipc/index.ts` and `lib.rs`'s handler list are untouched).
   Ratified by the implementer on Opus under Björn's 2026-10-18 reserved-steps rule; the rulings
-  are in `docs/decisions/2026-10-unattended-rulings.md` under `## #1326`.
+  are in `docs/archive/2026-10-unattended-rulings.md` under `## #1326`.
 
   **`crates/knobas-source/src/**`.** The SPI's view, diff, docs, pipeline and run DTOs that cross
   to the shell (`view::{Block, ViewSection, SourceView, ViewAction, ActionField, FieldKind,

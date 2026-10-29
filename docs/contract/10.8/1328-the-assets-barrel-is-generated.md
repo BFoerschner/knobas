@@ -6,7 +6,7 @@
   either append-only barrel. `generated/assets.ts` is the file #1325's entry booked for this
   ticket; this entry records what else the switch did to the barrel. Ruled by the merge-manager
   on Opus under Björn's 2026-10-18 reserved-steps rule; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1328`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1328`.
 
   **Crates that gain a derive.** Two, both of which already depend on `ts-rs`, so no
   `Cargo.toml` gains a dependency (two dependency comments are reworded):

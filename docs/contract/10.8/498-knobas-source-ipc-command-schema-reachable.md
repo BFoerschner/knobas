@@ -6,7 +6,7 @@
   #498's first acceptance criterion, which asks for "the §10.8 entry [that] records the trait
   growth and the IPC read" by name. Björn keeps the gate for frozen contracts and this entry is
   flagged for his review — ratified in his absence by the deputy's ruling of 2026-09-08 on #498
-  (`docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the trait
+  (`docs/archive/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the trait
   method, on battery clause 8 — the strictest of the three, since #146 had reserved a battery
   clause change to Björn and this ticket's own first criterion asks for it by name — and on the
   IPC read, and found both this entry and §9's section sufficient as written.**

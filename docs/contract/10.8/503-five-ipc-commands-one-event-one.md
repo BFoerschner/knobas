@@ -6,7 +6,7 @@
   application being typed at. Ratified in advance by spec #491 (stories 40–43) and by the ticket's
   own first criterion, which asks for this entry by name. **Björn keeps the gate for frozen
   contracts and this entry is flagged for his review — ratified in his absence by the deputy's
-  ruling of 2026-09-08 on #503 (`docs/decisions/2026-09-v1-5-unattended-rulings.md`).**
+  ruling of 2026-09-08 on #503 (`docs/archive/2026-09-v1-5-unattended-rulings.md`).**
 
   **No migration.** The shortcut is one `knobas.setting` row — `capture.shortcut` — under `0002`,
   comment 6's store, for the clones root's reason: one accelerator a person types once is not a

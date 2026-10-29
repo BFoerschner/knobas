@@ -5,7 +5,7 @@
   `full_name` (`knobas-source-gitea`'s `repo_item`), and PostgreSQL's parser reads
   `tidewater/payout-service` as one file-path lexeme, so `payout-service`, `payout` and
   `Payout-Service` matched nothing of the repo. **Ratified under #612's "What to build" by the
-  deputy's ruling of 2026-10-12 on that issue** (`docs/decisions/2026-10-unattended-rulings.md`),
+  deputy's ruling of 2026-10-12 on that issue** (`docs/archive/2026-10-unattended-rulings.md`),
   which chose this migration over adding the bare name to the repo's body or rewriting its stored
   title. Migration additions have been ratified by the orchestrator under the ticket's own
   criterion since the #42 entry; Björn keeps the gate for frozen contracts and this entry is

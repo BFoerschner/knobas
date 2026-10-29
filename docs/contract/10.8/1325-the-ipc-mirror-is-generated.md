@@ -5,7 +5,7 @@
   changed, nothing added to either append-only barrel: `app/src/lib/ipc/index.ts` changes only its
   header comment, which repeated §2.6's old rationale. Ratified by the implementer on Opus under
   Björn's 2026-10-18 reserved-steps rule; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1325`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1325`.
 
   **§2.6 amended.** "Mirrors stay hand-written (M0 rationale: `tauri-specta` is still an RC)"
   no longer holds. That reason was about one generator, and it still holds for it (`specta`

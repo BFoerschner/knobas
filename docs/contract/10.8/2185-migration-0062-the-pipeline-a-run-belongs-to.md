@@ -3,7 +3,7 @@
   change, no event, no DTO field, no `WriteOp`, nothing in `crates/knobas-source/src/**`,
   `crates/knobas-http/**`, `error.rs` or `profile.rs`, no new module in either barrel or in
   `commands/`. Every command keeps its arguments and its answer. Ruled by the implementer on Opus;
-  the rulings are in `docs/decisions/2026-10-unattended-rulings.md` under `## #2185`.
+  the rulings are in `docs/archive/2026-10-unattended-rulings.md` under `## #2185`.
 
   **The migration** (`0062_the_pipeline_a_run_belongs_to.sql`). No earlier migration edited.
   Transactional. One new table, `sync.item_pipeline (entity_id text collate "C" references

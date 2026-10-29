@@ -5,7 +5,7 @@
   lands here; the excerpt option and the walker are named in advance, and each follow-up adds its
   signatures below in an `Amendment (#<issue>, <date>):` line. All three are additive: no change to
   the SPI, the commands, `HttpConfig`, `Auth`, retry, budget, classification or deadlines. Ratified
-  by the implementer on Opus; the rulings are in `docs/decisions/2026-10-unattended-rulings.md`
+  by the implementer on Opus; the rulings are in `docs/archive/2026-10-unattended-rulings.md`
   under `## #1310`.
 
   **`crates/knobas-http` — additive (#1310):**

@@ -6,7 +6,7 @@
   `crates/knobas-source/src/**`, `crates/knobas-http/**`, `crates/knobas-wasm-host/**`, `error.rs`
   or `profile.rs`. Both commands sit in the existing `commands/sources.rs` and are appended at the
   foot of the handler list, after `owed_tickets`. Ruled by the implementer on Opus (`## #2031` in
-  `docs/decisions/2026-10-unattended-rulings.md`).
+  `docs/archive/2026-10-unattended-rulings.md`).
 
   ```rust
   #[tauri::command] pub async fn preview_install_adapter(.., manifest: String) -> Result<AdapterPreview, IpcError>;

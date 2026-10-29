@@ -5,7 +5,7 @@
   barrel or to `commands/` / `ipc/`. What `reach:` answers is unchanged. Reserved for Björn and
   ruled by the implementer on Opus under Björn's 2026-10-22 waiver, then ruled again by the
   merge-manager on Opus (the indexes cover every entity, not only tickets); both rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1850, #1851 and #1855`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1850, #1851 and #1855`.
 
   **The migration** (`0058_a_ticket_is_found_by_its_key_in_any_case.sql`). Two btree indexes
   over every entity, nothing dropped and no earlier migration edited: `entity_id_lower_idx` on

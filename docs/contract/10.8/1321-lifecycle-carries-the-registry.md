@@ -6,7 +6,7 @@
   event, no `WriteOp`, nothing under `crates/knobas-source/src/**`, no command added, removed or
   renamed, no argument the frontend sends changed, no DTO field changed, no module added to either
   barrel or to `commands/`. Ratified by the implementer on Opus under Björn's 2026-10-18
-  reserved-steps rule; the rulings are in `docs/decisions/2026-10-unattended-rulings.md` under
+  reserved-steps rule; the rulings are in `docs/archive/2026-10-unattended-rulings.md` under
   `## #1321`.
 
   **The rename.** `Registry::builtin()` becomes `Registry::for_process()`. It returns the same

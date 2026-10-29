@@ -7,7 +7,7 @@
   own third criterion, which asks for the entry by name and for the normalisation rule to be
   stated here. Björn keeps the gate for frozen contracts and this entry is flagged for his
   review — ratified in his absence by the deputy's ruling of 2026-09-08 on #496
-  (`docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on both
+  (`docs/archive/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on both
   surfaces and found the entry sufficient as written.**
 
   **`crates/knobas-db/migrations/**` — one migration, `0023_the_url_a_paste_names.sql`, and it

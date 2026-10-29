@@ -4,7 +4,7 @@
   `WriteOp`, nothing under `crates/knobas-source/src/**`, no new command, no new argument, no
   field added or renamed, no new module in either barrel or in `commands/`. Ratified by the
   implementer on Opus under Björn's 2026-10-18 reserved-steps rule; the ruling is in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1296–#1298`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1296–#1298`.
 
   `docs_tree` narrows its spaces to the wiki role's fillers
   (`knobas_app::sources::crud::fillers`), as the #1294 entry said it would, and beyond that entry

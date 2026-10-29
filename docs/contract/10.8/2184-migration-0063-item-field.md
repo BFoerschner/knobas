@@ -1,7 +1,7 @@
 - **Migration `0063` — issue #2184 (2026-10-26): each item's status, assignee and project are
   stored, and the Tickets screen's reads probe them instead of walking every ticket's payload.**
   Ruled by the implementer on Opus; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #2183 and #2184`. It follows `0028`,
+  `docs/archive/2026-10-unattended-rulings.md` under `## #2183 and #2184`. It follows `0028`,
   `0030` and `0032`'s pattern (ADR-0019, amended the same day) and edits no earlier migration. No
   command, no IPC schema change, no event, no DTO field, no `WriteOp`, nothing in
   `crates/knobas-source/src/**`, `crates/knobas-http/**`, `error.rs` or `profile.rs`, no new module

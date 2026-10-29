@@ -4,7 +4,7 @@
   IPC change, no new command, no event, no new module in either barrel or in `commands/`,
   nothing in `crates/knobas-source/src/**`, `crates/knobas-http/**`, `error.rs` or `profile.rs`.
   Ratified by the implementer on Opus under Björn's 2026-10-18 reserved-steps rule; the rulings
-  are in `docs/decisions/2026-10-unattended-rulings.md` under `## #1285`.
+  are in `docs/archive/2026-10-unattended-rulings.md` under `## #1285`.
 
   **The migration** (`0054_a_saved_views_query_keeps_no_jira_name.sql`). Renames only:
   `sync.saved_view.jql` → `sync.saved_view.source_query`, the name `SavedViewSource` carries it

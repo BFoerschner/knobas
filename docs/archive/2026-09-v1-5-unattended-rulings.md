@@ -1681,7 +1681,7 @@ changes"* beside *"3 servers produced, all known, no changes"*, which is the cri
 turns on and the Docker half of the witness ADR-0015 books (*"a file generated from the live
 hcloud or Docker host previews as all-known against `testenv/hetzner/estate.json`"*). Björn
 reverses any part with a follow-up ticket; the PR that acts on this appends it to
-`docs/decisions/2026-09-v1-5-unattended-rulings.md` in the same four-part shape.
+`docs/archive/2026-09-v1-5-unattended-rulings.md` in the same four-part shape.
 
 Owed inside #510, on PR #545: the ratification clause (part 1); two corrected sentences and one
 word (part 4b); the PR body corrected to match before the squash. For the orchestrator: a sixth
@@ -1737,7 +1737,7 @@ it gains.
 
 The clause owed: the entry's *"claims no ratification"* sentence stays as the history it is, and
 gains, beside it, *"— ratified in his absence by the deputy's ruling of 2026-09-08 on #510
-(`docs/decisions/2026-09-v1-5-unattended-rulings.md`)"*, the wording #496's, #498's, #503's,
+(`docs/archive/2026-09-v1-5-unattended-rulings.md`)"*, the wording #496's, #498's, #503's,
 #505's, #506's, #507's, #508's and #509's entries carry.
 
 Claim-by-claim verification of the entry against the diff is the merge-manager's deep pass, as on
@@ -2002,7 +2002,7 @@ measurement whenever Björn wants the sentence to be one, taken when no live sui
 ---
 
 **Record-keeping:** the PR appends this as `## #510` in
-`docs/decisions/2026-09-v1-5-unattended-rulings.md`, after `## #507` (the last section on
+`docs/archive/2026-09-v1-5-unattended-rulings.md`, after `## #507` (the last section on
 `origin/main` today) or after whatever section is last on the merge commit. The §10.8 clause of
 part 1, the two sentences and one word of part 4b, the PR body corrected to match before the
 squash (#509's second ruling, part 3: the body is the squash message), and the append are the
@@ -2386,7 +2386,7 @@ sweep's table:
 
 The seven on `76899b84` stand under part 4 of the #552 ruling, which bounds them to a PR that stays
 inside `testenv/**` and docs. `git diff --name-only 76899b84 16d0dee0` is exactly four paths:
-`docs/decisions/2026-09-v1-5-unattended-rulings.md`, `testenv/README.md`, `testenv/kuma-seed.mjs`,
+`docs/archive/2026-09-v1-5-unattended-rulings.md`, `testenv/README.md`, `testenv/kuma-seed.mjs`,
 `testenv/seed-kuma.sh`. No crate, no suite, no `justfile`. The merge-manager read the same list on
 the branch before squashing, and the eighth run is a run of the tree that is now `main`: the branch
 tree and the squash tree share the id `ae37f72d`, which is #525's condition (d) as applied by the
@@ -2843,7 +2843,7 @@ The orchestrator's docs-only PR writes it (part 5); it is `docs/**`.
 
 **(5) What the closing iteration owes, in this order**, the v1.5 exit's part 4 applied: (a) one
 docs-only PR — `docs/**` and nothing else, the merge-manager refusing any other path in `git diff
---name-only` — appending this ruling to `docs/decisions/2026-09-v1-5-unattended-rulings.md` as `##
+--name-only` — appending this ruling to `docs/archive/2026-09-v1-5-unattended-rulings.md` as `##
 Milestone 14 (v1.5 follow-ups) — the exit` after the `## #564` section, adding the roadmap sentence
 of part 3 and the working-model paragraph of part 4; no `Closes` keyword anywhere in it; merged
 before anything closes. (b) The orchestrator strips `in-progress` from #515, #544, #524, #516, #561,

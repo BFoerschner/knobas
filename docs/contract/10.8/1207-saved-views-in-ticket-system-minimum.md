@@ -5,7 +5,7 @@
   `crates/knobas-wasm-host/wit/adapter.wit` (`knobas:adapter@1.0.0` is untouched), no change to
   `crates/knobas-app/src/error.rs`. Parent spec #1192 (ADR-0029). Ratified by the implementer on
   Opus under Björn's 2026-10-18 reserved-steps rule; the ruling is in
-  `docs/decisions/2026-10-unattended-rulings.md`.
+  `docs/archive/2026-10-unattended-rulings.md`.
 
   **The frame.** `knobas_core::payload::Frame` gains `SavedView`, on the wire `"saved_view"` (the
   other two stay `"pipeline"` and `"run"`). A kind whose `KindPaths.frame` is `saved_view` is a

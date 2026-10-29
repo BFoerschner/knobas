@@ -627,7 +627,7 @@ macro_rules! open_alert_opened_at {
 ///
 /// Pinned by `an_acked_alert_is_still_open_and_still_on_the_list` in
 /// `crates/knobas-app/tests/it/search_ipc.rs`. Ruled for v1.5 on 2026-09-08
-/// (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, #504), which also
+/// (`docs/archive/2026-09-v1-5-unattended-rulings.md`, #504), which also
 /// records why copying the clause would not have made the two counts agree:
 /// #446's ack writes `acked_at` **and** `complete_with`, and the inbox's count
 /// excludes snoozed items, so the disagreement is a shelf and not a clause.

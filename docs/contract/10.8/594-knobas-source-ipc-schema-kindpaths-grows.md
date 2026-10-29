@@ -30,7 +30,7 @@
   but not mirrored". Only the child's declaration can say what such a parent is. Adding it now
   saves a second §10.8 touch later. The `kind` part and the two-shape `at` were ratified as within
   #591's sanctioned change by the deputy's ruling of 2026-10-11 on #594
-  (`docs/decisions/2026-10-unattended-rulings.md`); flagged for Björn's review. **`at` takes two
+  (`docs/archive/2026-10-unattended-rulings.md`); flagged for Björn's review. **`at` takes two
   shapes** for the same reason: the spec takes Confluence's transitive chain "from the existing
   `ancestors` payload (#284)", an array, while Gitea, TeamCity and Jira name one object. Both are
   said in one field rather than two, and an `at` that resolves to neither shape is a miss. The

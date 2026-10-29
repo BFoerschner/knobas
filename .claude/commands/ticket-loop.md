@@ -20,7 +20,7 @@ Every open issue labelled `ready-for-agent`, in any milestone or none, except a 
 
 ## Decisions (orchestrator's side; the briefs carry the workers' side)
 
-Whoever does the work decides, records the ruling in the PR under **Rulings** and in `docs/decisions/<yyyy-mm>-unattended-rulings.md`, and never waits for Björn. You rule only loop-level questions: order, nothing dropped, a cap that blocks the frontier is reported, not worked around.
+Whoever does the work decides, records the ruling in the PR under **Rulings** and as a comment on the issue, and never waits for Björn. You rule only loop-level questions: order, nothing dropped, a cap that blocks the frontier is reported, not worked around.
 
 A step a ticket, milestone or spec **reserves for Björn** is ruled by the **Opus** agent on the work. Every such ruling goes in the iteration report under *rulings recorded*.
 

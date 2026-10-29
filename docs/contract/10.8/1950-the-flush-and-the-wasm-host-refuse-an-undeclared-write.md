@@ -1,7 +1,7 @@
 - **`crates/knobas-source/src/**`, the write queue's flush and the WASM host — issue #1950
   (2026-10-24): an op the built source does not declare is refused before any adapter or guest
   is handed it.** Ruled by the implementer on Opus and ruled again by the merge-manager on Opus
-  (`## #1950` in `docs/decisions/2026-10-unattended-rulings.md`); the issue has no parent spec.
+  (`## #1950` in `docs/archive/2026-10-unattended-rulings.md`); the issue has no parent spec.
   No change to an existing signature on `Source`, no new `WriteOp` or `SourceError` variant, no
   WIT change, no migration, no new command, event or module in `commands/` or `ipc/`. The
   generated `sources.ts` changes only in the doc comment on `SourceDescriptor.write_ops`.

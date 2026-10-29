@@ -2,7 +2,7 @@
   system a saved view comes from.** No new command, event, migration, type or module in
   `commands/` or `ipc/`; the generated mirror (`app/src/lib/ipc/generated/search.ts`) is
   regenerated for the field. Ruled by the implementer on Opus (`## #2032` in
-  `docs/decisions/2026-10-unattended-rulings.md`); parent spec #1192, story 7.
+  `docs/archive/2026-10-unattended-rulings.md`); parent spec #1192, story 7.
 
   1. **`SavedViewSource.system`**, answered by `ticket_views` on every row whose
      `saved_view_source` is not `null`: the name the view's group is made from, by

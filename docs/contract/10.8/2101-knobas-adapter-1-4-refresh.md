@@ -3,7 +3,7 @@
   No migration, no IPC command, event or DTO, no `commands/` or `ipc/` module, no `WriteOp`, no
   battery clause, no change to `crates/knobas-source/src/**` (`Source::refresh`,
   `RefreshAnswer`, `Capability::Refresh` and clause 13 are #2095's entry,
-  `2095-source-refresh.md`). Rulings in `docs/decisions/2026-10-unattended-rulings.md` under
+  `2095-source-refresh.md`). Rulings in `docs/archive/2026-10-unattended-rulings.md` under
   `## #2101`.
 
   **The minor.** The one after #1380's 1.3.0 (`sink.walked`), under the 1198 entry's rule: a new

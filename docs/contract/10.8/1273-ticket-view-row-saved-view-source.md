@@ -5,7 +5,7 @@
   module in either barrel or in `commands/`, nothing in `crates/knobas-source/src/**`,
   `crates/knobas-http/**`, `error.rs` or `profile.rs`. Ratified by the implementer on Opus under
   Björn's 2026-10-18 reserved-steps rule; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1273`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1273`.
 
   **The IPC**, in the **existing** `crates/knobas-app/src/ticket_views.rs` (answered by
   `ticket_views`, `commands/search.rs`):

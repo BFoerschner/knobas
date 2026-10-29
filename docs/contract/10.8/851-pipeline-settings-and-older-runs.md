@@ -66,5 +66,5 @@
   `live_teamcity_seeded.rs`'s `older_runs_page_back_through_a_configurations_history` and
   `a_configurations_settings_come_back_without_a_credential`.
 
-  **Not declared here, by ruling** (`docs/decisions/2026-10-unattended-rulings.md`, #851): a run's
+  **Not declared here, by ruling** (`docs/archive/2026-10-unattended-rulings.md`, #851): a run's
   started-by and trigger, and its test summary (#855). #947 keeps the list.

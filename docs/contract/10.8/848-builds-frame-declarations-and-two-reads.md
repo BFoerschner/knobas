@@ -63,6 +63,6 @@
   `tests/it/builds_ipc.rs`, and on the seeded TeamCity by `live_teamcity_seeded.rs`'s
   `the_seeded_records_fill_the_builds_frame` and the battery.
 
-  **Not declared here, by ruling** (`docs/decisions/2026-10-unattended-rulings.md`, #848): a
+  **Not declared here, by ruling** (`docs/archive/2026-10-unattended-rulings.md`, #848): a
   pipeline's repository, default branch, parameter specs and triggers, and a run's started-by,
   agent, steps and test summary. Each is a later §10.8 entry by the ticket that first draws it.

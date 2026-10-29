@@ -12,11 +12,11 @@
   for this entry by name (*"§10.8 entry for the produce command"*). **Björn keeps the gate for
   frozen contracts and this entry is flagged for his review.** In his absence the v1.5 loop's
   deputy is what exercises that gate, and its ruling is recorded on the issue and appended to
-  `docs/decisions/2026-09-v1-5-unattended-rulings.md` by the PR that acts on it; **no ruling had
+  `docs/archive/2026-09-v1-5-unattended-rulings.md` by the PR that acts on it; **no ruling had
   been posted on #510 when this entry was written**, so this sentence records the flag and claims
   no ratification — **ratified in his absence by the deputy's ruling of 2026-09-08 on #510**
   ([comment](https://github.com/BFoerschner/knobas/issues/510#issuecomment-5581090073),
-  `docs/decisions/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the second
+  `docs/archive/2026-09-v1-5-unattended-rulings.md`), which exercised that gate on the second
   arm of `Importer`, on the third `PRODUCERS` row and on the one new field, and which ruled the
   fork named on the ticket before it started taken correctly as route 1, the field-name revert
   right and the `Produced` module move inside this ticket's scope. The sentences stand side by

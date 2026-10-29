@@ -7,7 +7,7 @@
   change to `crates/knobas-source/src/**`, `crates/knobas-http/**`, `crates/knobas-wasm-host/**`,
   `error.rs` or `profile.rs`. `restore_backup`'s shape is unchanged. Ratified by the implementer on
   Opus under Björn's 2026-10-18 reserved-steps rule; the ruling is in
-  `docs/decisions/2026-10-unattended-rulings.md`.
+  `docs/archive/2026-10-unattended-rulings.md`.
 
   **`install_adapter(manifest: string)`** keeps its name and its answer. `manifest` may now be a
   GitHub repository URL (`https://github.com/<o>/<r>`, its latest release's

@@ -59,4 +59,4 @@
   invokes, and every barrel command is answered or on its `UNANSWERED` record, and
   `fake-answers.ts` types exactly the barrel's commands), by `commands/time.rs`' two mirror tests
   and by `ipc_mirror` (the generated barrel is current). The rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1657`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1657`.

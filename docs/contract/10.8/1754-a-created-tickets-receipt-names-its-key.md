@@ -3,7 +3,7 @@
   app takes the ticket a write filed from it.** No signature change, no new `WriteReceipt` field,
   no `WriteOp` change, no migration, no new command, DTO, event or module in `commands/` or
   `ipc/`; the generated mirror does not change. Reserved for Björn, ruled by the implementer on Opus and confirmed by the merge-manager on
-  Opus (`## #1754` in `docs/decisions/2026-10-unattended-rulings.md`); the issue has no parent
+  Opus (`## #1754` in `docs/archive/2026-10-unattended-rulings.md`); the issue has no parent
   spec.
 
   1. **The receipt's contents.** Jira's `create_ticket` answers `WriteReceipt::id(<key>)`

@@ -4,7 +4,7 @@
   command, no IPC schema change, no event, no DTO field, no `WriteOp`, nothing in
   `crates/knobas-source/src/**`, `crates/knobas-http/**`, `error.rs` or `profile.rs`, no new module
   in either barrel or in `commands/`. Ruled by the implementer on Opus; the
-  rulings are in `docs/decisions/2026-10-unattended-rulings.md` under `## #2166`.
+  rulings are in `docs/archive/2026-10-unattended-rulings.md` under `## #2166`.
 
   **The migration** (`0061_a_jira_ticket_keeps_no_changelog.sql`). No earlier migration edited.
   Transactional. One statement: `payload - 'changelog'` on every `sync.item` of kind `ticket`

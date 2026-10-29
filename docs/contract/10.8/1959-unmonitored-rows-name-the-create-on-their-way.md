@@ -3,7 +3,7 @@
   monitor whose create is on its way.** No new command, event, migration, type or module in
   `commands/` or `ipc/`; the generated mirror (`app/src/lib/ipc/generated/assets.ts`) is
   regenerated for the field, which imports `QueuedWrite` from `./sources`. Reserved for Björn,
-  ruled by the implementer on Opus (`## #1959` in `docs/decisions/2026-10-unattended-rulings.md`);
+  ruled by the implementer on Opus (`## #1959` in `docs/archive/2026-10-unattended-rulings.md`);
   the issue has no parent spec.
 
   1. **`UnmonitoredAsset.monitor_on_its_way`**, answered by `unmonitored_assets` for every asset

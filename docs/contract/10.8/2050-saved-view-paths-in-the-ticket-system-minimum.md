@@ -7,7 +7,7 @@
   fields inside each descriptor's `KindPaths`, and `SavedViewSource`'s doc comments now say where
   its fields are read. Parent spec #1192, stories 2 and 7 (ADR-0029). Follows the #1207 entry,
   whose saved view had no required paths. Ruled by the implementer on Opus (`## #2050` in
-  `docs/decisions/2026-10-unattended-rulings.md`).
+  `docs/archive/2026-10-unattended-rulings.md`).
 
   **The declarations** (`knobas_core::payload`, re-exported by `knobas_source`). `KindPaths`
   gains `source_query`, `board_type` and `sub_query` (each a string) and `sprint` (a JSON

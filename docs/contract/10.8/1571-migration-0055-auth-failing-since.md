@@ -5,7 +5,7 @@
   `crates/knobas-source/src/**`, `crates/knobas-http/**`, `error.rs` or `profile.rs`, nothing added
   to either append-only barrel or to `commands/` / `ipc/`. Ratified by the implementer on Opus under
   Björn's 2026-10-18 reserved-steps rule; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1571`.
+  `docs/archive/2026-10-unattended-rulings.md` under `## #1571`.
 
   **The migration** (`0055_when_a_sign_in_started_failing.sql`). `auth_failing_since timestamptz`,
   nullable, on `knobas.source_config`, and the plpgsql function `knobas.keep_auth_failing_since()`
