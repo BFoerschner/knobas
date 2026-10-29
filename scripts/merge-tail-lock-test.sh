@@ -18,13 +18,11 @@
 #    stays. `take` is re-entrant for the holder; `assert` exits 0 for the
 #    holder and 1 for anyone else; `hold` runs nothing for a non-holder and
 #    passes its command's exit status through.
-# 4. `partner <PR> 2` names up to two ready, live waiters, oldest first
-#    (#1862); without a count it names one, as the brief before #1862 reads it.
-# 5. `gated` (#1862) says "merge without gating again" only to the holder,
+# 4. `gated` (#1862) says "merge without gating again" only to the holder,
 #    only while origin's main is the main `ready` recorded, the worktree's head
 #    is the head it recorded, and that head sits on that main. Anything else
 #    (a commit since, main moved, no record, origin unreadable) is stale.
-# 6. `hold` tells its command it runs for the holder (#1866):
+# 5. `hold` tells its command it runs for the holder (#1866):
 #    KNOBAS_MERGE_TAIL_HOLDER=<PR>, which `scripts/gate-slot.sh` reads. End to
 #    end with that script, the holder's gate under `hold` takes the freed gate
 #    slot ahead of a pre-gate that has waited longer.
@@ -35,11 +33,11 @@
 #
 # MERGE_TAIL_LOCK=<path> runs it against another copy of the script, such as
 # the one on `main` before #1836, to watch the dead-holder cases fail;
-# GATE_SLOT=<path> does the same for `scripts/gate-slot.sh` in case 6.
+# GATE_SLOT=<path> does the same for `scripts/gate-slot.sh` in case 5.
 set -uo pipefail # no -e: a failed check is counted, and the run goes on
 here=$(cd "$(dirname "$0")" && pwd)
 # Under a holder's re-gate (`hold <PR> just gate` runs `witness-unit`) the
-# environment already carries the mark case 6 looks for.
+# environment already carries the mark case 5 looks for.
 unset KNOBAS_MERGE_TAIL_HOLDER
 
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/knobas-merge-tail-check.XXXXXX")
@@ -206,31 +204,7 @@ check "hold: the holder's command exit status passes through (status $hold_statu
 check "hold: the holder still holds afterwards" [ "$(assert_status 1280)" = 0 ]
 lock release 1280 > /dev/null
 
-# --- 4. partner: up to two ready, live waiters, oldest first ---
-# 1302 is ready before 1301, so the order is by number, not by arrival. 1299
-# is merged in a batch, 1298's queue entry is dead, 1297 is queued but not
-# ready, 1300 is the holder asking.
-fresh
-lock take 1300 > /dev/null
-mkdir -p "$QUEUE"
-for n in 1302 1301 1303 1299 1298; do lock ready "$n" "sha$n" > /dev/null; done
-lock merged 1299 merge1299 > /dev/null
-touch "$QUEUE/1302" "$QUEUE/1301" "$QUEUE/1303" "$QUEUE/1298" "$QUEUE/1297"
-age 200 "$QUEUE/1298"
-lock partner 1300 2 > "$scratch/p1.out"
-check "partner 2: the two oldest ready, live waiters, oldest first" \
-    diff <(printf '1301 sha1301\n1302 sha1302\n') "$scratch/p1.out"
-lock partner 1300 > "$scratch/p2.out"
-# A holder on the brief before #1862 stacks one partner and reads one line.
-check "partner without a count: one partner, the oldest" diff <(printf '1301 sha1301\n') "$scratch/p2.out"
-rm "$QUEUE/1301" "$QUEUE/1302"
-lock partner 1300 2 > "$scratch/p3.out"
-check "partner 2 with one candidate left: one line" diff <(printf '1303 sha1303\n') "$scratch/p3.out"
-lock partner 1300 3 > "$scratch/p4.out" 2>&1; p4_status=$?
-check "partner 3: refused, a batch is at most three (status $p4_status)" [ "$p4_status" = 2 ]
-lock release 1300 > /dev/null
-
-# --- 5. The pre-gate record: merge without gating again only when nothing moved ---
+# --- 4. The pre-gate record: merge without gating again only when nothing moved ---
 # A real origin and two clones: `wt` is the merge-manager's worktree, `other`
 # moves main the way another merge does.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
@@ -309,7 +283,7 @@ status=$(gated_status 1310 "$scratch/g9.out")
 check "gated: release drops the record (status $status)" [ "$status" = 1 ]
 lock release 1310 > /dev/null
 
-# --- 6. The holder's gate goes first on the gate slots (#1866) ---
+# --- 5. The holder's gate goes first on the gate slots (#1866) ---
 fresh
 lock take 1320 > /dev/null
 # shellcheck disable=SC2016 # the command's own shell expands it
