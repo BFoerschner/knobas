@@ -8,7 +8,7 @@ The orchestrator's reference: why the loop's numbers and rules are what they are
 - **A ticket is a `ready-for-agent` issue.** One implementer in its own worktree, branch `issue-<N>`, test-first, a draft PR. One merge-manager reviews both axes with a deep pass on frozen surfaces, fixes, gates once on the head it merges, and squash-merges under the merge-tail lock, one PR at a time. The implementer never runs the full gate and never merges, except on a *self-merge* dispatch.
 - **Self-merge**: mechanical work or a small visible change a screenshot shows, no frozen surface, no live suite, about 300 lines or fewer. The implementer gates and merges itself. Docs-only work runs `just docs-check` in place of the gate.
 - **Rulings are the worker's.** Forks, steps reserved for Björn, review findings: the agent on the work rules them and records each in the PR under **Rulings** and as an issue comment. Milestone exits are approved by an independent Opus reviewer; frozen-contract changes are ruled by the agent that lands them.
-- **Models and seats**: Opus for every role (Björn, 2026-10-23). The live ceiling is in `ticket-loop.md`, *Ceiling*. Sonnet for self-merge tickets is to be revisited after two weeks of merge counts from 2026-10-29.
+- **Models and seats**: Opus for every role (Björn, 2026-10-23). No other model (Björn, 2026-10-29: not Sonnet for self-merge tickets either). The live ceiling is in `ticket-loop.md`, *Ceiling*.
 - **Where precedent lives.** `docs/adr/` holds ratified architecture decisions; `docs/decisions/` holds Björn's dated rulings; `docs/archive/` holds what no longer binds but is still cited. Before reopening a settled question, read the first two.
 
 ## Live runs
