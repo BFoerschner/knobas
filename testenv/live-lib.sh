@@ -10,7 +10,7 @@
 # This supersedes the 2026-09-06 move of the three JVM products to Hetzner for
 # live suites; those servers were decommissioned after it (#634). ADR-0013 is
 # unchanged -- the witness is still the real product. Recorded in
-# docs/decisions/2026-10-unattended-rulings.md.
+# docs/archive/2026-10-unattended-rulings.md.
 #
 # Four products, and what each brings up:
 #

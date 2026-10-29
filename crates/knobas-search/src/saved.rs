@@ -139,7 +139,7 @@ const MAX_ID_CHARS: usize = 48;
 ///
 /// `launcher_board` at sixteen was reported at 96 and 108 ms from runs taken
 /// without the #533 re-run standard's four conditions
-/// (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, `## #533`). Five runs
+/// (`docs/archive/2026-09-v1-5-unattended-rulings.md`, `## #533`). Five runs
 /// that met (b)-(d), with (a) shown by a 5-second process and gate-slot monitor
 /// over each whole run rather than an orchestrator hold (one further run was
 /// discarded on its evidence; ruling on #629, admitted for this not-reproduced

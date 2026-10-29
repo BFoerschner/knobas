@@ -159,8 +159,8 @@ pin_guarded() {
 # is a network round trip that can fail -- a Docker Hub 429 mid-run (observed
 # 2026-08-31) therefore left an images.env holding the header comment and none of the
 # seventeen digests, which `docker compose` reports as a missing-variable error
-# somewhere else entirely. Same reasoning as `just inventory`, which learned it
-# the same way.
+# somewhere else entirely. Same reasoning as the justfile's atomic writes, which
+# learned it the same way.
 #
 tmp=$(mktemp "${TMPDIR:-/tmp}/knobas-env.XXXXXX")
 trap 'rm -f "$tmp"' EXIT

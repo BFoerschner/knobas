@@ -5,7 +5,7 @@
 -- Single-writer, like every migration: a ticket that needs more schema takes
 -- the next number and never edits this file or its predecessors. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/contract/10.8/1172-migration-0050-ids-compare-bytewise.md`) and
+-- (`docs/archive/contract-10.8/1172-migration-0050-ids-compare-bytewise.md`) and
 -- ADR-0027.
 --
 -- ## Why

@@ -1228,7 +1228,7 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
 /// gone, shuts itself down within a minute, after which the next start is a
 /// clean one. That is what deleting `postmaster.pid` by hand, the old
 /// refusal's advice, did too. The evidence is recorded in
-/// `docs/decisions/2026-10-unattended-rulings.md` under #1775.
+/// `docs/archive/2026-10-unattended-rulings.md` under #1775.
 ///
 /// # Errors
 ///
@@ -1646,7 +1646,7 @@ fn read_password(password_file: &Path) -> Result<Option<String>, DbError> {
 /// A data directory that is a symlink loses the link alone (`remove_dir_all`
 /// follows no symlink): what it points at is left as it was, and `initdb`
 /// makes a directory in its place. Evidence:
-/// `docs/decisions/2026-10-unattended-rulings.md`, #1637, #1819, #1985 and
+/// `docs/archive/2026-10-unattended-rulings.md`, #1637, #1819, #1985 and
 /// #2007.
 fn recover_or_mark(data_dir: &Path) -> Result<(), DbError> {
     match shape(data_dir) {
@@ -2246,7 +2246,7 @@ enum Lock {
 /// lets only one of the two postmasters past it (see [`adopt`], *A stranger
 /// on the port*), the other exits, and the survivor, whose lock file is then
 /// gone, shuts itself down within a minute; the next start replays the WAL.
-/// The evidence is recorded in `docs/decisions/2026-10-unattended-rulings.md`
+/// The evidence is recorded in `docs/archive/2026-10-unattended-rulings.md`
 /// under #1789.
 fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
     let pid_file = data_dir.join("postmaster.pid");
@@ -3431,7 +3431,7 @@ mod tests {
     /// Where a killed `initdb` stops (#1819), one state of the three that
     /// fail every launch. Each was named by starting a server on what the
     /// kill left and logging in (recorded under #1819 in
-    /// `docs/decisions/2026-10-unattended-rulings.md`).
+    /// `docs/archive/2026-10-unattended-rulings.md`).
     ///
     /// **Each is a run `initdb` is held in** (#1908): its `postgres` waits
     /// there until the test has killed `initdb`. A kill timed by watching

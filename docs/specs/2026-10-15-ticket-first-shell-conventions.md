@@ -1,6 +1,6 @@
 # Ticket-first shell: conventions so far
 
-How code for the new shell (the TF milestones) is written, as the first tickets already did it. This file records conventions only. It decides nothing new, and the [design system](2026-10-15-ticket-first-design-system.md), the ADRs and spec #808 win wherever they differ. Each line names where it was ruled: the entry in `docs/decisions/2026-10-unattended-rulings.md` and the PR. A PR that departs from a line says why in its Rulings.
+How code for the new shell (the TF milestones) is written, as the first tickets already did it. This file records conventions only. It decides nothing new, and the [design system](2026-10-15-ticket-first-design-system.md), the ADRs and spec #808 win wherever they differ. Each line names where it was ruled: the entry in `docs/archive/2026-10-unattended-rulings.md` and the PR. A PR that departs from a line says why in its Rulings.
 
 Not yet recorded: the conventions of #826 (PR #899 was open when this was written).
 

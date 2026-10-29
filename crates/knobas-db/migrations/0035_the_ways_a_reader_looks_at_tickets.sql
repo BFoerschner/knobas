@@ -5,7 +5,7 @@
 -- the next number and never edits this file or its predecessors -- sqlx
 -- checksums applied migrations and an edit fails startup on every existing
 -- database. Recorded in `docs/contract.md` section 10.8
--- (`docs/contract/10.8/812-migration-0035-ticket-views-three-commands.md`).
+-- (`docs/archive/contract-10.8/812-migration-0035-ticket-views-three-commands.md`).
 --
 -- ## What a ticket view is
 --

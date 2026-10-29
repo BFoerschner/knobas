@@ -76,7 +76,7 @@
 # stopped, and released by the same EXIT, INT and TERM traps that clean up the
 # rest. For a bare `just test` on a cold tree that start is before the build,
 # so a waiting gate's compile does not share the cores the running gate is
-# already saturating; under `check` the build has happened in `inventory`
+# already saturating; under `check` the build has happened in `test-build`
 # by then, and what waits is the run.
 #
 # A slot is a symlink, `$TMPDIR/knobas-gate-slots/slot-<n>`, whose target is

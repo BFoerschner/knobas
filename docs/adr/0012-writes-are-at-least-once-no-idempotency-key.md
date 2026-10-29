@@ -4,25 +4,24 @@ status: accepted
 
 # Writes are at-least-once, and `Source::write` takes no idempotency key
 
-No transaction can span `source.write()` and `store::sent()`: the first is network I/O, and holding a database transaction across network I/O is the exact shape §10.6(c) moved the sync engine away from. So the write queue is at-least-once by construction — if knobas dies between the send returning and `sent` landing, the row stays pending and the next flush re-sends a write that already arrived. Since #163 the consequence includes creates: Gitea refuses a duplicate branch or an already-open PR with a 409, and a duplicated Jira `create_ticket` files the ticket twice. (This line first called `transition` and `approve` naturally idempotent. The #1122 audit found neither is: Jira takes a repeated transition on a workflow that loops back to its own status, and Gitea records a second `APPROVED` review. Corrected 2026-10-17, #1125.)
+No transaction can span `source.write()` and `store::sent()`, because the first is network I/O and §10.6(c) keeps transactions off network I/O. So the write queue is at-least-once by construction: if knobas dies between the send returning and `sent` landing, the row stays pending and the next flush re-sends a write that already arrived. Decided 2026-08-31 (Björn, closing #122): **the at-least-once property is stated, not papered over, and `Source::write(op: WriteOp)` keeps its signature.** None of the sources offers server-side idempotency on the endpoints the queue uses, so a key parameter would be accepted and ignored by every adapter.
 
-Decided 2026-08-31 (Björn, closing #122): **the documentation stance is the ruling.** `Source::write(op: WriteOp)` keeps its signature; the at-least-once property is stated rather than papered over. The reason is honesty in the SPI: none of the three M2 sources offers server-side idempotency on the endpoints the queue uses (Jira DC comment/create, Gitea issue comments, TeamCity's trigger), so a key parameter today would be accepted and ignored by every implementor — a parameter that looks like a guarantee no adapter keeps. And with zero honouring adapters, the user-facing statement needs no per-op metadata: it is simply true of every op that is not naturally idempotent.
-
-The canonical sentence, quotable verbatim by any user-facing surface (issue #224 puts it in the write queue view):
+- Duplicates are real for creates (a second branch or PR gets a 409, a Jira `create_ticket` files twice) and also for `transition` and `approve` (corrected 2026-10-17, #1125: Jira takes a repeated transition on a workflow that loops, Gitea records a second review).
+- The canonical sentence, quoted verbatim by any user-facing surface (the write queue view, the worklog draft):
 
 > A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than guess; it never merges or drops what you wrote.
 
-## Considered options
+- A send that got no answer is outside this window (#1125). A once-sent write that timed out or got a 502 or 504 comes back as `SourceError::Unconfirmed`. If a second arrival would duplicate it, the queue holds it for the reader instead of re-sending, per `WriteOp::delivery`'s `resend_harmless`, read by `knobas_sync::write_queue`'s `attempt`.
+- What cannot be prevented is disclosed. A `create_ticket` or `create_page` withdrawn while in flight can stand at the source with nothing in knobas claiming it. `knobas_sync::write_queue::unclaimed` writes one activity line where the fact exists. It is a disclosure, not a repair, since no key rides on the call.
 
-- **An idempotency key on `Source::write` now**, per the #122 implementer's design: the key is `write_queue.id` (stable, durable, never reused, free for the queue to supply), `SourceDescriptor` declares per-op whether an adapter honours it, and an adapter that cannot says so rather than pretending. Deferred, not rejected — this is the recorded starting shape for the retrofit when it is paid for (see consequences). What it buys today is nothing behavioural, at the price of a §10.8 ratified exception spent on a hypothesis.
-- **Queue-side dedupe by content hash.** Rejected outright: a hash cannot distinguish a crash-retry from a person deliberately posting the same words twice, so it silently swallows a real write — the same failure class this would exist to fix, arriving through the fix.
-- **A transaction spanning send and settle.** Rejected: §10.6(c). The gap is structural; the only system that can actually suppress the duplicate is the one that already has the row, and none of them offers to.
+## Rejected
+
+- An idempotency key on `Source::write` now. Deferred, not rejected. The recorded starting shape for the retrofit: the key is `write_queue.id`, `SourceDescriptor` declares per op whether an adapter honours it, and an adapter that cannot says so. Today it buys nothing behavioural.
+- Queue-side dedupe by content hash. A hash cannot tell a crash-retry from a person posting the same words twice, so it swallows real writes.
+- A transaction spanning send and settle. §10.6(c).
 
 ## Consequences
 
-- **What cannot be prevented is disclosed instead.** The same window that duplicates a write can leave one *unclaimed* (`CONTEXT.md`): a `create_ticket` or a `create_page` withdrawn while it was in flight stands at the source with nothing in knobas claiming it. Nothing at the withdrawal end can know that — the queue cannot tell a write in flight from one never tried — so the record is written where the fact exists, one activity line in `knobas_sync::write_queue::unclaimed` (#336). It is a disclosure and not a repair, for this ADR's own reason: no key rides on the call, so there is nothing to reconcile the artefact against.
-- **The reconsideration trigger is an adapter, not a report.** The day an adapter lands whose source offers server-side idempotency on a write endpoint the queue uses, the §10.8 exception is paid for that adapter, starting from the design recorded above. Field reports of post-crash duplicates do not reopen this: with no honouring source, a key could not have prevented them.
-- No §10.8 entry now — the frozen surface is untouched, which is the point.
-- **A send that got no answer is outside this window** (#1125). This ADR covers a crash between the send returning and `sent` landing, which still re-sends. A once-sent write whose request reached the source and then timed out, or got a `502`/`504`, comes back as `SourceError::Unconfirmed`. If a second arrival would duplicate it, the queue holds it for the reader instead of re-sending it (`WriteOp::delivery`'s `resend_harmless`, read by `knobas_sync::write_queue`'s `attempt`).
-- The flush loop's `source.write` call site signposts this ADR, so the next reader of that seam finds the ruling where the gap lives.
-- `CONTEXT.md`'s **Pending write** entry carries the guarantee, because a person can observe it: the duplicate comment is user-visible behaviour, not an implementation detail.
+- The reconsideration trigger is an adapter whose source offers server-side idempotency on a write endpoint the queue uses. Field reports of duplicates do not reopen this: with no honouring source, a key could not have prevented them.
+- No §10.8 entry: the frozen surface is untouched.
+- The flush loop's `source.write` call site cites this ADR. `CONTEXT.md`'s **Pending write** entry carries the guarantee.

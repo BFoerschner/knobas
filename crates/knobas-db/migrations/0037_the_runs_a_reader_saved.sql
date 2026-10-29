@@ -4,7 +4,7 @@
 --
 -- Single-writer, like every migration: a later ticket that needs more schema
 -- takes 0038 and never edits this file. Recorded in `docs/contract.md`
--- section 10.8 (`docs/contract/10.8/852-run-options-parameter-specs-and-run-presets.md`).
+-- section 10.8 (`docs/archive/contract-10.8/852-run-options-parameter-specs-and-run-presets.md`).
 --
 -- ## What a run preset is
 --

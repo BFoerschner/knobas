@@ -4,7 +4,7 @@
 --
 -- Single-writer (orchestrator), like every migration: a later ticket that
 -- needs more schema takes the next number and never edits this file. Recorded
--- as an exception in `docs/contract/10.8/873-migration-0038-dependencies-views-and-layer-writes.md`.
+-- as an exception in `docs/archive/contract-10.8/873-migration-0038-dependencies-views-and-layer-writes.md`.
 --
 -- ## What a view keeps
 --

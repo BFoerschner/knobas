@@ -6,7 +6,7 @@
 -- Single-writer, like every migration: a change that needs more schema
 -- requests 0063 and never edits this file or its predecessors -- sqlx
 -- checksums applied migrations. Recorded in
--- `docs/contract/10.8/2185-migration-0062-the-pipeline-a-run-belongs-to.md`.
+-- `docs/archive/contract-10.8/2185-migration-0062-the-pipeline-a-run-belongs-to.md`.
 --
 -- ## Why
 --

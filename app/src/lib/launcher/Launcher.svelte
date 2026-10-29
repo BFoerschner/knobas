@@ -20,7 +20,7 @@
 
   Two rows over the selected entity result, in this order, and nothing else
   (#1500; the 2026-10-21 ruling on #1416 in
-  `docs/decisions/2026-10-unattended-rulings.md`):
+  `docs/archive/2026-10-unattended-rulings.md`):
 
   * **Link to ⟨key⟩**, only while the breadcrumb names a job (the job page, or
     a view opened from it: 'PAY-231 › Time') and the result is not that job's

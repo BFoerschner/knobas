@@ -4,20 +4,20 @@ status: accepted
 
 # A project is a first-class scoping dimension, and it keeps the source's own word
 
-One Jira base URL holds many projects — `INT-`, `ERP-` — each with its own workflow, and one PAT sees all of them. knobas has no word for that grouping: a room is *All work*, one per configured source, or a stored context (ADR-0008), and none of those is "one project". So the M2.5 mini board (ADR-0009) over a multi-project Jira draws the **union of every workflow's statuses**, in a tile that is ~550px wide at the 1100px window floor against a 150px minimum column — three columns visible, the rest behind a sideways scrollbar.
+One Jira base URL holds many projects, each with its own workflow, and knobas had no word for that grouping, so the mini board over a multi-project Jira drew the union of every workflow's statuses. Decided 2026-08-30 (Björn): **a project is a first-class scoping dimension, modelled per source and named after the source's own word.**
 
-Decided 2026-08-30 (Björn, M2.6 grilling session): **a project is a first-class scoping dimension, modelled per source and named after the source's own word.** Jira has projects and TeamCity has projects (`TeamCityConfig.project_ids`); Gitea has no such thing here and gets none. (*Amended 2026-10-19, #1206, #1247:* a Gitea **ticket's** project is its repository, `repository.full_name`. ADR-0029's ticket-system minimum requires a project on every ticket, and the repository is the only grouping Gitea gives an issue. Only the `ticket` kind declares it; Gitea's code kinds (`repo`, `branch`, `pr`, `commit`) still have no project, and scoping to one repository's code is still its parent relation.) The value needs no new sync: `BASE_FIELDS` has requested `project` since M1, so `fields.project = { key, name }` is already on every mirrored issue. Reading it is a **payload read outside an adapter** governed by ADR-0007 — one named statement, one `coalesce` per source that spells it differently, and its failure direction pinned: a ticket whose record carries no readable project **belongs to no project room** and is still in *All work* and its source's room. Absence, never a wrong room, and no "No project" room — nothing is hidden, because two other rooms still hold it. (That is deliberately *unlike* the mini board's terminal group, where the column is the only place a statusless ticket could appear at all.)
+- Jira and TeamCity have projects. Gitea's code kinds (`repo`, `branch`, `pr`, `commit`) have none; scoping to one repository's code is its parent relation. (Amended 2026-10-19, #1206, #1247) A Gitea **ticket's** project is its repository, `repository.full_name`, because ADR-0029's ticket-system minimum requires a project on every ticket. Only the `ticket` kind declares it.
+- Reading it is a payload read under ADR-0007: one named statement, one `coalesce` per source spelling, failure direction pinned. A ticket with no readable project belongs to no project room and is still in *All work* and its source's room. There is no "No project" room.
+- A context is not a project. `CONTEXT.md`'s **Context** entry keeps `project` in its avoid list and says why.
 
-## Considered options
+## Rejected
 
-- **One generic container concept** — a "space" or "container" that Jira projects, TeamCity projects and Gitea repositories all map into. Rejected: a Gitea repository is already an entity **kind** in knobas, with its own address, its own monogram, and its own word in `0001_init.sql`'s kind list — it is one of the things a room draws, not the axis a room is drawn along. Folding it into a scoping concept would model one thing twice in two incompatible ways. Inventing a neutral word to dodge a collision that does not exist is the ADR-0009 mistake run backwards.
-- **Jira-only, hardcoded, revisit later.** Rejected: it costs the same as the decision above and records nothing, so the second source that wants it re-argues from scratch.
-- **One configured knobas source per project** (`projects: ["INT"]`, `projects: ["ERP"]`), which already yields a room each. Rejected, and worth stating because nothing currently refuses it: two sources against one base URL are two namespaces, so an issue both can see becomes `int:INT-1` **and** `erp:INT-1` — two entities, two mirror rows, and no link between them.
-- **Leave it to ad-hoc contexts.** Rejected: a context's membership is seed + direct links + one hop over confirmed links (ADR-0008), which cannot express "every ticket carrying this attribute". An ad-hoc *INT* room would hold what somebody added to it, not the project.
+- One generic container concept for Jira projects, TeamCity projects and Gitea repositories. A repository is an entity kind with its own address; folding it into a scoping concept models one thing twice.
+- Jira-only, hardcoded. Costs the same and records nothing.
+- One configured source per project. Two sources against one base URL are two namespaces, so one issue becomes two entities.
+- Ad-hoc contexts. Membership (ADR-0008) cannot express "every ticket carrying this attribute".
 
 ## Consequences
 
-- `CONTEXT.md` gains **Project**. The **Context** entry keeps `project` in its `_Avoid_` list — for its own reason, which is that a context is not a project — and now says so, or the next reader meets what looks like a contradiction.
-- Two §10.8 entries follow: the room filter grows a project dimension, and an additive command reports the projects a source's corpus shows. The switcher cannot derive them from a room's own scan — that reads the newest 200 items and is "a window, not a census", so a quiet project would silently have no room.
-- **The switcher's length becomes a property of the corpus rather than of the configuration.** Two projects is a convenience; forty is a problem this decision creates and does not solve.
-- The mini board gains a room kind whose columns are one workflow, which is what makes its column layout usable at tile width. Which layout a room draws is the milestone's spec, not this ADR.
+- `CONTEXT.md` has **Project**. The room filter carries a project dimension and a command reports the projects a source's corpus shows, each with a §10.8 entry.
+- The switcher's length is a property of the corpus, not the configuration. Forty projects is a problem this decision creates and does not solve.

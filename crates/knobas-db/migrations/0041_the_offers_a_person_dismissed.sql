@@ -5,7 +5,7 @@
 -- Single-writer, like every migration: a later ticket that needs more schema
 -- takes the next number and never edits this file. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/contract/10.8/900-901-migration-0041-dismissed-offers-and-open-stretches.md`).
+-- (`docs/archive/contract-10.8/900-901-migration-0041-dismissed-offers-and-open-stretches.md`).
 --
 -- ## Why a table and not a marker on the block
 --

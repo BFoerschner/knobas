@@ -15,7 +15,7 @@ offers the create?
 **Ruling: yes.** A create held as `Unconfirmed` counts as on its way (*Monitor queued* / *Ticket
 queued*, and `submit_write` refuses a second create) until the reader sends it again or discards
 it. A drift hold still offers the create. This supersedes the #1951, #1953 and #1959 rulings
-(`docs/decisions/2026-10-unattended-rulings.md`) for the unconfirmed case only; what they ruled for
+(`docs/archive/2026-10-unattended-rulings.md`) for the unconfirmed case only; what they ruled for
 a drift hold, a refusal and a withdrawal stands.
 
 **Why.** If the first create landed, offering it again makes two Uptime Kuma monitors of one name
@@ -27,7 +27,7 @@ unconfirmed hold, whose create may already exist, from a drift hold, whose creat
 (`knobas_core::write_queue::unconfirmed`) is what tells the two holds apart, read as
 `QueuedWrite::may_have_landed` in Rust, `held_snapshot ? 'unconfirmed'` in SQL and
 `mayHaveLanded` (`app/src/lib/shell/follow-write.ts`) in the app. The §10.8 entry is
-`docs/contract/10.8/1966-a-create-held-as-unconfirmed-is-on-its-way.md`.
+`docs/archive/contract-10.8/1966-a-create-held-as-unconfirmed-is-on-its-way.md`.
 
 **Reversing.** Cheap: one condition in `assets::ON_ITS_WAY`, one in `willNotGo`, and the field
 `ActionItemTicket.may_have_landed`.

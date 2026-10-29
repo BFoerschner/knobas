@@ -4,7 +4,7 @@
 -- Single-writer, like every migration: a ticket that needs more schema takes
 -- the next number and never edits this file or its predecessors. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/contract/10.8/1285-migration-0054-saved-view-source-query.md`).
+-- (`docs/archive/contract-10.8/1285-migration-0054-saved-view-source-query.md`).
 --
 -- ## Why
 --

@@ -1,18 +1,7 @@
 # Decision records
 
-Dated records of what was ruled during a stretch of work, and why. A file here names the forks
-that came up, the option taken, the reasoning it rests on, and what reversing it would cost, so
-that a settled question can be checked rather than re-argued. Files are named
-`YYYY-MM-DD-<slug>.md`; the 2026-08-29 batch is split between a rulings file and one for the
-orchestration that produced them.
+Dated records of what Björn ruled, and why: the fork, the option taken, the reasoning, and what reversing it would cost, so a settled question can be checked rather than re-argued. Files are named `YYYY-MM-DD-<slug>.md`.
 
-## How this differs from `docs/adr/`
+An ADR (`docs/adr/`) is a ratified architecture decision: numbered, with a `status:` header, fixing a shape the code keeps, and cited by `docs/contract.md`. A record here is operational: a rule about how work runs, a design fork on one issue, a reversal. Where a ruling here settles something architectural it gets an ADR, and the ADR binds.
 
-An ADR is a ratified architecture decision. It is numbered, it carries a `status:` header, it
-fixes a shape the code is then obliged to keep, and `docs/contract.md` cites it by filename. A
-record here is operational and dated: which PR merges first, how a batch was sequenced, the design
-fork on a single issue, a rule about how agents work that no crate can enforce.
-
-The two meet at one point. Where a ruling here settles something architectural, it gets an ADR of
-its own and the ADR is what binds; what stays here is the reasoning and the reversal cost the ADR
-compresses out. A ruling that only decides how work was run stays here.
+Rulings an agent makes while implementing or reviewing a ticket are not recorded here. Since 2026-10-29 they go in the PR under **Rulings** and as a comment on the issue, and nowhere else. The files that collected them before (the 2026-08-29 batch, the v1.5 milestone, October 2026) are in `docs/archive/`, with the memory archive of 2026-10-19.
