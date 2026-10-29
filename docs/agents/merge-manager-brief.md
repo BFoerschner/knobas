@@ -25,7 +25,7 @@ A PR line "Not witnessable by an agent, handed to the milestone review" is not a
 Start as soon as the PR opens, even as a draft.
 
 1. `gh pr view <n> --json body,comments`; `gh issue view <N> --json body,comments`. The issue body is the spec; parent spec and milestone description are context.
-2. `mattpocock-skills:code-review`, **Spec axis** (criteria, out-of-scope list); the implementer did Standards. Add a **deep pass** against ADR and contract (and the required §10.8 entry, which must match the diff exactly) when the diff touches a frozen surface: §10.8 IPC, migrations, write queue, source adapters (`crates/knobas-source/src/**`, `crates/knobas-http/**`), concurrency or locking.
+2. `mattpocock-skills:code-review`, **Spec axis** (criteria, out-of-scope list); the implementer did Standards. Add a **deep pass** against ADR and contract (and the PR's **Frozen surface** section, which must match the diff) when the diff touches a frozen surface: §10.8 IPC, migrations, write queue, source adapters (`crates/knobas-source/src/**`, `crates/knobas-http/**`), concurrency or locking.
 3. Verify claims. Don't redo the implementer's mutants; add one only for a claim you find untested. Ask whether the fixture can witness the claim, and which direction is unwitnessed. A finding about a ticket you haven't read is a hypothesis: read it first.
 4. Don't open screenshot PNGs; review the named differences and the code. An image only to settle a doubt the code can't answer.
 5. Fix on the branch yourself (`git status --short`, named paths). A gap beside the ticket follows *Fix it in place first*, below; one that fails its fit test you file and report with the finding quoted. Cap: 3 rounds, then stop and report.

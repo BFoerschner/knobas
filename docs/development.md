@@ -20,8 +20,7 @@ The first test run or `just dev` downloads PostgreSQL 18.6 once into the shared
 
 `just check` is the quality gate. Under the ticket loop the merge-manager runs
 it once, on the head it merges (`just gate`, below). It first
-fails on a stale contract index (`scripts/contract-index.py --check`) or a
-table below that lost step with the tree (`scripts/doc-lists.py`), then
+fails on a table below that lost step with the tree (`scripts/doc-lists.py`), then
 runs three halves side by side:
 
 - `front`: `svelte-check`, the Vitest suite and `vite build`.
@@ -36,7 +35,7 @@ prints its whole log. A passing one prints each recipe's wall time, and the
 cargo half adds `test`'s build and run times and its ten slowest test binaries.
 
 `just gate` runs `check-front` instead on a frontend-only head: the
-contract-index and doc-list checks, the conflict-marker scan, `svelte-check`, the Vitest files the change can reach
+doc-list check, the conflict-marker scan, `svelte-check`, the Vitest files the change can reach
 (`just front-changed`) and `vite build`.
 
 `just front` alone is the fast loop for frontend work. `just pre-gate` formats,
@@ -205,8 +204,8 @@ The demo profile keeps its server under `dev.knobas.desktop/demo/db/data`.
 ## Frozen surfaces
 
 The `Source` trait, the migration baseline and the IPC schema are frozen.
-Changing any of them takes an orchestrator decision, a spec update and an entry
-under `docs/contract/10.8/`. `docs/contract.md` is the record.
+A change to one is announced in the PR body under **Frozen surface**, as
+`docs/contract.md` §10.8 says; the merge-manager reviews it against the ADRs.
 
 ## Crates
 

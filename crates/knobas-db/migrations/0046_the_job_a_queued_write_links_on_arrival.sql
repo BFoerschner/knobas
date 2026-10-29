@@ -4,7 +4,7 @@
 -- Single-writer, like every migration: a ticket that needs more schema takes
 -- the next number and never edits this file or its predecessors. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/contract/10.8/1050-migration-0046-write-queue-link-to.md`).
+-- (`docs/archive/contract-10.8/1050-migration-0046-write-queue-link-to.md`).
 --
 -- ## `link_to`
 --

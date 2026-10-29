@@ -1209,7 +1209,7 @@ Ruled 2026-10-14 by the deputy for Björn, under the #701 delegation. Posted in 
 
 **If you disagree, the cost of reversing this is:** low: `pulls` and step 1 of `sync_repo` in `crates/knobas-source-gitea/src/sync.rs`, and two cursor fields.
 
-As built (#764): the exact second, not a window — the walk already re-read it (it stops only below the mark); what was wrong was the identity it compared. The sink does **not** skip identical payloads (it rewrites every item, and battery clause 2 asks the adapter for an empty idle run), so the no-op is the adapter's: the cursor holds number → fingerprint of the listing record for the pull requests on the watermark (`pulls_seen_at_watermark`), and a fingerprint for the repository record (`repo_fingerprint`). Renamed rather than retyped, so no cursor version bump; a cursor from before re-emits the repository and the watermark's pull requests once. Commits (immutable, keyed by object id) and branches (head ids) were not affected. TeamCity's watermark is a build id, not a timestamp: not affected. Jira already fingerprints a two-minute overlap (#345), which also covers JQL's minute resolution: not affected. §10.8 entry: `docs/contract/10.8/764-gitea-cursor-fingerprints-on-the-watermark.md`.
+As built (#764): the exact second, not a window — the walk already re-read it (it stops only below the mark); what was wrong was the identity it compared. The sink does **not** skip identical payloads (it rewrites every item, and battery clause 2 asks the adapter for an empty idle run), so the no-op is the adapter's: the cursor holds number → fingerprint of the listing record for the pull requests on the watermark (`pulls_seen_at_watermark`), and a fingerprint for the repository record (`repo_fingerprint`). Renamed rather than retyped, so no cursor version bump; a cursor from before re-emits the repository and the watermark's pull requests once. Commits (immutable, keyed by object id) and branches (head ids) were not affected. TeamCity's watermark is a build id, not a timestamp: not affected. Jira already fingerprints a two-minute overlap (#345), which also covers JQL's minute resolution: not affected. §10.8 entry: `docs/archive/contract-10.8/764-gitea-cursor-fingerprints-on-the-watermark.md`.
 ## #759 — the project census walks every mirrored item on every finished sync
 
 Ruled 2026-10-14 by the deputy for Björn. Posted on #759.
@@ -1250,7 +1250,7 @@ Ruled 2026-10-14 by the deputy for Björn. Posted in the body of #768.
 
 **If you disagree, the cost of reversing this is:** low.
 
-As built (#768): a flag, `parents_only`, on the existing command (no new command, the DTO keeps its shape). The session sends it on every read after an opening's first and keeps that read's two lists. The statements drop `sync.live_item`'s joins for the same liveness as correlated subqueries, ordered probes of the item indexes. §10.8 entry: `docs/contract/10.8/768-ipc-command-filter-suggestions-parents-only.md`.
+As built (#768): a flag, `parents_only`, on the existing command (no new command, the DTO keeps its shape). The session sends it on every read after an opening's first and keeps that read's two lists. The statements drop `sync.live_item`'s joins for the same liveness as correlated subqueries, ordered probes of the item indexes. §10.8 entry: `docs/archive/contract-10.8/768-ipc-command-filter-suggestions-parents-only.md`.
 
 ## #770 — the suggestion pass on analyzed tables
 
@@ -5548,7 +5548,7 @@ ADR-0025's amendment. The implementer's rulings under it:
 Reserved for Björn, ruled by the implementer on Opus:
 
 - **The §10.8 sign-off of the role claims and the five minimums**
-  (`docs/contract/10.8/1193-role-claims-and-minimums.md`). Ruling: signed as written. It states
+  (`docs/archive/contract-10.8/1193-role-claims-and-minimums.md`). Ruling: signed as written. It states
   the spec's minimums with every item mapped to an existing `KindPaths` field, `Source` read or
   `WriteOp`. Where a spec item has no SPI surface yet, the item waits for the ticket that adds
   that surface. **Reversing:** a §10.8 amendment to the minimum.
@@ -5630,7 +5630,7 @@ The merge-manager's rulings (PR #1226):
 
 Reserved for Björn, ruled by the implementer on Opus:
 
-- **The §10.8 sign-off** (`docs/contract/10.8/1196-source-list-carries-role-claims.md`):
+- **The §10.8 sign-off** (`docs/archive/contract-10.8/1196-source-list-carries-role-claims.md`):
   `SourceSummary` gains `roles`, from the adapter's template like `kinds`. Signed: it adds one
   field, changes no minimum and no command, and the shape test holds the mirror. **Reversing:** a
   §10.8 amendment.
@@ -5685,7 +5685,7 @@ The merge-manager's rulings (PR #1232):
 Reserved for Björn, ruled by the implementer on Opus:
 
 - **Fork: ratify `knobas:adapter@1.0.0` as a frozen surface.** Ruling: ratified, as
-  `docs/contract/10.8/1198-wit-world-knobas-adapter.md` records it. Reasoning: ADR-0028 and spec
+  `docs/archive/contract-10.8/1198-wit-world-knobas-adapter.md` records it. Reasoning: ADR-0028 and spec
   #1192 already decide that the world is frozen and versioned; the entry fixes its 1.0.0 content,
   which only this ticket can, and nothing outside knobas builds against it yet. **Reversing:**
   cheap until #1202 lets anyone install a component; after that, a 2.0.0.
@@ -5754,7 +5754,7 @@ The merge-manager's rulings (PR #1233):
 
 Reserved for Björn, ruled by the implementer on Opus:
 
-- **Ratifying the §10.8 entry** (`docs/contract/10.8/1194-source-action.md`): a `WriteOp`
+- **Ratifying the §10.8 entry** (`docs/archive/contract-10.8/1194-source-action.md`): a `WriteOp`
   variant, a descriptor field and four write-queue table rows. Ruling: ratified as written.
   Reasoning: it is what spec #1192 and ADR-0029 name (`source_action { id, fields }`, one
   variant, queued like any write), every addition is `#[serde(default)]` or a new variant, and
@@ -5826,7 +5826,7 @@ The implementer's rulings:
 
 Reserved for Björn, ruled by the implementer on Opus:
 
-- **Ratifying the §10.8 entry** (`docs/contract/10.8/1197-clone-urls-read.md`): one descriptor
+- **Ratifying the §10.8 entry** (`docs/archive/contract-10.8/1197-clone-urls-read.md`): one descriptor
   field (`clone_from`), one required read in the code-host minimum (`clone_urls`) and three
   clause-10 checks. Ruling: ratified as written. Reasoning: it is the read spec #1192 and the
   ticket name, the field is `#[serde(default)]`, WIT `knobas:adapter@1.0.0` is untouched, and
@@ -5937,7 +5937,7 @@ The implementer's rulings:
 
 Reserved for Björn, ruled by the implementer on Opus:
 
-- **The §10.8 sign-off** (`docs/contract/10.8/1199-role-data-check.md`): `knobas_source::role::data`
+- **The §10.8 sign-off** (`docs/archive/contract-10.8/1199-role-data-check.md`): `knobas_source::role::data`
   and `contract::fills_its_roles`, migration `0052` (`sync.role_check`), and
   `SourceSummary.role_misses`. Signed: no minimum, battery clause, command or event changes; the
   shape tests hold the mirror, and the table is derived state outside the backup. **Reversing:** a
@@ -6049,7 +6049,7 @@ The merge-manager's rulings (PR #1242, on Opus):
 - **A §10.8 entry is owed after all, for the battery's tests.** §10.8 freezes "any change to
   `crates/knobas-source/src/**` (the `Source` trait, its DTOs, the contract battery)", and every
   earlier PR that touched that path carried an entry, however small. The two clause-10 tests live
-  in `contract.rs`, so the PR adds `docs/contract/10.8/1201-custom-role-battery-witness.md`, which
+  in `contract.rs`, so the PR adds `docs/archive/contract-10.8/1201-custom-role-battery-witness.md`, which
   records the touch as tests only. **Reversing:** delete one file and rerun `just contract-index`.
 - **The shell route `#/item/<entity id>` is not frozen IPC.** A hash route is the frontend's own
   address; it adds no command, event, DTO field or barrel line, and the page reads only
@@ -6142,7 +6142,7 @@ The merge-manager's rulings (PR #1243, on Opus):
 
 Reserved for Björn, ruled by the implementer on Opus:
 
-- **Ratifying the §10.8 entry** (`docs/contract/10.8/1207-saved-views-in-ticket-system-minimum.md`):
+- **Ratifying the §10.8 entry** (`docs/archive/contract-10.8/1207-saved-views-in-ticket-system-minimum.md`):
   one `Frame` variant (`saved_view`), one `Minimum` field (`optional_kinds`) and the
   ticket-system minimum's optional saved-view kind. Ruling: ratified as written. Reasoning: the
   issue asks for exactly this optional kind, nothing existing changes shape (the tables, columns
@@ -6197,7 +6197,7 @@ The merge-manager's rulings:
 - **Reserved for Björn, ruled by the implementer on Opus: the §10.8 entry for Gitea's write
   table.** ADR-0006 makes each growth of the registry's write table a ratified exception, and
   `transition` and `create_ticket` are new on Gitea. Ratified as
-  `docs/contract/10.8/1206-gitea-ticket-writes.md`: no `WriteOp` variant and no frozen file
+  `docs/archive/contract-10.8/1206-gitea-ticket-writes.md`: no `WriteOp` variant and no frozen file
   changes, the two ops are the ticket system's optional writes (ADR-0029), and both are certified
   against the testenv Gitea and Forgejo. **Reversing:** drop the two ops from the descriptor and
   the entry.
@@ -6269,7 +6269,7 @@ The implementer's rulings (Opus, one PR for both tickets).
 
 Reserved for Björn, ruled by the implementer on Opus:
 
-- **The §10.8 sign-off of `knobas:adapter@1.1.0`** (`docs/contract/10.8/1205-wit-world-knobas-adapter-1-1.md`).
+- **The §10.8 sign-off of `knobas:adapter@1.1.0`** (`docs/archive/contract-10.8/1205-wit-world-knobas-adapter-1-1.md`).
   It only adds: an imported interface, an exported interface the host looks up as optional, and a
   `hosted` world for the host's binding. Witnessed, not argued: the fixture built against the
   frozen 1.0.0 file (`--features v1_0`) loads, syncs and answers `download` with `false` under this
@@ -6436,7 +6436,7 @@ No step of the three tickets is reserved for Björn. The implementer's rulings:
 
 Reserved for Björn, ruled by the implementer on Opus:
 
-- **The §10.8 entry is ratified** (`docs/contract/10.8/1209-1210-external-adapter-release-lifecycle.md`):
+- **The §10.8 entry is ratified** (`docs/archive/contract-10.8/1209-1210-external-adapter-release-lifecycle.md`):
   four new commands, three DTOs and `UpdateCheck`, and `install_adapter`'s argument widened to a
   URL. No migration, no event, no new module, `restore_backup` unchanged. Every addition is one
   the tickets name; none touches a frozen crate. **Reversing:** medium (four commands and their
@@ -6508,7 +6508,7 @@ No step of the ticket is reserved for Björn. The implementer's rulings:
   frozen list, or as a change to it. Ruling: a change. §10.8 lists "any change to
   `crates/knobas-source/src/**`", and this one changes the crate's dependency graph, the home of
   `knobas_core::payload` that thirty entries name, and two new public re-exports (`EntityRef`,
-  `Frame`). The merge-manager added `docs/contract/10.8/1234-knobas-spi-types-crate.md`, which
+  `Frame`). The merge-manager added `docs/archive/contract-10.8/1234-knobas-spi-types-crate.md`, which
   also freezes the new rule that `knobas-source` and `knobas-spi-types` stay buildable for
   `wasm32-wasip2`. **Reversing:** low (delete the entry; the code does not change).
 - **Fixture role-claim gap left for a follow-up.** The implementer's fourth mutant (drop the CI
@@ -7077,7 +7077,7 @@ The merge-manager's rulings (Opus):
 
 - **The PR needs a §10.8 entry.** *Fork:* treat `WriteOp::delivery()` as Rust-only and exempt,
   or as a change to `crates/knobas-source/src/**`, which §10.8 freezes whatever its wire effect.
-  *Ruling:* an entry, `docs/contract/10.8/1307-writeop-delivery.md`, added on the branch. The
+  *Ruling:* an entry, `docs/archive/contract-10.8/1307-writeop-delivery.md`, added on the branch. The
   frozen list names the path, not the wire; every earlier change under it carries one.
   *Reversing:* low (delete the file, rerun `just contract-index`).
 - **The reorder in `attempt` gets a witness.** *Fork:* leave "an undecodable row is refused at
@@ -7516,7 +7516,7 @@ The merge-manager's rulings (Sonnet, #1300):
   fingerprint, stability) is the shared module's doc. The Jira-specific measurement goes to
   `cursor.rs`, and what the fingerprint cannot see goes to `sync.rs`, beside the calls.
   *Reversing:* n/a.
-- **A §10.8 entry of its own** (`docs/contract/10.8/1314-source-fingerprint.md`), because
+- **A §10.8 entry of its own** (`docs/archive/contract-10.8/1314-source-fingerprint.md`), because
   `crates/knobas-source/src/**` is frozen (#1234's entry) and #1310's entry covers
   `crates/knobas-http/**` only. *Reversing:* n/a.
 
@@ -7863,7 +7863,7 @@ The merge-manager's rulings on #1322 (Opus):
 
 Reserved for Björn, ruled by implementer on Opus (the §10.8 entry and §2.6's amendment), under
 the 2026-10-18 reserved-steps rule. The evidence is in
-`docs/contract/10.8/1325-the-ipc-mirror-is-generated.md`.
+`docs/archive/contract-10.8/1325-the-ipc-mirror-is-generated.md`.
 
 - **The generator.** *Fork:* `ts-rs`, `specta` 2, `typeshare` or `tsify`. *Ruling:* `ts-rs =
   "=12.0.1"`. It is stable, runs inside a cargo test, and on a probe of the derives in use met all
@@ -7976,7 +7976,7 @@ The merge-manager's rulings on #1323 (Opus):
 ## #1326: the entity barrel is generated (Opus implementer, 2026-10-20)
 
 Reserved for Björn, ruled by implementer on Opus (the §10.8 entry), under the 2026-10-18
-reserved-steps rule. The entry is `docs/contract/10.8/1326-the-entity-barrel-is-generated.md`.
+reserved-steps rule. The entry is `docs/archive/contract-10.8/1326-the-entity-barrel-is-generated.md`.
 
 - **Two types with no Rust type.** *Fork:* `LanesAsked` and `OpenAt` bundle one `invoke`
   function's arguments (`mini_board` takes `lanes` and `lanes_first`, `open_checkout` four
@@ -8089,7 +8089,7 @@ reserved-steps rule. The entry is `docs/contract/10.8/1326-the-entity-barrel-is-
   derives, and the regenerated files equal the committed ones. The first ruling above is spent:
   this PR derives no entity type. *Reversing:* n/a.
 - **A §10.8 entry after all.** *Fork:* rely on #1325's booking, or add an entry. *Ruling:* add
-  `docs/contract/10.8/1328-the-assets-barrel-is-generated.md`. *Reasoning:* #1325's booking covers
+  `docs/archive/contract-10.8/1328-the-assets-barrel-is-generated.md`. *Reasoning:* #1325's booking covers
   the file, but the switch also changes what the frozen IPC module declares (three renamed types,
   nineteen `Extract` aliases, one hand-written type kept, 21 fixture tests gone), and #1326 recorded
   the same facts for its barrel; the entry names the two crates that gain a derive. *Reversing:*
@@ -8102,7 +8102,7 @@ reserved-steps rule. The entry is `docs/contract/10.8/1326-the-entity-barrel-is-
 ## #1327: the sources barrel is generated (Opus implementer, 2026-10-20)
 
 Reserved for Björn, ruled by implementer on Opus (the §10.8 entry), under the 2026-10-18
-reserved-steps rule. The entry is `docs/contract/10.8/1327-the-sources-barrel-is-generated.md`.
+reserved-steps rule. The entry is `docs/archive/contract-10.8/1327-the-sources-barrel-is-generated.md`.
 
 - **`IpcErrorCode`, which `ConnectionReport::code` reaches.** *Fork:* the type is `index.ts`'s,
   and `generated/` books no `index.ts`; spell the field `#[ts(type = "IpcErrorCode | null")]`
@@ -8194,7 +8194,7 @@ types, identical to the hand-written `sources.ts` at 7a96c634.
 ## #1329: the search barrel is generated (Opus implementer, 2026-10-20)
 
 Reserved for Björn, ruled by implementer on Opus (the §10.8 entry), under the 2026-10-18
-reserved-steps rule. The entry is `docs/contract/10.8/1329-the-search-barrel-is-generated.md`.
+reserved-steps rule. The entry is `docs/archive/contract-10.8/1329-the-search-barrel-is-generated.md`.
 
 - **`CredentialHealth` is the sources barrel's, and #1327 was in flight.** *Fork:* `LauncherHome`
   reaches `knobas_sync::CredentialHealth`; wait for #1327, spell the field with `#[ts(type)]`
@@ -8291,7 +8291,7 @@ identity on all 34 names against `search.ts` at 1187a8d5, two control mutations 
 - **A stale Rust doc corrected.** `Block::worklog_id` read "Always `None` here: nothing in #278
   writes a worklog"; #280 has written them since. The generated JSDoc would have carried it, so
   it now says what the TypeScript said: `null` until the block is logged.
-- **A §10.8 entry.** `docs/contract/10.8/1330-the-time-barrel-is-generated.md`, on #1328's
+- **A §10.8 entry.** `docs/archive/contract-10.8/1330-the-time-barrel-is-generated.md`, on #1328's
   merge-manager ruling that every barrel switch owes one. *Reversing:* delete one file and rerun
   `just contract-index`.
 
@@ -8362,7 +8362,7 @@ taken afresh from `time.ts` at f9fc1bf1.
   that true, so no existing ledger entry needs an amendment line, and `export * from "./sources"`
   already re-exports the name. *Reversing:* two lines.
 - **The non-append edit to `index.ts`.** Granted by the orchestrator in the dispatch; recorded in
-  `docs/contract/10.8/1332-1372-the-mirror-assertion-module-retires.md`. The header comment's
+  `docs/archive/contract-10.8/1332-1372-the-mirror-assertion-module-retires.md`. The header comment's
   "barrel by barrel" clause goes in the same edit, as #1325 edited that header. *Reversing:*
   restore the union.
 - **The `test-util` feature of `knobas-sync`.** *Ruling:* deleted with the module, since it gated
@@ -8388,7 +8388,7 @@ taken afresh from `time.ts` at f9fc1bf1.
 
 - **Reserved for Björn, ruled by implementer on Opus: sign-off on the contract amendment.**
   *Fork:* sign off on `Sink::walked` and the three `SyncProgress` fields as booked in
-  `docs/contract/10.8/1379-the-run-reports-its-walk.md`, or hold the PR. *Ruling:* signed off.
+  `docs/archive/contract-10.8/1379-the-run-reports-its-walk.md`, or hold the PR. *Ruling:* signed off.
   *Reasoning:* both are additive. The `Sink` method has a do-nothing default, so no existing sink
   or adapter changes; the fields are absent on the wire when nobody reports, so no reader of
   `SyncProgress` changes. It is the surface #1378 decided on (Björn, 2026-10-20) and #1380–#1384
@@ -8573,7 +8573,7 @@ taken afresh from `time.ts` at f9fc1bf1.
 ## #1384: the source's settings page shows the walk during a scheduled run (Opus implementer, 2026-10-20)
 
 - **Reserved for Björn, ruled by implementer on Opus: sign-off on the §10.8 entry.** *Ruling:*
-  signed off. `docs/contract/10.8/1384-watch-sync-joins-the-run-in-flight.md` books one command,
+  signed off. `docs/archive/contract-10.8/1384-watch-sync-joins-the-run-in-flight.md` books one command,
   appended to the handler list, its TypeScript function in the existing `sources` barrel, and the
   fake's answer; nothing else frozen moves. *Reasoning:* the command is additive and the entry
   matches the diff. Björn said on 2026-10-20 that Opus may amend without him. *Reversing:* remove
@@ -9875,7 +9875,7 @@ unchanged.
   DTO. The sign-off it needs is ruled below. *Reversing:* moderate; drop `TfRunTicket` from the
   problem block and the `CreateTicket` arms. The shared dialog can stay.
 - **Reserved for Björn, ruled by implementer on Opus: sign-off on the frozen-surface touch.**
-  *Ruling:* signed off, as `docs/contract/10.8/1451-create-ticket-links-on-arrival.md` records it:
+  *Ruling:* signed off, as `docs/archive/contract-10.8/1451-create-ticket-links-on-arrival.md` records it:
   `WriteOp::CreateTicket`'s `delivery()` gains `link: Some(ArrivalLink::Related)`, and
   `submit_write` accepts a `CreateTicket` with `link_to`. It widens an existing argument and adds
   nothing to the wire, and every op that took `link_to` before keeps its behaviour, pinned by
@@ -10297,7 +10297,7 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 
 **The fork:** the entry listed `KindPaths`' three fields but not that they reach the IPC through `SourceDescriptor.payload_paths`, which the regenerated `app/src/lib/ipc/generated/sources.ts` shows.
 
-**Ruling:** one sentence added to `docs/contract/10.8/1448-run-test-summary.md`, so the entry matches the diff.
+**Ruling:** one sentence added to `docs/archive/contract-10.8/1448-run-test-summary.md`, so the entry matches the diff.
 
 **Cost of reversing:** none.
 
@@ -10470,7 +10470,7 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 
 ### Reserved for Björn, ruled by implementer on Opus
 
-- **The §10.8 sign-off** (`docs/contract/10.8/1475-url-forms-in-the-source-descriptor.md`).
+- **The §10.8 sign-off** (`docs/archive/contract-10.8/1475-url-forms-in-the-source-descriptor.md`).
   *Ruling:* signed. The entry matches the diff: one additive descriptor field and its type, one
   battery clause, `RESOLVE_URL`'s second parameter, no command, argument, migration or WIT change.
   *Reversing:* a follow-up removing the field; every adapter but Confluence declares none.
@@ -10479,7 +10479,7 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 
 ### Reserved for Björn, ruled by merge-manager on Opus: the §10.8 sign-off (#1475), confirmed
 
-**The step:** the implementer signed the sign-off for `docs/contract/10.8/1475-url-forms-in-the-source-descriptor.md` and left it to the merge-manager to confirm.
+**The step:** the implementer signed the sign-off for `docs/archive/contract-10.8/1475-url-forms-in-the-source-descriptor.md` and left it to the merge-manager to confirm.
 
 **Ruling:** confirmed. The deep pass found the frozen surface as the entry describes it: `SourceDescriptor` gains one `#[serde(default)]` field and its type, every other adapter's descriptor adds `url_forms: Vec::new()` and nothing else, `adapter.wit` is unchanged at `knobas:adapter@1.3.0` (the descriptor is `func() -> json`, and `SourceDescriptor` has no `deny_unknown_fields`), and `RESOLVE_URL` stays one statement: its first arm is unchanged, the second is joined to the reading's own adapter kind and base, and `order by via_form, entity_id` keeps it deterministic with the stored address first. `docs/contract.md` changes only by its index line, and #1448's entry and amendment are intact. Two gaps are closed in the next two rulings.
 
@@ -10759,7 +10759,7 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 
 ### Reserved for Björn, ruled by implementer on Opus
 
-- **Sign-off on the §10.8 entry** (`docs/contract/10.8/1481-retire-four-uncalled-commands.md`).
+- **Sign-off on the §10.8 entry** (`docs/archive/contract-10.8/1481-retire-four-uncalled-commands.md`).
   *Ruling:* signed off. The entry adds nothing to the frozen surface and only removes from it.
   Every removed name had no caller outside the fake, the mirror and tests (the ticket's grep, run
   again on this tree), and the census holds the fake and the barrel to each other. The entries it
@@ -10956,7 +10956,7 @@ Ruled 2026-10-21 by the implementer (Sonnet).
 
 ### Reserved for Björn, ruled by implementer on Opus
 
-- **The §10.8 sign-off** (`docs/contract/10.8/1501-done-statuses-and-the-job-context-lifecycle.md`).
+- **The §10.8 sign-off** (`docs/archive/contract-10.8/1501-done-statuses-and-the-job-context-lifecycle.md`).
   *Ruling:* signed. The entry matches the diff: one additive `KindPaths` field, the regenerated
   `sources.ts`, `promote_context`'s answer now archived where its anchor is done, the sync run's
   step, the bring-up pass and the reach change. No command, argument, migration or WIT change.
@@ -11224,13 +11224,13 @@ set.
 
 ### Reserved for Björn, ruled by implementer on Opus
 
-- **Sign-off on the §10.8 entry** (`docs/contract/10.8/1578-retire-six-uncalled-commands.md`).
+- **Sign-off on the §10.8 entry** (`docs/archive/contract-10.8/1578-retire-six-uncalled-commands.md`).
   *Ruling:* signed off, on #1481's grounds. The entry only removes from the frozen surface. Every
   removed name had no caller outside the fake, the mirror and tests, and the census holds the fake
   and the barrel to each other. The parts it supersedes (§2.4, §2.5 with D5, #47, #434, #435, #760)
   are named and left unedited. *Reversing:* medium, revert the PR.
 - **Confirmed by merge-manager on Opus (2026-10-21).** *Ruling:* the sign-off stands.
-  `git diff --name-status` under `docs/` shows one `A` row in `docs/contract/10.8/` and no edit to
+  `git diff --name-status` under `docs/` shows one `A` row in `docs/archive/contract-10.8/` and no edit to
   an existing entry. A word-wise grep of the six command names, the six barrel names and
   `MemberAsset` over app, crates (the WASM host among them), testenv and scripts finds only
   retirement comments and the `knobas-core`/`knobas-search` functions the entry keeps. The
@@ -11305,7 +11305,7 @@ set.
 
 ### Reserved for Björn, ruled by implementer on Opus
 
-- **Sign-off on the §10.8 entry** (`docs/contract/10.8/1611-retire-detect-suggestions.md`).
+- **Sign-off on the §10.8 entry** (`docs/archive/contract-10.8/1611-retire-detect-suggestions.md`).
   *Ruling:* signed off, on #1481's and #1578's grounds. The entry only removes from the frozen
   surface, the removed command had no caller outside the fake and tests, the generated mirror is
   unchanged (the command answered a bare `u32`), and the parts it supersedes (#41, #745, #771,
@@ -11399,7 +11399,7 @@ set.
 - **Reserved for Björn, ruled by implementer on Opus: the frozen-surface change to
   `crates/knobas-source/src/**`** (waived by Björn 2026-10-22, review handoff). *Ruling:* one new
   public module, `knobas_source::watermark`, additive, booked in
-  `docs/contract/10.8/1622-knobas-source-shared-watermark.md`; nothing existing in the crate
+  `docs/archive/contract-10.8/1622-knobas-source-shared-watermark.md`; nothing existing in the crate
   changes. *Reversing:* moderate, as A4 says: the adapters take their copies back, nothing on disk
   changes.
 - **Where Jira's ceiling comes from.** `serverInfo.serverTime` is already fetched and would cost
@@ -11618,7 +11618,7 @@ set.
 
 ### The contract amendment belongs in the contract body, not §10.8
 
-**The fork:** a §10.8 entry is one file under `docs/contract/10.8/`, or a body amendment with #112 pointers.
+**The fork:** a §10.8 entry is one file under `docs/archive/contract-10.8/`, or a body amendment with #112 pointers.
 
 **Ruling:** the body. The diff touches no surface §10.8 freezes: no `crates/knobas-source/src/**`, `crates/knobas-http/**`, migration, IPC schema, or `knobas-app` `error.rs`/`profile.rs`. The change supersedes the §4.2 Jira cursor row, the #345 amendment's JQL line, and §5's mockd JQL subset. Under #112's convention the old text stays and gets an italic pointer, which the #345 amendment already did to the same row. The rebase's hand-resolved conflict keeps main's #1624 text in the Gitea cell and the #1623 pointer in the Jira cell. No conflict markers remain.
 
@@ -11692,7 +11692,7 @@ set.
   *Reversing:* low.
 - **The `SourceError::Unconfirmed` doc comment in the frozen crate.** It said the variant is
   "raised only by `knobas_http`". *Ruling:* rewritten and booked in
-  `docs/contract/10.8/1627-kuma-lost-ack-unconfirmed.md`, because it changes what the clause
+  `docs/archive/contract-10.8/1627-kuma-lost-ack-unconfirmed.md`, because it changes what the clause
   commits to (who may raise the variant), which #518's rule sends to the gate as code.
   *Reversing:* low, one comment.
 - **What `just kuma-live` witnesses.** ADR-0013 counts a dropped connection among what a live
@@ -11733,7 +11733,7 @@ set.
   `crates/knobas-http/**`** (waived by Björn 2026-10-22, review handoff). *Ruling:* one new
   module, `limiter.rs`, with an additive public `InstanceLimiter` and `LocalQuota`, plus a
   `test-util` `HttpClient::with_send_budget`; booked in
-  `docs/contract/10.8/1630-knobas-http-one-limiter-per-instance.md`. No `HttpConfig` field or
+  `docs/archive/contract-10.8/1630-knobas-http-one-limiter-per-instance.md`. No `HttpConfig` field or
   adapter changes. *Reversing:* low; the limiter goes back into the client.
 - **"Governor's keyed form".** Governor's `RateLimiter::keyed` holds one quota for every key, so
   it cannot give a Jira origin 5/s and a Gitea origin 10/s, or let the stricter of two
@@ -11861,7 +11861,7 @@ set.
 - **Reserved for Björn, ruled by implementer on Opus: the frozen-surface change to
   `crates/knobas-http/**`** (waived by Björn 2026-10-22). *Ruling:* private to `limiter.rs`
   behind the unchanged public `InstanceLimiter`; no signature, `HttpConfig` field or adapter
-  changes. Booked in `docs/contract/10.8/1728-1631-knobas-http-quota-loosens-and-wasm-host-shares-it.md`.
+  changes. Booked in `docs/archive/contract-10.8/1728-1631-knobas-http-quota-loosens-and-wasm-host-shares-it.md`.
   *Reversing:* low, one module.
 - **#1728's "Ruled up front" section** (registration tokens, loosening when no live holder asks
   for the stricter quota, a drained limiter on loosening, a tightening as in #1630) is built as
@@ -12615,7 +12615,7 @@ The measurement came after it.
   #1740 open until Björn signs it off. *Ruling:* change it, private to `limiter.rs` behind the
   unchanged public `InstanceLimiter`: `Slot::register`'s tightening branch and four `Paced`
   helpers. No signature, `HttpConfig` field or adapter change. Booked in
-  `docs/contract/10.8/1740-knobas-http-tightening-takes-over-what-was-left.md`.
+  `docs/archive/contract-10.8/1740-knobas-http-tightening-takes-over-what-was-left.md`.
   *Reasoning:* the waiver covers this spec's frozen-surface steps, and the change is the
   limiter's own arithmetic, which no caller sees. *Reversing:* low, one module.
 - **What a tightening carries over.** *Fork:* the old limiter's spent share of its burst (the
@@ -12740,7 +12740,7 @@ The measurement came after it.
   unchanged public `InstanceLimiter`: two `Slot` fields and two helpers, one line in
   `until_ready_within`, and one more argument to `Paced::tightened`. No signature, `HttpConfig`
   field or adapter change, and #1729's `watch_local_quota` mark is untouched. Booked in
-  `docs/contract/10.8/1764-knobas-http-tightening-after-a-quiet-has-what-it-refilled.md`.
+  `docs/archive/contract-10.8/1764-knobas-http-tightening-after-a-quiet-has-what-it-refilled.md`.
   *Reasoning:* as for #1740: the waiver covers this spec's frozen-surface steps, and the change
   is the limiter's own arithmetic. *Reversing:* low, one module.
 - **Where the last-grant instant lives.** *Fork:* per `Paced`, starting when it was built (the
@@ -12850,7 +12850,7 @@ The measurement came after it.
 - **`AlreadyRunning`'s text.** *Ruling:* `the database at <dir> is in use: <reason>`, replacing
   "another knobas instance is using…". *Reasoning:* its other causes (a live recorded pid whose
   port is not ours) are not knobas instances. The text reaches the boot screen, so it is booked in
-  §10.8 (`docs/contract/10.8/1636-…`), as #1628 booked a behaviour change. *Reversing:* a string.
+  §10.8 (`docs/archive/contract-10.8/1636-…`), as #1628 booked a behaviour change. *Reversing:* a string.
 - **Where the profile is named.** *Ruling:* `knobas-app`'s `naming_the_profile` puts `demo
   profile: ` or `default profile: ` in front of an `AlreadyRunning`. *Reasoning:* only the app
   knows the profile, and `profile.rs` is frozen. *Reversing:* low.
@@ -12897,7 +12897,7 @@ The measurement came after it.
   place of `Paced::drained`, and `Rate::refilled_in` shared with `Paced::tightened`, whose `u128`
   `Paced::with_left` now saturates itself. No signature,
   `HttpConfig` field or adapter change, and #1729's `watch_local_quota` mark is untouched. Booked
-  in `docs/contract/10.8/1771-knobas-http-loosening-after-a-quiet-has-what-it-refilled.md`.
+  in `docs/archive/contract-10.8/1771-knobas-http-loosening-after-a-quiet-has-what-it-refilled.md`.
   *Reasoning:* as for #1740 and #1764: the waiver covers this spec's frozen-surface steps, and the
   change is the limiter's own arithmetic. *Reversing:* low, one branch.
 - **What a loosening is credited with.** *Fork:* the quiet only (what the looser rate refills in
@@ -13149,7 +13149,7 @@ The measurement came after it.
   *Reasoning:* the quit of a window whose server died has nothing to stop, and `pg_ctl stop`
   reported that as an error in the log. *Reversing:* low.
 - **#1779: §10.8.** *Ruling:* booked
-  (`docs/contract/10.8/1775-1779-a-strangers-port-clears-a-live-pids-lock-and-a-dead-server-fails-the-window.md`):
+  (`docs/archive/contract-10.8/1775-1779-a-strangers-port-clears-a-live-pids-lock-and-a-dead-server-fails-the-window.md`):
   `db:state` can go `ready` to `failed`, and `retry_database` from that state restarts instead of
   bringing up. No type changes. *Reversing:* n/a.
 
@@ -13364,7 +13364,7 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   the live pid is not a `postgres`) was considered and rejected: a recycled pid can land on a
   second profile's or Homebrew's postgres, and that lockout would stay. *Reversing:* one `if` in
   `inspect_lock` and the variant.
-- **§10.8.** *Ruling:* booked (`docs/contract/10.8/1789-a-silent-port-clears-a-live-pids-lock.md`):
+- **§10.8.** *Ruling:* booked (`docs/archive/contract-10.8/1789-a-silent-port-clears-a-live-pids-lock.md`):
   the boot screen's `postmaster.pid records process <pid>, which is still running, but nothing
   answers…` refusal is gone. No type changes. *Reversing:* n/a.
 - **No test pins the recovering postmaster's refusal.** *Ruling:* not added. Freezing a startup
@@ -13625,7 +13625,7 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
 - **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): the frozen-surface
   change to `crates/knobas-http/**` and `crates/knobas-source/src/**`.** *Fork:* change both, or
   leave #1640 open until Björn signs it off. *Ruling:* change them, booked in
-  `docs/contract/10.8/1640-knobas-http-body-cap-no-redirected-write-no-userinfo.md`. The limiter
+  `docs/archive/contract-10.8/1640-knobas-http-body-cap-no-redirected-write-no-userinfo.md`. The limiter
   and #1729's `watch_local_quota` mark are untouched. *Reasoning:* spec #1620 ruling C2 names
   these changes and the waiver covers its frozen-surface steps. `HttpConfig::max_body` is a new
   public field, so the six adapter struct literals that name every field gain one line.
@@ -13838,7 +13838,7 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
 - **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): the frozen-surface
   change** to `crates/knobas-http/**`. *Fork:* change the frozen crate, or leave #1818 open for
   Björn. *Ruling:* make it, booked in
-  `docs/contract/10.8/1818-knobas-http-a-read-the-server-hung-up-on-is-sent-again.md`: one new
+  `docs/archive/contract-10.8/1818-knobas-http-a-read-the-server-hung-up-on-is-sent-again.md`: one new
   public predicate, `retry::closed_before_answering`, one dependency (`hyper`, already in the
   tree through reqwest), and one more transient case in `send_with`. *Reasoning:* the ticket
   names the change and the model; the limiter (#1630, #1728, #1740, #1764, #1771), the quota mark
@@ -13890,7 +13890,7 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
 - **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): the frozen-surface
   change** to `crates/knobas-http/**`. *Fork:* change the frozen crate, or leave the reading as
   it is. *Ruling:* change it, booked in
-  `docs/contract/10.8/1821-knobas-http-a-write-the-server-hung-up-on-is-unconfirmed.md`: one
+  `docs/archive/contract-10.8/1821-knobas-http-a-write-the-server-hung-up-on-is-unconfirmed.md`: one
   new branch in `send_with`'s transport classifier and one new public constant. *Reasoning:* the
   ticket names the change and the waiver lets an Opus implementer rule it; the limiter, the quota
   mark, #1640's changes and #1818's resend of a read are untouched. *Reversing:* low.
@@ -14129,7 +14129,7 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
 - **An adapter installed earlier from a plain-http URL.** Its update check and update now fail
   with the https message, and so does a restore that has to fetch it again. *Ruling:* intended;
   the reader re-installs it from an https URL. Booked in
-  `docs/contract/10.8/1641-a-release-is-fetched-over-https.md`. *Reversing:* low.
+  `docs/archive/contract-10.8/1641-a-release-is-fetched-over-https.md`. *Reversing:* low.
 
 ### #1641, merge-manager review (Opus, 2026-10-23)
 
@@ -14170,7 +14170,7 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
 - **Reserved for Björn, ruled by implementer on Opus: `open_checkout`'s IPC arguments.** *Fork:*
   drop `command` outright, or keep it and validate the program against the saved list. *Ruling:*
   drop it, with no replacement argument; `application`, `file` and `line` stay as they were, and
-  the §10.8 entry is `docs/contract/10.8/1643-open-checkout-takes-no-command-and-two-reads-clamp.md`.
+  the §10.8 entry is `docs/archive/contract-10.8/1643-open-checkout-takes-no-command-and-two-reads-clamp.md`.
   *Reasoning:* spec #1620 ruling C4 and ADR-0016: a program from a setting is only true when
   the command takes no program. A check against the list would be a second copy of the list's
   rules at the shim. *Reversing:* the argument, the `Run` enum and the entry come back.
@@ -14262,7 +14262,7 @@ Ruled 2026-10-23 by the implementer (Sonnet).
 
 - **Reserved for Björn, ruled by implementer on Opus: changing `crates/knobas-http/**`.**
   *Ruling:* changed under Björn's 2026-10-22 waiver, booked in
-  `docs/contract/10.8/1828-1830-knobas-http-a-read-that-follows-only-the-redirects-a-check-allows.md`.
+  `docs/archive/contract-10.8/1828-1830-knobas-http-a-read-that-follows-only-the-redirects-a-check-allows.md`.
   *Reasoning:* reqwest decides each hop inside the client; no caller of `send` sees a hop but the
   last, so checking every hop cannot be done outside the crate. *Reversing:* low.
 - **Per-request option or a client of its own.** *Fork:* a `Request` option, an `HttpConfig`
@@ -14698,7 +14698,7 @@ Ruled 2026-10-23 by the merge-manager (Opus).
 ### Reserved for Björn, ruled by implementer on Opus
 
 - **Retiring a command from the frozen IPC schema, and sign-off on its §10.8 entry**
-  (`docs/contract/10.8/1657-retire-log-all.md`), under Björn's 2026-10-22 waiver. *Ruling:*
+  (`docs/archive/contract-10.8/1657-retire-log-all.md`), under Björn's 2026-10-22 waiver. *Ruling:*
   retired and signed off, on #1578's and #1611's grounds and ruling D2. The entry only takes away
   from the frozen surface. The command had no caller outside the barrel, the fake and tests. The
   generated mirror changes in one doc comment only (`PlannedWorklog`'s), and the parts of #283,
@@ -14707,7 +14707,7 @@ Ruled 2026-10-23 by the merge-manager (Opus).
 ## #1657 / PR #1854: review of the implementer's rulings (Opus merge-manager, 2026-10-23)
 
 - **Reserved for Björn, ruled by merge-manager on Opus: retiring `log_all` from the frozen IPC
-  schema, and sign-off on `docs/contract/10.8/1657-retire-log-all.md`.** *Ruling:* the
+  schema, and sign-off on `docs/archive/contract-10.8/1657-retire-log-all.md`.** *Ruling:* the
   implementer's ruling is confirmed: retired and signed off. *Reasoning:* outside the barrel,
   `log_all` / `logAll` only appears now in `TfTime.svelte`'s local `$state` and in
   `TfLogAll.svelte`'s header comment (#1853). The entry only removes from the frozen surface, as
@@ -15487,7 +15487,7 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1891.
   migration and no IPC. The field is optional with a default and `CURSOR_VERSION` stays 4.
   `a_v4_envelope_without_the_board_read_stamp_decodes` checks that an old envelope re-encodes
   byte-identical. #1624 amended Gitea's cursor the same way, with no entry. *Reversing:* add a
-  file under `docs/contract/10.8/`.
+  file under `docs/archive/contract-10.8/`.
 - **`scope()` stays a `Debug` string.** *Fork:* `Debug` is no persistence format; use the serde
   spelling. *Ruling:* keep it. *Reasoning:* the string is only ever compared with what the same
   function wrote. If it drifts (a variant renamed, the projects reordered), the result is one
@@ -15611,7 +15611,7 @@ Measured on the seeded Jira Data Center 10.3 (`just jira-live`'s container): wit
 
 ## #1704 — the backup folder opened by a command, not a path grant (implementer, Opus)
 
-- **Reserved for Björn, ruled by implementer on Opus: the §10.8 entry** (waived by Björn 2026-10-22). *Fork:* what the frozen surface takes. *Ruling:* one command, `open_backup_folder`, with no argument, appended to the backup group of the handler list after `restore_backup`. It needs no new type, event, migration or `commands/`/`ipc/` file, and its entry is `docs/contract/10.8/1704-open-backup-folder-command.md`. *Reasoning:* the folder has to come from the `Profile` the process runs as. An argument naming the folder would bring back the problem the grant had: a window naming a folder it should not reach. *Reversing:* low before a second caller exists. It is a command, a mirror line and a fake line.
+- **Reserved for Björn, ruled by implementer on Opus: the §10.8 entry** (waived by Björn 2026-10-22). *Fork:* what the frozen surface takes. *Ruling:* one command, `open_backup_folder`, with no argument, appended to the backup group of the handler list after `restore_backup`. It needs no new type, event, migration or `commands/`/`ipc/` file, and its entry is `docs/archive/contract-10.8/1704-open-backup-folder-command.md`. *Reasoning:* the folder has to come from the `Profile` the process runs as. An argument naming the folder would bring back the problem the grant had: a window naming a folder it should not reach. *Reversing:* low before a second caller exists. It is a command, a mirror line and a fake line.
 - **Where the logic lives.** *Fork:* in the command body, or in `crate::backup`. *Ruling:* a new `backup/folder.rs` (`open`, the `Opener` trait and the managed `FolderOpener`), with the command in `commands/backup.rs` as a shim over it, as the module's other commands are. *Reasoning:* §10.8 freezes the file layout of `commands/` and `ipc/` only, and `commands/backup.rs` says its decisions belong in `crate::backup`. *Reversing:* low.
 - **The seam.** *Fork:* register the opener plugin on the mock app, or have `setup` manage an opener the test can replace. *Ruling:* a managed `FolderOpener` over an `Opener` trait, which closures also implement, as `notify::Backend` does. `setup` manages `FolderOpener::platform()`, which calls `tauri_plugin_opener::open_path`, beside the `Profile`. *Reasoning:* the plugin's Rust API opens Finder on the machine running the test. A recording opener lets the dispatch test see which folder was asked for. The plugin's Rust API checks no window scope, which is why the grant can go. *Reversing:* low.
 - **Seams, chosen without a human to confirm them.** *Fork:* where the tests go. *Ruling:* Tauri's dispatch on the mock app (`tests/it/backup_ipc.rs`: each profile opens its own folder and never the other's; the opener's refusal names the folder; the command is registered), the capability file (`tests/it/wiring.rs`), and the section's component test, which now expects the port to be called with no path. *Reasoning:* the ticket names a seam test. The expected folders are written out from the layout `Profile` documents, not read from `backup_dir()`, so the test cannot pass by computing its answer the way the code does. *Reversing:* n/a.
@@ -15710,7 +15710,7 @@ Measured on the seeded Jira Data Center 10.3 (`just jira-live`'s container): wit
 - **Reserved for Björn, ruled by implementer on Opus: migration `0060`** (Björn's 2026-10-22
   waiver, review handoff). *Fork:* the number, and whether it runs in a transaction. *Ruling:* `0060_the_ids_0050_missed_compare_bytewise_and_a_context_is_an_entity.sql`,
   next after `0059` on `origin/main` at `9deb973b`, transactional (no `-- no-transaction`), with
-  its §10.8 entry `docs/contract/10.8/1708-migration-0060-context-entity-key.md`. *Reasoning:* the
+  its §10.8 entry `docs/archive/contract-10.8/1708-migration-0060-context-entity-key.md`. *Reasoning:* the
   ticket's "next after `0055`" predates `0056` to `0059`. *Reversing:* a later migration.
 - **Which columns: six, not five.** *Fork:* the ticket lists five. *Ruling:* add
   `knobas.ticket_view.saved_view`. *Reasoning:* every text column in `knobas` and `sync` was read
@@ -15956,7 +15956,7 @@ The merge-manager's review (Opus, 2026-10-24):
 - **The witness.** *Ruling:* one table test per goal over the real entry points (the three commands on a mock app, `submit`, `worklog::log`, and `submit_in_background` for the cut test), each path on its own scratch database. The landing test opens the adapter's gate once the send is in the set (`Background::running() > 0`, a public read added for this) or the pool has closed. Before the fix it always went the second way, so `sent` failed and the next start sent the write again. The test reads that as two sends, and it read that on all five paths on 17bc0b62. The cut test never opens the gate before the quit ends, so the 100 ms grace decides nothing. Before the fix it found every row pending, on all six paths. *Reasoning:* the brief asks for doors and states. `running()` is the state that says the quit will wait for a task, and without it the only discriminator left was a clock. *Reversing:* trivial.
 - **The surviving mutant M6: `shutdown` no longer waits for aborted run handles.** *Ruling:* keep the wait, with no test that forces the race. *Reasoning:* without the wait, `hold_cut` can take the cut list before an aborted task's future has dropped on its worker, and that write is then left pending. In the fixture the drop always wins the race, because a parked task is cancelled on the next poll and `hold_cut`'s first statement takes longer than that. The ordering the code needs is the one `Background::close` keeps, and mutant M3 (`close` without its drain) does fail the app test. *Reversing:* n/a.
 - **`start_work/queue.rs:49` runs inside the set and now spawns its flush into the set too.** *Ruling:* accept the nesting. *Reasoning:* the inner task joins the same set the quit waits for. If the set is already closed, the inner flush runs inline and sends nothing (#1924), which is #1751's step-boundary rule. *Reversing:* n/a.
-- **§10.8.** *Ruling:* a new entry, `docs/contract/10.8/1932-the-quit-waits-for-a-send-a-command-waits-on.md`, IPC command semantics. *Reasoning:* three commands can now answer `not_ready` for a new reason, and a write cut at the quit now reads as held rather than pending in `pending_writes`. No signature, variant, event or migration changes. *Reversing:* one file.
+- **§10.8.** *Ruling:* a new entry, `docs/archive/contract-10.8/1932-the-quit-waits-for-a-send-a-command-waits-on.md`, IPC command semantics. *Reasoning:* three commands can now answer `not_ready` for a new reason, and a write cut at the quit now reads as held rather than pending in `pending_writes`. No signature, variant, event or migration changes. *Reversing:* one file.
 - **The guard holds a little more than what reached the source (Standards review).** *Fork:* arm `OnTheWire` only once the request has left, or from before the call. *Ruling:* from before the call. *Reasoning:* nothing in `Source::write` says when its request leaves. A write cut while it waits on knobas' own rate limit (#1729) or on its connection is held too, and so is a refusal whose record failed under the quit. Each of those costs the reader one check of the source and *Send again*. Sending it again blind could make a second comment or ticket, and that is the failure this ticket removes. The doc comment on the guard says so. *Reversing:* moderate, it needs a signal from the transport.
 - **Standards review dispositions.** *Ruling:* done: the three `in_the_set` callers take a `FnOnce(Scheduler)` instead of each cloning the scheduler; `in_the_set` is not generic over the answer; `CUT` became `CUT_DETAIL` and `Quit::cut` became `Quit::keep_cut`; the doc on `deliver` now covers the inline run during the quit; a doc comment on `quit_begun`. Kept: `Background::running` is public for the test (ruled above); the unbounded drain after `abort_all` matches the runs' wait, since an aborted task ends at its next poll; the test helpers `next_start` and the inline next start in LIFE-2 stay apart, because folding LIFE-2's into the helper is a change to a test this ticket does not need; `at_the_source`'s `matches!` checks stay, because they set up rows and the `match` dispatches the call. *Reversing:* trivial.
 
@@ -16058,7 +16058,7 @@ The merge-manager's review (Opus, 2026-10-24):
 - **`update_source` releases keychain waits too.** *Ruling:* yes, through the same function. *Reasoning:* one release for "a person acted on the source". A keychain wait released by an address change costs one keychain read on the next flush, which is what the ladder would spend anyway. *Reversing:* trivial, a second function.
 - **One owner for the `keychain:` prefix (#1946).** *Fork:* `Backend` drops it and every wrapper frames it, or the wrappers stop adding it. *Ruling:* the first, the ticket's first direction. `Backend` prints `{0}` as `Unavailable` and `NotFound` print their own words. `SourcesError::Secret` keeps `keychain: {0}`, `instance_for`'s special case is gone (`RunFailure::message` frames every keychain fault), and the importer's two `IpcError::internal` sites frame through `assets::keychain_error`. The join-error text in `knobas_secrets::spawn` became "the store's blocking task failed", so it no longer reads `keychain: keychain task failed`. *Reasoning:* a wrapper knows its reader, and two variants already worked this way. *Cost:* the log lines in `backup::settle_health` and `crud::add`'s orphan cleanup print the store's bare words in a field whose message already names the keychain. The prefix appears there zero times, not twice. *Reversing:* trivial.
 - **The pause queued at submit, at quit (#1933, #1938).** *Ruling:* checked by a test, no code change. *Reasoning:* `submit_in_background` puts the flush in the background set, so the quit waits for it. A flush whose keychain read ends after the quit has begun reaches `turn`, which selects the quit first and returns `Stopped`, so no wait is recorded and nothing is sent. `OnTheWire` is never armed, because `attempt` never runs. The row stays untried and the next start sends it once. A Kuma pause is `resend_harmless` in any case. `a_pause_queued_while_the_keychain_is_locked_sends_nothing_at_quit_and_goes_next_start` holds the background flush's keychain read at a door across the quit's start. *Not new here:* a keychain read blocked on a person's prompt cannot be cancelled (`spawn_blocking`), so a prompt left open at quit holds the quit for its grace. That is true of every write and sync that reads the keychain, and the grace bounds it. *Reversing:* n/a.
-- **§10.8.** Reserved for Björn, ruled by implementer on Opus. *Ruling:* a new entry, `docs/contract/10.8/1944-1946-a-keychain-fault-on-the-write-side-is-waited-out.md`, IPC command semantics. *Reasoning:* `submit_write` now queues an op it used to answer `invalid`, `set_source_secret` and `update_source` release more rows in `pending_writes`, and sources commands' error text changes. No signature, variant, event or migration changes. *Reversing:* one file.
+- **§10.8.** Reserved for Björn, ruled by implementer on Opus. *Ruling:* a new entry, `docs/archive/contract-10.8/1944-1946-a-keychain-fault-on-the-write-side-is-waited-out.md`, IPC command semantics. *Reasoning:* `submit_write` now queues an op it used to answer `invalid`, `set_source_secret` and `update_source` release more rows in `pending_writes`, and sources commands' error text changes. No signature, variant, event or migration changes. *Reversing:* one file.
 - **Seams under test (TDD, unattended).** *Ruling:* `submittable` with the real Kuma and TeamCity adapters over a locked `SecretStore` (unit). `knobas_sync::write_queue`'s public `submit`, `queue`, `flush_entity_of`, `flush_source` and `release_credential_waits` over #1741's `Lockable`, given a door on its read. The app's `submit`, `submit_in_background`, `crud::set_secret` and `Scheduler::shutdown` over a lockable fake in `tests/it/keychain_write.rs`. The `Display` of each wrapper over each `SecretError`. Doors and states only, no wall-clock bound. *Reversing:* n/a.
 - **Standards review dispositions.** *Done:* reflowed two doc comments in `knobas-sync`'s `write_queue.rs`. The `Gate` doc says `waited` reads the count before a wait on the credential, no longer "before a refusal". The `WaitReason` doc says a person acting on the source ends a keychain wait, since an address edit releases it too. The roles' writes moved into `submittable`'s helper `role_writes`. `assets::in_the_keychain` became `keychain_error`. *Kept:* each test file keeps its own `SecretStore` fake and door (`Locked` twice in unit tests, `Keychain` in `keychain_write.rs`, `Lockable` in `knobas-sync`), which is what every test file with a store fake does today (`backup_ipc.rs`, `sources_crud.rs`, `discovered_config.rs`). Sharing one across crates would need a test-support export from `knobas-secrets` that nothing else asks for. The inline wait for `is_shutting_down` copies `background_write.rs`'s private `quit_begun`. The `keychain:` string match is the ruled contract above. `role_writes` stays in the app rather than in `knobas_source::role`, the frozen SPI, which nothing else would call it from. *Reversing:* trivial.
 
@@ -16098,7 +16098,7 @@ The merge-manager's review (Opus, 2026-10-24):
 - **Against which descriptor.** *Ruling:* the built source's own, `source.descriptor()`, never the kind's template. *Reasoning:* that is what battery clause 5 probes, and what an instance-scoped op needs: a Kuma pause exists only with an account (#452). The template plus the roles' writes is what `submittable` lets wait while the keychain is locked (#1944). The flush decides what is sent. *Reversing:* trivial.
 - **Where in `attempt`.** *Ruling:* right after the row decodes, before the target parses and before hold detection. *Reasoning:* no change to the target makes an op declared, so holding it first would ask the reader to resolve a write that can only be refused. An undecodable row is refused at the same point for the same reason. *Reversing:* trivial.
 - **The adapters' own checks.** *Fork:* keep them as defence in depth, or remove them. *Ruling:* keep them, and keep battery clauses 5 and 11 as they are. *Reasoning:* the battery runs each adapter directly, with no queue in front, and clause 5 is what keeps an adapter's `write` match from growing a wildcard that performs. Removing the refusals would touch every adapter for no behaviour, and would leave `Source::write` safe only when reached through the queue. The doc comments on `Source::write`, `write_ops` and clause 5 now say the caller refuses first and the adapter's refusal is the defence behind it. *Reversing:* moderate, every adapter and the battery.
-- **Clause 5's text and §10.8.** Reserved for Björn, ruled by implementer on Opus (the issue has no parent spec). *Ruling:* the rule is unchanged and who enforces it widens. That is a change in `crates/knobas-source/src/**` (a new public function and three doc comments), so it gets its own entry, `docs/contract/10.8/1950-the-flush-and-the-wasm-host-refuse-an-undeclared-write.md`. It records the wording of the refusal, which now replaces the adapter's own in a refused row's `detail`. *Reversing:* one file.
+- **Clause 5's text and §10.8.** Reserved for Björn, ruled by implementer on Opus (the issue has no parent spec). *Ruling:* the rule is unchanged and who enforces it widens. That is a change in `crates/knobas-source/src/**` (a new public function and three doc comments), so it gets its own entry, `docs/archive/contract-10.8/1950-the-flush-and-the-wasm-host-refuse-an-undeclared-write.md`. It records the wording of the refusal, which now replaces the adapter's own in a refused row's `detail`. *Reversing:* one file.
 - **The refusal's wording.** *Ruling:* `source "<id>" does not declare the write "<op>", so it was not sent`, and `… the source action "<id>" …` for an undeclared action, as `SourceError::Protocol`. *Reasoning:* the panel shows a refused row's `detail`, and a person reading it needs the op and the fact that nothing reached the server. *Reversing:* trivial.
 - **Witnessing the guest.** *Ruling:* a new fixture config, `"performs_undeclared": true`, makes the guest's `write` perform every op and answer a receipt naming it. With it, `a_guest_is_never_handed_a_write_it_does_not_declare` sees the host's refusal of a comment and of an undeclared action, and the guest's receipt for its declared one. `a_guest_that_performs_undeclared_writes_passes_the_contract_battery` runs the whole battery over that guest. Without the host check both fail (mutant M3), because the guest answers `Ok`. *Reversing:* trivial.
 - **The test fakes.** *Ruling:* `knobas-sync`'s write-queue fake now declares every op its tests queue, plus `add_label`, and `scheduler_loop.rs`'s `Slow` declares the comment it is sent. Both used to declare less than they were asked to perform. `keychain_write.rs`'s Kuma fake no longer refuses an undeclared op itself, so its test can only pass if the flush refuses. *Reversing:* trivial.
@@ -17177,7 +17177,7 @@ The merge-manager's rulings (Opus):
 - **`kuma:monitors` and another instance's id.** *Ruling:* the create target is `NotOffered` (a create whose receipt named no id is followed by its run); another namespace is `Protocol`, as Confluence refuses one. *Cost of reversing:* none.
 - **Clause 13 in the live suite.** *Fork:* the full battery live (clause 2 is a coin toss against a Kuma that rewrites response times every beat, which is why `live_kuma` never ran it), a hand-copy of clause 13, or a public entry to clause 13 alone. *Ruling:* `knobas_source::contract::refreshes_as_it_syncs(source, items)`, run on a poll's batch that carries a paused monitor's tombstone, through both the account and the key-only source. *Reasoning:* the criterion names the battery's check; a copy would drift from it. *Cost of reversing:* one function.
 - **Test seams (the TDD skill asks Björn).** *Ruling:* `refresh::read` over a scripted `MonitorReads` (the wait, its ceiling, gone at once), `Source::refresh` over the recording (item, gone, not offered, refused), the battery, and the three live tests. *Cost of reversing:* none.
-- **`refreshes_as_it_syncs` and §10.8** (merge-manager, Opus). *Fork:* the implementer's "no §10.8 entry is owed", or an entry for the new public function. *Ruling:* an entry, `docs/contract/10.8/2100-kuma-refresh-clause-13-alone.md`, and the contract amendment corrected to point at it. *Reasoning:* §10.8 freezes "any change to `crates/knobas-source/src/**` (the `Source` trait, its DTOs, the contract battery)", not only the trait; #1199's `contract::fills_its_roles`, the same shape of addition, took an entry. The function itself is upheld: it runs clause 13's own code, so the live check cannot drift. *Cost of reversing:* one docs file.
+- **`refreshes_as_it_syncs` and §10.8** (merge-manager, Opus). *Fork:* the implementer's "no §10.8 entry is owed", or an entry for the new public function. *Ruling:* an entry, `docs/archive/contract-10.8/2100-kuma-refresh-clause-13-alone.md`, and the contract amendment corrected to point at it. *Reasoning:* §10.8 freezes "any change to `crates/knobas-source/src/**` (the `Source` trait, its DTOs, the contract battery)", not only the trait; #1199's `contract::fills_its_roles`, the same shape of addition, took an entry. The function itself is upheld: it runs clause 13's own code, so the live check cannot drift. *Cost of reversing:* one docs file.
 - **The 30 s wait against "a pause tombstones … before the follow-up run starts"** (merge-manager, Opus). *Ruling:* the criterion holds. A pause reads `getMonitor` inactive and answers *gone* without waiting; the wait is reached only for an active monitor (a resume, a create). The refresh holds the source's run lock throughout, so the wait can delay the follow-up run by up to 30 s but cannot let it start first, and `kuma_write_live` asserts zero runs started at each refresh's end. *Cost of reversing:* none.
 - **The `acked`/`ask` split in `socket.rs`** (merge-manager, Opus). *Ruling:* upheld. `call_with` is `verdict(acked(..)?)`, the same lock, `budget` timeout and timeout error as before; `verdict` maps `ok: false` to the same `Protocol` message and an ack with no `ok` to the same `Unconfirmed`. Only `ask` reads a refusal as `None`. *Cost of reversing:* none.
 
@@ -17393,7 +17393,7 @@ The merge-manager's rulings (Opus):
 
 ## #2173: pull-request time declarations with no reader (implementer, Opus, 2026-10-26)
 
-- **Retire or keep `opened` and `merged_at`.** *Fork:* retire both declarations with a §10.8 entry, or keep them for a future reader and say so in the ledger. *Ruling:* retire. `KindPaths` loses both fields, `field` loses `OPENED` and `MERGED_AT`, the battery stops weighing them and Gitea stops declaring them (`docs/contract/10.8/2173-retire-pull-request-time-declarations.md`). *Reasoning:* a declaration nobody reads is frozen surface every adapter, fixture and battery run pays for while no test can show it is right, since only a reader shows what a declaration is for; no ticket, spec or roadmap item names a reader; and serde ignores unknown keys, so an older out-of-process adapter still decodes. *Cost of reversing:* low: two fields, two `field` constants, two battery lines and Gitea's two paths, as #929 added them, under a new §10.8 entry.
+- **Retire or keep `opened` and `merged_at`.** *Fork:* retire both declarations with a §10.8 entry, or keep them for a future reader and say so in the ledger. *Ruling:* retire. `KindPaths` loses both fields, `field` loses `OPENED` and `MERGED_AT`, the battery stops weighing them and Gitea stops declaring them (`docs/archive/contract-10.8/2173-retire-pull-request-time-declarations.md`). *Reasoning:* a declaration nobody reads is frozen surface every adapter, fixture and battery run pays for while no test can show it is right, since only a reader shows what a declaration is for; no ticket, spec or roadmap item names a reader; and serde ignores unknown keys, so an older out-of-process adapter still decodes. *Cost of reversing:* low: two fields, two `field` constants, two battery lines and Gitea's two paths, as #929 added them, under a new §10.8 entry.
 ## #2176: TeamCity asks about build configurations side by side (implementer, Opus, 2026-10-26)
 
 #2159's rulings (`FuturesUnordered` in the run's own task, nothing spawned, the shared limiter as the one rate bound, completion-order progress, the test seam behind a holding proxy, no §10.8 entry for an additive adapter config key) carry over unchanged. Only what differs for TeamCity is ruled here.

@@ -4,7 +4,7 @@
 -- Single-writer, like every migration: a ticket that needs more schema takes
 -- the next number and never edits this file or its predecessors. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/contract/10.8/2166-migration-0061-jira-tickets-keep-no-changelog.md`).
+-- (`docs/archive/contract-10.8/2166-migration-0061-jira-tickets-keep-no-changelog.md`).
 -- Transactional, as sqlx runs every file without `-- no-transaction`: a
 -- failure leaves the database as `0060` did.
 --

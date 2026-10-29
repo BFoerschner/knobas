@@ -7,7 +7,7 @@
 -- `named`). Single-writer (orchestrator), like every migration: `0055` is
 -- #1571's, this number is #1650's and nothing else. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/contract/10.8/1650-migration-0056-stored-name-words.md`).
+-- (`docs/archive/contract-10.8/1650-migration-0056-stored-name-words.md`).
 --
 -- ## Why
 --

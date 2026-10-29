@@ -27,7 +27,7 @@ unconfirmed hold, whose create may already exist, from a drift hold, whose creat
 (`knobas_core::write_queue::unconfirmed`) is what tells the two holds apart, read as
 `QueuedWrite::may_have_landed` in Rust, `held_snapshot ? 'unconfirmed'` in SQL and
 `mayHaveLanded` (`app/src/lib/shell/follow-write.ts`) in the app. The §10.8 entry is
-`docs/contract/10.8/1966-a-create-held-as-unconfirmed-is-on-its-way.md`.
+`docs/archive/contract-10.8/1966-a-create-held-as-unconfirmed-is-on-its-way.md`.
 
 **Reversing.** Cheap: one condition in `assets::ON_ITS_WAY`, one in `willNotGo`, and the field
 `ActionItemTicket.may_have_landed`.

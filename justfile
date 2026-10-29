@@ -58,9 +58,8 @@ export CARGO_BUILD_JOBS := env("CARGO_BUILD_JOBS", "4")
 check:
     #!/usr/bin/env bash
     set -euo pipefail
-    # A stale section 10.8 index fails the gate before anything slow runs (#737),
-    # and so does a hand-written table that lost step with the tree (#1919).
-    python3 -I scripts/contract-index.py --check
+    # A hand-written table that lost step with the tree fails the gate before
+    # anything slow runs (#1919).
     python3 -I scripts/doc-lists.py
     front_log= scripts_log= cargo_log= front_pid= scripts_pid= cargo_pid=
     # The script checks are a half of their own (#920): none of them runs
@@ -176,7 +175,7 @@ check:
     fi
     echo "check: ok in ${SECONDS} s"
 
-# The frontend half of `check` alone, with the contract-index check it starts
+# The frontend half of `check` alone, with the doc-list check it starts
 # with. Enough for a head `scripts/gate-scope.sh` calls `front`: nothing in
 # `crates/` reads what changed, so the cargo half would run the tree main
 # already passed. Ruling: Björn, 2026-10-15.
@@ -184,23 +183,20 @@ check:
 # Its vitest run is the tests the change can reach, not the whole suite
 # (#920): `front-changed` below. `check` still runs every test.
 check-front base="origin/main":
-    python3 -I scripts/contract-index.py --check
     python3 -I scripts/doc-lists.py
     just conflict-markers
     just front-changed "{{base}}"
     @echo "check-front: ok"
 
-# The three checks that guard a docs-only change, nothing else: the
-# contract-index check (a new `docs/contract/10.8/` file without a regenerated
-# index), the doc-list check (#1919: a crate, `app/src/lib/` directory,
-# live-suite recipe or live product a hand-written table lists, or misses) and
-# the conflict-marker scan. Seconds, no `node_modules`, no cargo. What a
+# The two checks that guard a docs-only change, nothing else: the doc-list
+# check (#1919: a crate, `app/src/lib/` directory, live-suite recipe or live
+# product a hand-written table lists, or misses) and the conflict-marker
+# scan. Seconds, no `node_modules`, no cargo. What a
 # docs-only self-merge runs in place of a gate (#1691, ruling D5 in
 # `docs/decisions/2026-10-review-planning-rulings.md`); `scripts/docs-check-test.sh`
 # pins the red cases. Calls the script directly, not `just conflict-markers`,
 # so the test can run it from a scratch tree.
 docs-check:
-    python3 -I scripts/contract-index.py --check
     python3 -I scripts/doc-lists.py
     scripts/conflict-markers.sh
 
@@ -450,9 +446,9 @@ shell:
 # waiter, `take` is re-entrant and `assert` names the holder -- against a stub
 # `gh` and a private TMPDIR, about 15 s. And the gate scope's (issue #1543): a
 # head that changes only an app file a testenv script pins answers `full`. And
-# `docs-check` (issue #1691): green on a clean tree, red on a stray section 10.8
-# file, on a conflict marker in prose, and on a table row the tree lost or a
-# member the table lacks (#1919).
+# `docs-check` (issue #1691): green on a clean tree, red on a conflict marker
+# in prose, and on a table row the tree lost or a member the table lacks
+# (#1919).
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/bash-guard-test.sh
@@ -519,7 +515,6 @@ pre-gate:
     just conflict-markers
     npm --prefix app run build
     env -u RUSTUP_TOOLCHAIN cargo fmt --all
-    just contract-index
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source --lib every_op_has_its_own_snake_case_identifier
     # The generated IPC mirror (#1325): written here so a Rust change arrives
     # with its TypeScript among the files to commit; `check` fails without it.
@@ -2186,6 +2181,3 @@ ipc-mirror:
     scripts/ipc-mirror-check.sh app/src/lib/ipc/generated \
       env -C "$dir" "$exe" --exact ipc_mirror::the_generated_ipc_mirror_is_written --quiet
 
-# Move loose section 10.8 entries into docs/contract/10.8/ and regenerate the index (#737).
-contract-index:
-    python3 -I scripts/contract-index.py

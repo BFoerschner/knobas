@@ -6,7 +6,7 @@ GitHub Issues on `BFoerschner/knobas` via `gh` (`docs/agents/issue-tracker.md`).
 
 ## Documents
 
-Single context: `CONTEXT.md` + `docs/adr/` (`docs/agents/domain.md`). Spec `docs/specs/2026-08-23-knobas-design.md` · frozen contract `docs/contract.md` (§10.8 is the IPC/migration ledger) · roadmap `docs/roadmap.md` · working model `docs/agents/working-model.md` · dated rulings `docs/decisions/`.
+Single context: `CONTEXT.md` + `docs/adr/` (`docs/agents/domain.md`). Spec `docs/specs/2026-08-23-knobas-design.md` · frozen contract `docs/contract.md` (§10.8 lists the frozen surfaces and how a change to one is announced) · roadmap `docs/roadmap.md` · working model `docs/agents/working-model.md` · dated rulings `docs/decisions/`.
 
 ## Flow
 

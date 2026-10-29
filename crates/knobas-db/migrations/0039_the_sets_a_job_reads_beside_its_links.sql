@@ -5,7 +5,7 @@
 -- Single-writer, like every migration: a later ticket that needs more schema
 -- takes the next number and never edits this file. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/contract/10.8/866-migration-0039-link-sets-and-six-commands.md`).
+-- (`docs/archive/contract-10.8/866-migration-0039-link-sets-and-six-commands.md`).
 --
 -- ## What a link set is
 --

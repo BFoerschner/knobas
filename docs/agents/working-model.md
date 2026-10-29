@@ -48,7 +48,7 @@ Disjoint files do not mean disjoint resources. Five implementers dispatched at o
 - **No workflow has an automatic trigger** (Björn, 2026-09-05), and `check.yml` and `testenv.yml` are disabled outright since 2026-10-24 (Björn, #2035, `docs/decisions/2026-10-24-bjorn-rulings.md`). `gh pr checks` answers `no checks reported` on every branch. Treat a check status as no signal, ever. A step that says to dispatch one runs `just check` instead (`docs/development.md`, *CI*). `release.yml` is untouched and dispatched by hand. Reversing: `gh workflow enable check.yml`.
 - **Platform.** `check.yml` ran on `ubuntu-latest`; this machine is macOS. While it is disabled nothing runs the gate on Linux: a `#[cfg(target_os = "linux")]` path, a GNU-versus-BSD difference in a script, or a Linux-only test goes unchecked, and `release.yml`'s Linux leg builds a bundle but runs no test. When a change touches one of those, name the gap in the PR body.
 - **A merge-manager that cannot run the frontend half must not merge.** `front` is one half of `check` and needs `app/node_modules`. Take it from a worktree that already has one: `cmp` the two `app/package-lock.json`, `cp -Rpc` the `node_modules` across (an APFS clone), then `touch app/node_modules/.package-lock.json`, because that timestamp is `just deps`'s whole staleness test.
-- **No file is appended to by every PR.** §10.8 entries are one file each under `docs/contract/10.8/`, a PR adds a file and runs `just contract-index`, and the single-writer rule stays checkable on the diff. The committed test inventory and the rulings file, which every PR used to append to under `merge=union`, were retired on 2026-10-29.
+- **No file is appended to by every PR.** The committed test inventory, the rulings file and the §10.8 ledger were all retired on 2026-10-29; a frozen-surface change is announced in the PR body instead (`docs/contract.md` §10.8).
 - **`main` must always pass `just check`.** The implementer rebases at most once, at the end, if `git merge-tree` shows a conflict; the merge-manager's gate covers the rebased head. A rebase that conflicts in many places is squashed first and resolved once.
 
 ## Review economics
@@ -80,7 +80,7 @@ A check that measures a representation of the thing instead of the thing fails g
 
 ## Branching model
 
-Trunk-based with short-lived task branches: one issue, one branch, one PR to `main`, hours to a day of divergence. Pre-1.0 habits stay: a half-built feature ships to `main` not wired into navigation rather than living on a stale branch. What keeps parallel work from colliding is structure, not branches: streams own disjoint code cut along crate and module boundaries, and the cross-cutting surfaces (the `Source` trait, the migrations directory, the IPC schema) are frozen and single-writer, each change carrying its own §10.8 entry.
+Trunk-based with short-lived task branches: one issue, one branch, one PR to `main`, hours to a day of divergence. Pre-1.0 habits stay: a half-built feature ships to `main` not wired into navigation rather than living on a stale branch. What keeps parallel work from colliding is structure, not branches: streams own disjoint code cut along crate and module boundaries, and the cross-cutting surfaces (the `Source` trait, the migrations directory, the IPC schema) are frozen, and a change to one is announced in the PR as `docs/contract.md` §10.8 says.
 
 ## Test strategy by layer
 
