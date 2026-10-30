@@ -384,10 +384,7 @@ async fn toolbar(
 ) -> Result<Vec<ViewAction>, SourceError> {
     let default = record.default_branch();
     let names = || listing.items.iter().map(|b| b.name.as_str());
-    let empty = record
-        .repo
-        .empty
-        .then(|| super::EMPTY.to_owned());
+    let empty = record.repo.empty.then(|| super::EMPTY.to_owned());
     let mut actions = vec![act::new_branch(
         None,
         act::default_first(default, names(), None),

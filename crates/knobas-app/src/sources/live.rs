@@ -661,7 +661,13 @@ mod tests {
         let key = Key::of_ask(0, &ask);
         let mut reads = Reads::new(1 << 20);
         reads.put(key.clone(), Answer::Refused(None));
-        assert!(reads.replace(&key, Answer::Refused(Some(RefusedWrite::of(&ask, String::new())))));
-        assert!(!reads.replace(&key, Answer::Refused(Some(RefusedWrite::of(&ask, String::new())))));
+        assert!(reads.replace(
+            &key,
+            Answer::Refused(Some(RefusedWrite::of(&ask, String::new())))
+        ));
+        assert!(!reads.replace(
+            &key,
+            Answer::Refused(Some(RefusedWrite::of(&ask, String::new())))
+        ));
     }
 }
