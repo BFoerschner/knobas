@@ -146,7 +146,7 @@ function finish(root: DocumentFragment, links: MarkdownLinks) {
   const doc = root.ownerDocument;
   const seen = new Map<string, number>();
   for (const heading of root.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
-    const base = slug(heading.textContent ?? "");
+    const base = slug(heading.textContent);
     const count = seen.get(base) ?? 0;
     seen.set(base, count + 1);
     heading.id = `user-content-${count === 0 ? base : `${base}-${count}`}`;

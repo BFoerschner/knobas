@@ -161,7 +161,7 @@ test("raw HTML is sanitized: scripts, event handlers, javascript: links, styles 
       '<a href="javascript:window.pwned=3">click</a>',
       '<p style="color:red" class="tf-modal" onclick="window.pwned=4">styled</p>',
       '<form action="https://example.com"><input name="q"><button>go</button></form>',
-      "<iframe src=\"https://example.com\"></iframe>",
+      '<iframe src="https://example.com"></iframe>',
       "",
       "[md link](javascript:alert(1))",
     ].join("\n"),
