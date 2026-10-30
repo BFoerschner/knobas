@@ -50,3 +50,23 @@ test("each hunk's header counts its lines on both sides, as git prints it (#2267
   // Only added, at the top of an empty file: nothing of the old side, after its line 0.
   expect(lineDiff("b.txt", "", "x\ny").hunks[0]!.header).toBe("@@ -0,0 +1,2 @@");
 });
+
+test("a long file with one changed line diffs without a table of every line against every other (#2270)", () => {
+  const lines = Array.from({ length: 40_000 }, (_, n) => `  "k${n}": ${n},`);
+  const after = [...lines];
+  after[20_000] = '  "k20000": "changed",';
+  const file = lineDiff("big.json", lines.join("\n"), after.join("\n"));
+  expect(file.hunks.map((h) => h.header)).toEqual(["@@ -19998,7 +19998,7 @@"]);
+  expect(file.additions).toBe(1);
+  expect(file.deletions).toBe(1);
+});
+
+test("past the table's bound the changed middle is removed whole, then added whole: still a true diff", () => {
+  const before = Array.from({ length: 3_000 }, (_, n) => `a${n}`);
+  const after = Array.from({ length: 3_000 }, (_, n) => (n % 2 === 0 ? `a${n}` : `b${n}`));
+  const file = lineDiff("wide.txt", ["head", ...before, "tail"].join("\n"), ["head", ...after, "tail"].join("\n"));
+  const kinds = file.hunks.flatMap((h) => h.lines.map((l) => l.kind));
+  expect(kinds.filter((k) => k === "del")).toHaveLength(2_999);
+  expect(kinds.filter((k) => k === "add")).toHaveLength(2_999);
+  expect(kinds.indexOf("add")).toBeGreaterThan(kinds.lastIndexOf("del"));
+});
