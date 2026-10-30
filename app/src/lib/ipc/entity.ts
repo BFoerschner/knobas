@@ -24,7 +24,6 @@ import type {
   CodeFacts,
   ContextRow,
   DiffRead,
-  DiffReadAt,
   DocExport,
   DocPage,
   DocsHits,
