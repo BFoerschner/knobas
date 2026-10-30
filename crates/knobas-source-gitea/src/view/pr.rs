@@ -15,6 +15,7 @@ use super::{fact, login, when_of};
 use crate::model::UserRef;
 use crate::source::GiteaSource;
 
+pub(crate) mod diffs;
 mod label;
 mod land;
 mod maintain;
@@ -195,16 +196,43 @@ impl PullView<'_> {
     /// last reviewed at, read beside the rest. The commits are for picking
     /// from, not the diff: a failed read of them lists none and fails nothing.
     async fn files(&self) -> Result<ViewSection, SourceError> {
-        let (pull, text, reviews, resolves, commits, viewer) = tokio::try_join!(
+        // A diff kept for this pull request waits for the record, which says
+        // whether it still stands; else the diff is read beside the rest.
+        let kept = self.source.pull_diffs.holds(self.owner, self.repo, self.number);
+        let (pull, fetched, reviews, resolves, commits, viewer) = tokio::try_join!(
             self.pull(),
-            self.source
-                .client
-                .pull_diff(self.owner, self.repo, self.number),
+            async {
+                if kept {
+                    Ok(None)
+                } else {
+                    self.source
+                        .client
+                        .pull_diff(self.owner, self.repo, self.number)
+                        .await
+                        .map(Some)
+                }
+            },
             self.reviews(),
             async { Ok(self.source.resolves().await) },
             async { Ok(self.listed().await.map(|(c, _, _)| c).unwrap_or_default()) },
             self.viewer(),
         )?;
+        let key = diffs::DiffKey::of(self.owner, self.repo, self.number, &pull);
+        let text: std::sync::Arc<str> = match fetched {
+            Some(text) => text.into(),
+            None => match key.as_ref().and_then(|k| self.source.pull_diffs.get(k)) {
+                Some(text) => text,
+                None => self
+                    .source
+                    .client
+                    .pull_diff(self.owner, self.repo, self.number)
+                    .await?
+                    .into(),
+            },
+        };
+        if let Some(key) = key {
+            self.source.pull_diffs.put(key, std::sync::Arc::clone(&text));
+        }
         let reviewed = range::reviewed(&reviews, viewer.as_deref());
         let range = range::of(
             &self.source.id,

@@ -27,6 +27,9 @@ pub struct GiteaSource {
     /// Which token on which server this is, for [`Self::viewer`]'s cache: a
     /// hash of the instance id, the base URL and the secret, never the secret.
     viewer_key: u64,
+    /// Pull requests' diffs at their head and merge base, for this built
+    /// source's life (`view::pr::diffs`).
+    pub(crate) pull_diffs: crate::view::pr::diffs::PullDiffs,
 }
 
 /// Who each token is, by [`GiteaSource::viewer_key`], for the life of the
@@ -101,6 +104,7 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         config,
         client,
         viewer_key,
+        pull_diffs: Default::default(),
     }))
 }
 

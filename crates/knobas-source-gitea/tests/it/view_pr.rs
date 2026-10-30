@@ -3311,3 +3311,45 @@ async fn conversation_without_its_line_comments_still_says_the_reviews() {
     assert!(said.contains("priya.nair"), "{said}");
     assert!(!said.contains("> Bound the jitter."), "{said}");
 }
+
+/// A pull request's diff is kept for the session at its head and merge base
+/// (spec #2234 step 1, ADR-0032): the *Files* tab read again at the same
+/// ends reads the record, the reviews and the rest, but not the `.diff`; a
+/// pushed head is read again. A record that does not name both ends whole
+/// keeps nothing.
+#[tokio::test]
+async fn a_pull_requests_diff_is_read_once_per_head_and_merge_base() {
+    const BASE: &str = "907900b245f2941018dfd3ee155b876ef701c10a";
+    let mut pull = open_pull();
+    pull["merge_base"] = json!(BASE);
+    let server = gitea(pull.clone(), reviews()).await;
+    let source = source(&server);
+    let diffs = |asked: &[String]| asked.iter().filter(|p| p.ends_with("142.diff")).count();
+
+    let first = source.view(PR, Some("files")).await.unwrap().expect("drawn");
+    let again = source.view(PR, Some("files")).await.unwrap().expect("drawn");
+    assert_eq!(first, again, "the kept diff draws the same tab");
+    assert_eq!(diffs(&paths(&server).await), 1, "the second read sent no .diff");
+
+    let pushed = "d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f70819203";
+    pull["head"]["sha"] = json!(pushed);
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls/142")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(pull))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    source.view(PR, Some("files")).await.unwrap().expect("drawn");
+    assert_eq!(diffs(&paths(&server).await), 2, "a pushed head is read again");
+
+    // No merge base: nothing names what the diff stands at, so nothing is kept.
+    let unnamed = gitea(open_pull(), reviews()).await;
+    let source = source_of(&unnamed);
+    source.view(PR, Some("files")).await.unwrap().expect("drawn");
+    source.view(PR, Some("files")).await.unwrap().expect("drawn");
+    assert_eq!(diffs(&paths(&unnamed).await), 2);
+}
+
+fn source_of(server: &MockServer) -> Box<dyn Source> {
+    knobas_source_gitea::build(instance(server.uri(), TOKEN, json!({}))).expect("builds")
+}
