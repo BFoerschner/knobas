@@ -394,6 +394,18 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
   if (files === null) return undefined;
   const ref = branch ?? "main";
   const one = (built: ReturnType<typeof section>) => ({ sections: [built], actions: [] }) as unknown as SourceView;
+  // Any two of the branch's commits (#2271): `compare:<base>...<head>`, each end
+  // a sha (the base maybe `<sha>^`) or a branch, as the Gitea adapter reads it.
+  if (repoId === PAYOUT && branch === null && sectionId?.startsWith("compare:")) {
+    const [base = "", head = ""] = sectionId.slice("compare:".length).split("...");
+    const at = (end: string) => PAYOUT_COMMITS.findIndex(([sha]) => sha === end || sha.startsWith(end));
+    const newest = Math.max(at(head), 0);
+    const parent = base.endsWith("^");
+    const below = at(parent ? base.slice(0, -1) : base);
+    const oldest = below === -1 ? PAYOUT_COMMITS.length - 1 : parent ? below : below - 1;
+    const diffs = PAYOUT_COMMITS.slice(newest, oldest + 1).map(([, , , , path, before, after]) => diffOf(path, before, after));
+    return one(section(sectionId, "Diff", [{ type: "diff", files: diffs, truncated: false, commentable: null, gone: [] }], diffs.length));
+  }
   if (repoId === PAYOUT && branch !== null && branch !== "main" && (sectionId === null || sectionId === "overview" || sectionId === "commits" || sectionId === "diff")) {
     return branchView(branch, sectionId);
   }

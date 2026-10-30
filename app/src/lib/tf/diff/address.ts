@@ -59,20 +59,23 @@ export function picked(pick: RangePick | null, at: number): boolean {
   return pick !== null && at >= Math.min(pick.anchor, pick.end) && at <= Math.max(pick.anchor, pick.end);
 }
 
-/** A commit's whole sha from its id's `@<sha>`, `null` without a whole one. */
-export function wholeShaOf(commitId: string | null): string | null {
-  const found = commitId === null ? null : /@([0-9a-f]{40}|[0-9a-f]{64})$/i.exec(commitId);
+/**
+ * A commit's sha from its id's `@<sha>`, as the source wrote it (Gitea writes
+ * the whole one), `null` for an id without one.
+ */
+export function shaOfCommit(commitId: string | null): string | null {
+  const found = commitId === null ? null : /@([0-9a-f]{7,64})$/i.exec(commitId);
   return found ? found[1]! : null;
 }
 
 /**
  * The diff a pick in `rows` (newest first, as *Commits* lists them) names:
  * from the commit before its oldest to its newest, so every picked commit's
- * change is in it. `null` when either end has no whole sha (a commit the
- * mirror does not hold has no id).
+ * change is in it. `null` when either end has no sha (a commit the mirror
+ * does not hold has no id).
  */
 export function rangeOf(rows: readonly { entity_id: string | null }[], pick: RangePick): { base: string; head: string } | null {
-  const newest = wholeShaOf(rows[Math.min(pick.anchor, pick.end)]?.entity_id ?? null);
-  const oldest = wholeShaOf(rows[Math.max(pick.anchor, pick.end)]?.entity_id ?? null);
+  const newest = shaOfCommit(rows[Math.min(pick.anchor, pick.end)]?.entity_id ?? null);
+  const oldest = shaOfCommit(rows[Math.max(pick.anchor, pick.end)]?.entity_id ?? null);
   return newest === null || oldest === null ? null : { base: `${oldest}^`, head: newest };
 }

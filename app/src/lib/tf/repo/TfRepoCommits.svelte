@@ -18,7 +18,7 @@
   commit before the oldest picked to the newest (`diff/address.ts`). The pick
   is over the rows drawn; commits the filter hides between its ends are in
   the diff all the same, since it is a range of history. A commit the mirror
-  does not hold has no whole sha, so its box can sit inside a pick but not
+  does not hold has no sha, so its box can sit inside a pick but not
   end one. A new list (another branch, a filter, a refresh) drops the pick.
 -->
 <script lang="ts">
@@ -31,7 +31,7 @@
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import { commitHash, viewRows, visibleViewRows } from "./repo";
-  import { diffHash, picked, rangeOf, selectRange, wholeShaOf, type RangePick } from "../diff/address";
+  import { diffHash, picked, rangeOf, selectRange, shaOfCommit, type RangePick } from "../diff/address";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
 
@@ -173,7 +173,7 @@
               type="checkbox"
               bind:this={boxes[n]}
               checked={picked(pick, n)}
-              disabled={wholeShaOf(row.entity_id) === null && !picked(pick, n)}
+              disabled={shaOfCommit(row.entity_id) === null && !picked(pick, n)}
               aria-label={`Pick ${row.chip ?? row.title}`}
               onclick={(event) => choose(event, n)}
             /></td

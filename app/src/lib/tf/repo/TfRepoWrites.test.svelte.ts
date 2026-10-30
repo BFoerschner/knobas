@@ -164,6 +164,9 @@ const DIFF: ViewBlock = {
   ],
 };
 
+/** The change against a base other than main (#2271). */
+const ELSEWHERE: ViewBlock = DIFF.type === "diff" ? { ...DIFF, files: [{ ...DIFF.files[0]!, path: "CHANGELOG.md" }] } : DIFF;
+
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
 let writes: WriteOpPayload[];
@@ -230,7 +233,7 @@ function ports(over: Partial<RepoPorts> = {}): RepoPorts {
       if (section === "diff" && BRANCH_VIEWS[id]) return one("diff", [DIFF], 1);
       // Any base against any head (#2271): main's diff, and another file against any other base.
       if (id === REPO && section?.startsWith("compare:"))
-        return one(section, [section.startsWith("compare:main...") ? DIFF : { ...DIFF, files: [{ ...DIFF.files[0]!, path: "CHANGELOG.md" }] }], 1);
+        return one(section, [section.startsWith("compare:main...") ? DIFF : ELSEWHERE], 1);
       if (section === "files") return one("files", [{ type: "tree", trail: [], entries: [{ name: "README.md", kind: "file", size: 9, section: "file:README.md" }], truncated: false, url: null }]);
       if (section === "file:README.md")
         return one("file:README.md", [
