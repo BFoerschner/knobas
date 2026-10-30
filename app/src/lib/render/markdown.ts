@@ -32,7 +32,7 @@ import MarkdownIt from "markdown-it";
 
 import { drawDiagram } from "./diagram";
 import type { LineTokens, RenderPort } from "./port";
-import { MERMAID, renderersForFence } from "./registry";
+import { D2, GRAPHVIZ, MERMAID, renderersForFence } from "./registry";
 
 /** Where a link in the Markdown goes. */
 export type MarkdownLink =
@@ -299,3 +299,5 @@ function highlightInto(into: Element, code: string, lang: string, port: RenderPo
 
 // Mermaid's fences (#2258): the built-in diagram drawer, through the port's lazily loaded engine.
 registerFence(MERMAID.id, (code, into, port) => drawDiagram("mermaid", code, into, port));
+registerFence(D2.id, (code, into, port) => drawDiagram("d2", code, into, port));
+registerFence(GRAPHVIZ.id, (code, into, port) => drawDiagram("graphviz", code, into, port));

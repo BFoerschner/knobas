@@ -47,6 +47,17 @@ test("Mermaid is built in: a .mmd or .mermaid file and a mermaid fence are its f
   expect(names(renderersFor({ path: "flow.mmd", binary: true }))).toEqual([]);
 });
 
+test("D2 and Graphviz are built in: .d2, .dot and .gv files and d2, dot and graphviz fences are theirs first (#2259)", () => {
+  expect(names(renderersFor({ path: "docs/flow.d2", binary: false }))).toEqual(["D2", "Source"]);
+  expect(names(renderersFor({ path: "deps.DOT", binary: false }))).toEqual(["Graphviz", "Source"]);
+  expect(names(renderersFor({ path: "graphs/deps.gv", binary: false }))).toEqual(["Graphviz", "Source"]);
+  expect(names(renderersForFence("d2"))).toEqual(["D2", "Source"]);
+  expect(names(renderersForFence("dot"))).toEqual(["Graphviz", "Source"]);
+  expect(names(renderersForFence("GraphViz"))).toEqual(["Graphviz", "Source"]);
+  expect(renderersForFence("d2")[0]).toMatchObject({ id: "d2", input: "text", output: "svg", diff: false });
+  expect(renderersForFence("dot")[0]).toMatchObject({ id: "graphviz", input: "text", output: "svg", diff: false });
+});
+
 test("a renderer registered later goes ahead of Source, by file pattern and by fence", () => {
   const undo = register({ id: "boxes", name: "Boxes", patterns: ["*.box", "docs/*.boxes"], fences: ["boxes"], input: "text", output: "svg", diff: false });
   try {

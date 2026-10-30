@@ -185,7 +185,7 @@ const PAYOUT_IMAGES: Record<string, () => Uint8Array> = {
     ),
 };
 
-/** Diagram files (#2258): one that draws, with a click directive that must not run, and one that does not parse. */
+/** Diagram files (#2258, #2259): one that draws, with a click directive that must not run, and one that does not parse. */
 const DIAGRAMS = {
   "docs/architecture.mmd": [
     "flowchart TB",
@@ -198,6 +198,29 @@ const DIAGRAMS = {
     "  click psp call evil()",
   ].join("\n"),
   "docs/broken.mermaid": ["flowchart TB", '  shop["shop frontend"] --> api', "  api --> |outbox worker"].join("\n"),
+  // D2 and Graphviz (#2259): a README with one fence of each, a file of each that draws, and one of each that does not parse.
+  "docs/README.md": [
+    "# Diagrams",
+    "",
+    "```d2",
+    "shop -> api: POST /pay",
+    "api -> outbox: enqueue",
+    'outbox -> psp: "retry worker" {style.stroke-dash: 3}',
+    'api.link: "javascript:window.__pwned = \'d2\'"',
+    "```",
+    "",
+    "```dot",
+    "digraph deps {",
+    "  rankdir=LR;",
+    '  "payments-api" -> "sepa-batch" -> ledger;',
+    '  "payments-api" -> psp [label="card"];',
+    "}",
+    "```",
+  ].join("\n"),
+  "docs/flow.d2": ["direction: right", "shop -> api: POST /pay", "api -> db: payments {shape: cylinder}", "api -> psp: authorise"].join("\n"),
+  "docs/deps.gv": ["graph services {", '  api -- db [label="sql"];', "  api -- psp;", "  api -- sepa;", "}"].join("\n"),
+  "docs/broken.d2": ["shop -> api", "api -> {"].join("\n"),
+  "docs/broken.dot": ["digraph {", "  api -> ", "}"].join("\n"),
 };
 
 /** `?fake-md-hostile`'s file (#2255): raw HTML that must not run, for the sanitizer's headless Chrome witness. */

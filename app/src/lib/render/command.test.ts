@@ -42,12 +42,12 @@ test("a saved renderer draws diffs only where it declares so (#2279)", () => {
 
 test("installing the list again replaces the last one, so a removed renderer is gone", () => {
   installCommands([PLANTUML]);
-  installCommands([{ ...PLANTUML, id: "d2", name: "D2 CLI", patterns: ["*.d2"], fences: ["d2"] }]);
+  installCommands([{ ...PLANTUML, id: "pikchr", name: "Pikchr", patterns: ["*.pikchr"], fences: ["pikchr"] }]);
 
   expect(names(renderersFor({ path: "docs/flow.puml", binary: false }))).toEqual(["Source"]);
-  expect(names(renderersFor({ path: "docs/flow.d2", binary: false }))).toEqual(["D2 CLI", "Source"]);
+  expect(names(renderersFor({ path: "docs/flow.pikchr", binary: false }))).toEqual(["Pikchr", "Source"]);
   installCommands([]);
-  expect(names(renderersForFence("d2"))).toEqual(["Source"]);
+  expect(names(renderersForFence("pikchr"))).toEqual(["Source"]);
 });
 
 test("HTML output loses its scripts and handlers before it reaches the frame", () => {
