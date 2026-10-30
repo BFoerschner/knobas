@@ -888,9 +888,12 @@ mod tests {
     /// side for a deletion, and none where the diff has no `index` line.
     #[test]
     fn a_file_names_the_blob_it_holds_after_the_change() {
-        let modified = one("diff --git a/a.rs b/a.rs\nindex 3c9d2b4..7aa01f9 100644\n--- a/a.rs\n+++ b/a.rs\n");
+        let modified = one(
+            "diff --git a/a.rs b/a.rs\nindex 3c9d2b4..7aa01f9 100644\n--- a/a.rs\n+++ b/a.rs\n",
+        );
         assert_eq!(modified.blob.as_deref(), Some("7aa01f9"));
-        let deleted = one("diff --git a/a.rs b/a.rs\ndeleted file mode 100644\nindex 3c9d2b4..0000000\n");
+        let deleted =
+            one("diff --git a/a.rs b/a.rs\ndeleted file mode 100644\nindex 3c9d2b4..0000000\n");
         assert_eq!(deleted.blob.as_deref(), Some("3c9d2b4"));
         let bare = one("diff --git a/a.rs b/a.rs\nold mode 100644\nnew mode 100755\n");
         assert_eq!(bare.blob, None);

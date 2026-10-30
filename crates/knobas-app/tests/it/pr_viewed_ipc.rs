@@ -72,10 +72,15 @@ async fn a_file_is_viewed_until_it_is_unticked_or_the_head_moves() {
     let pr = pull(&pool, &source, "c90d11").await;
 
     assert!(
-        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &pr, &none())
-            .await
-            .unwrap()
-            .is_empty()
+        pr_viewed_files_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            &pr,
+            &none()
+        )
+        .await
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
         set_pr_file_viewed_inner(
@@ -115,9 +120,14 @@ async fn a_file_is_viewed_until_it_is_unticked_or_the_head_moves() {
         ["docs/backoff.md", "src/sepa/retry.rs"]
     );
     assert_eq!(
-        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &pr, &none())
-            .await
-            .unwrap(),
+        pr_viewed_files_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            &pr,
+            &none()
+        )
+        .await
+        .unwrap(),
         ["docs/backoff.md", "src/sepa/retry.rs"]
     );
     // Unticked.
@@ -139,10 +149,15 @@ async fn a_file_is_viewed_until_it_is_unticked_or_the_head_moves() {
     // starts its own set.
     push(&pool, &pr, "e41a07").await;
     assert!(
-        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &pr, &none())
-            .await
-            .unwrap()
-            .is_empty()
+        pr_viewed_files_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            &pr,
+            &none()
+        )
+        .await
+        .unwrap()
+        .is_empty()
     );
     assert_eq!(
         set_pr_file_viewed_inner(
@@ -186,15 +201,25 @@ async fn each_pull_request_keeps_its_own_ticks() {
     .await
     .unwrap();
     assert_eq!(
-        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &one, &none())
-            .await
-            .unwrap(),
+        pr_viewed_files_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            &one,
+            &none()
+        )
+        .await
+        .unwrap(),
         ["a.rs"]
     );
     assert_eq!(
-        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &two, &none())
-            .await
-            .unwrap(),
+        pr_viewed_files_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            &two,
+            &none()
+        )
+        .await
+        .unwrap(),
         ["b.rs"]
     );
 }

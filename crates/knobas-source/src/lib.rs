@@ -1634,7 +1634,7 @@ impl WriteOp {
             | WriteOp::Approve { .. }
             | WriteOp::SubmitReview { .. }
             | WriteOp::ReplyToThread { .. } => Delivery {
-                    projection: Projection::DeclaredState,
+                projection: Projection::DeclaredState,
                 can_leave_unclaimed: false,
                 ..conservative
             },

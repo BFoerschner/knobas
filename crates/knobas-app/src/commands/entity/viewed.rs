@@ -60,7 +60,13 @@ pub async fn pr_viewed_files(
     blobs: Option<std::collections::BTreeMap<String, String>>,
 ) -> Result<Vec<String>, IpcError> {
     let pool = lifecycle.pool()?;
-    pr_viewed_files_inner(&pool, lifecycle.registry(), &pr_id, &blobs.unwrap_or_default()).await
+    pr_viewed_files_inner(
+        &pool,
+        lifecycle.registry(),
+        &pr_id,
+        &blobs.unwrap_or_default(),
+    )
+    .await
 }
 
 /// Mark a pull request's file *Viewed* or not (#842).

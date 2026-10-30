@@ -1752,6 +1752,9 @@ export type WaitReason = "unreachable" | "unauthorized";
  * | [`UpdatePullRequestBranch`](Self::UpdatePullRequestBranch) | `"update_pull_request_branch"` | git workflows, spec #701 (Gitea, #708) |
  * | [`CommitFile`](Self::CommitFile) | `"commit_file"` | ticket-first, spec #808 (Gitea, #822) |
  * | [`SourceAction`](Self::SourceAction) | `"source_action"` | roles, spec #1192 (Gitea, #1194) |
+ * | [`ReplyToThread`](Self::ReplyToThread) | `"reply_to_thread"` | code area, spec #2234 (Gitea, #2277) |
+ * | [`ResolveThread`](Self::ResolveThread) | `"resolve_thread"` | code area, spec #2234 (Gitea, #2277) |
+ * | [`RequestReviewers`](Self::RequestReviewers) | `"request_reviewers"` | code area, spec #2234 (Gitea, #2303) |
  *
  * The enum grows per milestone and **each growth is a §10.8 ratified
  * exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -1983,7 +1986,39 @@ id: string,
  * The answers of the dialog the adapter declared, by field name. The
  * shell copies `id` and these from the action and never reads them.
  */
-fields: { [key in string]: string }, } };
+fields: { [key in string]: string }, } } | { "ReplyToThread": { 
+/**
+ * The **pull request** (#2277).
+ */
+entity: string, 
+/**
+ * The thread's id, as the diff handed it out.
+ */
+thread: string, 
+/**
+ * The reply, at the thread's path, side and line.
+ */
+comment: ReviewComment, } } | { "ResolveThread": { 
+/**
+ * The **pull request** (#2277).
+ */
+entity: string, 
+/**
+ * The thread's id, as the diff handed it out.
+ */
+thread: string, 
+/**
+ * `true` resolves, `false` opens it again.
+ */
+resolved: boolean, } } | { "RequestReviewers": { 
+/**
+ * The **pull request** (#2303).
+ */
+entity: string, 
+/**
+ * Who is asked, by login.
+ */
+reviewers: Array<string>, } };
 
 /**
  * What the queue will do about a write next.

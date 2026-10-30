@@ -1536,7 +1536,10 @@ async fn a_reply_is_a_comment_review_on_the_threads_line() {
     let (verb, at, body) = only_request(&server).await;
     assert_eq!(
         (verb.as_str(), at.as_str()),
-        ("POST", "/api/v1/repos/tidewater/payout-service/pulls/142/reviews")
+        (
+            "POST",
+            "/api/v1/repos/tidewater/payout-service/pulls/142/reviews"
+        )
     );
     assert_eq!(
         body,

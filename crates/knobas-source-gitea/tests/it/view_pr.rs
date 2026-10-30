@@ -679,7 +679,14 @@ async fn gitea_with_line_comments(pull: Value) -> MockServer {
         c
     };
     let mut opened = with_id(
-        line_comment("priya.nair", "2026-08-22T09:00:00Z", 2, 0, "-    30\n+    30 + jitter()", "Bound the jitter."),
+        line_comment(
+            "priya.nair",
+            "2026-08-22T09:00:00Z",
+            2,
+            0,
+            "-    30\n+    30 + jitter()",
+            "Bound the jitter.",
+        ),
         101,
     );
     opened["resolver"] = json!({ "login": "olu" });
