@@ -12,7 +12,7 @@
  * expanded line is context, the same text on both sides.
  */
 import { isIpcError } from "../../ipc";
-import type { DiffFile, SourceView } from "../../ipc/entity";
+import type { DiffFile, DiffRange, SourceView } from "../../ipc/entity";
 import type { DiffContext } from "./diff";
 
 type Read = (entityId: string, section: string | null) => Promise<SourceView | null>;
@@ -60,6 +60,44 @@ export function commitContext(read: Read, commitId: string, parentId: string | n
       const id = side === "new" ? commitId : parentId;
       if (id === null) return null;
       return wholeFileText(await read(id, `file:${side === "old" ? (file.old_path ?? file.path) : file.path}`));
+    },
+  };
+}
+
+/** The section of a range's repository that reads `path` whole at the commit `sha`. */
+export function fileAtSection(sha: string, path: string): string {
+  return `file@${sha}:${path}`;
+}
+
+/**
+ * Expanded context's reader for a diff that names its range (#2310): a pull request's, a compare's,
+ * a diff address's. Each side is read in the range's repository at its own whole sha (`base` the
+ * old side, by the file's old path; `head` the new), which stands at a fixed commit, so the app's
+ * read cache answers the second read of a file with no source request (ADR-0032). `bytes`, where
+ * given, reads a side's bytes at that sha for a rendered image diff (#2279); `not_found` is no file
+ * on that side.
+ */
+export function rangeContext(read: Read, range: DiffRange, bytes?: ReadBytes): DiffContext {
+  const at = (file: DiffFile, side: "old" | "new") =>
+    side === "new" ? { sha: range.head, path: file.path } : { sha: range.base, path: file.old_path ?? file.path };
+  const byteRead = bytes
+    ? {
+        async bytes(file: DiffFile, side: "old" | "new") {
+          const { sha, path } = at(file, side);
+          try {
+            return await bytes(range.repository, path, sha);
+          } catch (cause) {
+            if (isIpcError(cause) && cause.code === "not_found") return null;
+            throw cause;
+          }
+        },
+      }
+    : {};
+  return {
+    ...byteRead,
+    async text(file, side) {
+      const { sha, path } = at(file, side);
+      return wholeFileText(await read(range.repository, fileAtSection(sha, path)));
     },
   };
 }

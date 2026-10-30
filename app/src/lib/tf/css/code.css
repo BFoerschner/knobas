@@ -87,6 +87,7 @@
 .tf-banner { display: flex; gap: 10px; align-items: center; padding: 8px 12px; font-size: var(--t-sm); border-bottom: 1px solid var(--rule); }
 .tf-banner.tf-warn { background: var(--warn-bg); color: var(--warn); }
 .tf-banner.tf-info { background: var(--info-bg); color: var(--info); }
+.tf-banner.tf-err { background: var(--err-bg); color: var(--err); }
 .tf-banner .tf-acts { margin-left: auto; display: flex; gap: 6px; }
 .tf-code { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; overflow: auto; margin: 0; }
 .tf-code .tf-l { display: grid; grid-template-columns: 48px 1fr; white-space: pre; }
@@ -235,6 +236,25 @@
 .tf-ba-body { min-width: 0; overflow: auto; }
 .tf-ba-doc { padding: 0 14px; }
 .tf-ba-img { padding: 14px; display: grid; place-items: center; }
+/* A PDF's rendered diff (#2282): page rows, before | after, the differing ones marked. */
+.tf-pdfd { background: var(--sheet); }
+.tf-pdfd-wait { margin: 0; padding: 10px 14px; font-size: var(--t-sm); }
+.tf-pdfd-head, .tf-pdfd-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.tf-pdfd-head > span { padding: 6px 14px; font: 600 var(--t-xs) var(--sans); color: var(--ink-2); border-bottom: 1px solid var(--rule-2); }
+.tf-pdfd-head > span:first-child { box-shadow: inset 3px 0 0 var(--err); }
+.tf-pdfd-head > span + span { border-left: 1px solid var(--rule); box-shadow: inset 3px 0 0 var(--ok); }
+.tf-pdfd-row { border-bottom: 1px solid var(--rule-2); box-shadow: inset 4px 0 0 transparent; }
+.tf-pdfd-at { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 4px 14px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-pdfd-mark { padding: 0 6px; border-radius: 3px; font: 700 var(--t-2xs) var(--sans); text-transform: uppercase; letter-spacing: 0.04em; }
+.tf-pdfd-changed { background: var(--warn-bg); box-shadow: inset 4px 0 0 var(--warn); }
+.tf-pdfd-changed .tf-pdfd-mark { background: var(--warn); color: var(--sheet); }
+.tf-pdfd-added { background: var(--ok-bg); box-shadow: inset 4px 0 0 var(--ok); }
+.tf-pdfd-added .tf-pdfd-mark { background: var(--ok); color: var(--sheet); }
+.tf-pdfd-removed { background: var(--err-bg); box-shadow: inset 4px 0 0 var(--err); }
+.tf-pdfd-removed .tf-pdfd-mark { background: var(--err); color: var(--sheet); }
+.tf-pdfd-cell { min-width: 0; overflow-x: auto; padding: 4px 14px 14px; display: flex; justify-content: center; }
+.tf-pdfd-cell + .tf-pdfd-cell { border-left: 1px solid var(--rule); }
+.tf-pdfd-none { align-self: center; padding: 24px; font-size: var(--t-sm); color: var(--ink-2); font-style: italic; }
 .tf-ba-img > img, .tf-swipe-box img { max-width: 100%; background: repeating-conic-gradient(var(--sheet-2) 0 25%, var(--sheet) 0 50%) 0 0 / 16px 16px; }
 .tf-ba-old .tf-ba-img > img { outline: 2px solid var(--err); }
 .tf-ba-new .tf-ba-img > img { outline: 2px solid var(--ok); }
@@ -305,3 +325,48 @@
 .tf-rsw-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-rsw-tag { margin-left: auto; font-size: var(--t-2xs); color: var(--ink-2); font-weight: 600; white-space: nowrap; }
 .tf-rsw-kb { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); }
+
+/* A diff that names no range (#2310): context does not expand, said above it. */
+.tf-cnote { color: var(--ink-2); font-size: var(--t-sm); margin: 0 0 8px; }
+
+/* A pull request's commit picker (#2273; mockups/code-area/diff.html, state "range"): *Commits <choice> base…head ▾*. */
+.tf-pickbar { display: flex; align-items: center; gap: 8px; padding: 0 0 8px; }
+.tf-pick { position: relative; display: inline-flex; }
+.tf-pick-face { gap: 6px; }
+.tf-pick-face b { font-weight: 600; }
+.tf-pick-lab, .tf-pick-ends { color: var(--ink-2); }
+.tf-pick .tf-menu { left: 0; right: auto; width: 420px; max-height: 60vh; overflow: auto; font-size: var(--t-sm); }
+.tf-pick .tf-menu > button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); }
+.tf-pick .tf-menu > button:hover, .tf-pick .tf-menu > .tf-on { background: var(--sheet-2); }
+.tf-pick .tf-menu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
+.tf-pick-mh { padding: 6px 10px 2px; font-size: var(--t-2xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
+.tf-pick-tick { width: 14px; flex: none; }
+.tf-pick-box { width: 14px; height: 14px; flex: none; border: 1px solid var(--rule); border-radius: 3px; display: inline-grid; place-items: center; font-size: var(--t-2xs); }
+.tf-pick-c.tf-on .tf-pick-box { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.tf-pick-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-pick-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-pick-kb { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; }
+.tf-pick-foot { border-top: 1px solid var(--rule-2); margin-top: 4px; padding: 8px 10px 4px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-pick-foot a { color: var(--ink); text-decoration: underline; }
+
+/* The pipeline bar (#2264; mockups/code-area .pipe / .step / .stepfail): bytes → steps → renderer. */
+.tf-pipe { display: flex; flex-direction: column; gap: var(--control-gap); padding: 8px 12px; border-bottom: 1px solid var(--rule); background: var(--sheet); font-size: var(--t-sm); }
+.tf-pipe > .tf-acts { justify-content: flex-end; }
+.tf-psteps { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
+.tf-plab { font-weight: 600; margin-right: 4px; }
+.tf-parrow { color: var(--ink-2); }
+.tf-psrc { font: var(--t-xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
+.tf-pstep { display: inline-flex; align-items: center; height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet-2); overflow: hidden; }
+.tf-pgrip { display: inline-grid; place-items: center; width: 18px; height: 100%; padding: 0; border: 0; border-right: 1px solid var(--rule-2); background: none; color: var(--ink-2); cursor: grab; }
+.tf-pname { padding: 0 8px; font-weight: 600; white-space: nowrap; }
+.tf-parg { height: 100%; border: 0; border-left: 1px solid var(--rule-2); background: var(--paper); font: var(--t-xs) var(--mono); font-variant-ligatures: none; padding: 0 8px; color: var(--ink); }
+.tf-pfilter { min-width: 260px; }
+.tf-parg:focus-visible, .tf-pgrip:focus-visible, .tf-px:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tf-px { display: inline-grid; place-items: center; width: 22px; height: 100%; padding: 0; border: 0; border-left: 1px solid var(--rule-2); background: none; color: var(--ink-2); cursor: pointer; }
+.tf-pstep.tf-pbad { border-color: var(--err); background: var(--err-bg); color: var(--err); }
+.tf-pstep.tf-prenderer { padding: 0 8px; font-weight: 600; background: var(--info-bg); border-color: var(--info); color: var(--info); }
+.tf-pmenu { position: relative; display: inline-flex; }
+.tf-pmenu .tf-menu { width: 320px; font-size: var(--t-sm); }
+.tf-pmenu .tf-menu > button { display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); }
+.tf-stepfail .tf-sfcols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tf-stepfail .tf-sfcols b { display: block; font-size: var(--t-xs); margin-bottom: 4px; }

@@ -38,6 +38,16 @@ async fn served(base_wire: &str, head_wire: &str) -> MockServer {
         .respond_with(ResponseTemplate::new(200).set_body_string(DIFF))
         .mount(&server)
         .await;
+    // The same compare's commits (#2310): HEAD, whose parent is BASE.
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/compare/{base_wire}...{head_wire}")))
+        .and(query_param("files", "false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_commits": 1,
+            "commits": [{ "sha": HEAD, "parents": [{ "sha": BASE }] }]
+        })))
+        .mount(&server)
+        .await;
     server
 }
 
@@ -61,12 +71,22 @@ async fn a_repositorys_compare_section_is_the_diff_between_its_two_commits() {
         "the section answers under the id it was asked by"
     );
     assert_eq!(drawn.count, Some(1));
-    let Block::Diff { files, .. } = &drawn.blocks[0] else {
+    let Block::Diff { files, range, .. } = &drawn.blocks[0] else {
         panic!("a diff: {drawn:#?}");
     };
     assert_eq!(paths_of(files), ["src/retry.rs"]);
+    // What it is between, read in the repository it was asked of (#2310).
+    let range = range.as_ref().expect("a listing that settles both ends");
+    assert_eq!(
+        (
+            range.repository.as_str(),
+            range.base.as_str(),
+            range.head.as_str()
+        ),
+        (ENTITY, BASE, HEAD)
+    );
     assert!(view.actions.is_empty(), "a diff offers no write");
-    // Only the compare: no repository record, no listing.
+    // Only the compare, as a diff and as its commits: no repository record.
     let asked: Vec<String> = server
         .received_requests()
         .await
@@ -74,7 +94,13 @@ async fn a_repositorys_compare_section_is_the_diff_between_its_two_commits() {
         .iter()
         .map(|r| r.url.path().to_owned())
         .collect();
-    assert_eq!(asked, [format!("{REPO}/compare/{BASE}...{HEAD}")]);
+    assert_eq!(
+        asked,
+        [
+            format!("{REPO}/compare/{BASE}...{HEAD}"),
+            format!("{REPO}/compare/{BASE}...{HEAD}")
+        ]
+    );
 }
 
 #[tokio::test]

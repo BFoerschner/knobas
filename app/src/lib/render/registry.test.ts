@@ -49,10 +49,10 @@ test("Mermaid is built in: a .mmd or .mermaid file and a mermaid fence are its f
   expect(names(renderersFor({ path: "flow.mmd", binary: true }))).toEqual([]);
 });
 
-test("PDF is built in: a .pdf, read as bytes, is PDF's alone; a PDF diff is its own ticket (#2260)", () => {
+test("PDF is built in: a .pdf, read as bytes, is PDF's alone, and it draws diffs (#2260, #2282)", () => {
   expect(names(renderersFor({ path: "docs/spec.pdf", binary: true }))).toEqual(["PDF"]);
   expect(names(renderersFor({ path: "Design.PDF", binary: true }))).toEqual(["PDF"]);
-  expect(renderersFor({ path: "a.pdf", binary: true })[0]).toMatchObject({ id: "pdf", input: "bytes", fences: [], diff: false });
+  expect(renderersFor({ path: "a.pdf", binary: true })[0]).toMatchObject({ id: "pdf", input: "bytes", fences: [], diff: true });
   expect(names(renderersForFence("pdf"))).toEqual(["Source"]);
 });
 

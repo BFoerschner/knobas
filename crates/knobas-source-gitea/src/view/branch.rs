@@ -455,6 +455,7 @@ async fn diff(
             truncated,
             commentable: None,
             gone: Vec::new(),
+            range: None,
         }],
     })
 }

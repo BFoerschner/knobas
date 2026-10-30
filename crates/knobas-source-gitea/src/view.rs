@@ -279,6 +279,7 @@ async fn commit_diff(
             truncated,
             commentable: None,
             gone: Vec::new(),
+            range: None,
         }],
     })
 }

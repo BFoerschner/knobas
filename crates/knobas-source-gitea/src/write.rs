@@ -494,6 +494,12 @@ pub(crate) async fn update_branch(
 /// A line comment is Gitea's `CreatePullReviewComment`: its line number goes
 /// in `new_position` or `old_position` by the side it is on, the other `0`.
 ///
+/// No `commit_id` is sent, so Gitea files the review, and every line in it,
+/// at the pull request's head. Gitea would take an older one (measured on
+/// 1.27.3), but a review carries one commit, and the shell offers line
+/// comments on the full diff only, never on a picked commit or range
+/// (#2273, `TfPrFiles.svelte`): those line numbers are the head's.
+///
 /// Gitea refuses an approval or a request for changes from the pull
 /// request's own author with a **422** (*approve your own pull is not
 /// allowed*), and a request for changes with no words likewise; both arrive

@@ -56,6 +56,8 @@
     EntityDetail,
     EntityFilter,
     EntityPage,
+    PipeRun,
+    PipeStep,
     RefusedWrite,
     SourceView,
     ViewFresh,
@@ -86,6 +88,8 @@
     refusedWrites?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
     /** The byte read (#2256): a Markdown file's relative images, at the file's commit; none load when left out. */
     fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
+    /** A file pipeline over a file's bytes (#2264); the viewer offers none when left out. */
+    piped?: (entityId: string, path: string, commit: string | null, steps: PipeStep[]) => Promise<PipeRun>;
   }
 
   /**
@@ -109,6 +113,7 @@
     entityCheckout,
     entityCheckoutDiff,
     entityFileBytes,
+    entityFilePiped,
     entityView,
     getEntity,
     jobReach,
@@ -179,6 +184,7 @@
       codeFacts: (entityIds) => codeFacts(entityIds),
       refusedWrites: (asks) => refusedWrites(asks),
       fileBytes: (entityId, path, commit) => entityFileBytes(entityId, path, commit),
+      piped: (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
     },
     now: fixedNow,
   }: {

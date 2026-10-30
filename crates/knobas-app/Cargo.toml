@@ -137,6 +137,25 @@ uuid.workspace = true
 # The derive behind the generated IPC mirror (`src/ipc_mirror.rs`, #1325).
 ts-rs.workspace = true
 
+# Pipelines' built-in steps (#2264, spec #2234 step 5). Every one is pure
+# Rust, so no C toolchain joins the build, and pinned exactly: a step's output
+# is what a cached pipeline result stands for. Licences: jaq MIT; ruzstd MIT;
+# bzip2 MIT OR Apache-2.0 over libbz2-rs-sys (bzip2-1.0.6, permissive;
+# 0.2.5 in Cargo.lock); lzma-rs MIT; serde_norway (the maintained serde_yaml
+# fork) MIT OR Apache-2.0; flate2 and toml are copies the lock already holds.
+# Below jaq, foldhash 0.1 is Zlib (as the lock's foldhash 0.2 already was) and
+# self_cell is Apache-2.0 OR GPL-2.0-only, taken as Apache-2.0.
+# jq through jaq: the filter is parsed and run in process, no `jq` binary.
+jaq-core = "=3.1.1"
+jaq-std = "=3.0.3"
+jaq-json = "=2.0.3"
+flate2 = "=1.1.9"
+ruzstd = "=0.9.1"
+bzip2 = "=0.6.1"
+lzma-rs = "=0.3.0"
+serde_norway = "=0.9.42"
+toml = { version = "=0.9.12", features = ["preserve_order"] }
+
 [target.'cfg(unix)'.dependencies]
 # A user renderer (#2262, ADR-0033) runs in a process group of its own, and
 # the whole group is killed at its timeout: a wrapper script's children go
