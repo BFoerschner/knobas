@@ -516,7 +516,12 @@ mod tests {
         let marker = std::env::temp_dir().join(format!("knobas-2262-group-{}", std::process::id()));
         let _ = std::fs::remove_file(&marker);
         let ended = run_argv(
-            &argv(&["sh", "-c", "sleep 60 & echo $! > \"$0\"; wait", marker.to_str().unwrap()]),
+            &argv(&[
+                "sh",
+                "-c",
+                "sleep 60 & echo $! > \"$0\"; wait",
+                marker.to_str().unwrap(),
+            ]),
             Vec::new(),
             Limits {
                 timeout: Duration::from_secs(1),
