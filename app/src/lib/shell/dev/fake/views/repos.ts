@@ -16,7 +16,7 @@
  * divergence: the mock adapter draws no view for a repository at all.
  */
 import type { DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
-import { lineDiff } from "../../../../tf/code/line-diff";
+import { lineDiff } from "../../../../tf/diff/line-diff";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
 import { fakePdf, HOSTILE_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
 

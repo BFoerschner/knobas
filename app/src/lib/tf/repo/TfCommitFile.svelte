@@ -18,7 +18,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
-  import { lineDiff } from "../code/line-diff";
+  import { lineDiff } from "../diff/line-diff";
   import TfDiffView from "../diff/TfDiffView.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { echoWrite } from "../queued.svelte";

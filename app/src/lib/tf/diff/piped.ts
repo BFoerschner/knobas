@@ -12,7 +12,7 @@
  */
 import type { DiffFile, PipeRun, PipeStep } from "../../ipc/entity";
 import { sized, stepName } from "../../render/pipeline";
-import { lineDiff } from "../code/line-diff";
+import { lineDiff } from "./line-diff";
 import type { DrawnFile } from "./diff";
 import type { Side } from "./rendered";
 
