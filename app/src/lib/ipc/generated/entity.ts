@@ -291,15 +291,15 @@ file_command: string | null,
  * The command that opens a commit; without one the application is not
  * offered for a commit.
  */
-commit_command?: string, 
+commit_command?: string | null, 
 /**
  * The command that opens a range of commits.
  */
-range_command?: string, 
+range_command?: string | null, 
 /**
  * The command that opens a pull request.
  */
-pull_request_command?: string, };
+pull_request_command?: string | null, };
 
 /**
  * An application as a person typed it in the dialog: a new one has no id
@@ -317,15 +317,15 @@ file_command: string | null,
 /**
  * Blank is none: not offered for a commit.
  */
-commit_command?: string, 
+commit_command?: string | null, 
 /**
  * Blank is none: not offered for a range.
  */
-range_command?: string, 
+range_command?: string | null, 
 /**
  * Blank is none: not offered for a pull request.
  */
-pull_request_command?: string, };
+pull_request_command?: string | null, };
 
 /**
  * How a checkout was arrived at, or that it was not.

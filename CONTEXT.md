@@ -20,7 +20,7 @@ A [note](#note) made from the global shortcut while another window has the focus
 _Avoid_: quick note, scratch, jot, inbox (that is the stream of things to answer)
 
 **Checkout**:
-A clone of a [repo](#kind) on this machine, found under the **clones root** (a directory setting scanned two levels deep, each clone matched to a repo entity by host and owner/repo) or set by hand per repo. Knobas-owned data about the local disk, never a field of the mirrored repo, and never written to: no checkout, no fetch (ADR-0016). The one exception is *Clone*, which clones into a new folder directly under the clones root (ADR-0023). Where *Open in editor* and *open a terminal here* point.
+A clone of a [repo](#kind) on this machine, found under the **clones root** (a directory setting scanned two levels deep, each clone matched to a repo entity by host and owner/repo) or set by hand per repo. Knobas-owned data about the local disk, never a field of the mirrored repo, and never written to: no checkout, no fetch (ADR-0016). The one exception is *Clone*, which clones into a new folder directly under the clones root (ADR-0023). Where *Open in editor* and *open a terminal here* point; "Open in" on a commit, a range, a pull request or a file at a line runs there too, with that object's checked git names (ADR-0034).
 _Avoid_: clone (as a noun for the record: the clone is the directory, the checkout is what knobas knows about it), working copy, local path, worktree (one more checkout, set by hand)
 
 **Working tree state**:

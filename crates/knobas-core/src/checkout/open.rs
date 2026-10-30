@@ -243,15 +243,15 @@ pub struct Application {
     /// The command that opens a commit; without one the application is not
     /// offered for a commit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
+    #[ts(optional = nullable)]
     pub commit_command: Option<String>,
     /// The command that opens a range of commits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
+    #[ts(optional = nullable)]
     pub range_command: Option<String>,
     /// The command that opens a pull request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
+    #[ts(optional = nullable)]
     pub pull_request_command: Option<String>,
 }
 
@@ -630,15 +630,15 @@ pub struct Draft {
     pub file_command: Option<String>,
     /// Blank is none: not offered for a commit.
     #[serde(default)]
-    #[ts(optional)]
+    #[ts(optional = nullable)]
     pub commit_command: Option<String>,
     /// Blank is none: not offered for a range.
     #[serde(default)]
-    #[ts(optional)]
+    #[ts(optional = nullable)]
     pub range_command: Option<String>,
     /// Blank is none: not offered for a pull request.
     #[serde(default)]
-    #[ts(optional)]
+    #[ts(optional = nullable)]
     pub pull_request_command: Option<String>,
 }
 

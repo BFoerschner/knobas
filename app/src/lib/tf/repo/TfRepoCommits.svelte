@@ -20,6 +20,9 @@
   the diff all the same, since it is a range of history. A commit the mirror
   does not hold has no sha, so its box is never a pick's end: it is
   disabled, and drawn checked when a pick spans it. A new list (another branch, a filter, a refresh) drops the pick.
+
+  *Open in…* (#2274): a commit the mirror holds has the menu at the row's end,
+  offering what accepts a commit and *Browser*; a click in it is not the row's.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -33,6 +36,7 @@
   import { commitHash, viewRows, visibleViewRows } from "./repo";
   import { diffHash, picked, rangeOf, selectRange, shaOfCommit, type RangePick } from "../diff/address";
   import TfWaiting from "../TfWaiting.svelte";
+  import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { waitPhase } from "../waiting";
 
   let {
@@ -149,7 +153,7 @@
 
   /** A row opens its commit; a click on the link or the box inside already did its own. */
   function open(event: MouseEvent, row: ViewRow) {
-    if (row.entity_id === null || (event.target as Element | null)?.closest("a, input")) return;
+    if (row.entity_id === null || (event.target as Element | null)?.closest("a, input, .tf-openin")) return;
     location.hash = commitHash(repoId, row.entity_id);
   }
 </script>
@@ -188,6 +192,12 @@
           >
           <td class:tf-dim={row.chip === null}><Marked text={row.title} typed={filter.text} /></td>
           <td class="tf-dim tf-nowrap"><Marked text={row.meta ?? ""} typed={filter.text} /></td>
+          <td class="tf-ropen"
+            >{#if shaOfCommit(row.entity_id) !== null}<TfOpenObject
+                entityId={repoId}
+                object={{ kind: "commit", sha: shaOfCommit(row.entity_id)! }}
+              />{/if}</td
+          >
         </tr>
       {/each}
     </tbody>

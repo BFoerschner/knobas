@@ -355,7 +355,8 @@ test("the branch dropdown sets the branch for Files and for Commits", async () =
 test("Commits lists sha, message and who and when; the filter narrows; a mirrored commit opens its diff", async () => {
   await draw([REPO, "commits"]);
   const rows = [...target.querySelectorAll(".tf-cbody tbody tr")];
-  expect(rows.map(text)).toEqual(["c90d11a2b3PAY-231: jitter in backoffmara · 3 hours ago", "a41f2c0000Bump depsjonas · 2 days ago"]);
+  // A mirrored commit ends in its *Open in…* (#2274); one the mirror lacks has no sha to open.
+  expect(rows.map(text)).toEqual(["c90d11a2b3PAY-231: jitter in backoffmara · 3 hours agoOpen in… ▾", "a41f2c0000Bump depsjonas · 2 days ago"]);
   expect(rows[0]!.querySelector("a")!.getAttribute("href")).toBe(
     "#/repo/gitea%3Atidewater%2Fpayout-service/commits/gitea%3Atidewater%2Fpayout-service%40c90d11a2b3c4",
   );
@@ -386,7 +387,7 @@ test("Commits' Author: Mine keeps the commits whose declared author is mine (#97
   mine.click();
   flushSync();
   expect([...target.querySelectorAll(".tf-cbody tbody tr")].map(text)).toEqual([
-    "c90d11a2b3PAY-231: jitter in backoffmara · 3 hours ago",
+    "c90d11a2b3PAY-231: jitter in backoffmara · 3 hours agoOpen in… ▾",
   ]);
 });
 
@@ -394,7 +395,7 @@ test("a commit draws its sha, message, author and time, its diff per file, and N
   await draw([REPO, "commits", C1]);
   expect(text(target.querySelector(".tf-cgroup-h"))).toContain("c90d11a2b3 PAY-231: jitter in backoff mara, today 11:42");
   const diff = target.querySelector(".tf-diff")!;
-  expect(text(diff.querySelector(".tf-fh"))).toBe("src/retry.rs +1 −1");
+  expect(text(diff.querySelector(".tf-fh"))).toBe("src/retry.rs +1 −1 Open in… ▾");
   // A context line carries its old and its new number (#2266): `1` `1`.
   expect([...diff.querySelectorAll(".tf-ln")].map(text)).toEqual(["11 fn retry() {", "2− 3", "2+ 5"]);
   expect(diff.querySelector(".tf-ln.tf-del")).not.toBeNull();

@@ -69,6 +69,7 @@
 .tf-cgroup-h .tf-rc-who { font-weight: 400; }
 .tf-rcommits td.tf-rpick { width: 28px; padding-right: 0; }
 .tf-rcommits td:nth-child(2) { width: 110px; }
+.tf-rcommits td.tf-ropen { width: 1%; padding-top: 0; padding-bottom: 0; text-align: right; white-space: nowrap; }
 /* A commit picked for *Diff selected* (#2271). */
 .tf-rcommits tr.tf-picked td { background: var(--info-bg); }
 .tf-rbar.tf-rpickbar { display: flex; align-items: center; gap: 12px; }
@@ -114,6 +115,8 @@
 .tf-flist .tf-n { margin-left: auto; font-family: var(--sans); white-space: nowrap; }
 .tf-flist .tf-viewed { opacity: 0.5; }
 .tf-flist-none { padding: 8px; }
+.tf-diff .tf-fh-open { margin-left: auto; font: 400 var(--t-sm) var(--sans); }
+.tf-diff .tf-fh-viewed + .tf-fh-open { margin-left: 0; }
 .tf-diff .tf-fh-viewed { margin-left: auto; font: 400 var(--t-sm) var(--sans); display: flex; gap: 6px; align-items: center; }
 .tf-addc {
   opacity: 0; border: 0; background: var(--info); color: var(--sheet); border-radius: 4px; width: 18px; height: 18px;

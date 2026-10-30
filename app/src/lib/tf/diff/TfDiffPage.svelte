@@ -5,7 +5,8 @@
 
   - **The header**: the repository's name (its mirror row, linking its
     *Commits*), then `base … head` as written in the address, short shas
-    shortened.
+    shortened, and *Open in…* on the range (#2274); each file's header has
+    its own, at its line.
   - **The diff**: the repository's section `compare:<base>...<head>`
     (`address.ts`), drawn by the one diff component. Another address keeps
     the last diff drawn, dimmed, while it is read (#2246).
@@ -39,6 +40,7 @@
   import { waitPhase } from "../waiting";
   import { onShownAgain } from "../while-shown.svelte";
   import TfDiffView from "./TfDiffView.svelte";
+  import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { compareSection } from "./address";
 
   let {
@@ -132,12 +134,13 @@
   <h2 class="tf-cgroup-h">
     <a href={repoHash(repoId, "commits")}>{title ?? repoId}</a>
     <span class="tf-mono" data-testid="diff-range">{shown(base)} … {shown(head)}</span>
+    <span class="tf-acts"><TfOpenObject entityId={repoId} object={{ kind: "range", base, head }} /></span>
   </h2>
   <TfWaiting phase={waitPhase({ drawn: files !== null, reading, failed: failed !== null })} error={failed} shape="lines">
     {#if files !== null && files.length === 0}
       <div class="tf-empty">Nothing changes between {shown(base)} and {shown(head)}.</div>
     {:else if files !== null}
-      <TfDiffView {files} />
+      <TfDiffView {files} openAt={{ entityId: repoId, at: head }} />
     {/if}
   </TfWaiting>
 </div>

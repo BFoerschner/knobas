@@ -20,6 +20,8 @@
     - `viewed`: a *Viewed* box per file that collapses it.
     - `review`: a `+` per line that opens a comment box; *Add to review*
       keeps the comment pending in the reader's store under its line.
+    - `openAt`: *Open in…* in each file's header (#2274), on the file at
+      its first changed line, read at the diff's head; not on a deleted file.
     Threads the source holds are drawn wherever it answers them: under their
     line, or apart at the end of the file when outdated or not drawn
     (`pr/files.ts`); `gone` lists those on files the diff no longer holds.
@@ -34,6 +36,8 @@
   import { matchesPath, placeThreads, sameTarget, targetOf } from "../pr/files";
   import { keyOf, shownLayout, sidesOf, splitRows, unifiedRows, type DiffReview, type DiffViewed, type DrawnFile, type DrawnLine, type SideText } from "./diff";
   import { diffLayout, windowNarrow, type DiffLayoutChoice } from "./diff-layout.svelte";
+  import { firstLine } from "../openin/openin";
+  import TfOpenObject from "../openin/TfOpenObject.svelte";
 
   let {
     files,
@@ -44,6 +48,7 @@
     render = renderPort(),
     layout = diffLayout,
     narrow = windowNarrow(),
+    openAt = null,
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -56,6 +61,8 @@
     render?: RenderPort;
     layout?: DiffLayoutChoice;
     narrow?: { readonly current: boolean };
+    /** The repository (or branch) the files are in, and the commit or branch they are read at: *Open in…* per file. */
+    openAt?: { entityId: string; at: string | null } | null;
   } = $props();
 
   let filter = $state("");
@@ -209,6 +216,14 @@
       {#if viewed}
         <label class="tf-fh-viewed"
           ><input type="checkbox" checked={done} onchange={(event) => viewed.set(file.path, event.currentTarget.checked)} /> Viewed</label
+        >
+      {/if}
+      {#if openAt !== null && file.change !== "deleted"}
+        <span class="tf-fh-open"
+          ><TfOpenObject
+            entityId={openAt.entityId}
+            object={{ kind: "file", path: file.path, line: firstLine(file), at: openAt.at }}
+          /></span
         >
       {/if}
     </div>
