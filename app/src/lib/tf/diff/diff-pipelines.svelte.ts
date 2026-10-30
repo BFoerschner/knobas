@@ -4,55 +4,50 @@
  * Settings › Renderers turns it off, and each diff's own toggle overrides it
  * for that diff (`TfDiffView`).
  *
- * Kept as the layout choice is (`diff-layout.svelte.ts`): this viewer's
- * `localStorage` (`knobas.diff.pipelines`), across a restart, not in a backup.
- * Storage missing, blocked or holding rubbish costs the memory, never the
- * setting: it is on then.
+ * A Settings entry, so a `knobas.setting` row (`render.diff_pipelines`) like
+ * the rest of Settings › Renderers and *Pages kept open*, and a backup
+ * carries it (review of spec #2234, Standards 6). The split/unified toggle in
+ * a diff's own toolbar is not a Settings entry and stays the viewer's
+ * `localStorage` (`diff-layout.svelte.ts`). The shell holds the stored value
+ * once the database answers (`TfShell`); until then, or when the read fails,
+ * it is on.
  */
-export const PIPELINES_KEY = "knobas.diff.pipelines";
+import { diffPipelines as readDiffPipelines, setDiffPipelines } from "../../ipc/app";
+
+export interface DiffPipelinesPort {
+  read(): Promise<boolean>;
+  save(on: boolean): Promise<boolean>;
+}
+
+export const ipcDiffPipelines: DiffPipelinesPort = { read: () => readDiffPipelines(), save: (on) => setDiffPipelines(on) };
 
 export interface DiffPipelinesSetting {
   readonly on: boolean;
-  set(on: boolean): void;
-  /** Tests only: back to on, nothing stored. */
+  /** Holds `on` as read elsewhere (the shell's read once the database answers). */
+  hold(on: boolean): void;
+  /** Stores `on` and holds what the backend answers; a refusal rejects and changes nothing. */
+  set(on: boolean): Promise<void>;
+  /** Tests only: back to on. */
   reset(): void;
 }
 
-type Storage = Pick<globalThis.Storage, "getItem" | "setItem" | "removeItem">;
-
-export function createDiffPipelines(storage: () => Storage | null): DiffPipelinesSetting {
-  const read = (): boolean => {
-    try {
-      return storage()?.getItem(PIPELINES_KEY) !== "off";
-    } catch {
-      return true;
-    }
-  };
-  let on = $state(read());
+export function createDiffPipelines(port: DiffPipelinesPort = ipcDiffPipelines): DiffPipelinesSetting {
+  let on = $state(true);
   return {
     get on() {
       return on;
     },
-    set(next) {
+    hold(next) {
       on = next;
-      try {
-        storage()?.setItem(PIPELINES_KEY, next ? "on" : "off");
-      } catch {
-        // Kept for this run only.
-      }
+    },
+    async set(next) {
+      on = await port.save(next);
     },
     reset() {
       on = true;
-      try {
-        storage()?.removeItem(PIPELINES_KEY);
-      } catch {
-        // Nothing stored to clear.
-      }
     },
   };
 }
 
-/** The app's one setting, over this viewer's `localStorage` where there is one. */
-export const diffPipelines: DiffPipelinesSetting = createDiffPipelines(() =>
-  typeof window === "undefined" ? null : window.localStorage,
-);
+/** The app's one setting. */
+export const diffPipelines: DiffPipelinesSetting = createDiffPipelines();

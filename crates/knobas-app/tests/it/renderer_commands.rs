@@ -320,3 +320,21 @@ async fn a_default_without_a_pattern_or_mapped_twice_is_refused() {
         "nothing was stored"
     );
 }
+
+/// *Run pipelines on diffs* (#2270) is a `knobas.setting` row like the rest of
+/// Settings › Renderers (review of spec #2234, Standards 6): on until set,
+/// then what was stored; a row that is not a boolean reads as on.
+#[tokio::test]
+async fn pipelines_on_diffs_are_on_until_turned_off_and_then_stored() {
+    let pool = scratch("renderer_diff_pipelines").await;
+    assert!(renderers::diff_pipelines(&pool).await.unwrap());
+
+    assert!(!renderers::set_diff_pipelines(&pool, false).await.unwrap());
+    assert!(!renderers::diff_pipelines(&pool).await.unwrap());
+
+    knobas_app::settings::write_value(&pool, renderers::DIFF_PIPELINES_KEY, &serde_json::json!("off"))
+        .await
+        .unwrap();
+    assert!(renderers::diff_pipelines(&pool).await.unwrap(), "rubbish reads as on");
+    assert_eq!(renderers::DIFF_PIPELINES_KEY, "render.diff_pipelines");
+}

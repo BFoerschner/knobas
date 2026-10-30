@@ -233,17 +233,29 @@ test("a default naming a renderer that was deleted says the built-in default app
   expect(defaultRows()).toEqual(["*.puml | command:plantuml | Not installed: the built-in default applies."]);
 });
 
-test("Run pipelines on diffs is on until turned off here (#2270)", async () => {
+test("Run pipelines on diffs is on until turned off here, and stored (#2270, Standards 6)", async () => {
   const { ports } = backend();
-  const kept = new Map<string, string>();
-  const piping = createDiffPipelines(() => ({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) }));
+  const saved: boolean[] = [];
+  const piping = createDiffPipelines({ read: async () => true, save: async (on) => (saved.push(on), on) });
   app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store, piping } });
   await settle();
   const box = target.querySelector<HTMLInputElement>("#tf-rnd-pipes")!;
   expect(target.querySelector('label[for="tf-rnd-pipes"]')?.textContent).toMatch(/^Run pipelines on diffs/);
   expect(box.checked).toBe(true);
   box.click();
-  flushSync();
+  await settle();
+  expect(saved).toEqual([false]);
   expect(piping.on).toBe(false);
-  expect(createDiffPipelines(() => ({ getItem: (k) => kept.get(k) ?? null, setItem: () => {}, removeItem: () => {} })).on).toBe(false);
+});
+
+test("a refused save of Run pipelines on diffs puts the box back (Standards 6)", async () => {
+  const { ports } = backend();
+  const piping = createDiffPipelines({ read: async () => true, save: () => Promise.reject(new Error("the database is gone")) });
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store, piping } });
+  await settle();
+  const box = target.querySelector<HTMLInputElement>("#tf-rnd-pipes")!;
+  box.click();
+  await settle();
+  expect(piping.on).toBe(true);
+  expect(box.checked).toBe(true);
 });

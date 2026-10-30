@@ -51,9 +51,9 @@ function reader(fail: "old" | "new" | null = null) {
   return { asked, context };
 }
 
-function memoryStorage() {
-  const kept = new Map<string, string>();
-  return { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v), removeItem: (k: string) => void kept.delete(k) };
+/** The setting over a backend row that answers what it stored. */
+function storedSetting() {
+  return createDiffPipelines({ read: async () => true, save: async (on) => on });
 }
 
 let target: HTMLElement;
@@ -83,7 +83,7 @@ const button = (name: string) => [...target.querySelectorAll<HTMLButtonElement>(
 
 test("a changed base64 JSON file with a default pipeline diffs as decoded JSON, and the header names the pipeline", async () => {
   const { asked, context } = reader();
-  draw({ files: [B64], context, piping: createDiffPipelines(() => memoryStorage()) });
+  draw({ files: [B64], context, piping: storedSetting() });
   await settle();
   expect(asked).toEqual(["old:fixtures/webhooks.json.b64:base64_decode,pretty", "new:fixtures/webhooks.json.b64:base64_decode,pretty"]);
   expect(squash(header().querySelector(".tf-ran"))).toBe("base64 decode → pretty-print JSON");
@@ -95,7 +95,7 @@ test("a changed base64 JSON file with a default pipeline diffs as decoded JSON, 
 
 test("the per-diff toggle shows the raw diff, and turns the pipeline back on", async () => {
   const { context } = reader();
-  draw({ files: [B64], context, piping: createDiffPipelines(() => memoryStorage()) });
+  draw({ files: [B64], context, piping: storedSetting() });
   await settle();
   button("Show raw")!.click();
   flushSync();
@@ -108,8 +108,8 @@ test("the per-diff toggle shows the raw diff, and turns the pipeline back on", a
 
 test("with the setting off every diff is raw and nothing runs, and the per-diff toggle still turns a pipeline on", async () => {
   const { asked, context } = reader();
-  const piping = createDiffPipelines(() => memoryStorage());
-  piping.set(false);
+  const piping = storedSetting();
+  piping.hold(false);
   draw({ files: [B64], context, piping });
   await settle();
   expect(asked).toEqual([]);
@@ -123,7 +123,7 @@ test("with the setting off every diff is raw and nothing runs, and the per-diff 
 
 test("the toolbar's Run pipelines turns every file's pipeline on or off for this diff", async () => {
   const { context } = reader();
-  draw({ files: [B64], context, piping: createDiffPipelines(() => memoryStorage()) });
+  draw({ files: [B64], context, piping: storedSetting() });
   await settle();
   const pill = target.querySelector<HTMLButtonElement>(".tf-dtool button.tf-pill")!;
   expect(squash(pill)).toBe("Run pipelines");
@@ -136,7 +136,7 @@ test("the toolbar's Run pipelines turns every file's pipeline on or off for this
 
 test("a pipeline that fails on one side shows the raw diff and the step's error", async () => {
   const { context } = reader("old");
-  draw({ files: [B64], context, piping: createDiffPipelines(() => memoryStorage()) });
+  draw({ files: [B64], context, piping: storedSetting() });
   await settle();
   expect(lines()).toEqual([`1− ${btoa(OLD_JSON)}`, `1+ ${btoa(NEW_JSON)}`]);
   expect(squash(target.querySelector(".tf-diff .tf-banner.tf-err"))).toBe(
@@ -146,7 +146,7 @@ test("a pipeline that fails on one side shows the raw diff and the step's error"
 
 test("a file with no default pipeline, or a diff whose caller runs none, is drawn raw with no toggle", async () => {
   const { asked, context } = reader();
-  draw({ files: [{ ...B64, path: "src/plain.txt" }], context, piping: createDiffPipelines(() => memoryStorage()) });
+  draw({ files: [{ ...B64, path: "src/plain.txt" }], context, piping: storedSetting() });
   await settle();
   expect(asked).toEqual([]);
   expect(target.querySelector(".tf-dtool button.tf-pill")).toBeNull();
@@ -158,7 +158,7 @@ test("a piped diff takes no comment: no +, no box from c, and the raw file's thr
   const pending = createPendingComments(() => null);
   pending.add("pr", { path: B64.path, side: "new", line: 1, body: "why 2000?" });
   const thread = { side: "new" as const, line: 1, outdated: false, comments: [{ author: "ana", body: "too short", at: null }], id: "t1", replies: true, resolved_by: null };
-  draw({ files: [{ ...B64, threads: [thread] } as DiffFile], context, piping: createDiffPipelines(() => memoryStorage()), review: { entity: "pr", pending } });
+  draw({ files: [{ ...B64, threads: [thread] } as DiffFile], context, piping: storedSetting(), review: { entity: "pr", pending } });
   // While the runs are out the raw lines are drawn, comments and all: nothing is hidden yet.
   expect(target.querySelector(".tf-ran-hidden")).toBeNull();
   expect(target.querySelector(".tf-thread")).not.toBeNull();
@@ -190,7 +190,7 @@ test("two outputs too long to match line by line still diff, and the card says h
       output: { kind: "text", text: `[\n${many(side === "old" ? "a" : "b")}\n]\n` },
     }),
   };
-  draw({ files: [B64], context, piping: createDiffPipelines(() => memoryStorage()) });
+  draw({ files: [B64], context, piping: storedSetting() });
   await settle();
   expect(squash(target.querySelector(".tf-coarse"))).toBe("Too many changed lines to match one by one: the changed part is drawn removed whole, then added whole.");
   expect(squash(header().querySelector(".tf-add-n"))).toBe("+2100");

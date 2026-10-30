@@ -658,6 +658,10 @@ pub fn run() {
             commands::app::set_command_steps,
             commands::app::named_pipelines,
             commands::app::set_named_pipelines,
+            // *Run pipelines on diffs* as a setting row (review of spec
+            // #2234), appended at the foot (§10.8).
+            commands::app::diff_pipelines,
+            commands::app::set_diff_pipelines,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

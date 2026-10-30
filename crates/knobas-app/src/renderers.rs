@@ -221,6 +221,36 @@ fn settle(drafts: &[UserRendererDraft]) -> Result<Vec<UserRenderer>, IpcError> {
     Ok(out)
 }
 
+/// The `knobas.setting` key holding *Run pipelines on diffs* (#2270): whether
+/// a diff runs each file's default pipeline on both sides before diffing.
+/// A Settings › Renderers entry, so a row like the rest of them (review of
+/// spec #2234, Standards 6); the split/unified toggle in a diff's own toolbar
+/// stays the viewer's `localStorage`.
+pub const DIFF_PIPELINES_KEY: &str = "render.diff_pipelines";
+
+/// *Run pipelines on diffs* as stored; on until set, and a row that is not a
+/// boolean reads as on.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn diff_pipelines(pool: &PgPool) -> Result<bool, IpcError> {
+    Ok(read_value(pool, DIFF_PIPELINES_KEY)
+        .await?
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true))
+}
+
+/// Store *Run pipelines on diffs* and answer what is now stored.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn set_diff_pipelines(pool: &PgPool, on: bool) -> Result<bool, IpcError> {
+    write_value(pool, DIFF_PIPELINES_KEY, &serde_json::Value::Bool(on)).await?;
+    Ok(on)
+}
+
 /// The `knobas.setting` key holding the default renderer per file pattern
 /// (#2263).
 pub const DEFAULTS_KEY: &str = "render.defaults";

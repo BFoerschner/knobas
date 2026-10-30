@@ -204,6 +204,14 @@
       at: (trying?.at ?? 0) + 1,
     };
   }
+
+  /** Stores *Run pipelines on diffs*; a refusal says so and the box goes back to what is stored. */
+  function setPiping(box: HTMLInputElement) {
+    piping.set(box.checked).catch((cause: unknown) => {
+      box.checked = piping.on;
+      push({ text: `Could not save Run pipelines on diffs: ${ipcErrorMessage(cause)}`, tone: "err" });
+    });
+  }
 </script>
 
 <header class="tf-stg-h">
@@ -218,7 +226,7 @@
     ></label
   >
   <div class="tf-stg-c tf-stg-inl">
-    <input id="tf-rnd-pipes" type="checkbox" checked={piping.on} onchange={(event) => piping.set(event.currentTarget.checked)} /><span>On</span>
+    <input id="tf-rnd-pipes" type="checkbox" checked={piping.on} onchange={(event) => setPiping(event.currentTarget)} /><span>On</span>
   </div>
 </div>
 {#if saved !== null}

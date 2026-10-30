@@ -106,6 +106,16 @@ export function setPagesKeptOpen(count: number): Promise<number> {
   return invoke<number>("set_pages_kept_open", { count });
 }
 
+/** *Run pipelines on diffs* (#2270): on until set in Settings › Renderers. */
+export function diffPipelines(): Promise<boolean> {
+  return invoke<boolean>("diff_pipelines");
+}
+
+/** Store *Run pipelines on diffs*, and get back what is now stored. */
+export function setDiffPipelines(on: boolean): Promise<boolean> {
+  return invoke<boolean>("set_diff_pipelines", { on });
+}
+
 /** The command renderers saved in Settings › Renderers (#2262), in order. */
 export function userRenderers(): Promise<UserRenderer[]> {
   return invoke<UserRenderer[]>("user_renderers");

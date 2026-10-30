@@ -5,7 +5,7 @@
  * Answers `user_renderers`, `set_user_renderers`, `run_renderer` (#2262: one saved
  * renderer, `cat`, which the fake runs by echoing its input; any other command
  * fails with that said on stderr), `renderer_defaults`, `set_renderer_defaults` (#2263, none until
- * one is made), `command_steps`, `set_command_steps`, `named_pipelines`, `set_named_pipelines` (#2265: one
+ * one is made), `diff_pipelines`, `set_diff_pipelines` (#2270, on until set), `command_steps`, `set_command_steps`, `named_pipelines`, `set_named_pipelines` (#2265: one
  * command step, Upper, which `repoFilePiped` runs; no pipeline until one is saved, but under
  * `?fake-diff-pipeline` *Base64 JSON*, the default for `*.json.b64`), `pages_kept_open`, `set_pages_kept_open` (#2247), `passive_attribution`, `set_passive_attribution`,
  * `monitoring_settings`, `set_monitoring_settings`, `backup_status`,
@@ -95,6 +95,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   // #2265: one command step, `tr a-z A-Z`, and no named pipeline until one is saved.
   let steps: CommandStep[] = [{ id: "upper", name: "Upper", command: "tr a-z A-Z", timeout_secs: 10 }];
   let pipelines: NamedPipeline[] = [];
+  // *Run pipelines on diffs* (#2270): on until set.
+  let diffPipelinesOn = true;
   // `?fake-diff-pipeline` (#2270): `*.json.b64` opens, and diffs, through a saved pipeline.
   if (params.has("fake-diff-pipeline")) {
     pipelines = [{ id: "base64-json", name: "Base64 JSON", steps: [{ step: "base64_decode" }, { step: "pretty", format: "json" }] }];
@@ -118,6 +120,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       pipelines = (args["pipelines"] as NamedPipelineDraft[]).map((d, i) => ({ id: d.id ?? idOf(d.name, i, "pipeline"), name: d.name.trim(), steps: d.steps }));
       return pipelines;
     },
+    diff_pipelines: () => diffPipelinesOn,
+    set_diff_pipelines: (args) => (diffPipelinesOn = args["on"] as boolean),
     renderer_defaults: () => defaults,
     set_renderer_defaults: (args) => {
       defaults = (args["defaults"] as RendererDefault[]).map((d) => ({ pattern: d.pattern.trim(), renderer: d.renderer.trim(), pipeline: d.pipeline?.trim() || null }));

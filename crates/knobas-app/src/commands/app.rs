@@ -552,6 +552,34 @@ pub async fn set_renderer_defaults<R: tauri::Runtime>(
     crate::renderers::save_defaults(&pool, &defaults).await
 }
 
+/// *Run pipelines on diffs* (#2270): on until set
+/// (`crate::renderers::diff_pipelines`).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn diff_pipelines<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<bool, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::diff_pipelines(&pool).await
+}
+
+/// Store *Run pipelines on diffs* and answer what is now stored.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_diff_pipelines<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    on: bool,
+) -> Result<bool, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::set_diff_pipelines(&pool, on).await
+}
+
 /// The command steps saved in Settings › Renderers (#2265), in order.
 ///
 /// # Errors
@@ -700,6 +728,18 @@ mod tests {
         assert!(
             crate::commands::mirror::keys(invocation).contains(&"count"),
             "the mirror calls set_pages_kept_open without passing count: {invocation}"
+        );
+    }
+
+    /// The mirror sends `on`, the argument's name (review of spec #2234,
+    /// Standards 6).
+    #[test]
+    fn the_mirror_sends_whether_pipelines_run_on_diffs() {
+        let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
+        let invocation = crate::commands::mirror::invocation(mirror, "set_diff_pipelines");
+        assert!(
+            crate::commands::mirror::keys(invocation).contains(&"on"),
+            "the mirror calls set_diff_pipelines without passing on: {invocation}"
         );
     }
 

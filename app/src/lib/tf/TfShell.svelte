@@ -38,6 +38,8 @@
     namedPipelines?: () => Promise<import("../ipc/app").NamedPipeline[]>;
     /** The command steps (#2265), held once the database answers. */
     commandSteps?: () => Promise<import("../ipc/app").CommandStep[]>;
+    /** *Run pipelines on diffs* (#2270), held once the database answers; on without it. */
+    diffPipelines?: () => Promise<boolean>;
   }
 </script>
 
@@ -46,7 +48,8 @@
   import { onMount, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
-  import { commandSteps, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
+  import { commandSteps, diffPipelines, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
+  import { diffPipelines as heldDiffPipelines } from "./diff/diff-pipelines.svelte";
   import { rendererDefaults as heldDefaults } from "../render/defaults.svelte";
   import { commandSteps as heldCommandSteps, namedPipelines as heldPipelines } from "../render/pipelines.svelte";
   import { defaultPipeline } from "../render/defaults";
@@ -108,6 +111,7 @@
       rendererDefaults,
       namedPipelines,
       commandSteps,
+      diffPipelines,
     },
     prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches,
     onstarttimer = () => {},
@@ -340,6 +344,8 @@
   // The named pipelines and command steps (#2265): until they answer, no file opens through a default pipeline.
   onReady(ready, () => ports.namedPipelines, (list) => heldPipelines.hold(list));
   onReady(ready, () => ports.commandSteps, (list) => heldCommandSteps.hold(list));
+  // *Run pipelines on diffs* (#2270): until it answers, it is on.
+  onReady(ready, () => ports.diffPipelines, (on) => heldDiffPipelines.hold(on));
 
   $effect(() => {
     if (!lifecycle.ready) return;
