@@ -79,6 +79,8 @@
   let standing = $state<BranchStanding | null>(null);
   /** What the branch changes: another branch's stays drawn, dimmed, while this one's is read (#2246). */
   let files = $state<DiffFile[] | null>(null);
+  /** The section `files` was read for: until another base's diff answers, the page still draws the last one. */
+  let filesFor = $state<string | null>(null);
   let reading = $state(false);
   let failed = $state<string | null>(null);
   /** *Into*, the default branch proposed once: a new *From* keeps what the reader picked. */
@@ -152,6 +154,7 @@
       reading = false;
       const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
       files = block?.type === "diff" ? block.files : [];
+      filesFor = asked;
     }, (error) => {
       if (!alive()) return;
       reading = false;
@@ -192,8 +195,10 @@
     const names = branches.filter((option) => !option.isDefault).map((option) => option.name);
     return head !== null && !names.includes(head) ? [head, ...names] : names;
   });
-  /** The files changed: the diff's, or before it is read the branch's own count, which is against the default branch. */
-  const changed = $derived(files?.length ?? (base === defaultBranch ? (standing?.files ?? null) : null));
+  /** The files changed: this base's diff's, or before it is read the branch's own count, which is against the default branch. */
+  const changed = $derived(
+    files !== null && filesFor === section ? files.length : base === defaultBranch ? (standing?.files ?? null) : null,
+  );
   /** Why the source draws the pull request disabled (#2030): its words, on the button. */
   const refused = $derived(standing?.prBlocked ?? null);
   const ready = $derived(head !== null && title.trim() !== "" && base !== "" && base !== head && !busy && refused === null);

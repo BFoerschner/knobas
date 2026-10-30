@@ -634,6 +634,9 @@ test("Into is the diff's base: picking another reads and draws the change agains
   const into = target.querySelector<HTMLSelectElement>(".tf-compare select")!;
   into.value = "release/1.9";
   into.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  // Until release/1.9's diff answers, main's count is not offered as release/1.9's.
+  expect(target.querySelector(".tf-compare .tf-cfiles")).toBeNull();
   await settle();
   expect(reads).toContainEqual([REPO, "compare:release/1.9...spike/sepa-instant"]);
   expect(paths()).toEqual(["CHANGELOG.md"]);
