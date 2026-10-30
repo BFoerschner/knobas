@@ -231,6 +231,10 @@ _Avoid_: mirror (the database's copy, written by sync), store, snapshot
 The line-by-line difference between two versions of a set of files, as a source view's diff block carries it: per file its path and old path, what happened to it, its line counts and its hunks. Parsed from the unified diff text a git server answers, by one parser every git adapter shares. Capped per file and per view; a file over the cap keeps its counts and says it was cut. A pull request's diff also carries its **line threads** and may take new line comments.
 _Avoid_: patch (the text before it is parsed), changeset, delta
 
+**File pipeline**:
+The ordered steps between a file's bytes and its renderer (base64 decode, gunzip, jq, pretty-print, …), each taking bytes or text and giving bytes or text. Run in the backend under a size cap and a timeout per step, and kept in the [read cache](#read-cache) by (sha, path, steps). In the viewer it is *Pipeline*, on the open file; in code `file_pipeline`, `PipeStep`, `PipeRun`.
+_Avoid_: pipeline alone in code or docs (a CI [pipeline](#pipeline)), filter (jq's word for one step), transform
+
 **Pipeline**:
 What a CI source runs: TeamCity's build configuration, a GitLab pipeline, a Jenkins job. The Builds view is drawn over pipelines and their [runs](#run); the source's own word appears once, in the view's header (ADR-0022).
 _Avoid_: build configuration (TeamCity's word), job (a [job](#job))

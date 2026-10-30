@@ -399,7 +399,8 @@ async fn jq_errors_are_its_own() {
 }
 
 /// A step past its timeout is answered as timed out; its worker, which keeps
-/// writing, is stopped at its next write and frees its place.
+/// writing, is stopped at its next write and frees its place: with every
+/// worker taken by a filter that never ends, the next run still gets one.
 #[tokio::test]
 async fn a_step_past_its_timeout_is_stopped() {
     let limits = Limits {
@@ -407,17 +408,27 @@ async fn a_step_past_its_timeout_is_stopped() {
         timeout: Duration::from_millis(300),
     };
     let started = Instant::now();
-    let run = run_bytes(&[jq("repeat(1)")], b"null".to_vec(), "x", limits).await;
-    let failed = failure(&run);
-    assert_eq!(failed.why, PipeWhy::TimedOut);
-    assert_eq!(failed.error, "jq did not finish in 300 ms");
-    assert!(started.elapsed() < Duration::from_secs(2));
-    // Every worker is free again: as many runs as there are workers, and one
-    // more, all finish.
-    for _ in 0..=knobas_app::file_pipeline::WORKERS {
-        let run = run_bytes(&[jq(".")], b"1".to_vec(), "x", limits).await;
-        assert_eq!(done(&run).1, "1\n");
+    let endless: Vec<_> = (0..knobas_app::file_pipeline::WORKERS)
+        .map(|_| {
+            tokio::spawn(async move {
+                run_bytes(&[jq("repeat(1)")], b"null".to_vec(), "x", limits).await
+            })
+        })
+        .collect();
+    for run in endless {
+        let run = run.await.unwrap();
+        let failed = failure(&run);
+        assert_eq!(failed.why, PipeWhy::TimedOut);
+        assert_eq!(failed.error, "jq did not finish in 300 ms");
     }
+    assert!(started.elapsed() < Duration::from_secs(2));
+    // Left running, each would hold its worker until 200 MiB of `1`s.
+    let next = Limits {
+        cap: SIZE_CAP,
+        timeout: Duration::from_secs(2),
+    };
+    let run = run_bytes(&[jq(".")], b"1".to_vec(), "x", next).await;
+    assert_eq!(done(&run).1, "1\n");
 }
 
 /// **Every built-in step round trips at the IPC seam.**

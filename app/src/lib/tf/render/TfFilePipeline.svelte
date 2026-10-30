@@ -218,7 +218,7 @@
           <div class="tf-rsw-mh">Built in</div>
           {#each STEP_CHOICES as choice (choice.id)}
             <button type="button" role="menuitem" onclick={() => add(choice.make)}
-              >{choice.label}<span class="tf-rsw-kb">{choice.io}</span></button
+              ><span>{choice.label}</span><span class="tf-rsw-kb">{choice.io}</span></button
             >
           {/each}
         </div>
