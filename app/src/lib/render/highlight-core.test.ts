@@ -78,7 +78,7 @@ test("the lines in view of a long file come back before the pass from the top re
 
   const first = c.replies[0];
   expect(first).toMatchObject({ type: "lines", from: 3_000 });
-  expect(first!.type === "lines" && first.lines).toHaveLength(40);
+  expect(first?.type === "lines" && first.lines).toHaveLength(40);
   expect(kinds(c.lineAt(3_010))).toEqual(["kw:let", "num:3010"]);
   expect(c.lineAt(10 * CHUNK - 1)).toBeDefined();
 });

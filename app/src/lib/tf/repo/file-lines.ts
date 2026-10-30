@@ -26,6 +26,7 @@ export function needles(typed: string): string[] {
  * (a stale answer) are ignored.
  */
 export function segments(text: string, tokens: LineTokens | undefined, found: readonly string[]): Segment[] | null {
+  if (text === "") return null;
   const runs = found.length === 0 || !found.some((n) => text.toLowerCase().includes(n)) ? null : markNeedles(text, found);
   const usable = tokens !== undefined && tokens.map(([t]) => t).join("") === text ? tokens : undefined;
   if (runs === null && usable === undefined) return null;

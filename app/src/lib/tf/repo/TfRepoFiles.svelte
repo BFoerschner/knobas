@@ -26,6 +26,12 @@
   below. A line link (`line/<n>/<path>`) draws its line, marks it and scrolls
   it to the middle. Copying a selection across lines copies their text from
   the file, not from the drawn nodes, so the lines between need not be drawn.
+
+  The file is drawn by the first renderer that accepts it (`render/registry.ts`,
+  #2254): *Source* draws the lines plain at once and colours them as the
+  highlighting worker answers, the lines in view first; *Image* draws an SVG.
+  *Find in file* (#2299) marks every hit, "N of M"; `Enter` and `Shift+Enter`
+  step through them, drawing a hit's line first where the window left it out.
 -->
 <script lang="ts">
   import { flushSync, tick, untrack } from "svelte";
@@ -36,6 +42,10 @@
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
+  import { imageUrl, renderersFor } from "../../render/registry";
+  import { findCount, stepMatch } from "../builds/run-reads";
+  import { fileHits, firstHitOn, lineOfHit, needles, segments } from "./file-lines";
   import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
@@ -76,6 +86,7 @@
     checkout = undefined,
     title = "",
     refreshed = 0,
+    render = renderPort(),
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -103,6 +114,8 @@
     title?: string;
     /** The page's refreshes (#2135): each reads the open directories and the file again over what the tab drew. */
     refreshed?: number;
+    /** The engines renderers draw with (#2254): the app's workers, a fake in tests. */
+    render?: RenderPort;
   } = $props();
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
@@ -319,6 +332,79 @@
   // A line is 13 px at 1.6.
   const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: 20.8, from: WHOLE_UP_TO + 1 });
   let code = $state<HTMLElement | null>(null);
+
+  /** What draws the file (#2254): the first renderer that accepts it. */
+  const renderer = $derived(file === null ? null : (renderersFor(file)[0] ?? null));
+  const image = $derived(
+    renderer?.id === "image" && file !== null && !file.binary ? imageUrl(new TextEncoder().encode(file.text), file.path) : null,
+  );
+
+  /**
+   * Each line's tokens as the worker sent them, by line index; not reactive
+   * itself, `painted` counts the answers so the drawn rows read them again.
+   */
+  let tokensOf: (LineTokens | undefined)[] = [];
+  let painted = $state(0);
+  let highlighting: HighlightJob | null = null;
+  $effect(() => {
+    const read = file;
+    if (read === null || read.binary || renderer?.id !== "source") return;
+    const got: (LineTokens | undefined)[] = [];
+    tokensOf = got;
+    untrack(() => (painted += 1));
+    const started = render.highlight(
+      { text: read.text, path: read.path, focus: untrack(() => [win.start, win.end]) },
+      {
+        onLines(from, answered) {
+          if (tokensOf !== got) return;
+          for (let i = 0; i < answered.length; i += 1) got[from + i] = answered[i];
+          painted += 1;
+        },
+      },
+    );
+    highlighting = started;
+    return () => {
+      started.cancel();
+      if (highlighting === started) highlighting = null;
+    };
+  });
+  // The lines in view moved: the worker does them next.
+  $effect(() => {
+    const [from, to] = [win.start, win.end];
+    untrack(() => highlighting?.focus(from, to));
+  });
+
+  /** *Find in file* (#2299): what is typed, its hits, and the hit stepped to. */
+  let typed = $state("");
+  let current = $state(0);
+  const found = $derived(needles(typed));
+  const hits = $derived(fileHits(lines, found));
+
+  /** Line `index`'s segments: its tokens and hits, `null` to draw its text as it is. */
+  function shade(text: string, index: number) {
+    void painted;
+    return segments(text, tokensOf[index], found);
+  }
+
+  function findIn(event: Event) {
+    typed = (event.currentTarget as HTMLInputElement).value;
+    current = 0;
+  }
+
+  /** Steps to the next or previous hit, drawing its line if the window left it out, and scrolls it to the middle. */
+  function jump(step: 1 | -1) {
+    if (hits.total === 0) return;
+    current = stepMatch(current, step, hits.total);
+    win.reveal(lineOfHit(hits, current));
+    flushSync();
+    code?.querySelector("mark.tf-curm")?.scrollIntoView?.({ block: "center" });
+  }
+
+  function findKeys(event: KeyboardEvent) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    jump(event.shiftKey ? -1 : 1);
+  }
 
   /** The file and line last scrolled to, so a refresh of the file leaves the reader where they are. */
   let shownLine: string | null = null;
@@ -561,8 +647,26 @@
       {/if}
       {#if file.binary}
         <div class="tf-empty"><p>A binary file, not drawn.</p></div>
+      {:else if image !== null}
+        <div class="tf-fimage"><img src={image} alt={file.path} /></div>
       {:else}
-        <pre class="tf-code" bind:this={code} oncopy={copyLines} {@attach win.list}>{#each win.slice(lines) as text, i (win.start + i)}{@const n = win.start + i + 1}<div class="tf-l" class:tf-at={n === line} data-n={n} {@attach win.row(n - 1)}><span>{n}</span><span>{text || " "}</span></div>{/each}</pre>
+        <div class="tf-findbar">
+          <label class="tf-fsearch">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
+              ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
+            >
+            <input placeholder="Find in file" aria-label="Find in file" value={typed} oninput={findIn} onkeydown={findKeys} />
+            <span class="tf-dim tf-lqn" aria-live="polite">{findCount(typed, hits.total, current)}</span>
+          </label>
+          <span class="tf-nav2">
+            <button type="button" aria-label="Previous match" onclick={() => jump(-1)}>↑</button><button
+              type="button"
+              aria-label="Next match"
+              onclick={() => jump(1)}>↓</button
+            >
+          </span>
+        </div>
+        <pre class="tf-code" bind:this={code} oncopy={copyLines} {@attach win.list}>{#each win.slice(lines) as text, i (win.start + i)}{@const n = win.start + i + 1}{@const segs = shade(text, n - 1)}<div class="tf-l" class:tf-at={n === line} data-n={n} {@attach win.row(n - 1)}><span>{n}</span><span>{#if segs === null}{text || " "}{:else}{@const base = firstHitOn(hits, n - 1) ?? 0}{#each segs as seg, at (at)}{#if seg.hit !== null}<mark class={seg.kind === "" ? undefined : `tf-hl-${seg.kind}`} class:tf-curm={base + seg.hit === current}>{seg.text}</mark>{:else if seg.kind !== ""}<span class="tf-hl-{seg.kind}">{seg.text}</span>{:else}{seg.text}{/if}{/each}{/if}</span></div>{/each}</pre>
       {/if}
       {/if}
       </TfWaiting>

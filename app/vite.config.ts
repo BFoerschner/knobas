@@ -42,6 +42,10 @@ export default defineConfig(({ mode }) => ({
     // a bug can have here, because `just dev` gets no CSP at all.
     assetsInlineLimit: 0,
   },
+  // The highlighting worker (#2254) imports each grammar on demand, and only
+  // an ES-module worker can split those into chunks of their own; the default
+  // (`iife`) would bundle every grammar Shiki has into the worker.
+  worker: { format: "es" },
   test: {
     environment: "jsdom",
     // Two suffixes, and the second one is load-bearing. Runes (`$state`) are

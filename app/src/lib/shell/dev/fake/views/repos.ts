@@ -145,15 +145,24 @@ const MAIN_COMMITS: [string, string, string, string][] = [
   ["b07c93e4d1a8", "README: how to run locally", "jonas", "2026-08-18T16:44:00Z"],
 ];
 
+/** `?fake-file-kinds`'s files (#2254). */
+const FILE_KINDS: Record<string, string> = {
+  "web/client.ts": `import type { Payout } from "./types";\n\n/** Sends one payout batch; retried by the service, not here. */\nexport async function sendBatch(base: string, batch: Payout[]): Promise<number> {\n  const response = await fetch(\`\${base}/batches\`, { method: "POST", body: JSON.stringify(batch) });\n  return response.status; // 202 when queued\n}`,
+  "notes/plan.zzq": "fn main() { this is no language knobas knows }",
+};
+
 function filesOf(repoId: string, branch: string | null): Record<string, string> | null {
   const repo = CORPUS.find((entry) => entry.entity_id === repoId && entry.kind === "repo");
   if (!repo) return null;
   if (repoId === PAYOUT) {
     const files = branch === FEATURE ? PAYOUT_FEATURE : PAYOUT_MAIN;
+    const query = new URLSearchParams(globalThis.location?.search);
+    // `?fake-file-kinds` (#2254): a TypeScript file and a file in no known language, for highlighting.
+    const kinds = query.has("fake-file-kinds") ? FILE_KINDS : {};
     // `?fake-file-lines=<n>` (perf audit, #2200's class): one file of `n` lines.
-    const n = Number(new URLSearchParams(globalThis.location?.search).get("fake-file-lines") ?? 0) || 0;
-    if (n === 0) return files;
-    return { ...files, "BULK.rs": Array.from({ length: n }, (_, i) => `    let value_${i} = payout.amount * ${i};`).join("\n") };
+    const n = Number(query.get("fake-file-lines") ?? 0) || 0;
+    if (n === 0) return { ...files, ...kinds };
+    return { ...files, ...kinds, "BULK.rs": Array.from({ length: n }, (_, i) => `    let value_${i} = payout.amount * ${i};`).join("\n") };
   }
   const name = repo.title.slice(repo.title.indexOf("/") + 1);
   return {

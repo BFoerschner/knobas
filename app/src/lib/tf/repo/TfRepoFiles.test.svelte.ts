@@ -11,6 +11,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { SourceView, TreeEntry } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
+import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
 
 const REPO = "gitea:tidewater/payout-service";
 
@@ -89,7 +90,12 @@ afterEach(() => {
   target.remove();
 });
 
-function draw(entityView: (at: string, section: string | null) => Promise<SourceView>, path: string | null, line: number | null = null) {
+function draw(
+  entityView: (at: string, section: string | null) => Promise<SourceView>,
+  path: string | null,
+  line: number | null = null,
+  render?: RenderPort,
+) {
   const ports = {
     entityView,
     submitWrite: async () => {
@@ -98,7 +104,7 @@ function draw(entityView: (at: string, section: string | null) => Promise<Source
   };
   view = mount(TfRepoFiles, {
     target,
-    props: { ports, repoId: REPO, at: REPO, branch: "main", path, line, changed: new Set<string>() },
+    props: { ports, repoId: REPO, at: REPO, branch: "main", path, line, changed: new Set<string>(), ...(render ? { render } : {}) },
   });
   flushSync();
 }
@@ -309,4 +315,133 @@ test("copying a selection across lines gives the selected text, without the line
 
   expect(copied["text/plain"]).toBe("main() {\n    run();\n}");
   expect(event.defaultPrevented).toBe(true);
+});
+
+/** A renderer port whose highlighting answers only when the test says, with what each job was asked and focused on. */
+function heldRender() {
+  const jobs: { request: HighlightRequest; handlers: HighlightHandlers; focus: [number, number][]; cancelled: boolean }[] = [];
+  const port: RenderPort = {
+    highlight(request, handlers) {
+      const job = { request, handlers, focus: [] as [number, number][], cancelled: false };
+      jobs.push(job);
+      return { focus: (from, to) => job.focus.push([from, to]), cancel: () => (job.cancelled = true) };
+    },
+  };
+  return { jobs, port };
+}
+
+const colored = () => [...target.querySelectorAll(".tf-fileview .tf-code [class^='tf-hl-']")].map((el) => `${el.className}:${el.textContent}`);
+
+test("a file draws as plain text first and gains colour when the highlighter answers", async () => {
+  const render = heldRender();
+  draw(openSource({ "src/main.rs": "fn main() {\n    run(42);\n}" }).entityView, "src/main.rs", null, render.port);
+  await settle();
+
+  expect(lineText(0)).toEqual(["1", "fn main() {"]);
+  expect(colored()).toEqual([]);
+  expect(render.jobs.map((job) => job.request.path)).toEqual(["src/main.rs"]);
+
+  render.jobs[0]!.handlers.onLines(0, [[["fn", "kw"], [" main() {", ""]], [["    run(", ""], ["42", "num"], [");", ""]], [["}", ""]]]);
+  flushSync();
+
+  expect(colored()).toEqual(["tf-hl-kw:fn", "tf-hl-num:42"]);
+  expect(lineText(1)).toEqual(["2", "    run(42);"]);
+});
+
+test("a file in a language the highlighter does not know stays plain text, with no error", async () => {
+  const render = heldRender();
+  draw(openSource({ "notes/plan.zzq": "fn main() {}" }).entityView, "notes/plan.zzq", null, render.port);
+  await settle();
+  render.jobs[0]!.handlers.onPlain?.();
+  flushSync();
+
+  expect(lineText(0)).toEqual(["1", "fn main() {}"]);
+  expect(colored()).toEqual([]);
+  expect(target.querySelector(".tf-cfail")).toBeNull();
+});
+
+test("the highlighter is asked for the lines in view of a long file first, and told when the view moves", async () => {
+  const render = heldRender();
+  draw(openSource({ "BULK.rs": long(50_000) }).entityView, "BULK.rs", 40_000, render.port);
+  await settle();
+
+  const job = render.jobs.at(-1)!;
+  const asked = [job.request.focus!, ...job.focus];
+  const last = asked.at(-1)!;
+  const drawn = [...drawnLines()].map((row) => Number((row as HTMLElement).dataset["n"]) - 1);
+  expect(last[1] - last[0]).toBeLessThan(500);
+  expect(last[0]).toBeLessThanOrEqual(Math.min(...drawn));
+  expect(last[1]).toBeGreaterThan(Math.max(...drawn));
+  expect(drawn).toContain(39_999);
+});
+
+test("an SVG file is drawn as an image", async () => {
+  const svg = '<svg width="4" height="4"/>';
+  draw(openSource({ "docs/logo.svg": svg }).entityView, "docs/logo.svg");
+  await settle();
+
+  const img = target.querySelector<HTMLImageElement>(".tf-fileview img");
+  expect(img?.getAttribute("src")).toBe(`data:image/svg+xml;base64,${btoa(svg)}`);
+  expect(drawnLines()).toHaveLength(0);
+});
+
+// -- Find in file (#2299) ------------------------------------------------------
+
+const findField = () => target.querySelector<HTMLInputElement>("input[aria-label='Find in file']")!;
+const findSays = () => text(target.querySelector(".tf-findbar .tf-lqn"));
+const current = () => target.querySelector(".tf-code mark.tf-curm");
+const rowOf = (el: Element | null) => (el?.closest(".tf-l") as HTMLElement | null)?.dataset["n"];
+
+function find(typed: string) {
+  findField().value = typed;
+  findField().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+}
+
+function press(shift = false) {
+  findField().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: shift, bubbles: true, cancelable: true }));
+  flushSync();
+}
+
+test("find in a file drawn whole marks every hit and steps through them with Enter and Shift+Enter", async () => {
+  draw(openSource({ "src/sepa/retry.rs": "retry once\nnothing\nretry twice, Retry thrice" }).entityView, "src/sepa/retry.rs");
+  await settle();
+
+  find("retry");
+  expect(findSays()).toBe("1 of 3");
+  expect(target.querySelectorAll(".tf-code mark")).toHaveLength(3);
+  expect(rowOf(current())).toBe("1");
+
+  press();
+  expect(findSays()).toBe("2 of 3");
+  expect(rowOf(current())).toBe("3");
+  press();
+  expect(text(current())).toBe("Retry");
+  press(true);
+  press(true);
+  expect(findSays()).toBe("1 of 3");
+  expect(rowOf(current())).toBe("1");
+
+  find("absent");
+  expect(findSays()).toBe("0 found");
+  expect(target.querySelectorAll(".tf-code mark")).toHaveLength(0);
+});
+
+test("find in a long file draws a hit's line the window left out before marking it", async () => {
+  const lines = long(50_000).split("\n");
+  lines[44_443] = "let needle = 1;";
+  lines[9] = "let needle = 0;";
+  draw(openSource({ "BULK.rs": lines.join("\n") }).entityView, "BULK.rs");
+  await settle();
+
+  find("needle");
+  expect(findSays()).toBe("1 of 2");
+  expect(target.querySelector(".tf-l[data-n='44444']")).toBeNull();
+
+  press();
+  expect(findSays()).toBe("2 of 2");
+  expect(rowOf(current())).toBe("44444");
+  expect(drawnLines().length).toBeLessThan(500);
+  press();
+  expect(rowOf(current())).toBe("10");
 });

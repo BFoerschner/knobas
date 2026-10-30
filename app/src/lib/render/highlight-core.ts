@@ -31,7 +31,7 @@ const SCOPES: [kind: string, scopes: string[]][] = [
   ["com", ["comment", "punctuation.definition.comment"]],
   ["str", ["string", "punctuation.definition.string", "constant.character", "markup.inline.raw", "markup.fenced_code", "markup.raw"]],
   ["num", ["constant.numeric", "constant.language", "constant.other", "support.constant", "variable.other.constant"]],
-  ["kw", ["keyword", "storage", "storage.type", "storage.modifier", "keyword.control", "markup.heading", "entity.name.section", "markup.bold"]],
+  ["kw", ["keyword", "storage", "storage.type", "storage.modifier", "keyword.control", "markup.heading", "punctuation.definition.heading", "entity.name.section", "markup.bold"]],
   ["fn", ["entity.name.function", "support.function", "meta.function-call.generic", "markup.underline.link", "string.other.link"]],
   ["ty", ["entity.name.type", "entity.name.class", "entity.name.struct", "entity.name.enum", "entity.name.trait", "support.type", "support.class", "entity.name.tag", "entity.other.attribute-name"]],
 ];
@@ -156,7 +156,7 @@ export function createHighlightCore({
   }
 
   function tokenize(h: HighlighterCore, lang: string, lines: string[], grammarState?: GrammarState) {
-    return h.codeToTokens(lines.join("\n"), { lang, theme: THEME.name, grammarState, tokenizeMaxLineLength: 4000 });
+    return h.codeToTokens(lines.join("\n"), { lang, theme: THEME.name, tokenizeMaxLineLength: 4000, ...(grammarState ? { grammarState } : {}) });
   }
 
   async function run(job: Job, text: string, lang: string | null) {
