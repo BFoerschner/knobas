@@ -77,10 +77,7 @@ pub(super) async fn run(step: &PipeStep, input: &[u8], limits: Limits) -> Result
     let ended = run_argv(
         &argv,
         stdin,
-        crate::renderers::Limits {
-            timeout: limits.timeout,
-            output_cap: usize::try_from(limits.cap).unwrap_or(usize::MAX),
-        },
+        limits.into(),
         std::env::vars_os().collect(),
     )
     .await;

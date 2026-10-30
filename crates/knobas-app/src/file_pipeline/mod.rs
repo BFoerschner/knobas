@@ -478,10 +478,7 @@ async fn run_command(
     let ended = run_argv(
         &argv,
         input.to_vec(),
-        crate::renderers::Limits {
-            timeout: limits.timeout,
-            output_cap: usize::try_from(limits.cap).unwrap_or(usize::MAX),
-        },
+        limits.into(),
         std::env::vars_os().collect(),
     )
     .await;

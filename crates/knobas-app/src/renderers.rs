@@ -414,6 +414,17 @@ pub(crate) struct Limits {
     pub output_cap: usize,
 }
 
+/// A pipeline step's limits (#2264) as a run's: one type of limits reaches
+/// [`run_argv`], whoever starts the program.
+impl From<crate::file_pipeline::Limits> for Limits {
+    fn from(step: crate::file_pipeline::Limits) -> Self {
+        Self {
+            timeout: step.timeout,
+            output_cap: usize::try_from(step.cap).unwrap_or(usize::MAX),
+        }
+    }
+}
+
 /// How a program ended.
 #[derive(Debug)]
 pub(crate) enum Ended {
@@ -561,6 +572,23 @@ async fn read_capped(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pipeline step's limits are a run's: the same timeout, the cap as the
+    /// output cap, one past `usize` held at its most.
+    #[test]
+    fn a_pipeline_steps_limits_are_a_runs_limits() {
+        let step = crate::file_pipeline::Limits {
+            cap: 7,
+            timeout: Duration::from_millis(1500),
+        };
+        let run = Limits::from(step);
+        assert_eq!((run.timeout, run.output_cap), (Duration::from_millis(1500), 7));
+        let huge = Limits::from(crate::file_pipeline::Limits {
+            cap: u64::MAX,
+            timeout: Duration::ZERO,
+        });
+        assert_eq!(huge.output_cap, usize::try_from(u64::MAX).unwrap_or(usize::MAX));
+    }
 
     fn argv(words: &[&str]) -> Vec<String> {
         words.iter().map(|w| (*w).to_owned()).collect()
