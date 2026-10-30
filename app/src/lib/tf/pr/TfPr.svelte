@@ -11,8 +11,12 @@
     (ADR-0020 rule 4).
   - **Overview**: the head commit's checks (a check whose link the mirror
     holds opens its run) and the description; beside it *Ready to merge?*
-    (the source's *Approvals*, the checks and *Conflicts*, #994) and, when
-    the repository is cloned, the local checkout.
+    (the source's *Approvals*, its required checks and *Conflicts*, #994,
+    with a verdict that holds back wherever *Merge…* is refused) atop the
+    side rail (#2278): the reviewers and their state, the checks with the
+    required ones marked and a failing one first, the builds of the head
+    the mirror holds, the conflicts and, when the repository is cloned,
+    the local checkout. The rail sits beside every tab but *Files changed*.
   - **Conversation**: each comment and review in time order, and a comment
     box that queues `Comment`; *Comment* is drawn disabled with the source's
     reason where the token may not comment (#2030), and a press queues nothing.
@@ -97,12 +101,16 @@
     PR_TABS,
     commitParts,
     conversationOf,
+    conflictsOf,
     conversationParts,
     headerOf,
     overviewParts,
     prHash,
+    railChecks,
+    readiness,
     readPrRoute,
     readyLines,
+    reviewersOf,
     tabCounts,
     type PrTab,
   } from "./pr";
@@ -335,6 +343,11 @@
   const header = $derived(headerOf(view ?? null));
   const counts = $derived(tabCounts(view ?? null));
   const readyRows = $derived(readyLines(view ?? null));
+  const standing = $derived(readiness(view ?? null));
+  const reviewers = $derived(reviewersOf(view ?? null));
+  const rail = $derived(railChecks(view ?? null));
+  const conflicts = $derived(conflictsOf(view ?? null));
+  const builds = $derived(detail?.builds ?? []);
   const number = $derived(prId === null ? null : prNumber(prId));
   const title = $derived(detail?.row.title ?? "");
   const conversation = $derived(conversationParts(view ?? null));
@@ -726,15 +739,80 @@
             {/each}
           {/if}
         </div>
-        <aside class="tf-side" aria-label="Ready to merge">
-          <div class="tf-panel" hidden={readyRows.length === 0}>
+        <aside class="tf-side" aria-label="Pull request status">
+          <div class="tf-panel" hidden={standing.lines.length === 0}>
             <header><h3>Ready to merge?</h3></header>
             <div class="tf-prready">
-              {#each readyRows as line, n (n)}
-                <span><span class="tf-dot tf-{line.tone}"></span> {line.text}</span>
+              {#if standing.verdict !== null}
+                <div class="tf-prverdict tf-{standing.verdict.tone}">
+                  {standing.verdict.text}{#if standing.verdict.why !== null}<span class="tf-prwhy">{standing.verdict.why}</span>{/if}
+                </div>
+              {/if}
+              {#each standing.lines as line, n (n)}
+                <div class="tf-prck tf-{line.tone}">
+                  <span class="tf-prmk" aria-hidden="true">{line.tone === "ok" ? "✓" : line.tone === "err" ? "✕" : "●"}</span>
+                  <span>{line.text}{#if line.why !== undefined}<span class="tf-prwhy">{line.why}</span>{/if}</span>
+                </div>
               {/each}
             </div>
           </div>
+          {#if view}
+            <div class="tf-panel tf-prreviewers">
+              <header><h3>Reviewers</h3></header>
+              {#if reviewers.length === 0}
+                <p class="tf-prnote">No reviews yet.</p>
+              {:else}
+                <div class="tf-prlist">
+                  {#each reviewers as reviewer (reviewer.who)}
+                    {@const own = me !== null && reviewer.who === me}
+                    <div class="tf-prit">
+                      <span class="tf-av" class:tf-me={own} aria-hidden="true">{initials(reviewer.who)}</span>
+                      <span class="tf-prgrow">{own ? "you" : reviewer.who}</span>
+                      <span class="tf-chip tf-{reviewer.tone ?? 'muted'}">{reviewer.state}</span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+            {#if rail.length > 0}
+              <div class="tf-panel tf-prrail-checks">
+                <header><h3>Checks</h3></header>
+                <div class="tf-prlist">
+                  {#each rail as check, n (n)}
+                    {@const run = runOf(check.row)}
+                    <div class="tf-prit">
+                      <span class="tf-dot tf-{check.row.tone ?? 'muted'}"></span>
+                      <span class="tf-prgrow">{#if run !== null}<a href={run}>{check.row.title}</a>{:else}{check.row.title}{/if}</span>
+                      {#if check.required}<span class="tf-prreq">Required</span>{/if}
+                      <span class="tf-dim">{check.row.chip ?? ""}</span>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+            {#if builds.length > 0}
+              <div class="tf-panel tf-prbuilds">
+                <header><h3>Builds of the head</h3><span class="tf-dim">from the mirror</span></header>
+                <div class="tf-prlist">
+                  {#each builds as build (build.entity_id)}
+                    <div class="tf-prit">
+                      <span class="tf-dot tf-{build.state?.tone ?? 'muted'}"></span>
+                      <span class="tf-prgrow"><a href={itemHash(build)}>{build.title}</a></span>
+                      {#if build.state !== null}<span class="tf-dim">{build.state.text}</span>{/if}
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+            {#if conflicts !== null}
+              <div class="tf-panel tf-prconflicts">
+                <header><h3>Conflicts</h3></header>
+                <p class="tf-prnote" class:tf-prconflict={conflicts.conflicts}>
+                  {conflicts.text}.{#if conflicts.conflicts}{" "}Resolve them in a checkout and push; they cannot be resolved here.{/if}
+                </p>
+              </div>
+            {/if}
+          {/if}
           {#if local !== null && repo !== null}
             <div class="tf-panel">
               <header><h3>Local checkout</h3></header>
