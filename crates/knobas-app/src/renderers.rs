@@ -468,7 +468,9 @@ pub fn frame_response(path: &str) -> tauri::http::Response<Vec<u8>> {
             .header("x-content-type-options", "nosniff")
             .header("cache-control", "no-store")
             .body(body),
-        None => tauri::http::Response::builder().status(400).body(Vec::new()),
+        None => tauri::http::Response::builder()
+            .status(400)
+            .body(Vec::new()),
     };
     built.unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
 }
@@ -646,12 +648,24 @@ mod tests {
     #[test]
     fn a_frame_document_is_served_under_its_own_policy() {
         let doc = "<!doctype html><p style=\"color: red\">é</p>";
-        let path = format!("/{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(doc));
+        let path = format!(
+            "/{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(doc)
+        );
         let answer = frame_response(&path);
         assert_eq!(answer.status(), 200);
         assert_eq!(answer.body().as_slice(), doc.as_bytes());
-        let header = |name: &str| answer.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned);
-        assert_eq!(header("content-type").as_deref(), Some("text/html; charset=utf-8"));
+        let header = |name: &str| {
+            answer
+                .headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+        };
+        assert_eq!(
+            header("content-type").as_deref(),
+            Some("text/html; charset=utf-8")
+        );
         assert_eq!(
             header("content-security-policy").as_deref(),
             Some("default-src 'none'; style-src 'unsafe-inline'; img-src data:")
@@ -680,12 +694,18 @@ mod tests {
             timeout: Duration::from_millis(1500),
         };
         let run = Limits::from(step);
-        assert_eq!((run.timeout, run.output_cap), (Duration::from_millis(1500), 7));
+        assert_eq!(
+            (run.timeout, run.output_cap),
+            (Duration::from_millis(1500), 7)
+        );
         let huge = Limits::from(crate::file_pipeline::Limits {
             cap: u64::MAX,
             timeout: Duration::ZERO,
         });
-        assert_eq!(huge.output_cap, usize::try_from(u64::MAX).unwrap_or(usize::MAX));
+        assert_eq!(
+            huge.output_cap,
+            usize::try_from(u64::MAX).unwrap_or(usize::MAX)
+        );
     }
 
     fn argv(words: &[&str]) -> Vec<String> {

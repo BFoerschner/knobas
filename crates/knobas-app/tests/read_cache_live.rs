@@ -740,7 +740,11 @@ async fn a_pull_requests_diff_is_read_once_at_its_head() {
     println!("files: cold {sent_cold}, warm {sent_warm} requests ({took:?})");
     assert_eq!(cold, first, "a rebuilt source reads the same tab");
     assert_eq!(warm, cold, "the kept diff draws the same tab");
-    assert_eq!(sent_warm + 1, sent_cold, "only the .diff is not asked again");
+    assert_eq!(
+        sent_warm + 1,
+        sent_cold,
+        "only the .diff is not asked again"
+    );
 }
 
 /// Spec #2234 story 16: a text file past Gitea's file view (10,000 lines or
@@ -764,7 +768,10 @@ async fn a_file_past_the_views_cut_is_read_whole_through_its_bytes() {
     else {
         panic!("the file: {view:?}");
     };
-    println!("view: {} lines, truncated {truncated}, size {size}", text.lines().count());
+    println!(
+        "view: {} lines, truncated {truncated}, size {size}",
+        text.lines().count()
+    );
     assert!(*truncated, "Gitea's view cuts it");
     assert!(text.lines().count() <= 10_000);
     assert_eq!(*size, long.len() as u64, "the size is the whole file's");
@@ -783,7 +790,11 @@ async fn a_file_past_the_views_cut_is_read_whole_through_its_bytes() {
     };
     let (whole, sent) = read().await;
     println!("bytes: {sent} requests");
-    assert_eq!(whole.expect("the bytes read"), long.as_bytes(), "whole, byte for byte");
+    assert_eq!(
+        whole.expect("the bytes read"),
+        long.as_bytes(),
+        "whole, byte for byte"
+    );
     let (_, again) = read().await;
     assert_eq!(again, 0, "a second look is the cache's");
 }

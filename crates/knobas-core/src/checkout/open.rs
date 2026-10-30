@@ -827,10 +827,21 @@ mod tests {
         let forty = "a".repeat(40);
         let sixty_four = "B".repeat(64);
         assert!(is_full_sha(&forty) && is_full_sha(&sixty_four));
-        for not in ["abc1234", &"a".repeat(41), &"a".repeat(63), &format!("{}g", "a".repeat(39)), ""] {
+        for not in [
+            "abc1234",
+            &"a".repeat(41),
+            &"a".repeat(63),
+            &format!("{}g", "a".repeat(39)),
+            "",
+        ] {
             assert!(!is_full_sha(not), "{not:?}");
         }
-        assert!(is_sha("abc1234") && is_sha(&sixty_four) && !is_sha("abc123") && !is_sha(&"a".repeat(65)));
+        assert!(
+            is_sha("abc1234")
+                && is_sha(&sixty_four)
+                && !is_sha("abc123")
+                && !is_sha(&"a".repeat(65))
+        );
     }
 
     const CHECKOUT: &str = "/Users/mara/code/payout-service";

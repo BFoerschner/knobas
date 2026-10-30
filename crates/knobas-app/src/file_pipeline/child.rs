@@ -74,13 +74,7 @@ pub(super) async fn run(step: &PipeStep, input: &[u8], limits: Limits) -> Result
         ARG.to_owned(),
         limits.cap.to_string(),
     ];
-    let ended = run_argv(
-        &argv,
-        stdin,
-        limits.into(),
-        std::env::vars_os().collect(),
-    )
-    .await;
+    let ended = run_argv(&argv, stdin, limits.into(), std::env::vars_os().collect()).await;
     match ended {
         Ended::Exited {
             status: Some(0),

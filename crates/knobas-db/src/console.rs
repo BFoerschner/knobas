@@ -62,14 +62,20 @@ mod environment {
     fn a_program_gets_the_parents_environment_less_knobas_variables() {
         let parent: Vec<(OsString, OsString)> = vec![
             ("PATH".into(), "/usr/bin:/bin".into()),
-            ("KNOBAS_DB_URL".into(), "postgres://knobas:hunter2@db".into()),
+            (
+                "KNOBAS_DB_URL".into(),
+                "postgres://knobas:hunter2@db".into(),
+            ),
             ("KNOBAS_".into(), "bare".into()),
             ("LANG".into(), "C".into()),
         ];
         let mut env = command("/usr/bin/env");
         scrub_knobas_env(&mut env, parent);
         let printed = String::from_utf8(env.output().expect("env runs").stdout).expect("utf-8");
-        let mut names: Vec<&str> = printed.lines().filter_map(|line| line.split('=').next()).collect();
+        let mut names: Vec<&str> = printed
+            .lines()
+            .filter_map(|line| line.split('=').next())
+            .collect();
         names.sort_unstable();
         assert_eq!(names, ["LANG", "PATH"], "{printed}");
     }

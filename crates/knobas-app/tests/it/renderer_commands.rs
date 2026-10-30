@@ -332,9 +332,16 @@ async fn pipelines_on_diffs_are_on_until_turned_off_and_then_stored() {
     assert!(!renderers::set_diff_pipelines(&pool, false).await.unwrap());
     assert!(!renderers::diff_pipelines(&pool).await.unwrap());
 
-    knobas_app::settings::write_value(&pool, renderers::DIFF_PIPELINES_KEY, &serde_json::json!("off"))
-        .await
-        .unwrap();
-    assert!(renderers::diff_pipelines(&pool).await.unwrap(), "rubbish reads as on");
+    knobas_app::settings::write_value(
+        &pool,
+        renderers::DIFF_PIPELINES_KEY,
+        &serde_json::json!("off"),
+    )
+    .await
+    .unwrap();
+    assert!(
+        renderers::diff_pipelines(&pool).await.unwrap(),
+        "rubbish reads as on"
+    );
     assert_eq!(renderers::DIFF_PIPELINES_KEY, "render.diff_pipelines");
 }

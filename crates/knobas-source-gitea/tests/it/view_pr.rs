@@ -3326,10 +3326,22 @@ async fn a_pull_requests_diff_is_read_once_per_head_and_merge_base() {
     let source = source(&server);
     let diffs = |asked: &[String]| asked.iter().filter(|p| p.ends_with("142.diff")).count();
 
-    let first = source.view(PR, Some("files")).await.unwrap().expect("drawn");
-    let again = source.view(PR, Some("files")).await.unwrap().expect("drawn");
+    let first = source
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    let again = source
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .expect("drawn");
     assert_eq!(first, again, "the kept diff draws the same tab");
-    assert_eq!(diffs(&paths(&server).await), 1, "the second read sent no .diff");
+    assert_eq!(
+        diffs(&paths(&server).await),
+        1,
+        "the second read sent no .diff"
+    );
 
     let pushed = "d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f70819203";
     pull["head"]["sha"] = json!(pushed);
@@ -3339,14 +3351,30 @@ async fn a_pull_requests_diff_is_read_once_per_head_and_merge_base() {
         .with_priority(1)
         .mount(&server)
         .await;
-    source.view(PR, Some("files")).await.unwrap().expect("drawn");
-    assert_eq!(diffs(&paths(&server).await), 2, "a pushed head is read again");
+    source
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    assert_eq!(
+        diffs(&paths(&server).await),
+        2,
+        "a pushed head is read again"
+    );
 
     // No merge base: nothing names what the diff stands at, so nothing is kept.
     let unnamed = gitea(open_pull(), reviews()).await;
     let source = source_of(&unnamed);
-    source.view(PR, Some("files")).await.unwrap().expect("drawn");
-    source.view(PR, Some("files")).await.unwrap().expect("drawn");
+    source
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    source
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .expect("drawn");
     assert_eq!(diffs(&paths(&unnamed).await), 2);
 }
 

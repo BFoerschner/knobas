@@ -31,7 +31,10 @@ impl DiffKey {
     /// The key for `pull`'s diff, or `None` when its record does not name
     /// both ends as whole shas: then nothing says what the diff stands at.
     pub(super) fn of(owner: &str, repo: &str, number: u64, pull: &super::Pull) -> Option<Self> {
-        let merge_base = pull.merge_base.clone().filter(|s| crate::view::is_full_sha(s))?;
+        let merge_base = pull
+            .merge_base
+            .clone()
+            .filter(|s| crate::view::is_full_sha(s))?;
         let head = pull
             .head
             .as_ref()
@@ -83,7 +86,10 @@ impl PullDiffs {
 
     /// Whether a diff of this pull request is kept, at whatever ends.
     pub(crate) fn holds(&self, owner: &str, repo: &str, number: u64) -> bool {
-        self.lock().entries.iter().any(|(key, _)| key.same_pull(owner, repo, number))
+        self.lock()
+            .entries
+            .iter()
+            .any(|(key, _)| key.same_pull(owner, repo, number))
     }
 
     /// The diff kept at `key`, now the most recently used.
@@ -127,7 +133,13 @@ mod tests {
     use super::*;
 
     fn key(number: u64, head: char) -> DiffKey {
-        DiffKey::new("o", "r", number, &"b".repeat(40), &head.to_string().repeat(40))
+        DiffKey::new(
+            "o",
+            "r",
+            number,
+            &"b".repeat(40),
+            &head.to_string().repeat(40),
+        )
     }
 
     fn text(bytes: usize) -> Arc<str> {

@@ -198,7 +198,10 @@ impl PullView<'_> {
     async fn files(&self) -> Result<ViewSection, SourceError> {
         // A diff kept for this pull request waits for the record, which says
         // whether it still stands; else the diff is read beside the rest.
-        let kept = self.source.pull_diffs.holds(self.owner, self.repo, self.number);
+        let kept = self
+            .source
+            .pull_diffs
+            .holds(self.owner, self.repo, self.number);
         let (pull, fetched, reviews, resolves, commits, viewer) = tokio::try_join!(
             self.pull(),
             async {
@@ -231,7 +234,9 @@ impl PullView<'_> {
             },
         };
         if let Some(key) = key {
-            self.source.pull_diffs.put(key, std::sync::Arc::clone(&text));
+            self.source
+                .pull_diffs
+                .put(key, std::sync::Arc::clone(&text));
         }
         let reviewed = range::reviewed(&reviews, viewer.as_deref());
         let range = range::of(

@@ -252,7 +252,11 @@ mod tests {
         assert_eq!(empty.code, crate::IpcErrorCode::Invalid);
         assert!(empty.message.contains("Empty"), "{}", empty.message);
         let quote = checked_command("Bad", "cat 'x").unwrap_err();
-        assert!(quote.message.starts_with("Bad's command cannot be run"), "{}", quote.message);
+        assert!(
+            quote.message.starts_with("Bad's command cannot be run"),
+            "{}",
+            quote.message
+        );
     }
 
     /// The write has to be an upsert, and it has to touch exactly the key
