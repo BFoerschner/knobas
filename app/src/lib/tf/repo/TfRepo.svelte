@@ -473,56 +473,54 @@
       {#if NOT_BUILT[route.tab] !== undefined}
         <div class="tf-empty"><p>{NOT_BUILT[route.tab]} is not built in the new shell yet.</p></div>
       {:else}
-        {#key repoId}
-          {#each drawn as one (one)}
-            {@const refreshed = held.reads[one] ?? 0}
-            {#if one === "local"}
-              <TfRepoTab shown={one === slot}>
-                <TfRepoLocal {repoId} title={repo?.title ?? ""} {checkout} readDiff={ports.entityCheckoutDiff} {setPath} />
-              </TfRepoTab>
-            {:else if branches !== null && at !== null}
-              <!-- The rest wait for the branch every tab reads at. -->
-              <TfRepoTab shown={one === slot}>
-                {#if one === "files"}
-                  <TfRepoFiles
-                    {ports}
-                    {repoId}
-                    {at}
-                    branch={branchName}
-                    path={placeOf(one).path}
-                    line={placeOf(one).line}
-                    {changed}
-                    editing={placeOf(one).tab === "edit"}
-                    {job}
-                    checkoutBranch={checkout?.tree?.status === "read" ? checkout.tree.branch : null}
-                    {checkout}
-                    title={repo?.title ?? ""}
-                    {source}
-                    {refreshed}
-                  />
-                {:else if one === "commit" && placeOf(one).commit !== null}
-                  <TfRepoCommit {ports} {repoId} commitId={placeOf(one).commit ?? ""} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />
-                {:else if one === "branches"}
-                  <TfRepoBranches {ports} {repoId} {source} {refreshed} />
-                {:else if one === "compare"}
-                  <TfRepoCompare
-                    {ports}
-                    {repoId}
-                    {source}
-                    branches={branches}
-                    head={placeOf(one).branch ?? proposed}
-                    defaultBranch={defaultBranch?.name ?? null}
-                    {refreshed}
-                  />
-                {:else if one === "commits"}
-                  <TfRepoCommits {ports} {repoId} {at} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
-                {:else if one === "prs"}
-                  <TfRepoPrs {ports} {repoId} rows={prs} {job} />
-                {/if}
-              </TfRepoTab>
-            {/if}
-          {/each}
-        {/key}
+        {#each drawn as one (one)}
+          {@const refreshed = held.reads[one] ?? 0}
+          {#if one === "local"}
+            <TfRepoTab shown={one === slot}>
+              <TfRepoLocal {repoId} title={repo?.title ?? ""} {checkout} readDiff={ports.entityCheckoutDiff} {setPath} />
+            </TfRepoTab>
+          {:else if branches !== null && at !== null}
+            <!-- The rest wait for the branch every tab reads at. -->
+            <TfRepoTab shown={one === slot}>
+              {#if one === "files"}
+                <TfRepoFiles
+                  {ports}
+                  {repoId}
+                  {at}
+                  branch={branchName}
+                  path={placeOf(one).path}
+                  line={placeOf(one).line}
+                  {changed}
+                  editing={placeOf(one).tab === "edit"}
+                  {job}
+                  checkoutBranch={checkout?.tree?.status === "read" ? checkout.tree.branch : null}
+                  {checkout}
+                  title={repo?.title ?? ""}
+                  {source}
+                  {refreshed}
+                />
+              {:else if one === "commit" && placeOf(one).commit !== null}
+                <TfRepoCommit {ports} {repoId} commitId={placeOf(one).commit ?? ""} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />
+              {:else if one === "branches"}
+                <TfRepoBranches {ports} {repoId} {source} {refreshed} />
+              {:else if one === "compare"}
+                <TfRepoCompare
+                  {ports}
+                  {repoId}
+                  {source}
+                  branches={branches}
+                  head={placeOf(one).branch ?? proposed}
+                  defaultBranch={defaultBranch?.name ?? null}
+                  {refreshed}
+                />
+              {:else if one === "commits"}
+                <TfRepoCommits {ports} {repoId} {at} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
+              {:else if one === "prs"}
+                <TfRepoPrs {ports} {repoId} rows={prs} {job} />
+              {/if}
+            </TfRepoTab>
+          {/if}
+        {/each}
       {/if}
     </div>
   {/if}

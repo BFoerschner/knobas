@@ -778,10 +778,13 @@ test("opening another repository starts its tabs fresh (#2248)", async () => {
   expect(shownTree()).toEqual(["src/", "lib.rs", "retry.rs", "README.md"]);
   await go([REPO, "commits"]);
   expect(hiddenTabs()).toBe(1);
+  const left = target.querySelector(".tf-fileview");
 
   await go([LEDGER]);
   expect(text(target.querySelector("h1"))).toBe("tidewater/ledger");
   expect(hiddenTabs()).toBe(0);
+  // Mounted afresh, so no tab carries what the reader did into this repository.
+  expect(fileView()).not.toBe(left);
   expect(shownTree()).toEqual(["src/", "README.md"]);
   expect(text(fileView()?.querySelector("header") ?? null)).toContain("README.md");
   expect(target.querySelector(".tf-tabs a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fledger/files");

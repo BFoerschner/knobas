@@ -116,6 +116,26 @@ test("stop ends the following, for a stepper that goes away while the flow moves
   expect(peeks).toBe(before);
 });
 
+test("a stepper whose page is hidden reads nothing while it follows, and reads where the flow got to on its return (#2249)", async () => {
+  let shown = true;
+  const sw = createStartWork("jira:PAY-231", undefined, () => shown);
+  const running = sw.run();
+  releaseRun([one(1, "running")]);
+  await running;
+  shown = false;
+  const before = peeks;
+  peeked = [one(1, "succeeded")];
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(peeks).toBe(before);
+  expect(sw.following).toBe(true);
+
+  shown = true;
+  await vi.advanceTimersByTimeAsync(800);
+  expect(peeks).toBe(before + 1);
+  expect(sw.steps.map((step) => step.outcome)).toEqual(["succeeded"]);
+  expect(sw.following).toBe(false);
+});
+
 test("edited replaces one key of the op, so the repository picker's amendment carries the entity", () => {
   const step = one(1, "pending");
   const amended = edited(step, "entity", "gitea:other") as Record<string, Record<string, unknown>>;
