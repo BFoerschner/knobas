@@ -6,7 +6,8 @@
  * renderer, `cat`, which the fake runs by echoing its input; any other command
  * fails with that said on stderr), `renderer_defaults`, `set_renderer_defaults` (#2263, none until
  * one is made), `command_steps`, `set_command_steps`, `named_pipelines`, `set_named_pipelines` (#2265: one
- * command step, Upper, which `repoFilePiped` runs; no pipeline until one is saved), `pages_kept_open`, `set_pages_kept_open` (#2247), `passive_attribution`, `set_passive_attribution`,
+ * command step, Upper, which `repoFilePiped` runs; no pipeline until one is saved, but under
+ * `?fake-diff-pipeline` *Base64 JSON*, the default for `*.json.b64`), `pages_kept_open`, `set_pages_kept_open` (#2247), `passive_attribution`, `set_passive_attribution`,
  * `monitoring_settings`, `set_monitoring_settings`, `backup_status`,
  * `backup_now`, `set_backup_schedule` and `open_backup_folder` (which opens
  * nothing: a browser has no file manager to show the folder in).
@@ -53,7 +54,7 @@ function record(at: Date, bytes: number): BackupRecord {
 }
 
 /** This feature's commands. */
-export function handlers(): Handlers {
+export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   let passive = true;
   // `?fake-pages-kept-open=<n>` starts *Pages kept open* at n (the keep-alive budget, #2250).
   const keptAsked = new URLSearchParams(globalThis.location?.search).get("fake-pages-kept-open");
@@ -94,6 +95,11 @@ export function handlers(): Handlers {
   // #2265: one command step, `tr a-z A-Z`, and no named pipeline until one is saved.
   let steps: CommandStep[] = [{ id: "upper", name: "Upper", command: "tr a-z A-Z", timeout_secs: 10 }];
   let pipelines: NamedPipeline[] = [];
+  // `?fake-diff-pipeline` (#2270): `*.json.b64` opens, and diffs, through a saved pipeline.
+  if (params.has("fake-diff-pipeline")) {
+    pipelines = [{ id: "base64-json", name: "Base64 JSON", steps: [{ step: "base64_decode" }, { step: "pretty", format: "json" }] }];
+    defaults = [{ pattern: "*.json.b64", renderer: "", pipeline: "base64-json" }];
+  }
   const idOf = (name: string, i: number, kind: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `${kind}-${i + 1}`;
 
   return {

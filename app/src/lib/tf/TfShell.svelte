@@ -49,6 +49,8 @@
   import { commandSteps, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
   import { rendererDefaults as heldDefaults } from "../render/defaults.svelte";
   import { commandSteps as heldCommandSteps, namedPipelines as heldPipelines } from "../render/pipelines.svelte";
+  import { defaultPipeline } from "../render/defaults";
+  import { installPipelines } from "./diff/piped";
   import { installCommands } from "../render/command";
   import { listSources, syncStatus, type SourceSummary, type SourceSyncStatus } from "../ipc/sources";
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
@@ -345,6 +347,15 @@
     void read()
       .then((list) => heldDefaults.hold(list))
       .catch(() => {});
+  });
+
+  // Every diff's default pipeline per file (#2270) is the viewer's (#2265): read from the held stores at each ask, so a
+  // pipeline edited in Settings, or a default saved from the viewer, reaches the diffs too. Installed once.
+  installPipelines({
+    of: (path) => {
+      const found = defaultPipeline(path, heldDefaults.list, heldPipelines.list);
+      return found === null ? null : { name: found.pipeline.name, pattern: found.pattern, steps: found.pipeline.steps };
+    },
   });
 
   // The named pipelines and command steps (#2265): until they answer, no file opens through a default pipeline.
