@@ -319,7 +319,50 @@
       open = null;
     },
     add: addToReview,
+    canReply: (thread) => !!review?.reply && thread.replies && thread.id !== null,
+    canResolve: (thread) => !!review?.resolve && thread.id !== null,
+    isResolved: (thread) => review?.resolved?.(thread) ?? thread.resolved_by !== null,
+    isShown: (thread) => thread.id !== null && shownThreads[thread.id] === true,
+    show(thread, on) {
+      if (thread.id !== null) shownThreads = { ...shownThreads, [thread.id]: on };
+    },
+    isReplying: (thread) => thread.id !== null && replying === thread.id,
+    openReply(thread) {
+      replying = thread.id;
+      replyDraft = "";
+    },
+    get replyDraft() {
+      return replyDraft;
+    },
+    set replyDraft(text: string) {
+      replyDraft = text;
+    },
+    cancelReply() {
+      replying = null;
+    },
+    sendReply(path, thread) {
+      const send = review?.reply;
+      const body = replyDraft.trim();
+      if (!send || body === "") return;
+      void send(path, thread, body).then((queued) => {
+        if (!queued || replying !== thread.id) return;
+        replying = null;
+        replyDraft = "";
+      });
+    },
+    resolve(thread, on) {
+      void review?.resolve?.(thread, on);
+    },
+    queuedOn: (thread) => review?.queued?.(thread) ?? [],
   };
+
+  /** The reply box open under one thread (#2277), by the thread's id, and its words. */
+  let replying = $state<string | null>(null);
+  let replyDraft = $state("");
+  /** Resolved threads the reader opened. */
+  let shownThreads = $state<Record<string, boolean>>({});
+  /** Pending comments written on an earlier head (#2276): kept apart, never sent. */
+  const stale = $derived(review ? review.pending.stale(review.entity) : []);
 
   /** Pending comments on files the diff no longer holds. */
   const homeless = $derived(drafts.filter((d) => !files.some((file) => file.path === d.path)));
@@ -500,6 +543,24 @@
         {/each}
         {#each homeless as d (d.id)}
           {@render mine(`${d.path}, ${lineName(d.side, d.line)}: ${d.body}`)}
+        {/each}
+      </details>
+    {/if}
+    {#if review && stale.length > 0}
+      <!-- #2276: drafts written on an earlier head count their lines on a head that is gone, so no review sends them. -->
+      <details class="tf-outdated tf-stale" open>
+        <summary>{stale.length} of your pending {stale.length === 1 ? "comment was" : "comments were"} written on an earlier head</summary>
+        {#each stale as d (d.id)}
+          <div class="tf-thread tf-pending">
+            <p>
+              <b>You</b> <span class="tf-chip tf-warn">pending</span>
+              <span class="tf-mono tf-dim">{d.path}, {lineName(d.side, d.line)}{d.head ? ` at ${d.head.slice(0, 7)}` : ""}</span>
+              {d.body}
+            </p>
+            <div class="tf-acts">
+              <button type="button" class="tf-btn tf-sm tf-ghost tf-danger" onclick={() => review.pending.discard(review.entity, d.id)}>Discard</button>
+            </div>
+          </div>
         {/each}
       </details>
     {/if}

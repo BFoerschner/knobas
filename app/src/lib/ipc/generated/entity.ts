@@ -515,7 +515,28 @@ export type Commenting = {
  * source's descriptor declares it and the shell can queue it, as for an
  * action.
  */
-write_op: string, };
+write_op: string, 
+/**
+ * The identifier a reply to one of the diff's threads goes through
+ * (`reply_to_thread`, #2277), on the threads that say they take one
+ * ([`LineThread::replies`](crate::diff::LineThread::replies)); `None`
+ * offers no reply. Absent on the wire reads as `None`.
+ */
+reply: string | null, 
+/**
+ * The identifier resolving or reopening a thread goes through
+ * (`resolve_thread`, #2277), on every thread with an id; `None` where
+ * the source cannot resolve threads (Forgejo 17 has no endpoint for it).
+ * Absent on the wire reads as `None`.
+ */
+resolve: string | null, 
+/**
+ * The head commit the diff's line comments are written against, in the
+ * source's spelling (#2276): the shell keeps the reader's unsent
+ * comments by pull request and this commit. `None` where the source did
+ * not say. Absent on the wire reads as `None`.
+ */
+head: string | null, };
 
 /**
  * What kind of working set this is.
@@ -615,7 +636,15 @@ old_mode?: string, new_mode?: string,
  *
  * The outdated ones last.
  */
-threads: Array<LineThread>, };
+threads: Array<LineThread>, 
+/**
+ * The blob the file holds after the change, as the diff's `index` line
+ * names it (abbreviated as the server printed it; the blob before, for a
+ * deletion): what *Viewed* is kept by (#2276), so a file whose content
+ * did not change stays viewed through a new commit. `None` where the
+ * diff names none.
+ */
+blob?: string, };
 
 /**
  * One line of a hunk, with its number on each side it exists on.
@@ -1852,7 +1881,27 @@ export type LineComments = "none" | "sends" | "requires";
  * its place since a later push. An outdated thread is drawn muted at the end
  * of its file, never on a line it was not written about.
  */
-export type LineThread = { side: ReviewSide, line: number, outdated: boolean, comments: Array<LineComment>, };
+export type LineThread = { side: ReviewSide, line: number, outdated: boolean, comments: Array<LineComment>, 
+/**
+ * The source's id for the thread, which a reply or a resolve names
+ * ([`WriteOp::ReplyToThread`](crate::WriteOp::ReplyToThread),
+ * [`WriteOp::ResolveThread`](crate::WriteOp::ResolveThread); #2277);
+ * `None` where the source offers neither on it. Absent on the wire
+ * reads as `None`.
+ */
+id: string | null, 
+/**
+ * Who resolved the thread, as the source names them; `None` while it is
+ * open (#2277). The shell draws a resolved thread collapsed. Absent on
+ * the wire reads as `None`.
+ */
+resolved_by: string | null, 
+/**
+ * Whether the source takes a reply on this thread (#2277): Gitea places
+ * a reply by line on the current head, so an outdated thread takes none.
+ * Absent on the wire reads as `false`.
+ */
+replies: boolean, };
 
 /**
  * The end of a link that the reader is **not** looking at.

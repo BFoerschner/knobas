@@ -114,6 +114,15 @@ impl SourceView {
                     {
                         *commentable = None;
                     }
+                    // A reply and a resolve go the same way: dropped where
+                    // the credential cannot make them.
+                    if let Some(c) = commentable.as_mut() {
+                        for op in [&mut c.reply, &mut c.resolve] {
+                            if op.as_deref().is_some_and(|op| refused(op).is_some()) {
+                                *op = None;
+                            }
+                        }
+                    }
                 }
                 Block::Facts { .. }
                 | Block::Text { .. }
@@ -450,6 +459,24 @@ pub struct Commenting {
     /// source's descriptor declares it and the shell can queue it, as for an
     /// action.
     pub write_op: String,
+    /// The identifier a reply to one of the diff's threads goes through
+    /// (`reply_to_thread`, #2277), on the threads that say they take one
+    /// ([`LineThread::replies`](crate::diff::LineThread::replies)); `None`
+    /// offers no reply. Absent on the wire reads as `None`.
+    #[serde(default)]
+    pub reply: Option<String>,
+    /// The identifier resolving or reopening a thread goes through
+    /// (`resolve_thread`, #2277), on every thread with an id; `None` where
+    /// the source cannot resolve threads (Forgejo 17 has no endpoint for it).
+    /// Absent on the wire reads as `None`.
+    #[serde(default)]
+    pub resolve: Option<String>,
+    /// The head commit the diff's line comments are written against, in the
+    /// source's spelling (#2276): the shell keeps the reader's unsent
+    /// comments by pull request and this commit. `None` where the source did
+    /// not say. Absent on the wire reads as `None`.
+    #[serde(default)]
+    pub head: Option<String>,
 }
 
 impl ViewAction {
@@ -770,12 +797,18 @@ mod tests {
                             body: "Bound the `jitter`.".into(),
                             at: Some("2026-08-22T09:00:00Z".into()),
                         }],
+                        id: None,
+                        resolved_by: None,
+                        replies: false,
                     }];
                     files
                 },
                 truncated: true,
                 commentable: Some(Commenting {
                     write_op: "submit_review".into(),
+                    reply: None,
+                    resolve: None,
+                    head: None,
                 }),
                 gone: vec![FileThread {
                     path: "src/dropped.rs".into(),
@@ -788,6 +821,9 @@ mod tests {
                             body: "Why a second retry loop?".into(),
                             at: None,
                         }],
+                        id: None,
+                        resolved_by: None,
+                        replies: false,
                     },
                 }],
             },
@@ -1088,12 +1124,18 @@ mod tests {
                 body: "nit".into(),
                 at: None,
             }],
+            id: None,
+            resolved_by: None,
+            replies: false,
         }];
         let diff = serde_json::to_value(Block::Diff {
             files,
             truncated: false,
             commentable: Some(Commenting {
                 write_op: "submit_review".into(),
+                reply: None,
+                resolve: None,
+                head: None,
             }),
             gone: vec![FileThread {
                 path: "gone.txt".into(),
@@ -1106,6 +1148,9 @@ mod tests {
                         body: "was".into(),
                         at: None,
                     }],
+                    id: None,
+                    resolved_by: None,
+                    replies: false,
                 },
             }],
         })
@@ -1115,12 +1160,13 @@ mod tests {
             serde_json::json!({
                 "type": "diff",
                 "truncated": false,
-                "commentable": { "write_op": "submit_review" },
+                "commentable": { "write_op": "submit_review", "reply": null, "resolve": null, "head": null },
                 "gone": [{
                     "path": "gone.txt",
                     "thread": {
                         "side": "old", "line": 4, "outdated": true,
-                        "comments": [{ "author": "olu", "body": "was", "at": null }]
+                        "comments": [{ "author": "olu", "body": "was", "at": null }],
+                        "id": null, "resolved_by": null, "replies": false
                     }
                 }],
                 "files": [{
@@ -1130,6 +1176,7 @@ mod tests {
                     "additions": 2,
                     "deletions": 0,
                     "truncated": false,
+                    "blob": "5786b13",
                     "hunks": [{
                         "header": "@@ -0,0 +1,2 @@",
                         "lines": [
@@ -1139,7 +1186,8 @@ mod tests {
                     }],
                     "threads": [{
                         "side": "new", "line": 2, "outdated": false,
-                        "comments": [{ "author": "olu", "body": "nit", "at": null }]
+                        "comments": [{ "author": "olu", "body": "nit", "at": null }],
+                        "id": null, "resolved_by": null, "replies": false
                     }]
                 }]
             })

@@ -71,6 +71,14 @@ pub struct DiffFile {
     /// The outdated ones last.
     #[serde(default)]
     pub threads: Vec<LineThread>,
+    /// The blob the file holds after the change, as the diff's `index` line
+    /// names it (abbreviated as the server printed it; the blob before, for a
+    /// deletion): what *Viewed* is kept by (#2276), so a file whose content
+    /// did not change stays viewed through a new commit. `None` where the
+    /// diff names none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub blob: Option<String>,
 }
 
 /// One conversation on one line of a file's diff (issue #709, `CONTEXT.md`
@@ -91,6 +99,23 @@ pub struct LineThread {
     pub line: u32,
     pub outdated: bool,
     pub comments: Vec<LineComment>,
+    /// The source's id for the thread, which a reply or a resolve names
+    /// ([`WriteOp::ReplyToThread`](crate::WriteOp::ReplyToThread),
+    /// [`WriteOp::ResolveThread`](crate::WriteOp::ResolveThread); #2277);
+    /// `None` where the source offers neither on it. Absent on the wire
+    /// reads as `None`.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Who resolved the thread, as the source names them; `None` while it is
+    /// open (#2277). The shell draws a resolved thread collapsed. Absent on
+    /// the wire reads as `None`.
+    #[serde(default)]
+    pub resolved_by: Option<String>,
+    /// Whether the source takes a reply on this thread (#2277): Gitea places
+    /// a reply by line on the current head, so an outdated thread takes none.
+    /// Absent on the wire reads as `false`.
+    #[serde(default)]
+    pub replies: bool,
 }
 
 /// A [`LineThread`] on a file the diff no longer holds (issue #709): written
@@ -271,6 +296,12 @@ fn file_line(
         .and_then(|r| r.strip_suffix('%'))
     {
         f.similarity = rest.parse().ok();
+    } else if let Some((before, after)) = raw
+        .strip_prefix("index ")
+        .and_then(|r| r.split(' ').next())
+        .and_then(|r| r.split_once(".."))
+    {
+        f.blobs = Some((before.to_owned(), after.to_owned()));
     } else if let Some(mode) = raw.strip_prefix("old mode ") {
         f.old_mode = Some(mode.to_owned());
     } else if let Some(mode) = raw.strip_prefix("new mode ") {
@@ -301,6 +332,8 @@ struct FileBuilder {
     similarity: Option<u8>,
     old_mode: Option<String>,
     new_mode: Option<String>,
+    /// The `index <before>..<after>` line's two blobs.
+    blobs: Option<(String, String)>,
     additions: u32,
     deletions: u32,
     hunks: Vec<Hunk>,
@@ -324,6 +357,7 @@ impl FileBuilder {
             similarity: None,
             old_mode: None,
             new_mode: None,
+            blobs: None,
             additions: 0,
             deletions: 0,
             hunks: Vec::new(),
@@ -368,6 +402,18 @@ impl FileBuilder {
         } else {
             None
         };
+        // The blob after the change, or before it for a deletion, whose
+        // after side is all zeros.
+        let blob = self.blobs.and_then(|(before, after)| {
+            let gone = |b: &str| b.is_empty() || b.bytes().all(|c| c == b'0');
+            if !gone(&after) {
+                Some(after)
+            } else if !gone(&before) {
+                Some(before)
+            } else {
+                None
+            }
+        });
         DiffFile {
             path,
             old_path,
@@ -380,6 +426,7 @@ impl FileBuilder {
             old_mode: self.old_mode,
             new_mode: self.new_mode,
             threads: Vec::new(),
+            blob,
         }
     }
 }
@@ -835,6 +882,21 @@ mod tests {
             (Some("100644"), Some("100755"))
         );
         assert_eq!(mode.similarity, None);
+    }
+
+    /// #2276: a file's blob is the `index` line's after side, the before
+    /// side for a deletion, and none where the diff has no `index` line.
+    #[test]
+    fn a_file_names_the_blob_it_holds_after_the_change() {
+        let modified = one(
+            "diff --git a/a.rs b/a.rs\nindex 3c9d2b4..7aa01f9 100644\n--- a/a.rs\n+++ b/a.rs\n",
+        );
+        assert_eq!(modified.blob.as_deref(), Some("7aa01f9"));
+        let deleted =
+            one("diff --git a/a.rs b/a.rs\ndeleted file mode 100644\nindex 3c9d2b4..0000000\n");
+        assert_eq!(deleted.blob.as_deref(), Some("3c9d2b4"));
+        let bare = one("diff --git a/a.rs b/a.rs\nold mode 100644\nnew mode 100755\n");
+        assert_eq!(bare.blob, None);
     }
 
     /// A per-view cap from both sides, over files each under it: exactly the cap draws everything, one more cuts the last file,

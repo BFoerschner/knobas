@@ -267,6 +267,18 @@
 .tf-outdated summary { cursor: pointer; color: var(--ink-2); }
 .tf-outdated .tf-thread { margin-left: 0; }
 .tf-diff.tf-split .tf-thread.tf-on-new, .tf-diff.tf-split .tf-newc.tf-on-new { margin-left: calc(50% + 56px); }
+/* A thread's footer, its reply and resolve (#2277; mockups/code-area .thr footer), and a resolved thread as one line. */
+.tf-thr-f, .tf-thr-h { display: flex; align-items: center; gap: var(--control-gap); margin: 6px -10px -6px; padding: 6px 8px; border-top: 1px solid var(--rule-2); background: var(--sheet-2); }
+.tf-thr-h { margin: -6px -10px; border-top: 0; background: none; }
+.tf-thr-sp { flex: 1; }
+.tf-thr-reply {
+  flex: 1; height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--ink-2);
+  display: flex; align-items: center; padding: 0 8px; font: var(--t-sm) var(--sans); cursor: text; text-align: left;
+}
+.tf-thr-reply + .tf-thr-sp { display: none; }
+.tf-thread.tf-resolved { border-left-color: var(--ok); }
+.tf-thread .tf-reply { margin: 6px 0 0; }
+.tf-said.tf-queued { opacity: 0.8; }
 @media (max-width: 900px) {
   .tf-dgrid { grid-template-columns: minmax(0, 1fr); }
   .tf-flist { position: static; }

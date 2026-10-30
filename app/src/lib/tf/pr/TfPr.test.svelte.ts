@@ -694,6 +694,38 @@ test("line comments waiting turn Review… into Submit review (N pending), which
   expect(text(".tf-fhead .tf-sub")).toContain("review queued");
 });
 
+test("#2276: Submit review from Overview reads the diff's head first and sends no comment written on an earlier head", async () => {
+  pending.seen(PR, "aaa111");
+  pending.add(PR, { path: "src/sepa/retry.rs", side: "new", line: 14, body: "Written on the old head." });
+  const pr = prView([SUBMIT, COMMENT, APPROVE_SENDS, CHANGES, EDIT, MERGE]);
+  // The head moved since the Files tab last drew it.
+  const files: SourceView = {
+    sections: [
+      {
+        id: "files",
+        title: "Files",
+        count: 0,
+        deferred: false,
+        blocks: [
+          { type: "diff", files: [], truncated: false, commentable: { write_op: "submit_review", reply: null, resolve: null, head: "bbb222" }, gone: [] },
+        ],
+      },
+    ],
+    actions: [],
+  };
+  await draw([PR], ports({ author: "jonas", pr, entityView: async (_id, section) => (section === "files" ? files : pr) }));
+  button("Submit review (1 pending)")!.click();
+  flushSync();
+  const dialog = document.querySelector(".tf-dialog")!;
+  dialog.querySelector<HTMLInputElement>("input[value=approve]")!.click();
+  flushSync();
+  dialogButton("Submit review").click();
+  await settle();
+  expect(writes).toEqual([{ SubmitReview: { entity: PR, verdict: "approve", body: "", comments: [] } }]);
+  // Kept apart, never dropped.
+  expect(pending.stale(PR).map((d) => d.body)).toEqual(["Written on the old head."]);
+});
+
 test("Request changes waits for its words; Comment waits for a line comment", async () => {
   await draw([PR], ports({ author: "jonas", pr: prView([SUBMIT, COMMENT, APPROVE_SENDS, CHANGES, EDIT, MERGE]) }));
   button("Review…")!.click();
@@ -1263,4 +1295,85 @@ test("text the source does not mark Markdown stays as written", async () => {
   await draw([PR], ports({ pr: withBlocks("overview", [...overview, { type: "text", text: "Plain **not bold**", markdown: false }]) }));
   expect(target.querySelector(".tf-prdesc .tf-md")).toBeNull();
   expect(text(".tf-prdesc p")).toBe("Plain **not bold**");
+});
+
+// -- Request… in the Reviewers panel (#2303) ---------------------------------
+
+const REQUEST = action("request_reviewers", "Request…", {
+  fields: [
+    {
+      name: "reviewers",
+      label: "Reviewer",
+      kind: { type: "choice", options: ["olu", "kai"].map((who) => ({ value: who, label: who })) },
+      value: null,
+      required: true,
+      placeholder: null,
+    },
+  ],
+});
+
+/** `view` with the overview naming `who` as asked for a review, as Gitea's verdicts say it. */
+function withRequested(view: SourceView, who: string): SourceView {
+  const copy = structuredClone(view);
+  const facts = copy.sections[0]!.blocks[0]!;
+  if (facts.type === "facts") facts.facts.push(fact("Review", `requested from ${who}`, "muted"));
+  return copy;
+}
+
+test("#2303: Request… asks the picked reviewer, under `reviewers`, and the read after the write draws them requested", async () => {
+  let read = prView([COMMENT, EDIT, REQUEST]);
+  const { sync, follower, io } = lifecycle(() => read);
+  await draw([PR], io, follower);
+  // Drawn in the panel, never in the toolbar.
+  expect(buttons()).toEqual(["Edit"]);
+  target.querySelector<HTMLButtonElement>(".tf-prreviewers header button")!.click();
+  flushSync();
+  expect(lines(".tf-prpick button")).toEqual(["OL olu", "KA kai"]);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-prpick button")].find((b) => b.textContent?.includes("olu"))!.click();
+  await settle();
+  expect(writes).toEqual([{ RequestReviewers: { entity: PR, reviewers: ["olu"] } }]);
+  // At once: requested, while the write is out.
+  expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "OL olu · queued Review requested"]);
+  // The write landed; its refresh reads the view again, which names olu.
+  read = withRequested(prView([COMMENT, EDIT, REQUEST]), "olu");
+  await sync.refreshed(PR, 80);
+  expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "OL olu Review requested"]);
+});
+
+test("#2303: a reader the source offers no Request… sees no button", async () => {
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT]) }));
+  expect(target.querySelector(".tf-prreviewers header button")).toBeNull();
+});
+
+test("#2303: a refused request says the source's words and leaves the rail as it was", async () => {
+  let hear: Hear = () => {};
+  const follower: WriteFollower = {
+    follow: (_id, h) => {
+      hear = h;
+      return () => {};
+    },
+  };
+  const numbered = ports({
+    pr: prView([COMMENT, EDIT, REQUEST]),
+    submitWrite: async (payload) => {
+      writes.push(payload);
+      return { id: 32 } as never;
+    },
+  });
+  await draw([PR], numbered, follower);
+  target.querySelector<HTMLButtonElement>(".tf-prreviewers header button")!.click();
+  flushSync();
+  target.querySelector<HTMLButtonElement>(".tf-prpick button")!.click();
+  await settle();
+  hear({ id: 32, state: "refused", detail: "422 reviewer olu does not exist" } as never);
+  flushSync();
+  expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved"]);
+  expect(toasts.items.at(-1)!.text).toBe("Review request was refused: 422 reviewer olu does not exist");
+});
+
+test("#2276: the reader's unsent review is a Draft in the Reviewers panel", async () => {
+  pending.add(PR, { path: "src/retry.rs", side: "new", line: 27, body: "Sub-second?" });
+  pending.add(PR, { path: "src/retry.rs", side: "new", line: 28, body: "Why 3?" });
+  await draw([PR]);
+  expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "MA you · 2 pending comments Draft"]);
 });
