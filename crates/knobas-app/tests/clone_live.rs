@@ -317,3 +317,118 @@ async fn stopping_a_clone_leaves_nothing_behind() {
         "nothing was left in the clones root"
     );
 }
+
+// -- a pull request's worktree (#2285, ADR-0035) ------------------------------
+
+/// `git ls-remote <url> refs/pull/*/head`'s first pull request: its number
+/// and its head sha, as the server answers them.
+fn a_seeded_pull_request(url: &str) -> (u64, String) {
+    let out = std::process::Command::new("git")
+        .args(["ls-remote", url, "refs/pull/*/head"])
+        .env("LC_ALL", "C")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let line = text.lines().next().expect("the seed opens pull requests");
+    let (sha, name) = line.split_once('\t').unwrap();
+    let number = name
+        .trim_start_matches("refs/pull/")
+        .trim_end_matches("/head")
+        .parse()
+        .unwrap();
+    (number, sha.to_owned())
+}
+
+fn git_in(dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("LC_ALL", "C")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// A seeded pull request opens in a worktree at the head the server serves
+/// under `refs/pull/<n>/head`, fetched over the network, and the clone it is
+/// made from keeps its branch, its `HEAD` and its status. Read-only at the
+/// server: nothing to take back.
+#[tokio::test]
+#[ignore = "needs the testenv Gitea: just gitea-live"]
+async fn a_seeded_pull_request_opens_in_a_worktree_at_the_servers_head() {
+    use knobas_app::checkout::open::open_object_admitting;
+    use knobas_app::checkout::set_applications;
+    use knobas_core::checkout::open::{Draft, Object};
+
+    let (pool, id, dir, root) = fixture(SEEDED).await;
+    let seen = Arc::new(Seen::default());
+    start_admitting(&pool, &Registry::for_process(), &Clones::global(), seen.clone(), &id, &["http"])
+        .await
+        .unwrap();
+    assert_eq!(seen.end().await.state, CloneState::Done);
+    let checkout = root.join("payout-service");
+    let (number, head) = a_seeded_pull_request(&format!("{}/{SEEDED}.git", gitea_url()));
+    println!("pull request #{number} at {head}");
+    let standing = || {
+        (
+            git_in(&checkout, &["branch", "--show-current"]),
+            git_in(&checkout, &["rev-parse", "HEAD"]),
+            git_in(&checkout, &["status", "--porcelain=v1", "--untracked-files=all"]),
+        )
+    };
+    let before = standing();
+
+    let record = dir.path().join("record");
+    let stub = dir.path().join("stub");
+    std::fs::write(
+        &stub,
+        format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{0}.tmp'\nmv '{0}.tmp' '{0}'\n", record.display()),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    set_applications(
+        &pool,
+        &[Draft {
+            id: Some("editor".into()),
+            name: "Editor".into(),
+            command: format!("{} {{path}}", stub.display()),
+            pull_request_command: Some(format!("{} {{path}}", stub.display())),
+            ..Draft::default()
+        }],
+        None,
+    )
+    .await
+    .unwrap();
+
+    let object = Object::PullRequest {
+        number,
+        base: "main".into(),
+        head: "x".into(),
+        branch: "x".into(),
+        item: None,
+    };
+    for _ in 0..2 {
+        let argv = open_object_admitting(
+            &pool,
+            Some(&Registry::for_process()),
+            &id,
+            Some("editor"),
+            &object,
+            &["http"],
+        )
+        .await
+        .unwrap();
+        let worktree = root.join("pull-requests").join("tidewater").join(format!("payout-service-{number}"));
+        assert_eq!(argv[1..], [shown(&worktree)]);
+        assert_eq!(git_in(&worktree, &["rev-parse", "HEAD"]), head);
+        assert_eq!(git_in(&worktree, &["status", "--porcelain=v1"]), "");
+        assert_eq!(standing(), before, "the clone is untouched");
+    }
+    assert!(!checkout.join(".git/FETCH_HEAD").exists());
+}
