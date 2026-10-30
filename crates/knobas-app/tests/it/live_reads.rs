@@ -977,3 +977,122 @@ async fn a_read_behind_across_a_new_credential_lands_nowhere() {
     );
     f.live.settled().await;
 }
+
+// -- a range's diff: local git first (#2272, ADR-0036) ----------------------
+
+/// `git -C dir <args>` with no user configuration, answering stdout.
+fn git(dir: &std::path::Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "commit.gpgsign=false"])
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .output()
+        .expect("git runs");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// A repository entity of the fake's (fixed views: `commit/…`) whose
+/// checkout is a temp repository with two commits; answers the entity id,
+/// the checkout, and the two shas.
+async fn repo_with_checkout(f: &Fixture) -> (String, tempfile::TempDir, String, String) {
+    let id = f.entity(&format!("commit/repo-{}", uuid::Uuid::new_v4().simple()));
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'repo','repo')")
+        .bind(&id)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, web_url)
+         values ($1,$2,'repo','repo','','{}'::jsonb,null)",
+    )
+    .bind(&id)
+    .bind(&f.id)
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q"]);
+    std::fs::write(dir.path().join("pay.py"), "a = 1\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-q", "-m", "one"]);
+    let one = git(dir.path(), &["rev-parse", "HEAD"]);
+    std::fs::write(dir.path().join("pay.py"), "a = 2\n").unwrap();
+    git(dir.path(), &["commit", "-q", "-am", "two"]);
+    let two = git(dir.path(), &["rev-parse", "HEAD"]);
+    knobas_app::checkout::set_override(&f.pool, &id, dir.path().to_str())
+        .await
+        .unwrap();
+    (id, dir, one, two)
+}
+
+async fn range_diff(
+    f: &Fixture,
+    id: &str,
+    base: &str,
+    head: &str,
+    ignore_whitespace: bool,
+) -> knobas_app::checkout::RangeDiff {
+    knobas_app::checkout::range_diff(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &f.live,
+        id,
+        base,
+        head,
+        ignore_whitespace,
+    )
+    .await
+    .unwrap()
+}
+
+/// A checkout holding both shas answers the diff, and the source is asked
+/// nothing; the same read with a sha it lacks is the source's, kept by sha
+/// pair. The pair is the witness that the counter sees this path's reads.
+#[tokio::test]
+async fn a_range_whose_commits_the_checkout_holds_asks_the_source_nothing() {
+    use knobas_app::checkout::DiffReadAt;
+    let f = fixture().await;
+    let (id, _dir, one, two) = repo_with_checkout(&f).await;
+
+    let local = range_diff(&f, &id, &one, &two, false).await;
+    assert_eq!(local.read_at, DiffReadAt::Checkout);
+    assert_eq!(local.files.len(), 1);
+    assert_eq!(local.files[0].path, "pay.py");
+    let range = local.range.expect("both ends settled");
+    assert_eq!((range.repository.as_str(), range.base.as_str(), range.head.as_str()), (id.as_str(), one.as_str(), two.as_str()));
+    let local = range_diff(&f, &id, &format!("{two}^"), &two, true).await;
+    assert_eq!(local.read_at, DiffReadAt::Checkout);
+    assert_eq!(f.seen.reads(), 0, "the source was asked: {:?}", f.seen.reads.lock().unwrap());
+
+    let missing = "0123456789abcdef0123456789abcdef01234567";
+    let remote = range_diff(&f, &id, &one, missing, true).await;
+    assert_eq!(remote.read_at, DiffReadAt::Source);
+    assert_eq!(
+        *f.seen.reads.lock().unwrap(),
+        [(id.clone(), Some(format!("compare:{one}...{missing}")))]
+    );
+    range_diff(&f, &id, &one, missing, false).await;
+    assert_eq!(f.seen.reads(), 1, "kept by sha pair");
+}
+
+/// A branch name is the source's even when the checkout has a branch of
+/// that name: where it stands there is not where it stands at the source.
+#[tokio::test]
+async fn a_branch_name_is_read_from_the_source() {
+    use knobas_app::checkout::DiffReadAt;
+    let f = fixture().await;
+    let (id, dir, one, _) = repo_with_checkout(&f).await;
+    git(dir.path(), &["branch", "feature"]);
+
+    let read = range_diff(&f, &id, &one, "feature", false).await;
+    assert_eq!(read.read_at, DiffReadAt::Source);
+    assert_eq!(f.seen.reads(), 1);
+}

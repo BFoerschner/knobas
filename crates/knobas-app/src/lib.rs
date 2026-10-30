@@ -509,6 +509,7 @@ pub fn run() {
             // #824's uncommitted diff at a checkout, appended at the foot:
             // the list is append-only (§10.8).
             commands::entity::entity_checkout_diff,
+            commands::entity::entity_range_diff,
             // #819's two conversation reads, appended at the foot: the list
             // is append-only (§10.8).
             commands::entity::visit_entity,

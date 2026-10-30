@@ -26,9 +26,10 @@
 //!
 //! No checkout, no fetch, and nothing here writes to an existing working tree.
 //! `clone_command` produces a **string a person copies**; it is never spawned.
-//! knobas runs three git commands: [`working_tree`]'s read-only `status` at
+//! knobas runs these git commands: [`working_tree`]'s read-only `status` at
 //! the checkout path (ADR-0021, #704), [`uncommitted`]'s read-only `diff`
-//! there (ADR-0026, #824), and [`clone`]'s `git clone` into a new folder under
+//! there (ADR-0026, #824), [`range`]'s read-only `rev-parse` and `diff`
+//! between two checked shas (ADR-0036, #2272), and [`clone`]'s `git clone` into a new folder under
 //! the clones root, whose URL is built from the source's address and a checked
 //! name and never from the mirror (ADR-0023, #823). [`open`] starts the
 //! applications a person set (#501, #844), and the rule it keeps is the other
@@ -272,6 +273,103 @@ pub async fn local_changes(
         ))
     })?;
     Ok(uncommitted::read(Path::new(&path)).await)
+}
+
+/// Where a [`RangeDiff`] was read.
+///
+/// - `checkout`: local read-only git at the repository's checkout, which
+///   holds both commits (ADR-0036).
+/// - `source`: the source's compare read, kept by sha pair (ADR-0032).
+///
+/// Issue #2272.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
+pub enum DiffReadAt {
+    Checkout,
+    Source,
+}
+
+/// The diff between two commits of a repository, from wherever it was read.
+///
+/// Issue #2272.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct RangeDiff {
+    pub files: Vec<knobas_source::diff::DiffFile>,
+    /// A cap cut it (ADR-0020 rule 6).
+    pub truncated: bool,
+    /// The two whole shas it is between, where they are settled; `None` for
+    /// a range from before the repository's first commit, and where the
+    /// source did not name them.
+    pub range: Option<knobas_source::view::DiffRange>,
+    /// Local git or the source. Whitespace is ignored only at `checkout`:
+    /// the source's API cannot return a diff with whitespace ignored.
+    pub read_at: DiffReadAt,
+}
+
+/// The diff from `base` to `head` of the repository `entity_id` (#2272,
+/// ADR-0036): from local read-only git when its checkout holds both commits,
+/// with whitespace ignored when asked; otherwise the source's
+/// `compare:<base>...<head>` section, through the read cache, and whitespace
+/// shown as the source answers it.
+///
+/// A checkout that lacks a commit is never fetched into: the source answers.
+///
+/// # Errors
+///
+/// What the source's read refuses with, as [`crate::sources::to_ipc`] maps it.
+#[allow(clippy::too_many_arguments)]
+pub async fn range_diff(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+    ignore_whitespace: bool,
+) -> Result<RangeDiff, IpcError> {
+    if let Some(path) = resolve(pool, entity_id).await.ok().and_then(|c| c.path)
+        && let Some(local) = range::read(Path::new(&path), base, head, ignore_whitespace).await
+    {
+        return Ok(RangeDiff {
+            files: local.files,
+            truncated: local.truncated,
+            range: local.base.map(|base| knobas_source::view::DiffRange {
+                repository: entity_id.to_owned(),
+                base,
+                head: local.head,
+                commits: Vec::new(),
+                reviewed: None,
+            }),
+            read_at: DiffReadAt::Checkout,
+        });
+    }
+    let section = format!("compare:{base}...{head}");
+    let view = crate::sources::crud::view(pool, secrets, registry, live, entity_id, Some(&section))
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, None))?;
+    let block = view.and_then(|view| {
+        view.sections.into_iter().next().and_then(|section| {
+            section.blocks.into_iter().find_map(|block| match block {
+                knobas_source::view::Block::Diff {
+                    files,
+                    truncated,
+                    range,
+                    ..
+                } => Some((files, truncated, range)),
+                _ => None,
+            })
+        })
+    });
+    let (files, truncated, range) = block.unwrap_or_default();
+    Ok(RangeDiff {
+        files,
+        truncated,
+        range,
+        read_at: DiffReadAt::Source,
+    })
 }
 
 /// [`view`] without the working tree read: where the checkout is, and no git.
