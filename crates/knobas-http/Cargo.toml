@@ -34,7 +34,7 @@ reqwest.workspace = true
 serde.workspace = true
 # The excerpting JSON read decodes a body it already holds as text (#1313).
 serde_json.workspace = true
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["time", "rt"] }
 tracing = "0.1"
 url = "2"
 

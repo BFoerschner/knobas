@@ -314,6 +314,28 @@ async fn a_transient_failure_costs_exactly_the_documented_attempts() {
     );
 }
 
+/// **The request counter sees what the server sees** (#2239): a call the
+/// retry budget repeats counts every attempt, a call outside a counted
+/// scope is in no count, and two scopes count apart.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_request_counter_counts_what_reached_the_server() {
+    let server = CountingServer::always(503, "");
+    let client = HttpClient::new(config(server.url())).expect("client");
+
+    let (_, outside) = knobas_http::counted::counted(async {}).await;
+    let _ = client.get_json::<serde_json::Value>("/thing", &[]).await;
+    let (answer, sent) =
+        knobas_http::counted::counted(client.get_json::<serde_json::Value>("/thing", &[])).await;
+    assert!(answer.is_err(), "503 every time");
+    assert_eq!(outside, 0);
+    assert_eq!(sent, knobas_http::MAX_ATTEMPTS as u64, "one count per attempt");
+    assert_eq!(
+        server.hits(),
+        2 * knobas_http::MAX_ATTEMPTS as usize,
+        "the uncounted call reached the server too"
+    );
+}
+
 /// A non-transient failure is not retried at all: one request, one answer.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_deterministic_failure_is_asked_once() {
