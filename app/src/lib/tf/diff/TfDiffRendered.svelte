@@ -9,13 +9,14 @@
   the ones expanded context reads, so switching back and forth asks nothing
   again. Each renderer draws as the file viewer draws it: Markdown through
   the sanitizer, a diagram and a command's output in a sandboxed frame, an
-  image as an `<img>`.
+  image as an `<img>` of a blob URL (an SVG sanitized first, `render/image.ts`),
+  let go when the pane goes.
 -->
 <script lang="ts">
   import { ipcCommands, type CommandPort } from "../../render/command";
   import { isDiagramEngine } from "../../render/diagram";
   import { renderPort, type RenderPort } from "../../render/port";
-  import { imageUrl } from "../../render/registry";
+  import { imageBlob } from "../../render/image";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
   import TfDiagram from "../render/TfDiagram.svelte";
@@ -50,7 +51,20 @@
   const NAME = { old: "before", new: "after" } as const;
   const id = $derived(plan.renderer.id);
   const textOf = (content: string | Uint8Array) => (typeof content === "string" ? content : new TextDecoder().decode(content));
-  const urlOf = (content: string | Uint8Array) => imageUrl(typeof content === "string" ? new TextEncoder().encode(content) : content, path);
+  /** Each image side's blob URL, made once its bytes are in and revoked with the pane or a new read. */
+  let urls = $state<Partial<Record<Side, string>>>({});
+  $effect(() => {
+    if (id !== "image") return;
+    const made: Partial<Record<Side, string>> = {};
+    for (const side of plan.sides) {
+      const got = sideOf(side);
+      if (got?.kind !== "drawn") continue;
+      const bytes = typeof got.content === "string" ? new TextEncoder().encode(got.content) : got.content;
+      made[side] = URL.createObjectURL(imageBlob(bytes, path));
+    }
+    urls = made;
+    return () => Object.values(made).forEach((url) => URL.revokeObjectURL(url!));
+  });
   /** An image's size once it loaded, by side. */
   let sizes = $state<Partial<Record<Side, string>>>({});
   const measure = (side: Side) => (event: Event) => {
@@ -62,15 +76,11 @@
   const clip = (node: HTMLElement) => {
     node.style.setProperty("clip-path", `inset(0 0 0 ${cut}%)`);
   };
-  const drawnOf = (side: Side) => {
-    const got = sideOf(side);
-    return got?.kind === "drawn" ? got.content : null;
-  };
 </script>
 
 {#snippet drawn(side: Side, content: string | Uint8Array)}
   {#if id === "image"}
-    <img src={urlOf(content)} alt="{path} {NAME[side]}" onload={measure(side)} />
+    {#if urls[side]}<img src={urls[side]} alt="{path} {NAME[side]}" onload={measure(side)} />{/if}
   {:else if id === "markdown"}
     <TfMarkdown text={textOf(content)} {render} />
   {:else if isDiagramEngine(id)}
@@ -81,12 +91,11 @@
 {/snippet}
 
 {#if swipe}
-  {@const [old, now] = [drawnOf("old"), drawnOf("new")]}
   <div class="tf-swipe">
-    {#if old !== null && now !== null}
+    {#if urls.old && urls.new}
       <div class="tf-swipe-box">
-        <img src={urlOf(old)} alt="{path} before" />
-        <div class="tf-swipe-after" {@attach clip}><img src={urlOf(now)} alt="{path} after" /></div>
+        <img src={urls.old} alt="{path} before" />
+        <div class="tf-swipe-after" {@attach clip}><img src={urls.new} alt="{path} after" /></div>
       </div>
       <label class="tf-swipe-bar"><span>before</span><input type="range" min="0" max="100" bind:value={cut} aria-label="Swipe between {path} before and after" /><span>after</span></label>
     {:else}

@@ -27,7 +27,7 @@
     onNewBranch,
     refreshed = 0,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity">;
+    ports: Pick<RepoPorts, "entityView" | "getEntity" | "fileBytes">;
     repoId: string;
     commitId: string;
     now: Date;
@@ -121,5 +121,5 @@
 {:else if files !== null && files.length === 0}
   <div class="tf-empty">This commit changes no file.</div>
 {:else if files !== null}
-  <TfDiffView {files} {cut} context={commitContext(ports.entityView, commitId, parent)} />
+  <TfDiffView {files} {cut} context={commitContext(ports.entityView, commitId, parent, ports.fileBytes)} />
 {/if}

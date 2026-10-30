@@ -45,11 +45,28 @@ beforeEach(() => {
   document.body.appendChild(target);
 });
 
+/** `URL.createObjectURL` held for each test: each URL handed out with its blob, and which were revoked. */
+let blobs: { made: Map<string, Blob>; revoked: string[]; restore: () => void };
+function holdBlobs() {
+  const made = new Map<string, Blob>();
+  const revoked: string[] = [];
+  const [create, revoke] = [URL.createObjectURL, URL.revokeObjectURL];
+  URL.createObjectURL = (blob: Blob) => {
+    const url = `blob:test/${made.size}`;
+    made.set(url, blob);
+    return url;
+  };
+  URL.revokeObjectURL = (url: string) => void revoked.push(url);
+  return { made, revoked, restore: () => ((URL.createObjectURL = create), (URL.revokeObjectURL = revoke)) };
+}
+beforeEach(() => (blobs = holdBlobs()));
+
 afterEach(() => {
   views.forEach((view) => unmount(view));
   views = [];
   target.remove();
   installCommands([]);
+  blobs.restore();
 });
 
 function draw(props: Record<string, unknown>) {
@@ -191,8 +208,9 @@ test("a changed PNG opens rendered, side by side from each side's bytes, and swi
   expect(sides("assets/logo.png")).toEqual(["before", "after"]);
   const srcs = [...card("assets/logo.png").querySelectorAll<HTMLImageElement>(".tf-ba img")].map((img) => img.getAttribute("src"));
   expect(srcs).toHaveLength(2);
-  expect(srcs.every((src) => src?.startsWith("data:image/png;base64,"))).toBe(true);
-  expect(srcs[0]).not.toBe(srcs[1]);
+  expect(srcs.map((src) => blobs.made.get(src!)?.type)).toEqual(["image/png", "image/png"]);
+  expect(new Uint8Array(await blobs.made.get(srcs[0]!)!.arrayBuffer()).at(-1)).toBe(1);
+  expect(new Uint8Array(await blobs.made.get(srcs[1]!)!.arrayBuffer()).at(-1)).toBe(2);
 
   mode("assets/logo.png", "Swipe");
   await settle();
@@ -210,6 +228,24 @@ test("a changed PNG opens rendered, side by side from each side's bytes, and swi
   mode("assets/logo.png", "Bytes");
   flushSync();
   expect(card("assets/logo.png").textContent).toContain("A binary file: no lines to draw.");
+});
+
+test("an image's URLs are let go with the file, and an SVG side is sanitized", async () => {
+  const svg = (word: string) => new TextEncoder().encode(`<svg onload="alert(1)"><script>alert(2)</script><text>${word}</text></svg>`);
+  const SVG = file("assets/mark.svg", { change: "binary", additions: 0, deletions: 0, hunks: [] });
+  const { context } = reader({}, { "assets/mark.svg": [svg("old"), svg("new")] });
+  draw({ files: [SVG], context });
+  await settle();
+  const made = [...blobs.made.entries()];
+  expect(made).toHaveLength(2);
+  const texts = await Promise.all(made.map(([, blob]) => blob.text()));
+  expect(made.map(([, blob]) => blob.type)).toEqual(["image/svg+xml", "image/svg+xml"]);
+  expect(texts.some((text) => /script|onload/i.test(text))).toBe(false);
+  expect(texts.map((text) => text.includes(">old<"))).toEqual([true, false]);
+
+  views.forEach((view) => unmount(view));
+  views = [];
+  expect(blobs.revoked.sort()).toEqual(made.map(([url]) => url).sort());
 });
 
 test("a PNG with no side before it (added) shows its after side only and does not swipe", async () => {
