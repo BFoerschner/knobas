@@ -87,3 +87,16 @@ test("alignment: pages between two matches pair up as changed, the rest are adde
     { old: 2, new: null, mark: "removed" },
   ]);
 });
+
+test("a page with a drawn annotation stays same when a page inserted before it renumbers the file's objects", async () => {
+  const marked: FakePage = { ...page("Three", "reviewed"), box: true };
+  const before = [page("One"), marked];
+  const after = [page("One"), { ...page("New"), box: true as const }, marked];
+  expect((await compare(before, after)).map((row) => row.mark)).toEqual(["same", "added", "same"]);
+});
+
+test("a page whose only change is a gradient's colour is marked changed; an unchanged gradient is same", async () => {
+  const before = [{ ...page("One"), gradient: "ff0000" }, { ...page("Two"), gradient: "00ff00" }];
+  const after = [{ ...page("One"), gradient: "0000ff" }, { ...page("Two"), gradient: "00ff00" }];
+  expect((await compare(before, after)).map((row) => row.mark)).toEqual(["changed", "same"]);
+});

@@ -70,6 +70,15 @@ async function printsOf(pdf: PdfDocument): Promise<PdfPrint[]> {
   return prints;
 }
 
+/**
+ * Two drawings agree only pixel for pixel, no tolerance. Both are drawn by
+ * the same pdf.js in the same browser at the same scale, on a canvas read
+ * back in software (`willReadFrequently`), from operator lists already
+ * equal by print: anti-aliasing and font hinting come out the same both
+ * times, so any pixel that differs is a difference in what the page holds
+ * (the image pdf.js handed over as a bitmap). A tolerance would let a small
+ * changed image through.
+ */
 const samePixels = (a: Uint8ClampedArray, b: Uint8ClampedArray) => a.length === b.length && a.every((value, i) => value === b[i]);
 
 /** The scale the pixel check draws at: a page about 400 px wide, enough to see a changed image. */

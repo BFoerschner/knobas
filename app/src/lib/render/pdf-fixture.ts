@@ -23,6 +23,10 @@ export interface FakePage {
   field?: string;
   /** A one-colour image on the page (`rrggbb`, 2×2 pixels drawn 120 pt wide), so a page can change by its image alone. */
   image?: string;
+  /** A square annotation that draws itself (its own appearance stream), as a reviewer's mark does. */
+  box?: true;
+  /** A gradient from this colour (`rrggbb`) to white, a shading pdf.js names per page (`pattern_p0_1`). */
+  gradient?: string;
 }
 
 export interface FakePdfSpec {
@@ -57,6 +61,11 @@ export function fakePdf(spec: FakePdfSpec): Uint8Array {
     const annots = (page.links ?? []).map((link) =>
       add(`<< /Type /Annot /Subtype /Link /Rect [${link.rect.join(" ")}] /Border [0 0 0] ${action(link.to, pageRef)} >>`),
     );
+    if (page.box) {
+      const look = "0 0 1 RG 2 w 1 1 98 48 re S";
+      const ap = add(`<< /Type /XObject /Subtype /Form /BBox [0 0 100 50] /Length ${look.length} >>\nstream\n${look}\nendstream`);
+      annots.push(add(`<< /Type /Annot /Subtype /Square /Rect [300 500 400 550] /AP << /N ${ap} 0 R >> >>`));
+    }
     if (page.field !== undefined) {
       const field = add(
         `<< /Type /Annot /Subtype /Widget /FT /Tx /T (${escape(page.field)}) /V (${escape(page.field)}) /Rect [72 100 300 124] /P ${pageId(k)} 0 R /DA (/F1 12 Tf 0 g) /AA << /K << /S /JavaScript /JS (app.alert\\("field"\\)) >> >> >>`,
@@ -71,12 +80,18 @@ export function fakePdf(spec: FakePdfSpec): Uint8Array {
     const text =
       page.lines.map((line, i) => `BT /F1 ${i === 0 ? 20 : 12} Tf 72 ${720 - i * 28} Td (${escape(line)}) Tj ET`).join("\n") +
       (image === null ? "" : "\nq 120 0 0 120 72 300 cm /Im1 Do Q");
-    const xobject = image === null ? "" : ` /XObject << /Im1 ${image} 0 R >>`;
+    const rgb = (hex: string) => [0, 2, 4].map((at) => (parseInt(hex.slice(at, at + 2), 16) / 255).toFixed(3)).join(" ");
+    const shading =
+      page.gradient === undefined
+        ? null
+        : add(`<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 1 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [${rgb(page.gradient)}] /C1 [1 1 1] /N 1 >> >>`);
+    const painted = text + (shading === null ? "" : "\nq 200 0 0 50 72 200 cm /Sh1 sh Q");
+    const xobject = (image === null ? "" : ` /XObject << /Im1 ${image} 0 R >>`) + (shading === null ? "" : ` /Shading << /Sh1 ${shading} 0 R >>`);
     objects[pageId(k)] =
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >>${xobject} >> /Contents ${pageId(k) + 1} 0 R` +
       (annots.length > 0 ? ` /Annots [${annots.map((a) => `${a} 0 R`).join(" ")}]` : "") +
       " >>";
-    objects[pageId(k) + 1] = `<< /Length ${text.length} >>\nstream\n${text}\nendstream`;
+    objects[pageId(k) + 1] = `<< /Length ${painted.length} >>\nstream\n${painted}\nendstream`;
   });
   const js = spec.openJs === undefined ? "" : `<< /S /JavaScript /JS (${escape(spec.openJs)}) >>`;
   objects[1] =
