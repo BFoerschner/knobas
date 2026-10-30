@@ -11,7 +11,9 @@
 //! (`tokio::spawn`, a `JoinSet`), which does not inherit the task-local. A
 //! budget asserted through it is therefore an upper bound only for work that
 //! sends from its own task; pair a "no requests" assertion with a read that
-//! counts more than none, so the counter is shown to see that path.
+//! counts more than none, so the counter is shown to see that path. Work
+//! spawned through [`inherit`] is the exception: it counts into its
+//! spawner's counter.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -27,6 +29,20 @@ pub async fn counted<F: Future>(work: F) -> (F::Output, u64) {
     let sent = Arc::new(AtomicU64::new(0));
     let answer = SENT.scope(Arc::clone(&sent), work).await;
     (answer, sent.load(Ordering::SeqCst))
+}
+
+/// `work`, counting into the counter of the task that calls this, where
+/// [`counted`] is running there (#2242): for work a counted task spawns on
+/// its behalf -- a read the app runs again behind its answer -- so a budget
+/// can count it too. Outside [`counted`] it is `work` as it is.
+pub fn inherit<F: Future>(work: F) -> impl Future<Output = F::Output> {
+    let sent = SENT.try_with(Arc::clone).ok();
+    async move {
+        match sent {
+            Some(sent) => SENT.scope(sent, work).await,
+            None => work.await,
+        }
+    }
 }
 
 /// One request is going on the wire; counted where [`counted`] is running.

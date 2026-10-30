@@ -31,6 +31,11 @@ pub enum Standing {
     /// sha -- so the app keeps it in memory for the session and answers the
     /// same pair again from there.
     Fixed,
+    /// Keyed by a reference that moves -- a branch name, a branch list, a
+    /// tree by branch -- so the app answers the pair from memory where it
+    /// holds it and reads it again behind the answer; the next ask gets the
+    /// fresh one (#2242). A re-read that fails leaves the kept answer.
+    Moving,
 }
 
 /// What [`Source::view`](crate::Source::view) answers for one entity: its

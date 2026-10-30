@@ -76,6 +76,12 @@ pub(super) async fn draw(
     branch: &str,
     section: Option<&str>,
 ) -> Result<SourceView, SourceError> {
+    // The tree reads nothing of the repository (#2241).
+    if let Some(id) = section.filter(|id| files::owns(id)) {
+        return Ok(SourceView::new(vec![
+            files::read(source, owner, repo, files::Of::Branch(branch), id).await?,
+        ]));
+    }
     let record: RepoRecord = source.client.repo_as(owner, repo).await?;
     let base = record.default_branch().to_owned();
     let is_default = branch == base;
@@ -83,9 +89,6 @@ pub(super) async fn draw(
     match section {
         Some(DIFF) if !is_default => Ok(SourceView::new(vec![
             diff(source, owner, repo, &base, branch).await?,
-        ])),
-        Some(id) if files::owns(id) => Ok(SourceView::new(vec![
-            files::read(source, &record, owner, repo, files::At::Branch(branch), id).await?,
         ])),
         Some(OVERVIEW | COMMITS) | None => {
             whole(source, &record, owner, repo, branch, section).await

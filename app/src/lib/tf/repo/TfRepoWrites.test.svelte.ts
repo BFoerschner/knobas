@@ -361,8 +361,9 @@ test("Branches lists main as default, then each branch with ahead and behind or 
   expect(locked.title).toBe("Protected branch: lift its protection on Gitea to delete it");
   expect(text(target.querySelector(".tf-rbranches-note"))).toBe("The first 5 branches; there may be more on Gitea.");
   // Each branch's standing is its own view's read.
-  // Each branch's whole view, and the repository's for its toolbar (#2030).
-  expect(reads.filter(([, section]) => section === null).map(([id]) => id).sort()).toEqual([CHORE, FEATURE, LOCKED, REPO, SPIKE].sort());
+  // Each branch's whole view; the repository's never (#2243): *New branch…*
+  // asks `refused_writes` (#2241).
+  expect(reads.filter(([, section]) => section === null).map(([id]) => id).sort()).toEqual([CHORE, FEATURE, LOCKED, SPIKE].sort());
 });
 
 test("the Branches filter narrows by name, No PR and Merged", async () => {
@@ -523,13 +524,24 @@ test("New branch from here… starts the branch at the commit's whole sha", asyn
 /** What a token that may only read is told, in its source's words (#2030). */
 const READ_ONLY = "This token cannot write: it lacks the write:repository scope";
 
-/** `ports()`, the repository's whole view offering `actions` as its toolbar. */
+/**
+ * `ports()`, the source answering `refused_writes` with `actions`' disabled
+ * reasons (#2241), and the whole repository view, never asked for (#2243),
+ * failing the test if it is.
+ */
 const repoToolbar = (actions: ViewAction[], over: Partial<RepoPorts> = {}): RepoPorts => {
   const base = ports(over);
   return {
     ...base,
-    entityView: async (id, section) =>
-      id === REPO && section === null ? { sections: [], actions } : base.entityView(id, section),
+    entityView: async (id, section) => {
+      if (id === REPO && section === null) throw new Error("the page read the whole repository view");
+      return base.entityView(id, section);
+    },
+    refusedWrites: async (asks) =>
+      asks.flatMap((ask) => {
+        const offered = actions.find((candidate) => candidate.write_op === ask.op);
+        return offered?.disabled ? [{ ...ask, reason: offered.disabled }] : [];
+      }),
   };
 };
 
@@ -833,15 +845,11 @@ test("a file with no blob sha to commit against cannot be edited, and says why",
 const PROTECTED =
   "main is a protected branch that this account may not push to: commit to a new branch and open a pull request instead";
 
-/** The file section declaring its own `commit_file`, disabled with `disabled` where given (#985). */
+/** The source answering `refused_writes` for a commit onto the branch with `disabled` where given (#985, #2241). */
 function declaring(disabled: string | null): RepoPorts {
   const stand = ports();
-  const read = stand.entityView;
-  stand.entityView = async (id, section) => {
-    const answer = await read(id, section);
-    if (section === "file:README.md") answer!.sections[0]!.blocks.push({ type: "actions", actions: [action("commit_file", disabled)] });
-    return answer;
-  };
+  stand.refusedWrites = async (asks) =>
+    disabled === null ? [] : asks.filter((ask) => ask.op === "commit_file").map((ask) => ({ ...ask, reason: disabled }));
   return stand;
 }
 
