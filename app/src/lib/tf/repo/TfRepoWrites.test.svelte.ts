@@ -707,7 +707,7 @@ test("the commit dialog shows the diff and a message with the job key, and queue
   button("Commit change…", target)!.click();
   flushSync();
   expect(text(dialog()!.querySelector("h2"))).toBe("Commit README.md");
-  expect([...dialog()!.querySelectorAll(".tf-diff .tf-ln")].map(text)).toEqual(["1 # payout", "2− old line", "2+ new line", "3"]);
+  expect([...dialog()!.querySelectorAll(".tf-diff .tf-ln")].map(text)).toEqual(["11 # payout", "2− old line", "2+ new line", "33"]);
   const message = dialog()!.querySelector<HTMLInputElement>("#tf-cf-msg")!;
   expect(message.value).toBe("PAY-231: update README.md");
   const radios = [...dialog()!.querySelectorAll<HTMLInputElement>("input[type=radio]")];

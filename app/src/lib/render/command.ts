@@ -20,6 +20,10 @@
 import DOMPurify from "dompurify";
 
 import { runRenderer, type CommandOutput, type RenderContent, type RenderRun, type UserRenderer } from "../ipc/app";
+import { mount, unmount } from "svelte";
+
+import TfCommandOutput from "../tf/render/TfCommandOutput.svelte";
+import { registerFence } from "./markdown";
 import { register, type Renderer } from "./registry";
 
 export const COMMAND_PREFIX = "command:";
@@ -35,8 +39,12 @@ export const ipcCommands: CommandPort = { run: (id, content) => runRenderer(id, 
 const installed = new Map<string, UserRenderer>();
 let undo: (() => void)[] = [];
 
-/** Makes `saved` the command renderers in the registry, in order, replacing the last set. */
-export function installCommands(saved: readonly UserRenderer[]): void {
+/**
+ * Makes `saved` the command renderers in the registry, in order, replacing
+ * the last set; each draws the Markdown fences it accepts (#2255's
+ * `registerFence`) through `commands`.
+ */
+export function installCommands(saved: readonly UserRenderer[], commands: CommandPort = ipcCommands): void {
   undo.forEach((step) => step());
   undo = [];
   installed.clear();
@@ -51,8 +59,16 @@ export function installCommands(saved: readonly UserRenderer[]): void {
       diff: false,
     };
     undo.push(register(renderer));
+    if (renderer.fences.length > 0) undo.push(registerFence(renderer.id, (code, into) => drawFence(renderer, code, into, commands)));
     installed.set(renderer.id, user);
   }
+}
+
+/** A fence's code run through a command renderer, drawn in the fence's body in place of its plain `<pre>`. */
+function drawFence(renderer: Renderer, code: string, into: HTMLElement, commands: CommandPort): () => void {
+  into.replaceChildren();
+  const drawn = mount(TfCommandOutput, { target: into, props: { renderer, text: code, commands } });
+  return () => void unmount(drawn);
 }
 
 /** The saved id behind a registry renderer, or `null` for a built-in. */

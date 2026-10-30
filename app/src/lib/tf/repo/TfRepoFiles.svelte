@@ -32,6 +32,10 @@
   highlighting worker answers, the lines in view first; *Image* draws an SVG;
   a command renderer (#2262) runs on the backend and draws in a sandboxed
   frame (`../render/TfCommandOutput.svelte`).
+  A Markdown file is drawn by the Markdown component (#2255): its relative
+  links open files here, external ones go to the browser. *Rendered* and
+  *Source* switch any file whose renderer is not Source to its lines and
+  back, remembered per file type (`render/view-choice.svelte.ts`).
   *Find in file* (#2299) marks every hit, "N of M"; `Enter` and `Shift+Enter`
   step through them, drawing a hit's line first where the window left it out.
 -->
@@ -46,6 +50,8 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
   import { imageUrl, renderersFor } from "../../render/registry";
+  import { viewChoices as appViewChoices, type ViewChoice } from "../../render/view-choice.svelte";
+  import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { findCount, stepMatch } from "../builds/run-reads";
   import { fileHits, firstHitOn, lineOfHit, needles, segments } from "./file-lines";
   import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
@@ -63,6 +69,7 @@
     editHash,
     fileHash,
     fileLines,
+    lineHash,
     likelySections,
     pickDefaultFile,
     repoHash,
@@ -92,6 +99,7 @@
     refreshed = 0,
     render = renderPort(),
     commands = ipcCommands,
+    views = appViewChoices,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -123,6 +131,8 @@
     render?: RenderPort;
     /** Runs a command renderer (#2262): the IPC, a fake in tests. */
     commands?: CommandPort;
+    /** *Rendered* or *Source*, per file type (#2255): the app's store, a fresh one in tests. */
+    views?: { of(path: string): ViewChoice; pick(path: string, choice: ViewChoice): void };
   } = $props();
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
@@ -342,8 +352,12 @@
 
   /** What draws the file (#2254): the first renderer that accepts it. */
   const renderer = $derived(file === null ? null : (renderersFor(file)[0] ?? null));
+  /** A text file whose renderer is not Source has *Rendered* and *Source* (#2255). */
+  const toggles = $derived(file !== null && !file.binary && renderer !== null && renderer.id !== "source");
+  /** What draws the file now: its renderer, or Source where the reader picked it. */
+  const drawAs = $derived(toggles && file !== null && views.of(file.path) === "source" ? "source" : (renderer?.id ?? null));
   const image = $derived(
-    renderer?.id === "image" && file !== null && !file.binary ? imageUrl(new TextEncoder().encode(file.text), file.path) : null,
+    drawAs === "image" && file !== null && !file.binary ? imageUrl(new TextEncoder().encode(file.text), file.path) : null,
   );
 
   /**
@@ -355,7 +369,7 @@
   let highlighting: HighlightJob | null = null;
   $effect(() => {
     const read = file;
-    if (read === null || read.binary || renderer?.id !== "source") return;
+    if (read === null || read.binary || drawAs !== "source") return;
     const got: (LineTokens | undefined)[] = [];
     tokensOf = got;
     untrack(() => (painted += 1));
@@ -550,6 +564,9 @@
     return Promise.all(reads);
   }
 
+  /** A relative link in a Markdown file: the file here, at its line where it names one. */
+  const fileLink = (to: string, at: number | null) => (at === null ? fileHash(repoId, to) : lineHash(repoId, to, at));
+
   function toggle(dir: string) {
     if (open.has(dir)) open.delete(dir);
     else open.add(dir);
@@ -626,6 +643,13 @@
           >{file.binary ? `${file.size} bytes` : `${lines.length} ${lines.length === 1 ? "line" : "lines"}`}{branch !== null ? `, on ${branch}` : ""}</span
         >
         <span class="tf-acts">
+          {#if toggles}
+            {@const choice = views.of(file.path)}
+            <span class="tf-seg" role="group" aria-label="View">
+              <button type="button" aria-pressed={choice === "rendered"} onclick={() => views.pick(file!.path, "rendered")}>Rendered</button>
+              <button type="button" aria-pressed={choice === "source"} onclick={() => views.pick(file!.path, "source")}>Source</button>
+            </span>
+          {/if}
           {#if editable}
             <a class="tf-btn tf-sm" href={editHash(repoId, file.path)}>Edit</a>
           {:else}
@@ -656,7 +680,9 @@
         <div class="tf-empty"><p>A binary file, not drawn.</p></div>
       {:else if image !== null}
         <div class="tf-fimage"><img src={image} alt={file.path} /></div>
-      {:else if renderer !== null && commandIdOf(renderer) !== null}
+      {:else if drawAs === "markdown"}
+        <TfMarkdown text={file.text} base={parentOf(file.path)} {fileLink} {render} />
+      {:else if renderer !== null && drawAs === renderer.id && commandIdOf(renderer) !== null}
         <TfCommandOutput {renderer} text={file.text} {commands} />
       {:else}
         <div class="tf-findbar">

@@ -13,6 +13,8 @@ import type { SourceView, TreeEntry } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
 import { installCommands, type CommandPort } from "../../render/command";
+import { createViewChoices } from "../../render/view-choice.svelte";
+import { fileHash, lineHash } from "./repo";
 
 const REPO = "gitea:tidewater/payout-service";
 
@@ -106,7 +108,18 @@ function draw(
   };
   view = mount(TfRepoFiles, {
     target,
-    props: { ports, repoId: REPO, at: REPO, branch: "main", path, line, changed: new Set<string>(), ...(render ? { render } : {}), ...(commands ? { commands } : {}) },
+    props: {
+      ports,
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      path,
+      line,
+      changed: new Set<string>(),
+      views: createViewChoices(() => null),
+      ...(render ? { render } : {}),
+      ...(commands ? { commands } : {}),
+    },
   });
   flushSync();
 }
@@ -484,4 +497,111 @@ test("a file a saved command renderer accepts is run by its id and drawn in the 
   } finally {
     installCommands([]);
   }
+});
+
+// -- Markdown (#2255) -----------------------------------------------------------
+
+const MD_FILES: Files = {
+  "README.md": [
+    "# payout-service",
+    "",
+    "| Area | State |",
+    "|---|---|",
+    "| Card | live |",
+    "",
+    "- [x] Retry with backoff",
+    "- [ ] Dead-letter queue",
+    "",
+    "```rust",
+    "fn main() {}",
+    "```",
+    "",
+    "See [the runbook](docs/runbook.md).",
+  ].join("\n"),
+  "docs/runbook.md": "# Runbook\n\n[Back](../README.md), [the retry](../src/retry.rs#L3).",
+  "docs/logo.svg": '<svg width="4" height="4"/>',
+  "src/retry.rs": "fn retry() {}\n\n\n",
+};
+
+const rendered = () => target.querySelector(".tf-fileview .tf-md");
+const viewButtons = () =>
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-fileview [aria-label='View'] button")].map(
+    (button) => `${button.textContent}${button.getAttribute("aria-pressed") === "true" ? "*" : ""}`,
+  );
+function pickView(name: string) {
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-fileview [aria-label='View'] button")].find((b) => b.textContent === name)!.click();
+  flushSync();
+}
+
+test("the landing renders the README as Markdown: its table, task list, Rust fence and relative link", async () => {
+  draw(openSource(MD_FILES).entityView, null);
+  await settle();
+
+  expect(drawnLines()).toHaveLength(0);
+  expect(text(rendered()!.querySelector("h1"))).toBe("payout-service");
+  expect([...rendered()!.querySelectorAll("td")].map(text)).toEqual(["Card", "live"]);
+  expect(rendered()!.querySelectorAll("li.tf-task")).toHaveLength(2);
+  expect(text(rendered()!.querySelector(".tf-fence pre"))).toBe("fn main() {}");
+  expect(rendered()!.querySelector("a")?.getAttribute("href")).toBe(fileHash(REPO, "docs/runbook.md"));
+  expect(viewButtons()).toEqual(["Rendered*", "Source"]);
+});
+
+test("a Markdown file's relative links open files in the Files tab, resolved against its own directory", async () => {
+  draw(openSource(MD_FILES).entityView, "docs/runbook.md");
+  await settle();
+
+  expect([...rendered()!.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual([
+    fileHash(REPO, "README.md"),
+    lineHash(REPO, "src/retry.rs", 3),
+  ]);
+});
+
+test("Source shows a Markdown file's lines, and the choice holds for the next file of its type only", async () => {
+  const props = $state({
+    ports: { ...openSource(MD_FILES), submitWrite: async () => ({}) as never },
+    repoId: REPO,
+    at: REPO,
+    branch: "main",
+    path: "README.md" as string | null,
+    changed: new Set<string>(),
+    views: createViewChoices(() => null),
+  });
+  view = mount(TfRepoFiles, { target, props });
+  await settle();
+
+  pickView("Source");
+  expect(rendered()).toBeNull();
+  expect(lineText(0)).toEqual(["1", "# payout-service"]);
+  expect(viewButtons()).toEqual(["Rendered", "Source*"]);
+
+  props.path = "docs/runbook.md";
+  await settle();
+  expect(rendered()).toBeNull();
+  expect(lineText(0)).toEqual(["1", "# Runbook"]);
+
+  props.path = "docs/logo.svg";
+  await settle();
+  expect(target.querySelector(".tf-fileview img")).not.toBeNull();
+  expect(viewButtons()).toEqual(["Rendered*", "Source"]);
+
+  props.path = "README.md";
+  await settle();
+  pickView("Rendered");
+  expect(text(rendered()!.querySelector("h1"))).toBe("payout-service");
+});
+
+test("the view choice is remembered across a remount, per file type", async () => {
+  const stored = new Map<string, string>();
+  const storage = { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => void stored.set(key, value) };
+  const first = createViewChoices(() => storage);
+  first.pick("README.md", "source");
+  const again = createViewChoices(() => storage);
+  expect(again.of("docs/OTHER.MD")).toBe("source");
+  expect(again.of("logo.svg")).toBe("rendered");
+});
+
+test("a file with no renderer but Source has no view toggle", async () => {
+  draw(openSource(MD_FILES).entityView, "src/retry.rs");
+  await settle();
+  expect(viewButtons()).toEqual([]);
 });

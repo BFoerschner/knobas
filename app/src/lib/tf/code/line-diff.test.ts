@@ -1,6 +1,6 @@
 /**
  * The diff of an edit (#845): what the commit dialog shows before the write is
- * queued, drawn by `TfDiff` as a source's diff is. Expected values are worked
+ * queued, drawn by `TfDiffView` as a source's diff is. Expected values are worked
  * by hand from prototype-6's `lineDiff` and `hunks` (three lines of context).
  */
 import { expect, test } from "vitest";
