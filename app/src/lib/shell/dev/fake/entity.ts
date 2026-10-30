@@ -507,13 +507,8 @@ function visitEntity(args: Record<string, unknown>): string | null {
   return fixtureTime("today 09:00");
 }
 
-/**
- * This feature's commands. `?fake-hold-view=<prefix>` (#2246) never answers an
- * `entity_view` read whose section starts with `<prefix>` (`commits`,
- * `file:src/`), so a screenshot can show a tab waiting on it.
- */
-export function handlers(params = new URLSearchParams()): Handlers {
-  const held = params.get("fake-hold-view");
+/** This feature's commands. */
+export function handlers(): Handlers {
   return {
     get_entity: (args) => getEntity(args),
     refresh_entity: (args) => refreshEntity(args),
@@ -522,8 +517,7 @@ export function handlers(params = new URLSearchParams()): Handlers {
     entity_thread: (args) => entityThread(args),
     visit_entity: (args) => visitEntity(args),
     reachable_transitions: (args) => fakeTransitions(args),
-    entity_view: (args) =>
-      held !== null && held !== "" && String(args["section"] ?? "").startsWith(held) ? (new Promise(() => {}) as never) : entityView(args),
+    entity_view: (args) => entityView(args),
     // Every fake source's credential may make every write it declares (#2040).
     refused_writes: () => [],
     resolve_url: (args) => resolveUrl(args),

@@ -1000,16 +1000,11 @@ function bulkCode(n: number): (typeof CORPUS)[number][] {
 }
 CORPUS.push(...bulkCode(Number(new URLSearchParams(globalThis.location?.search).get("fake-code-rows") ?? 0) || 0));
 
-/**
- * This feature's commands. `?fake-hold-pages` (#2245) never answers a
- * `list_entities` read past its first page, so a screenshot can show a list
- * drawn from its first page while the rest are held back.
- */
-export function handlers(params = new URLSearchParams()): Handlers {
-  const hold = params.has("fake-hold-pages");
+/** This feature's commands. */
+export function handlers(): Handlers {
   return {
     code_facts: (args) => codeFacts(args),
-    list_entities: (args) => (hold && Number(args["offset"] ?? 0) > 0 ? (new Promise(() => {}) as never) : listEntities(args)),
+    list_entities: (args) => listEntities(args),
     mini_board: (args) => miniBoard(args),
     list_projects: () => listProjects(),
   };

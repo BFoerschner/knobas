@@ -8,7 +8,7 @@ import type { AdHocBlock, DayBlock, OpenStretch } from "../../ipc/time";
 import type { EntityDetail, EntityPage, RunRow, SourceView } from "../../ipc/entity";
 import { repoOfRow, underRepoHash } from "../../tf/repo/repo";
 import { dayRows, offerRuns } from "../../tf/time/day-view";
-import { demoHandlers } from "./fake-tauri";
+import { demoHandlers, holdBack } from "./fake-tauri";
 import { historyBuilds } from "./fake/builds";
 import { fakeRoleScope } from "./fake/corpus";
 import { FIXTURE_SOURCES } from "./fake/sources";
@@ -800,8 +800,8 @@ test("the Builds fake's runs move with the day, and a changed answer leaves the 
   }
 });
 
-test("code: ?fake-hold-pages answers list_entities' first page and holds every later one back (#2245)", async () => {
-  const h = demoHandlers(new URLSearchParams("fake-hold-pages")) as Calls;
+test("?fake-hold-pages answers list_entities' first page and holds every later one back (#2245)", async () => {
+  const h = holdBack(demoHandlers(), new URLSearchParams("fake-hold-pages")) as Calls;
   const filter = { sources: [], kinds: ["repo"], order: "updated_desc" };
   expect((h["list_entities"]!({ filter, limit: 1, offset: 0 }) as { rows: unknown[] }).rows).toHaveLength(1);
   const later = h["list_entities"]!({ filter, limit: 1, offset: 1 }) as Promise<unknown>;
@@ -809,8 +809,8 @@ test("code: ?fake-hold-pages answers list_entities' first page and holds every l
   expect(answered).toBe(false);
 });
 
-test("entity view: ?fake-hold-view=<prefix> holds back the sections it names and answers the rest (#2246)", async () => {
-  const h = demoHandlers(new URLSearchParams("fake-hold-view=commits")) as Calls;
+test("?fake-hold-view=<prefix> holds back the sections it names and answers the rest (#2246)", async () => {
+  const h = holdBack(demoHandlers(), new URLSearchParams("fake-hold-view=commits")) as Calls;
   const held = h["entity_view"]!({ entityId: "gitea:tidewater/payout-service", section: "commits" }) as Promise<unknown>;
   const answered = await Promise.race([held.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 20))]);
   expect(answered).toBe(false);
