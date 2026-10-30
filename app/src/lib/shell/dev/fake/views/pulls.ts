@@ -27,7 +27,7 @@
 import type { DiffFile, Fact, SourceView, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../../../ipc/entity";
 import { CORPUS } from "../corpus";
 import { JOB_ROWS } from "../job-reach";
-import { PAYOUT_COMMITS, payoutCommitId, payoutPrFiles } from "./repos";
+import { PAYOUT_COMMITS, PAYOUT_MAIN_SHA, payoutCommitId, payoutPrFiles } from "./repos";
 
 const fact = (label: string, value: string, tone: Fact["tone"] = null): Fact => ({ label, value, tone });
 const section = (id: string, title: string, blocks: ViewBlock[], count: number | null = null, deferred = false): ViewSection => ({
@@ -402,7 +402,18 @@ function filesSection(entityId: string, title: string): ViewSection {
           },
         ];
   const commentable = { write_op: "submit_review" };
-  return section("files", "Files", [{ type: "diff", files, truncated: false, commentable, gone: [] }], files.length);
+  // #142's range (#2273, #2310): its commits to pick from, and the viewer last reviewed at the oldest.
+  const range =
+    entityId === PR_142 && bulk === 0
+      ? {
+          repository: "mock:tidewater/payout-service",
+          base: PAYOUT_MAIN_SHA,
+          head: PAYOUT_COMMITS[0]![0],
+          commits: PAYOUT_COMMITS.map(([sha, subject, author]) => ({ sha, title: subject, meta: author })),
+          reviewed: PAYOUT_COMMITS.at(-1)![0],
+        }
+      : undefined;
+  return section("files", "Files", [{ type: "diff", files, truncated: false, commentable, gone: [], ...(range ? { range } : {}) }], files.length);
 }
 
 /** A pull request's whole view, or one of its sections; `undefined` for anything else. */

@@ -1012,3 +1012,51 @@ test("a branch list the app read again behind its answer is read again when it m
   await settle();
   expect([...branchSelect().options].map((option) => option.value)).toContain("pushed");
 });
+
+test("the compare page's diff expands context read whole at the shas the source settled (#2310)", async () => {
+  const base = ports({ getEntity: repoDetail(), refresh: refreshProbe().ports });
+  const HEAD = "1262a5b610480702cfed4a1f3f76c87bf68fae55";
+  const FORK = "907900b245f2941018dfd3ee155b876ef701c102";
+  const whole = Array.from({ length: 12 }, (_, n) => `line ${n + 1}`).join("\n");
+  const asked: string[] = [];
+  const diff: ViewBlock = {
+    type: "diff",
+    files: [
+      {
+        path: "src/retry.rs",
+        old_path: null,
+        change: "modified",
+        additions: 1,
+        deletions: 1,
+        hunks: [
+          { header: "@@ -1,1 +1,1 @@", lines: [{ kind: "del", old: 1, new: null, text: "a" }, { kind: "add", old: null, new: 1, text: "line 1" }] },
+          { header: "@@ -10,1 +10,1 @@", lines: [{ kind: "context", old: 10, new: 10, text: "line 10" }] },
+        ],
+        truncated: false,
+        threads: [],
+      },
+    ],
+    truncated: false,
+    commentable: null,
+    gone: [],
+    range: { repository: REPO, base: FORK, head: HEAD, commits: [] },
+  };
+  await draw([REPO, "compare", "feature", "PAY-231-sepa-retry"], {
+    ...base,
+    entityView: async (id, sectionId) => {
+      if (id === FEATURE && sectionId === null) return { sections: [], actions: [] };
+      if (id === REPO && sectionId?.startsWith("file@")) {
+        asked.push(sectionId);
+        return section("f", [{ type: "file", trail: [], path: "src/retry.rs", text: whole, language: null, size: 1, truncated: false, binary: false, url: null, sha: null } as unknown as ViewBlock]);
+      }
+      if (id === REPO && sectionId === "compare:main...feature/PAY-231-sepa-retry") return section("diff", [diff]);
+      return base.entityView(id, sectionId);
+    },
+  });
+  const expand = target.querySelector<HTMLButtonElement>(".tf-cbody .tf-exp");
+  expect(expand).not.toBeNull();
+  expand!.click();
+  await settle();
+  expect(asked).toEqual(expect.arrayContaining([`file@${HEAD}:src/retry.rs`, `file@${FORK}:src/retry.rs`]));
+  expect(text(target.querySelector(".tf-cbody .tf-diff"))).toMatch(/22 line 2/);
+});

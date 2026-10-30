@@ -9,7 +9,9 @@
     its own, at its line.
   - **The diff**: the repository's section `compare:<base>...<head>`
     (`address.ts`), drawn by the one diff component. Another address keeps
-    the last diff drawn, dimmed, while it is read (#2246).
+    the last diff drawn, dimmed, while it is read (#2246). Where the answer
+    names its range (#2310), context expands and an image diff renders, each
+    side read whole at its sha (`context.ts` `rangeContext`).
   - **Shown again** after keep-alive held it hidden, it reads once more over
     what it drew: between two whole shas the read cache answers that, and a
     branch's end may have moved.
@@ -17,24 +19,27 @@
   Reads go through `entity_view` and `get_entity`, injectable as `ports`.
 -->
 <script module lang="ts">
-  import { entityView, getEntity, type EntityDetail, type SourceView } from "../../ipc/entity";
+  import { entityFileBytes, entityView, getEntity, type EntityDetail, type SourceView } from "../../ipc/entity";
 
   /** The page's two reads. */
   export interface DiffPagePorts {
     entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
     getEntity: (entityId: string) => Promise<EntityDetail>;
+    /** A file's bytes at a commit, for a rendered image diff (#2279). */
+    fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
   }
 
   /** Called through, not bound at load: a test's mock of the bridge may not carry every command. */
   const BRIDGE: DiffPagePorts = {
     entityView: (entityId, section) => entityView(entityId, section),
     getEntity: (entityId) => getEntity(entityId),
+    fileBytes: (entityId, path, commit) => entityFileBytes(entityId, path, commit),
   };
 </script>
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { DiffFile } from "../../ipc/entity";
+  import type { DiffFile, DiffRange } from "../../ipc/entity";
   import TfWaiting from "../TfWaiting.svelte";
   import { repoHash } from "../repo/repo";
   import { waitPhase } from "../waiting";
@@ -42,6 +47,7 @@
   import TfDiffView from "./TfDiffView.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { compareSection } from "./address";
+  import { rangeContext } from "./context";
 
   let {
     repoId,
@@ -65,6 +71,9 @@
   let cut = $state(false);
   let reading = $state(false);
   let failed = $state<string | null>(null);
+  /** What the drawn diff is between, where the source named it. */
+  let range = $state<DiffRange | null>(null);
+  const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes));
 
   const section = $derived(compareSection(base, head));
 
@@ -115,6 +124,7 @@
         const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
         files = block?.type === "diff" ? block.files : [];
         cut = block?.type === "diff" && block.truncated;
+        range = block?.type === "diff" ? (block.range ?? null) : null;
       },
       (error) => {
         if (!alive()) return;
@@ -143,7 +153,9 @@
     {#if files !== null && files.length === 0}
       <div class="tf-empty">Nothing changes between {shown(base)} and {shown(head)}.</div>
     {:else if files !== null}
-      <TfDiffView {files} {cut} openAt={{ entityId: repoId, at: head }} />
+      {#key `${section}\n${range?.base}\n${range?.head}`}
+        <TfDiffView {files} {cut} {context} openAt={{ entityId: repoId, at: head }} />
+      {/key}
     {/if}
   </TfWaiting>
 </div>

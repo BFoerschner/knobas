@@ -355,6 +355,7 @@ const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
 const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
+const TfPrPicker = (await import("../tf/pr/TfPrPicker.svelte")).default;
 const TfCheckoutsSection = (await import("../tf/settings/TfCheckoutsSection.svelte")).default;
 const { createApps } = await import("../tf/openin/apps.svelte");
 const { createClones } = await import("../tf/openin/clones.svelte");
@@ -1315,6 +1316,25 @@ const CASES: Case[] = [
         }),
       };
     },
+    exercise: (target) => {
+      target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
+    },
+  },
+  {
+    /** A pull request's commit picker (#2273): open, its menu registers a layer and a window click listener. */
+    name: "TfPrPicker",
+    source: "lib/tf/pr/TfPrPicker.svelte",
+    open: (target) => ({
+      app: mount(TfPrPicker, {
+        target,
+        props: {
+          range: { repository: "g:o/r", base: "b", head: "h", commits: [{ sha: "h", title: "t", meta: null }], reviewed: "b" },
+          choice: { kind: "all" },
+          onchoose: () => {},
+          layers: createLayers(),
+        },
+      }),
+    }),
     exercise: (target) => {
       target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
     },

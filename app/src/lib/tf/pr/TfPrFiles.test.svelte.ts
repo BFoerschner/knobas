@@ -275,7 +275,8 @@ test("since my last review shows the changes between the reviewed head and the h
 });
 
 test("a viewer who never reviewed the pull request is not offered since my last review", async () => {
-  await draw(rangedView({ ...RANGE, reviewed: undefined }));
+  const { reviewed: _never, ...unreviewed } = RANGE;
+  await draw(rangedView(unreviewed));
   face()!.click();
   flushSync();
   expect(option(/All commits/)).toBeDefined();

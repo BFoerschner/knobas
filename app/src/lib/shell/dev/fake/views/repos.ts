@@ -272,6 +272,19 @@ export const PAYOUT_COMMITS: [sha: string, subject: string, author: string, at: 
   ["7be0e4f15c60", "PAY-231: retry SEPA payouts on transient PSP errors", "mara", "2026-08-21T15:30:00Z", "tests/sepa_retry.rs", "", TEST_HEAD],
 ];
 
+/** Main's tip, which the branch's oldest commit sits on. */
+export const PAYOUT_MAIN_SHA = "5d77e1a2c3b4";
+
+/** A path's text at one of the branch's commits or at main's tip, `null` where it is not there. */
+function payoutTextAt(sha: string, path: string): string | null {
+  const at = sha === PAYOUT_MAIN_SHA ? PAYOUT_COMMITS.length : PAYOUT_COMMITS.findIndex(([commit]) => commit === sha);
+  if (at === -1) return null;
+  const touched = PAYOUT_COMMITS.map((commit, n) => [n, commit] as const).filter(([, commit]) => commit[4] === path);
+  const last = touched.find(([n]) => n >= at);
+  const text = last ? last[1][6] : (touched.at(-1)?.[1][5] ?? PAYOUT_MAIN[path] ?? null);
+  return text === "" ? null : text;
+}
+
 /**
  * `?fake-rendered-diff` (#2279): the newest commit also changes a README, a Mermaid diagram and a PNG, adds a
  * Markdown file and deletes one, so its diff offers *Rendered*. Each changed file reads whole at that commit
@@ -644,7 +657,16 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
       sides.set(path, [sides.get(path)?.[0] ?? before, after]);
     }
     const diffs = [...sides].map(([path, [before, after]]) => diffOf(path, before, after));
-    return one(section(sectionId, "Diff", [{ type: "diff", files: diffs, truncated: false, commentable: null, gone: [] }], diffs.length));
+    // What it is between (#2310): the commit before the oldest (main's tip below the first), and the newest.
+    const range = { repository: PAYOUT, base: PAYOUT_COMMITS[oldest + 1]?.[0] ?? PAYOUT_MAIN_SHA, head: PAYOUT_COMMITS[newest]![0], commits: [] };
+    return one(section(sectionId, "Diff", [{ type: "diff", files: diffs, truncated: false, commentable: null, gone: [], range }], diffs.length));
+  }
+  // A file whole at one of the branch's commits or main's tip (#2310): `file@<sha>:<path>`.
+  if (repoId === PAYOUT && sectionId?.startsWith("file@")) {
+    const [sha = "", path = ""] = sectionId.slice("file@".length).split(/:(.*)/s);
+    const text = payoutTextAt(sha, path);
+    if (text === null) throw { code: "not_found", message: `gitea: no file ${path} at ${sha}`, source_id: null };
+    return one(section(sectionId, "Files", [{ type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: blobOf(text), commit: sha }]));
   }
   if (repoId === PAYOUT && branch !== null && branch !== "main" && (sectionId === null || sectionId === "overview" || sectionId === "commits" || sectionId === "diff")) {
     return branchView(branch, sectionId);

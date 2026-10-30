@@ -157,3 +157,43 @@ test("Back and Forward return to the diff address: the same page, drawn as it wa
   await go(other);
   expect(headers(target)).toEqual(["docs/backoff.md"]);
 });
+
+test("a diff that names its range expands context read whole at its two shas (#2310)", async () => {
+  const MODIFIED: DiffFile = {
+    path: "src/retry.rs",
+    old_path: null,
+    change: "modified",
+    additions: 1,
+    deletions: 1,
+    hunks: [
+      { header: "@@ -1,1 +1,1 @@", lines: [{ kind: "del", old: 1, new: null, text: "a" }, { kind: "add", old: null, new: 1, text: "b" }] },
+      { header: "@@ -10,1 +10,1 @@", lines: [{ kind: "context", old: 10, new: 10, text: "line 10" }] },
+    ],
+    truncated: false,
+    threads: [],
+  };
+  const PARENT = "907900b245f2941018dfd3ee155b876ef701c102";
+  const whole = ["b", ...Array.from({ length: 11 }, (_, n) => `line ${n + 2}`)].join("\n");
+  const fileView = { sections: [{ id: "f", title: "f", count: null, deferred: false, blocks: [{ type: "file", trail: [], path: "src/retry.rs", text: whole, language: null, size: 1, truncated: false, binary: false, url: null, sha: null }] }], actions: [] } as unknown as SourceView;
+  const asked: string[] = [];
+  const ports: DiffPagePorts = {
+    getEntity: async () => detail,
+    entityView: async (id, section) => {
+      asked.push(`${id} ${section}`);
+      if (section?.startsWith("file@")) return fileView;
+      return {
+        sections: [{ id: "x", title: "Diff", count: 1, deferred: false, blocks: [{ type: "diff", files: [MODIFIED], truncated: false, commentable: null, gone: [], range: { repository: REPO, base: PARENT, head: HEAD, commits: [] } }] }],
+        actions: [],
+      } as unknown as SourceView;
+    },
+  };
+  view = mount(TfDiffPage, { target, props: { repoId: REPO, base: `${BASE}^`, head: HEAD, ports } });
+  await settle();
+  const expand = target.querySelector<HTMLButtonElement>(".tf-exp");
+  expect(expand).not.toBeNull();
+  expand!.click();
+  await settle();
+  expect(asked).toContain(`${REPO} file@${HEAD}:src/retry.rs`);
+  expect(asked).toContain(`${REPO} file@${PARENT}:src/retry.rs`);
+  expect(target.querySelector(".tf-diff")!.textContent!.replace(/\s+/g, " ")).toMatch(/22 line 2 .*99 line 9/);
+});
