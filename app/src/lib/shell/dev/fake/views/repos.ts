@@ -101,10 +101,57 @@ async fn gives_up_after_max_attempts() {
     assert_eq!(attempts.load(Ordering::SeqCst), MAX_ATTEMPTS);
 }`;
 
+/** `payout-service`'s README: GitHub-flavoured Markdown for the Markdown component (#2255). */
+const PAYOUT_README = [
+  "# payout-service",
+  "",
+  "Sends payout batches to the PSP and books them in the ledger. The retry policy is in [src/sepa/retry.rs](src/sepa/retry.rs);",
+  "the PSP's own docs are on [their portal](https://psp.example.com/docs).",
+  "",
+  "## Run locally",
+  "",
+  "```sh",
+  "cargo run -- --env dev",
+  "```",
+  "",
+  "## Status",
+  "",
+  "| Area | State | Owner |",
+  "|---|---|---|",
+  "| SEPA batches | live | @mara |",
+  "| Instant payouts | beta | @jonas |",
+  "| Refunds | ~~manual~~ automated | @priya |",
+  "",
+  "- [x] Retry transient PSP errors",
+  "- [x] Book each batch in the ledger",
+  "- [ ] Dead-letter queue with replay",
+  "",
+  "```rust",
+  "pub async fn run() -> anyhow::Result<()> {",
+  "    sepa::batch::schedule().await",
+  "}",
+  "```",
+].join("\n");
+
+/** `?fake-md-hostile`'s file (#2255): raw HTML that must not run, for the sanitizer's headless Chrome witness. */
+const HOSTILE_MD = [
+  "# Hostile",
+  "",
+  "<script>window.__pwned = 'script'</script>",
+  '<img src="nope.png" onerror="window.__pwned = \'onerror\'">',
+  '<p onclick="window.__pwned = \'onclick\'" style="color: red">styled paragraph</p>',
+  '<a href="javascript:window.__pwned=\'href\'">javascript link</a>',
+  '<a href="JaVaScRiPt:window.__pwned=\'mixed\'">mixed-case link</a>',
+  '<svg><script>window.__pwned = \'svg\'</script></svg>',
+  '<iframe srcdoc="<script>parent.__pwned = \'iframe\'</script>"></iframe>',
+  "",
+  "[markdown link](javascript:window.__pwned='md')",
+].join("\n");
+
 /** `payout-service` on its default branch, as prototype-6's `repoFiles` (with `main`'s retry). */
 const PAYOUT_MAIN: Record<string, string> = {
   "Cargo.toml": `[package]\nname = "payout-service"\nversion = "1.9.0-rc1"\nedition = "2021"\n\n[dependencies]\ntokio = { version = "1.40", features = ["full"] }\nreqwest = "0.12"\nrand = "0.8"\nthiserror = "1"`,
-  "README.md": `# payout-service\n\nSends payout batches to the PSP and books them in the ledger.\n\n## Run locally\n\n    cargo run -- --env dev\n\n## Tests\n\n    cargo test`,
+  "README.md": PAYOUT_README,
   "src/main.rs": `use payout_service::run;\n\n#[tokio::main]\nasync fn main() {\n    run().await.expect("payout-service failed");\n}`,
   "src/lib.rs": `pub mod psp;\npub mod sepa;\n\npub async fn run() -> anyhow::Result<()> {\n    sepa::batch::schedule().await\n}`,
   "src/psp/client.rs": `use crate::psp::errors::PspError;\n\npub struct PspClient { base_url: String }\n\nimpl PspClient {\n    pub async fn send_batch(&self, body: &[u8]) -> Result<(), PspError> {\n        todo!("POST {}/batches", self.base_url)\n    }\n}`,
@@ -158,7 +205,11 @@ function filesOf(repoId: string, branch: string | null): Record<string, string> 
     const files = branch === FEATURE ? PAYOUT_FEATURE : PAYOUT_MAIN;
     const query = new URLSearchParams(globalThis.location?.search);
     // `?fake-file-kinds` (#2254): a TypeScript file and a file in no known language, for highlighting.
-    const kinds = query.has("fake-file-kinds") ? FILE_KINDS : {};
+    const kinds = {
+      ...(query.has("fake-file-kinds") ? FILE_KINDS : {}),
+      // `?fake-md-hostile` (#2255): a Markdown file of raw HTML that tries to run script.
+      ...(query.has("fake-md-hostile") ? { "docs/hostile.md": HOSTILE_MD } : {}),
+    };
     // `?fake-file-lines=<n>` (perf audit, #2200's class): one file of `n` lines.
     const n = Number(query.get("fake-file-lines") ?? 0) || 0;
     if (n === 0) return { ...files, ...kinds };

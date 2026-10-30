@@ -14,6 +14,8 @@
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-notification": "2.4.0",
     "@tauri-apps/plugin-opener": "2.5.4",
+    "dompurify": "3.4.17",
+    "markdown-it": "15.0.3",
     "shiki": "4.5.0"
   },
   "devDependencies": {

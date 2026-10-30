@@ -198,6 +198,10 @@ function view142(): SourceView {
             fact("Mergeable", `no: ${blocked}`, "warn"),
             fact("Approvals", "1 of 2", "warn"),
             fact("Conflicts", "none with main", "ok"),
+            // The side rail (#2278): main requires the integration tests and the build.
+            fact("Required checks", "0 of 2 pass", "err"),
+            fact("Required check", "Payout_IntegrationTests #1187", "err"),
+            fact("Required check", "Payout_Build #1188", "info"),
             fact("Created", "2026-08-21 15:30"),
             fact("Updated", "2026-08-22 10:20"),
             fact("Review", "approved by priya", "ok"),

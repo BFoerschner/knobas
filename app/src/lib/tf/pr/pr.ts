@@ -149,10 +149,11 @@ export function tabCounts(view: SourceView | null): Record<PrTab, number | null>
   };
 }
 
-/** One line of *Ready to merge?*: its words and its dot's tone. */
+/** One line of *Ready to merge?*: its words and its dot's tone, and what stands in its way where the page can name it. */
 export interface ReadyLine {
   text: string;
   tone: Tone;
+  why?: string;
 }
 
 /** The opening letter raised: the line starts a sentence knobas draws. */
@@ -200,13 +201,130 @@ export function readyLines(view: SourceView | null): ReadyLine[] {
     return lines;
   }
   if (approvals) lines.push({ text: `Approvals: ${approvals.value}`, tone: approvals.tone ?? "muted" });
-  if (checks) lines.push(checks);
-  if (conflicts) {
-    const none = conflicts.value.startsWith("none ");
-    const text = none ? `No conflicts ${conflicts.value.slice("none ".length)}` : opening(conflicts.value);
-    lines.push({ text, tone: conflicts.tone ?? (none ? "ok" : "warn") });
-  }
+  const required = all.find((fact) => fact.label === "Required checks");
+  if (required) lines.push(requiredLine(view, required.value, required.tone ?? "muted"));
+  else if (checks) lines.push(checks);
+  const said = conflictsOf(view);
+  if (conflicts && said) lines.push({ text: said.text, tone: conflicts.tone ?? (said.conflicts ? "warn" : "ok") });
   return lines;
+}
+
+/**
+ * *Required checks: 1 of 3 pass*, and each required check that has not
+ * passed by its name and state. Whether one passed is its *Required check*
+ * fact's tone where the source gives one (Gitea passes a `skipped` status,
+ * which its checks list leaves untoned), else its row's.
+ */
+function requiredLine(view: SourceView | null, value: string, tone: Tone): ReadyLine {
+  const open = railChecks(view).filter((check) => check.required && check.standing !== "ok");
+  const line: ReadyLine = { text: `Required checks: ${value}`, tone };
+  if (open.length > 0) line.why = open.map((check) => `${check.row.title} ${check.row.chip ?? ""}`.trim()).join(", ");
+  return line;
+}
+
+/**
+ * One check in the side rail (#2278): the source's row, whether the base
+ * requires it, and where it stands: a required check's *Required check*
+ * fact's tone where the source gives one (Gitea fails a `warning` and passes
+ * a `skipped` status, which its checks list tones warn and not at all), else
+ * the row's.
+ */
+export interface RailCheck {
+  row: ViewRow;
+  required: boolean;
+  standing: Tone | null;
+}
+
+const CHECK_RANK: Tone[] = ["err", "warn", "info", "ok"];
+
+/**
+ * The side rail's *Checks* (#2278): the head commit's checks, failing first
+ * as the source sorts them and, within one state, the ones the base
+ * requires first (Gitea's *Required check* facts, `land.rs`), so a failing
+ * required check is the top line. A required check that never reported is
+ * drawn last, *not reported*; the source names it by its pattern.
+ */
+export function railChecks(view: SourceView | null): RailCheck[] {
+  const required = facts(view).filter((fact) => fact.label === "Required check");
+  const rows = headerOf(view).checks;
+  const rank = (check: RailCheck) => {
+    const at = check.standing === null ? -1 : CHECK_RANK.indexOf(check.standing);
+    return (at < 0 ? CHECK_RANK.length : at) * 2 + (check.required ? 0 : 1);
+  };
+  const drawn = rows
+    .map((row): RailCheck => {
+      const fact = required.find((candidate) => candidate.value === row.title);
+      return { row, required: fact !== undefined, standing: fact?.tone ?? row.tone };
+    })
+    .sort((a, b) => rank(a) - rank(b));
+  const unreported = required
+    .filter((fact) => !rows.some((row) => row.title === fact.value))
+    .map(
+      (fact): RailCheck => ({
+        row: { entity_id: null, title: fact.value, meta: null, tone: "info", chip: "not reported", url: null },
+        required: true,
+        standing: "info",
+      }),
+    );
+  return [...drawn, ...unreported];
+}
+
+/** *Ready to merge?*'s verdict: its words, its tone, and the source's reason where *Merge…* is refused. */
+export interface ReadyVerdict {
+  text: string;
+  tone: Tone;
+  why: string | null;
+}
+
+/**
+ * *Ready to merge?* as the side rail draws it (#2278): its lines and, where
+ * the source offers *Merge…*, a verdict over them. Ready only where every
+ * line is met and the source does not refuse the merge: *Merge…*'s reason is
+ * the source's one decision (`land.rs`), so a line the page cannot draw (a
+ * head behind a protected base) still holds the verdict back, saying why.
+ */
+export function readiness(view: SourceView | null): { verdict: ReadyVerdict | null; lines: ReadyLine[] } {
+  const lines = readyLines(view);
+  const merge = view?.actions.find((action) => action.write_op === "merge_pull_request") ?? null;
+  if (merge === null || lines.length === 0) return { verdict: null, lines };
+  const met = lines.filter((line) => line.tone === "ok").length;
+  const counted = `${met} of ${lines.length} met`;
+  if (met === lines.length && merge.disabled === null) return { verdict: { text: `Ready: ${counted}`, tone: "ok", why: null }, lines };
+  const tone: Tone = lines.some((line) => line.tone === "err") ? "err" : "warn";
+  return { verdict: { text: `Not yet: ${counted}`, tone, why: merge.disabled }, lines };
+}
+
+/** One reviewer in the side rail and where their review stands. */
+export interface Reviewer {
+  who: string;
+  state: string;
+  tone: Tone | null;
+}
+
+/**
+ * The reviewers (#2278), from the overview's *Review* facts: each
+ * reviewer's standing verdict as Gitea's `verdicts` writes it, `approved by
+ * sven`, `changes requested by jonas`, `requested from priya`.
+ */
+export function reviewersOf(view: SourceView | null): Reviewer[] {
+  return facts(view)
+    .filter((fact) => fact.label === "Review")
+    .flatMap((fact): Reviewer[] => {
+      if (fact.value.startsWith("requested from ")) {
+        return [{ who: fact.value.slice("requested from ".length), state: "Review requested", tone: fact.tone }];
+      }
+      const at = fact.value.lastIndexOf(" by ");
+      if (at < 0) return [];
+      return [{ who: fact.value.slice(at + 4), state: opening(fact.value.slice(0, at)), tone: fact.tone }];
+    });
+}
+
+/** The side rail's *Conflicts*: whether the head conflicts with its base, in the source's words; `null` while it has not said. */
+export function conflictsOf(view: SourceView | null): { conflicts: boolean; text: string } | null {
+  const fact = facts(view).find((candidate) => candidate.label === "Conflicts");
+  if (fact === undefined) return null;
+  const none = fact.value.startsWith("none ");
+  return { conflicts: !none, text: none ? `No conflicts ${fact.value.slice("none ".length)}` : opening(fact.value) };
 }
 
 /**
