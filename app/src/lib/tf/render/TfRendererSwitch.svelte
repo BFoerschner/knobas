@@ -48,7 +48,7 @@
   let menu = $state<HTMLDivElement | null>(null);
 
   /** What a built-in's second line says beyond "built in". */
-  const BLURB: Record<string, string> = { source: "highlighted", mermaid: "strict security" };
+  const BLURB: Record<string, string> = { source: "highlighted", mermaid: "strict security", d2: "WASM", graphviz: "viz.js WASM" };
 
   const candidate = $derived.by((): Renderer | null => {
     if (shown.id !== opened.renderer?.id) return shown;

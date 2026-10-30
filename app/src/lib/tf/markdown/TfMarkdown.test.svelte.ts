@@ -439,6 +439,39 @@ test("switching theme draws the diagram again in the other palette", async () =>
   }
 });
 
+test("d2, dot and graphviz fences go to their own engines, each drawn in a sandboxed frame (#2259)", async () => {
+  const asked: DiagramRequest[] = [];
+  draw("```d2\napi -> outbox\n```\n\n```dot\ndigraph { a -> b }\n```\n\n```graphviz\ngraph { c }\n```\n", { render: diagramPort(asked) });
+  await settle();
+  expect(asked.map((request) => [request.engine, request.code])).toEqual([
+    ["d2", "api -> outbox"],
+    ["graphviz", "digraph { a -> b }"],
+    ["graphviz", "graph { c }"],
+  ]);
+  const frames = [...md().querySelectorAll<HTMLIFrameElement>(".tf-fence .tf-diagram iframe")];
+  expect(frames.map((frame) => [frame.getAttribute("sandbox"), frame.title])).toEqual([
+    ["", "D2 diagram"],
+    ["", "Graphviz diagram"],
+    ["", "Graphviz diagram"],
+  ]);
+  expect(drawingIn(frames[0]!)).toContain("light:api -&gt; outbox");
+  expect(frames.map(drawingIn).join("")).not.toContain("onclick");
+});
+
+test("a D2 or DOT fence that does not parse keeps its source under its engine's error (#2259)", async () => {
+  draw("```d2\nBROKEN -> {\n```\n\n```dot\ndigraph { BROKEN\n```\n", { render: diagramPort() });
+  await settle();
+  const fails = [...md().querySelectorAll(".tf-fence-body")].map((body) => [
+    text(body.querySelector(".tf-stepfail b")),
+    body.querySelector("pre code")?.textContent,
+  ]);
+  expect(fails).toEqual([
+    ["D2 could not draw this.", "BROKEN -> {"],
+    ["Graphviz could not draw this.", "digraph { BROKEN"],
+  ]);
+  expect(md().querySelector("iframe")).toBeNull();
+});
+
 test("where the port has no diagram engine the fence stays its source", async () => {
   draw(MERMAID_MD);
   await settle();
