@@ -85,7 +85,9 @@ async fn cat_hands_back_its_stdin_as_html() {
         .unwrap();
     let html = "<p>hello</p><script>parent.document.title = 'owned'</script>";
 
-    let run = renderers::run(&pool, &saved[0].id, text(html)).await.unwrap();
+    let run = renderers::run(&pool, &saved[0].id, text(html))
+        .await
+        .unwrap();
 
     assert_eq!(
         run,
@@ -133,7 +135,9 @@ async fn a_renderer_past_its_timeout_is_stopped_and_says_so() {
     let saved = renderers::save(&pool, &[slow]).await.unwrap();
 
     let started = Instant::now();
-    let run = renderers::run(&pool, &saved[0].id, text("x")).await.unwrap();
+    let run = renderers::run(&pool, &saved[0].id, text("x"))
+        .await
+        .unwrap();
 
     assert!(
         matches!(run, RenderRun::TimedOut { seconds: 1, .. }),
@@ -180,12 +184,18 @@ async fn a_missing_program_did_not_start() {
     let pool = scratch("renderer_commands_missing").await;
     let saved = renderers::save(
         &pool,
-        &[draft("Gone", "knobas-no-such-renderer-2262", CommandOutput::Svg)],
+        &[draft(
+            "Gone",
+            "knobas-no-such-renderer-2262",
+            CommandOutput::Svg,
+        )],
     )
     .await
     .unwrap();
 
-    let run = renderers::run(&pool, &saved[0].id, text("x")).await.unwrap();
+    let run = renderers::run(&pool, &saved[0].id, text("x"))
+        .await
+        .unwrap();
 
     assert!(matches!(run, RenderRun::NotStarted { .. }), "{run:?}");
 }

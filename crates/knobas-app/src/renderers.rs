@@ -246,7 +246,10 @@ pub async fn run(pool: &PgPool, id: &str, content: RenderContent) -> Result<Rend
             ))
         })?;
     let argv = knobas_core::checkout::open::words(&renderer.command).map_err(|error| {
-        IpcError::invalid(format!("{}'s command cannot be run: {error}", renderer.name))
+        IpcError::invalid(format!(
+            "{}'s command cannot be run: {error}",
+            renderer.name
+        ))
     })?;
     let stdin = match content {
         RenderContent::Text { text } => text.into_bytes(),
@@ -282,7 +285,8 @@ pub async fn run(pool: &PgPool, id: &str, content: RenderContent) -> Result<Rend
 }
 
 fn lossy(bytes: Vec<u8>) -> String {
-    String::from_utf8(bytes).unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
+    String::from_utf8(bytes)
+        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
 }
 
 fn drawn(output: CommandOutput, stdout: Vec<u8>) -> RenderRun {
@@ -303,7 +307,21 @@ fn image_type(bytes: &[u8]) -> &'static str {
         [0x89, b'P', b'N', b'G', ..] => "image/png",
         [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
         [b'G', b'I', b'F', b'8', ..] => "image/gif",
-        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => "image/webp",
+        [
+            b'R',
+            b'I',
+            b'F',
+            b'F',
+            _,
+            _,
+            _,
+            _,
+            b'W',
+            b'E',
+            b'B',
+            b'P',
+            ..,
+        ] => "image/webp",
         _ if bytes.trim_ascii_start().starts_with(b"<") => "image/svg+xml",
         _ => "application/octet-stream",
     }
@@ -347,7 +365,11 @@ pub(crate) async fn run_argv(
     built
         .args(arguments)
         .env_clear()
-        .envs(parent.into_iter().filter(|(name, _)| !name.as_encoded_bytes().starts_with(b"KNOBAS_")))
+        .envs(
+            parent
+                .into_iter()
+                .filter(|(name, _)| !name.as_encoded_bytes().starts_with(b"KNOBAS_")),
+        )
         .current_dir(std::env::temp_dir())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -382,9 +404,7 @@ pub(crate) async fn run_argv(
     let ended = match collected {
         Err(_) => {
             let _ = child.kill().await;
-            Ended::TimedOut {
-                stderr: Vec::new(),
-            }
+            Ended::TimedOut { stderr: Vec::new() }
         }
         Ok(None) => {
             let _ = child.kill().await;
@@ -419,7 +439,11 @@ pub(crate) async fn run_argv(
 /// Everything `reader` writes up to `cap` bytes. Past the cap: `None` when
 /// `refuse`, else the first `cap` bytes, the rest read and dropped so the
 /// writer never blocks.
-async fn read_capped(mut reader: impl AsyncRead + Unpin, cap: usize, refuse: bool) -> Option<Vec<u8>> {
+async fn read_capped(
+    mut reader: impl AsyncRead + Unpin,
+    cap: usize,
+    refuse: bool,
+) -> Option<Vec<u8>> {
     let mut kept = Vec::new();
     let mut chunk = vec![0_u8; 64 * 1024];
     loop {
