@@ -59,6 +59,7 @@ test("a long file with one changed line diffs without a table of every line agai
   expect(file.hunks.map((h) => h.header)).toEqual(["@@ -19998,7 +19998,7 @@"]);
   expect(file.additions).toBe(1);
   expect(file.deletions).toBe(1);
+  expect(file.coarse).toBeUndefined();
 });
 
 test("past the table's bound the changed middle is removed whole, then added whole: still a true diff", () => {
@@ -69,4 +70,6 @@ test("past the table's bound the changed middle is removed whole, then added who
   expect(kinds.filter((k) => k === "del")).toHaveLength(2_999);
   expect(kinds.filter((k) => k === "add")).toHaveLength(2_999);
   expect(kinds.indexOf("add")).toBeGreaterThan(kinds.lastIndexOf("del"));
+  // And says so: the card names the coarse diff instead of passing it off as the least one.
+  expect(file.coarse).toBe(true);
 });

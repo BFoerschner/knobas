@@ -73,7 +73,11 @@ export interface DiffReview {
  * (*Local changes*: "src/retry.rs (modified, staged)", the same file twice). The label keys
  * and titles the card; the path still picks the language and places comments.
  */
-export type DrawnFile = DiffFile & { label?: string };
+export type DrawnFile = DiffFile & {
+  label?: string;
+  /** Worked out here (`lineDiff`) with a changed middle too long to match line by line: drawn removed whole, then added whole. */
+  coarse?: true;
+};
 
 /** What tells a drawn file apart from the others: its label, else its path. */
 export function keyOf(file: DrawnFile): string {

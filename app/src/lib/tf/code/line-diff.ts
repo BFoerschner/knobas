@@ -8,7 +8,8 @@
  * The lines both versions start and end with are matched first; the table is
  * lines × lines of the changed middle only, and a middle past
  * `TABLE_BOUND` cells is drawn removed whole, then added whole (#2270: a
- * pipeline's two outputs are diffed here, and can be long).
+ * pipeline's two outputs are diffed here, and can be long). Such a diff is
+ * marked `coarse`, and the card says so.
  */
 import type { DiffFile, DiffLine } from "../../ipc/entity";
 
@@ -22,10 +23,11 @@ function split(text: string): string[] {
 }
 
 /** `before` → `after` as one file of the source's diff shape; no hunk where nothing changed. */
-export function lineDiff(path: string, before: string, after: string): DiffFile {
+export function lineDiff(path: string, before: string, after: string): DiffFile & { coarse?: true } {
   const a = split(before);
   const b = split(after);
   const lines: DiffLine[] = [];
+  let coarse = false;
   // The lines both sides open and close with need no table: only the changed middle does.
   let head = 0;
   while (head < a.length && head < b.length && a[head] === b[head]) head += 1;
@@ -36,6 +38,7 @@ export function lineDiff(path: string, before: string, after: string): DiffFile 
   const midB = b.slice(head, b.length - tail);
   if ((midA.length + 1) * (midB.length + 1) > TABLE_BOUND) {
     // Too wide a middle for the table: removed whole, then added whole. A true diff, if not the least one.
+    coarse = true;
     midA.forEach((text, k) => lines.push({ kind: "del", old: head + k + 1, new: null, text }));
     midB.forEach((text, k) => lines.push({ kind: "add", old: null, new: head + k + 1, text }));
   } else {
@@ -91,5 +94,6 @@ export function lineDiff(path: string, before: string, after: string): DiffFile 
     hunks,
     truncated: false,
     threads: [],
+    ...(coarse ? { coarse: true as const } : {}),
   };
 }

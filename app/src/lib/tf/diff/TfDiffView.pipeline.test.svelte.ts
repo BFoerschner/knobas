@@ -8,6 +8,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
+import { createPendingComments } from "../../detail/view/pending-comments.svelte";
 import type { DiffFile, PipeRun, PipeStep } from "../../ipc/entity";
 import { createDiffLayout } from "./diff-layout.svelte";
 import { createDiffPipelines } from "./diff-pipelines.svelte";
@@ -150,4 +151,45 @@ test("a file with no default pipeline, or a diff whose caller runs none, is draw
   expect(asked).toEqual([]);
   expect(target.querySelector(".tf-dtool button.tf-pill")).toBeNull();
   expect(button("Show raw")).toBeUndefined();
+});
+
+test("a piped diff takes no comment: no +, no box from c, and the raw file's thread and draft are counted, not drawn on the piped lines", async () => {
+  const { context } = reader();
+  const pending = createPendingComments(() => null);
+  pending.add("pr", { path: B64.path, side: "new", line: 1, body: "why 2000?" });
+  const thread = { side: "new" as const, line: 1, outdated: false, comments: [{ author: "ana", body: "too short", at: null }], id: "t1", replies: true, resolved_by: null };
+  draw({ files: [{ ...B64, threads: [thread] } as DiffFile], context, piping: createDiffPipelines(() => memoryStorage()), review: { entity: "pr", pending } });
+  await settle();
+  expect(lines()[3]).toBe('3+ "timeout_ms": 2000');
+  expect(target.querySelector("button.tf-addc")).toBeNull();
+  expect(target.querySelector(".tf-thread")).toBeNull();
+  expect(target.querySelector(".tf-pending")).toBeNull();
+  expect(squash(target.querySelector(".tf-ran-hidden"))).toBe("2 comments are on the raw file's lines, not the pipeline's output. Show raw to read them or to comment.");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true }));
+  flushSync();
+  expect(target.querySelector(".tf-newc")).toBeNull();
+  // Raw again: the thread, the draft and the + are back on the file's own lines.
+  button("Show raw")!.click();
+  flushSync();
+  expect(target.querySelector(".tf-ran-hidden")).toBeNull();
+  expect(target.querySelectorAll("button.tf-addc").length).toBeGreaterThan(0);
+  expect(target.querySelector(".tf-thread")).not.toBeNull();
+  expect(target.querySelector(".tf-pending")).not.toBeNull();
+});
+
+test("two outputs too long to match line by line still diff, and the card says how they are drawn", async () => {
+  const many = (tag: string) => Array.from({ length: 2_100 }, (_, n) => `"${tag}${n}"`).join(",\n");
+  const context = {
+    text: async () => null,
+    piped: async (_file: DiffFile, side: "old" | "new"): Promise<PipeRun> => ({
+      outcome: "done",
+      name: "webhooks.json",
+      output: { kind: "text", text: `[\n${many(side === "old" ? "a" : "b")}\n]\n` },
+    }),
+  };
+  draw({ files: [B64], context, piping: createDiffPipelines(() => memoryStorage()) });
+  await settle();
+  expect(squash(target.querySelector(".tf-coarse"))).toBe("Too many changed lines to match one by one: the changed part is drawn removed whole, then added whole.");
+  expect(squash(header().querySelector(".tf-add-n"))).toBe("+2100");
+  expect(squash(header().querySelector(".tf-del-n"))).toBe("−2100");
 });

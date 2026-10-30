@@ -241,7 +241,9 @@
     if (!pipe) return null;
     const on = pipeOn(key);
     const got = on ? runs[runName(key, pipe)] : undefined;
-    return { label: pipelineLabel(pipe), pattern: pipe.pattern, on, running: on && got === undefined, failed: got?.kind === "failed" ? got : null };
+    // A piped diff draws no thread or draft (`quiet`): they sit on the raw lines. The header counts them instead.
+    const hidden = file.threads.length + drafts.filter((d) => d.path === file.path).length;
+    return { label: pipelineLabel(pipe), pattern: pipe.pattern, on, running: on && got === undefined, failed: got?.kind === "failed" ? got : null, hidden };
   };
   /** The piped diff a file draws in place of its own, where its pipeline is on and ran on both sides. */
   const pipedOf = (file: DrawnFile) => {

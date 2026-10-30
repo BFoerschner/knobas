@@ -24,7 +24,11 @@
   - **Pipeline** (#2270): where the file has one, the header names it
     (`.tf-ran`, and the pattern that made it the default) while it is on,
     and *Show raw* / *Run pipeline* turns it off and on for this file. A side
-    that failed draws the raw diff under the step's error.
+    that failed draws the raw diff under the step's error. The raw file's
+    comments are not drawn on the piped lines; a note counts them.
+  - **Coarse** (`file.coarse`): a diff worked out here whose changed middle
+    was too long to match line by line says it is drawn removed whole, then
+    added whole.
   - **Keys** come from the view: `nextHunk`, `comment` and `scrollTo` are
     this card's part of `n`/`p`, `c` and `j`/`k` (#2268).
 -->
@@ -45,6 +49,8 @@
     running: boolean;
     /** The side that gave no output, and why (worded to follow "failed on the file before the change, "). */
     failed: { side: "old" | "new"; why: string } | null;
+    /** The file's review threads and the reader's pending comments: on the raw lines, so not drawn while it is on. */
+    hidden: number;
   }
 </script>
 
@@ -432,6 +438,14 @@
       <div class="tf-banner tf-err">
         The pipeline failed on the file {pipeline.failed.side === "old" ? "before" : "after"} the change, {pipeline.failed.why}. This is the raw diff.
       </div>
+    {:else if pipeline?.on && pipeline.hidden > 0}
+      <div class="tf-banner tf-info tf-ran-hidden">
+        {pipeline.hidden === 1 ? "1 comment is" : `${n(pipeline.hidden)} comments are`} on the raw file's lines, not the pipeline's output. <i>Show raw</i> to read
+        {pipeline.hidden === 1 ? "it" : "them"} or to comment.
+      </div>
+    {/if}
+    {#if file.coarse}
+      <div class="tf-banner tf-warn tf-coarse">Too many changed lines to match one by one: the changed part is drawn removed whole, then added whole.</div>
     {/if}
     {#if rendered !== null && shows !== "lines"}
       <TfDiffRendered plan={rendered} path={file.path} {sides} swipe={shows === "swipe"} {sideOf} {load} {render} {commands} />

@@ -63,8 +63,8 @@ function textOf(run: PipeRun): { text: string } | { why: string } {
 
 /**
  * `file`'s diff as its pipeline's outputs: `old` and `new` are the runs over each side, `null` where the
- * file is not on that side. The diff keeps the file's path and label (comments, *Viewed*, the tree and
- * the tree go by them) and carries no threads: their lines are the raw file's. `name` is the output's file
+ * file is not on that side. The diff keeps the file's path and label (*Viewed*, the tree and the
+ * pending comments go by them) and carries no threads: their lines are the raw file's. `name` is the output's file
  * name, which picks the language the two sides are highlighted in.
  */
 export function pipedDiff(file: DrawnFile, old: PipeRun | null, nu: PipeRun | null): PipedDiff {
