@@ -1349,6 +1349,16 @@ export function entityRangeDiff(entityId: string, base: string, head: string, ig
   return invoke<RangeDiff>("entity_range_diff", { entityId, base, head, ignoreWhitespace });
 }
 
+/**
+ * The change one commit made — `entity_commit_diff` (#2319, story 78): local
+ * read-only git when the checkout of repository `entityId` holds `sha`
+ * (whitespace ignored when asked), else the commit `commitId`'s own diff
+ * section. `read_at` says which; only `checkout` ignores whitespace.
+ */
+export function entityCommitDiff(entityId: string, commitId: string, sha: string, ignoreWhitespace: boolean): Promise<RangeDiff> {
+  return invoke<RangeDiff>("entity_commit_diff", { entityId, commitId, sha, ignoreWhitespace });
+}
+
 /** What the capture shortcut is set to, and whether it holds — `capture_shortcut` (#503). */
 export function captureShortcut(): Promise<CaptureShortcut> {
   return invoke<CaptureShortcut>("capture_shortcut");

@@ -128,6 +128,35 @@ const PRS = [
   row("gitea:tidewater/ledger#9", "pr", "Elsewhere", { path: "tidewater/ledger", state: { text: "open", tone: "info" } }),
 ];
 
+/** C1's change, as its `diff` section draws it. */
+const C1_DIFF: ViewBlock = {
+            type: "diff",
+            truncated: false,
+            commentable: null,
+            gone: [],
+            files: [
+              {
+                path: "src/retry.rs",
+                old_path: null,
+                change: "modified",
+                additions: 1,
+                deletions: 1,
+                truncated: false,
+                threads: [],
+                hunks: [
+                  {
+                    header: "@@ -1,2 +1,2 @@",
+                    lines: [
+                      { kind: "context", old: 1, new: 1, text: "fn retry() {" },
+                      { kind: "del", old: 2, new: null, text: "    3" },
+                      { kind: "add", old: null, new: 2, text: "    5" },
+                    ],
+                  },
+                ],
+              },
+            ],
+          };
+
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
 let viewReads: [string, string | null][];
@@ -185,36 +214,10 @@ function ports(over: Partial<RepoPorts> = {}, cloned = true): RepoPorts {
                 : [vrow(null, "Only on the feature", "7be0e40000", "mara · 1 day ago")],
           },
         ]);
+      // A commit's whole view defers its diff, as Gitea's (#2319); the diff is its own read.
       if (id === C1 && sectionId === null)
-        return withActions(section("diff", [
-          {
-            type: "diff",
-            truncated: false,
-            commentable: null,
-            gone: [],
-            files: [
-              {
-                path: "src/retry.rs",
-                old_path: null,
-                change: "modified",
-                additions: 1,
-                deletions: 1,
-                truncated: false,
-                threads: [],
-                hunks: [
-                  {
-                    header: "@@ -1,2 +1,2 @@",
-                    lines: [
-                      { kind: "context", old: 1, new: 1, text: "fn retry() {" },
-                      { kind: "del", old: 2, new: null, text: "    3" },
-                      { kind: "add", old: null, new: 2, text: "    5" },
-                    ],
-                  },
-                ],
-              },
-            ],
-          },
-        ]));
+        return withActions({ sections: [{ id: "diff", title: "Diff", count: null, deferred: true, blocks: [] }], actions: [] });
+      if (id === C1 && sectionId === "diff") return section("diff", [C1_DIFF]);
       const tree = TREES[at];
       if (tree && sectionId !== null && tree[sectionId])
         return section(sectionId, [{ type: "tree", trail: [], entries: tree[sectionId]!, truncated: false, url: null }]);
@@ -460,6 +463,40 @@ test("a commit draws its sha, message, author and time, its diff per file, and N
   expect(target.querySelector(".tf-tabs a[aria-current='page']")!.textContent).toContain("Commits");
 });
 
+test("a commit the checkout holds is read there, offers Ignore whitespace, and the source reads no diff (#2319)", async () => {
+  const asked: [string, string, string, boolean][] = [];
+  const only = C1_DIFF.type === "diff" ? C1_DIFF.files : [];
+  await draw(
+    [REPO, "commits", C1],
+    ports({
+      commitDiff: async (repo, commit, sha, ignoreWhitespace) => {
+        asked.push([repo, commit, sha, ignoreWhitespace]);
+        return { files: ignoreWhitespace ? [] : only, truncated: false, range: null, read_at: "checkout" };
+      },
+    }),
+  );
+  expect(asked).toEqual([[REPO, C1, "c90d11a2b3c4", false]]);
+  expect(text(target.querySelector(".tf-diff .tf-fh"))).toBe("M src/retry.rs +1 −1 Open in… ▾");
+  // The whole view is read for its toolbar and parent; its diff is never asked of the source.
+  expect(viewReads.filter(([id]) => id === C1)).toEqual([[C1, null]]);
+  const ws = target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!;
+  expect(ws.disabled).toBe(false);
+  expect(target.querySelector("[data-testid=ws-why]")).toBeNull();
+  ws.click();
+  await settle();
+  expect(asked.at(-1)).toEqual([REPO, C1, "c90d11a2b3c4", true]);
+  expect(text(target.querySelector(".tf-empty"))).toBe("This commit changes no file.");
+});
+
+test("a commit no checkout holds is the source's diff, one read, and says why whitespace stays (#2319)", async () => {
+  await draw([REPO, "commits", C1]);
+  expect(viewReads.filter(([id]) => id === C1)).toEqual(expect.arrayContaining([[C1, null], [C1, "diff"]]));
+  expect(viewReads.filter(([id, s]) => id === C1 && s === "diff").length).toBe(1);
+  const ws = target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!;
+  expect(ws.disabled).toBe(true);
+  expect(text(target.querySelector("[data-testid=ws-why]"))).toContain("A checkout holding this commit can.");
+});
+
 test("Pull requests lists this repository's, with a state filter", async () => {
   await draw([REPO, "prs"]);
   const rows = () => [...target.querySelectorAll(".tf-cbody tbody tr")].map((tr) => text(tr.querySelector("td")));
@@ -669,7 +706,7 @@ test("the compare page keeps its branch's diff drawn while a refresh reads it ag
         if (id !== REPO || sectionId !== "compare:main...feature/PAY-231-sepa-retry") return base.entityView(id, sectionId);
         // The first read answers; the refresh's stays out.
         if ((diffs += 1) > 1) return new Promise(() => {});
-        const diff = await base.entityView(C1, null);
+        const diff = await base.entityView(C1, "diff");
         return section("diff", diff!.sections[0]!.blocks);
       },
     },

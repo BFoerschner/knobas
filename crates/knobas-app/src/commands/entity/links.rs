@@ -376,6 +376,37 @@ pub async fn entity_range_diff<R: tauri::Runtime>(
     .await
 }
 
+/// The change commit `commit_id` (whole or short `sha`) made, for the
+/// commit tab (#2319, story 78): read by local read-only git when the
+/// checkout of repository `entity_id` holds it, with whitespace ignored when
+/// asked; otherwise the commit's own `diff` section, kept by sha.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what the source's read refuses with when the source answers.
+#[tauri::command]
+pub async fn entity_commit_diff<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    commit_id: String,
+    sha: String,
+    ignore_whitespace: bool,
+) -> Result<crate::checkout::RangeDiff, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::checkout::commit_diff(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &commit_id,
+        &sha,
+        ignore_whitespace,
+    )
+    .await
+}
+
 /// The bytes of the file at `path` in `entity_id`'s tree (#2256, spec #2234
 /// step 5): a README's relative image, a PDF. `commit` is the `commit` of the
 /// file block the reader has open, handed back, so a README's image is read

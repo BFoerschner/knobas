@@ -749,7 +749,9 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
             }),
           ]
         : [];
-    return { sections: sectionId === null ? [overview, diff] : [diff], actions } as SourceView;
+    // The whole view defers its diff, as Gitea's (#2319): the commit tab reads it local-first.
+    const deferred = { ...diff, count: null, deferred: true, blocks: [] };
+    return { sections: sectionId === null ? [overview, deferred] : [diff], actions } as SourceView;
   }
   const branchAt = entityId.indexOf("@refs/heads/");
   const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);

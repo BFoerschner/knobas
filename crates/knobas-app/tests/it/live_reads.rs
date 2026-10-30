@@ -216,9 +216,12 @@ impl Source for Fake {
             .and_then(|n| n.parse().ok())
             .unwrap_or(0);
         // A compare is a diff block, as Gitea's (#2271); one whose head is
-        // `text` draws none, as a source that cannot compare would.
-        if let Some(range) = section.and_then(|s| s.strip_prefix("compare:"))
-            && !range.ends_with("...text")
+        // `text` draws none, as a source that cannot compare would. A
+        // commit's `diff` section is one too (#2319).
+        if section == Some("diff")
+            || section
+                .and_then(|s| s.strip_prefix("compare:"))
+                .is_some_and(|range| !range.ends_with("...text"))
         {
             return Ok(Some(SourceView::new(vec![ViewSection {
                 id: section.unwrap_or_default().to_owned(),
@@ -1158,4 +1161,88 @@ async fn a_source_that_draws_no_diff_is_a_refusal_not_no_changes() {
     .await
     .expect_err("no diff block is no answer");
     assert_eq!(refused.code, knobas_app::IpcErrorCode::NotFound);
+}
+
+async fn commit_diff(
+    f: &Fixture,
+    repo: &str,
+    commit: &str,
+    sha: &str,
+    ignore_whitespace: bool,
+) -> knobas_app::checkout::RangeDiff {
+    knobas_app::checkout::commit_diff(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &f.live,
+        repo,
+        commit,
+        sha,
+        ignore_whitespace,
+    )
+    .await
+    .unwrap()
+}
+
+/// A commit the repository's checkout holds is read there, against its
+/// parent, and the source is asked nothing (#2319, story 78); one it lacks
+/// is the commit's own `diff` section, one read as before the commit tab
+/// went local-first, kept by sha. Never a compare: Forgejo's costs two
+/// requests and refuses a private repository.
+#[tokio::test]
+async fn a_commit_the_checkout_holds_asks_the_source_nothing() {
+    use knobas_app::checkout::DiffReadAt;
+    let f = fixture().await;
+    let (repo, _dir, one, two) = repo_with_checkout(&f).await;
+
+    let local = commit_diff(&f, &repo, &f.entity(&format!("commit/{two}")), &two, true).await;
+    assert_eq!(local.read_at, DiffReadAt::Checkout);
+    assert_eq!(
+        local
+            .files
+            .iter()
+            .map(|f| f.path.as_str())
+            .collect::<Vec<_>>(),
+        ["pay.py"]
+    );
+    let range = local.range.expect("a commit with a parent is settled");
+    assert_eq!(
+        (range.base.as_str(), range.head.as_str()),
+        (one.as_str(), two.as_str())
+    );
+    assert_eq!(
+        f.seen.reads(),
+        0,
+        "the source was asked: {:?}",
+        f.seen.reads.lock().unwrap()
+    );
+
+    let missing = "0123456789abcdef0123456789abcdef01234567";
+    let commit = f.entity(&format!("commit/{missing}"));
+    let remote = commit_diff(&f, &repo, &commit, missing, true).await;
+    assert_eq!(remote.read_at, DiffReadAt::Source);
+    assert_eq!(
+        *f.seen.reads.lock().unwrap(),
+        [(commit.clone(), Some("diff".to_owned()))]
+    );
+    commit_diff(&f, &repo, &commit, missing, false).await;
+    assert_eq!(f.seen.reads(), 1, "kept by sha");
+}
+
+/// A repository with no checkout reads the commit's `diff` section alone.
+#[tokio::test]
+async fn a_commit_with_no_checkout_is_one_read_of_its_diff() {
+    use knobas_app::checkout::DiffReadAt;
+    let f = fixture().await;
+    let (repo, _dir, _, two) = repo_with_checkout(&f).await;
+    knobas_app::checkout::set_override(&f.pool, &repo, None)
+        .await
+        .unwrap();
+    let commit = f.entity(&format!("commit/{two}"));
+    let read = commit_diff(&f, &repo, &commit, &two, false).await;
+    assert_eq!(read.read_at, DiffReadAt::Source);
+    assert_eq!(
+        *f.seen.reads.lock().unwrap(),
+        [(commit, Some("diff".to_owned()))]
+    );
 }

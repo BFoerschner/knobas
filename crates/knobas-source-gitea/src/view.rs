@@ -1,7 +1,7 @@
 //! The source views this adapter draws (ADR-0020, issue #661).
 //!
 //! A **commit** opens on its overview (who, when, its parents, its whole
-//! message) and has its diff as a second tab; its toolbar offers *New
+//! message) and has its diff as a second, deferred tab; its toolbar offers *New
 //! branch…* from it ([`act`], #707). A **pull request** is
 //! [`pr`]'s, a **branch** is [`branch`]'s and a **repository** is
 //! [`repo`]'s (#663).
@@ -186,8 +186,10 @@ pub(crate) fn bytes_standing(
 /// Whether `sha` is a whole object id (`knobas_core`'s one check).
 pub(crate) use knobas_core::checkout::open::is_full_sha;
 
-/// A commit: *Overview* and *Diff*, neither deferred -- reading a commit's
-/// change is why it is opened (spec #660, story 1).
+/// A commit: *Overview* and *Diff*. The diff is deferred (#2319, ADR-0036):
+/// the commit tab reads it local-first, from a checkout that holds the
+/// commit, and only otherwise as this view's `diff` section, so the whole
+/// view reading it too would cost a request every opening.
 async fn commit(
     source: &GiteaSource,
     entity: &str,
@@ -201,11 +203,17 @@ async fn commit(
             // The whole view's toolbar (#707): a branch from this commit, in
             // its repository -- disabled on a mirror, which Gitea refuses a
             // branch on (#722), as the branch and repository views have it.
-            let (record, overview, diff) = tokio::try_join!(
+            let (record, overview) = tokio::try_join!(
                 source.client.repo_as::<rows::RepoRecord>(owner, repo),
                 commit_overview(source, owner, repo, sha),
-                commit_diff(source, owner, repo, sha),
             )?;
+            let diff = ViewSection {
+                id: DIFF.to_owned(),
+                title: "Diff".to_owned(),
+                count: None,
+                deferred: true,
+                blocks: Vec::new(),
+            };
             let new_branch = act::new_branch(
                 Some(act::repo_id(source, owner, repo)),
                 vec![knobas_source::view::ChoiceOption::new(sha, short(sha))],

@@ -459,6 +459,28 @@ mod tests {
         assert_eq!(diff.files[0].additions, 3);
     }
 
+    /// A merge commit's `^` is its first parent (#2319): the change the
+    /// merge brought onto the branch it landed on, as Gitea's `.diff` of a
+    /// commit draws it, never a combined diff against both parents.
+    #[tokio::test]
+    async fn a_merge_commits_parent_is_its_first() {
+        let r = repo();
+        let p = r.dir.path();
+        let trunk = git(p, &["rev-parse", "--abbrev-ref", "HEAD"]);
+        git(p, &["checkout", "-q", "-b", "side", &r.root]);
+        std::fs::write(p.join("side.txt"), "side\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "side"]);
+        git(p, &["checkout", "-q", &trunk]);
+        git(p, &["merge", "-q", "--no-ff", "--no-edit", "side"]);
+        let merge = git(p, &["rev-parse", "HEAD"]);
+        let diff = read(p, &format!("{merge}^"), &merge, false)
+            .await
+            .expect("read here");
+        assert_eq!(paths(&diff), ["side.txt"]);
+        assert_eq!(diff.base.as_deref(), Some(r.edit.as_str()));
+    }
+
     #[tokio::test]
     async fn a_shallow_clones_cut_is_not_taken_for_a_root() {
         let r = repo();

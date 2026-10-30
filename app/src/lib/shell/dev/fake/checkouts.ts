@@ -70,11 +70,22 @@ function fakeRepoOf(entityId: string): string | null {
  * file whose removed and added lines differ only in whitespace.
  */
 function fakeRangeDiff(entityId: string, base: string, head: string, ignoreWhitespace: boolean): RangeDiff {
-  const view = repoView(entityId, `compare:${base}...${head}`);
-  const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
-  if (block?.type !== "diff") throw { code: "not_found", message: `no compare of ${entityId}`, source_id: null };
   const shas = isDiffEnd(base, true) && isDiffEnd(head, false);
-  const local = shas && fakeCheckout(entityId).path !== null;
+  return fakeDiffOf(repoView(entityId, `compare:${base}...${head}`), shas && fakeCheckout(entityId).path !== null, ignoreWhitespace);
+}
+
+/**
+ * `entity_commit_diff` (#2319): the commit's fake `diff` section, read "at the
+ * checkout" when its repository has one and `sha` is one, else "from the source".
+ */
+function fakeCommitDiff(entityId: string, commitId: string, sha: string, ignoreWhitespace: boolean): RangeDiff {
+  return fakeDiffOf(repoView(commitId, "diff"), isDiffEnd(sha, false) && fakeCheckout(entityId).path !== null, ignoreWhitespace);
+}
+
+/** A fake view's diff block as a `RangeDiff`; at a checkout, whitespace-only files drop when asked. */
+function fakeDiffOf(view: ReturnType<typeof repoView>, local: boolean, ignoreWhitespace: boolean): RangeDiff {
+  const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
+  if (block?.type !== "diff") throw { code: "not_found", message: "the source draws no diff here", source_id: null };
   const bare = (file: DiffFile, kind: "add" | "del") =>
     file.hunks.flatMap((hunk) => hunk.lines.filter((line) => line.kind === kind).map((line) => line.text.replace(/\s+/g, ""))).join("\n");
   const files = local && ignoreWhitespace ? block.files.filter((file) => bare(file, "add") !== bare(file, "del")) : block.files;
@@ -500,6 +511,8 @@ export function handlers(): Handlers {
     entity_checkout_diff: (args) => fakeCheckoutDiff(String(args["entityId"] ?? "")),
     entity_range_diff: (args) =>
       fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), args["ignoreWhitespace"] === true),
+    entity_commit_diff: (args) =>
+      fakeCommitDiff(String(args["entityId"] ?? ""), String(args["commitId"] ?? ""), String(args["sha"] ?? ""), args["ignoreWhitespace"] === true),
     clone_repo: (args) => fakeClone(args),
     set_checkout_override: (args) => {
       const id = String(args["entityId"] ?? "");
