@@ -466,7 +466,10 @@ mod tests {
         let command = git_read(Path::new("git"), Path::new("."));
         let envs: Vec<(&OsStr, Option<&OsStr>)> = command.as_std().get_envs().collect();
         for set in ["GIT_NO_LAZY_FETCH", "GIT_NO_REPLACE_OBJECTS"] {
-            assert!(envs.contains(&(OsStr::new(set), Some(OsStr::new("1")))), "{set}");
+            assert!(
+                envs.contains(&(OsStr::new(set), Some(OsStr::new("1")))),
+                "{set}"
+            );
         }
         for removed in [
             "GIT_ALLOW_PROTOCOL",
