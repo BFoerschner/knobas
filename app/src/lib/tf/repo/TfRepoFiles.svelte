@@ -641,14 +641,14 @@
     return Promise.all(reads);
   }
 
-  /** A relative link in a Markdown file: the file here, at its line where it names one. */
   /** A Markdown file's relative images, read at the commit the file was (#2256); one function per file and `at`. */
   const imageRead = $derived.by(() => {
     const read = ports.fileBytes;
-    const where = at;
+    const entityId = at;
     const commit = file?.commit ?? null;
-    return read === undefined ? null : (path: string) => read(where, path, commit);
+    return read === undefined ? null : (path: string) => read(entityId, path, commit);
   });
+  /** A relative link in a Markdown file: the file here, at its line where it names one. */
   const fileLink = (to: string, at: number | null) => (at === null ? fileHash(repoId, to) : lineHash(repoId, to, at));
 
   function toggle(dir: string) {

@@ -133,7 +133,7 @@ export function renderersForFence(lang: string): Renderer[] {
   return renderers.filter((r) => r.fences.includes(wanted) || r.fences.includes("*"));
 }
 
-/** A data URL for an image's bytes (CSP takes `data:` images, not `blob:`). */
+/** A data URL for an image's bytes, for a renderer's output; a Markdown image is a blob instead (`image.ts`, #2256). */
 export function imageUrl(bytes: Uint8Array, path: string): string {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
   const type = ext === "svg" ? "image/svg+xml" : ext === "jpg" ? "image/jpeg" : ext === "ico" ? "image/x-icon" : `image/${ext}`;

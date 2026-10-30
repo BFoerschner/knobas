@@ -323,6 +323,34 @@ test("an SVG image is sanitized before it is drawn: no script, no handler, its d
   }
 });
 
+test("an image whose name only looks like an SVG type is no SVG: the sanitizer cannot be stepped around (#2256)", async () => {
+  const urls = blobUrls();
+  try {
+    draw("![x](x.svg+xml;charset=utf-8)", { image: async () => new TextEncoder().encode("<svg><script>1</script></svg>") });
+    await settle();
+    const blob = urls.made.get(md().querySelector("img")!.getAttribute("src")!)!;
+    expect(blob.type).toBe("application/octet-stream");
+  } finally {
+    urls.restore();
+  }
+});
+
+test("an image read that answers after the text is gone makes no blob URL (#2256)", async () => {
+  const urls = blobUrls();
+  let answer: (bytes: Uint8Array) => void = () => {};
+  try {
+    draw("![logo](logo.png)", { image: () => new Promise<Uint8Array>((resolve) => (answer = resolve)) });
+    await settle();
+    unmount(view!);
+    view = null;
+    answer(PNG);
+    await settle();
+    expect(urls.made.size).toBe(0);
+  } finally {
+    urls.restore();
+  }
+});
+
 test("an image the byte read refuses draws its alt text and the reason, and nothing loads (#2256)", async () => {
   const urls = blobUrls();
   try {

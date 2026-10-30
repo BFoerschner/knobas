@@ -24,10 +24,13 @@ const TYPES: Record<string, string> = {
   bmp: "image/bmp",
 };
 
-/** The media type of the image at `path`, by its extension. */
+/**
+ * The media type of the image at `path`, by its extension; `application/octet-stream` for one not listed. Never built
+ * from the name: `x.svg+xml;charset=utf-8` would make an SVG type that skips the sanitizer.
+ */
 export function imageType(path: string): string {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
-  return TYPES[ext] ?? `image/${ext}`;
+  return TYPES[ext] ?? "application/octet-stream";
 }
 
 /** The SVG text `svg`, with nothing left in it that is not drawing; `""` where no `<svg>` survives. */
