@@ -334,6 +334,43 @@ test("Files opens the README, marks the locally changed file M, and a changed fi
   expect(target.querySelector(".tf-banner a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/local");
 });
 
+test("the landing draws the branch's last commit above the README; a file opened does not (#2257)", async () => {
+  await draw([REPO]);
+  const strip = target.querySelector(".tf-lastc")!;
+  expect(text(strip)).toBe("c90d11a2b3 PAY-231: jitter in backoff mara · 3 hours ago History");
+  expect(strip.querySelector("a.tf-mono")!.getAttribute("href")).toBe(
+    "#/repo/gitea%3Atidewater%2Fpayout-service/commits/gitea%3Atidewater%2Fpayout-service%40c90d11a2b3c4",
+  );
+  expect([...strip.querySelectorAll("a")].at(-1)!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/commits");
+  // It sits above the README, in the column beside the tree.
+  expect(strip.nextElementSibling!.matches(".tf-fileview")).toBe(true);
+
+  // Another branch: its own last commit.
+  const select = target.querySelector<HTMLSelectElement>(".tf-fhead select")!;
+  select.value = "feature/PAY-231-sepa-retry";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(text(target.querySelector(".tf-lastc"))).toContain("Only on the feature");
+  unmount(view!);
+  view = null;
+
+  await draw([REPO, "files", "src", "lib.rs"]);
+  expect(target.querySelector(".tf-lastc")).toBeNull();
+});
+
+test("a last commit that does not read leaves the landing without its strip (#2257)", async () => {
+  const base = ports();
+  await draw(
+    [REPO],
+    ports({
+      entityView: (id, sectionId) =>
+        sectionId === "commits" ? Promise.reject({ code: "unavailable", message: "down" }) : base.entityView(id, sectionId),
+    }),
+  );
+  expect(target.querySelector(".tf-lastc")).toBeNull();
+  expect(text(target.querySelector(".tf-fileview .tf-md"))).toBe("// README.md fn main() {}");
+});
+
 test("a line link opens Files on the file with that line marked (#2251)", async () => {
   await draw([REPO, "line", "2", "src", "lib.rs"]);
   expect(text(target.querySelector(".tf-fileview header .tf-p"))).toBe("src/lib.rs");

@@ -19,7 +19,9 @@
   *sent*, until the source holds a newer blob, the file read again on the
   refresh event and a run's end.
 
-  With no file in the address the top directory's README opens.
+  With no file in the address the top directory's README opens, under the
+  branch's last commit (`TfRepoLastCommit`, #2257): the landing is the tree,
+  the last commit and the README, with no second listing of the top.
 
   **Read at a commit** (#2241): the source reads the tree at the branch's tip
   and the sections its listings name stand at that commit, so a file opened
@@ -72,6 +74,7 @@
   import { commandIdOf, ipcCommands, type CommandPort } from "../../render/command";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
+  import TfRepoLastCommit from "./TfRepoLastCommit.svelte";
   import {
     REPO_FILES,
     ancestors,
@@ -703,6 +706,8 @@
       </TfWaiting>
     </nav>
   </aside>
+  <div class="tf-fcol">
+  {#if path === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
   <div class="tf-fileview">
     {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
@@ -731,8 +736,9 @@
     {:else}
       <TfWaiting phase={waitPhase({ drawn: file !== null || fileStranded, reading: fileReading && !fileStranded, failed: fileFailed !== null })} error={fileFailed} failClass="tf-fpad" shape="lines">
       {#if file !== null}
+      {@const cut = file.path.lastIndexOf("/") + 1}
       <header>
-        <span class="tf-p">{file.path}</span>
+        <span class="tf-p">{#if cut > 0}<span class="tf-pdir">{file.path.slice(0, cut)}</span>{/if}{file.path.slice(cut)}</span>
         <span class="tf-dim tf-small"
           >{file.binary ? `${file.size} bytes` : `${lines.length} ${lines.length === 1 ? "line" : "lines"}`}{branch !== null ? `, on ${branch}` : ""}</span
         >
@@ -802,6 +808,7 @@
       {/if}
       </TfWaiting>
     {/if}
+  </div>
   </div>
 </div>
 
