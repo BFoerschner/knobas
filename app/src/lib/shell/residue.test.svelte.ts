@@ -270,6 +270,7 @@ vi.mock("../ipc/app", () => ({
   ping: () => deferred("pong"),
   pagesKeptOpen: () => deferred(5),
   setPagesKeptOpen: (count: number) => deferred(count),
+  userRenderers: () => deferred([]),
 }));
 
 /**
@@ -349,6 +350,7 @@ const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).defa
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
+const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
 const TfCheckoutsSection = (await import("../tf/settings/TfCheckoutsSection.svelte")).default;
 const { createApps } = await import("../tf/openin/apps.svelte");
 const { createClones } = await import("../tf/openin/clones.svelte");
@@ -396,6 +398,7 @@ const TfSyncNow = (await import("../tf/TfSyncNow.svelte")).default;
 const { createRoleSyncs } = await import("../tf/role-sync.svelte");
 const { sourceRoles } = await import("../tf/roles.svelte");
 const TfCodeRow = (await import("../tf/code-row/TfCodeRow.svelte")).default;
+const TfDiffPage = (await import("../tf/diff/TfDiffPage.svelte")).default;
 const TfNote = (await import("../tf/note/TfNote.svelte")).default;
 const { createPendingComments } = await import("../detail/view/pending-comments.svelte");
 const TfMonitors = (await import("../tf/monitors/TfMonitors.svelte")).default;
@@ -1249,6 +1252,21 @@ const CASES: Case[] = [
     }),
   },
   {
+    /** A command renderer's run (#2262), answering late. */
+    name: "TfCommandOutput",
+    source: "lib/tf/render/TfCommandOutput.svelte",
+    open: (target) => ({
+      app: mount(TfCommandOutput, {
+        target,
+        props: {
+          renderer: { id: "command:cat", name: "Cat", patterns: [], fences: [], input: "text", output: "html", diff: false },
+          text: "<p>x</p>",
+          commands: { run: () => deferred({ outcome: "drawn", output: "html", body: "<p>x</p>" }) },
+        },
+      }),
+    }),
+  },
+  {
     /** Settings › Checkouts (#844) reads the list when it opens. */
     name: "TfCheckoutsSection",
     source: "lib/tf/settings/TfCheckoutsSection.svelte",
@@ -1664,6 +1682,25 @@ const CASES: Case[] = [
       }),
     }),
   },
+  // The diff address (#2271): the repository's row and its compare, answering late.
+  {
+    name: "TfDiffPage",
+    source: "lib/tf/diff/TfDiffPage.svelte",
+    open: (target) => ({
+      app: mount(TfDiffPage, {
+        target,
+        props: {
+          repoId: "gitea:tidewater/payout-service",
+          base: "main",
+          head: "feature/x",
+          ports: {
+            getEntity: () => deferred({ row: { title: "tidewater/payout-service" } } as never),
+            entityView: () => deferred({ sections: [], actions: [] } as never),
+          },
+        },
+      }),
+    }),
+  },
   // The one diff component (#2266): a highlight job per file side, cancelled with it.
   {
     name: "TfDiffView",
@@ -1924,6 +1961,7 @@ const CASES: Case[] = [
   sectionCase("TfBackupSection", "backup"),
   sectionCase("TfLogsSection", "logs"),
   sectionCase("TfPerformanceSection", "performance"),
+  sectionCase("TfRenderersSection", "renderers"),
   {
     /**
      * The write queue panel (#1425): a layer on the stack, and a title read

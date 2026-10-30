@@ -67,7 +67,13 @@
 .tf-fimage img { max-width: 100%; }
 .tf-cgroup-h .tf-acts { margin-left: auto; display: flex; gap: 6px; }
 .tf-cgroup-h .tf-rc-who { font-weight: 400; }
-.tf-rcommits td:first-child { width: 110px; }
+.tf-rcommits td.tf-rpick { width: 28px; padding-right: 0; }
+.tf-rcommits td:nth-child(2) { width: 110px; }
+/* A commit picked for *Diff selected* (#2271). */
+.tf-rcommits tr.tf-picked td { background: var(--info-bg); }
+.tf-rbar.tf-rpickbar { display: flex; align-items: center; gap: 12px; }
+.tf-rpickbar .tf-fbar { flex: 1; }
+.tf-diffpage .tf-cgroup-h a { color: inherit; }
 .tf-rprs td:first-child { width: 70px; }
 /*
   The one diff component (#2266, `diff/TfDiffView.svelte`; `mockups/code-area/diff.css`): every diff, file by file.
@@ -174,3 +180,8 @@
   .tf-repo { grid-template-columns: minmax(0, 1fr); }
   .tf-ftree { position: static; }
 }
+
+/* A command renderer's run (#2262): the sandboxed frame, and a failure above the source (mockups/code-area .stepfail). */
+.tf-rframe { display: block; width: 100%; min-height: 60vh; border: 0; background: var(--paper); }
+.tf-stepfail { border-bottom: 1px solid var(--rule); background: var(--err-bg); padding: 10px 12px; font-size: var(--t-sm); color: var(--err); display: flex; flex-direction: column; gap: 8px; }
+.tf-stepfail pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; background: var(--paper); color: var(--ink); border-radius: 4px; padding: 8px 10px; white-space: pre-wrap; }

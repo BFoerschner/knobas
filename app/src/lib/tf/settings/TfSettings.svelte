@@ -43,6 +43,7 @@
   import TfStandupSection from "./TfStandupSection.svelte";
   import TfTimeSection from "./TfTimeSection.svelte";
   import TfPerformanceSection from "./TfPerformanceSection.svelte";
+  import TfRenderersSection from "./TfRenderersSection.svelte";
 
   let {
     rest,
@@ -78,7 +79,7 @@
   } = $props();
 
   /** The sections #831 draws whose first paint waits on a read. */
-  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "notes", "backup", "logs", "checkouts", "performance"]);
+  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "notes", "backup", "logs", "checkouts", "performance", "renderers"]);
 
   const place = $derived(settingsPlace(rest));
   const sourceId = $derived("source" in place ? place.source : null);
@@ -239,6 +240,8 @@
         <TfAppearanceSection {theme} />
       {:else if place.section === "performance"}
         <TfPerformanceSection ports={sectionPorts} />
+      {:else if place.section === "renderers"}
+        <TfRenderersSection {...sectionPorts.renderers ? { ports: sectionPorts.renderers } : {}} />
       {:else if place.section === "keyboard"}
         <TfKeyboardSection />
       {:else if place.section === "logs"}

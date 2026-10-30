@@ -7,9 +7,18 @@
  * by a test in that module which `include_str!`s this file.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { AppStatus } from "./generated/app";
+import type { AppStatus, RenderContent, RenderRun, UserRenderer, UserRendererDraft } from "./generated/app";
 
-export type { AppStatus, DbState } from "./generated/app";
+export type {
+  AppStatus,
+  CommandOutput,
+  DbState,
+  RenderContent,
+  RendererInput,
+  RenderRun,
+  UserRenderer,
+  UserRendererDraft,
+} from "./generated/app";
 
 /**
  * Liveness probe.
@@ -79,4 +88,22 @@ export function pagesKeptOpen(): Promise<number> {
  */
 export function setPagesKeptOpen(count: number): Promise<number> {
   return invoke<number>("set_pages_kept_open", { count });
+}
+
+/** The command renderers saved in Settings › Renderers (#2262), in order. */
+export function userRenderers(): Promise<UserRenderer[]> {
+  return invoke<UserRenderer[]>("user_renderers");
+}
+
+/** Save the whole list of command renderers; answers it as stored (ids, lowercase fences, held timeouts). */
+export function setUserRenderers(renderers: UserRendererDraft[]): Promise<UserRenderer[]> {
+  return invoke<UserRenderer[]>("set_user_renderers", { renderers });
+}
+
+/**
+ * Run saved renderer `id` with `content` on its stdin (ADR-0033). A failure,
+ * a timeout or too much output is an answer (`RenderRun`), not a rejection.
+ */
+export function runRenderer(id: string, content: RenderContent): Promise<RenderRun> {
+  return invoke<RenderRun>("run_renderer", { id, content });
 }

@@ -72,6 +72,8 @@ const SECTION_OF: Record<string, Section> = {
   // the reader to the repository page that draws them (#1440).
   branch: "code",
   commit: "code",
+  // The diff between any two commits of a repository (#2271).
+  diff: "code",
   builds: "builds",
   build: "builds",
   docs: "docs",

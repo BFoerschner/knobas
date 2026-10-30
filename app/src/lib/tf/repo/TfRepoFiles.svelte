@@ -29,7 +29,9 @@
 
   The file is drawn by the first renderer that accepts it (`render/registry.ts`,
   #2254): *Source* draws the lines plain at once and colours them as the
-  highlighting worker answers, the lines in view first; *Image* draws an SVG.
+  highlighting worker answers, the lines in view first; *Image* draws an SVG;
+  a command renderer (#2262) runs on the backend and draws in a sandboxed
+  frame (`../render/TfCommandOutput.svelte`).
   A Markdown file is drawn by the Markdown component (#2255): its relative
   links open files here, external ones go to the browser. *Rendered* and
   *Source* switch any file whose renderer is not Source to its lines and
@@ -55,6 +57,8 @@
   import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
+  import TfCommandOutput from "../render/TfCommandOutput.svelte";
+  import { commandIdOf, ipcCommands, type CommandPort } from "../../render/command";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import {
@@ -94,6 +98,7 @@
     title = "",
     refreshed = 0,
     render = renderPort(),
+    commands = ipcCommands,
     views = appViewChoices,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen">;
@@ -124,6 +129,8 @@
     refreshed?: number;
     /** The engines renderers draw with (#2254): the app's workers, a fake in tests. */
     render?: RenderPort;
+    /** Runs a command renderer (#2262): the IPC, a fake in tests. */
+    commands?: CommandPort;
     /** *Rendered* or *Source*, per file type (#2255): the app's store, a fresh one in tests. */
     views?: { of(path: string): ViewChoice; pick(path: string, choice: ViewChoice): void };
   } = $props();
@@ -675,6 +682,8 @@
         <div class="tf-fimage"><img src={image} alt={file.path} /></div>
       {:else if drawAs === "markdown"}
         <TfMarkdown text={file.text} base={parentOf(file.path)} {fileLink} {render} />
+      {:else if renderer !== null && drawAs === renderer.id && commandIdOf(renderer) !== null}
+        <TfCommandOutput {renderer} text={file.text} {commands} />
       {:else}
         <div class="tf-findbar">
           <label class="tf-fsearch">

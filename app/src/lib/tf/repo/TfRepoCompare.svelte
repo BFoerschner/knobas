@@ -13,9 +13,12 @@
     pull requests.
   - **A pull request already open** from the branch is the source's overview's
     row: the page says so and offers *Open PR #N* instead.
-  - **What it changes**: the branch's own view, its deferred *Diff* (Gitea's
-    `compare_diff` against the default branch) drawn by the one diff component (`TfDiffView`), and beside
-    it what it carries (its *Commits*).
+  - **What it changes**: the diff from *Into* to *From* (#2271), the
+    repository's `compare:<into>...<from>` section, drawn by the one diff
+    component (`TfDiffView`): picking another *Into* reads it against that
+    base. *Open as diff* opens the same diff at its own address. Beside it,
+    from the branch's own view, what it carries over the default branch (its
+    *Commits*).
 
   A branch the mirror does not hold yet (one this session's edit queued) has
   no view to read: the form still opens, since the pull request names the
@@ -29,6 +32,7 @@
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
+  import { compareSection, diffHash } from "../diff/address";
   import { itemHash, resolveTicket } from "../job/job";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
@@ -75,6 +79,8 @@
   let standing = $state<BranchStanding | null>(null);
   /** What the branch changes: another branch's stays drawn, dimmed, while this one's is read (#2246). */
   let files = $state<DiffFile[] | null>(null);
+  /** The section `files` was read for: until another base's diff answers, the page still draws the last one. */
+  let filesFor = $state<string | null>(null);
   let reading = $state(false);
   /** The diff hit the parser's ceiling. */
   let cut = $state(false);
@@ -88,14 +94,29 @@
   let link = $state(true);
   let busy = $state(false);
 
-  // The branch's view and its diff, read for each branch the address names.
+  /** The diff read: from *Into* to the branch, once the mirror holds the branch. */
+  const section = $derived(listedId === null || head === null || base === "" ? null : compareSection(base, head));
+
+  // The branch's view, read for each branch the address names.
   $effect(() => {
     const id = listedId;
     let live = true;
     standing = null;
     failed = null;
     if (id === null) return;
-    readBranch(id, () => live);
+    readStanding(id, () => live);
+    return () => {
+      live = false;
+    };
+  });
+
+  // Its diff, read again for each base and branch.
+  $effect(() => {
+    const asked = section;
+    let live = true;
+    failed = null;
+    if (asked === null) return;
+    readDiff(asked, () => live);
     return () => {
       live = false;
     };
@@ -106,25 +127,37 @@
     () => refreshed,
     () => {
       const id = listedId;
-      return id === null ? Promise.resolve() : readBranch(id, () => listedId === id, true);
+      const asked = section;
+      if (id === null || asked === null) return Promise.resolve();
+      return Promise.all([readStanding(id, () => listedId === id, true), readDiff(asked, () => section === asked, true)]);
     },
   );
 
-  /** The branch's standing and its diff; `again` keeps what the page drew when a read fails. */
-  function readBranch(id: string, alive: () => boolean, again = false): Promise<unknown> {
+  /** The branch's standing; `again` keeps what the page drew when a read fails. */
+  function readStanding(id: string, alive: () => boolean, again = false): Promise<unknown> {
+    return ports.entityView(id, null).then(
+      (answer) => {
+        if (alive()) standing = branchStanding(answer);
+      },
+      (error: unknown) => {
+        if (alive() && !again) failed = ipcErrorMessage(error);
+      },
+    );
+  }
+
+  /** The diff `asked` names; `again` keeps what the page drew when a read fails. */
+  function readDiff(asked: string, alive: () => boolean, again = false): Promise<unknown> {
     const fail = (error: unknown) => {
       if (alive() && !again) failed = ipcErrorMessage(error);
     };
     reading = true;
-    const standingRead = ports.entityView(id, null).then((answer) => {
-      if (alive()) standing = branchStanding(answer);
-    }, fail);
-    const diffRead = ports.entityView(id, "diff").then((view) => {
+    return ports.entityView(repoId, asked).then((view) => {
       if (!alive()) return;
       reading = false;
       const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
       files = block?.type === "diff" ? block.files : [];
       cut = block?.type === "diff" && block.truncated;
+      filesFor = asked;
     }, (error) => {
       if (!alive()) return;
       reading = false;
@@ -132,7 +165,6 @@
       fail(error);
       files = null;
     });
-    return Promise.all([standingRead, diffRead]);
   }
 
   // The form, proposed for each branch: from its ticket where it names one.
@@ -166,7 +198,10 @@
     const names = branches.filter((option) => !option.isDefault).map((option) => option.name);
     return head !== null && !names.includes(head) ? [head, ...names] : names;
   });
-  const changed = $derived(files?.length ?? standing?.files ?? null);
+  /** The files changed: this base's diff's, or before it is read the branch's own count, which is against the default branch. */
+  const changed = $derived(
+    files !== null && filesFor === section ? files.length : base === defaultBranch ? (standing?.files ?? null) : null,
+  );
   /** Why the source draws the pull request disabled (#2030): its words, on the button. */
   const refused = $derived(standing?.prBlocked ?? null);
   const ready = $derived(head !== null && title.trim() !== "" && base !== "" && base !== head && !busy && refused === null);
@@ -234,17 +269,22 @@
             title={refused ?? undefined}>Create pull request</button>
         {/if}
         {#if changed !== null}
-          <span class="tf-dim tf-small tf-cfiles">{changed} {changed === 1 ? "file" : "files"} changed against {defaultBranch ?? into}</span>
+          <span class="tf-dim tf-small tf-cfiles">{changed} {changed === 1 ? "file" : "files"} changed against {base}</span>
         {/if}
       </div>
     </form>
-    <h2 class="tf-cgroup-h tf-cchanges">What it changes</h2>
+    <h2 class="tf-cgroup-h tf-cchanges">
+      What it changes
+      {#if section !== null && head !== null}
+        <span class="tf-acts"><a class="tf-btn tf-sm tf-ghost" href={diffHash(repoId, base, head)}>Open as diff</a></span>
+      {/if}
+    </h2>
     {#if listed === null || listed.entityId === null}
       <div class="tf-empty">This branch is not on {sourceName(source)} yet, or knobas has not synced it. What it changes shows here once it has.</div>
     {:else}
       <TfWaiting phase={waitPhase({ drawn: files !== null, reading, failed: failed !== null })} error={failed} shape="lines">
         {#if files !== null && files.length === 0}
-          <div class="tf-empty">This branch has no commits that {defaultBranch ?? into} lacks.</div>
+          <div class="tf-empty">This branch has no commits that {base} lacks.</div>
         {:else if files !== null}
           <TfDiffView {files} {cut} />
         {/if}
