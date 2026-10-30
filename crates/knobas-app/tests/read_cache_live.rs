@@ -297,12 +297,14 @@ async fn a_file_opened_from_the_tree_costs_at_most_two_requests() {
         "the file alone, no action beside it"
     );
     assert!(sent >= 1, "the counter sees the file's reads: {sent}");
-    assert!(sent <= 2, "an uncached open costs at most two requests: {sent}");
+    assert!(
+        sent <= 2,
+        "an uncached open costs at most two requests: {sent}"
+    );
     assert!(took < UNCACHED_BUDGET, "an uncached open took {took:?}");
 
     let (_, again, _) = app.view_of(&repo, &readme).await;
     assert_eq!(again, 0, "kept, and never read behind");
-
 }
 
 /// **Grants once per repository** (#2241): *New branch…* and *Commit
@@ -314,7 +316,10 @@ async fn a_file_opened_from_the_tree_costs_at_most_two_requests() {
 async fn a_repositorys_grants_are_asked_once_and_then_behind() {
     let app = app().await;
     let repo = app.repo();
-    let asks = [(repo.as_str(), "create_branch"), (repo.as_str(), "commit_file")];
+    let asks = [
+        (repo.as_str(), "create_branch"),
+        (repo.as_str(), "commit_file"),
+    ];
     let (first, first_sent) = app.refused(&asks).await;
     println!("grants:       {first_sent} requests, {first:?}");
     assert!(first_sent >= 1, "the probe is counted: {first_sent}");
@@ -334,11 +339,20 @@ async fn a_pushed_branch_is_the_read_after_the_read_behind() {
     let app = app().await;
     let repo = app.repo();
     let (first, first_sent, _) = app.view_of(&repo, "branches").await;
-    println!("branches:    {first_sent} requests, {:?}", branch_names(&first));
+    println!(
+        "branches:    {first_sent} requests, {:?}",
+        branch_names(&first)
+    );
 
-    let pushed = format!("read-cache-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let pushed = format!(
+        "read-cache-{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
     let http = reqwest::Client::new();
-    let api = format!("{}/api/v1/repos/{SEEDED}/branches", need("KNOBAS_GITEA_URL"));
+    let api = format!(
+        "{}/api/v1/repos/{SEEDED}/branches",
+        need("KNOBAS_GITEA_URL")
+    );
     let auth = format!("token {}", need("KNOBAS_GITEA_TOKEN"));
     let made = http
         .post(&api)
@@ -347,7 +361,11 @@ async fn a_pushed_branch_is_the_read_after_the_read_behind() {
         .send()
         .await
         .expect("Gitea answers");
-    assert!(made.status().is_success(), "the branch is pushed: {}", made.status());
+    assert!(
+        made.status().is_success(),
+        "the branch is pushed: {}",
+        made.status()
+    );
     // Deleted again however the test ends: from a thread of its own, with
     // a client of its own (a pooled connection is the test runtime's).
     struct Delete(String, String);
@@ -355,13 +373,15 @@ async fn a_pushed_branch_is_the_read_after_the_read_behind() {
         fn drop(&mut self) {
             let (url, auth) = (self.0.clone(), self.1.clone());
             let _ = std::thread::spawn(move || {
-                tokio::runtime::Runtime::new().unwrap().block_on(async move {
-                    let _ = reqwest::Client::new()
-                        .delete(url)
-                        .header("Authorization", auth)
-                        .send()
-                        .await;
-                });
+                tokio::runtime::Runtime::new()
+                    .unwrap()
+                    .block_on(async move {
+                        let _ = reqwest::Client::new()
+                            .delete(url)
+                            .header("Authorization", auth)
+                            .send()
+                            .await;
+                    });
             })
             .join();
         }
@@ -370,7 +390,11 @@ async fn a_pushed_branch_is_the_read_after_the_read_behind() {
 
     let (second, second_sent, took) = app.view_of(&repo, "branches").await;
     println!("again:       {second_sent} requests, {took:?}");
-    assert_eq!(branch_names(&second), branch_names(&first), "the kept list, at once");
+    assert_eq!(
+        branch_names(&second),
+        branch_names(&first),
+        "the kept list, at once"
+    );
     assert!(took < CACHED_BUDGET, "a stale answer took {took:?}");
     assert_eq!(second_sent, first_sent, "exactly one read behind it");
 

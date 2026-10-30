@@ -50,6 +50,7 @@
     EntityPage,
     RefusedWrite,
     SourceView,
+    ViewFresh,
     WriteAsk,
   } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
@@ -270,7 +271,7 @@
     let live = true;
     let stop: (() => void) | null = null;
     void listen(EVENTS.viewFresh, ({ payload }) => {
-      const fresh = payload as { entity_id: string; section: string | null };
+      const fresh = payload as ViewFresh;
       if (!live || fresh.entity_id !== id || fresh.section !== "branches") return;
       ports.entityView(id, "branches").then(
         (view) => {

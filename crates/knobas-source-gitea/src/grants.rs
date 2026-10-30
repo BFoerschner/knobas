@@ -249,7 +249,10 @@ async fn standing(
     let needs_record = asks.iter().any(|ask| {
         ask.op == crate::WRITE_OP_CREATE_BRANCH
             || (ask.op == crate::WRITE_OP_COMMIT_FILE
-                && matches!(source.key_of(&ask.entity), Ok(crate::keys::GiteaKey::Repo { .. })))
+                && matches!(
+                    source.key_of(&ask.entity),
+                    Ok(crate::keys::GiteaKey::Repo { .. })
+                ))
     });
     let record: Option<Held> = if needs_record {
         source.client.repo_as(owner, repo).await.ok()

@@ -145,6 +145,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::commands::entity::ActionItemTicket::export_all(cfg)?;
     crate::notify::NotificationDraft::export_all(cfg)?;
     crate::notify::NotificationClicked::export_all(cfg)?;
+    crate::sources::live::ViewFresh::export_all(cfg)?;
     crate::checkout::FoundBy::export_all(cfg)?;
     crate::checkout::CheckoutView::export_all(cfg)?;
     crate::checkout::working_tree::WorkingTreeState::export_all(cfg)?;

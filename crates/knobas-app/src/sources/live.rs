@@ -366,7 +366,9 @@ impl LiveSources {
     fn read_behind(&self, lent: &Lent, keys: Vec<Key>) {
         let keys: Vec<Key> = {
             let mut behind = self.0.behind.lock().expect("the reads behind");
-            keys.into_iter().filter(|key| behind.insert(key.clone())).collect()
+            keys.into_iter()
+                .filter(|key| behind.insert(key.clone()))
+                .collect()
         };
         if keys.is_empty() {
             return;

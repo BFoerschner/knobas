@@ -291,11 +291,18 @@ async fn directory(
     at: &At<'_>,
     dir: &str,
 ) -> Result<Block, SourceError> {
-    let listing: Vec<Listed> = source.client.contents_at_as(owner, repo, dir, at.sha).await?;
+    let listing: Vec<Listed> = source
+        .client
+        .contents_at_as(owner, repo, dir, at.sha)
+        .await?;
     // The directory's own page is any entry's, its name taken off.
-    let url = listing
-        .iter()
-        .find_map(|listed| listed.html_url.as_deref()?.rsplit_once('/').map(|(up, _)| up.to_owned()));
+    let url = listing.iter().find_map(|listed| {
+        listed
+            .html_url
+            .as_deref()?
+            .rsplit_once('/')
+            .map(|(up, _)| up.to_owned())
+    });
     let mut entries: Vec<TreeEntry> = listing
         .into_iter()
         .map(|listed| {
@@ -353,8 +360,12 @@ async fn file(
     // at one commit, which no push moves (#2241), so neither can be newer
     // than the other.
     let (own, raw) = tokio::try_join!(
-        source.client.file_entry_as::<Listed>(owner, repo, path, at.sha),
-        source.client.raw_capped(owner, repo, path, at.sha, BYTE_CAP),
+        source
+            .client
+            .file_entry_as::<Listed>(owner, repo, path, at.sha),
+        source
+            .client
+            .raw_capped(owner, repo, path, at.sha, BYTE_CAP),
     )?;
     let binary = raw.bytes.iter().take(SNIFF).any(|b| *b == 0);
     let (text, truncated) = if binary {

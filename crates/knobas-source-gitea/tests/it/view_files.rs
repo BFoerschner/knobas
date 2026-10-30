@@ -49,7 +49,10 @@ async fn gitea() -> MockServer {
         .await;
     for branch in ["main", "feature/PAY-231-sepa-retry"] {
         Mock::given(method("GET"))
-            .and(path(format!("{REPO}/branches/{}", branch.replace('/', "%2F"))))
+            .and(path(format!(
+                "{REPO}/branches/{}",
+                branch.replace('/', "%2F")
+            )))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "name": branch, "protected": false, "commit": { "id": tip(branch) }
             })))
@@ -66,8 +69,9 @@ fn tip(at: &str) -> String {
         return at.to_owned();
     }
     let fold = |seed: u64| {
-        at.bytes()
-            .fold(seed, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
+        at.bytes().fold(seed, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        })
     };
     format!("{:016x}{:016x}{:08x}", fold(7), fold(8), fold(9) as u32)
 }
@@ -334,7 +338,12 @@ async fn the_top_directory_lists_directories_first() {
         [
             (".github", EntryKind::Dir, None, at("files:.github")),
             ("src", EntryKind::Dir, None, at("files:src")),
-            ("Cargo.toml", EntryKind::File, Some(410), at("file:Cargo.toml")),
+            (
+                "Cargo.toml",
+                EntryKind::File,
+                Some(410),
+                at("file:Cargo.toml")
+            ),
             ("current", EntryKind::Symlink, Some(7), at("file:current")),
             ("README.md", EntryKind::File, Some(60), at("file:README.md")),
             ("vendor", EntryKind::Submodule, None, None),
@@ -365,7 +374,11 @@ async fn a_nested_directory_is_read_by_the_section_its_entry_names() {
         trail,
         crumbs_at(
             "main",
-            &[(short, "files"), ("src", "files:src"), ("lib", "files:src/lib")]
+            &[
+                (short, "files"),
+                ("src", "files:src"),
+                ("lib", "files:src/lib")
+            ]
         ),
         "a repository's read at a sha names it by the sha"
     );
@@ -476,7 +489,11 @@ async fn a_file_is_read_raw_at_the_ref() {
         drawn.trail,
         crumbs_at(
             "main",
-            &[("main", "files"), ("src", "files:src"), ("main.rs", "file:src/main.rs")]
+            &[
+                ("main", "files"),
+                ("src", "files:src"),
+                ("main.rs", "file:src/main.rs")
+            ]
         ),
         "a file read with no sha reads the tip first, and its trail names it"
     );
@@ -542,7 +559,10 @@ async fn a_gitea_without_contents_ext_draws_the_blob_from_contents() {
         .iter()
         .filter(|r| r.url.path().contains("/contents-ext/"))
         .count();
-    assert_eq!(missing_route, 1, "a route found missing is not asked again (#2241)");
+    assert_eq!(
+        missing_route, 1,
+        "a route found missing is not asked again (#2241)"
+    );
 }
 
 /// A Markdown file says so, so the shell can draw it rendered.
@@ -719,9 +739,11 @@ async fn a_file_at_the_sha_its_id_names_reads_only_itself() {
 /// push to, or an unprotected one, is not.
 #[tokio::test]
 async fn a_commit_onto_a_protected_branch_is_refused_with_the_flushs_reason() {
-    for (protected, user_can_push, refused) in
-        [(true, false, true), (true, true, false), (false, true, false)]
-    {
+    for (protected, user_can_push, refused) in [
+        (true, false, true),
+        (true, true, false),
+        (false, true, false),
+    ] {
         let server = gitea().await;
         branch_main(&server, protected, user_can_push).await;
         let ask = knobas_source::grants::WriteAsk {
@@ -754,7 +776,11 @@ async fn a_commit_onto_a_protected_branch_is_refused_with_the_flushs_reason() {
 #[tokio::test]
 async fn a_new_branch_is_refused_in_a_mirror_and_an_empty_repository() {
     for (mirror, empty, reason) in [
-        (true, false, Some("A mirror: its branches come from upstream")),
+        (
+            true,
+            false,
+            Some("A mirror: its branches come from upstream"),
+        ),
         (false, true, Some("The repository is empty")),
         (false, false, None),
     ] {
@@ -777,7 +803,11 @@ async fn a_new_branch_is_refused_in_a_mirror_and_an_empty_repository() {
             .await
             .unwrap();
         let reasons: Vec<_> = answer.iter().map(|r| r.reason.as_str()).collect();
-        assert_eq!(reasons, reason.into_iter().collect::<Vec<_>>(), "mirror {mirror}, empty {empty}");
+        assert_eq!(
+            reasons,
+            reason.into_iter().collect::<Vec<_>>(),
+            "mirror {mirror}, empty {empty}"
+        );
     }
 }
 
@@ -886,9 +916,21 @@ async fn what_names_a_whole_sha_is_fixed_and_what_reads_a_tip_moves() {
         (ENTITY.to_owned(), Some("overview"), Live),
         (ENTITY.to_owned(), None, Live),
         (BRANCH.to_owned(), None, Live),
-        (BRANCH.to_owned(), Some(&*leak(named("main", "file:src/lib.rs"))), Fixed),
-        (ENTITY.to_owned(), Some(&*leak(named("main", "files:src"))), Fixed),
-        (ENTITY.to_owned(), Some(&*leak(format!("files@{}", &SHA[..12]))), Live),
+        (
+            BRANCH.to_owned(),
+            Some(leak(named("main", "file:src/lib.rs"))),
+            Fixed,
+        ),
+        (
+            ENTITY.to_owned(),
+            Some(leak(named("main", "files:src"))),
+            Fixed,
+        ),
+        (
+            ENTITY.to_owned(),
+            Some(leak(format!("files@{}", &SHA[..12]))),
+            Live,
+        ),
         (
             "other:tidewater/payout-service@x".to_owned(),
             Some("files"),

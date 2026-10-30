@@ -683,13 +683,20 @@ async fn a_failed_read_behind_keeps_the_answer_and_says_nothing() {
     let f = fixture().await;
     let heard = Arc::new(Mutex::new(Vec::new()));
     let ear = heard.clone();
-    f.live.on_fresh(move |fresh| ear.lock().unwrap().push(fresh));
+    f.live
+        .on_fresh(move |fresh| ear.lock().unwrap().push(fresh));
     let first = f.read("moving/repo", Some("branches")).await.unwrap();
     f.seen.failing.store(true, Ordering::SeqCst);
     f.push();
-    assert_eq!(f.read("moving/repo", Some("branches")).await.unwrap(), first);
+    assert_eq!(
+        f.read("moving/repo", Some("branches")).await.unwrap(),
+        first
+    );
     f.live.settled().await;
-    assert_eq!(f.read("moving/repo", Some("branches")).await.unwrap(), first);
+    assert_eq!(
+        f.read("moving/repo", Some("branches")).await.unwrap(),
+        first
+    );
     f.live.settled().await;
     assert!(heard.lock().unwrap().is_empty(), "nothing said");
 }
@@ -701,7 +708,8 @@ async fn a_read_behind_that_moved_is_told() {
     let f = fixture().await;
     let heard = Arc::new(Mutex::new(Vec::new()));
     let ear = heard.clone();
-    f.live.on_fresh(move |fresh| ear.lock().unwrap().push(fresh));
+    f.live
+        .on_fresh(move |fresh| ear.lock().unwrap().push(fresh));
     f.read("moving/repo", Some("branches")).await.unwrap();
     f.read("moving/repo", Some("branches")).await.unwrap();
     f.live.settled().await;

@@ -42,7 +42,7 @@
 
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { EVENTS, ipcErrorMessage } from "../../ipc";
-  import type { CheckoutView, TreeEntry, ViewBlock, ViewSection } from "../../ipc/entity";
+  import type { CheckoutView, TreeEntry, ViewBlock, ViewFresh, ViewSection } from "../../ipc/entity";
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
@@ -497,7 +497,7 @@
     let live = true;
     let stop: (() => void) | null = null;
     void listen(EVENTS.viewFresh, ({ payload }) => {
-      const fresh = payload as { entity_id: string; section: string | null };
+      const fresh = payload as ViewFresh;
       if (live && fresh.entity_id === where && fresh.section === "files") void rereadTop();
     }).then(
       (unlisten) => {
