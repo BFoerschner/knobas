@@ -92,7 +92,7 @@ async function settle() {
 }
 
 const headers = (root: ParentNode) =>
-  [...root.querySelectorAll(".tf-fh")].filter((h) => !h.closest("[hidden]")).map((h) => h.textContent!.split(" ")[0]);
+  [...root.querySelectorAll(".tf-fh .tf-mono")].filter((h) => !h.closest("[hidden]")).map((h) => h.textContent!.split(" ")[0]);
 
 test("the address reads the repository's compare between its two ends and draws that diff", async () => {
   const ports: DiffPagePorts = { entityView: vi.fn(answer), getEntity: async () => detail };
