@@ -162,7 +162,8 @@ function fakeCheckoutDiff(entityId: string): DiffRead {
 }
 
 /**
- * The *Open in…* applications (#844): macOS's shipped four, transcribed,
+ * The *Open in…* applications (#844): macOS's shipped four, transcribed (each
+ * opening a pull request at its worktree since #2285),
  * because the browser this runs in has no platform to ask. The list a
  * session saves replaces them, as the backend's one settings row does.
  */
@@ -177,10 +178,22 @@ interface FakeApp {
 }
 
 const SHIPPED: FakeApp[] = [
-  { id: "vscode", name: "VS Code", command: 'open -a "Visual Studio Code" {path}', file_command: 'open -a "Visual Studio Code" {file}' },
-  { id: "terminal", name: "Terminal", command: "open -a Terminal {path}", file_command: null },
-  { id: "fork", name: "Fork", command: "open -a Fork {path}", file_command: null },
-  { id: "jetbrains", name: "IntelliJ IDEA", command: 'open -a "IntelliJ IDEA" {path}', file_command: 'open -a "IntelliJ IDEA" {file}' },
+  {
+    id: "vscode",
+    name: "VS Code",
+    command: 'open -a "Visual Studio Code" {path}',
+    file_command: 'open -a "Visual Studio Code" {file}',
+    pull_request_command: 'open -a "Visual Studio Code" {path}',
+  },
+  { id: "terminal", name: "Terminal", command: "open -a Terminal {path}", file_command: null, pull_request_command: "open -a Terminal {path}" },
+  { id: "fork", name: "Fork", command: "open -a Fork {path}", file_command: null, pull_request_command: "open -a Fork {path}" },
+  {
+    id: "jetbrains",
+    name: "IntelliJ IDEA",
+    command: 'open -a "IntelliJ IDEA" {path}',
+    file_command: 'open -a "IntelliJ IDEA" {file}',
+    pull_request_command: 'open -a "IntelliJ IDEA" {path}',
+  },
 ];
 
 let fakeApps: FakeApp[] = SHIPPED.map((app) => ({ ...app }));
