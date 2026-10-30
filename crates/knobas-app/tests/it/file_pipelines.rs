@@ -153,7 +153,10 @@ async fn run_bytes(steps: &[PipeStep], bytes: Vec<u8>, name: &str, limits: Limit
 async fn fixture() -> Fixture {
     helper();
     let db = knobas_db::test_util::scratch_database("file_pipelines").await;
-    let pool = db.pool(4).await.expect("a pool onto this test's own database");
+    let pool = db
+        .pool(4)
+        .await
+        .expect("a pool onto this test's own database");
     let shelf = Arc::new(Shelf::default());
     let id = format!("pipe-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let f = Fixture {
