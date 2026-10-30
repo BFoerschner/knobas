@@ -698,9 +698,14 @@ test("a .mmd file is drawn as a diagram in a sandboxed frame, and Source shows i
   expect(frame.getAttribute("sandbox")).toBe("");
   expect([frame.width, frame.height]).toEqual(["300", "120"]);
   expect(render.asked).toEqual(["flowchart LR\n  a --> b"]);
-  expect(viewButtons()).toEqual(["Rendered*", "Source"]);
+  expect(menuItems()).toEqual([
+    "*Mermaid built in · strict security DEFAULT FOR *.mmd",
+    "Source built in · highlighted",
+    "Use Source for *.mmd by default",
+    "Renderers and defaults… Settings › Renderers",
+  ]);
 
-  pickView("Source");
+  choose("Source built in");
   await settle();
   expect(target.querySelector(".tf-fileview iframe")).toBeNull();
   expect(lineText(1)).toEqual(["2", "  a --> b"]);
