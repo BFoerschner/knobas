@@ -70,6 +70,19 @@ export function defaultPattern(path: string): string {
   return dot > 0 ? `*${name.slice(dot).toLowerCase()}` : name;
 }
 
+/**
+ * The pattern *Make default* writes for a file `opened` under the defaults:
+ * the one that chose its current default (so a `docs/*.md` row is changed,
+ * not shadowed by a `*.md` it outranks), unless that pattern is broader than
+ * the file's own {@link defaultPattern}. A `*` row deciding a README must not
+ * become "Markdown for every file": the switcher's offer is per `*.ext`.
+ */
+export function makeDefaultPattern(opened: Opened, path: string): string {
+  const own = defaultPattern(path);
+  if (opened.pattern === null || specificity(opened.pattern) < specificity(own)) return own;
+  return opened.pattern;
+}
+
 /** `list` with `pattern` mapped to `renderer`: the existing row (same pattern, any case) changed in place, else one more at the end. */
 export function withDefault(list: readonly RendererDefault[], pattern: string, renderer: string): RendererDefault[] {
   const key = pattern.toLowerCase();

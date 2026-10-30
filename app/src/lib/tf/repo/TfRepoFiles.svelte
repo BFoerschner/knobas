@@ -62,7 +62,7 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
   import { allRenderers, imageUrl, type Renderer } from "../../render/registry";
-  import { defaultPattern, openWith, withDefault } from "../../render/defaults";
+  import { makeDefaultPattern, openWith, withDefault } from "../../render/defaults";
   import { rendererDefaults as appDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
@@ -393,8 +393,8 @@
     return opened.offered.find((r) => r.id === picked) ?? opened.renderer;
   });
   const drawAs = $derived(renderer?.id ?? null);
-  /** The pattern *Make default* writes: the one that chose the default, else the file's extension. */
-  const switchPattern = $derived(file === null ? "" : (opened?.pattern ?? defaultPattern(file.path)));
+  /** The pattern *Make default* writes: the one that chose the default, unless broader than the file's extension. */
+  const switchPattern = $derived(file === null || opened === null ? "" : makeDefaultPattern(opened, file.path));
 
   async function makeDefault(path: string, chosen: Renderer) {
     try {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { defaultPattern, openWith, withDefault, type RendererDefault } from "./defaults";
+import { defaultPattern, makeDefaultPattern, openWith, withDefault, type RendererDefault } from "./defaults";
 import { IMAGE, MARKDOWN, SOURCE, type Renderer } from "./registry";
 
 const PUML: Renderer = {
@@ -85,6 +85,22 @@ describe("defaultPattern", () => {
     expect(defaultPattern("archive.json.gz")).toBe("*.gz");
     expect(defaultPattern("justfile")).toBe("justfile");
     expect(defaultPattern(".gitignore")).toBe(".gitignore");
+  });
+});
+
+describe("makeDefaultPattern", () => {
+  test("is the pattern that chose the default, so a narrower row is changed rather than shadowed", () => {
+    const list: RendererDefault[] = [
+      { pattern: "*.md", renderer: "markdown" },
+      { pattern: "docs/*.md", renderer: "source" },
+    ];
+    expect(makeDefaultPattern(openWith(text("docs/plan.md"), BUILT_IN, list), "docs/plan.md")).toBe("docs/*.md");
+  });
+
+  test("is the file's own extension when a broader pattern chose the default, or none did", () => {
+    const everything: RendererDefault[] = [{ pattern: "*", renderer: "source" }];
+    expect(makeDefaultPattern(openWith(text("README.md"), BUILT_IN, everything), "README.md")).toBe("*.md");
+    expect(makeDefaultPattern(openWith(text("README.md"), BUILT_IN, []), "README.md")).toBe("*.md");
   });
 });
 
