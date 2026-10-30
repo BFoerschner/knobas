@@ -15,10 +15,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use knobas_app::file_pipeline::saved::{self, CommandStepDraft, NamedPipelineDraft};
 use knobas_app::file_pipeline::{
     Limits, PipeFormat, PipeOutput, PipeRun, PipeStep, PipeWhy, Piped, SIZE_CAP, run_on_file,
 };
-use knobas_app::file_pipeline::saved::{self, CommandStepDraft, NamedPipelineDraft};
 use knobas_app::renderers::{self, RendererDefault};
 use knobas_app::sources::live::LiveSources;
 use knobas_app::sources::{self, NewSource, Registry, SecretInput};
@@ -473,9 +473,9 @@ async fn a_step_past_its_timeout_is_stopped() {
         .cycle()
         .take(knobas_app::file_pipeline::WORKERS + 2)
         .map(|filter| {
-            tokio::spawn(async move {
-                run_bytes(&[jq(filter)], b"null".to_vec(), "x", limits).await
-            })
+            tokio::spawn(
+                async move { run_bytes(&[jq(filter)], b"null".to_vec(), "x", limits).await },
+            )
         })
         .collect();
     for run in endless {
@@ -852,7 +852,9 @@ async fn a_command_step_uppercases_the_content() {
 
     let run = f.pipe("notes.txt", &[step("gone")]).await;
     assert!(
-        failure(&run).error.contains("'gone' is not one of your command steps"),
+        failure(&run)
+            .error
+            .contains("'gone' is not one of your command steps"),
         "{run:?}"
     );
 }
@@ -902,7 +904,11 @@ async fn named_pipelines_round_trip_and_refuse_by_name() {
     };
     let saved = saved::save_named_pipelines(
         &f.pool,
-        &[draft(None, " Gzipped JSON ", vec![PipeStep::Gunzip, jq(".")])],
+        &[draft(
+            None,
+            " Gzipped JSON ",
+            vec![PipeStep::Gunzip, jq(".")],
+        )],
     )
     .await
     .unwrap();
@@ -910,7 +916,11 @@ async fn named_pipelines_round_trip_and_refuse_by_name() {
     assert_eq!(saved[0].name, "Gzipped JSON");
     let renamed = saved::save_named_pipelines(
         &f.pool,
-        &[draft(Some("gzipped-json"), "Events", vec![PipeStep::Gunzip])],
+        &[draft(
+            Some("gzipped-json"),
+            "Events",
+            vec![PipeStep::Gunzip],
+        )],
     )
     .await
     .unwrap();
@@ -920,7 +930,11 @@ async fn named_pipelines_round_trip_and_refuse_by_name() {
     let error = saved::save_named_pipelines(&f.pool, &[draft(None, "Empty", vec![])])
         .await
         .unwrap_err();
-    assert!(error.message.contains("Empty has no steps"), "{}", error.message);
+    assert!(
+        error.message.contains("Empty has no steps"),
+        "{}",
+        error.message
+    );
     let error = saved::save_named_pipelines(
         &f.pool,
         &[

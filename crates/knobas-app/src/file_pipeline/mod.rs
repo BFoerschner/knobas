@@ -41,9 +41,9 @@ mod jq;
 pub mod saved;
 mod steps;
 
-pub use child::{ARG as CHILD_ARG, main_if_asked};
 #[cfg(feature = "test-util")]
 pub use child::use_helper;
+pub use child::{ARG as CHILD_ARG, main_if_asked};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
@@ -441,27 +441,27 @@ async fn run_step(
         _ => on_worker(step.clone(), input, limits).await,
     };
     ran.map_err(|failure| match failure {
-            Failure::Error(error) => (PipeWhy::Error, error),
-            Failure::TooLarge => (
-                PipeWhy::TooLarge,
-                format!(
-                    "{name} was stopped at the size cap: its {} of input expands past {}",
-                    sized(size),
-                    sized(limits.cap)
-                ),
+        Failure::Error(error) => (PipeWhy::Error, error),
+        Failure::TooLarge => (
+            PipeWhy::TooLarge,
+            format!(
+                "{name} was stopped at the size cap: its {} of input expands past {}",
+                sized(size),
+                sized(limits.cap)
             ),
-            Failure::Stopped => (
-                PipeWhy::TimedOut,
-                format!("{name} did not finish in {}", seconds(limits.timeout)),
+        ),
+        Failure::Stopped => (
+            PipeWhy::TimedOut,
+            format!("{name} did not finish in {}", seconds(limits.timeout)),
+        ),
+        Failure::Busy => (
+            PipeWhy::TimedOut,
+            format!(
+                "{name} did not start in {}: every pipeline worker is busy with an earlier step",
+                seconds(limits.timeout)
             ),
-            Failure::Busy => (
-                PipeWhy::TimedOut,
-                format!(
-                    "{name} did not start in {}: every pipeline worker is busy with an earlier step",
-                    seconds(limits.timeout)
-                ),
-            ),
-        })
+        ),
+    })
 }
 
 /// A saved command step over `input` (ADR-0033): its stdout, or its stderr

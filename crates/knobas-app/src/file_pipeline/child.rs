@@ -184,4 +184,3 @@ fn framed(stdin: Vec<u8>) -> Option<(PipeStep, Vec<u8>)> {
     let mut stdin = stdin;
     Some((step, stdin.split_off(end)))
 }
-
