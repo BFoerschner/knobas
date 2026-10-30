@@ -1646,6 +1646,101 @@ async fn required_status_checks_block_until_they_pass() {
     }
 }
 
+/// The overview declares the required checks for the pull request's side
+/// rail (#2278), so the shell reads them without taking *Merge…*'s sentence
+/// apart: *Required checks* counts the passed against all required, toned
+/// err where one failed, info where one is pending or never reported, ok
+/// where all passed; one *Required check* fact names each required context
+/// (a pattern that matched nothing is named itself), so the shell can mark
+/// those rows of *Checks*. Where the status check is off nothing is declared.
+#[tokio::test]
+async fn the_overview_declares_its_required_checks() {
+    let cases = [
+        (
+            "required and passed",
+            json!(["ci/build"]),
+            json!([status("ci/build", "success"), status("ci/lint", "failure")]),
+            Some(("1 of 1 pass", Tone::Ok)),
+            vec!["ci/build"],
+        ),
+        (
+            "an error and a warning fail",
+            json!(["ci/*"]),
+            json!([status("ci/build", "error"), status("ci/lint", "warning")]),
+            Some(("0 of 2 pass", Tone::Err)),
+            vec!["ci/build", "ci/lint"],
+        ),
+        (
+            "never reported",
+            json!(["ci/build"]),
+            json!([]),
+            Some(("0 of 1 pass", Tone::Info)),
+            vec!["ci/build"],
+        ),
+        (
+            "one pending",
+            json!(["ci/*"]),
+            json!([status("ci/build", "success"), status("ci/lint", "pending")]),
+            Some(("1 of 2 pass", Tone::Info)),
+            vec!["ci/build", "ci/lint"],
+        ),
+        (
+            "a failure is louder than a pending one",
+            json!(["ci/*", "deploy"]),
+            json!([status("ci/build", "failure"), status("ci/lint", "pending")]),
+            Some(("0 of 3 pass", Tone::Err)),
+            vec!["ci/build", "ci/lint", "deploy"],
+        ),
+        (
+            "no contexts named: every status reported is required",
+            json!([]),
+            json!([status("deploy", "success"), status("ci/lint", "error")]),
+            Some(("1 of 2 pass", Tone::Err)),
+            vec!["deploy", "ci/lint"],
+        ),
+        (
+            "no contexts named and nothing reported",
+            json!([]),
+            json!([]),
+            Some(("none have reported", Tone::Info)),
+            vec![],
+        ),
+    ];
+    for (what, contexts, statuses, summary, named) in cases {
+        let server = gitea(mergeable_pull(), json!([])).await;
+        protect_main_with(
+            &server,
+            json!({ "enable_status_check": true, "status_check_contexts": contexts }),
+        )
+        .await;
+        head_statuses(&server, statuses).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        let facts = facts_of(section(&view, "overview"));
+        let drawn = fact(facts, "Required checks").map(|f| (f.value.as_str(), f.tone));
+        let expected = summary.map(|(value, tone)| (value, Some(tone)));
+        assert_eq!(drawn, expected, "{what}");
+        let required: Vec<&str> = facts
+            .iter()
+            .filter(|f| f.label == "Required check")
+            .map(|f| f.value.as_str())
+            .collect();
+        assert_eq!(required, named, "{what}");
+    }
+
+    // The status check off: nothing declared.
+    let server = gitea(mergeable_pull(), json!([])).await;
+    protect_main_with(
+        &server,
+        json!({ "enable_status_check": false, "status_check_contexts": ["ci/build"] }),
+    )
+    .await;
+    head_statuses(&server, json!([status("ci/build", "failure")])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    let facts = facts_of(section(&view, "overview"));
+    assert!(fact(facts, "Required checks").is_none());
+    assert!(fact(facts, "Required check").is_none());
+}
+
 /// Where the status check is off, or its statuses cannot be read, the checks
 /// decide nothing: a failing status on a check that is off is no blocker
 /// (#710's *Checks* still draws it), and a read Gitea refuses leaves

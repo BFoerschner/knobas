@@ -328,39 +328,108 @@ fn official_reviewers(reviews: &[Review], state: &str) -> Vec<String> {
 /// alternatives) is not judged: the doubt leaves *Merge…* enabled and
 /// Gitea's refusal says the rest (ADR-0004).
 fn unmet_checks(checks: &Checks) -> Option<Vec<String>> {
+    if checks.required.is_empty() && checks.reported.is_empty() {
+        return Some(Vec::new());
+    }
+    let unmet: Vec<String> = required_standing(checks)
+        .into_iter()
+        .filter_map(|(name, standing)| match standing {
+            Standing::Passed => None,
+            Standing::Failed => Some(format!("{name} failed")),
+            Standing::Pending => Some(format!("{name} is pending")),
+            Standing::Unreported => Some(format!("{name} has not reported")),
+        })
+        .collect();
+    (!unmet.is_empty()).then_some(unmet)
+}
+
+/// Where one required check stands on the head commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Standing {
+    Passed,
+    Failed,
+    Pending,
+    /// A required pattern no reported context matched.
+    Unreported,
+}
+
+/// Each required check by name, once, with where it stands, as
+/// [`unmet_checks`] reads Gitea's rule: with no context named every reported
+/// status, else each pattern's matches in the order Gitea reported them, or
+/// the pattern itself where it matched none. A pattern Gitea's glob reads
+/// beyond `*` and `?` is left out (not judged).
+fn required_standing(checks: &Checks) -> Vec<(String, Standing)> {
     let context = |status: &Status| status.context.clone().unwrap_or_default();
-    let verdict = |status: &Status| match status.status.as_deref().unwrap_or_default() {
-        "success" | "skipped" => None,
-        "error" | "failure" | "warning" => Some(format!("{} failed", context(status))),
-        _ => Some(format!("{} is pending", context(status))),
+    let standing = |status: &Status| match status.status.as_deref().unwrap_or_default() {
+        "success" | "skipped" => Standing::Passed,
+        "error" | "failure" | "warning" => Standing::Failed,
+        _ => Standing::Pending,
     };
-    let mut unmet = Vec::new();
-    if checks.required.is_empty() {
-        if checks.reported.is_empty() {
-            return Some(unmet);
+    let mut named: Vec<(String, Standing)> = Vec::new();
+    let mut add = |name: String, at: Standing| {
+        if !named.iter().any(|(seen, _)| *seen == name) {
+            named.push((name, at));
         }
-        unmet.extend(checks.reported.iter().filter_map(verdict));
-    } else {
-        for pattern in &checks.required {
-            if pattern.contains(['[', '{', '\\']) {
-                continue;
-            }
-            let matched: Vec<&Status> = checks
-                .reported
-                .iter()
-                .filter(|s| glob_matches(pattern, &context(s)))
-                .collect();
-            if matched.is_empty() {
-                unmet.push(format!("{pattern} has not reported"));
-            }
-            for line in matched.into_iter().filter_map(verdict) {
-                if !unmet.contains(&line) {
-                    unmet.push(line);
-                }
-            }
+    };
+    if checks.required.is_empty() {
+        for status in &checks.reported {
+            add(context(status), standing(status));
+        }
+        return named;
+    }
+    for pattern in &checks.required {
+        if pattern.contains(['[', '{', '\\']) {
+            continue;
+        }
+        let matched: Vec<&Status> = checks
+            .reported
+            .iter()
+            .filter(|s| glob_matches(pattern, &context(s)))
+            .collect();
+        if matched.is_empty() {
+            add(pattern.clone(), Standing::Unreported);
+        }
+        for status in matched {
+            add(context(status), standing(status));
         }
     }
-    (!unmet.is_empty()).then_some(unmet)
+    named
+}
+
+/// *Required checks* and one *Required check* per required context, for
+/// the pull request's side rail (#2278): the passed of all required, toned
+/// by the loudest standing (a failure err, a pending or unreported one info,
+/// all passed ok). Nothing where the base's protection does not enable the
+/// status check, or its statuses could not be read.
+fn required_facts(landing: &Landing) -> Vec<Fact> {
+    let Some(checks) = landing.checks.as_ref() else {
+        return Vec::new();
+    };
+    let named = required_standing(checks);
+    let passed = named.iter().filter(|(_, at)| *at == Standing::Passed).count();
+    let (value, tone) = if named.is_empty() {
+        ("none have reported".to_owned(), Tone::Info)
+    } else {
+        let tone = if named.iter().any(|(_, at)| *at == Standing::Failed) {
+            Tone::Err
+        } else if passed < named.len() {
+            Tone::Info
+        } else {
+            Tone::Ok
+        };
+        (format!("{passed} of {} pass", named.len()), tone)
+    };
+    let mut facts = vec![Fact {
+        label: "Required checks".to_owned(),
+        value,
+        tone: Some(tone),
+    }];
+    facts.extend(named.into_iter().map(|(name, _)| Fact {
+        label: "Required check".to_owned(),
+        value: name,
+        tone: None,
+    }));
+    facts
 }
 
 /// `pattern` against the whole of `text`: `*` any run of characters, `?`
@@ -487,6 +556,8 @@ pub(super) fn mergeable_fact(pull: &Pull, reviews: &[Review], landing: &Landing)
 ///   does not read as work in progress ([`Blocker::Conflict`]'s reading);
 ///   nothing while Gitea has not said, and nothing for a work-in-progress
 ///   title, whose `false` says nothing about a conflict.
+/// - *Required checks* and each *Required check* ([`required_facts`],
+///   #2278), where the base's protection enables the status check.
 pub(super) fn ready_facts(pull: &Pull, reviews: &[Review], landing: &Landing) -> Vec<Fact> {
     if !pull.is_open() {
         return Vec::new();
@@ -522,6 +593,7 @@ pub(super) fn ready_facts(pull: &Pull, reviews: &[Review], landing: &Landing) ->
         value,
         tone: Some(tone),
     }));
+    facts.extend(required_facts(landing));
     facts
 }
 
