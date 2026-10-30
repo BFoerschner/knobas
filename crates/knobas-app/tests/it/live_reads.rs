@@ -22,7 +22,7 @@ use knobas_app::sources::live::LiveSources;
 use knobas_app::sources::{self, NewSource, Registry, SecretInput, SourcePatch, SourcesError};
 use knobas_secrets::{KeychainAccount, MemoryStore, Secret, SecretError, SecretStore};
 use knobas_source::instance::SourceInstance;
-use knobas_source::view::{Block, SourceView, Standing, ViewSection};
+use knobas_source::view::{BYTES_CAP, Block, FileBytes, SourceView, Standing, ViewSection};
 use knobas_source::{AuthMethod, Source, SourceDescriptor, SourceError};
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
@@ -126,6 +126,39 @@ impl Source for Fake {
     fn refusal_standing(&self, ask: &knobas_source::grants::WriteAsk) -> Standing {
         if key(&ask.entity).starts_with("moving/") {
             Standing::Moving
+        } else {
+            Standing::Live
+        }
+    }
+    /// A file `<name>-<n>.bin` is `n` bytes of `7`, refused over the cap with
+    /// its size as an adapter must (never cut); read at a commit it is fixed.
+    async fn file_bytes(
+        &self,
+        entity: &str,
+        path: &str,
+        commit: Option<&str>,
+        cap: u64,
+    ) -> Result<Option<FileBytes>, SourceError> {
+        self.seen
+            .reads
+            .lock()
+            .unwrap()
+            .push((entity.to_owned(), Some(format!("bytes:{path}@{commit:?}"))));
+        let size: u64 = path
+            .trim_end_matches(".bin")
+            .rsplit('-')
+            .next()
+            .and_then(|n| n.parse().ok())
+            .ok_or_else(|| SourceError::protocol(format!("no file {path:?}")))?;
+        Ok(Some(if size > cap {
+            FileBytes::TooLarge { size }
+        } else {
+            FileBytes::Read(vec![7; usize::try_from(size).unwrap()])
+        }))
+    }
+    fn bytes_standing(&self, _entity: &str, _path: &str, commit: Option<&str>) -> Standing {
+        if commit.is_some() {
+            Standing::Fixed
         } else {
             Standing::Live
         }
@@ -787,6 +820,91 @@ async fn grants_are_kept_and_read_again_behind() {
     f.refused("ticket/1").await;
     f.refused("ticket/1").await;
     assert_eq!(f.seen.grants.load(Ordering::SeqCst) - before, 2, "live");
+}
+
+// -- the byte read (#2256) ----------------------------------------------------
+
+impl Fixture {
+    /// `path`'s bytes through the command's body, as the shell's
+    /// `entityFileBytes` asks them.
+    async fn bytes(
+        &self,
+        key: &str,
+        path: &str,
+        commit: Option<&str>,
+    ) -> Result<Vec<u8>, knobas_app::IpcError> {
+        knobas_app::commands::entity::entity_file_bytes_inner(
+            &self.pool,
+            &self.secrets,
+            &self.registry,
+            &self.live,
+            &self.entity(key),
+            path,
+            commit,
+        )
+        .await
+    }
+}
+
+/// A file's bytes at a commit are read once: the second look at a README's
+/// image costs the source nothing. Without a commit, every time.
+#[tokio::test]
+async fn a_byte_read_at_a_commit_is_read_once() {
+    let f = fixture().await;
+    let sha = Some("1f0e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c");
+    assert_eq!(
+        f.bytes("repo/r", "logo-5.bin", sha).await.unwrap(),
+        vec![7; 5]
+    );
+    assert_eq!(
+        f.bytes("repo/r", "logo-5.bin", sha).await.unwrap(),
+        vec![7; 5]
+    );
+    assert_eq!(f.seen.reads(), 1, "the second look is the cache's");
+    f.bytes("repo/r", "other-5.bin", sha).await.unwrap();
+    assert_eq!(f.seen.reads(), 2, "another file at the commit is read");
+    f.bytes("repo/r", "logo-5.bin", None).await.unwrap();
+    f.bytes("repo/r", "logo-5.bin", None).await.unwrap();
+    assert_eq!(f.seen.reads(), 4, "a read at a moving name is never kept");
+}
+
+/// **The cap, at the IPC seam**: a file one byte over it is refused, `invalid`,
+/// with its size and the cap in the message, and none of it answered; one at
+/// the cap exactly is answered whole.
+#[tokio::test]
+async fn a_file_over_the_cap_is_refused_with_its_size() {
+    let f = fixture().await;
+    let refused = f
+        .bytes("repo/r", "scan-66479718.bin", Some("c0ffee"))
+        .await
+        .expect_err("over the cap");
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
+    assert_eq!(
+        refused.message,
+        "scan-66479718.bin is 63.4 MiB; knobas reads a file's bytes up to 50 MiB"
+    );
+    let over = format!("edge-{}.bin", BYTES_CAP + 1);
+    assert!(f.bytes("repo/r", &over, Some("c0ffee")).await.is_err());
+    let at = format!("edge-{BYTES_CAP}.bin");
+    let whole = f.bytes("repo/r", &at, Some("c0ffee")).await.unwrap();
+    assert_eq!(whole.len() as u64, BYTES_CAP, "at the cap, whole");
+}
+
+/// Kept bytes count by their length against the bound: two files that fit
+/// are kept, one longer than the whole bound is answered and not kept.
+#[tokio::test]
+async fn kept_bytes_count_by_their_length() {
+    // Room for two 10,000-byte files, and as JSON number arrays for none.
+    let f = fixture_bound(25_000).await;
+    let sha = Some("c0ffee");
+    f.bytes("repo/r", "a-10000.bin", sha).await.unwrap();
+    f.bytes("repo/r", "b-10000.bin", sha).await.unwrap();
+    f.bytes("repo/r", "a-10000.bin", sha).await.unwrap();
+    f.bytes("repo/r", "b-10000.bin", sha).await.unwrap();
+    assert_eq!(f.seen.reads(), 2, "both held");
+    f.bytes("repo/r", "c-30000.bin", sha).await.unwrap();
+    f.bytes("repo/r", "c-30000.bin", sha).await.unwrap();
+    assert_eq!(f.seen.reads(), 4, "longer than the bound: not kept");
 }
 
 /// A new credential while a read behind is under way: the read, made with

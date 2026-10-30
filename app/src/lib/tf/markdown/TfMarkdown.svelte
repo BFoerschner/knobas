@@ -8,12 +8,17 @@
   - an external link (`tf-ext`) goes to the opener, never the webview;
   - an in-page `#anchor` scrolls to its heading;
   - a fence's *Copy* copies its code;
+  - a relative image is read through `image` (the source's byte read) and
+    drawn from a blob URL, an SVG sanitized first; one the read refuses is
+    its alt text and the reason;
   - fences are drawn by the renderer registry, highlighted where no renderer
     claims them, and stopped when the text changes or the component goes.
 -->
 <script lang="ts">
   import { drawFences, fenceCode, markdownFragment, type MarkdownLinks } from "../../render/markdown";
+  import { imageBlob } from "../../render/image";
   import { renderPort, type RenderPort } from "../../render/port";
+  import { ipcErrorMessage } from "../../ipc";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { push } from "../../shell/toasts.svelte";
 
@@ -24,6 +29,7 @@
     openExternal = realOpenExternal,
     copy = (code: string) => navigator.clipboard.writeText(code),
     render = renderPort(),
+    image = null,
   }: {
     /** The Markdown. */
     text: string;
@@ -37,12 +43,54 @@
     copy?: (code: string) => Promise<void>;
     /** The engines fences are drawn with (#2254): the app's workers, a fake in tests. */
     render?: RenderPort;
+    /**
+     * The byte read of a repository file (#2256), for relative images; `null` where the surface has no repository,
+     * and such an image loads nothing.
+     */
+    image?: ((path: string) => Promise<Uint8Array>) | null;
   } = $props();
 
-  /** Draws the text; again whenever it, its base or its links change. */
+  /** Draws the text; again whenever it, its base, its links or its image read change. */
   function paint(node: HTMLElement) {
     node.replaceChildren(markdownFragment(text, { base, fileLink }));
-    return drawFences(node, render);
+    const stopFences = drawFences(node, render);
+    const stopImages = image === null ? () => {} : drawImages(node, image);
+    return () => {
+      stopFences();
+      stopImages();
+    };
+  }
+
+  /**
+   * Fills each relative image from the byte read, as a blob URL; one the read
+   * refuses becomes its alt text and the reason. Returns how to stop: answers
+   * after it are dropped, and every URL made is revoked.
+   */
+  function drawImages(node: HTMLElement, read: (path: string) => Promise<Uint8Array>) {
+    let live = true;
+    const urls: string[] = [];
+    for (const img of node.querySelectorAll<HTMLImageElement>("img[data-md-path]")) {
+      const path = img.dataset["mdPath"] ?? "";
+      read(path).then(
+        (bytes) => {
+          if (!live) return;
+          const url = URL.createObjectURL(imageBlob(bytes, path));
+          urls.push(url);
+          img.src = url;
+        },
+        (error: unknown) => {
+          if (!live) return;
+          const missing = document.createElement("span");
+          missing.className = "tf-md-noimg";
+          missing.textContent = img.alt === "" ? ipcErrorMessage(error) : `${img.alt}: ${ipcErrorMessage(error)}`;
+          img.replaceWith(missing);
+        },
+      );
+    }
+    return () => {
+      live = false;
+      for (const url of urls) URL.revokeObjectURL(url);
+    };
   }
 
   function follow(node: HTMLElement) {

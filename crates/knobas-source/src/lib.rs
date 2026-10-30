@@ -2063,6 +2063,40 @@ pub trait Source: Send + Sync {
         let _ = (entity, section);
         view::Standing::Live
     }
+    /// The bytes of the file at `path` in `entity`'s tree (#2256, spec #2234
+    /// step 5), read whole up to `cap` bytes: a README's image, a PDF.
+    ///
+    /// `commit` is a [`Block::File`](view::Block::File)'s `commit`, handed
+    /// back: the read is at that commit, where the file the reader has open
+    /// was read. `None` reads at the entity's own reference (its branch, its
+    /// repository's default branch).
+    ///
+    /// A file longer than `cap` is [`FileBytes::TooLarge`](view::FileBytes::TooLarge)
+    /// with its size; the adapter stops reading past the cap and never
+    /// answers a cut file. A path that is no file is
+    /// [`SourceError::Protocol`].
+    ///
+    /// `Ok(None)` is **this adapter reads no file bytes**, and is the
+    /// default.
+    async fn file_bytes(
+        &self,
+        entity: &str,
+        path: &str,
+        commit: Option<&str>,
+        cap: u64,
+    ) -> Result<Option<view::FileBytes>, SourceError> {
+        let _ = (entity, path, commit, cap);
+        Ok(None)
+    }
+    /// What [`file_bytes`](Source::file_bytes)' answer for the same
+    /// arguments stands at, as [`view_standing`](Source::view_standing) says
+    /// it of a view (ADR-0032, #2256): [`Standing::Fixed`](view::Standing::Fixed)
+    /// only where `commit` names a commit no push can change. The default is
+    /// [`Standing::Live`](view::Standing::Live). Pure: it reads nothing.
+    fn bytes_standing(&self, entity: &str, path: &str, commit: Option<&str>) -> view::Standing {
+        let _ = (entity, path, commit);
+        view::Standing::Live
+    }
     /// A pipeline's settings, read live (ADR-0022, issue #851): the
     /// repositories it builds, its triggers and its parameters, scrubbed of
     /// every credential. `entity` is a pipeline's [`EntityRef`] in string

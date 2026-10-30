@@ -542,6 +542,32 @@ impl Source for GiteaSource {
         crate::view::draw(self, entity, section).await
     }
 
+    /// A file's bytes, whole or refused over the cap (#2256); see
+    /// [`crate::view::file_bytes`].
+    async fn file_bytes(
+        &self,
+        entity: &str,
+        path: &str,
+        commit: Option<&str>,
+        cap: u64,
+    ) -> Result<Option<knobas_source::view::FileBytes>, SourceError> {
+        crate::view::file_bytes(self, entity, path, commit, cap)
+            .await
+            .map(Some)
+    }
+
+    /// A byte read at a full sha is fixed (#2256); see
+    /// [`crate::view::bytes_standing`].
+    fn bytes_standing(
+        &self,
+        entity: &str,
+        path: &str,
+        commit: Option<&str>,
+    ) -> knobas_source::view::Standing {
+        let _ = path;
+        crate::view::bytes_standing(self, entity, commit)
+    }
+
     /// Every write's grants move (#2241): the account may be given or lose
     /// a push, the repository turned from a mirror, the branch protected.
     /// Kept by the app and asked again behind, so a repository's probe is
