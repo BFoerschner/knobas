@@ -228,7 +228,7 @@ The app process's memory of [source views](#source-view) and of files' bytes (a 
 _Avoid_: mirror (the database's copy, written by sync), store, snapshot
 
 **Diff**:
-The line-by-line difference between two versions of a set of files, as a source view's diff block carries it: per file its path and old path, what happened to it, its line counts and its hunks. Parsed from the unified diff text a git server answers, by one parser every git adapter shares. Capped per file and per view; a file over the cap keeps its counts and says it was cut. A pull request's diff also carries its **line threads** and may take new line comments.
+The line-by-line difference between two versions of a set of files, as a source view's diff block carries it: per file its path and old path, what happened to it, its line counts and its hunks. Parsed from the unified diff text a git server answers, or that local read-only git answers at a checkout holding both commits (ADR-0036; only there can whitespace be ignored), by one parser every git adapter shares. Capped per file and per view; a file over the cap keeps its counts and says it was cut. A pull request's diff also carries its **line threads** and may take new line comments.
 _Avoid_: patch (the text before it is parsed), changeset, delta
 
 **File pipeline**:

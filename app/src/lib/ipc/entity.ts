@@ -60,6 +60,8 @@ import type {
   ProposalEvidence,
   Protocol,
   PublishTarget,
+  PullRequestWorktree,
+  RangeDiff,
   Reached,
   RefusedWrite,
   RuleTicket,
@@ -120,6 +122,7 @@ export type {
   DiffLine,
   DiffRange,
   DiffRead,
+  DiffReadAt,
   DigestLine,
   DocAncestor,
   DocBacklink,
@@ -224,7 +227,9 @@ export type {
   Protocol,
   Publication,
   PublishTarget,
+  PullRequestWorktree,
   RangeCommit,
+  RangeDiff,
   ReachOrigin,
   Reached,
   RefusedWrite,
@@ -1282,6 +1287,35 @@ export function objectPage(entityId: string, object: OpenObject): Promise<string
 }
 
 /**
+ * What *Open in › Diff tool* would run for `base`..`head` — `diff_tool`
+ * (#2275): `git difftool --dir-diff --gui --no-prompt` at the checkout, `git`
+ * first. `null` when it is not offered: no checkout, or an end that is not a
+ * sha the checkout holds.
+ */
+export function diffTool(entityId: string, base: string, head: string): Promise<string[] | null> {
+  return invoke<string[] | null>("diff_tool", { entityId, base, head });
+}
+
+/** Start the Diff tool on `base`..`head` — `open_diff_tool` (#2275). Answers the argv it started. */
+export function openDiffTool(entityId: string, base: string, head: string): Promise<string[]> {
+  return invoke<string[]>("open_diff_tool", { entityId, base, head });
+}
+
+/** The pull request worktrees knobas made under the clones root — `pull_request_worktrees` (#2285). */
+export function pullRequestWorktrees(): Promise<PullRequestWorktree[]> {
+  return invoke<PullRequestWorktree[]>("pull_request_worktrees");
+}
+
+/**
+ * Remove one pull request worktree knobas made — `remove_pull_request_worktree`
+ * (#2285). git refuses one with changes or untracked files (`conflict`).
+ * Answers the list as it then stands.
+ */
+export function removePullRequestWorktree(path: string): Promise<PullRequestWorktree[]> {
+  return invoke<PullRequestWorktree[]>("remove_pull_request_worktree", { path });
+}
+
+/**
  * Clone a repository into `<clones root>/<name>`, or stop the clone that is
  * running — `clone_repo` (#823, ADR-0023).
  *
@@ -1303,6 +1337,16 @@ export function cloneRepo(entityId: string, stop?: boolean): Promise<CloneAnswer
  */
 export function entityCheckoutDiff(entityId: string): Promise<DiffRead> {
   return invoke<DiffRead>("entity_checkout_diff", { entityId });
+}
+
+/**
+ * The diff from `base` to `head` of a repository — `entity_range_diff`
+ * (#2272, ADR-0036): local read-only git when its checkout holds both
+ * commits (whitespace ignored when asked), else the source's compare read.
+ * `read_at` says which; only `checkout` ignores whitespace.
+ */
+export function entityRangeDiff(entityId: string, base: string, head: string, ignoreWhitespace: boolean): Promise<RangeDiff> {
+  return invoke<RangeDiff>("entity_range_diff", { entityId, base, head, ignoreWhitespace });
 }
 
 /** What the capture shortcut is set to, and whether it holds — `capture_shortcut` (#503). */

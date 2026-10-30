@@ -384,6 +384,10 @@ pub fn run() {
             commands::entity::open_checkout,
             commands::entity::open_object,
             commands::entity::object_page,
+            commands::entity::diff_tool,
+            commands::entity::open_diff_tool,
+            commands::entity::pull_request_worktrees,
+            commands::entity::remove_pull_request_worktree,
             commands::search::search,
             commands::search::launcher_home,
             commands::search::smart_lists,
@@ -509,6 +513,7 @@ pub fn run() {
             // #824's uncommitted diff at a checkout, appended at the foot:
             // the list is append-only (§10.8).
             commands::entity::entity_checkout_diff,
+            commands::entity::entity_range_diff,
             // #819's two conversation reads, appended at the foot: the list
             // is append-only (§10.8).
             commands::entity::visit_entity,

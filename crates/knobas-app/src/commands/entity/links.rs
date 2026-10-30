@@ -344,6 +344,38 @@ pub async fn entity_view<R: tauri::Runtime>(
     .map_err(|error| crate::sources::to_ipc(&error, None))
 }
 
+/// The diff from `base` to `head` of the repository `entity_id` (#2272,
+/// ADR-0036): read by local read-only git when its checkout holds both
+/// commits, with whitespace ignored when `ignore_whitespace` asks; otherwise
+/// the source's compare read, kept by sha pair. `read_at` says which, and so
+/// whether whitespace could be ignored.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what the source's read refuses with when the source answers.
+#[tauri::command]
+pub async fn entity_range_diff<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+    ignore_whitespace: bool,
+) -> Result<crate::checkout::RangeDiff, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::checkout::range_diff(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &base,
+        &head,
+        ignore_whitespace,
+    )
+    .await
+}
+
 /// The bytes of the file at `path` in `entity_id`'s tree (#2256, spec #2234
 /// step 5): a README's relative image, a PDF. `commit` is the `commit` of the
 /// file block the reader has open, handed back, so a README's image is read

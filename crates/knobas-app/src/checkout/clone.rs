@@ -50,7 +50,7 @@ use knobas_sync::scheduler::AdapterRegistry;
 
 use crate::IpcError;
 
-use super::working_tree;
+use super::working_tree::{self, PROTOCOL_VARIABLES, REPOSITORY_VARIABLES};
 
 /// At most one progress event per this long, per clone, besides one on each
 /// change of step. `activity:new`'s rate, and for its reason: events carry
@@ -358,27 +358,7 @@ async fn start_with(
     protocols: &[&str],
 ) -> Result<CloneAnswer, IpcError> {
     let repo_id = repo_id(pool, entity_id).await?;
-
-    let source: Option<(String, String, serde_json::Value)> = sqlx::query_as(
-        "select s.kind, s.base_url, s.config
-           from sync.item i join knobas.source_config s on s.id = i.source_id
-          where i.entity_id = $1",
-    )
-    .bind(&repo_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(IpcError::internal)?;
-    let (kind, base_url, config) = source.ok_or_else(|| {
-        IpcError::not_found(format!(
-            "{repo_id}'s source is no longer configured, so there is no address to clone from"
-        ))
-    })?;
-
-    let key = EntityRef::parse(&repo_id).map_err(IpcError::invalid)?.key;
-    let name = clone::FullName::parse(&key).map_err(IpcError::invalid)?;
-    let url = resolve_clone_url(
-        registry, &repo_id, &kind, &base_url, &config, &name, protocols,
-    )?;
+    let (url, name) = url_of(pool, registry, &repo_id, protocols).await?;
 
     let root = super::clones_root(pool).await?.ok_or_else(|| {
         IpcError::invalid("no clones root is set: choose where clones go in Settings › Checkouts")
@@ -448,6 +428,39 @@ async fn start_with(
             Err(error)
         }
     }
+}
+
+/// The URL git reaches repository `repo_id` at, and its checked name: the
+/// source's typed address and the full name, as ADR-0023 builds it. What a
+/// clone clones from, and what a pull request's worktree fetches from
+/// (ADR-0035).
+pub(super) async fn url_of(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    repo_id: &str,
+    protocols: &[&str],
+) -> Result<(String, clone::FullName), IpcError> {
+    let source: Option<(String, String, serde_json::Value)> = sqlx::query_as(
+        "select s.kind, s.base_url, s.config
+           from sync.item i join knobas.source_config s on s.id = i.source_id
+          where i.entity_id = $1",
+    )
+    .bind(repo_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    let (kind, base_url, config) = source.ok_or_else(|| {
+        IpcError::not_found(format!(
+            "{repo_id}'s source is no longer configured, so there is no address to reach it at"
+        ))
+    })?;
+
+    let key = EntityRef::parse(repo_id).map_err(IpcError::invalid)?.key;
+    let name = clone::FullName::parse(&key).map_err(IpcError::invalid)?;
+    let url = resolve_clone_url(
+        registry, repo_id, &kind, &base_url, &config, &name, protocols,
+    )?;
+    Ok((url, name))
 }
 
 /// The URL git clones `name` from: the code-host read `clone_urls` (#1197).
@@ -552,21 +565,15 @@ async fn spawn_into(
         .env("GIT_TERMINAL_PROMPT", "0")
         // git's own words, untranslated: `failure_cause` matches English.
         .env("LC_ALL", "C")
-        // Each of these would override the `-c protocol.*` flags or point git
-        // at a repository other than the new folder.
-        .env_remove("GIT_ALLOW_PROTOCOL")
-        .env_remove("GIT_CONFIG_PARAMETERS")
-        .env_remove("GIT_CONFIG_COUNT")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env_remove("GIT_COMMON_DIR")
-        .env_remove("GIT_OBJECT_DIRECTORY")
-        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // Each of these would override the `-c protocol.*` flags or point git at
+    // a repository other than the new folder.
+    for name in PROTOCOL_VARIABLES.into_iter().chain(REPOSITORY_VARIABLES) {
+        command.env_remove(name);
+    }
     // The folder made above goes whenever git did not start, also when the
     // spawn's task did not finish.
     let spawned = spawn_off_runtime(command).await;

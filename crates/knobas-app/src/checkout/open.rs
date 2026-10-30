@@ -33,7 +33,9 @@
 //!
 //! A repository, a file, a commit, a range and a pull request all go through
 //! [`open_object`] and the one [`spawn`]; an application is offered for an
-//! object only when it has a command for it.
+//! object only when it has a command for it. A pull request's `{path}` is its
+//! worktree under the clones root, not the checkout (#2285, ADR-0035,
+//! [`super::worktree`]).
 
 use std::path::{Path, PathBuf};
 
@@ -290,6 +292,32 @@ pub async fn open_object(
     application: Option<&str>,
     object: &Object,
 ) -> Result<Vec<String>, IpcError> {
+    open_object_admitting(
+        pool,
+        registry,
+        entity_id,
+        application,
+        object,
+        &knobas_core::checkout::clone::PROTOCOLS,
+    )
+    .await
+}
+
+/// [`open_object`], a pull request's worktree fetching over `protocols`: the
+/// test-only door to a folder or the testenv's http, as *Clone*'s
+/// `start_admitting` is.
+///
+/// # Errors
+///
+/// As [`open_object`], and [`super::worktree::open`]'s for a pull request.
+pub async fn open_object_admitting(
+    pool: &PgPool,
+    registry: Option<&dyn AdapterRegistry>,
+    entity_id: &str,
+    application: Option<&str>,
+    object: &Object,
+    protocols: &[&str],
+) -> Result<Vec<String>, IpcError> {
     let checkout = super::resolve(pool, entity_id).await?;
     let path = checkout.path.ok_or_else(|| {
         IpcError::not_found(format!(
@@ -333,6 +361,30 @@ pub async fn open_object(
             page(pool, registry, entity_id, object).await?
         }
         _ => None,
+    };
+    // A pull request opens in its own worktree, never the person's checkout
+    // (#2285, ADR-0035). The template is checked first, so a command that
+    // cannot run fetches nothing.
+    rules::check_for(&template, kind)
+        .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))?;
+    let checkout = match (object, registry) {
+        (Object::PullRequest { number, item, .. }, Some(registry)) => {
+            super::worktree::open(
+                pool,
+                registry,
+                entity_id,
+                *number,
+                item.as_deref(),
+                protocols,
+            )
+            .await?
+        }
+        (Object::PullRequest { .. }, None) => {
+            return Err(IpcError::invalid(
+                "a pull request opens in its worktree, which needs the source's address",
+            ));
+        }
+        _ => checkout,
     };
     let code = Code::of(object, url);
     let argv = rules::fill(

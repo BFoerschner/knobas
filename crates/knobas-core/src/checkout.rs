@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 
 pub mod clone;
 pub mod open;
+pub mod worktree;
 
 /// A remote URL reduced to the three things that identify a repository.
 ///

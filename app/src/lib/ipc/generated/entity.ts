@@ -717,6 +717,17 @@ reviewed?: string, };
 export type DiffRead = { "status": "read" } & UncommittedDiff | { "status": "no_git" } | { "status": "not_a_repo" } | { "status": "failed", reason: string, };
 
 /**
+ * Where a [`RangeDiff`] was read.
+ *
+ * - `checkout`: local read-only git at the repository's checkout, which
+ *   holds both commits (ADR-0036).
+ * - `source`: the source's compare read, kept by sha pair (ADR-0032).
+ *
+ * Issue #2272.
+ */
+export type DiffReadAt = "checkout" | "source";
+
+/**
  * One line of one list: what it is about, and why it is here.
  *
  * Story 59 -- *"every digest line links to the commit, PR, worklog, comment
@@ -2688,9 +2699,16 @@ address: string, };
  * - `range`: the diff between two commits or branches, as the diff address
  *   names them (`base` may be `<sha>^`).
  * - `pull_request`: by its number, with its base and head as the page knows
- *   them, and the head's branch.
+ *   them, and the head's branch. An application opens it in its worktree
+ *   under the clones root (#2285, ADR-0035), never in the person's checkout.
  */
-export type OpenObject = { "kind": "repository" } | { "kind": "file", path: string, line: number | null, at: string | null, } | { "kind": "commit", sha: string, } | { "kind": "range", base: string, head: string, } | { "kind": "pull_request", number: number, base: string, head: string, branch: string, };
+export type OpenObject = { "kind": "repository" } | { "kind": "file", path: string, line: number | null, at: string | null, } | { "kind": "commit", sha: string, } | { "kind": "range", base: string, head: string, } | { "kind": "pull_request", number: number, base: string, head: string, branch: string, 
+/**
+ * The pull request's own entity id, when the page has one: knobas's
+ * bookkeeping of its worktree (#2285), read against the mirror to
+ * tell a closed one. Never an argument and never a placeholder.
+ */
+item?: string | null, };
 
 /**
  * Which kind of [`Object`]: what an application declares it accepts by
@@ -3083,10 +3101,41 @@ source_id: string,
 parent: string, };
 
 /**
+ * A worktree, as Settings › Checkouts lists it.
+ *
+ * - `closed`: The mirror holds the pull request closed or merged.
+ *
+ * Issue #2285.
+ */
+export type PullRequestWorktree = { repo_entity_id: string, number: number, path: string, closed: boolean, };
+
+/**
  * One commit of a [`DiffRange`]: its whole sha, its subject and a quiet
  * second reading (author, age) as a commit row has.
  */
 export type RangeCommit = { sha: string, title: string, meta: string | null, };
+
+/**
+ * The diff between two commits of a repository, from wherever it was read.
+ *
+ * Issue #2272.
+ */
+export type RangeDiff = { files: Array<DiffFile>, 
+/**
+ * A cap cut it (ADR-0020 rule 6).
+ */
+truncated: boolean, 
+/**
+ * The two whole shas it is between, where they are settled; `None` for
+ * a range from before the repository's first commit, and where the
+ * source did not name them.
+ */
+range: DiffRange | null, 
+/**
+ * Local git or the source. Whitespace is ignored only at `checkout`:
+ * the source's API cannot return a diff with whitespace ignored.
+ */
+read_at: DiffReadAt, };
 
 /**
  * Where a reached entity's path came from.

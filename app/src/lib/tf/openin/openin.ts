@@ -6,6 +6,7 @@
  * from this disk (`knobas_core::checkout::open`); what is filled here is only
  * drawn, as prototype-6's `fill`.
  */
+import { keyOf } from "../../time/format";
 import type {
   CheckoutApplication,
   CheckoutSettings,
@@ -217,4 +218,24 @@ export function fillObject(command: string, at: ObjectFill): string {
 export function firstLine(file: DiffFile): number | null {
   const lines = file.hunks.flatMap((hunk) => hunk.lines);
   return lines.find((line) => line.kind === "add")?.new ?? lines.find((line) => line.new !== null)?.new ?? null;
+}
+
+// -- a pull request's worktree and the Diff tool (#2275, #2285) ----------------
+
+/**
+ * Where an application opens pull request `number` of repository `repoEntityId`
+ * (ADR-0035): `<clones root>/pull-requests/<owner>/<repo>-<number>`, as the
+ * backend's `knobas_core::checkout::worktree::folder` puts it. `null` without a
+ * clones root or an `owner/repo` key.
+ */
+export function worktreeOf(clonesRoot: string | null, repoEntityId: string | null, number: number): string | null {
+  if (clonesRoot === null || repoEntityId === null) return null;
+  const [owner, repo, ...rest] = keyOf(repoEntityId).split("/");
+  if (!owner || !repo || rest.length > 0) return null;
+  return `${clonesRoot.replace(/\/+$/, "")}/pull-requests/${owner}/${repo}-${number}`;
+}
+
+/** Whether `end` is a sha the Diff tool takes: 7 to 64 hex digits, a base with one `^` allowed. */
+export function isDiffEnd(end: string, base: boolean): boolean {
+  return (base ? /^[0-9a-f]{7,64}\^?$/i : /^[0-9a-f]{7,64}$/i).test(end);
 }

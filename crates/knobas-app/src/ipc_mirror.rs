@@ -171,6 +171,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_core::checkout::open::Object::export_all(cfg)?;
     knobas_core::checkout::open::ObjectKind::export_all(cfg)?;
     crate::checkout::open::GitFound::export_all(cfg)?;
+    crate::checkout::worktree::PullRequestWorktree::export_all(cfg)?;
     crate::checkout::open::CheckoutSettings::export_all(cfg)?;
     crate::checkout::clone::FailureCause::export_all(cfg)?;
     crate::checkout::clone::CloneState::export_all(cfg)?;
@@ -179,6 +180,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::checkout::uncommitted::CappedDiff::export_all(cfg)?;
     crate::checkout::uncommitted::UncommittedDiff::export_all(cfg)?;
     crate::checkout::uncommitted::DiffRead::export_all(cfg)?;
+    crate::checkout::DiffReadAt::export_all(cfg)?;
+    crate::checkout::RangeDiff::export_all(cfg)?;
     crate::capture::ShortcutView::export_all(cfg)?;
     crate::capture::Recorded::export_all(cfg)?;
     crate::conversation::ThreadComment::export_all(cfg)?;

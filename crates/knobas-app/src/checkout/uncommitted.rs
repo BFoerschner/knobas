@@ -250,7 +250,7 @@ async fn untracked(git: &Path, path: &Path, cap: usize) -> Result<(Vec<String>, 
 /// Run `command` and read its stdout up to `max_lines` lines or `max_bytes`
 /// bytes; past either git is killed. Answers what was read and whether the
 /// cut came, or the refusal git gave.
-async fn run_capped(
+pub(super) async fn run_capped(
     command: tokio::process::Command,
     max_lines: usize,
     max_bytes: usize,

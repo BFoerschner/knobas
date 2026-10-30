@@ -1277,6 +1277,8 @@ const CASES: Case[] = [
             entityCheckout: () => deferred(CLONED),
             objectPage: () => deferred(null),
             openExternal: () => deferred(undefined),
+            diffTool: () => deferred(null),
+            openDiffTool: () => deferred([]),
           },
         },
       }),
@@ -1489,7 +1491,12 @@ const CASES: Case[] = [
     open: (target) => ({
       app: mount(TfCheckoutsSection, {
         target,
-        props: { apps: residueApps(), saveRoot: () => deferred(undefined), layers: createLayers() },
+        props: {
+          apps: residueApps(),
+          saveRoot: () => deferred(undefined),
+          worktreePorts: { list: () => deferred([]), remove: () => deferred([]) },
+          layers: createLayers(),
+        },
       }),
     }),
   },
@@ -1913,6 +1920,7 @@ const CASES: Case[] = [
           ports: {
             getEntity: () => deferred({ row: { title: "tidewater/payout-service" } } as never),
             entityView: () => deferred({ sections: [], actions: [] } as never),
+            rangeDiff: () => deferred({ files: [], truncated: false, range: null, read_at: "source" } as never),
           },
         },
       }),
