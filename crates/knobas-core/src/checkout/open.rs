@@ -169,10 +169,7 @@ impl Code {
     /// `object`'s values, and `url` for its page.
     #[must_use]
     pub fn of(object: &Object, url: Option<String>) -> Self {
-        let mut code = Self {
-            url,
-            ..Self::NONE
-        };
+        let mut code = Self { url, ..Self::NONE };
         match object {
             Object::Repository | Object::File { .. } => {}
             Object::Commit { sha } => code.sha = Some(sha.clone()),
@@ -355,10 +352,7 @@ pub enum TemplateError {
     /// A placeholder knobas does not fill, carried so the message can name it.
     UnknownPlaceholder(String),
     /// A placeholder knobas fills, but not in a command for this object.
-    NotForObject {
-        name: String,
-        object: ObjectKind,
-    },
+    NotForObject { name: String, object: ObjectKind },
     /// The object has no value for this placeholder: a `{url}` whose source
     /// declares no page.
     NoValue(String),
@@ -396,7 +390,10 @@ impl std::fmt::Display for TemplateError {
             }
             Self::NoValue(name) => {
                 if name == "url" {
-                    write!(f, "the source declares no web page for this, so {{url}} has no value")
+                    write!(
+                        f,
+                        "the source declares no web page for this, so {{url}} has no value"
+                    )
                 } else {
                     write!(f, "there is no {{{name}}} here")
                 }
@@ -715,8 +712,7 @@ pub fn settle(drafts: &[Draft]) -> Result<Vec<Application>, ListError> {
         let file_command = optional(&draft.file_command, ObjectKind::File)?;
         let commit_command = optional(&draft.commit_command, ObjectKind::Commit)?;
         let range_command = optional(&draft.range_command, ObjectKind::Range)?;
-        let pull_request_command =
-            optional(&draft.pull_request_command, ObjectKind::PullRequest)?;
+        let pull_request_command = optional(&draft.pull_request_command, ObjectKind::PullRequest)?;
         let given = draft.id.as_deref().map(str::trim).unwrap_or_default();
         let taken = |id: &str| out.iter().any(|app| app.id == id);
         let id = if !given.is_empty() && !taken(given) {
@@ -946,10 +942,7 @@ mod tests {
             );
         }
         assert_eq!(
-            at(&Code {
-                url: None,
-                ..good
-            }),
+            at(&Code { url: None, ..good }),
             Err(TemplateError::NoValue("url".to_owned()))
         );
     }
@@ -957,13 +950,19 @@ mod tests {
     /// Each object carries its own placeholders and no other's.
     #[test]
     fn a_command_takes_only_its_objects_placeholders() {
-        assert_eq!(check_for("tig show {sha} {path}", ObjectKind::Commit), Ok(()));
+        assert_eq!(
+            check_for("tig show {sha} {path}", ObjectKind::Commit),
+            Ok(())
+        );
         assert_eq!(
             check_for("difftool {base} {head}", ObjectKind::Range),
             Ok(())
         );
         assert_eq!(
-            check_for("x {pr} {branch} {base} {head} {url}", ObjectKind::PullRequest),
+            check_for(
+                "x {pr} {branch} {base} {head} {url}",
+                ObjectKind::PullRequest
+            ),
             Ok(())
         );
         assert_eq!(
@@ -993,11 +992,15 @@ mod tests {
     /// only by having that command.
     #[test]
     fn an_application_accepts_the_objects_it_has_a_command_for() {
-        let old: Application =
-            serde_json::from_str(r#"{"id":"vscode","name":"VS Code","command":"code {path}","file_command":null}"#)
-                .unwrap();
+        let old: Application = serde_json::from_str(
+            r#"{"id":"vscode","name":"VS Code","command":"code {path}","file_command":null}"#,
+        )
+        .unwrap();
         let kinds = |app: &Application| -> Vec<ObjectKind> {
-            ObjectKind::ALL.into_iter().filter(|k| app.accepts(*k)).collect()
+            ObjectKind::ALL
+                .into_iter()
+                .filter(|k| app.accepts(*k))
+                .collect()
         };
         assert_eq!(kinds(&old), [ObjectKind::Repository, ObjectKind::File]);
         assert_eq!(old.command_for(ObjectKind::File), Some("code {path}"));

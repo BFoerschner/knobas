@@ -329,7 +329,9 @@ pub async fn open_object(
         })?
         .to_owned();
     let url = match registry {
-        Some(registry) if template.contains("{url}") => page(pool, registry, entity_id, object).await?,
+        Some(registry) if template.contains("{url}") => {
+            page(pool, registry, entity_id, object).await?
+        }
         _ => None,
     };
     let code = Code::of(object, url);
@@ -408,7 +410,9 @@ pub async fn page(
     let name = knobas_core::checkout::clone::FullName::parse(&key).map_err(IpcError::invalid)?;
     let repo = format!("{}/{}", name.owner(), name.repo());
     let refuse = |what: &str, value: &str| {
-        IpcError::invalid(format!("{what} '{value}' is not a name knobas opens a page for"))
+        IpcError::invalid(format!(
+            "{what} '{value}' is not a name knobas opens a page for"
+        ))
     };
     let rev = |what: &str, value: &str, caret: bool| {
         if rules::is_ref_name(value, caret) {
@@ -441,9 +445,14 @@ pub async fn page(
         }
         Object::Range { base, head } => (
             Page::Range,
-            vec![("base", rev("the base", base, true)?), ("head", rev("the head", head, false)?)],
+            vec![
+                ("base", rev("the base", base, true)?),
+                ("head", rev("the head", head, false)?),
+            ],
         ),
-        Object::PullRequest { number, base, head, .. } => (
+        Object::PullRequest {
+            number, base, head, ..
+        } => (
             Page::PullRequest,
             vec![
                 ("pr", number.to_string()),

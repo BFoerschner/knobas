@@ -25,9 +25,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use knobas_app::IpcErrorCode;
-use knobas_app::checkout::open::{
-    APPLICATIONS_KEY, GitFound, legacy_key, open, open_object, page,
-};
+use knobas_app::checkout::open::{APPLICATIONS_KEY, GitFound, legacy_key, open, open_object, page};
 use knobas_app::checkout::uncommitted::DiffRead;
 use knobas_app::checkout::working_tree::TreeRead;
 use knobas_app::checkout::{
@@ -1528,7 +1526,12 @@ async fn an_object_the_application_does_not_accept_or_a_refused_value_runs_nothi
     set_applications(
         &pool,
         &[
-            app(Some("plain"), "Plain", &format!("{} {{path}}", stub.display()), None),
+            app(
+                Some("plain"),
+                "Plain",
+                &format!("{} {{path}}", stub.display()),
+                None,
+            ),
             every_object(&stub),
         ],
         None,
@@ -1543,7 +1546,10 @@ async fn an_object_the_application_does_not_accept_or_a_refused_value_runs_nothi
         .await
         .unwrap_err();
     assert_eq!(error.code, IpcErrorCode::Invalid);
-    assert!(error.message.contains("Plain has no commit command"), "{error:?}");
+    assert!(
+        error.message.contains("Plain has no commit command"),
+        "{error:?}"
+    );
     let error = open_object(
         &pool,
         Some(&registry),
