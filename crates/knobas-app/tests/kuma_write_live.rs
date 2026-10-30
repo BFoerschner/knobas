@@ -250,6 +250,7 @@ async fn app_with(
     .expect("a scheduler over the scratch database");
 
     SourcesState {
+        live: Default::default(),
         pool,
         scheduler,
         secrets,

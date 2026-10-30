@@ -295,6 +295,7 @@ pub async fn reachable_transitions<R: tauri::Runtime>(
         &state.pool,
         &state.secrets,
         &state.registry,
+        &state.live,
         &entity_id,
     )
     .await
@@ -302,7 +303,9 @@ pub async fn reachable_transitions<R: tauri::Runtime>(
 }
 
 /// The **source view** of one entity (#661, ADR-0020): what its adapter draws
-/// for its kind, read live when the detail opens and never stored.
+/// for its kind, read live when the detail opens and never stored in the
+/// database. A view the adapter says stands at a fixed commit is kept in
+/// memory for the session and answered from there (ADR-0032, #2239).
 ///
 /// `section: None` reads the whole view, deferred sections as stubs;
 /// `Some(id)` reads that one deferred section when the reader opens its tab.
@@ -333,6 +336,7 @@ pub async fn entity_view<R: tauri::Runtime>(
         &state.pool,
         &state.secrets,
         &state.registry,
+        &state.live,
         &entity_id,
         section.as_deref(),
     )
@@ -362,7 +366,13 @@ pub async fn refused_writes<R: tauri::Runtime>(
 ) -> Result<Vec<knobas_source::grants::RefusedWrite>, IpcError> {
     let state = crate::sources::state(&app)?;
     Ok(
-        crate::sources::crud::refused_writes(&state.pool, &state.secrets, &state.registry, &asks)
+        crate::sources::crud::refused_writes(
+            &state.pool,
+            &state.secrets,
+            &state.registry,
+            &state.live,
+            &asks,
+        )
             .await,
     )
 }

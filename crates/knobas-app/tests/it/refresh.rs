@@ -324,6 +324,7 @@ async fn fixture(name: &str) -> Fixture {
     .expect("a scheduler");
     Fixture {
         state: SourcesState {
+            live: Default::default(),
             pool,
             scheduler,
             secrets,
@@ -807,6 +808,7 @@ async fn scheduled(
     .expect("a scheduler");
     (
         SourcesState {
+            live: Default::default(),
             pool,
             scheduler,
             secrets,

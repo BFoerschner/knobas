@@ -55,6 +55,7 @@ mod keychain_write;
 mod link_on_arrival_ipc;
 mod link_set_patterns_ipc;
 mod link_sets_ipc;
+mod live_reads;
 mod monitor_on_its_way_ipc;
 mod notes_export_ipc;
 mod notes_search_ipc;

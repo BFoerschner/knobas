@@ -534,6 +534,7 @@ pub async fn translate(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
     id: &str,
 ) -> Result<Option<knobas_source::query::Translation>, IpcError> {
     let row: Option<(Option<String>, Option<serde_json::Value>)> = sqlx::query_as(
@@ -561,7 +562,7 @@ pub async fn translate(
     let namespace = knobas_core::entity::EntityRef::parse(&saved)
         .map(|entity| entity.namespace)
         .map_err(IpcError::invalid)?;
-    crate::sources::crud::translate_query(pool, secrets, registry, &saved, &payload)
+    crate::sources::crud::translate_query(pool, secrets, registry, live, &saved, &payload)
         .await
         .map_err(|error| crate::sources::to_ipc(&error, Some(&namespace)))
 }

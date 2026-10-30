@@ -230,6 +230,7 @@ async fn fixture_on(
 
     Fixture {
         state: SourcesState {
+            live: Default::default(),
             pool,
             scheduler,
             secrets,

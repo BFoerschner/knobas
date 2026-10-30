@@ -200,6 +200,7 @@ async fn opening_a_detail_builds_off_the_runtime() {
             &read_pool,
             &secrets,
             &registry,
+            &knobas_app::sources::live::LiveSources::default(),
             &format!("{id}:survey-2"),
             None,
         )
@@ -259,6 +260,7 @@ async fn saving_a_credential_builds_off_the_runtime() {
             &read_pool,
             &secrets,
             &registry,
+            &knobas_app::sources::live::LiveSources::default(),
             &id,
             knobas_app::sources::SecretInput {
                 value: Some("a token".to_owned()),

@@ -676,6 +676,7 @@ async fn uninstall_with_two_sources_asks_once_per_source_and_does_what_each_says
     let Err(error) = installed::uninstall(
         &pool,
         &secrets,
+        &knobas_app::sources::live::LiveSources::default(),
         &registry,
         store.path(),
         "wasm-fixture",
@@ -696,6 +697,7 @@ async fn uninstall_with_two_sources_asks_once_per_source_and_does_what_each_says
     let removed = installed::uninstall(
         &pool,
         &secrets,
+        &knobas_app::sources::live::LiveSources::default(),
         &registry,
         store.path(),
         "wasm-fixture",

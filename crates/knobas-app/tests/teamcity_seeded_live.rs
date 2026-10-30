@@ -369,6 +369,7 @@ async fn app_with(
     .expect("a scheduler over the scratch database");
 
     SourcesState {
+        live: Default::default(),
         pool,
         scheduler,
         secrets,
@@ -640,7 +641,7 @@ async fn a_seeded_parameter_changed_through_the_write_queue_reads_back_in_the_ne
     let state = app(&env, &account).await;
     sync(&state, TEAMCITY).await;
     let value_in_view = async || -> String {
-        let view = crud::view(&state.pool, &state.secrets, &state.registry, &entity, None)
+        let view = crud::view(&state.pool, &state.secrets, &state.registry, &state.live, &entity, None)
             .await
             .unwrap_or_else(|e| panic!("the view of {entity} reads: {e:?}"))
             .expect("TeamCity draws a build configuration");
@@ -767,7 +768,7 @@ async fn a_builds_change_and_its_revision_open_the_mirrored_gitea_commit() {
 
     let view_of = async |id: i64| {
         let entity = format!("{TEAMCITY}:build:{id}");
-        crud::view(&state.pool, &state.secrets, &state.registry, &entity, None)
+        crud::view(&state.pool, &state.secrets, &state.registry, &state.live, &entity, None)
             .await
             .unwrap_or_else(|e| panic!("the view of {entity} reads: {e:?}"))
             .expect("TeamCity draws a build")

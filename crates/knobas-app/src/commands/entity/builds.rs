@@ -69,13 +69,14 @@ pub async fn pipeline_runs_live_inner(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
     pipeline_id: &str,
     limit: Option<u32>,
 ) -> Result<Vec<RunRow>, IpcError> {
     runs_of_pipeline(
         pool,
         registry.as_ref(),
-        Some((secrets, registry)),
+        Some((secrets, registry, live)),
         pipeline_id,
         limit,
     )
@@ -114,6 +115,7 @@ async fn runs_of_pipeline(
 type LiveReads<'a> = (
     &'a std::sync::Arc<dyn knobas_secrets::SecretStore>,
     &'a std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    &'a crate::sources::live::LiveSources,
 );
 
 /// Fills each run's [`RunRow::commit_id`] from its `revision` (#1004), with
@@ -142,8 +144,8 @@ async fn with_commits<'a>(
     let held = knobas_core::builds::commits_of(pool, declarations, &shas).await?;
     let shared = knobas_core::builds::shared_shas(&runs, &held);
     let resolved = match live {
-        Some((secrets, registry)) => {
-            crate::sources::crud::shared_commits(pool, secrets, registry, shared).await
+        Some((secrets, registry, live)) => {
+            crate::sources::crud::shared_commits(pool, secrets, registry, live, shared).await
         }
         None => knobas_core::builds::ResolvedCommits::new(),
     };
@@ -232,6 +234,7 @@ pub async fn older_pipeline_runs_inner(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
     pipeline_id: &str,
     before: &str,
     limit: Option<u32>,
@@ -253,6 +256,7 @@ pub async fn older_pipeline_runs_inner(
         pool,
         secrets,
         registry,
+        live,
         &entity.to_string(),
         &run.to_string(),
         count,
@@ -267,7 +271,7 @@ pub async fn older_pipeline_runs_inner(
         .collect();
     let pipeline = entity.to_string();
     let pairs = runs.iter_mut().map(|r| (pipeline.as_str(), r)).collect();
-    with_commits(pool, &declarations, Some((secrets, registry)), pairs).await?;
+    with_commits(pool, &declarations, Some((secrets, registry, live)), pairs).await?;
     Ok(runs)
 }
 
@@ -283,12 +287,13 @@ pub async fn pipeline_settings_inner(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
     pipeline_id: &str,
 ) -> Result<Option<knobas_source::pipeline::PipelineSettings>, IpcError> {
     let entity = EntityRef::parse(pipeline_id).map_err(IpcError::invalid)?;
     let declarations = crate::sources::paths::declared_paths(pool, registry.as_ref()).await?;
     live_pipeline(pool, &declarations, &entity).await?;
-    crate::sources::crud::pipeline_settings(pool, secrets, registry, &entity.to_string())
+    crate::sources::crud::pipeline_settings(pool, secrets, registry, live, &entity.to_string())
         .await
         .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))
 }
@@ -320,12 +325,13 @@ pub async fn run_chain_inner(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
     run_id: &str,
 ) -> Result<Vec<ChainStepRow>, IpcError> {
     let run = EntityRef::parse(run_id).map_err(IpcError::invalid)?;
     let declarations = crate::sources::paths::declared_paths(pool, registry.as_ref()).await?;
     let identity = identity_of(pool).await?;
-    let steps = crate::sources::crud::run_chain(pool, secrets, registry, &run.to_string())
+    let steps = crate::sources::crud::run_chain(pool, secrets, registry, live, &run.to_string())
         .await
         .map_err(|error| crate::sources::to_ipc(&error, Some(&run.namespace)))?;
     let mut chain: Vec<ChainStepRow> = steps
@@ -349,7 +355,7 @@ pub async fn run_chain_inner(
             run.as_mut().map(|r| (pipeline_id, r))
         })
         .collect();
-    with_commits(pool, &declarations, Some((secrets, registry)), pairs).await?;
+    with_commits(pool, &declarations, Some((secrets, registry, live)), pairs).await?;
     Ok(chain)
 }
 
@@ -365,7 +371,7 @@ pub async fn run_chain<R: tauri::Runtime>(
     run_id: String,
 ) -> Result<Vec<ChainStepRow>, IpcError> {
     let state = crate::sources::state(&app)?;
-    run_chain_inner(&state.pool, &state.secrets, &state.registry, &run_id).await
+    run_chain_inner(&state.pool, &state.secrets, &state.registry, &state.live, &run_id).await
 }
 
 /// Older runs of one pipeline, beyond the mirror's window (#851).
@@ -386,6 +392,7 @@ pub async fn older_pipeline_runs<R: tauri::Runtime>(
         &state.pool,
         &state.secrets,
         &state.registry,
+        &state.live,
         &pipeline_id,
         &before,
         limit,
@@ -405,7 +412,7 @@ pub async fn pipeline_settings<R: tauri::Runtime>(
     pipeline_id: String,
 ) -> Result<Option<knobas_source::pipeline::PipelineSettings>, IpcError> {
     let state = crate::sources::state(&app)?;
-    pipeline_settings_inner(&state.pool, &state.secrets, &state.registry, &pipeline_id).await
+    pipeline_settings_inner(&state.pool, &state.secrets, &state.registry, &state.live, &pipeline_id).await
 }
 
 // -- the run page's live reads (ADR-0022; #854, #855, #856) ------------------
@@ -417,10 +424,11 @@ async fn run_adapter(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
     run_id: &str,
-) -> Result<(EntityRef, Box<dyn knobas_source::Source>), IpcError> {
+) -> Result<(EntityRef, std::sync::Arc<dyn knobas_source::Source>), IpcError> {
     let entity = EntityRef::parse(run_id).map_err(IpcError::invalid)?;
-    let source = crate::sources::crud::run_source(pool, secrets, registry, &entity.to_string())
+    let source = crate::sources::crud::run_source(pool, secrets, registry, live, &entity.to_string())
         .await
         .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))?;
     Ok((entity, source))
@@ -445,11 +453,12 @@ pub async fn run_log_inner(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
     run_id: &str,
     from: Option<u64>,
     count: Option<u32>,
 ) -> Result<Option<knobas_source::run::RunLog>, IpcError> {
-    let (entity, source) = run_adapter(pool, secrets, registry, run_id).await?;
+    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
     let count = count
         .unwrap_or(knobas_source::run::LOG_LINES_MAX)
         .clamp(1, knobas_source::run::LOG_LINES_MAX);
@@ -468,9 +477,10 @@ pub async fn run_tests_inner(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
     run_id: &str,
 ) -> Result<Option<knobas_source::run::RunTests>, IpcError> {
-    let (entity, source) = run_adapter(pool, secrets, registry, run_id).await?;
+    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
     source
         .run_tests(&entity.to_string())
         .await
@@ -487,10 +497,11 @@ pub async fn test_history_inner(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
     run_id: &str,
     test_id: &str,
 ) -> Result<Option<Vec<knobas_source::run::TestOutcome>>, IpcError> {
-    let (entity, source) = run_adapter(pool, secrets, registry, run_id).await?;
+    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
     source
         .test_history(&entity.to_string(), test_id)
         .await
@@ -518,12 +529,13 @@ pub async fn run_artifacts_inner(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
     run_id: &str,
     path: Option<&str>,
 ) -> Result<Option<Vec<knobas_source::run::ArtifactEntry>>, IpcError> {
     let path = path.unwrap_or_default();
     artifact_path(path)?;
-    let (entity, source) = run_adapter(pool, secrets, registry, run_id).await?;
+    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
     source
         .run_artifacts(&entity.to_string(), path)
         .await
@@ -539,11 +551,12 @@ pub async fn artifact_preview_inner(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
     run_id: &str,
     path: &str,
 ) -> Result<Option<knobas_source::run::ArtifactPreview>, IpcError> {
     artifact_path(path)?;
-    let (entity, source) = run_adapter(pool, secrets, registry, run_id).await?;
+    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
     source
         .artifact_preview(&entity.to_string(), path)
         .await
@@ -563,6 +576,7 @@ pub async fn download_run_file_inner(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
     registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
     run_id: &str,
     target: &knobas_source::run::DownloadTarget,
     dir: &std::path::Path,
@@ -571,7 +585,7 @@ pub async fn download_run_file_inner(
     if let DownloadTarget::File { path } | DownloadTarget::Folder { path } = target {
         artifact_path(path)?;
     }
-    let (entity, source) = run_adapter(pool, secrets, registry, run_id).await?;
+    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
     let mut sink = crate::downloads::FileSink::new(dir);
     let streamed = source
         .download(&entity.to_string(), target, &mut sink)
@@ -608,6 +622,7 @@ pub async fn run_log<R: tauri::Runtime>(
         &state.pool,
         &state.secrets,
         &state.registry,
+        &state.live,
         &run_id,
         from,
         count,
@@ -626,7 +641,7 @@ pub async fn run_tests<R: tauri::Runtime>(
     run_id: String,
 ) -> Result<Option<knobas_source::run::RunTests>, IpcError> {
     let state = crate::sources::state(&app)?;
-    run_tests_inner(&state.pool, &state.secrets, &state.registry, &run_id).await
+    run_tests_inner(&state.pool, &state.secrets, &state.registry, &state.live, &run_id).await
 }
 
 /// One test's last ten outcomes (#855).
@@ -645,6 +660,7 @@ pub async fn test_history<R: tauri::Runtime>(
         &state.pool,
         &state.secrets,
         &state.registry,
+        &state.live,
         &run_id,
         &test_id,
     )
@@ -667,6 +683,7 @@ pub async fn run_artifacts<R: tauri::Runtime>(
         &state.pool,
         &state.secrets,
         &state.registry,
+        &state.live,
         &run_id,
         path.as_deref(),
     )
@@ -685,7 +702,7 @@ pub async fn artifact_preview<R: tauri::Runtime>(
     path: String,
 ) -> Result<Option<knobas_source::run::ArtifactPreview>, IpcError> {
     let state = crate::sources::state(&app)?;
-    artifact_preview_inner(&state.pool, &state.secrets, &state.registry, &run_id, &path).await
+    artifact_preview_inner(&state.pool, &state.secrets, &state.registry, &state.live, &run_id, &path).await
 }
 
 /// A run's log, an artifact, a folder or every artifact, into the downloads
@@ -710,6 +727,7 @@ pub async fn download_run_file<R: tauri::Runtime>(
         &state.pool,
         &state.secrets,
         &state.registry,
+        &state.live,
         &run_id,
         &target,
         &dir,
@@ -749,6 +767,7 @@ pub async fn pipeline_runs<R: tauri::Runtime>(
         &state.pool,
         &state.secrets,
         &state.registry,
+        &state.live,
         &pipeline_id,
         limit,
     )

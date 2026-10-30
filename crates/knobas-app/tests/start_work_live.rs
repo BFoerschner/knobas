@@ -667,6 +667,7 @@ async fn app_over(
     .expect("a scheduler over the scratch database");
 
     SourcesState {
+        live: Default::default(),
         pool,
         scheduler,
         secrets,
@@ -1393,6 +1394,7 @@ async fn gitea_app(env: &Env, repos: &[String]) -> SourcesState {
     .await
     .expect("a scheduler over the scratch database");
     SourcesState {
+        live: Default::default(),
         pool,
         scheduler,
         secrets,
@@ -1424,7 +1426,7 @@ async fn settled(state: &SourcesState, id: i64) -> knobas_core::write_queue::Que
 /// The source's view of `entity`, as the detail reads it, flattened to text.
 async fn view_text(state: &SourcesState, entity: &str) -> String {
     let view =
-        knobas_app::sources::crud::view(&state.pool, &state.secrets, &state.registry, entity, None)
+        knobas_app::sources::crud::view(&state.pool, &state.secrets, &state.registry, &state.live, entity, None)
             .await
             .expect("the view reads");
     serde_json::to_string(&view).expect("a view serializes")
@@ -2113,6 +2115,7 @@ async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_
     .await
     .expect("a scheduler");
     let state = SourcesState {
+        live: Default::default(),
         pool,
         scheduler,
         secrets,

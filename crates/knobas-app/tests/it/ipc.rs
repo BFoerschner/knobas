@@ -514,6 +514,7 @@ fn sources_state(
     tokio::task::block_in_place(|| {
         tauri::async_runtime::block_on(async move {
             knobas_app::sources::SourcesState {
+                live: Default::default(),
                 scheduler: knobas_app::sources::test_scheduler(
                     &handle,
                     db,

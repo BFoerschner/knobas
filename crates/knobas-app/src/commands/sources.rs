@@ -234,6 +234,7 @@ pub async fn uninstall_adapter<R: tauri::Runtime>(
     let outcome = crate::sources::installed::uninstall(
         &state.pool,
         &state.secrets,
+        &state.live,
         &installs.registry,
         &installs.store,
         &kind,
@@ -381,7 +382,7 @@ pub async fn delete_source<R: tauri::Runtime>(
 ) -> Result<(), IpcError> {
     let state = crate::sources::state(&app)?;
     let purge = Purge::from(purge_items);
-    crud::delete(&state.pool, &state.secrets, &id, purge_items)
+    crud::delete(&state.pool, &state.secrets, &state.live, &id, purge_items)
         .await
         .map_err(|error| to_ipc(&error, Some(&id)))?;
     state.scheduler.forget_source(&id, purge).await;
@@ -399,7 +400,14 @@ pub async fn set_source_secret<R: tauri::Runtime>(
     secret: SecretInput,
 ) -> Result<knobas_sync::config::CredentialHealth, IpcError> {
     let state = crate::sources::state(&app)?;
-    let health = crud::set_secret(&state.pool, &state.secrets, &state.registry, &id, secret)
+    let health = crud::set_secret(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &id,
+        secret,
+    )
         .await
         .map_err(|error| to_ipc(&error, Some(&id)))?;
     emit(&app, crate::events::SOURCE_HEALTH, &health);
