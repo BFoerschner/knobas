@@ -11,7 +11,8 @@
     (`address.ts`), drawn by the one diff component. Another address keeps
     the last diff drawn, dimmed, while it is read (#2246). Where the answer
     names its range (#2310), context expands and an image diff renders, each
-    side read whole at its sha (`context.ts` `rangeContext`).
+    side read whole at its sha (`context.ts` `rangeContext`). Where it names
+    none, a line above the diff says context does not expand, and why.
   - **Shown again** after keep-alive held it hidden, it reads once more over
     what it drew: between two whole shas the read cache answers that, and a
     branch's end may have moved.
@@ -153,6 +154,9 @@
     {#if files !== null && files.length === 0}
       <div class="tf-empty">Nothing changes between {shown(base)} and {shown(head)}.</div>
     {:else if files !== null}
+      {#if range === null}
+        <p class="tf-cnote" data-testid="no-range">Context does not expand here: the source did not settle which two commits this diff is between, as for a range from the repository's first commit or a branch that merged its base back in.</p>
+      {/if}
       {#key `${section}\n${range?.base}\n${range?.head}`}
         <TfDiffView {files} {cut} {context} openAt={{ entityId: repoId, at: head }} />
       {/key}

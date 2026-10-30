@@ -104,6 +104,14 @@ test("the address reads the repository's compare between its two ends and draws 
   expect(target.querySelector("h2 a")!.textContent).toBe("tidewater/payout-service");
 });
 
+test("a diff that names no range says its context does not expand, rather than offering nothing silently", async () => {
+  const ports: DiffPagePorts = { entityView: vi.fn(answer), getEntity: async () => detail };
+  view = mount(TfDiffPage, { target, props: { repoId: REPO, base: `${BASE}^`, head: HEAD, ports } });
+  await settle();
+  expect(target.querySelector("[data-testid=no-range]")?.textContent).toContain("Context does not expand here");
+  expect(target.querySelector(".tf-exp")).toBeNull();
+});
+
 test("a failed read says why instead of drawing no changes", async () => {
   const ports: DiffPagePorts = { entityView: () => Promise.reject(new Error("gitea: 404")), getEntity: async () => detail };
   view = mount(TfDiffPage, { target, props: { repoId: REPO, base: "nope", head: HEAD, ports } });
@@ -191,6 +199,7 @@ test("a diff that names its range expands context read whole at its two shas (#2
   await settle();
   const expand = target.querySelector<HTMLButtonElement>(".tf-exp");
   expect(expand).not.toBeNull();
+  expect(target.querySelector("[data-testid=no-range]")).toBeNull();
   expand!.click();
   await settle();
   expect(asked).toContain(`${REPO} file@${HEAD}:src/retry.rs`);

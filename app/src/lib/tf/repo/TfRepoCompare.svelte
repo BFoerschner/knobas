@@ -297,6 +297,9 @@
         {#if files !== null && files.length === 0}
           <div class="tf-empty">This branch has no commits that {base} lacks.</div>
         {:else if files !== null}
+          {#if range === null}
+            <p class="tf-cnote" data-testid="no-range">Context does not expand here: the source did not settle which two commits this diff is between, as for a range from the repository's first commit or a branch that merged its base back in.</p>
+          {/if}
           {#key `${filesFor}\n${range?.base}\n${range?.head}`}
             <TfDiffView {files} {cut} {context} openAt={head === null ? null : { entityId: repoId, at: head }} />
           {/key}

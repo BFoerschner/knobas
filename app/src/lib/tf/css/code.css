@@ -294,6 +294,9 @@
 .tf-rsw-tag { margin-left: auto; font-size: var(--t-2xs); color: var(--ink-2); font-weight: 600; white-space: nowrap; }
 .tf-rsw-kb { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); }
 
+/* A diff that names no range (#2310): context does not expand, said above it. */
+.tf-cnote { color: var(--ink-2); font-size: var(--t-sm); margin: 0 0 8px; }
+
 /* A pull request's commit picker (#2273; mockups/code-area/diff.html, state "range"): *Commits <choice> base…head ▾*. */
 .tf-pickbar { display: flex; align-items: center; gap: 8px; padding: 0 0 8px; }
 .tf-pick { position: relative; display: inline-flex; }

@@ -26,7 +26,11 @@
     my last review*. Any choice but all is a compare in the range's repository
     (`diff/pick.ts`), drawn in place. Line comments are offered on the whole
     diff only: the review goes to Gitea at the head, so a line of an older
-    commit's diff would land on the head's line of the same number.
+    commit's diff would land on the head's line of the same number. Gitea
+    itself takes a review at an older `commit_id` (measured on 1.27.3), but
+    one review carries one commit and knobas sends none, which Gitea reads as
+    the head (`write.rs` `submit_review`). Pending drafts are the full diff's
+    too: a pick draws none.
   - **Expanded context** (`diff/context.ts` `rangeContext`): each side read
     whole at its sha, bytes too for a rendered image diff (#2279). A new pick
     draws a new diff component, so no side read at one range is kept for another.
@@ -164,12 +168,14 @@
   {/if}
   {#if pickFailed !== null}
     <p class="tf-cfail">Could not read the picked commits: {pickFailed}</p>
+  {:else if section !== null && picked === null}
+    <div class="tf-empty">This source draws no diff for the picked commits.</div>
   {:else if shown === null}
     <!-- The pick's compare has not answered yet. -->
   {:else if shown.files.length === 0 && shown.gone.length === 0}
     <div class="tf-empty">{section === null ? "This pull request changes no files." : "Nothing changes in the picked commits."}</div>
   {:else}
-    {#key section}
+    {#key `${section}\n${shown.range?.base}\n${shown.range?.head}`}
       <TfDiffView
         files={shown.files}
         gone={shown.gone}

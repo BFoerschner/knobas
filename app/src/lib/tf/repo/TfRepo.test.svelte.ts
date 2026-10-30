@@ -1055,6 +1055,7 @@ test("the compare page's diff expands context read whole at the shas the source 
   });
   const expand = target.querySelector<HTMLButtonElement>(".tf-cbody .tf-exp");
   expect(expand).not.toBeNull();
+  expect(target.querySelector("[data-testid=no-range]")).toBeNull();
   expand!.click();
   await settle();
   expect(asked).toEqual(expect.arrayContaining([`file@${HEAD}:src/retry.rs`, `file@${FORK}:src/retry.rs`]));

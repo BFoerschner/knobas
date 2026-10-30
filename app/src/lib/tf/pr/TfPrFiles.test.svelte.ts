@@ -262,6 +262,23 @@ test("the picker names all commits; one commit shows only that commit's changes,
   expect(plus()).toBeGreaterThan(0);
 });
 
+test("a pick draws none of the full diff's pending drafts; all commits draws them again", async () => {
+  // A draft's line is the head's (the review goes to Gitea at the head), so it belongs to the full diff only.
+  pending.add(PR, { path: NOTE.path, side: "new", line: 1, body: "On the head's line 1" });
+  pending.add(PR, { path: "src/sepa/retry.rs", side: "old", line: 2, body: "Kept apart on a pick?" });
+  await draw(rangedView(), { [`compare:${MID}^...${MID}`]: compareView(`${MID}^`, MID) });
+  expect(target.querySelectorAll(".tf-pending").length).toBe(2);
+  face()!.click();
+  flushSync();
+  option(/08232cb/)!.click();
+  await settle();
+  expect(list()).toEqual([expect.stringMatching(/backoff\.md/)]);
+  expect(target.querySelectorAll(".tf-pending").length).toBe(0);
+  option(/All commits/)!.click();
+  await settle();
+  expect(target.querySelectorAll(".tf-pending").length).toBe(2);
+});
+
 test("since my last review shows the changes between the reviewed head and the head now", async () => {
   await draw(rangedView(), { [`compare:${FIRST}...${HEAD}`]: compareView(FIRST, HEAD) });
   face()!.click();
