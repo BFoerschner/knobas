@@ -338,3 +338,95 @@ test("a long Pull requests tab draws each group's pull requests near the viewpor
   flushSync();
   expect([...target.querySelectorAll(".tf-cprs tbody tr")].map((tr) => cells(tr)[0])).toEqual(["#6999"]);
 });
+
+test("2,500 repositories with the later pages held back: the first 1,000 draw at once, counted at the total (#2245)", async () => {
+  const many = Array.from({ length: 2500 }, (_, n) => repo(`bulk-${String(n).padStart(4, "0")}`, "2026-08-01T10:00:00Z"));
+  let release!: () => void;
+  const later = new Promise<void>((resolve) => (release = resolve));
+  await draw(
+    ["repos"],
+    null,
+    ports({
+      listEntities: async (filter, limit, offset) => {
+        if (!filter.kinds.includes("repo")) return page([]);
+        if (offset > 0) await later;
+        return { rows: many.slice(offset, offset + limit), total: many.length, tally: null, groups: null };
+      },
+    }),
+  );
+  const first = target.querySelector(".tf-tbl tbody tr:not(.tf-wgap)");
+  expect(first).not.toBeNull();
+  expect(target.querySelector(".tf-skel")).toBeNull();
+  expect(cells(first!)[0]).toBe("tidewater/bulk-0000");
+  // The counts are the mirror's total, not the rows in so far.
+  expect(text(target.querySelector(".tf-tabs a"))).toBe("Repositories 2500");
+  expect(text(target.querySelector(".tf-sub"))).toContain("2500 repositories");
+
+  const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
+  const find = (typed: string) => {
+    field.value = typed;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+    return [...target.querySelectorAll(".tf-tbl tbody tr")].map((tr) => cells(tr)[0]);
+  };
+  expect(find("bulk-0999")).toEqual(["tidewater/bulk-0999"]);
+  expect(find("bulk-2499")).toEqual([]);
+  find("");
+  const before = target.querySelector(".tf-tbl tbody tr:not(.tf-wgap)");
+
+  release();
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  // Appended behind what was drawn: the same row node, not a list drawn anew.
+  expect(target.querySelector(".tf-tbl tbody tr:not(.tf-wgap)")).toBe(before);
+  expect(find("bulk-2499")).toEqual(["tidewater/bulk-2499"]);
+  expect(find("bulk-0999")).toEqual(["tidewater/bulk-0999"]);
+});
+
+test("Code draws skeleton rows until its first page answers (#2246)", async () => {
+  await draw(["repos"], null, ports({ listEntities: () => new Promise<EntityPage>(() => {}) }));
+  expect(target.querySelectorAll(".tf-skel tbody tr").length).toBeGreaterThan(0);
+  expect(target.querySelector(".tf-empty")).toBeNull();
+  unmount(view!);
+  view = null;
+  await draw(["prs"], null, ports({ listEntities: () => new Promise<EntityPage>(() => {}) }));
+  expect(target.querySelectorAll(".tf-skel tbody tr").length).toBeGreaterThan(0);
+});
+
+test("Sync now's re-read keeps the repositories drawn, dimmed, until the new list is in (#2246)", async () => {
+  let hold: Promise<void> | null = null;
+  const base = ports();
+  const props = $state({
+    ready: true,
+    rest: ["repos"],
+    job: null,
+    now: NOW,
+    syncRevision: 0,
+    ports: ports({
+      listEntities: async (filter, limit, offset) => {
+        if (hold !== null) await hold;
+        return base.listEntities(filter, limit, offset);
+      },
+    }),
+  });
+  view = mount(TfCode, { target, props });
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  flushSync();
+  expect(target.querySelector(".tf-wait-dim")).toBeNull();
+
+  let release!: () => void;
+  hold = new Promise<void>((resolve) => (release = resolve));
+  props.syncRevision = 1;
+  flushSync();
+  const dimmed = target.querySelector(".tf-wait-dim");
+  expect(dimmed).not.toBeNull();
+  expect(dimmed!.querySelectorAll("tbody tr").length).toBe(3);
+
+  release();
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(target.querySelector(".tf-wait-dim")).toBeNull();
+  expect(target.querySelectorAll(".tf-tbl tbody tr").length).toBe(3);
+});
