@@ -271,6 +271,8 @@ vi.mock("../ipc/app", () => ({
   pagesKeptOpen: () => deferred(5),
   setPagesKeptOpen: (count: number) => deferred(count),
   userRenderers: () => deferred([]),
+  rendererDefaults: () => deferred([]),
+  setRendererDefaults: (list: unknown[]) => deferred(list),
 }));
 
 /**
@@ -352,6 +354,7 @@ const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
 const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
 const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
+const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
 const TfCheckoutsSection = (await import("../tf/settings/TfCheckoutsSection.svelte")).default;
 const { createApps } = await import("../tf/openin/apps.svelte");
 const { createClones } = await import("../tf/openin/clones.svelte");
@@ -1290,6 +1293,30 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    /** The renderer switcher (#2263): open, its menu registers a layer and a window click listener. */
+    name: "TfRendererSwitch",
+    source: "lib/tf/render/TfRendererSwitch.svelte",
+    open: (target) => {
+      const source = { id: "source", name: "Source", patterns: ["*"], fences: ["*"], input: "text", output: "lines", diff: true } as const;
+      return {
+        app: mount(TfRendererSwitch, {
+          target,
+          props: {
+            opened: { offered: [source], renderer: source, pattern: null },
+            shown: source,
+            pattern: "*.rs",
+            onpick: () => {},
+            onmakedefault: () => {},
+            layers: createLayers(),
+          },
+        }),
+      };
+    },
+    exercise: (target) => {
+      target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
+    },
   },
   {
     /** Settings › Checkouts (#844) reads the list when it opens. */

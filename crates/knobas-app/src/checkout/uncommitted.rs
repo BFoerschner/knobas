@@ -25,7 +25,7 @@
 //! # Capped, and git is stopped past the cap
 //!
 //! Each half is parsed by [`knobas_source::diff::parse_view`], so it carries
-//! the per-file and per-view line caps of ADR-0020 rule 6 like a pull
+//! the parser's line ceiling of ADR-0020 rule 6 (#2269) like a pull
 //! request's diff. Past [`READ_LINES`] lines or [`READ_BYTES`] bytes of one
 //! half's output git is killed and the rest is never read: that half is then
 //! `truncated`, and so is the file the cut fell in, whose `additions` and
@@ -57,8 +57,8 @@ use super::working_tree::{
 pub const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The most lines of one half's `git diff` output read before git is
-/// stopped: four views' worth, so a lockfile over the per-file cap does not
-/// keep the files after it from being read.
+/// stopped: four times the parser's ceiling, so the ceiling, not this read,
+/// is what cuts a long diff and says so.
 pub const READ_LINES: usize = 4 * MAX_LINES_PER_VIEW;
 
 /// The most bytes of one half's output read before git is stopped, for the

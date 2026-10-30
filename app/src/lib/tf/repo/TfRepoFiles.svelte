@@ -42,15 +42,17 @@
   a command renderer (#2262) runs on the backend and draws in a sandboxed
   frame (`../render/TfCommandOutput.svelte`).
   A Markdown file is drawn by the Markdown component (#2255): its relative
-  links open files here, external ones go to the browser. *Rendered* and
-  *Source* switch any file whose renderer is not Source to its lines and
-  back, remembered per file type (`render/view-choice.svelte.ts`).
+  links open files here, external ones go to the browser. Which renderer a
+  file opens with is the default per file pattern (#2263, `render/defaults.ts`);
+  the header's *Render as ▾* (`../render/TfRendererSwitch.svelte`) switches
+  this file to any other renderer that takes it, for as long as the tab lives,
+  and makes one the default for the file's pattern.
   *Find in file* (#2299) marks every hit, "N of M"; `Enter` and `Shift+Enter`
   step through them, drawing a hit's line first where the window left it out.
 -->
 <script lang="ts">
   import { flushSync, tick, untrack } from "svelte";
-  import { SvelteSet } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { EVENTS, ipcErrorMessage } from "../../ipc";
@@ -59,8 +61,10 @@
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
-  import { imageUrl, renderersFor } from "../../render/registry";
-  import { viewChoices as appViewChoices, type ViewChoice } from "../../render/view-choice.svelte";
+  import { allRenderers, imageUrl, type Renderer } from "../../render/registry";
+  import { makeDefaultPattern, openWith, withDefault } from "../../render/defaults";
+  import { rendererDefaults as appDefaults, type RendererDefaults } from "../../render/defaults.svelte";
+  import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import TfDiagram from "../render/TfDiagram.svelte";
   import { findCount, stepMatch } from "../builds/run-reads";
@@ -110,7 +114,7 @@
     refusal = null,
     render = renderPort(),
     commands = ipcCommands,
-    views = appViewChoices,
+    defaults = appDefaults,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -144,8 +148,8 @@
     render?: RenderPort;
     /** Runs a command renderer (#2262): the IPC, a fake in tests. */
     commands?: CommandPort;
-    /** *Rendered* or *Source*, per file type (#2255): the app's store, a fresh one in tests. */
-    views?: { of(path: string): ViewChoice; pick(path: string, choice: ViewChoice): void };
+    /** The default renderer per file pattern (#2263): the app's copy, a fresh one in tests. */
+    defaults?: RendererDefaults;
   } = $props();
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
@@ -378,12 +382,28 @@
   const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: 20.8, from: WHOLE_UP_TO + 1 });
   let code = $state<HTMLElement | null>(null);
 
-  /** What draws the file (#2254): the first renderer that accepts it. */
-  const renderer = $derived(file === null ? null : (renderersFor(file)[0] ?? null));
-  /** A text file whose renderer is not Source has *Rendered* and *Source* (#2255). */
-  const toggles = $derived(file !== null && !file.binary && renderer !== null && renderer.id !== "source");
-  /** What draws the file now: its renderer, or Source where the reader picked it. */
-  const drawAs = $derived(toggles && file !== null && views.of(file.path) === "source" ? "source" : (renderer?.id ?? null));
+  /** What takes the file and what it opens with (#2254, #2263): the default for its pattern, else the registry's first. */
+  const opened = $derived(file === null ? null : openWith(file, allRenderers(), defaults.list));
+  /** The renderer picked in the switcher per file, for as long as the tab lives (#2263). */
+  const picks = new SvelteMap<string, string>();
+  /** What draws the file now: the one picked, else the default. */
+  const renderer = $derived.by((): Renderer | null => {
+    if (opened === null || file === null) return null;
+    const picked = picks.get(file.path);
+    return opened.offered.find((r) => r.id === picked) ?? opened.renderer;
+  });
+  const drawAs = $derived(renderer?.id ?? null);
+  /** The pattern *Make default* writes: the one that chose the default, unless broader than the file's extension. */
+  const switchPattern = $derived(file === null || opened === null ? "" : makeDefaultPattern(opened, file.path));
+
+  async function makeDefault(path: string, chosen: Renderer) {
+    try {
+      await defaults.save(withDefault(defaults.list, switchPattern, chosen.id));
+      picks.delete(path);
+    } catch (cause) {
+      push({ text: `Could not make ${chosen.name} the default: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
   const image = $derived(
     drawAs === "image" && file !== null && !file.binary ? imageUrl(new TextEncoder().encode(file.text), file.path) : null,
   );
@@ -720,12 +740,15 @@
           >{file.binary ? `${file.size} bytes` : `${lines.length} ${lines.length === 1 ? "line" : "lines"}`}{branch !== null ? `, on ${branch}` : ""}</span
         >
         <span class="tf-acts">
-          {#if toggles}
-            {@const choice = views.of(file.path)}
-            <span class="tf-seg" role="group" aria-label="View">
-              <button type="button" aria-pressed={choice === "rendered"} onclick={() => views.pick(file!.path, "rendered")}>Rendered</button>
-              <button type="button" aria-pressed={choice === "source"} onclick={() => views.pick(file!.path, "source")}>Source</button>
-            </span>
+          {#if opened !== null && renderer !== null}
+            {@const at = file.path}
+            <TfRendererSwitch
+              {opened}
+              shown={renderer}
+              pattern={switchPattern}
+              onpick={(r) => picks.set(at, r.id)}
+              onmakedefault={(r) => void makeDefault(at, r)}
+            />
           {/if}
           {#if editable}
             <a class="tf-btn tf-sm" href={editHash(repoId, file.path)}>Edit</a>

@@ -60,7 +60,6 @@
 /* *Submit review (N pending)*: prototype-6's warn-edged button. */
 .tf-btn.tf-warnbtn { border-color: var(--warn); color: var(--warn); }
 .tf-gone { margin: 12px 0 0; }
-.tf-prfiles-cut { margin: 12px 0 0; font-size: var(--t-sm); }
 .tf-prr-line { font-size: var(--t-sm); }
 .tf-prm-ready { padding: 0; }
 .tf-prm-blocked { flex-direction: column; align-items: flex-start; gap: 2px; }

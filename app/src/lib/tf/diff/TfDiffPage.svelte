@@ -61,6 +61,8 @@
 
   let title = $state<string | null>(null);
   let files = $state<DiffFile[] | null>(null);
+  /** The diff hit the parser's ceiling (#2269). */
+  let cut = $state(false);
   let reading = $state(false);
   let failed = $state<string | null>(null);
 
@@ -112,6 +114,7 @@
         reading = false;
         const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
         files = block?.type === "diff" ? block.files : [];
+        cut = block?.type === "diff" && block.truncated;
       },
       (error) => {
         if (!alive()) return;
@@ -140,7 +143,7 @@
     {#if files !== null && files.length === 0}
       <div class="tf-empty">Nothing changes between {shown(base)} and {shown(head)}.</div>
     {:else if files !== null}
-      <TfDiffView {files} openAt={{ entityId: repoId, at: head }} />
+      <TfDiffView {files} {cut} openAt={{ entityId: repoId, at: head }} />
     {/if}
   </TfWaiting>
 </div>

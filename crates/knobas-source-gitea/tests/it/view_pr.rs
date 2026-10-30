@@ -2421,12 +2421,12 @@ async fn the_reviews_line_comments_are_read_at_the_same_time() {
     );
 }
 
-/// A file the cap cut (#709): a comment on a line past the cut is not called
+/// A file the ceiling cut (#709, #2269): a comment on a line past the cut is not called
 /// outdated -- the line may be there, unshown -- while one on a shown line
 /// still sits on it.
 #[tokio::test]
 async fn a_comment_past_a_files_cut_is_not_called_outdated() {
-    let lines = knobas_source::diff::MAX_LINES_PER_FILE + 100;
+    let lines = knobas_source::diff::MAX_LINES_PER_VIEW + 100;
     let mut diff = format!(
         "diff --git a/big.txt b/big.txt\nnew file mode 100644\nindex 0000000..1111111\n\
          --- /dev/null\n+++ b/big.txt\n@@ -0,0 +1,{lines} @@\n"

@@ -594,9 +594,19 @@ additions: number,
  */
 deletions: number, hunks: Array<Hunk>, 
 /**
- * Some of this file's lines were cut by a cap.
+ * Some of this file's lines were cut by the ceiling.
  */
 truncated: boolean, 
+/**
+ * How alike the two sides of a rename or copy are, in percent, where
+ * git says (`similarity index 92%`; #2268).
+ */
+similarity?: number, 
+/**
+ * The file's mode before and after, where it changed (`old mode
+ * 100644` / `new mode 100755`; #2268): an executable bit set or cleared.
+ */
+old_mode?: string, new_mode?: string, 
 /**
  * The review conversations on this file's lines (issue #709): what a
  * source that keeps line comments read for it, in the order the file

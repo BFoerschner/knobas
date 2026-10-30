@@ -39,3 +39,14 @@ test("a file that was empty is a new file of added lines", () => {
   expect(file.change).toBe("added");
   expect(lines(file)).toEqual([["a-/1 # Hi", "a-/2 ", "a-/3 text"]]);
 });
+
+test("each hunk's header counts its lines on both sides, as git prints it (#2267)", () => {
+  const before = Array.from({ length: 20 }, (_, n) => `l${n + 1}`);
+  const after = [...before];
+  after[1] = "changed";
+  after.splice(15, 0, "new");
+  const file = lineDiff("a.txt", before.join("\n"), after.join("\n"));
+  expect(file.hunks.map((hunk) => hunk.header)).toEqual(["@@ -1,5 +1,5 @@", "@@ -13,6 +13,7 @@"]);
+  // Only added, at the top of an empty file: nothing of the old side, after its line 0.
+  expect(lineDiff("b.txt", "", "x\ny").hunks[0]!.header).toBe("@@ -0,0 +1,2 @@");
+});

@@ -106,10 +106,8 @@
       viewed={{ paths: viewed, set: (path, on) => void toggle(path, on) }}
       review={diff?.commentable ? { entity: prId, pending } : null}
       {openAt}
+      cut={diff?.truncated ?? false}
       {...render ? { render } : {}}
     />
-  {/if}
-  {#if diff?.truncated}
-    <p class="tf-dim tf-prfiles-cut">The source cut this diff; the rest is on its own page.</p>
   {/if}
 {/if}
