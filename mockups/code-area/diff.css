@@ -69,7 +69,7 @@
 .ln .addc { visibility: hidden; }
 .ln.hov .addc { visibility: visible; }
 .hunk { display: flex; align-items: center; gap: 8px; background: var(--info-bg); color: var(--info); font: var(--t-xs)/26px var(--mono); padding-left: 6px; }
-.hunk .exp { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 3px; color: var(--info); font: 600 var(--t-xs) var(--sans); }
+.hunk .exp { display: inline-flex; align-items: center; gap: 4px; height: var(--control-h-sm); padding: 0 6px; border-radius: 3px; color: var(--info); font: 600 var(--t-xs) var(--sans); }
 .hunk .exp:hover { background: var(--sheet); }
 .s2 { display: grid; grid-template-columns: 1fr 1fr; }
 .s2 > .side + .side { border-left: 1px solid var(--rule); }

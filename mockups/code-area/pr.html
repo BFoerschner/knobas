@@ -2,7 +2,7 @@
 <!--
   #2252: the pull request page and its side rail (spec #2234 story 85): merge readiness as a checklist, reviewers and
   their state, required checks and the builds of the head commit from the mirror, conflicts. Merge stays in the
-  header. The body is drawn by the one Markdown component. States: blocked | ready.
+  header. The body is drawn by the one Markdown component. States: blocked | ready | refresh (re-read: old content dimmed).
 -->
 <html lang="en">
 <head>
@@ -12,10 +12,12 @@
 <link rel="stylesheet" href="base.css"><link rel="stylesheet" href="code.css">
 <script src="mockup.js"></script>
 </head>
-<body data-page="pr" data-kind="pr" data-tab="conv" data-states="blocked ready">
+<body data-page="pr" data-kind="pr" data-tab="conv" data-states="blocked ready refresh">
 <div class="tf">
 <div id="chrome"></div>
-<main><div class="body"><div class="prgrid">
+<main>
+<div class="barwrap" data-when="refresh"><div class="bar"></div></div>
+<div class="body"><div class="prgrid" data-dim>
   <section class="tl">
     <article class="cmt"><header><span class="av b">ML</span><b>mara</b><span class="dim">opened this 2 days ago</span>
       <div class="tf-acts"><button class="tf-btn tf-sm tf-ghost">Edit</button><button class="tf-iconbtn tf-sm" title="More" data-ic="more"></button></div></header>

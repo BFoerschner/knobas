@@ -62,7 +62,7 @@
     ["repo", "Repository page", "Persistent tree, README rendered on the landing (GFM table, task list, strikethrough, highlighted fence, a Mermaid fence drawn), regrouped tabs.", ["readme", "skeleton", "refresh"]],
     ["file", "Renderer switcher", "A diagram file drawn by its default renderer, the switcher open with every renderer that accepts *.mmd; Source highlighted; a broken diagram showing its source and the parser's error.", ["switcher", "source", "broken"]],
     ["pipeline", "Pipeline editor", "A .json.gz unwrapped by gunzip → jq → Source, edited in place; the gzip suggestion when no default matches; a failed step naming itself, its stderr and its input.", ["editing", "suggested", "failed"]],
-    ["pr", "Pull request", "Conversation with the side rail: merge readiness, reviewers, required checks, builds of the head from the mirror, conflicts.", ["blocked", "ready"]],
+    ["pr", "Pull request", "Conversation with the side rail: merge readiness, reviewers, required checks, builds of the head from the mirror, conflicts.", ["blocked", "ready", "refresh"]],
     ["diff", "Diff", "The one diff component: file tree with filter and badges, unified and split, word-level changes, expand context, collapse, threads, the pipeline named in a file header, Load diff, the range picker, Ignore whitespace disabled with its reason, a re-read dimmed.", ["unified", "split", "range", "refresh"]],
   ];
   const links = (id, states, theme) => states.map((s) => `<a href="${id}.html?theme=${theme}&state=${s}">${s}</a>`).join("");

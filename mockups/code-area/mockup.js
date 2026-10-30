@@ -1,11 +1,11 @@
 // The Code area mockup (#2252): shared chrome, theme, states and the few interactions a reviewer can click.
-// Address: <page>.html?theme=light|dark&state=<state>&layout=unified|split&bare (bare hides the mockup bar for shots).
+// Address: <page>.html?theme=light|dark&state=<state>&bare (bare hides the mockup bar for shots).
 (function () {
   const q = new URLSearchParams(location.search);
   const root = document.documentElement;
   let theme = q.get("theme");
   try { theme = theme || localStorage.getItem("knobas-mockup-theme"); } catch (e) { /* storage off */ }
-  if (theme === "dark" || theme === "light") root.dataset.theme = theme;
+  root.dataset.theme = theme === "dark" || theme === "light" ? theme : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 
   const ICONS = {
     folder: '<path d="M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z"/>',
@@ -88,7 +88,7 @@
     document.querySelectorAll("[data-openin]").forEach((el) => (el.outerHTML = openin(el.dataset.openin)));
     if (!q.has("bare")) b.insertAdjacentHTML("beforeend", mockbar(page, states));
     // ?check: layout self-test for the implementer (page overflow, a control row that wraps, mixed heights in one row).
-    if (q.has("check")) setTimeout(() => {
+    if (q.has("check")) document.fonts.ready.then(() => {
       const out = [];
       const fams = new Set([...document.fonts].filter((f) => f.status === "loaded").map((f) => f.family.replace(/"/g, "")));
       if (!fams.has("Archivo") || !fams.has("JetBrains Mono")) out.push("fonts not loaded: " + [...fams].join(","));
@@ -102,7 +102,7 @@
       });
       document.querySelectorAll(".tf-menu").forEach((m) => { const r = m.getBoundingClientRect(); if (r.right > innerWidth || r.left < 0) out.push("menu off screen: " + Math.round(r.left) + ".." + Math.round(r.right)); });
       document.body.insertAdjacentHTML("beforeend", `<pre id="check">${out.length ? out.join("\n") : "CHECK OK"}</pre>`);
-    }, 300);
+    });
     const tb = document.getElementById("themebtn");
     if (tb) tb.onclick = () => {
       const next = root.dataset.theme === "dark" ? "light" : "dark";
