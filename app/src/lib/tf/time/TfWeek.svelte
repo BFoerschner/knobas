@@ -12,8 +12,9 @@
   attributes that take percentages.
 -->
 <script lang="ts">
+  import { pageVisible } from "../kept-pages.svelte";
+  import { everyWhileShown } from "../while-shown.svelte";
   import { minutesLabel } from "../../time/format";
-  import { onMount } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import { getEntity as realGetEntity } from "../../ipc/entity";
@@ -63,10 +64,8 @@
   /** The clock, moved every thirty seconds so the running timer's minutes move. */
   // svelte-ignore state_referenced_locally
   let clock = $state(now());
-  onMount(() => {
-    const tick = setInterval(() => (clock = now()), 30_000);
-    return () => clearInterval(tick);
-  });
+  // Paused while keep-alive holds the page hidden, read at once on its return (#2249).
+  everyWhileShown(pageVisible(), 30_000, () => (clock = now()));
 
   const thisMonday = $derived(mondayOf(dayKey(clock)));
   const monday = $derived(mondayOf(week ?? dayKey(clock)));

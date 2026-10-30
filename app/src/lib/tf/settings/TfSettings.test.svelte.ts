@@ -5,6 +5,7 @@
  * `update_source` and `backfill_source` are the two commands this ticket is
  * the first UI for; their live behaviour is `crates/knobas-app/tests/it`'s.
  */
+import { pageContext } from "../kept-pages.svelte";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -263,7 +264,8 @@ async function settle() {
 async function open(rest: string[], p: SettingsPorts = ports(), health = createHealthStub()) {
   view = mount(TfSettings, {
     target,
-    props: { rest, job: null, ready: true, ports: p, health, layers: createLayers(), now: () => NOW },
+    context,
+    props: { rest, job: null, ready: true, ports: p, health, layers: createLayers(), now: () => ((clockReads += 1), NOW) },
   });
   await settle();
   return { p, health };
@@ -1938,4 +1940,34 @@ test("the Sources row says the credential is running out only while amber or exp
 
   await open([], expiring(null));
   expect(state()).toBe("Synced 4 min ago");
+});
+
+// A page keep-alive holds hidden (#2249): the components above mount inside it.
+const page = $state({ shown: true });
+const context = pageContext(() => page.shown);
+let clockReads = 0;
+
+test("Settings stops its clock while its page is hidden and reads it once when shown again (#2249)", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  try {
+    await open([]);
+    const mounted = clockReads;
+    vi.advanceTimersByTime(30_000);
+    flushSync();
+    expect(clockReads).toBeGreaterThan(mounted);
+
+    page.shown = false;
+    flushSync();
+    const hidden = clockReads;
+    vi.advanceTimersByTime(120_000);
+    flushSync();
+    expect(clockReads).toBe(hidden);
+
+    page.shown = true;
+    flushSync();
+    expect(clockReads).toBeGreaterThan(hidden);
+  } finally {
+    vi.useRealTimers();
+    page.shown = true;
+  }
 });

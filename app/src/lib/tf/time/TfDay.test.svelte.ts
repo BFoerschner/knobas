@@ -5,6 +5,7 @@
  *
  * Instants are local, for `day.test.ts`'s reason.
  */
+import { pageContext } from "../kept-pages.svelte";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -124,13 +125,14 @@ function render(
   const layers = createLayers();
   view = mount(TfDay, {
     target,
+    context,
     props: {
       day: over.day === undefined ? DAY : over.day,
       timer: { current: over.running ?? null },
       job: over.job ?? null,
       ontimer: () => (stops += 1),
       onlog: (entityId: string, day: string) => logs.push([entityId, day]),
-      now: () => over.clock ?? NOW,
+      now: () => ((clockReads += 1), over.clock ?? NOW),
       // Six hundred pixels wide and seven a character, unless a test says otherwise:
       // jsdom lays nothing out and measures no text.
       stripWidth: () => over.stripWidth ?? 600,
@@ -681,4 +683,35 @@ test("past the horizon, what knobas saw is absent rather than zero, and the bloc
   expect(figures()).toEqual(["2h 10m tracked", "0m logged", "2h 10m to log", "– offered by knobas", "– open, app in front"]);
   expect(squash(target.textContent)).toContain("No record of what was in front of you.");
   expect(rows()).toEqual(["unlogged"]);
+});
+
+// A page keep-alive holds hidden (#2249): the components above mount inside it.
+const page = $state({ shown: true });
+const context = pageContext(() => page.shown);
+let clockReads = 0;
+
+test("The Day tab stops its clock while its page is hidden and reads it once when shown again (#2249)", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  try {
+    render();
+    await settle();
+    const mounted = clockReads;
+    vi.advanceTimersByTime(30_000);
+    flushSync();
+    expect(clockReads).toBeGreaterThan(mounted);
+
+    page.shown = false;
+    flushSync();
+    const hidden = clockReads;
+    vi.advanceTimersByTime(120_000);
+    flushSync();
+    expect(clockReads).toBe(hidden);
+
+    page.shown = true;
+    flushSync();
+    expect(clockReads).toBeGreaterThan(hidden);
+  } finally {
+    vi.useRealTimers();
+    page.shown = true;
+  }
 });

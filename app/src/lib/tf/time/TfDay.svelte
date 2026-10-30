@@ -19,8 +19,9 @@
   ticket you are on"). Only the `running` row carries `tf-tm-run`.
 -->
 <script lang="ts">
+  import { pageVisible } from "../kept-pages.svelte";
+  import { everyWhileShown } from "../while-shown.svelte";
   import { keyOf, minutesLabel } from "../../time/format";
-  import { onMount } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import {
@@ -116,10 +117,8 @@
   /** The clock, moved every thirty seconds so the running row and now line move. */
   // svelte-ignore state_referenced_locally
   let clock = $state(now());
-  onMount(() => {
-    const tick = setInterval(() => (clock = now()), 30_000);
-    return () => clearInterval(tick);
-  });
+  // Paused while keep-alive holds the page hidden, read at once on its return (#2249).
+  everyWhileShown(pageVisible(), 30_000, () => (clock = now()));
 
   const key = $derived(day ?? dayKey(clock));
   const today = $derived(dayKey(clock));

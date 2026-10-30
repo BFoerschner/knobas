@@ -15,6 +15,8 @@
   status. Only the newest list read may land (`latestRead`, #107).
 -->
 <script lang="ts">
+  import { pageVisible } from "../kept-pages.svelte";
+  import { everyWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage, EVENTS } from "../../ipc";
   import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import { health as sharedHealth, type Health } from "../../shell/health.svelte";
@@ -91,6 +93,8 @@
   let finished = $state(0);
   // svelte-ignore state_referenced_locally
   let clock = $state(now());
+  // Moved every thirty seconds while the page is shown, at once on its return (#2249).
+  everyWhileShown(pageVisible(), 30_000, () => (clock = now()));
 
   const readAdapters = latestRead<SourceDescriptor[]>();
   /**
@@ -140,10 +144,8 @@
       })
       .then((off) => (dead ? off() : offs.push(off)))
       .catch(() => {});
-    const tick = setInterval(() => (clock = now()), 30_000);
     return () => {
       dead = true;
-      clearInterval(tick);
       for (const off of offs.splice(0)) off();
     };
   });

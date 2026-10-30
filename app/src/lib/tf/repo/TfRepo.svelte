@@ -501,7 +501,7 @@
                     {refreshed}
                   />
                 {:else if one === "commit" && placeOf(one).commit !== null}
-                  <TfRepoCommit {ports} {repoId} commitId={placeOf(one).commit} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />
+                  <TfRepoCommit {ports} {repoId} commitId={placeOf(one).commit ?? ""} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />
                 {:else if one === "branches"}
                   <TfRepoBranches {ports} {repoId} {source} {refreshed} />
                 {:else if one === "compare"}
