@@ -50,6 +50,7 @@ use crate::IpcError;
 
 pub mod clone;
 pub mod open;
+pub mod range;
 pub mod uncommitted;
 pub mod working_tree;
 
