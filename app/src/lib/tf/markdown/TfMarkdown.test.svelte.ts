@@ -260,3 +260,89 @@ test("new text draws over the old", () => {
   flushSync();
   expect(text(md())).toBe("two");
 });
+
+/** `URL.createObjectURL` held for one test: each URL handed out, its blob, and which were revoked. */
+function blobUrls() {
+  const made = new Map<string, Blob>();
+  const revoked: string[] = [];
+  const create = URL.createObjectURL;
+  const revoke = URL.revokeObjectURL;
+  URL.createObjectURL = (blob: Blob) => {
+    const url = `blob:test/${made.size}`;
+    made.set(url, blob);
+    return url;
+  };
+  URL.revokeObjectURL = (url: string) => void revoked.push(url);
+  return { made, revoked, restore: () => ((URL.createObjectURL = create), (URL.revokeObjectURL = revoke)) };
+}
+
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+test("a relative image loads through the byte read as a blob URL, resolved against the file's directory (#2256)", async () => {
+  const urls = blobUrls();
+  const asked: string[] = [];
+  try {
+    draw("![logo](img/logo.png) ![remote](https://t.example/x.png)", {
+      image: async (path: string) => (asked.push(path), PNG),
+    });
+    await settle();
+    expect(asked).toEqual(["docs/img/logo.png"]);
+    const [logo, remote] = [...md().querySelectorAll("img")];
+    expect(logo!.getAttribute("src")).toBe("blob:test/0");
+    expect(urls.made.get("blob:test/0")!.type).toBe("image/png");
+    expect(new Uint8Array(await urls.made.get("blob:test/0")!.arrayBuffer())).toEqual(PNG);
+    expect(remote!.hasAttribute("src")).toBe(false);
+    unmount(view!);
+    view = null;
+    expect(urls.revoked).toEqual(["blob:test/0"]);
+  } finally {
+    urls.restore();
+  }
+});
+
+test("an SVG image is sanitized before it is drawn: no script, no handler, its drawing kept (#2256)", async () => {
+  const urls = blobUrls();
+  const svg = [
+    '<svg width="10" height="10" onload="window.pwned = 5">',
+    "<script>window.pwned = 6</script>",
+    '<circle cx="5" cy="5" r="4" fill="teal"/>',
+    '<foreignObject><iframe src="https://t.example"></iframe></foreignObject>',
+    "</svg>",
+  ].join("");
+  try {
+    draw("![diagram](arch.svg)", { image: async () => new TextEncoder().encode(svg) });
+    await settle();
+    const blob = urls.made.get(md().querySelector("img")!.getAttribute("src")!)!;
+    expect(blob.type).toBe("image/svg+xml");
+    const drawn = await blob.text();
+    expect(drawn).toContain("<circle");
+    expect(drawn).toMatch(/^<svg[^>]* xmlns="[^"]+svg"/);
+    expect(drawn).not.toMatch(/script|onload|foreignObject|iframe/i);
+  } finally {
+    urls.restore();
+  }
+});
+
+test("an image the byte read refuses draws its alt text and the reason, and nothing loads (#2256)", async () => {
+  const urls = blobUrls();
+  try {
+    draw("![the big one](huge.png)", {
+      image: async () => {
+        throw { code: "invalid", message: "docs/huge.png is 63.2 MB; a byte read takes up to 50 MB.", source_id: null };
+      },
+    });
+    await settle();
+    expect(md().querySelector("img")).toBeNull();
+    const missing = md().querySelector(".tf-md-noimg")!;
+    expect(text(missing)).toBe("the big one: docs/huge.png is 63.2 MB; a byte read takes up to 50 MB.");
+    expect(urls.made.size).toBe(0);
+  } finally {
+    urls.restore();
+  }
+});
+
+test("on a surface with no byte read a relative image loads nothing", async () => {
+  draw("![logo](logo.png)");
+  await settle();
+  expect(md().querySelector("img")!.hasAttribute("src")).toBe(false);
+});
