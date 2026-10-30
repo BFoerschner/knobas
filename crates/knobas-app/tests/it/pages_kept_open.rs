@@ -18,7 +18,11 @@ async fn pages_kept_open_is_five_until_set_and_then_what_was_stored() {
     assert_eq!(settings::pages_kept_open(&pool).await.unwrap(), 5);
 
     assert_eq!(settings::set_pages_kept_open(&pool, 0).await.unwrap(), 0);
-    assert_eq!(settings::pages_kept_open(&pool).await.unwrap(), 0, "0 is a value, not unset");
+    assert_eq!(
+        settings::pages_kept_open(&pool).await.unwrap(),
+        0,
+        "0 is a value, not unset"
+    );
 
     assert_eq!(settings::set_pages_kept_open(&pool, 40).await.unwrap(), 15);
     assert_eq!(settings::pages_kept_open(&pool).await.unwrap(), 15);
