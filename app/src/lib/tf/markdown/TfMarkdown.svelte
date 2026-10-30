@@ -12,7 +12,7 @@
     claims them, and stopped when the text changes or the component goes.
 -->
 <script lang="ts">
-  import { drawFences, fenceCode, markdownFragment } from "../../render/markdown";
+  import { drawFences, fenceCode, markdownFragment, type MarkdownLinks } from "../../render/markdown";
   import { renderPort, type RenderPort } from "../../render/port";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { push } from "../../shell/toasts.svelte";
@@ -30,7 +30,7 @@
     /** The repository directory the text's file sits in, for relative links; `""` the top. */
     base?: string;
     /** The href that opens a repository file (at a line); `null` where the surface has no repository. */
-    fileLink?: ((path: string, line: number | null) => string) | null;
+    fileLink?: MarkdownLinks["fileLink"];
     /** Hands an external link to the browser. */
     openExternal?: (url: string) => Promise<void>;
     /** A fence's *Copy*. */
@@ -67,8 +67,22 @@
         );
       }
     };
+    // A middle click opens no new webview window: an external link goes to the opener, any other does nothing.
+    const auxclick = (event: MouseEvent) => {
+      const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null;
+      if (!link || !node.contains(link)) return;
+      event.preventDefault();
+      if (event.button === 1 && link.classList.contains("tf-ext"))
+        openExternal(link.getAttribute("href") ?? "").catch((error: unknown) =>
+          push({ text: error instanceof Error ? error.message : String(error) }),
+        );
+    };
     node.addEventListener("click", click);
-    return () => node.removeEventListener("click", click);
+    node.addEventListener("auxclick", auxclick);
+    return () => {
+      node.removeEventListener("click", click);
+      node.removeEventListener("auxclick", auxclick);
+    };
   }
 </script>
 

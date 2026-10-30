@@ -136,6 +136,18 @@ test("an external link goes to the opener and does not navigate the app", () => 
   expect(opened).toEqual(["https://example.com/wiki"]);
 });
 
+test("a middle click opens no window: an external link goes to the opener, a file link does nothing", () => {
+  draw("[wiki](https://example.com/wiki) [file](src/a.rs)");
+  const [external, file] = [...md().querySelectorAll("a")];
+  const middle = () => new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 });
+  const onExternal = middle();
+  external!.dispatchEvent(onExternal);
+  const onFile = middle();
+  file!.dispatchEvent(onFile);
+  expect([onExternal.defaultPrevented, onFile.defaultPrevented]).toEqual([true, true]);
+  expect(opened).toEqual(["https://example.com/wiki"]);
+});
+
 test("a relative link where the surface has no repository draws as text, not a link", () => {
   draw("[runbook](runbook.md)", { fileLink: null });
   expect(md().querySelector("a")?.hasAttribute("href") ?? false).toBe(false);
@@ -162,6 +174,10 @@ test("raw HTML is sanitized: scripts, event handlers, javascript: links, styles 
       '<p style="color:red" class="tf-modal" onclick="window.pwned=4">styled</p>',
       '<form action="https://example.com"><input name="q"><button>go</button></form>',
       '<iframe src="https://example.com"></iframe>',
+      '<svg><a href="https://example.com"><text>svg</text></a></svg><math><mi>math</mi></math>',
+      '<video src="https://t.example/v.mp4" poster="https://t.example/p.png"><source src="https://t.example/s.mp4"></video>',
+      '<table background="https://t.example/b.png"><tr><td>cell</td></tr></table>',
+      '<map><area href="https://example.com/" shape="default"></map>',
       "",
       "[md link](javascript:alert(1))",
     ].join("\n"),
@@ -170,6 +186,7 @@ test("raw HTML is sanitized: scripts, event handlers, javascript: links, styles 
   const urls = [...md().querySelectorAll("*")].flatMap((el) => [...el.attributes].map((attr) => attr.value));
   expect(urls.filter((value) => /javascript:/i.test(value))).toEqual([]);
   expect(md().querySelector("p.tf-modal")).toBeNull();
+  expect(md().querySelector("svg, math, [poster], [background], [href]:not(a), [src]:not(img)")).toBeNull();
   expect(text(md())).toContain("styled");
   expect((window as unknown as { pwned?: number }).pwned).toBeUndefined();
 });

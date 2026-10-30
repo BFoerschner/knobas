@@ -20,7 +20,8 @@
  *   scheme loses its href.
  * - **Images** lose their `src` unless it is a `data:` URL (the CSP refuses
  *   remote ones); a relative one keeps its resolved path in `data-md-path`
- *   for the byte read (#2256).
+ *   for the byte read (#2256). No element but `<a>` keeps an `href` and none
+ *   but `<img>` a `src` (`<area>`, `<video>`, `<audio>`, `<source>`, `<track>`).
  * - **Fences** are `.tf-fence` blocks. {@link drawFences} hands each to the
  *   renderer the registry names for its language (`renderersForFence`) that
  *   has a fence drawer ({@link registerFence}, #2258's Mermaid), else
@@ -129,7 +130,10 @@ export const SANITIZE: Config = {
     "style", "link", "meta", "base", "form", "input", "button", "textarea", "select", "option",
     "iframe", "frame", "frameset", "object", "embed", "dialog", "template",
   ],
-  FORBID_ATTR: ["style", "class", "id", "name", "target", "form", "formaction", "srcset", "ping"],
+  FORBID_ATTR: [
+    "style", "class", "id", "name", "target", "form", "formaction", "srcset", "ping",
+    "poster", "background", "usemap", "download",
+  ],
   ALLOW_DATA_ATTR: false,
   ADD_ATTR: ["data-md-fence", "data-md-task"],
 };
@@ -167,6 +171,10 @@ function finish(root: DocumentFragment, links: MarkdownLinks) {
       anchor.setAttribute("href", links.fileLink(to.path, to.line));
     }
   }
+
+  // Only `<a>` links and only `<img>` loads: `<area href>` would navigate the webview, a media `src` would fetch.
+  for (const other of root.querySelectorAll("[href]:not(a)")) other.removeAttribute("href");
+  for (const other of root.querySelectorAll("[src]:not(img)")) other.removeAttribute("src");
 
   for (const image of root.querySelectorAll("img")) {
     const src = image.getAttribute("src") ?? "";
