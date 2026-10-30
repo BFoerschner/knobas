@@ -446,7 +446,7 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
  * `entity_file_bytes` for the repositories this module draws (#2256): a README image, or any file's text as bytes,
  * at the entity's branch (the fake's commit is the branch name it was read at). `undefined` for another entity.
  */
-export function repoFileBytes(entityId: string, path: string): ArrayBuffer | undefined {
+export function repoFileBytes(entityId: string, path: string): Uint8Array | undefined {
   const branchAt = entityId.indexOf("@refs/heads/");
   const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);
   const branch = branchAt === -1 ? null : entityId.slice(branchAt + "@refs/heads/".length);
@@ -455,8 +455,7 @@ export function repoFileBytes(entityId: string, path: string): ArrayBuffer | und
   const image = repoId === PAYOUT ? PAYOUT_IMAGES[path] : undefined;
   const text = files[path];
   if (image === undefined && text === undefined) throw { code: "not_found", message: `gitea: no file ${path}`, source_id: null };
-  const bytes = image !== undefined ? image() : new TextEncoder().encode(text);
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  return image !== undefined ? image() : new TextEncoder().encode(text);
 }
 
 /** Why `main` takes no commit straight onto it: protected, as prototype-6 has it (#985). */
