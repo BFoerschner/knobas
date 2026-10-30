@@ -375,6 +375,21 @@ test("the highlighter is asked for the lines in view of a long file first, and t
   expect(drawn).toContain(39_999);
 });
 
+test("closing the file viewer cancels its highlighting, and a late answer draws nothing", async () => {
+  const render = heldRender();
+  draw(openSource({ "src/main.rs": "fn main() {}" }).entityView, "src/main.rs", null, render.port);
+  await settle();
+  const job = render.jobs[0]!;
+  expect(job.cancelled).toBe(false);
+
+  unmount(view!);
+  view = null;
+  expect(job.cancelled).toBe(true);
+  job.handlers.onLines(0, [[["fn", "kw"], [" main() {}", ""]]]);
+  flushSync();
+  expect(colored()).toEqual([]);
+});
+
 test("an SVG file is drawn as an image", async () => {
   const svg = '<svg width="4" height="4"/>';
   draw(openSource({ "docs/logo.svg": svg }).entityView, "docs/logo.svg");

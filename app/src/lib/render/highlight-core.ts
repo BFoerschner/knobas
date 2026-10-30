@@ -160,6 +160,14 @@ export function createHighlightCore({
   }
 
   async function run(job: Job, text: string, lang: string | null) {
+    try {
+      await pass(job, text, lang);
+    } finally {
+      jobs.delete(job.id);
+    }
+  }
+
+  async function pass(job: Job, text: string, lang: string | null) {
     if (lang === null) return post({ type: "plain", id: job.id });
     let h: HighlighterCore;
     try {
@@ -191,7 +199,6 @@ export function createHighlightCore({
       if (next < lines.length) await pause();
     }
     if (!job.cancelled) post({ type: "done", id: job.id });
-    jobs.delete(job.id);
   }
 
   return {
