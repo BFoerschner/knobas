@@ -13,6 +13,7 @@
   import { clockLabel } from "../../time/format";
   import { ipcErrorMessage } from "../../ipc";
   import type { ChoiceOption, DiffFile, EntityDetail } from "../../ipc/entity";
+  import { commitContext, parentOf } from "../diff/context";
   import TfDiffView from "../diff/TfDiffView.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
@@ -39,6 +40,10 @@
   let detail = $state<EntityDetail | null>(null);
   let files = $state<DiffFile[] | null>(null);
   let start = $state<ReturnType<typeof branchFrom>>(null);
+  /** The diff hit the parser's ceiling. */
+  let cut = $state(false);
+  /** The first parent's address, for the old side of expanded context. */
+  let parent = $state<string | null>(null);
   let failed = $state<string | null>(null);
 
   $effect(() => {
@@ -77,6 +82,8 @@
       const diff = view?.sections.find((candidate) => candidate.id === "diff");
       const block = diff?.blocks.find((candidate) => candidate.type === "diff");
       files = block?.type === "diff" ? block.files : [];
+      cut = block?.type === "diff" && block.truncated;
+      parent = parentOf(view);
       start = branchFrom(view);
     }, fail);
     return Promise.all([rowRead, viewRead]);
@@ -114,5 +121,5 @@
 {:else if files !== null && files.length === 0}
   <div class="tf-empty">This commit changes no file.</div>
 {:else if files !== null}
-  <TfDiffView {files} />
+  <TfDiffView {files} {cut} context={commitContext(ports.entityView, commitId, parent)} />
 {/if}

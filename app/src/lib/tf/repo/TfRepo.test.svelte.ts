@@ -447,7 +447,7 @@ test("a commit draws its sha, message, author and time, its diff per file, and N
   await draw([REPO, "commits", C1]);
   expect(text(target.querySelector(".tf-cgroup-h"))).toContain("c90d11a2b3 PAY-231: jitter in backoff mara, today 11:42");
   const diff = target.querySelector(".tf-diff")!;
-  expect(text(diff.querySelector(".tf-fh"))).toBe("src/retry.rs +1 −1");
+  expect(text(diff.querySelector(".tf-fh"))).toBe("M src/retry.rs +1 −1");
   // A context line carries its old and its new number (#2266): `1` `1`.
   expect([...diff.querySelectorAll(".tf-ln")].map(text)).toEqual(["11 fn retry() {", "2− 3", "2+ 5"]);
   expect(diff.querySelector(".tf-ln.tf-del")).not.toBeNull();

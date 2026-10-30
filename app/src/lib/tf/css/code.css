@@ -134,7 +134,37 @@
 .tf-diff .tf-no { color: var(--ink-2); text-align: right; padding-right: 8px; user-select: none; }
 .tf-diff .tf-add { background: var(--ok-bg); }
 .tf-diff .tf-del { background: var(--err-bg); }
-.tf-diff .tf-hunk { background: var(--info-bg); color: var(--info); font-size: var(--t-xs); line-height: 26px; padding-left: 12px; white-space: pre; }
+.tf-diff .tf-hunk { display: flex; align-items: center; gap: 8px; background: var(--info-bg); color: var(--info); font-size: var(--t-xs); line-height: 26px; padding-left: 12px; white-space: pre; }
+/* Expand context (#2267): small buttons in the gap's row, as the mockup draws them. */
+.tf-diff .tf-exp {
+  display: inline-flex; align-items: center; height: var(--control-h-sm); padding: 0 6px; border: 0; border-radius: 3px;
+  background: none; color: var(--info); font: 600 var(--t-xs) var(--sans); cursor: pointer;
+}
+.tf-diff .tf-exp:hover { background: var(--sheet); }
+.tf-diff .tf-extra .tf-no { opacity: 0.7; }
+/* Word-level changes (#2267). */
+.tf-diff .tf-add .tf-wd { background: var(--add-word); border-radius: 2px; }
+.tf-diff .tf-del .tf-wd { background: var(--del-word); border-radius: 2px; }
+/* Collapse, badges, and what a file draws in place of its lines (#2268, #2269). */
+.tf-diff.tf-closed .tf-fh { border-bottom: 0; }
+.tf-diff.tf-current { border-color: var(--ink-2); }
+.tf-fh-caret {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px;
+  background: none; color: var(--ink-2); cursor: pointer; flex: none;
+}
+.tf-fh-caret:hover { background: var(--sheet); }
+.tf-fh-caret svg { width: 14px; height: 14px; }
+.tf-bd {
+  display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 3px;
+  font: 700 10px var(--sans); flex: none; background: var(--muted-bg); color: var(--ink-2);
+}
+.tf-bd-A { background: var(--ok-bg); color: var(--ok); }
+.tf-bd-D { background: var(--err-bg); color: var(--err); }
+.tf-bd-M { background: var(--warn-bg); color: var(--warn); }
+.tf-bd-R { background: var(--info-bg); color: var(--info); }
+.tf-diff .tf-dwhy { display: flex; align-items: center; gap: 10px; padding: 10px 14px; font: var(--t-sm) var(--sans); color: var(--ink-2); }
+.tf-diff .tf-dwhy .tf-btn { margin-left: auto; }
+.tf-dcut { margin: 0 0 12px; padding: 8px 12px; border-radius: 6px; background: var(--warn-bg); color: var(--ink); font-size: var(--t-sm); }
 .tf-srow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .tf-srow > .tf-ln + .tf-ln { border-left: 1px solid var(--rule); }
 .tf-diff .tf-pad { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--sheet-2) 6px 7px); }
@@ -158,6 +188,14 @@
 .tf-flist .tf-n { margin-left: auto; font-family: var(--sans); white-space: nowrap; }
 .tf-flist .tf-viewed { opacity: 0.5; }
 .tf-flist-none { padding: 8px; }
+.tf-flist .tf-fdir { padding: 6px 10px 2px; border-top: 1px solid var(--rule-2); color: var(--ink-2); font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
+.tf-flist .tf-fdir:first-child { border-top: 0; }
+.tf-flist .tf-fdir + button { border-top: 0; }
+.tf-flist button.tf-d1 { padding-left: 24px; }
+.tf-flist button[aria-current="true"] { background: var(--sheet-2); box-shadow: inset 2px 0 0 var(--ink); }
+.tf-flist .tf-fname { overflow: hidden; text-overflow: ellipsis; min-width: 0; white-space: nowrap; }
+.tf-dkeys { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 8px 2px 0; font-size: var(--t-xs); }
+.tf-dkeys span { display: inline-flex; gap: 3px; align-items: center; }
 .tf-diff .tf-fh-viewed { margin-left: auto; font: 400 var(--t-sm) var(--sans); display: flex; gap: 6px; align-items: center; }
 .tf-addc {
   opacity: 0; border: 0; background: var(--info); color: var(--sheet); border-radius: 4px; width: 18px; height: 18px;
