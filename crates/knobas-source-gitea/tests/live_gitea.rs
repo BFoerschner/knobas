@@ -1412,10 +1412,11 @@ async fn the_seeded_trees_are_walked_and_a_seeded_file_is_drawn() {
 /// The whole tree for *Go to file* (#2311): every listing names it at its
 /// own commit, and it holds exactly the files Gitea's recursive tree holds,
 /// by their whole paths. Also what the adapter's paging leans on, at two
-/// entries a page: `total_count` counts every entry on every page, and
-/// Gitea's own `truncated` is true on the last page too, so it cannot say
-/// whether a read has them all. And the commits section counts what Gitea's
-/// `X-Total-Count` counts for the default branch.
+/// entries a page: `total_count` counts every entry on every page, and the
+/// answer's own `truncated` cannot say whether a read has them all (on the
+/// last page Gitea 1.27.3 says false, Forgejo 17 true; measured, #2311). And
+/// the commits section counts what Gitea's `X-Total-Count` counts for the
+/// default branch.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn the_whole_tree_is_every_file_at_the_listings_commit() {
@@ -1461,8 +1462,8 @@ async fn the_whole_tree_is_every_file_at_the_listings_commit() {
     let file = source.view(&entity, Some(&every)).await.unwrap().unwrap();
     assert!(matches!(file.sections[0].blocks[0], Block::File { .. }), "an entry opens its file");
 
-    // Two to a page: the count is every entry, and `truncated` stays true
-    // on the last page.
+    // Two to a page: the count is every entry on every page; `truncated`
+    // is true on the first, and printed on the last, where forges differ.
     let total = whole["total_count"].as_u64().expect("a total_count") as usize;
     assert_eq!(total, whole["tree"].as_array().unwrap().len());
     assert!(total > 2, "the seeded tree spans pages of two");
@@ -1483,7 +1484,9 @@ async fn the_whole_tree_is_every_file_at_the_listings_commit() {
             paged["truncated"]
         );
         assert_eq!(paged["total_count"].as_u64(), Some(total as u64));
-        assert_eq!(paged["truncated"], true, "page {page}");
+        if page == 1 {
+            assert_eq!(paged["truncated"], true, "more pages follow the first");
+        }
     }
 
     // The commits section's count is Gitea's count of the default branch.

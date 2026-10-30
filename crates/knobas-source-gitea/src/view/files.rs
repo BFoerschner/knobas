@@ -396,10 +396,10 @@ struct GitEntry {
 struct GitTree {
     #[serde(default)]
     tree: Vec<GitEntry>,
-    /// Every entry of the tree, all pages together. Gitea's own `truncated`
-    /// is true on every page of a tree over one page, the last included
-    /// (measured, #2311), so it says nothing about whether this read has
-    /// them all; the count does.
+    /// Every entry of the tree, all pages together (measured on Gitea 1.27.3
+    /// and Forgejo 17, #2311): what says how many pages to read. The
+    /// answer's own `truncated` is no help: on the last page Gitea says
+    /// false and Forgejo true.
     #[serde(default)]
     total_count: Option<usize>,
 }
