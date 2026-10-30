@@ -18,6 +18,7 @@
 import type { DiffFile, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/code/line-diff";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
+import { HOSTILE_PDF, SPEC_PDF } from "../../../../render/pdf-fixture";
 
 const RETRY_MAIN = `use std::time::Duration;
 
@@ -338,6 +339,18 @@ const FILE_KINDS: Record<string, string> = {
   "notes/plan.zzq": "fn main() { this is no language knobas knows }",
 };
 
+/**
+ * `?fake-binary`'s files (#2260): binary files in payout-service's tree, read through the byte read. A three-page
+ * PDF with an external link and a link to a page, a hostile PDF (JavaScript on open, script and launch links, a
+ * scripted field) and the README's PNG.
+ */
+const BINARY: Record<string, () => Uint8Array> = {
+  "docs/spec.pdf": SPEC_PDF,
+  "docs/hostile.pdf": HOSTILE_PDF,
+  "docs/img/logo.png": () => PAYOUT_IMAGES["docs/img/logo.png"]!(),
+};
+const binaryOf = (path: string) => (new URLSearchParams(globalThis.location?.search).has("fake-binary") ? BINARY[path] : undefined);
+
 function filesOf(repoId: string, branch: string | null): Record<string, string> | null {
   const repo = CORPUS.find((entry) => entry.entity_id === repoId && entry.kind === "repo");
   if (!repo) return null;
@@ -349,6 +362,8 @@ function filesOf(repoId: string, branch: string | null): Record<string, string> 
       ...(query.has("fake-file-kinds") ? FILE_KINDS : {}),
       // `?fake-md-hostile` (#2255): a Markdown file of raw HTML that tries to run script.
       ...(query.has("fake-md-hostile") ? { "docs/hostile.md": HOSTILE_MD } : {}),
+      // `?fake-binary` (#2260): binary files; the text here is a stand-in, `binaryOf` has their bytes.
+      ...(query.has("fake-binary") ? Object.fromEntries(Object.keys(BINARY).map((path) => [path, ""])) : {}),
     };
     // `?fake-file-lines=<n>` (perf audit, #2200's class): one file of `n` lines.
     const n = Number(query.get("fake-file-lines") ?? 0) || 0;
@@ -380,7 +395,7 @@ function listing(files: Record<string, string>, dir: string): TreeEntry[] {
     if (!path.startsWith(prefix)) continue;
     const rest = path.slice(prefix.length);
     if (rest.includes("/")) dirs.add(rest.slice(0, rest.indexOf("/")));
-    else entries.push({ name: rest, kind: "file", size: text.length, section: `file:${path}` });
+    else entries.push({ name: rest, kind: "file", size: binaryOf(path)?.().length ?? text.length, section: `file:${path}` });
   }
   return [
     ...[...dirs].sort().map((name): TreeEntry => ({ name, kind: "dir", size: null, section: `files:${prefix}${name}` })),
@@ -543,6 +558,11 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
   const path = id.slice("file:".length);
   const text = files[path];
   if (text === undefined) throw { code: "not_found", message: `gitea: no file ${path} at ${ref}`, source_id: null };
+  const bytes = binaryOf(path)?.();
+  if (bytes !== undefined)
+    return section(id, "Files", [
+      { type: "file", trail: [], path, text: "", language: null, size: bytes.length, truncated: false, binary: true, url: null, sha: blobOf(path), commit: ref },
+    ]);
   // No action beside the file (#2241): *Commit change…*'s standing is `refused_writes`' ({@link repoRefusals}).
   return section(id, "Files", [
     { type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: blobOf(text), commit: ref },
@@ -565,7 +585,7 @@ export function repoFileBytes(entityId: string, path: string): Uint8Array | unde
   const branch = branchAt === -1 ? null : entityId.slice(branchAt + "@refs/heads/".length);
   const files = filesOf(repoId, branch);
   if (files === null) return undefined;
-  const image = repoId === PAYOUT ? PAYOUT_IMAGES[path] : undefined;
+  const image = repoId === PAYOUT ? (binaryOf(path) ?? PAYOUT_IMAGES[path]) : undefined;
   const text = files[path];
   if (image === undefined && text === undefined) throw { code: "not_found", message: `gitea: no file ${path}`, source_id: null };
   return image !== undefined ? image() : new TextEncoder().encode(text);
