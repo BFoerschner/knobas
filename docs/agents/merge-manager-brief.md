@@ -48,7 +48,7 @@ Lock script from your dispatch. Start once the PR is ready and your fixes are pu
 2. After a force-push: `until [ "$(gh pr view <n> --json mergeable --jq .mergeable)" = MERGEABLE ]; do sleep 5; done`, give up after 2 min.
 3. `bash <lock> assert <PR> && gh pr merge <n> --squash --delete-branch --match-head-commit <sha>`, short imperative subject, in one Bash call. `assert` exits 1 when your PR no longer holds the lock: stop and report, never merge. `fatal: 'main' is already used by worktree` on exit 1 means it merged; confirm with `gh pr view <n> --json state,mergedAt`.
 4. Release the lock.
-5. `git ls-remote --heads origin <branch>`; if present, `git push origin --delete <branch>`.
+5. `git ls-remote --heads origin <branch>`; if present, `git push origin --delete <branch>`. Only the PR's own branch: a `pr-assets/*` branch stays until Björn deletes it himself (implementer brief, *Screenshots*).
 6. `gh issue view <N> --json state`; if open, close with a comment naming PR and commit.
 7. `git -C /Users/dev/Projects/knobas worktree remove .worktrees/<name>`, the one git command allowed outside your worktree, post-merge only. Dirty: report, never force. Already gone is fine.
 8. Leave nothing running (implementer brief, *Live suites*), also when you stop early.
