@@ -328,7 +328,11 @@ fn a_seeded_pull_request(url: &str) -> (u64, String) {
         .env("LC_ALL", "C")
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     let line = text.lines().next().expect("the seed opens pull requests");
     let (sha, name) = line.split_once('\t').unwrap();
@@ -348,7 +352,11 @@ fn git_in(dir: &Path, args: &[&str]) -> String {
         .env("LC_ALL", "C")
         .output()
         .unwrap();
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
@@ -365,9 +373,16 @@ async fn a_seeded_pull_request_opens_in_a_worktree_at_the_servers_head() {
 
     let (pool, id, dir, root) = fixture(SEEDED).await;
     let seen = Arc::new(Seen::default());
-    start_admitting(&pool, &Registry::for_process(), &Clones::global(), seen.clone(), &id, &["http"])
-        .await
-        .unwrap();
+    start_admitting(
+        &pool,
+        &Registry::for_process(),
+        &Clones::global(),
+        seen.clone(),
+        &id,
+        &["http"],
+    )
+    .await
+    .unwrap();
     assert_eq!(seen.end().await.state, CloneState::Done);
     let checkout = root.join("payout-service");
     let (number, head) = a_seeded_pull_request(&format!("{}/{SEEDED}.git", gitea_url()));
@@ -376,7 +391,10 @@ async fn a_seeded_pull_request_opens_in_a_worktree_at_the_servers_head() {
         (
             git_in(&checkout, &["branch", "--show-current"]),
             git_in(&checkout, &["rev-parse", "HEAD"]),
-            git_in(&checkout, &["status", "--porcelain=v1", "--untracked-files=all"]),
+            git_in(
+                &checkout,
+                &["status", "--porcelain=v1", "--untracked-files=all"],
+            ),
         )
     };
     let before = standing();
@@ -385,7 +403,10 @@ async fn a_seeded_pull_request_opens_in_a_worktree_at_the_servers_head() {
     let stub = dir.path().join("stub");
     std::fs::write(
         &stub,
-        format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{0}.tmp'\nmv '{0}.tmp' '{0}'\n", record.display()),
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{0}.tmp'\nmv '{0}.tmp' '{0}'\n",
+            record.display()
+        ),
     )
     .unwrap();
     {
@@ -424,7 +445,10 @@ async fn a_seeded_pull_request_opens_in_a_worktree_at_the_servers_head() {
         )
         .await
         .unwrap();
-        let worktree = root.join("pull-requests").join("tidewater").join(format!("payout-service-{number}"));
+        let worktree = root
+            .join("pull-requests")
+            .join("tidewater")
+            .join(format!("payout-service-{number}"));
         assert_eq!(argv[1..], [shown(&worktree)]);
         assert_eq!(git_in(&worktree, &["rev-parse", "HEAD"]), head);
         assert_eq!(git_in(&worktree, &["status", "--porcelain=v1"]), "");
