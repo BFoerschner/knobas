@@ -43,7 +43,8 @@
 }
 .tf-ftreebox > header { display: flex; gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid var(--rule-2); }
 /* Go to file (#2311, mockups/code-area `.tree > header .tf-minif`): the head's field, `T` beside it. */
-.tf-ftreebox > header .tf-gotofile { flex: 1; max-width: none; min-width: 0; }
+/* An input in a row of buttons takes the row's height, here the small 26px (#2238). */
+.tf-ftreebox > header .tf-gotofile { flex: 1; max-width: none; min-width: 0; height: 26px; box-sizing: border-box; }
 .tf-gotofile kbd { flex: none; }
 .tf-ftreebox > header .tf-iconbtn { width: 26px; height: 26px; padding: 0; display: inline-grid; place-items: center; }
 .tf-ftreebox > header .tf-iconbtn[disabled] { opacity: .45; cursor: default; background: none; }
@@ -407,6 +408,9 @@
 
 /* The file header's *More* (⋯) (#2311, mockups/code-area/file.html): Edit, History, the source's page. */
 .tf-fmore { position: relative; display: inline-flex; }
+/* Icon-only, square at its row's small height (#2238: 26px, a literal until #2280's tokens). */
+.tf-fmore > .tf-iconbtn { width: 26px; height: 26px; padding: 0; display: inline-grid; place-items: center; }
+.tf-fmore > .tf-iconbtn svg { width: 14px; height: 14px; }
 .tf-fmore svg { fill: currentColor; }
 .tf-fmore .tf-menu { font-size: var(--t-sm); }
 .tf-fmore .tf-menu > a, .tf-fmore .tf-menu > span { display: flex; flex-direction: column; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }

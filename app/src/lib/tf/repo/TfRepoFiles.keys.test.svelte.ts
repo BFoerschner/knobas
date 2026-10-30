@@ -13,6 +13,7 @@ import type { SourceView, TreeEntry } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import { createRendererDefaults } from "../../render/defaults.svelte";
 import { pageContext } from "../kept-pages.svelte";
+import { layers } from "../layers.svelte";
 import { fileHash } from "./repo";
 
 const REPO = "gitea:tidewater/payout-service";
@@ -258,6 +259,22 @@ test("a page held hidden takes no T", async () => {
   press("t", document.body);
   expect(document.activeElement).not.toBe(field());
   shown = true;
+  press("t", document.body);
+  expect(document.activeElement).toBe(field());
+});
+
+test("T is not taken while a dialog or the launcher is open over the page", async () => {
+  draw(stand());
+  await settle();
+  const off = layers.add({ kind: "dialog", close: () => {} });
+  try {
+    const t = new KeyboardEvent("keydown", { key: "t", bubbles: true, cancelable: true });
+    document.body.dispatchEvent(t);
+    expect(t.defaultPrevented).toBe(false);
+    expect(document.activeElement).not.toBe(field());
+  } finally {
+    off();
+  }
   press("t", document.body);
   expect(document.activeElement).toBe(field());
 });

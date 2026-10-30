@@ -59,7 +59,8 @@
   source cut is searched as far as it was read, and says so; a source with
   no whole tree is searched among the directories read so far. In the tree,
   `↑`/`↓` move between the rows, `←`/`→` fold and unfold, `Enter` opens; no
-  key is taken while a field has focus, nor while the page is held hidden.
+  key is taken while a field has focus, while the page is held hidden, nor
+  while a dialog or the launcher is open over it.
   The file's header says its size, its lines or kind and the commit it is
   read at; *More* (⋯) holds *Edit*, *History* and its page on the source.
 -->
@@ -120,6 +121,7 @@
   import { pageVisible } from "../kept-pages.svelte";
   import { waitPhase } from "../waiting";
   import { inTextField } from "../../shell/keys";
+  import { layers } from "../layers.svelte";
   import { fileMeta, goToFile, treeKey, treeRows } from "./file-tree";
   import TfFileMore from "./TfFileMore.svelte";
 
@@ -951,7 +953,8 @@
       if (event.key !== "t" && event.key !== "T") return;
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       if (inTextField(event.target) || inTextField(document.activeElement)) return;
-      if (goField === null) return;
+      // A dialog or the launcher over the page keeps its keys and its focus.
+      if (layers.open.length > 0 || goField === null) return;
       event.preventDefault();
       goField.focus();
     };
