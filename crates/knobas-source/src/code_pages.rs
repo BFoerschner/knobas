@@ -157,7 +157,10 @@ pub fn page(base_url: &str, template: &str, values: &[(&str, &str)]) -> Option<S
         let close = after.find('}')?;
         let name = &after[..close];
         let value = values.iter().find(|(key, _)| *key == name)?.1;
-        if value.split('/').any(|segment| segment == "." || segment == "..") {
+        if value
+            .split('/')
+            .any(|segment| segment == "." || segment == "..")
+        {
             return None;
         }
         encode_into(&mut out, value);
