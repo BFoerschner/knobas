@@ -1501,3 +1501,116 @@ async fn a_commit_aimed_at_anything_but_a_repository_is_refused_before_a_request
     }
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+// -- thread replies, resolve, review requests (#2277, #2303) -----------------
+
+/// A Gitea answering every POST with `status`, and nothing else.
+async fn answering(status: u16) -> MockServer {
+    let server = MockServer::builder().start().await;
+    Mock::given(method("POST"))
+        .and(header("Authorization", format!("token {TOKEN}").as_str()))
+        .respond_with(ResponseTemplate::new(status))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// #2277: a reply is a comment-only review with one line comment on the
+/// thread's line, which Gitea joins to the conversation there.
+#[tokio::test]
+async fn a_reply_is_a_comment_review_on_the_threads_line() {
+    let server = accepting().await;
+    source(&server)
+        .write(WriteOp::ReplyToThread {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            thread: "4088".to_owned(),
+            comment: knobas_source::ReviewComment {
+                path: "src/retry.rs".to_owned(),
+                line: 27,
+                side: knobas_source::ReviewSide::New,
+                body: "Done in 7aa01f9.".to_owned(),
+            },
+        })
+        .await
+        .expect("a declared op is performed");
+    let (verb, at, body) = only_request(&server).await;
+    assert_eq!(
+        (verb.as_str(), at.as_str()),
+        (
+            "POST",
+            "/api/v1/repos/tidewater/payout-service/pulls/142/reviews"
+        )
+    );
+    assert_eq!(
+        body,
+        json!({ "event": "COMMENT", "body": "", "comments": [
+            { "path": "src/retry.rs", "body": "Done in 7aa01f9.", "new_position": 27, "old_position": 0 }
+        ] })
+    );
+}
+
+/// #2277: resolve and unresolve post to the thread's first comment, no
+/// body; Forgejo's 405 is refused with a sentence saying the server cannot.
+#[tokio::test]
+async fn a_resolve_posts_to_the_threads_comment_and_forgejos_405_says_it_cannot() {
+    for (resolved, word) in [(true, "resolve"), (false, "unresolve")] {
+        let server = answering(204).await;
+        source(&server)
+            .write(WriteOp::ResolveThread {
+                entity: "gitea:tidewater/payout-service#142".to_owned(),
+                thread: "4088".to_owned(),
+                resolved,
+            })
+            .await
+            .expect("a declared op is performed");
+        let (_, at, _) = only_request(&server).await;
+        assert_eq!(
+            at,
+            format!("/api/v1/repos/tidewater/payout-service/pulls/comments/4088/{word}")
+        );
+    }
+    let forgejo = answering(405).await;
+    let error = source(&forgejo)
+        .write(WriteOp::ResolveThread {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            thread: "4088".to_owned(),
+            resolved: true,
+        })
+        .await
+        .expect_err("Forgejo cannot resolve");
+    assert!(
+        matches!(&error, SourceError::Protocol { status: Some(405), message } if message.contains("cannot resolve")),
+        "{error:?}"
+    );
+}
+
+/// #2303: a review request is `POST …/requested_reviewers` with the logins
+/// under `reviewers`; one naming nobody is refused before a request leaves.
+#[tokio::test]
+async fn a_review_request_names_the_reviewers_under_their_key() {
+    let server = answering(201).await;
+    source(&server)
+        .write(WriteOp::RequestReviewers {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            reviewers: vec!["olu".to_owned(), "kai".to_owned()],
+        })
+        .await
+        .expect("a declared op is performed");
+    let (_, at, body) = only_request(&server).await;
+    assert_eq!(
+        at,
+        "/api/v1/repos/tidewater/payout-service/pulls/142/requested_reviewers"
+    );
+    assert_eq!(body, json!({ "reviewers": ["olu", "kai"] }));
+
+    let untouched = answering(500).await;
+    let error = source(&untouched)
+        .write(WriteOp::RequestReviewers {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            reviewers: vec![],
+        })
+        .await
+        .expect_err("nobody to ask");
+    assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
+    assert!(untouched.received_requests().await.unwrap().is_empty());
+}

@@ -228,6 +228,20 @@ pub const WRITE_OP_COMMIT_FILE: &str = "commit_file";
 pub const WRITE_OP_TRANSITION: &str = "transition";
 /// See [`WRITE_OP_CREATE_BRANCH`]. A new issue in a repository (#1206).
 pub const WRITE_OP_CREATE_TICKET: &str = "create_ticket";
+/// See [`WRITE_OP_CREATE_BRANCH`]. *Reply…* on a review thread of a pull
+/// request's diff (#2277): a comment-only review with one comment on the
+/// thread's line, which Gitea joins to the conversation there.
+pub const WRITE_OP_REPLY_TO_THREAD: &str = "reply_to_thread";
+/// See [`WRITE_OP_CREATE_BRANCH`]. *Resolve* and *Unresolve* on a review
+/// thread (#2277). Declared for every server this adapter speaks to, and
+/// offered on a diff only where the server resolves threads: Gitea does,
+/// Forgejo 17 has no endpoint for it and answers 405, so on Forgejo the diff
+/// offers no resolve ([`source::version_resolves`]) and a write that reaches
+/// it anyway is refused with that sentence.
+pub const WRITE_OP_RESOLVE_THREAD: &str = "resolve_thread";
+/// See [`WRITE_OP_CREATE_BRANCH`]. *Request…* in a pull request's Reviewers
+/// panel (#2303): `POST …/pulls/{n}/requested_reviewers`.
+pub const WRITE_OP_REQUEST_REVIEWERS: &str = "request_reviewers";
 
 /// This adapter's one [source action](knobas_source::WriteOp::SourceAction)
 /// (#1194, ADR-0029): *Add label…* on a pull request, a write no role's
@@ -299,6 +313,9 @@ pub fn descriptor_template() -> SourceDescriptor {
             WRITE_OP_TRANSITION.to_owned(),
             WRITE_OP_CREATE_TICKET.to_owned(),
             knobas_source::SOURCE_ACTION.to_owned(),
+            WRITE_OP_REPLY_TO_THREAD.to_owned(),
+            WRITE_OP_RESOLVE_THREAD.to_owned(),
+            WRITE_OP_REQUEST_REVIEWERS.to_owned(),
         ],
         // Writes outside every role's vocabulary (#1194, ADR-0029), each
         // drawn by the view that offers it.
@@ -607,7 +624,10 @@ mod tests {
                 "commit_file",
                 "transition",
                 "create_ticket",
-                "source_action"
+                "source_action",
+                "reply_to_thread",
+                "resolve_thread",
+                "request_reviewers"
             ],
             "the action bar is rendered from this list alone (issue #43)"
         );

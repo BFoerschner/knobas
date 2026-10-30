@@ -16,6 +16,9 @@ const thread = (side: "old" | "new", line: number, outdated = false): LineThread
   line,
   outdated,
   comments: [{ author: "jonas", body: `on ${side} ${line}`, at: null }],
+  id: null,
+  resolved_by: null,
+  replies: false,
 });
 
 function file(threads: LineThread[]): DiffFile {
@@ -57,12 +60,12 @@ test("the diff is the Files section's diff block, or nothing before it answered"
         title: "Files",
         count: 1,
         deferred: false,
-        blocks: [{ type: "diff", files: [file([])], truncated: false, commentable: { write_op: "submit_review" }, gone: [] }],
+        blocks: [{ type: "diff", files: [file([])], truncated: false, commentable: { write_op: "submit_review", reply: null, resolve: null, head: null }, gone: [] }],
       },
     ],
     actions: [],
   };
-  expect(diffOf(view)).toMatchObject({ files: [{ path: "src/sepa/retry.rs" }], commentable: { write_op: "submit_review" } });
+  expect(diffOf(view)).toMatchObject({ files: [{ path: "src/sepa/retry.rs" }], commentable: { write_op: "submit_review", reply: null, resolve: null, head: null } });
   expect(diffOf({ sections: [{ id: "files", title: "Files", count: 3, deferred: true, blocks: [] }], actions: [] })).toBeNull();
   expect(diffOf(null)).toBeNull();
 });

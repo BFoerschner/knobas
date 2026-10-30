@@ -509,6 +509,14 @@ export function writeWords(
       }
       case "SourceAction":
         return titled("Action on", "An action on an item");
+      case "ReplyToThread":
+        return [{ text: "Reply on " }, key];
+      case "ResolveThread":
+        return [{ text: op?.resolved === false ? "Unresolve a thread on " : "Resolve a thread on " }, key];
+      case "RequestReviewers": {
+        const who = Array.isArray(op?.reviewers) ? op.reviewers.filter((r): r is string => typeof r === "string") : [];
+        return [{ text: who.length > 0 ? `Ask ${who.join(", ")} to review ` : "Request a review of " }, key];
+      }
       default: {
         const unheard: undefined = variant;
         void unheard;

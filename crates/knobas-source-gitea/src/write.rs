@@ -546,6 +546,113 @@ pub(crate) async fn submit_review(
         .map(|_| ())
 }
 
+// -- reply_to_thread, resolve_thread (issue #2277) ---------------------------
+
+/// Reply on a review thread (#2277): a comment-only review carrying one line
+/// comment at the thread's path, side and line. Gitea's API has no reply
+/// route; its web page groups a conversation by path and line, so the reply
+/// joins the thread there, and this adapter's diff groups it the same way.
+/// `thread` is not read: Gitea places by line.
+///
+/// # Errors
+///
+/// As [`submit_review`].
+pub(crate) async fn reply_to_thread(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    index: u64,
+    comment: &ReviewComment,
+) -> Result<(), SourceError> {
+    submit_review(
+        client,
+        owner,
+        repo,
+        index,
+        ReviewVerdict::Comment,
+        "",
+        std::slice::from_ref(comment),
+    )
+    .await
+}
+
+/// Resolve review thread `thread` -- the id of the comment that opened it --
+/// or open it again (#2277): `POST /repos/{o}/{r}/pulls/comments/{id}/resolve`
+/// or `/unresolve`, no body, 204 and idempotent on Gitea 1.27.3 (the fact
+/// note of 2026-10-30). Forgejo 17 has neither route and answers 405, which
+/// is refused here with a sentence that says so; the diff does not offer
+/// resolve there, so only a payload that names one anyway meets it.
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`] for a thread id that is not a comment id, and
+/// for the 405; otherwise whatever the request maps to (a 404 for a comment
+/// that is gone, with Gitea's sentence).
+pub(crate) async fn resolve_thread(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    thread: &str,
+    resolved: bool,
+) -> Result<(), SourceError> {
+    let id: u64 = thread.parse().map_err(|_| {
+        SourceError::protocol(format!(
+            "gitea: {thread:?} is not a review comment's id, so no thread is resolved"
+        ))
+    })?;
+    let path = format!(
+        "/repos/{}/{}/pulls/comments/{id}/{}",
+        GiteaClient::path_segment(owner)?,
+        GiteaClient::path_segment(repo)?,
+        if resolved { "resolve" } else { "unresolve" }
+    );
+    match client.post(&path, &json!({})).await {
+        Ok(_) => Ok(()),
+        Err(error) if error.status() == Some(405) => Err(SourceError::Protocol {
+            status: Some(405),
+            message: "This server cannot resolve review threads through its API (Forgejo has \
+                      no such endpoint); resolve it on the source's own page"
+                .to_owned(),
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+// -- request_reviewers (issue #2303) ------------------------------------------
+
+/// Ask `reviewers` to review pull request `index` (#2303):
+/// `POST /repos/{o}/{r}/pulls/{index}/requested_reviewers` with
+/// `{"reviewers": [...]}`, the same on Gitea and Forgejo. Gitea refuses a
+/// login it does not know, the pull request's author and a reader who may
+/// not request with a 422 or 403 carrying its sentence (ADR-0004).
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`] for an empty list, before a request leaves;
+/// otherwise as [`create_branch`].
+pub(crate) async fn request_reviewers(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    index: u64,
+    reviewers: &[String],
+) -> Result<(), SourceError> {
+    if reviewers.is_empty() {
+        return Err(SourceError::protocol(
+            "gitea: a review request names nobody, so nothing is sent",
+        ));
+    }
+    let path = format!(
+        "/repos/{}/{}/pulls/{index}/requested_reviewers",
+        GiteaClient::path_segment(owner)?,
+        GiteaClient::path_segment(repo)?
+    );
+    client
+        .post_once(&path, &json!({ "reviewers": reviewers }))
+        .await
+        .map(|_| ())
+}
+
 /// What a delete reads of the repository before it acts: its default branch
 /// and whether it is a mirror.
 #[derive(serde::Deserialize)]

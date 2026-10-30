@@ -6,8 +6,10 @@ use super::*;
 
 pub use knobas_core::viewed::VIEWED_SETTING;
 
-/// The files of pull request `pr_id` the reader marked *Viewed* on its
-/// current head (#842), in path order: [`knobas_core::viewed::files`].
+/// The files of pull request `pr_id` the reader marked *Viewed* (#842), in
+/// path order: [`knobas_core::viewed::files`]. `blobs` is the blob each file
+/// holds in the diff drawn, by path (#2276): a file it names is viewed by its
+/// blob, one it does not by the current head.
 ///
 /// # Errors
 ///
@@ -17,15 +19,16 @@ pub async fn pr_viewed_files_inner(
     pool: &PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     pr_id: &str,
+    blobs: &std::collections::BTreeMap<String, String>,
 ) -> Result<Vec<String>, IpcError> {
     let entity = EntityRef::parse(pr_id).map_err(IpcError::invalid)?;
     let declarations = declared_paths(pool, registry).await?;
-    Ok(knobas_core::viewed::files(pool, &declarations, &entity).await?)
+    Ok(knobas_core::viewed::files(pool, &declarations, &entity, blobs).await?)
 }
 
-/// Mark one file of pull request `pr_id` *Viewed* or not on its current head
-/// (#842), and answer the files now viewed there, in path order:
-/// [`knobas_core::viewed::set_file`].
+/// Mark one file of pull request `pr_id` *Viewed* or not (#842), by its blob
+/// where `blobs` names it (#2276), and answer the files now viewed, in path
+/// order: [`knobas_core::viewed::set_file`].
 ///
 /// # Errors
 ///
@@ -37,10 +40,11 @@ pub async fn set_pr_file_viewed_inner(
     pr_id: &str,
     path: &str,
     viewed: bool,
+    blobs: &std::collections::BTreeMap<String, String>,
 ) -> Result<Vec<String>, IpcError> {
     let entity = EntityRef::parse(pr_id).map_err(IpcError::invalid)?;
     let declarations = declared_paths(pool, registry).await?;
-    Ok(knobas_core::viewed::set_file(pool, &declarations, &entity, path, viewed).await?)
+    Ok(knobas_core::viewed::set_file(pool, &declarations, &entity, path, viewed, blobs).await?)
 }
 
 /// The files of a pull request marked *Viewed* on its head (#842).
@@ -53,9 +57,16 @@ pub async fn set_pr_file_viewed_inner(
 pub async fn pr_viewed_files(
     lifecycle: State<'_, Lifecycle>,
     pr_id: String,
+    blobs: Option<std::collections::BTreeMap<String, String>>,
 ) -> Result<Vec<String>, IpcError> {
     let pool = lifecycle.pool()?;
-    pr_viewed_files_inner(&pool, lifecycle.registry(), &pr_id).await
+    pr_viewed_files_inner(
+        &pool,
+        lifecycle.registry(),
+        &pr_id,
+        &blobs.unwrap_or_default(),
+    )
+    .await
 }
 
 /// Mark a pull request's file *Viewed* or not (#842).
@@ -70,7 +81,16 @@ pub async fn set_pr_file_viewed(
     pr_id: String,
     path: String,
     viewed: bool,
+    blobs: Option<std::collections::BTreeMap<String, String>>,
 ) -> Result<Vec<String>, IpcError> {
     let pool = lifecycle.pool()?;
-    set_pr_file_viewed_inner(&pool, lifecycle.registry(), &pr_id, &path, viewed).await
+    set_pr_file_viewed_inner(
+        &pool,
+        lifecycle.registry(),
+        &pr_id,
+        &path,
+        viewed,
+        &blobs.unwrap_or_default(),
+    )
+    .await
 }

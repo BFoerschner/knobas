@@ -347,13 +347,13 @@ export function pipelineRuns(pipelineId: string, limit?: number): Promise<RunRow
  * by pull request and the head commit its source declares: once the mirror
  * reads another head they read as none.
  */
-export function prViewedFiles(prId: string): Promise<string[]> {
-  return invoke<string[]>("pr_viewed_files", { prId });
+export function prViewedFiles(prId: string, blobs: Record<string, string> = {}): Promise<string[]> {
+  return invoke<string[]>("pr_viewed_files", { prId, blobs });
 }
 
 /** Mark one file of a pull request *Viewed* or not on its current head (#842), answering the files now viewed. */
-export function setPrFileViewed(prId: string, path: string, viewed: boolean): Promise<string[]> {
-  return invoke<string[]>("set_pr_file_viewed", { prId, path, viewed });
+export function setPrFileViewed(prId: string, path: string, viewed: boolean, blobs: Record<string, string> = {}): Promise<string[]> {
+  return invoke<string[]>("set_pr_file_viewed", { prId, path, viewed, blobs });
 }
 
 /** Pin or unpin a pipeline (#849); answers whether it is now pinned. */
