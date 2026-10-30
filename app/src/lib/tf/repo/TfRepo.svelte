@@ -58,6 +58,7 @@
     EntityPage,
     PipeRun,
     PipeStep,
+    RangeDiff,
     RefusedWrite,
     SourceView,
     ViewFresh,
@@ -90,6 +91,8 @@
     fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
     /** A file pipeline over a file's bytes (#2264); the viewer offers none when left out. */
     piped?: (entityId: string, path: string, commit: string | null, steps: PipeStep[]) => Promise<PipeRun>;
+    /** A diff between two ends, local-first (ADR-0036): Compare's; the source's compare alone when left out. */
+    rangeDiff?: (entityId: string, base: string, head: string, ignoreWhitespace: boolean) => Promise<RangeDiff>;
   }
 
   /**
@@ -114,6 +117,7 @@
     entityCheckoutDiff,
     entityFileBytes,
     entityFilePiped,
+    entityRangeDiff,
     entityView,
     getEntity,
     jobReach,
@@ -185,6 +189,7 @@
       refusedWrites: (asks) => refusedWrites(asks),
       fileBytes: (entityId, path, commit) => entityFileBytes(entityId, path, commit),
       piped: (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
+      rangeDiff: (entityId, base, head, ignoreWhitespace) => entityRangeDiff(entityId, base, head, ignoreWhitespace),
     },
     now: fixedNow,
   }: {

@@ -44,7 +44,7 @@
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import { entityFileBytes, entityFilePiped, type LineThread, type PipeRun, type PipeStep, type SourceView } from "../../ipc/entity";
+  import { entityFileBytes, entityFilePiped, entityRangeDiff, type LineThread, type PipeRun, type PipeStep, type RangeDiff, type SourceView } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { PendingCommentStore } from "../../detail/view/pending-comments.svelte";
   import type { RenderPort } from "../../render/port";
@@ -70,6 +70,7 @@
     follower,
     render,
     openAt = null,
+    rangeDiff = (entityId, base, head, ignoreWhitespace) => entityRangeDiff(entityId, base, head, ignoreWhitespace),
     fileBytes = (entityId, path, commit) => entityFileBytes(entityId, path, commit),
     piped = (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
   }: {
@@ -91,6 +92,8 @@
     render?: RenderPort;
     /** *Open in…* per file (#2274): the repository and the head the files are read at. */
     openAt?: { entityId: string; at: string | null } | null;
+    /** A pick's diff, read at a checkout holding both commits, else the source's compare (ADR-0036); the IPC by default. */
+    rangeDiff?: (entityId: string, base: string, head: string, ignoreWhitespace: boolean) => Promise<RangeDiff>;
     /** A file's bytes at a commit, for a rendered image diff (#2279); the IPC by default. */
     fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
     /** A file pipeline over a file at a commit, for pipelines on diffs (#2270); the IPC by default. */
@@ -167,8 +170,8 @@
   let choice = $state<PrPick>({ kind: "all" });
   const ends = $derived(range === null ? null : pickedEnds(range, choice));
   const section = $derived(ends === null ? null : compareSection(ends.base, ends.head));
-  /** `undefined` while the pick's compare has not answered. */
-  let picked = $state<SourceView | null | undefined>(undefined);
+  /** `undefined` while the pick's diff has not answered; local-first, as every diff between two shas (ADR-0036). */
+  let picked = $state<RangeDiff | undefined>(undefined);
   let pickFailed = $state<string | null>(null);
 
   $effect(() => {
@@ -179,12 +182,12 @@
 
   $effect(() => {
     const repo = range?.repository;
-    const asked = section;
+    const asked = ends;
     picked = undefined;
     pickFailed = null;
     if (!repo || asked === null) return;
     let live = true;
-    entityView(repo, asked).then(
+    rangeDiff(repo, asked.base, asked.head, false).then(
       (answer) => {
         if (live) picked = answer;
       },
@@ -200,8 +203,7 @@
   /** What is drawn: the pull request's diff, or the pick's compare once it answered. */
   const shown = $derived.by(() => {
     if (section === null) return diff;
-    const block = picked?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
-    return block?.type === "diff" ? { files: block.files, truncated: block.truncated, commentable: null, gone: [], range: block.range ?? null } : null;
+    return picked === undefined ? null : { files: picked.files, truncated: picked.truncated, commentable: null, gone: [], range: picked.range };
   });
   const context = $derived(shown?.range ? rangeContext(entityView, shown.range, fileBytes, piped) : null);
 

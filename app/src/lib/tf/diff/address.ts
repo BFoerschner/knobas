@@ -13,6 +13,7 @@
  *
  * Pure: the shell parses the hash; this reads its segments.
  */
+import type { RangeDiff, SourceView } from "../../ipc/entity";
 import { isSha } from "./sha";
 
 /** What `#/diff/...` names. */
@@ -79,4 +80,21 @@ export function rangeOf(rows: readonly { entity_id: string | null }[], pick: Ran
   const newest = shaOfCommit(rows[Math.min(pick.anchor, pick.end)]?.entity_id ?? null);
   const oldest = shaOfCommit(rows[Math.max(pick.anchor, pick.end)]?.entity_id ?? null);
   return newest === null || oldest === null ? null : { base: `${oldest}^`, head: newest };
+}
+
+/** A diff between two ends of a repository, read local-first (`entity_range_diff`, ADR-0036). */
+export type RangeDiffRead = (entityId: string, base: string, head: string, ignoreWhitespace: boolean) => Promise<RangeDiff>;
+
+/**
+ * The range read over the source's compare alone, for a page wired with no `rangeDiff` (a test's ports): the
+ * compare's diff as the source drew it, read at the source.
+ */
+export function rangeDiffVia(entityView: (entityId: string, section: string | null) => Promise<SourceView | null>): RangeDiffRead {
+  return async (entityId, base, head) => {
+    const view = await entityView(entityId, compareSection(base, head));
+    const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
+    return block?.type === "diff"
+      ? { files: block.files, truncated: block.truncated, range: block.range ?? null, read_at: "source" }
+      : { files: [], truncated: false, range: null, read_at: "source" };
+  };
 }

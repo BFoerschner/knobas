@@ -124,6 +124,13 @@ async function draw(answer: SourceView | (() => SourceView) = filesView(), write
         asked.push(id === PR ? section : `${id} ${section}`);
         return (section !== null && others[section]) || (typeof answer === "function" ? answer() : answer);
       },
+      // A pick reads its diff local-first (Spec 6 of the review of spec #2234): here the source's compare answers it.
+      rangeDiff: async (id: string, base: string, head: string, ignoreWhitespace: boolean) => {
+        asked.push(`${id} range:${base}...${head}${ignoreWhitespace ? " -w" : ""}`);
+        const block = others[`compare:${base}...${head}`]?.sections[0]?.blocks.find((b) => b.type === "diff");
+        if (block?.type !== "diff") throw { code: "not_found", message: "no such compare" };
+        return { files: block.files, truncated: block.truncated, range: block.range ?? null, read_at: "source" as const };
+      },
       viewedFiles: async (_id: string, blobs: Record<string, string>) => viewedNow(blobs),
       setViewed: async (_id: string, path: string, on: boolean, blobs: Record<string, string>) => {
         if (on) stored.set(path, blobs[path] ?? null);
@@ -295,7 +302,7 @@ test("the picker names all commits; one commit shows only that commit's changes,
   flushSync();
   option(/08232cb/)!.click();
   await settle();
-  expect(asked).toContain(`${REPO} compare:${MID}^...${MID}`);
+  expect(asked).toContain(`${REPO} range:${MID}^...${MID}`);
   expect(list()).toEqual([expect.stringMatching(/backoff\.md/)]);
   // Gitea takes a review at one commit; knobas sends one at the head, so a line is commented on the whole diff only.
   expect(plus()).toBe(0);
@@ -334,7 +341,7 @@ test("since my last review shows the changes between the reviewed head and the h
   expect(squash(option(/Since your last review/))).toMatch(/You reviewed 97cb5a8 · 2 commits since/);
   option(/Since your last review/)!.click();
   await settle();
-  expect(asked).toContain(`${REPO} compare:${FIRST}...${HEAD}`);
+  expect(asked).toContain(`${REPO} range:${FIRST}...${HEAD}`);
   expect(list()).toEqual([expect.stringMatching(/backoff\.md/)]);
   expect(plus()).toBe(0);
 });

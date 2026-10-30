@@ -33,7 +33,7 @@
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
-  import { compareSection, diffHash } from "../diff/address";
+  import { compareSection, diffHash, rangeDiffVia } from "../diff/address";
   import { rangeContext } from "../diff/context";
   import { itemHash, resolveTicket } from "../job/job";
   import type { RepoPorts } from "./TfRepo.svelte";
@@ -61,7 +61,7 @@
     defaultBranch,
     refreshed = 0,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped">;
+    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -162,13 +162,15 @@
       if (alive() && !again) failed = ipcErrorMessage(error);
     };
     reading = true;
-    return ports.entityView(repoId, asked).then((view) => {
+    const [from, to] = [base, head ?? ""];
+    // Local-first, as every diff (ADR-0036, Spec 6 of the review of spec #2234): branch names are the source's, and
+    // its compare names the two commits (`range`) that *Open as diff* takes to a checkout.
+    return (ports.rangeDiff ?? rangeDiffVia(ports.entityView))(repoId, from, to, false).then((diff) => {
       if (!alive()) return;
       reading = false;
-      const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
-      files = block?.type === "diff" ? block.files : [];
-      cut = block?.type === "diff" && block.truncated;
-      range = block?.type === "diff" ? (block.range ?? null) : null;
+      files = diff.files;
+      cut = diff.truncated;
+      range = diff.range;
       filesFor = asked;
     }, (error) => {
       if (!alive()) return;

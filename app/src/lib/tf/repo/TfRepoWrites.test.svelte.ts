@@ -674,11 +674,25 @@ test("Open as diff names the compare's two commits once the source settled them,
       const answer = await base.entityView(id, section);
       if (id !== REPO || section !== "compare:main...spike/sepa-instant" || answer === null) return answer;
       const block = answer.sections[0]!.blocks.find((b) => b.type === "diff");
-      if (block?.type === "diff") block.range = { repository: REPO, base: mergeBase, head: tip, commits: [], reviewed: null };
+      if (block?.type === "diff") block.range = { repository: REPO, base: mergeBase, head: tip, commits: [] };
       return answer;
     },
   });
   expect(button("Open as diff", target)!.getAttribute("href")).toBe(`#/diff/gitea%3Atidewater%2Fpayout-service/${mergeBase}/${tip}`);
+});
+
+test("Compare reads its diff through the range read, local-first like every diff (Spec 6)", async () => {
+  const asked: string[] = [];
+  const local = { path: "src/local.rs", old_path: null, change: "modified" as const, additions: 1, deletions: 0, hunks: [], truncated: false, threads: [] };
+  await draw(COMPARE("spike/sepa-instant"), null, {
+    ...ports(),
+    rangeDiff: async (id, base, head, ignoreWhitespace) => {
+      asked.push(`${id} ${base}...${head}${ignoreWhitespace ? " -w" : ""}`);
+      return { files: [local], truncated: false, range: null, read_at: "checkout" as const };
+    },
+  });
+  expect(asked).toEqual([`${REPO} main...spike/sepa-instant`]);
+  expect([...target.querySelectorAll(".tf-compare .tf-diff .tf-fh .tf-mono")].map((h) => text(h))).toEqual(["src/local.rs"]);
 });
 
 test("Into picked stays picked when From changes, and is the base queued", async () => {
