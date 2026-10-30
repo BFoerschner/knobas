@@ -79,3 +79,14 @@ test("a diagram that does not parse answers D2's errors by line, not a drawing",
   // The instance still draws after an error.
   expect(await svgOf("after -> error")).toContain(">after<");
 });
+
+test("an engine that never starts answers an error, and the next render starts it again", async () => {
+  let starts = 0;
+  const stuck = d2Renderer(() => {
+    starts += 1;
+    return starts === 1 ? new Promise<D2Engine>(() => {}) : node;
+  }, 50);
+  expect(await stuck("a -> b", LIGHT)).toEqual({ error: "D2 did not start within 0.05 s." });
+  expect(await stuck("again -> b", LIGHT)).toEqual({ svg: expect.stringContaining(">again<") });
+  expect(starts).toBe(2);
+});
