@@ -355,6 +355,7 @@ const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
 const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
 const TfPdf = (await import("../tf/render/TfPdf.svelte")).default;
+const TfPdfDiff = (await import("../tf/render/TfPdfDiff.svelte")).default;
 const TfBytesImage = (await import("../tf/render/TfBytesImage.svelte")).default;
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
 const TfFilePipeline = (await import("../tf/render/TfFilePipeline.svelte")).default;
@@ -1321,12 +1322,49 @@ const CASES: Case[] = [
                       draw: () => ({ done: deferred(undefined), cancel() {} }),
                       text: () => deferred(undefined),
                       links: () => deferred([{ rect: [0, 0, 10, 10] as [number, number, number, number], target: { url: "https://psp.example.com/" } }]),
+                      print: () => deferred({ key: "page", unsure: false }),
+                      pixels: () => deferred(null),
                     }),
                   close() {},
                 },
               }),
           },
           openExternal: () => deferred(undefined),
+        },
+      }),
+    }),
+  },
+  {
+    /** A PDF's diff (#2282): both documents answer late, their pages compared, a page drawn through a held observer. */
+    name: "TfPdfDiff",
+    source: "lib/tf/render/TfPdfDiff.svelte",
+    open: (target) => ({
+      app: mount(TfPdfDiff, {
+        target,
+        props: {
+          before: new Uint8Array([37, 80, 68, 70]),
+          after: new Uint8Array([37, 80, 68, 70, 49]),
+          path: "spec.pdf",
+          render: {
+            highlight: () => ({ focus() {}, cancel() {} }),
+            pdf: () =>
+              deferred({
+                pdf: {
+                  pages: 1,
+                  page: () =>
+                    deferred({
+                      width: 816,
+                      height: 1056,
+                      draw: () => ({ done: deferred(undefined), cancel() {} }),
+                      text: () => deferred(undefined),
+                      links: () => deferred([]),
+                      print: () => deferred({ key: "page", unsure: false }),
+                      pixels: () => deferred(null),
+                    }),
+                  close() {},
+                },
+              }),
+          },
         },
       }),
     }),

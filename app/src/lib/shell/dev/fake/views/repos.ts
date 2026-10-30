@@ -18,7 +18,7 @@
 import type { DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/code/line-diff";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
-import { HOSTILE_PDF, SPEC_PDF } from "../../../../render/pdf-fixture";
+import { fakePdf, HOSTILE_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
 
 const RETRY_MAIN = `use std::time::Duration;
 
@@ -301,6 +301,35 @@ function renderedDiffFiles(): DiffFile[] {
   const png: DiffFile = { path: "docs/img/logo.png", old_path: null, change: "binary", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [] };
   return [...text, png];
 }
+
+/**
+ * `?fake-pdf-diff` (#2282): the newest commit also changes three PDFs, read as bytes at it (after) and its parent
+ * (before). `docs/spec.pdf` changes the text of page 2 of 4; `docs/handbook.pdf` gains a page between pages 1
+ * and 2 of 3; `docs/brand.pdf` changes only the colour of the image on page 2 of 3 (page 3 keeps its image).
+ */
+const pdfPage = (title: string, line: string, image?: string): FakePage => ({ lines: [title, line], ...(image ? { image } : {}) });
+const SPEC_PAGES = [
+  pdfPage("Payout service: design", "Pays out SEPA batches once a day."),
+  pdfPage("Retries", "Transient PSP errors are retried three times."),
+  pdfPage("Backoff", "None: a retry goes out at once."),
+  pdfPage("Ledger", "Every payout is booked once it settles."),
+];
+const HANDBOOK_PAGES = [pdfPage("On-call handbook", "Who is paged, and when."), pdfPage("Escalation", "Page the PSP's desk after 30 minutes."), pdfPage("Hand-over", "Write up the shift in the channel.")];
+const BRAND_PAGES = (colour: string) => [pdfPage("Brand", "The logo and its colours."), pdfPage("Logo", "The mark, 2 by 2.", colour), pdfPage("Type", "Helvetica throughout.", "8a5600")];
+const PDF_DIFF: Record<string, [before: () => Uint8Array, after: () => Uint8Array]> = {
+  "docs/spec.pdf": [
+    () => fakePdf({ pages: SPEC_PAGES }),
+    () => fakePdf({ pages: SPEC_PAGES.map((page, i) => (i === 1 ? pdfPage("Retries", "Transient PSP errors are retried five times, with jitter.") : page)) }),
+  ],
+  "docs/handbook.pdf": [
+    () => fakePdf({ pages: HANDBOOK_PAGES }),
+    () => fakePdf({ pages: [HANDBOOK_PAGES[0]!, pdfPage("Runbooks", "Each alert links its runbook."), ...HANDBOOK_PAGES.slice(1)] }),
+  ],
+  "docs/brand.pdf": [() => fakePdf({ pages: BRAND_PAGES("1f7444") }), () => fakePdf({ pages: BRAND_PAGES("2f55d4") })],
+};
+const pdfDiffOn = () => new URLSearchParams(globalThis.location?.search).has("fake-pdf-diff");
+const pdfDiffFiles = (): DiffFile[] =>
+  Object.keys(PDF_DIFF).map((path) => ({ path, old_path: null, change: "binary", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [] }));
 
 /** A `?fake-rendered-diff` file at the newest commit (`at` 0, after) or its parent (`at` 1, before); `undefined` for none. */
 function renderedDiffSide(at: number, path: string): string | null | undefined {
@@ -604,6 +633,8 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
 export function repoFileBytes(entityId: string, path: string): Uint8Array | undefined {
   // `?fake-rendered-diff`'s PNG at the newest commit (after) and its parent (before).
   const commitAt = PAYOUT_COMMITS.findIndex(([sha]) => payoutCommitId(sha) === entityId);
+  const pdf = PDF_DIFF[path];
+  if (commitAt !== -1 && commitAt <= 1 && pdf !== undefined && pdfDiffOn()) return pdf[commitAt === 0 ? 1 : 0]();
   if (commitAt !== -1 && renderedDiffOn()) {
     if (path === "docs/img/logo.png" && commitAt <= 1) return commitAt === 0 ? bytesOf(LOGO_AFTER) : PAYOUT_IMAGES[path]!();
     throw { code: "not_found", message: `gitea: no file ${path} at this commit`, source_id: null };
@@ -667,7 +698,7 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
     // `?fake-diff-lines=<n>` (#2269): forty more files of n/40 added lines each.
     const bulk = Number(new URLSearchParams(globalThis.location?.search).get("fake-diff-lines") ?? 0) || 0;
     const more = bulk === 0 ? [] : Array.from({ length: 40 }, (_, f) => diffOf(`bulk/f${String(f).padStart(2, "0")}.rs`, "", Array.from({ length: Math.ceil(bulk / 40) }, (_, i) => `let v${f}_${i} = ${i};`).join("\n")));
-    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...(at === 0 && diffPipelineOn() ? diffPipelineFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
+    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...(at === 0 && pdfDiffOn() ? pdfDiffFiles() : []), ...(at === 0 && diffPipelineOn() ? diffPipelineFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
     // The whole view's toolbar (#707): a branch from this commit, its whole sha the value.
     const from = { value: commit[0], label: commit[0].slice(0, 10) };
     const actions =
