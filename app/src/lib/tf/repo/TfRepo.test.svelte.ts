@@ -394,8 +394,11 @@ test("a commit draws its sha, message, author and time, its diff per file, and N
   expect(text(target.querySelector(".tf-cgroup-h"))).toContain("c90d11a2b3 PAY-231: jitter in backoff mara, today 11:42");
   const diff = target.querySelector(".tf-diff")!;
   expect(text(diff.querySelector(".tf-fh"))).toBe("src/retry.rs +1 −1");
-  expect([...diff.querySelectorAll(".tf-ln")].map(text)).toEqual(["1 fn retry() {", "2− 3", "2+ 5"]);
+  // A context line carries its old and its new number (#2266): `1` `1`.
+  expect([...diff.querySelectorAll(".tf-ln")].map(text)).toEqual(["11 fn retry() {", "2− 3", "2+ 5"]);
   expect(diff.querySelector(".tf-ln.tf-del")).not.toBeNull();
+  // A commit takes no line comments: only a pull request's review offers them (#2266).
+  expect(diff.querySelector(".tf-addc")).toBeNull();
   const branch = [...target.querySelectorAll("button")].find((b) => text(b) === "New branch from here…")!;
   expect(branch.getAttribute("aria-disabled")).toBeNull();
   expect(target.querySelector(".tf-tabs a[aria-current='page']")!.textContent).toContain("Commits");
@@ -427,7 +430,7 @@ test("Local changes draws the checkout line, the uncommitted diff with the PR's 
   expect(text(line)).toContain("/Users/mara/src/payout-service on main 1 ahead, 1 changed");
   expect(line.querySelector("button[aria-haspopup='menu']")).not.toBeNull();
   expect(text(target.querySelector(".tf-cbody"))).toContain("knobas never commits, stashes or pushes here");
-  // The pull request's diff block (#842's `TfDiff`), each file marked.
+  // The pull request's diff block (`TfDiffView`, #2266), each file marked.
   expect([...target.querySelectorAll(".tf-cbody .tf-diff .tf-fh .tf-mono")].map(text)).toEqual([
     "src/retry.rs (modified, not staged)",
     "src/sepa/mod.rs (modified, staged)",

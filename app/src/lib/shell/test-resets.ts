@@ -26,6 +26,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "detail/view-read.ts#flights": async () => (await import("../detail/view-read")).viewMemory.clear(),
   // The pending line comments (#709).
   "detail/view/pending-comments.svelte.ts#pendingComments": async () => (await import("../detail/view/pending-comments.svelte")).pendingComments.forget(),
+  // Split or unified (#2266), stored in `localStorage`: each test starts unified.
+  "tf/diff/diff-layout.svelte.ts#diffLayout": async () => (await import("../tf/diff/diff-layout.svelte")).diffLayout.reset(),
   // The source list's role claims (#1196), held once per window.
   "tf/roles.svelte.ts#sourceRoles": async () => (await import("../tf/roles.svelte")).sourceRoles.forget(),
   // The stack and its dismiss timers, in one reset.

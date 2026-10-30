@@ -402,7 +402,7 @@ test("every sticky side column is bounded by the window and scrolls on its own, 
 
 test("the changed files list sticks: its box is as tall as the diffs beside it (#2091)", () => {
   // A sticky element moves only inside its parent, and a grid item kept to its content's height leaves it no room.
-  expect(block(code, ".tf-prfiles-nav")).toMatch(/align-self:\s*stretch/);
+  expect(block(code, ".tf-dnav")).toMatch(/align-self:\s*stretch/);
 });
 
 test("an Inbox row has no content-visibility: the windowed list measures drawn rows, and a skipped row measures as its placeholder (#2209)", () => {
