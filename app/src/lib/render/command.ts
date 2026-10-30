@@ -17,7 +17,7 @@
  *   runs nothing and keeps the SVG's own styles. {@link frameDocument} builds
  *   the frame's document.
  */
-import { runRenderer, type CommandOutput, type RenderContent, type RenderRun, type UserRenderer } from "../ipc/app";
+import { runRenderer, type RenderContent, type RenderRun, type UserRenderer } from "../ipc/app";
 import { mount, unmount } from "svelte";
 
 import TfCommandOutput from "../tf/render/TfCommandOutput.svelte";
