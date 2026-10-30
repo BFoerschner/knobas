@@ -333,20 +333,10 @@ async fn an_edited_address_rebuilds_the_source() {
     assert_eq!(f.seen.builds() - builds, 1, "rebuilt once, for both reads");
 }
 
-/// *Remove*: a read refuses as it always did, and a source added again under
-/// the id is built anew, with its own credential.
-#[tokio::test]
-async fn a_removed_source_is_dropped() {
-    let f = fixture().await;
-    f.read("branch/a", None).await.unwrap();
-    sources::crud::delete(&f.pool, &f.secrets, &f.live, &f.id, true)
-        .await
-        .unwrap();
-    let refused = f.read("branch/a", None).await.unwrap_err();
-    assert!(matches!(refused, SourcesError::NotFound(_)), "{refused:?}");
-    // Back with the same address and another credential: the same recipe,
-    // so only dropping the instance on removal reads the new one.
-    let builds = f.seen.builds();
+/// The source added back under a removed one's id, with the same address
+/// and another credential: the same recipe, so only an instance dropped with
+/// the removal reads the new credential.
+async fn add_again(f: &Fixture) {
     sources::crud::add(
         &f.pool,
         &f.secrets,
@@ -365,9 +355,41 @@ async fn a_removed_source_is_dropped() {
     )
     .await
     .unwrap();
+}
+
+/// *Remove*: a read refuses as it always did, and the built instance goes
+/// with the source, so one added again under the id reads its own
+/// credential, even with no read between.
+#[tokio::test]
+async fn a_removed_source_is_dropped() {
+    let f = fixture().await;
+    f.read("branch/a", None).await.unwrap();
+    sources::crud::delete(&f.pool, &f.secrets, &f.live, &f.id, true)
+        .await
+        .unwrap();
+    add_again(&f).await;
     let text = f.read("branch/a", None).await.unwrap();
     assert!(text.contains("again-pat"), "{text}");
-    assert!(f.seen.builds() > builds);
+
+    sources::crud::delete(&f.pool, &f.secrets, &f.live, &f.id, true)
+        .await
+        .unwrap();
+    let refused = f.read("branch/a", None).await.unwrap_err();
+    assert!(matches!(refused, SourcesError::NotFound(_)), "{refused:?}");
+}
+
+/// A source whose row is gone however it went is refused, and its instance
+/// dropped by that read.
+#[tokio::test]
+async fn a_source_gone_from_the_configuration_is_dropped_by_the_next_read() {
+    let f = fixture().await;
+    f.read("branch/a", None).await.unwrap();
+    assert!(knobas_sync::config::delete(&f.pool, &f.id, true).await.unwrap());
+    let refused = f.read("branch/a", None).await.unwrap_err();
+    assert!(matches!(refused, SourcesError::NotFound(_)), "{refused:?}");
+    add_again(&f).await;
+    let text = f.read("branch/a", None).await.unwrap();
+    assert!(text.contains("again-pat"), "{text}");
 }
 
 /// Two sources keep their own instances.
