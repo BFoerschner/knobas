@@ -26,6 +26,7 @@ export type SettingsSection =
   | "backup"
   | "appearance"
   | "performance"
+  | "renderers"
   | "keyboard"
   | "logs";
 
@@ -41,6 +42,7 @@ export const SETTINGS_SECTIONS: readonly (readonly [SettingsSection, string])[] 
   ["backup", "Backup and export"],
   ["appearance", "Appearance"],
   ["performance", "Performance"],
+  ["renderers", "Renderers"],
   ["keyboard", "Keyboard"],
   ["logs", "Logs and database"],
 ];

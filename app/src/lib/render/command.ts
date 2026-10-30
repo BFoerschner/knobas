@@ -86,7 +86,7 @@ export function frameDocument(output: Exclude<CommandOutput, "image">, body: str
   if (output === "html") {
     inner = DOMPurify.sanitize(body, { USE_PROFILES: { html: true, svg: true }, FORBID_TAGS: ["style", "form", "iframe", "object", "embed"] });
   } else {
-    const root = DOMPurify.sanitize(body, { USE_PROFILES: { svg: true, svgFilters: true }, RETURN_DOM: true });
+    const root = DOMPurify.sanitize(body, { USE_PROFILES: { svg: true, svgFilters: true }, RETURN_DOM: true }) as unknown as Element;
     const svg = root.querySelector("svg");
     // XMLSerializer writes the SVG namespace an `<img>` needs.
     const markup = svg === null ? "" : new XMLSerializer().serializeToString(svg);

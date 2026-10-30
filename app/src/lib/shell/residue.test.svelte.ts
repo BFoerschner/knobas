@@ -270,6 +270,7 @@ vi.mock("../ipc/app", () => ({
   ping: () => deferred("pong"),
   pagesKeptOpen: () => deferred(5),
   setPagesKeptOpen: (count: number) => deferred(count),
+  userRenderers: () => deferred([]),
 }));
 
 /**
@@ -349,6 +350,7 @@ const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).defa
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
+const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
 const TfCheckoutsSection = (await import("../tf/settings/TfCheckoutsSection.svelte")).default;
 const { createApps } = await import("../tf/openin/apps.svelte");
 const { createClones } = await import("../tf/openin/clones.svelte");
@@ -1248,6 +1250,21 @@ const CASES: Case[] = [
     }),
   },
   {
+    /** A command renderer's run (#2262), answering late. */
+    name: "TfCommandOutput",
+    source: "lib/tf/render/TfCommandOutput.svelte",
+    open: (target) => ({
+      app: mount(TfCommandOutput, {
+        target,
+        props: {
+          renderer: { id: "command:cat", name: "Cat", patterns: [], fences: [], input: "text", output: "html", diff: false },
+          text: "<p>x</p>",
+          commands: { run: () => deferred({ outcome: "drawn", output: "html", body: "<p>x</p>" }) },
+        },
+      }),
+    }),
+  },
+  {
     /** Settings › Checkouts (#844) reads the list when it opens. */
     name: "TfCheckoutsSection",
     source: "lib/tf/settings/TfCheckoutsSection.svelte",
@@ -1899,6 +1916,7 @@ const CASES: Case[] = [
   sectionCase("TfBackupSection", "backup"),
   sectionCase("TfLogsSection", "logs"),
   sectionCase("TfPerformanceSection", "performance"),
+  sectionCase("TfRenderersSection", "renderers"),
   {
     /**
      * The write queue panel (#1425): a layer on the stack, and a title read
