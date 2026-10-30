@@ -118,10 +118,16 @@ fences: Array<string>, input: RendererInput, output: CommandOutput,
 /**
  * Killed after this many seconds.
  */
-timeout_secs: number, };
+timeout_secs: number, 
+/**
+ * Whether a diff of a file it draws offers a *Rendered* mode: the
+ * file drawn by it twice, before and after side by side (#2279). A
+ * row saved before the field existed reads as `false`.
+ */
+diff: boolean, };
 
 /**
  * A renderer as Settings › Renderers sends it: a new one has no id yet, and
  * no timeout is the default.
  */
-export type UserRendererDraft = { id: string | null, name: string, command: string, patterns: Array<string>, fences: Array<string>, input: RendererInput, output: CommandOutput, timeout_secs: number | null, };
+export type UserRendererDraft = { id: string | null, name: string, command: string, patterns: Array<string>, fences: Array<string>, input: RendererInput, output: CommandOutput, timeout_secs: number | null, diff: boolean, };

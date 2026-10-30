@@ -3,7 +3,8 @@
  * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
  * `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
-import type { CheckoutSettings, CheckoutView, CloneAnswer, DiffRead } from "../../../ipc/entity";
+import type { CheckoutSettings, CheckoutView, CloneAnswer, DiffRead, OpenObject } from "../../../ipc/entity";
+import { fillObject, objectCommand } from "../../../tf/openin/openin";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 import { CORPUS } from "./corpus";
@@ -170,6 +171,9 @@ interface FakeApp {
   name: string;
   command: string;
   file_command: string | null;
+  commit_command?: string;
+  range_command?: string;
+  pull_request_command?: string;
 }
 
 const SHIPPED: FakeApp[] = [
@@ -245,7 +249,19 @@ function fakeSetApps(drafts: unknown, defaultId: unknown) {
     const given = String(draft.id ?? "").trim();
     let id = given !== "" && !out.some((app) => app.id === given) ? given : slug(name);
     for (let n = 2; out.some((app) => app.id === id); n += 1) id = `${slug(name)}-${n}`;
-    out.push({ id, name, command, file_command: file });
+    const optional = (key: "commit_command" | "range_command" | "pull_request_command") => {
+      const given = String(draft[key] ?? "").trim();
+      return given === "" ? {} : { [key]: given };
+    };
+    out.push({
+      id,
+      name,
+      command,
+      file_command: file,
+      ...optional("commit_command"),
+      ...optional("range_command"),
+      ...optional("pull_request_command"),
+    });
   });
   fakeApps = out;
   fakeDefault = typeof defaultId === "string" ? defaultId : null;
@@ -287,6 +303,44 @@ function fakeOpen(args: Record<string, unknown>) {
       .replace(/\{line\}/g, String(line))
       .replace(/\{name\}/g, name),
   );
+}
+
+/** The fake's Gitea pages (#2274), as `code_pages` declares Gitea's, after its base URL. */
+function fakePage(entityId: string, object: OpenObject): string | null {
+  const repo = fakeRepoOf(entityId);
+  const url = repo === null ? null : fakeCheckout(repo).repo_url;
+  if (url === null) return null;
+  const enc = (value: string) => value.split("/").map(encodeURIComponent).join("/");
+  switch (object.kind) {
+    case "repository":
+      return url;
+    case "file":
+      return object.at === null ? null : `${url}/src/${enc(object.at)}/${enc(object.path)}#L${object.line ?? 1}`;
+    case "commit":
+      return `${url}/commit/${object.sha}`;
+    case "range":
+      return `${url}/compare/${enc(object.base)}...${enc(object.head)}`;
+    case "pull_request":
+      return `${url}/pulls/${object.number}`;
+  }
+}
+
+/** `open_object` (#2274): the argv the backend would start, nothing started. */
+function fakeOpenObject(args: Record<string, unknown>) {
+  const entityId = String(args["entityId"] ?? "");
+  const object = args["object"] as OpenObject;
+  const checkout = fakeCheckout(entityId);
+  if (checkout.path === null) {
+    throw { code: "not_found", message: `${entityId} has no checkout on this machine, so there is nothing to open`, source_id: null };
+  }
+  const id = typeof args["application"] === "string" ? args["application"] : fakeSettings().default_application;
+  const app = fakeApps.find((one) => one.id === id);
+  if (!app) throw { code: "invalid", message: `'${id}' is not one of your applications: see Settings › Checkouts`, source_id: null };
+  const template = objectCommand({ ...app }, object.kind);
+  if (template === null) {
+    throw { code: "invalid", message: `${app.name} does not open this: add it in Settings › Checkouts`, source_id: null };
+  }
+  return words(template).map((word) => fillObject(word, { path: checkout.path!, object, url: fakePage(entityId, object) }));
 }
 
 /**
@@ -372,6 +426,8 @@ export function handlers(): Handlers {
     },
     entity_checkout: (args) => fakeCheckout(String(args["entityId"] ?? "")),
     open_checkout: (args) => fakeOpen(args),
+    open_object: (args) => fakeOpenObject(args),
+    object_page: (args) => fakePage(String(args["entityId"] ?? ""), args["object"] as OpenObject),
     checkout_settings: () => fakeSettings(),
     set_checkout_applications: (args) => fakeSetApps(args["applications"], args["defaultApplication"]),
     entity_checkout_diff: (args) => fakeCheckoutDiff(String(args["entityId"] ?? "")),

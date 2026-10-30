@@ -59,6 +59,7 @@ fn descriptor(account: bool) -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        code_pages: None,
         write_ops: if account {
             vec!["pause_monitor".to_owned(), "resume_monitor".to_owned()]
         } else {

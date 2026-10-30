@@ -90,6 +90,11 @@ pub struct UserRenderer {
     pub output: CommandOutput,
     /// Killed after this many seconds.
     pub timeout_secs: u32,
+    /// Whether a diff of a file it draws offers a *Rendered* mode: the
+    /// file drawn by it twice, before and after side by side (#2279). A
+    /// row saved before the field existed reads as `false`.
+    #[serde(default)]
+    pub diff: bool,
 }
 
 /// A renderer as Settings › Renderers sends it: a new one has no id yet, and
@@ -109,6 +114,8 @@ pub struct UserRendererDraft {
     pub output: CommandOutput,
     #[serde(default)]
     pub timeout_secs: Option<u32>,
+    #[serde(default)]
+    pub diff: bool,
 }
 
 /// What goes on stdin: text, or bytes in base64.
@@ -223,6 +230,7 @@ fn settle(drafts: &[UserRendererDraft]) -> Result<Vec<UserRenderer>, IpcError> {
                 .timeout_secs
                 .unwrap_or(DEFAULT_TIMEOUT_SECS)
                 .clamp(1, MAX_TIMEOUT_SECS),
+            diff: draft.diff,
         });
     }
     Ok(out)
@@ -561,6 +569,15 @@ mod tests {
 
     fn argv(words: &[&str]) -> Vec<String> {
         words.iter().map(|w| (*w).to_owned()).collect()
+    }
+
+    /// A renderer saved before #2279 has no `diff` field: it reads as one
+    /// that does not draw diffs, so the stored list still parses.
+    #[test]
+    fn a_renderer_stored_without_diff_reads_as_not_drawing_diffs() {
+        let stored = r#"{"id":"plantuml","name":"PlantUML","command":"plantuml -tsvg -pipe","patterns":["*.puml"],"fences":[],"input":"text","output":"svg","timeout_secs":10}"#;
+        let renderer: UserRenderer = serde_json::from_str(stored).expect("a pre-#2279 row parses");
+        assert!(!renderer.diff);
     }
 
     /// A run that writes past the cap is stopped and refused, not cut.

@@ -76,6 +76,7 @@ impl Source for Tickets {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            code_pages: None,
         }
     }
 

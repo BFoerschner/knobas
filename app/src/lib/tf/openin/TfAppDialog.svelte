@@ -1,6 +1,8 @@
 <!--
   *Add an application* and *Edit an application* (#844, R-8.23), prototype-6's
-  `openAppDialog`: a name, a command, a command for a file; the placeholders
+  `openAppDialog`: a name, a command, a command for a file, and (#2274) a
+  command for a commit, a range and a pull request, each optional: an
+  application is offered for the objects it has a command for; the placeholders
   as buttons that insert at the cursor; *It will run*, filled at a checkout on
   this disk; the warnings; *Try it on <repo>*; and, editing, *Remove*.
 
@@ -40,6 +42,9 @@
   let name = $state(editing?.name ?? "");
   let command = $state(editing?.command ?? "");
   let fileCommand = $state(editing?.file_command ?? "");
+  let commitCommand = $state(editing?.commit_command ?? "");
+  let rangeCommand = $state(editing?.range_command ?? "");
+  let prCommand = $state(editing?.pull_request_command ?? "");
   let error = $state<string | null>(null);
   let busy = $state(false);
   /** The entry's place in the saved list: `index`, or where a *Try it* saved a new one. */
@@ -53,8 +58,12 @@
 
   let commandField = $state<HTMLInputElement | null>(null);
   let fileField = $state<HTMLInputElement | null>(null);
+  let commitField = $state<HTMLInputElement | null>(null);
+  let rangeField = $state<HTMLInputElement | null>(null);
+  let prField = $state<HTMLInputElement | null>(null);
+  type Field = "command" | "file" | "commit" | "range" | "pr";
   /** The field a placeholder button inserts into: the one last focused. */
-  let last = $state<"command" | "file">("command");
+  let last = $state<Field>("command");
 
   const checkout = $derived(sample?.path ?? "/Users/you/code/repository");
   const file = $derived(`${checkout}/${sample?.file ?? "README.md"}`);
@@ -69,12 +78,19 @@
   const warned = $derived(warnings(command.trim()));
   const ready = $derived(name.trim() !== "" && command.trim() !== "" && !busy);
 
+  const FIELDS: Record<Field, { el: () => HTMLInputElement | null; get: () => string; set: (value: string) => void }> = {
+    command: { el: () => commandField, get: () => command, set: (value) => (command = value) },
+    file: { el: () => fileField, get: () => fileCommand, set: (value) => (fileCommand = value) },
+    commit: { el: () => commitField, get: () => commitCommand, set: (value) => (commitCommand = value) },
+    range: { el: () => rangeField, get: () => rangeCommand, set: (value) => (rangeCommand = value) },
+    pr: { el: () => prField, get: () => prCommand, set: (value) => (prCommand = value) },
+  };
+
   function insert(placeholder: string) {
-    const field = last === "file" ? fileField : commandField;
-    const value = last === "file" ? fileCommand : command;
-    const next = insertAt(value, field?.selectionStart ?? null, placeholder);
-    if (last === "file") fileCommand = next.value;
-    else command = next.value;
+    const target = FIELDS[last];
+    const field = target.el();
+    const next = insertAt(target.get(), field?.selectionStart ?? null, placeholder);
+    target.set(next.value);
     queueMicrotask(() => {
       field?.focus();
       field?.setSelectionRange(next.cursor, next.cursor);
@@ -109,6 +125,9 @@
       name: name.trim(),
       command: command.trim(),
       file_command: fileCommand.trim() || null,
+      ...(commitCommand.trim() ? { commit_command: commitCommand.trim() } : {}),
+      ...(rangeCommand.trim() ? { range_command: rangeCommand.trim() } : {}),
+      ...(prCommand.trim() ? { pull_request_command: prCommand.trim() } : {}),
     };
     if (entryAt !== null && entryAt < list.length) list[entryAt] = entry;
     else list.push(entry);
@@ -207,6 +226,42 @@
         bind:this={fileField}
         onfocus={() => (last = "file")}
       />
+      <label for="tf-app-commit">For a commit</label>
+      <input
+        id="tf-app-commit"
+        class="tf-mono"
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="optional, e.g. tig -C {'{path}'} show {'{sha}'}"
+        bind:value={commitCommand}
+        bind:this={commitField}
+        onfocus={() => (last = "commit")}
+      />
+      <label for="tf-app-range">For a range</label>
+      <input
+        id="tf-app-range"
+        class="tf-mono"
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="optional, e.g. git -C {'{path}'} difftool -d {'{base}'} {'{head}'}"
+        bind:value={rangeCommand}
+        bind:this={rangeField}
+        onfocus={() => (last = "range")}
+      />
+      <label for="tf-app-pr">For a pull request</label>
+      <input
+        id="tf-app-pr"
+        class="tf-mono"
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="optional, e.g. MyGitViewer --pr {'{pr}'} {'{path}'}"
+        bind:value={prCommand}
+        bind:this={prField}
+        onfocus={() => (last = "pr")}
+      />
     </form>
     <div class="tf-pane-h">Placeholders knobas fills in</div>
     <div class="tf-phs">
@@ -225,8 +280,9 @@
       <div class="tf-banner tf-err tf-dbanner" role="alert">{error}</div>
     {/if}
     <p class="tf-dsub">
-      The values come only from this disk: the checkout knobas found or the path you set. Branch names, titles and other
-      synced values are never passed to a program. Paths with spaces are quoted for you. The command runs as you, with no
+      The paths come only from this disk: the checkout knobas found or the path you set. A sha, a branch or a pull
+      request number is passed only when it is a plain git name, and the URL is built from the source’s address; titles
+      and other synced values are never passed to a program. Paths with spaces are quoted for you. The command runs as you, with no
       shell, so pipes and <span class="tf-mono">&amp;&amp;</span> don’t work; point it at a script instead.
     </p>
   {/snippet}

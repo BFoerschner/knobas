@@ -16,6 +16,10 @@
     viewed ones start collapsed. Lines are windowed and a file over 1,500
     changed lines waits for *Load diff* (#2269); changed words are marked and
     context expands where the caller passes `context` (#2267).
+  - **Rendered** (#2279): a file whose renderer draws diffs (`rendered.ts`)
+    offers *Rendered* in its header, the file drawn before and after by its
+    renderer (`TfDiffRendered`); an image also swipes. Its sides come from
+    `context`, read once and kept beside expanded context's reads.
   - **Keys** (`list`, #2268): `j`/`k` files, `n`/`p` hunks, `v` viewed, `c`
     comment, `s` split; none while typing, none on a hidden page.
   - **Ceiling** (`cut`): a diff the parser stopped at 50,000 lines says so.
@@ -26,6 +30,8 @@
     - `viewed`: a *Viewed* box per file that collapses it.
     - `review`: a `+` per line that opens a comment box; *Add to review*
       keeps the comment pending in the reader's store under its line.
+    - `openAt`: *Open in…* in each file's header (#2274), on the file at its
+      first changed line, read at the diff's head; not on a deleted file.
     Threads the source holds are drawn wherever it answers them: under their
     line, or apart at the end of the file when outdated or not drawn
     (`pr/files.ts`); `gone` lists those on files the diff no longer holds.
@@ -62,6 +68,12 @@
   import { diffLayout, windowNarrow, type DiffLayoutChoice } from "./diff-layout.svelte";
   import type { DiffTalk } from "./talk";
   import TfDiffCard from "./TfDiffCard.svelte";
+  import { ipcCommands, type CommandPort } from "../../render/command";
+  import { openWith, type RendererDefault } from "../../render/defaults";
+  import { rendererDefaults } from "../../render/defaults.svelte";
+  import { allRenderers } from "../../render/registry";
+  import { hunkText, renderedPlan, type DiffMode, type Side, type SideGot } from "./rendered";
+  import type { OpenAt } from "./TfDiffCard.svelte";
   import { badgeOf, collapsedAtFirst, isLock, needsLoad, treeOf } from "./tree";
 
   let {
@@ -73,8 +85,11 @@
     context = null,
     cut = false,
     render = renderPort(),
+    defaults = rendererDefaults,
+    commands = ipcCommands,
     layout = diffLayout,
     narrow = windowNarrow(),
+    openAt = null,
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -89,8 +104,14 @@
     /** The parser's ceiling cut this diff. */
     cut?: boolean;
     render?: RenderPort;
+    /** The renderer each file opens with (#2263): its rendered diff is drawn by it. */
+    defaults?: { readonly list: readonly RendererDefault[] };
+    /** Runs a command renderer's rendered diff: the IPC, a fake in tests. */
+    commands?: CommandPort;
     layout?: DiffLayoutChoice;
     narrow?: { readonly current: boolean };
+    /** *Open in…* in each file's header (#2274): the repository (or branch) and the commit or branch the files are read at. */
+    openAt?: OpenAt | null;
   } = $props();
 
   let filter = $state("");
@@ -110,30 +131,40 @@
     return { lines: newLines.get(key) ?? [], shown: opened[key] ?? {} };
   };
 
-  async function expand(file: DrawnFile, hunk: number, how: "down" | "up" | "all") {
+  /** Reads a file's two sides whole, once: expanded context and its rendered diff share the read. */
+  async function readWhole(file: DrawnFile, reader: DiffContext): Promise<WholeTexts> {
     const key = keyOf(file);
-    if (!context) return;
-    let whole = wholes[key];
-    if (!whole) {
-      const reader = context;
-      let read = reads.get(key);
-      if (!read) {
-        read = Promise.all([
-          // The old side only highlights: a failed read of it costs that, not the expansion.
-          file.change === "added" ? null : reader.text(file, "old").catch(() => null),
-          file.change === "deleted" ? null : reader.text(file, "new"),
-        ]).then(([old, nu]) => ({ old, new: nu }));
-        reads.set(key, read);
-      }
-      try {
-        whole = await read;
-      } catch (cause) {
-        reads.delete(key);
-        push({ text: `Could not read ${file.path}: ${ipcErrorMessage(cause)}`, tone: "err" });
-        return;
-      }
-      wholes = { ...wholes, [key]: whole };
+    const had = wholes[key];
+    if (had) return had;
+    let read = reads.get(key);
+    if (!read) {
+      read = Promise.all([
+        // The old side only highlights: a failed read of it costs that, not the expansion.
+        file.change === "added" ? null : reader.text(file, "old").catch(() => null),
+        file.change === "deleted" ? null : reader.text(file, "new"),
+      ]).then(([old, nu]) => ({ old, new: nu }));
+      reads.set(key, read);
     }
+    try {
+      const whole = await read;
+      wholes = { ...wholes, [key]: whole };
+      return whole;
+    } catch (cause) {
+      reads.delete(key);
+      throw cause;
+    }
+  }
+
+  async function expand(file: DrawnFile, hunk: number, how: "down" | "up" | "all") {
+    if (!context) return;
+    let whole: WholeTexts;
+    try {
+      whole = await readWhole(file, context);
+    } catch (cause) {
+      push({ text: `Could not read ${file.path}: ${ipcErrorMessage(cause)}`, tone: "err" });
+      return;
+    }
+    const key = keyOf(file);
     if (whole.new === null) {
       push({ text: `${file.path} could not be read whole, so its context does not expand.`, tone: "err" });
       return;
@@ -198,6 +229,48 @@
     const toks = tokens[`${side}\n${key}`]?.[row];
     return toks && toks.map(([part]) => part).join("") === cell.line.text ? toks : undefined;
   };
+
+  /** Each file's rendered mode, where its renderer draws diffs and the sides can be read (by `keyOf`). */
+  const plans = $derived(
+    new Map(
+      files.map((file) => {
+        const opened = openWith({ path: file.path, binary: file.change === "binary" }, allRenderers(), defaults.list);
+        return [keyOf(file), renderedPlan(file, opened.renderer, { whole: context !== null, bytes: typeof context?.bytes === "function" })] as const;
+      }),
+    ),
+  );
+  /** The mode the reader picked per file; a binary file with a rendered mode opens in it (it has no lines). */
+  let modes = $state.raw<Record<string, DiffMode>>({});
+  const modeOf = (file: DrawnFile): DiffMode => modes[keyOf(file)] ?? (plans.get(keyOf(file)) && file.change === "binary" ? "rendered" : "lines");
+  /** Each side a rendered diff read, under `side\nkey`, and the reads made. */
+  let got = $state.raw<Record<string, SideGot>>({});
+  const asked = new Set<string>();
+  const NAMES = { old: "before", new: "after" } as const;
+
+  function loadSide(file: DrawnFile, side: Side) {
+    const name = `${side}\n${keyOf(file)}`;
+    const reader = context;
+    if (asked.has(name)) return;
+    asked.add(name);
+    const read = async (): Promise<SideGot> => {
+      const hunk = hunkText(file, side);
+      if (hunk !== null) return { kind: "drawn", content: hunk };
+      if (reader === null) return { kind: "failed", why: "nothing reads this diff's files" };
+      if (file.change === "binary") {
+        const bytes = await reader.bytes!(file, side);
+        return bytes === null ? { kind: "absent" } : { kind: "drawn", content: bytes };
+      }
+      const text = (await readWhole(file, reader))[side];
+      return text === null ? { kind: "failed", why: `the file ${NAMES[side]} the change is not readable whole` } : { kind: "drawn", content: text };
+    };
+    read()
+      .catch((cause): SideGot => {
+        asked.delete(name);
+        return { kind: "failed", why: ipcErrorMessage(cause) };
+      })
+      .then((side) => (got = { ...got, [name]: side }));
+  }
+  const sideOf = (file: DrawnFile, side: Side): SideGot | undefined => got[`${side}\n${keyOf(file)}`];
 
   /**
    * Collapsed by hand (`true`) or opened by hand (`false`); otherwise viewed, lock and generated files start
@@ -404,12 +477,19 @@
         loaded={loads[key] === true}
         onload={() => (loads = { ...loads, [key]: true })}
         current={current === key}
+        rendered={plans.get(key) ?? null}
+        mode={modeOf(file)}
+        onmode={(mode) => (modes = { ...modes, [key]: mode })}
+        sideOf={(side) => sideOf(file, side)}
+        load={(side) => loadSide(file, side)}
+        {commands}
         expandable={context !== null}
         expanded={expandedOf(key)}
         onexpand={(hunk, how) => void expand(file, hunk, how)}
         tokensOf={(side, cell) => tokensOf(file, side, cell)}
         {talk}
         {render}
+        {openAt}
       />
     {/each}
     {#if gone.length > 0 || homeless.length > 0}

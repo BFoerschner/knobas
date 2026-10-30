@@ -22,6 +22,11 @@ export type DiagramEngine = DiagramRequest["engine"];
 
 const NAMES: Record<DiagramEngine, string> = { mermaid: "Mermaid", d2: "D2", graphviz: "Graphviz" };
 
+/** Whether a renderer id is a diagram engine's, drawn by `drawDiagram` (a rendered diff, #2279). */
+export function isDiagramEngine(id: string): id is DiagramEngine {
+  return Object.hasOwn(NAMES, id);
+}
+
 /** The light tokens (`tf/css/tokens.css`), for a document whose stylesheet holds none (jsdom). */
 const LIGHT: Omit<Palette, "dark"> = {
   paper: "#E4E8EC",

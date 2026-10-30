@@ -10,7 +10,7 @@
  * | `fences`   | accepted fence languages: where it applies inside Markdown   |
  * | `input`    | text or bytes                                                |
  * | `output`   | SVG, HTML or image; `lines` for *Source*, see below          |
- * | `diff`     | whether it can render a diff (if not: before and after side by side) |
+ * | `diff`     | whether it draws a diff of its files: Source is the line diff, any other before and after side by side (#2279) |
  *
  * `id` is the registry's key, what a default per pattern (#2263) stores.
  * *Source* outputs `lines`: highlighted lines the viewer draws itself from
@@ -46,7 +46,7 @@ export const IMAGE: Renderer = {
   fences: [],
   input: "bytes",
   output: "image",
-  diff: false,
+  diff: true,
 };
 
 /**
@@ -75,7 +75,7 @@ export const MERMAID: Renderer = {
   fences: ["mermaid"],
   input: "text",
   output: "svg",
-  diff: false,
+  diff: true,
 };
 
 /**
@@ -90,7 +90,7 @@ export const D2: Renderer = {
   fences: ["d2"],
   input: "text",
   output: "svg",
-  diff: false,
+  diff: true,
 };
 
 /**
@@ -105,7 +105,7 @@ export const GRAPHVIZ: Renderer = {
   fences: ["dot", "graphviz"],
   input: "text",
   output: "svg",
-  diff: false,
+  diff: true,
 };
 
 /**

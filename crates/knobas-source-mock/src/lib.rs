@@ -1228,6 +1228,7 @@ impl Source for MockSource {
             // and a clone is built from each repository's own page, as before.
             clone_from: vec![knobas_source::clone_urls::CloneFrom::BaseUrl],
             url_forms: Vec::new(),
+            code_pages: None,
             write_ops: if self.files_tickets {
                 vec!["comment".to_owned(), "create_ticket".to_owned()]
             } else {

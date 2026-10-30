@@ -23,3 +23,21 @@ test("no parent address, or a file the source cut, is no whole text", async () =
   expect(await commitContext(read, "c", parentOf(overview(null))).text(FILE, "old")).toBeNull();
   expect(await commitContext(read, "c", null).text(FILE, "new")).toBeNull();
 });
+
+test("an image's bytes are read at each side's commit, the old one by its old path (#2279)", async () => {
+  const asked: string[] = [];
+  const bytes = (id: string, path: string, commit: string | null) => (asked.push(`${id} ${path} ${commit}`), Promise.resolve(new Uint8Array([id.length])));
+  const context = commitContext(() => Promise.resolve(null), "g:o/r@new", "g:o/r@older", bytes);
+  expect(await context.bytes!(FILE, "new")).toEqual(new Uint8Array([9]));
+  expect(await context.bytes!(FILE, "old")).toEqual(new Uint8Array([11]));
+  expect(asked).toEqual(["g:o/r@new src/new.rs null", "g:o/r@older src/old.rs null"]);
+});
+
+test("a side the file is not on reads as none; no parent address, or no byte reader, is a refusal or no reader", async () => {
+  const missing = () => Promise.reject({ code: "not_found", message: "src/old.rs is not at abc" });
+  expect(await commitContext(() => Promise.resolve(null), "c", "p", missing).bytes!(FILE, "old")).toBeNull();
+  const broken = () => Promise.reject({ code: "unreachable", message: "down" });
+  await expect(commitContext(() => Promise.resolve(null), "c", "p", broken).bytes!(FILE, "old")).rejects.toMatchObject({ code: "unreachable" });
+  await expect(commitContext(() => Promise.resolve(null), "c", null, missing).bytes!(FILE, "old")).rejects.toThrow(/parent/);
+  expect(commitContext(() => Promise.resolve(null), "c", "p").bytes).toBeUndefined();
+});

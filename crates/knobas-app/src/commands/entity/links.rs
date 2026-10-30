@@ -384,7 +384,8 @@ pub async fn entity_file_bytes<R: tauri::Runtime>(
 /// # Errors
 ///
 /// `invalid` for a file over the cap, its size and the cap in the message,
-/// and for a source that reads no bytes; otherwise as [`entity_view`].
+/// and for a source that reads no bytes; `not_found` where the source
+/// answers 404 for the path (no file there); otherwise as [`entity_view`].
 pub async fn entity_file_bytes_inner(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
@@ -398,7 +399,16 @@ pub async fn entity_file_bytes_inner(
     let read =
         crate::sources::crud::file_bytes(pool, secrets, registry, live, entity_id, path, commit)
             .await
-            .map_err(|error| crate::sources::to_ipc(&error, None))?;
+            .map_err(|error| match error {
+                // The source has no file at `path` there (#2279 merger, witnessed on
+                // Gitea 1.27.3: a raw read of a path absent at a sha is a 404). A
+                // rendered diff of a binary file reads that as "no file on that side".
+                crate::sources::SourcesError::Source(knobas_source::SourceError::Protocol {
+                    status: Some(404),
+                    ..
+                }) => IpcError::not_found(format!("{entity_id} holds no file {path}")),
+                other => crate::sources::to_ipc(&other, None),
+            })?;
     match read.as_deref() {
         Some(FileBytes::Read(bytes)) => Ok(bytes.clone()),
         Some(FileBytes::TooLarge { size }) => Err(IpcError::invalid(format!(

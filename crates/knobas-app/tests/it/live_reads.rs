@@ -144,6 +144,13 @@ impl Source for Fake {
             .lock()
             .unwrap()
             .push((entity.to_owned(), Some(format!("bytes:{path}@{commit:?}"))));
+        if path == "gone.bin" {
+            // What Gitea answers for a path the commit does not hold (#2279).
+            return Err(SourceError::Protocol {
+                status: Some(404),
+                message: "HTTP 404 Not Found: not found".to_owned(),
+            });
+        }
         let size: u64 = path
             .trim_end_matches(".bin")
             .rsplit('-')
@@ -866,6 +873,29 @@ async fn a_byte_read_at_a_commit_is_read_once() {
     f.bytes("repo/r", "logo-5.bin", None).await.unwrap();
     f.bytes("repo/r", "logo-5.bin", None).await.unwrap();
     assert_eq!(f.seen.reads(), 4, "a read at a moving name is never kept");
+}
+
+/// A path the source answers 404 for is `not_found` at the IPC seam: a
+/// rendered diff of a binary file reads it as no file on that side (#2279).
+/// Any other refusal stays what it was.
+#[tokio::test]
+async fn a_path_the_commit_does_not_hold_is_not_found() {
+    let f = fixture().await;
+    let gone = f
+        .bytes("repo/r", "gone.bin", Some("c0ffee"))
+        .await
+        .expect_err("no file there");
+    assert_eq!(
+        gone.code,
+        knobas_app::IpcErrorCode::NotFound,
+        "{}",
+        gone.message
+    );
+    let other = f
+        .bytes("repo/r", "unsized", Some("c0ffee"))
+        .await
+        .expect_err("a refusal");
+    assert_eq!(other.code, knobas_app::IpcErrorCode::Internal);
 }
 
 /// **The cap, at the IPC seam**: a file one byte over it is refused, `invalid`,
