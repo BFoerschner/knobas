@@ -66,6 +66,47 @@ export interface DiagramRequest {
 /** A drawn diagram's SVG (not yet sanitized), or the parser's error. */
 export type DiagramAnswer = { svg: string } | { error: string };
 
+/**
+ * Where a link in a PDF goes, once the Markdown link rules (#2255) have had
+ * it: a web page (http or https, for the opener) or a page of the document
+ * (1-based). Any other link, and every action a PDF asks to run, is not drawn.
+ */
+export type PdfTarget = { url: string } | { page: number };
+
+/** A link on a page: its box `[left, top, width, height]` in CSS pixels at zoom 1, and where it goes. */
+export interface PdfLink {
+  rect: [number, number, number, number];
+  target: PdfTarget;
+}
+
+/** A drawing of a page under way. */
+export interface PdfDraw {
+  done: Promise<void>;
+  cancel(): void;
+}
+
+/** One page of an open PDF. Its size is in CSS pixels at zoom 1. */
+export interface PdfPage {
+  width: number;
+  height: number;
+  /** Paints the page onto `canvas` at `scale`, sizing the canvas for the screen's pixel ratio. */
+  draw(canvas: HTMLCanvasElement, scale: number): PdfDraw;
+  /** Fills `into` with the page's text as transparent spans over the drawing, so it can be selected. */
+  text(into: HTMLElement, scale: number): Promise<void>;
+  links(): Promise<PdfLink[]>;
+}
+
+export interface PdfDocument {
+  pages: number;
+  /** Page `n`, 1-based. */
+  page(n: number): Promise<PdfPage>;
+  /** Lets the document and its worker's copy go. */
+  close(): void;
+}
+
+/** An open PDF, or why its bytes are not one. */
+export type PdfAnswer = { pdf: PdfDocument } | { error: string };
+
 export interface RenderPort {
   highlight(request: HighlightRequest, handlers: HighlightHandlers): HighlightJob;
   /**
@@ -73,6 +114,11 @@ export interface RenderPort {
    * {@link plainPort}): the diagram's source stays as it is.
    */
   diagram?(request: DiagramRequest): Promise<DiagramAnswer>;
+  /**
+   * Opens a PDF's bytes with pdf.js (#2260). Absent where no engine runs
+   * (jsdom's {@link plainPort}): the viewer says the PDF is not drawn here.
+   */
+  pdf?(bytes: Uint8Array): Promise<PdfAnswer>;
 }
 
 /** What the port sends the diagram worker (D2, Graphviz). */
@@ -196,7 +242,15 @@ export function engineDiagram(request: DiagramRequest): Promise<DiagramAnswer> {
   return wasm(request);
 }
 
-/** The app's port: Shiki in a module worker and the diagram engines, or {@link plainPort} where there is no `Worker`. */
+/**
+ * pdf.js, loaded with the first PDF opened (#2260): `pdf.ts`, pdf.js's
+ * display layer and its worker are chunks of their own.
+ */
+export function enginePdf(bytes: Uint8Array): Promise<PdfAnswer> {
+  return import("./pdf").then(({ renderPdf }) => renderPdf(bytes));
+}
+
+/** The app's port: Shiki in a module worker, the diagram engines and pdf.js, or {@link plainPort} where there is no `Worker`. */
 export function renderPort(): RenderPort {
   shared ??=
     typeof Worker === "undefined"
@@ -204,6 +258,7 @@ export function renderPort(): RenderPort {
       : {
           ...workerPort(() => new Worker(new URL("./highlight.worker.ts", import.meta.url), { type: "module", name: "highlight" })),
           diagram: engineDiagram,
+          pdf: enginePdf,
         };
   return shared;
 }

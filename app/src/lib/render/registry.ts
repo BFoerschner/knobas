@@ -17,10 +17,10 @@
  * the worker's tokens, never markup from outside, so nothing needs the
  * sanitizer or the sandboxed frame that HTML and SVG output go through.
  *
- * The engines behind a renderer (Shiki now; Mermaid, D2, Graphviz, pdf.js
- * later) sit behind the one renderer port (`port.ts`), so jsdom tests use a
- * fake. How to add one: `notes/renderer-registry.md` on the spec's branch,
- * and `register` below.
+ * The engines behind a renderer (Shiki, Mermaid, D2, Graphviz, pdf.js)
+ * sit behind the one renderer port (`port.ts`), so jsdom tests use a fake.
+ * How to add one: `notes/renderer-registry.md` on the spec's branch, and
+ * `register` below.
  */
 
 export type RendererInput = "text" | "bytes";
@@ -108,6 +108,25 @@ export const GRAPHVIZ: Renderer = {
   diff: false,
 };
 
+/**
+ * PDF (#2260): a `.pdf` file's bytes, opened by pdf.js with scripting and
+ * form actions off (`render/pdf-core.ts`) and painted page by page into
+ * canvases (`tf/render/TfPdf.svelte`). pdf.js loads with the first PDF.
+ * Its diff, page by page, is #2282's.
+ */
+export const PDF: Renderer = {
+  id: "pdf",
+  name: "PDF",
+  patterns: ["*.pdf"],
+  fences: [],
+  input: "bytes",
+  output: "image",
+  diff: false,
+};
+
+/** The most a byte read hands a renderer (`view::BYTES_CAP`, #2256): past it the read is refused, never cut. */
+export const BYTES_CAP = 50 * 1024 * 1024;
+
 /** Source: the text, highlighted. Takes every text file and every fence, so it is always the last resort. */
 export const SOURCE: Renderer = {
   id: "source",
@@ -120,7 +139,7 @@ export const SOURCE: Renderer = {
 };
 
 /** Built-ins first, in the order that makes the first that accepts the default; Source last. */
-const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, SOURCE];
+const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, SOURCE];
 
 /**
  * Adds a renderer ahead of Source, so it becomes the default for what it

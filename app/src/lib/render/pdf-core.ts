@@ -1,0 +1,152 @@
+/**
+ * The PDF engine (#2260, spec #2234 step 5): pdf.js, scripting and form
+ * actions off. It takes the pdf.js module it is handed (the app's modern
+ * build with its worker in `pdf.ts`, the legacy build in Node tests) and
+ * answers the port's `PdfDocument`.
+ *
+ * What a PDF can ask to run, and why none of it does:
+ *
+ * - **JavaScript** (`/OpenAction`, the `/JavaScript` name tree, link and
+ *   field actions) runs only in pdf.js's scripting sandbox, which only the
+ *   pdf.js *viewer* starts (`PDFScriptingManager`, `pdf.sandbox.mjs`). This
+ *   module uses the display layer alone and never loads it.
+ * - **Eval**: pdf.js 6.4 compiles nothing with `eval`/`new Function` (the
+ *   PostScript-function compiler is gone); `isEvalSupported: false` is passed
+ *   anyway, so an upgrade that brings the option back finds it off.
+ * - **Forms**: no `AnnotationLayer`, so no field is ever an HTML control.
+ *   Pages render with `AnnotationMode.ENABLE`: a field's appearance is
+ *   painted into the canvas as pixels. XFA is off (`enableXfa: false`).
+ * - **Links** follow the Markdown rules (#2255): http and https go to the
+ *   opener, a link to a page scrolls to it, and every other link (a
+ *   `javascript:` or `file:` URI, a launch, a named or script action) is
+ *   not drawn at all.
+ * - **Fetches**: no `standardFontDataUrl`, `cMapUrl`, `iccUrl` or `wasmUrl`,
+ *   so the worker fetches nothing; a font a PDF does not embed falls back to
+ *   a system font, and a JPEG 2000 or JBIG2 image is not drawn.
+ */
+import type { PageViewport, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
+
+import type { PdfAnswer, PdfDocument, PdfLink, PdfPage, PdfTarget } from "./port";
+
+/** The part of pdf.js this module uses. */
+export interface PdfLib {
+  getDocument: typeof import("pdfjs-dist").getDocument;
+  TextLayer: typeof import("pdfjs-dist").TextLayer;
+  AnnotationMode: typeof import("pdfjs-dist").AnnotationMode;
+}
+
+/** CSS pixels per PDF point. */
+const CSS_PER_POINT = 96 / 72;
+
+/**
+ * What every document opens with. `isEvalSupported` is not in pdf.js 6.4's
+ * types (it compiles nothing), hence the widened type.
+ */
+export const DOCUMENT_OPTIONS: Record<string, unknown> = {
+  isEvalSupported: false,
+  enableXfa: false,
+  // A PDF's errors are its own; pdf.js says nothing on the console about them.
+  verbosity: 0,
+};
+
+const round = (n: number) => Math.round(n * 100) / 100;
+
+/** The link schemes a Markdown link may take to the opener (`render/markdown.ts`'s `resolveLink`). */
+function webUrl(url: unknown): string | null {
+  if (typeof url !== "string") return null;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The 1-based page an explicit or named destination points at, or `null`. */
+async function destPage(doc: PDFDocumentProxy, dest: unknown): Promise<number | null> {
+  try {
+    const explicit = typeof dest === "string" ? await doc.getDestination(dest) : dest;
+    if (!Array.isArray(explicit) || explicit.length === 0) return null;
+    const [ref] = explicit as [unknown];
+    const index =
+      typeof ref === "number" ? ref : ref !== null && typeof ref === "object" ? await doc.getPageIndex(ref as never) : null;
+    return index === null || index < 0 || index >= doc.numPages ? null : index + 1;
+  } catch {
+    return null;
+  }
+}
+
+interface LinkAnnotation {
+  subtype?: string;
+  rect?: number[];
+  url?: unknown;
+  dest?: unknown;
+}
+
+async function linksOf(doc: PDFDocumentProxy, page: PDFPageProxy, viewport: PageViewport): Promise<PdfLink[]> {
+  const annotations = (await page.getAnnotations({ intent: "display" })) as LinkAnnotation[];
+  const links: PdfLink[] = [];
+  for (const annotation of annotations) {
+    if (annotation.subtype !== "Link" || annotation.rect === undefined) continue;
+    const url = webUrl(annotation.url);
+    const at = url === null && annotation.dest !== undefined ? await destPage(doc, annotation.dest) : null;
+    const target: PdfTarget | null = url !== null ? { url } : at !== null ? { page: at } : null;
+    if (target === null) continue;
+    const [ax, ay, bx, by] = annotation.rect as [number, number, number, number];
+    const [x1, y1] = viewport.convertToViewportPoint(ax, ay) as [number, number];
+    const [x2, y2] = viewport.convertToViewportPoint(bx, by) as [number, number];
+    const left = Math.min(x1, x2);
+    const top = Math.min(y1, y2);
+    links.push({ rect: [round(left), round(top), round(Math.max(x1, x2) - left), round(Math.max(y1, y2) - top)], target });
+  }
+  return links;
+}
+
+function pageOf(lib: PdfLib, doc: PDFDocumentProxy, page: PDFPageProxy): PdfPage {
+  const base = page.getViewport({ scale: CSS_PER_POINT });
+  return {
+    width: round(base.width),
+    height: round(base.height),
+    draw(canvas, scale) {
+      const viewport = page.getViewport({ scale: scale * CSS_PER_POINT });
+      const ratio = globalThis.devicePixelRatio || 1;
+      canvas.width = Math.floor(viewport.width * ratio);
+      canvas.height = Math.floor(viewport.height * ratio);
+      // Through the CSSOM: the app's CSP refuses `style=""` in markup, not this.
+      canvas.style.width = `${Math.floor(viewport.width)}px`;
+      canvas.style.height = `${Math.floor(viewport.height)}px`;
+      const task = page.render({
+        canvas,
+        viewport,
+        transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
+        annotationMode: lib.AnnotationMode.ENABLE,
+      });
+      return { done: task.promise, cancel: () => task.cancel() };
+    },
+    async text(into, scale) {
+      const viewport = page.getViewport({ scale: scale * CSS_PER_POINT });
+      into.replaceChildren();
+      into.style.setProperty("--total-scale-factor", String(viewport.scale));
+      await new lib.TextLayer({ textContentSource: page.streamTextContent(), container: into, viewport }).render();
+    },
+    links: () => linksOf(doc, page, base),
+  };
+}
+
+/** `bytes` opened as a PDF, or the parser's error. The bytes are copied: pdf.js takes the buffer it is handed. */
+export async function openPdf(lib: PdfLib, bytes: Uint8Array, extra: Record<string, unknown> = {}): Promise<PdfAnswer> {
+  const task = lib.getDocument({ ...DOCUMENT_OPTIONS, ...extra, data: bytes.slice() });
+  let doc: PDFDocumentProxy;
+  try {
+    doc = await task.promise;
+  } catch (error) {
+    void task.destroy();
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+  const pdf: PdfDocument = {
+    pages: doc.numPages,
+    page: async (n) => pageOf(lib, doc, await doc.getPage(n)),
+    close: () => void task.destroy(),
+  };
+  return { pdf };
+}
