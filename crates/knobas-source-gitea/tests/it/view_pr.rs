@@ -3213,3 +3213,29 @@ async fn conversation_quotes_each_reviews_line_comments_under_it() {
     );
     assert!(!texts.iter().any(|t| t.contains("draft")), "{texts:#?}");
 }
+
+/// #2277: a review's line comments that cannot be read cost *Conversation*
+/// its quotes, never the tab: the reviews are still said.
+#[tokio::test]
+async fn conversation_without_its_line_comments_still_says_the_reviews() {
+    let server = gitea_with_line_comments(open_pull()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/issues/142/comments")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls/142/reviews/21/comments")))
+        .respond_with(ResponseTemplate::new(500))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let view = source(&server)
+        .view(PR, Some("conversation"))
+        .await
+        .expect("the tab is drawn")
+        .unwrap();
+    let said = format!("{:?}", view.sections[0].blocks);
+    assert!(said.contains("priya.nair"), "{said}");
+    assert!(!said.contains("> Bound the jitter."), "{said}");
+}

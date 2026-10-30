@@ -86,7 +86,7 @@ pub(super) async fn draw(
                 overview(&pull, &reviews, &landing, checks),
                 files_stub(&pull),
                 commits,
-                conversation(&reviews, &comments, &at.line_comments(&reviews).await?),
+                conversation(&reviews, &comments, &at.line_comments(&reviews).await),
             ]
         }
         Some(OVERVIEW) => {
@@ -101,7 +101,7 @@ pub(super) async fn draw(
         Some(COMMITS) => vec![at.commits(None).await?],
         Some(CONVERSATION) => {
             let (reviews, comments) = tokio::try_join!(at.reviews(), at.comments())?;
-            let said = at.line_comments(&reviews).await?;
+            let said = at.line_comments(&reviews).await;
             vec![conversation(&reviews, &comments, &said)]
         }
         Some(other) => {
@@ -153,11 +153,10 @@ impl PullView<'_> {
     /// Each review's line comments, by review id, for *Conversation* (#2277):
     /// a reply to a thread is a review of one line comment, and it is said
     /// there as Gitea's own page says it. Only the reviews Gitea counts any
-    /// for are asked, all at once.
-    async fn line_comments(
-        &self,
-        reviews: &[Review],
-    ) -> Result<Vec<(u64, Vec<String>)>, SourceError> {
+    /// for are asked, all at once. A failed read quotes nothing: it costs the
+    /// quotes, never the pull request's page (the Files tab still draws the
+    /// threads, or says why it cannot).
+    async fn line_comments(&self, reviews: &[Review]) -> Vec<(u64, Vec<String>)> {
         let commented = threads::with_comments(reviews);
         let reads = commented
             .iter()
@@ -167,8 +166,10 @@ impl PullView<'_> {
                     .pull_review_comments(self.owner, self.repo, self.number, id)
             })
             .collect();
-        let answers = threads::all(reads).await?;
-        Ok(commented
+        let Ok(answers) = threads::all(reads).await else {
+            return Vec::new();
+        };
+        commented
             .iter()
             .zip(answers)
             .map(|(&(id, review), raw)| {
@@ -180,7 +181,7 @@ impl PullView<'_> {
                         .collect(),
                 )
             })
-            .collect())
+            .collect()
     }
 
     /// The diff, its reviews' line comments on their lines, and whether the
