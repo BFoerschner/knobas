@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { DiffFile, SourceView } from "../../ipc/entity";
-import { commitContext, parentOf } from "./context";
+import { commitContext, parentOf, rangeContext } from "./context";
 
 const fileView = (text: string, cut = false): SourceView =>
   ({ sections: [{ id: "file:x", title: "x", blocks: [{ type: "file", trail: [], path: "x", text, language: null, size: text.length, truncated: cut, binary: false, url: null, sha: null }] }], actions: [] }) as unknown as SourceView;
@@ -40,4 +40,22 @@ test("a side the file is not on reads as none; no parent address, or no byte rea
   await expect(commitContext(() => Promise.resolve(null), "c", "p", broken).bytes!(FILE, "old")).rejects.toMatchObject({ code: "unreachable" });
   await expect(commitContext(() => Promise.resolve(null), "c", null, missing).bytes!(FILE, "old")).rejects.toThrow(/parent/);
   expect(commitContext(() => Promise.resolve(null), "c", "p").bytes).toBeUndefined();
+});
+
+const RANGE = { repository: "g:o/r", base: "b".repeat(40), head: "h".repeat(40), commits: [] };
+
+test("a range's sides are read in its repository at its two shas, the old one by its old path (#2310)", async () => {
+  const asked: string[] = [];
+  const read = (id: string, section: string | null) => (asked.push(`${id} ${section}`), Promise.resolve(fileView(`${section}`)));
+  const bytesAsked: string[] = [];
+  const bytes = (id: string, path: string, commit: string | null) => (bytesAsked.push(`${id} ${path} ${commit}`), Promise.resolve(new Uint8Array([1])));
+  const context = rangeContext(read, RANGE, bytes);
+  expect(await context.text(FILE, "new")).toBe(`file@${"h".repeat(40)}:src/new.rs`);
+  expect(await context.text(FILE, "old")).toBe(`file@${"b".repeat(40)}:src/old.rs`);
+  expect(asked).toEqual([`g:o/r file@${"h".repeat(40)}:src/new.rs`, `g:o/r file@${"b".repeat(40)}:src/old.rs`]);
+  expect(await context.bytes!(FILE, "old")).toEqual(new Uint8Array([1]));
+  expect(bytesAsked).toEqual([`g:o/r src/old.rs ${"b".repeat(40)}`]);
+  const missing = () => Promise.reject({ code: "not_found", message: "not there" });
+  expect(await rangeContext(read, RANGE, missing).bytes!(FILE, "new")).toBeNull();
+  expect(rangeContext(read, RANGE).bytes).toBeUndefined();
 });

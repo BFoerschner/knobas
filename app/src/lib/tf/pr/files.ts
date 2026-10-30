@@ -10,7 +10,7 @@
  * one whose line this diff does not draw, is kept apart at the end of its
  * file, never dropped (the old shell's `DiffBlock` reads them the same way).
  */
-import type { Commenting, DiffFile, DiffLine, FileThread, LineThread, SourceView } from "../../ipc/entity";
+import type { Commenting, DiffFile, DiffLine, DiffRange, FileThread, LineThread, SourceView } from "../../ipc/entity";
 import type { ReviewSide } from "../../ipc/sources";
 
 /** What *Files changed* draws: the files, and whether and how they take comments. */
@@ -21,6 +21,8 @@ export interface PrDiff {
   commentable: Commenting | null;
   /** Threads on files the diff no longer holds. */
   gone: FileThread[];
+  /** What the diff is between, where the source names it (#2273, #2310). */
+  range: DiffRange | null;
 }
 
 /** The *Files* section's diff, or `null` while it is the deferred stub. */
@@ -28,7 +30,7 @@ export function diffOf(view: SourceView | null): PrDiff | null {
   const files = view?.sections.find((section) => section.id === "files");
   for (const block of files?.blocks ?? []) {
     if (block.type === "diff") {
-      return { files: block.files, truncated: block.truncated, commentable: block.commentable, gone: block.gone };
+      return { files: block.files, truncated: block.truncated, commentable: block.commentable, gone: block.gone, range: block.range ?? null };
     }
   }
   return null;

@@ -7,7 +7,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { DiffFile, SourceView } from "../../ipc/entity";
+import type { DiffFile, DiffRange, SourceView } from "../../ipc/entity";
 import { createPendingComments, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
 import TfPrFiles from "./TfPrFiles.svelte";
 
@@ -83,14 +83,14 @@ afterEach(() => {
   target.remove();
 });
 
-async function draw(answer: SourceView = filesView()) {
+async function draw(answer: SourceView = filesView(), others: Record<string, SourceView> = {}) {
   view = mount(TfPrFiles, {
     target,
     props: {
       prId: PR,
-      entityView: async (_id: string, section: string | null) => {
-        asked.push(section);
-        return answer;
+      entityView: async (id: string, section: string | null) => {
+        asked.push(id === PR ? section : `${id} ${section}`);
+        return (section !== null && others[section]) || answer;
       },
       viewedFiles: async () => [...viewed],
       setViewed: async (_id: string, path: string, on: boolean) => {
@@ -201,4 +201,104 @@ test("a diff the source takes no comments on draws no +", async () => {
   await draw(filesView(false));
   expect(target.querySelector(".tf-addc")).toBeNull();
   expect(target.querySelectorAll(".tf-diff .tf-ln").length).toBeGreaterThan(0);
+});
+
+// #2273, #2310: the commit picker, since my last review, and expanded context at the range's shas.
+
+const REPO = "gitea:tidewater/payout-service";
+const HEAD = "1262a5b610480702cfed4a1f3f76c87bf68fae55";
+const MID = "08232cb289a2d05c5813b08948b2063901c33ba7";
+const FIRST = "97cb5a8667f8aac8e6cdaeff83ffec9574f56a4b";
+const MERGE_BASE = "907900b245f2941018dfd3ee155b876ef701c102";
+const RANGE: DiffRange = {
+  repository: REPO,
+  base: MERGE_BASE,
+  head: HEAD,
+  commits: [
+    { sha: HEAD, title: "Jitter in backoff", meta: "mara · 5 h ago" },
+    { sha: MID, title: "Backoff jitter", meta: "mara · 1 d ago" },
+    { sha: FIRST, title: "Retry SEPA payouts", meta: "mara · 2 d ago" },
+  ],
+  reviewed: FIRST,
+};
+
+function rangedView(range: DiffRange | undefined = RANGE): SourceView {
+  const answer = filesView();
+  const block = answer.sections[0]!.blocks[0]!;
+  if (block.type === "diff" && range) block.range = range;
+  return answer;
+}
+
+/** A compare's answer: one file, its own range. */
+function compareView(base: string, head: string): SourceView {
+  return {
+    sections: [{ id: `compare:${base}...${head}`, title: "Diff", count: 1, deferred: false, blocks: [{ type: "diff", files: [NOTE], truncated: false, commentable: null, gone: [] }] }],
+    actions: [],
+  };
+}
+
+const face = () => target.querySelector<HTMLButtonElement>(".tf-pick-face");
+const options = () => [...target.querySelectorAll<HTMLElement>(".tf-pick .tf-menu [role^=menuitem]")];
+const option = (label: RegExp) => options().find((b) => label.test(squash(b)));
+const plus = () => target.querySelectorAll(".tf-addc").length;
+
+test("the picker names all commits; one commit shows only that commit's changes, and offers no line comments", async () => {
+  await draw(rangedView(), { [`compare:${MID}^...${MID}`]: compareView(`${MID}^`, MID) });
+  expect(squash(face())).toMatch(/Commits All 3/);
+  expect(plus()).toBeGreaterThan(0);
+  face()!.click();
+  flushSync();
+  option(/08232cb/)!.click();
+  await settle();
+  expect(asked).toContain(`${REPO} compare:${MID}^...${MID}`);
+  expect(list()).toEqual([expect.stringMatching(/backoff\.md/)]);
+  // Gitea takes a review at one commit; knobas sends one at the head, so a line is commented on the whole diff only.
+  expect(plus()).toBe(0);
+  expect(squash(face())).toMatch(/08232cb/);
+  // Back to all commits: the pull request's own diff, comments and all.
+  option(/All commits/)!.click();
+  await settle();
+  expect(list()).toHaveLength(2);
+  expect(plus()).toBeGreaterThan(0);
+});
+
+test("since my last review shows the changes between the reviewed head and the head now", async () => {
+  await draw(rangedView(), { [`compare:${FIRST}...${HEAD}`]: compareView(FIRST, HEAD) });
+  face()!.click();
+  flushSync();
+  expect(squash(option(/Since your last review/))).toMatch(/You reviewed 97cb5a8 · 2 commits since/);
+  option(/Since your last review/)!.click();
+  await settle();
+  expect(asked).toContain(`${REPO} compare:${FIRST}...${HEAD}`);
+  expect(list()).toEqual([expect.stringMatching(/backoff\.md/)]);
+  expect(plus()).toBe(0);
+});
+
+test("a viewer who never reviewed the pull request is not offered since my last review", async () => {
+  await draw(rangedView({ ...RANGE, reviewed: undefined }));
+  face()!.click();
+  flushSync();
+  expect(option(/All commits/)).toBeDefined();
+  expect(option(/Since your last review/)).toBeUndefined();
+});
+
+test("a diff that names no range draws no picker", async () => {
+  await draw();
+  expect(face()).toBeNull();
+});
+
+test("context expands between hunks, read whole at the head in the range's repository (#2310)", async () => {
+  const whole = Array.from({ length: 30 }, (_, n) => `line ${n + 1}`).join("\n");
+  const fileAt: SourceView = {
+    sections: [{ id: "f", title: "f", count: null, deferred: false, blocks: [{ type: "file", trail: [], path: RETRY.path, text: whole, language: null, size: whole.length, truncated: false, binary: false, url: null, sha: null } as never] }],
+    actions: [],
+  };
+  await draw(rangedView(), { [`file@${HEAD}:${RETRY.path}`]: fileAt, [`file@${MERGE_BASE}:${RETRY.path}`]: fileAt });
+  const expand = target.querySelector<HTMLButtonElement>(".tf-exp");
+  expect(expand).not.toBeNull();
+  expand!.click();
+  await settle();
+  expect(asked).toContain(`${REPO} file@${HEAD}:${RETRY.path}`);
+  // The hidden lines, old and new numbers beside each: old 4 is new 5, old 19 new 20.
+  expect(squash(target.querySelector(".tf-diff"))).toMatch(/45 line 5 .*1920 line 20 21\+/);
 });
