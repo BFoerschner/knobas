@@ -7,8 +7,8 @@ use std::io::{self, Read as _, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use base64::Engine as _;
-use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig, STANDARD};
 use base64::engine::DecodePaddingMode;
+use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig, STANDARD};
 
 use super::{PipeFormat, PipeStep};
 
@@ -158,7 +158,8 @@ fn base64_decode(input: &[u8], out: &mut Capped<'_>) -> Result<(), Failure> {
         .copied()
         .filter(|b| !b.is_ascii_whitespace())
         .collect();
-    let config = GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent);
+    let config =
+        GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent);
     let url_safe = compact.iter().any(|b| matches!(b, b'-' | b'_'));
     let alphabet = if url_safe {
         &base64::alphabet::URL_SAFE
@@ -217,15 +218,18 @@ fn convert(from: PipeFormat, to: PipeFormat, input: &[u8]) -> Result<String, Fai
     let written = match to {
         PipeFormat::Json => serde_json::to_string_pretty(&value).map_err(|e| e.to_string()),
         PipeFormat::Yaml => serde_norway::to_string(&value).map_err(|e| e.to_string()),
-        PipeFormat::Toml => toml::to_string_pretty(&value).map_err(|e| format!("TOML cannot hold it: {e}")),
-    };
-    written.map(|mut text| {
-        if !text.ends_with('\n') {
-            text.push('\n');
+        PipeFormat::Toml => {
+            toml::to_string_pretty(&value).map_err(|e| format!("TOML cannot hold it: {e}"))
         }
-        text
-    })
-    .map_err(Failure::Error)
+    };
+    written
+        .map(|mut text| {
+            if !text.ends_with('\n') {
+                text.push('\n');
+            }
+            text
+        })
+        .map_err(Failure::Error)
 }
 
 fn from_toml(value: toml::Value) -> serde_norway::Value {

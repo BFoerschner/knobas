@@ -276,8 +276,13 @@ pub struct PipeFailure {
 pub enum PipeRun {
     /// Every step ran; `name` is what the output goes by (it picks the
     /// renderer).
-    Done { name: String, output: PipeOutput },
-    Failed { failure: PipeFailure },
+    Done {
+        name: String,
+        output: PipeOutput,
+    },
+    Failed {
+        failure: PipeFailure,
+    },
 }
 
 impl PipeRun {
@@ -395,8 +400,7 @@ async fn run_step(
 /// step's deadline (see the module's *Limits*).
 async fn on_worker(step: PipeStep, input: Carried, limits: Limits) -> Result<Vec<u8>, Failure> {
     let deadline = tokio::time::Instant::now() + limits.timeout;
-    let Ok(Ok(permit)) =
-        tokio::time::timeout_at(deadline, PERMITS.clone().acquire_owned()).await
+    let Ok(Ok(permit)) = tokio::time::timeout_at(deadline, PERMITS.clone().acquire_owned()).await
     else {
         return Err(Failure::Busy);
     };
@@ -413,7 +417,9 @@ async fn on_worker(step: PipeStep, input: Carried, limits: Limits) -> Result<Vec
         .map_err(|error| Failure::Error(format!("no worker thread: {error}")))?;
     match tokio::time::timeout_at(deadline, answered).await {
         Ok(Ok(output)) => output,
-        Ok(Err(_)) => Err(Failure::Error("the step stopped without an answer".to_owned())),
+        Ok(Err(_)) => Err(Failure::Error(
+            "the step stopped without an answer".to_owned(),
+        )),
         Err(_) => {
             stop.store(true, Ordering::Relaxed);
             Err(Failure::Stopped)
@@ -435,8 +441,13 @@ fn shown(bytes: &[u8]) -> PipeInput {
     let (head, binary) = text.map_or_else(
         || {
             let stop = AtomicBool::new(false);
-            let dump = steps::run(&PipeStep::HexDump, &bytes[..bytes.len().min(256)], u64::MAX, &stop)
-                .unwrap_or_default();
+            let dump = steps::run(
+                &PipeStep::HexDump,
+                &bytes[..bytes.len().min(256)],
+                u64::MAX,
+                &stop,
+            )
+            .unwrap_or_default();
             (String::from_utf8_lossy(&dump).into_owned(), true)
         },
         |text| (text.to_owned(), false),
@@ -479,7 +490,9 @@ fn seconds(timeout: Duration) -> String {
 pub enum Piped {
     Ran(Arc<PipeRun>),
     /// The file is over the byte read's cap.
-    TooLarge { size: u64 },
+    TooLarge {
+        size: u64,
+    },
     /// The source reads no bytes.
     NoBytes,
 }
@@ -513,7 +526,10 @@ pub async fn run_on_file(
     if let Some(kept) = live.kept_run(&lent, entity_id, path, commit, &pipeline) {
         return Ok(Piped::Ran(kept));
     }
-    let Some(file) = live.bytes(&lent, entity_id, path, commit, BYTES_CAP).await? else {
+    let Some(file) = live
+        .bytes(&lent, entity_id, path, commit, BYTES_CAP)
+        .await?
+    else {
         return Ok(Piped::NoBytes);
     };
     if let FileBytes::TooLarge { size } = file.as_ref() {

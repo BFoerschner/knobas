@@ -97,7 +97,11 @@ fn parse_errors(code: &str, errors: jaq_core::load::Errors<&str, ()>) -> String 
     for (_, error) in errors {
         match error {
             Error::Io(errors) => {
-                said.extend(errors.into_iter().map(|(path, error)| format!("{path}: {error}")));
+                said.extend(
+                    errors
+                        .into_iter()
+                        .map(|(path, error)| format!("{path}: {error}")),
+                );
             }
             Error::Lex(errors) => said.extend(
                 errors

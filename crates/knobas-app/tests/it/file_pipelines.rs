@@ -253,7 +253,10 @@ async fn gunzip_then_jq_draws_json() {
     let run = f
         .pipe(
             "fixtures/events.json.gz",
-            &[PipeStep::Gunzip, jq(r#".events[] | select(.level == "error") | {at, code}"#)],
+            &[
+                PipeStep::Gunzip,
+                jq(r#".events[] | select(.level == "error") | {at, code}"#),
+            ],
         )
         .await;
     assert_eq!(
@@ -286,7 +289,10 @@ async fn a_run_is_kept_by_sha_and_pipeline() {
     let first = f.piped("events.json.gz", &codes).await;
     assert_eq!(done(&first).1, "[\n  200,\n  503\n]\n");
     let levels = f
-        .piped("events.json.gz", &[PipeStep::Gunzip, jq("[.events[].level]")])
+        .piped(
+            "events.json.gz",
+            &[PipeStep::Gunzip, jq("[.events[].level]")],
+        )
         .await;
     assert_eq!(done(&levels).1, "[\n  \"info\",\n  \"error\"\n]\n");
     let again = f.piped("events.json.gz", &codes).await;
@@ -323,7 +329,11 @@ async fn a_gzip_bomb_is_refused_at_the_cap() {
         "{}",
         failed.error
     );
-    assert!(failed.error.starts_with("gunzip was stopped at the size cap"));
+    assert!(
+        failed
+            .error
+            .starts_with("gunzip was stopped at the size cap")
+    );
     assert_eq!(SIZE_CAP, 200 * 1024 * 1024);
 }
 
@@ -336,7 +346,8 @@ async fn every_decompressor_stops_at_the_cap_as_it_streams() {
         cap: 1024 * 1024,
         timeout: Duration::from_secs(30),
     };
-    let zstd = ruzstd::encoding::compress_to_vec(&mib[..], ruzstd::encoding::CompressionLevel::Fastest);
+    let zstd =
+        ruzstd::encoding::compress_to_vec(&mib[..], ruzstd::encoding::CompressionLevel::Fastest);
     let mut bz = bzip2::write::BzEncoder::new(Vec::new(), bzip2::Compression::fast());
     bz.write_all(&mib).unwrap();
     let bz = bz.finish().unwrap();
@@ -351,14 +362,13 @@ async fn every_decompressor_stops_at_the_cap_as_it_streams() {
     ] {
         let input = if copies == 1 {
             let mut two = Vec::new();
-            lzma_rs::xz_compress(&mut &[mib.clone(), mib.clone()].concat()[..], &mut two)
-                .unwrap();
+            lzma_rs::xz_compress(&mut &[mib.clone(), mib.clone()].concat()[..], &mut two).unwrap();
             two
         } else {
             member.repeat(copies)
         };
         let started = Instant::now();
-        let run = run_bytes(&[step.clone()], input, "x", limits).await;
+        let run = run_bytes(std::slice::from_ref(&step), input, "x", limits).await;
         let failed = failure(&run);
         assert_eq!(failed.why, PipeWhy::TooLarge, "{step:?}: {}", failed.error);
         assert!(
@@ -374,16 +384,24 @@ async fn every_decompressor_stops_at_the_cap_as_it_streams() {
 async fn a_jq_syntax_error_names_the_step() {
     let f = fixture().await;
     f.put("a.json.gz", gzip(br#"{"a":1}"#));
-    let run = f.pipe("a.json.gz", &[PipeStep::Gunzip, jq(".a | | .b")]).await;
+    let run = f
+        .pipe("a.json.gz", &[PipeStep::Gunzip, jq(".a | | .b")])
+        .await;
     let failed = failure(&run);
     assert_eq!((failed.index, failed.name.as_str()), (1, "jq"));
     assert_eq!(failed.why, PipeWhy::Error);
     assert!(
-        failed.error.starts_with("the filter does not parse: expected "),
+        failed
+            .error
+            .starts_with("the filter does not parse: expected "),
         "{}",
         failed.error
     );
-    assert!(failed.error.contains("expected term at column 6"), "{}", failed.error);
+    assert!(
+        failed.error.contains("expected term at column 6"),
+        "{}",
+        failed.error
+    );
     // Its input is gunzip's output, shown as text.
     assert_eq!(failed.input.head, r#"{"a":1}"#);
     assert!(!failed.input.binary);
@@ -392,10 +410,30 @@ async fn a_jq_syntax_error_names_the_step() {
 /// A runtime error is jq's own words; an unknown function names itself.
 #[tokio::test]
 async fn jq_errors_are_its_own() {
-    let run = run_bytes(&[jq(".a | ascii_downcase")], br#"{"a":null}"#.to_vec(), "x.json", Limits::default()).await;
-    assert!(failure(&run).error.starts_with("jq: error: "), "{:?}", failure(&run));
-    let run = run_bytes(&[jq("nosuch(1)")], b"{}".to_vec(), "x.json", Limits::default()).await;
-    assert!(failure(&run).error.contains("`nosuch`"), "{:?}", failure(&run));
+    let run = run_bytes(
+        &[jq(".a | ascii_downcase")],
+        br#"{"a":null}"#.to_vec(),
+        "x.json",
+        Limits::default(),
+    )
+    .await;
+    assert!(
+        failure(&run).error.starts_with("jq: error: "),
+        "{:?}",
+        failure(&run)
+    );
+    let run = run_bytes(
+        &[jq("nosuch(1)")],
+        b"{}".to_vec(),
+        "x.json",
+        Limits::default(),
+    )
+    .await;
+    assert!(
+        failure(&run).error.contains("`nosuch`"),
+        "{:?}",
+        failure(&run)
+    );
 }
 
 /// A step past its timeout is answered as timed out; its worker, which keeps
@@ -437,11 +475,17 @@ async fn every_built_in_step_round_trips() {
     let f = fixture().await;
     let json = r#"{"name":"knobas","tags":["a","b"],"n":1}"#;
     f.put("doc.json", json);
-    f.put("doc.json.b64", "eyJuYW1lIjoia25vYmFzIiwidGFncyI6WyJhIiwiYiJdLCJuIjoxfQ==\n");
+    f.put(
+        "doc.json.b64",
+        "eyJuYW1lIjoia25vYmFzIiwidGFncyI6WyJhIiwiYiJdLCJuIjoxfQ==\n",
+    );
     f.put("doc.json.gz", gzip(json.as_bytes()));
     f.put(
         "doc.json.zst",
-        ruzstd::encoding::compress_to_vec(json.as_bytes(), ruzstd::encoding::CompressionLevel::Fastest),
+        ruzstd::encoding::compress_to_vec(
+            json.as_bytes(),
+            ruzstd::encoding::CompressionLevel::Fastest,
+        ),
     );
     let mut bz = bzip2::write::BzEncoder::new(Vec::new(), bzip2::Compression::fast());
     bz.write_all(json.as_bytes()).unwrap();
@@ -450,10 +494,19 @@ async fn every_built_in_step_round_trips() {
     lzma_rs::xz_compress(&mut json.as_bytes(), &mut xz).unwrap();
     f.put("doc.json.xz", xz);
     f.put("doc.yaml", "name: knobas\ntags:\n  - a\n  - b\nn: 1\n");
-    f.put("doc.toml", "name = \"knobas\"\nn = 1\n[deps]\nserde = \"1\"\n");
+    f.put(
+        "doc.toml",
+        "name = \"knobas\"\nn = 1\n[deps]\nserde = \"1\"\n",
+    );
     f.put("blob.bin", vec![0x1f, 0x8b, b'h', b'i', 0, 255]);
 
-    for path in ["doc.json.gz", "doc.json.zst", "doc.json.bz2", "doc.json.xz", "doc.json.b64"] {
+    for path in [
+        "doc.json.gz",
+        "doc.json.zst",
+        "doc.json.bz2",
+        "doc.json.xz",
+        "doc.json.b64",
+    ] {
         let step = match path.rsplit('.').next().unwrap() {
             "gz" => PipeStep::Gunzip,
             "zst" => PipeStep::Unzstd,
@@ -461,7 +514,11 @@ async fn every_built_in_step_round_trips() {
             "xz" => PipeStep::Unxz,
             _ => PipeStep::Base64Decode,
         };
-        assert_eq!(done(&f.pipe(path, &[step]).await), ("doc.json", json), "{path}");
+        assert_eq!(
+            done(&f.pipe(path, &[step]).await),
+            ("doc.json", json),
+            "{path}"
+        );
     }
     assert_eq!(
         done(&f.pipe("doc.json", &[PipeStep::Base64Encode]).await),
@@ -474,44 +531,81 @@ async fn every_built_in_step_round_trips() {
         done(&f.pipe("doc.json", &[jq(".tags[0]")]).await),
         ("doc.json", "\"a\"\n")
     );
-    let pretty_json = "{\n  \"name\": \"knobas\",\n  \"tags\": [\n    \"a\",\n    \"b\"\n  ],\n  \"n\": 1\n}\n";
+    let pretty_json =
+        "{\n  \"name\": \"knobas\",\n  \"tags\": [\n    \"a\",\n    \"b\"\n  ],\n  \"n\": 1\n}\n";
     assert_eq!(
-        done(&f.pipe("doc.json", &[PipeStep::Pretty { format: PipeFormat::Json }]).await),
+        done(
+            &f.pipe(
+                "doc.json",
+                &[PipeStep::Pretty {
+                    format: PipeFormat::Json
+                }]
+            )
+            .await
+        ),
         ("doc.json", pretty_json)
     );
     assert_eq!(
         done(
-            &f.pipe("doc.yaml", &[PipeStep::Pretty { format: PipeFormat::Yaml }])
-                .await
+            &f.pipe(
+                "doc.yaml",
+                &[PipeStep::Pretty {
+                    format: PipeFormat::Yaml
+                }]
+            )
+            .await
         ),
         ("doc.yaml", "name: knobas\ntags:\n- a\n- b\nn: 1\n")
     );
     assert_eq!(
         done(
-            &f.pipe("doc.toml", &[PipeStep::Pretty { format: PipeFormat::Toml }])
-                .await
+            &f.pipe(
+                "doc.toml",
+                &[PipeStep::Pretty {
+                    format: PipeFormat::Toml
+                }]
+            )
+            .await
         ),
-        ("doc.toml", "name = \"knobas\"\nn = 1\n\n[deps]\nserde = \"1\"\n")
+        (
+            "doc.toml",
+            "name = \"knobas\"\nn = 1\n\n[deps]\nserde = \"1\"\n"
+        )
     );
     let convert = |from, to| PipeStep::Convert { from, to };
     assert_eq!(
-        done(&f.pipe("doc.json", &[convert(PipeFormat::Json, PipeFormat::Yaml)]).await),
+        done(
+            &f.pipe("doc.json", &[convert(PipeFormat::Json, PipeFormat::Yaml)])
+                .await
+        ),
         ("doc.yaml", "name: knobas\ntags:\n- a\n- b\nn: 1\n")
     );
     assert_eq!(
-        done(&f.pipe("doc.yaml", &[convert(PipeFormat::Yaml, PipeFormat::Json)]).await),
+        done(
+            &f.pipe("doc.yaml", &[convert(PipeFormat::Yaml, PipeFormat::Json)])
+                .await
+        ),
         ("doc.json", pretty_json)
     );
     assert_eq!(
-        done(&f.pipe("doc.toml", &[convert(PipeFormat::Toml, PipeFormat::Json)]).await),
+        done(
+            &f.pipe("doc.toml", &[convert(PipeFormat::Toml, PipeFormat::Json)])
+                .await
+        ),
         (
             "doc.json",
             "{\n  \"name\": \"knobas\",\n  \"n\": 1,\n  \"deps\": {\n    \"serde\": \"1\"\n  }\n}\n"
         )
     );
     assert_eq!(
-        done(&f.pipe("doc.yaml", &[convert(PipeFormat::Yaml, PipeFormat::Toml)]).await),
-        ("doc.toml", "name = \"knobas\"\ntags = [\n    \"a\",\n    \"b\",\n]\nn = 1\n")
+        done(
+            &f.pipe("doc.yaml", &[convert(PipeFormat::Yaml, PipeFormat::Toml)])
+                .await
+        ),
+        (
+            "doc.toml",
+            "name = \"knobas\"\ntags = [\n    \"a\",\n    \"b\",\n]\nn = 1\n"
+        )
     );
     assert_eq!(
         done(&f.pipe("blob.bin", &[PipeStep::HexDump]).await),
@@ -537,8 +631,18 @@ async fn every_built_in_step_round_trips() {
 /// A failed step's input that is not text is shown as a hex dump.
 #[tokio::test]
 async fn a_binary_input_is_shown_as_hex() {
-    let run = run_bytes(&[jq(".")], vec![0x1f, 0x8b, 0, 1], "x.gz", Limits::default()).await;
+    let run = run_bytes(
+        &[jq(".")],
+        vec![0x1f, 0x8b, 0, 1],
+        "x.gz",
+        Limits::default(),
+    )
+    .await;
     let input = &failure(&run).input;
     assert!(input.binary);
-    assert!(input.head.starts_with("00000000  1f 8b 00 01"), "{}", input.head);
+    assert!(
+        input.head.starts_with("00000000  1f 8b 00 01"),
+        "{}",
+        input.head
+    );
 }

@@ -33,6 +33,7 @@ pub mod conversation;
 pub mod docs;
 pub mod downloads;
 mod error;
+pub mod file_pipeline;
 pub mod inbox;
 #[cfg(test)]
 mod ipc_mirror;
@@ -40,7 +41,6 @@ pub mod link_sets;
 pub mod logging;
 pub mod notes_export;
 pub mod notify;
-pub mod file_pipeline;
 mod profile;
 pub mod protocol;
 pub mod renderers;
