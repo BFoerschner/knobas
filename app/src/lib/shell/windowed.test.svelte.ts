@@ -214,3 +214,20 @@ test("a list that starts far below the viewport draws one row, and one partway d
   expect([win.start, win.end]).toEqual([0, 25]);
   stop();
 });
+
+test("a list inside a box that clips it (a diff's file card), the box below the screen, draws one row (#2269)", () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({ width: 200, height: 300, top: 5_000, bottom: 5_300, left: 0, right: 200, x: 0, y: 5_000, toJSON: () => ({}) }) as DOMRect,
+  );
+  vi.spyOn(window, "innerHeight", "get").mockReturnValue(1_000);
+  document.body.innerHTML = '<section style="overflow: hidden; overflow-y: hidden"><div></div></section>';
+  const list = document.querySelector("div")!;
+  Object.defineProperty(list.parentElement!, "clientHeight", { value: 300 });
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20, overscan: 600 });
+  const stop = $effect.root(() => {
+    win.list(list);
+  });
+  flushSync();
+  expect(win.end - win.start).toBe(1);
+  stop();
+});
