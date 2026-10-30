@@ -256,11 +256,20 @@ async fn renderer_defaults_read_back_from_a_new_pool() {
 
     let saved = renderers::save_defaults(
         &pool,
-        &[mapped(" *.md ", "source"), mapped("docs/*.mmd", "command:mmdc")],
+        &[
+            mapped(" *.md ", "source"),
+            mapped("docs/*.mmd", "command:mmdc"),
+        ],
     )
     .await
     .unwrap();
-    assert_eq!(saved, [mapped("*.md", "source"), mapped("docs/*.mmd", "command:mmdc")]);
+    assert_eq!(
+        saved,
+        [
+            mapped("*.md", "source"),
+            mapped("docs/*.mmd", "command:mmdc")
+        ]
+    );
     pool.close().await;
 
     let again = db.pool(4).await.expect("a second pool");
@@ -275,14 +284,24 @@ async fn a_default_without_a_pattern_or_mapped_twice_is_refused() {
     let error = renderers::save_defaults(&pool, &[mapped("  ", "source")])
         .await
         .unwrap_err();
-    assert!(error.message.contains("no file pattern"), "{}", error.message);
+    assert!(
+        error.message.contains("no file pattern"),
+        "{}",
+        error.message
+    );
     let error = renderers::save_defaults(&pool, &[mapped("*.md", " ")])
         .await
         .unwrap_err();
     assert!(error.message.contains("*.md"), "{}", error.message);
-    let error = renderers::save_defaults(&pool, &[mapped("*.md", "source"), mapped("*.MD", "markdown")])
-        .await
-        .unwrap_err();
+    let error = renderers::save_defaults(
+        &pool,
+        &[mapped("*.md", "source"), mapped("*.MD", "markdown")],
+    )
+    .await
+    .unwrap_err();
     assert!(error.message.contains("*.MD"), "{}", error.message);
-    assert!(renderers::defaults(&pool).await.unwrap().is_empty(), "nothing was stored");
+    assert!(
+        renderers::defaults(&pool).await.unwrap().is_empty(),
+        "nothing was stored"
+    );
 }

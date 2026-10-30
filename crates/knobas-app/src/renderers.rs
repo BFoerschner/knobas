@@ -281,8 +281,13 @@ pub async fn save_defaults(
         if renderer.is_empty() {
             return Err(IpcError::invalid(format!("{pattern} names no renderer")));
         }
-        if out.iter().any(|d| d.pattern.to_lowercase() == pattern.to_lowercase()) {
-            return Err(IpcError::invalid(format!("{pattern} has a default already")));
+        if out
+            .iter()
+            .any(|d| d.pattern.to_lowercase() == pattern.to_lowercase())
+        {
+            return Err(IpcError::invalid(format!(
+                "{pattern} has a default already"
+            )));
         }
         out.push(RendererDefault {
             pattern: pattern.to_owned(),
