@@ -1,5 +1,6 @@
 //! The built-in steps' work: plain functions over bytes, run on a pipeline
-//! worker thread (`super::on_worker`). Every one writes through [`Capped`], so
+//! worker thread (`super::on_worker`), or for jq in a child process
+//! (`super::child`). Every one writes through [`Capped`], so
 //! the size cap is checked as the output grows, never after it has grown, and
 //! the worker's stop flag is seen at every write.
 

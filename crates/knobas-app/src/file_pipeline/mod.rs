@@ -9,15 +9,15 @@
 //! - **Size.** Every step's output is capped at [`Limits::cap`] (200 MiB),
 //!   checked as it is written ([`steps::Capped`]): a decompressor is stopped
 //!   at the byte that passes it, so a gzip bomb never expands in memory.
-//! - **Time.** Every step has [`Limits::timeout`]. A built-in step is Rust
-//!   with no process to kill, so it runs on a worker thread of its own and
+//! - **Time.** Every step has [`Limits::timeout`]. The jq step runs in a
+//!   child process (`child`, #2314) and is killed at it. Any other built-in
+//!   step is Rust with no process to kill, so it runs on a worker thread of its own and
 //!   the pipeline stops waiting at the deadline. The thread is then
 //!   *abandoned, not killed*: its stop flag is set, which every write it makes
 //!   checks, so a decompressor or a jq filter that keeps producing output
-//!   ends at its next write. A filter that loops without writing (`last(range(infinite))`)
-//!   runs on until the process exits; [`WORKERS`] threads at most are
-//!   ever held that way, because a worker keeps its permit until its thread
-//!   ends, and a run that cannot get a permit by its deadline times out.
+//!   ends at its next write. [`WORKERS`] threads at most are ever held, because
+//!   a worker keeps its permit until its thread ends, and a run that cannot
+//!   get a permit by its deadline times out.
 //! - **A failure** is a [`PipeFailure`]: the step's place and name, what it
 //!   said, and the head of the input it was given.
 //!
@@ -34,8 +34,13 @@
 //! `crate::renderers::run_argv` under ADR-0033's rules rather than on a
 //! worker: [`run_step`] is the one place that picks how a step runs.
 
+mod child;
 mod jq;
 mod steps;
+
+pub use child::{ARG as CHILD_ARG, main_if_asked};
+#[cfg(feature = "test-util")]
+pub use child::use_helper;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
@@ -60,7 +65,8 @@ pub const SIZE_CAP: u64 = 200 * 1024 * 1024;
 pub const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Built-in steps running at once, abandoned ones included.
 pub const WORKERS: usize = 4;
-/// A worker's stack: deep enough for a jq filter's honest recursion.
+/// A worker's stack, and the jq child's: deep enough for a jq filter's
+/// honest recursion.
 const WORKER_STACK: usize = 256 * 1024 * 1024;
 /// How much of a failed step's input its failure shows.
 const INPUT_HEAD: usize = 4 * 1024;
@@ -370,9 +376,12 @@ async fn run_step(
 ) -> Result<Vec<u8>, (PipeWhy, String)> {
     let name = step.name();
     let size = input.bytes().len() as u64;
-    on_worker(step.clone(), input, limits)
-        .await
-        .map_err(|failure| match failure {
+    let ran = match step {
+        // jq out of process (#2314): see `child`.
+        PipeStep::Jq { .. } => child::run(step, input.bytes(), limits).await,
+        _ => on_worker(step.clone(), input, limits).await,
+    };
+    ran.map_err(|failure| match failure {
             Failure::Error(error) => (PipeWhy::Error, error),
             Failure::TooLarge => (
                 PipeWhy::TooLarge,

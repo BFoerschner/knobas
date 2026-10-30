@@ -16,8 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use knobas_app::file_pipeline::{
-    Limits, PipeFormat, PipeOutput, PipeRun, PipeStep, PipeWhy, Piped, SIZE_CAP, run_bytes,
-    run_on_file,
+    Limits, PipeFormat, PipeOutput, PipeRun, PipeStep, PipeWhy, Piped, SIZE_CAP, run_on_file,
 };
 use knobas_app::sources::live::LiveSources;
 use knobas_app::sources::{self, NewSource, Registry, SecretInput};
@@ -131,7 +130,20 @@ struct Fixture {
     entity: String,
 }
 
+/// The jq step runs in a child: the app's own binary (#2314). A test
+/// binary is not it, so it is pointed at the one Cargo built beside it.
+fn helper() {
+    knobas_app::file_pipeline::use_helper(env!("CARGO_BIN_EXE_knobas-app"));
+}
+
+/// `file_pipeline::run_bytes`, with the jq helper in place.
+async fn run_bytes(steps: &[PipeStep], bytes: Vec<u8>, name: &str, limits: Limits) -> PipeRun {
+    helper();
+    knobas_app::file_pipeline::run_bytes(steps, bytes, name, limits).await
+}
+
 async fn fixture() -> Fixture {
+    helper();
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
     let shelf = Arc::new(Shelf::default());
@@ -436,9 +448,11 @@ async fn jq_errors_are_its_own() {
     );
 }
 
-/// A step past its timeout is answered as timed out; its worker, which keeps
-/// writing, is stopped at its next write and frees its place: with every
-/// worker taken by a filter that never ends, the next run still gets one.
+/// A step past its timeout is answered as timed out, and the jq step is
+/// killed there (#2314): it runs in a child process, so a filter that loops
+/// without writing (or composes a closure with itself without end) holds
+/// nothing once its time is up. More of them than there are workers, and a
+/// built-in step after them still gets a worker at once.
 #[tokio::test]
 async fn a_step_past_its_timeout_is_stopped() {
     let limits = Limits {
@@ -446,27 +460,61 @@ async fn a_step_past_its_timeout_is_stopped() {
         timeout: Duration::from_millis(300),
     };
     let started = Instant::now();
-    let endless: Vec<_> = (0..knobas_app::file_pipeline::WORKERS)
-        .map(|_| {
+    let filters: [&'static str; 4] = [
+        "repeat(1)",
+        "last(range(1e18))",
+        "[repeat(1)] | length",
+        "def f(g): f(g | g); f(.)",
+    ];
+    let endless: Vec<_> = filters
+        .into_iter()
+        .cycle()
+        .take(knobas_app::file_pipeline::WORKERS + 2)
+        .map(|filter| {
             tokio::spawn(async move {
-                run_bytes(&[jq("repeat(1)")], b"null".to_vec(), "x", limits).await
+                run_bytes(&[jq(filter)], b"null".to_vec(), "x", limits).await
             })
         })
         .collect();
     for run in endless {
         let run = run.await.unwrap();
         let failed = failure(&run);
-        assert_eq!(failed.why, PipeWhy::TimedOut);
+        assert_eq!(failed.why, PipeWhy::TimedOut, "{failed:?}");
         assert_eq!(failed.error, "jq did not finish in 300 ms");
     }
-    assert!(started.elapsed() < Duration::from_secs(2));
-    // Left running, each would hold its worker until 200 MiB of `1`s.
+    assert!(started.elapsed() < Duration::from_secs(3));
     let next = Limits {
         cap: SIZE_CAP,
         timeout: Duration::from_secs(2),
     };
+    let run = run_bytes(&[PipeStep::Gunzip], gzip(b"1"), "x.gz", next).await;
+    assert_eq!(done(&run).1, "1");
     let run = run_bytes(&[jq(".")], b"1".to_vec(), "x", next).await;
     assert_eq!(done(&run).1, "1\n");
+}
+
+/// **A value nested deep at run time fails the step, not the app (#2314).**
+/// `reduce` builds it by iteration, past the evaluation's stack guard; then
+/// writing it (`tojson`) or comparing it (`==`) recursed off the end of the
+/// stack and aborted the process. (Written as the output, it passes the size
+/// cap first: two spaces of indent a level.) The jq step now runs in a child, so the
+/// child dies and the step says why. That this test process is still here to
+/// assert is half of the claim.
+#[tokio::test]
+async fn a_value_nested_deep_at_run_time_fails_the_step_not_the_app() {
+    for filter in [
+        "reduce range(1000000) as $_ (0; [.]) | tojson",
+        "def deep: reduce range(1000000) as $_ (0; [.]); deep == deep",
+    ] {
+        let run = run_bytes(&[jq(filter)], b"null".to_vec(), "x.json", Limits::default()).await;
+        let failed = failure(&run);
+        assert_eq!((failed.index, failed.name.as_str()), (0, "jq"), "{filter}");
+        assert_eq!(failed.why, PipeWhy::Error, "{filter}: {failed:?}");
+        assert_eq!(
+            failed.error, "jq ran out of stack: the filter built a value nested too deep to write",
+            "{filter}"
+        );
+    }
 }
 
 /// **Every built-in step round trips at the IPC seam.**
