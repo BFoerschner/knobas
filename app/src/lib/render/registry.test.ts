@@ -1,7 +1,7 @@
 /** The renderer registry (#2254): what each renderer declares, and which accept a file or a fence. */
 import { expect, test } from "vitest";
 
-import { imageUrl, register, renderersFor, renderersForFence, type Renderer } from "./registry";
+import { register, renderersFor, renderersForFence, type Renderer } from "./registry";
 
 const names = (list: Renderer[]) => list.map((r) => r.name);
 
@@ -79,9 +79,4 @@ test("a renderer registered later goes ahead of Source, by file pattern and by f
     undo();
   }
   expect(names(renderersFor({ path: "docs/architecture.box", binary: false }))).toEqual(["Source"]);
-});
-
-test("an image's bytes become a data URL of its type", () => {
-  expect(imageUrl(new TextEncoder().encode("<svg/>"), "a.svg")).toBe(`data:image/svg+xml;base64,${btoa("<svg/>")}`);
-  expect(imageUrl(new Uint8Array([0x89, 0x50]), "a.png")).toBe("data:image/png;base64,iVA=");
 });

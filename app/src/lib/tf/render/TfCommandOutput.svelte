@@ -6,7 +6,8 @@
   until it answers, the source shows plain under *Running*. SVG and HTML are
   sanitized and drawn in a frame with `sandbox=""` (`render/command.ts`): no
   script runs in it and its origin is opaque, so nothing in it reaches the
-  app. An image is an `<img>` of the data URL the backend built. A failure,
+  app. An image is the backend's data URL decoded and drawn from a blob,
+  an SVG sanitized (`render/image.ts`). A failure,
   a timeout or too much output draws what the command said above the source,
   as the mockup's broken renderer does.
 -->
@@ -14,7 +15,9 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { RenderRun } from "../../ipc/app";
   import { commandIdOf, contentFor, failureLine, frameDocument, ipcCommands, type CommandPort } from "../../render/command";
+  import { dataUrlImage } from "../../render/image";
   import type { Renderer } from "../../render/registry";
+  import TfBytesImage from "./TfBytesImage.svelte";
 
   let {
     renderer,
@@ -53,11 +56,15 @@
   const failed = $derived(refused ?? (run === null ? null : failureLine(run)));
   const stderr = $derived(run !== null && (run.outcome === "failed" || run.outcome === "timed_out") ? run.stderr : "");
   const lines = $derived(text.split("\n"));
+  const image = $derived(run !== null && run.outcome === "drawn" && run.output === "image" ? dataUrlImage(run.body) : null);
+  const imageBytes = $derived(image === null ? null : () => Promise.resolve(image.bytes));
 </script>
 
 {#if run !== null && run.outcome === "drawn"}
   {#if run.output === "image"}
-    <div class="tf-fimage"><img src={run.body} alt={renderer.name} /></div>
+    {#if image !== null && imageBytes !== null}
+      <TfBytesImage read={imageBytes} path={renderer.name} size={image.bytes.length} type={image.type} />
+    {/if}
   {:else}
     <iframe class="tf-rframe" sandbox="" title={renderer.name} srcdoc={frameDocument(run.output, run.body)}></iframe>
   {/if}

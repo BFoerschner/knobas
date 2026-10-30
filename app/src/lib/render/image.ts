@@ -45,7 +45,31 @@ export function sanitizeSvg(svg: string): string {
 
 /** `bytes`, the image at `path`, as a blob an `<img>` may load; an SVG sanitized. */
 export function imageBlob(bytes: Uint8Array, path: string): Blob {
-  const type = imageType(path);
-  if (type === "image/svg+xml") return new Blob([sanitizeSvg(new TextDecoder().decode(bytes))], { type });
-  return new Blob([bytes as Uint8Array<ArrayBuffer>], { type });
+  return typedImageBlob(bytes, imageType(path));
+}
+
+/**
+ * `bytes` as a blob of media type `type`, an SVG sanitized. A type that is
+ * not one of the listed image types becomes `application/octet-stream`, so no
+ * caller can name an SVG type the sanitizer would miss.
+ */
+export function typedImageBlob(bytes: Uint8Array, type: string): Blob {
+  const known = Object.values(TYPES).includes(type) ? type : "application/octet-stream";
+  if (known === "image/svg+xml") return new Blob([sanitizeSvg(new TextDecoder().decode(bytes))], { type: known });
+  return new Blob([bytes as Uint8Array<ArrayBuffer>], { type: known });
+}
+
+/**
+ * A base64 `data:` URL's bytes and media type (a command renderer's image,
+ * #2262); `null` for anything else. The type is the URL's as written:
+ * {@link typedImageBlob} decides what it may be.
+ */
+export function dataUrlImage(url: string): { bytes: Uint8Array; type: string } | null {
+  const match = /^data:([^;,]*);base64,(.*)$/s.exec(url);
+  if (match === null) return null;
+  try {
+    return { type: match[1]!.toLowerCase(), bytes: Uint8Array.from(atob(match[2]!), (c) => c.charCodeAt(0)) };
+  } catch {
+    return null;
+  }
 }

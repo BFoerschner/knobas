@@ -186,12 +186,3 @@ export function renderersForFence(lang: string): Renderer[] {
   const wanted = lang.trim().toLowerCase();
   return renderers.filter((r) => r.fences.includes(wanted) || r.fences.includes("*"));
 }
-
-/** A data URL for an image's bytes, for a renderer's output; a Markdown image is a blob instead (`image.ts`, #2256). */
-export function imageUrl(bytes: Uint8Array, path: string): string {
-  const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
-  const type = ext === "svg" ? "image/svg+xml" : ext === "jpg" ? "image/jpeg" : ext === "ico" ? "image/x-icon" : `image/${ext}`;
-  let binary = "";
-  for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
-  return `data:${type};base64,${btoa(binary)}`;
-}

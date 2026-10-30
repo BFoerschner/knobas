@@ -75,7 +75,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
-  import { allRenderers, imageUrl, type Renderer } from "../../render/registry";
+  import { allRenderers, type Renderer } from "../../render/registry";
   import { defaultPipeline, makeDefaultPattern, openWith, withDefault, withPipeline } from "../../render/defaults";
   import { rendererDefaults as appDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
@@ -549,9 +549,12 @@
       push({ text: `Could not make ${chosen.name} the default: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
   }
-  const image = $derived(
-    drawAs === "image" && drawn !== null && !drawn.binary ? imageUrl(new TextEncoder().encode(drawn.text), drawn.path) : null,
-  );
+  /** A text file drawn as an image (an SVG): its bytes, for `TfBytesImage`, which sanitizes an SVG. */
+  const image = $derived.by(() => {
+    if (drawAs !== "image" || drawn === null || drawn.binary) return null;
+    const bytes = new TextEncoder().encode(drawn.text);
+    return { bytes, read: () => Promise.resolve(bytes) };
+  });
 
   /**
    * Each line's tokens as the worker sent them, by line index; not reactive
@@ -1178,7 +1181,7 @@
       {:else if drawn === null || drawn.binary}
         <div class="tf-empty"><p>A binary file, not drawn.</p></div>
       {:else if image !== null}
-        <div class="tf-fimage"><img src={image} alt={drawn.path} /></div>
+        <TfBytesImage read={image.read} path={drawn.path} size={image.bytes.length} />
       {:else if drawAs === "markdown"}
         <TfMarkdown text={drawn.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} />
       {:else if drawAs === "mermaid" || drawAs === "d2" || drawAs === "graphviz"}

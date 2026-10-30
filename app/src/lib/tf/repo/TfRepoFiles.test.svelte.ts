@@ -429,14 +429,25 @@ test("closing the file viewer cancels its highlighting, and a late answer draws 
   expect(colored()).toEqual([]);
 });
 
-test("an SVG file is drawn as an image", async () => {
-  const svg = '<svg width="4" height="4"/>';
-  draw(openSource({ "docs/logo.svg": svg }).entityView, "docs/logo.svg");
-  await settle();
+test("an SVG file is drawn as an image, sanitized first (Standards 1)", async () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4" onload="parent.x=1"><script>parent.x=2</script></svg>';
+  const made: Blob[] = [];
+  const create = URL.createObjectURL;
+  URL.createObjectURL = (blob: Blob) => (made.push(blob), `blob:fake/${made.length}`);
+  try {
+    draw(openSource({ "docs/logo.svg": svg }).entityView, "docs/logo.svg");
+    await settle();
 
-  const img = target.querySelector<HTMLImageElement>(".tf-fileview img");
-  expect(img?.getAttribute("src")).toBe(`data:image/svg+xml;base64,${btoa(svg)}`);
-  expect(drawnLines()).toHaveLength(0);
+    const img = target.querySelector<HTMLImageElement>(".tf-fileview img");
+    expect(img?.getAttribute("src")).toBe("blob:fake/1");
+    expect(made[0]!.type).toBe("image/svg+xml");
+    const drawn = await made[0]!.text();
+    expect(drawn).toContain('width="4"');
+    expect(drawn).not.toMatch(/script|onload/i);
+    expect(drawnLines()).toHaveLength(0);
+  } finally {
+    URL.createObjectURL = create;
+  }
 });
 
 // -- Find in file (#2299) ------------------------------------------------------

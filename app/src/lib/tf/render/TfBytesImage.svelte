@@ -1,22 +1,26 @@
 <!--
-  A binary image in the file viewer (#2260): its bytes from the byte read
-  (#2256), drawn as an `<img>` from a blob (an SVG sanitized first,
+  An image's bytes drawn: a binary image in the file viewer (#2260, its bytes
+  from the byte read, #2256), a text SVG drawn as an image, a command
+  renderer's image (#2262). Drawn as an `<img>` from a blob (an SVG sanitized first,
   `render/image.ts`). The blob URL is let go when the file changes or the
   viewer closes. Past the byte cap nothing is read.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import { imageBlob } from "../../render/image";
+  import { imageType, typedImageBlob } from "../../render/image";
   import { BYTES_CAP } from "../../render/registry";
 
   let {
     read,
     path,
     size,
+    type = imageType(path),
   }: {
     read: () => Promise<Uint8Array>;
     path: string;
     size: number;
+    /** The image's media type; by default what `path`'s extension says. */
+    type?: string;
   } = $props();
 
   let src = $state<string | null>(null);
@@ -24,7 +28,7 @@
 
   $effect(() => {
     const reading = read;
-    const name = path;
+    const kind = type;
     let live = true;
     let made: string | null = null;
     src = null;
@@ -34,7 +38,7 @@
     reading().then(
       (bytes) => {
         if (!live) return;
-        made = URL.createObjectURL(imageBlob(bytes, name));
+        made = URL.createObjectURL(typedImageBlob(bytes, kind));
         src = made;
       },
       (error: unknown) => live && (failed = ipcErrorMessage(error)),

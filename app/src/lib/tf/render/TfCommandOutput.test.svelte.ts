@@ -75,11 +75,48 @@ test("a renderer whose command fails shows its stderr above the source", async (
   expect(target.querySelector(".tf-code")?.textContent).toContain("@startuml");
 });
 
-test("an image renderer's data URL is an image, no frame", async () => {
-  await draw("x", { outcome: "drawn", output: "image", body: "data:image/png;base64,iVBORw0KGgo=" }, { ...CAT, output: "image" });
+/** `URL.createObjectURL` recorded for the test's length: the blobs made, the URLs let go. */
+async function withBlobs(run: (made: Blob[], revoked: string[]) => Promise<void>) {
+  const made: Blob[] = [];
+  const revoked: string[] = [];
+  const create = URL.createObjectURL;
+  const revoke = URL.revokeObjectURL;
+  URL.createObjectURL = (blob: Blob) => (made.push(blob), `blob:fake/${made.length}`);
+  URL.revokeObjectURL = (url: string) => void revoked.push(url);
+  try {
+    await run(made, revoked);
+  } finally {
+    URL.createObjectURL = create;
+    URL.revokeObjectURL = revoke;
+  }
+}
 
-  expect(target.querySelector("iframe")).toBeNull();
-  expect(target.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,iVBORw0KGgo=");
+test("an image renderer's output is an image from a blob of its bytes, no frame", async () => {
+  await withBlobs(async (made) => {
+    await draw("x", { outcome: "drawn", output: "image", body: "data:image/png;base64,iVBORw0KGgo=" }, { ...CAT, output: "image" });
+    await Promise.resolve();
+    flushSync();
+
+    expect(target.querySelector("iframe")).toBeNull();
+    expect(target.querySelector("img")?.getAttribute("src")).toBe("blob:fake/1");
+    expect(made[0]!.type).toBe("image/png");
+    expect([...new Uint8Array(await made[0]!.arrayBuffer())]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  });
+});
+
+test("an image renderer's SVG is sanitized before it is drawn (Standards 1, spec story 44)", async () => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" onload="parent.x=1"><script>parent.x=2</script><rect width="4" height="4"/></svg>`;
+  await withBlobs(async (made) => {
+    await draw("x", { outcome: "drawn", output: "image", body: `data:image/svg+xml;base64,${btoa(svg)}` }, { ...CAT, output: "image" });
+    await Promise.resolve();
+    flushSync();
+
+    expect(target.querySelector("img")?.getAttribute("src")).toBe("blob:fake/1");
+    expect(made[0]!.type).toBe("image/svg+xml");
+    const drawn = await made[0]!.text();
+    expect(drawn).toContain("<rect");
+    expect(drawn).not.toMatch(/script|onload/i);
+  });
 });
 
 test("a bytes renderer gets the text's UTF-8 bytes", async () => {
