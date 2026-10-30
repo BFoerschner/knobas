@@ -269,7 +269,14 @@ pub async fn translate_ticket_view<R: tauri::Runtime>(
     id: String,
 ) -> Result<Option<knobas_source::query::Translation>, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::ticket_views::translate(&state.pool, &state.secrets, &state.registry, &id).await
+    crate::ticket_views::translate(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &id,
+    )
+    .await
 }
 
 /// A ticket view was opened: a saved view, such as a Jira view, stops saying

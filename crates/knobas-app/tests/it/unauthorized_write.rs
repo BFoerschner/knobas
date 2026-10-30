@@ -204,6 +204,7 @@ impl Fixture {
             &self.state.pool,
             &self.state.secrets,
             &self.state.registry,
+            &self.state.live,
             source,
             secret,
         )
@@ -268,6 +269,7 @@ async fn fixture(name: &str) -> Fixture {
         source,
         other,
         state: SourcesState {
+            live: Default::default(),
             pool,
             scheduler,
             secrets,

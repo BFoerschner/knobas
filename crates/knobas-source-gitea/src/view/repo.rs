@@ -103,7 +103,17 @@ pub(super) async fn draw(
         }
         Some(COMMITS) => vec![commits(source, &record, owner, repo).await?],
         Some(id) if files::owns(id) => {
-            vec![files::read(source, &record, owner, repo, record.default_branch(), id).await?]
+            vec![
+                files::read(
+                    source,
+                    &record,
+                    owner,
+                    repo,
+                    files::At::Branch(record.default_branch()),
+                    id,
+                )
+                .await?,
+            ]
         }
         Some(other) => {
             return Err(SourceError::protocol(format!(

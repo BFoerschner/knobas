@@ -539,6 +539,7 @@ async fn make_an_editable_copy_asks_the_saved_views_source_to_translate_its_quer
         &pool,
         &secrets,
         &crate::support::shared(registry.clone()),
+        &knobas_app::sources::live::LiveSources::default(),
         &id,
     )
     .await
@@ -583,6 +584,7 @@ async fn make_an_editable_copy_asks_the_saved_views_source_to_translate_its_quer
         &pool,
         &secrets,
         &crate::support::shared(registry.clone()),
+        &knobas_app::sources::live::LiveSources::default(),
         &mock_view.id,
     )
     .await
@@ -597,6 +599,7 @@ async fn make_an_editable_copy_asks_the_saved_views_source_to_translate_its_quer
         &pool,
         &secrets,
         &crate::support::shared(registry.clone()),
+        &knobas_app::sources::live::LiveSources::default(),
         &own.id,
     )
     .await
@@ -606,6 +609,7 @@ async fn make_an_editable_copy_asks_the_saved_views_source_to_translate_its_quer
         &pool,
         &secrets,
         &crate::support::shared(registry.clone()),
+        &knobas_app::sources::live::LiveSources::default(),
         "no-such-view-1208",
     )
     .await

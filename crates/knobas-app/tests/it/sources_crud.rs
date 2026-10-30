@@ -514,6 +514,7 @@ async fn re_entering_a_secret_overwrites_it_tests_it_and_releases_the_backoff() 
         &f.pool,
         &f.secrets,
         &crate::support::shared(f.registry.clone()),
+        &knobas_app::sources::live::LiveSources::default(),
         &f.id,
         SecretInput::of("pat-two"),
     )
@@ -672,7 +673,7 @@ async fn deleting_a_source_removes_its_secret_and_can_purge_its_items() {
         .await
         .unwrap();
 
-    sources::crud::delete(&f.pool, &f.secrets, &f.id, false)
+    sources::crud::delete(&f.pool, &f.secrets, &Default::default(), &f.id, false)
         .await
         .unwrap();
     assert!(
@@ -686,7 +687,7 @@ async fn deleting_a_source_removes_its_secret_and_can_purge_its_items() {
         "the keychain item goes with it"
     );
 
-    let err = sources::crud::delete(&f.pool, &f.secrets, &f.id, false)
+    let err = sources::crud::delete(&f.pool, &f.secrets, &Default::default(), &f.id, false)
         .await
         .unwrap_err();
     assert!(matches!(err, sources::SourcesError::NotFound(_)), "{err:?}");
@@ -881,6 +882,7 @@ async fn a_credential_that_is_still_wrong_does_not_release_the_backoff() {
         &f.pool,
         &f.secrets,
         &crate::support::shared(refusing),
+        &knobas_app::sources::live::LiveSources::default(),
         &f.id,
         SecretInput::of("still-wrong"),
     )
@@ -942,6 +944,7 @@ async fn an_unreachable_source_does_not_blame_the_credential_or_release_the_back
         &f.pool,
         &f.secrets,
         &crate::support::shared(refusing),
+        &knobas_app::sources::live::LiveSources::default(),
         &f.id,
         SecretInput::of("probably-fine"),
     )
@@ -1191,6 +1194,7 @@ async fn adding_an_account_keeps_the_stored_key_and_turns_the_write_ops_on() {
         &f.pool,
         &f.secrets,
         &crate::support::shared(f.registry.clone()),
+        &knobas_app::sources::live::LiveSources::default(),
         &f.id,
         SecretInput {
             value: None,
@@ -1248,6 +1252,7 @@ async fn re_entering_the_key_keeps_the_stored_account() {
         &f.pool,
         &f.secrets,
         &crate::support::shared(f.registry.clone()),
+        &knobas_app::sources::live::LiveSources::default(),
         &f.id,
         SecretInput::of("uk1_rotated"),
     )
@@ -1360,6 +1365,7 @@ async fn a_re_enter_with_nothing_typed_and_nothing_stored_is_refused() {
         &f.pool,
         &f.secrets,
         &crate::support::shared(f.registry.clone()),
+        &knobas_app::sources::live::LiveSources::default(),
         &f.id,
         SecretInput::default(),
     )

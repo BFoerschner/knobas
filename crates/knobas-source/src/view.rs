@@ -19,6 +19,20 @@ pub use crate::diff::{
     DiffChange, DiffFile, DiffLine, DiffLineKind, FileThread, Hunk, LineComment, LineThread,
 };
 
+/// What a view's answer stands at, as
+/// [`Source::view_standing`](crate::Source::view_standing) says before the
+/// read (ADR-0032, #2239). Never on the wire: it is the app's to act on, and
+/// the shell draws a kept answer as it draws a fresh one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Standing {
+    /// Read live every time, and kept nowhere: the default.
+    Live,
+    /// Fixed by the entity and section alone -- something at a full commit
+    /// sha -- so the app keeps it in memory for the session and answers the
+    /// same pair again from there.
+    Fixed,
+}
+
 /// What [`Source::view`](crate::Source::view) answers for one entity: its
 /// sections, in the order the shell draws them as tabs. The first is the one a
 /// detail opens on.

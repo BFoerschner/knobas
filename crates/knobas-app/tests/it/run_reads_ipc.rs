@@ -204,15 +204,24 @@ async fn each_run_read_reaches_the_runs_own_source_with_the_cap_applied() {
     let run = format!("{tc}:build:7");
     let s = no_secrets();
 
-    let whole = run_log_inner(&pool, &s, &answering(), &run, None, None)
-        .await
-        .unwrap()
-        .unwrap();
+    let whole = run_log_inner(
+        &pool,
+        &s,
+        &answering(),
+        &knobas_app::sources::live::LiveSources::default(),
+        &run,
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(whole.total, u64::from(LOG_LINES_MAX), "no count is the cap");
     let over = run_log_inner(
         &pool,
         &s,
         &answering(),
+        &knobas_app::sources::live::LiveSources::default(),
         &run,
         Some(3),
         Some(LOG_LINES_MAX * 5),
@@ -227,30 +236,64 @@ async fn each_run_read_reaches_the_runs_own_source_with_the_cap_applied() {
     );
 
     assert!(
-        run_tests_inner(&pool, &s, &answering(), &run)
-            .await
-            .unwrap()
-            .is_some()
+        run_tests_inner(
+            &pool,
+            &s,
+            &answering(),
+            &knobas_app::sources::live::LiveSources::default(),
+            &run
+        )
+        .await
+        .unwrap()
+        .is_some()
     );
-    let history = test_history_inner(&pool, &s, &answering(), &run, "-12")
-        .await
-        .unwrap()
-        .unwrap();
+    let history = test_history_inner(
+        &pool,
+        &s,
+        &answering(),
+        &knobas_app::sources::live::LiveSources::default(),
+        &run,
+        "-12",
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(history[0].number.as_deref(), Some("-12"));
-    let folder = run_artifacts_inner(&pool, &s, &answering(), &run, Some("logs"))
-        .await
-        .unwrap()
-        .unwrap();
+    let folder = run_artifacts_inner(
+        &pool,
+        &s,
+        &answering(),
+        &knobas_app::sources::live::LiveSources::default(),
+        &run,
+        Some("logs"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(folder[0].path, "logs/x");
-    let root = run_artifacts_inner(&pool, &s, &answering(), &run, None)
-        .await
-        .unwrap()
-        .unwrap();
+    let root = run_artifacts_inner(
+        &pool,
+        &s,
+        &answering(),
+        &knobas_app::sources::live::LiveSources::default(),
+        &run,
+        None,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(root[0].path, "/x", "no path is the root, \"\"");
-    let preview = artifact_preview_inner(&pool, &s, &answering(), &run, "logs/a.log")
-        .await
-        .unwrap()
-        .unwrap();
+    let preview = artifact_preview_inner(
+        &pool,
+        &s,
+        &answering(),
+        &knobas_app::sources::live::LiveSources::default(),
+        &run,
+        "logs/a.log",
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(preview.text.as_deref(), Some("logs/a.log"));
 }
 
@@ -264,33 +307,61 @@ async fn a_bad_address_or_path_is_refused_and_a_foreign_run_is_the_sources_refus
 
     assert_eq!(
         code(
-            run_log_inner(&pool, &s, &answering(), "no id", None, None)
-                .await
-                .unwrap_err()
+            run_log_inner(
+                &pool,
+                &s,
+                &answering(),
+                &knobas_app::sources::live::LiveSources::default(),
+                "no id",
+                None,
+                None
+            )
+            .await
+            .unwrap_err()
         ),
         IpcErrorCode::Invalid
     );
     assert_eq!(
         code(
-            run_tests_inner(&pool, &s, &answering(), "nobody:build:7")
-                .await
-                .unwrap_err()
+            run_tests_inner(
+                &pool,
+                &s,
+                &answering(),
+                &knobas_app::sources::live::LiveSources::default(),
+                "nobody:build:7"
+            )
+            .await
+            .unwrap_err()
         ),
         IpcErrorCode::NotFound
     );
     assert_eq!(
         code(
-            run_artifacts_inner(&pool, &s, &answering(), &run, Some("../etc"))
-                .await
-                .unwrap_err()
+            run_artifacts_inner(
+                &pool,
+                &s,
+                &answering(),
+                &knobas_app::sources::live::LiveSources::default(),
+                &run,
+                Some("../etc")
+            )
+            .await
+            .unwrap_err()
         ),
         IpcErrorCode::Invalid
     );
     assert_eq!(
         code(
-            artifact_preview_inner(&pool, &s, &answering(), &run, "/etc/passwd")
-                .await
-                .unwrap_err()
+            artifact_preview_inner(
+                &pool,
+                &s,
+                &answering(),
+                &knobas_app::sources::live::LiveSources::default(),
+                &run,
+                "/etc/passwd"
+            )
+            .await
+            .unwrap_err()
         ),
         IpcErrorCode::Invalid
     );
@@ -300,9 +371,17 @@ async fn a_bad_address_or_path_is_refused_and_a_foreign_run_is_the_sources_refus
     };
     assert_eq!(
         code(
-            download_run_file_inner(&pool, &s, &answering(), &run, &escape, dir.path())
-                .await
-                .unwrap_err()
+            download_run_file_inner(
+                &pool,
+                &s,
+                &answering(),
+                &knobas_app::sources::live::LiveSources::default(),
+                &run,
+                &escape,
+                dir.path()
+            )
+            .await
+            .unwrap_err()
         ),
         IpcErrorCode::Invalid
     );
@@ -310,9 +389,15 @@ async fn a_bad_address_or_path_is_refused_and_a_foreign_run_is_the_sources_refus
     let other = format!("{tc}:buildType:Payout_Build");
     assert_eq!(
         code(
-            run_tests_inner(&pool, &s, &answering(), &other)
-                .await
-                .unwrap_err()
+            run_tests_inner(
+                &pool,
+                &s,
+                &answering(),
+                &knobas_app::sources::live::LiveSources::default(),
+                &other
+            )
+            .await
+            .unwrap_err()
         ),
         IpcErrorCode::Internal
     );
@@ -326,7 +411,16 @@ async fn a_download_is_a_new_file_in_the_folder_named_by_its_last_segment() {
     let s = no_secrets();
     let dir = tempfile::tempdir().unwrap();
     let down = async |target: DownloadTarget| {
-        download_run_file_inner(&pool, &s, &answering(), &run, &target, dir.path()).await
+        download_run_file_inner(
+            &pool,
+            &s,
+            &answering(),
+            &knobas_app::sources::live::LiveSources::default(),
+            &run,
+            &target,
+            dir.path(),
+        )
+        .await
     };
 
     let log = down(DownloadTarget::Log).await.unwrap().unwrap();

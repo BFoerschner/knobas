@@ -426,6 +426,7 @@ impl Harness {
 
         let harness = Self {
             state: SourcesState {
+                live: Default::default(),
                 pool,
                 scheduler,
                 secrets,

@@ -1560,6 +1560,8 @@ gitea-live forge="gitea":
       -- --ignored --nocapture --test-threads=1 --exact each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_up_run
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test clone_live \
       -- --ignored --nocapture --test-threads=1
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test read_cache_live \
+      -- --ignored --nocapture --test-threads=1
 
 # The same real container, reconfigured to answer FEWER records than the adapter
 # asked for: `testenv/docker-compose.capped.yml` sets Gitea's

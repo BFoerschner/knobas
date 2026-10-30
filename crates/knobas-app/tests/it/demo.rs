@@ -147,6 +147,7 @@ async fn an_unconfigured_source_cannot_be_reached() {
         &pool,
         &secrets,
         &crate::support::shared(registry.clone()),
+        &knobas_app::sources::live::LiveSources::default(),
         &missing,
         knobas_app::sources::SecretInput::of("pat"),
     )

@@ -6,7 +6,8 @@
 //! [`pr`]'s, a **branch** is [`branch`]'s and a **repository** is
 //! [`repo`]'s (#663).
 //!
-//! Every read here is live and nothing is stored (rule 1). A refusal is the
+//! Every read here is live and nothing is stored (rule 1); what stands at a
+//! whole commit sha the app may keep in memory ([`standing`], ADR-0032). A refusal is the
 //! error it maps to, so the detail says *Showing the mirror* and why. A few
 //! parts of a view are drawn without what they could not read, saying so: a
 //! pull request's checks (#710) and labels (#1194) on any failure, and its
@@ -78,6 +79,35 @@ pub(crate) async fn draw(
     Ok(Some(view))
 }
 
+/// What the view of `entity` at `section` stands at (ADR-0032, #2239):
+/// [`Standing::Fixed`] for a commit's diff and its tree's sections at a full
+/// sha, which no push can change and which offer no write; everything else
+/// is live. A commit's overview is not fixed (its checks move), and neither
+/// is its whole view (its toolbar reads the repository).
+///
+/// [`Standing::Fixed`]: knobas_source::view::Standing::Fixed
+pub(crate) fn standing(
+    source: &GiteaSource,
+    entity: &str,
+    section: Option<&str>,
+) -> knobas_source::view::Standing {
+    use knobas_source::view::Standing;
+    match (source.key_of(entity), section) {
+        (Ok(GiteaKey::Commit { sha, .. }), Some(id))
+            if full_sha(&sha) && (id == DIFF || files::owns(id)) =>
+        {
+            Standing::Fixed
+        }
+        _ => Standing::Live,
+    }
+}
+
+/// Whether `sha` is a whole object id, SHA-1's 40 hex characters or
+/// SHA-256's 64: a shorter one names whichever commit it is unique to today.
+fn full_sha(sha: &str) -> bool {
+    matches!(sha.len(), 40 | 64) && sha.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 /// A commit: *Overview* and *Diff*, neither deferred -- reading a commit's
 /// change is why it is opened (spec #660, story 1).
 async fn commit(
@@ -110,6 +140,12 @@ async fn commit(
         }
         Some(OVERVIEW) => vec![commit_overview(source, owner, repo, sha).await?],
         Some(DIFF) => vec![commit_diff(source, owner, repo, sha).await?],
+        // The tree at this commit (#2239): the Files tab's sections, read at
+        // the sha, which no tab of a commit's view names yet.
+        Some(id) if files::owns(id) => {
+            let record: rows::RepoRecord = source.client.repo_as(owner, repo).await?;
+            vec![files::read(source, &record, owner, repo, files::At::Commit(sha), id).await?]
+        }
         Some(other) => {
             return Err(SourceError::protocol(format!(
                 "gitea: a commit's view has no section {other:?} (asked for {entity:?})"

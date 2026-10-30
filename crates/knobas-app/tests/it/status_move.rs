@@ -167,6 +167,7 @@ async fn app(jira_url: &str) -> SourcesState {
     .expect("a scheduler over the scratch database");
 
     SourcesState {
+        live: Default::default(),
         pool,
         scheduler,
         secrets,
@@ -382,6 +383,7 @@ async fn reachable(state: &SourcesState, entity: &str) -> Result<Vec<String>, St
         &state.pool,
         &state.secrets,
         &state.registry,
+        &state.live,
         entity,
     )
     .await

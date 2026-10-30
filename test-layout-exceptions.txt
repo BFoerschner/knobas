@@ -18,6 +18,7 @@ knobas-app/atlassian_live  just atlassian-live runs it with --test atlassian_liv
 knobas-app/clone_live  just gitea-live runs it with --test clone_live
 knobas-app/confluence_live  just atlassian-live runs it with --test confluence_live
 knobas-app/estate_live  just estate-live runs it with --test estate_live
+knobas-app/read_cache_live  just gitea-live runs it with --test read_cache_live
 knobas-app/kuma_write_live  just kuma-live runs it with --test kuma_write_live
 knobas-app/share_exit  just atlassian-live runs it with --test share_exit
 knobas-app/start_work_live  just start-work-live runs it with --test start_work_live

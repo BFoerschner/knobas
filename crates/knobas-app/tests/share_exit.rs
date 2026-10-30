@@ -593,6 +593,7 @@ async fn engine(
         .await
         .expect("a scheduler over the profile");
     knobas_app::sources::SourcesState {
+        live: Default::default(),
         pool: state.pool.clone(),
         scheduler,
         secrets,
@@ -671,6 +672,7 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
         &sharer.pool,
         &sharer_keys,
         &sharer_engine.registry,
+        &sharer_engine.live,
         JIRA,
         knobas_app::sources::SecretInput::of(env.password.clone()),
     )
@@ -752,6 +754,7 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
         &colleague.pool,
         &colleague_keys,
         &colleague_engine.registry,
+        &colleague_engine.live,
         JIRA,
         knobas_app::sources::SecretInput::of(env.password.clone()),
     )
