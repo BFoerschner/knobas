@@ -93,3 +93,23 @@ test("picked from the bottom up, the range is the same", () => {
   diffSelected().click();
   expect(location.hash).toBe(diffHash(REPO, `${SHAS[3]}^`, SHAS[1]!));
 });
+
+test("a commit the mirror does not hold is never a pick's end, but sits inside one", async () => {
+  unmount(view!);
+  const rows = SHAS.map((sha, n) => commit(sha, `commit ${n}`));
+  rows[1] = { ...rows[1]!, entity_id: null };
+  const held = { ...VIEW, sections: [{ ...VIEW.sections[0]!, blocks: [{ type: "entities", rows }] }] } as unknown as SourceView;
+  view = mount(TfRepoCommits, {
+    target,
+    props: { ports: { entityView: async () => held, codeFacts: async () => [] }, repoId: REPO, at: REPO, branch: "main", defaultBranch: "main" },
+  });
+  for (let n = 0; n < 5; n++) await tick();
+  flushSync();
+  expect(boxes()[1]!.disabled).toBe(true);
+  click(boxes()[0]!);
+  click(boxes()[2]!, true);
+  expect(boxes().map((box) => box.checked)).toEqual([true, true, true, false]);
+  expect(boxes()[1]!.disabled).toBe(true);
+  diffSelected().click();
+  expect(location.hash).toBe(diffHash(REPO, `${SHAS[2]}^`, SHAS[0]!));
+});

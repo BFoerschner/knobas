@@ -18,8 +18,8 @@
   commit before the oldest picked to the newest (`diff/address.ts`). The pick
   is over the rows drawn; commits the filter hides between its ends are in
   the diff all the same, since it is a range of history. A commit the mirror
-  does not hold has no sha, so its box can sit inside a pick but not
-  end one. A new list (another branch, a filter, a refresh) drops the pick.
+  does not hold has no sha, so its box is never a pick's end: it is
+  disabled, and drawn checked when a pick spans it. A new list (another branch, a filter, a refresh) drops the pick.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -136,6 +136,9 @@
   /** A box clicked: a click picks its commit, a shift-click stretches the pick to it. */
   function choose(event: MouseEvent, at: number) {
     pick = selectRange(pick, at, event.shiftKey);
+    // The browser has already toggled the clicked box; `checked=` is only set
+    // again when its value changes, so a box whose pick did not change would
+    // keep the browser's toggle. Every box is set to the pick here.
     for (const [n, box] of boxes.entries()) if (box) box.checked = picked(pick, n);
   }
   let boxes = $state<(HTMLInputElement | undefined)[]>([]);
@@ -173,7 +176,7 @@
               type="checkbox"
               bind:this={boxes[n]}
               checked={picked(pick, n)}
-              disabled={shaOfCommit(row.entity_id) === null && !picked(pick, n)}
+              disabled={shaOfCommit(row.entity_id) === null}
               aria-label={`Pick ${row.chip ?? row.title}`}
               onclick={(event) => choose(event, n)}
             /></td
