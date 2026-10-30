@@ -13,7 +13,7 @@
   import { clockLabel } from "../../time/format";
   import { ipcErrorMessage } from "../../ipc";
   import type { ChoiceOption, DiffFile, EntityDetail } from "../../ipc/entity";
-  import TfDiff from "../code/TfDiff.svelte";
+  import TfDiffView from "../diff/TfDiffView.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import { branchFrom, repoHash, shaOf } from "./repo";
@@ -114,5 +114,5 @@
 {:else if files !== null && files.length === 0}
   <div class="tf-empty">This commit changes no file.</div>
 {:else if files !== null}
-  <TfDiff {files} />
+  <TfDiffView {files} />
 {/if}
