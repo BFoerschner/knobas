@@ -1320,6 +1320,8 @@ const CASES: Case[] = [
                       draw: () => ({ done: deferred(undefined), cancel() {} }),
                       text: () => deferred(undefined),
                       links: () => deferred([{ rect: [0, 0, 10, 10] as [number, number, number, number], target: { url: "https://psp.example.com/" } }]),
+                      print: () => deferred({ key: "page", unsure: false }),
+                      pixels: () => deferred(null),
                     }),
                   close() {},
                 },

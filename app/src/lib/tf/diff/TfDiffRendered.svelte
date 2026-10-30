@@ -10,7 +10,8 @@
   again. Each renderer draws as the file viewer draws it: Markdown through
   the sanitizer, a diagram and a command's output in a sandboxed frame, an
   image as an `<img>` of a blob URL (an SVG sanitized first, `render/image.ts`),
-  let go when the pane goes.
+  let go when the pane goes. A PDF is compared page by page in one pane
+  (`TfPdfDiff`, #2282) once both sides are read.
 -->
 <script lang="ts">
   import { ipcCommands, type CommandPort } from "../../render/command";
@@ -20,6 +21,7 @@
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
   import TfDiagram from "../render/TfDiagram.svelte";
+  import TfPdfDiff from "../render/TfPdfDiff.svelte";
   import type { RenderedPlan, Side, SideGot } from "./rendered";
 
   let {
@@ -50,6 +52,13 @@
 
   const NAME = { old: "before", new: "after" } as const;
   const id = $derived(plan.renderer.id);
+  /** A side's bytes once read, `null` where there is no file on that side; `undefined` while it is read. */
+  const bytesOf = (side: Side): Uint8Array | null | undefined => {
+    const got = sideOf(side);
+    if (got === undefined || got.kind === "failed") return undefined;
+    if (got.kind === "absent") return null;
+    return typeof got.content === "string" ? new TextEncoder().encode(got.content) : got.content;
+  };
   const textOf = (content: string | Uint8Array) => (typeof content === "string" ? content : new TextDecoder().decode(content));
   /** Each image side's blob URL, made once its bytes are in and revoked with the pane or a new read. */
   let urls = $state<Partial<Record<Side, string>>>({});
@@ -107,6 +116,16 @@
       {/if}
     {/if}
   </div>
+{:else if id === "pdf"}
+  {@const failed = plan.sides.map((side) => [side, sideOf(side)] as const).find(([, got]) => got?.kind === "failed")}
+  {@const [old, nu] = [plan.sides.includes("old") ? bytesOf("old") : null, plan.sides.includes("new") ? bytesOf("new") : null]}
+  {#if failed && failed[1]?.kind === "failed"}
+    <p class="tf-stepfail" role="alert">The {NAME[failed[0]]} side could not be read: {failed[1].why}</p>
+  {:else if old !== undefined && nu !== undefined}
+    <TfPdfDiff before={old} after={nu} {path} {render} />
+  {:else}
+    <p class="tf-dim" aria-live="polite">Reading both sides…</p>
+  {/if}
 {:else}
   <div class="tf-ba" class:tf-ba-one={sides.length === 1}>
     {#each sides as side (side)}

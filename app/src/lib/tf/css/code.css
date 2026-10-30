@@ -235,6 +235,25 @@
 .tf-ba-body { min-width: 0; overflow: auto; }
 .tf-ba-doc { padding: 0 14px; }
 .tf-ba-img { padding: 14px; display: grid; place-items: center; }
+/* A PDF's rendered diff (#2282): page rows, before | after, the differing ones marked. */
+.tf-pdfd { background: var(--sheet); }
+.tf-pdfd-wait { margin: 0; padding: 10px 14px; font-size: var(--t-sm); }
+.tf-pdfd-head, .tf-pdfd-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.tf-pdfd-head > span { padding: 6px 14px; font: 600 var(--t-xs) var(--sans); color: var(--ink-2); border-bottom: 1px solid var(--rule-2); }
+.tf-pdfd-head > span:first-child { box-shadow: inset 3px 0 0 var(--err); }
+.tf-pdfd-head > span + span { border-left: 1px solid var(--rule); box-shadow: inset 3px 0 0 var(--ok); }
+.tf-pdfd-row { border-bottom: 1px solid var(--rule-2); box-shadow: inset 4px 0 0 transparent; }
+.tf-pdfd-at { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 4px 14px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-pdfd-mark { padding: 0 6px; border-radius: 3px; font: 700 var(--t-2xs) var(--sans); text-transform: uppercase; letter-spacing: 0.04em; }
+.tf-pdfd-changed { background: var(--warn-bg); box-shadow: inset 4px 0 0 var(--warn); }
+.tf-pdfd-changed .tf-pdfd-mark { background: var(--warn); color: var(--sheet); }
+.tf-pdfd-added { background: var(--ok-bg); box-shadow: inset 4px 0 0 var(--ok); }
+.tf-pdfd-added .tf-pdfd-mark { background: var(--ok); color: var(--sheet); }
+.tf-pdfd-removed { background: var(--err-bg); box-shadow: inset 4px 0 0 var(--err); }
+.tf-pdfd-removed .tf-pdfd-mark { background: var(--err); color: var(--sheet); }
+.tf-pdfd-cell { min-width: 0; overflow-x: auto; padding: 4px 14px 14px; display: flex; justify-content: center; }
+.tf-pdfd-cell + .tf-pdfd-cell { border-left: 1px solid var(--rule); }
+.tf-pdfd-none { align-self: center; padding: 24px; font-size: var(--t-sm); color: var(--ink-2); font-style: italic; }
 .tf-ba-img > img, .tf-swipe-box img { max-width: 100%; background: repeating-conic-gradient(var(--sheet-2) 0 25%, var(--sheet) 0 50%) 0 0 / 16px 16px; }
 .tf-ba-old .tf-ba-img > img { outline: 2px solid var(--err); }
 .tf-ba-new .tf-ba-img > img { outline: 2px solid var(--ok); }
