@@ -10,6 +10,9 @@
   backend stored in the registry (`render/command.ts`), so the file viewer
   and Markdown use it at once.
 
+  *Run pipelines on diffs* (#2270, `diff/diff-pipelines.svelte.ts`) is on
+  by default; each diff's own toggle overrides it.
+
   *Default renderers* (#2263) is the global list from file pattern to the
   renderer a file opens with (`render/defaults.ts`), Source included: added
   here or from the file viewer's *Render as ▾*, changed or removed here. A
@@ -45,8 +48,13 @@
   import { rendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import { push } from "../../shell/toasts.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
+  import { diffPipelines, type DiffPipelinesSetting } from "../diff/diff-pipelines.svelte";
 
-  let { ports = realRendererPorts, defaults = rendererDefaults }: { ports?: RendererPorts; defaults?: RendererDefaults } = $props();
+  let {
+    ports = realRendererPorts,
+    defaults = rendererDefaults,
+    piping = diffPipelines,
+  }: { ports?: RendererPorts; defaults?: RendererDefaults; piping?: DiffPipelinesSetting } = $props();
 
   /** `null` until the read answers. */
   let saved = $state<UserRenderer[] | null>(null);
@@ -185,6 +193,17 @@
   <h1>Renderers</h1>
   <p>Your own programs that draw a file or a Markdown fence: SVG, HTML or an image from its text or bytes.</p>
 </header>
+<div class="tf-stg-row">
+  <label class="tf-stg-l" for="tf-rnd-pipes"
+    >Run pipelines on diffs<small
+      >A diff runs a file's default pipeline on both sides and diffs the outputs, so two base64 blobs diff as decoded JSON. Each
+      diff's own toggle overrides this.</small
+    ></label
+  >
+  <div class="tf-stg-c tf-stg-inl">
+    <input id="tf-rnd-pipes" type="checkbox" checked={piping.on} onchange={(event) => piping.set(event.currentTarget.checked)} /><span>On</span>
+  </div>
+</div>
 {#if saved !== null}
   <div class="tf-stg-sec">
     <h2>Command renderers</h2>

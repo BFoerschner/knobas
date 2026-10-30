@@ -224,6 +224,14 @@
 /* Open in (#2274) follows the mode switch where there is no Viewed: one group at the right. */
 .tf-diff .tf-fh-acts + .tf-fh-open { margin-left: 0; }
 .tf-fh-acts .tf-seg button { padding: 1px 9px; font-size: var(--t-xs); }
+/* Pipelines on diffs (#2270, `mockups/code-area/diff.html`): the pipeline the header names, and the toolbar's toggle. */
+.tf-diff .tf-ran { display: inline-flex; align-items: center; gap: 5px; font: 600 var(--t-xs) var(--sans); color: var(--info); background: var(--info-bg); border-radius: 3px; padding: 1px 7px; white-space: nowrap; }
+.tf-diff .tf-ran::before { content: "✓"; }
+.tf-diff .tf-ran.tf-running::before { content: "…"; }
+.tf-diff .tf-ran-why { font: 400 var(--t-xs) var(--sans); color: var(--ink-2); white-space: nowrap; }
+.tf-diff > .tf-banner { font-family: var(--sans); }
+.tf-dtool .tf-pill { display: inline-flex; align-items: center; height: var(--control-h-sm); padding: 0 10px; border: 1px solid var(--rule); border-radius: 13px; background: var(--sheet); font: var(--t-sm) var(--sans); color: var(--ink-2); white-space: nowrap; cursor: pointer; }
+.tf-dtool .tf-pill[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 /* A rendered diff (#2279): before and after side by side, `mockups/code-area/diff.html`. */
 .tf-ba { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .tf-ba.tf-ba-one { grid-template-columns: minmax(0, 1fr); }

@@ -41,3 +41,19 @@ test("a side the file is not on reads as none; no parent address, or no byte rea
   await expect(commitContext(() => Promise.resolve(null), "c", null, missing).bytes!(FILE, "old")).rejects.toThrow(/parent/);
   expect(commitContext(() => Promise.resolve(null), "c", "p").bytes).toBeUndefined();
 });
+
+test("a pipeline runs on each side at its own commit, the old one by its old path; a side the file is not on is none (#2270)", async () => {
+  const asked: string[] = [];
+  const done = { outcome: "done", name: "x", output: { kind: "text", text: "t" } } as const;
+  const piped = (id: string, path: string, commit: string | null, steps: { step: string }[]) => (
+    asked.push(`${id} ${path} ${commit} ${steps.map((s) => s.step)}`), Promise.resolve(done)
+  );
+  const context = commitContext(() => Promise.resolve(null), "g:o/r@new", "g:o/r@older", undefined, piped);
+  expect(await context.piped!(FILE, "new", [{ step: "base64_decode" }])).toEqual(done);
+  expect(await context.piped!(FILE, "old", [{ step: "base64_decode" }])).toEqual(done);
+  expect(asked).toEqual(["g:o/r@new src/new.rs null base64_decode", "g:o/r@older src/old.rs null base64_decode"]);
+  const missing = () => Promise.reject({ code: "not_found", message: "gone" });
+  expect(await commitContext(() => Promise.resolve(null), "c", "p", undefined, missing).piped!(FILE, "old", [])).toBeNull();
+  await expect(commitContext(() => Promise.resolve(null), "c", null, undefined, piped).piped!(FILE, "old", [])).rejects.toThrow(/parent/);
+  expect(commitContext(() => Promise.resolve(null), "c", "p").piped).toBeUndefined();
+});

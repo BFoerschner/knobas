@@ -309,6 +309,23 @@ function renderedDiffSide(at: number, path: string): string | null | undefined {
   return sides === undefined ? undefined : sides[at === 0 ? 1 : 0];
 }
 
+/**
+ * `?fake-diff-pipeline` (#2270): the newest commit also changes a base64-encoded JSON fixture, and
+ * `fake-tauri.ts` installs a default pipeline for `*.json.b64` (base64 decode, then pretty JSON), so its
+ * diff is of the decoded JSON. {@link repoFilePiped} runs those two steps on either side.
+ */
+const DIFF_PIPELINE: Record<string, [before: string, after: string]> = {
+  "fixtures/webhooks.json.b64": [
+    JSON.stringify({ subscribers: [{ url: "ledger.internal/hook", timeout_ms: 5000 }, { url: "mail.internal/hook" }] }),
+    JSON.stringify({ subscribers: [{ url: "ledger.internal/hook", timeout_ms: 2000, retry: { max: 10, base_s: 2 }, jitter: 0.2 }, { url: "mail.internal/hook" }] }),
+  ],
+};
+const diffPipelineOn = () => new URLSearchParams(globalThis.location?.search).has("fake-diff-pipeline");
+/** `?fake-diff-pipeline`'s file on the newest commit's diff: two lines of base64. */
+function diffPipelineFiles(): DiffFile[] {
+  return Object.entries(DIFF_PIPELINE).map(([path, [before, after]]) => lineDiff(path, btoa(before), btoa(after)));
+}
+
 /** A commit's entity id on `payout-service`, in the Gitea key grammar (`owner/repo@sha`). */
 export const payoutCommitId = (sha: string) => `${PAYOUT}@${sha}`;
 
@@ -650,7 +667,7 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
     // `?fake-diff-lines=<n>` (#2269): forty more files of n/40 added lines each.
     const bulk = Number(new URLSearchParams(globalThis.location?.search).get("fake-diff-lines") ?? 0) || 0;
     const more = bulk === 0 ? [] : Array.from({ length: 40 }, (_, f) => diffOf(`bulk/f${String(f).padStart(2, "0")}.rs`, "", Array.from({ length: Math.ceil(bulk / 40) }, (_, i) => `let v${f}_${i} = ${i};`).join("\n")));
-    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
+    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...(at === 0 && diffPipelineOn() ? diffPipelineFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
     // The whole view's toolbar (#707): a branch from this commit, its whole sha the value.
     const from = { value: commit[0], label: commit[0].slice(0, 10) };
     const actions =
@@ -750,6 +767,23 @@ function fakeJq(filter: string, input: unknown): unknown[] {
  * name, jq is {@link fakeJq}, pretty-print JSON re-lays it; any other step fails, naming the dev fake.
  */
 export function repoFilePiped(entityId: string, path: string, steps: PipeStep[]): PipeRun | undefined {
+  // `?fake-diff-pipeline`'s fixture at the newest commit (after) and its parent (before).
+  const commitAt = PAYOUT_COMMITS.findIndex(([sha]) => payoutCommitId(sha) === entityId);
+  const piped = DIFF_PIPELINE[path];
+  if (commitAt !== -1 && commitAt <= 1 && piped && diffPipelineOn()) {
+    let text = btoa(piped[commitAt === 0 ? 1 : 0]);
+    let name = path;
+    for (const [index, step] of steps.entries()) {
+      if (step.step === "base64_decode") (text = atob(text)), (name = name.replace(/\.b64$/, ""));
+      else if (step.step === "pretty" && step.format === "json") text = `${JSON.stringify(JSON.parse(text), null, 2)}\n`;
+      else
+        return {
+          outcome: "failed",
+          failure: { index, name: step.step, why: "error", error: `the dev fake does not run ${step.step}`, input: { size: text.length, head: text.slice(0, 64), binary: false } },
+        };
+    }
+    return { outcome: "done", name, output: { kind: "text", text } };
+  }
   const branchAt = entityId.indexOf("@refs/heads/");
   const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);
   const files = filesOf(repoId, branchAt === -1 ? null : entityId.slice(branchAt + "@refs/heads/".length));

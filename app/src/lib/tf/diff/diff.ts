@@ -17,7 +17,7 @@
  *   the file's old path, so a rename that changes the language highlights
  *   each side in its own.
  */
-import type { DiffFile, DiffLine, LineThread } from "../../ipc/entity";
+import type { DiffFile, DiffLine, LineThread, PipeRun, PipeStep } from "../../ipc/entity";
 import type { PendingCommentStore } from "../../detail/view/pending-comments.svelte";
 import { wordMarks, type Range } from "./words";
 
@@ -41,6 +41,11 @@ export interface DiffContext {
    * that side (a binary diff does not say whether it was added or deleted). Absent: none offered.
    */
   bytes?(file: DiffFile, side: "old" | "new"): Promise<Uint8Array | null>;
+  /**
+   * A side run through a file pipeline's `steps` (#2270, `entityFilePiped`): `null` where the file is not on
+   * that side. Absent: this diff runs no pipelines.
+   */
+  piped?(file: DiffFile, side: "old" | "new", steps: PipeStep[]): Promise<PipeRun | null>;
 }
 
 /** *Viewed* per file: which are, and how to change one. */

@@ -8,6 +8,7 @@ import { renderersFor, renderersForFence } from "../../render/registry";
 import TfRenderersSection, { type RendererPorts } from "./TfRenderersSection.svelte";
 import type { RendererDefault } from "../../render/defaults";
 import { createRendererDefaults } from "../../render/defaults.svelte";
+import { createDiffPipelines } from "../diff/diff-pipelines.svelte";
 
 /** A `render.defaults` row that answers what it was last sent (#2263). */
 function storedDefaults(start: RendererDefault[] = []) {
@@ -230,4 +231,19 @@ test("a default naming a renderer that was deleted says the built-in default app
   app = mount(TfRenderersSection, { target, props: { ports, defaults: store } });
   await settle();
   expect(defaultRows()).toEqual(["*.puml | command:plantuml | Not installed: the built-in default applies."]);
+});
+
+test("Run pipelines on diffs is on until turned off here (#2270)", async () => {
+  const { ports } = backend();
+  const kept = new Map<string, string>();
+  const piping = createDiffPipelines(() => ({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) }));
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store, piping } });
+  await settle();
+  const box = target.querySelector<HTMLInputElement>("#tf-rnd-pipes")!;
+  expect(target.querySelector('label[for="tf-rnd-pipes"]')?.textContent).toMatch(/^Run pipelines on diffs/);
+  expect(box.checked).toBe(true);
+  box.click();
+  flushSync();
+  expect(piping.on).toBe(false);
+  expect(createDiffPipelines(() => ({ getItem: (k) => kept.get(k) ?? null, setItem: () => {}, removeItem: () => {} })).on).toBe(false);
 });

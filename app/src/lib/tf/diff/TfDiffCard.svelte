@@ -21,6 +21,10 @@
     switches the file between *Rendered* (`TfDiffRendered`), *Swipe* for an
     image changed on both sides, and its *Lines* (a binary file's *Bytes*).
     The buttons sit in `.tf-fh-acts`, which later header controls share.
+  - **Pipeline** (#2270): where the file has one, the header names it
+    (`.tf-ran`, and the pattern that made it the default) while it is on,
+    and *Show raw* / *Run pipeline* turns it off and on for this file. A side
+    that failed draws the raw diff under the step's error.
   - **Keys** come from the view: `nextHunk`, `comment` and `scrollTo` are
     this card's part of `n`/`p`, `c` and `j`/`k` (#2268).
 -->
@@ -29,6 +33,18 @@
   export interface OpenAt {
     entityId: string;
     at: string | null;
+  }
+
+  /** A file's pipeline as its header shows it (#2270). */
+  export interface CardPipeline {
+    label: string;
+    /** The pattern that made it the file's default; `null` where none did. */
+    pattern: string | null;
+    on: boolean;
+    /** On, and a side has not answered yet. */
+    running: boolean;
+    /** The side that gave no output, and why (worded to follow "failed on the file before the change, "). */
+    failed: { side: "old" | "new"; why: string } | null;
   }
 </script>
 
@@ -75,6 +91,8 @@
     load,
     commands,
     openAt = null,
+    pipeline = null,
+    onpipeline = () => {},
   }: {
     file: DrawnFile;
     split: boolean;
@@ -106,6 +124,9 @@
     commands: CommandPort;
     /** *Open in…* in the header, on the file at its first changed line; never on a deleted file. */
     openAt?: OpenAt | null;
+    /** The file's pipeline, or `null` where it has none; `onpipeline` turns it on or off for this file. */
+    pipeline?: CardPipeline | null;
+    onpipeline?: (on: boolean) => void;
   } = $props();
 
   /** The sides a rendered diff draws: the plan's, less one the reader found no file on. */
@@ -379,11 +400,22 @@
       <span class="tf-del-n">−{file.deletions}</span>
     {/if}
     {#if chip}<span class="tf-chip">{chip}</span>{/if}
-    {#if MODES.length > 0}
+    {#if pipeline !== null && pipeline.on && pipeline.failed === null}
+      <span class="tf-ran" class:tf-running={pipeline.running} title={pipeline.running ? "Running the pipeline on both sides" : "The diff of the pipeline's output on both sides"}
+        >{pipeline.label}</span
+      >
+      {#if pipeline.pattern !== null}<span class="tf-ran-why">default for {pipeline.pattern}</span>{/if}
+    {/if}
+    {#if MODES.length > 0 || pipeline !== null}
       <span class="tf-fh-acts">
-        <span class="tf-seg" role="group" aria-label="Show {keyOf(file)} as">
-          {#each MODES as m (m.mode)}<button type="button" aria-pressed={shows === m.mode} onclick={() => onmode(m.mode)}>{m.label}</button>{/each}
-        </span>
+        {#if pipeline !== null}
+          <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => onpipeline(!pipeline.on)}>{pipeline.on ? "Show raw" : "Run pipeline"}</button>
+        {/if}
+        {#if MODES.length > 0}
+          <span class="tf-seg" role="group" aria-label="Show {keyOf(file)} as">
+            {#each MODES as m (m.mode)}<button type="button" aria-pressed={shows === m.mode} onclick={() => onmode(m.mode)}>{m.label}</button>{/each}
+          </span>
+        {/if}
       </span>
     {/if}
     {#if viewed}
@@ -396,6 +428,11 @@
     {/if}
   </div>
   {#if !closed}
+    {#if pipeline?.on && pipeline.failed}
+      <div class="tf-banner tf-err">
+        The pipeline failed on the file {pipeline.failed.side === "old" ? "before" : "after"} the change, {pipeline.failed.why}. This is the raw diff.
+      </div>
+    {/if}
     {#if rendered !== null && shows !== "lines"}
       <TfDiffRendered plan={rendered} path={file.path} {sides} swipe={shows === "swipe"} {sideOf} {load} {render} {commands} />
     {:else if file.change === "binary"}
