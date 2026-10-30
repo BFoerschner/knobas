@@ -635,6 +635,44 @@ new: number | null,
 text: string, };
 
 /**
+ * The two commits a [`Block::Diff`] is between (#2273, #2310, spec #2234
+ * step 6): the diff is `base`'s tree to `head`'s.
+ *
+ * `repository` is the entity both commits belong to, the one whose sections
+ * read the diff between any two of its commits (`compare:<base>...<head>`)
+ * and a file at one of them (`file@<sha>:<path>`), and whose byte read takes
+ * a commit; at a whole sha each read stands at a fixed commit, so the app
+ * keeps it (ADR-0032). A pull request's diff also lists its `commits`, newest
+ * first, and the head the viewer last reviewed at (`reviewed`), which is
+ * how a reader picks one commit, a range or *since my last review*.
+ */
+export type DiffRange = { 
+/**
+ * The repository's entity id.
+ */
+repository: string, 
+/**
+ * The old side's commit, its whole sha: the merge base of a pull
+ * request, the commit before a range.
+ */
+base: string, 
+/**
+ * The new side's commit, its whole sha.
+ */
+head: string, 
+/**
+ * The commits from `base` (not included) to `head`, newest first, where
+ * the source lists them (a pull request's); empty otherwise.
+ */
+commits: Array<RangeCommit>, 
+/**
+ * The head's whole sha at the viewer's latest submitted review of a
+ * pull request; `None` for one the viewer never reviewed, and for any
+ * other diff.
+ */
+reviewed?: string, };
+
+/**
  * The answer the *Local changes* tab draws: the diff, or why there is none.
  * The same four arms as the working tree's
  * [`TreeRead`](super::working_tree::TreeRead).
@@ -2940,6 +2978,12 @@ source_id: string,
 parent: string, };
 
 /**
+ * One commit of a [`DiffRange`]: its whole sha, its subject and a quiet
+ * second reading (author, age) as a commit row has.
+ */
+export type RangeCommit = { sha: string, title: string, meta: string | null, };
+
+/**
  * Where a reached entity's path came from.
  *
  * Tagged on `kind`; #866's link sets joined as the third arm without
@@ -3791,7 +3835,13 @@ export type ViewBlock = { "type": "facts", facts: Array<Fact>, } | { "type": "te
  * outdated, drawn in a list at the end of the diff. Absent on the
  * wire reads as empty.
  */
-gone: Array<FileThread>, } | { "type": "log", text: string, truncated: boolean, } | { "type": "settings", title: string | null, entity: string, write_op: string, values: Array<Setting>, } | { "type": "actions", actions: Array<ViewAction>, } | { "type": "tree", trail: Array<Crumb>, entries: Array<TreeEntry>, 
+gone: Array<FileThread>, 
+/**
+ * The two commits the diff is between, where the source names them
+ * (#2273, #2310): what a reader reads a file whole at, and a pull
+ * request's commits to pick from. Absent on the wire when `None`.
+ */
+range?: DiffRange, } | { "type": "log", text: string, truncated: boolean, } | { "type": "settings", title: string | null, entity: string, write_op: string, values: Array<Setting>, } | { "type": "actions", actions: Array<ViewAction>, } | { "type": "tree", trail: Array<Crumb>, entries: Array<TreeEntry>, 
 /**
  * The source's cap cut the listing; the rest is at `url`.
  */

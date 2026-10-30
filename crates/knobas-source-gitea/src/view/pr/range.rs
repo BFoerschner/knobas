@@ -28,7 +28,11 @@ pub(super) fn reviewed(reviews: &[Review], viewer: Option<&str>) -> Option<Strin
         .rev()
         .filter(|r| login(r.user.as_ref()).as_deref() == Some(viewer))
         .filter(|r| r.state.as_deref().is_some_and(|s| SUBMITTED.contains(&s)))
-        .find_map(|r| r.commit_id.clone().filter(|sha| super::super::full_sha(sha)))
+        .find_map(|r| {
+            r.commit_id
+                .clone()
+                .filter(|sha| super::super::full_sha(sha))
+        })
 }
 
 /// The range `pull`'s diff is, in `owner/repo` of source `source_id`: from
@@ -43,7 +47,10 @@ pub(super) fn of(
     commits: &[ListedCommit],
     reviewed: Option<String>,
 ) -> Option<DiffRange> {
-    let base = pull.merge_base.clone().filter(|s| super::super::full_sha(s))?;
+    let base = pull
+        .merge_base
+        .clone()
+        .filter(|s| super::super::full_sha(s))?;
     let head = pull
         .head
         .as_ref()
@@ -102,6 +109,9 @@ mod tests {
         let reviews = [review("priya", "APPROVED", B)];
         assert_eq!(reviewed(&reviews, Some("knobas")), None);
         assert_eq!(reviewed(&reviews, None), None);
-        assert_eq!(reviewed(&[review("knobas", "COMMENT", "1262a5b")], Some("knobas")), None);
+        assert_eq!(
+            reviewed(&[review("knobas", "COMMENT", "1262a5b")], Some("knobas")),
+            None
+        );
     }
 }

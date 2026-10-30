@@ -78,7 +78,11 @@ async fn a_repositorys_compare_section_is_the_diff_between_its_two_commits() {
     // What it is between, read in the repository it was asked of (#2310).
     let range = range.as_ref().expect("a listing that settles both ends");
     assert_eq!(
-        (range.repository.as_str(), range.base.as_str(), range.head.as_str()),
+        (
+            range.repository.as_str(),
+            range.base.as_str(),
+            range.head.as_str()
+        ),
         (ENTITY, BASE, HEAD)
     );
     assert!(view.actions.is_empty(), "a diff offers no write");
@@ -90,7 +94,13 @@ async fn a_repositorys_compare_section_is_the_diff_between_its_two_commits() {
         .iter()
         .map(|r| r.url.path().to_owned())
         .collect();
-    assert_eq!(asked, [format!("{REPO}/compare/{BASE}...{HEAD}"), format!("{REPO}/compare/{BASE}...{HEAD}")]);
+    assert_eq!(
+        asked,
+        [
+            format!("{REPO}/compare/{BASE}...{HEAD}"),
+            format!("{REPO}/compare/{BASE}...{HEAD}")
+        ]
+    );
 }
 
 #[tokio::test]

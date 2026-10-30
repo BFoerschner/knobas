@@ -616,19 +616,31 @@ async fn the_files_tab_names_its_range_commits_and_the_viewers_last_review() {
     pull["merge_base"] = json!(BASE);
     let mut given = reviews();
     let list = given.as_array_mut().unwrap();
-    list.push(json!({ "id": 20, "user": { "login": VIEWER }, "state": "COMMENT",
-                      "commit_id": FIRST_SHA, "submitted_at": "2026-08-22T09:00:00Z" }));
-    list.push(json!({ "id": 21, "user": { "login": VIEWER }, "state": "APPROVED",
-                      "commit_id": HEAD_SHA, "submitted_at": "2026-08-22T12:00:00Z" }));
+    list.push(
+        json!({ "id": 20, "user": { "login": VIEWER }, "state": "COMMENT",
+                      "commit_id": FIRST_SHA, "submitted_at": "2026-08-22T09:00:00Z" }),
+    );
+    list.push(
+        json!({ "id": 21, "user": { "login": VIEWER }, "state": "APPROVED",
+                      "commit_id": HEAD_SHA, "submitted_at": "2026-08-22T12:00:00Z" }),
+    );
     // A draft is not given yet, so the approval above stays the latest.
-    list.push(json!({ "id": 22, "user": { "login": VIEWER }, "state": "PENDING",
-                      "commit_id": FIRST_SHA }));
+    list.push(
+        json!({ "id": 22, "user": { "login": VIEWER }, "state": "PENDING",
+                      "commit_id": FIRST_SHA }),
+    );
     let server = gitea(pull, given).await;
-    let view = source(&server).view(PR, Some("files")).await.unwrap().unwrap();
+    let view = source(&server)
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .unwrap();
     let Block::Diff { range, .. } = &view.sections[0].blocks[0] else {
         panic!("the files tab is a diff: {view:#?}");
     };
-    let range = range.as_ref().expect("a record naming both ends names a range");
+    let range = range
+        .as_ref()
+        .expect("a record naming both ends names a range");
     assert_eq!(range.repository, "gitea:tidewater/payout-service");
     assert_eq!((range.base.as_str(), range.head.as_str()), (BASE, HEAD_SHA));
     assert_eq!(range.reviewed.as_deref(), Some(HEAD_SHA));
@@ -640,13 +652,20 @@ async fn the_files_tab_names_its_range_commits_and_the_viewers_last_review() {
     assert_eq!(
         picked,
         [
-            (FIRST_SHA, "PAY-231: retry SEPA payouts on transient PSP errors"),
+            (
+                FIRST_SHA,
+                "PAY-231: retry SEPA payouts on transient PSP errors"
+            ),
             (HEAD_SHA, "PAY-231: jitter in backoff"),
         ]
     );
     // A record without its merge base names no range: nothing to read whole at.
     let server = gitea(open_pull(), reviews()).await;
-    let view = source(&server).view(PR, Some("files")).await.unwrap().unwrap();
+    let view = source(&server)
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .unwrap();
     let Block::Diff { range, .. } = &view.sections[0].blocks[0] else {
         panic!("the files tab is a diff");
     };

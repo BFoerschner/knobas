@@ -236,7 +236,10 @@ mod tests {
         let l = listing(&[('c', &['b']), ('b', &['a']), ('a', &['0'])]);
         let base = format!("{}^", sha('a'));
         assert_eq!(between(&l, &base, &sha('c')), Some((sha('0'), sha('c'))));
-        assert_eq!(between(&l, &sha('0'), &sha('c')), Some((sha('0'), sha('c'))));
+        assert_eq!(
+            between(&l, &sha('0'), &sha('c')),
+            Some((sha('0'), sha('c')))
+        );
     }
 
     #[test]
