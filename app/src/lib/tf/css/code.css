@@ -87,6 +87,7 @@
 .tf-banner { display: flex; gap: 10px; align-items: center; padding: 8px 12px; font-size: var(--t-sm); border-bottom: 1px solid var(--rule); }
 .tf-banner.tf-warn { background: var(--warn-bg); color: var(--warn); }
 .tf-banner.tf-info { background: var(--info-bg); color: var(--info); }
+.tf-banner.tf-err { background: var(--err-bg); color: var(--err); }
 .tf-banner .tf-acts { margin-left: auto; display: flex; gap: 6px; }
 .tf-code { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; overflow: auto; margin: 0; }
 .tf-code .tf-l { display: grid; grid-template-columns: 48px 1fr; white-space: pre; }
@@ -245,3 +246,25 @@
 .tf-rsw-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-rsw-tag { margin-left: auto; font-size: var(--t-2xs); color: var(--ink-2); font-weight: 600; white-space: nowrap; }
 .tf-rsw-kb { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); }
+
+/* The pipeline bar (#2264; mockups/code-area .pipe / .step / .stepfail): bytes → steps → renderer. */
+.tf-pipe { display: flex; flex-direction: column; gap: var(--control-gap); padding: 8px 12px; border-bottom: 1px solid var(--rule); background: var(--sheet); font-size: var(--t-sm); }
+.tf-pipe > .tf-acts { justify-content: flex-end; }
+.tf-psteps { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
+.tf-plab { font-weight: 600; margin-right: 4px; }
+.tf-parrow { color: var(--ink-2); }
+.tf-psrc { font: var(--t-xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
+.tf-pstep { display: inline-flex; align-items: center; height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet-2); overflow: hidden; }
+.tf-pgrip { display: inline-grid; place-items: center; width: 18px; height: 100%; padding: 0; border: 0; border-right: 1px solid var(--rule-2); background: none; color: var(--ink-2); cursor: grab; }
+.tf-pname { padding: 0 8px; font-weight: 600; white-space: nowrap; }
+.tf-parg { height: 100%; border: 0; border-left: 1px solid var(--rule-2); background: var(--paper); font: var(--t-xs) var(--mono); font-variant-ligatures: none; padding: 0 8px; color: var(--ink); }
+.tf-pfilter { min-width: 260px; }
+.tf-parg:focus-visible, .tf-pgrip:focus-visible, .tf-px:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tf-px { display: inline-grid; place-items: center; width: 22px; height: 100%; padding: 0; border: 0; border-left: 1px solid var(--rule-2); background: none; color: var(--ink-2); cursor: pointer; }
+.tf-pstep.tf-pbad { border-color: var(--err); background: var(--err-bg); color: var(--err); }
+.tf-pstep.tf-prenderer { padding: 0 8px; font-weight: 600; background: var(--info-bg); border-color: var(--info); color: var(--info); }
+.tf-pmenu { position: relative; display: inline-flex; }
+.tf-pmenu .tf-menu { width: 320px; font-size: var(--t-sm); }
+.tf-pmenu .tf-menu > button { display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); }
+.tf-stepfail .tf-sfcols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tf-stepfail .tf-sfcols b { display: block; font-size: var(--t-xs); margin-bottom: 4px; }

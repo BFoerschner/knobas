@@ -75,6 +75,9 @@
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
+  import TfFilePipeline from "../render/TfFilePipeline.svelte";
+  import type { PipeRun, PipeStep } from "../../ipc/entity";
+  import { inputOf, pipedFile, sized } from "../../render/pipeline";
   import { commandIdOf, ipcCommands, type CommandPort } from "../../render/command";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
@@ -119,7 +122,7 @@
     commands = ipcCommands,
     defaults = appDefaults,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes">;
+    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "piped">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -377,7 +380,57 @@
    */
   const fileStranded = $derived(treeFailed !== null && fileSection === null);
 
-  const lines = $derived(file === null || file.binary ? [] : fileLines(file.text));
+  /**
+   * **Pipelines** (#2264): each file's steps by path, for as long as the tab lives; none while editing. A pipeline
+   * runs in the backend over the file's bytes at its commit; what it finished as is drawn in the file's place, by
+   * the renderer its name takes (`events.json.gz` through gunzip is `events.json`). Until it answers, and when a
+   * step fails, the file is drawn as read.
+   */
+  const pipes = new SvelteMap<string, PipeStep[]>();
+  const steps = $derived(file === null || editing ? null : (pipes.get(file.path) ?? null));
+  let piped = $state<{ path: string; run: PipeRun } | null>(null);
+  let piping = $state(false);
+  let pipeRefused = $state<string | null>(null);
+  $effect(() => {
+    const read = file;
+    const chain = steps;
+    const run = ports.piped;
+    if (read === null || chain === null || chain.length === 0 || run === undefined) {
+      piped = null;
+      piping = false;
+      pipeRefused = null;
+      return;
+    }
+    if (untrack(() => piped?.path) !== read.path) piped = null;
+    let live = true;
+    piping = true;
+    run(at, read.path, read.commit ?? null, $state.snapshot(chain)).then(
+      (answer) => {
+        if (!live) return;
+        piped = { path: read.path, run: answer };
+        piping = false;
+        pipeRefused = null;
+      },
+      (cause: unknown) => {
+        if (!live) return;
+        piped = null;
+        piping = false;
+        pipeRefused = ipcErrorMessage(cause);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  });
+  const pipeFailure = $derived(piped !== null && piped.run.outcome === "failed" ? piped.run.failure : null);
+  /** The file as it is drawn: the pipeline's output where it finished, else the file as read. */
+  const drawn = $derived.by((): FileBlock | null => {
+    if (file === null) return null;
+    if (steps === null || steps.length === 0 || piped === null || piped.run.outcome !== "done") return file;
+    return { ...file, ...pipedFile(piped.run) };
+  });
+
+  const lines = $derived(drawn === null || drawn.binary ? [] : fileLines(drawn.text));
 
   /** Files of more lines than this draw only the lines in view and a margin (#2251). */
   const WHOLE_UP_TO = 2_000;
@@ -386,18 +439,18 @@
   let code = $state<HTMLElement | null>(null);
 
   /** What takes the file and what it opens with (#2254, #2263): the default for its pattern, else the registry's first. */
-  const opened = $derived(file === null ? null : openWith(file, allRenderers(), defaults.list));
+  const opened = $derived(drawn === null ? null : openWith(drawn, allRenderers(), defaults.list));
   /** The renderer picked in the switcher per file, for as long as the tab lives (#2263). */
   const picks = new SvelteMap<string, string>();
   /** What draws the file now: the one picked, else the default. */
   const renderer = $derived.by((): Renderer | null => {
-    if (opened === null || file === null) return null;
-    const picked = picks.get(file.path);
+    if (opened === null || drawn === null) return null;
+    const picked = picks.get(drawn.path);
     return opened.offered.find((r) => r.id === picked) ?? opened.renderer;
   });
   const drawAs = $derived(renderer?.id ?? null);
   /** The pattern *Make default* writes: the one that chose the default, unless broader than the file's extension. */
-  const switchPattern = $derived(file === null || opened === null ? "" : makeDefaultPattern(opened, file.path));
+  const switchPattern = $derived(drawn === null || opened === null ? "" : makeDefaultPattern(opened, drawn.path));
 
   async function makeDefault(path: string, chosen: Renderer) {
     try {
@@ -408,7 +461,7 @@
     }
   }
   const image = $derived(
-    drawAs === "image" && file !== null && !file.binary ? imageUrl(new TextEncoder().encode(file.text), file.path) : null,
+    drawAs === "image" && drawn !== null && !drawn.binary ? imageUrl(new TextEncoder().encode(drawn.text), drawn.path) : null,
   );
 
   /**
@@ -419,7 +472,7 @@
   let painted = $state(0);
   let highlighting: HighlightJob | null = null;
   $effect(() => {
-    const read = file;
+    const read = drawn;
     if (read === null || read.binary || drawAs !== "source") return;
     const got: (LineTokens | undefined)[] = [];
     tokensOf = got;
@@ -771,7 +824,7 @@
         >
         <span class="tf-acts">
           {#if opened !== null && renderer !== null}
-            {@const at = file.path}
+            {@const at = drawn?.path ?? file.path}
             <TfRendererSwitch
               {opened}
               shown={renderer}
@@ -779,6 +832,10 @@
               onpick={(r) => picks.set(at, r.id)}
               onmakedefault={(r) => void makeDefault(at, r)}
             />
+          {/if}
+          {#if steps === null && ports.piped !== undefined}
+            {@const at = file.path}
+            <button type="button" class="tf-btn tf-sm" onclick={() => pipes.set(at, [])}>+ Pipeline</button>
           {/if}
           {#if editable}
             <a class="tf-btn tf-sm" href={editHash(repoId, file.path)}>Edit</a>
@@ -806,16 +863,39 @@
           {#if file.url}<span class="tf-acts"><a class="tf-btn tf-sm" href={file.url}>The rest on the source</a></span>{/if}
         </div>
       {/if}
-      {#if file.binary}
+      {#if steps !== null}
+        {@const at = file.path}
+        <TfFilePipeline
+          {steps}
+          path={file.path}
+          shownAs={drawn !== null && drawn !== file ? `${renderer?.name ?? "Source"} · ${drawn.path.slice(drawn.path.lastIndexOf("/") + 1)}` : (renderer?.name ?? "Source")}
+          failedAt={pipeFailure?.index ?? null}
+          running={piping}
+          onchange={(next) => pipes.set(at, next)}
+          onreset={() => pipes.delete(at)}
+        />
+        {#if pipeFailure !== null}
+          <div class="tf-stepfail" role="alert">
+            <b>Step {pipeFailure.index + 1}, {pipeFailure.name}, failed.</b>
+            <div class="tf-sfcols">
+              <div><b>What it said</b><pre>{pipeFailure.error}</pre></div>
+              <div><b>Its input, {inputOf(steps, pipeFailure.index)}, {sized(pipeFailure.input.size)}</b><pre>{pipeFailure.input.head}</pre></div>
+            </div>
+          </div>
+        {:else if pipeRefused !== null}
+          <div class="tf-banner tf-err" role="alert">The pipeline could not read the file: {pipeRefused}</div>
+        {/if}
+      {/if}
+      {#if drawn === null || drawn.binary}
         <div class="tf-empty"><p>A binary file, not drawn.</p></div>
       {:else if image !== null}
-        <div class="tf-fimage"><img src={image} alt={file.path} /></div>
+        <div class="tf-fimage"><img src={image} alt={drawn.path} /></div>
       {:else if drawAs === "markdown"}
-        <TfMarkdown text={file.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} />
+        <TfMarkdown text={drawn.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} />
       {:else if drawAs === "mermaid"}
-        <TfDiagram engine="mermaid" code={file.text} {render} />
+        <TfDiagram engine="mermaid" code={drawn.text} {render} />
       {:else if renderer !== null && drawAs === renderer.id && commandIdOf(renderer) !== null}
-        <TfCommandOutput {renderer} text={file.text} {commands} />
+        <TfCommandOutput {renderer} text={drawn.text} {commands} />
       {:else}
         <div class="tf-findbar">
           <label class="tf-fsearch">

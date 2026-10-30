@@ -15,7 +15,7 @@
  * `payout-service` and its `genericFiles` for every other repository. A
  * divergence: the mock adapter draws no view for a repository at all.
  */
-import type { DiffFile, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
+import type { DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/code/line-diff";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
 
@@ -266,6 +266,22 @@ const FILE_KINDS: Record<string, string> = {
   "notes/plan.zzq": "fn main() { this is no language knobas knows }",
 };
 
+/**
+ * `?fake-pipeline`'s files (#2264): a gzipped JSON fixture, drawn as binary until a pipeline unwraps it. The fake
+ * keeps what is inside, not the gzip; {@link repoFilePiped} unwraps by name.
+ */
+const EVENTS_JSON = JSON.stringify({
+  events: [
+    { at: "2026-10-29T08:14:02Z", level: "info", code: 200, msg: "delivered" },
+    { at: "2026-10-29T08:14:09Z", level: "error", code: 503, msg: "subscriber returned 503, retry 1 in 2 s" },
+    { at: "2026-10-29T08:14:11Z", level: "error", code: 503, msg: "subscriber returned 503, retry 2 in 4 s" },
+    { at: "2026-10-29T08:14:15Z", level: "error", code: null, msg: "connection reset by peer" },
+  ],
+});
+const WRAPPED: Record<string, { inner: string; size: number }> = {
+  "fixtures/events.json.gz": { inner: EVENTS_JSON, size: 49_357 },
+};
+
 function filesOf(repoId: string, branch: string | null): Record<string, string> | null {
   const repo = CORPUS.find((entry) => entry.entity_id === repoId && entry.kind === "repo");
   if (!repo) return null;
@@ -277,6 +293,8 @@ function filesOf(repoId: string, branch: string | null): Record<string, string> 
       ...(query.has("fake-file-kinds") ? FILE_KINDS : {}),
       // `?fake-md-hostile` (#2255): a Markdown file of raw HTML that tries to run script.
       ...(query.has("fake-md-hostile") ? { "docs/hostile.md": HOSTILE_MD } : {}),
+      // `?fake-pipeline` (#2264): a gzipped JSON file to unwrap.
+      ...(query.has("fake-pipeline") ? Object.fromEntries(Object.keys(WRAPPED).map((path) => [path, ""])) : {}),
     };
     // `?fake-file-lines=<n>` (perf audit, #2200's class): one file of `n` lines.
     const n = Number(query.get("fake-file-lines") ?? 0) || 0;
@@ -471,6 +489,12 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
   const path = id.slice("file:".length);
   const text = files[path];
   if (text === undefined) throw { code: "not_found", message: `gitea: no file ${path} at ${ref}`, source_id: null };
+  const wrapped = WRAPPED[path];
+  if (wrapped !== undefined) {
+    return section(id, "Files", [
+      { type: "file", trail: [], path, text: "", language: null, size: wrapped.size, truncated: false, binary: true, url: null, sha: blobOf(wrapped.inner), commit: ref },
+    ]);
+  }
   // No action beside the file (#2241): *Commit change…*'s standing is `refused_writes`' ({@link repoRefusals}).
   return section(id, "Files", [
     { type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: blobOf(text), commit: ref },
@@ -605,4 +629,69 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
     return one(treeSection(files, sectionId, ref));
   }
   return { sections: [], actions: [] };
+}
+
+/** A fake jq: `.`, `.key`, `.[]`, `.key[]` and `.[n]` joined by `|`; anything else is refused as jq would refuse it. */
+function fakeJq(filter: string, input: unknown): unknown[] {
+  const at = filter.search(/\|\s*\|/);
+  if (at !== -1) throw new Error(`the filter does not parse: expected term at column ${filter.indexOf("|", at + 1) + 1}`);
+  let values = [input];
+  for (const part of filter.split("|").map((p) => p.trim())) {
+    if (part === ".") continue;
+    const match = /^\.([A-Za-z_][\w]*)?(\[(\d*)\])?$/.exec(part);
+    if (match === null) throw new Error(`jq: error: the dev fake's jq knows only paths, not ${part}`);
+    const [, key, brackets, index] = match;
+    values = values.flatMap((value) => {
+      let picked: unknown = key === undefined ? value : (value as Record<string, unknown> | null)?.[key] ?? null;
+      if (brackets === undefined) return [picked];
+      if (!Array.isArray(picked)) throw new Error(`jq: error: cannot iterate over ${picked === null ? "null" : typeof picked}`);
+      if (index !== undefined && index !== "") picked = picked[Number(index)] ?? null;
+      return index !== undefined && index !== "" ? [picked] : picked;
+    });
+  }
+  return values;
+}
+
+/**
+ * `entity_file_piped` for the repositories this module draws (#2264): gunzip unwraps a `?fake-pipeline` file by
+ * name, jq is {@link fakeJq}, pretty-print JSON re-lays it; any other step fails, naming the dev fake.
+ */
+export function repoFilePiped(entityId: string, path: string, steps: PipeStep[]): PipeRun | undefined {
+  const branchAt = entityId.indexOf("@refs/heads/");
+  const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);
+  const files = filesOf(repoId, branchAt === -1 ? null : entityId.slice(branchAt + "@refs/heads/".length));
+  if (files === null) return undefined;
+  let gz = WRAPPED[path];
+  const read = gz === undefined ? files[path] : "";
+  if (read === undefined) throw { code: "not_found", message: `gitea: no file ${path}`, source_id: null };
+  let text = read;
+  let name = path;
+  for (const [index, step] of steps.entries()) {
+    const input = gz === undefined ? text : "\u001f\u008b\u0008…";
+    const fail = (error: string): PipeRun => ({
+      outcome: "failed",
+      failure: { index, name: step.step === "jq" ? "jq" : step.step, why: "error", error, input: { size: gz?.size ?? text.length, head: input, binary: gz !== undefined } },
+    });
+    try {
+      if (step.step === "gunzip") {
+        if (gz === undefined) return fail("invalid gzip header");
+        text = gz.inner;
+        gz = undefined;
+        name = name.replace(/\.gz$/, "");
+      } else if (gz !== undefined) {
+        return fail("the input is not JSON: expected value at 1:1");
+      } else if (step.step === "jq") {
+        text = fakeJq(step.filter, JSON.parse(text)).map((value) => `${JSON.stringify(value, null, 2)}\n`).join("");
+        name = name.replace(/(\.[^./]+)?$/, ".json");
+      } else if (step.step === "pretty" && step.format === "json") {
+        text = `${JSON.stringify(JSON.parse(text), null, 2)}\n`;
+      } else {
+        return fail(`the dev fake does not run ${step.step}`);
+      }
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (gz !== undefined) return { outcome: "done", name, output: { kind: "bytes", base64: "H4sIAAAAAAAAAw==", size: gz.size } };
+  return { outcome: "done", name, output: { kind: "text", text } };
 }
