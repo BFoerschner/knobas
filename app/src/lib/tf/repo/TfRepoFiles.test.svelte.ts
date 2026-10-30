@@ -310,3 +310,70 @@ test("copying a selection across lines gives the selected text, without the line
   expect(copied["text/plain"]).toBe("main() {\n    run();\n}");
   expect(event.defaultPrevented).toBe(true);
 });
+
+// ---- the tree at a commit, moved behind (#2241, #2242) ----
+
+/**
+ * A source whose listings name the commit they were read at, as Gitea's do
+ * (`file@<n>:<path>`), and whose branch `push()` moves to a new one.
+ */
+function commitSource() {
+  let tip = 1;
+  const texts: Record<number, string> = { 1: "# one", 2: "# two" };
+  const reads: string[] = [];
+  const entityView = async (_at: string, section: string | null): Promise<SourceView> => {
+    const id = section ?? "";
+    reads.push(id);
+    const one = (blocks: unknown[]) => ({ sections: [{ id, title: "Files", count: null, deferred: false, blocks }], actions: [] }) as unknown as SourceView;
+    if (id === "files")
+      return one([{ type: "tree", trail: [], entries: [{ name: "README.md", kind: "file", size: 5, section: `file@${tip}:README.md` }], truncated: false, url: null }]);
+    const at = Number(/^file@(\d+):/.exec(id)?.[1] ?? tip);
+    return one([{ type: "file", trail: [], path: "README.md", text: texts[at], language: null, size: 5, truncated: false, binary: false, url: null, sha: `b${at}` }]);
+  };
+  return { reads, entityView, push: () => (tip += 1) };
+}
+
+test("the app's view:fresh for the top directory reads the tree at the new commit and the file there; one that did not move reads nothing more", async () => {
+  const source = commitSource();
+  const heard: ((event: { payload: unknown }) => void)[] = [];
+  const ports = {
+    entityView: source.entityView,
+    submitWrite: async () => {
+      throw { code: "invalid", message: "no write in this suite" };
+    },
+    listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
+      if (event === "view:fresh") heard.push(handler);
+      return () => {};
+    },
+  };
+  view = mount(TfRepoFiles, { target, props: { ports, repoId: REPO, at: REPO, branch: "main", path: null, changed: new Set<string>() } });
+  await settle();
+  expect(lineText(0)).toEqual(["1", "# one"]);
+
+  const tell = (entity_id: string, section: string) => {
+    for (const hear of heard) hear({ payload: { entity_id, section } });
+  };
+  const before = source.reads.length;
+  tell(REPO, "files");
+  await settle();
+  expect(source.reads.slice(before)).toEqual(["files"]);
+  expect(lineText(0)).toEqual(["1", "# one"]);
+
+  source.push();
+  tell(`${REPO}@refs/heads/other`, "files");
+  await settle();
+  expect(lineText(0)).toEqual(["1", "# one"]);
+
+  tell(REPO, "files");
+  await settle();
+  expect(lineText(0)).toEqual(["1", "# two"]);
+  expect(source.reads).toContain("file@2:README.md");
+});
+
+test("a deep link's guess that drew the file stands for the section its listing names, so the file is not read twice", async () => {
+  const source = commitSource();
+  draw(source.entityView, "README.md");
+  await settle();
+  expect(lineText(0)).toEqual(["1", "# one"]);
+  expect(source.reads.filter((id) => id.endsWith("README.md"))).toEqual(["file:README.md"]);
+});

@@ -1193,6 +1193,7 @@ mod tests {
             super::events::CAPTURE_OPEN_NOTE,
             super::events::CLONE_PROGRESS,
             super::events::ITEM_REFRESHED,
+            super::events::VIEW_FRESH,
         ];
         names.sort_unstable();
         declared.sort_unstable();
