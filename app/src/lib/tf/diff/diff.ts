@@ -23,6 +23,21 @@ import { wordMarks, type Range } from "./words";
 
 export type DiffLayout = "unified" | "split";
 
+/**
+ * The most lines one diff carries over all its files: the parser's safety
+ * stop (`knobas_source::diff::MAX_LINES_PER_VIEW`, #2269), named where a
+ * diff hits it.
+ */
+export const DIFF_CEILING = 50_000;
+
+/** How many hidden lines one *Expand* shows. */
+export const EXPAND_STEP = 20;
+
+/** Expanded context's reader (#2267): a file's whole text on one side, at that side's commit, through the read cache; `null` where it cannot be read whole. */
+export interface DiffContext {
+  text(file: DiffFile, side: "old" | "new"): Promise<string | null>;
+}
+
 /** *Viewed* per file: which are, and how to change one. */
 export interface DiffViewed {
   paths: readonly string[];
