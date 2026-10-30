@@ -67,7 +67,13 @@
 .tf-fimage img { max-width: 100%; }
 .tf-cgroup-h .tf-acts { margin-left: auto; display: flex; gap: 6px; }
 .tf-cgroup-h .tf-rc-who { font-weight: 400; }
-.tf-rcommits td:first-child { width: 110px; }
+.tf-rcommits td.tf-rpick { width: 28px; padding-right: 0; }
+.tf-rcommits td:nth-child(2) { width: 110px; }
+/* A commit picked for *Diff selected* (#2271). */
+.tf-rcommits tr.tf-picked td { background: var(--info-bg); }
+.tf-rbar.tf-rpickbar { display: flex; align-items: center; gap: 12px; }
+.tf-rpickbar .tf-fbar { flex: 1; }
+.tf-diffpage .tf-cgroup-h a { color: inherit; }
 .tf-rprs td:first-child { width: 70px; }
 /*
   The one diff component (#2266, `diff/TfDiffView.svelte`; `mockups/code-area/diff.css`): every diff, file by file.
