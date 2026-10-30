@@ -637,6 +637,8 @@ pub fn run() {
             commands::app::user_renderers,
             commands::app::set_user_renderers,
             commands::app::run_renderer,
+            // #2256's byte read, appended at the foot (§10.8).
+            commands::entity::entity_file_bytes,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

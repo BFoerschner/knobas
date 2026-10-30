@@ -344,6 +344,86 @@ pub async fn entity_view<R: tauri::Runtime>(
     .map_err(|error| crate::sources::to_ipc(&error, None))
 }
 
+/// The bytes of the file at `path` in `entity_id`'s tree (#2256, spec #2234
+/// step 5): a README's relative image, a PDF. `commit` is the `commit` of the
+/// file block the reader has open, handed back, so a README's image is read
+/// at the README's commit; `None` reads at the entity's own reference.
+///
+/// Answered raw ([`tauri::ipc::Response`]: an `ArrayBuffer` in the shell,
+/// not a JSON array four times the size), whole and never cut. A file over
+/// [`BYTES_CAP`](knobas_source::view::BYTES_CAP) is refused with its size.
+/// Kept for the session where the adapter says the read is fixed (a whole
+/// sha), so a second look costs no request (ADR-0032).
+///
+/// # Errors
+///
+/// See [`entity_file_bytes_inner`].
+#[tauri::command]
+pub async fn entity_file_bytes<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    path: String,
+    commit: Option<String>,
+) -> Result<tauri::ipc::Response, IpcError> {
+    let state = crate::sources::state(&app)?;
+    entity_file_bytes_inner(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &path,
+        commit.as_deref(),
+    )
+    .await
+    .map(tauri::ipc::Response::new)
+}
+
+/// [`entity_file_bytes`]'s body, reachable from a test.
+///
+/// # Errors
+///
+/// `invalid` for a file over the cap, its size and the cap in the message,
+/// and for a source that reads no bytes; otherwise as [`entity_view`].
+pub async fn entity_file_bytes_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    path: &str,
+    commit: Option<&str>,
+) -> Result<Vec<u8>, IpcError> {
+    use knobas_source::view::{BYTES_CAP, FileBytes};
+    let read = crate::sources::crud::file_bytes(
+        pool, secrets, registry, live, entity_id, path, commit, BYTES_CAP,
+    )
+    .await
+    .map_err(|error| crate::sources::to_ipc(&error, None))?;
+    match read.as_deref() {
+        Some(FileBytes::Read(bytes)) => Ok(bytes.clone()),
+        Some(FileBytes::TooLarge { size }) => Err(IpcError::invalid(format!(
+            "{path} is {}; knobas reads a file's bytes up to {}",
+            mebibytes(*size),
+            mebibytes(BYTES_CAP)
+        ))),
+        None => Err(IpcError::invalid(format!(
+            "{entity_id}'s source reads no file bytes"
+        ))),
+    }
+}
+
+/// `size` bytes in MiB, to one place where it is not whole.
+fn mebibytes(size: u64) -> String {
+    #[allow(clippy::cast_precision_loss)]
+    let mib = size as f64 / (1024.0 * 1024.0);
+    if mib.fract() == 0.0 {
+        format!("{mib:.0} MiB")
+    } else {
+        format!("{mib:.1} MiB")
+    }
+}
+
 /// The writes among `asks` their sources' credentials cannot make, each with
 /// its reason (#2040, ADR-0020 rule 4): a surface that draws a write from the
 /// template `write_ops` -- the inbox's *Re-run*, the Builds frame's *Run…* --
