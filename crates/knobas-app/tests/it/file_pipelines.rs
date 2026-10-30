@@ -495,6 +495,47 @@ async fn a_step_past_its_timeout_is_stopped() {
     assert_eq!(done(&run).1, "1\n");
 }
 
+/// The children `ps` lists that were started with `cap` (no other test uses
+/// that cap, so a sibling test's children are not counted).
+#[cfg(unix)]
+fn children_with_cap(cap: u64) -> usize {
+    let listed = std::process::Command::new("ps")
+        .args(["-Ao", "args="])
+        .output()
+        .expect("ps runs");
+    let wanted = format!("{} {cap}", knobas_app::file_pipeline::CHILD_ARG);
+    String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .filter(|line| line.trim_end().ends_with(&wanted))
+        .count()
+}
+
+/// **A jq filter that never writes is killed at its timeout (#2314)**, not
+/// only answered for: its child process is gone once the step has failed.
+/// `ps` sees the child while it runs, so the second look can see one too.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_never_writing_jq_child_is_killed_at_its_timeout() {
+    let limits = Limits {
+        cap: SIZE_CAP - 2314,
+        timeout: Duration::from_secs(2),
+    };
+    let run = tokio::spawn(async move {
+        run_bytes(&[jq("last(range(1e18))")], b"null".to_vec(), "x", limits).await
+    });
+    let seen = Instant::now();
+    while children_with_cap(limits.cap) == 0 {
+        assert!(
+            seen.elapsed() < Duration::from_millis(1500),
+            "the jq child never showed in ps"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let run = run.await.unwrap();
+    assert_eq!(failure(&run).why, PipeWhy::TimedOut, "{:?}", failure(&run));
+    assert_eq!(children_with_cap(limits.cap), 0, "the jq child outlived its timeout");
+}
+
 /// **A value nested deep at run time fails the step, not the app (#2314).**
 /// `reduce` builds it by iteration, past the evaluation's stack guard; then
 /// writing it (`tojson`) or comparing it (`==`) recursed off the end of the

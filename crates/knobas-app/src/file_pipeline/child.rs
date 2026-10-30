@@ -46,9 +46,16 @@ pub fn use_helper(program: impl Into<PathBuf>) {
     let _ = HELPER.set(program.into());
 }
 
+/// The app's own binary. On Linux, `/proc/self/exe`: the running image even
+/// after a package update replaced or removed the file at its path (where
+/// `current_exe` answers `… (deleted)`). Elsewhere the path the process
+/// started from: on macOS the bundle's binary; an app moved or replaced while
+/// running fails the step with the reason, or runs the newer binary, whose
+/// refusal of a step it cannot read fails the step too, never the app.
 fn program() -> Result<PathBuf, String> {
     match HELPER.get() {
         Some(program) => Ok(program.clone()),
+        None if cfg!(target_os = "linux") => Ok(PathBuf::from("/proc/self/exe")),
         None => std::env::current_exe()
             .map_err(|error| format!("the app's own binary cannot be found: {error}")),
     }
