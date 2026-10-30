@@ -125,6 +125,8 @@ impl Source for Fake {
 
 struct Fixture {
     pool: PgPool,
+    /// Keeps this test's own database ([`fixture`]) for as long as it runs.
+    _db: knobas_db::embedded::Connector,
     secrets: Arc<dyn SecretStore>,
     registry: Arc<dyn AdapterRegistry>,
     shelf: Arc<Shelf>,
@@ -144,14 +146,19 @@ async fn run_bytes(steps: &[PipeStep], bytes: Vec<u8>, name: &str, limits: Limit
     knobas_app::file_pipeline::run_bytes(steps, bytes, name, limits).await
 }
 
+/// A source over a fake, on a database of the test's own: the saved command
+/// steps, named pipelines and renderer defaults are app-wide rows, so tests
+/// sharing the file's database ran the steps another test had just saved
+/// (#2323).
 async fn fixture() -> Fixture {
     helper();
-    let pool = knobas_db::test_util::test_pool().await;
-    knobas_db::migrate::run(&pool).await.unwrap();
+    let db = knobas_db::test_util::scratch_database("file_pipelines").await;
+    let pool = db.pool(4).await.expect("a pool onto this test's own database");
     let shelf = Arc::new(Shelf::default());
     let id = format!("pipe-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let f = Fixture {
         pool,
+        _db: db,
         secrets: Arc::new(MemoryStore::default()),
         registry: Arc::new(Building(shelf.clone())),
         shelf,
