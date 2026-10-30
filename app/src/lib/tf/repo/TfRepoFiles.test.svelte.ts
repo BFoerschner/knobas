@@ -430,7 +430,7 @@ test("closing the file viewer cancels its highlighting, and a late answer draws 
 });
 
 test("an SVG file is drawn as an image, sanitized first (Standards 1)", async () => {
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4" onload="parent.x=1"><script>parent.x=2</script></svg>';
+  const svg = '<svg width="4" height="4" onload="parent.x=1"><script>parent.x=2</script></svg>';
   const made: Blob[] = [];
   const create = URL.createObjectURL;
   URL.createObjectURL = (blob: Blob) => (made.push(blob), `blob:fake/${made.length}`);

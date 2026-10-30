@@ -105,7 +105,7 @@ test("an image renderer's output is an image from a blob of its bytes, no frame"
 });
 
 test("an image renderer's SVG is sanitized before it is drawn (Standards 1, spec story 44)", async () => {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" onload="parent.x=1"><script>parent.x=2</script><rect width="4" height="4"/></svg>`;
+  const svg = `<svg onload="parent.x=1"><script>parent.x=2</script><rect width="4" height="4"/></svg>`;
   await withBlobs(async (made) => {
     await draw("x", { outcome: "drawn", output: "image", body: `data:image/svg+xml;base64,${btoa(svg)}` }, { ...CAT, output: "image" });
     await Promise.resolve();

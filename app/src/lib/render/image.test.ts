@@ -16,7 +16,7 @@ test("a type that is not a listed image type is loaded as bytes, never as HTML o
 });
 
 test("an SVG blob keeps its drawing and loses its script", async () => {
-  const blob = typedImageBlob(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>x()</script><circle r="2"/></svg>'), "image/svg+xml");
+  const blob = typedImageBlob(new TextEncoder().encode('<svg><script>x()</script><circle r="2"/></svg>'), "image/svg+xml");
   const svg = await blob.text();
   expect(svg).toContain("<circle");
   expect(svg).not.toContain("script");
