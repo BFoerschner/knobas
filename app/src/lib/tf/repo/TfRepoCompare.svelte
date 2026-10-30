@@ -28,12 +28,13 @@
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import type { DiffFile } from "../../ipc/entity";
+  import type { DiffFile, DiffRange } from "../../ipc/entity";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { compareSection, diffHash } from "../diff/address";
+  import { rangeContext } from "../diff/context";
   import { itemHash, resolveTicket } from "../job/job";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
@@ -60,7 +61,7 @@
     defaultBranch,
     refreshed = 0,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite">;
+    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -85,6 +86,9 @@
   let reading = $state(false);
   /** The diff hit the parser's ceiling. */
   let cut = $state(false);
+  /** What the compare's diff is between, where the source settled it (#2310): context reads at its shas. */
+  let range = $state<DiffRange | null>(null);
+  const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
   let failed = $state<string | null>(null);
   /** *Into*, the default branch proposed once: a new *From* keeps what the reader picked. */
   let base = $state(untrack(() => into));
@@ -158,6 +162,7 @@
       const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
       files = block?.type === "diff" ? block.files : [];
       cut = block?.type === "diff" && block.truncated;
+      range = block?.type === "diff" ? (block.range ?? null) : null;
       filesFor = asked;
     }, (error) => {
       if (!alive()) return;
@@ -292,7 +297,12 @@
         {#if files !== null && files.length === 0}
           <div class="tf-empty">This branch has no commits that {base} lacks.</div>
         {:else if files !== null}
-          <TfDiffView {files} {cut} openAt={head === null ? null : { entityId: repoId, at: head }} />
+          {#if range === null}
+            <p class="tf-cnote" data-testid="no-range">Context does not expand here: the source did not settle which two commits this diff is between, as for a range from the repository's first commit or a branch that merged its base back in.</p>
+          {/if}
+          {#key `${filesFor}\n${range?.base}\n${range?.head}`}
+            <TfDiffView {files} {cut} {context} openAt={head === null ? null : { entityId: repoId, at: head }} />
+          {/key}
         {/if}
       </TfWaiting>
     {/if}

@@ -605,3 +605,106 @@ async fn a_private_readmes_images_are_read_at_its_commit_and_kept() {
         absent.message
     );
 }
+
+/// The open pull request the seed opens on the seeded repository from the
+/// branch `feature/PAY-231-sepa-retry`, by its number.
+async fn sepa_pull() -> u64 {
+    let listed: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "{}/api/v1/repos/{SEEDED}/pulls?state=open&limit=50",
+            need("KNOBAS_GITEA_URL")
+        ))
+        .header(
+            "Authorization",
+            format!("token {}", need("KNOBAS_GITEA_TOKEN")),
+        )
+        .send()
+        .await
+        .expect("Gitea answers")
+        .json()
+        .await
+        .expect("a pull request list");
+    listed
+        .as_array()
+        .expect("a list")
+        .iter()
+        .find(|p| p["head"]["ref"] == "feature/PAY-231-sepa-retry")
+        .and_then(|p| p["number"].as_u64())
+        .unwrap_or_else(|| panic!("the seed opens the SEPA retry pull request: {listed}"))
+}
+
+/// The range a view's diff names.
+fn range_of(view: &knobas_source::view::SourceView) -> knobas_source::view::DiffRange {
+    view.sections[0]
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Diff { range, .. } => range.clone(),
+            _ => None,
+        })
+        .expect("the diff names its range")
+}
+
+/// #2273, #2310: a pull request's diff names its merge base, head and
+/// commits, and no last review for a token that never reviewed it; one of
+/// its commits picked is a compare that names that commit's parent and the
+/// commit; and a file read whole at the head for expanded context, and its
+/// bytes for a rendered diff, cost no request the second time.
+#[tokio::test]
+#[ignore = "needs the testenv Gitea: just gitea-live"]
+async fn a_pull_requests_range_is_picked_from_and_read_whole_at_its_shas() {
+    let app = app().await;
+    let pull = format!("{}:{SEEDED}#{}", app.source, sepa_pull().await);
+    let (files, sent, _) = app.view_of(&pull, "files").await;
+    println!("files: {sent} requests");
+    let range = range_of(&files);
+    assert_eq!(range.repository, app.repo());
+    assert!(
+        range.base.len() == 40 && range.head.len() == 40,
+        "whole shas: {range:?}"
+    );
+    assert!(!range.commits.is_empty(), "its commits: {range:?}");
+    assert_eq!(range.commits[0].sha, range.head, "newest first");
+    assert_eq!(range.reviewed, None, "the token never reviewed it");
+
+    // The oldest commit alone, as the picker reads it.
+    let oldest = range.commits.last().unwrap().sha.clone();
+    let (one, _, _) = app
+        .view_of(&app.repo(), &format!("compare:{oldest}^...{oldest}"))
+        .await;
+    let picked = range_of(&one);
+    assert_eq!(picked.head, oldest);
+    assert_eq!(
+        picked.base, range.base,
+        "the oldest commit sits on the merge base"
+    );
+
+    let path = match &files.sections[0].blocks[0] {
+        Block::Diff { files, .. } => files[0].path.clone(),
+        other => panic!("a diff: {other:?}"),
+    };
+    let at = format!("file@{}:{path}", range.head);
+    let (_, first, _) = app.view_of(&app.repo(), &at).await;
+    let (_, again, took) = app.view_of(&app.repo(), &at).await;
+    println!("whole at the head: {first} then {again} requests, {took:?}");
+    assert!(first >= 1, "the first read is Gitea's: {first}");
+    assert_eq!(again, 0, "a second expansion is the cache's");
+
+    let repo = app.repo();
+    let bytes = || {
+        knobas_http::counted::counted(knobas_app::sources::crud::file_bytes(
+            &app.pool,
+            &app.secrets,
+            &app.registry,
+            &app.live,
+            &repo,
+            &path,
+            Some(&range.head),
+        ))
+    };
+    let (read, first) = bytes().await;
+    assert!(read.expect("the bytes read").is_some());
+    let (_, again) = bytes().await;
+    println!("bytes at the head: {first} then {again} requests");
+    assert!(first >= 1 && again == 0, "{first} then {again}");
+}

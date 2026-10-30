@@ -18,7 +18,7 @@
 import type { DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/code/line-diff";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
-import { HOSTILE_PDF, SPEC_PDF } from "../../../../render/pdf-fixture";
+import { fakePdf, HOSTILE_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
 
 const RETRY_MAIN = `use std::time::Duration;
 
@@ -273,6 +273,19 @@ export const PAYOUT_COMMITS: [sha: string, subject: string, author: string, at: 
   ["7be0e4f15c60", "PAY-231: retry SEPA payouts on transient PSP errors", "mara", "2026-08-21T15:30:00Z", "tests/sepa_retry.rs", "", TEST_HEAD],
 ];
 
+/** Main's tip, which the branch's oldest commit sits on. */
+export const PAYOUT_MAIN_SHA = "5d77e1a2c3b4";
+
+/** A path's text at one of the branch's commits or at main's tip, `null` where it is not there. */
+function payoutTextAt(sha: string, path: string): string | null {
+  const at = sha === PAYOUT_MAIN_SHA ? PAYOUT_COMMITS.length : PAYOUT_COMMITS.findIndex(([commit]) => commit === sha);
+  if (at === -1) return null;
+  const touched = PAYOUT_COMMITS.map((commit, n) => [n, commit] as const).filter(([, commit]) => commit[4] === path);
+  const last = touched.find(([n]) => n >= at);
+  const text = last ? last[1][6] : (touched.at(-1)?.[1][5] ?? PAYOUT_MAIN[path] ?? null);
+  return text === "" ? null : text;
+}
+
 /**
  * `?fake-rendered-diff` (#2279): the newest commit also changes a README, a Mermaid diagram and a PNG, adds a
  * Markdown file and deletes one, so its diff offers *Rendered*. Each changed file reads whole at that commit
@@ -302,11 +315,57 @@ function renderedDiffFiles(): DiffFile[] {
   return [...text, png];
 }
 
+/**
+ * `?fake-pdf-diff` (#2282): the newest commit also changes three PDFs, read as bytes at it (after) and its parent
+ * (before). `docs/spec.pdf` changes the text of page 2 of 4; `docs/handbook.pdf` gains a page between pages 1
+ * and 2 of 3; `docs/brand.pdf` changes only the colour of the image on page 2 of 3 (page 3 keeps its image).
+ */
+const pdfPage = (title: string, line: string, image?: string): FakePage => ({ lines: [title, line], ...(image ? { image } : {}) });
+const SPEC_PAGES = [
+  pdfPage("Payout service: design", "Pays out SEPA batches once a day."),
+  pdfPage("Retries", "Transient PSP errors are retried three times."),
+  pdfPage("Backoff", "None: a retry goes out at once."),
+  pdfPage("Ledger", "Every payout is booked once it settles."),
+];
+const HANDBOOK_PAGES = [pdfPage("On-call handbook", "Who is paged, and when."), pdfPage("Escalation", "Page the PSP's desk after 30 minutes."), pdfPage("Hand-over", "Write up the shift in the channel.")];
+const BRAND_PAGES = (colour: string) => [pdfPage("Brand", "The logo and its colours."), pdfPage("Logo", "The mark, 2 by 2.", colour), pdfPage("Type", "Helvetica throughout.", "8a5600")];
+const PDF_DIFF: Record<string, [before: () => Uint8Array, after: () => Uint8Array]> = {
+  "docs/spec.pdf": [
+    () => fakePdf({ pages: SPEC_PAGES }),
+    () => fakePdf({ pages: SPEC_PAGES.map((page, i) => (i === 1 ? pdfPage("Retries", "Transient PSP errors are retried five times, with jitter.") : page)) }),
+  ],
+  "docs/handbook.pdf": [
+    () => fakePdf({ pages: HANDBOOK_PAGES }),
+    () => fakePdf({ pages: [HANDBOOK_PAGES[0]!, pdfPage("Runbooks", "Each alert links its runbook."), ...HANDBOOK_PAGES.slice(1)] }),
+  ],
+  "docs/brand.pdf": [() => fakePdf({ pages: BRAND_PAGES("1f7444") }), () => fakePdf({ pages: BRAND_PAGES("2f55d4") })],
+};
+const pdfDiffOn = () => new URLSearchParams(globalThis.location?.search).has("fake-pdf-diff");
+const pdfDiffFiles = (): DiffFile[] =>
+  Object.keys(PDF_DIFF).map((path) => ({ path, old_path: null, change: "binary", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [] }));
+
 /** A `?fake-rendered-diff` file at the newest commit (`at` 0, after) or its parent (`at` 1, before); `undefined` for none. */
 function renderedDiffSide(at: number, path: string): string | null | undefined {
   if (!renderedDiffOn() || (at !== 0 && at !== 1)) return undefined;
   const sides = RENDERED_DIFF[path];
   return sides === undefined ? undefined : sides[at === 0 ? 1 : 0];
+}
+
+/**
+ * `?fake-diff-pipeline` (#2270): the newest commit also changes a base64-encoded JSON fixture, and
+ * `fake-tauri.ts` installs a default pipeline for `*.json.b64` (base64 decode, then pretty JSON), so its
+ * diff is of the decoded JSON. {@link repoFilePiped} runs those two steps on either side.
+ */
+const DIFF_PIPELINE: Record<string, [before: string, after: string]> = {
+  "fixtures/webhooks.json.b64": [
+    JSON.stringify({ subscribers: [{ url: "ledger.internal/hook", timeout_ms: 5000 }, { url: "mail.internal/hook" }] }),
+    JSON.stringify({ subscribers: [{ url: "ledger.internal/hook", timeout_ms: 2000, retry: { max: 10, base_s: 2 }, jitter: 0.2 }, { url: "mail.internal/hook" }] }),
+  ],
+};
+const diffPipelineOn = () => new URLSearchParams(globalThis.location?.search).has("fake-diff-pipeline");
+/** `?fake-diff-pipeline`'s file on the newest commit's diff: two lines of base64. */
+function diffPipelineFiles(): DiffFile[] {
+  return Object.entries(DIFF_PIPELINE).map(([path, [before, after]]) => lineDiff(path, btoa(before), btoa(after)));
 }
 
 /** A commit's entity id on `payout-service`, in the Gitea key grammar (`owner/repo@sha`). */
@@ -587,6 +646,8 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
 export function repoFileBytes(entityId: string, path: string): Uint8Array | undefined {
   // `?fake-rendered-diff`'s PNG at the newest commit (after) and its parent (before).
   const commitAt = PAYOUT_COMMITS.findIndex(([sha]) => payoutCommitId(sha) === entityId);
+  const pdf = PDF_DIFF[path];
+  if (commitAt !== -1 && commitAt <= 1 && pdf !== undefined && pdfDiffOn()) return pdf[commitAt === 0 ? 1 : 0]();
   if (commitAt !== -1 && renderedDiffOn()) {
     if (path === "docs/img/logo.png" && commitAt <= 1) return commitAt === 0 ? bytesOf(LOGO_AFTER) : PAYOUT_IMAGES[path]!();
     throw { code: "not_found", message: `gitea: no file ${path} at this commit`, source_id: null };
@@ -652,7 +713,7 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
     // `?fake-diff-lines=<n>` (#2269): forty more files of n/40 added lines each.
     const bulk = Number(new URLSearchParams(globalThis.location?.search).get("fake-diff-lines") ?? 0) || 0;
     const more = bulk === 0 ? [] : Array.from({ length: 40 }, (_, f) => diffOf(`bulk/f${String(f).padStart(2, "0")}.rs`, "", Array.from({ length: Math.ceil(bulk / 40) }, (_, i) => `let v${f}_${i} = ${i};`).join("\n")));
-    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
+    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...(at === 0 && pdfDiffOn() ? pdfDiffFiles() : []), ...(at === 0 && diffPipelineOn() ? diffPipelineFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
     // The whole view's toolbar (#707): a branch from this commit, its whole sha the value.
     const from = { value: commit[0], label: commit[0].slice(0, 10) };
     const actions =
@@ -690,7 +751,16 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
       sides.set(path, [sides.get(path)?.[0] ?? before, after]);
     }
     const diffs = [...sides].map(([path, [before, after]]) => diffOf(path, before, after));
-    return one(section(sectionId, "Diff", [{ type: "diff", files: diffs, truncated: false, commentable: null, gone: [] }], diffs.length));
+    // What it is between (#2310): the commit before the oldest (main's tip below the first), and the newest.
+    const range = { repository: PAYOUT, base: PAYOUT_COMMITS[oldest + 1]?.[0] ?? PAYOUT_MAIN_SHA, head: PAYOUT_COMMITS[newest]![0], commits: [] };
+    return one(section(sectionId, "Diff", [{ type: "diff", files: diffs, truncated: false, commentable: null, gone: [], range }], diffs.length));
+  }
+  // A file whole at one of the branch's commits or main's tip (#2310): `file@<sha>:<path>`.
+  if (repoId === PAYOUT && sectionId?.startsWith("file@")) {
+    const [sha = "", path = ""] = sectionId.slice("file@".length).split(/:(.*)/s);
+    const text = payoutTextAt(sha, path);
+    if (text === null) throw { code: "not_found", message: `gitea: no file ${path} at ${sha}`, source_id: null };
+    return one(section(sectionId, "Files", [{ type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: blobOf(text), commit: sha }]));
   }
   if (repoId === PAYOUT && branch !== null && branch !== "main" && (sectionId === null || sectionId === "overview" || sectionId === "commits" || sectionId === "diff")) {
     return branchView(branch, sectionId);
@@ -752,6 +822,23 @@ function fakeJq(filter: string, input: unknown): unknown[] {
  * name, jq is {@link fakeJq}, pretty-print JSON re-lays it; any other step fails, naming the dev fake.
  */
 export function repoFilePiped(entityId: string, path: string, steps: PipeStep[]): PipeRun | undefined {
+  // `?fake-diff-pipeline`'s fixture at the newest commit (after) and its parent (before).
+  const commitAt = PAYOUT_COMMITS.findIndex(([sha]) => payoutCommitId(sha) === entityId);
+  const piped = DIFF_PIPELINE[path];
+  if (commitAt !== -1 && commitAt <= 1 && piped && diffPipelineOn()) {
+    let text = btoa(piped[commitAt === 0 ? 1 : 0]);
+    let name = path;
+    for (const [index, step] of steps.entries()) {
+      if (step.step === "base64_decode") (text = atob(text)), (name = name.replace(/\.b64$/, ""));
+      else if (step.step === "pretty" && step.format === "json") text = `${JSON.stringify(JSON.parse(text), null, 2)}\n`;
+      else
+        return {
+          outcome: "failed",
+          failure: { index, name: step.step, why: "error", error: `the dev fake does not run ${step.step}`, input: { size: text.length, head: text.slice(0, 64), binary: false } },
+        };
+    }
+    return { outcome: "done", name, output: { kind: "text", text } };
+  }
   const branchAt = entityId.indexOf("@refs/heads/");
   const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);
   const files = filesOf(repoId, branchAt === -1 ? null : entityId.slice(branchAt + "@refs/heads/".length));

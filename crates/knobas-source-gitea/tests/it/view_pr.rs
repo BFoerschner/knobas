@@ -595,7 +595,8 @@ async fn the_files_tab_is_read_on_its_own_from_the_pull_requests_diff() {
     // The diff, and beside it what places the line comments (#709): the pull
     // request's state and its reviews. No review here has line comments, so
     // none is asked for them. And whether the token may send a review at
-    // all (#2030): the branch probe, an empty write in the same scope.
+    // all (#2030): the branch probe, an empty write in the same scope. Its
+    // commits and who the token is go with the range (#2273).
     let mut asked = paths(&server).await;
     asked.sort();
     assert_eq!(
@@ -604,11 +605,79 @@ async fn the_files_tab_is_read_on_its_own_from_the_pull_requests_diff() {
             format!("{REPO}/branches"),
             format!("{REPO}/pulls/142"),
             format!("{REPO}/pulls/142.diff"),
+            format!("{REPO}/pulls/142/commits"),
             format!("{REPO}/pulls/142/reviews"),
+            "/api/v1/user".to_owned(),
             // Whether the server resolves threads (#2277).
             "/api/v1/version".to_owned(),
         ]
     );
+}
+
+/// The *Files* tab names what its diff is between (#2273, #2310): the merge
+/// base and the head the record names, the repository both are read in, the
+/// commits to pick from, and the head at the viewer's latest submitted review.
+#[tokio::test]
+async fn the_files_tab_names_its_range_commits_and_the_viewers_last_review() {
+    const BASE: &str = "907900b245f2941018dfd3ee155b876ef701c10a";
+    let mut pull = open_pull();
+    pull["merge_base"] = json!(BASE);
+    let mut given = reviews();
+    let list = given.as_array_mut().unwrap();
+    list.push(
+        json!({ "id": 20, "user": { "login": VIEWER }, "state": "COMMENT",
+                      "commit_id": FIRST_SHA, "submitted_at": "2026-08-22T09:00:00Z" }),
+    );
+    list.push(
+        json!({ "id": 21, "user": { "login": VIEWER }, "state": "APPROVED",
+                      "commit_id": HEAD_SHA, "submitted_at": "2026-08-22T12:00:00Z" }),
+    );
+    // A draft is not given yet, so the approval above stays the latest.
+    list.push(
+        json!({ "id": 22, "user": { "login": VIEWER }, "state": "PENDING",
+                      "commit_id": FIRST_SHA }),
+    );
+    let server = gitea(pull, given).await;
+    let view = source(&server)
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .unwrap();
+    let Block::Diff { range, .. } = &view.sections[0].blocks[0] else {
+        panic!("the files tab is a diff: {view:#?}");
+    };
+    let range = range
+        .as_ref()
+        .expect("a record naming both ends names a range");
+    assert_eq!(range.repository, "gitea:tidewater/payout-service");
+    assert_eq!((range.base.as_str(), range.head.as_str()), (BASE, HEAD_SHA));
+    assert_eq!(range.reviewed.as_deref(), Some(HEAD_SHA));
+    let picked: Vec<_> = range
+        .commits
+        .iter()
+        .map(|c| (c.sha.as_str(), c.title.as_str()))
+        .collect();
+    assert_eq!(
+        picked,
+        [
+            (
+                FIRST_SHA,
+                "PAY-231: retry SEPA payouts on transient PSP errors"
+            ),
+            (HEAD_SHA, "PAY-231: jitter in backoff"),
+        ]
+    );
+    // A record without its merge base names no range: nothing to read whole at.
+    let server = gitea(open_pull(), reviews()).await;
+    let view = source(&server)
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .unwrap();
+    let Block::Diff { range, .. } = &view.sections[0].blocks[0] else {
+        panic!("the files tab is a diff");
+    };
+    assert_eq!(range, &None);
 }
 
 // -- line comments on the diff (issue #709) ----------------------------------
@@ -2436,15 +2505,15 @@ async fn the_edit_is_prefilled_with_the_description_as_gitea_holds_it() {
 /// The reviews' line comments are read side by side (#709, as #703 reads the
 /// tabs): Gitea answers them one review at a time, and four reviewed rounds
 /// read in turn would cost four round trips on top of the diff's. The diff,
-/// the record and the reviews are three reads at once; four reviews' comments
-/// at once are the fourth.
+/// the record, the reviews, the commits and the viewer are five reads at once
+/// (#2273); six reviews' comments at once are more than that first wave.
 #[tokio::test]
 async fn the_reviews_line_comments_are_read_at_the_same_time() {
     let flight = InFlight::new(Duration::from_millis(300));
     let server = MockServer::builder().start().await;
     flight.watch(&server).await;
     let held = |body: ResponseTemplate| body.set_delay(flight.delay());
-    let reviews: Vec<Value> = (31..=34)
+    let reviews: Vec<Value> = (31..=36)
         .map(|id| {
             json!({ "id": id, "user": { "login": "olu" }, "state": "COMMENT",
                     "submitted_at": "2026-08-22T11:00:00Z", "comments_count": 1 })
@@ -2470,7 +2539,7 @@ async fn the_reviews_line_comments_are_read_at_the_same_time() {
             .mount(&server)
             .await;
     }
-    for id in 31..=34 {
+    for id in 31..=36 {
         Mock::given(method("GET"))
             .and(path(format!("{REPO}/pulls/142/reviews/{id}/comments")))
             .respond_with(held(ResponseTemplate::new(200).set_body_json(json!([
@@ -2494,11 +2563,11 @@ async fn the_reviews_line_comments_are_read_at_the_same_time() {
     let Block::Diff { files, .. } = &view.sections[0].blocks[0] else {
         panic!("a diff: {view:#?}");
     };
-    assert_eq!(files[0].threads[0].comments.len(), 4, "{view:#?}");
+    assert_eq!(files[0].threads[0].comments.len(), 6, "{view:#?}");
     assert_eq!(
         flight.most(),
-        4,
-        "the four reviews' comments in flight at once"
+        6,
+        "the six reviews' comments in flight at once"
     );
 }
 

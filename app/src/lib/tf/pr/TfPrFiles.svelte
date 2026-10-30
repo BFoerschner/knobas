@@ -24,12 +24,27 @@
   opens (the whole view defers it, ADR-0020 rule 3). The one diff component
   draws it (`diff/TfDiffView`, #2266), with *Viewed* and, where the source
   takes comments, the review passed in.
+
+  Where the diff names its range (#2273, #2310):
+  - **The commit picker** (`TfPrPicker`): all commits, one, a range, or *since
+    my last review*. Any choice but all is a compare in the range's repository
+    (`diff/pick.ts`), drawn in place. Line comments are offered on the whole
+    diff only: the review goes to Gitea at the head, so a line of an older
+    commit's diff would land on the head's line of the same number. Gitea
+    itself takes a review at an older `commit_id` (measured on 1.27.3), but
+    one review carries one commit and knobas sends none, which Gitea reads as
+    the head (`write.rs` `submit_review`). Pending drafts, replies, resolve
+    and *Viewed* (kept by the head's blob) are the full diff's too: a pick
+    draws none of them.
+  - **Expanded context** (`diff/context.ts` `rangeContext`): each side read
+    whole at its sha, bytes too for a rendered image diff (#2279). A new pick
+    draws a new diff component, so no side read at one range is kept for another.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import type { LineThread, SourceView } from "../../ipc/entity";
+  import { entityFileBytes, entityFilePiped, type LineThread, type PipeRun, type PipeStep, type SourceView } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { PendingCommentStore } from "../../detail/view/pending-comments.svelte";
   import type { RenderPort } from "../../render/port";
@@ -37,7 +52,11 @@
   import { push } from "../../shell/toasts.svelte";
   import { echoOn, echoesOn, echoWrite, sameWords, settleEchoes, watchEchoes, type Echo, type EchoListen } from "../queued.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
+  import { compareSection } from "../diff/address";
+  import { rangeContext } from "../diff/context";
+  import { pickedEnds, type PrPick } from "../diff/pick";
   import { diffOf } from "./files";
+  import TfPrPicker from "./TfPrPicker.svelte";
 
   let {
     prId,
@@ -51,6 +70,8 @@
     follower,
     render,
     openAt = null,
+    fileBytes = (entityId, path, commit) => entityFileBytes(entityId, path, commit),
+    piped = (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
   }: {
     prId: string;
     entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
@@ -70,6 +91,10 @@
     render?: RenderPort;
     /** *Open in…* per file (#2274): the repository and the head the files are read at. */
     openAt?: { entityId: string; at: string | null } | null;
+    /** A file's bytes at a commit, for a rendered image diff (#2279); the IPC by default. */
+    fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
+    /** A file pipeline over a file at a commit, for pipelines on diffs (#2270); the IPC by default. */
+    piped?: (entityId: string, path: string, commit: string | null, steps: PipeStep[]) => Promise<PipeRun>;
   } = $props();
 
   /** The surface the replies and resolves queued here are tagged with (#2277). */
@@ -136,6 +161,49 @@
   });
 
   const diff = $derived(view ? diffOf(view) : null);
+  const range = $derived(diff?.range ?? null);
+
+  /** The commit picker's choice (#2273), and the compare it reads; all commits is the diff above. */
+  let choice = $state<PrPick>({ kind: "all" });
+  const ends = $derived(range === null ? null : pickedEnds(range, choice));
+  const section = $derived(ends === null ? null : compareSection(ends.base, ends.head));
+  /** `undefined` while the pick's compare has not answered. */
+  let picked = $state<SourceView | null | undefined>(undefined);
+  let pickFailed = $state<string | null>(null);
+
+  $effect(() => {
+    // A new pull request starts at all commits.
+    void prId;
+    choice = { kind: "all" };
+  });
+
+  $effect(() => {
+    const repo = range?.repository;
+    const asked = section;
+    picked = undefined;
+    pickFailed = null;
+    if (!repo || asked === null) return;
+    let live = true;
+    entityView(repo, asked).then(
+      (answer) => {
+        if (live) picked = answer;
+      },
+      (error) => {
+        if (live) pickFailed = ipcErrorMessage(error);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  });
+
+  /** What is drawn: the pull request's diff, or the pick's compare once it answered. */
+  const shown = $derived.by(() => {
+    if (section === null) return diff;
+    const block = picked?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
+    return block?.type === "diff" ? { files: block.files, truncated: block.truncated, commentable: null, gone: [], range: block.range ?? null } : null;
+  });
+  const context = $derived(shown?.range ? rangeContext(entityView, shown.range, fileBytes, piped) : null);
 
   /** The thread of `answer` an echo is about, by the thread's id. */
   function threadOf(answer: SourceView | null, id: string): LineThread | null {
@@ -217,17 +285,32 @@
 {:else if view === null}
   <div class="tf-empty">This source draws no changed files for a pull request.</div>
 {:else if view !== undefined}
-  {#if (diff?.files.length ?? 0) === 0 && (diff?.gone.length ?? 0) === 0}
-    <div class="tf-empty">This pull request changes no files.</div>
+  {#if range !== null}
+    <div class="tf-pickbar">
+      <TfPrPicker {range} {choice} onchoose={(next) => (choice = next)} />
+    </div>
+  {/if}
+  {#if pickFailed !== null}
+    <p class="tf-cfail">Could not read the picked commits: {pickFailed}</p>
+  {:else if section !== null && picked === null}
+    <div class="tf-empty">This source draws no diff for the picked commits.</div>
+  {:else if shown === null}
+    <!-- The pick's compare has not answered yet. -->
+  {:else if shown.files.length === 0 && shown.gone.length === 0}
+    <div class="tf-empty">{section === null ? "This pull request changes no files." : "Nothing changes in the picked commits."}</div>
   {:else}
-    <TfDiffView
-      files={diff?.files ?? []}
-      gone={diff?.gone ?? []}
-      viewed={{ paths: viewed, set: (path, on) => void toggle(path, on) }}
-      {review}
-      {openAt}
-      cut={diff?.truncated ?? false}
-      {...render ? { render } : {}}
-    />
+    {#key `${section}\n${shown.range?.base}\n${shown.range?.head}`}
+      <!-- Viewed, line comments, replies and drafts are the full diff's: each is kept at the head. -->
+      <TfDiffView
+        files={shown.files}
+        gone={shown.gone}
+        viewed={section === null ? { paths: viewed, set: (path, on) => void toggle(path, on) } : null}
+        review={section === null ? review : null}
+        {context}
+        openAt={openAt && ends ? { entityId: openAt.entityId, at: ends.head } : openAt}
+        cut={shown.truncated}
+        {...render ? { render } : {}}
+      />
+    {/key}
   {/if}
 {/if}
