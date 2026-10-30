@@ -52,6 +52,8 @@ import type {
   NoteLinkInput,
   NotesExport,
   NotificationDraft,
+  PipeRun,
+  PipeStep,
   PipelineRow,
   PipelineSettings,
   Project,
@@ -205,6 +207,13 @@ export type {
   ParameterKind,
   ParameterOption,
   ParameterSpec,
+  PipeFailure,
+  PipeFormat,
+  PipeInput,
+  PipeOutput,
+  PipeRun,
+  PipeStep,
+  PipeWhy,
   PipelineReason,
   PipelineRepository,
   PipelineRow,
@@ -753,6 +762,18 @@ type RawBytes = ArrayBuffer | ArrayLike<number>;
 export async function entityFileBytes(entityId: string, path: string, commit: string | null): Promise<Uint8Array> {
   const answer = await invoke<RawBytes>("entity_file_bytes", { entityId, path, commit });
   return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
+}
+
+/**
+ * A file pipeline over the bytes of the file at `path` in `entityId`'s tree — `knobas_app::commands::entity::entity_file_piped`
+ * (#2264, spec #2234 step 5): `steps` in order, each on the last one's output. Read at `commit` as
+ * {@link entityFileBytes} reads; a run over a file at a whole sha is kept, so the same pipeline again costs nothing.
+ *
+ * A step that fails, passes the 200 MiB cap or its timeout is an answer (`outcome: "failed"`), naming the step, its
+ * error and the head of its input. Rejects as {@link entityFileBytes} does.
+ */
+export function entityFilePiped(entityId: string, path: string, commit: string | null, steps: PipeStep[]): Promise<PipeRun> {
+  return invoke<PipeRun>("entity_file_piped", { entityId, path, commit, steps });
 }
 
 /**

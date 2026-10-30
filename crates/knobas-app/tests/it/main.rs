@@ -44,6 +44,7 @@ mod estate_exit;
 mod external_adapter;
 mod external_adapter_install;
 mod external_adapter_release;
+mod file_pipelines;
 mod inbox_ipc;
 mod ipc;
 mod item_field;

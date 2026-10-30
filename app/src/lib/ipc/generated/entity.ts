@@ -2745,6 +2745,62 @@ label: string | null,
 hint: string | null, kind: ParameterKind, };
 
 /**
+ * A step that gave no output.
+ */
+export type PipeFailure = { 
+/**
+ * Its place in the pipeline, from 0.
+ */
+index: number, name: string, why: PipeWhy, 
+/**
+ * What it said, in one line.
+ */
+error: string, input: PipeInput, };
+
+/**
+ * A data format the pretty-print and convert steps read and write.
+ */
+export type PipeFormat = "json" | "yaml" | "toml";
+
+/**
+ * The head of the input a failed step was given.
+ */
+export type PipeInput = { 
+/**
+ * Its whole size in bytes.
+ */
+size: number, 
+/**
+ * Its first 4 KiB as text, or, when it is not text, its first 256
+ * bytes as a hex dump.
+ */
+head: string, 
+/**
+ * The head is a hex dump.
+ */
+binary: boolean, };
+
+/**
+ * A pipeline's output: text where it is UTF-8, else bytes in base64.
+ */
+export type PipeOutput = { "kind": "text", text: string, } | { "kind": "bytes", base64: string, size: number, };
+
+/**
+ * What a pipeline answered.
+ */
+export type PipeRun = { "outcome": "done", name: string, output: PipeOutput, } | { "outcome": "failed", failure: PipeFailure, };
+
+/**
+ * One step of a pipeline.
+ */
+export type PipeStep = { "step": "base64_decode" } | { "step": "base64_encode" } | { "step": "gunzip" } | { "step": "unzstd" } | { "step": "bunzip2" } | { "step": "unxz" } | { "step": "jq", filter: string, } | { "step": "pretty", format: PipeFormat, } | { "step": "convert", from: PipeFormat, to: PipeFormat, } | { "step": "hex_dump" };
+
+/**
+ * Why a step stopped.
+ */
+export type PipeWhy = "error" | "too_large" | "timed_out";
+
+/**
  * Why a pipeline is on a job (#850, R-9.1, R-9.2). Tagged on `kind`, so a
  * link set (#866) joins as one more arm without changing these.
  *

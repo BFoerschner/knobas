@@ -15,10 +15,10 @@
  * `payout-service` and its `genericFiles` for every other repository. A
  * divergence: the mock adapter draws no view for a repository at all.
  */
-import type { DiffFile, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
+import type { DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/code/line-diff";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
-import { HOSTILE_PDF, SPEC_PDF } from "../../../../render/pdf-fixture";
+import { fakePdf, HOSTILE_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
 
 const RETRY_MAIN = `use std::time::Duration;
 
@@ -315,6 +315,35 @@ function renderedDiffFiles(): DiffFile[] {
   return [...text, png];
 }
 
+/**
+ * `?fake-pdf-diff` (#2282): the newest commit also changes three PDFs, read as bytes at it (after) and its parent
+ * (before). `docs/spec.pdf` changes the text of page 2 of 4; `docs/handbook.pdf` gains a page between pages 1
+ * and 2 of 3; `docs/brand.pdf` changes only the colour of the image on page 2 of 3 (page 3 keeps its image).
+ */
+const pdfPage = (title: string, line: string, image?: string): FakePage => ({ lines: [title, line], ...(image ? { image } : {}) });
+const SPEC_PAGES = [
+  pdfPage("Payout service: design", "Pays out SEPA batches once a day."),
+  pdfPage("Retries", "Transient PSP errors are retried three times."),
+  pdfPage("Backoff", "None: a retry goes out at once."),
+  pdfPage("Ledger", "Every payout is booked once it settles."),
+];
+const HANDBOOK_PAGES = [pdfPage("On-call handbook", "Who is paged, and when."), pdfPage("Escalation", "Page the PSP's desk after 30 minutes."), pdfPage("Hand-over", "Write up the shift in the channel.")];
+const BRAND_PAGES = (colour: string) => [pdfPage("Brand", "The logo and its colours."), pdfPage("Logo", "The mark, 2 by 2.", colour), pdfPage("Type", "Helvetica throughout.", "8a5600")];
+const PDF_DIFF: Record<string, [before: () => Uint8Array, after: () => Uint8Array]> = {
+  "docs/spec.pdf": [
+    () => fakePdf({ pages: SPEC_PAGES }),
+    () => fakePdf({ pages: SPEC_PAGES.map((page, i) => (i === 1 ? pdfPage("Retries", "Transient PSP errors are retried five times, with jitter.") : page)) }),
+  ],
+  "docs/handbook.pdf": [
+    () => fakePdf({ pages: HANDBOOK_PAGES }),
+    () => fakePdf({ pages: [HANDBOOK_PAGES[0]!, pdfPage("Runbooks", "Each alert links its runbook."), ...HANDBOOK_PAGES.slice(1)] }),
+  ],
+  "docs/brand.pdf": [() => fakePdf({ pages: BRAND_PAGES("1f7444") }), () => fakePdf({ pages: BRAND_PAGES("2f55d4") })],
+};
+const pdfDiffOn = () => new URLSearchParams(globalThis.location?.search).has("fake-pdf-diff");
+const pdfDiffFiles = (): DiffFile[] =>
+  Object.keys(PDF_DIFF).map((path) => ({ path, old_path: null, change: "binary", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [] }));
+
 /** A `?fake-rendered-diff` file at the newest commit (`at` 0, after) or its parent (`at` 1, before); `undefined` for none. */
 function renderedDiffSide(at: number, path: string): string | null | undefined {
   if (!renderedDiffOn() || (at !== 0 && at !== 1)) return undefined;
@@ -340,6 +369,22 @@ const FILE_KINDS: Record<string, string> = {
 };
 
 /**
+ * `?fake-pipeline`'s files (#2264): a gzipped JSON fixture, drawn as binary until a pipeline unwraps it. The fake
+ * keeps what is inside, not the gzip; {@link repoFilePiped} unwraps by name.
+ */
+const EVENTS_JSON = JSON.stringify({
+  events: [
+    { at: "2026-10-29T08:14:02Z", level: "info", code: 200, msg: "delivered" },
+    { at: "2026-10-29T08:14:09Z", level: "error", code: 503, msg: "subscriber returned 503, retry 1 in 2 s" },
+    { at: "2026-10-29T08:14:11Z", level: "error", code: 503, msg: "subscriber returned 503, retry 2 in 4 s" },
+    { at: "2026-10-29T08:14:15Z", level: "error", code: null, msg: "connection reset by peer" },
+  ],
+});
+const WRAPPED: Record<string, { inner: string; size: number }> = {
+  "fixtures/events.json.gz": { inner: EVENTS_JSON, size: 49_357 },
+};
+
+/**
  * `?fake-binary`'s files (#2260): binary files in payout-service's tree, read through the byte read. A three-page
  * PDF with an external link and a link to a page, a hostile PDF (JavaScript on open, script and launch links, a
  * scripted field) and the README's PNG.
@@ -362,6 +407,8 @@ function filesOf(repoId: string, branch: string | null): Record<string, string> 
       ...(query.has("fake-file-kinds") ? FILE_KINDS : {}),
       // `?fake-md-hostile` (#2255): a Markdown file of raw HTML that tries to run script.
       ...(query.has("fake-md-hostile") ? { "docs/hostile.md": HOSTILE_MD } : {}),
+      // `?fake-pipeline` (#2264): a gzipped JSON file to unwrap.
+      ...(query.has("fake-pipeline") ? Object.fromEntries(Object.keys(WRAPPED).map((path) => [path, ""])) : {}),
       // `?fake-binary` (#2260): binary files; the text here is a stand-in, `binaryOf` has their bytes.
       ...(query.has("fake-binary") ? Object.fromEntries(Object.keys(BINARY).map((path) => [path, ""])) : {}),
     };
@@ -558,6 +605,12 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
   const path = id.slice("file:".length);
   const text = files[path];
   if (text === undefined) throw { code: "not_found", message: `gitea: no file ${path} at ${ref}`, source_id: null };
+  const wrapped = WRAPPED[path];
+  if (wrapped !== undefined) {
+    return section(id, "Files", [
+      { type: "file", trail: [], path, text: "", language: null, size: wrapped.size, truncated: false, binary: true, url: null, sha: blobOf(wrapped.inner), commit: ref },
+    ]);
+  }
   const bytes = binaryOf(path)?.();
   if (bytes !== undefined)
     return section(id, "Files", [
@@ -576,6 +629,8 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
 export function repoFileBytes(entityId: string, path: string): Uint8Array | undefined {
   // `?fake-rendered-diff`'s PNG at the newest commit (after) and its parent (before).
   const commitAt = PAYOUT_COMMITS.findIndex(([sha]) => payoutCommitId(sha) === entityId);
+  const pdf = PDF_DIFF[path];
+  if (commitAt !== -1 && commitAt <= 1 && pdf !== undefined && pdfDiffOn()) return pdf[commitAt === 0 ? 1 : 0]();
   if (commitAt !== -1 && renderedDiffOn()) {
     if (path === "docs/img/logo.png" && commitAt <= 1) return commitAt === 0 ? bytesOf(LOGO_AFTER) : PAYOUT_IMAGES[path]!();
     throw { code: "not_found", message: `gitea: no file ${path} at this commit`, source_id: null };
@@ -639,7 +694,7 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
     // `?fake-diff-lines=<n>` (#2269): forty more files of n/40 added lines each.
     const bulk = Number(new URLSearchParams(globalThis.location?.search).get("fake-diff-lines") ?? 0) || 0;
     const more = bulk === 0 ? [] : Array.from({ length: 40 }, (_, f) => diffOf(`bulk/f${String(f).padStart(2, "0")}.rs`, "", Array.from({ length: Math.ceil(bulk / 40) }, (_, i) => `let v${f}_${i} = ${i};`).join("\n")));
-    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
+    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...(at === 0 && pdfDiffOn() ? pdfDiffFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
     // The whole view's toolbar (#707): a branch from this commit, its whole sha the value.
     const from = { value: commit[0], label: commit[0].slice(0, 10) };
     const actions =
@@ -720,4 +775,69 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
     return one(treeSection(files, sectionId, ref));
   }
   return { sections: [], actions: [] };
+}
+
+/** A fake jq: `.`, `.key`, `.[]`, `.key[]` and `.[n]` joined by `|`; anything else is refused as jq would refuse it. */
+function fakeJq(filter: string, input: unknown): unknown[] {
+  const at = filter.search(/\|\s*\|/);
+  if (at !== -1) throw new Error(`the filter does not parse: expected term at column ${filter.indexOf("|", at + 1) + 1}`);
+  let values = [input];
+  for (const part of filter.split("|").map((p) => p.trim())) {
+    if (part === ".") continue;
+    const match = /^\.([A-Za-z_][\w]*)?(\[(\d*)\])?$/.exec(part);
+    if (match === null) throw new Error(`jq: error: the dev fake's jq knows only paths, not ${part}`);
+    const [, key, brackets, index] = match;
+    values = values.flatMap((value) => {
+      let picked: unknown = key === undefined ? value : (value as Record<string, unknown> | null)?.[key] ?? null;
+      if (brackets === undefined) return [picked];
+      if (!Array.isArray(picked)) throw new Error(`jq: error: cannot iterate over ${picked === null ? "null" : typeof picked}`);
+      if (index !== undefined && index !== "") picked = picked[Number(index)] ?? null;
+      return index !== undefined && index !== "" ? [picked] : picked;
+    });
+  }
+  return values;
+}
+
+/**
+ * `entity_file_piped` for the repositories this module draws (#2264): gunzip unwraps a `?fake-pipeline` file by
+ * name, jq is {@link fakeJq}, pretty-print JSON re-lays it; any other step fails, naming the dev fake.
+ */
+export function repoFilePiped(entityId: string, path: string, steps: PipeStep[]): PipeRun | undefined {
+  const branchAt = entityId.indexOf("@refs/heads/");
+  const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);
+  const files = filesOf(repoId, branchAt === -1 ? null : entityId.slice(branchAt + "@refs/heads/".length));
+  if (files === null) return undefined;
+  let gz = WRAPPED[path];
+  const read = gz === undefined ? files[path] : "";
+  if (read === undefined) throw { code: "not_found", message: `gitea: no file ${path}`, source_id: null };
+  let text = read;
+  let name = path;
+  for (const [index, step] of steps.entries()) {
+    const input = gz === undefined ? text : "\u001f\u008b\u0008…";
+    const fail = (error: string): PipeRun => ({
+      outcome: "failed",
+      failure: { index, name: step.step === "jq" ? "jq" : step.step, why: "error", error, input: { size: gz?.size ?? text.length, head: input, binary: gz !== undefined } },
+    });
+    try {
+      if (step.step === "gunzip") {
+        if (gz === undefined) return fail("invalid gzip header");
+        text = gz.inner;
+        gz = undefined;
+        name = name.replace(/\.gz$/, "");
+      } else if (gz !== undefined) {
+        return fail("the input is not JSON: expected value at 1:1");
+      } else if (step.step === "jq") {
+        text = fakeJq(step.filter, JSON.parse(text)).map((value) => `${JSON.stringify(value, null, 2)}\n`).join("");
+        name = name.replace(/(\.[^./]+)?$/, ".json");
+      } else if (step.step === "pretty" && step.format === "json") {
+        text = `${JSON.stringify(JSON.parse(text), null, 2)}\n`;
+      } else {
+        return fail(`the dev fake does not run ${step.step}`);
+      }
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (gz !== undefined) return { outcome: "done", name, output: { kind: "bytes", base64: "H4sIAAAAAAAAAw==", size: gz.size } };
+  return { outcome: "done", name, output: { kind: "text", text } };
 }

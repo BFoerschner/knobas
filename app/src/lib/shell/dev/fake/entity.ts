@@ -2,7 +2,7 @@
  * `?fake-ipc`: One entity: the detail and the job page's reads, the reachable
  * transitions, the conversation, and the URL resolver.
  */
-import type { LinkEntry, LinkRow, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
+import type { LinkEntry, LinkRow, PipeStep, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
@@ -11,7 +11,7 @@ import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
 import { fixtureBuildEntity, runView } from "./builds";
 import { pullView } from "./views/pulls";
-import { repoFileBytes, repoRefusals, repoView } from "./views/repos";
+import { repoFileBytes, repoFilePiped, repoRefusals, repoView } from "./views/repos";
 
 /**
  * PR #142 and the builds the mirror holds for its head commit (#2278): the
@@ -531,6 +531,11 @@ export function handlers(): Handlers {
       const read = repoFileBytes(String(args["entityId"]), String(args["path"]));
       if (read === undefined) throw { code: "invalid", message: `${String(args["entityId"])}'s source reads no file bytes`, source_id: null };
       return read;
+    },
+    entity_file_piped: (args) => {
+      const run = repoFilePiped(String(args["entityId"]), String(args["path"]), (args["steps"] as PipeStep[] | undefined) ?? []);
+      if (run === undefined) throw { code: "invalid", message: `${String(args["entityId"])}'s source reads no file bytes`, source_id: null };
+      return run;
     },
     // Every fake source's credential may make every write it declares (#2040);
     // a commit onto a repository's protected `main` is refused (#2241).

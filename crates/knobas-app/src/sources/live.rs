@@ -356,6 +356,57 @@ impl LiveSources {
         Ok(answer)
     }
 
+    /// A pipeline's kept run over the file at `path`, where the bytes are
+    /// read at a whole sha (`bytes_standing` *Fixed*; #2264). `pipeline`
+    /// names the steps and their limits.
+    pub(crate) fn kept_run(
+        &self,
+        lent: &Lent,
+        entity: &str,
+        path: &str,
+        commit: Option<&str>,
+        pipeline: &str,
+    ) -> Option<Arc<crate::file_pipeline::PipeRun>> {
+        let key = Self::piped_key(lent, entity, path, commit, pipeline)?;
+        match self.reads().get(&key) {
+            Some(Answer::Piped(kept)) => Some(kept),
+            _ => None,
+        }
+    }
+
+    /// Keep `run` as [`Self::kept_run`] finds it; over moving bytes, nothing.
+    pub(crate) fn keep_run(
+        &self,
+        lent: &Lent,
+        entity: &str,
+        path: &str,
+        commit: Option<&str>,
+        pipeline: &str,
+        run: Arc<crate::file_pipeline::PipeRun>,
+    ) {
+        if let Some(key) = Self::piped_key(lent, entity, path, commit, pipeline) {
+            self.reads().put(key, Answer::Piped(run));
+        }
+    }
+
+    fn piped_key(
+        lent: &Lent,
+        entity: &str,
+        path: &str,
+        commit: Option<&str>,
+        pipeline: &str,
+    ) -> Option<Key> {
+        (lent.source.bytes_standing(entity, path, commit) == Standing::Fixed).then(|| Key {
+            generation: lent.generation,
+            entity: entity.to_owned(),
+            ask: Ask::Piped {
+                path: path.to_owned(),
+                commit: commit.map(str::to_owned),
+                pipeline: pipeline.to_owned(),
+            },
+        })
+    }
+
     /// The asks among `asks` the source's credential cannot make, as
     /// `Source::refused_writes` answers: each ask the adapter says moves is
     /// answered from the cache where it holds it, and asked again behind;
@@ -461,7 +512,7 @@ impl LiveSources {
                         },
                     )),
                     // Kept only where fixed, so never read behind.
-                    Ask::Bytes { .. } => {}
+                    Ask::Bytes { .. } | Ask::Piped { .. } => {}
                 }
             }
             for (key, section) in views {
@@ -556,6 +607,13 @@ enum Ask {
         commit: Option<String>,
         cap: u64,
     },
+    /// A pipeline's run over a file (#2264): `pipeline` is its steps and
+    /// limits, written out.
+    Piped {
+        path: String,
+        commit: Option<String>,
+        pipeline: String,
+    },
 }
 
 impl Key {
@@ -578,6 +636,7 @@ enum Answer {
     View(Option<SourceView>),
     Refused(Option<RefusedWrite>),
     Bytes(Option<Arc<FileBytes>>),
+    Piped(Arc<crate::file_pipeline::PipeRun>),
 }
 
 impl Answer {
@@ -600,6 +659,8 @@ impl Answer {
                 };
                 return Some((bytes, 0));
             }
+            // Kept only over fixed bytes, so never compared either.
+            Self::Piped(run) => return Some((run.weight(), 0)),
         };
         Some((json.len(), digest(&json)))
     }
