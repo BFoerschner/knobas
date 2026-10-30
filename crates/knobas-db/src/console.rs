@@ -10,7 +10,7 @@
 //! Every production `Command::new` goes through [`command`];
 //! `knobas-app`'s `console_choke_point` test fails on one that does not.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::process::Command;
 
 /// `program` as a [`Command`] that opens no window on Windows. Elsewhere it is
@@ -26,9 +26,54 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
     command
 }
 
+/// Make `parent` less every `KNOBAS_*` variable the whole environment of
+/// `command` (#1643): call it before any `env`/`env_remove` of the caller's
+/// own, which it would clear.
+///
+/// knobas's own variables are for knobas: under `just dev` `KNOBAS_DB_URL`
+/// carries the database password, and a program knobas starts (a terminal at
+/// a checkout, a command renderer, a diff tool) would otherwise hand it on.
+/// Everything else, `PATH` and `HOME` first, is what the program needs to find
+/// its way. The one such scrub; a caller passes `std::env::vars_os()`, a test
+/// its own list.
+pub fn scrub_knobas_env(
+    command: &mut Command,
+    parent: impl IntoIterator<Item = (OsString, OsString)>,
+) -> &mut Command {
+    command.env_clear().envs(
+        parent
+            .into_iter()
+            .filter(|(name, _)| !name.as_encoded_bytes().starts_with(b"KNOBAS_")),
+    )
+}
+
 /// The program gets a console, as a console program needs, but no window.
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[cfg(all(test, unix))]
+mod environment {
+    use super::*;
+
+    /// A program started through [`scrub_knobas_env`] sees its parent's
+    /// environment less every `KNOBAS_*` variable, and nothing the starting
+    /// process had that the parent list does not name.
+    #[test]
+    fn a_program_gets_the_parents_environment_less_knobas_variables() {
+        let parent: Vec<(OsString, OsString)> = vec![
+            ("PATH".into(), "/usr/bin:/bin".into()),
+            ("KNOBAS_DB_URL".into(), "postgres://knobas:hunter2@db".into()),
+            ("KNOBAS_".into(), "bare".into()),
+            ("LANG".into(), "C".into()),
+        ];
+        let mut env = command("/usr/bin/env");
+        scrub_knobas_env(&mut env, parent);
+        let printed = String::from_utf8(env.output().expect("env runs").stdout).expect("utf-8");
+        let mut names: Vec<&str> = printed.lines().filter_map(|line| line.split('=').next()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["LANG", "PATH"], "{printed}");
+    }
+}
 
 #[cfg(all(test, windows))]
 mod tests {

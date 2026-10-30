@@ -542,7 +542,7 @@ pub async fn open_diff_tool(
     tokio::task::spawn_blocking(move || {
         let (program, arguments) = to_run.split_first().expect("git and its arguments");
         let mut command = knobas_db::console::command(program);
-        command
+        knobas_db::console::scrub_knobas_env(&mut command, std::env::vars_os())
             .args(arguments)
             .env("GIT_TERMINAL_PROMPT", "0")
             .stdin(Stdio::null())
@@ -550,11 +550,6 @@ pub async fn open_diff_tool(
             .stderr(Stdio::null());
         for name in REPOSITORY_VARIABLES {
             command.env_remove(name);
-        }
-        for (name, _) in std::env::vars_os() {
-            if name.as_encoded_bytes().starts_with(b"KNOBAS_") {
-                command.env_remove(name);
-            }
         }
         let child = command.spawn()?;
         // `difftool --dir-diff` waits for the tool and then removes its

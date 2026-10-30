@@ -565,13 +565,9 @@ fn spawn(argv: &[String]) -> std::io::Result<()> {
 }
 
 /// `argv[0]` with the rest as its arguments, in `parent`'s environment less
-/// every `KNOBAS_*` variable (#1643).
-///
-/// knobas's own variables are for knobas: under `just dev` `KNOBAS_DB_URL`
-/// carries the database password, and a terminal opened at a checkout would
-/// otherwise hand it to every shell started in it. The git paths drop `GIT_*`
-/// for their reason; this drops `KNOBAS_*` for this one. Everything else,
-/// `PATH` and `HOME` first, is what the program needs to find its way.
+/// every `KNOBAS_*` variable (#1643, `knobas_db::console::scrub_knobas_env`):
+/// a terminal opened at a checkout would otherwise hand `KNOBAS_DB_URL` to
+/// every shell started in it.
 fn scrubbed_command(
     argv: &[String],
     parent: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
@@ -580,11 +576,7 @@ fn scrubbed_command(
         .split_first()
         .ok_or_else(|| std::io::Error::other("the command has no program in it"))?;
     let mut built = std::process::Command::new(program);
-    built.args(arguments).env_clear().envs(
-        parent
-            .into_iter()
-            .filter(|(name, _)| !name.as_encoded_bytes().starts_with(b"KNOBAS_")),
-    );
+    knobas_db::console::scrub_knobas_env(&mut built, parent).args(arguments);
     Ok(built)
 }
 

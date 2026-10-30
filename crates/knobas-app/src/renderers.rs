@@ -457,14 +457,8 @@ pub(crate) async fn run_argv(
         return Ended::NotStarted("the command has no program in it".to_owned());
     };
     let mut built = knobas_db::console::command(program);
-    built
+    knobas_db::console::scrub_knobas_env(&mut built, parent)
         .args(arguments)
-        .env_clear()
-        .envs(
-            parent
-                .into_iter()
-                .filter(|(name, _)| !name.as_encoded_bytes().starts_with(b"KNOBAS_")),
-        )
         .current_dir(std::env::temp_dir())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
