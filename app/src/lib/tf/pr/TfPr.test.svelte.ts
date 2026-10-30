@@ -694,6 +694,38 @@ test("line comments waiting turn Review… into Submit review (N pending), which
   expect(text(".tf-fhead .tf-sub")).toContain("review queued");
 });
 
+test("#2276: Submit review from Overview reads the diff's head first and sends no comment written on an earlier head", async () => {
+  pending.seen(PR, "aaa111");
+  pending.add(PR, { path: "src/sepa/retry.rs", side: "new", line: 14, body: "Written on the old head." });
+  const pr = prView([SUBMIT, COMMENT, APPROVE_SENDS, CHANGES, EDIT, MERGE]);
+  // The head moved since the Files tab last drew it.
+  const files: SourceView = {
+    sections: [
+      {
+        id: "files",
+        title: "Files",
+        count: 0,
+        deferred: false,
+        blocks: [
+          { type: "diff", files: [], truncated: false, commentable: { write_op: "submit_review", reply: null, resolve: null, head: "bbb222" }, gone: [] },
+        ],
+      },
+    ],
+    actions: [],
+  };
+  await draw([PR], ports({ author: "jonas", pr, entityView: async (_id, section) => (section === "files" ? files : pr) }));
+  button("Submit review (1 pending)")!.click();
+  flushSync();
+  const dialog = document.querySelector(".tf-dialog")!;
+  dialog.querySelector<HTMLInputElement>("input[value=approve]")!.click();
+  flushSync();
+  dialogButton("Submit review").click();
+  await settle();
+  expect(writes).toEqual([{ SubmitReview: { entity: PR, verdict: "approve", body: "", comments: [] } }]);
+  // Kept apart, never dropped.
+  expect(pending.stale(PR).map((d) => d.body)).toEqual(["Written on the old head."]);
+});
+
 test("Request changes waits for its words; Comment waits for a line comment", async () => {
   await draw([PR], ports({ author: "jonas", pr: prView([SUBMIT, COMMENT, APPROVE_SENDS, CHANGES, EDIT, MERGE]) }));
   button("Review…")!.click();

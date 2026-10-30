@@ -10,6 +10,11 @@
   source's only with line comments to send. A verdict whose words the source
   requires (*Request changes*) is not sent without them. Once queued, the
   comments it took are settled: one edited meanwhile stays pending.
+
+  With comments waiting it reads the diff's head first (`headOf`, #2276):
+  only the Files tab tells the store a new head, so after a push the reader
+  could open this from another tab with comments written on a head that is
+  gone. Those are kept apart once the head is read, and a send waits for it.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -34,6 +39,7 @@
     submitWrite,
     onqueued,
     onclose,
+    headOf = null,
   }: {
     actions: readonly ViewAction[];
     prId: string;
@@ -46,6 +52,8 @@
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     onqueued: (write: QueuedWrite) => void;
     onclose: () => void;
+    /** The head the pull request's diff is drawn at now, as its source says (`Commenting.head`); `null` where it does not. */
+    headOf?: (() => Promise<string | null>) | null;
   } = $props();
 
   const uid = $props.id();
@@ -58,17 +66,36 @@
   // The review's words are kept with its comments until it is sent (#2276), so a restart keeps them too.
   let summary = $state(untrack(() => pending.body(prId)));
   let busy = $state(false);
+  // The current head, once read, so drafts from an earlier one are not sent (#2276).
+  const current: Promise<void> = untrack(() =>
+    headOf !== null && pending.of(prId).length > 0
+      ? headOf().then(
+          (head) => {
+            if (head !== null) pending.seen(prId, head);
+          },
+          () => {},
+        )
+      : Promise.resolve(),
+  );
 
   const chosen = $derived(choices.find((choice) => choice.verdict === verdict) ?? null);
   const missing = $derived(chosen?.action ? missingFields(chosen.action, { body: summary }) : ["verdict"]);
 
   async function send() {
-    const action = chosen?.action;
-    if (busy || !action || missing.length > 0) return;
-    const sent = [...drafts];
-    const payload = actionPayload(action, prId, { body: summary.trim() }, [], asReview(sent));
-    if (payload === null) return;
+    if (busy || !chosen?.action || missing.length > 0) return;
     busy = true;
+    await current;
+    const action = chosen?.action;
+    if (!action) {
+      busy = false;
+      return;
+    }
+    const sent = [...pending.of(prId)];
+    const payload = actionPayload(action, prId, { body: summary.trim() }, [], asReview(sent));
+    if (payload === null) {
+      busy = false;
+      return;
+    }
     try {
       const write = await submitWrite(payload);
       pending.settle(prId, sent, summary);

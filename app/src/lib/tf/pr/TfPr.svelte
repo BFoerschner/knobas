@@ -121,6 +121,7 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
+  import { diffOf } from "./files";
   import TfPrFiles from "./TfPrFiles.svelte";
   import TfPrMerge from "./TfPrMerge.svelte";
   import TfPrReview from "./TfPrReview.svelte";
@@ -929,6 +930,7 @@
     submitWrite={ports.submitWrite}
     onqueued={(write) => echoChip(prId, "review", "Review", write)}
     onclose={() => (reviewing = false)}
+    headOf={() => ports.entityView(prId, "files").then((answer) => diffOf(answer)?.commentable?.head ?? null)}
   />
 {/if}
 
