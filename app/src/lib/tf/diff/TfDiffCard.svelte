@@ -21,7 +21,7 @@
     switches the file between *Rendered* (`TfDiffRendered`), *Swipe* for an
     image changed on both sides, and its *Lines* (a binary file's *Bytes*).
     The buttons sit in `.tf-fh-acts`, which later header controls share.
-  - **Pipeline** (#2270): where the file has one, the header names it
+  - **File pipeline** (#2270): where the file has one, the header names it
     (`.tf-ran`, and the pattern that made it the default) while it is on,
     and *Show raw* / *Run pipeline* turns it off and on for this file. A side
     that failed draws the raw diff under the step's error. The raw file's
@@ -438,7 +438,7 @@
       <div class="tf-banner tf-err">
         The pipeline failed on the file {pipeline.failed.side === "old" ? "before" : "after"} the change, {pipeline.failed.why}. This is the raw diff.
       </div>
-    {:else if pipeline?.on && pipeline.hidden > 0}
+    {:else if pipeline?.on && !pipeline.running && pipeline.hidden > 0}
       <div class="tf-banner tf-info tf-ran-hidden">
         {pipeline.hidden === 1 ? "1 comment is" : `${n(pipeline.hidden)} comments are`} on the raw file's lines, not the pipeline's output. <i>Show raw</i> to read
         {pipeline.hidden === 1 ? "it" : "them"} or to comment.

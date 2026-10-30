@@ -159,6 +159,9 @@ test("a piped diff takes no comment: no +, no box from c, and the raw file's thr
   pending.add("pr", { path: B64.path, side: "new", line: 1, body: "why 2000?" });
   const thread = { side: "new" as const, line: 1, outdated: false, comments: [{ author: "ana", body: "too short", at: null }], id: "t1", replies: true, resolved_by: null };
   draw({ files: [{ ...B64, threads: [thread] } as DiffFile], context, piping: createDiffPipelines(() => memoryStorage()), review: { entity: "pr", pending } });
+  // While the runs are out the raw lines are drawn, comments and all: nothing is hidden yet.
+  expect(target.querySelector(".tf-ran-hidden")).toBeNull();
+  expect(target.querySelector(".tf-thread")).not.toBeNull();
   await settle();
   expect(lines()[3]).toBe('3+ "timeout_ms": 2000');
   expect(target.querySelector("button.tf-addc")).toBeNull();

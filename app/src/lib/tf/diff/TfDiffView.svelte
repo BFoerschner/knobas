@@ -20,7 +20,7 @@
     offers *Rendered* in its header, the file drawn before and after by its
     renderer (`TfDiffRendered`); an image also swipes. Its sides come from
     `context`, read once and kept beside expanded context's reads.
-  - **Pipelines** (#2270): where the caller runs pipelines (`context.piped`)
+  - **File pipelines** (#2270): where the caller runs pipelines (`context.piped`)
     and a file's pattern has a default pipeline (`pipelines`), both sides
     run through it and the outputs are diffed (`piped.ts`); the header names
     the pipeline. *Run pipelines on diffs* (`piping`, on by default) decides
