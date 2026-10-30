@@ -7,8 +7,11 @@
 //! other reader is refused with a 403 by Gitea, so the action is absent for
 //! them, not disabled: nothing the reader can do here changes it. The people
 //! offered are the ones Gitea says a review can be requested from
-//! (`GET …/reviewers`), less the author, whom Gitea refuses, and those already
-//! asked. A failed read of them, or nobody left to ask, offers nothing.
+//! (`GET …/reviewers`), less the author, whom Gitea refuses, the reader, and
+//! those already asked. Gitea's list leaves the reader out and Forgejo 17's
+//! does not (live, #2303); Gitea's own page never offers you to yourself, so
+//! neither does this. A failed read of them, or nobody left to ask, offers
+//! nothing.
 
 use knobas_source::view::{ActionField, ChoiceOption, FieldKind, ViewAction};
 
@@ -38,7 +41,11 @@ pub(super) fn action(
     let options: Vec<ChoiceOption> = candidates
         .iter()
         .filter_map(|user| login(Some(user)))
-        .filter(|who| Some(who) != author.as_ref() && !requested.contains(who))
+        .filter(|who| {
+            Some(who) != author.as_ref()
+                && Some(who.as_str()) != viewer
+                && !requested.contains(who)
+        })
         .map(|who| ChoiceOption::new(who.clone(), who))
         .collect();
     if options.is_empty() {

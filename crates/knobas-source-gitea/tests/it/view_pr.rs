@@ -3134,8 +3134,10 @@ fn request_of(view: &SourceView) -> Option<&ViewAction> {
 /// Gitea would refuse them (ADR-0020 rule 4).
 #[tokio::test]
 async fn request_is_offered_to_a_pusher_with_the_people_gitea_names() {
+    // Forgejo lists the token's own account too (#2303); it is not offered.
     let candidates = json!([
-        { "login": "mara.lindqvist" }, { "login": "olu" }, { "login": "kai" }, { "login": "sven" }
+        { "login": "mara.lindqvist" }, { "login": "olu" }, { "login": "kai" }, { "login": "sven" },
+        { "login": VIEWER }
     ]);
     let mut pusher = open_pull();
     pusher["base"]["repo"]["permissions"] = json!({ "push": true });

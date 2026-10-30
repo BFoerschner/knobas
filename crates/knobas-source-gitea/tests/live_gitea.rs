@@ -7260,6 +7260,12 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
     let FieldKind::Choice { options } = &request.fields[0].kind else {
         panic!("{request:#?}");
     };
+    // Never the reader: Forgejo's `/reviewers` lists the token's account.
+    let me = env.login().await;
+    assert!(
+        options.iter().all(|o| o.value != me),
+        "{me} is offered to themself: {options:#?}"
+    );
     let who = options
         .iter()
         .map(|o| o.value.clone())
