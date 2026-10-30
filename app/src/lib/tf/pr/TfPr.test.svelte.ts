@@ -1228,3 +1228,34 @@ test("⌘R on a pull request runs its Refresh, as a click does (#2156)", async (
   await settle();
   expect(probe.refreshed).toEqual([PR]);
 });
+
+// -- Markdown (#2261) --------------------------------------------------------------
+
+const FENCED = "Retries **SEPA** payouts.\n\n```mermaid\nflowchart LR\n  a --> b\n```";
+
+test("a description and a comment the source writes in Markdown are drawn by the Markdown component, a mermaid fence as a diagram fence", async () => {
+  const overview = prView().sections.find((section) => section.id === "overview")!.blocks.filter((block) => block.type !== "text");
+  let pr = withBlocks("overview", [...overview, { type: "text", text: FENCED, markdown: true }]);
+  pr = withBlocks(
+    "conversation",
+    [
+      { type: "facts", facts: [fact("jonas", "2026-08-22 09:30")] },
+      { type: "text", text: "As drawn:\n\n```mermaid\nsequenceDiagram\n  A->>B: hi\n```", markdown: true },
+    ],
+    pr,
+  );
+  await draw([PR], ports({ pr }));
+  expect(text(".tf-prdesc .tf-md strong")).toBe("SEPA");
+  expect(target.querySelector(".tf-prdesc .tf-md .tf-fence[data-lang='mermaid'] pre code")?.textContent).toBe("flowchart LR\n  a --> b");
+  unmount(view!);
+  view = null;
+  await draw([PR, "conversation"], ports({ pr }));
+  expect(target.querySelector(".tf-msg-body .tf-md .tf-fence[data-lang='mermaid'] pre code")?.textContent).toBe("sequenceDiagram\n  A->>B: hi");
+});
+
+test("text the source does not mark Markdown stays as written", async () => {
+  const overview = prView().sections.find((section) => section.id === "overview")!.blocks.filter((block) => block.type !== "text");
+  await draw([PR], ports({ pr: withBlocks("overview", [...overview, { type: "text", text: "Plain **not bold**", markdown: false }]) }));
+  expect(target.querySelector(".tf-prdesc .tf-md")).toBeNull();
+  expect(text(".tf-prdesc p")).toBe("Plain **not bold**");
+});

@@ -1,8 +1,8 @@
 /**
  * The renderer port (spec #2234 step 5, #2254): every engine a renderer
  * needs, behind one interface, so jsdom tests use a fake and the app uses the
- * workers. Only highlighting so far; Mermaid, D2, Graphviz and pdf.js join it
- * as methods of their own.
+ * workers. Highlighting and diagrams (Mermaid, #2258) so far; D2, Graphviz
+ * and pdf.js join them.
  *
  * Highlighting is a job: `highlight` starts one and returns at once, and the
  * worker answers in pieces through `onLines` (lines `from`… of the text,
@@ -39,8 +39,40 @@ export interface HighlightJob {
   cancel(): void;
 }
 
+/**
+ * The knobas tokens a diagram is coloured from (`--sheet`, `--ink`, …, as
+ * `tf/css/tokens.css` defines them for the theme drawn now), and whether
+ * that theme is dark.
+ */
+export interface Palette {
+  dark: boolean;
+  paper: string;
+  sheet: string;
+  sheet2: string;
+  ink: string;
+  ink2: string;
+  rule: string;
+  mutedBg: string;
+  mark: string;
+}
+
+/** A diagram to draw: its engine, its source, the palette to draw it in. */
+export interface DiagramRequest {
+  engine: "mermaid";
+  code: string;
+  palette: Palette;
+}
+
+/** A drawn diagram's SVG (not yet sanitized), or the parser's error. */
+export type DiagramAnswer = { svg: string } | { error: string };
+
 export interface RenderPort {
   highlight(request: HighlightRequest, handlers: HighlightHandlers): HighlightJob;
+  /**
+   * Draws a diagram (#2258). Absent where no engine runs (jsdom's
+   * {@link plainPort}): the diagram's source stays as it is.
+   */
+  diagram?(request: DiagramRequest): Promise<DiagramAnswer>;
 }
 
 /** What the port sends the worker. */
@@ -101,12 +133,24 @@ export const plainPort: RenderPort = {
 
 let shared: RenderPort | null = null;
 
-/** The app's port: Shiki in a module worker, or {@link plainPort} where there is no `Worker`. */
+/**
+ * Mermaid, loaded on the first diagram: `mermaid.ts` and Mermaid itself are
+ * a chunk of their own. It runs on the main thread, since it lays text out
+ * in the document.
+ */
+export function engineDiagram(request: DiagramRequest): Promise<DiagramAnswer> {
+  return import("./mermaid").then(({ renderMermaid }) => renderMermaid(request.code, request.palette));
+}
+
+/** The app's port: Shiki in a module worker and Mermaid, or {@link plainPort} where there is no `Worker`. */
 export function renderPort(): RenderPort {
   shared ??=
     typeof Worker === "undefined"
       ? plainPort
-      : workerPort(() => new Worker(new URL("./highlight.worker.ts", import.meta.url), { type: "module", name: "highlight" }));
+      : {
+          ...workerPort(() => new Worker(new URL("./highlight.worker.ts", import.meta.url), { type: "module", name: "highlight" })),
+          diagram: engineDiagram,
+        };
   return shared;
 }
 

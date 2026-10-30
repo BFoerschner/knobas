@@ -55,6 +55,7 @@
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import { untrack } from "svelte";
+  import TfMarkdown from "../markdown/TfMarkdown.svelte";
 
   let {
     id,
@@ -165,8 +166,11 @@
   {/each}
 {/snippet}
 
-{#snippet textOf(text: string)}
-  <div class="tf-panel tf-item-textp"><p class="tf-item-text">{text}</p></div>
+{#snippet textOf(text: string, markdown = false)}
+  <!-- A text block the source marks Markdown is drawn by the Markdown component (#2261); any other text as written. -->
+  <div class="tf-panel tf-item-textp">
+    {#if markdown}<TfMarkdown {text} />{:else}<p class="tf-item-text">{text}</p>{/if}
+  </div>
 {/snippet}
 
 {#snippet blocksOf(blocks: ViewBlock[])}
@@ -179,7 +183,7 @@
         {/each}
       </dl>
     {:else if block.type === "text"}
-      {@render textOf(block.text)}
+      {@render textOf(block.text, block.markdown)}
     {:else if block.type === "entities"}
       {#if block.title !== null}<h3 class="tf-cgroup-h">{block.title}</h3>{/if}
       <ul class="tf-item-rows">

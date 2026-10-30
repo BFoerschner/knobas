@@ -107,7 +107,8 @@ export function headerOf(view: SourceView | null): PrHeader {
 }
 
 /** What the Overview tab draws, in the source's order: the checks, the description, and a muted line where the source put one. */
-export type OverviewPart = Line | { checks: ViewRow[] } | { description: string };
+/** The description is Markdown where the source says it writes Markdown there (#2261), drawn by the Markdown component. */
+export type OverviewPart = Line | { checks: ViewRow[] } | { description: string; markdown: boolean };
 
 export function overviewParts(view: SourceView | null): OverviewPart[] {
   const parts: OverviewPart[] = [];
@@ -121,7 +122,7 @@ export function overviewParts(view: SourceView | null): OverviewPart[] {
       if (block.rows.length > 0) parts.push({ checks: block.rows });
     } else if (block.type === "text" && !seenDescription) {
       seenDescription = true;
-      parts.push({ description: block.text });
+      parts.push({ description: block.text, markdown: block.markdown });
     }
   }
   return parts;
@@ -390,6 +391,8 @@ export interface PrMessage {
   at: string;
   verdict: { text: string; tone: Tone | null } | null;
   body: string;
+  /** Whether the source writes `body` in Markdown (#2261): then the Markdown component draws it. */
+  markdown: boolean;
 }
 
 /**
@@ -412,10 +415,12 @@ export function conversationParts(view: SourceView | null): (Line | { message: P
           at: said.value,
           verdict: review ? { text: review.value, tone: review.tone } : null,
           body: "",
+          markdown: false,
         },
       });
     } else if (block.type === "text" && last !== undefined && "message" in last) {
       last.message.body = block.text;
+      last.message.markdown = block.markdown;
     } else {
       parts.push(...(linesOf(block) ?? []));
     }

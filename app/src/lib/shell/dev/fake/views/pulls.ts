@@ -228,7 +228,12 @@ function view142(): SourceView {
           { type: "facts", facts: [fact("jonas", "2026-08-22 09:30"), fact("Review", "commented")] },
           { type: "text", text: "Should the jitter be bounded? ±20 % feels wide.", markdown: true },
           { type: "facts", facts: [fact("mara", "2026-08-22 10:20")] },
-          { type: "text", text: "Bounded to ±10 % in c90d11.", markdown: true },
+          {
+            type: "text",
+            // A mermaid fence in a comment (#2261): drawn as a diagram by the Markdown component.
+            text: "Bounded to ±10 % in c90d11. The delay is now:\n\n```mermaid\nflowchart LR\n  fail[5xx] --> wait[\"2ⁿ s ± 10 %\"] --> retry[retry]\n```",
+            markdown: true,
+          },
         ],
         2,
       ),

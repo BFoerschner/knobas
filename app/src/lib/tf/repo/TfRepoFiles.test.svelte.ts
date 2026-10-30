@@ -606,6 +606,52 @@ test("a file with no renderer but Source has no view toggle", async () => {
   expect(viewButtons()).toEqual([]);
 });
 
+// -- Mermaid files (#2258) --------------------------------------------------------
+
+function diagramRender() {
+  const asked: string[] = [];
+  const port: RenderPort = {
+    ...heldRender().port,
+    async diagram(request) {
+      asked.push(request.code);
+      if (request.code.includes("-->|")) return { error: "Parse error on line 2:\nExpecting 'SEMI', got 'PIPE'" };
+      return { svg: '<svg viewBox="0 0 300 120"><text>drawn</text></svg>' };
+    },
+  };
+  return { asked, port };
+}
+
+test("a .mmd file is drawn as a diagram in a sandboxed frame, and Source shows its lines", async () => {
+  const render = diagramRender();
+  draw(openSource({ "docs/flow.mmd": "flowchart LR\n  a --> b" }).entityView, "docs/flow.mmd", null, render.port);
+  await settle();
+
+  const frame = target.querySelector<HTMLIFrameElement>(".tf-fileview .tf-fdiagram iframe")!;
+  expect(frame.getAttribute("sandbox")).toBe("");
+  expect([frame.width, frame.height]).toEqual(["300", "120"]);
+  expect(render.asked).toEqual(["flowchart LR\n  a --> b"]);
+  expect(viewButtons()).toEqual(["Rendered*", "Source"]);
+
+  pickView("Source");
+  await settle();
+  expect(target.querySelector(".tf-fileview iframe")).toBeNull();
+  expect(lineText(1)).toEqual(["2", "  a --> b"]);
+});
+
+test("a .mermaid file that does not parse shows the parser's error above its numbered source", async () => {
+  draw(openSource({ "flow.mermaid": "flowchart TB\n  api -->|outbox worker" }).entityView, "flow.mermaid", null, diagramRender().port);
+  await settle();
+
+  const drawn = target.querySelector(".tf-fileview .tf-fdiagram")!;
+  expect(text(drawn.querySelector(".tf-stepfail b"))).toBe("Mermaid could not draw this.");
+  expect(drawn.querySelector(".tf-stepfail pre")?.textContent).toContain("Expecting 'SEMI', got 'PIPE'");
+  expect([...drawn.querySelectorAll(".tf-code .tf-l")].map((row) => [...row.children].map((span) => span.textContent))).toEqual([
+    ["1", "flowchart TB"],
+    ["2", "  api -->|outbox worker"],
+  ]);
+  expect(drawn.querySelector("iframe")).toBeNull();
+});
+
 // ---- the tree at a commit, moved behind (#2241, #2242) ----
 
 /**
