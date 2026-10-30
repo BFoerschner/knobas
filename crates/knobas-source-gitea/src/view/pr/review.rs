@@ -69,6 +69,7 @@ pub(super) fn commenting(pull: &Pull, resolves: bool) -> Option<Commenting> {
         write_op: crate::WRITE_OP_SUBMIT_REVIEW.to_owned(),
         reply: Some(crate::WRITE_OP_REPLY_TO_THREAD.to_owned()),
         resolve: resolves.then(|| crate::WRITE_OP_RESOLVE_THREAD.to_owned()),
+        head: pull.head.as_ref().and_then(|h| h.sha.clone()),
     })
 }
 

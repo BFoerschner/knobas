@@ -445,6 +445,12 @@ pub struct Commenting {
     /// Absent on the wire reads as `None`.
     #[serde(default)]
     pub resolve: Option<String>,
+    /// The head commit the diff's line comments are written against, in the
+    /// source's spelling (#2276): the shell keeps the reader's unsent
+    /// comments by pull request and this commit. `None` where the source did
+    /// not say. Absent on the wire reads as `None`.
+    #[serde(default)]
+    pub head: Option<String>,
 }
 
 impl ViewAction {
@@ -776,6 +782,7 @@ mod tests {
                     write_op: "submit_review".into(),
                     reply: None,
                     resolve: None,
+                    head: None,
                 }),
                 gone: vec![FileThread {
                     path: "src/dropped.rs".into(),
@@ -1090,6 +1097,7 @@ mod tests {
                 write_op: "submit_review".into(),
                 reply: None,
                 resolve: None,
+                head: None,
             }),
             gone: vec![FileThread {
                 path: "gone.txt".into(),
@@ -1114,7 +1122,7 @@ mod tests {
             serde_json::json!({
                 "type": "diff",
                 "truncated": false,
-                "commentable": { "write_op": "submit_review", "reply": null, "resolve": null },
+                "commentable": { "write_op": "submit_review", "reply": null, "resolve": null, "head": null },
                 "gone": [{
                     "path": "gone.txt",
                     "thread": {

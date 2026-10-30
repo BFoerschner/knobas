@@ -577,6 +577,8 @@ async fn the_files_tab_is_read_on_its_own_from_the_pull_requests_diff() {
             write_op: "submit_review".into(),
             reply: Some("reply_to_thread".into()),
             resolve: None,
+            // What the reader's unsent comments are kept by (#2276).
+            head: Some(HEAD_SHA.into()),
         })
     );
     let summary: Vec<_> = files
