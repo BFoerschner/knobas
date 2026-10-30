@@ -15,6 +15,10 @@
   here or from the file viewer's *Render as ▾*, changed or removed here. A
   row naming a renderer that is gone says the built-in default applies.
 
+  #2265: a default may also name a pipeline (a named pipeline's id), so a pattern's files open through it; a row
+  may name only a pipeline, and its output then picks the renderer by its own name. The command steps and the named
+  pipelines are `TfPipelinesSettings`.
+
   The test pane runs a *saved* renderer on pasted text: the webview never
   sends a program (ADR-0016), so a renderer is saved before it is tried, as
   *Try it* does for *Open in…* (#1643).
@@ -38,15 +42,22 @@
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { CommandOutput, RendererInput } from "../../ipc/app";
+  import type { CommandOutput, RendererDefault, RendererInput } from "../../ipc/app";
   import { COMMAND_PREFIX, installCommands } from "../../render/command";
   import { allRenderers, type Renderer } from "../../render/registry";
   import { withDefault } from "../../render/defaults";
   import { rendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
+  import { commandSteps, namedPipelines, type CommandSteps, type NamedPipelines } from "../../render/pipelines.svelte";
+  import TfPipelinesSettings from "./TfPipelinesSettings.svelte";
   import { push } from "../../shell/toasts.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
 
-  let { ports = realRendererPorts, defaults = rendererDefaults }: { ports?: RendererPorts; defaults?: RendererDefaults } = $props();
+  let {
+    ports = realRendererPorts,
+    defaults = rendererDefaults,
+    pipelines = namedPipelines,
+    stepCommands = commandSteps,
+  }: { ports?: RendererPorts; defaults?: RendererDefaults; pipelines?: NamedPipelines; stepCommands?: CommandSteps } = $props();
 
   /** `null` until the read answers. */
   let saved = $state<UserRenderer[] | null>(null);
@@ -65,14 +76,14 @@
   const choices = $derived((void installs, allRenderers()));
   const nameOf = (id: string) => choices.find((r) => r.id === id)?.name ?? null;
   /** The default being added. */
-  let adding = $state({ pattern: "", renderer: "source" });
+  let adding = $state({ pattern: "", renderer: "source", pipeline: "" });
   let defaultsRefusal = $state<string | null>(null);
 
   $effect(() => {
     void defaults.load().catch((cause) => push({ text: `Could not read the default renderers: ${ipcErrorMessage(cause)}`, tone: "err" }));
   });
 
-  async function storeDefaults(list: { pattern: string; renderer: string }[]): Promise<boolean> {
+  async function storeDefaults(list: RendererDefault[]): Promise<boolean> {
     try {
       await defaults.save(list);
       defaultsRefusal = null;
@@ -84,7 +95,10 @@
   }
 
   async function addDefault() {
-    if (await storeDefaults(withDefault(defaults.list, adding.pattern.trim(), adding.renderer))) adding = { pattern: "", renderer: "source" };
+    const pattern = adding.pattern.trim();
+    const pipeline = adding.pipeline === "" ? null : adding.pipeline;
+    const list = withDefault(defaults.list, pattern, adding.renderer).map((d) => (d.pattern.toLowerCase() === pattern.toLowerCase() ? { ...d, pipeline } : d));
+    if (await storeDefaults(list)) adding = { pattern: "", renderer: "source", pipeline: "" };
   }
 
   $effect(() => {
@@ -276,7 +290,7 @@
       <p class="tf-dim">No defaults yet: every file opens with the first renderer that accepts it.</p>
     {:else}
       <table class="tf-tbl tf-rnd-defaults">
-        <thead><tr><th>Files</th><th>Open with</th><th><span class="tf-sr">Actions</span></th></tr></thead>
+        <thead><tr><th>Files</th><th>Through</th><th>Open with</th><th><span class="tf-sr">Actions</span></th></tr></thead>
         <tbody>
           {#each defaults.list as d, at (d.pattern)}
             <tr>
@@ -284,14 +298,30 @@
               <td>
                 <select
                   class="tf-select"
+                  aria-label="Open {d.pattern} through"
+                  value={d.pipeline ?? ""}
+                  onchange={(event) =>
+                    void storeDefaults(
+                      defaults.list.map((row, i) => (i === at ? { ...row, pipeline: event.currentTarget.value === "" ? null : event.currentTarget.value } : row)),
+                    )}
+                >
+                  <option value="">No pipeline</option>
+                  {#each pipelines.list as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+                  {#if d.pipeline !== null && !pipelines.list.some((p) => p.id === d.pipeline)}<option value={d.pipeline}>{d.pipeline}</option>{/if}
+                </select>
+              </td>
+              <td>
+                <select
+                  class="tf-select"
                   aria-label="Open {d.pattern} with"
                   value={d.renderer}
                   onchange={(event) => void storeDefaults(defaults.list.map((row, i) => (i === at ? { ...row, renderer: event.currentTarget.value } : row)))}
                 >
+                  {#if d.renderer === ""}<option value="">The output's own</option>{/if}
                   {#each choices as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
-                  {#if nameOf(d.renderer) === null}<option value={d.renderer}>{d.renderer}</option>{/if}
+                  {#if d.renderer !== "" && nameOf(d.renderer) === null}<option value={d.renderer}>{d.renderer}</option>{/if}
                 </select>
-                {#if nameOf(d.renderer) === null}<span class="tf-small tf-dim">Not installed: the built-in default applies.</span>{/if}
+                {#if d.renderer !== "" && nameOf(d.renderer) === null}<span class="tf-small tf-dim">Not installed: the built-in default applies.</span>{/if}
               </td>
               <td class="tf-right">
                 <button class="tf-btn tf-sm tf-ghost" onclick={() => void storeDefaults(defaults.list.filter((_, i) => i !== at))}>Remove</button>
@@ -305,6 +335,10 @@
       <label class="tf-stg-l" for="tf-rnd-dpat">Add a default<small>A file pattern, such as <span class="tf-mono">*.md</span> or <span class="tf-mono">docs/*.mmd</span>.</small></label>
       <div class="tf-stg-c tf-stg-inl">
         <input id="tf-rnd-dpat" class="tf-stg-in tf-mono" bind:value={adding.pattern} placeholder="*.md" />
+        <select class="tf-select" aria-label="Through" bind:value={adding.pipeline}>
+          <option value="">No pipeline</option>
+          {#each pipelines.list as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+        </select>
         <select class="tf-select" aria-label="Open with" bind:value={adding.renderer}>
           {#each choices as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
         </select>
@@ -313,6 +347,8 @@
     </div>
     {#if defaultsRefusal !== null}<p class="tf-stg-errt" role="alert">{defaultsRefusal}</p>{/if}
   </div>
+
+  <TfPipelinesSettings {pipelines} {stepCommands} {defaults} />
 
   {#if saved.length > 0}
     <div class="tf-stg-sec">

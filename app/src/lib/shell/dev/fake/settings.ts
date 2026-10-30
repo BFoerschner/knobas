@@ -5,7 +5,8 @@
  * Answers `user_renderers`, `set_user_renderers`, `run_renderer` (#2262: one saved
  * renderer, `cat`, which the fake runs by echoing its input; any other command
  * fails with that said on stderr), `renderer_defaults`, `set_renderer_defaults` (#2263, none until
- * one is made), `pages_kept_open`, `set_pages_kept_open` (#2247), `passive_attribution`, `set_passive_attribution`,
+ * one is made), `command_steps`, `set_command_steps`, `named_pipelines`, `set_named_pipelines` (#2265: one
+ * command step, Upper, which `repoFilePiped` runs; no pipeline until one is saved), `pages_kept_open`, `set_pages_kept_open` (#2247), `passive_attribution`, `set_passive_attribution`,
  * `monitoring_settings`, `set_monitoring_settings`, `backup_status`,
  * `backup_now`, `set_backup_schedule` and `open_backup_folder` (which opens
  * nothing: a browser has no file manager to show the folder in).
@@ -30,7 +31,7 @@
  */
 import type { BackupRecord, BackupSchedule, BackupStatus } from "../../../ipc/backup";
 import type { MonitoringSettings } from "../../../ipc/assets";
-import type { RenderContent, RendererDefault, UserRenderer, UserRendererDraft } from "../../../ipc/app";
+import type { CommandStep, CommandStepDraft, NamedPipeline, NamedPipelineDraft, RenderContent, RendererDefault, UserRenderer, UserRendererDraft } from "../../../ipc/app";
 import type { Handlers } from "../fake-tauri";
 
 const DIRECTORY = "~/Library/Application Support/knobas/backups";
@@ -90,10 +91,30 @@ export function handlers(): Handlers {
   // The default renderer per file pattern (#2263): none until one is made.
   let defaults: RendererDefault[] = [];
 
+  // #2265: one command step, `tr a-z A-Z`, and no named pipeline until one is saved.
+  let steps: CommandStep[] = [{ id: "upper", name: "Upper", command: "tr a-z A-Z", timeout_secs: 10 }];
+  let pipelines: NamedPipeline[] = [];
+  const idOf = (name: string, i: number, kind: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `${kind}-${i + 1}`;
+
   return {
+    command_steps: () => steps,
+    set_command_steps: (args) => {
+      steps = (args["steps"] as CommandStepDraft[]).map((d, i) => ({
+        id: d.id ?? idOf(d.name, i, "step"),
+        name: d.name.trim(),
+        command: d.command.trim(),
+        timeout_secs: d.timeout_secs ?? 10,
+      }));
+      return steps;
+    },
+    named_pipelines: () => pipelines,
+    set_named_pipelines: (args) => {
+      pipelines = (args["pipelines"] as NamedPipelineDraft[]).map((d, i) => ({ id: d.id ?? idOf(d.name, i, "pipeline"), name: d.name.trim(), steps: d.steps }));
+      return pipelines;
+    },
     renderer_defaults: () => defaults,
     set_renderer_defaults: (args) => {
-      defaults = (args["defaults"] as RendererDefault[]).map((d) => ({ pattern: d.pattern.trim(), renderer: d.renderer.trim() }));
+      defaults = (args["defaults"] as RendererDefault[]).map((d) => ({ pattern: d.pattern.trim(), renderer: d.renderer.trim(), pipeline: d.pipeline?.trim() || null }));
       return defaults;
     },
     user_renderers: () => renderers,

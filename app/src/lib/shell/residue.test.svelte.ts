@@ -273,6 +273,10 @@ vi.mock("../ipc/app", () => ({
   userRenderers: () => deferred([]),
   rendererDefaults: () => deferred([]),
   setRendererDefaults: (list: unknown[]) => deferred(list),
+  namedPipelines: () => deferred([]),
+  setNamedPipelines: (list: unknown[]) => deferred(list),
+  commandSteps: () => deferred([]),
+  setCommandSteps: (list: unknown[]) => deferred(list),
 }));
 
 /**

@@ -34,6 +34,10 @@
     userRenderers?: () => Promise<import("../ipc/app").UserRenderer[]>;
     /** The default renderer per file pattern (#2263), held once the database answers. */
     rendererDefaults?: () => Promise<import("../ipc/app").RendererDefault[]>;
+    /** The named pipelines (#2265), held once the database answers. */
+    namedPipelines?: () => Promise<import("../ipc/app").NamedPipeline[]>;
+    /** The command steps (#2265), held once the database answers. */
+    commandSteps?: () => Promise<import("../ipc/app").CommandStep[]>;
   }
 </script>
 
@@ -42,8 +46,9 @@
   import { onMount, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
-  import { pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
+  import { commandSteps, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
   import { rendererDefaults as heldDefaults } from "../render/defaults.svelte";
+  import { commandSteps as heldCommandSteps, namedPipelines as heldPipelines } from "../render/pipelines.svelte";
   import { installCommands } from "../render/command";
   import { listSources, syncStatus, type SourceSummary, type SourceSyncStatus } from "../ipc/sources";
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
@@ -98,6 +103,8 @@
       pagesKeptOpen,
       userRenderers,
       rendererDefaults,
+      namedPipelines,
+      commandSteps,
     },
     prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches,
     onstarttimer = () => {},
@@ -338,6 +345,21 @@
     void read()
       .then((list) => heldDefaults.hold(list))
       .catch(() => {});
+  });
+
+  // The named pipelines and command steps (#2265): until they answer, no file opens through a default pipeline.
+  $effect(() => {
+    if (!lifecycle.ready) return;
+    const pipelines = untrack(() => ports.namedPipelines);
+    const steps = untrack(() => ports.commandSteps);
+    if (pipelines !== undefined)
+      void pipelines()
+        .then((list) => heldPipelines.hold(list))
+        .catch(() => {});
+    if (steps !== undefined)
+      void steps()
+        .then((list) => heldCommandSteps.hold(list))
+        .catch(() => {});
   });
 
   $effect(() => {

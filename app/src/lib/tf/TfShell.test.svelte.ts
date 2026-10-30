@@ -1400,7 +1400,7 @@ test("the saved command renderers are in the registry once the database answers 
 });
 
 test("the default renderers per file pattern are held once the database answers (#2263)", async () => {
-  start({ rendererDefaults: () => Promise.resolve([{ pattern: "*.md", renderer: "source" }]) });
+  start({ rendererDefaults: () => Promise.resolve([{ pattern: "*.md", renderer: "source", pipeline: null }]) });
   await settle();
-  expect(rendererDefaults.list).toEqual([{ pattern: "*.md", renderer: "source" }]);
+  expect(rendererDefaults.list).toEqual([{ pattern: "*.md", renderer: "source", pipeline: null }]);
 });

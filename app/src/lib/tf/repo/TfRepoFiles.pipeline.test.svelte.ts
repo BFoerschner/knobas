@@ -10,7 +10,9 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { PipeRun, PipeStep, SourceView } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
-import { createRendererDefaults } from "../../render/defaults.svelte";
+import { createRendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
+import { createCommandSteps, createNamedPipelines, type CommandSteps, type NamedPipelines } from "../../render/pipelines.svelte";
+import type { NamedPipeline, NamedPipelineDraft, RendererDefault } from "../../ipc/app";
 
 const REPO = "gitea:tidewater/payout-service";
 const PATH = "fixtures/events.json.gz";
@@ -64,10 +66,18 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function draw(piped: ReturnType<typeof pipedPort>["piped"], render?: RenderPort) {
+interface Extra {
+  defaults?: RendererDefaults;
+  pipelines?: NamedPipelines;
+  stepCommands?: CommandSteps;
+  fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
+}
+
+function draw(piped: ReturnType<typeof pipedPort>["piped"], render?: RenderPort, extra: Extra = {}) {
   const ports = {
     entityView: async (_at: string, section: string | null) => fileView(section ?? ""),
     piped,
+    ...(extra.fileBytes ? { fileBytes: extra.fileBytes } : {}),
     submitWrite: async () => {
       throw { code: "invalid", message: "no write in this suite" };
     },
@@ -81,7 +91,9 @@ function draw(piped: ReturnType<typeof pipedPort>["piped"], render?: RenderPort)
       branch: "main",
       path: PATH,
       changed: new Set<string>(),
-      defaults: createRendererDefaults({ read: async () => [], save: async (list) => list }),
+      defaults: extra.defaults ?? createRendererDefaults({ read: async () => [], save: async (list) => list }),
+      pipelines: extra.pipelines ?? createNamedPipelines({ read: async () => [], save: async () => [] }),
+      stepCommands: extra.stepCommands ?? createCommandSteps({ read: async () => [], save: async () => [] }),
       ...(render ? { render } : {}),
     },
   });
@@ -202,4 +214,127 @@ test("a step is moved with its grip's arrow keys and removed with its ×; Reset 
   await settle();
   expect(target.querySelector(".tf-pipe")).toBeNull();
   expect(button("+ Pipeline")).not.toBeNull();
+});
+
+const GZ_BYTES = Uint8Array.of(0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0);
+const GZ_JSON: NamedPipeline = { id: "gz-json", name: "Gzipped JSON", steps: [{ step: "gunzip" }, { step: "jq", filter: "." }] };
+
+/** A store of named pipelines that records each save and answers ids made from new names. */
+function storedPipelines(list: NamedPipeline[]) {
+  const saves: NamedPipelineDraft[][] = [];
+  const store = createNamedPipelines({
+    read: async () => list,
+    save: async (drafts) => {
+      saves.push(drafts);
+      return drafts.map((d) => ({ id: d.id ?? d.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: d.name, steps: d.steps }));
+    },
+  });
+  store.hold(list);
+  return { saves, store };
+}
+
+function storedDefaults(list: RendererDefault[]) {
+  const saves: RendererDefault[][] = [];
+  const store = createRendererDefaults({
+    read: async () => list,
+    save: async (next) => {
+      saves.push(next);
+      return next;
+    },
+  });
+  store.hold(list);
+  return { saves, store };
+}
+
+test("a gzipped file with no default shows the gunzip chip, and the content shows raw until the chip is clicked (#2265)", async () => {
+  const { asked, piped } = pipedPort(() => done('{"a":1}'));
+  draw(piped, undefined, { fileBytes: async () => GZ_BYTES });
+  await settle();
+  const chip = target.querySelector(".tf-suggest");
+  expect(text(chip)).toContain("These bytes look gzip-compressed.");
+  expect(text(chip)).toContain("Nothing has been applied");
+  expect(asked).toEqual([]);
+  expect(target.querySelector(".tf-pipe")).toBeNull();
+  expect(text(target.querySelector(".tf-empty"))).toBe("A binary file, not drawn.");
+
+  button("Unwrap with gunzip")!.click();
+  await settle();
+  expect(asked.map((a) => a.steps)).toEqual([[{ step: "gunzip" }]]);
+  expect(target.querySelector(".tf-suggest")).toBeNull();
+  expect(drawnLines()).toEqual(['{"a":1}']);
+});
+
+test("Not now puts the chip away and applies nothing", async () => {
+  const { asked, piped } = pipedPort(() => done("x"));
+  draw(piped, undefined, { fileBytes: async () => GZ_BYTES });
+  await settle();
+  button("Not now")!.click();
+  await settle();
+  expect(target.querySelector(".tf-suggest")).toBeNull();
+  expect(asked).toEqual([]);
+});
+
+test("a pipeline saved as the default for *.json.gz runs on the file as it opens, and offers no chip", async () => {
+  const { asked, piped } = pipedPort(() => done('{\n  "a": 1\n}\n'));
+  const defaults = storedDefaults([{ pattern: "*.json.gz", renderer: "", pipeline: "gz-json" }]);
+  const pipelines = storedPipelines([GZ_JSON]);
+  draw(piped, undefined, { defaults: defaults.store, pipelines: pipelines.store, fileBytes: async () => GZ_BYTES });
+  await settle();
+  expect(asked.map((a) => a.steps)).toEqual([GZ_JSON.steps]);
+  expect(target.querySelector(".tf-suggest")).toBeNull();
+  expect(text(target.querySelector(".tf-pipe .tf-acts"))).toContain("Gzipped JSON, the default for *.json.gz");
+  expect(drawnLines()).toEqual(["{", '"a": 1', "}"]);
+});
+
+test("a named pipeline edited in Settings changes what every file it is the default for runs", async () => {
+  const { asked, piped } = pipedPort(() => done("x"));
+  const defaults = storedDefaults([{ pattern: "*.json.gz", renderer: "", pipeline: "gz-json" }]);
+  const pipelines = storedPipelines([GZ_JSON]);
+  draw(piped, undefined, { defaults: defaults.store, pipelines: pipelines.store });
+  await settle();
+  const edited: NamedPipeline = { ...GZ_JSON, steps: [{ step: "gunzip" }, { step: "jq", filter: ".events" }] };
+  pipelines.store.hold([edited]);
+  await settle();
+  expect(asked.map((a) => a.steps)).toEqual([GZ_JSON.steps, edited.steps]);
+});
+
+test("Save as default for *.json.gz… stores the pipeline by name and points the pattern at it", async () => {
+  const { piped } = pipedPort(() => done("x"));
+  const defaults = storedDefaults([]);
+  const pipelines = storedPipelines([]);
+  draw(piped, undefined, { defaults: defaults.store, pipelines: pipelines.store });
+  await settle();
+  button("+ Pipeline")!.click();
+  await settle();
+  await addStep("gzip");
+  button("Save as default for *.json.gz…")!.click();
+  await settle();
+  const name = target.querySelector<HTMLInputElement>("input[aria-label='Pipeline name']")!;
+  const pattern = target.querySelector<HTMLInputElement>("input[aria-label='File pattern']")!;
+  expect(pattern.value).toBe("*.json.gz");
+  name.value = "Events";
+  name.dispatchEvent(new Event("input", { bubbles: true }));
+  button("Save")!.click();
+  await settle();
+  expect(pipelines.saves).toEqual([[{ id: null, name: "Events", steps: [{ step: "gunzip" }] }]]);
+  expect(defaults.saves).toEqual([[{ pattern: "*.json.gz", renderer: "", pipeline: "events" }]]);
+  expect(text(target.querySelector(".tf-pipe .tf-acts"))).toContain("Events, the default for *.json.gz");
+});
+
+test("the person's command steps are in the Add step menu, under Your commands", async () => {
+  const { asked, piped } = pipedPort(() => done("X"));
+  const stepCommands = createCommandSteps({ read: async () => [], save: async () => [] });
+  stepCommands.hold([{ id: "upper", name: "Upper", command: "tr a-z A-Z", timeout_secs: 10 }]);
+  draw(piped, undefined, { stepCommands });
+  await settle();
+  button("+ Pipeline")!.click();
+  await settle();
+  button("+ Add step")!.click();
+  flushSync();
+  expect(text(target.querySelector(".tf-pmenu .tf-menu"))).toContain("Your commands");
+  button("+ Add step")!.click();
+  flushSync();
+  await addStep("Upper");
+  expect(asked.at(-1)?.steps).toEqual([{ step: "command", id: "upper" }]);
+  expect(target.querySelector(".tf-pstep.tf-puser")?.getAttribute("aria-label")).toBe("Step 1, Upper");
 });
