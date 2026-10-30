@@ -55,7 +55,8 @@ pub const PLACEHOLDERS: [&str; 10] = [
 /// - `range`: the diff between two commits or branches, as the diff address
 ///   names them (`base` may be `<sha>^`).
 /// - `pull_request`: by its number, with its base and head as the page knows
-///   them, and the head's branch.
+///   them, and the head's branch. An application opens it in its worktree
+///   under the clones root (#2285, ADR-0035), never in the person's checkout.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts", rename = "OpenObject")]
@@ -78,6 +79,12 @@ pub enum Object {
         base: String,
         head: String,
         branch: String,
+        /// The pull request's own entity id, when the page has one: knobas's
+        /// bookkeeping of its worktree (#2285), read against the mirror to
+        /// tell a closed one. Never an argument and never a placeholder.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        item: Option<String>,
     },
 }
 
@@ -182,6 +189,7 @@ impl Code {
                 base,
                 head,
                 branch,
+                ..
             } => {
                 code.pr = Some(*number);
                 code.base = Some(base.clone());
@@ -277,45 +285,84 @@ impl Application {
 pub const SHIPPED_DEFAULT: &str = "vscode";
 
 /// The applications knobas starts with on `os` (`std::env::consts::OS`'s
-/// spelling): VS Code, Terminal, Fork and IntelliJ IDEA on macOS, none
-/// elsewhere.
+/// spelling), so "Open in" works without setup (#2275): an editor, a
+/// terminal and a file manager on each of macOS, Linux and Windows, and
+/// Fork and IntelliJ IDEA besides on macOS. None on any other platform.
 ///
-/// `open -a <application>` and not a CLI name such as `code` or `idea`: an app
-/// started from Finder has `/usr/bin:/bin:/usr/sbin:/sbin` for `PATH`, where
-/// those shims are not, and `open` resolves the application through Launch
-/// Services. `open -a` takes no line number, so the file commands open the
-/// file without one; a person who has the shim edits the command.
+/// Each opens a pull request at its worktree (#2285): the pull request
+/// command is the repository command, whose `{path}` is then the worktree.
+///
+/// - **macOS**: `open -a <application>` and not a CLI name such as `code` or
+///   `idea`: an app started from Finder has `/usr/bin:/bin:/usr/sbin:/sbin`
+///   for `PATH`, where those shims are not, and `open` resolves the
+///   application through Launch Services. `open -a` takes no line number, so
+///   the file commands open the file without one; a person who has the shim
+///   edits the command.
+/// - **Linux**: VS Code's `code`, which takes `--goto <file>:<line>`;
+///   GNOME Terminal, the default desktop's, started in the checkout with
+///   `--working-directory` (another terminal is one edit away); and
+///   `xdg-open`, which hands a folder to the desktop's file manager.
+/// - **Windows**: `code.cmd`, the name VS Code's installer puts on `PATH`
+///   (a `.cmd` is a batch file, which the standard library starts through
+///   `cmd.exe` with its arguments quoted, or refuses one it cannot quote);
+///   Windows Terminal's `wt -d`; and `explorer`.
 ///
 /// The ids `vscode`, `jetbrains` and `terminal` are #501's action ids, so a
 /// caller that still names one of those reaches the same application.
 #[must_use]
 pub fn shipped_on(os: &str) -> Vec<Application> {
-    if os != "macos" {
-        return Vec::new();
-    }
     let app = |id: &str, name: &str, command: &str, file: Option<&str>| Application {
         id: id.to_owned(),
         name: name.to_owned(),
         command: command.to_owned(),
         file_command: file.map(str::to_owned),
+        pull_request_command: Some(command.to_owned()),
         ..Application::default()
     };
-    vec![
-        app(
-            "vscode",
-            "VS Code",
-            "open -a \"Visual Studio Code\" {path}",
-            Some("open -a \"Visual Studio Code\" {file}"),
-        ),
-        app("terminal", "Terminal", "open -a Terminal {path}", None),
-        app("fork", "Fork", "open -a Fork {path}", None),
-        app(
-            "jetbrains",
-            "IntelliJ IDEA",
-            "open -a \"IntelliJ IDEA\" {path}",
-            Some("open -a \"IntelliJ IDEA\" {file}"),
-        ),
-    ]
+    match os {
+        "macos" => vec![
+            app(
+                "vscode",
+                "VS Code",
+                "open -a \"Visual Studio Code\" {path}",
+                Some("open -a \"Visual Studio Code\" {file}"),
+            ),
+            app("terminal", "Terminal", "open -a Terminal {path}", None),
+            app("fork", "Fork", "open -a Fork {path}", None),
+            app(
+                "jetbrains",
+                "IntelliJ IDEA",
+                "open -a \"IntelliJ IDEA\" {path}",
+                Some("open -a \"IntelliJ IDEA\" {file}"),
+            ),
+        ],
+        "linux" => vec![
+            app(
+                "vscode",
+                "VS Code",
+                "code {path}",
+                Some("code --goto {file}:{line}"),
+            ),
+            app(
+                "terminal",
+                "Terminal",
+                "gnome-terminal --working-directory={path}",
+                None,
+            ),
+            app("files", "Files", "xdg-open {path}", None),
+        ],
+        "windows" => vec![
+            app(
+                "vscode",
+                "VS Code",
+                "code.cmd {path}",
+                Some("code.cmd --goto {file}:{line}"),
+            ),
+            app("terminal", "Windows Terminal", "wt -d {path}", None),
+            app("files", "File Explorer", "explorer {path}", None),
+        ],
+        _ => Vec::new(),
+    }
 }
 
 /// [`shipped_on`] for this machine.
@@ -1020,56 +1067,124 @@ mod tests {
         );
     }
 
-    /// The shipped list is R-8.21's four, in its order, on macOS only.
+    /// Each platform's shipped list, in its order (#2275); none elsewhere.
     #[test]
-    fn macos_ships_four_applications_and_the_others_none() {
-        let names: Vec<String> = shipped_on("macos").into_iter().map(|a| a.name).collect();
-        assert_eq!(names, ["VS Code", "Terminal", "Fork", "IntelliJ IDEA"]);
-        for os in ["linux", "windows", "MACOS", ""] {
+    fn macos_linux_and_windows_ship_their_applications_and_the_others_none() {
+        let names = |os: &str| -> Vec<String> { shipped_on(os).into_iter().map(|a| a.name).collect() };
+        assert_eq!(names("macos"), ["VS Code", "Terminal", "Fork", "IntelliJ IDEA"]);
+        assert_eq!(names("linux"), ["VS Code", "Terminal", "Files"]);
+        assert_eq!(names("windows"), ["VS Code", "Windows Terminal", "File Explorer"]);
+        for os in ["freebsd", "MACOS", "Linux", ""] {
             assert!(shipped_on(os).is_empty(), "{os}");
         }
-        assert!(shipped_on("macos").iter().any(|a| a.id == SHIPPED_DEFAULT));
+        for os in ["macos", "linux", "windows"] {
+            assert!(shipped_on(os).iter().any(|a| a.id == SHIPPED_DEFAULT), "{os}");
+        }
     }
 
-    /// What `open` receives from each shipped command, spelled out rather than
+    /// What `open` receives from each shipped command on `os` (the
+    /// repository's, the file's, the pull request's), spelled out rather than
     /// derived from the list.
-    #[test]
-    fn the_shipped_commands_fill_to_the_documented_argv() {
-        let file = Path::new("/Users/mara/code/payout-service/src/lib.rs");
-        let at_file = Fill {
-            checkout: Path::new(CHECKOUT),
-            file: Some(file),
-            line: Some(3),
-            code: &Code::NONE,
+    fn shipped_argv(os: &str, checkout: &str, file: &str) -> Vec<[Option<Vec<String>>; 3]> {
+        let code = Code {
+            pr: Some(7),
+            base: Some("main".into()),
+            head: Some("feature/x".into()),
+            branch: Some("feature/x".into()),
+            ..Code::NONE
         };
-        let argv: Vec<(Vec<String>, Option<Vec<String>>)> = shipped_on("macos")
+        let at = |file: Option<&'static Path>| Fill {
+            checkout: Path::new(checkout),
+            file,
+            line: Some(3),
+            code: &code,
+        };
+        let file: &'static Path = Box::leak(Path::new(file).to_path_buf().into_boxed_path());
+        shipped_on(os)
             .iter()
             .map(|a| {
-                (
-                    filled(&a.command, &at_checkout()),
-                    a.file_command.as_deref().map(|c| filled(c, &at_file)),
-                )
+                [
+                    Some(filled(&a.command, &at(None))),
+                    a.file_command.as_deref().map(|c| filled(c, &at(Some(file)))),
+                    a.pull_request_command.as_deref().map(|c| filled(c, &at(None))),
+                ]
             })
-            .collect();
-        let s = |v: &[&str]| v.iter().map(|x| (*x).to_owned()).collect::<Vec<_>>();
+            .collect()
+    }
+
+    fn s(v: &[&str]) -> Option<Vec<String>> {
+        Some(v.iter().map(|x| (*x).to_owned()).collect())
+    }
+
+    #[test]
+    fn the_macos_commands_fill_to_the_documented_argv() {
+        let file = "/Users/mara/code/payout-service/src/lib.rs";
         assert_eq!(
-            argv,
+            shipped_argv("macos", CHECKOUT, file),
             [
-                (
+                [
                     s(&["open", "-a", "Visual Studio Code", CHECKOUT]),
-                    Some(s(&[
-                        "open",
-                        "-a",
-                        "Visual Studio Code",
-                        file.to_str().unwrap()
-                    ]))
-                ),
-                (s(&["open", "-a", "Terminal", CHECKOUT]), None),
-                (s(&["open", "-a", "Fork", CHECKOUT]), None),
-                (
+                    s(&["open", "-a", "Visual Studio Code", file]),
+                    s(&["open", "-a", "Visual Studio Code", CHECKOUT]),
+                ],
+                [
+                    s(&["open", "-a", "Terminal", CHECKOUT]),
+                    None,
+                    s(&["open", "-a", "Terminal", CHECKOUT]),
+                ],
+                [
+                    s(&["open", "-a", "Fork", CHECKOUT]),
+                    None,
+                    s(&["open", "-a", "Fork", CHECKOUT]),
+                ],
+                [
                     s(&["open", "-a", "IntelliJ IDEA", CHECKOUT]),
-                    Some(s(&["open", "-a", "IntelliJ IDEA", file.to_str().unwrap()]))
-                ),
+                    s(&["open", "-a", "IntelliJ IDEA", file]),
+                    s(&["open", "-a", "IntelliJ IDEA", CHECKOUT]),
+                ],
+            ]
+        );
+    }
+
+    /// A path with a space stays one argument, and `{file}:{line}` is one.
+    #[test]
+    fn the_linux_commands_fill_to_the_documented_argv() {
+        let (checkout, file) = ("/home/mara/my code/payout", "/home/mara/my code/payout/src/lib.rs");
+        assert_eq!(
+            shipped_argv("linux", checkout, file),
+            [
+                [
+                    s(&["code", checkout]),
+                    s(&["code", "--goto", "/home/mara/my code/payout/src/lib.rs:3"]),
+                    s(&["code", checkout]),
+                ],
+                [
+                    s(&["gnome-terminal", "--working-directory=/home/mara/my code/payout"]),
+                    None,
+                    s(&["gnome-terminal", "--working-directory=/home/mara/my code/payout"]),
+                ],
+                [s(&["xdg-open", checkout]), None, s(&["xdg-open", checkout])],
+            ]
+        );
+    }
+
+    #[test]
+    fn the_windows_commands_fill_to_the_documented_argv() {
+        let (checkout, file) = (r"C:\Users\Mara\code\pay out", r"C:\Users\Mara\code\pay out\src\lib.rs");
+        assert_eq!(
+            shipped_argv("windows", checkout, file),
+            [
+                [
+                    s(&["code.cmd", checkout]),
+                    s(&["code.cmd", "--goto", r"C:\Users\Mara\code\pay out\src\lib.rs:3"]),
+                    s(&["code.cmd", checkout]),
+                ],
+                [
+                    s(&["wt", "-d", checkout]),
+                    None,
+                    s(&["wt", "-d", checkout]),
+                ],
+                [s(&["explorer", checkout]), None, s(&["explorer", checkout])],
             ]
         );
     }
