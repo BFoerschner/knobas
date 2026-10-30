@@ -685,7 +685,10 @@ async fn a_commit_reads_its_files_at_its_sha() {
     let drawn = file(section);
     assert_eq!(drawn.text, "then\n");
     assert_eq!(drawn.sha, Some(blob("retry.rs", SHA)));
-    assert_eq!(drawn.trail, crumbs(&[(SHA, "files"), ("retry.rs", "file:retry.rs")]));
+    assert_eq!(
+        drawn.trail,
+        crumbs(&[(SHA, "files"), ("retry.rs", "file:retry.rs")])
+    );
     assert_eq!(
         drawn.url.as_deref(),
         Some(format!("{WEB}/src/commit/{SHA}/retry.rs").as_str())
@@ -703,7 +706,13 @@ async fn a_commit_reads_its_files_at_its_sha() {
 #[tokio::test]
 async fn a_commit_lists_its_directories_at_its_sha() {
     let server = gitea().await;
-    listing(&server, "", SHA, json!([entry("retry.rs", "retry.rs", "file", 5)])).await;
+    listing(
+        &server,
+        "",
+        SHA,
+        json!([entry("retry.rs", "retry.rs", "file", 5)]),
+    )
+    .await;
     let section = read(&server, &at_commit(SHA), "files").await;
     let (trail, entries) = tree(&section);
     assert_eq!(trail, crumbs(&[(SHA, "files")]));
@@ -731,7 +740,11 @@ async fn only_a_whole_shas_tree_and_diff_are_fixed() {
         (at_commit(&"g".repeat(40)), Some("files"), Live),
         (BRANCH.to_owned(), Some("file:src/lib.rs"), Live),
         (ENTITY.to_owned(), Some("file:src/lib.rs"), Live),
-        ("other:tidewater/payout-service@x".to_owned(), Some("files"), Live),
+        (
+            "other:tidewater/payout-service@x".to_owned(),
+            Some("files"),
+            Live,
+        ),
     ] {
         assert_eq!(
             source.view_standing(&entity, section),

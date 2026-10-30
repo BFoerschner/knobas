@@ -544,11 +544,7 @@ impl Source for GiteaSource {
 
     /// A commit's diff and its tree at a full sha are fixed (#2239); see
     /// [`crate::view::standing`].
-    fn view_standing(
-        &self,
-        entity: &str,
-        section: Option<&str>,
-    ) -> knobas_source::view::Standing {
+    fn view_standing(&self, entity: &str, section: Option<&str>) -> knobas_source::view::Standing {
         crate::view::standing(self, entity, section)
     }
 }

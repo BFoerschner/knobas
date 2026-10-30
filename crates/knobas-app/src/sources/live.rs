@@ -192,8 +192,7 @@ impl LiveSources {
         let slot = self.0.built.lock().expect("the built sources").remove(id);
         // A slot a build holds right now is let go: whatever it builds is
         // lent to that read alone, and the next read starts a slot anew.
-        if let Some(built) = slot.and_then(|slot| slot.try_lock().ok().and_then(|mut s| s.take()))
-        {
+        if let Some(built) = slot.and_then(|slot| slot.try_lock().ok().and_then(|mut s| s.take())) {
             self.drop_reads(built.generation);
         }
     }

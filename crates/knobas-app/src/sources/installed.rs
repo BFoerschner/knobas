@@ -462,8 +462,7 @@ pub async fn uninstall(
     }
     for (done, removal) in answered.iter().enumerate() {
         if let Err(error) =
-            super::crud::delete(pool, secrets, live, &removal.source_id, removal.purge_items)
-                .await
+            super::crud::delete(pool, secrets, live, &removal.source_id, removal.purge_items).await
         {
             return Err(InstallError::Remove {
                 id: removal.source_id.clone(),

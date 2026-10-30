@@ -328,7 +328,11 @@ async fn the_request_counter_counts_what_reached_the_server() {
         knobas_http::counted::counted(client.get_json::<serde_json::Value>("/thing", &[])).await;
     assert!(answer.is_err(), "503 every time");
     assert_eq!(outside, 0);
-    assert_eq!(sent, knobas_http::MAX_ATTEMPTS as u64, "one count per attempt");
+    assert_eq!(
+        sent,
+        knobas_http::MAX_ATTEMPTS as u64,
+        "one count per attempt"
+    );
     assert_eq!(
         server.hits(),
         2 * knobas_http::MAX_ATTEMPTS as usize,

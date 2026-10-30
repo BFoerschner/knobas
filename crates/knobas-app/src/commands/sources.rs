@@ -408,8 +408,8 @@ pub async fn set_source_secret<R: tauri::Runtime>(
         &id,
         secret,
     )
-        .await
-        .map_err(|error| to_ipc(&error, Some(&id)))?;
+    .await
+    .map_err(|error| to_ipc(&error, Some(&id)))?;
     emit(&app, crate::events::SOURCE_HEALTH, &health);
     // A credential that now works releases the backoff, so the source may be
     // due this instant rather than at the next tick.

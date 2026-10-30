@@ -871,8 +871,12 @@ pub async fn refused_writes(
     }
     let mut asked = tokio::task::JoinSet::new();
     for (id, of) in by_source {
-        let (pool, secrets, registry, live) =
-            (pool.clone(), secrets.clone(), registry.clone(), live.clone());
+        let (pool, secrets, registry, live) = (
+            pool.clone(),
+            secrets.clone(),
+            registry.clone(),
+            live.clone(),
+        );
         asked.spawn(async move {
             let answer = match adapter_for(&pool, &secrets, &registry, &live, &of[0].entity).await {
                 Ok(source) => source.refused_writes(&of).await.map_err(SourcesError::from),
@@ -1308,7 +1312,10 @@ async fn adapter_for(
     live: &LiveSources,
     entity_id: &str,
 ) -> Result<Arc<dyn knobas_source::Source>, SourcesError> {
-    Ok(live.source(pool, secrets, registry, entity_id).await?.source)
+    Ok(live
+        .source(pool, secrets, registry, entity_id)
+        .await?
+        .source)
 }
 
 /// The credential health of every source -- the cheap poll the top strip's

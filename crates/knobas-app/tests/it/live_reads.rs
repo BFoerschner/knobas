@@ -294,7 +294,12 @@ async fn ten_reads_build_the_source_once_and_ask_the_keychain_once() {
 #[tokio::test]
 async fn a_new_credential_is_the_next_reads() {
     let f = fixture().await;
-    assert!(f.read("branch/a", None).await.unwrap().contains("first-pat"));
+    assert!(
+        f.read("branch/a", None)
+            .await
+            .unwrap()
+            .contains("first-pat")
+    );
     sources::crud::set_secret(
         &f.pool,
         &f.secrets,
@@ -314,8 +319,18 @@ async fn a_new_credential_is_the_next_reads() {
 #[tokio::test]
 async fn an_edited_address_rebuilds_the_source() {
     let f = fixture().await;
-    assert!(f.read("branch/a", None).await.unwrap().contains("one.example"));
-    assert!(f.read("commit/c1", Some("files")).await.unwrap().contains("one.example"));
+    assert!(
+        f.read("branch/a", None)
+            .await
+            .unwrap()
+            .contains("one.example")
+    );
+    assert!(
+        f.read("commit/c1", Some("files"))
+            .await
+            .unwrap()
+            .contains("one.example")
+    );
     let builds = f.seen.builds();
     sources::crud::update(
         &f.pool,
@@ -328,8 +343,18 @@ async fn an_edited_address_rebuilds_the_source() {
     )
     .await
     .unwrap();
-    assert!(f.read("branch/a", None).await.unwrap().contains("two.example"));
-    assert!(f.read("commit/c1", Some("files")).await.unwrap().contains("two.example"));
+    assert!(
+        f.read("branch/a", None)
+            .await
+            .unwrap()
+            .contains("two.example")
+    );
+    assert!(
+        f.read("commit/c1", Some("files"))
+            .await
+            .unwrap()
+            .contains("two.example")
+    );
     assert_eq!(f.seen.builds() - builds, 1, "rebuilt once, for both reads");
 }
 
@@ -384,7 +409,11 @@ async fn a_removed_source_is_dropped() {
 async fn a_source_gone_from_the_configuration_is_dropped_by_the_next_read() {
     let f = fixture().await;
     f.read("branch/a", None).await.unwrap();
-    assert!(knobas_sync::config::delete(&f.pool, &f.id, true).await.unwrap());
+    assert!(
+        knobas_sync::config::delete(&f.pool, &f.id, true)
+            .await
+            .unwrap()
+    );
     let refused = f.read("branch/a", None).await.unwrap_err();
     assert!(matches!(refused, SourcesError::NotFound(_)), "{refused:?}");
     add_again(&f).await;
@@ -423,9 +452,25 @@ async fn each_source_has_its_own_instance() {
     )
     .await
     .unwrap();
-    assert!(f.read("branch/a", None).await.unwrap().contains("first-pat"));
-    assert!(other.read("branch/a", None).await.unwrap().contains("other-pat"));
-    assert!(f.read("branch/a", None).await.unwrap().contains("first-pat"));
+    assert!(
+        f.read("branch/a", None)
+            .await
+            .unwrap()
+            .contains("first-pat")
+    );
+    assert!(
+        other
+            .read("branch/a", None)
+            .await
+            .unwrap()
+            .contains("other-pat")
+    );
+    assert!(
+        f.read("branch/a", None)
+            .await
+            .unwrap()
+            .contains("first-pat")
+    );
 }
 
 // -- the read cache (#2239) ---------------------------------------------------
@@ -442,11 +487,17 @@ async fn a_fixed_view_is_read_once_and_a_live_one_every_time() {
 
     f.read("commit/bbb", Some("file:src/lib.rs")).await.unwrap();
     assert_eq!(f.seen.reads(), 2, "the same path at another sha is read");
-    f.read("commit/aaa", Some("file:src/main.rs")).await.unwrap();
+    f.read("commit/aaa", Some("file:src/main.rs"))
+        .await
+        .unwrap();
     assert_eq!(f.seen.reads(), 3, "another path at the sha is read");
 
-    f.read("branch/main", Some("file:src/lib.rs")).await.unwrap();
-    f.read("branch/main", Some("file:src/lib.rs")).await.unwrap();
+    f.read("branch/main", Some("file:src/lib.rs"))
+        .await
+        .unwrap();
+    f.read("branch/main", Some("file:src/lib.rs"))
+        .await
+        .unwrap();
     assert_eq!(f.seen.reads(), 5, "a live view is never kept");
 }
 

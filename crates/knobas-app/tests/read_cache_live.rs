@@ -39,7 +39,9 @@ const CACHED_BUDGET: Duration = Duration::from_millis(150);
 
 fn need(name: &str) -> String {
     std::env::var(name)
-        .unwrap_or_else(|_| panic!("{name} is not set -- run `eval \"$(testenv/seed --env)\"` first"))
+        .unwrap_or_else(|_| {
+            panic!("{name} is not set -- run `eval \"$(testenv/seed --env)\"` first")
+        })
         .trim_end_matches('/')
         .to_owned()
 }
@@ -98,7 +100,10 @@ async fn two_commits() -> (String, String) {
             "{}/api/v1/repos/{SEEDED}/commits?sha=main&limit=2&stat=false&files=false",
             need("KNOBAS_GITEA_URL")
         ))
-        .header("Authorization", format!("token {}", need("KNOBAS_GITEA_TOKEN")))
+        .header(
+            "Authorization",
+            format!("token {}", need("KNOBAS_GITEA_TOKEN")),
+        )
         .send()
         .await
         .expect("Gitea answers")
@@ -166,5 +171,8 @@ async fn a_file_opened_again_at_its_sha_costs_no_request() {
 
     let (_, other_sent, _) = app.open(&older).await;
     println!("other sha:   {other_sent} requests");
-    assert!(other_sent >= 2, "another sha is read from Gitea: {other_sent}");
+    assert!(
+        other_sent >= 2,
+        "another sha is read from Gitea: {other_sent}"
+    );
 }

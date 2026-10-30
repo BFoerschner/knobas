@@ -1701,10 +1701,17 @@ async fn writes(
             get_entity_inner(pool, &Registry::for_process(), "ci:build:42")
                 .await
                 .map_err(said)?;
-            knobas_app::sources::crud::view(pool, &secrets, &registry, &state.live, "ci:build:42", None)
-                .await
-                .map_err(said)
-                .map(|_| ())
+            knobas_app::sources::crud::view(
+                pool,
+                &secrets,
+                &registry,
+                &state.live,
+                "ci:build:42",
+                None,
+            )
+            .await
+            .map_err(said)
+            .map(|_| ())
         },
     )
     .await;

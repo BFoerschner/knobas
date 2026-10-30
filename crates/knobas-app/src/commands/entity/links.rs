@@ -365,16 +365,14 @@ pub async fn refused_writes<R: tauri::Runtime>(
     asks: Vec<knobas_source::grants::WriteAsk>,
 ) -> Result<Vec<knobas_source::grants::RefusedWrite>, IpcError> {
     let state = crate::sources::state(&app)?;
-    Ok(
-        crate::sources::crud::refused_writes(
-            &state.pool,
-            &state.secrets,
-            &state.registry,
-            &state.live,
-            &asks,
-        )
-            .await,
+    Ok(crate::sources::crud::refused_writes(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &asks,
     )
+    .await)
 }
 
 /// Everything the note view draws for one note (#46).

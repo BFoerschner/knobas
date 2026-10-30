@@ -371,7 +371,14 @@ pub async fn run_chain<R: tauri::Runtime>(
     run_id: String,
 ) -> Result<Vec<ChainStepRow>, IpcError> {
     let state = crate::sources::state(&app)?;
-    run_chain_inner(&state.pool, &state.secrets, &state.registry, &state.live, &run_id).await
+    run_chain_inner(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &run_id,
+    )
+    .await
 }
 
 /// Older runs of one pipeline, beyond the mirror's window (#851).
@@ -412,7 +419,14 @@ pub async fn pipeline_settings<R: tauri::Runtime>(
     pipeline_id: String,
 ) -> Result<Option<knobas_source::pipeline::PipelineSettings>, IpcError> {
     let state = crate::sources::state(&app)?;
-    pipeline_settings_inner(&state.pool, &state.secrets, &state.registry, &state.live, &pipeline_id).await
+    pipeline_settings_inner(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &pipeline_id,
+    )
+    .await
 }
 
 // -- the run page's live reads (ADR-0022; #854, #855, #856) ------------------
@@ -428,9 +442,10 @@ async fn run_adapter(
     run_id: &str,
 ) -> Result<(EntityRef, std::sync::Arc<dyn knobas_source::Source>), IpcError> {
     let entity = EntityRef::parse(run_id).map_err(IpcError::invalid)?;
-    let source = crate::sources::crud::run_source(pool, secrets, registry, live, &entity.to_string())
-        .await
-        .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))?;
+    let source =
+        crate::sources::crud::run_source(pool, secrets, registry, live, &entity.to_string())
+            .await
+            .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))?;
     Ok((entity, source))
 }
 
@@ -641,7 +656,14 @@ pub async fn run_tests<R: tauri::Runtime>(
     run_id: String,
 ) -> Result<Option<knobas_source::run::RunTests>, IpcError> {
     let state = crate::sources::state(&app)?;
-    run_tests_inner(&state.pool, &state.secrets, &state.registry, &state.live, &run_id).await
+    run_tests_inner(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &run_id,
+    )
+    .await
 }
 
 /// One test's last ten outcomes (#855).
@@ -702,7 +724,15 @@ pub async fn artifact_preview<R: tauri::Runtime>(
     path: String,
 ) -> Result<Option<knobas_source::run::ArtifactPreview>, IpcError> {
     let state = crate::sources::state(&app)?;
-    artifact_preview_inner(&state.pool, &state.secrets, &state.registry, &state.live, &run_id, &path).await
+    artifact_preview_inner(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &run_id,
+        &path,
+    )
+    .await
 }
 
 /// A run's log, an artifact, a folder or every artifact, into the downloads
