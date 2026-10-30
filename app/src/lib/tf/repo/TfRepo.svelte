@@ -93,6 +93,8 @@
     piped?: (entityId: string, path: string, commit: string | null, steps: PipeStep[]) => Promise<PipeRun>;
     /** A diff between two ends, local-first (ADR-0036): Compare's; the source's compare alone when left out. */
     rangeDiff?: (entityId: string, base: string, head: string, ignoreWhitespace: boolean) => Promise<RangeDiff>;
+    /** One commit's diff, local-first (#2319): the commit tab's; the commit's own `diff` section when left out. */
+    commitDiff?: (entityId: string, commitId: string, sha: string, ignoreWhitespace: boolean) => Promise<RangeDiff>;
   }
 
   /**
@@ -118,6 +120,7 @@
     entityFileBytes,
     entityFilePiped,
     entityRangeDiff,
+    entityCommitDiff,
     entityView,
     getEntity,
     jobReach,
@@ -190,6 +193,7 @@
       fileBytes: (entityId, path, commit) => entityFileBytes(entityId, path, commit),
       piped: (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
       rangeDiff: (entityId, base, head, ignoreWhitespace) => entityRangeDiff(entityId, base, head, ignoreWhitespace),
+      commitDiff: (entityId, commitId, sha, ignoreWhitespace) => entityCommitDiff(entityId, commitId, sha, ignoreWhitespace),
     },
     now: fixedNow,
   }: {
