@@ -27,7 +27,7 @@
   import type { LineTokens } from "../../render/port";
   import { Windowed } from "../../shell/windowed.svelte";
   import { ago } from "../../shell/time";
-  import { placeThreads, sameTarget, targetOf } from "../pr/files";
+  import { placeThreads, targetOf } from "../pr/files";
   import { changedWords, DIFF_CEILING, EXPAND_STEP as STEP, keyOf, splitRows, unifiedRows, type DrawnFile, type DrawnLine, type Expanded, type Gap } from "./diff";
   import type { DiffTalk } from "./talk";
   import { badgeOf, isGenerated, isLock, LOAD_OVER, needsLoad } from "./tree";
