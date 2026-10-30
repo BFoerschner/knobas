@@ -4,6 +4,7 @@
  * reach read, the kind chips, the actions and the snoozed line. What the
  * backend derives is `knobas-core`'s `inbox` tests; here the calls are counted.
  */
+import { pageContext } from "../kept-pages.svelte";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -138,7 +139,7 @@ async function open(
       return { id: 7 } as unknown as QueuedWrite;
     },
   };
-  view = mount(TfInbox, { target, props: { ready: true, job: over.job ?? null, inbox: store(over.extra), ports, ...(over.clock ? {} : { now: NOW }) } });
+  view = mount(TfInbox, { target, context: hiddenable, props: { ready: true, job: over.job ?? null, inbox: store(over.extra), ports, ...(over.clock ? {} : { now: NOW }) } });
   await settle();
 }
 
@@ -476,4 +477,30 @@ test("an inbox under 300 rows draws every row, as before windowing (#2209)", asy
   await open({ extra: many(250) });
   expect(rows()).toHaveLength(254);
   expect(target.querySelector<HTMLElement>(".tf-inbox")!.getAttribute("style")).toBeNull();
+});
+
+// A page keep-alive holds hidden (#2249): the components above mount inside it.
+const page = $state({ shown: true });
+const hiddenable = pageContext(() => page.shown);
+
+
+test("an inbox whose page is hidden stops its clock, and shown again reads it at once (#2249)", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+  try {
+    vi.setSystemTime(new Date(2026, 7, 22, 23, 50));
+    await open({ clock: true });
+    page.shown = false;
+    flushSync();
+    vi.setSystemTime(new Date(2026, 7, 23, 0, 10));
+    vi.advanceTimersByTime(90_000);
+    flushSync();
+    expect(text(rowOf("Idempotent").querySelector("time"))).toBe("13:50");
+
+    page.shown = true;
+    flushSync();
+    expect(text(rowOf("Idempotent").querySelector("time"))).toBe("yesterday 13:50");
+  } finally {
+    vi.useRealTimers();
+    page.shown = true;
+  }
 });

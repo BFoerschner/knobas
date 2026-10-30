@@ -50,7 +50,9 @@ function record(at: Date, bytes: number): BackupRecord {
 /** This feature's commands. */
 export function handlers(): Handlers {
   let passive = true;
-  let keptOpen = 5;
+  // `?fake-pages-kept-open=<n>` starts *Pages kept open* at n (the keep-alive budget, #2250).
+  const keptAsked = new URLSearchParams(globalThis.location?.search).get("fake-pages-kept-open");
+  let keptOpen = keptAsked === null ? 5 : Math.min(15, Math.max(0, Math.round(Number(keptAsked)) || 0));
   let monitoring: MonitoringSettings = { sample_retention_days: 30, response_time_warn_ms: 2000 };
   let schedule: BackupSchedule = { enabled: true, hour: 2, minute: 0, keep: 14 };
   const taken = todayAt(2, 0);

@@ -33,6 +33,7 @@
   import { refusedAttrs } from "../../shell/refused-writes";
   import { createStartWork, demandOf, editable, edited, type StartWorkApi } from "../../start-work/start-work.svelte";
   import { keyOf } from "./job";
+  import { pageVisible } from "../kept-pages.svelte";
 
   let {
     detail,
@@ -56,7 +57,8 @@
   } = $props();
 
   // svelte-ignore state_referenced_locally
-  const flow = createStartWork(detail.row.entity_id, api);
+  // Its follow reads nothing while keep-alive holds the page hidden (#2249).
+  const flow = createStartWork(detail.row.entity_id, api, pageVisible());
   // svelte-ignore state_referenced_locally
   const key = keyOf(detail.row.entity_id);
 

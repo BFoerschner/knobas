@@ -5,8 +5,9 @@
  *
  * Instants are local, for `day.test.ts`'s reason.
  */
+import { pageContext } from "../kept-pages.svelte";
 import { flushSync, mount, tick, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { QueuedWrite } from "../../ipc/sources";
 import type { DayWindow, RunningTimer, Week, WeekCell } from "../../ipc/time";
@@ -91,10 +92,11 @@ async function render(over: { week?: string | null; running?: RunningTimer | nul
   let queues = 0;
   view = mount(TfWeek, {
     target,
+    context,
     props: {
       week: over.week ?? null,
       timer: { current: over.running ?? null },
-      now: () => NOW,
+      now: () => ((clockReads += 1), NOW),
       onqueue: () => void (queues += 1),
       ports: {
         weekTimesheet: async (days: DayWindow[]) => {
@@ -231,4 +233,34 @@ test("the running timer counts into today on its target", async () => {
   });
   const row = [...target.querySelectorAll("tbody tr")].find((tr) => text(tr).includes("Standup and planning"))!;
   expect(text(row.querySelectorAll("td")[5])).toBe("1h 48m 1h 48m to log");
+});
+
+// A page keep-alive holds hidden (#2249): the components above mount inside it.
+const page = $state({ shown: true });
+const context = pageContext(() => page.shown);
+let clockReads = 0;
+
+test("The Week tab stops its clock while its page is hidden and reads it once when shown again (#2249)", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  try {
+    await render();
+    const mounted = clockReads;
+    vi.advanceTimersByTime(30_000);
+    flushSync();
+    expect(clockReads).toBeGreaterThan(mounted);
+
+    page.shown = false;
+    flushSync();
+    const hidden = clockReads;
+    vi.advanceTimersByTime(120_000);
+    flushSync();
+    expect(clockReads).toBe(hidden);
+
+    page.shown = true;
+    flushSync();
+    expect(clockReads).toBeGreaterThan(hidden);
+  } finally {
+    vi.useRealTimers();
+    page.shown = true;
+  }
 });

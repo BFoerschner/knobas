@@ -656,3 +656,167 @@ test("⌘R on a repository runs its Refresh, as a click does (#2156)", async () 
   await settle();
   expect(probe.refreshed).toEqual([REPO]);
 });
+
+// Keep-alive inside the repository (#2248) and a hidden page's pause (#2249).
+
+const LEDGER = "gitea:tidewater/ledger";
+/** The address and page visibility a live page is drawn at, moved by `go` and `show`. */
+const live = $state<{ rest: string[]; visible: boolean }>({ rest: [], visible: true });
+
+/** Mount the page over `live`, so a test moves its address as the shell does. */
+async function drawLive(rest: string[], stand: RepoPorts = ports()) {
+  live.rest = rest;
+  live.visible = true;
+  view = mount(TfRepo, {
+    target,
+    props: {
+      ready: true,
+      get rest() {
+        return live.rest;
+      },
+      get visible() {
+        return live.visible;
+      },
+      job: null,
+      ports: stand,
+      now: NOW,
+    },
+  });
+  await settle();
+}
+
+async function go(rest: string[]) {
+  live.rest = rest;
+  await settle();
+}
+
+/** The tab bodies the page holds, hidden or shown. */
+const shownTab = () => target.querySelector(".tf-cbody > .tf-kept:not([hidden])");
+const hiddenTabs = () => target.querySelectorAll(".tf-cbody > .tf-kept[hidden]").length;
+const fileView = () => shownTab()?.querySelector(".tf-fileview") ?? null;
+const shownTree = () => [...(shownTab()?.querySelectorAll(".tf-ftree a, .tf-ftree button") ?? [])].map(text);
+function openDir(name: string) {
+  const button = [...target.querySelectorAll<HTMLButtonElement>(".tf-ftree button")].find((one) => text(one) === name)!;
+  button.click();
+}
+
+/** A second repository, its tree the first one's. */
+function twoRepos(): RepoPorts {
+  const base = ports();
+  return ports({
+    getEntity: async (id) => {
+      if (id !== LEDGER) return base.getEntity(id);
+      const detail = await base.getEntity(REPO);
+      return { ...detail, row: row(LEDGER, "repo", "tidewater/ledger") } as EntityDetail;
+    },
+    entityView: (id, sectionId) => base.entityView(id === LEDGER ? REPO : id, sectionId),
+  });
+}
+
+test("Files, then Commits, then back to Files keeps the open file and the expanded tree, with no remount (#2248)", async () => {
+  await drawLive([REPO, "files", "src", "lib.rs"]);
+  expect(shownTree()).toEqual(["src/", "lib.rs", "retry.rs", "README.md"]);
+  // Folded by hand: a remount would open it again from the address.
+  openDir("src/");
+  await settle();
+  expect(shownTree()).toEqual(["src/", "README.md"]);
+  const drawn = fileView();
+  expect(text(drawn?.querySelector("header") ?? null)).toContain("lib.rs");
+
+  await go([REPO, "commits"]);
+  expect([...shownTab()!.querySelectorAll("tbody tr")].map(text)[0]).toContain("PAY-231: jitter in backoff");
+  expect(hiddenTabs()).toBe(1);
+  // The Files tab links back to the file it was left at.
+  expect(target.querySelector(".tf-tabs a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/files/src/lib.rs");
+
+  const before = viewReads.length;
+  await go([REPO, "files", "src", "lib.rs"]);
+  expect(fileView()).toBe(drawn);
+  expect(shownTree()).toEqual(["src/", "README.md"]);
+  // Shown again, it reads the file in the background over what it drew.
+  expect(viewReads.slice(before)).toContainEqual([REPO, "file:src/lib.rs"]);
+});
+
+test("a tab shown again at another place reads that place, and a tab never left reads nothing again (#2248)", async () => {
+  await drawLive([REPO, "commits"]);
+  const before = viewReads.length;
+  await go([REPO, "branches"]);
+  await go([REPO, "commits"]);
+  expect(viewReads.slice(before).filter(([, s]) => s === "commits")).toHaveLength(1);
+  const commits = shownTab();
+  await go([REPO, "commits"]);
+  expect(shownTab()).toBe(commits);
+  expect(viewReads.slice(before).filter(([, s]) => s === "commits")).toHaveLength(1);
+});
+
+test("a hidden tab has visible false: Local changes reads its diff on focus only while shown (#2248)", async () => {
+  let diffs = 0;
+  let checkouts = 0;
+  const base = ports();
+  await drawLive(
+    [REPO, "local"],
+    ports({
+      entityCheckout: async (id) => ((checkouts += 1), base.entityCheckout(id)),
+      entityCheckoutDiff: async (id) => ((diffs += 1), base.entityCheckoutDiff(id)),
+    }),
+  );
+  const shown = { diffs, checkouts };
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  // The page's own checkout read and its diff, and the tab's diff.
+  expect({ diffs: diffs - shown.diffs, checkouts: checkouts - shown.checkouts }).toEqual({ diffs: 2, checkouts: 1 });
+
+  await go([REPO, "files"]);
+  const hidden = { diffs, checkouts };
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect({ diffs: diffs - hidden.diffs, checkouts: checkouts - hidden.checkouts }).toEqual({ diffs: 1, checkouts: 1 });
+});
+
+test("opening another repository starts its tabs fresh (#2248)", async () => {
+  await drawLive([REPO], twoRepos());
+  // Opened by hand: nothing in the address opens it.
+  openDir("src/");
+  await settle();
+  expect(shownTree()).toEqual(["src/", "lib.rs", "retry.rs", "README.md"]);
+  await go([REPO, "commits"]);
+  expect(hiddenTabs()).toBe(1);
+  const left = target.querySelector(".tf-fileview");
+
+  await go([LEDGER]);
+  expect(text(target.querySelector("h1"))).toBe("tidewater/ledger");
+  expect(hiddenTabs()).toBe(0);
+  // Mounted afresh, so no tab carries what the reader did into this repository.
+  expect(fileView()).not.toBe(left);
+  expect(shownTree()).toEqual(["src/", "README.md"]);
+  expect(text(fileView()?.querySelector("header") ?? null)).toContain("README.md");
+  expect(target.querySelector(".tf-tabs a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fledger/files");
+
+  // Its own tabs are kept for its visit.
+  const files = shownTab();
+  await go([LEDGER, "commits"]);
+  expect(hiddenTabs()).toBe(1);
+  await go([LEDGER]);
+  expect(shownTab()).toBe(files);
+});
+
+test("a hidden repository page does not read its checkout on window focus, and reads it once when shown again (#2249)", async () => {
+  let checkouts = 0;
+  const base = ports();
+  await drawLive([REPO], ports({ entityCheckout: async (id) => ((checkouts += 1), base.entityCheckout(id)) }));
+  const mounted = checkouts;
+
+  live.visible = false;
+  await settle();
+  window.dispatchEvent(new Event("focus"));
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(checkouts).toBe(mounted);
+
+  live.visible = true;
+  await settle();
+  expect(checkouts).toBe(mounted + 1);
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(checkouts).toBe(mounted + 2);
+});
