@@ -625,7 +625,7 @@
     const reads: Promise<unknown>[] = [rereadTop()];
     for (const dir of Object.keys(listings)) {
       if (dir === "") continue;
-      const section = dir === "" ? "files" : entryOf(dir)?.section;
+      const section = entryOf(dir)?.section;
       if (section == null) continue;
       const read = readSection(section).then(
         (read) => {

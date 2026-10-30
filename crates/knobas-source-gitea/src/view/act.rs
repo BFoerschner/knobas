@@ -53,6 +53,9 @@ pub(super) fn default_first<'a>(
 /// into a plain repository, so the actions stay, disabled (the #701 ruling).
 pub(crate) const MIRRORED: &str = "A mirror: its branches come from upstream";
 
+/// Why *New branch…* is refused in a repository with no commit to start at.
+pub(crate) const EMPTY: &str = "The repository is empty";
+
 /// *New branch…*: a name, and where it starts. `repository` is the entity the
 /// write targets where the view is not the repository's own.
 pub(super) fn new_branch(

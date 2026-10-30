@@ -23,9 +23,10 @@ use crate::model::{CommitDetail, Signature, UserRef};
 use crate::source::GiteaSource;
 
 mod act;
-pub(crate) use act::MIRRORED;
+pub(crate) use act::{EMPTY, MIRRORED};
 mod branch;
 mod checks;
+mod compare;
 mod files;
 mod grants;
 mod pr;
@@ -68,6 +69,13 @@ pub(crate) async fn draw(
             repo,
             branch,
         } => branch::draw(source, entity, owner, repo, branch, section).await?,
+        // Any two commits' diff (#2271): the compare alone, no record read.
+        GiteaKey::Repo { owner, repo } if section.is_some_and(compare::owns) => {
+            let section = section.unwrap_or_default();
+            SourceView::new(vec![
+                compare::read(source, entity, owner, repo, section).await?,
+            ])
+        }
         GiteaKey::Repo { owner, repo } => repo::draw(source, entity, owner, repo, section).await?,
         // An issue's detail is the ticket's, drawn from the mirror (#1206).
         GiteaKey::Issue { .. } => return Ok(None),
@@ -82,13 +90,16 @@ pub(crate) async fn draw(
 
 /// What the view of `entity` at `section` stands at (ADR-0032, #2239):
 /// [`Standing::Fixed`] for a commit's diff and its tree's sections at a full
-/// sha, and for a branch's or repository's tree sections that name the sha
-/// they are read at (#2241), which no push can change and which offer no
-/// write. [`Standing::Moving`] for what is read by a moving reference and
-/// offers no write: a repository's branch list, and a branch's or
-/// repository's tree sections that read the tip first (#2242). Everything
-/// else is live. A commit's overview is not fixed (its checks move), and
-/// neither is its whole view (its toolbar reads the repository).
+/// sha, for a branch's or repository's tree sections that name the sha
+/// they are read at (#2241), and for a repository's compare between two full
+/// shas ([`compare`]), which no push can change and which offer no write.
+/// [`Standing::Moving`] for what is read by a moving reference and offers no
+/// write: a repository's branch list, and a branch's or repository's tree
+/// sections that read the tip first (#2242). A compare by branch names stays
+/// live: the Compare tab is not told of a moved one (`view:fresh`), so a kept
+/// diff would stand until the next ask. Everything else is live. A commit's
+/// overview is not fixed (its checks move), and neither is its whole view
+/// (its toolbar reads the repository).
 ///
 /// [`Standing::Fixed`]: knobas_source::view::Standing::Fixed
 /// [`Standing::Moving`]: knobas_source::view::Standing::Moving
@@ -104,6 +115,7 @@ pub(crate) fn standing(
         {
             Standing::Fixed
         }
+        (Ok(GiteaKey::Repo { .. }), Some(id)) if compare::fixed(id) => Standing::Fixed,
         (Ok(GiteaKey::Branch { .. } | GiteaKey::Repo { .. }), Some(id)) if files::names_sha(id) => {
             Standing::Fixed
         }

@@ -561,7 +561,7 @@ test("a refresh reads Commits, a commit, the compare page and Branches again ove
   unmount(view!);
 
   await draw([REPO, "compare", "feature", "PAY-231-sepa-retry"], stand());
-  expect(await press()).toEqual(expect.arrayContaining([[FEATURE, null], [FEATURE, "diff"]]));
+  expect(await press()).toEqual(expect.arrayContaining([[FEATURE, null], [REPO, "compare:main...feature/PAY-231-sepa-retry"]]));
   unmount(view!);
 
   await draw([REPO, "branches"], stand());
@@ -612,7 +612,7 @@ test("the compare page keeps its branch's diff drawn while a refresh reads it ag
       ...base,
       entityView: async (id, sectionId) => {
         if (id === FEATURE && sectionId === null) return { sections: [], actions: [] };
-        if (id !== FEATURE || sectionId !== "diff") return base.entityView(id, sectionId);
+        if (id !== REPO || sectionId !== "compare:main...feature/PAY-231-sepa-retry") return base.entityView(id, sectionId);
         // The first read answers; the refresh's stays out.
         if ((diffs += 1) > 1) return new Promise(() => {});
         const diff = await base.entityView(C1, null);
