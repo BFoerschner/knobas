@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use knobas_app::checkout::uncommitted::{DiffRead, UncommittedDiff, read, read_with};
-use knobas_source::diff::{DiffChange, DiffLineKind, MAX_LINES_PER_FILE};
+use knobas_source::diff::{DiffChange, DiffLineKind, MAX_LINES_PER_VIEW};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -192,12 +192,13 @@ async fn a_changed_binary_file_is_binary_with_no_lines() {
     assert!(file.hunks.is_empty());
 }
 
-/// A file over the per-file cap keeps the lines before the cut and its full
-/// counts, says it was cut, and does not cut the file after it.
+/// A file over the ceiling (#2269) keeps the lines before the cut and its
+/// full counts, says it was cut, and the half says the ceiling cut it; the
+/// file after it keeps its counts and no lines.
 #[tokio::test]
-async fn a_file_over_the_cap_is_cut_and_keeps_its_counts() {
+async fn a_file_over_the_ceiling_is_cut_and_keeps_its_counts() {
     let dir = repo();
-    let big: String = (0..MAX_LINES_PER_FILE + 200)
+    let big: String = (0..MAX_LINES_PER_VIEW + 200)
         .map(|n| format!("line {n}\n"))
         .collect();
     fs::write(dir.path().join("a.txt"), big).unwrap();
@@ -210,14 +211,16 @@ async fn a_file_over_the_cap_is_cut_and_keeps_its_counts() {
     let a = &files[0];
     assert_eq!(a.path, "a.txt");
     assert!(a.truncated);
-    assert_eq!(a.additions as usize, MAX_LINES_PER_FILE + 200);
+    assert_eq!(a.additions as usize, MAX_LINES_PER_VIEW + 200);
     let kept: usize = a.hunks.iter().map(|h| h.lines.len()).sum();
-    assert_eq!(kept, MAX_LINES_PER_FILE);
+    assert_eq!(kept, MAX_LINES_PER_VIEW);
+    assert!(diff.unstaged.truncated);
     let b = &files[1];
     assert_eq!(
         (b.path.as_str(), b.truncated, b.additions),
-        ("b.txt", false, 1)
+        ("b.txt", true, 1)
     );
+    assert!(b.hunks.iter().all(|h| h.lines.is_empty()));
 }
 
 /// The paths the shared parser strips stay `a/` and `b/` whatever prefixes

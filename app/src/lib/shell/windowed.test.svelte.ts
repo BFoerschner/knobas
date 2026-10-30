@@ -134,7 +134,8 @@ test("a list that scrolls itself reads the viewport from its own scroll, keeps i
     win.room("after")(list.querySelector<HTMLElement>(".after")!);
   });
   flushSync();
-  expect([win.start, win.end]).toEqual([0, 15]);
+  // Its 6 px of padding sit above row 0, so 294 px of rows show: 14 of them (#2269).
+  expect([win.start, win.end]).toEqual([0, 14]);
 
   // Scrolled 2,000 px into itself: its 6 px of padding come first, so row 94 is the first drawn.
   scrolled = 2000;
@@ -188,4 +189,96 @@ test("a list that only clips sideways (the run log's `overflow: auto`, #2211) st
   expect(win.after).toBeGreaterThan(0);
   expect(list.style.paddingBottom).toBe(`${win.after}px`);
   stop();
+});
+
+test("a list that starts far below the viewport draws one row, and one partway down draws only what reaches the screen (#2269)", () => {
+  let listTop = 5_000;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () =>
+      ({ width: 200, height: 20_000, top: listTop, bottom: listTop + 20_000, left: 0, right: 200, x: 0, y: listTop, toJSON: () => ({}) }) as DOMRect,
+  );
+  vi.spyOn(window, "innerHeight", "get").mockReturnValue(1_000);
+  document.body.innerHTML = "<div></div>";
+  const list = document.querySelector("div")!;
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20, overscan: 100 });
+  const stop = $effect.root(() => {
+    win.list(list);
+  });
+  flushSync();
+  // A diff's card 4,000 px under the screen: nothing of it is near.
+  expect(win.end - win.start).toBe(1);
+  // Its top 600 px down the screen: 400 px of it show, 100 px more drawn.
+  listTop = 600;
+  window.dispatchEvent(new Event("resize"));
+  flushSync();
+  expect([win.start, win.end]).toEqual([0, 25]);
+  stop();
+});
+
+test("a list inside a box that clips it (a diff's file card), the box below the screen, draws one row (#2269)", () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({ width: 200, height: 300, top: 5_000, bottom: 5_300, left: 0, right: 200, x: 0, y: 5_000, toJSON: () => ({}) }) as DOMRect,
+  );
+  vi.spyOn(window, "innerHeight", "get").mockReturnValue(1_000);
+  document.body.innerHTML = '<section style="overflow: hidden; overflow-y: hidden"><div></div></section>';
+  const list = document.querySelector("div")!;
+  Object.defineProperty(list.parentElement!, "clientHeight", { value: 300 });
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20, overscan: 600 });
+  const stop = $effect.root(() => {
+    win.list(list);
+  });
+  flushSync();
+  expect(win.end - win.start).toBe(1);
+  stop();
+});
+
+test("a row held on a page keep-alive hid does not scroll the page shown after it when that page's rows are measured (#2267 merger)", () => {
+  // Every ResizeObserver, so a row's measurement can be reported by hand.
+  const observers: { targets: Element[]; report: (entries: ResizeObserverEntry[]) => void }[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      targets: Element[] = [];
+      constructor(report: (entries: ResizeObserverEntry[]) => void) {
+        observers.push({ targets: this.targets, report });
+      }
+      observe(el: Element) {
+        this.targets.push(el);
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  // A hidden page lays out nothing; a shown row sits 100 px down the screen.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const [top, height] = this.closest("[hidden]") ? [0, 0] : this.classList.contains("main") ? [0, 1_000] : [100, 20];
+    return { width: 200, height, top, bottom: top + height, left: 0, right: 200, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+  });
+  document.body.innerHTML =
+    '<div class="main" style="overflow-y: auto"><div class="a"><div class="la"><div class="ra"></div></div></div><div class="b" hidden><div class="lb"><div class="rb"></div></div></div></div>';
+  const main = document.querySelector<HTMLElement>(".main")!;
+  let scrolled = 500;
+  Object.defineProperty(main, "scrollTop", { get: () => scrolled, set: (px: number) => (scrolled = px) });
+  Object.defineProperty(main, "clientHeight", { value: 1_000 });
+  Object.defineProperty(main, "scrollHeight", { value: 50_000 });
+  const a = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+  const b = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+  const stop = $effect.root(() => {
+    a.list(document.querySelector(".la")!);
+    a.row(0)(document.querySelector(".ra")!);
+    b.list(document.querySelector(".lb")!);
+    b.row(0)(document.querySelector(".rb")!);
+  });
+  flushSync();
+  // The reader scrolls page A: its row is held.
+  main.dispatchEvent(new Event("scroll"));
+  // Page B is shown instead, and its row comes out 30 px, not 20.
+  document.querySelector<HTMLElement>(".a")!.hidden = true;
+  document.querySelector<HTMLElement>(".b")!.hidden = false;
+  const rb = document.querySelector(".rb")!;
+  const sizes = observers.find((o) => o.targets.includes(rb))!;
+  sizes.report([{ target: rb, borderBoxSize: [{ blockSize: 30, inlineSize: 200 }], contentRect: { height: 30 } } as unknown as ResizeObserverEntry]);
+  expect(scrolled).toBe(500);
+  stop();
+  vi.unstubAllGlobals();
 });

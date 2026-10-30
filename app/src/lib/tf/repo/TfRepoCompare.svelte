@@ -82,6 +82,8 @@
   /** The section `files` was read for: until another base's diff answers, the page still draws the last one. */
   let filesFor = $state<string | null>(null);
   let reading = $state(false);
+  /** The diff hit the parser's ceiling. */
+  let cut = $state(false);
   let failed = $state<string | null>(null);
   /** *Into*, the default branch proposed once: a new *From* keeps what the reader picked. */
   let base = $state(untrack(() => into));
@@ -154,6 +156,7 @@
       reading = false;
       const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
       files = block?.type === "diff" ? block.files : [];
+      cut = block?.type === "diff" && block.truncated;
       filesFor = asked;
     }, (error) => {
       if (!alive()) return;
@@ -283,7 +286,7 @@
         {#if files !== null && files.length === 0}
           <div class="tf-empty">This branch has no commits that {base} lacks.</div>
         {:else if files !== null}
-          <TfDiffView {files} />
+          <TfDiffView {files} {cut} />
         {/if}
       </TfWaiting>
     {/if}
