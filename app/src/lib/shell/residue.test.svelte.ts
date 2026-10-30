@@ -353,6 +353,8 @@ const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
 const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
+const TfPdf = (await import("../tf/render/TfPdf.svelte")).default;
+const TfBytesImage = (await import("../tf/render/TfBytesImage.svelte")).default;
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
 const TfCheckoutsSection = (await import("../tf/settings/TfCheckoutsSection.svelte")).default;
 const { createApps } = await import("../tf/openin/apps.svelte");
@@ -1267,6 +1269,47 @@ const CASES: Case[] = [
           commands: { run: () => deferred({ outcome: "drawn", output: "html", body: "<p>x</p>" }) },
         },
       }),
+    }),
+  },
+  {
+    /** A PDF (#2260): its bytes and its document answer late; the page draws through a held observer. */
+    name: "TfPdf",
+    source: "lib/tf/render/TfPdf.svelte",
+    open: (target) => ({
+      app: mount(TfPdf, {
+        target,
+        props: {
+          read: () => deferred(new Uint8Array([37, 80, 68, 70])),
+          size: 4,
+          render: {
+            highlight: () => ({ focus() {}, cancel() {} }),
+            pdf: () =>
+              deferred({
+                pdf: {
+                  pages: 1,
+                  page: () =>
+                    deferred({
+                      width: 816,
+                      height: 1056,
+                      draw: () => ({ done: deferred(undefined), cancel() {} }),
+                      text: () => deferred(undefined),
+                      links: () => deferred([{ rect: [0, 0, 10, 10] as [number, number, number, number], target: { url: "https://psp.example.com/" } }]),
+                    }),
+                  close() {},
+                },
+              }),
+          },
+          openExternal: () => deferred(undefined),
+        },
+      }),
+    }),
+  },
+  {
+    /** A binary image (#2260): its bytes answer late, then a blob URL it lets go. */
+    name: "TfBytesImage",
+    source: "lib/tf/render/TfBytesImage.svelte",
+    open: (target) => ({
+      app: mount(TfBytesImage, { target, props: { read: () => deferred(new Uint8Array([0x89, 0x50])), path: "logo.png", size: 2 } }),
     }),
   },
   {

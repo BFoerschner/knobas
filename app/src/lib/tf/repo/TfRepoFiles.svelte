@@ -69,6 +69,8 @@
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import TfDiagram from "../render/TfDiagram.svelte";
+  import TfBytesImage from "../render/TfBytesImage.svelte";
+  import TfPdf from "../render/TfPdf.svelte";
   import { findCount, stepMatch } from "../builds/run-reads";
   import { fileHits, firstHitOn, lineOfHit, needles, segments } from "./file-lines";
   import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
@@ -671,6 +673,18 @@
     const commit = file?.commit ?? null;
     return read === undefined ? null : (path: string) => read(entityId, path, commit);
   });
+  /**
+   * A binary file's bytes, at the commit it was read at (#2256), for the renderer that reads bytes (an image, a PDF,
+   * #2260). Keyed by what it reads, so a re-read of the same file hands the renderer the same function and it reads
+   * nothing again.
+   */
+  const bytesAt = $derived(file === null || !file.binary ? null : JSON.stringify([at, file.path, file.commit ?? null]));
+  const bytesRead = $derived.by(() => {
+    const read = ports.fileBytes;
+    if (bytesAt === null || read === undefined) return null;
+    const [entityId, path, commit] = JSON.parse(bytesAt) as [string, string, string | null];
+    return () => read(entityId, path, commit);
+  });
   /** A relative link in a Markdown file: the file here, at its line where it names one. */
   const fileLink = (to: string, at: number | null) => (at === null ? fileHash(repoId, to) : lineHash(repoId, to, at));
 
@@ -806,7 +820,11 @@
           {#if file.url}<span class="tf-acts"><a class="tf-btn tf-sm" href={file.url}>The rest on the source</a></span>{/if}
         </div>
       {/if}
-      {#if file.binary}
+      {#if file.binary && bytesRead !== null && drawAs === "pdf"}
+        <TfPdf read={bytesRead} size={file.size} {render} />
+      {:else if file.binary && bytesRead !== null && drawAs === "image"}
+        <TfBytesImage read={bytesRead} path={file.path} size={file.size} />
+      {:else if file.binary}
         <div class="tf-empty"><p>A binary file, not drawn.</p></div>
       {:else if image !== null}
         <div class="tf-fimage"><img src={image} alt={file.path} /></div>

@@ -6,7 +6,7 @@
  */
 import { expect, test } from "vitest";
 
-import { fakePdf, HOSTILE_PDF, SPEC_PDF } from "../shell/dev/fake/pdf";
+import { fakePdf, HOSTILE_PDF, SPEC_PDF } from "../shell/dev/fake/views/pdf";
 import { DOCUMENT_OPTIONS, openPdf, type PdfLib } from "./pdf-core";
 import type { PdfDocument } from "./port";
 
