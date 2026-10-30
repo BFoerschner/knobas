@@ -3,7 +3,8 @@
  * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
  * `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
-import type { CheckoutSettings, CheckoutView, CloneAnswer, DiffRead, OpenObject } from "../../../ipc/entity";
+import type { CheckoutSettings, CheckoutView, CloneAnswer, DiffFile, DiffRead, OpenObject, RangeDiff } from "../../../ipc/entity";
+import { repoView } from "./views/repos";
 import { fillObject, objectCommand } from "../../../tf/openin/openin";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
@@ -60,6 +61,24 @@ function fakeRepoOf(entityId: string): string | null {
     (candidate) => candidate.kind === "repo" && entityId.startsWith(candidate.entity_id),
   ).sort((a, b) => b.entity_id.length - a.entity_id.length);
   return repos[0]?.entity_id ?? null;
+}
+
+/**
+ * `entity_range_diff` (#2272): the repository's fake compare, read "at the
+ * checkout" when the repository has one and both ends are shas (as the
+ * backend's local git), else "from the source". Ignoring whitespace drops a
+ * file whose removed and added lines differ only in whitespace.
+ */
+function fakeRangeDiff(entityId: string, base: string, head: string, ignoreWhitespace: boolean): RangeDiff {
+  const view = repoView(entityId, `compare:${base}...${head}`);
+  const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
+  if (block?.type !== "diff") throw { code: "not_found", message: `no compare of ${entityId}`, source_id: null };
+  const shas = /^[0-9a-f]{7,64}\^?$/.test(base) && /^[0-9a-f]{7,64}$/.test(head);
+  const local = shas && fakeCheckout(entityId).path !== null;
+  const bare = (file: DiffFile, kind: "add" | "del") =>
+    file.hunks.flatMap((hunk) => hunk.lines.filter((line) => line.kind === kind).map((line) => line.text.replace(/\s+/g, ""))).join("\n");
+  const files = local && ignoreWhitespace ? block.files.filter((file) => bare(file, "add") !== bare(file, "del")) : block.files;
+  return { files, truncated: block.truncated, range: block.range ?? null, read_at: local ? "checkout" : "source" };
 }
 
 /** `entity_checkout`, including the refusal a non-repo kind gets. */
@@ -431,6 +450,8 @@ export function handlers(): Handlers {
     checkout_settings: () => fakeSettings(),
     set_checkout_applications: (args) => fakeSetApps(args["applications"], args["defaultApplication"]),
     entity_checkout_diff: (args) => fakeCheckoutDiff(String(args["entityId"] ?? "")),
+    entity_range_diff: (args) =>
+      fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), args["ignoreWhitespace"] === true),
     clone_repo: (args) => fakeClone(args),
     set_checkout_override: (args) => {
       const id = String(args["entityId"] ?? "");

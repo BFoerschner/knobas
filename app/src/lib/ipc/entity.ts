@@ -24,6 +24,7 @@ import type {
   CodeFacts,
   ContextRow,
   DiffRead,
+  DiffReadAt,
   DocExport,
   DocPage,
   DocsHits,
@@ -60,6 +61,7 @@ import type {
   ProposalEvidence,
   Protocol,
   PublishTarget,
+  RangeDiff,
   Reached,
   RefusedWrite,
   RuleTicket,
@@ -120,6 +122,7 @@ export type {
   DiffLine,
   DiffRange,
   DiffRead,
+  DiffReadAt,
   DigestLine,
   DocAncestor,
   DocBacklink,
@@ -225,6 +228,7 @@ export type {
   Publication,
   PublishTarget,
   RangeCommit,
+  RangeDiff,
   ReachOrigin,
   Reached,
   RefusedWrite,
@@ -1303,6 +1307,16 @@ export function cloneRepo(entityId: string, stop?: boolean): Promise<CloneAnswer
  */
 export function entityCheckoutDiff(entityId: string): Promise<DiffRead> {
   return invoke<DiffRead>("entity_checkout_diff", { entityId });
+}
+
+/**
+ * The diff from `base` to `head` of a repository — `entity_range_diff`
+ * (#2272, ADR-0036): local read-only git when its checkout holds both
+ * commits (whitespace ignored when asked), else the source's compare read.
+ * `read_at` says which; only `checkout` ignores whitespace.
+ */
+export function entityRangeDiff(entityId: string, base: string, head: string, ignoreWhitespace: boolean): Promise<RangeDiff> {
+  return invoke<RangeDiff>("entity_range_diff", { entityId, base, head, ignoreWhitespace });
 }
 
 /** What the capture shortcut is set to, and whether it holds — `capture_shortcut` (#503). */

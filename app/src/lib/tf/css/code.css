@@ -137,6 +137,9 @@
 .tf-rbar.tf-rpickbar { display: flex; align-items: center; gap: 12px; }
 .tf-rpickbar .tf-fbar { flex: 1; }
 .tf-diffpage .tf-cgroup-h a { color: inherit; }
+/* *Ignore whitespace* (#2272): offered on a diff read at the checkout, disabled with its reason otherwise. */
+.tf-diffws { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; }
+.tf-diffws .tf-cnote { margin: 0; }
 .tf-rprs td:first-child { width: 70px; }
 /*
   The one diff component (#2266, `diff/TfDiffView.svelte`; `mockups/code-area/diff.css`): every diff, file by file.

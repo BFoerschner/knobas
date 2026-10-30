@@ -985,7 +985,14 @@ fn git(dir: &std::path::Path, args: &[&str]) -> String {
     let out = std::process::Command::new("git")
         .arg("-C")
         .arg(dir)
-        .args(["-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "commit.gpgsign=false"])
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
         .args(args)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -994,7 +1001,11 @@ fn git(dir: &std::path::Path, args: &[&str]) -> String {
         .env_remove("GIT_INDEX_FILE")
         .output()
         .expect("git runs");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
@@ -1067,10 +1078,22 @@ async fn a_range_whose_commits_the_checkout_holds_asks_the_source_nothing() {
     assert_eq!(local.files.len(), 1);
     assert_eq!(local.files[0].path, "pay.py");
     let range = local.range.expect("both ends settled");
-    assert_eq!((range.repository.as_str(), range.base.as_str(), range.head.as_str()), (id.as_str(), one.as_str(), two.as_str()));
+    assert_eq!(
+        (
+            range.repository.as_str(),
+            range.base.as_str(),
+            range.head.as_str()
+        ),
+        (id.as_str(), one.as_str(), two.as_str())
+    );
     let local = range_diff(&f, &id, &format!("{two}^"), &two, true).await;
     assert_eq!(local.read_at, DiffReadAt::Checkout);
-    assert_eq!(f.seen.reads(), 0, "the source was asked: {:?}", f.seen.reads.lock().unwrap());
+    assert_eq!(
+        f.seen.reads(),
+        0,
+        "the source was asked: {:?}",
+        f.seen.reads.lock().unwrap()
+    );
 
     let missing = "0123456789abcdef0123456789abcdef01234567";
     let remote = range_diff(&f, &id, &one, missing, true).await;

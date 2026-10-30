@@ -717,6 +717,17 @@ reviewed?: string, };
 export type DiffRead = { "status": "read" } & UncommittedDiff | { "status": "no_git" } | { "status": "not_a_repo" } | { "status": "failed", reason: string, };
 
 /**
+ * Where a [`RangeDiff`] was read.
+ *
+ * - `checkout`: local read-only git at the repository's checkout, which
+ *   holds both commits (ADR-0036).
+ * - `source`: the source's compare read, kept by sha pair (ADR-0032).
+ *
+ * Issue #2272.
+ */
+export type DiffReadAt = "checkout" | "source";
+
+/**
  * One line of one list: what it is about, and why it is here.
  *
  * Story 59 -- *"every digest line links to the commit, PR, worklog, comment
@@ -3087,6 +3098,28 @@ parent: string, };
  * second reading (author, age) as a commit row has.
  */
 export type RangeCommit = { sha: string, title: string, meta: string | null, };
+
+/**
+ * The diff between two commits of a repository, from wherever it was read.
+ *
+ * Issue #2272.
+ */
+export type RangeDiff = { files: Array<DiffFile>, 
+/**
+ * A cap cut it (ADR-0020 rule 6).
+ */
+truncated: boolean, 
+/**
+ * The two whole shas it is between, where they are settled; `None` for
+ * a range from before the repository's first commit, and where the
+ * source did not name them.
+ */
+range: DiffRange | null, 
+/**
+ * Local git or the source. Whitespace is ignored only at `checkout`:
+ * the source's API cannot return a diff with whitespace ignored.
+ */
+read_at: DiffReadAt, };
 
 /**
  * Where a reached entity's path came from.

@@ -1878,6 +1878,7 @@ const CASES: Case[] = [
           ports: {
             getEntity: () => deferred({ row: { title: "tidewater/payout-service" } } as never),
             entityView: () => deferred({ sections: [], actions: [] } as never),
+            rangeDiff: () => deferred({ files: [], truncated: false, range: null, read_at: "source" } as never),
           },
         },
       }),

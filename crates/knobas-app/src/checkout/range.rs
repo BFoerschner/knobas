@@ -68,7 +68,12 @@ pub struct LocalDiff {
 /// `ignore_whitespace`; `None` when it cannot be read here (no git, no
 /// repository, a name that is not a sha, a commit the checkout does not
 /// hold, git refusing or slow), so the source is asked.
-pub async fn read(path: &Path, base: &str, head: &str, ignore_whitespace: bool) -> Option<LocalDiff> {
+pub async fn read(
+    path: &Path,
+    base: &str,
+    head: &str,
+    ignore_whitespace: bool,
+) -> Option<LocalDiff> {
     let search = std::env::var_os("PATH").unwrap_or_default();
     read_with(&search, path, base, head, ignore_whitespace).await
 }
@@ -89,9 +94,14 @@ pub async fn read_with(
     if !is_sha(stem) || !is_sha(head) {
         return None;
     }
-    let git = locate(search, Path::new(APPLE_SHIM), command_line_tools_installed, TIMEOUT)
-        .await
-        .ok()?;
+    let git = locate(
+        search,
+        Path::new(APPLE_SHIM),
+        command_line_tools_installed,
+        TIMEOUT,
+    )
+    .await
+    .ok()?;
     if !is_dir_off_runtime(path).await {
         return None;
     }
@@ -142,7 +152,13 @@ pub async fn holds_commits_with(search: &OsStr, path: &Path, shas: &[&str]) -> b
     if shas.iter().any(|sha| !is_sha(sha)) {
         return false;
     }
-    let Ok(git) = locate(search, Path::new(APPLE_SHIM), command_line_tools_installed, TIMEOUT).await
+    let Ok(git) = locate(
+        search,
+        Path::new(APPLE_SHIM),
+        command_line_tools_installed,
+        TIMEOUT,
+    )
+    .await
     else {
         return false;
     };
@@ -186,7 +202,11 @@ async fn commit(git: &Path, path: &Path, name: &str) -> Option<String> {
 /// one, and the source is asked instead.
 async fn empty_tree_if_whole(git: &Path, path: &Path) -> Option<String> {
     let mut command = git_read(git, path);
-    command.args(["rev-parse", "--is-shallow-repository", "--show-object-format"]);
+    command.args([
+        "rev-parse",
+        "--is-shallow-repository",
+        "--show-object-format",
+    ]);
     let (out, _) = run_capped(command, 4, 1024).await.ok()?;
     let out = String::from_utf8_lossy(&out);
     let mut lines = out.lines().map(str::trim);
@@ -282,14 +302,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path();
         git(p, &["init", "-q"]);
-        std::fs::write(p.join("pay.py"), "def pay():\n    total = 1\n    return total\n").unwrap();
+        std::fs::write(
+            p.join("pay.py"),
+            "def pay():\n    total = 1\n    return total\n",
+        )
+        .unwrap();
         git(p, &["add", "."]);
         git(p, &["commit", "-q", "-m", "root"]);
         let root = git(p, &["rev-parse", "HEAD"]);
-        std::fs::write(p.join("pay.py"), "def pay():\n  total  =  1   \n  return total\n").unwrap();
+        std::fs::write(
+            p.join("pay.py"),
+            "def pay():\n  total  =  1   \n  return total\n",
+        )
+        .unwrap();
         git(p, &["commit", "-q", "-am", "reformat"]);
         let reformat = git(p, &["rev-parse", "HEAD"]);
-        std::fs::write(p.join("pay.py"), "def pay():\n  total  =  2   \n  return total\n").unwrap();
+        std::fs::write(
+            p.join("pay.py"),
+            "def pay():\n  total  =  2   \n  return total\n",
+        )
+        .unwrap();
         git(p, &["commit", "-q", "-am", "edit"]);
         let edit = git(p, &["rev-parse", "HEAD"]);
         Repo {
@@ -326,10 +358,9 @@ mod tests {
         .unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let search = std::env::join_paths(
-            std::iter::once(bin.path().to_path_buf())
-                .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())),
-        )
+        let search = std::env::join_paths(std::iter::once(bin.path().to_path_buf()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+        ))
         .unwrap();
         (bin, calls, search)
     }
@@ -341,7 +372,9 @@ mod tests {
     #[tokio::test]
     async fn a_range_whose_commits_are_here_is_read_here() {
         let r = repo();
-        let diff = read(r.dir.path(), &r.reformat, &r.edit, false).await.expect("read here");
+        let diff = read(r.dir.path(), &r.reformat, &r.edit, false)
+            .await
+            .expect("read here");
         assert_eq!(paths(&diff), ["pay.py"]);
         assert_eq!(diff.base.as_deref(), Some(r.reformat.as_str()));
         assert_eq!(diff.head, r.edit);
@@ -352,7 +385,9 @@ mod tests {
     async fn a_short_sha_and_a_parent_resolve_to_whole_shas() {
         let r = repo();
         let base = format!("{}^", &r.edit[..12]);
-        let diff = read(r.dir.path(), &base, &r.edit[..12], false).await.expect("read here");
+        let diff = read(r.dir.path(), &base, &r.edit[..12], false)
+            .await
+            .expect("read here");
         assert_eq!(diff.base.as_deref(), Some(r.reformat.as_str()));
         assert_eq!(diff.head, r.edit);
     }
@@ -379,9 +414,13 @@ mod tests {
     #[tokio::test]
     async fn ignoring_whitespace_leaves_a_reformat_with_no_changes() {
         let r = repo();
-        let shown = read(r.dir.path(), &r.root, &r.reformat, false).await.unwrap();
+        let shown = read(r.dir.path(), &r.root, &r.reformat, false)
+            .await
+            .unwrap();
         assert_eq!(paths(&shown), ["pay.py"]);
-        let ignored = read(r.dir.path(), &r.root, &r.reformat, true).await.unwrap();
+        let ignored = read(r.dir.path(), &r.root, &r.reformat, true)
+            .await
+            .unwrap();
         assert!(ignored.files.is_empty(), "{:?}", ignored.files);
         let real = read(r.dir.path(), &r.root, &r.edit, true).await.unwrap();
         assert_eq!((real.files[0].additions, real.files[0].deletions), (1, 1));
@@ -390,7 +429,9 @@ mod tests {
     #[tokio::test]
     async fn a_root_commits_parent_is_the_empty_tree() {
         let r = repo();
-        let diff = read(r.dir.path(), &format!("{}^", r.root), &r.root, false).await.unwrap();
+        let diff = read(r.dir.path(), &format!("{}^", r.root), &r.root, false)
+            .await
+            .unwrap();
         assert_eq!(paths(&diff), ["pay.py"]);
         assert_eq!(diff.base, None);
         assert_eq!(diff.files[0].additions, 3);
@@ -401,11 +442,11 @@ mod tests {
         let r = repo();
         let shallow = tempfile::tempdir().unwrap();
         let url = format!("file://{}", r.dir.path().display());
-        git(
-            shallow.path(),
-            &["clone", "-q", "--depth", "1", &url, "."],
+        git(shallow.path(), &["clone", "-q", "--depth", "1", &url, "."]);
+        assert_eq!(
+            read(shallow.path(), &format!("{}^", r.edit), &r.edit, false).await,
+            None
         );
-        assert_eq!(read(shallow.path(), &format!("{}^", r.edit), &r.edit, false).await, None);
     }
 
     /// Every git command the read runs is `rev-parse` or `diff`, with the
@@ -424,7 +465,11 @@ mod tests {
             (r.reformat.clone(), r.edit.clone(), false),
             (r.root.clone(), r.edit.clone(), true),
             (format!("{}^", r.root), r.root.clone(), false),
-            ("0123456789abcdef0123456789abcdef01234567".to_owned(), r.edit.clone(), false),
+            (
+                "0123456789abcdef0123456789abcdef01234567".to_owned(),
+                r.edit.clone(),
+                false,
+            ),
         ] {
             read_with(&search, r.dir.path(), &base, &head, ws).await;
         }

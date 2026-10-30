@@ -6,7 +6,7 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { DiffFile, EntityDetail, SourceView } from "../../ipc/entity";
+import type { DiffFile, EntityDetail, RangeDiff, SourceView } from "../../ipc/entity";
 import { createKeptPagesSetting } from "../kept-pages.svelte";
 import { definePage, type TfPageContext } from "../page-entry";
 import { parseTfHash, type TfRoute } from "../route";
@@ -23,6 +23,9 @@ const bridge = vi.hoisted(() => ({
 vi.mock("../../ipc/entity", async (original) => ({
   ...(await original<typeof import("../../ipc/entity")>()),
   entityView: bridge.entityView,
+  // The range read as the source answers it: the compare section's diff block.
+  entityRangeDiff: (id: string, base: string, head: string) =>
+    bridge.entityView(id, `compare:${base}...${head}`).then((v) => fromSource(v)),
   getEntity: bridge.getEntity,
 }));
 
@@ -69,6 +72,23 @@ function answer(id: string, section: string | null): Promise<SourceView | null> 
   return Promise.resolve(diffView(ANSWERS[section]!));
 }
 
+/** A compare section's diff block as `entity_range_diff` answers it from the source. */
+function fromSource(v: SourceView | null): RangeDiff {
+  const block = v?.sections[0]?.blocks.find((b) => b.type === "diff");
+  return block?.type === "diff"
+    ? { files: block.files, truncated: block.truncated, range: block.range ?? null, read_at: "source" }
+    : { files: [], truncated: false, range: null, read_at: "source" };
+}
+
+/** Ports whose range read is the source's compare through `entityView`. */
+function viaSource(entityView: DiffPagePorts["entityView"]): DiffPagePorts {
+  return {
+    entityView,
+    getEntity: async () => detail,
+    rangeDiff: (id, base, head) => entityView(id, `compare:${base}...${head}`).then(fromSource),
+  };
+}
+
 const detail = { row: { title: "tidewater/payout-service" } } as EntityDetail;
 
 let target: HTMLElement;
@@ -95,7 +115,7 @@ const headers = (root: ParentNode) =>
   [...root.querySelectorAll(".tf-fh .tf-mono")].filter((h) => !h.closest("[hidden]")).map((h) => h.textContent!.split(" ")[0]);
 
 test("the address reads the repository's compare between its two ends and draws that diff", async () => {
-  const ports: DiffPagePorts = { entityView: vi.fn(answer), getEntity: async () => detail };
+  const ports = viaSource(vi.fn(answer));
   view = mount(TfDiffPage, { target, props: { repoId: REPO, base: `${BASE}^`, head: HEAD, ports } });
   await settle();
   expect(ports.entityView).toHaveBeenCalledWith(REPO, `compare:${BASE}^...${HEAD}`);
@@ -105,7 +125,7 @@ test("the address reads the repository's compare between its two ends and draws 
 });
 
 test("a diff that names no range says its context does not expand, rather than offering nothing silently", async () => {
-  const ports: DiffPagePorts = { entityView: vi.fn(answer), getEntity: async () => detail };
+  const ports = viaSource(vi.fn(answer));
   view = mount(TfDiffPage, { target, props: { repoId: REPO, base: `${BASE}^`, head: HEAD, ports } });
   await settle();
   expect(target.querySelector("[data-testid=no-range]")?.textContent).toContain("Context does not expand here");
@@ -113,7 +133,7 @@ test("a diff that names no range says its context does not expand, rather than o
 });
 
 test("a failed read says why instead of drawing no changes", async () => {
-  const ports: DiffPagePorts = { entityView: () => Promise.reject(new Error("gitea: 404")), getEntity: async () => detail };
+  const ports = viaSource(() => Promise.reject(new Error("gitea: 404")));
   view = mount(TfDiffPage, { target, props: { repoId: REPO, base: "nope", head: HEAD, ports } });
   await settle();
   expect(target.textContent).toContain("gitea: 404");
@@ -184,17 +204,14 @@ test("a diff that names its range expands context read whole at its two shas (#2
   const whole = ["b", ...Array.from({ length: 11 }, (_, n) => `line ${n + 2}`)].join("\n");
   const fileView = { sections: [{ id: "f", title: "f", count: null, deferred: false, blocks: [{ type: "file", trail: [], path: "src/retry.rs", text: whole, language: null, size: 1, truncated: false, binary: false, url: null, sha: null }] }], actions: [] } as unknown as SourceView;
   const asked: string[] = [];
-  const ports: DiffPagePorts = {
-    getEntity: async () => detail,
-    entityView: async (id, section) => {
+  const ports = viaSource(async (id, section) => {
       asked.push(`${id} ${section}`);
       if (section?.startsWith("file@")) return fileView;
       return {
         sections: [{ id: "x", title: "Diff", count: 1, deferred: false, blocks: [{ type: "diff", files: [MODIFIED], truncated: false, commentable: null, gone: [], range: { repository: REPO, base: PARENT, head: HEAD, commits: [] } }] }],
         actions: [],
       } as unknown as SourceView;
-    },
-  };
+  });
   view = mount(TfDiffPage, { target, props: { repoId: REPO, base: `${BASE}^`, head: HEAD, ports } });
   await settle();
   const expand = target.querySelector<HTMLButtonElement>(".tf-exp");
@@ -205,4 +222,39 @@ test("a diff that names its range expands context read whole at its two shas (#2
   expect(asked).toContain(`${REPO} file@${HEAD}:src/retry.rs`);
   expect(asked).toContain(`${REPO} file@${PARENT}:src/retry.rs`);
   expect(target.querySelector(".tf-diff")!.textContent!.replace(/\s+/g, " ")).toMatch(/22 line 2 .*99 line 9/);
+});
+
+test("a diff read at the checkout offers Ignore whitespace, and asks again with it", async () => {
+  const asked: boolean[] = [];
+  const ports: DiffPagePorts = {
+    ...viaSource(answer),
+    rangeDiff: async (_id, _base, _head, ignoreWhitespace) => {
+      asked.push(ignoreWhitespace);
+      // A reformat: whitespace ignored, nothing is left.
+      return { files: ignoreWhitespace ? [] : [file("pay.py")], truncated: false, range: null, read_at: "checkout" };
+    },
+  };
+  view = mount(TfDiffPage, { target, props: { repoId: REPO, base: BASE, head: HEAD, ports } });
+  await settle();
+  const box = target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!;
+  expect(box.disabled).toBe(false);
+  expect(target.querySelector("[data-testid=ws-why]")).toBeNull();
+  expect(headers(target)).toEqual(["pay.py"]);
+
+  box.click();
+  await settle();
+  expect(asked).toEqual([false, true]);
+  expect(headers(target)).toEqual([]);
+  expect(target.querySelector(".tf-empty")!.textContent).toContain("Nothing changes");
+});
+
+test("on a diff the source served, Ignore whitespace is disabled and says why", async () => {
+  const ports = viaSource(answer);
+  view = mount(TfDiffPage, { target, props: { repoId: REPO, base: `${BASE}^`, head: HEAD, ports } });
+  await settle();
+  const box = target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!;
+  expect(box.disabled).toBe(true);
+  const why = document.getElementById(box.getAttribute("aria-describedby")!);
+  expect(why?.textContent).toContain("cannot leave whitespace out");
+  expect(why).toBe(target.querySelector("[data-testid=ws-why]"));
 });

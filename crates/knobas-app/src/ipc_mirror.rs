@@ -175,6 +175,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::checkout::uncommitted::CappedDiff::export_all(cfg)?;
     crate::checkout::uncommitted::UncommittedDiff::export_all(cfg)?;
     crate::checkout::uncommitted::DiffRead::export_all(cfg)?;
+    crate::checkout::DiffReadAt::export_all(cfg)?;
+    crate::checkout::RangeDiff::export_all(cfg)?;
     crate::capture::ShortcutView::export_all(cfg)?;
     crate::capture::Recorded::export_all(cfg)?;
     crate::conversation::ThreadComment::export_all(cfg)?;
