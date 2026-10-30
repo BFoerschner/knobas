@@ -743,8 +743,12 @@ test("a .mermaid file that does not parse shows the parser's error above its num
   expect(drawn.querySelector("iframe")).toBeNull();
 });
 
-test("a .d2, a .dot and a .gv file are drawn by their engines in a sandboxed frame, with Source beside (#2259)", async () => {
-  for (const [path, engine] of [["docs/flow.d2", "D2"], ["deps.dot", "Graphviz"], ["graphs/deps.gv", "Graphviz"]] as const) {
+test("a .d2, a .dot and a .gv file are drawn by their engines in a sandboxed frame, with Source in the switcher (#2259)", async () => {
+  for (const [path, engine, blurb, pattern] of [
+    ["docs/flow.d2", "D2", "WASM", "*.d2"],
+    ["deps.dot", "Graphviz", "viz.js WASM", "*.dot"],
+    ["graphs/deps.gv", "Graphviz", "viz.js WASM", "*.gv"],
+  ] as const) {
     if (view) unmount(view);
     view = null;
     const render = diagramRender();
@@ -753,7 +757,12 @@ test("a .d2, a .dot and a .gv file are drawn by their engines in a sandboxed fra
     const frame = target.querySelector<HTMLIFrameElement>(".tf-fileview .tf-fdiagram iframe")!;
     expect([path, frame.getAttribute("sandbox"), frame.title]).toEqual([path, "", `${engine} diagram`]);
     expect(render.asked).toEqual(["a -> b"]);
-    expect(viewButtons()).toEqual(["Rendered*", "Source"]);
+    expect(menuItems()).toEqual([
+      `*${engine} built in · ${blurb} DEFAULT FOR ${pattern}`,
+      "Source built in · highlighted",
+      `Use Source for ${pattern} by default`,
+      "Renderers and defaults… Settings › Renderers",
+    ]);
   }
 });
 
