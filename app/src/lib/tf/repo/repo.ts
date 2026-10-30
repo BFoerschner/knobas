@@ -93,6 +93,8 @@ export interface RepoRoute {
   tab: RepoTab;
   /** Files and edit: the file's path in the tree. */
   path: string | null;
+  /** Files: the line a line link (`line/<n>/<path>`, #2251) marks, from 1; `null` for none. */
+  line: number | null;
   /** Commits: the commit's entity id, whose diff opens. */
   commit: string | null;
   /** Compare: the branch proposed (#837's `compare/<branch>`). */
@@ -108,12 +110,17 @@ const TABS = new Set<string>([...REPO_TABS.map((tab) => tab.id), "edit", "compar
  */
 export function readRepoRoute(rest: readonly string[]): RepoRoute {
   const repoId = rest[0] || null;
+  if (rest[1] === LINE) {
+    const n = /^\d+$/.test(rest[2] ?? "") ? Number(rest[2]) : 0;
+    return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: n > 0 ? n : null, commit: null, branch: null };
+  }
   const tab = (TABS.has(rest[1] ?? "") ? rest[1] : "files") as RepoTab;
   const tail = rest.slice(2).join("/") || null;
   return {
     repoId,
     tab,
     path: tab === "files" || tab === "edit" ? tail : null,
+    line: null,
     commit: tab === "commits" ? (rest[2] ?? null) : null,
     branch: tab === "compare" ? tail : null,
   };
@@ -129,6 +136,17 @@ export function repoHash(repoId: string, tab?: RepoTab, ...tail: string[]): stri
 /** The Files tab with `path` open; each segment encoded, the slashes kept. */
 export function fileHash(repoId: string, path: string): string {
   return repoHash(repoId, "files", ...path.split("/").map(encodeURIComponent));
+}
+
+/** The segment a line link starts with: not a tab, the Files tab lit. */
+const LINE = "line";
+
+/**
+ * The Files tab with `path` open at `line` (from 1), marked (#2251). The line
+ * comes before the path: a path's segments are any names a tree holds.
+ */
+export function lineHash(repoId: string, path: string, line: number): string {
+  return [repoHash(repoId), LINE, String(line), ...path.split("/").map(encodeURIComponent)].join("/");
 }
 
 /** A commit's diff under the Commits tab. */
@@ -286,10 +304,45 @@ export function fileLines(text: string): string[] {
   return lines;
 }
 
+/** A place in a file's text: a line (from 0) and a character in it. */
+export interface TextPlace {
+  line: number;
+  offset: number;
+}
+
+/**
+ * The text between two places of a file's lines, in either order, its lines
+ * joined by newlines (#2251): what a selection across the file viewer copies,
+ * whether or not the lines between are drawn.
+ */
+export function selectedText(lines: readonly string[], a: TextPlace, b: TextPlace): string {
+  const [from, to] = a.line < b.line || (a.line === b.line && a.offset <= b.offset) ? [a, b] : [b, a];
+  if (from.line === to.line) return (lines[from.line] ?? "").slice(from.offset, to.offset);
+  const out = [(lines[from.line] ?? "").slice(from.offset)];
+  for (let n = from.line + 1; n < to.line; n += 1) out.push(lines[n] ?? "");
+  out.push((lines[to.line] ?? "").slice(0, to.offset));
+  return out.join("\n");
+}
+
 /** The directories above a path, outermost first: `src`, `src/sepa`. */
 export function ancestors(path: string): string[] {
   const parts = path.split("/").slice(0, -1);
   return parts.map((_, at) => parts.slice(0, at + 1).join("/"));
+}
+
+/**
+ * The sections a link to `path` is likely read through, asked before the
+ * listings above it have named them (#2244, spec #2234 step 2): each
+ * directory above it (`""` the top) and the file. The ids are Gitea's
+ * adapter's (`files`, `files:<dir>`, `file:<path>`), the one tree a source
+ * draws today, and only a guess: the section a listing names is the one the
+ * tab keeps, and a guess it names too is answered by the read already asked.
+ * The shell never takes an id apart (ADR-0020 rule 3).
+ */
+export function likelySections(path: string): { dirs: Record<string, string>; file: string } {
+  const dirs: Record<string, string> = { "": "files" };
+  for (const dir of ancestors(path)) dirs[dir] = `files:${dir}`;
+  return { dirs, file: `file:${path}` };
 }
 
 /**

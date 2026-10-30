@@ -27,11 +27,13 @@ import {
   fileHash,
   fileLines,
   headLine,
+  lineHash,
   pickDefaultFile,
   readRepoRoute,
   repoHash,
   repoPrs,
   repoOfRow,
+  selectedText,
   shaOf,
   underRepoHash,
   visibleRepoPrs,
@@ -42,7 +44,7 @@ import {
 const REPO = "gitea:tidewater/payout-service";
 
 test("an address names the repository, its tab and what the tab has selected", () => {
-  expect(readRepoRoute([REPO])).toEqual({ repoId: REPO, tab: "files", path: null, commit: null, branch: null });
+  expect(readRepoRoute([REPO])).toEqual({ repoId: REPO, tab: "files", path: null, line: null, commit: null, branch: null });
   expect(readRepoRoute([REPO, "files", "src", "sepa", "retry.rs"])).toMatchObject({ tab: "files", path: "src/sepa/retry.rs" });
   expect(readRepoRoute([REPO, "commits"])).toMatchObject({ tab: "commits", commit: null });
   expect(readRepoRoute([REPO, "commits", `${REPO}@c90d11`])).toMatchObject({ tab: "commits", commit: `${REPO}@c90d11` });
@@ -52,6 +54,32 @@ test("an address names the repository, its tab and what the tab has selected", (
   // A tab this page has no place for reads as Files rather than a blank page.
   expect(readRepoRoute([REPO, "wiki"]).tab).toBe("files");
   expect(readRepoRoute([]).repoId).toBeNull();
+});
+
+test("a link to a line of a file is the Files tab at that line (#2251)", () => {
+  // The route hands segments decoded, as `parseHash` does.
+  const segments = (hash: string) => hash.split("/").slice(2).map(decodeURIComponent);
+  expect(lineHash(REPO, "src/a b.rs", 40_000)).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/line/40000/src/a%20b.rs");
+  expect(readRepoRoute(segments(lineHash(REPO, "src/a b.rs", 40_000)))).toEqual({
+    repoId: REPO,
+    tab: "files",
+    path: "src/a b.rs",
+    line: 40_000,
+    commit: null,
+    branch: null,
+  });
+  expect(readRepoRoute([REPO, "files", "line", "7"])).toMatchObject({ path: "line/7", line: null });
+  // No line number, or none worth one, is the file at its top.
+  expect(readRepoRoute([REPO, "line", "x", "README.md"])).toMatchObject({ tab: "files", path: "README.md", line: null });
+  expect(readRepoRoute([REPO, "line", "0", "README.md"])).toMatchObject({ path: "README.md", line: null });
+});
+
+test("a selection across a file's lines copies their text from where it starts to where it ends", () => {
+  const lines = ["fn main() {", "    run();", "}"];
+  expect(selectedText(lines, { line: 0, offset: 3 }, { line: 2, offset: 1 })).toBe("main() {\n    run();\n}");
+  // Backwards, as a drag upwards leaves it.
+  expect(selectedText(lines, { line: 1, offset: 4 }, { line: 0, offset: 8 })).toBe(") {\n    ");
+  expect(selectedText(lines, { line: 1, offset: 4 }, { line: 1, offset: 7 })).toBe("run");
 });
 
 test("addresses encode the entity id as one segment and a path segment by segment", () => {
