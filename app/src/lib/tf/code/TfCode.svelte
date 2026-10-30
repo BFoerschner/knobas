@@ -54,6 +54,9 @@
   import Marked from "../filter/Marked.svelte";
   import { clones } from "../openin/clones.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { untrack } from "svelte";
+  import TfWaiting from "../TfWaiting.svelte";
+  import { waitPhase } from "../waiting";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { itemHash, keyOf } from "../job/job";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
@@ -135,14 +138,22 @@
    * Every row of a room, read on with `offset` past one read's `LIMIT` until
    * `total` (#1825): the page's counts and its Open PRs column count what the
    * mirror holds, so a tail dropped unsaid would miscount them.
+   *
+   * `onPage`, where given, is handed the list so far after each page (#2245):
+   * the first page draws at once and the rest append behind it, its `total`
+   * the first page's, so the counts are the mirror's from the start.
    */
-  async function whole(filter: EntityFilter): Promise<EntityPage> {
+  async function whole(filter: EntityFilter, onPage?: (page: EntityPage) => void): Promise<EntityPage> {
     const first: { page?: EntityPage } = {};
-    const rows = await readAllRows(async (offset) => {
-      const page = await ports.listEntities(filter, LIMIT, offset);
-      first.page ??= page;
-      return page;
-    });
+    const rows = await readAllRows(
+      async (offset) => {
+        const page = await ports.listEntities(filter, LIMIT, offset);
+        first.page ??= page;
+        return page;
+      },
+      undefined,
+      onPage && ((rows) => onPage({ ...first.page!, rows: rows as EntityRow[] })),
+    );
     return { ...first.page!, rows };
   }
 
@@ -153,6 +164,9 @@
   let branches = $state<EntityRow[]>([]);
   let sources = $state<Pick<SourceSummary, "id" | "base_url">[]>([]);
   let failed = $state<string | null>(null);
+  /** A re-read under way (#2246): each tab keeps what it drew, dimmed, until its lists have answered. */
+  let repoReading = $state(false);
+  let prReading = $state(false);
   let checkouts = $state<Record<string, CheckoutView>>({});
   let jobs = $state<OpenJob[]>([]);
   let facts = $state.raw<CodeFacts[]>([]);
@@ -163,21 +177,42 @@
     void syncRevision;
     let live = true;
     failed = null;
-    checkouts = {};
+    // A first read draws each list from its first page and appends the rest
+    // (#2245); a re-read keeps the whole list drawn, dimmed, until the whole
+    // new one is in, so a long list never shrinks back to one page under the
+    // reader.
+    const again = untrack(() => repos !== null || attention !== null || everyPr !== null);
+    repoReading = again;
+    prReading = again;
     const fail = (error: unknown) => {
       if (live) failed = ipcErrorMessage(error);
     };
-    whole(filterOf(["repo"], "updated_desc")).then((page) => {
+    const readCheckouts = checkoutReader(() => live);
+    let asked = 0;
+    const repoPage = (page: EntityPage) => {
       if (!live) return;
       repos = page;
-      void readCheckouts(page.rows.map((row) => row.entity_id), () => live);
-    }, fail);
-    whole(filterOf(["pr"], "attention")).then((page) => {
-      if (live) attention = page;
-    }, fail);
-    whole(filterOf(["pr"], "updated_desc")).then((page) => {
-      if (live) everyPr = page;
-    }, fail);
+      readCheckouts(page.rows.slice(asked).map((row) => row.entity_id));
+      asked = page.rows.length;
+    };
+    const whileLive = (set: (page: EntityPage) => unknown) => (page: EntityPage) => {
+      if (live) set(page);
+    };
+    // A first read is handed every page as it lands, the last one too, so
+    // only a re-read sets the list from the whole answer.
+    const read = (filter: EntityFilter, set: (page: EntityPage) => void) =>
+      again ? whole(filter).then(set, fail) : whole(filter, set).then(undefined, fail);
+    const repoRead = read(filterOf(["repo"], "updated_desc"), repoPage);
+    const prReads = [
+      read(filterOf(["pr"], "attention"), whileLive((page) => (attention = page))),
+      read(filterOf(["pr"], "updated_desc"), whileLive((page) => (everyPr = page))),
+    ];
+    void repoRead.finally(() => {
+      if (live) repoReading = false;
+    });
+    void Promise.allSettled(prReads).then(() => {
+      if (live) prReading = false;
+    });
     ports.listSources().then(
       (rows) => {
         if (live) sources = rows;
@@ -232,23 +267,36 @@
     if (clones.finished === seenClones) return;
     seenClones = clones.finished;
     const ids = (repos?.rows ?? []).filter((row) => !checkouts[row.entity_id]?.path).map((row) => row.entity_id);
-    void readCheckouts(ids, () => true);
+    checkoutReader(() => true)(ids);
   });
 
-  /** Each repository's checkout, a few at a time; one that fails draws nothing. */
-  async function readCheckouts(ids: string[], alive: () => boolean) {
-    const queue = [...ids];
+  /**
+   * Each repository's checkout, a few at a time; one that fails draws
+   * nothing. The reader it answers takes more ids as each page of
+   * repositories lands, through the same few lanes.
+   */
+  function checkoutReader(alive: () => boolean): (ids: string[]) => void {
+    const queue: string[] = [];
+    let lanes = 0;
     const lane = async () => {
-      for (let id = queue.shift(); id !== undefined && alive(); id = queue.shift()) {
-        try {
-          const view = await ports.entityCheckout(id);
-          if (alive()) checkouts[id] = view;
-        } catch {
-          // An unreadable checkout leaves the cell empty rather than claiming one.
+      lanes += 1;
+      try {
+        for (let id = queue.shift(); id !== undefined && alive(); id = queue.shift()) {
+          try {
+            const view = await ports.entityCheckout(id);
+            if (alive()) checkouts[id] = view;
+          } catch {
+            // An unreadable checkout leaves the cell empty rather than claiming one.
+          }
         }
+      } finally {
+        lanes -= 1;
       }
     };
-    await Promise.all(Array.from({ length: CHECKOUT_LANES }, lane));
+    return (ids) => {
+      queue.push(...ids);
+      while (lanes < CHECKOUT_LANES && queue.length > 0) void lane();
+    };
   }
 
   const index = $derived(jobIndex(jobs));
@@ -367,7 +415,8 @@
     ]),
   );
 
-  const prTotal = $derived(lines?.length ?? null);
+  /** The mirror's count from the first page on, not the rows in so far (#2245). */
+  const prTotal = $derived(lines === null || everyPr === null ? null : Math.max(lines.length, everyPr.total));
   const filter = $derived(tab === "prs" ? prFilter : repoFilter);
   const searchAll = () => {
     filter.scope = "all";
@@ -421,10 +470,8 @@
   <FilterBar config={prConfig} filter={prFilter} shown={lines === null ? null : shownPrs.length} total={prTotal} />
 {/if}
 <div class="tf-cbody">
-  {#if failed !== null}
-    <p class="tf-cfail">{failed}</p>
-  {/if}
   {#if tab === "repos"}
+    <TfWaiting phase={waitPhase({ drawn: repos !== null, reading: repoReading, failed: failed !== null })} error={failed} columns={7}>
     {#if shownRepos.length > 0}
       <table class="tf-tbl">
         <thead>
@@ -456,10 +503,12 @@
           {#if repoWin.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach repoWin.room("after")}></td></tr>{/if}
         </tbody>
       </table>
-    {:else if repos !== null}
+    {:else}
       {@render nothing()}
     {/if}
+    </TfWaiting>
   {:else}
+    <TfWaiting phase={waitPhase({ drawn: lines !== null, reading: prReading, failed: failed !== null })} error={failed} columns={5}>
     {#each groups as { group, lines: kept } (group ?? "open")}
       {#if group !== null}
         <h2 class="tf-cgroup-h">{GROUP_LABEL[group]} <span class="tf-count">{kept.length}</span></h2>
@@ -490,10 +539,9 @@
         </tbody>
       </table>
     {:else}
-      {#if lines !== null}
-        {@render nothing()}
-      {/if}
+      {@render nothing()}
     {/each}
+    </TfWaiting>
   {/if}
 </div>
 

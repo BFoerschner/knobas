@@ -1,0 +1,101 @@
+<!doctype html>
+<!--
+  #2252: the pull request page and its side rail (spec #2234 story 85): merge readiness as a checklist, reviewers and
+  their state, required checks and the builds of the head commit from the mirror, conflicts. Merge stays in the
+  header. The body is drawn by the one Markdown component. States: blocked | ready | refresh (re-read: old content dimmed).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pull request</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="base.css"><link rel="stylesheet" href="code.css">
+<script src="mockup.js"></script>
+</head>
+<body data-page="pr" data-kind="pr" data-tab="conv" data-states="blocked ready refresh">
+<div class="tf">
+<div id="chrome"></div>
+<main>
+<div class="barwrap" data-when="refresh"><div class="bar"></div></div>
+<div class="body"><div class="prgrid" data-dim>
+  <section class="tl">
+    <article class="cmt"><header><span class="av b">ML</span><b>mara</b><span class="dim">opened this 2 days ago</span>
+      <div class="tf-acts"><button class="tf-btn tf-sm tf-ghost">Edit</button><button class="tf-iconbtn tf-sm" title="More" data-ic="more"></button></div></header>
+      <div class="md"><p>A failed webhook delivery is retried with exponential backoff (2, 4, 8 … 512 s, ten tries) instead of
+        being dropped. The outbox row keeps the attempt count, so a restart resumes where it was.</p>
+        <ul><li class="task"><span class="box on">✓</span>Backoff schedule and jitter</li><li class="task"><span class="box on">✓</span>Attempt count on the outbox row</li><li class="task"><span class="box"></span>Dead-letter after the tenth try (#415)</li></ul>
+        <p>Closes <a href="#">PAY-214</a>.</p></div></article>
+
+    <div class="ev"><span class="av d">JK</span><b>jonas</b> requested changes · 1 day ago</div>
+    <article class="cmt"><header><span class="av d">JK</span><b>jonas</b><span class="dim">on <span class="mono">src/retry.rs</span> line 42 · outdated</span>
+      <div class="tf-acts"><a class="tf-btn tf-sm tf-ghost" href="diff.html">Show in diff</a><button class="tf-btn tf-sm">Resolve</button></div></header>
+      <div class="md"><p>Without jitter every subscriber that failed together retries together. Add ±20 %?</p></div></article>
+    <div class="ev" data-ic="commit">mara pushed 2 commits · <span class="mono">7aa01f9</span> <span class="mono">9f3e1c2</span> · 5 h ago</div>
+    <div class="ev"><span class="av c">SR</span><b>sven</b> approved · 3 h ago</div>
+    <div class="ev" data-when="ready"><span class="av d">JK</span><b>jonas</b> approved · 20 min ago</div>
+
+    <article class="cmt"><header><b>Comment</b></header>
+      <div class="md"><div style="height:70px;border:1px solid var(--rule);border-radius:4px;background:var(--paper);padding:8px;color:var(--ink-2)">Write a comment. Markdown is drawn the same here as everywhere.</div></div>
+      <div style="display:flex;justify-content:flex-end;gap:var(--control-gap);padding:0 12px 12px"><button class="tf-btn tf-sm tf-primary">Comment</button></div></article>
+  </section>
+
+  <aside class="rail">
+    <section class="tf-panel"><header><h3>Ready to merge?</h3></header>
+      <div class="ready" data-when="blocked">
+        <div class="verdict no">Not yet: 2 of 6 met</div>
+        <div class="ck no"><span class="mk">✕</span><span>Conflicts with <span class="mono">main</span> in 1 file<span class="why">See Conflicts below</span></span></div>
+        <div class="ck no"><span class="mk">✕</span><span>Approvals: 1 of 2<span class="why">jonas requested changes</span></span></div>
+        <div class="ck no"><span class="mk">✕</span><span>Required checks: 2 of 3 pass<span class="why">ci/test failed on 9f3e1c2</span></span></div>
+        <div class="ck wait"><span class="mk">●</span><span>Branch is 4 commits behind <span class="mono">main</span><span class="why">The protection rule asks for an up-to-date branch</span></span></div>
+        <div class="ck ok"><span class="mk">✓</span><span>No unresolved threads you must answer</span></div>
+        <div class="ck ok"><span class="mk">✓</span><span>You can merge into <span class="mono">main</span></span></div>
+        <div class="tf-acts"><button class="tf-btn tf-sm">Update branch</button></div>
+      </div>
+      <div class="ready" data-when="ready">
+        <div class="verdict ok">Ready: 6 of 6 met</div>
+        <div class="ck ok"><span class="mk">✓</span><span>No conflicts with <span class="mono">main</span></span></div>
+        <div class="ck ok"><span class="mk">✓</span><span>Approvals: 2 of 2</span></div>
+        <div class="ck ok"><span class="mk">✓</span><span>Required checks: 3 of 3 pass</span></div>
+        <div class="ck ok"><span class="mk">✓</span><span>Branch is up to date with <span class="mono">main</span></span></div>
+        <div class="ck ok"><span class="mk">✓</span><span>No unresolved threads you must answer</span></div>
+        <div class="ck ok"><span class="mk">✓</span><span>You can merge into <span class="mono">main</span></span></div>
+      </div></section>
+
+    <section class="tf-panel"><header><h3>Reviewers</h3><div class="tf-acts"><button class="tf-btn tf-sm tf-ghost">Request…</button></div></header>
+      <div class="list">
+        <div class="it"><span class="av c">SR</span><span class="grow">sven</span><span class="tf-chip ok">Approved</span></div>
+        <div class="it" data-when="blocked"><span class="av d">JK</span><span class="grow">jonas</span><span class="tf-chip err">Changes requested</span></div>
+        <div class="it" data-when="ready"><span class="av d">JK</span><span class="grow">jonas</span><span class="tf-chip ok">Approved</span></div>
+        <div class="it"><span class="av">BF</span><span class="grow">you <span class="dim small">· 2 pending comments</span></span><span class="tf-chip warn">Draft</span></div>
+      </div></section>
+
+    <section class="tf-panel"><header><h3>Checks</h3><span class="dim small mono">9f3e1c2</span></header>
+      <div class="list">
+        <div class="it"><span class="dot ok"></span><span class="grow">ci/lint</span><span class="req">REQUIRED</span><span class="dim small num">0:48</span></div>
+        <div class="it" data-when="blocked"><span class="dot err"></span><span class="grow">ci/test</span><span class="req">REQUIRED</span><span class="dim small num">6:12</span></div>
+        <div class="it" data-when="ready"><span class="dot ok"></span><span class="grow">ci/test</span><span class="req">REQUIRED</span><span class="dim small num">5:58</span></div>
+        <div class="it"><span class="dot ok"></span><span class="grow">ci/build</span><span class="req">REQUIRED</span><span class="dim small num">3:30</span></div>
+        <div class="it"><span class="dot warn"></span><span class="grow">coverage</span><span class="dim small">−0.4 %</span></div>
+      </div></section>
+
+    <section class="tf-panel"><header><h3>Builds of the head</h3><span class="dim small">from the mirror</span></header>
+      <div class="list">
+        <div class="it" data-when="blocked"><span class="dot err"></span><span class="grow"><a href="#"><b>payments-api</b> #1184</a> · test failed</span><span class="dim small">2 h ago</span></div>
+        <div class="it" data-when="ready"><span class="dot ok"></span><span class="grow"><a href="#"><b>payments-api</b> #1186</a> · passed</span><span class="dim small">12 min ago</span></div>
+        <div class="it"><span class="dot run"></span><span class="grow"><a href="#"><b>deploy-preview</b> #77</a> · running</span><span class="dim small">4 min</span></div>
+      </div></section>
+
+    <section class="tf-panel"><header><h3>Conflicts</h3></header>
+      <p class="note" data-when="ready">None against <span class="mono">main</span> at <span class="mono">e02b7d1</span>.</p>
+      <div data-when="blocked"><div class="conf"><span>✕ src/webhook.rs <span class="dim">· both changed lines 88–104</span></span></div>
+        <p class="note">Against <span class="mono">main</span> at <span class="mono">e02b7d1</span>. Gitea cannot resolve this in the browser; resolve it in your checkout.</p></div></section>
+
+    <section class="tf-panel"><header><h3>Local checkout</h3></header>
+      <p class="note">Both commits are in <span class="mono">~/src/payments-api</span>: diffs are read from local git.</p>
+      <div class="tf-acts" style="padding:0 12px 12px"><span data-openin="tf-sm"></span></div></section>
+  </aside>
+</div></div></main>
+<footer class="tf-status"><span>Gitea · synced 1 min ago</span><span>3 sources healthy</span></footer>
+</div>
+</body>
+</html>

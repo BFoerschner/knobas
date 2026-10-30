@@ -9,12 +9,16 @@
   shell's breadcrumb (`TfCrumbs.svelte`). A new screen adds a folder and does not edit this
   file. What stays here is the shell's own:
 
-  - **The role frame** (#2106): a page that names a `role` is a view of that
-    role, and is handed *Sync now* for it as the `sync` snippet, which its
-    header draws where its own actions go, and `syncRevision`, which moves
-    when those runs have ended. The button and its runs are this frame's, so
-    every role view draws the same one, and its runs outlive a view drawn
-    again.
+  - **Keep-alive** (#2247): the page you leave stays mounted and hidden, up to
+    *Pages kept open* of them, the least recently used dropped past that
+    (`page-entry.ts` says what a page sees; `kept-pages.svelte.ts` is the
+    cache). Each is drawn by `TfKeptPage.svelte`.
+  - **The role frame** (#2106, in `TfKeptPage.svelte`): a page that names a
+    `role` is a view of that role, and is handed *Sync now* for it as the
+    `sync` snippet, which its header draws where its own actions go, and
+    `syncRevision`, which moves when those runs have ended and when the page
+    is shown again. The button and its runs are this frame's, so every role
+    view draws the same one, and its runs outlive a view drawn again.
   - **A bare `#/job`** with no job opened yet says how to open one. Job has no
     breadcrumb: it is the place the breadcrumb leads to.
   - **A full view not built yet** starts with the breadcrumb (R-1.6): the job
@@ -24,64 +28,56 @@
     blank pane and never a page pretending to be another.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
-  import type { RoleFrameProps, TfPageContext } from "./page-entry";
-  import { pageFor } from "./pages";
-  import { SECTION_NAME } from "./route";
+  import { keptPages, hold, type Held, type KeptPagesSetting } from "./kept-pages.svelte";
+  import type { TfPageContext, TfPageEntry } from "./page-entry";
+  import { PAGES } from "./pages";
+  import { SECTION_NAME, type TfRoute } from "./route";
   import TfCrumbs from "./TfCrumbs.svelte";
-  import TfSyncNow from "./TfSyncNow.svelte";
+  import TfKeptPage from "./TfKeptPage.svelte";
 
-  /** Everything the shell hands a page; see `page-entry.ts`. */
-  let { ctx }: { ctx: TfPageContext } = $props();
+  let {
+    ctx,
+    pages = PAGES,
+    kept = keptPages,
+  }: {
+    /** Everything the shell hands a page; see `page-entry.ts`. `visible` is this host's. */
+    ctx: Omit<TfPageContext, "visible">;
+    /** The registered pages; the glob's when omitted. */
+    pages?: readonly TfPageEntry[];
+    /** *Pages kept open* (#2247); the window's when omitted. */
+    kept?: Pick<KeptPagesSetting, "value">;
+  } = $props();
 
   const route = $derived(ctx.route);
   const job = $derived(ctx.job);
   const jobAt = $derived(ctx.jobAt);
 
-  const page = $derived(pageFor(route));
+  const page = $derived(pages.find((candidate) => candidate.matches(route)));
 
   /**
-   * The page's props, each its own signal (#1987). A spread of `page.props(ctx)`
-   * is one object, new on every change to `ctx`, and every prop read hangs on
-   * it: a tab switch would re-run a page's read keyed on a prop that stayed,
-   * as the job's `segment`. Here a prop tells its readers only when its own
-   * value changed (`===`: an array such as `rest`, new per route, still tells
-   * them). The keys are read once per page; `props` returns a fixed set.
+   * The pages keep-alive holds (#2247, `kept-pages.svelte.ts`): the shown one
+   * last. Plain, not state: the derived below is its only writer and reader,
+   * and re-runs on the address, the page and *Pages kept open*, so lowering
+   * the setting drops the surplus at once.
    */
-  function propSignals(read: () => Record<string, unknown>): Record<string, unknown> {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(untrack(read))) {
-      const value = $derived(read()[key]);
-      Object.defineProperty(out, key, { get: () => value, enumerable: true });
-    }
-    return out;
-  }
-  const pageProps = $derived.by((): Record<string, unknown> => {
+  let held: Held<{ entry: TfPageEntry; route: TfRoute }>[] = [];
+  const drawn = $derived.by(() => {
     const entry = page;
-    return entry ? propSignals(() => entry.props(ctx)) : {};
+    const at = route;
+    const next =
+      entry === undefined ? null : { key: `${pages.indexOf(entry)}:${entry.address?.(at) ?? ""}`, value: { entry, route: at } };
+    held = hold(held, next, kept.value);
+    // Drawn in a fixed order, so showing a page again moves no element.
+    return [...held].sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
   });
-
-  /** The role this page is a view of, and its *Sync now* (#2106). */
-  const roleSync = $derived(page?.role === undefined ? null : ctx.roleSyncs.of(page.role));
-  /** What the frame hands a role view beside its own props: nothing for any other page. */
-  const frameProps = $derived<RoleFrameProps>(
-    roleSync === null ? {} : { sync: syncNow, syncRevision: roleSync.revision },
-  );
 </script>
 
-{#snippet syncNow()}
-  {#if roleSync !== null}<TfSyncNow sync={roleSync} />{/if}
-{/snippet}
+{#each drawn as one (one.key)}
+  <TfKeptPage entry={one.value.entry} route={one.value.route} visible={one.visible} shows={one.shows} {ctx} />
+{/each}
 
-{#if page && page.crumbs && route.view === "full"}
-  {@const Page = page.component}
-  <div class="tf-full">
-    <TfCrumbs {job} {jobAt} name={SECTION_NAME[route.section]} />
-    <Page {...pageProps} {...frameProps} />
-  </div>
-{:else if page}
-  {@const Page = page.component}
-  <Page {...pageProps} {...frameProps} />
+{#if page}
+  <!-- Drawn above. -->
 {:else if route.view === "job"}
   <div class="tf-full">
     <header class="tf-fhead">

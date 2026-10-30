@@ -109,6 +109,7 @@
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import { ago } from "../../shell/time";
+  import { pageVisible } from "../kept-pages.svelte";
 
   let {
     segment,
@@ -193,13 +194,17 @@
   const commentRefused = $derived(refusalOf(refused, detail?.row.entity_id ?? null, "comment"));
   const moveRefused = $derived(refusalOf(refused, detail?.row.entity_id ?? null, "transition"));
 
-  // The job on screen is what the timer chip and ⌘T start on (R-1.4).
-  $effect(() => currentJob.set(detail?.row.entity_id ?? null));
+  /** Whether keep-alive shows this job or holds it hidden (#2247). */
+  const pageShown = pageVisible();
+
+  // The job on screen is what the timer chip and ⌘T start on (R-1.4); a job
+  // keep-alive holds hidden (#2247) is not on screen.
+  $effect(() => (pageShown() ? currentJob.set(detail?.row.entity_id ?? null) : undefined));
 
   // *Link to <key>* from the launcher (#1500): this job's own dialog, over its
   // Connections drawer, with the result preset, once the job has drawn.
   $effect(() => {
-    if (!detail) return;
+    if (!detail || !pageShown()) return;
     const asked = linkRequest.take(keyOf(detail.row.entity_id));
     if (asked === null) return;
     preset = asked;
@@ -435,6 +440,8 @@
   onMount(() => {
     // `L` opens the drawer (R-4.3), outside a text field and with nothing open over the page.
     const onkey = (event: KeyboardEvent) => {
+      // A page keep-alive holds hidden (#2247) takes no keys.
+      if (!pageShown()) return;
       if (event.key.toLowerCase() !== "l" || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       if (!detail || drawer || layers.open.length > 0 || inTextField(document.activeElement)) return;
       event.preventDefault();

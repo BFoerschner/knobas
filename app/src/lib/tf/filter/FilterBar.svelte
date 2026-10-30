@@ -33,6 +33,7 @@
 
   import { inTextField } from "../../shell/keys";
   import { countLine, type FilterConfig, type FilterState } from "./filter";
+  import { pageVisible } from "../kept-pages.svelte";
 
   let {
     config,
@@ -90,9 +91,12 @@
     onchange();
   }
 
+  const pageShown = pageVisible();
   onMount(() => {
     if (config.hint === false) return;
     const onkey = (event: KeyboardEvent) => {
+      // A page keep-alive holds hidden (#2247) takes no keys.
+      if (!pageShown()) return;
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       const at = document.activeElement;
       if (at instanceof HTMLElement && inTextField(at)) return;

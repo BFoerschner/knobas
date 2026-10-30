@@ -446,6 +446,7 @@
           {at}
           branch={branchName}
           path={route.path}
+          line={route.line}
           {changed}
           editing={route.tab === "edit"}
           {job}

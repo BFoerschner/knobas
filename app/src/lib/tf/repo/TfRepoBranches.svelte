@@ -48,6 +48,8 @@
     type BranchRow,
     type BranchStanding,
   } from "./repo";
+  import TfWaiting from "../TfWaiting.svelte";
+  import { waitPhase } from "../waiting";
 
   let {
     ports,
@@ -67,6 +69,8 @@
   const AT_ONCE = 4;
 
   let listed = $state<ViewRow[] | null>(null);
+  /** A listing read under way: what is drawn stays, dimmed, until it answers (#2246). */
+  let reading = $state(false);
   let failed = $state<string | null>(null);
   let standings = $state<Record<string, BranchStanding>>({});
   let facts = $state<Record<string, CodeFacts>>({});
@@ -106,9 +110,11 @@
    * fails.
    */
   function readBranches(id: string, alive: () => boolean, again = false): Promise<unknown> {
+    reading = true;
     return ports.entityView(id, "branches").then(
       (view) => {
         if (!alive()) return;
+        reading = false;
         listed = viewRows(view?.sections[0]);
         const names = new Set(listed.map((row) => row.title));
         settleEchoes(id, (echo) => (echo.kind === MADE && names.has(echo.text)) || (echo.kind === DELETED && !names.has(echo.text)));
@@ -136,7 +142,9 @@
         return Promise.all(Array.from({ length: AT_ONCE }, worker));
       },
       (error) => {
-        if (alive() && !again) failed = ipcErrorMessage(error);
+        if (!alive()) return;
+        reading = false;
+        if (!again) failed = ipcErrorMessage(error);
       },
     );
   }
@@ -219,11 +227,10 @@
 <div class="tf-rbar">
   <FilterBar {config} {filter} shown={listed === null ? null : shown.length} total={listed === null ? null : rows.length} />
 </div>
-{#if failed !== null}
-  <p class="tf-cfail">{failed}</p>
-{:else if listed !== null && shown.length === 0}
+<TfWaiting phase={waitPhase({ drawn: listed !== null, reading, failed: failed !== null })} error={failed} columns={6}>
+{#if shown.length === 0}
   <div class="tf-empty">No branches match.</div>
-{:else if shown.length > 0}
+{:else}
   <table class="tf-tbl tf-rbranches">
     <thead>
       <tr><th>Branch</th><th>Against {defaultName}</th><th>Pull request</th><th>By</th><th>Updated</th><th></th></tr>
@@ -268,6 +275,7 @@
     </tbody>
   </table>
 {/if}
+</TfWaiting>
 {#each notes as note, n (n)}
   <p class="tf-dim tf-small tf-rbranches-note">{note.title}</p>
 {/each}

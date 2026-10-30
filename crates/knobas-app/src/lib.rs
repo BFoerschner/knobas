@@ -329,6 +329,8 @@ pub fn run() {
             commands::app::frontend_ready,
             commands::app::retry_database,
             commands::app::complete_first_run,
+            commands::app::pages_kept_open,
+            commands::app::set_pages_kept_open,
             commands::backup::backup_status,
             commands::backup::backup_now,
             commands::backup::share_export,

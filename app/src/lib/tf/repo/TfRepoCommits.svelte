@@ -23,6 +23,8 @@
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import { commitHash, viewRows, visibleViewRows } from "./repo";
+  import TfWaiting from "../TfWaiting.svelte";
+  import { waitPhase } from "../waiting";
 
   let {
     ports,
@@ -42,7 +44,9 @@
     refreshed?: number;
   } = $props();
 
+  /** The commits drawn: another branch's are kept, dimmed, while this one's are read (#2246). */
   let rows = $state<ViewRow[] | null>(null);
+  let reading = $state(false);
   let failed = $state<string | null>(null);
   /** The commits whose declared author is mine. */
   let mine = $state<ReadonlySet<string>>(new Set());
@@ -50,9 +54,7 @@
   $effect(() => {
     const where = at;
     let live = true;
-    rows = null;
     failed = null;
-    mine = new Set();
     readCommits(where, () => live);
     return () => {
       live = false;
@@ -70,11 +72,14 @@
 
   /** The commits at `where`, then whose are mine; `again` keeps what the tab drew when it fails. */
   function readCommits(where: string, alive: () => boolean, again = false): Promise<unknown> {
+    reading = true;
     return ports.entityView(where, "commits").then(
       (view) => {
         if (!alive()) return;
         const read = viewRows(view?.sections[0]);
+        reading = false;
         rows = read;
+        mine = new Set();
         const ids = read.flatMap((row) => (row.entity_id === null ? [] : [row.entity_id]));
         if (ids.length === 0) return;
         return ports.codeFacts(ids).then(
@@ -85,7 +90,11 @@
         );
       },
       (error) => {
-        if (alive() && !again) failed = ipcErrorMessage(error);
+        if (!alive()) return;
+        reading = false;
+        if (again) return;
+        failed = ipcErrorMessage(error);
+        rows = null;
       },
     );
   }
@@ -116,11 +125,10 @@
 <div class="tf-rbar">
   <FilterBar {config} {filter} shown={rows === null ? null : shown.length} total={rows?.length ?? null} />
 </div>
-{#if failed !== null}
-  <p class="tf-cfail">{failed}</p>
-{:else if rows !== null && shown.length === 0}
+<TfWaiting phase={waitPhase({ drawn: rows !== null, reading, failed: failed !== null })} error={failed}>
+{#if shown.length === 0}
   <div class="tf-empty">No commits match.</div>
-{:else if shown.length > 0}
+{:else}
   <table class="tf-tbl tf-rcommits">
     <tbody>
       {#each shown as row, n (n)}
@@ -137,3 +145,4 @@
     </tbody>
   </table>
 {/if}
+</TfWaiting>

@@ -64,3 +64,19 @@ export function retryDatabase(): Promise<void> {
 export function completeFirstRun(): Promise<void> {
   return invoke<void>("complete_first_run");
 }
+
+/**
+ * *Pages kept open* (#2247): how many pages the shell keeps mounted and hidden
+ * besides the one in front, 0 to 15, 5 until set.
+ */
+export function pagesKeptOpen(): Promise<number> {
+  return invoke<number>("pages_kept_open");
+}
+
+/**
+ * Store *Pages kept open*, and get back what is now stored (held to 15), so
+ * Settings › Performance draws what the database holds.
+ */
+export function setPagesKeptOpen(count: number): Promise<number> {
+  return invoke<number>("set_pages_kept_open", { count });
+}

@@ -14,5 +14,6 @@ type ItemRoute = Extract<TfRoute, { view: "item" }>;
 export const page = definePage({
   matches: (route): route is ItemRoute => route.view === "item",
   component: TfItem,
+  address: (route) => route.id,
   props: ({ route, ready, job, jobAt }) => ({ id: route.id, ready, job, jobAt }),
 });

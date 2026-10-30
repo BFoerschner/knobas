@@ -20,15 +20,22 @@
   refresh event and a run's end.
 
   With no file in the address the top directory's README opens.
+
+  A file over 2,000 lines is a windowed list (#2251, `shell/windowed.svelte.ts`):
+  only the lines near the viewport are drawn, the rest are room above and
+  below. A line link (`line/<n>/<path>`) draws its line, marks it and scrolls
+  it to the middle. Copying a selection across lines copies their text from
+  the file, not from the drawn nodes, so the lines between need not be drawn.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { flushSync, tick, untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutView, TreeEntry, ViewBlock, ViewSection } from "../../ipc/entity";
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
+  import { Windowed } from "../../shell/windowed.svelte";
   import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
@@ -42,10 +49,15 @@
     editHash,
     fileHash,
     fileLines,
+    likelySections,
     pickDefaultFile,
     repoHash,
+    selectedText,
     sourceName,
+    type TextPlace,
   } from "./repo";
+  import TfWaiting from "../TfWaiting.svelte";
+  import { waitPhase } from "../waiting";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -56,6 +68,7 @@
     at,
     branch,
     path,
+    line = null,
     changed,
     editing = false,
     job = null,
@@ -74,6 +87,8 @@
     branch: string | null;
     /** The file the address names, or `null`. */
     path: string | null;
+    /** The line a line link marks, from 1; `null` for none. */
+    line?: number | null;
     /** The paths the local checkout changed. */
     changed: ReadonlySet<string>;
     /** The address is the file's edit (`edit/<path>`). */
@@ -98,8 +113,15 @@
   /** Why the source refuses a commit straight onto the branch (#985), `null` where it takes one. */
   let refusal = $state<string | null>(null);
   let fileFailed = $state<string | null>(null);
+  /** The file shown is being read: the one drawn before stays, dimmed, until it answers (#2246). */
+  let fileReading = $state(false);
   /** Directory reads asked and not answered, at the current `at`. */
   let asked = new Set<string>();
+  /**
+   * Reads a deep link asked before a listing named their section (#2244), by
+   * section, at the current `at`: the listing that names one takes it.
+   */
+  let early = new Map<string, Promise<ViewSection | undefined>>();
   let generation = 0;
 
   const join = (dir: string, name: string) => (dir === "" ? name : `${dir}/${name}`);
@@ -117,11 +139,28 @@
     return view?.sections[0];
   }
 
+  /** The read of `section` asked early, once, else a new one. */
+  function take(section: string, where = at): Promise<ViewSection | undefined> {
+    const read = early.get(section);
+    if (read === undefined) return readSection(section, where);
+    early.delete(section);
+    return read;
+  }
+
+  /** Asks for `section` now, for the listing that names it later. */
+  function askEarly(section: string): Promise<ViewSection | undefined> {
+    const read = readSection(section);
+    // A wrong guess fails unheard; the listing's own section is read instead.
+    read.catch(() => {});
+    early.set(section, read);
+    return read;
+  }
+
   function readDir(dir: string, section: string) {
     if (asked.has(dir) || listings[dir] !== undefined) return;
     asked.add(dir);
     const mine = generation;
-    readSection(section).then(
+    take(section).then(
       (read) => {
         if (mine !== generation) return;
         const block = read?.blocks[0];
@@ -138,6 +177,7 @@
     void at;
     generation += 1;
     asked = new Set();
+    early = new Map();
     listings = {};
     treeFailed = null;
     untrack(() => readDir("", "files"));
@@ -156,6 +196,40 @@
     }
   });
 
+  // A link to a file below directories not read yet asks for each of them
+  // and the file at once (#2244); the file draws as soon as it answers, and
+  // the tree fills in as its listings arrive.
+  $effect(() => {
+    const where = at;
+    const target = path;
+    if (target === null) return;
+    return untrack(() => {
+      if (listings[parentOf(target)] !== undefined) return;
+      const likely = likelySections(target);
+      for (const [dir, section] of Object.entries(likely.dirs))
+        if (!asked.has(dir) && listings[dir] === undefined && !early.has(section)) askEarly(section);
+      let live = true;
+      const asking = askEarly(likely.file);
+      // Answered, it is spent: a later open of the file reads it again.
+      const spent = () => {
+        if (early.get(likely.file) === asking) early.delete(likely.file);
+      };
+      asking.then(
+        (read) => {
+          spent();
+          if (!live || where !== at || (fileSection !== null && fileSection !== likely.file)) return;
+          if (file !== null && drawnSection === likely.file) return;
+          drawFile(read, likely.file);
+        },
+        // Its directory's listing says whether there is such a file.
+        spent,
+      );
+      return () => {
+        live = false;
+      };
+    });
+  });
+
   const shown = $derived(path ?? pickDefaultFile(listings[""] ?? []));
 
   const MISSING = "\u0000missing";
@@ -169,30 +243,61 @@
     const entry = entryOf(shown);
     return entry === undefined || entry.section === null || entry.kind === "dir" ? MISSING : entry.section;
   });
-  // The file, once its directory has said which section opens it.
+  /** The section the file drawn was read through; the file drawn stays, dimmed, while the next one is read. */
+  let drawnSection: string | null = null;
+
+  function drawFile(read: ViewSection | undefined, section: string) {
+    const block = read?.blocks[0];
+    file = block?.type === "file" ? block : null;
+    drawnSection = section;
+    refusal = commitRefusal(read);
+    fileReading = false;
+    fileFailed = null;
+    draft = null;
+    settleCommit(file);
+  }
+
+  // The file, once its directory has said which section opens it; a deep
+  // link's early read that drew it already stands.
   $effect(() => {
     const section = fileSection;
     const where = at;
-    file = null;
-    refusal = null;
+    // Drawn already, by a deep link's early read or before a step away and back.
+    if (section !== null && section === untrack(() => drawnSection) && untrack(() => file) !== null) {
+      fileReading = false;
+      fileFailed = null;
+      return;
+    }
     fileFailed = null;
+    // Waiting for the directory that says which section opens the file; with no file to show, nothing is drawn.
+    const showing = untrack(() => shown) !== null;
+    fileReading = showing;
+    if (!showing) {
+      file = null;
+      drawnSection = null;
+      refusal = null;
+    }
     if (section === null) return;
     if (section === MISSING) {
+      fileReading = false;
+      file = null;
+      drawnSection = null;
+      refusal = null;
       fileFailed = `There is no file ${untrack(() => shown)} on ${untrack(() => branch) ?? "this branch"}.`;
       return;
     }
     let live = true;
-    readSection(section, where).then(
+    take(section, where).then(
       (read) => {
-        if (!live) return;
-        const block = read?.blocks[0];
-        file = block?.type === "file" ? block : null;
-        refusal = commitRefusal(read);
-        draft = null;
-        settleCommit(file);
+        if (live && !(file !== null && drawnSection === section)) drawFile(read, section);
       },
       (error) => {
-        if (live) fileFailed = ipcErrorMessage(error);
+        if (!live) return;
+        fileReading = false;
+        file = null;
+        drawnSection = null;
+        refusal = null;
+        fileFailed = ipcErrorMessage(error);
       },
     );
     return () => {
@@ -200,7 +305,61 @@
     };
   });
 
+  /**
+   * A directory read failed before the file's section was known: no answer is
+   * coming, so the file pane neither waits on skeletons nor stays dimmed; the
+   * tree draws the error.
+   */
+  const fileStranded = $derived(treeFailed !== null && fileSection === null);
+
   const lines = $derived(file === null || file.binary ? [] : fileLines(file.text));
+
+  /** Files of more lines than this draw only the lines in view and a margin (#2251). */
+  const WHOLE_UP_TO = 2_000;
+  // A line is 13 px at 1.6.
+  const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: 20.8, from: WHOLE_UP_TO + 1 });
+  let code = $state<HTMLElement | null>(null);
+
+  /** The file and line last scrolled to, so a refresh of the file leaves the reader where they are. */
+  let shownLine: string | null = null;
+  $effect(() => {
+    const at = line;
+    const read = file;
+    if (at === null || read === null || read.binary || editing) return;
+    const key = `${read.path}\u0000${at}`;
+    if (key === shownLine) return;
+    shownLine = key;
+    void tick().then(() => {
+      win.reveal(at - 1);
+      flushSync();
+      code?.querySelector(".tf-l.tf-at")?.scrollIntoView?.({ block: "center" });
+    });
+  });
+
+  /** Where `node` at `offset` sits in the file's text, if it is inside a drawn line's text. */
+  function placeOf(node: Node | null, offset: number): TextPlace | null {
+    const el = node instanceof Element ? node : (node?.parentElement ?? null);
+    const row = el?.closest<HTMLElement>(".tf-l");
+    if (!row || !code?.contains(row)) return null;
+    const n = Number(row.dataset["n"]) - 1;
+    const body = row.lastElementChild;
+    if (body === null || !body.contains(node)) return { line: n, offset: 0 };
+    const before = document.createRange();
+    before.setStart(body, 0);
+    before.setEnd(node!, offset);
+    return { line: n, offset: Math.min(before.toString().length, lines[n]?.length ?? 0) };
+  }
+
+  /** Copies the file's own text between the selection's ends: no line numbers, every line between. */
+  function copyLines(event: ClipboardEvent) {
+    const selection = document.getSelection();
+    if (selection === null || selection.isCollapsed || event.clipboardData === null) return;
+    const from = placeOf(selection.anchorNode, selection.anchorOffset);
+    const to = placeOf(selection.focusNode, selection.focusOffset);
+    if (from === null || to === null) return;
+    event.clipboardData.setData("text/plain", selectedText(lines, from, to));
+    event.preventDefault();
+  }
 
   /** Why the file shown cannot be edited, `null` where it can. */
   const notEditable = $derived(
@@ -336,10 +495,12 @@
     {#if treeFailed !== null}
       <p class="tf-cfail">{treeFailed}</p>
     {/if}
-    {@render listing("", 0)}
+    <TfWaiting phase={waitPhase({ drawn: listings[""] !== undefined || treeFailed !== null, reading: false, failed: false })} columns={1} count={8}>
+      {@render listing("", 0)}
+    </TfWaiting>
   </nav>
   <div class="tf-fileview">
-    {#if file !== null && editing && editable && branch !== null}
+    {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
         <span class="tf-p">{file.path}</span>
         <span class="tf-chip tf-warn">editing on {branch}</span>
@@ -361,7 +522,11 @@
           oninput={(event) => (draft = (event.currentTarget as HTMLTextAreaElement).value)}
         ></textarea>
       </div>
-    {:else if file !== null}
+    {:else if shown === null && listings[""] !== undefined}
+      <div class="tf-empty"><p>Pick a file in the tree.</p></div>
+    {:else}
+      <TfWaiting phase={waitPhase({ drawn: file !== null || fileStranded, reading: fileReading && !fileStranded, failed: fileFailed !== null })} error={fileFailed} failClass="tf-fpad" shape="lines">
+      {#if file !== null}
       <header>
         <span class="tf-p">{file.path}</span>
         <span class="tf-dim tf-small"
@@ -397,12 +562,10 @@
       {#if file.binary}
         <div class="tf-empty"><p>A binary file, not drawn.</p></div>
       {:else}
-        <pre class="tf-code">{#each lines as line, n (n)}<div class="tf-l"><span>{n + 1}</span><span>{line || " "}</span></div>{/each}</pre>
+        <pre class="tf-code" bind:this={code} oncopy={copyLines} {@attach win.list}>{#each win.slice(lines) as text, i (win.start + i)}{@const n = win.start + i + 1}<div class="tf-l" class:tf-at={n === line} data-n={n} {@attach win.row(n - 1)}><span>{n}</span><span>{text || " "}</span></div>{/each}</pre>
       {/if}
-    {:else if fileFailed !== null}
-      <p class="tf-cfail tf-fpad">{fileFailed}</p>
-    {:else if shown === null && listings[""] !== undefined}
-      <div class="tf-empty"><p>Pick a file in the tree.</p></div>
+      {/if}
+      </TfWaiting>
     {/if}
   </div>
 </div>
