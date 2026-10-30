@@ -199,6 +199,11 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
                 "transition",
                 "create_ticket",
                 "source_action",
+                // Spec #2234 step 6d (#2277, #2303), ratified in that PR's
+                // frozen-surface entry.
+                "reply_to_thread",
+                "resolve_thread",
+                "request_reviewers",
             ],
         ),
         // `set_parameter` and `run_build` are the source views' growth (#668,
