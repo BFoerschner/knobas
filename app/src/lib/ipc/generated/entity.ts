@@ -1950,7 +1950,21 @@ resolved_by: string | null,
  * a reply by line on the current head, so an outdated thread takes none.
  * Absent on the wire reads as `false`.
  */
-replies: boolean, };
+replies: boolean, 
+/**
+ * The commit an outdated thread was written on, its whole sha as the
+ * source names it (#2318, spec #2234 story 84): where its words still
+ * read in context. `None` on a thread that is not outdated, and where
+ * the source names none. Absent on the wire reads as `None`.
+ */
+commit?: string, 
+/**
+ * An outdated thread's line as it read at [`commit`](Self::commit):
+ * the hunk the source kept with the comment, ending on that line
+ * (#2318). `None` on a thread that is not outdated, and where the
+ * source kept none. Absent on the wire reads as `None`.
+ */
+hunk?: Hunk, };
 
 /**
  * The end of a link that the reader is **not** looking at.

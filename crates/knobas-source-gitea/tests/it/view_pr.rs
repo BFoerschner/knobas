@@ -11,8 +11,9 @@ use std::time::Duration;
 
 use knobas_source::ReviewSide;
 use knobas_source::view::{
-    ActionField, Block, ChoiceOption, Commenting, DiffChange, Fact, FieldKind, FileThread,
-    LineComment, LineComments, LineThread, SourceView, Tone, ViewAction, ViewRow, ViewSection,
+    ActionField, Block, ChoiceOption, Commenting, DiffChange, DiffLine, DiffLineKind, Fact,
+    FieldKind, FileThread, Hunk, LineComment, LineComments, LineThread, SourceView, Tone,
+    ViewAction, ViewRow, ViewSection,
 };
 use knobas_source::{Source, SourceError};
 use serde_json::{Value, json};
@@ -701,7 +702,7 @@ index 1111111..2222222 100644
 /// (shape taken from the real 1.27.3 server, #709): `position` is the new
 /// side's line and `original_position` the old side's, the other `0`;
 /// `diff_hunk` is the diff up to and including the commented line, as it was
-/// when the comment was made.
+/// when the comment was made, and `commit_id` the head it was made on (#2318).
 fn line_comment(who: &str, at: &str, new: u32, old: u32, hunk_tail: &str, body: &str) -> Value {
     json!({
         "user": { "login": who },
@@ -710,6 +711,7 @@ fn line_comment(who: &str, at: &str, new: u32, old: u32, hunk_tail: &str, body: 
         "position": new,
         "original_position": old,
         "diff_hunk": format!("@@ -1,3 +1,3 @@\n pub fn backoff() -> u64 {{\n{hunk_tail}"),
+        "commit_id": FIRST_SHA,
         "body": body,
     })
 }
@@ -857,6 +859,32 @@ async fn gitea_with_line_comments(pull: Value) -> MockServer {
     server
 }
 
+/// The hunk [`line_comment`] sends, as the adapter answers it: numbered from
+/// the commented line, its last (#2318), so its first line is `first` on both
+/// sides, then `tail` as (kind, old number, new number, text).
+fn at_first(
+    header: &str,
+    first: u32,
+    tail: &[(DiffLineKind, Option<u32>, Option<u32>, &str)],
+) -> Hunk {
+    let mut lines = vec![DiffLine {
+        kind: DiffLineKind::Context,
+        old: Some(first),
+        new: Some(first),
+        text: "pub fn backoff() -> u64 {".into(),
+    }];
+    lines.extend(tail.iter().map(|&(kind, old, new, text)| DiffLine {
+        kind,
+        old,
+        new,
+        text: text.into(),
+    }));
+    Hunk {
+        header: header.into(),
+        lines,
+    }
+}
+
 fn said(author: &str, at: &str, body: &str) -> LineComment {
     LineComment {
         author: author.into(),
@@ -897,6 +925,12 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 id: Some("204".into()),
                 resolved_by: None,
                 replies: false,
+                commit: Some(FIRST_SHA.into()),
+                hunk: Some(at_first(
+                    "@@ -6,1 +6,2 @@",
+                    6,
+                    &[(DiffLineKind::Add, None, Some(7), "    loop {}")]
+                )),
             },
         }],
         "{view:#?}"
@@ -916,6 +950,8 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 id: Some("102".into()),
                 resolved_by: None,
                 replies: true,
+                commit: None,
+                hunk: None,
             },
             LineThread {
                 side: ReviewSide::New,
@@ -929,6 +965,8 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 id: Some("101".into()),
                 resolved_by: Some("olu".into()),
                 replies: true,
+                commit: None,
+                hunk: None,
             },
             LineThread {
                 side: ReviewSide::New,
@@ -939,6 +977,15 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 id: Some("202".into()),
                 resolved_by: None,
                 replies: false,
+                commit: Some(FIRST_SHA.into()),
+                hunk: Some(at_first(
+                    "@@ -2,2 +2,2 @@",
+                    2,
+                    &[
+                        (DiffLineKind::Del, Some(3), None, "    30"),
+                        (DiffLineKind::Add, None, Some(3), "    35"),
+                    ]
+                )),
             },
             LineThread {
                 side: ReviewSide::New,
@@ -948,6 +995,12 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 id: Some("203".into()),
                 resolved_by: None,
                 replies: false,
+                commit: Some(FIRST_SHA.into()),
+                hunk: Some(at_first(
+                    "@@ -39,1 +39,2 @@",
+                    39,
+                    &[(DiffLineKind::Add, None, Some(40), "    gone")]
+                )),
             },
         ],
         "{view:#?}"
@@ -2634,6 +2687,74 @@ async fn a_comment_past_a_files_cut_is_not_called_outdated() {
         .map(|t| (t.line, t.outdated))
         .collect();
     assert_eq!(threads, [(3, false), (lines as u32, false)]);
+}
+
+/// An outdated comment as Gitea 1.27.3 answered it live (#2318): its hunk with
+/// a `\ No newline` note, whose `@@` line starts one short on both sides.
+/// The thread carries the commit it was written on, and the hunk numbered
+/// from the commented line, which Gitea's `position` gives exactly.
+#[tokio::test]
+async fn an_outdated_threads_hunk_is_numbered_from_its_line() {
+    let written_on = "5e2eaee59d13a2ebfeb91a50a5ff3cbc8479b07a";
+    let server = MockServer::builder().start().await;
+    let reviews = json!([{ "id": 41, "user": { "login": "olu" }, "state": "COMMENT",
+                           "submitted_at": "2026-08-22T11:00:00Z", "comments_count": 1 }]);
+    let comment = json!({ "id": 7, "user": { "login": "olu" }, "created_at": "2026-08-22T11:00:00Z",
+        "path": "README.md", "position": 2, "original_position": 0,
+        "commit_id": written_on, "original_commit_id": "",
+        "diff_hunk": "@@ -1,3 +1,2 @@\n-\n-Rust\n\\ No newline at end of file\n+reviewed from knobas",
+        "body": "say what reviewed it" });
+    for (p, answer) in [
+        (
+            format!("{REPO}/pulls/142"),
+            ResponseTemplate::new(200).set_body_json(open_pull()),
+        ),
+        (
+            format!("{REPO}/pulls/142/reviews"),
+            ResponseTemplate::new(200).set_body_json(reviews),
+        ),
+        (
+            format!("{REPO}/pulls/142.diff"),
+            ResponseTemplate::new(200).set_body_string(CHANGED_DIFF),
+        ),
+        (
+            format!("{REPO}/pulls/142/reviews/41/comments"),
+            ResponseTemplate::new(200).set_body_json(json!([comment])),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(answer)
+            .mount(&server)
+            .await;
+    }
+    let view = source(&server)
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .unwrap();
+    let Block::Diff { gone, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff: {view:#?}");
+    };
+    let line = |kind, old, new, text: &str| DiffLine {
+        kind,
+        old,
+        new,
+        text: text.into(),
+    };
+    assert_eq!(gone[0].thread.commit.as_deref(), Some(written_on));
+    assert_eq!(
+        gone[0].thread.hunk,
+        Some(Hunk {
+            header: "@@ -2,2 +2,1 @@".into(),
+            lines: vec![
+                line(DiffLineKind::Del, Some(2), None, ""),
+                line(DiffLineKind::Del, Some(3), None, "Rust"),
+                line(DiffLineKind::Add, None, Some(2), "reviewed from knobas"),
+            ],
+        }),
+        "{view:#?}"
+    );
 }
 
 // -- Checks (issue #710) -----------------------------------------------------

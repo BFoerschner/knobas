@@ -226,6 +226,34 @@ test("a thread sits under its line; an outdated one is kept apart at the end of 
   expect(apart.querySelector(".tf-thread .tf-md strong")?.textContent).toBe("a lot");
 });
 
+test("an outdated thread is drawn at the commit it was written on, its hunk as it read there (#2318)", async () => {
+  const at = "7be0e4c1d2e3f405162738495a6b7c8d9e0f1a2b";
+  const hunk = {
+    header: "@@ -7,2 +7,2 @@",
+    lines: [
+      { kind: "del" as const, old: 7, new: null, text: "const TRIES: u32 = 3;" },
+      { kind: "add" as const, old: null, new: 8, text: "const TRIES: u32 = 10;" },
+    ],
+  };
+  const outdated = { ...RETRY.threads[1]!, commit: at, hunk };
+  const range: DiffRange = { repository: "gitea:tidewater/payout-service", base: "a".repeat(40), head: "c".repeat(40), commits: [] };
+  const answer = filesView();
+  const block = answer.sections[0]!.blocks[0]!;
+  if (block.type !== "diff") throw new Error("a diff");
+  block.files = [{ ...RETRY, threads: [RETRY.threads[0]!, outdated] }, NOTE];
+  block.range = range;
+  block.gone = [{ path: "src/sepa/legacy.rs", thread: { ...outdated, line: 3, hunk: { header: "@@ -0,0 +1,3 @@", lines: [{ kind: "add", old: null, new: 3, text: "loop {}" }] } } }];
+  await draw(answer);
+  const apart = cards()[0]!.querySelector("details.tf-outdated")!;
+  expect(squash(apart)).toBe("1 outdated line 8at 7be0e4c 7− const TRIES: u32 = 3;8+ const TRIES: u32 = 10;priya Ten attempts is a lot.");
+  const link = apart.querySelector<HTMLAnchorElement>(".tf-was-at a")!;
+  expect(link.getAttribute("href")).toBe(`#/diff/gitea%3Atidewater%2Fpayout-service/${at}%5E/${at}`);
+  expect([...apart.querySelectorAll(".tf-was-hunk .tf-ln")].map((ln) => ln.className)).toEqual(["tf-ln tf-del", "tf-ln tf-add"]);
+  const gone = target.querySelector("details.tf-gone")!;
+  expect(squash(gone)).toBe("On files this change no longer holds src/sepa/legacy.rs, line 3at 7be0e4c 3+ loop {}priya Ten attempts is a lot.");
+  expect(gone.querySelector<HTMLAnchorElement>(".tf-was-at a")!.getAttribute("href")).toBe(link.getAttribute("href"));
+});
+
 test("+ on a removed line opens a box on its old side; Add to review keeps it pending under the line", async () => {
   await draw();
   const removed = [...cards()[0]!.querySelectorAll(".tf-ln")].find((ln) => ln.classList.contains("tf-del"))!;
