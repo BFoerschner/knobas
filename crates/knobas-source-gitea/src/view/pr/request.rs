@@ -42,9 +42,7 @@ pub(super) fn action(
         .iter()
         .filter_map(|user| login(Some(user)))
         .filter(|who| {
-            Some(who) != author.as_ref()
-                && Some(who.as_str()) != viewer
-                && !requested.contains(who)
+            Some(who) != author.as_ref() && Some(who.as_str()) != viewer && !requested.contains(who)
         })
         .map(|who| ChoiceOption::new(who.clone(), who))
         .collect();
