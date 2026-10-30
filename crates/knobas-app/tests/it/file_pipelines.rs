@@ -15,10 +15,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use knobas_app::file_pipeline::saved::{self, CommandStepDraft, NamedPipelineDraft};
 use knobas_app::file_pipeline::{
-    Limits, PipeFormat, PipeOutput, PipeRun, PipeStep, PipeWhy, Piped, SIZE_CAP, run_bytes,
-    run_on_file,
+    Limits, PipeFormat, PipeOutput, PipeRun, PipeStep, PipeWhy, Piped, SIZE_CAP, run_on_file,
 };
+use knobas_app::renderers::{self, RendererDefault};
 use knobas_app::sources::live::LiveSources;
 use knobas_app::sources::{self, NewSource, Registry, SecretInput};
 use knobas_secrets::{MemoryStore, SecretStore};
@@ -131,7 +132,20 @@ struct Fixture {
     entity: String,
 }
 
+/// The jq step runs in a child: the app's own binary (#2314). A test
+/// binary is not it, so it is pointed at the one Cargo built beside it.
+fn helper() {
+    knobas_app::file_pipeline::use_helper(env!("CARGO_BIN_EXE_knobas-app"));
+}
+
+/// `file_pipeline::run_bytes`, with the jq helper in place.
+async fn run_bytes(steps: &[PipeStep], bytes: Vec<u8>, name: &str, limits: Limits) -> PipeRun {
+    helper();
+    knobas_app::file_pipeline::run_bytes(steps, bytes, name, limits).await
+}
+
 async fn fixture() -> Fixture {
+    helper();
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
     let shelf = Arc::new(Shelf::default());
@@ -436,9 +450,11 @@ async fn jq_errors_are_its_own() {
     );
 }
 
-/// A step past its timeout is answered as timed out; its worker, which keeps
-/// writing, is stopped at its next write and frees its place: with every
-/// worker taken by a filter that never ends, the next run still gets one.
+/// A step past its timeout is answered as timed out, and the jq step is
+/// killed there (#2314): it runs in a child process, so a filter that loops
+/// without writing (or composes a closure with itself without end) holds
+/// nothing once its time is up. More of them than there are workers, and a
+/// built-in step after them still gets a worker at once.
 #[tokio::test]
 async fn a_step_past_its_timeout_is_stopped() {
     let limits = Limits {
@@ -446,27 +462,106 @@ async fn a_step_past_its_timeout_is_stopped() {
         timeout: Duration::from_millis(300),
     };
     let started = Instant::now();
-    let endless: Vec<_> = (0..knobas_app::file_pipeline::WORKERS)
-        .map(|_| {
-            tokio::spawn(async move {
-                run_bytes(&[jq("repeat(1)")], b"null".to_vec(), "x", limits).await
-            })
+    let filters: [&'static str; 4] = [
+        "repeat(1)",
+        "last(range(1e18))",
+        "[repeat(1)] | length",
+        "def f(g): f(g | g); f(.)",
+    ];
+    let endless: Vec<_> = filters
+        .into_iter()
+        .cycle()
+        .take(knobas_app::file_pipeline::WORKERS + 2)
+        .map(|filter| {
+            tokio::spawn(
+                async move { run_bytes(&[jq(filter)], b"null".to_vec(), "x", limits).await },
+            )
         })
         .collect();
     for run in endless {
         let run = run.await.unwrap();
         let failed = failure(&run);
-        assert_eq!(failed.why, PipeWhy::TimedOut);
+        assert_eq!(failed.why, PipeWhy::TimedOut, "{failed:?}");
         assert_eq!(failed.error, "jq did not finish in 300 ms");
     }
-    assert!(started.elapsed() < Duration::from_secs(2));
-    // Left running, each would hold its worker until 200 MiB of `1`s.
+    assert!(started.elapsed() < Duration::from_secs(3));
     let next = Limits {
         cap: SIZE_CAP,
         timeout: Duration::from_secs(2),
     };
+    let run = run_bytes(&[PipeStep::Gunzip], gzip(b"1"), "x.gz", next).await;
+    assert_eq!(done(&run).1, "1");
     let run = run_bytes(&[jq(".")], b"1".to_vec(), "x", next).await;
     assert_eq!(done(&run).1, "1\n");
+}
+
+/// The children `ps` lists that were started with `cap` (no other test uses
+/// that cap, so a sibling test's children are not counted).
+#[cfg(unix)]
+fn children_with_cap(cap: u64) -> usize {
+    let listed = std::process::Command::new("ps")
+        .args(["-Ao", "args="])
+        .output()
+        .expect("ps runs");
+    let wanted = format!("{} {cap}", knobas_app::file_pipeline::CHILD_ARG);
+    String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .filter(|line| line.trim_end().ends_with(&wanted))
+        .count()
+}
+
+/// **A jq filter that never writes is killed at its timeout (#2314)**, not
+/// only answered for: its child process is gone once the step has failed.
+/// `ps` sees the child while it runs, so the second look can see one too.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_never_writing_jq_child_is_killed_at_its_timeout() {
+    let limits = Limits {
+        cap: SIZE_CAP - 2314,
+        timeout: Duration::from_secs(2),
+    };
+    let run = tokio::spawn(async move {
+        run_bytes(&[jq("last(range(1e18))")], b"null".to_vec(), "x", limits).await
+    });
+    let seen = Instant::now();
+    while children_with_cap(limits.cap) == 0 {
+        assert!(
+            seen.elapsed() < Duration::from_millis(1500),
+            "the jq child never showed in ps"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let run = run.await.unwrap();
+    assert_eq!(failure(&run).why, PipeWhy::TimedOut, "{:?}", failure(&run));
+    assert_eq!(
+        children_with_cap(limits.cap),
+        0,
+        "the jq child outlived its timeout"
+    );
+}
+
+/// **A value nested deep at run time fails the step, not the app (#2314).**
+/// `reduce` builds it by iteration, past the evaluation's stack guard; then
+/// writing it (`tojson`) or comparing it (`==`) recursed off the end of the
+/// stack and aborted the process. (Written as the output, it passes the size
+/// cap first: two spaces of indent a level.) The jq step now runs in a child, so the
+/// child dies and the step says why. That this test process is still here to
+/// assert is half of the claim.
+#[tokio::test]
+async fn a_value_nested_deep_at_run_time_fails_the_step_not_the_app() {
+    for filter in [
+        "reduce range(1000000) as $_ (0; [.]) | tojson",
+        "def deep: reduce range(1000000) as $_ (0; [.]); deep == deep",
+    ] {
+        let run = run_bytes(&[jq(filter)], b"null".to_vec(), "x.json", Limits::default()).await;
+        let failed = failure(&run);
+        assert_eq!((failed.index, failed.name.as_str()), (0, "jq"), "{filter}");
+        assert_eq!(failed.why, PipeWhy::Error, "{filter}: {failed:?}");
+        assert_eq!(
+            failed.error, "jq ran out of stack: the filter built a value nested too deep to write",
+            "{filter}"
+        );
+    }
 }
 
 /// **Every built-in step round trips at the IPC seam.**
@@ -754,4 +849,170 @@ async fn laying_out_is_stopped_at_the_cap() {
         let run = run_bytes(std::slice::from_ref(&step), input.into_bytes(), "x", limits).await;
         assert_eq!(failure(&run).why, PipeWhy::TooLarge, "{step:?}: {run:?}");
     }
+}
+
+fn command(name: &str, command: &str) -> CommandStepDraft {
+    CommandStepDraft {
+        id: None,
+        name: name.to_owned(),
+        command: command.to_owned(),
+        timeout_secs: None,
+    }
+}
+
+fn step(id: &str) -> PipeStep {
+    PipeStep::Command { id: id.to_owned() }
+}
+
+/// **A command step runs the person's saved command (#2265)**: `tr a-z A-Z`
+/// uppercases the content, which reaches it on stdin; the output keeps the
+/// file's name. A failing one is named by its saved name and says its
+/// stderr; an id that is not saved fails naming it.
+#[tokio::test]
+async fn a_command_step_uppercases_the_content() {
+    let f = fixture().await;
+    let saved = saved::save_command_steps(
+        &f.pool,
+        &[
+            command(" Upper ", "tr a-z A-Z"),
+            command("Breaks", r#"sh -c "echo it broke >&2; exit 3""#),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        saved.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+        ["upper", "breaks"]
+    );
+    f.put("notes.txt", "hello, pipeline");
+    let run = f.pipe("notes.txt", &[step("upper")]).await;
+    assert_eq!(done(&run), ("notes.txt", "HELLO, PIPELINE"));
+
+    let run = f.pipe("notes.txt", &[step("upper"), step("breaks")]).await;
+    let failed = failure(&run);
+    assert_eq!((failed.index, failed.name.as_str()), (1, "Breaks"));
+    assert_eq!(failed.why, PipeWhy::Error);
+    assert_eq!(failed.error, "it broke");
+    assert_eq!(failed.input.head, "HELLO, PIPELINE");
+
+    let run = f.pipe("notes.txt", &[step("gone")]).await;
+    assert!(
+        failure(&run)
+            .error
+            .contains("'gone' is not one of your command steps"),
+        "{run:?}"
+    );
+}
+
+/// A kept run stands for the command its step ran: the same id with an
+/// edited command is run again, not answered from the kept run.
+#[tokio::test]
+async fn an_edited_command_step_is_run_again() {
+    let f = fixture().await;
+    saved::save_command_steps(&f.pool, &[command("Upper", "tr a-z A-Z")])
+        .await
+        .unwrap();
+    f.put("a.txt", "abc");
+    assert_eq!(done(&f.pipe("a.txt", &[step("upper")]).await).1, "ABC");
+    let mut edited = command("Upper", "tr a-c x-z");
+    edited.id = Some("upper".to_owned());
+    saved::save_command_steps(&f.pool, &[edited]).await.unwrap();
+    assert_eq!(done(&f.pipe("a.txt", &[step("upper")]).await).1, "xyz");
+}
+
+/// A command step is killed at its own timeout, with everything it started.
+#[tokio::test]
+async fn a_command_step_past_its_timeout_is_stopped() {
+    let f = fixture().await;
+    let mut slow = command("Slow", "sleep 30");
+    slow.timeout_secs = Some(1);
+    saved::save_command_steps(&f.pool, &[slow]).await.unwrap();
+    f.put("a.txt", "abc");
+    let started = Instant::now();
+    let run = f.pipe("a.txt", &[step("slow")]).await;
+    let failed = failure(&run);
+    assert_eq!(failed.why, PipeWhy::TimedOut);
+    assert_eq!(failed.error, "Slow did not finish in 1 s");
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
+/// Named pipelines are one settings row: saved with ids made from their
+/// names, a rename keeping the id; one with no steps, or a name used twice,
+/// is refused by name.
+#[tokio::test]
+async fn named_pipelines_round_trip_and_refuse_by_name() {
+    let f = fixture().await;
+    let draft = |id: Option<&str>, name: &str, steps: Vec<PipeStep>| NamedPipelineDraft {
+        id: id.map(str::to_owned),
+        name: name.to_owned(),
+        steps,
+    };
+    let saved = saved::save_named_pipelines(
+        &f.pool,
+        &[draft(
+            None,
+            " Gzipped JSON ",
+            vec![PipeStep::Gunzip, jq(".")],
+        )],
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved[0].id, "gzipped-json");
+    assert_eq!(saved[0].name, "Gzipped JSON");
+    let renamed = saved::save_named_pipelines(
+        &f.pool,
+        &[draft(
+            Some("gzipped-json"),
+            "Events",
+            vec![PipeStep::Gunzip],
+        )],
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved::named_pipelines(&f.pool).await.unwrap(), renamed);
+    assert_eq!(renamed[0].id, "gzipped-json");
+
+    let error = saved::save_named_pipelines(&f.pool, &[draft(None, "Empty", vec![])])
+        .await
+        .unwrap_err();
+    assert!(
+        error.message.contains("Empty has no steps"),
+        "{}",
+        error.message
+    );
+    let error = saved::save_named_pipelines(
+        &f.pool,
+        &[
+            draft(None, "Twice", vec![PipeStep::Gunzip]),
+            draft(None, "twice", vec![PipeStep::Gunzip]),
+        ],
+    )
+    .await
+    .unwrap_err();
+    assert!(error.message.contains("twice"), "{}", error.message);
+    assert_eq!(saved::named_pipelines(&f.pool).await.unwrap(), renamed);
+}
+
+/// A default per file pattern may name a pipeline and no renderer (the
+/// output picks its own); one naming neither is refused. A row stored before
+/// the field existed reads as naming no pipeline.
+#[tokio::test]
+async fn a_default_may_name_only_a_pipeline() {
+    let f = fixture().await;
+    let row = |renderer: &str, pipeline: Option<&str>| RendererDefault {
+        pattern: "*.json.gz".to_owned(),
+        renderer: renderer.to_owned(),
+        pipeline: pipeline.map(str::to_owned),
+    };
+    let saved = renderers::save_defaults(&f.pool, &[row("", Some(" events "))])
+        .await
+        .unwrap();
+    assert_eq!(saved, [row("", Some("events"))]);
+    let error = renderers::save_defaults(&f.pool, &[row(" ", Some(" "))])
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("*.json.gz"), "{}", error.message);
+    let old: RendererDefault =
+        serde_json::from_str(r#"{"pattern":"*.md","renderer":"source"}"#).unwrap();
+    assert_eq!(old.pipeline, None);
 }

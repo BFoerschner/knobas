@@ -379,5 +379,16 @@
 .tf-pmenu { position: relative; display: inline-flex; }
 .tf-pmenu .tf-menu { width: 320px; font-size: var(--t-sm); }
 .tf-pmenu .tf-menu > button { display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); }
+.tf-pmenu .tf-menu > a { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }
+.tf-pmenu .tf-menu > a:hover, .tf-pmenu .tf-menu > a:focus-visible { background: var(--sheet-2); }
+.tf-pmenu .tf-menu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
+.tf-pmono { font-family: var(--mono); font-variant-ligatures: none; }
+/* #2265: the person's own command step (mockup `.step.user`), the save form, the suggestion chip (`.suggest`). */
+.tf-pstep.tf-puser .tf-pname::after { content: " cmd"; font: 600 var(--t-2xs) var(--sans); color: var(--ink-2); }
+.tf-psave { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; justify-content: flex-end; }
+.tf-psave label { display: inline-flex; align-items: center; gap: 6px; }
+.tf-psave input { height: var(--control-h-sm); padding: 0 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--ink); }
+.tf-suggest { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--rule); background: var(--info-bg); color: var(--info); font-size: var(--t-sm); }
+.tf-suggest .tf-acts { margin-left: auto; }
 .tf-stepfail .tf-sfcols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .tf-stepfail .tf-sfcols b { display: block; font-size: var(--t-xs); margin-bottom: 4px; }

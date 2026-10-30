@@ -623,7 +623,7 @@ test("a Markdown file's relative links open files in the Files tab, resolved aga
 });
 
 test("a .md file mapped to Source opens as source, and the switcher offers Markdown (#2263)", async () => {
-  const defaults = createRendererDefaults(storedDefaults([{ pattern: "*.md", renderer: "source" }]).port);
+  const defaults = createRendererDefaults(storedDefaults([{ pattern: "*.md", renderer: "source", pipeline: null }]).port);
   await defaults.load();
   draw(openSource(MD_FILES).entityView, "README.md", null, undefined, undefined, defaults);
   await settle();
@@ -675,7 +675,7 @@ test("a pick in the switcher holds for that file; Make default writes the patter
 
   choose("Use Source for *.md by default");
   await settle();
-  expect(backend.saves).toEqual([[{ pattern: "*.md", renderer: "source" }]]);
+  expect(backend.saves).toEqual([[{ pattern: "*.md", renderer: "source", pipeline: null }]]);
   props.path = "docs/runbook.md";
   await settle();
   expect(face()).toBe("Render as Source");

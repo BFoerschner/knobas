@@ -256,6 +256,7 @@ fn mapped(pattern: &str, renderer: &str) -> renderers::RendererDefault {
     renderers::RendererDefault {
         pattern: pattern.to_owned(),
         renderer: renderer.to_owned(),
+        pipeline: None,
     }
 }
 
