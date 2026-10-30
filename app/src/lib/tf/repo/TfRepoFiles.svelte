@@ -29,7 +29,9 @@
 
   The file is drawn by the first renderer that accepts it (`render/registry.ts`,
   #2254): *Source* draws the lines plain at once and colours them as the
-  highlighting worker answers, the lines in view first; *Image* draws an SVG.
+  highlighting worker answers, the lines in view first; *Image* draws an SVG;
+  a command renderer (#2262) runs on the backend and draws in a sandboxed
+  frame (`../render/TfCommandOutput.svelte`).
   *Find in file* (#2299) marks every hit, "N of M"; `Enter` and `Shift+Enter`
   step through them, drawing a hit's line first where the window left it out.
 -->
@@ -49,6 +51,8 @@
   import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
+  import TfCommandOutput from "../render/TfCommandOutput.svelte";
+  import { commandIdOf, ipcCommands, type CommandPort } from "../../render/command";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import {
@@ -87,6 +91,7 @@
     title = "",
     refreshed = 0,
     render = renderPort(),
+    commands = ipcCommands,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -116,6 +121,8 @@
     refreshed?: number;
     /** The engines renderers draw with (#2254): the app's workers, a fake in tests. */
     render?: RenderPort;
+    /** Runs a command renderer (#2262): the IPC, a fake in tests. */
+    commands?: CommandPort;
   } = $props();
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
@@ -649,6 +656,8 @@
         <div class="tf-empty"><p>A binary file, not drawn.</p></div>
       {:else if image !== null}
         <div class="tf-fimage"><img src={image} alt={file.path} /></div>
+      {:else if renderer !== null && commandIdOf(renderer) !== null}
+        <TfCommandOutput {renderer} text={file.text} {commands} />
       {:else}
         <div class="tf-findbar">
           <label class="tf-fsearch">
