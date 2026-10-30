@@ -21,6 +21,7 @@ mod sync_moving;
 mod tickets;
 mod view;
 mod view_branch;
+mod view_compare;
 mod view_files;
 mod view_pr;
 mod view_repo;

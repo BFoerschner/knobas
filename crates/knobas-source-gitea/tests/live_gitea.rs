@@ -1017,6 +1017,87 @@ async fn a_seeded_branchs_view_reads_ahead_with_its_seeded_commits() {
     );
 }
 
+/// The diff between any two commits (#2271): the repository's
+/// `compare:<base>...<head>` section, read from the real server. One commit
+/// as a range (`<sha>^...<sha>`) is that commit's own diff, and the seeded
+/// branch's commits as one range carry every file each of them touched. The
+/// `^` is Gitea's to resolve (1.27.3 does, measured 2026-10-30).
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_diff_between_two_seeded_commits_is_read_from_the_compare() {
+    use knobas_source::view::{Block, Standing};
+
+    let env = env();
+    let source = env.one_repo();
+    let repo = format!("gitea:{}", env.full_name());
+    let branch = format!("{repo}@refs/heads/feature/PAY-231-sepa-retry");
+    let commits = source
+        .view(&branch, Some("commits"))
+        .await
+        .unwrap_or_else(|error| panic!("the commits of {branch} failed: {error:?}"))
+        .expect("Gitea draws a branch");
+    let shas: Vec<String> = commits.sections[0]
+        .blocks
+        .iter()
+        .flat_map(|b| match b {
+            Block::Entities { rows, .. } => rows.clone(),
+            _ => Vec::new(),
+        })
+        .filter_map(|r| r.entity_id)
+        .filter_map(|id| id.rsplit_once('@').map(|(_, sha)| sha.to_owned()))
+        .filter(|sha| sha.len() == 40)
+        .collect();
+    println!("commits {shas:?}");
+    assert!(shas.len() >= 2, "the seed commits at least twice to the branch: {shas:?}");
+
+    let paths = |view: &knobas_source::view::SourceView| -> Vec<String> {
+        let mut paths: Vec<String> = view
+            .sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .flat_map(|b| match b {
+                Block::Diff { files, .. } => files.iter().map(|f| f.path.clone()).collect(),
+                _ => Vec::new(),
+            })
+            .collect();
+        paths.sort();
+        paths
+    };
+    let compare = async |base: &str, head: &str| {
+        let section = format!("compare:{base}...{head}");
+        assert_eq!(source.view_standing(&repo, Some(&section)), Standing::Fixed);
+        let view = source
+            .view(&repo, Some(&section))
+            .await
+            .unwrap_or_else(|error| panic!("{section} failed: {error:?}"))
+            .expect("Gitea draws a compare");
+        paths(&view)
+    };
+
+    let mut every = Vec::new();
+    for sha in &shas {
+        let own = source
+            .view(&format!("{repo}@{sha}"), Some("diff"))
+            .await
+            .unwrap_or_else(|error| panic!("the diff of {sha} failed: {error:?}"))
+            .expect("Gitea draws a commit");
+        let own = paths(&own);
+        println!("{sha}: {own:?}");
+        assert!(!own.is_empty(), "{sha} changes something");
+        assert_eq!(compare(&format!("{sha}^"), sha).await, own, "{sha} as a range is its own diff");
+        every.extend(own);
+    }
+    every.sort();
+    every.dedup();
+    let (newest, oldest) = (&shas[0], &shas[shas.len() - 1]);
+    let range = compare(&format!("{oldest}^"), newest).await;
+    println!("{oldest}^...{newest}: {range:?}");
+    assert_eq!(range, every, "the range carries every file its commits touched");
+    // Its inner bounds leave the oldest commit's change out.
+    let inner = compare(oldest, newest).await;
+    assert_ne!(inner, range, "{oldest}...{newest} is not the range");
+}
+
 /// The seeded repository's source view (#663), read from the real server:
 /// its open pull requests include the fixture's open ones, its branches the
 /// fixture's with `main` first, its README is the one `auto_init` wrote, and
