@@ -74,7 +74,7 @@ const ALL: Span = { start: 0, end: 0, before: 0, after: 0 };
 export class Windowed<K = string> {
   readonly #options: Required<WindowedOptions<K>>;
   readonly #heights: Heights<K>;
-  /** The viewport, in the list's pixels: its top, and its height. */
+  /** The viewport, in the list's pixels: its top (negative while the list starts below it), and its height. */
   #viewTop = $state(0);
   #viewHeight = $state(typeof window === "undefined" ? 0 : window.innerHeight);
   /** Bumped when a measurement moves a row, so the span is worked out again. */
@@ -214,7 +214,10 @@ export class Windowed<K = string> {
         top = Math.max(top, box.top + clip.clientTop);
         bottom = Math.min(bottom, box.top + clip.clientTop + clip.clientHeight);
       }
-      this.#viewTop = Math.max(0, top - origin());
+      // Below 0 while the list starts lower than the screen's top: a list far
+      // under the screen then draws one row, not a screenful (#2269: forty
+      // diff cards, each its own list).
+      this.#viewTop = top - origin();
       this.#viewHeight = Math.max(0, bottom - top);
       // The reader scrolled: hold the row on screen now. Not on a scroll this
       // list made to hold a row, nor on a resize: those arrive after a redraw
