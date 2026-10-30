@@ -174,14 +174,32 @@ test("the deep file draws as soon as its read answers, and the tree fills in as 
   release("files");
   release("files:src");
   await settle();
-  expect(tree()).toEqual(["src/", "psp/", "README.md"]);
+  expect(tree()).toEqual(["src", "psp", "README.md"]);
 
   for (const section of ["files:src/psp", "files:src/psp/gateway", "files:src/psp/gateway/sepa"]) release(section);
   await settle();
-  expect(tree()).toEqual(["src/", "psp/", "gateway/", "sepa/", "codes.rs", "mod.rs", "README.md"]);
+  expect(tree()).toEqual(["src", "psp", "gateway", "sepa", "codes.rs", "mod.rs", "README.md"]);
   // The listing that names the file takes the read already answered: one read each.
   expect(source.asked).toHaveLength(6);
   expect(lineText(0)).toEqual(["1", 'pub const ACCEPTED: &str = "ACCP";']);
+});
+
+test("Collapse all folds every directory open and leaves the file open (#2257)", async () => {
+  const source = heldSource(DEEP_FILES);
+  draw(source.entityView, DEEP);
+  await settle();
+  for (const read of [...source.asked]) read.release();
+  await settle();
+  expect(tree()).toEqual(["src", "psp", "gateway", "sepa", "codes.rs", "mod.rs", "README.md"]);
+
+  target.querySelector<HTMLButtonElement>("button[title='Collapse all']")!.click();
+  flushSync();
+  expect(tree()).toEqual(["src", "README.md"]);
+  expect(text(target.querySelector(".tf-fileview header .tf-p"))).toBe(DEEP);
+  // A directory opened again opens one level: what was below it stays folded.
+  target.querySelector<HTMLButtonElement>(".tf-ftree button.tf-fdir")!.click();
+  flushSync();
+  expect(tree()).toEqual(["src", "psp", "README.md"]);
 });
 
 test("a deep file opened again after its early read reads it afresh", async () => {
@@ -278,7 +296,7 @@ test("a source that names its sections otherwise still opens the deep file, thro
 
   expect(lineText(0)).toEqual(["1", 'pub const ACCEPTED: &str = "ACCP";']);
   expect(target.querySelector(".tf-cfail")).toBeNull();
-  expect(tree()).toEqual(["src/", "psp/", "gateway/", "sepa/", "codes.rs", "mod.rs", "README.md"]);
+  expect(tree()).toEqual(["src", "psp", "gateway", "sepa", "codes.rs", "mod.rs", "README.md"]);
   expect(reads).toContain(`blob:${DEEP}`);
 });
 

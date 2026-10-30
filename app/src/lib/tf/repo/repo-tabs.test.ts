@@ -55,7 +55,9 @@ test("a tab of the row links where it was left, its own address before that", ()
   const held = walk([[R, "files", "src", "a b.rs"], [R, "commits", "c1"], [R, "compare", "feat"]]);
   expect(tabHref(held, R, "files")).toBe("#/repo/gitea%3Ao%2Fr/files/src/a%20b.rs");
   expect(tabHref(held, R, "commits")).toBe("#/repo/gitea%3Ao%2Fr/commits/c1");
-  expect(tabHref(held, R, "prs")).toBe("#/repo/gitea%3Ao%2Fr/compare/feat");
+  // Compare is its own tab (#2257, the mockup's ruling on #2252), no longer under Pull requests.
+  expect(tabHref(held, R, "compare")).toBe("#/repo/gitea%3Ao%2Fr/compare/feat");
+  expect(tabHref(held, R, "prs")).toBe("#/repo/gitea%3Ao%2Fr/prs");
   expect(tabHref(held, R, "branches")).toBe("#/repo/gitea%3Ao%2Fr/branches");
   // The bare address is Files with nothing named: the tab's own.
   expect(tabHref(walk([[R]]), R, "files")).toBe("#/repo/gitea%3Ao%2Fr/files");

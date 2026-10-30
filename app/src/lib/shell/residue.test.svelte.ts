@@ -1457,6 +1457,7 @@ const CASES: Case[] = [
     [
       ["TfRepo", "lib/tf/repo/TfRepo.svelte", []],
       ["TfRepoFiles", "lib/tf/repo/TfRepoFiles.svelte", ["files", "src", "lib.rs"]],
+      ["TfRepoLastCommit", "lib/tf/repo/TfRepoLastCommit.svelte", []],
       ["TfRepoCommits", "lib/tf/repo/TfRepoCommits.svelte", ["commits"]],
       ["TfRepoCommit", "lib/tf/repo/TfRepoCommit.svelte", ["commits", "gitea:tidewater/payout-service@c90d11"]],
       ["TfRepoPrs", "lib/tf/repo/TfRepoPrs.svelte", ["prs"]],

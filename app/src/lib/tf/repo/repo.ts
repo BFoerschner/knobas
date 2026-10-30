@@ -62,32 +62,32 @@ export const REPO_BRANCHES = "repo-branches";
 export const REPO_FILES = "repo-files";
 
 /**
- * The page's tabs, in prototype-6's order. A later ticket that builds one
- * replaces its `NOT_BUILT` entry in `TfRepo.svelte` with an arm drawing its
- * component; the tab row is this list.
+ * The page's tabs, in the order of the approved mockup (#2252, #2257): the
+ * repository at a ref (Files, Commits, Branches, Compare), then work in
+ * flight (Pull requests, Local changes); `group` is which, and the row draws
+ * a rule between the two. Compare takes any base and head (#2271), so it is
+ * its own tab beside the history rather than under Pull requests. A later
+ * ticket that builds one replaces its `NOT_BUILT` entry in `TfRepo.svelte`
+ * with an arm drawing its component; the tab row is this list.
  */
 export const REPO_TABS = [
-  { id: "files", label: "Files" },
-  { id: "commits", label: "Commits" },
-  { id: "branches", label: "Branches" },
-  { id: "prs", label: "Pull requests" },
-  { id: "local", label: "Local changes" },
+  { id: "files", label: "Files", group: "ref" },
+  { id: "commits", label: "Commits", group: "ref" },
+  { id: "branches", label: "Branches", group: "ref" },
+  { id: "compare", label: "Compare", group: "ref" },
+  { id: "prs", label: "Pull requests", group: "work" },
+  { id: "local", label: "Local changes", group: "work" },
 ] as const;
 
 /** A tab of the row. */
 export type RepoTabId = (typeof REPO_TABS)[number]["id"];
 
-/**
- * What an address can open: a tab, or one of the two places that light a tab
- * without being it (an edit lights Files, the compare page Pull requests).
- */
-export type RepoTab = RepoTabId | "edit" | "compare";
+/** What an address can open: a tab, or an edit, which lights Files without being it. */
+export type RepoTab = RepoTabId | "edit";
 
 /** Which tab of the row an address lights. */
 export function litTab(tab: RepoTab): RepoTabId {
-  if (tab === "edit") return "files";
-  if (tab === "compare") return "prs";
-  return tab;
+  return tab === "edit" ? "files" : tab;
 }
 
 /** What `#/repo/<repo entity id>/...` names. */
@@ -105,7 +105,7 @@ export interface RepoRoute {
   branch: string | null;
 }
 
-const TABS = new Set<string>([...REPO_TABS.map((tab) => tab.id), "edit", "compare"]);
+const TABS = new Set<string>([...REPO_TABS.map((tab) => tab.id), "edit"]);
 
 /**
  * Read what follows `repo` in the address. The route has decoded every
