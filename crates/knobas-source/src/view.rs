@@ -238,6 +238,12 @@ pub enum Block {
         /// wire reads as empty.
         #[serde(default)]
         gone: Vec<FileThread>,
+        /// The two commits the diff is between, where the source names them
+        /// (#2273, #2310): what a reader reads a file whole at, and a pull
+        /// request's commits to pick from. Absent on the wire when `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        range: Option<DiffRange>,
     },
     Log {
         text: String,
@@ -450,6 +456,48 @@ pub struct Commenting {
     /// source's descriptor declares it and the shell can queue it, as for an
     /// action.
     pub write_op: String,
+}
+
+/// The two commits a [`Block::Diff`] is between (#2273, #2310, spec #2234
+/// step 6): the diff is `base`'s tree to `head`'s.
+///
+/// `repository` is the entity both commits belong to, the one whose sections
+/// read the diff between any two of its commits (`compare:<base>...<head>`)
+/// and a file at one of them (`file@<sha>:<path>`), and whose byte read takes
+/// a commit; at a whole sha each read stands at a fixed commit, so the app
+/// keeps it (ADR-0032). A pull request's diff also lists its `commits`, newest
+/// first, and the head the viewer last reviewed at (`reviewed`), which is
+/// how a reader picks one commit, a range or *since my last review*.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct DiffRange {
+    /// The repository's entity id.
+    pub repository: String,
+    /// The old side's commit, its whole sha: the merge base of a pull
+    /// request, the commit before a range.
+    pub base: String,
+    /// The new side's commit, its whole sha.
+    pub head: String,
+    /// The commits from `base` (not included) to `head`, newest first, where
+    /// the source lists them (a pull request's); empty otherwise.
+    #[serde(default)]
+    pub commits: Vec<RangeCommit>,
+    /// The head's whole sha at the viewer's latest submitted review of a
+    /// pull request; `None` for one the viewer never reviewed, and for any
+    /// other diff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reviewed: Option<String>,
+}
+
+/// One commit of a [`DiffRange`]: its whole sha, its subject and a quiet
+/// second reading (author, age) as a commit row has.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct RangeCommit {
+    pub sha: String,
+    pub title: String,
+    pub meta: Option<String>,
 }
 
 impl ViewAction {
@@ -790,6 +838,17 @@ mod tests {
                         }],
                     },
                 }],
+                range: Some(DiffRange {
+                    repository: "gitea-main:tidewater/payout-service".into(),
+                    base: "907900b245f2941018dfd3ee155b876ef701c10a".into(),
+                    head: "1262a5b61048aaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                    commits: vec![RangeCommit {
+                        sha: "1262a5b61048aaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                        title: "Jitter".into(),
+                        meta: Some("mara · 5 h ago".into()),
+                    }],
+                    reviewed: Some("97cb5a8667f8aac8e6cdaeff83ffec9574f56a4b".into()),
+                }),
             },
             Block::Log {
                 text: "[12:00:01] Step 1/3\n[12:00:09] FAILED".into(),
@@ -1108,6 +1167,7 @@ mod tests {
                     }],
                 },
             }],
+            range: None,
         })
         .unwrap();
         assert_eq!(
@@ -1162,6 +1222,20 @@ mod tests {
             panic!("a diff decodes as a diff");
         };
         assert!(files[0].threads.is_empty() && commentable.is_none() && gone.is_empty());
+        // A diff's range (#2273, #2310) is absent on the wire when `None`
+        // (above), and so is its `reviewed`.
+        let range = serde_json::to_value(DiffRange {
+            repository: "g:o/r".into(),
+            base: "b".into(),
+            head: "h".into(),
+            commits: Vec::new(),
+            reviewed: None,
+        })
+        .unwrap();
+        assert_eq!(
+            range,
+            serde_json::json!({ "repository": "g:o/r", "base": "b", "head": "h", "commits": [] })
+        );
         // A row's commit hint is absent on the wire when it is `None`, so the
         // shell's row keeps the shape #661 froze; one sent without it decodes.
         let row = ViewRow {

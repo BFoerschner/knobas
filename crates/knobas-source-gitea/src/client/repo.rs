@@ -169,6 +169,26 @@ impl GiteaClient {
             .await
     }
 
+    /// The same compare's commits with their parents and no per-commit
+    /// files (`files=false` is honoured there, measured on 1.27.3), for the
+    /// two whole shas a compare's diff is between (#2310).
+    pub(crate) async fn compare_commits<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        base: &str,
+        head: &str,
+    ) -> Result<T, SourceError> {
+        self.get_json(
+            &compare_path(owner, repo, base, head)?,
+            &[
+                ("files", "false".to_owned()),
+                ("verification", "false".to_owned()),
+            ],
+        )
+        .await
+    }
+
     /// The same compare as `git diff` prints it (`?output=diff`, Gitea
     /// 1.27). The API's route, not the web UI's `compare/…diff`: that one
     /// ignores a token and answers 404 for a private repository (measured on
