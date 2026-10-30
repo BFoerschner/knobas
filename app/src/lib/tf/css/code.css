@@ -197,6 +197,32 @@
 .tf-dkeys { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 8px 2px 0; font-size: var(--t-xs); }
 .tf-dkeys span { display: inline-flex; gap: 3px; align-items: center; }
 .tf-diff .tf-fh-viewed { margin-left: auto; font: 400 var(--t-sm) var(--sans); display: flex; gap: 6px; align-items: center; }
+/* Header controls (#2279 the mode switch; later ones join it): right-aligned, Viewed after them. */
+.tf-diff .tf-fh-acts { margin-left: auto; display: flex; gap: var(--control-gap); align-items: center; font-weight: 400; }
+.tf-diff .tf-fh-acts + .tf-fh-viewed { margin-left: 0; }
+.tf-fh-acts .tf-seg button { padding: 1px 9px; font-size: var(--t-xs); }
+/* A rendered diff (#2279): before and after side by side, `mockups/code-area/diff.html`. */
+.tf-ba { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.tf-ba.tf-ba-one { grid-template-columns: minmax(0, 1fr); }
+.tf-ba > figure { margin: 0; min-width: 0; display: flex; flex-direction: column; }
+.tf-ba > figure + figure { border-left: 1px solid var(--rule); }
+.tf-ba figcaption { padding: 6px 14px; font: 600 var(--t-xs) var(--sans); color: var(--ink-2); border-bottom: 1px solid var(--rule-2); }
+.tf-ba-old figcaption { box-shadow: inset 3px 0 0 var(--err); }
+.tf-ba-new figcaption { box-shadow: inset 3px 0 0 var(--ok); }
+.tf-ba > figure > .tf-dim, .tf-ba > figure > .tf-stepfail { margin: 0; padding: 10px 14px; font-size: var(--t-sm); }
+.tf-ba-body { min-width: 0; overflow: auto; }
+.tf-ba-doc { padding: 0 14px; }
+.tf-ba-img { padding: 14px; display: grid; place-items: center; }
+.tf-ba-img > img, .tf-swipe-box img { max-width: 100%; background: repeating-conic-gradient(var(--sheet-2) 0 25%, var(--sheet) 0 50%) 0 0 / 16px 16px; }
+.tf-ba-old .tf-ba-img > img { outline: 2px solid var(--err); }
+.tf-ba-new .tf-ba-img > img { outline: 2px solid var(--ok); }
+.tf-swipe { padding: 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.tf-swipe-box { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+.tf-swipe-box img { display: block; }
+.tf-swipe-after { position: absolute; inset: 0; }
+.tf-swipe-after img { width: 100%; height: 100%; object-fit: contain; }
+.tf-swipe-bar { display: flex; gap: 8px; align-items: center; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-swipe-bar input { width: 240px; }
 .tf-addc {
   opacity: 0; border: 0; background: var(--info); color: var(--sheet); border-radius: 4px; width: 18px; height: 18px;
   line-height: 16px; cursor: pointer; margin: 2px 6px 0; font: 700 var(--t-sm) var(--sans); padding: 0;

@@ -393,6 +393,7 @@ const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
 const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
 const TfDiffView = (await import("../tf/diff/TfDiffView.svelte")).default;
+const TfDiffRendered = (await import("../tf/diff/TfDiffRendered.svelte")).default;
 const TfItem = (await import("../tf/item/TfItem.svelte")).default;
 const TfDetailRefresh = (await import("../tf/TfDetailRefresh.svelte")).default;
 const { createDetailRefresh } = await import("../tf/refresh.svelte");
@@ -1749,6 +1750,24 @@ const CASES: Case[] = [
               threads: [],
             },
           ],
+        },
+      }),
+    }),
+  },
+  // A rendered diff (#2279): asks the view for its sides; the view keeps them.
+  {
+    name: "TfDiffRendered",
+    source: "lib/tf/diff/TfDiffRendered.svelte",
+    open: (target) => ({
+      app: mount(TfDiffRendered, {
+        target,
+        props: {
+          plan: { renderer: { id: "markdown", name: "Markdown", patterns: ["*.md"], fences: [], input: "text", output: "html", diff: true }, sides: ["old", "new"], swipe: false },
+          path: "README.md",
+          sides: ["old", "new"],
+          swipe: false,
+          sideOf: (side: "old" | "new") => ({ kind: "drawn", content: side === "old" ? "# Before" : "# After" }),
+          load: () => {},
         },
       }),
     }),

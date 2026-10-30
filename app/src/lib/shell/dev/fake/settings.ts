@@ -108,7 +108,7 @@ export function handlers(): Handlers {
         input: d.input,
         output: d.output,
         timeout_secs: Math.min(120, Math.max(1, d.timeout_secs ?? 10)),
-        diff: d.diff ?? false,
+        diff: d.diff,
       }));
       return renderers;
     },
