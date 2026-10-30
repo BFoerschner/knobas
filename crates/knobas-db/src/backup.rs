@@ -940,7 +940,9 @@ async fn tool_command(tool: &str) -> Result<tokio::process::Command, BackupError
             tool: tool.to_owned(),
             source: io::Error::other(error),
         })??;
-    Ok(tokio::process::Command::from(crate::console::command(found)))
+    Ok(tokio::process::Command::from(crate::console::command(
+        found,
+    )))
 }
 
 /// Run `command`, turning a non-zero exit into a [`BackupError::Tool`]

@@ -88,10 +88,16 @@ fn the_rule_rejects_a_bare_start_and_spares_tests() {
     assert!(!offends("knobas-app/src/checkout/open.rs", bare));
 
     let in_tests = "fn read() {}\n#[cfg(test)]\nmod tests {\n    fn f() { std::process::Command::new(\"git\"); }\n}";
-    assert!(!offends("knobas-app/src/checkout/working_tree.rs", in_tests));
+    assert!(!offends(
+        "knobas-app/src/checkout/working_tree.rs",
+        in_tests
+    ));
 
     let commented = "// std::process::Command::new(\"git\") would open a window\nfn read() {}";
-    assert!(!offends("knobas-app/src/checkout/working_tree.rs", commented));
+    assert!(!offends(
+        "knobas-app/src/checkout/working_tree.rs",
+        commented
+    ));
 }
 
 fn workspace_crates() -> PathBuf {

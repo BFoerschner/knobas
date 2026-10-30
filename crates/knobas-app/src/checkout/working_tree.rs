@@ -115,7 +115,8 @@ pub(super) async fn command_line_tools_installed() -> bool {
             if !cfg!(target_os = "macos") {
                 return true;
             }
-            let mut command = tokio::process::Command::from(knobas_db::console::command("xcode-select"));
+            let mut command =
+                tokio::process::Command::from(knobas_db::console::command("xcode-select"));
             command
                 .arg("-p")
                 .stdin(Stdio::null())

@@ -88,12 +88,15 @@ mod tests {
                     .expect("the probe writes its report");
             }
             Ok("app") => {
-                let dir = std::path::PathBuf::from(std::env::var_os(REPORT).expect("the app's report dir"));
+                let dir = std::path::PathBuf::from(
+                    std::env::var_os(REPORT).expect("the app's report dir"),
+                );
                 rerun(Command::new(&me), "probe", &dir.join("plain"));
                 rerun(command(&me), "probe", &dir.join("built"));
             }
             _ => {
-                let dir = std::env::temp_dir().join(format!("knobas-console-{}", std::process::id()));
+                let dir =
+                    std::env::temp_dir().join(format!("knobas-console-{}", std::process::id()));
                 std::fs::create_dir_all(&dir).expect("a report directory");
                 let mut app = Command::new(&me);
                 app.creation_flags(DETACHED_PROCESS);
