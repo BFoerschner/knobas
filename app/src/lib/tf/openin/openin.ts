@@ -6,6 +6,7 @@
  * from this disk (`knobas_core::checkout::open`); what is filled here is only
  * drawn, as prototype-6's `fill`.
  */
+import { keyOf } from "../../time/format";
 import type {
   CheckoutApplication,
   CheckoutSettings,
@@ -229,8 +230,7 @@ export function firstLine(file: DiffFile): number | null {
  */
 export function worktreeOf(clonesRoot: string | null, repoEntityId: string | null, number: number): string | null {
   if (clonesRoot === null || repoEntityId === null) return null;
-  const key = repoEntityId.slice(repoEntityId.indexOf(":") + 1);
-  const [owner, repo, ...rest] = key.split("/");
+  const [owner, repo, ...rest] = keyOf(repoEntityId).split("/");
   if (!owner || !repo || rest.length > 0) return null;
   return `${clonesRoot.replace(/\/+$/, "")}/pull-requests/${owner}/${repo}-${number}`;
 }

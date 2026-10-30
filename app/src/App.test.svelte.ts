@@ -144,6 +144,9 @@ vi.mock("./lib/ipc/entity", () => ({
   // Settings › Checkouts and Open in… on a fresh install: no root, no applications (#1968).
   checkoutSettings: () =>
     Promise.resolve({ clones_root: null, git: { status: "no_git" }, default_application: null, applications: [] }),
+  // Its pull request worktrees (#2285): none.
+  pullRequestWorktrees: () => Promise.resolve([]),
+  removePullRequestWorktree: () => Promise.reject(new Error("no worktree is removed in this test")),
   captureShortcut: () =>
     Promise.resolve({ accelerator: null, refusal: null, shown: noteShownHere, note_count: 0, last_note_at: null }),
   setCaptureShortcut: () => Promise.reject(new Error("no shortcut is set in this test")),
