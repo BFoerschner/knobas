@@ -343,6 +343,7 @@ fn overview_blocks(source_id: &str, owner: &str, repo: &str, record: &CommitDeta
                     chip: None,
                     url: sibling_url(record, &parent.sha),
                     commit: None,
+                    author: None,
                 })
                 .collect(),
         });

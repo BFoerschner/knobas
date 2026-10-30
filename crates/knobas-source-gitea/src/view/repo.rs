@@ -6,7 +6,8 @@
 //! * *Pull requests* (count = open) -- the open ones, with the rooms' chip.
 //! * *Branches* (count) -- the default branch first, then by last commit,
 //!   newest first.
-//! * *Commits* -- the default branch's latest twenty.
+//! * *Commits* (count = every commit the default branch has, #2311) -- its
+//!   latest twenty.
 //! * *Files* (deferred) -- the tree at the default branch ([`files`], #711);
 //!   none for an empty repository, which has no tree.
 //!
@@ -354,6 +355,7 @@ fn branches(
                 chip: is_default.then(|| "default".to_owned()),
                 url: None,
                 commit: None,
+                author: None,
             }
         })
         .collect();
@@ -460,12 +462,12 @@ async fn commits(
     owner: &str,
     repo: &str,
 ) -> Result<ViewSection, SourceError> {
-    let latest: Vec<ListedCommit> = if record.repo.empty {
-        Vec::new()
+    let (latest, count): (Vec<ListedCommit>, _) = if record.repo.empty {
+        (Vec::new(), Some(0))
     } else {
         source
             .client
-            .latest_commits_as(owner, repo, record.default_branch(), rows::LATEST_COMMITS)
+            .latest_commits_counted(owner, repo, record.default_branch(), rows::LATEST_COMMITS)
             .await?
     };
     let rows = latest
@@ -475,8 +477,9 @@ async fn commits(
     Ok(ViewSection {
         id: COMMITS.to_owned(),
         title: "Commits".to_owned(),
-        // The latest twenty by design, not a list that stopped paging.
-        count: None,
+        // Every commit the default branch has (#2311, the last-commit
+        // strip's *N commits*); the rows are the latest twenty by design.
+        count,
         deferred: false,
         blocks: vec![Block::Entities { title: None, rows }],
     })

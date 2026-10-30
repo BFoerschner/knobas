@@ -184,6 +184,7 @@ async fn a_commit_view_is_its_overview_and_its_diff() {
                 "https://gitea.example/tidewater/payout-service/commit/{PARENT}"
             )),
             commit: None,
+            author: None,
         }]
     );
     assert_eq!(
@@ -360,6 +361,7 @@ async fn a_commits_statuses_are_its_checks_failing_first() {
             chip: Some(chip.into()),
             url: url.map(Into::into),
             commit: None,
+            author: None,
         };
     assert_eq!(
         rows,

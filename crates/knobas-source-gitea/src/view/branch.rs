@@ -17,7 +17,8 @@
 //! the reverse compare, which would list every commit it counts.
 //!
 //! The default branch itself is measured against nothing: it says *default
-//! branch*, its *Commits* are its latest twenty, and it has no *Diff*.
+//! branch*, its *Commits* are its latest twenty (counted by every commit it
+//! has, #2311), and it has no *Diff*.
 //!
 //! The whole view's toolbar (#707, [`super::act`]): *Open pull request…*
 //! where no pull request is open from the branch (disabled with nothing
@@ -364,14 +365,15 @@ async fn read_carried(
 ) -> Result<Carried, SourceError> {
     let base = record.default_branch();
     if branch == base {
-        let latest: Vec<ListedCommit> = source
+        // The latest twenty, counted by every commit the branch has (#2311).
+        let (latest, count): (Vec<ListedCommit>, _) = source
             .client
-            .latest_commits_as(owner, repo, branch, rows::LATEST_COMMITS)
+            .latest_commits_counted(owner, repo, branch, rows::LATEST_COMMITS)
             .await?;
         return Ok(Carried {
             facts: vec![fact("Branch", "default branch".to_owned())],
             commits: latest,
-            count: None,
+            count,
             ahead: None,
             files: None,
             note: None,

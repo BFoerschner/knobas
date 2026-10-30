@@ -1098,3 +1098,176 @@ fn a_byte_read_is_fixed_only_at_a_whole_sha() {
         Standing::Live
     );
 }
+
+// ---------------------------------------------------------------------------
+// The whole tree (#2311): every file at a commit, for *Go to file*, from
+// Gitea's recursive tree (`git/trees/{sha}?recursive=true`), paged by a
+// thousand and counted by its `total_count`.
+
+/// One entry of a recursive tree as `git/trees` answers it.
+fn git_entry(path: &str, kind: &str, mode: &str) -> Value {
+    json!({ "path": path, "type": kind, "mode": mode, "size": 3, "sha": "0".repeat(40), "url": "" })
+}
+
+/// `git/trees/{sha}?recursive=true&page={page}` answers `entries` of `total`.
+async fn git_tree(server: &MockServer, sha: &str, page: u32, entries: Vec<Value>, total: usize) {
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/git/trees/{sha}")))
+        .and(query_param("recursive", "true"))
+        .and(query_param("page", page.to_string().as_str()))
+        .and(query_param("per_page", "1000"))
+        .and(header("Authorization", format!("token {TOKEN}").as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "sha": sha, "url": "", "tree": entries,
+            "truncated": total > 1000, "page": page, "total_count": total
+        })))
+        .mount(server)
+        .await;
+}
+
+fn every(section: &ViewSection) -> (Vec<(String, EntryKind, Option<String>)>, bool) {
+    match section.blocks.as_slice() {
+        [Block::Tree { entries, truncated, paths, .. }] => {
+            assert_eq!(*paths, None, "the whole tree names no further read");
+            (
+                entries
+                    .iter()
+                    .map(|e| (e.name.clone(), e.kind, e.section.clone()))
+                    .collect(),
+                *truncated,
+            )
+        }
+        other => panic!("one tree block, not {other:#?}"),
+    }
+}
+
+/// Every listing names the read of the whole tree at its own commit.
+#[tokio::test]
+async fn a_listing_names_the_whole_tree_at_its_commit() {
+    let server = gitea().await;
+    listing(&server, "", "main", json!([entry("a.rs", "a.rs", "file", 1)])).await;
+    let section = read(&server, ENTITY, "files").await;
+    let [Block::Tree { paths, .. }] = section.blocks.as_slice() else {
+        panic!("one tree block");
+    };
+    assert_eq!(paths.as_deref(), Some(format!("paths@{}", tip("main")).as_str()));
+
+    listing(&server, "", SHA, json!([entry("a.rs", "a.rs", "file", 1)])).await;
+    let section = read(&server, &at_commit(SHA), "files").await;
+    let [Block::Tree { paths, .. }] = section.blocks.as_slice() else {
+        panic!("one tree block");
+    };
+    assert_eq!(paths.as_deref(), Some("paths"), "a commit's ids name no sha");
+}
+
+/// The whole tree is its files, each by its whole path and opened by the
+/// section the tree would name it by; directories and submodules are not
+/// files, a symlink is drawn as one.
+#[tokio::test]
+async fn the_whole_tree_lists_every_file_by_its_path() {
+    let server = gitea().await;
+    let sha = tip("main");
+    git_tree(
+        &server,
+        &sha,
+        1,
+        vec![
+            git_entry("README.md", "blob", "100644"),
+            git_entry("src", "tree", "040000"),
+            git_entry("src/lib.rs", "blob", "100644"),
+            git_entry("src/run", "blob", "100755"),
+            git_entry("current", "blob", "120000"),
+            git_entry("vendor", "commit", "160000"),
+        ],
+        6,
+    )
+    .await;
+    let section = read(&server, ENTITY, &format!("paths@{sha}")).await;
+    let (files, truncated) = every(&section);
+    let at = |p: &str| Some(format!("file@{sha}:{p}"));
+    assert_eq!(
+        files,
+        [
+            ("README.md".to_owned(), EntryKind::File, at("README.md")),
+            ("src/lib.rs".to_owned(), EntryKind::File, at("src/lib.rs")),
+            ("src/run".to_owned(), EntryKind::File, at("src/run")),
+            ("current".to_owned(), EntryKind::Symlink, at("current")),
+        ]
+    );
+    assert!(!truncated);
+    let asked: Vec<_> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.url.path().to_owned())
+        .collect();
+    assert_eq!(asked, [format!("{REPO}/git/trees/{sha}")], "one read, no tip");
+
+    // A commit's own tree, by its plain id.
+    git_tree(&server, SHA, 1, vec![git_entry("x.rs", "blob", "100644")], 1).await;
+    let section = read(&server, &at_commit(SHA), "paths").await;
+    assert_eq!(
+        every(&section).0,
+        [("x.rs".to_owned(), EntryKind::File, Some("file:x.rs".to_owned()))]
+    );
+}
+
+/// Gitea pages the recursive tree by a thousand: every page its count names
+/// is read.
+#[tokio::test]
+async fn the_whole_tree_reads_every_page() {
+    let server = gitea().await;
+    let sha = tip("main");
+    let page = |from: usize, to: usize| -> Vec<Value> {
+        (from..to)
+            .map(|n| git_entry(&format!("f{n:05}"), "blob", "100644"))
+            .collect()
+    };
+    git_tree(&server, &sha, 1, page(0, 1000), 2_500).await;
+    git_tree(&server, &sha, 2, page(1000, 2000), 2_500).await;
+    git_tree(&server, &sha, 3, page(2000, 2500), 2_500).await;
+    let section = read(&server, ENTITY, &format!("paths@{sha}")).await;
+    let (files, truncated) = every(&section);
+    assert_eq!(files.len(), 2_500);
+    assert_eq!(files[1_999].0, "f01999");
+    assert_eq!(files[2_499].0, "f02499");
+    assert!(!truncated, "every page was read");
+}
+
+/// A tree past the most pages knobas reads is cut there and says so; what
+/// Go to file does with it is the shell's (it says it searched the first).
+#[tokio::test]
+async fn a_whole_tree_past_the_page_cap_is_cut_and_says_so() {
+    let server = gitea().await;
+    let sha = tip("main");
+    let thousand: Vec<Value> = (0..1000)
+        .map(|n| git_entry(&format!("f{n:04}"), "blob", "100644"))
+        .collect();
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/git/trees/{sha}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "sha": sha, "tree": thousand, "truncated": true, "page": 1, "total_count": 90_000
+        })))
+        .mount(&server)
+        .await;
+    let section = read(&server, ENTITY, &format!("paths@{sha}")).await;
+    let (files, truncated) = every(&section);
+    assert!(truncated);
+    assert_eq!(files.len(), 20_000, "twenty pages of a thousand");
+    let reads = server.received_requests().await.unwrap().len();
+    assert_eq!(reads, 20);
+}
+
+/// The whole tree at a sha is kept (ADR-0032); by the tip it moves.
+#[tokio::test]
+async fn the_whole_tree_at_a_sha_is_fixed() {
+    use knobas_source::view::Standing::{Fixed, Moving};
+    let server = gitea().await;
+    let source = source(&server);
+    let at = format!("paths@{SHA}");
+    assert_eq!(source.view_standing(ENTITY, Some(&at)), Fixed);
+    assert_eq!(source.view_standing(BRANCH, Some(&at)), Fixed);
+    assert_eq!(source.view_standing(&at_commit(SHA), Some("paths")), Fixed);
+    assert_eq!(source.view_standing(ENTITY, Some("paths")), Moving);
+}

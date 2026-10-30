@@ -51,6 +51,7 @@ fn row(entity_id: Option<String>, title: &str) -> ViewRow {
         chip: None,
         url: None,
         commit: None,
+        author: None,
     }
 }
 

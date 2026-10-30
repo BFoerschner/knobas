@@ -187,6 +187,7 @@ fn cut(text: &str, url: &str) -> ViewRow {
         chip: None,
         url: Some(url.to_owned()),
         commit: None,
+        author: None,
     }
 }
 
@@ -201,6 +202,7 @@ async fn one_commit_is_one_row_in_every_view_that_lists_it() {
         chip: Some("c90d11a3f5".into()),
         url: Some(format!("{WEB}/commit/{SHA}")),
         commit: None,
+        author: Some("Mara Lindqvist".into()),
     };
 
     let in_pr = list(&section(&server, PR, "commits").await, None);

@@ -274,6 +274,17 @@ pub enum Block {
         truncated: bool,
         /// The directory's page at its source.
         url: Option<String>,
+        /// The section that lists every file of the tree at the commit this
+        /// listing was read at (#2311): what *Go to file* filters, named by
+        /// the source so the shell builds no id. Its answer is one `Tree`
+        /// whose entries are the files below the top, each `name` the whole
+        /// path from the top (`src/lib.rs`), in the source's order, and
+        /// `truncated` where the source or its cap stopped short. `None`
+        /// where the source has no such read, and on that answer itself.
+        /// Absent on the wire when `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        paths: Option<String>,
     },
     File {
         trail: Vec<Crumb>,
@@ -663,6 +674,12 @@ pub struct ViewRow {
     /// `tone`.
     pub chip: Option<String>,
     pub url: Option<String>,
+    /// Who the row is by, as the source names the account (#2311): a
+    /// commit's author, for the avatar and name a last-commit strip draws.
+    /// `meta` still reads in full without it. Absent on the wire when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub author: Option<String>,
     /// A commit another source may hold, named by where it lives rather than
     /// by an id (issue #665): a TeamCity change knows its sha and its VCS
     /// root's URL, and cannot see a Gitea mirror. **The app's to resolve, not
@@ -817,6 +834,7 @@ mod tests {
                         chip: Some("merged".into()),
                         url: Some("https://gitea.example/c/c90d11".into()),
                         commit: None,
+                        author: None,
                     },
                     ViewRow {
                         entity_id: None,
@@ -829,6 +847,7 @@ mod tests {
                             repo_url: "http://gitea:3000/tidewater/payout-service.git".into(),
                             sha: "179eb1fb0144c3b61ed482890f1a5f4e162736eb".into(),
                         }),
+                        author: None,
                     },
                 ],
             },
@@ -945,6 +964,7 @@ mod tests {
                 ],
                 truncated: true,
                 url: Some("https://gitea.example/o/r/src/branch/main/src".into()),
+                paths: Some("paths".into()),
             },
             Block::File {
                 trail: vec![Crumb {
@@ -1099,6 +1119,7 @@ mod tests {
             ],
             truncated: false,
             url: None,
+            paths: None,
         };
         assert_eq!(
             serde_json::to_value(&tree).unwrap(),
@@ -1294,6 +1315,7 @@ mod tests {
             chip: None,
             url: None,
             commit: None,
+            author: None,
         };
         let wire = serde_json::to_value(&row).unwrap();
         assert_eq!(

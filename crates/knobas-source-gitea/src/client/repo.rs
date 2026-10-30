@@ -319,15 +319,45 @@ impl GiteaClient {
         .await
     }
 
-    /// The newest `limit` commits of `branch`, the listing projections off.
-    /// An empty repository's 409 is no commits, as for [`Self::commits`].
-    pub(crate) async fn latest_commits_as<T: serde::de::DeserializeOwned>(
+    /// One page of `GET /repos/{o}/{r}/git/trees/{sha}?recursive=true`
+    /// (#2311): `per_page` entries of the whole tree at a commit, every
+    /// directory's entries below it, and `total_count`, all of them.
+    pub(crate) async fn git_tree_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+        page: u32,
+        per_page: usize,
+    ) -> Result<T, SourceError> {
+        self.get_json(
+            &format!(
+                "/repos/{}/{}/git/trees/{}",
+                segment(owner)?,
+                segment(repo)?,
+                super::object_id(sha)?
+            ),
+            &[
+                ("recursive", "true".to_owned()),
+                ("page", page.to_string()),
+                ("per_page", per_page.to_string()),
+            ],
+        )
+        .await
+    }
+
+    /// The newest `limit` commits of `branch`, the listing projections off,
+    /// with Gitea's `X-Total-Count` beside them: how many
+    /// commits the branch has in all (#2311, the last-commit strip's *N
+    /// commits*). `None` where Gitea sent no count. An empty repository's
+    /// 409 is no commits, as for [`Self::commits`].
+    pub(crate) async fn latest_commits_counted<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,
         repo: &str,
         branch: &str,
         limit: u32,
-    ) -> Result<Vec<T>, SourceError> {
+    ) -> Result<(Vec<T>, Option<u64>), SourceError> {
         let path = format!("/repos/{}/{}/commits", segment(owner)?, segment(repo)?);
         let query = [
             ("sha", branch.to_owned()),
@@ -337,9 +367,10 @@ impl GiteaClient {
             ("limit", limit.to_string()),
             ("page", "1".to_owned()),
         ];
-        match self.get_json(&path, &query).await {
-            Err(error) if error.status() == Some(409) => Ok(Vec::new()),
-            other => other,
+        match self.get_json_counted::<Option<Vec<T>>>(&path, &query).await {
+            Err(error) if error.status() == Some(409) => Ok((Vec::new(), Some(0))),
+            Err(error) => Err(error),
+            Ok((page, total)) => Ok((page.unwrap_or_default(), total.map(|n| n as u64))),
         }
     }
 

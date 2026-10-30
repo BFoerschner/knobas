@@ -304,6 +304,7 @@ async fn the_overview_says_what_happened_where_and_for_how_long() {
                 server.uri()
             )),
             commit: None,
+            author: None,
         }]
     );
 }
@@ -375,6 +376,7 @@ async fn the_overview_names_the_revision_it_built_by_repository_and_sha() {
                 repo_url: "http://gitea:3000/tidewater/payout-service.git".into(),
                 sha: SHA.into(),
             }),
+            author: None,
         }]
     );
     let wire = serde_json::to_string(&view).expect("serializes");
@@ -449,6 +451,7 @@ async fn more_failed_tests_than_one_read_keep_their_total_and_end_on_a_cut_row()
                 server.uri()
             )),
             commit: None,
+            author: None,
         }]
     );
     let listed = tests

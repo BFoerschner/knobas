@@ -8,7 +8,9 @@
 //!
 //! * `files` -- the top directory;
 //! * `files:{dir}` -- a directory below it (`files:src/lib`);
-//! * `file:{path}` -- a file (`file:src/lib.rs`), read raw.
+//! * `file:{path}` -- a file (`file:src/lib.rs`), read raw;
+//! * `paths` -- every file of the tree, by its whole path (#2311): what
+//!   *Go to file* filters, named by every listing (`Block::Tree::paths`).
 //!
 //! A branch's and a repository's tree are read at the commit the tip was
 //! when the tree was first asked for, and the ids the tree hands out name
@@ -49,6 +51,18 @@ const BYTE_CAP: usize = 1_000_000;
 const LINE_CAP: usize = 10_000;
 /// How far into a file a NUL byte makes it binary, as git looks.
 const SNIFF: usize = 8_000;
+/// The whole tree's id (#2311).
+const PATHS: &str = "paths";
+/// How many entries one page of Gitea's recursive tree holds: its own most
+/// (`[api] DEFAULT_GIT_TREES_PER_PAGE`, 1000; a larger ask is answered with
+/// that many).
+const TREE_PAGE: usize = 1_000;
+/// How many pages of the recursive tree the whole tree reads at most: twenty
+/// thousand entries, directories among them. A tree past it is cut there and
+/// says so (`truncated`).
+const TREE_PAGES: u32 = 20;
+/// How many pages after the first are asked side by side.
+const TREE_READS_AT_ONCE: usize = 4;
 
 /// A place in the tree a section id names: a directory (`""` the top) or a
 /// file. The one place an id is taken apart; [`Place::id`] builds them.
@@ -56,6 +70,8 @@ const SNIFF: usize = 8_000;
 enum Place<'a> {
     Dir(&'a str),
     File(&'a str),
+    /// Every file below the top (#2311).
+    Every,
 }
 
 /// A section id taken apart: where in the tree, and the commit it names
@@ -76,6 +92,17 @@ impl<'a> Named<'a> {
     /// fixed commit (ADR-0032). An id without one -- the tab's own `files`,
     /// or a deep link's guess -- reads the tip first.
     fn parse(id: &'a str) -> Option<Self> {
+        if let Some(rest) = id.strip_prefix(PATHS) {
+            let sha = match rest.strip_prefix('@') {
+                Some(sha) if super::full_sha(sha) => Some(sha),
+                None if rest.is_empty() => None,
+                _ => return None,
+            };
+            return Some(Self {
+                place: Place::Every,
+                sha,
+            });
+        }
         let (dir, rest) = if let Some(rest) = id.strip_prefix(FILES) {
             (true, rest)
         } else {
@@ -111,6 +138,7 @@ impl Place<'_> {
             Self::Dir("") => format!("{FILES}{at}"),
             Self::Dir(dir) => format!("{FILES}{at}:{dir}"),
             Self::File(path) => format!("file{at}:{path}"),
+            Self::Every => format!("{PATHS}{at}"),
         }
     }
 }
@@ -199,7 +227,7 @@ pub(super) async fn read(
     let unnamed = || SourceError::protocol(format!("gitea: {id:?} names no place in the tree"));
     let named = Named::parse(id).ok_or_else(unnamed)?;
     match named.place {
-        Place::Dir("") => {}
+        Place::Dir("") | Place::Every => {}
         Place::Dir(path) | Place::File(path) => crate::client::GiteaClient::tree_path(path)?,
     }
     let resolved: String;
@@ -255,6 +283,7 @@ pub(super) async fn read(
     let block = match named.place {
         Place::File(path) => file(source, owner, repo, &at, path).await?,
         Place::Dir(dir) => directory(source, owner, repo, &at, dir).await?,
+        Place::Every => every(source, owner, repo, &at).await?,
     };
     Ok(ViewSection {
         // The id asked, as every section answers (the contract battery):
@@ -345,6 +374,102 @@ async fn directory(
         entries,
         truncated,
         url: at.page(url.as_deref()),
+        paths: Some(at.id(Place::Every)),
+    })
+}
+
+/// One entry of Gitea's recursive tree.
+#[derive(Debug, serde::Deserialize)]
+struct GitEntry {
+    path: String,
+    #[serde(rename = "type", default)]
+    kind: String,
+    #[serde(default)]
+    mode: String,
+    #[serde(default)]
+    size: u64,
+}
+
+/// One page of `git/trees/{sha}?recursive=true`.
+#[derive(Debug, serde::Deserialize)]
+struct GitTree {
+    #[serde(default)]
+    tree: Vec<GitEntry>,
+    /// Every entry of the tree, all pages together. Gitea's own `truncated`
+    /// is true on every page of a tree over one page, the last included
+    /// (measured, #2311), so it says nothing about whether this read has
+    /// them all; the count does.
+    #[serde(default)]
+    total_count: Option<usize>,
+}
+
+/// Every file of the tree at `at` (#2311), by its whole path, in git's order:
+/// page by page of Gitea's recursive tree, the first read alone (it says how
+/// many there are), the rest side by side, at most [`TREE_PAGES`]. A tree
+/// past them is cut and says so. Directories and submodules are left out; a
+/// symlink is a file, as in a listing.
+async fn every(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    at: &At<'_>,
+) -> Result<Block, SourceError> {
+    let first: GitTree = source.client.git_tree_as(owner, repo, at.sha, 1, TREE_PAGE).await?;
+    // No count: a page short of full is the last one, so another is read
+    // only after a full one, one at a time.
+    let total = first.total_count;
+    let mut pages = vec![first];
+    match total {
+        Some(total) => {
+            let wanted = u32::try_from(total.div_ceil(TREE_PAGE))
+                .unwrap_or(u32::MAX)
+                .min(TREE_PAGES);
+            let rest: Vec<u32> = (2..=wanted).collect();
+            for some in rest.chunks(TREE_READS_AT_ONCE) {
+                let reads = some
+                    .iter()
+                    .map(|page| source.client.git_tree_as::<GitTree>(owner, repo, at.sha, *page, TREE_PAGE))
+                    .collect();
+                pages.extend(super::rows::all_of(reads).await?);
+            }
+        }
+        None => {
+            let mut page = 1;
+            while page < TREE_PAGES && pages.last().is_some_and(|p| p.tree.len() >= TREE_PAGE) {
+                page += 1;
+                pages.push(source.client.git_tree_as(owner, repo, at.sha, page, TREE_PAGE).await?);
+            }
+        }
+    }
+    let read: usize = pages.iter().map(|p| p.tree.len()).sum();
+    let truncated = match total {
+        Some(total) => read < total,
+        None => pages.len() as u32 == TREE_PAGES && pages.last().is_some_and(|p| p.tree.len() >= TREE_PAGE),
+    };
+    let entries = pages
+        .into_iter()
+        .flat_map(|page| page.tree)
+        .filter(|entry| entry.kind == "blob")
+        .map(|entry| {
+            let kind = if entry.mode == "120000" {
+                EntryKind::Symlink
+            } else {
+                EntryKind::File
+            };
+            TreeEntry {
+                section: Some(at.id(Place::File(&entry.path))),
+                name: entry.path,
+                kind,
+                size: Some(entry.size),
+            }
+        })
+        .collect();
+    Ok(Block::Tree {
+        trail: trail(at, "", false),
+        entries,
+        truncated,
+        url: None,
+        paths: None,
     })
 }
 

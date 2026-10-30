@@ -452,6 +452,7 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
                     "https://gitea.example/tidewater/payout-service/commit/{FIRST_SHA}"
                 )),
                 commit: None,
+                author: Some("Mara Lindqvist".into()),
             },
             ViewRow {
                 entity_id: Some(format!("gitea:tidewater/payout-service@{HEAD_SHA}")),
@@ -461,6 +462,7 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
                 chip: Some("c90d11a3f5".into()),
                 url: None,
                 commit: None,
+                author: Some("Mara Lindqvist".into()),
             },
         ]
     );
@@ -1166,6 +1168,7 @@ async fn a_pull_request_past_the_commit_budget_says_what_it_left_out() {
                     "https://gitea.example/tidewater/payout-service/pulls/142/commits".into()
                 ),
                 commit: None,
+                author: None,
             }),
             "{header:?}"
         );
