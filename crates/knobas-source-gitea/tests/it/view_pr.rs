@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use knobas_source::ReviewSide;
 use knobas_source::view::{
-    ActionField, Block, ChoiceOption, Commenting, DiffChange, Fact, FieldKind, FileThread,
-    LineComment, LineComments, LineThread, SourceView, Tone, ViewAction, ViewRow, ViewSection,
+    ActionField, Block, ChoiceOption, Commenting, DiffChange, DiffLine, DiffLineKind, Fact,
+    FieldKind, FileThread, Hunk, LineComment, LineComments, LineThread, SourceView, Tone, ViewAction, ViewRow, ViewSection,
 };
 use knobas_source::{Source, SourceError};
 use serde_json::{Value, json};
@@ -701,7 +701,7 @@ index 1111111..2222222 100644
 /// (shape taken from the real 1.27.3 server, #709): `position` is the new
 /// side's line and `original_position` the old side's, the other `0`;
 /// `diff_hunk` is the diff up to and including the commented line, as it was
-/// when the comment was made.
+/// when the comment was made, and `commit_id` the head it was made on (#2318).
 fn line_comment(who: &str, at: &str, new: u32, old: u32, hunk_tail: &str, body: &str) -> Value {
     json!({
         "user": { "login": who },
@@ -710,6 +710,7 @@ fn line_comment(who: &str, at: &str, new: u32, old: u32, hunk_tail: &str, body: 
         "position": new,
         "original_position": old,
         "diff_hunk": format!("@@ -1,3 +1,3 @@\n pub fn backoff() -> u64 {{\n{hunk_tail}"),
+        "commit_id": FIRST_SHA,
         "body": body,
     })
 }
@@ -857,6 +858,27 @@ async fn gitea_with_line_comments(pull: Value) -> MockServer {
     server
 }
 
+/// The hunk [`line_comment`] sends, parsed: its first line kept, then `tail`
+/// as (kind, old number, new number, text).
+fn at_first(tail: &[(DiffLineKind, Option<u32>, Option<u32>, &str)]) -> Hunk {
+    let mut lines = vec![DiffLine {
+        kind: DiffLineKind::Context,
+        old: Some(1),
+        new: Some(1),
+        text: "pub fn backoff() -> u64 {".into(),
+    }];
+    lines.extend(tail.iter().map(|&(kind, old, new, text)| DiffLine {
+        kind,
+        old,
+        new,
+        text: text.into(),
+    }));
+    Hunk {
+        header: "@@ -1,3 +1,3 @@".into(),
+        lines,
+    }
+}
+
 fn said(author: &str, at: &str, body: &str) -> LineComment {
     LineComment {
         author: author.into(),
@@ -897,6 +919,8 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 id: Some("204".into()),
                 resolved_by: None,
                 replies: false,
+                commit: Some(FIRST_SHA.into()),
+                hunk: Some(at_first(&[(DiffLineKind::Add, None, Some(2), "    loop {}")])),
             },
         }],
         "{view:#?}"
@@ -916,6 +940,8 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 id: Some("102".into()),
                 resolved_by: None,
                 replies: true,
+                commit: None,
+                hunk: None,
             },
             LineThread {
                 side: ReviewSide::New,
@@ -929,6 +955,8 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 id: Some("101".into()),
                 resolved_by: Some("olu".into()),
                 replies: true,
+                commit: None,
+                hunk: None,
             },
             LineThread {
                 side: ReviewSide::New,
@@ -939,6 +967,11 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 id: Some("202".into()),
                 resolved_by: None,
                 replies: false,
+                commit: Some(FIRST_SHA.into()),
+                hunk: Some(at_first(&[
+                    (DiffLineKind::Del, Some(2), None, "    30"),
+                    (DiffLineKind::Add, None, Some(2), "    35"),
+                ])),
             },
             LineThread {
                 side: ReviewSide::New,
@@ -948,6 +981,8 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 id: Some("203".into()),
                 resolved_by: None,
                 replies: false,
+                commit: Some(FIRST_SHA.into()),
+                hunk: Some(at_first(&[(DiffLineKind::Add, None, Some(2), "    gone")])),
             },
         ],
         "{view:#?}"
