@@ -17,9 +17,7 @@
  *   runs nothing and keeps the SVG's own styles. {@link frameDocument} builds
  *   the frame's document.
  */
-import DOMPurify from "dompurify";
-
-import { runRenderer, type CommandOutput, type RenderContent, type RenderRun, type UserRenderer } from "../ipc/app";
+import { runRenderer, type RenderContent, type RenderRun, type UserRenderer } from "../ipc/app";
 import { mount, unmount } from "svelte";
 
 import TfCommandOutput from "../tf/render/TfCommandOutput.svelte";
@@ -93,23 +91,8 @@ function base64Of(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/**
- * The document a sandboxed frame draws for a run's SVG or HTML `body`,
- * sanitized. An image's `data:` URL needs no frame and is not taken here.
- */
-export function frameDocument(output: Exclude<CommandOutput, "image">, body: string): string {
-  let inner: string;
-  if (output === "html") {
-    inner = DOMPurify.sanitize(body, { USE_PROFILES: { html: true, svg: true }, FORBID_TAGS: ["style", "form", "iframe", "object", "embed"] });
-  } else {
-    const root = DOMPurify.sanitize(body, { USE_PROFILES: { svg: true, svgFilters: true }, RETURN_DOM: true }) as unknown as Element;
-    const svg = root.querySelector("svg");
-    // XMLSerializer writes the SVG namespace an `<img>` needs.
-    const markup = svg === null ? "" : new XMLSerializer().serializeToString(svg);
-    inner = `<img alt="" src="data:image/svg+xml;base64,${base64Of(new TextEncoder().encode(markup))}">`;
-  }
-  return `<!doctype html><html><head><meta charset="utf-8"></head><body>${inner}</body></html>`;
-}
+/** The sandboxed frame's document for a run's SVG or HTML, sanitized: the one frame diagrams use too (`frame.ts`, #2258). */
+export { frameDocument } from "./frame";
 
 /** Why a run drew nothing, in a line, or `null` for a run that drew. */
 export function failureLine(run: RenderRun): string | null {

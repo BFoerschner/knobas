@@ -33,18 +33,25 @@ test("a Markdown file is Markdown's first, then Source's; a fence is never Markd
   expect(names(renderersForFence("markdown"))).toEqual(["Source"]);
 });
 
+test("Mermaid is built in: a .mmd or .mermaid file and a mermaid fence are its first, then Source's (#2258)", () => {
+  expect(names(renderersFor({ path: "docs/architecture.mmd", binary: false }))).toEqual(["Mermaid", "Source"]);
+  expect(names(renderersFor({ path: "flow.MERMAID", binary: false }))).toEqual(["Mermaid", "Source"]);
+  expect(names(renderersForFence("Mermaid"))).toEqual(["Mermaid", "Source"]);
+  expect(names(renderersFor({ path: "flow.mmd", binary: true }))).toEqual([]);
+});
+
 test("a renderer registered later goes ahead of Source, by file pattern and by fence", () => {
-  const undo = register({ id: "mermaid", name: "Mermaid", patterns: ["*.mmd", "docs/*.mermaid"], fences: ["mermaid"], input: "text", output: "svg", diff: false });
+  const undo = register({ id: "boxes", name: "Boxes", patterns: ["*.box", "docs/*.boxes"], fences: ["boxes"], input: "text", output: "svg", diff: false });
   try {
-    expect(names(renderersFor({ path: "docs/architecture.mmd", binary: false }))).toEqual(["Mermaid", "Source"]);
-    expect(names(renderersFor({ path: "docs/a.mermaid", binary: false }))).toEqual(["Mermaid", "Source"]);
-    expect(names(renderersFor({ path: "other/a.mermaid", binary: false }))).toEqual(["Source"]);
-    expect(names(renderersForFence("Mermaid"))).toEqual(["Mermaid", "Source"]);
+    expect(names(renderersFor({ path: "docs/architecture.box", binary: false }))).toEqual(["Boxes", "Source"]);
+    expect(names(renderersFor({ path: "docs/a.boxes", binary: false }))).toEqual(["Boxes", "Source"]);
+    expect(names(renderersFor({ path: "other/a.boxes", binary: false }))).toEqual(["Source"]);
+    expect(names(renderersForFence("Boxes"))).toEqual(["Boxes", "Source"]);
     expect(names(renderersForFence("rust"))).toEqual(["Source"]);
   } finally {
     undo();
   }
-  expect(names(renderersFor({ path: "docs/architecture.mmd", binary: false }))).toEqual(["Source"]);
+  expect(names(renderersFor({ path: "docs/architecture.box", binary: false }))).toEqual(["Source"]);
 });
 
 test("an image's bytes become a data URL of its type", () => {

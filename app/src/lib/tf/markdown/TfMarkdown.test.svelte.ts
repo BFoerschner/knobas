@@ -8,7 +8,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
+import type { DiagramRequest, HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
 import { register } from "../../render/registry";
 import { registerFence } from "../../render/markdown";
 import { installCommands } from "../../render/command";
@@ -259,4 +259,75 @@ test("new text draws over the old", () => {
   props.text = "# two";
   flushSync();
   expect(text(md())).toBe("two");
+});
+
+/** A diagram engine that draws each diagram as one text naming its palette and code, and fails on `BROKEN`. */
+function diagramPort(asked: DiagramRequest[] = []): RenderPort {
+  return {
+    ...keywordPort(),
+    async diagram(request) {
+      asked.push(request);
+      if (request.code.includes("BROKEN")) return { error: "Parse error on line 2:\nExpecting 'NODE_STRING', got 'EOF'" };
+      return { svg: `<svg viewBox="0 0 120 40"><text onclick="parent.hit = 1">${request.palette.dark ? "dark" : "light"}:${request.code}</text></svg>` };
+    },
+  };
+}
+
+const MERMAID_MD = "Intro\n\n```mermaid\nflowchart LR\n  a --> b\n```\n";
+
+/** The SVG inside a frame's `<img>`, decoded. */
+function drawingIn(frame: HTMLIFrameElement): string {
+  const src = new DOMParser().parseFromString(frame.srcdoc, "text/html").querySelector("img")?.getAttribute("src") ?? "";
+  return new TextDecoder().decode(Uint8Array.from(atob(src.split(",")[1] ?? ""), (c) => c.charCodeAt(0)));
+}
+
+test("a mermaid fence is drawn by the diagram engine, sanitized, in a sandboxed frame sized to the drawing", async () => {
+  const asked: DiagramRequest[] = [];
+  draw(MERMAID_MD, { render: diagramPort(asked) });
+  await settle();
+  expect(asked.map((request) => [request.engine, request.code])).toEqual([["mermaid", "flowchart LR\n  a --> b"]]);
+  const frame = md().querySelector<HTMLIFrameElement>(".tf-fence .tf-diagram iframe")!;
+  expect(frame.getAttribute("sandbox")).toBe("");
+  expect([frame.width, frame.height]).toEqual(["120", "40"]);
+  const drawing = drawingIn(frame);
+  expect(drawing).toContain("light:flowchart LR");
+  expect(drawing).not.toContain("onclick");
+  expect(md().querySelector(".tf-fence pre")).toBeNull();
+});
+
+test("a diagram that does not parse keeps its source and shows the parser's error above it", async () => {
+  draw("```mermaid\nflowchart TD\n  BROKEN -->\n```", { render: diagramPort() });
+  await settle();
+  const body = md().querySelector(".tf-fence-body")!;
+  expect(text(body.querySelector(".tf-stepfail b"))).toBe("Mermaid could not draw this.");
+  expect(body.querySelector(".tf-stepfail pre")?.textContent).toContain("Parse error on line 2");
+  expect(body.querySelector("pre code")?.textContent).toBe("flowchart TD\n  BROKEN -->");
+  expect(body.querySelector("iframe")).toBeNull();
+});
+
+test("switching theme draws the diagram again in the other palette", async () => {
+  const html = document.documentElement;
+  const asked: DiagramRequest[] = [];
+  try {
+    draw(MERMAID_MD, { render: diagramPort(asked) });
+    await settle();
+    html.style.setProperty("--sheet", "#1A2027");
+    html.style.setProperty("--ink", "#E4E9EE");
+    html.setAttribute("data-theme", "dark");
+    await settle();
+    expect(asked.map((request) => request.palette.dark)).toEqual([false, true]);
+    expect(asked[1]!.palette.sheet).toBe("#1A2027");
+    expect(drawingIn(md().querySelector<HTMLIFrameElement>(".tf-diagram iframe")!)).toContain("dark:flowchart");
+  } finally {
+    html.removeAttribute("data-theme");
+    html.style.removeProperty("--sheet");
+    html.style.removeProperty("--ink");
+  }
+});
+
+test("where the port has no diagram engine the fence stays its source", async () => {
+  draw(MERMAID_MD);
+  await settle();
+  expect(md().querySelector(".tf-fence pre code")?.textContent).toBe("flowchart LR\n  a --> b");
+  expect(md().querySelector("iframe")).toBeNull();
 });
