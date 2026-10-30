@@ -97,6 +97,7 @@
     type TextPlace,
   } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
+  import { pageVisible } from "../kept-pages.svelte";
   import { waitPhase } from "../waiting";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
@@ -480,6 +481,26 @@
     jump(event.shiftKey ? -1 : 1);
   }
 
+  /**
+   * Another file opens at its top. The shell's one scroller (`.tf-main`) is shared by every file, so without this a
+   * file opened from the tree started at the depth the last one was read to: a PDF below its first page, a short file
+   * at its end. A re-read of the same file, and a link to a line (the effect below), leave the scroll be.
+   */
+  const shownPage = pageVisible();
+  let fileview = $state<HTMLElement | null>(null);
+  let openedPath: string | null = null;
+  $effect(() => {
+    const opening = file?.path ?? null;
+    if (opening === null || opening === openedPath) return;
+    openedPath = opening;
+    const view = untrack(() => fileview);
+    const main = view?.closest(".tf-main");
+    if (!view || !main || untrack(() => line) !== null || !shownPage()) return;
+    // The tree's sticky top (`code.css`, `.tf-ftreebox`): the file's top comes to rest beside the tree's.
+    const above = view.getBoundingClientRect().top - main.getBoundingClientRect().top - 12;
+    if (above < 0) main.scrollTop += above;
+  });
+
   /** The file and line last scrolled to, so a refresh of the file leaves the reader where they are. */
   let shownLine: string | null = null;
   $effect(() => {
@@ -749,7 +770,7 @@
   </aside>
   <div class="tf-fcol">
   {#if path === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
-  <div class="tf-fileview">
+  <div class="tf-fileview" bind:this={fileview}>
     {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
         <span class="tf-p">{file.path}</span>
