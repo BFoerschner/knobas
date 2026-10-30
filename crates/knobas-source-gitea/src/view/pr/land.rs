@@ -406,7 +406,10 @@ fn required_facts(landing: &Landing) -> Vec<Fact> {
         return Vec::new();
     };
     let named = required_standing(checks);
-    let passed = named.iter().filter(|(_, at)| *at == Standing::Passed).count();
+    let passed = named
+        .iter()
+        .filter(|(_, at)| *at == Standing::Passed)
+        .count();
     let (value, tone) = if named.is_empty() {
         ("none have reported".to_owned(), Tone::Info)
     } else {
