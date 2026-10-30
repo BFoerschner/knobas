@@ -429,13 +429,15 @@
   /**
    * **Suggestion chips** (#2265): with no pipeline on the file (none added, none a default), bytes that look gzip,
    * zstd or base64 offer their unwrap step; it is never applied until clicked. *Not now* puts it away for the tab.
+   * A binary file's head is read through the byte read (kept by sha) only where no renderer reads its bytes.
    */
   const notNow = new SvelteSet<string>();
   let sniffed = $state<{ key: string; head: Uint8Array } | null>(null);
   $effect(() => {
     const read = bytesRead;
     const key = bytesAt;
-    if (read === null || key === null || steps !== null) return;
+    // Only a binary file nothing else draws: a PDF or an image reads its own bytes (and a PDF past its cap none).
+    if (read === null || key === null || steps !== null || renderer?.input === "bytes") return;
     if (untrack(() => sniffed?.key) === key) return;
     let live = true;
     read().then(
