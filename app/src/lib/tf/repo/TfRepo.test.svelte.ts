@@ -771,17 +771,27 @@ test("a hidden tab has visible false: Local changes reads its diff on focus only
 });
 
 test("opening another repository starts its tabs fresh (#2248)", async () => {
-  await drawLive([REPO, "files", "src", "lib.rs"], twoRepos());
-  const drawn = fileView();
+  await drawLive([REPO], twoRepos());
+  // Opened by hand: nothing in the address opens it.
+  openDir("src/");
+  await settle();
+  expect(shownTree()).toEqual(["src/", "lib.rs", "retry.rs", "README.md"]);
   await go([REPO, "commits"]);
   expect(hiddenTabs()).toBe(1);
 
   await go([LEDGER]);
   expect(text(target.querySelector("h1"))).toBe("tidewater/ledger");
   expect(hiddenTabs()).toBe(0);
-  expect(fileView()).not.toBe(drawn);
+  expect(shownTree()).toEqual(["src/", "README.md"]);
   expect(text(fileView()?.querySelector("header") ?? null)).toContain("README.md");
   expect(target.querySelector(".tf-tabs a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fledger/files");
+
+  // Its own tabs are kept for its visit.
+  const files = shownTab();
+  await go([LEDGER, "commits"]);
+  expect(hiddenTabs()).toBe(1);
+  await go([LEDGER]);
+  expect(shownTab()).toBe(files);
 });
 
 test("a hidden repository page does not read its checkout on window focus, and reads it once when shown again (#2249)", async () => {
