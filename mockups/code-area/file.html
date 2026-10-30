@@ -1,0 +1,102 @@
+<!doctype html>
+<!--
+  #2252: a file open beside the persistent tree, and the renderer switcher. The switcher lists every renderer that
+  accepts the open file (built-in and the user's command renderers), says which is the default for the pattern,
+  and sets a new default. States: switcher (menu open, Mermaid drawn) | source (Source renderer, highlighted) |
+  broken (a diagram that fails to parse shows its source and the parser's error, never a blank box).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Renderer switcher</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="base.css"><link rel="stylesheet" href="code.css">
+<script src="mockup.js"></script>
+</head>
+<body data-page="file" data-kind="repo" data-tab="repo" data-states="switcher source broken">
+<div class="tf">
+<div id="chrome"></div>
+<main><div class="body"><div class="repo">
+  <aside class="tree" aria-label="Files">
+    <header><span class="tf-minif" data-ic="search"><span>Go to file</span><kbd>T</kbd></span><button class="tf-iconbtn tf-sm" title="Collapse all" data-ic="collapse"></button></header>
+    <div class="rows">
+      <a class="row dir" href="#" data-ic="folder">.gitea</a>
+      <a class="row dir" href="#" data-ic="folder-open">docs</a>
+      <a class="row d1" href="#" aria-current="true" data-ic="file">architecture.mmd</a>
+      <a class="row d1" href="#" data-ic="file">runbook.md</a>
+      <a class="row d1" href="#" data-ic="file">api.pdf</a>
+      <a class="row dir" href="#" data-ic="folder">fixtures</a>
+      <a class="row dir" href="#" data-ic="folder">migrations</a>
+      <a class="row dir" href="#" data-ic="folder">src</a>
+      <a class="row" href="#" data-ic="file">Cargo.lock</a>
+      <a class="row" href="#" data-ic="file">Cargo.toml</a>
+      <a class="row" href="repo.html" data-ic="file">README.md</a>
+      <a class="row" href="#" data-ic="file">justfile</a>
+    </div>
+    <footer><span><kbd>T</kbd> go to file</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>←</kbd><kbd>→</kbd> fold</span></footer>
+  </aside>
+
+  <article class="fileview">
+    <header><span class="p"><span class="dim">docs /</span> architecture.mmd</span><span class="meta">1.4 KB · 38 lines · at <span class="mono">4c1d0aa</span></span>
+      <div class="tf-acts">
+        <div class="menuwrap rsw">
+          <button class="tf-select tf-sm"><span class="lab">Render as</span><b data-when="switcher broken">Mermaid</b><b data-when="source">Source</b><svg class="i s" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></button>
+          <div class="tf-menu" data-when="switcher" role="menu">
+            <div class="mh">Renderers that accept *.mmd</div>
+            <button class="on"><span class="tick">✓</span><span>Mermaid<span class="sub">built in · strict security</span></span><span class="tag">DEFAULT FOR *.mmd</span></button>
+            <button><span class="tick"></span><span>Source<span class="sub">built in · highlighted</span></span></button>
+            <button><span class="tick"></span><span>mmdc<span class="sub mono">mmdc -i - -o - -e svg</span></span><span class="tag">COMMAND</span></button>
+            <hr>
+            <button><span class="tick"></span>Use Source for *.mmd by default</button>
+            <button><span class="tick"></span>Renderers and defaults…<span class="kb dim small">Settings › Renderers</span></button>
+          </div>
+        </div>
+        <button class="tf-btn tf-sm" data-ic="plus">Pipeline</button>
+        <span data-openin="tf-sm"></span><button class="tf-btn tf-sm tf-ghost" data-ic="copy">Copy</button><button class="tf-iconbtn tf-sm" title="More" data-ic="more"></button>
+      </div></header>
+
+    <div class="filediagram" data-when="switcher">
+      <svg class="dg" width="760" height="380" viewBox="0 0 760 380" role="img" aria-label="Architecture">
+        <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs>
+        <g class="node"><rect x="300" y="10" width="160" height="42" rx="5"/><text x="380" y="31">shop frontend</text></g>
+        <g class="node hot"><rect x="300" y="110" width="160" height="42" rx="5"/><text x="380" y="131">payments-api</text></g>
+        <g class="node"><rect x="60" y="210" width="160" height="42" rx="5"/><text x="140" y="231">card PSP</text></g>
+        <g class="node"><rect x="540" y="210" width="160" height="42" rx="5"/><text x="620" y="231">SEPA bank</text></g>
+        <g class="node db"><rect x="300" y="210" width="160" height="42" rx="5"/><text x="380" y="231">postgres · payments</text></g>
+        <g class="node hot"><rect x="300" y="310" width="160" height="42" rx="5"/><text x="380" y="331">retry worker</text></g>
+        <path class="edge" d="M380 52V108"/><text class="elab" x="420" y="82">POST /pay</text>
+        <path class="edge" d="M330 152C260 170 170 180 145 208"/><path class="edge" d="M430 152C500 170 600 180 615 208"/>
+        <path class="edge" d="M380 152V208"/><path class="edge" d="M380 252V308"/><text class="elab" x="425" y="282">outbox</text>
+        <path class="edge" d="M460 331C640 331 700 300 690 254"/><text class="elab" x="640" y="350">webhooks</text>
+      </svg>
+    </div>
+
+    <div class="stepfail" data-when="broken"><b>Mermaid could not draw this file.</b>
+      <pre>Parse error on line 14:
+...  api --&gt;|outbox| worker
+-----------------------^
+Expecting 'SEMI', 'NEWLINE', 'EOF', got 'PIPE'</pre></div>
+
+    <div class="code" data-when="source broken">
+      <div class="l"><span>1</span><span><span class="k">flowchart</span> TB</span></div>
+      <div class="l"><span>2</span><span>  <span class="c">%% payments-api and what it talks to</span></span></div>
+      <div class="l"><span>3</span><span>  shop[<span class="s">"shop frontend"</span>] <span class="p">--&gt;</span>|<span class="s">POST /pay</span>| api[<span class="s">"payments-api"</span>]</span></div>
+      <div class="l"><span>4</span><span>  api <span class="p">--&gt;</span> psp[<span class="s">"card PSP"</span>]</span></div>
+      <div class="l"><span>5</span><span>  api <span class="p">--&gt;</span> sepa[<span class="s">"SEPA bank"</span>]</span></div>
+      <div class="l"><span>6</span><span>  api <span class="p">--&gt;</span> db[(<span class="s">"postgres · payments"</span>)]</span></div>
+      <div class="l"><span>7</span><span></span></div>
+      <div class="l"><span>8</span><span>  <span class="k">subgraph</span> async [<span class="s">"delivery"</span>]</span></div>
+      <div class="l"><span>9</span><span>    worker[<span class="s">"retry worker"</span>]</span></div>
+      <div class="l"><span>10</span><span>  <span class="k">end</span></span></div>
+      <div class="l"><span>11</span><span></span></div>
+      <div class="l"><span>12</span><span>  <span class="k">classDef</span> <span class="t">hot</span> fill:<span class="n">#DFE6FA</span>,stroke:<span class="n">#2F55D4</span></span></div>
+      <div class="l"><span>13</span><span>  <span class="k">class</span> api,worker <span class="t">hot</span></span></div>
+      <div class="l"><span>14</span><span>  db <span class="p">--&gt;</span>|<span class="s">outbox</span>| worker</span></div>
+      <div class="l"><span>15</span><span>  worker <span class="p">-.-&gt;</span>|<span class="s">webhooks</span>| sepa</span></div>
+    </div>
+  </article>
+</div></div></main>
+<footer class="tf-status"><span>Gitea · synced 1 min ago</span><span>3 sources healthy</span></footer>
+</div>
+</body>
+</html>

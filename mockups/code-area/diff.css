@@ -1,0 +1,102 @@
+/* The one diff component (#2252, spec #2234 step 6): toolbar, file tree with badges, files in split or unified. */
+
+.dtool { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; padding: 10px 22px; background: var(--paper); border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.dtool .sepv { width: 1px; height: 18px; background: var(--rule); margin: 0 6px; }
+.dtool .why { font-size: var(--t-xs); color: var(--ink-2); }
+.dtool .tf-acts { margin-left: auto; }
+.dtool .prog { display: inline-flex; align-items: center; gap: 8px; font-size: var(--t-xs); color: var(--ink-2); }
+.dtool .prog .track { width: 90px; height: 6px; border-radius: 3px; background: var(--rule-2); overflow: hidden; }
+.dtool .prog .track i { display: block; height: 100%; width: 43%; background: var(--ok); }
+.range .tf-menu { width: 380px; }
+.range .tf-menu .c { display: grid; grid-template-columns: 16px 64px 1fr auto; gap: 8px; align-items: center; }
+.range .tf-menu .c .mono { font-size: var(--t-xs); color: var(--ink-2); }
+.range .tf-menu .c.sel { background: var(--info-bg); border-radius: 0; }
+.range .tf-menu .c.sel.first { border-radius: 4px 4px 0 0; } .range .tf-menu .c.sel.last { border-radius: 0 0 4px 4px; }
+.range .tf-menu .box { width: 13px; height: 13px; border: 1.5px solid var(--ink-2); border-radius: 3px; display: inline-grid; place-items: center; font-size: 10px; line-height: 1; }
+.range .tf-menu .sel .box { background: var(--info); border-color: var(--info); color: var(--sheet); }
+.range .tf-menu .foot { display: flex; align-items: center; gap: var(--control-gap); padding: 6px 6px 2px 10px; border-top: 1px solid var(--rule-2); margin-top: 4px; font-size: var(--t-xs); color: var(--ink-2); }
+.range .tf-menu .foot .tf-btn { margin-left: auto; }
+
+.dgrid { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; align-items: start; padding: 14px 22px 40px; }
+.dtree { position: sticky; top: 58px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; display: flex; flex-direction: column; max-height: calc(100vh - 80px); overflow: hidden; }
+.dtree > header { display: flex; gap: var(--control-gap); align-items: center; padding: 8px; border-bottom: 1px solid var(--rule-2); }
+.dtree > header .tf-minif { flex: 1; }
+.dtree .rows { overflow: auto; padding: 4px 0; font: var(--t-sm) var(--mono); font-variant-ligatures: none; }
+.dtree .row { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; white-space: nowrap; }
+.dtree .row:hover { background: var(--sheet-2); }
+.dtree .row .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dtree .row.dir { color: var(--ink-2); font-weight: 600; font-size: var(--t-xs); }
+.dtree .row[aria-current="true"] { background: var(--sheet-2); box-shadow: inset 2px 0 0 var(--ink); }
+.dtree .row.viewed .nm { color: var(--ink-2); text-decoration: line-through; text-decoration-color: var(--rule); }
+.dtree .row .end { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; font-family: var(--sans); font-size: var(--t-2xs); }
+.dtree .d1 { padding-left: 24px; } .dtree .d2 { padding-left: 38px; }
+.dtree > footer { padding: 7px 10px; border-top: 1px solid var(--rule-2); font-size: var(--t-xs); color: var(--ink-2); display: flex; gap: 6px 10px; flex-wrap: wrap; align-items: center; }
+
+/* Status badges: added, deleted, renamed with similarity, mode, binary, modified. */
+.bd { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 3px; font: 700 10px var(--sans); flex: none; }
+.bd.A { background: var(--ok-bg); color: var(--ok); } .bd.D { background: var(--err-bg); color: var(--err); }
+.bd.M { background: var(--warn-bg); color: var(--warn); } .bd.R { background: var(--info-bg); color: var(--info); }
+.bd.X, .bd.B { background: var(--muted-bg); color: var(--ink-2); }
+.addn { color: var(--ok); font-weight: 600; } .deln { color: var(--err); font-weight: 600; }
+.vtick { color: var(--ok); font-weight: 800; }
+
+/* A file of the diff. */
+.df { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.df + .df { margin-top: 12px; }
+.df > header { position: sticky; top: 46px; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 6px; height: 42px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); font-size: var(--t-sm); }
+.df.closed > header { border-bottom: 0; }
+.df > header .path { font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.df > header .path .old { font-weight: 400; color: var(--ink-2); }
+.df > header .tf-acts { margin-left: auto; }
+.df > header .viewed { display: inline-flex; align-items: center; gap: 6px; height: var(--control-h-sm); padding: 0 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); font-size: var(--t-sm); }
+.df > header .viewed .box { width: 13px; height: 13px; border: 1.5px solid var(--ink-2); border-radius: 3px; display: inline-grid; place-items: center; font-size: 10px; line-height: 1; }
+.df > header .viewed.on { border-color: var(--ok); color: var(--ok); background: var(--ok-bg); }
+.df > header .viewed.on .box { background: var(--ok); border-color: var(--ok); color: var(--sheet); }
+.ran { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-xs); color: var(--info); background: var(--info-bg); border-radius: 3px; padding: 1px 7px; font-weight: 600; white-space: nowrap; }
+.ran.off { color: var(--ink-2); background: var(--muted-bg); }
+.df .why { display: flex; align-items: center; gap: 10px; padding: 10px 14px; font-size: var(--t-sm); color: var(--ink-2); }
+.df .why .tf-acts { margin-left: auto; }
+
+/* Lines. Unified: old no, new no, code. Split: old no, old code | new no, new code. */
+.dl { font: var(--t-sm)/1.65 var(--mono); font-variant-ligatures: none; }
+.u .ln { display: grid; grid-template-columns: 46px 46px 18px 1fr; white-space: pre; }
+.ln .no { color: var(--ink-2); text-align: right; padding-right: 8px; user-select: none; opacity: .8; }
+.ln .sg { color: var(--ink-2); user-select: none; }
+.ln.add { background: var(--ok-bg); } .ln.del { background: var(--err-bg); }
+.ln.add .sg { color: var(--ok); } .ln.del .sg { color: var(--err); }
+.ln ins, .ln .ins { background: var(--add-word); text-decoration: none; border-radius: 2px; }
+.ln del, .ln .delw { background: var(--del-word); text-decoration: none; border-radius: 2px; }
+.ln .addc { visibility: hidden; }
+.ln.hov .addc { visibility: visible; }
+.hunk { display: flex; align-items: center; gap: 8px; background: var(--info-bg); color: var(--info); font: var(--t-xs)/26px var(--mono); padding-left: 6px; }
+.hunk .exp { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 3px; color: var(--info); font: 600 var(--t-xs) var(--sans); }
+.hunk .exp:hover { background: var(--sheet); }
+.s2 { display: grid; grid-template-columns: 1fr 1fr; }
+.s2 > .side + .side { border-left: 1px solid var(--rule); }
+.s2 .ln { display: grid; grid-template-columns: 46px 18px 1fr; white-space: pre; overflow: hidden; }
+.s2 .ln.pad { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--sheet-2) 6px 7px); }
+
+/* A comment thread inside the diff. */
+.thr { margin: 6px 14px 8px 110px; border: 1px solid var(--rule); border-left: 3px solid var(--info); border-radius: 4px; background: var(--sheet); font: var(--t-sm)/1.5 var(--sans); white-space: normal; }
+.thr.pending { border-left-color: var(--warn); }
+.thr .m { display: flex; gap: 8px; padding: 8px 10px; }
+.thr .m + .m { border-top: 1px solid var(--rule-2); }
+.thr .m p { margin-top: 2px; }
+.thr footer { display: flex; align-items: center; gap: var(--control-gap); padding: 6px 8px; border-top: 1px solid var(--rule-2); background: var(--sheet-2); }
+.thr footer .reply { flex: 1; height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--ink-2); display: flex; align-items: center; padding: 0 8px; font-size: var(--t-sm); }
+.s2 .thr { margin-left: 64px; }
+
+/* Rendered before/after, an image change. */
+.ba { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+.ba > div { padding: 14px; display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: var(--t-xs); color: var(--ink-2); }
+.ba > div + div { border-left: 1px solid var(--rule); }
+.ba .img { width: 120px; height: 120px; border-radius: 8px; background: repeating-conic-gradient(var(--sheet-2) 0 25%, var(--sheet) 0 50%) 0 0/16px 16px; display: grid; place-items: center; border: 2px solid var(--err); }
+.ba > div + div .img { border-color: var(--ok); }
+
+.kbdline { display: flex; gap: 4px 10px; flex-wrap: wrap; align-items: center; }
+.kbdline span { display: inline-flex; gap: 4px; align-items: center; }
+
+@media (max-width: 1100px) {
+  .dgrid { grid-template-columns: minmax(0, 1fr); }
+  .dtree { position: static; }
+}
