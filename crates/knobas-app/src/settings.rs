@@ -167,6 +167,55 @@ pub async fn complete_first_run(pool: &PgPool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+// -- Pages kept open (#2247) ---------------------------------------------------
+
+/// The `knobas.setting` key holding *Pages kept open*: how many pages the
+/// shell keeps mounted and hidden besides the one in front (keep-alive, spec
+/// #2234 step 3). Namespaced `shell.` because it is the window's, read by its
+/// page host and nothing in the backend.
+pub const PAGES_KEPT_OPEN_KEY: &str = "shell.pages_kept_open";
+
+/// *Pages kept open* until somebody sets it.
+pub const PAGES_KEPT_OPEN_DEFAULT: u32 = 5;
+
+/// The most *Pages kept open* takes: the cap is the only memory valve, so it
+/// has a ceiling.
+pub const PAGES_KEPT_OPEN_MAX: u32 = 15;
+
+/// What a stored row means: a whole number up to the ceiling, else the default.
+///
+/// A row that is not a number is one an older or a broken knobas wrote, and
+/// reads as unset, the rule [`read`] keeps for strings.
+fn pages_kept_open_from(value: Option<&serde_json::Value>) -> u32 {
+    value
+        .and_then(serde_json::Value::as_u64)
+        .map_or(PAGES_KEPT_OPEN_DEFAULT, |stored| {
+            u32::try_from(stored.min(u64::from(PAGES_KEPT_OPEN_MAX))).unwrap_or(PAGES_KEPT_OPEN_MAX)
+        })
+}
+
+/// *Pages kept open* as stored, or the default.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the query fails.
+pub async fn pages_kept_open(pool: &PgPool) -> Result<u32, IpcError> {
+    Ok(pages_kept_open_from(
+        read_value(pool, PAGES_KEPT_OPEN_KEY).await?.as_ref(),
+    ))
+}
+
+/// Store *Pages kept open*, held to the ceiling, and answer what is now stored.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn set_pages_kept_open(pool: &PgPool, count: u32) -> Result<u32, IpcError> {
+    let kept = count.min(PAGES_KEPT_OPEN_MAX);
+    write_value(pool, PAGES_KEPT_OPEN_KEY, &serde_json::Value::from(kept)).await?;
+    Ok(kept)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +247,17 @@ mod tests {
             reader.contains(concat!("where key = ", "'first_run.completed'")),
             "app_status no longer reads the key this command writes"
         );
+    }
+
+    /// *Pages kept open* reads 5 until set, 0 to 15 once set, and the default
+    /// for a row no knobas could have meant (#2247).
+    #[test]
+    fn pages_kept_open_reads_the_stored_count_held_to_fifteen() {
+        assert_eq!(pages_kept_open_from(None), 5);
+        assert_eq!(pages_kept_open_from(Some(&serde_json::json!(0))), 0);
+        assert_eq!(pages_kept_open_from(Some(&serde_json::json!(9))), 9);
+        assert_eq!(pages_kept_open_from(Some(&serde_json::json!(40))), 15);
+        assert_eq!(pages_kept_open_from(Some(&serde_json::json!(-1))), 5);
+        assert_eq!(pages_kept_open_from(Some(&serde_json::json!("7"))), 5);
     }
 }

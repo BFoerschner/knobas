@@ -76,6 +76,8 @@ vi.mock("./lib/ipc/app", () => ({
   retryDatabase: () => Promise.resolve(undefined),
   completeFirstRun: () => Promise.resolve(undefined),
   ping: () => Promise.resolve("pong"),
+  pagesKeptOpen: () => Promise.resolve(5),
+  setPagesKeptOpen: (count: number) => Promise.resolve(count),
 }));
 
 vi.mock("./lib/ipc/sources", () => ({
@@ -244,6 +246,8 @@ vi.mock("./lib/ipc/time", () => ({
   deleteBlock: () => Promise.reject(new Error("no edit in this test")),
   dismissBlock: () => Promise.reject(new Error("no edit in this test")),
   createBlock: () => Promise.reject(new Error("no edit in this test")),
+  pagesKeptOpen: () => Promise.resolve(5),
+  setPagesKeptOpen: () => Promise.reject(new Error("no settings write in this test")),
   passiveAttribution: () => Promise.resolve(false),
   setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
   worklogDraft: (entityId: string, when: { day: string; offsetMinutes: number }) => {

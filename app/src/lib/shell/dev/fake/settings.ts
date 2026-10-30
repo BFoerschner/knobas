@@ -2,7 +2,7 @@
  * `?fake-ipc`: The Settings pages that read a stored preference (#831): Time (passive
  * attribution), Monitoring and Backup and export's status.
  *
- * Answers `passive_attribution`, `set_passive_attribution`,
+ * Answers `pages_kept_open`, `set_pages_kept_open` (#2247), `passive_attribution`, `set_passive_attribution`,
  * `monitoring_settings`, `set_monitoring_settings`, `backup_status`,
  * `backup_now`, `set_backup_schedule` and `open_backup_folder` (which opens
  * nothing: a browser has no file manager to show the folder in).
@@ -50,6 +50,7 @@ function record(at: Date, bytes: number): BackupRecord {
 /** This feature's commands. */
 export function handlers(): Handlers {
   let passive = true;
+  let keptOpen = 5;
   let monitoring: MonitoringSettings = { sample_retention_days: 30, response_time_warn_ms: 2000 };
   let schedule: BackupSchedule = { enabled: true, hour: 2, minute: 0, keep: 14 };
   const taken = todayAt(2, 0);
@@ -77,6 +78,11 @@ export function handlers(): Handlers {
   };
 
   return {
+    pages_kept_open: () => keptOpen,
+    set_pages_kept_open: (args) => {
+      keptOpen = Math.min(15, Math.max(0, Math.round(Number(args["count"]))));
+      return keptOpen;
+    },
     passive_attribution: () => passive,
     set_passive_attribution: (args) => {
       passive = args["enabled"] === true;

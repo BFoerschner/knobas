@@ -27,15 +27,16 @@
 
   const shown = pageVisible();
   const born = untrack(() => name);
-  log.mounts.push(born);
-  log.reads.push(born);
+  const pages = untrack(() => log);
+  pages.mounts.push(born);
+  pages.reads.push(born);
 
   let seen = untrack(() => syncRevision);
   $effect(() => {
     const at = syncRevision;
     if (at === seen) return;
     seen = at;
-    log.reads.push(born);
+    pages.reads.push(born);
   });
 </script>
 

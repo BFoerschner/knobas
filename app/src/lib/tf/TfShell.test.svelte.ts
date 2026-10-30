@@ -218,6 +218,7 @@ function start(
     jobPorts?: JobPorts;
     dialogs?: Snippet<[SourceSyncStatus[]]>;
     health?: Pick<Health, "all">;
+    pagesKeptOpen?: TfShellPorts["pagesKeptOpen"];
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -257,6 +258,7 @@ function start(
             )),
         syncStatus: () => Promise.resolve(sync),
         listen: over.listen ?? (() => Promise.resolve(() => {})),
+        ...(over.pagesKeptOpen ? { pagesKeptOpen: over.pagesKeptOpen } : {}),
       },
       prefersDark: over.prefersDark ?? (() => false),
       onstarttimer: over.onstarttimer ?? (() => {}),
@@ -1367,4 +1369,12 @@ test("⌘R never presses the Sync now of a page kept hidden", async () => {
   cmdR();
   await settle();
   expect(asked).toEqual([]);
+});
+
+test("the stored Pages kept open reaches the page host once the database answers", async () => {
+  start({ pagesKeptOpen: () => Promise.resolve(0) });
+  await settle();
+  await at("#/time");
+  await at("#/inbox");
+  expect(target.querySelectorAll(".tf-kept"), "none kept besides the page in front").toHaveLength(1);
 });
