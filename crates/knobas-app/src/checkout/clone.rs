@@ -546,7 +546,7 @@ async fn spawn_into(
         )));
     }
 
-    let mut command = tokio::process::Command::new(git);
+    let mut command = tokio::process::Command::from(knobas_db::console::command(git));
     command
         .args(clone::clone_args(url, target, protocols))
         .env("GIT_TERMINAL_PROMPT", "0")

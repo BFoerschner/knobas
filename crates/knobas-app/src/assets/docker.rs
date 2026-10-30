@@ -252,7 +252,7 @@ impl Cli {
         // child -- an ssh context reaching a server that is asleep -- parks a
         // tokio worker for as long as it takes.
         let ran = tokio::task::spawn_blocking(move || {
-            std::process::Command::new(&program)
+            knobas_db::console::command(&program)
                 .args(argv(&spawned))
                 .output()
         })

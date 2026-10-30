@@ -876,7 +876,7 @@ async fn close_pool_bounded(pool: &PgPool) {
 #[cfg(feature = "test-util")]
 pub(crate) fn pg_ctl_stop_immediate(data_dir: &Path) -> Option<std::process::Command> {
     let pg_ctl = find_tool(&installation_dir(), PG_CTL)?;
-    let mut command = std::process::Command::new(pg_ctl);
+    let mut command = crate::console::command(pg_ctl);
     command
         .arg("stop")
         .arg("-D")
@@ -2084,10 +2084,7 @@ async fn run_initdb_stopping(
             message,
         ))
     };
-    let mut command = tokio::process::Command::new(initdb);
-    // The crate's `CREATE_NO_WINDOW`: no console flashes up over the app.
-    #[cfg(windows)]
-    command.creation_flags(0x0800_0000);
+    let mut command = tokio::process::Command::from(crate::console::command(initdb));
     command
         .arg("--auth")
         .arg("password")
@@ -2156,7 +2153,7 @@ async fn run_initdb_stopping(
 /// the caller's drop kills it anyway.
 #[cfg(unix)]
 fn terminate(pid: u32) -> bool {
-    std::process::Command::new("kill")
+    crate::console::command("kill")
         .arg("-TERM")
         .arg(pid.to_string())
         .stdout(std::process::Stdio::null())
@@ -2335,7 +2332,7 @@ fn lock_port(contents: &str) -> Option<u16> {
 /// server write minutes ago, where a recycled pid is as good as impossible.
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
-    std::process::Command::new("ps")
+    crate::console::command("ps")
         .arg("-p")
         .arg(pid.to_string())
         .stdout(std::process::Stdio::null())

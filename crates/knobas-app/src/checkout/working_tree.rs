@@ -115,7 +115,7 @@ pub(super) async fn command_line_tools_installed() -> bool {
             if !cfg!(target_os = "macos") {
                 return true;
             }
-            let mut command = tokio::process::Command::new("xcode-select");
+            let mut command = tokio::process::Command::from(knobas_db::console::command("xcode-select"));
             command
                 .arg("-p")
                 .stdin(Stdio::null())
@@ -255,7 +255,7 @@ pub(crate) async fn git_on_path() -> Result<PathBuf, TreeRead> {
 /// inherited repository location removed, stdin closed and the process killed
 /// when its future is dropped. The caller adds the subcommand.
 pub(super) fn git_at(git: &Path, path: &Path) -> tokio::process::Command {
-    let mut command = tokio::process::Command::new(git);
+    let mut command = tokio::process::Command::from(knobas_db::console::command(git));
     command
         .arg("-C")
         .arg(path)
