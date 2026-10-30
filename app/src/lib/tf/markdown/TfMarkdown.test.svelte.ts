@@ -11,6 +11,8 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
 import { register } from "../../render/registry";
 import { registerFence } from "../../render/markdown";
+import { installCommands } from "../../render/command";
+import type { RenderContent } from "../../ipc/app";
 import TfMarkdown from "./TfMarkdown.svelte";
 
 let target: HTMLElement;
@@ -214,6 +216,33 @@ test("a fence goes to the renderer the registry names for its language", async (
   } finally {
     undoFence();
     undoRenderer();
+  }
+});
+
+test("a fence in a saved command renderer's language is run by it and drawn in its sandboxed frame (#2262)", async () => {
+  const ran: [string, RenderContent][] = [];
+  installCommands(
+    [{ id: "cat", name: "Cat", command: "cat", patterns: [], fences: ["cat"], input: "text", output: "html", timeout_secs: 10 }],
+    {
+      run: async (id, content) => {
+        ran.push([id, content]);
+        return { outcome: "drawn", output: "html", body: content.kind === "text" ? content.text : "" };
+      },
+    },
+  );
+  try {
+    draw("Before\n\n```Cat\n<b>bold</b><script>alert(1)</script>\n```\n\n```rust\nfn main() {}\n```");
+    await settle();
+
+    expect(ran).toEqual([["cat", { kind: "text", text: "<b>bold</b><script>alert(1)</script>" }]]);
+    const frames = md().querySelectorAll(".tf-fence iframe");
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.getAttribute("sandbox")).toBe("");
+    expect(frames[0]!.getAttribute("srcdoc")).toContain("<b>bold</b>");
+    expect(frames[0]!.getAttribute("srcdoc")).not.toMatch(/<script/i);
+    expect(text(md().querySelectorAll(".tf-fence")[1])).toContain("fn main() {}");
+  } finally {
+    installCommands([]);
   }
 });
 

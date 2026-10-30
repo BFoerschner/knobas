@@ -19,6 +19,8 @@ import { entityAddress } from "./address";
 import { sourceRoles } from "./roles.svelte";
 import { jobHash, NAV, SECTION_NAME } from "./route";
 import TfShell, { type TfShellPorts } from "./TfShell.svelte";
+import { installCommands } from "../render/command";
+import { renderersForFence } from "../render/registry";
 import { createTheme, type Theme } from "./theme.svelte";
 import { createRoleSyncs, type RoleSyncPorts, type RoleSyncs } from "./role-sync.svelte";
 import { sourceFacts } from "./job/source-facts.fixture";
@@ -219,6 +221,7 @@ function start(
     dialogs?: Snippet<[SourceSyncStatus[]]>;
     health?: Pick<Health, "all">;
     pagesKeptOpen?: TfShellPorts["pagesKeptOpen"];
+    userRenderers?: TfShellPorts["userRenderers"];
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -259,6 +262,7 @@ function start(
         syncStatus: () => Promise.resolve(sync),
         listen: over.listen ?? (() => Promise.resolve(() => {})),
         ...(over.pagesKeptOpen ? { pagesKeptOpen: over.pagesKeptOpen } : {}),
+        ...(over.userRenderers ? { userRenderers: over.userRenderers } : {}),
       },
       prefersDark: over.prefersDark ?? (() => false),
       onstarttimer: over.onstarttimer ?? (() => {}),
@@ -1377,4 +1381,17 @@ test("the stored Pages kept open reaches the page host once the database answers
   await at("#/time");
   await at("#/inbox");
   expect(target.querySelectorAll(".tf-kept"), "none kept besides the page in front").toHaveLength(1);
+});
+
+test("the saved command renderers are in the registry once the database answers (#2262)", async () => {
+  start({
+    userRenderers: () =>
+      Promise.resolve([{ id: "plantuml", name: "PlantUML", command: "plantuml -tsvg -pipe", patterns: ["*.puml"], fences: ["plantuml"], input: "text", output: "svg", timeout_secs: 10 }]),
+  });
+  try {
+    await settle();
+    expect(renderersForFence("plantuml").map((r) => r.id)).toEqual(["command:plantuml", "source"]);
+  } finally {
+    installCommands([]);
+  }
 });
