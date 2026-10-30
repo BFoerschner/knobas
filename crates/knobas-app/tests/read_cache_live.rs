@@ -798,3 +798,127 @@ async fn a_file_past_the_views_cut_is_read_whole_through_its_bytes() {
     let (_, again) = read().await;
     assert_eq!(again, 0, "a second look is the cache's");
 }
+
+/// #2319, story 78: the commit tab's reads, counted. With no checkout its
+/// diff is one request, the commit's own `.diff` (the whole view defers it
+/// and so reads none), and a second look is the cache's. With a checkout
+/// holding the commit the diff is read there and Gitea is asked nothing.
+#[tokio::test]
+#[ignore = "needs the testenv Gitea: just gitea-live"]
+async fn a_commits_diff_is_read_at_a_checkout_that_holds_it_and_else_once() {
+    use knobas_app::checkout::DiffReadAt;
+    let app = app().await;
+    let repo = app.repo();
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'repo',$2)")
+        .bind(&repo)
+        .bind(SEEDED)
+        .execute(&app.pool)
+        .await
+        .expect("the repository's entity is written");
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, web_url)
+         values ($1,$2,'repo',$3,'','{}'::jsonb,null)",
+    )
+    .bind(&repo)
+    .bind(&app.source)
+    .bind(SEEDED)
+    .execute(&app.pool)
+    .await
+    .expect("the repository is in the mirror");
+    let (sha, _) = two_commits().await;
+    let commit = format!("{repo}@{sha}");
+
+    let diff = || {
+        knobas_http::counted::counted(knobas_app::checkout::commit_diff(
+            &app.pool,
+            &app.secrets,
+            &app.registry,
+            &app.live,
+            &repo,
+            &commit,
+            &sha,
+            false,
+        ))
+    };
+    let (whole, sent_whole, _) = {
+        let ((view, took), sent) = knobas_http::counted::counted(async {
+            let started = Instant::now();
+            let view = knobas_app::sources::crud::view(
+                &app.pool,
+                &app.secrets,
+                &app.registry,
+                &app.live,
+                &commit,
+                None,
+            )
+            .await;
+            (view, started.elapsed())
+        })
+        .await;
+        (
+            view.expect("the whole view reads").expect("drawn"),
+            sent,
+            took,
+        )
+    };
+    let deferred = whole
+        .sections
+        .iter()
+        .find(|s| s.id == "diff")
+        .expect("a diff tab");
+    assert!(
+        deferred.deferred && deferred.blocks.is_empty(),
+        "{deferred:?}"
+    );
+
+    // At the source: one request, then none.
+    let (read, sent) = diff().await;
+    let read = read.expect("the commit's diff reads");
+    assert_eq!(read.read_at, DiffReadAt::Source);
+    assert!(!read.files.is_empty(), "the seeded commit changes a file");
+    let (_, again) = diff().await;
+    println!("whole view {sent_whole}, diff at the source {sent} then {again} requests");
+    assert_eq!(sent, 1, "the commit's .diff alone");
+    assert_eq!(again, 0, "kept by sha");
+
+    // At a checkout that holds it: Gitea is asked nothing.
+    let url = need("KNOBAS_GITEA_URL");
+    let (scheme, rest) = url.split_once("://").expect("a URL");
+    let token = need("KNOBAS_GITEA_TOKEN");
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let cloned = std::process::Command::new("git")
+        .args(["clone", "-q"])
+        .arg(format!("{scheme}://knobas:{token}@{rest}/{SEEDED}.git"))
+        .arg(dir.path().join("payout-service"))
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .expect("git runs");
+    assert!(
+        cloned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cloned.stderr)
+    );
+    let path = dir.path().join("payout-service");
+    knobas_app::checkout::set_override(&app.pool, &repo, path.to_str())
+        .await
+        .expect("the checkout is set");
+    let (local, sent) = diff().await;
+    let local = local.expect("the commit's diff reads at the checkout");
+    println!("diff at the checkout: {sent} requests");
+    assert_eq!(local.read_at, DiffReadAt::Checkout);
+    assert_eq!(sent, 0, "the checkout holds it: Gitea is asked nothing");
+    assert_eq!(
+        local
+            .files
+            .iter()
+            .map(|f| f.path.as_str())
+            .collect::<Vec<_>>(),
+        read.files
+            .iter()
+            .map(|f| f.path.as_str())
+            .collect::<Vec<_>>(),
+        "the same change, wherever it was read"
+    );
+}

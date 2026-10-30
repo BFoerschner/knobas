@@ -721,7 +721,8 @@ export type DiffRead = { "status": "read" } & UncommittedDiff | { "status": "no_
  *
  * - `checkout`: local read-only git at the repository's checkout, which
  *   holds both commits (ADR-0036).
- * - `source`: the source's compare read, kept by sha pair (ADR-0032).
+ * - `source`: the source's compare read, kept by sha pair (ADR-0032), or
+ *   for one commit its own diff section, kept by sha (#2319).
  *
  * Issue #2272.
  */
