@@ -409,6 +409,7 @@
         onexpand={(hunk, how) => void expand(file, hunk, how)}
         tokensOf={(side, cell) => tokensOf(file, side, cell)}
         {talk}
+        {render}
       />
     {/each}
     {#if gone.length > 0 || homeless.length > 0}

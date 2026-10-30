@@ -24,9 +24,10 @@
   import { flushSync } from "svelte";
   import type { DiffLine, LineComment } from "../../ipc/entity";
   import { lineName } from "../../detail/view/pending-comments.svelte";
-  import type { LineTokens } from "../../render/port";
+  import type { LineTokens, RenderPort } from "../../render/port";
   import { Windowed } from "../../shell/windowed.svelte";
   import { ago } from "../../shell/time";
+  import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { placeThreads, targetOf } from "../pr/files";
   import { changedWords, DIFF_CEILING, EXPAND_STEP as STEP, keyOf, splitRows, unifiedRows, type DrawnFile, type DrawnLine, type Expanded, type Gap } from "./diff";
   import type { DiffTalk } from "./talk";
@@ -49,6 +50,7 @@
     onexpand,
     tokensOf,
     talk,
+    render,
   }: {
     file: DrawnFile;
     split: boolean;
@@ -68,6 +70,8 @@
     onexpand: (hunk: number, how: Expand) => void;
     tokensOf: (side: "old" | "new", drawn: DrawnLine) => LineTokens | undefined;
     talk: DiffTalk;
+    /** Draws a line comment's Markdown body (#2261). */
+    render: RenderPort;
   } = $props();
 
   type Expand = "down" | "up" | "all";
@@ -213,7 +217,11 @@
 
 {#snippet said(comments: readonly LineComment[])}
   {#each comments as c, k (k)}
-    <p><b>{c.author}</b>{c.at ? ` ${ago(c.at)}` : ""}: {c.body}</p>
+    <!-- A line comment's body is the source's Markdown (`LineComment`), drawn by the Markdown component (#2261). -->
+    <div class="tf-said">
+      <p><b>{c.author}</b>{c.at ? ` ${ago(c.at)}` : ""}</p>
+      <TfMarkdown text={c.body} {render} />
+    </div>
   {/each}
 {/snippet}
 
