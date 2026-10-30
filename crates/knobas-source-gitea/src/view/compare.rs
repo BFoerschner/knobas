@@ -8,6 +8,11 @@
 //! 2026-10-30). Git forbids `..` in a ref name, so the first `...` splits the
 //! two ends. The read is the compare alone: no repository record, no write
 //! offered.
+//!
+//! The one exception is the repository's first commit, which has no commit
+//! before it: Gitea answers `<root>^` with 404 (measured on 1.27.3), and has
+//! no compare from the empty tree. A range of that one commit is its own
+//! diff; a longer range that starts at it is refused, saying why.
 
 use knobas_source::SourceError;
 use knobas_source::view::{Block, ViewSection};
@@ -49,7 +54,13 @@ pub(super) async fn read(
             "gitea: {section:?} names no compare `compare:<base>...<head>` (asked for {entity:?})"
         )));
     };
-    let text = source.client.compare_diff(owner, repo, base, head).await?;
+    let text = match source.client.compare_diff(owner, repo, base, head).await {
+        Ok(text) => text,
+        Err(error) if error.status() == Some(404) => {
+            first_commit(source, owner, repo, base, head, error).await?
+        }
+        Err(error) => return Err(error),
+    };
     let (files, truncated) = knobas_source::diff::parse_view(&text);
     Ok(ViewSection {
         id: section.to_owned(),
@@ -62,5 +73,37 @@ pub(super) async fn read(
             commentable: None,
             gone: Vec::new(),
         }],
+    })
+}
+
+/// The diff for a compare Gitea did not find (`refused`, a 404): when the
+/// base is `<oldest>^` and `oldest` is the repository's first commit, the
+/// range of that commit alone is its own diff, and a longer one is refused
+/// with the reason. Anything else is `refused` as it came.
+async fn first_commit(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    base: &str,
+    head: &str,
+    refused: SourceError,
+) -> Result<String, SourceError> {
+    let Some(oldest) = base.strip_suffix('^') else {
+        return Err(refused);
+    };
+    match source.client.commit(owner, repo, oldest).await {
+        Ok(commit) if commit.parents.is_empty() => {}
+        _ => return Err(refused),
+    }
+    if oldest == head {
+        return source.client.commit_diff(owner, repo, oldest).await;
+    }
+    Err(SourceError::Protocol {
+        status: Some(404),
+        message: format!(
+            "gitea: {oldest} is the repository's first commit, so no commit comes \
+             before it and Gitea cannot read a range that starts there; pick the \
+             range from the commit after it, or open {oldest} on its own"
+        ),
     })
 }

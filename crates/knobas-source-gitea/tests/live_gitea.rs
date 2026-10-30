@@ -1106,6 +1106,45 @@ async fn the_diff_between_two_seeded_commits_is_read_from_the_compare() {
     // Its inner bounds leave the oldest commit's change out.
     let inner = compare(oldest, newest).await;
     assert_ne!(inner, range, "{oldest}...{newest} is not the range");
+
+    // The repository's first commit (the seed's `auto_init`, the oldest on
+    // `main`) has no commit before it: alone it is its own diff, and a
+    // longer range from it is refused, saying why.
+    let main = format!("{repo}@refs/heads/main");
+    let on_main = source
+        .view(&main, Some("commits"))
+        .await
+        .unwrap_or_else(|error| panic!("the commits of {main} failed: {error:?}"))
+        .expect("Gitea draws a branch");
+    let on_main: Vec<String> = on_main.sections[0]
+        .blocks
+        .iter()
+        .flat_map(|b| match b {
+            Block::Entities { rows, .. } => rows.clone(),
+            _ => Vec::new(),
+        })
+        .filter_map(|r| r.entity_id)
+        .filter_map(|id| id.rsplit_once('@').map(|(_, sha)| sha.to_owned()))
+        .collect();
+    let (tip, root) = (&on_main[0], &on_main[on_main.len() - 1]);
+    let own = source
+        .view(&format!("{repo}@{root}"), Some("diff"))
+        .await
+        .unwrap_or_else(|error| panic!("the diff of {root} failed: {error:?}"))
+        .expect("Gitea draws a commit");
+    assert_eq!(
+        compare(&format!("{root}^"), root).await,
+        paths(&own),
+        "the first commit {root} as a range is its own diff"
+    );
+    if tip != root {
+        let error = source
+            .view(&repo, Some(&format!("compare:{root}^...{tip}")))
+            .await
+            .expect_err("a range from the first commit is refused");
+        println!("{root}^...{tip}: {error}");
+        assert!(error.to_string().contains("first commit"), "{error}");
+    }
 }
 
 /// The seeded repository's source view (#663), read from the real server:

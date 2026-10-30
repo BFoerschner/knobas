@@ -135,3 +135,74 @@ async fn a_compare_between_whole_shas_is_fixed_and_one_naming_a_branch_is_live()
         "a commit's view has no compare section"
     );
 }
+
+/// The repository's first commit has no commit before it: Gitea answers
+/// `<root>^` with 404 (1.27.3, measured 2026-10-30) and the commit with no
+/// parents.
+async fn root_served(parents: serde_json::Value) -> MockServer {
+    let server = MockServer::builder().start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/compare/{BASE}%5E...{HEAD}")))
+        .respond_with(ResponseTemplate::new(404).set_body_json(
+            serde_json::json!({ "message": format!("ref \"{BASE}^\" does not exist") }),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/compare/{BASE}%5E...{BASE}")))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/git/commits/{BASE}")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "sha": BASE, "parents": parents })),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/git/commits/{BASE}.diff")))
+        .respond_with(ResponseTemplate::new(200).set_body_string(DIFF))
+        .mount(&server)
+        .await;
+    server
+}
+
+#[tokio::test]
+async fn the_first_commit_alone_as_a_range_is_its_own_diff() {
+    let server = root_served(serde_json::json!([])).await;
+    let view = source(&server)
+        .view(ENTITY, Some(&format!("compare:{BASE}^...{BASE}")))
+        .await
+        .unwrap()
+        .expect("drawn");
+    let Block::Diff { files, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff");
+    };
+    assert_eq!(paths_of(files), ["src/retry.rs"]);
+}
+
+#[tokio::test]
+async fn a_longer_range_from_the_first_commit_is_refused_saying_why() {
+    let server = root_served(serde_json::json!([])).await;
+    let error = source(&server)
+        .view(ENTITY, Some(&format!("compare:{BASE}^...{HEAD}")))
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("first commit"),
+        "the refusal names the first commit: {error}"
+    );
+}
+
+#[tokio::test]
+async fn a_compare_gitea_does_not_find_past_a_commit_with_a_parent_is_its_404() {
+    let server = root_served(serde_json::json!([{ "sha": HEAD }])).await;
+    let error = source(&server)
+        .view(ENTITY, Some(&format!("compare:{BASE}^...{HEAD}")))
+        .await
+        .unwrap_err();
+    assert_eq!(error.status(), Some(404), "{error}");
+    assert!(!error.to_string().contains("first commit"), "{error}");
+}
