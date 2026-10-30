@@ -40,6 +40,7 @@ pub mod link_sets;
 pub mod logging;
 pub mod notes_export;
 pub mod notify;
+pub mod file_pipeline;
 mod profile;
 pub mod protocol;
 pub mod renderers;
@@ -642,6 +643,8 @@ pub fn run() {
             commands::app::set_renderer_defaults,
             // #2256's byte read, appended at the foot (§10.8).
             commands::entity::entity_file_bytes,
+            // #2264's pipeline over a file's bytes, appended at the foot (§10.8).
+            commands::entity::entity_file_piped,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

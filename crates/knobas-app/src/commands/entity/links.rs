@@ -412,6 +412,83 @@ pub async fn entity_file_bytes_inner(
     }
 }
 
+/// A pipeline over the bytes of the file at `path` in `entity_id`'s tree
+/// (#2264, spec #2234 step 5): `steps` in order, each on the last one's
+/// output, the last one's drawn by the renderer its name picks. Read as
+/// [`entity_file_bytes`] reads; a run over a file at a whole sha is kept, so
+/// the same pipeline again costs nothing (ADR-0032). Every step is capped at
+/// [`SIZE_CAP`](crate::file_pipeline::SIZE_CAP) of output and
+/// [`STEP_TIMEOUT`](crate::file_pipeline::STEP_TIMEOUT).
+///
+/// # Errors
+///
+/// See [`entity_file_piped_inner`].
+#[tauri::command]
+pub async fn entity_file_piped<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    path: String,
+    commit: Option<String>,
+    steps: Vec<crate::file_pipeline::PipeStep>,
+) -> Result<crate::file_pipeline::PipeRun, IpcError> {
+    let state = crate::sources::state(&app)?;
+    entity_file_piped_inner(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &path,
+        commit.as_deref(),
+        &steps,
+    )
+    .await
+}
+
+/// [`entity_file_piped`]'s body, reachable from a test.
+///
+/// # Errors
+///
+/// As [`entity_file_bytes_inner`]: the read's refusals. A step that fails is
+/// an answer ([`PipeRun::Failed`](crate::file_pipeline::PipeRun::Failed)).
+#[allow(clippy::too_many_arguments)]
+pub async fn entity_file_piped_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    path: &str,
+    commit: Option<&str>,
+    steps: &[crate::file_pipeline::PipeStep],
+) -> Result<crate::file_pipeline::PipeRun, IpcError> {
+    use crate::file_pipeline::{Limits, Piped, run_on_file};
+    let piped = run_on_file(
+        pool,
+        secrets,
+        registry,
+        live,
+        entity_id,
+        path,
+        commit,
+        steps,
+        Limits::default(),
+    )
+    .await
+    .map_err(|error| crate::sources::to_ipc(&error, None))?;
+    match piped {
+        Piped::Ran(run) => Ok(run.as_ref().clone()),
+        Piped::TooLarge { size } => Err(IpcError::invalid(format!(
+            "{path} is {}; knobas reads a file's bytes up to {}",
+            mebibytes(size),
+            mebibytes(knobas_source::view::BYTES_CAP)
+        ))),
+        Piped::NoBytes => Err(IpcError::invalid(format!(
+            "{entity_id}'s source reads no file bytes"
+        ))),
+    }
+}
+
 /// `size` bytes in MiB, to one place where it is not whole.
 fn mebibytes(size: u64) -> String {
     #[allow(clippy::cast_precision_loss)]
