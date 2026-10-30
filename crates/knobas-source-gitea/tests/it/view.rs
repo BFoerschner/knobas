@@ -134,7 +134,8 @@ fn section<'v>(view: &'v SourceView, id: &str) -> &'v knobas_source::view::ViewS
 #[tokio::test]
 async fn a_commit_view_is_its_overview_and_its_diff() {
     let server = gitea(200).await;
-    let view = source(&server)
+    let source = source(&server);
+    let view = source
         .view(COMMIT, None)
         .await
         .expect("the read succeeds")
@@ -197,8 +198,32 @@ async fn a_commit_view_is_its_overview_and_its_diff() {
         "the whole message, as text"
     );
 
+    // The diff is deferred (#2319): the commit tab reads it local-first, at a
+    // checkout that holds the commit, so the whole view does not read it too.
     let diff = section(&view, "diff");
     assert_eq!(diff.title, "Diff");
+    assert!(diff.deferred, "{diff:#?}");
+    assert!(diff.blocks.is_empty(), "{diff:#?}");
+    let paths: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_owned())
+        .collect();
+    assert!(
+        !paths.iter().any(|p| p.ends_with(".diff")),
+        "the whole view read the diff: {paths:?}"
+    );
+
+    let view = source
+        .view(COMMIT, Some("diff"))
+        .await
+        .expect("the read succeeds")
+        .expect("Gitea draws a commit's diff");
+    let diff = section(&view, "diff");
+    assert_eq!(diff.title, "Diff");
+    assert!(!diff.deferred);
     assert_eq!(diff.count, Some(2), "files changed");
     let Block::Diff {
         files, truncated, ..
@@ -225,7 +250,7 @@ async fn a_commit_view_is_its_overview_and_its_diff() {
 #[tokio::test]
 async fn a_diff_gitea_refuses_is_an_error_and_not_an_empty_diff() {
     let server = gitea(404).await;
-    let failed = source(&server).view(COMMIT, None).await;
+    let failed = source(&server).view(COMMIT, Some("diff")).await;
     assert!(
         matches!(
             failed,
@@ -485,8 +510,8 @@ async fn a_read_only_token_offers_a_new_branch_disabled_saying_why() {
         Some("This token cannot write: it lacks the write:repository scope")
     );
     assert_eq!(
-        section(&view, "diff").count,
-        Some(2),
+        section(&view, "overview").blocks.len(),
+        3,
         "the reads are as drawn"
     );
 

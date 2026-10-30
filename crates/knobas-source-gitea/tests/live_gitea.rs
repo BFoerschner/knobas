@@ -408,7 +408,14 @@ async fn a_seeded_commits_view_carries_the_diff_the_seed_pushed() {
             }
         }
 
-        let diff = &view.sections[1];
+        // Deferred in the whole view (#2319): its own read draws it.
+        assert!(view.sections[1].deferred, "{id}");
+        let diff_view = source
+            .view(&id, Some("diff"))
+            .await
+            .unwrap_or_else(|error| panic!("the diff of {id} failed: {error:?}"))
+            .unwrap_or_else(|| panic!("Gitea draws a commit's diff, and drew nothing for {id}"));
+        let diff = &diff_view.sections[0];
         let Block::Diff {
             files, truncated, ..
         } = &diff.blocks[0]
