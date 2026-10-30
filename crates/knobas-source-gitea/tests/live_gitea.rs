@@ -1208,7 +1208,12 @@ async fn the_seeded_trees_are_walked_and_a_seeded_file_is_drawn() {
     assert_eq!(language.as_deref(), Some("markdown"));
     assert_eq!(size, text.len() as u64);
     assert!(!truncated && !binary);
-    assert!(url.is_some_and(|u| u.ends_with("/src/branch/main/README.md")));
+    // Read at the tip's sha (#2241), a repository's page names the commit.
+    assert!(
+        url.as_deref()
+            .is_some_and(|u| u.contains("/src/commit/") && u.ends_with("/README.md")),
+        "{url:?}"
+    );
     assert_eq!(
         trail.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
         ["main", "README.md"]
@@ -4839,30 +4844,25 @@ async fn a_file_is_committed_onto_a_branch_a_new_branch_held_when_it_moved_and_r
     );
 
     // 4. The branch is protected: refused with the reason, before a request;
-    //    a new branch from it still goes. The file's view declares its commit
-    //    taken before, and disabled with the same reason after (#985).
+    //    a new branch from it still goes. `refused_writes` takes the commit
+    //    before, and refuses it with the same reason after (#985, asked
+    //    there since #2241 rather than beside every file).
     let branch_entity = format!("{repo_id}@refs/heads/{branch}");
-    let file_section = format!("file:{path}");
     let declared_commit = || async {
-        let view = source
-            .view(&branch_entity, Some(&file_section))
+        source
+            .refused_writes(&[knobas_source::grants::WriteAsk {
+                entity: branch_entity.clone(),
+                op: "commit_file".to_owned(),
+                field: None,
+            }])
             .await
-            .expect("the file's view")
-            .expect("drawn");
-        view.sections[0]
-            .blocks
-            .iter()
-            .find_map(|block| match block {
-                knobas_source::view::Block::Actions { actions } => actions
-                    .iter()
-                    .find(|a| a.write_op == "commit_file")
-                    .cloned(),
-                _ => None,
-            })
-            .expect("the file declares its commit")
+            .expect("refused_writes answers")
+            .into_iter()
+            .next()
+            .map(|refused| refused.reason)
     };
     assert_eq!(
-        declared_commit().await.disabled,
+        declared_commit().await,
         None,
         "an unprotected branch takes the commit"
     );
@@ -4894,8 +4894,7 @@ async fn a_file_is_committed_onto_a_branch_a_new_branch_held_when_it_moved_and_r
     );
     let reason = declared_commit()
         .await
-        .disabled
-        .expect("a protected branch's commit is declared disabled");
+        .expect("a protected branch's commit is refused");
     println!("LIVE the file's commit on a protected branch: {reason:?}");
     assert!(
         matches!(&refused, Err(SourceError::Protocol { message, .. }) if message.ends_with(&reason)),

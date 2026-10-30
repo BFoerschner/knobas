@@ -23,6 +23,7 @@ use crate::model::{CommitDetail, Signature, UserRef};
 use crate::source::GiteaSource;
 
 mod act;
+pub(crate) use act::MIRRORED;
 mod branch;
 mod checks;
 mod files;
@@ -81,11 +82,16 @@ pub(crate) async fn draw(
 
 /// What the view of `entity` at `section` stands at (ADR-0032, #2239):
 /// [`Standing::Fixed`] for a commit's diff and its tree's sections at a full
-/// sha, which no push can change and which offer no write; everything else
-/// is live. A commit's overview is not fixed (its checks move), and neither
-/// is its whole view (its toolbar reads the repository).
+/// sha, and for a branch's or repository's tree sections that name the sha
+/// they are read at (#2241), which no push can change and which offer no
+/// write. [`Standing::Moving`] for what is read by a moving reference and
+/// offers no write: a repository's branch list, and a branch's or
+/// repository's tree sections that read the tip first (#2242). Everything
+/// else is live. A commit's overview is not fixed (its checks move), and
+/// neither is its whole view (its toolbar reads the repository).
 ///
 /// [`Standing::Fixed`]: knobas_source::view::Standing::Fixed
+/// [`Standing::Moving`]: knobas_source::view::Standing::Moving
 pub(crate) fn standing(
     source: &GiteaSource,
     entity: &str,
@@ -98,13 +104,20 @@ pub(crate) fn standing(
         {
             Standing::Fixed
         }
+        (Ok(GiteaKey::Branch { .. } | GiteaKey::Repo { .. }), Some(id)) if files::names_sha(id) => {
+            Standing::Fixed
+        }
+        (Ok(GiteaKey::Branch { .. } | GiteaKey::Repo { .. }), Some(id)) if files::owns(id) => {
+            Standing::Moving
+        }
+        (Ok(GiteaKey::Repo { .. }), Some(repo::BRANCHES)) => Standing::Moving,
         _ => Standing::Live,
     }
 }
 
 /// Whether `sha` is a whole object id, SHA-1's 40 hex characters or
 /// SHA-256's 64: a shorter one names whichever commit it is unique to today.
-fn full_sha(sha: &str) -> bool {
+pub(crate) fn full_sha(sha: &str) -> bool {
     matches!(sha.len(), 40 | 64) && sha.chars().all(|c| c.is_ascii_hexdigit())
 }
 
@@ -143,8 +156,7 @@ async fn commit(
         // The tree at this commit (#2239): the Files tab's sections, read at
         // the sha, which no tab of a commit's view names yet.
         Some(id) if files::owns(id) => {
-            let record: rows::RepoRecord = source.client.repo_as(owner, repo).await?;
-            vec![files::read(source, &record, owner, repo, files::At::Commit(sha), id).await?]
+            vec![files::read(source, owner, repo, files::Of::Commit(sha), id).await?]
         }
         Some(other) => {
             return Err(SourceError::protocol(format!(

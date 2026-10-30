@@ -60,6 +60,13 @@ impl GiteaClient {
         Ok((labels.unwrap_or_default(), total))
     }
 
+    /// Whether `path` is a path in a tree this client would put in a route
+    /// (no empty, `.` or `..` segment): asked before anything is sent for
+    /// it, a tip included (#2241).
+    pub(crate) fn tree_path(path: &str) -> Result<(), SourceError> {
+        escaped_path(path).map(drop)
+    }
+
     /// `GET /repos/{o}/{r}/branches/{branch}` -- one branch and its tip.
     pub(crate) async fn branch_as<T: serde::de::DeserializeOwned>(
         &self,

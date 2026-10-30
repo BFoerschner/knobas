@@ -51,7 +51,7 @@ pub(super) fn default_first<'a>(
 /// write on a pull mirror (a 403, `Git Repository is a mirror.`), so the view
 /// must not offer one it knows will be refused. A mirror can be turned
 /// into a plain repository, so the actions stay, disabled (the #701 ruling).
-pub(super) const MIRRORED: &str = "A mirror: its branches come from upstream";
+pub(crate) const MIRRORED: &str = "A mirror: its branches come from upstream";
 
 /// *New branch…*: a name, and where it starts. `repository` is the entity the
 /// write targets where the view is not the repository's own.

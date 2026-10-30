@@ -206,16 +206,90 @@ pub(crate) async fn refused(source: &GiteaSource, asks: &[WriteAsk]) -> Vec<Refu
     let mut answered: Vec<RefusedWrite> = Vec::new();
     for ((owner, repo), repo_asks) in &by_repository {
         let ops: Vec<&str> = repo_asks.iter().map(|a| a.op.as_str()).collect();
-        let grants = probe(source, owner, repo, &ops).await;
-        answered.extend(repo_asks.iter().filter_map(|ask| {
+        let (grants, standing) = tokio::join!(
+            probe(source, owner, repo, &ops),
+            standing(source, owner, repo, repo_asks),
+        );
+        answered.extend(repo_asks.iter().zip(standing).filter_map(|(ask, held)| {
             grants
                 .refusal(&ask.op)
+                .or(held)
                 .map(|why| RefusedWrite::of(ask, why))
         }));
     }
     asks.iter()
         .filter_map(|ask| answered.iter().find(|r| r.refuses(ask)).cloned())
         .collect()
+}
+
+/// What a repository's record says of a write, beside the token's grants.
+#[derive(Debug, serde::Deserialize)]
+struct Held {
+    #[serde(default)]
+    empty: bool,
+    #[serde(default)]
+    mirror: bool,
+    #[serde(default)]
+    default_branch: Option<String>,
+}
+
+/// Why each of `asks` (all in `owner/repo`) is refused by where it would
+/// land rather than by the token, as the views that offer them say (#2241):
+/// *New branch…* in an empty repository or a mirror ([`crate::view::MIRRORED`]),
+/// and *Commit change…* onto a protected branch the account may not push to
+/// ([`crate::write::PushGuard`], #985). This is what a file view used to read
+/// beside every file; asked here, the app keeps it with the grants. A read
+/// that fails says nothing, as a probe without a verdict does.
+async fn standing(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    asks: &[&WriteAsk],
+) -> Vec<Option<String>> {
+    let needs_record = asks.iter().any(|ask| {
+        ask.op == crate::WRITE_OP_CREATE_BRANCH
+            || (ask.op == crate::WRITE_OP_COMMIT_FILE
+                && matches!(source.key_of(&ask.entity), Ok(crate::keys::GiteaKey::Repo { .. })))
+    });
+    let record: Option<Held> = if needs_record {
+        source.client.repo_as(owner, repo).await.ok()
+    } else {
+        None
+    };
+    let mut out = Vec::with_capacity(asks.len());
+    for ask in asks {
+        let why = match ask.op.as_str() {
+            crate::WRITE_OP_CREATE_BRANCH => record.as_ref().and_then(|held| {
+                if held.empty {
+                    Some("The repository is empty".to_owned())
+                } else {
+                    held.mirror.then(|| crate::view::MIRRORED.to_owned())
+                }
+            }),
+            crate::WRITE_OP_COMMIT_FILE => {
+                let branch = match source.key_of(&ask.entity) {
+                    Ok(crate::keys::GiteaKey::Branch { branch, .. }) => Some(branch),
+                    Ok(crate::keys::GiteaKey::Repo { .. }) => record
+                        .as_ref()
+                        .and_then(|held| held.default_branch.clone())
+                        .filter(|b| !b.is_empty()),
+                    _ => None,
+                };
+                match branch {
+                    Some(branch) => source
+                        .client
+                        .branch_as::<crate::write::PushGuard>(owner, repo, &branch)
+                        .await
+                        .ok()
+                        .and_then(|guard| guard.refusal(&branch)),
+                    None => None,
+                }
+            }
+            _ => None,
+        };
+        out.push(why);
+    }
+    out
 }
 
 /// One probe: the category's write with an empty body (the module docs).

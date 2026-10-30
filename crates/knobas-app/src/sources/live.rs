@@ -293,7 +293,7 @@ impl LiveSources {
         };
         if let Some(Answer::View(kept)) = self.reads().get(&key) {
             if behind {
-                self.read_behind(lent, key);
+                self.read_behind(lent, vec![key]);
             }
             return Ok(kept);
         }
@@ -336,8 +336,8 @@ impl LiveSources {
                 _ => ask_now.push(ask.clone()),
             }
         }
-        for key in kept_keys {
-            self.read_behind(lent, key);
+        if !kept_keys.is_empty() {
+            self.read_behind(lent, kept_keys);
         }
         if !ask_now.is_empty() {
             let fresh = lent.source.refused_writes(&ask_now).await?;
@@ -359,52 +359,73 @@ impl LiveSources {
             .collect())
     }
 
-    /// Read `key` again behind the answer just given from the cache, unless
-    /// such a read is under way: its answer replaces the kept one where the
-    /// cache still holds it, and a moved view is told.
-    fn read_behind(&self, lent: &Lent, key: Key) {
-        if !self.0.behind.lock().expect("the reads behind").insert(key.clone()) {
+    /// Read `keys` again behind the answer just given from the cache, each
+    /// unless a read of it is under way: a view's own read, or the writes'
+    /// asks together, as they were asked. An answer replaces the kept one
+    /// where the cache still holds it, and a moved view is told.
+    fn read_behind(&self, lent: &Lent, keys: Vec<Key>) {
+        let keys: Vec<Key> = {
+            let mut behind = self.0.behind.lock().expect("the reads behind");
+            keys.into_iter().filter(|key| behind.insert(key.clone())).collect()
+        };
+        if keys.is_empty() {
             return;
         }
         self.0.pending.fetch_add(1, Ordering::SeqCst);
         let this = self.clone();
         let source = Arc::clone(&lent.source);
         let work = async move {
-            let fresh = match &key.ask {
-                Ask::View(section) => source
-                    .view(&key.entity, section.as_deref())
-                    .await
-                    .map(Answer::View),
-                Ask::Write { op, field } => {
-                    let ask = WriteAsk {
-                        entity: key.entity.clone(),
-                        op: op.clone(),
-                        field: field.clone(),
-                    };
-                    source
-                        .refused_writes(std::slice::from_ref(&ask))
-                        .await
-                        .map(|fresh| Answer::Refused(fresh.into_iter().find(|r| r.refuses(&ask))))
+            let mut views = Vec::new();
+            let mut asks = Vec::new();
+            for key in &keys {
+                match &key.ask {
+                    Ask::View(section) => views.push((key, section.clone())),
+                    Ask::Write { op, field } => asks.push((
+                        key,
+                        WriteAsk {
+                            entity: key.entity.clone(),
+                            op: op.clone(),
+                            field: field.clone(),
+                        },
+                    )),
                 }
-            };
-            match fresh {
-                Ok(answer) => {
-                    let moved = this.reads().replace(&key, answer);
-                    if moved && let Ask::View(section) = &key.ask {
-                        let listener = this.0.fresh.lock().expect("the listener").clone();
-                        if let Some(listener) = listener {
-                            listener(ViewFresh {
+            }
+            for (key, section) in views {
+                match source.view(&key.entity, section.as_deref()).await {
+                    Ok(view) => {
+                        if this.reads().replace(key, Answer::View(view)) {
+                            this.tell(ViewFresh {
                                 entity_id: key.entity.clone(),
-                                section: section.clone(),
+                                section,
                             });
                         }
                     }
-                }
-                Err(error) => {
-                    tracing::debug!(entity = %key.entity, %error, "a read behind failed; the kept answer stands");
+                    Err(error) => {
+                        tracing::debug!(entity = %key.entity, %error, "a read behind failed; the kept answer stands");
+                    }
                 }
             }
-            this.0.behind.lock().expect("the reads behind").remove(&key);
+            if !asks.is_empty() {
+                let of: Vec<WriteAsk> = asks.iter().map(|(_, ask)| ask.clone()).collect();
+                match source.refused_writes(&of).await {
+                    Ok(fresh) => {
+                        let mut reads = this.reads();
+                        for (key, ask) in &asks {
+                            let refusal = fresh.iter().find(|r| r.refuses(ask)).cloned();
+                            reads.replace(key, Answer::Refused(refusal));
+                        }
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, "grants asked behind failed; the kept answer stands");
+                    }
+                }
+            }
+            {
+                let mut behind = this.0.behind.lock().expect("the reads behind");
+                for key in &keys {
+                    behind.remove(key);
+                }
+            }
             if this.0.pending.fetch_sub(1, Ordering::SeqCst) == 1 {
                 this.0.idle.notify_waiters();
             }
@@ -413,6 +434,13 @@ impl LiveSources {
         #[cfg(feature = "test-util")]
         let work = knobas_http::counted::inherit(work);
         tokio::spawn(work);
+    }
+
+    fn tell(&self, fresh: ViewFresh) {
+        let listener = self.0.fresh.lock().expect("the listener").clone();
+        if let Some(listener) = listener {
+            listener(fresh);
+        }
     }
 
     fn reads(&self) -> std::sync::MutexGuard<'_, Reads> {
