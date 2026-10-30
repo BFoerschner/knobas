@@ -301,3 +301,98 @@ test("a binary PNG is drawn from its bytes as a blob image, which is let go with
     URL.revokeObjectURL = revoke;
   }
 });
+
+// -- A text file past the source's cut (spec #2234 story 16) ------------------
+
+/** A source whose one text file is cut after `cut` of its lines, as Gitea cuts at 10,000 lines or 1 MB. */
+function cutSource(path: string, whole: string, cut: number) {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const size = new TextEncoder().encode(whole).length;
+  const text = whole.split("\n").slice(0, cut).join("\n");
+  return async (_at: string, section: string | null): Promise<SourceView> => {
+    const blocks =
+      section === "files"
+        ? [{ type: "tree", trail: [], entries: [{ name, kind: "file", size, section: `file:${path}` }], truncated: false, url: null }]
+        : [{ type: "file", trail: [], path, text, language: null, size, truncated: true, binary: false, url: "https://gitea.example/raw", sha: "b10b", commit: "c0mmit" }];
+    return { sections: [{ id: section, title: "Files", count: null, deferred: false, blocks }], actions: [] } as unknown as SourceView;
+  };
+}
+
+function drawCut(path: string, whole: string, cut: number, fileBytes: ((entityId: string, path: string, commit: string | null) => Promise<Uint8Array>) | null, line: number | null) {
+  view = mount(TfRepoFiles, {
+    target,
+    props: {
+      ports: {
+        entityView: cutSource(path, whole, cut),
+        ...(fileBytes ? { fileBytes } : {}),
+        submitWrite: async () => {
+          throw { code: "invalid", message: "no write in this suite" };
+        },
+      },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      path,
+      line,
+      changed: new Set<string>(),
+      defaults: createRendererDefaults({ read: async () => [], save: async (list) => list }),
+      render: plainPort,
+    },
+  });
+  flushSync();
+}
+
+const LONG = Array.from({ length: 12_000 }, (_, i) => `line ${i + 1}`).join("\n");
+const cutBanner = () => [...target.querySelectorAll(".tf-banner")].find((b) => text(b).startsWith("The file is longer than knobas shows"));
+
+test("a text file past the source's cut is read whole through the byte read, at its commit, and drawn to its last line", async () => {
+  const reads: string[] = [];
+  drawCut("data/ledger.csv", LONG, 10_000, async (entityId, path, commit) => (reads.push(`${entityId} ${path} ${commit}`), new TextEncoder().encode(LONG)), 11_500);
+  await settle();
+
+  expect(reads).toEqual([`${REPO} data/ledger.csv c0mmit`]);
+  expect(cutBanner()).toBeUndefined();
+  const at = target.querySelector<HTMLElement>(".tf-fileview .tf-code .tf-l.tf-at");
+  expect(at?.dataset["n"]).toBe("11500");
+  expect(at?.lastElementChild?.textContent).toBe("line 11500");
+});
+
+test("a cut file past the byte cap, or with no byte read, keeps the cut and says so", async () => {
+  const reads: string[] = [];
+  drawCut("data/ledger.csv", LONG, 10_000, null, null);
+  await settle();
+  expect(cutBanner()).toBeDefined();
+  unmount(view!);
+  view = null;
+
+  view = mount(TfRepoFiles, {
+    target,
+    props: {
+      ports: {
+        entityView: async (_at: string, section: string | null) => {
+          const answer = await cutSource("data/huge.csv", LONG, 10_000)(_at, section);
+          const block = answer.sections[0]!.blocks[0] as unknown as { size: number };
+          block.size = BYTES_CAP + 1;
+          if (section === "files") (answer.sections[0]!.blocks[0] as unknown as { entries: { size: number }[] }).entries[0]!.size = BYTES_CAP + 1;
+          return answer;
+        },
+        fileBytes: async (entityId: string, path: string) => (reads.push(`${entityId} ${path}`), new Uint8Array()),
+        submitWrite: async () => {
+          throw { code: "invalid", message: "no write in this suite" };
+        },
+      },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      path: "data/huge.csv",
+      line: null,
+      changed: new Set<string>(),
+      defaults: createRendererDefaults({ read: async () => [], save: async (list) => list }),
+      render: plainPort,
+    },
+  });
+  flushSync();
+  await settle();
+  expect(reads).toEqual([]);
+  expect(cutBanner()).toBeDefined();
+});

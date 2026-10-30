@@ -422,12 +422,11 @@ const PNG: &[u8] = &[
 const SVG: &str =
     "<svg width=\"8\" height=\"8\"><script>alert(1)</script><rect width=\"8\" height=\"8\"/></svg>";
 
-/// **The byte read against Gitea** (#2256): a private repository's README
-/// names the commit it was read at; its relative PNG and SVG read at that
-/// commit are the bytes committed; a second look at each costs no request.
-#[tokio::test]
-#[ignore = "needs the testenv Gitea: just gitea-live"]
-async fn a_private_readmes_images_are_read_at_its_commit_and_kept() {
+/// A private repository of the token's user holding `files` (committed in
+/// order; a `README.md` goes over the one `auto_init` made), an [`App`] with
+/// a source of its own scoped to it, and the repository's entity id. The
+/// repository is deleted when the returned guard drops, however the test ends.
+async fn scratch_repo(files: &[(&str, &[u8])]) -> (App, String, Delete) {
     use base64::Engine as _;
     let http = reqwest::Client::new();
     let base = need("KNOBAS_GITEA_URL");
@@ -456,32 +455,10 @@ async fn a_private_readmes_images_are_read_at_its_commit_and_kept() {
         made.status()
     );
     // Deleted again however the test ends, as the pushed branch is.
-    struct Delete(String, String);
-    impl Drop for Delete {
-        fn drop(&mut self) {
-            let (url, auth) = (self.0.clone(), self.1.clone());
-            let _ = std::thread::spawn(move || {
-                tokio::runtime::Runtime::new()
-                    .unwrap()
-                    .block_on(async move {
-                        let _ = reqwest::Client::new()
-                            .delete(url)
-                            .header("Authorization", auth)
-                            .send()
-                            .await;
-                    });
-            })
-            .join();
-        }
-    }
-    let _delete = Delete(format!("{base}/api/v1/repos/{owner}/{name}"), auth.clone());
+    let delete = Delete(format!("{base}/api/v1/repos/{owner}/{name}"), auth.clone());
     let b64 = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
-    let readme = "# bytes\n\n![logo](docs/img/logo.png)\n\n![flow](docs/img/flow.svg)\n";
-    for (path, content) in [
-        ("docs/img/logo.png", PNG.to_vec()),
-        ("docs/img/flow.svg", SVG.as_bytes().to_vec()),
-        ("README.md", readme.as_bytes().to_vec()),
-    ] {
+    for (path, content) in files {
+        let (path, content) = (*path, content.to_vec());
         // README.md exists from auto_init: one PUT over it needs its sha.
         let sha = if path == "README.md" {
             let entry: serde_json::Value = http
@@ -546,6 +523,42 @@ async fn a_private_readmes_images_are_read_at_its_commit_and_kept() {
     .await
     .expect("the source row is written");
     let repo = format!("{}:{owner}/{name}", app.source);
+    (app, repo, delete)
+}
+
+/// Deletes a scratch repository on drop.
+struct Delete(String, String);
+impl Drop for Delete {
+    fn drop(&mut self) {
+        let (url, auth) = (self.0.clone(), self.1.clone());
+        let _ = std::thread::spawn(move || {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(async move {
+                    let _ = reqwest::Client::new()
+                        .delete(url)
+                        .header("Authorization", auth)
+                        .send()
+                        .await;
+                });
+        })
+        .join();
+    }
+}
+
+/// **The byte read against Gitea** (#2256): a private repository's README
+/// names the commit it was read at; its relative PNG and SVG read at that
+/// commit are the bytes committed; a second look at each costs no request.
+#[tokio::test]
+#[ignore = "needs the testenv Gitea: just gitea-live"]
+async fn a_private_readmes_images_are_read_at_its_commit_and_kept() {
+    let readme = "# bytes\n\n![logo](docs/img/logo.png)\n\n![flow](docs/img/flow.svg)\n";
+    let (app, repo, _delete) = scratch_repo(&[
+        ("docs/img/logo.png", PNG),
+        ("docs/img/flow.svg", SVG.as_bytes()),
+        ("README.md", readme.as_bytes()),
+    ])
+    .await;
 
     let (view, _, _) = app.view_of(&repo, FILE).await;
     let Some(Block::File { text, commit, .. }) = view.sections[0].blocks.first() else {
@@ -728,4 +741,49 @@ async fn a_pull_requests_diff_is_read_once_at_its_head() {
     assert_eq!(cold, first, "a rebuilt source reads the same tab");
     assert_eq!(warm, cold, "the kept diff draws the same tab");
     assert_eq!(sent_warm + 1, sent_cold, "only the .diff is not asked again");
+}
+
+/// Spec #2234 story 16: a text file past Gitea's file view (10,000 lines or
+/// 1 MB) is cut in the view, and the byte read the viewer then makes at the
+/// commit it was read at answers it whole, byte for byte; a second look is
+/// the cache's.
+#[tokio::test]
+#[ignore = "needs the testenv Gitea: just gitea-live"]
+async fn a_file_past_the_views_cut_is_read_whole_through_its_bytes() {
+    let long: String = (1..=12_000).map(|n| format!("line {n}\n")).collect();
+    let (app, repo, _delete) = scratch_repo(&[("data/ledger.csv", long.as_bytes())]).await;
+
+    let (view, _, _) = app.view_of(&repo, "file:data/ledger.csv").await;
+    let Some(Block::File {
+        text,
+        truncated,
+        commit,
+        size,
+        ..
+    }) = view.sections[0].blocks.first()
+    else {
+        panic!("the file: {view:?}");
+    };
+    println!("view: {} lines, truncated {truncated}, size {size}", text.lines().count());
+    assert!(*truncated, "Gitea's view cuts it");
+    assert!(text.lines().count() <= 10_000);
+    assert_eq!(*size, long.len() as u64, "the size is the whole file's");
+    let commit = commit.clone().expect("the file names its commit");
+
+    let read = || {
+        knobas_http::counted::counted(knobas_app::commands::entity::entity_file_bytes_inner(
+            &app.pool,
+            &app.secrets,
+            &app.registry,
+            &app.live,
+            &repo,
+            "data/ledger.csv",
+            Some(&commit),
+        ))
+    };
+    let (whole, sent) = read().await;
+    println!("bytes: {sent} requests");
+    assert_eq!(whole.expect("the bytes read"), long.as_bytes(), "whole, byte for byte");
+    let (_, again) = read().await;
+    assert_eq!(again, 0, "a second look is the cache's");
 }

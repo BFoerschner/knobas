@@ -75,7 +75,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
-  import { allRenderers, type Renderer } from "../../render/registry";
+  import { allRenderers, BYTES_CAP, type Renderer } from "../../render/registry";
   import { defaultPipeline, makeDefaultPattern, openWith, withDefault, withPipeline } from "../../render/defaults";
   import { rendererDefaults as appDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
@@ -512,11 +512,41 @@
   /** The run that answered for the file open now; another file's, until the effect above clears it, is not. */
   const ran = $derived(piped !== null && file !== null && piped.path === file.path ? piped.run : null);
   const pipeFailure = $derived(ran !== null && ran.outcome === "failed" ? ran.failure : null);
+  /**
+   * **A text file past the source's cut** (spec #2234 story 16): Gitea's file view stops at 10,000 lines or 1 MB, so
+   * such a file is read whole through the byte read (#2256, up to `BYTES_CAP`) at the commit it was read at, and the
+   * windowed viewer draws all of it. Until the bytes answer, or where they cannot be read, the cut stands and says so.
+   */
+  const wholeAt = $derived(
+    file === null || file.binary || !file.truncated || file.size > BYTES_CAP || ports.fileBytes === undefined
+      ? null
+      : JSON.stringify([at, file.path, file.commit ?? null]),
+  );
+  let whole = $state<{ key: string; text: string } | null>(null);
+  $effect(() => {
+    const key = wholeAt;
+    const read = ports.fileBytes;
+    if (key === null || read === undefined || untrack(() => whole?.key) === key) return;
+    const [entityId, path, commit] = JSON.parse(key) as [string, string, string | null];
+    let live = true;
+    read(entityId, path, commit).then(
+      (bytes) => {
+        if (live) whole = { key, text: new TextDecoder().decode(bytes) };
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  });
+  /** The file as read, whole where the byte read answered for a cut one. */
+  const shownFile = $derived(file !== null && whole !== null && whole.key === wholeAt ? { ...file, text: whole.text, truncated: false } : file);
+
   /** The file as it is drawn: the pipeline's output where it finished, else the file as read. */
   const drawn = $derived.by((): FileBlock | null => {
-    if (file === null) return null;
-    if (steps === null || steps.length === 0 || ran === null || ran.outcome !== "done") return file;
-    return { ...file, ...pipedFile(ran) };
+    if (shownFile === null) return null;
+    if (steps === null || steps.length === 0 || ran === null || ran.outcome !== "done") return shownFile;
+    return { ...shownFile, ...pipedFile(ran) };
   });
 
   const lines = $derived(drawn === null || drawn.binary ? [] : fileLines(drawn.text));
@@ -1128,7 +1158,7 @@
           <span class="tf-acts"><a class="tf-btn tf-sm" href={repoHash(repoId, "local")}>See local changes</a></span>
         </div>
       {/if}
-      {#if file.truncated}
+      {#if shownFile?.truncated}
         <div class="tf-banner tf-info">
           The file is longer than knobas shows.
           {#if file.url}<span class="tf-acts"><a class="tf-btn tf-sm" href={file.url}>The rest on the source</a></span>{/if}
