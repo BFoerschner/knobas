@@ -1344,9 +1344,18 @@ async fn the_seeded_trees_are_walked_and_a_seeded_file_is_drawn() {
             .is_some_and(|u| u.contains("/src/commit/") && u.ends_with("/README.md")),
         "{url:?}"
     );
+    // A repository's file read at the sha its id names starts its trail at
+    // that commit, short (#2241): such a read knows no branch, and reading
+    // the default branch's name would cost the repository's record per file.
+    let readme_section = readme.section.as_deref().expect("a file opens");
+    let readme_sha = readme_section
+        .strip_prefix("file@")
+        .and_then(|rest| rest.split_once(':'))
+        .map(|(sha, _)| sha)
+        .unwrap_or_else(|| panic!("a repository's file id names its sha: {readme_section}"));
     assert_eq!(
         trail.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
-        ["main", "README.md"]
+        [&readme_sha[..10], "README.md"]
     );
 
     // A branch, walked down one directory at a time to a seeded file.
@@ -6524,10 +6533,12 @@ fn read_of(view: &knobas_source::view::SourceView) -> Vec<(String, Option<u64>, 
 const TESTENV_READER: (&str, &str) = ("jonas.becker", "tidewater-dev");
 
 /// Issue #2030, spec #1192 story 10, against the real server: a token minted
-/// with `read:repository` reads the repository, a branch, a commit, a pull
-/// request and a file as a token that may write does, and is offered every
-/// write there disabled, saying which scope it lacks; the token that may
-/// write is offered none for its scope. An account that may not push to a
+/// with `read:repository` reads the repository, a branch, a commit and a pull
+/// request as a token that may write does, and is offered every write there
+/// disabled, saying which scope it lacks; the token that may write is offered
+/// none for its scope. *Commit change…*, which no file section offers since
+/// #2241, is `refused_writes`' answer for `commit_file` (#2317): refused the
+/// read-only token for its scope, not the other. An account that may not push to a
 /// repository (a seeded person on the admin's mirror) is told so on
 /// *New branch…*. The answers `view::grants` reads are measured here: the
 /// empty-bodied branch and issue writes, refused for the scope or for the
@@ -6689,17 +6700,18 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
                 .expect("drawn"),
         ));
     }
-    // The README, where *Commit change…* is offered (the Files tab's file).
-    let file = "file:README.md";
-    let (a, b) = tokio::join!(
-        narrow.view(&entities[0], Some(file)),
-        wide.view(&entities[0], Some(file))
+    // *Commit change…* on the Files tab: no file section offers a write
+    // since #2241; its standing is `refused_writes`' answer for
+    // `commit_file`, asked of the repository (its default branch).
+    let commit_file = [knobas_source::grants::WriteAsk {
+        entity: entities[0].clone(),
+        op: "commit_file".to_owned(),
+        field: None,
+    }];
+    let (commit_refused, commit_allowed) = tokio::join!(
+        narrow.refused_writes(&commit_file),
+        wide.refused_writes(&commit_file)
     );
-    seen.push((
-        format!("{} {file}", entities[0]),
-        a.expect("the README reads").expect("drawn"),
-        b.expect("the README reads").expect("drawn"),
-    ));
 
     let tip: serde_json::Value = http
         .get(format!("{api}/repos/{mirror}/commits?limit=1"))
@@ -6755,6 +6767,26 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
             );
         }
     }
+    let commit_refused = commit_refused.expect("the read-only token is answered");
+    println!("LIVE commit_file, read-only: {commit_refused:?}");
+    assert_eq!(
+        commit_refused
+            .iter()
+            .map(|r| (r.entity.as_str(), r.op.as_str(), r.reason.as_str()))
+            .collect::<Vec<_>>(),
+        [(
+            entities[0].as_str(),
+            "commit_file",
+            "This token cannot write: it lacks the write:repository scope"
+        )],
+        "Commit change… is refused a token that may only read, naming the scope"
+    );
+    let commit_allowed = commit_allowed.expect("the token that may write is answered");
+    assert_eq!(
+        commit_allowed,
+        [],
+        "Commit change… is not refused a token that may write"
+    );
     let pushless = pushless
         .expect("a reader reads the mirror's commit")
         .expect("drawn");
