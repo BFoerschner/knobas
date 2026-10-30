@@ -59,6 +59,9 @@ knobas-sync = { path = "../knobas-sync" }
 # External adapters (ADR-0028): a WASM component is one more `Source` the
 # registry builds, beside the compiled-in rows above.
 knobas-wasm-host = { path = "../knobas-wasm-host" }
+# A user renderer's bytes in and its image out cross the bridge as base64
+# (#2262).
+base64 = "0.22"
 # `IpcError` is what every command rejects with, so it has to serialize.
 serde.workspace = true
 # `EntityDetail::payload` is the source record verbatim (§3a), which is a
@@ -132,6 +135,12 @@ percent-encoding = "2"
 uuid.workspace = true
 # The derive behind the generated IPC mirror (`src/ipc_mirror.rs`, #1325).
 ts-rs.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# A user renderer (#2262, ADR-0033) runs in a process group of its own, and
+# the whole group is killed at its timeout: a wrapper script's children go
+# with it. The copy already in the lockfile.
+rustix = { version = "1", features = ["process"] }
 
 [dev-dependencies]
 # The CRUD tests inject an adapter that refuses to connect.

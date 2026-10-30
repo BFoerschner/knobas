@@ -214,6 +214,8 @@ export interface SectionPorts {
    * `~/Library`. No path: the command opens the running profile's (#1704).
    */
   openBackupFolder: () => Promise<void>;
+  /** Settings › Renderers (#2262); the IPC when omitted. */
+  renderers?: import("./TfRenderersSection.svelte").RendererPorts;
 }
 
 /** The real commands, each looked up when it is called (see above). */

@@ -30,6 +30,8 @@
     listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
     /** *Pages kept open* as stored (#2247), read once the database answers; the default stands without it. */
     pagesKeptOpen?: () => Promise<number>;
+    /** The command renderers saved in Settings › Renderers (#2262), installed in the registry once the database answers. */
+    userRenderers?: () => Promise<import("../ipc/app").UserRenderer[]>;
   }
 </script>
 
@@ -38,7 +40,8 @@
   import { onMount, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
-  import { pagesKeptOpen } from "../ipc/app";
+  import { pagesKeptOpen, userRenderers } from "../ipc/app";
+  import { installCommands } from "../render/command";
   import { listSources, syncStatus, type SourceSummary, type SourceSyncStatus } from "../ipc/sources";
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
   import { health as sharedHealth, type Health } from "../shell/health.svelte";
@@ -90,6 +93,7 @@
       syncStatus,
       listen: (event, handler) => tauriListen(event, handler),
       pagesKeptOpen,
+      userRenderers,
     },
     prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches,
     onstarttimer = () => {},
@@ -309,6 +313,16 @@
     if (read === undefined) return;
     void read()
       .then((count) => kept.set(count))
+      .catch(() => {});
+  });
+
+  // The command renderers (#2262): until they answer, the built-ins draw everything.
+  $effect(() => {
+    if (!lifecycle.ready) return;
+    const read = untrack(() => ports.userRenderers);
+    if (read === undefined) return;
+    void read()
+      .then((saved) => installCommands(saved))
       .catch(() => {});
   });
 

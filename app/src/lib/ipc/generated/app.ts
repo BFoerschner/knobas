@@ -20,6 +20,12 @@ demo: boolean, source_count: number, app_version: string,
 secrets_in_memory: boolean, };
 
 /**
+ * What a renderer writes on stdout: SVG or HTML (drawn sanitized, in a
+ * sandboxed frame), or an image's bytes.
+ */
+export type CommandOutput = "svg" | "html" | "image";
+
+/**
  * How far the database has got.
  *
  * Interfaces §2.1. Tagged on `state`, so TypeScript reads it as a
@@ -45,3 +51,61 @@ detail: string | null, } | { "state": "migrating" } | { "state": "ready" } | { "
  * Why, shown to the user as text.
  */
 message: string, };
+
+/**
+ * What goes on stdin: text, or bytes in base64.
+ */
+export type RenderContent = { "kind": "text", text: string, } | { "kind": "bytes", base64: string, };
+
+/**
+ * How a run ended. A run that failed is an answer, not an error: the viewer
+ * draws the source and what the command said.
+ *
+ * - `drawn`: exit 0. `body` is the SVG or HTML as text, or for an image a
+ *   `data:` URL of the type its first bytes name.
+ * - `failed`: a non-zero exit (`status` is `None` for a signal), with stderr.
+ * - `timed_out`: stopped at its timeout, with the stderr it had written.
+ * - `too_large`: stopped when stdout passed the cap.
+ * - `not_started`: the program could not be started (not on `PATH`).
+ */
+export type RenderRun = { "outcome": "drawn", output: CommandOutput, body: string, } | { "outcome": "failed", status: number | null, stderr: string, } | { "outcome": "timed_out", seconds: number, stderr: string, } | { "outcome": "too_large", cap_bytes: number, } | { "outcome": "not_started", reason: string, };
+
+/**
+ * What a renderer reads on stdin: the file's text, or its bytes.
+ */
+export type RendererInput = "text" | "bytes";
+
+/**
+ * One saved command renderer (#2262), Settings › Renderers.
+ */
+export type UserRenderer = { 
+/**
+ * Made from the name when first saved, kept through a rename.
+ */
+id: string, 
+/**
+ * What the switcher shows.
+ */
+name: string, 
+/**
+ * The program and its arguments, as typed: quotes group words, no shell.
+ */
+command: string, 
+/**
+ * File globs it accepts (`*.puml`, `docs/*.uml`).
+ */
+patterns: Array<string>, 
+/**
+ * Markdown fence languages it accepts, lowercase.
+ */
+fences: Array<string>, input: RendererInput, output: CommandOutput, 
+/**
+ * Killed after this many seconds.
+ */
+timeout_secs: number, };
+
+/**
+ * A renderer as Settings › Renderers sends it: a new one has no id yet, and
+ * no timeout is the default.
+ */
+export type UserRendererDraft = { id: string | null, name: string, command: string, patterns: Array<string>, fences: Array<string>, input: RendererInput, output: CommandOutput, timeout_secs: number | null, };

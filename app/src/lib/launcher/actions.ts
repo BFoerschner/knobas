@@ -48,6 +48,7 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
   backup: "Export and restore what knobas keeps",
   appearance: "Theme and density",
   performance: "How many pages stay open in the background",
+  renderers: "Your own commands that draw files and Markdown fences",
   keyboard: "The shortcuts",
   logs: "The sync log and the local database",
 };

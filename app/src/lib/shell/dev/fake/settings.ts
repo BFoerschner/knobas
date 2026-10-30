@@ -2,7 +2,9 @@
  * `?fake-ipc`: The Settings pages that read a stored preference (#831): Time (passive
  * attribution), Monitoring and Backup and export's status.
  *
- * Answers `pages_kept_open`, `set_pages_kept_open` (#2247), `passive_attribution`, `set_passive_attribution`,
+ * Answers `user_renderers`, `set_user_renderers`, `run_renderer` (#2262: one saved
+ * renderer, `cat`, which the fake runs by echoing its input; any other command
+ * fails with that said on stderr), `pages_kept_open`, `set_pages_kept_open` (#2247), `passive_attribution`, `set_passive_attribution`,
  * `monitoring_settings`, `set_monitoring_settings`, `backup_status`,
  * `backup_now`, `set_backup_schedule` and `open_backup_folder` (which opens
  * nothing: a browser has no file manager to show the folder in).
@@ -27,6 +29,7 @@
  */
 import type { BackupRecord, BackupSchedule, BackupStatus } from "../../../ipc/backup";
 import type { MonitoringSettings } from "../../../ipc/assets";
+import type { RenderContent, UserRenderer, UserRendererDraft } from "../../../ipc/app";
 import type { Handlers } from "../fake-tauri";
 
 const DIRECTORY = "~/Library/Application Support/knobas/backups";
@@ -79,7 +82,34 @@ export function handlers(): Handlers {
     };
   };
 
+  let renderers: UserRenderer[] = [
+    { id: "cat", name: "Cat", command: "cat", patterns: ["*.cat.html"], fences: ["cat"], input: "text", output: "html", timeout_secs: 10 },
+  ];
+
   return {
+    user_renderers: () => renderers,
+    set_user_renderers: (args) => {
+      const drafts = args["renderers"] as UserRendererDraft[];
+      renderers = drafts.map((d, i) => ({
+        id: d.id ?? (d.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `renderer-${i + 1}`),
+        name: d.name.trim(),
+        command: d.command.trim(),
+        patterns: d.patterns,
+        fences: d.fences.map((f) => f.toLowerCase()),
+        input: d.input,
+        output: d.output,
+        timeout_secs: Math.min(120, Math.max(1, d.timeout_secs ?? 10)),
+      }));
+      return renderers;
+    },
+    run_renderer: (args) => {
+      const saved = renderers.find((r) => r.id === args["id"]);
+      if (!saved) throw { code: "invalid", message: `'${String(args["id"])}' is not one of your renderers: see Settings › Renderers` };
+      const content = args["content"] as RenderContent;
+      if (saved.command !== "cat") return { outcome: "failed", status: 127, stderr: `the dev fake runs only cat, not ${saved.command}\n` };
+      const body = content.kind === "text" ? content.text : atob(content.base64);
+      return saved.output === "image" ? { outcome: "drawn", output: "image", body: `data:image/svg+xml;base64,${btoa(body)}` } : { outcome: "drawn", output: saved.output, body };
+    },
     pages_kept_open: () => keptOpen,
     set_pages_kept_open: (args) => {
       keptOpen = Math.min(15, Math.max(0, Math.round(Number(args["count"]))));
