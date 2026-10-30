@@ -160,6 +160,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_core::checkout::open::Object::export_all(cfg)?;
     knobas_core::checkout::open::ObjectKind::export_all(cfg)?;
     crate::checkout::open::GitFound::export_all(cfg)?;
+    crate::checkout::worktree::PullRequestWorktree::export_all(cfg)?;
     crate::checkout::open::CheckoutSettings::export_all(cfg)?;
     crate::checkout::clone::FailureCause::export_all(cfg)?;
     crate::checkout::clone::CloneState::export_all(cfg)?;

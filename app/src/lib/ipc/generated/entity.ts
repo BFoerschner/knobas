@@ -2996,6 +2996,15 @@ source_id: string,
 parent: string, };
 
 /**
+ * A worktree, as Settings › Checkouts lists it.
+ *
+ * - `closed`: The mirror holds the pull request closed or merged.
+ *
+ * Issue #2285.
+ */
+export type PullRequestWorktree = { repo_entity_id: string, number: number, path: string, closed: boolean, };
+
+/**
  * Where a reached entity's path came from.
  *
  * Tagged on `kind`; #866's link sets joined as the third arm without
