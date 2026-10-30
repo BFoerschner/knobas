@@ -468,6 +468,58 @@ pub async fn set_pages_kept_open<R: tauri::Runtime>(
     crate::settings::set_pages_kept_open(&pool, count).await
 }
 
+/// The command renderers saved in Settings › Renderers (#2262), in order.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn user_renderers<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::renderers::UserRenderer>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::list(&pool).await
+}
+
+/// Save the whole list of command renderers and answer it as stored: ids
+/// made from new names, fence languages lowercase, timeouts held to 1-120 s.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a renderer with
+/// no name or a command that cannot be run,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_user_renderers<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    renderers: Vec<crate::renderers::UserRendererDraft>,
+) -> Result<Vec<crate::renderers::UserRenderer>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::save(&pool, &renderers).await
+}
+
+/// Run saved renderer `id` with `content` on its stdin (ADR-0033): the
+/// program and its arguments are the saved ones, never the webview's, and
+/// no shell runs. A failure, a timeout or too much output is an answer.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an unknown id
+/// or bytes that are not base64,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn run_renderer<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+    content: crate::renderers::RenderContent,
+) -> Result<crate::renderers::RenderRun, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::run(&pool, &id, content).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,11 +574,27 @@ mod tests {
     #[test]
     fn every_command_in_this_module_has_a_typescript_mirror() {
         let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
-        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 7);
+        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 10);
     }
 
     /// The mirror sends `count`, the argument's name: a mirror sending
     /// anything else arrives with the value missing (#2247).
+    /// The mirror sends each argument by its Rust name (#2262).
+    #[test]
+    fn the_mirror_sends_the_renderer_arguments() {
+        let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
+        for (command, args) in [
+            ("set_user_renderers", &["renderers"][..]),
+            ("run_renderer", &["id", "content"][..]),
+        ] {
+            let invocation = crate::commands::mirror::invocation(mirror, command);
+            let keys = crate::commands::mirror::keys(invocation);
+            for arg in args {
+                assert!(keys.contains(arg), "{command} without {arg}: {invocation}");
+            }
+        }
+    }
+
     #[test]
     fn the_mirror_sends_the_count_of_pages_kept_open() {
         let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");

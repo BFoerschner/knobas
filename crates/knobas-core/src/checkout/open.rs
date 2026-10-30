@@ -152,6 +152,22 @@ pub fn fill(template: &str, at: &Fill<'_>) -> Result<Vec<String>, TemplateError>
     words.iter().map(|word| substitute(word, at)).collect()
 }
 
+/// `command` as an argument vector with no placeholder filled: quotes group
+/// words, nothing else is special, so `a;b` and `$HOME` stay one literal
+/// argument each. A renderer command (#2262, ADR-0033) takes no placeholder,
+/// so a `{` in it is just a character.
+///
+/// # Errors
+///
+/// [`TemplateError::Empty`] for no program, [`TemplateError::UnclosedQuote`].
+pub fn words(command: &str) -> Result<Vec<String>, TemplateError> {
+    let words = split_words(command)?;
+    if words.is_empty() {
+        return Err(TemplateError::Empty);
+    }
+    Ok(words)
+}
+
 /// Whether `template` is one knobas could run, without running anything: the
 /// check a settings write makes. [`fill`] against a stand-in checkout, so there
 /// is one rule.

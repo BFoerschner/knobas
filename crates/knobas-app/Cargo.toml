@@ -59,6 +59,9 @@ knobas-sync = { path = "../knobas-sync" }
 # External adapters (ADR-0028): a WASM component is one more `Source` the
 # registry builds, beside the compiled-in rows above.
 knobas-wasm-host = { path = "../knobas-wasm-host" }
+# A user renderer's bytes in and its image out cross the bridge as base64
+# (#2262).
+base64 = "0.22"
 # `IpcError` is what every command rejects with, so it has to serialize.
 serde.workspace = true
 # `EntityDetail::payload` is the source record verbatim (§3a), which is a

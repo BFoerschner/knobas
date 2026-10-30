@@ -3115,6 +3115,7 @@ name = "knobas-app"
 version = "3.2.6"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "knobas-app",
  "knobas-core",
