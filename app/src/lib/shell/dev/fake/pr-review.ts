@@ -10,6 +10,7 @@ export function handlers(): Handlers {
   const viewed = new Map<string, Set<string>>([["mock:payout-service#142", new Set(["docs/backoff.md"])]]);
   const sorted = (id: string) => [...(viewed.get(id) ?? [])].sort();
   return {
+    // The fake keeps by path alone: its diffs never change (the app keeps by blob, #2276).
     pr_viewed_files: (args) => sorted(String(args["prId"] ?? "")),
     set_pr_file_viewed: (args) => {
       const id = String(args["prId"] ?? "");

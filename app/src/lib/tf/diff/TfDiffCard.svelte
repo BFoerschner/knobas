@@ -22,7 +22,7 @@
 -->
 <script lang="ts">
   import { flushSync } from "svelte";
-  import type { DiffLine, LineComment } from "../../ipc/entity";
+  import type { DiffLine, LineComment, LineThread } from "../../ipc/entity";
   import { lineName } from "../../detail/view/pending-comments.svelte";
   import type { LineTokens, RenderPort } from "../../render/port";
   import { Windowed } from "../../shell/windowed.svelte";
@@ -80,7 +80,7 @@
     | { kind: "gap"; key: string; gap: Gap }
     | { kind: "line"; key: string; cell: DrawnLine }
     | { kind: "pair"; key: string; old: DrawnLine | null; new: DrawnLine | null }
-    | { kind: "thread"; key: string; comments: readonly LineComment[]; onNew: boolean }
+    | { kind: "thread"; key: string; thread: LineThread; onNew: boolean }
     | { kind: "draft"; key: string; body: string }
     | { kind: "box"; key: string; line: DiffLine; onNew: boolean };
 
@@ -103,7 +103,7 @@
     /** What follows a line: its threads, the reader's pending comments on it, the open comment box. */
     const after = (cell: DrawnLine, onNew: boolean) => {
       (placed.under[cell.at] ?? []).forEach((thread, n) => {
-        if (!cell.extra) out.push({ kind: "thread", key: `t${cell.at}:${n}`, comments: thread.comments, onNew });
+        if (!cell.extra) out.push({ kind: "thread", key: `t${cell.at}:${n}`, thread, onNew });
       });
       if (cell.extra) return;
       for (const d of talk.draftsAt(file.path, cell.line)) out.push({ kind: "draft", key: `d${d.id}`, body: d.body });
@@ -225,6 +225,45 @@
   {/each}
 {/snippet}
 
+<!--
+  One review thread (#2277): its comments, the replies queued this session,
+  and *Reply…* and *Resolve* where the source takes them. A resolved thread
+  is drawn collapsed to one line, opened on *Show*.
+-->
+{#snippet conversation(thread: LineThread)}
+  {@const resolved = talk.isResolved(thread)}
+  {#if resolved && !talk.isShown(thread)}
+    <div class="tf-thr-h">
+      <span class="tf-chip tf-ok">Resolved</span>
+      <span class="tf-dim">{thread.resolved_by ? `by ${thread.resolved_by} · ` : ""}{thread.comments.length} {thread.comments.length === 1 ? "comment" : "comments"}</span>
+      <span class="tf-thr-sp"></span>
+      <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => talk.show(thread, true)}>Show</button>
+      {#if talk.canResolve(thread)}<button type="button" class="tf-btn tf-sm" onclick={() => talk.resolve(thread, false)}>Unresolve</button>{/if}
+    </div>
+  {:else}
+    {@render said(thread.comments)}
+    {#each talk.queuedOn(thread) as body, k (k)}
+      <div class="tf-said tf-queued"><p><b>You</b> <span class="tf-chip tf-warn">queued</span> {body}</p></div>
+    {/each}
+    {#if talk.isReplying(thread)}
+      <div class="tf-newc tf-reply">
+        <textarea value={talk.replyDraft} oninput={(event) => (talk.replyDraft = event.currentTarget.value)} placeholder="Reply" aria-label="Reply on {file.path}, {lineName(thread.side, thread.line)}"></textarea>
+        <div class="tf-acts">
+          <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => talk.cancelReply()}>Cancel</button>
+          <button type="button" class="tf-btn tf-sm tf-primary" disabled={talk.replyDraft.trim() === ""} onclick={() => talk.sendReply(file.path, thread)}>Reply</button>
+        </div>
+      </div>
+    {:else if talk.canReply(thread) || talk.canResolve(thread) || resolved}
+      <footer class="tf-thr-f">
+        {#if talk.canReply(thread)}<button type="button" class="tf-thr-reply" onclick={() => talk.openReply(thread)}>Reply…</button>{/if}
+        <span class="tf-thr-sp"></span>
+        {#if resolved}<button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => talk.show(thread, false)}>Hide</button>{/if}
+        {#if talk.canResolve(thread)}<button type="button" class="tf-btn tf-sm" onclick={() => talk.resolve(thread, !resolved)}>{resolved ? "Unresolve" : "Resolve"}</button>{/if}
+      </footer>
+    {/if}
+  {/if}
+{/snippet}
+
 <!-- The `+` on a line, where the source takes comments; an empty cell otherwise. -->
 {#snippet plus(cell: DrawnLine)}
   {#if talk.review && !cell.extra}
@@ -263,7 +302,7 @@
   {:else if it.kind === "pair"}
     <div class="tf-srow" {@attach win.row(it.key)} {@attach keep(it.key)}>{@render half(it.old, "old")}{@render half(it.new, "new")}</div>
   {:else if it.kind === "thread"}
-    <div class="tf-thread" class:tf-on-new={split && it.onNew} {@attach win.row(it.key)}>{@render said(it.comments)}</div>
+    <div class="tf-thread" class:tf-on-new={split && it.onNew} class:tf-resolved={talk.isResolved(it.thread)} {@attach win.row(it.key)}>{@render conversation(it.thread)}</div>
   {:else if it.kind === "draft"}
     <div class="tf-thread tf-pending" {@attach win.row(it.key)}><p><b>You</b> <span class="tf-chip tf-warn">pending</span> {it.body}</p></div>
   {:else}
@@ -319,7 +358,7 @@
       <details class="tf-outdated">
         <summary>{placed.apart.length + strays.length} outdated</summary>
         {#each placed.apart as thread, t (t)}
-          <div class="tf-thread"><span class="tf-dim">{lineName(thread.side, thread.line)}</span>{@render said(thread.comments)}</div>
+          <div class="tf-thread" class:tf-resolved={talk.isResolved(thread)}><span class="tf-dim">{lineName(thread.side, thread.line)}</span>{@render conversation(thread)}</div>
         {/each}
         {#each strays as d (d.id)}
           <div class="tf-thread tf-pending"><p><b>You</b> <span class="tf-chip tf-warn">pending</span> {`${lineName(d.side, d.line)}: ${d.body}`}</p></div>

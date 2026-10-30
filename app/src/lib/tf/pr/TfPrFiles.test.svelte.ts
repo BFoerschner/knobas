@@ -9,6 +9,8 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { DiffFile, SourceView } from "../../ipc/entity";
 import { createPendingComments, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
+import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+import { forgetEchoes } from "../queued.svelte";
 import TfPrFiles from "./TfPrFiles.svelte";
 
 const PR = "gitea:tidewater/payout-service#142";
@@ -33,8 +35,16 @@ const RETRY: DiffFile = {
   ],
   truncated: false,
   threads: [
-    { side: "new", line: 21, outdated: false, comments: [{ author: "jonas", body: "Should the jitter be bounded?", at: null }] },
-    { side: "new", line: 8, outdated: true, comments: [{ author: "priya", body: "Ten attempts is **a lot**.", at: null }] },
+    {
+      side: "new",
+      line: 21,
+      outdated: false,
+      comments: [{ author: "jonas", body: "Should the jitter be bounded?", at: null }],
+      id: "4088",
+      resolved_by: null,
+      replies: true,
+    },
+    { side: "new", line: 8, outdated: true, comments: [{ author: "priya", body: "Ten attempts is **a lot**.", at: null }], id: "4060", resolved_by: null, replies: false },
   ],
 };
 const NOTE: DiffFile = {
@@ -56,7 +66,7 @@ function filesView(commentable = true): SourceView {
         title: "Files",
         count: 2,
         deferred: false,
-        blocks: [{ type: "diff", files: [RETRY, NOTE], truncated: false, commentable: commentable ? { write_op: "submit_review" } : null, gone: [] }],
+        blocks: [{ type: "diff", files: [RETRY, NOTE], truncated: false, commentable: commentable ? { write_op: "submit_review", reply: null, resolve: null, head: null } : null, gone: [] }],
       },
     ],
     actions: [],
@@ -75,6 +85,13 @@ beforeEach(() => {
   pending = createPendingComments(() => null);
   viewed = [];
   asked = [];
+  sent = [];
+  refreshed = [];
+  stored = new Map();
+});
+
+afterEach(() => {
+  forgetEchoes();
 });
 
 afterEach(() => {
@@ -83,21 +100,47 @@ afterEach(() => {
   target.remove();
 });
 
-async function draw(answer: SourceView = filesView()) {
+/**
+ * The ticks as the app keeps them (`knobas_core::viewed`, #2276): by the
+ * blob a file held when ticked, or by the head where its diff named none.
+ */
+let stored: Map<string, string | null>;
+const viewedNow = (blobs: Record<string, string>) =>
+  [...stored].filter(([path, blob]) => (blob === null ? !(path in blobs) : blobs[path] === blob)).map(([path]) => path).sort();
+
+/** What `submit_write` was handed, and the `item:refreshed` handler the page listens with. */
+let sent: WriteOpPayload[];
+let refreshed: ((event: { payload: unknown }) => void)[];
+
+async function draw(answer: SourceView | (() => SourceView) = filesView(), writes = false) {
+  for (const path of viewed) if (!stored.has(path)) stored.set(path, null);
   view = mount(TfPrFiles, {
     target,
     props: {
       prId: PR,
       entityView: async (_id: string, section: string | null) => {
         asked.push(section);
-        return answer;
+        return typeof answer === "function" ? answer() : answer;
       },
-      viewedFiles: async () => [...viewed],
-      setViewed: async (_id: string, path: string, on: boolean) => {
-        viewed = on ? [...viewed, path].sort() : viewed.filter((p) => p !== path);
+      viewedFiles: async (_id: string, blobs: Record<string, string>) => viewedNow(blobs),
+      setViewed: async (_id: string, path: string, on: boolean, blobs: Record<string, string>) => {
+        if (on) stored.set(path, blobs[path] ?? null);
+        else stored.delete(path);
+        viewed = viewedNow(blobs);
         return [...viewed];
       },
       pending,
+      submitWrite: writes
+        ? async (payload: WriteOpPayload) => {
+            sent.push(payload);
+            return { id: sent.length, state: "pending" } as QueuedWrite;
+          }
+        : null,
+      listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
+        if (event === "item:refreshed") refreshed.push(handler);
+        return () => {};
+      },
+      follower: { follow: () => () => {} },
     },
   });
   await settle();
@@ -200,4 +243,95 @@ test("a diff the source takes no comments on draws no +", async () => {
   await draw(filesView(false));
   expect(target.querySelector(".tf-addc")).toBeNull();
   expect(target.querySelectorAll(".tf-diff .tf-ln").length).toBeGreaterThan(0);
+});
+
+/** The files at a head: each file's blob, and the commentable diff's head, as Gitea's *Files* section answers. */
+function at(head: string, blobs: { retry: string; note: string }, threads: DiffFile["threads"] = RETRY.threads, resolve = true): SourceView {
+  const base = filesView();
+  const block = base.sections[0]!.blocks[0]!;
+  if (block.type !== "diff") throw new Error("a diff");
+  block.files = [
+    { ...RETRY, blob: blobs.retry, threads },
+    { ...NOTE, blob: blobs.note },
+  ];
+  block.commentable = { write_op: "submit_review", reply: "reply_to_thread", resolve: resolve ? "resolve_thread" : null, head };
+  return base;
+}
+
+const viewedBox = (n: number) => cards()[n]!.querySelector<HTMLInputElement>(".tf-fh input[type=checkbox]")!;
+
+test("#2276: after a new commit that changes one file, only that file loses Viewed", async () => {
+  await draw(at("c90d11", { retry: "1111111", note: "2222222" }));
+  viewedBox(0).click();
+  await settle();
+  viewedBox(1).click();
+  await settle();
+  expect(list()).toEqual(["Abackoff.md+1 −0 ✓", "Mretry.rs+2 −1 ✓"]);
+  unmount(view!);
+  view = null;
+
+  // A push changes retry.rs and leaves the note as it was.
+  await draw(at("e41a07", { retry: "3333333", note: "2222222" }));
+  expect(list()).toEqual(["Abackoff.md+1 −0 ✓", "Mretry.rs+2 −1"]);
+});
+
+test("#2277: Reply… queues a reply on the thread's line, drawn queued until the read after it holds it", async () => {
+  let reply: string | null = null;
+  const thread = () => [
+    {
+      ...RETRY.threads[0]!,
+      comments: [...RETRY.threads[0]!.comments, ...(reply === null ? [] : [{ author: "knobas", body: reply, at: null }])],
+    },
+    RETRY.threads[1]!,
+  ];
+  await draw(() => at("c90d11", { retry: "1111111", note: "2222222" }, thread()), true);
+  const card = cards()[0]!;
+  [...card.querySelectorAll<HTMLButtonElement>(".tf-thread button")].find((b) => b.textContent === "Reply…")!.click();
+  flushSync();
+  const box = card.querySelector<HTMLTextAreaElement>(".tf-thread textarea")!;
+  box.value = "Bounded to ±10 % now.";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...card.querySelectorAll<HTMLButtonElement>(".tf-thread button")].find((b) => b.textContent === "Reply")!.click();
+  await settle();
+  expect(sent).toEqual([
+    {
+      ReplyToThread: {
+        entity: PR,
+        thread: "4088",
+        comment: { path: "src/sepa/retry.rs", line: 21, side: "new", body: "Bounded to ±10 % now." },
+      },
+    },
+  ]);
+  expect(squash(card.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? You queued Bounded to ±10 % now. Reply… Resolve");
+
+  // The write landed: its refresh reads the files again, and the reply is the source's now.
+  reply = "Bounded to ±10 % now.";
+  for (const hear of refreshed) hear({ payload: { entity_id: PR, write_id: 1 } });
+  await settle();
+  expect(asked).toEqual(["files", "files"]);
+  expect(squash(cards()[0]!.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? knobas Bounded to ±10 % now. Reply… Resolve");
+});
+
+test("#2277: Resolve queues the resolve and collapses the thread; a resolved thread reads collapsed, and Forgejo's offers none", async () => {
+  await draw(at("c90d11", { retry: "1111111", note: "2222222" }), true);
+  const card = cards()[0]!;
+  [...card.querySelectorAll<HTMLButtonElement>(".tf-thread button")].find((b) => b.textContent === "Resolve")!.click();
+  await settle();
+  expect(sent).toEqual([{ ResolveThread: { entity: PR, thread: "4088", resolved: true } }]);
+  expect(squash(card.querySelector(".tf-thread"))).toBe("Resolved 1 comment Show Unresolve");
+  unmount(view!);
+  view = null;
+  forgetEchoes();
+
+  // Read again with the source's state: resolved by mara, collapsed with no write of ours.
+  const resolved = [{ ...RETRY.threads[0]!, resolved_by: "mara" }, RETRY.threads[1]!];
+  await draw(at("c90d11", { retry: "1111111", note: "2222222" }, resolved), true);
+  expect(squash(cards()[0]!.querySelector(".tf-thread"))).toBe("Resolved by mara · 1 comment Show Unresolve");
+  unmount(view!);
+  view = null;
+
+  // A source that cannot resolve (Forgejo) offers a reply and no resolve.
+  await draw(at("c90d11", { retry: "1111111", note: "2222222" }, RETRY.threads, false), true);
+  expect(squash(cards()[0]!.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? Reply…");
 });

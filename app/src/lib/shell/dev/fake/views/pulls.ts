@@ -123,6 +123,22 @@ function actions(title: string, body: string, own: boolean, open: boolean, behin
       }),
     );
   }
+  // *Request…* in the Reviewers panel (#2303): the people the source says a review can be asked of.
+  if (open)
+    list.push(
+      action("request_reviewers", "Request…", {
+        fields: [
+          {
+            name: "reviewers",
+            label: "Reviewer",
+            kind: { type: "choice", options: ["sven", "kai", "olu"].map((who) => ({ value: who, label: who })) },
+            value: null,
+            required: true,
+            placeholder: null,
+          },
+        ],
+      }),
+    );
   // The source's own action (#1194): a write no role's vocabulary has, its id fixed.
   list.push(
     action("source_action", "Add label…", {
@@ -336,12 +352,29 @@ function files142(): DiffFile[] {
         { author: "jonas", body: "Should the jitter be bounded? ±20 % feels wide.", at: "2026-08-22T09:30:00Z" },
         { author: "mara", body: "Bounded to ±10 % in c90d11.", at: "2026-08-22T10:20:00Z" },
       ],
+      // A thread the source takes a reply and a resolve on (#2277).
+      id: "4088",
+      resolved_by: null,
+      replies: true,
+    },
+    {
+      side: "new",
+      line: 3,
+      outdated: false,
+      comments: [{ author: "priya", body: "Name the backoff module after what it does.", at: "2026-08-21T17:50:00Z" }],
+      // Resolved, so drawn collapsed (#2277).
+      id: "4071",
+      resolved_by: "mara",
+      replies: true,
     },
     {
       side: "new",
       line: 8,
       outdated: true,
       comments: [{ author: "priya", body: "Ten attempts is a lot for a payout.", at: "2026-08-21T18:02:00Z" }],
+      id: "4060",
+      resolved_by: null,
+      replies: false,
     },
   ];
   return [{ ...retry!, threads }, ...rest];
@@ -401,7 +434,7 @@ function filesSection(entityId: string, title: string): ViewSection {
             threads: [],
           },
         ];
-  const commentable = { write_op: "submit_review" };
+  const commentable = { write_op: "submit_review", reply: "reply_to_thread", resolve: "resolve_thread", head: "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192" };
   return section("files", "Files", [{ type: "diff", files, truncated: false, commentable, gone: [] }], files.length);
 }
 

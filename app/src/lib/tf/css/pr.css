@@ -82,5 +82,13 @@
 .tf-prgrow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-prreq { font: 600 var(--t-2xs) var(--sans); text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; }
 .tf-prnote { margin: 0; padding: 0 12px 10px; font-size: var(--t-xs); color: var(--ink-2); }
+/* *Request…*'s picker (#2303): the people the source names, one button each, under the panel's header. */
+.tf-prpick { display: flex; flex-direction: column; margin: 0 12px 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); }
+.tf-prpick button {
+  display: flex; align-items: center; gap: 8px; height: var(--control-h-sm); padding: 0 8px; border: 0; background: none;
+  color: var(--ink); font: var(--t-sm) var(--sans); text-align: left; cursor: pointer;
+}
+.tf-prpick button + button { border-top: 1px solid var(--rule-2); }
+.tf-prpick button:hover, .tf-prpick button:focus-visible { background: var(--sheet-2); }
 .tf-prnote.tf-prconflict { color: var(--err); }
 .tf-prbuilds > header .tf-dim { font-size: var(--t-xs); }

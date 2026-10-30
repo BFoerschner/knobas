@@ -58,8 +58,8 @@
     listSources: () => Promise<SourceFacts[]>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     /** *Viewed* on the pull request's files (#842). */
-    prViewedFiles: (prId: string) => Promise<string[]>;
-    setPrFileViewed: (prId: string, path: string, viewed: boolean) => Promise<string[]>;
+    prViewedFiles: (prId: string, blobs: Record<string, string>) => Promise<string[]>;
+    setPrFileViewed: (prId: string, path: string, viewed: boolean, blobs: Record<string, string>) => Promise<string[]>;
     /** Hears `item:refreshed` and `sync:state`, which read the live view again for the page's echoes (#2103); the bridge's when left out. */
     listen?: EchoListen;
     /** The header's *Refresh* (#2107); the bridge's when left out. */
@@ -139,8 +139,8 @@
       resolveUrl: (url) => resolveUrl(url),
       listSources: () => listSources(),
       submitWrite: (payload) => submitWrite(payload),
-      prViewedFiles: (id) => prViewedFiles(id),
-      setPrFileViewed: (id, path, viewed) => setPrFileViewed(id, path, viewed),
+      prViewedFiles: (id, blobs) => prViewedFiles(id, blobs),
+      setPrFileViewed: (id, path, viewed, blobs) => setPrFileViewed(id, path, viewed, blobs),
     },
     pending = sharedPending,
     follower = writeFollower(),
@@ -413,6 +413,41 @@
   let reviewing = $state(false);
   let merging = $state(false);
 
+  /** The echo kind of a review request queued here (#2303), one per reviewer. */
+  const REQUESTED = "reviewer";
+  /** *Request…* in the Reviewers panel, where the source offers it to this reader (ADR-0020 rule 4). */
+  const request = $derived(offered((a) => a.write_op === "request_reviewers"));
+  /** Who *Request…* may ask: the source's choices, less those asked this session. */
+  const askable = $derived.by(() => {
+    const field = request?.fields.find((f) => f.name === "reviewers");
+    if (field?.kind.type !== "choice" || prId === null) return [];
+    const asked = new Set(echoesOn(prId, REQUESTED).map((echo) => echo.text));
+    return field.kind.options.filter((option) => !asked.has(option.value));
+  });
+  let picking = $state(false);
+  /** The rail's reviewers: the read's, then those asked here that it does not name yet. */
+  const railReviewers = $derived.by(() => {
+    const read = reviewers.map((reviewer) => ({ ...reviewer, note: null as string | null }));
+    if (prId === null) return read;
+    for (const echo of echoesOn(prId, REQUESTED))
+      if (!read.some((reviewer) => reviewer.who === echo.text)) read.push({ who: echo.text, state: "Review requested", tone: "muted", note: echo.state });
+    return read;
+  });
+
+  /** Ask `who` for a review (#2303): queued, drawn requested at once, and read back by the refresh after it. */
+  async function requestReview(who: string) {
+    const id = prId;
+    if (id === null || request === null || request.disabled !== null) return;
+    picking = false;
+    try {
+      const write = await ports.submitWrite({ RequestReviewers: { entity: id, reviewers: [who] } });
+      echoWrite(id, REQUESTED, who, { write, many: true, following: { name: "Review request" }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null });
+      toastQueued(`review request to ${who} on ${name}`, detail?.source ?? null);
+    } catch (cause) {
+      push({ text: `Could not ask ${who} for a review: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
   /** The comments this session queued that the conversation did not hold when it was read. */
   const queuedComments = $derived(prId === null ? [] : echoesOn(prId, "comment"));
   /** The chips of what this session queued here, beside the state: `close queued`, then `close sent`. */
@@ -430,6 +465,8 @@
   /** Whether the read in `answer` shows `echo` landed; `sentBefore` holds the writes sent when it was asked. */
   function landedIn(answer: SourceView | null, echo: Echo, sentBefore: ReadonlySet<number>): boolean {
     if (echo.kind === "comment") return conversationOf(answer).some((message) => sameWords(message.body, echo.text));
+    // A review request (#2303) lands once the read names the reviewer.
+    if (echo.kind === REQUESTED) return reviewersOf(answer).some((reviewer) => reviewer.who === echo.text);
     if (!STATE_READ.includes(echo.kind)) return echo.write !== null && sentBefore.has(echo.write);
     const state = headerOf(answer).state?.text ?? null;
     return state !== null && echo.base !== null && state !== echo.base;
@@ -629,6 +666,10 @@
           viewedFiles={ports.prViewedFiles}
           setViewed={ports.setPrFileViewed}
           {pending}
+          submitWrite={ports.submitWrite}
+          source={detail?.source?.id ?? null}
+          listen={ports.listen}
+          {follower}
         />
       {:else}
         <div>
@@ -761,19 +802,52 @@
           </div>
           {#if view}
             <div class="tf-panel tf-prreviewers">
-              <header><h3>Reviewers</h3></header>
-              {#if reviewers.length === 0}
+              <header
+                ><h3>Reviewers</h3>
+                {#if request !== null && askable.length > 0}
+                  <div class="tf-acts">
+                    <button
+                      type="button"
+                      class="tf-btn tf-sm tf-ghost"
+                      aria-expanded={picking}
+                      aria-disabled={request.disabled !== null ? "true" : undefined}
+                      title={request.disabled ?? undefined}
+                      onclick={() => {
+                        if (request.disabled === null) picking = !picking;
+                      }}>Request…</button
+                    >
+                  </div>
+                {/if}</header
+              >
+              {#if picking && request !== null}
+                <div class="tf-prpick" role="group" aria-label="Ask for a review">
+                  {#each askable as option (option.value)}
+                    <button type="button" onclick={() => void requestReview(option.value)}
+                      ><span class="tf-av" aria-hidden="true">{initials(option.label)}</span>{option.label}</button
+                    >
+                  {/each}
+                </div>
+              {/if}
+              {#if railReviewers.length === 0 && waiting === 0}
                 <p class="tf-prnote">No reviews yet.</p>
               {:else}
                 <div class="tf-prlist">
-                  {#each reviewers as reviewer (reviewer.who)}
+                  {#each railReviewers as reviewer (reviewer.who)}
                     {@const own = me !== null && reviewer.who === me}
                     <div class="tf-prit">
                       <span class="tf-av" class:tf-me={own} aria-hidden="true">{initials(reviewer.who)}</span>
-                      <span class="tf-prgrow">{own ? "you" : reviewer.who}</span>
+                      <span class="tf-prgrow">{own ? "you" : reviewer.who}{#if reviewer.note !== null}<span class="tf-dim"> · {reviewer.note}</span>{/if}</span>
                       <span class="tf-chip tf-{reviewer.tone ?? 'muted'}">{reviewer.state}</span>
                     </div>
                   {/each}
+                  {#if waiting > 0}
+                    <!-- The reader's own unsent review (#2276): its pending comments, kept across restarts. -->
+                    <div class="tf-prit">
+                      <span class="tf-av tf-me" aria-hidden="true">{initials(me ?? "you")}</span>
+                      <span class="tf-prgrow">you <span class="tf-dim">· {waiting} pending {waiting === 1 ? "comment" : "comments"}</span></span>
+                      <span class="tf-chip tf-warn">Draft</span>
+                    </div>
+                  {/if}
                 </div>
               {/if}
             </div>

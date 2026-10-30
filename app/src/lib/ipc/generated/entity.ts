@@ -503,7 +503,14 @@ reply: string | null,
  * the source cannot resolve threads (Forgejo 17 has no endpoint for it).
  * Absent on the wire reads as `None`.
  */
-resolve: string | null, };
+resolve: string | null, 
+/**
+ * The head commit the diff's line comments are written against, in the
+ * source's spelling (#2276): the shell keeps the reader's unsent
+ * comments by pull request and this commit. `None` where the source did
+ * not say. Absent on the wire reads as `None`.
+ */
+head: string | null, };
 
 /**
  * What kind of working set this is.

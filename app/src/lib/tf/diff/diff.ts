@@ -17,7 +17,7 @@
  *   the file's old path, so a rename that changes the language highlights
  *   each side in its own.
  */
-import type { DiffFile, DiffLine } from "../../ipc/entity";
+import type { DiffFile, DiffLine, LineThread } from "../../ipc/entity";
 import type { PendingCommentStore } from "../../detail/view/pending-comments.svelte";
 import { wordMarks, type Range } from "./words";
 
@@ -48,6 +48,14 @@ export interface DiffViewed {
 export interface DiffReview {
   entity: string;
   pending: PendingCommentStore;
+  /** Queue a reply to `thread` on `path` (#2277); absent where the source takes none. */
+  reply?: ((path: string, thread: LineThread, body: string) => Promise<boolean>) | null;
+  /** Queue a resolve (`on`) or reopen of `thread` (#2277); absent where the source cannot (Forgejo). */
+  resolve?: ((thread: LineThread, on: boolean) => Promise<boolean>) | null;
+  /** The replies queued this session, not yet in the read, by thread id. */
+  queued?: (thread: LineThread) => readonly string[];
+  /** Whether `thread` reads resolved, a queued resolve or reopen counted. */
+  resolved?: (thread: LineThread) => boolean;
 }
 
 /**

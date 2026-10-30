@@ -12,6 +12,8 @@
   comments it took are settled: one edited meanwhile stays pending.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import { ipcErrorMessage } from "../../ipc";
   import type { ViewAction } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
@@ -53,7 +55,8 @@
   let verdict = $state<Verdict | null>(
     (() => reviewChoices(actions, pending.of(prId).length, base).find((choice) => choice.action !== null)?.verdict ?? null)(),
   );
-  let summary = $state("");
+  // The review's words are kept with its comments until it is sent (#2276), so a restart keeps them too.
+  let summary = $state(untrack(() => pending.body(prId)));
   let busy = $state(false);
 
   const chosen = $derived(choices.find((choice) => choice.verdict === verdict) ?? null);
@@ -68,7 +71,7 @@
     busy = true;
     try {
       const write = await submitWrite(payload);
-      pending.settle(prId, sent);
+      pending.settle(prId, sent, summary);
       toastQueued(`submit review on ${name}`, source);
       onqueued(write);
       onclose();
@@ -92,6 +95,7 @@
       <textarea
         rows="3"
         bind:value={summary}
+        oninput={() => pending.setBody(prId, summary)}
         aria-label="Summary"
         placeholder={chosen?.action?.fields.some((field) => field.name === "body" && field.required) ? "Summary" : "Summary (optional)"}
       ></textarea>
