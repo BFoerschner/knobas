@@ -25,13 +25,14 @@
     (`pr/files.ts`); `gone` lists those on files the diff no longer holds.
 -->
 <script lang="ts">
-  import type { DiffFile, DiffLine, FileThread, LineComment } from "../../ipc/entity";
+  import type { DiffLine, FileThread, LineComment } from "../../ipc/entity";
   import { lineName } from "../../detail/view/pending-comments.svelte";
-  import { renderPort, type LineTokens, type RenderPort } from "../../render/port";
+  import { untrack } from "svelte";
+  import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
   import { ago } from "../../shell/time";
   import { push } from "../../shell/toasts.svelte";
   import { matchesPath, placeThreads, sameTarget, targetOf } from "../pr/files";
-  import { shownLayout, sidesOf, splitRows, unifiedRows, type DiffReview, type DiffViewed, type DrawnLine } from "./diff";
+  import { keyOf, shownLayout, sidesOf, splitRows, unifiedRows, type DiffReview, type DiffViewed, type DrawnFile, type DrawnLine, type SideText } from "./diff";
   import { diffLayout, windowNarrow, type DiffLayoutChoice } from "./diff-layout.svelte";
 
   let {
@@ -44,7 +45,8 @@
     layout = diffLayout,
     narrow = windowNarrow(),
   }: {
-    files: readonly DiffFile[];
+    /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
+    files: readonly DrawnFile[];
     /** The file list and its filter beside the diffs. */
     list?: boolean;
     viewed?: DiffViewed | null;
@@ -57,35 +59,56 @@
   } = $props();
 
   let filter = $state("");
-  const shown = $derived(files.filter((file) => matchesPath(file.path, filter)));
+  const shown = $derived(files.filter((file) => matchesPath(keyOf(file), filter)));
   const split = $derived(shownLayout(layout.chosen, narrow.current) === "split");
   const isViewed = (path: string) => viewed?.paths.includes(path) ?? false;
 
-  /** Each file's two sides, and their tokens as they arrive: `path` → side → rows of that side's text. */
-  const sides = $derived(new Map(files.map((file) => [file.path, sidesOf(file)])));
+  /**
+   * Each file's two sides (by `keyOf`), and their tokens as they arrive, under `side\nkey`. A re-read
+   * that hands over the same texts (Local changes on every focus, a refreshed commit) keeps its
+   * tokens and starts no job; a side whose text changed drops its tokens and is highlighted anew.
+   */
+  const sides = $derived(new Map(files.map((file) => [keyOf(file), sidesOf(file)])));
   let tokens = $state.raw<Record<string, (LineTokens | undefined)[]>>({});
+  const jobs = new Map<string, { text: string; port: RenderPort; job: HighlightJob }>();
   $effect(() => {
     const port = render;
-    const jobs = [...sides].flatMap(([path, both]) =>
-      (["old", "new"] as const).map((side) => {
-        const got: (LineTokens | undefined)[] = [];
-        const key = `${side}\n${path}`;
-        return port.highlight(both[side], {
-          onLines(from, lines) {
-            lines.forEach((line, n) => (got[from + n] = line));
-            tokens = { ...tokens, [key]: [...got] };
-          },
-        });
-      }),
-    );
-    return () => {
-      jobs.forEach((job) => job.cancel());
-      tokens = {};
-    };
+    const want = new Map<string, SideText>();
+    for (const [key, both] of sides) for (const side of ["old", "new"] as const) want.set(`${side}\n${key}`, both[side]);
+    const had = untrack(() => tokens);
+    const kept: Record<string, (LineTokens | undefined)[]> = {};
+    for (const [name, made] of jobs) {
+      if (want.get(name)?.text === made.text && made.port === port) {
+        if (had[name]) kept[name] = had[name];
+      } else {
+        made.job.cancel();
+        jobs.delete(name);
+      }
+    }
+    tokens = kept;
+    for (const [name, side] of want) {
+      if (jobs.has(name)) continue;
+      const got: (LineTokens | undefined)[] = [];
+      const job = port.highlight(side, {
+        onLines(from, lines) {
+          lines.forEach((line, n) => (got[from + n] = line));
+          tokens = { ...tokens, [name]: [...got] };
+        },
+      });
+      jobs.set(name, { text: side.text, port, job });
+    }
   });
-  const tokensOf = (path: string, side: "old" | "new", at: number) => {
-    const row = sides.get(path)?.index[at]?.[side];
-    return row === null || row === undefined ? undefined : tokens[`${side}\n${path}`]?.[row];
+  $effect(() => () => {
+    jobs.forEach((made) => made.job.cancel());
+    jobs.clear();
+  });
+  /** A line's tokens, only while they are of the text drawn: a re-read draws plain until its own arrive. */
+  const tokensOf = (file: DrawnFile, side: "old" | "new", drawn: DrawnLine) => {
+    const key = keyOf(file);
+    const row = sides.get(key)?.index[drawn.at]?.[side];
+    if (row === null || row === undefined) return undefined;
+    const toks = tokens[`${side}\n${key}`]?.[row];
+    return toks && toks.map(([part]) => part).join("") === drawn.line.text ? toks : undefined;
   };
 
   /** Each file's card, to scroll to from the list. */
@@ -160,26 +183,26 @@
 {/snippet}
 
 <!-- One side of a split row: its number, sign and code, or padding where the side has no line. -->
-{#snippet half(path: string, cell: DrawnLine | null, side: "old" | "new")}
+{#snippet half(file: DrawnFile, cell: DrawnLine | null, side: "old" | "new")}
   {#if cell === null}
     <div class="tf-ln tf-pad"><span></span><span></span><span></span></div>
   {:else}
     {@const line = cell.line}
     <div class="tf-ln" class:tf-add={line.kind === "add"} class:tf-del={line.kind === "del"}>
-      <span class="tf-no">{side === "old" ? line.old : line.new}</span><span>{SIGN[line.kind]} {@render code(line.text, tokensOf(path, side, cell.at))}</span>
-      {#if targetOf(line).side === side}{@render plus(path, line)}{:else}<span></span>{/if}
+      <span class="tf-no">{side === "old" ? line.old : line.new}</span><span>{SIGN[line.kind]} {@render code(line.text, tokensOf(file, side, cell))}</span>
+      {#if targetOf(line).side === side}{@render plus(file.path, line)}{:else}<span></span>{/if}
     </div>
   {/if}
 {/snippet}
 
-{#snippet card(file: DiffFile)}
+{#snippet card(file: DrawnFile)}
   {@const done = isViewed(file.path)}
   {@const placed = placeThreads(file)}
   {@const lines = file.hunks.flatMap((hunk) => hunk.lines)}
   {@const strays = drafts.filter((d) => d.path === file.path && !lines.some((line) => draftsAt(file.path, line).includes(d)))}
-  <div class="tf-diff" class:tf-viewed={done} class:tf-split={split} bind:this={cards[file.path]}>
+  <div class="tf-diff" class:tf-viewed={done} class:tf-split={split} bind:this={cards[keyOf(file)]}>
     <div class="tf-fh">
-      <span class="tf-mono">{file.old_path && file.old_path !== file.path ? `${file.old_path} → ${file.path}` : file.path}</span>
+      <span class="tf-mono">{file.old_path && file.old_path !== file.path ? `${file.old_path} → ${keyOf(file)}` : keyOf(file)}</span>
       <span class="tf-add-n">+{file.additions}</span>
       <span class="tf-del-n">−{file.deletions}</span>
       {#if file.change === "added"}<span class="tf-chip">new file</span>{/if}
@@ -195,7 +218,7 @@
           {#if row.kind === "gap"}
             <div class="tf-hunk">{row.header}</div>
           {:else}
-            <div class="tf-srow">{@render half(file.path, row.old, "old")}{@render half(file.path, row.new, "new")}</div>
+            <div class="tf-srow">{@render half(file, row.old, "old")}{@render half(file, row.new, "new")}</div>
             {#each under(row) as cell (cell.at)}
               {@render after(file.path, cell.line, placed.under[cell.at] ?? [], targetOf(cell.line).side)}
             {/each}
@@ -209,7 +232,7 @@
             {@const line = row.line}
             <div class="tf-ln" class:tf-add={line.kind === "add"} class:tf-del={line.kind === "del"}>
               <span class="tf-no">{line.old ?? ""}</span><span class="tf-no">{line.new ?? ""}</span><span
-                >{SIGN[line.kind]} {@render code(line.text, tokensOf(file.path, line.kind === "del" ? "old" : "new", row.at))}</span
+                >{SIGN[line.kind]} {@render code(line.text, tokensOf(file, line.kind === "del" ? "old" : "new", row))}</span
               >
               {@render plus(file.path, line)}
             </div>
@@ -254,10 +277,10 @@
         <input bind:value={filter} placeholder="Filter changed files" aria-label="Filter changed files" />
       </label>
       <nav class="tf-flist" aria-label="Changed files">
-        {#each shown as file (file.path)}
+        {#each shown as file (keyOf(file))}
           {@const done = isViewed(file.path)}
-          <button type="button" class:tf-viewed={done} title={file.path} onclick={() => cards[file.path]?.scrollIntoView({ block: "start" })}
-            >{baseName(file.path)}<span class="tf-n"
+          <button type="button" class:tf-viewed={done} title={keyOf(file)} onclick={() => cards[keyOf(file)]?.scrollIntoView({ block: "start" })}
+            >{baseName(keyOf(file))}<span class="tf-n"
               ><span class="tf-add-n">+{file.additions}</span> <span class="tf-del-n">−{file.deletions}</span>{done ? " ✓" : ""}</span
             ></button
           >
@@ -268,7 +291,7 @@
     </div>
   {/if}
   <div class="tf-dfiles">
-    {#each list ? shown : files as file (file.path)}{@render card(file)}{/each}
+    {#each list ? shown : files as file (keyOf(file))}{@render card(file)}{/each}
     {#if gone.length > 0 || homeless.length > 0}
       <details class="tf-outdated tf-gone">
         <summary>On files this change no longer holds</summary>

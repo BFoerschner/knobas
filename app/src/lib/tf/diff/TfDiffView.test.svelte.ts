@@ -191,3 +191,36 @@ test("a string that spans hunks is highlighted as one string on both sides", asy
     expect(kinds(after.children[side]!)).toEqual(expect.arrayContaining(["kw:fn", "fn:main"]));
   }
 });
+
+test("a labelled file is titled by its label and highlighted by its path's language", async () => {
+  draw({ files: [{ ...RETRY, label: "src/retry.rs (modified, staged)" }], layout: createDiffLayout(() => null), render: shikiPort() });
+  await highlighted(3);
+  expect(squash(target.querySelector(".tf-fh .tf-mono"))).toBe("src/retry.rs (modified, staged)");
+  expect(kinds(target.querySelectorAll(".tf-ln")[0]!)).toEqual(expect.arrayContaining(["kw:fn", "fn:retry"]));
+});
+
+test("a re-read with the same texts keeps its tokens and starts no job; a changed side starts one", async () => {
+  const port = shikiPort();
+  const opened: string[] = [];
+  const counting: RenderPort = { highlight: (request, handlers) => (opened.push(request.text), port.highlight(request, handlers)) };
+  const props = $state({ files: [RETRY], layout: createDiffLayout(() => null), render: counting });
+  views.push(mount(TfDiffView, { target, props }));
+  flushSync();
+  await highlighted(3);
+  expect(opened).toHaveLength(2);
+
+  // Local changes on focus: equal files, new objects.
+  props.files = structuredClone([RETRY]);
+  flushSync();
+  expect(opened).toHaveLength(2);
+  expect(kinds(target.querySelectorAll(".tf-ln")[0]!)).toEqual(expect.arrayContaining(["kw:fn"]));
+
+  // The added line changed: the new side is highlighted again, the old side is kept.
+  const changed = structuredClone(RETRY);
+  changed.hunks[0]!.lines[2] = add(2, "    7");
+  props.files = [changed];
+  flushSync();
+  expect(opened).toHaveLength(3);
+  expect(opened[2]).toContain("    7");
+  expect(squash(target.querySelectorAll(".tf-ln")[2]!)).toBe("2+ 7");
+});

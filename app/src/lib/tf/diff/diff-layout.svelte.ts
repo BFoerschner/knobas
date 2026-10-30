@@ -5,9 +5,12 @@
  *
  * The choice is this viewer's, in the webview's `localStorage`
  * (`knobas.diff.layout`), as the shell switch (`knobas.shell`) and the
- * pending line comments are: a share export should not carry a colleague's
- * layout, and it needs no command. Storage missing, blocked or holding
- * rubbish costs the memory, never the toggle: the choice is unified then.
+ * pending line comments are: a toggle drawn in the diff's own toolbar, not a
+ * Settings entry, so it is not a `knobas.setting` row (*Pages kept open*,
+ * #2247, is one) and needs no command. The webview keeps `localStorage`
+ * across a restart; a backup does not carry it. Storage missing, blocked or
+ * holding rubbish costs the memory, never the toggle: the choice is unified
+ * then.
  */
 import { MediaQuery } from "svelte/reactivity";
 

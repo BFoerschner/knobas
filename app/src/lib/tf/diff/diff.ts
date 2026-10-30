@@ -34,6 +34,18 @@ export interface DiffReview {
   pending: PendingCommentStore;
 }
 
+/**
+ * A file as the component draws it: a caller may name it by a `label` in place of its path
+ * (*Local changes*: "src/retry.rs (modified, staged)", the same file twice). The label keys
+ * and titles the card; the path still picks the language and places comments.
+ */
+export type DrawnFile = DiffFile & { label?: string };
+
+/** What tells a drawn file apart from the others: its label, else its path. */
+export function keyOf(file: DrawnFile): string {
+  return file.label ?? file.path;
+}
+
 /** A line of the file, and its place among the file's lines. */
 export interface DrawnLine {
   line: DiffLine;
