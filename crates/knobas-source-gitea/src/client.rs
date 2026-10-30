@@ -199,6 +199,10 @@ pub(crate) fn is_repo_scoped(error: &SourceError) -> bool {
 #[derive(Debug)]
 pub(crate) struct GiteaClient {
     http: HttpClient,
+    /// Set once the server answered `contents-ext` 404 (a Gitea before 1.24,
+    /// Forgejo): its file entries are read from `contents` straight away
+    /// after, not after a 404 each (#2241).
+    no_contents_ext: std::sync::atomic::AtomicBool,
 }
 
 impl GiteaClient {
@@ -227,7 +231,10 @@ impl GiteaClient {
             forbidden: Some(forbidden_refusal),
             max_body: knobas_http::MAX_BODY,
         })?;
-        Ok(Self { http })
+        Ok(Self {
+            http,
+            no_contents_ext: std::sync::atomic::AtomicBool::new(false),
+        })
     }
 
     /// `GET /api/v1/user` -- the authenticated account.

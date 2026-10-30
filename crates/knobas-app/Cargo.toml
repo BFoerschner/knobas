@@ -20,8 +20,9 @@ version.workspace = true
 # `Lifecycle::begin_retry`'s claim, or stop the database outside the exit
 # handler.
 # It turns on knobas-core's own: the test-only derives on the Builds frame's
-# DTOs, which live there (#1318).
-test-util = ["knobas-core/test-util"]
+# DTOs, which live there (#1318), and knobas-http's request counter, which
+# a read run again behind its answer counts into (#2242).
+test-util = ["knobas-core/test-util", "knobas-http/test-util"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

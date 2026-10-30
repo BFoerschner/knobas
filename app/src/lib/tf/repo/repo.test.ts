@@ -5,7 +5,7 @@
  */
 import { expect, test } from "vitest";
 
-import type { DiffFile, DiffRead, EntityRow, SourceView, ViewAction, ViewSection } from "../../ipc/entity";
+import type { DiffFile, DiffRead, EntityDetail, EntityRow, SourceView, ViewAction, ViewSection } from "../../ipc/entity";
 import {
   ancestors,
   branchOptions,
@@ -13,7 +13,9 @@ import {
   branchStanding,
   type BranchRow,
   commitPrefill,
-  commitRefusal,
+  mirrorDefault,
+  repoAsks,
+  repoRefusals,
   compareHash,
   editHash,
   branchFrom,
@@ -436,24 +438,38 @@ test("a branch from a commit starts where the commit's own New branch… starts,
   expect(branchFrom(null)).toBeNull();
 });
 
-test("a commit onto the branch is refused where the file's section declares commit_file disabled, in its words (#985)", () => {
-  const reason = "main is a protected branch that this account may not push to: commit to a new branch and open a pull request instead";
-  const fileSection = (actions: ViewAction[] | null): ViewSection =>
-    ({
-      id: "file:README.md",
-      title: "Files",
-      count: null,
-      deferred: false,
-      blocks: [
-        { type: "file", trail: [], path: "README.md", text: "", language: null, size: 0, truncated: false, binary: false, url: null, sha: "a1" },
-        ...(actions === null ? [] : [{ type: "actions", actions }]),
+test("the repository page asks New branch and Commit change together, and reads each refusal in the source's words (#2241)", () => {
+  const repo = "gitea:tidewater/payout-service";
+  const branch = `${repo}@refs/heads/feature/x`;
+  expect(repoAsks(repo, branch)).toEqual([
+    { entity: repo, op: "create_branch" },
+    { entity: branch, op: "commit_file" },
+  ]);
+  const protectedMain = "main is a protected branch that this account may not push to";
+  expect(
+    repoRefusals(
+      [
+        { entity: repo, op: "create_branch", reason: "A mirror: its branches come from upstream" },
+        { entity: repo, op: "commit_file", reason: protectedMain },
       ],
-    }) as unknown as ViewSection;
-  expect(commitRefusal(fileSection([action("commit_file", reason)]))).toBe(reason);
-  expect(commitRefusal(fileSection([action("commit_file")]))).toBeNull();
-  expect(commitRefusal(fileSection([action("delete_branch", "Protected branch")]))).toBeNull();
-  expect(commitRefusal(fileSection(null))).toBeNull();
-  expect(commitRefusal(undefined)).toBeNull();
+      repo,
+      branch,
+    ),
+  ).toEqual({ branch: "A mirror: its branches come from upstream", commit: null });
+  expect(repoRefusals([{ entity: repo, op: "commit_file", reason: protectedMain }], repo, repo)).toEqual({
+    branch: null,
+    commit: protectedMain,
+  });
+  expect(repoRefusals([], repo, repo)).toEqual({ branch: null, commit: null });
+});
+
+test("the default branch is the mirror row's declared one, and none where it names none (#2243)", () => {
+  const detail = (payload: unknown) => ({ payload }) as unknown as EntityDetail;
+  expect(mirrorDefault(detail({ default_branch: "trunk" }))).toBe("trunk");
+  expect(mirrorDefault(detail({ default_branch: "" }))).toBeNull();
+  expect(mirrorDefault(detail({}))).toBeNull();
+  expect(mirrorDefault(detail(null))).toBeNull();
+  expect(mirrorDefault(null)).toBeNull();
 });
 
 // ---- readAllRows (#1825) ----

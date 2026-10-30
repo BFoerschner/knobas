@@ -21,6 +21,15 @@
 
   With no file in the address the top directory's README opens.
 
+  **Read at a commit** (#2241): the source reads the tree at the branch's tip
+  and the sections its listings name stand at that commit, so a file opened
+  from them costs the source its own two reads, and the app keeps it. Whether
+  a commit straight onto the branch is taken is the page's `refused_writes`
+  answer (`refusal`), not part of the file's read. A refresh, a commit's echo
+  and the app's `view:fresh` for the top directory (#2242) read the top again;
+  where the tip moved its sections are new, and the tree and the file are read
+  at the new commit, the file drawn kept, dimmed, meanwhile.
+
   A file over 2,000 lines is a windowed list (#2251, `shell/windowed.svelte.ts`):
   only the lines near the viewport are drawn, the rest are room above and
   below. A line link (`line/<n>/<path>`) draws its line, marks it and scrolls
@@ -43,8 +52,9 @@
   import { flushSync, tick, untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
 
-  import { ipcErrorMessage } from "../../ipc";
-  import type { CheckoutView, TreeEntry, ViewBlock, ViewSection } from "../../ipc/entity";
+  import { listen as tauriListen } from "@tauri-apps/api/event";
+  import { EVENTS, ipcErrorMessage } from "../../ipc";
+  import type { CheckoutView, TreeEntry, ViewBlock, ViewFresh, ViewSection } from "../../ipc/entity";
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
@@ -66,7 +76,6 @@
     REPO_FILES,
     ancestors,
     commitKind,
-    commitRefusal,
     editHash,
     fileHash,
     fileLines,
@@ -98,6 +107,7 @@
     checkout = undefined,
     title = "",
     refreshed = 0,
+    refusal = null,
     render = renderPort(),
     commands = ipcCommands,
     views = appViewChoices,
@@ -128,6 +138,8 @@
     title?: string;
     /** The page's refreshes (#2135): each reads the open directories and the file again over what the tab drew. */
     refreshed?: number;
+    /** Why the source refuses a commit straight onto the branch (#985, #2241), `null` where it takes one. */
+    refusal?: string | null;
     /** The engines renderers draw with (#2254): the app's workers, a fake in tests. */
     render?: RenderPort;
     /** Runs a command renderer (#2262): the IPC, a fake in tests. */
@@ -141,8 +153,6 @@
   let treeFailed = $state<string | null>(null);
   const open = new SvelteSet<string>();
   let file = $state<FileBlock | null>(null);
-  /** Why the source refuses a commit straight onto the branch (#985), `null` where it takes one. */
-  let refusal = $state<string | null>(null);
   let fileFailed = $state<string | null>(null);
   /** The file shown is being read: the one drawn before stays, dimmed, until it answers (#2246). */
   let fileReading = $state(false);
@@ -170,20 +180,27 @@
     return view?.sections[0];
   }
 
-  /** The read of `section` asked early, once, else a new one. */
-  function take(section: string, where = at): Promise<ViewSection | undefined> {
-    const read = early.get(section);
+  /**
+   * What an early read is held by: the place, not the section, since a guess
+   * names no commit and the listing's section does (#2241).
+   */
+  const dirKey = (dir: string) => `dir\u0000${dir}`;
+  const fileKey = (full: string) => `file\u0000${full}`;
+
+  /** The read of `place` asked early, once, else -- or where that guess was refused -- a new one of `section`. */
+  function take(section: string, place: string, where = at): Promise<ViewSection | undefined> {
+    const read = early.get(place);
     if (read === undefined) return readSection(section, where);
-    early.delete(section);
-    return read;
+    early.delete(place);
+    return read.catch(() => readSection(section, where));
   }
 
-  /** Asks for `section` now, for the listing that names it later. */
-  function askEarly(section: string): Promise<ViewSection | undefined> {
+  /** Asks for `section` now, for the listing that names `place` later. */
+  function askEarly(section: string, place: string): Promise<ViewSection | undefined> {
     const read = readSection(section);
     // A wrong guess fails unheard; the listing's own section is read instead.
     read.catch(() => {});
-    early.set(section, read);
+    early.set(place, read);
     return read;
   }
 
@@ -191,7 +208,7 @@
     if (asked.has(dir) || listings[dir] !== undefined) return;
     asked.add(dir);
     const mine = generation;
-    take(section).then(
+    take(section, dirKey(dir)).then(
       (read) => {
         if (mine !== generation) return;
         const block = read?.blocks[0];
@@ -238,19 +255,19 @@
       if (listings[parentOf(target)] !== undefined) return;
       const likely = likelySections(target);
       for (const [dir, section] of Object.entries(likely.dirs))
-        if (!asked.has(dir) && listings[dir] === undefined && !early.has(section)) askEarly(section);
+        if (!asked.has(dir) && listings[dir] === undefined && !early.has(dirKey(dir))) askEarly(section, dirKey(dir));
       let live = true;
-      const asking = askEarly(likely.file);
+      const asking = askEarly(likely.file, fileKey(target));
       // Answered, it is spent: a later open of the file reads it again.
       const spent = () => {
-        if (early.get(likely.file) === asking) early.delete(likely.file);
+        if (early.get(fileKey(target)) === asking) early.delete(fileKey(target));
       };
       asking.then(
         (read) => {
           spent();
-          if (!live || where !== at || (fileSection !== null && fileSection !== likely.file)) return;
-          if (file !== null && drawnSection === likely.file) return;
-          drawFile(read, likely.file);
+          if (!live || where !== at || shown !== target) return;
+          if (file !== null && file.path === target) return;
+          drawFile(read, fileSection ?? GUESSED);
         },
         // Its directory's listing says whether there is such a file.
         spent,
@@ -276,12 +293,13 @@
   });
   /** The section the file drawn was read through; the file drawn stays, dimmed, while the next one is read. */
   let drawnSection: string | null = null;
+  /** `drawnSection` of a file a deep link's guess drew before its listing named its section. */
+  const GUESSED = "\u0000guessed";
 
   function drawFile(read: ViewSection | undefined, section: string) {
     const block = read?.blocks[0];
     file = block?.type === "file" ? block : null;
     drawnSection = section;
-    refusal = commitRefusal(read);
     fileReading = false;
     fileFailed = null;
     draft = null;
@@ -299,6 +317,18 @@
       fileFailed = null;
       return;
     }
+    // A deep link's guess drew this file before its listing named the section: it stands for it.
+    if (
+      section !== null &&
+      section !== MISSING &&
+      drawnSection === GUESSED &&
+      untrack(() => file)?.path === untrack(() => shown)
+    ) {
+      drawnSection = section;
+      fileReading = false;
+      fileFailed = null;
+      return;
+    }
     fileFailed = null;
     // Waiting for the directory that says which section opens the file; with no file to show, nothing is drawn.
     const showing = untrack(() => shown) !== null;
@@ -306,19 +336,17 @@
     if (!showing) {
       file = null;
       drawnSection = null;
-      refusal = null;
     }
     if (section === null) return;
     if (section === MISSING) {
       fileReading = false;
       file = null;
       drawnSection = null;
-      refusal = null;
       fileFailed = `There is no file ${untrack(() => shown)} on ${untrack(() => branch) ?? "this branch"}.`;
       return;
     }
     let live = true;
-    take(section, where).then(
+    take(section, fileKey(untrack(() => shown) ?? ""), where).then(
       (read) => {
         if (live && !(file !== null && drawnSection === section)) drawFile(read, section);
       },
@@ -327,7 +355,6 @@
         fileReading = false;
         file = null;
         drawnSection = null;
-        refusal = null;
         fileFailed = ipcErrorMessage(error);
       },
     );
@@ -521,17 +548,18 @@
   // file again (#2105); what the reader typed stays.
   $effect(() => untrack(() => watchEchoes(REPO_FILES, rereadFile, { listen: ports.listen })));
 
-  function rereadFile(): Promise<void> {
+  function rereadFile(): Promise<unknown> {
     const section = fileSection;
     const where = at;
     if (section === null || section === MISSING) return Promise.resolve();
+    // The file a commit made is at the branch's new tip: the top says which.
+    void rereadTop();
     return readSection(section, where).then(
       (read) => {
         if (section !== fileSection || where !== at) return;
         const block = read?.blocks[0];
         if (block?.type !== "file") return;
         file = block;
-        refusal = commitRefusal(read);
         settleCommit(block);
       },
       // The file keeps what it drew; the next read tries again.
@@ -546,11 +574,59 @@
     () => Promise.all([rereadTree(), rereadFile()]),
   );
 
+  /**
+   * The top directory again (#2241, #2242): where its sections name a new
+   * commit, the branch moved, and the tree is read again at it -- the open
+   * directories by the sections the new top names, the file by its new
+   * section once its directory answers, drawn over what the tab shows.
+   */
+  function rereadTop(): Promise<unknown> {
+    const mine = generation;
+    return readSection("files").then(
+      (read) => {
+        const block = read?.blocks[0];
+        if (mine !== generation || block?.type !== "tree") return;
+        const before = (listings[""] ?? []).map((entry) => entry.section).join("\u0000");
+        if (block.entries.map((entry) => entry.section).join("\u0000") === before) return;
+        generation += 1;
+        asked = new Set([""]);
+        early = new Map();
+        listings = { "": block.entries };
+      },
+      // The tree keeps what it drew.
+      () => {},
+    );
+  }
+
+  // The app read the top directory again behind its answer, and it moved (#2242).
+  $effect(() => {
+    const where = at;
+    const listen = untrack(() => ports.listen) ?? ((event, handler) => tauriListen(event, handler));
+    let live = true;
+    let stop: (() => void) | null = null;
+    void listen(EVENTS.viewFresh, ({ payload }) => {
+      const fresh = payload as ViewFresh;
+      if (live && fresh.entity_id === where && fresh.section === "files") void rereadTop();
+    }).then(
+      (unlisten) => {
+        if (live) stop = unlisten;
+        else unlisten();
+      },
+      // No bridge to hear it on (a test without `listen`): nothing is told.
+      () => {},
+    );
+    return () => {
+      live = false;
+      stop?.();
+    };
+  });
+
   function rereadTree(): Promise<unknown> {
     const mine = generation;
-    const reads: Promise<unknown>[] = [];
+    const reads: Promise<unknown>[] = [rereadTop()];
     for (const dir of Object.keys(listings)) {
-      const section = dir === "" ? "files" : entryOf(dir)?.section;
+      if (dir === "") continue;
+      const section = entryOf(dir)?.section;
       if (section == null) continue;
       const read = readSection(section).then(
         (read) => {

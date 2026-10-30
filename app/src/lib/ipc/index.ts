@@ -62,6 +62,12 @@ export const EVENTS = {
    * followed if any, and whether it was refreshed, gone or failed (#2095).
    */
   itemRefreshed: "item:refreshed",
+  /**
+   * `ViewFresh` — a source view the app answered from memory was read again
+   * behind its answer, and the answer moved (#2242): the entity and section.
+   * A page showing that view reads it again.
+   */
+  viewFresh: "view:fresh",
 } as const;
 
 /** What every command rejects with — `knobas_app::IpcError`. */
