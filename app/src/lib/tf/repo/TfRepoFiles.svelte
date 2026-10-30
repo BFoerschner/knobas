@@ -69,6 +69,8 @@
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import TfDiagram from "../render/TfDiagram.svelte";
+  import TfBytesImage from "../render/TfBytesImage.svelte";
+  import TfPdf from "../render/TfPdf.svelte";
   import { findCount, stepMatch } from "../builds/run-reads";
   import { fileHits, firstHitOn, lineOfHit, needles, segments } from "./file-lines";
   import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
@@ -95,6 +97,7 @@
     type TextPlace,
   } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
+  import { pageVisible } from "../kept-pages.svelte";
   import { waitPhase } from "../waiting";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
@@ -478,6 +481,26 @@
     jump(event.shiftKey ? -1 : 1);
   }
 
+  /**
+   * Another file opens at its top. The shell's one scroller (`.tf-main`) is shared by every file, so without this a
+   * file opened from the tree started at the depth the last one was read to: a PDF below its first page, a short file
+   * at its end. A re-read of the same file, and a link to a line (the effect below), leave the scroll be.
+   */
+  const shownPage = pageVisible();
+  let fileview = $state<HTMLElement | null>(null);
+  let openedPath: string | null = null;
+  $effect(() => {
+    const opening = file?.path ?? null;
+    if (opening === null || opening === openedPath) return;
+    openedPath = opening;
+    const view = untrack(() => fileview);
+    const main = view?.closest(".tf-main");
+    if (!view || !main || untrack(() => line) !== null || !shownPage()) return;
+    // The tree's sticky top (`code.css`, `.tf-ftreebox`): the file's top comes to rest beside the tree's.
+    const above = view.getBoundingClientRect().top - main.getBoundingClientRect().top - 12;
+    if (above < 0) main.scrollTop += above;
+  });
+
   /** The file and line last scrolled to, so a refresh of the file leaves the reader where they are. */
   let shownLine: string | null = null;
   $effect(() => {
@@ -671,6 +694,18 @@
     const commit = file?.commit ?? null;
     return read === undefined ? null : (path: string) => read(entityId, path, commit);
   });
+  /**
+   * A binary file's bytes, at the commit it was read at (#2256), for the renderer that reads bytes (an image, a PDF,
+   * #2260). Keyed by what it reads, so a re-read of the same file hands the renderer the same function and it reads
+   * nothing again.
+   */
+  const bytesAt = $derived(file === null || !file.binary ? null : JSON.stringify([at, file.path, file.commit ?? null]));
+  const bytesRead = $derived.by(() => {
+    const read = ports.fileBytes;
+    if (bytesAt === null || read === undefined) return null;
+    const [entityId, path, commit] = JSON.parse(bytesAt) as [string, string, string | null];
+    return () => read(entityId, path, commit);
+  });
   /** A relative link in a Markdown file: the file here, at its line where it names one. */
   const fileLink = (to: string, at: number | null) => (at === null ? fileHash(repoId, to) : lineHash(repoId, to, at));
 
@@ -735,7 +770,7 @@
   </aside>
   <div class="tf-fcol">
   {#if path === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
-  <div class="tf-fileview">
+  <div class="tf-fileview" bind:this={fileview}>
     {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
         <span class="tf-p">{file.path}</span>
@@ -806,7 +841,11 @@
           {#if file.url}<span class="tf-acts"><a class="tf-btn tf-sm" href={file.url}>The rest on the source</a></span>{/if}
         </div>
       {/if}
-      {#if file.binary}
+      {#if file.binary && bytesRead !== null && drawAs === "pdf"}
+        <TfPdf read={bytesRead} size={file.size} {render} />
+      {:else if file.binary && bytesRead !== null && drawAs === "image"}
+        <TfBytesImage read={bytesRead} path={file.path} size={file.size} />
+      {:else if file.binary}
         <div class="tf-empty"><p>A binary file, not drawn.</p></div>
       {:else if image !== null}
         <div class="tf-fimage"><img src={image} alt={file.path} /></div>
