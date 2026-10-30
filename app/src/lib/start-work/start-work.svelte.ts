@@ -159,7 +159,12 @@ export const BRIDGE: StartWorkApi = {
   amend: (stepId, payload) => startWorkAmend(stepId, payload),
 };
 
-export function createStartWork(entityId: string, api: StartWorkApi = BRIDGE): StartWork {
+/**
+ * `shown` is the stepper's page's `visible` (`pageVisible()`): while keep-alive
+ * holds the page hidden the follow reads nothing, and its next tick after the
+ * return reads the flow where it has got to (#2249).
+ */
+export function createStartWork(entityId: string, api: StartWorkApi = BRIDGE, shown: () => boolean = () => true): StartWork {
   const state = $state<{
     steps: StartWorkStep[];
     error: string | null;
@@ -206,6 +211,7 @@ export function createStartWork(entityId: string, api: StartWorkApi = BRIDGE): S
     state.following = true;
     const mine = generation;
     poll = setInterval(() => {
+      if (!shown()) return;
       void (async () => {
         let steps: StartWorkStep[];
         try {

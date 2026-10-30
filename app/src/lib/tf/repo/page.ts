@@ -14,5 +14,5 @@ export const page = definePage({
   component: TfRepo,
   // One page per repository; its tabs and paths are that page drawn again (#2247).
   address: (route) => route.rest[0] ?? "",
-  props: ({ route, ready, job, jobAt }) => ({ ready, rest: route.rest, job, jobAt }),
+  props: ({ route, ready, job, jobAt, visible }) => ({ ready, rest: route.rest, job, jobAt, visible }),
 });

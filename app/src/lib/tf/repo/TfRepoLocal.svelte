@@ -12,6 +12,8 @@
     else…*, which sets the path by hand (`set_checkout_override`).
 -->
 <script lang="ts">
+  import { pageVisible } from "../kept-pages.svelte";
+  import { onFocusWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutView, DiffRead } from "../../ipc/entity";
   import TfDiff from "../code/TfDiff.svelte";
@@ -68,10 +70,10 @@
   $effect(() => {
     if (path === null) return;
     void load();
-    const again = () => void load();
-    window.addEventListener("focus", again);
-    return () => window.removeEventListener("focus", again);
   });
+  // Read again on focus, and once when the tab or its page is shown again;
+  // nothing while either is hidden (#2248, #2249).
+  onFocusWhileShown(pageVisible(), () => void load());
 
   async function save() {
     const value = typed.trim();
