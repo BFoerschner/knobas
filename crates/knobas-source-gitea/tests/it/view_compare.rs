@@ -31,7 +31,7 @@ fn source(server: &MockServer) -> Box<dyn Source> {
 }
 
 async fn served(base_wire: &str, head_wire: &str) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("GET"))
         .and(path(format!("{REPO}/compare/{base_wire}...{head_wire}")))
         .and(query_param("output", "diff"))
@@ -56,7 +56,10 @@ async fn a_repositorys_compare_section_is_the_diff_between_its_two_commits() {
         .expect("drawn");
     assert_eq!(view.sections.len(), 1);
     let drawn = &view.sections[0];
-    assert_eq!(drawn.id, section, "the section answers under the id it was asked by");
+    assert_eq!(
+        drawn.id, section,
+        "the section answers under the id it was asked by"
+    );
     assert_eq!(drawn.count, Some(1));
     let Block::Diff { files, .. } = &drawn.blocks[0] else {
         panic!("a diff: {drawn:#?}");
@@ -90,8 +93,13 @@ async fn a_base_before_a_commit_and_branch_names_reach_gitea_escaped() {
 
 #[tokio::test]
 async fn a_compare_section_without_two_ends_is_refused() {
-    let server = MockServer::start().await;
-    for bad in ["compare:", "compare:main", "compare:...main", "compare:main..."] {
+    let server = MockServer::builder().start().await;
+    for bad in [
+        "compare:",
+        "compare:main",
+        "compare:...main",
+        "compare:main...",
+    ] {
         let error = source(&server).view(ENTITY, Some(bad)).await.unwrap_err();
         assert!(error.to_string().contains("compare"), "{bad}: {error}");
     }
@@ -102,7 +110,7 @@ async fn a_compare_section_without_two_ends_is_refused() {
 /// commit before one included: a branch name moves.
 #[tokio::test]
 async fn a_compare_between_whole_shas_is_fixed_and_one_naming_a_branch_is_live() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let source = source(&server);
     for (section, standing) in [
         (format!("compare:{BASE}...{HEAD}"), Fixed),
@@ -112,7 +120,11 @@ async fn a_compare_between_whole_shas_is_fixed_and_one_naming_a_branch_is_live()
         (format!("compare:{}...{HEAD}", &BASE[..12]), Live),
         (format!("compare:{BASE}^^...{HEAD}"), Live),
     ] {
-        assert_eq!(source.view_standing(ENTITY, Some(&section)), standing, "{section}");
+        assert_eq!(
+            source.view_standing(ENTITY, Some(&section)),
+            standing,
+            "{section}"
+        );
     }
     assert_eq!(
         source.view_standing(

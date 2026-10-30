@@ -396,6 +396,7 @@ const TfSyncNow = (await import("../tf/TfSyncNow.svelte")).default;
 const { createRoleSyncs } = await import("../tf/role-sync.svelte");
 const { sourceRoles } = await import("../tf/roles.svelte");
 const TfCodeRow = (await import("../tf/code-row/TfCodeRow.svelte")).default;
+const TfDiffPage = (await import("../tf/diff/TfDiffPage.svelte")).default;
 const TfNote = (await import("../tf/note/TfNote.svelte")).default;
 const { createPendingComments } = await import("../detail/view/pending-comments.svelte");
 const TfMonitors = (await import("../tf/monitors/TfMonitors.svelte")).default;
@@ -1660,6 +1661,25 @@ const CASES: Case[] = [
           viewedFiles: () => deferred([]),
           setViewed: () => deferred([]),
           pending: createPendingComments(() => null),
+        },
+      }),
+    }),
+  },
+  // The diff address (#2271): the repository's row and its compare, answering late.
+  {
+    name: "TfDiffPage",
+    source: "lib/tf/diff/TfDiffPage.svelte",
+    open: (target) => ({
+      app: mount(TfDiffPage, {
+        target,
+        props: {
+          repoId: "gitea:tidewater/payout-service",
+          base: "main",
+          head: "feature/x",
+          ports: {
+            getEntity: () => deferred({ row: { title: "tidewater/payout-service" } } as never),
+            entityView: () => deferred({ sections: [], actions: [] } as never),
+          },
         },
       }),
     }),

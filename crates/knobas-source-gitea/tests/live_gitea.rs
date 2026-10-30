@@ -1048,7 +1048,10 @@ async fn the_diff_between_two_seeded_commits_is_read_from_the_compare() {
         .filter(|sha| sha.len() == 40)
         .collect();
     println!("commits {shas:?}");
-    assert!(shas.len() >= 2, "the seed commits at least twice to the branch: {shas:?}");
+    assert!(
+        shas.len() >= 2,
+        "the seed commits at least twice to the branch: {shas:?}"
+    );
 
     let paths = |view: &knobas_source::view::SourceView| -> Vec<String> {
         let mut paths: Vec<String> = view
@@ -1084,7 +1087,11 @@ async fn the_diff_between_two_seeded_commits_is_read_from_the_compare() {
         let own = paths(&own);
         println!("{sha}: {own:?}");
         assert!(!own.is_empty(), "{sha} changes something");
-        assert_eq!(compare(&format!("{sha}^"), sha).await, own, "{sha} as a range is its own diff");
+        assert_eq!(
+            compare(&format!("{sha}^"), sha).await,
+            own,
+            "{sha} as a range is its own diff"
+        );
         every.extend(own);
     }
     every.sort();
@@ -1092,7 +1099,10 @@ async fn the_diff_between_two_seeded_commits_is_read_from_the_compare() {
     let (newest, oldest) = (&shas[0], &shas[shas.len() - 1]);
     let range = compare(&format!("{oldest}^"), newest).await;
     println!("{oldest}^...{newest}: {range:?}");
-    assert_eq!(range, every, "the range carries every file its commits touched");
+    assert_eq!(
+        range, every,
+        "the range carries every file its commits touched"
+    );
     // Its inner bounds leave the oldest commit's change out.
     let inner = compare(oldest, newest).await;
     assert_ne!(inner, range, "{oldest}...{newest} is not the range");
