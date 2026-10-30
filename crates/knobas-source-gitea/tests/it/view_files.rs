@@ -1271,3 +1271,23 @@ async fn the_whole_tree_at_a_sha_is_fixed() {
     assert_eq!(source.view_standing(&at_commit(SHA), Some("paths")), Fixed);
     assert_eq!(source.view_standing(ENTITY, Some("paths")), Moving);
 }
+
+/// A server whose page is smaller than a thousand (`DEFAULT_GIT_TREES_PER_PAGE`
+/// set lower) is read by its own page.
+#[tokio::test]
+async fn a_smaller_server_page_is_read_by_its_own_size() {
+    let server = gitea().await;
+    let sha = tip("main");
+    let page = |from: usize, to: usize| -> Vec<Value> {
+        (from..to)
+            .map(|n| git_entry(&format!("f{n:04}"), "blob", "100644"))
+            .collect()
+    };
+    git_tree(&server, &sha, 1, page(0, 500), 1_200).await;
+    git_tree(&server, &sha, 2, page(500, 1000), 1_200).await;
+    git_tree(&server, &sha, 3, page(1000, 1200), 1_200).await;
+    let section = read(&server, ENTITY, &format!("paths@{sha}")).await;
+    let (files, truncated) = every(&section);
+    assert_eq!(files.len(), 1_200);
+    assert!(!truncated);
+}

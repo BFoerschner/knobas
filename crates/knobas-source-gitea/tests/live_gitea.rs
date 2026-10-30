@@ -1409,6 +1409,104 @@ async fn the_seeded_trees_are_walked_and_a_seeded_file_is_drawn() {
     assert_eq!(missing.status(), Some(404));
 }
 
+/// The whole tree for *Go to file* (#2311): every listing names it at its
+/// own commit, and it holds exactly the files Gitea's recursive tree holds,
+/// by their whole paths. Also what the adapter's paging leans on, at two
+/// entries a page: `total_count` counts every entry on every page, and
+/// Gitea's own `truncated` is true on the last page too, so it cannot say
+/// whether a read has them all. And the commits section counts what Gitea's
+/// `X-Total-Count` counts for the default branch.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_whole_tree_is_every_file_at_the_listings_commit() {
+    use knobas_source::view::Block;
+
+    let env = env();
+    let source = env.one_repo();
+    let branch = "feature/PAY-231-sepa-retry";
+    let entity = format!("gitea:{}@refs/heads/{branch}", env.full_name());
+    let top = source.view(&entity, Some("files")).await.unwrap().unwrap();
+    let Block::Tree { paths, trail, .. } = &top.sections[0].blocks[0] else {
+        panic!("a listing");
+    };
+    let paths = paths.clone().expect("a listing names the whole tree");
+    let sha = trail[0].section.strip_prefix("files@").expect("a sha").to_owned();
+    assert_eq!(paths, format!("paths@{sha}"));
+
+    let started = std::time::Instant::now();
+    let view = source.view(&entity, Some(&paths)).await.unwrap().unwrap();
+    println!("whole tree read in {:?}", started.elapsed());
+    let Block::Tree { entries, truncated, .. } = &view.sections[0].blocks[0] else {
+        panic!("a tree");
+    };
+    let ours: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+    println!("{} files: {ours:?}", ours.len());
+    assert!(!truncated);
+
+    let whole = api_json(
+        &env,
+        &format!("repos/{}/git/trees/{sha}?recursive=true&per_page=1000", env.full_name()),
+    )
+    .await;
+    let blobs: Vec<&str> = whole["tree"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["type"] == "blob")
+        .map(|e| e["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(ours, blobs, "every file, in git's order, nothing else");
+    assert!(ours.iter().any(|p| p.contains('/')), "files below the top, by whole path");
+    let every = entries.first().and_then(|e| e.section.clone()).unwrap();
+    let file = source.view(&entity, Some(&every)).await.unwrap().unwrap();
+    assert!(matches!(file.sections[0].blocks[0], Block::File { .. }), "an entry opens its file");
+
+    // Two to a page: the count is every entry, and `truncated` stays true
+    // on the last page.
+    let total = whole["total_count"].as_u64().expect("a total_count") as usize;
+    assert_eq!(total, whole["tree"].as_array().unwrap().len());
+    assert!(total > 2, "the seeded tree spans pages of two");
+    let last = total.div_ceil(2);
+    for page in [1, last] {
+        let paged = api_json(
+            &env,
+            &format!(
+                "repos/{}/git/trees/{sha}?recursive=true&per_page=2&page={page}",
+                env.full_name()
+            ),
+        )
+        .await;
+        println!(
+            "page {page}: {} entries, total_count {}, truncated {}",
+            paged["tree"].as_array().map_or(0, Vec::len),
+            paged["total_count"],
+            paged["truncated"]
+        );
+        assert_eq!(paged["total_count"].as_u64(), Some(total as u64));
+        assert_eq!(paged["truncated"], true, "page {page}");
+    }
+
+    // The commits section's count is Gitea's count of the default branch.
+    let repo = format!("gitea:{}", env.full_name());
+    let commits = source.view(&repo, Some("commits")).await.unwrap().unwrap();
+    let counted = reqwest::Client::new()
+        .get(format!(
+            "{}/api/v1/repos/{}/commits?sha=main&limit=1",
+            env.url,
+            env.full_name()
+        ))
+        .header("Authorization", format!("token {}", env.token))
+        .send()
+        .await
+        .unwrap()
+        .headers()
+        .get("x-total-count")
+        .and_then(|v| v.to_str().ok()?.parse::<u64>().ok());
+    println!("commits on main: {:?}, Gitea counts {counted:?}", commits.sections[0].count);
+    assert!(counted.is_some_and(|n| n > 0));
+    assert_eq!(commits.sections[0].count, counted);
+}
+
 /// Interfaces §4.2's key forms, against ids the *real* server issued.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]

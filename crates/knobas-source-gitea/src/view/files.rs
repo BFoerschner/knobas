@@ -53,9 +53,10 @@ const LINE_CAP: usize = 10_000;
 const SNIFF: usize = 8_000;
 /// The whole tree's id (#2311).
 const PATHS: &str = "paths";
-/// How many entries one page of Gitea's recursive tree holds: its own most
-/// (`[api] DEFAULT_GIT_TREES_PER_PAGE`, 1000; a larger ask is answered with
-/// that many).
+/// How many entries one page of Gitea's recursive tree is asked for: its
+/// default and its most (`[api] DEFAULT_GIT_TREES_PER_PAGE`, 1000, by
+/// Gitea's source). A server set lower answers fewer and says how many in
+/// all, so its pages are read by the size of its first, up to [`TREE_PAGES`].
 const TREE_PAGE: usize = 1_000;
 /// How many pages of the recursive tree the whole tree reads at most: twenty
 /// thousand entries, directories among them. A tree past it is cut there and
@@ -421,7 +422,9 @@ async fn every(
     let mut pages = vec![first];
     match total {
         Some(total) => {
-            let wanted = u32::try_from(total.div_ceil(TREE_PAGE))
+            // The server's own page, where it holds fewer than asked.
+            let size = pages[0].tree.len().clamp(1, TREE_PAGE);
+            let wanted = u32::try_from(total.div_ceil(size))
                 .unwrap_or(u32::MAX)
                 .min(TREE_PAGES);
             let rest: Vec<u32> = (2..=wanted).collect();
