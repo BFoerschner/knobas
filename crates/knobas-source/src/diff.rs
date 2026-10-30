@@ -809,7 +809,11 @@ mod tests {
         let (files, cut) = parse_view(&text);
         assert!(!cut);
         assert_eq!(files.len(), 40);
-        assert!(files.iter().all(|f| !f.truncated && f.hunks[0].lines.len() == 500));
+        assert!(
+            files
+                .iter()
+                .all(|f| !f.truncated && f.hunks[0].lines.len() == 500)
+        );
         let big = one(&added_file("big.txt", 3_000));
         assert!(!big.truncated, "a 3,000-line file is not cut either");
         assert_eq!(big.hunks[0].lines.len(), 3_000);
@@ -819,17 +823,13 @@ mod tests {
     /// extended header.
     #[test]
     fn a_rename_says_its_similarity_and_a_mode_change_its_modes() {
-        let renamed = one(
-            "diff --git a/src/old_queue.rs b/src/queue/legacy.rs\n\
+        let renamed = one("diff --git a/src/old_queue.rs b/src/queue/legacy.rs\n\
              similarity index 92%\n\
              rename from src/old_queue.rs\n\
-             rename to src/queue/legacy.rs\n",
-        );
+             rename to src/queue/legacy.rs\n");
         assert_eq!(renamed.change, DiffChange::Renamed);
         assert_eq!(renamed.similarity, Some(92));
-        let mode = one(
-            "diff --git a/deploy.sh b/deploy.sh\nold mode 100644\nnew mode 100755\n",
-        );
+        let mode = one("diff --git a/deploy.sh b/deploy.sh\nold mode 100644\nnew mode 100755\n");
         assert_eq!(
             (mode.old_mode.as_deref(), mode.new_mode.as_deref()),
             (Some("100644"), Some("100755"))
