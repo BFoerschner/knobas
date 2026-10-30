@@ -266,8 +266,9 @@ export type ChainStepRow = { pipeline_id: string, name: string, run: RunRow | nu
 /**
  * One application on the *Open in…* menu.
  *
- * Issue #844, R-8.21. Its commands take `{path}`, `{file}`, `{line}` and
- * `{name}`, all filled from this disk.
+ * Issue #844, R-8.21, #2274. It accepts the objects it has a command for:
+ * every application a repository and a file, and a commit, a range or a
+ * pull request when it has that command.
  */
 export type CheckoutApplication = { 
 /**
@@ -285,7 +286,20 @@ command: string,
 /**
  * The command that opens a file, if the application has one.
  */
-file_command: string | null, };
+file_command: string | null, 
+/**
+ * The command that opens a commit; without one the application is not
+ * offered for a commit.
+ */
+commit_command?: string | null, 
+/**
+ * The command that opens a range of commits.
+ */
+range_command?: string | null, 
+/**
+ * The command that opens a pull request.
+ */
+pull_request_command?: string | null, };
 
 /**
  * An application as a person typed it in the dialog: a new one has no id
@@ -299,7 +313,19 @@ id: string | null, name: string, command: string,
 /**
  * Blank is no file command.
  */
-file_command: string | null, };
+file_command: string | null, 
+/**
+ * Blank is none: not offered for a commit.
+ */
+commit_command?: string | null, 
+/**
+ * Blank is none: not offered for a range.
+ */
+range_command?: string | null, 
+/**
+ * Blank is none: not offered for a pull request.
+ */
+pull_request_command?: string | null, };
 
 /**
  * How a checkout was arrived at, or that it was not.
@@ -2564,6 +2590,26 @@ export type NotificationDraft = { title: string, body: string,
  * unread so the two ends of the click path stay the frontend's.
  */
 address: string, };
+
+/**
+ * What an application is opened on (#2274).
+ *
+ * - `repository`: the checkout.
+ * - `file`: a file in the repository, relative to it, at a line, read `at` a
+ *   commit or branch (the page's; the checkout is the working tree as left).
+ * - `commit`: one commit, by its sha.
+ * - `range`: the diff between two commits or branches, as the diff address
+ *   names them (`base` may be `<sha>^`).
+ * - `pull_request`: by its number, with its base and head as the page knows
+ *   them, and the head's branch.
+ */
+export type OpenObject = { "kind": "repository" } | { "kind": "file", path: string, line: number | null, at: string | null, } | { "kind": "commit", sha: string, } | { "kind": "range", base: string, head: string, } | { "kind": "pull_request", number: number, base: string, head: string, branch: string, };
+
+/**
+ * Which kind of [`Object`]: what an application declares it accepts by
+ * having a command for it.
+ */
+export type OpenObjectKind = "repository" | "file" | "commit" | "range" | "pull_request";
 
 /**
  * Which panel a [`DocBlock::Panel`] is.

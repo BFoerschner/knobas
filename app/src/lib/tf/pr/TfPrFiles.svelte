@@ -37,6 +37,7 @@
     setViewed,
     pending,
     render,
+    openAt = null,
   }: {
     prId: string;
     entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
@@ -46,6 +47,8 @@
     pending: PendingCommentStore;
     /** The renderer port, for tests; the app's by default. */
     render?: RenderPort;
+    /** *Open in…* per file (#2274): the repository and the head the files are read at. */
+    openAt?: { entityId: string; at: string | null } | null;
   } = $props();
 
   /** `undefined` while the *Files* read has not answered. */
@@ -102,6 +105,7 @@
       gone={diff?.gone ?? []}
       viewed={{ paths: viewed, set: (path, on) => void toggle(path, on) }}
       review={diff?.commentable ? { entity: prId, pending } : null}
+      {openAt}
       cut={diff?.truncated ?? false}
       {...render ? { render } : {}}
     />

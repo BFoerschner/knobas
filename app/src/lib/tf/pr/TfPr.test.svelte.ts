@@ -260,7 +260,8 @@ const button = (name: string) =>
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name) ??
   [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name);
 const cells = (tr: Element) => [...tr.querySelectorAll("td")].map((td) => td.textContent?.replace(/\s+/g, " ").trim()).join(" | ");
-const buttons = () => [...target.querySelectorAll(".tf-fhead .tf-acts button:not(.tf-refresh)")].map((b) => b.textContent?.trim());
+const buttons = () =>
+  [...target.querySelectorAll(".tf-fhead .tf-acts button:not(.tf-refresh):not([aria-haspopup=menu])")].map((b) => b.textContent?.trim());
 
 test("the header names the pull request, its state, head into base and the reader as its author", async () => {
   await draw([PR]);
@@ -282,6 +283,10 @@ test("somebody else's pull request names its author and offers Review…", async
   await draw([PR], ports({ author: "jonas", pr: theirs }));
   expect(text(".tf-fhead .tf-sub")).toBe("open feature/PAY-231-sepa-retry into main, by jonas");
   expect(buttons()).toEqual(["Review…", "Edit", "Merge…"]);
+  // *Open in…* on the pull request (#2274): a ghost after the actions, before Refresh (#2238).
+  const all = [...target.querySelectorAll(".tf-fhead .tf-acts > *")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
+  expect(all.slice(-2, -1)).toEqual(["Open in… ▾"]);
+  expect(target.querySelector(".tf-fhead .tf-acts [aria-haspopup=menu]")!.className).toContain("tf-ghost");
 });
 
 test("the toolbar draws what the source offers, in prototype-6's order: Review…, Update branch, Edit, Close, Merge…", async () => {

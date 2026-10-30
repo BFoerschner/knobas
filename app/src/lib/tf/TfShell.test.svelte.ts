@@ -1389,7 +1389,7 @@ test("the stored Pages kept open reaches the page host once the database answers
 test("the saved command renderers are in the registry once the database answers (#2262)", async () => {
   start({
     userRenderers: () =>
-      Promise.resolve([{ id: "plantuml", name: "PlantUML", command: "plantuml -tsvg -pipe", patterns: ["*.puml"], fences: ["plantuml"], input: "text", output: "svg", timeout_secs: 10 }]),
+      Promise.resolve([{ id: "plantuml", name: "PlantUML", command: "plantuml -tsvg -pipe", patterns: ["*.puml"], fences: ["plantuml"], input: "text", output: "svg", timeout_secs: 10, diff: false }]),
   });
   try {
     await settle();

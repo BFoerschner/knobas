@@ -54,7 +54,7 @@ export function installCommands(saved: readonly UserRenderer[], commands: Comman
       fences: user.fences.map((fence) => fence.toLowerCase()),
       input: user.input,
       output: user.output,
-      diff: false,
+      diff: user.diff,
     };
     undo.push(register(renderer));
     if (renderer.fences.length > 0) undo.push(registerFence(renderer.id, (code, into) => drawFence(renderer, code, into, commands)));

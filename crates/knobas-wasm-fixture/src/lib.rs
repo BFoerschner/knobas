@@ -471,6 +471,7 @@ impl Adapter for Fixture {
             source_actions: vec![BOOK_REPAIR.into()],
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            code_pages: None,
         }
     }
 

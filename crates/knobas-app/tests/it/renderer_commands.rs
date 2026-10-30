@@ -27,6 +27,7 @@ fn draft(name: &str, command: &str, output: CommandOutput) -> UserRendererDraft 
         input: RendererInput::Text,
         output,
         timeout_secs: None,
+        diff: false,
     }
 }
 
@@ -58,7 +59,20 @@ async fn saved_renderers_read_back_with_ids_and_lowercase_fences() {
     assert_eq!(saved[0].fences, ["plantuml"]);
     assert_eq!(saved[0].timeout_secs, renderers::DEFAULT_TIMEOUT_SECS);
     assert_eq!(saved[1].id, "plantuml-2", "two renderers never share an id");
+    assert!(!saved[0].diff, "a renderer draws no diff unless it says so");
     assert_eq!(renderers::list(&pool).await.unwrap(), saved);
+}
+
+/// A renderer that declares diff support (#2279) keeps the declaration
+/// through a save and a read back.
+#[tokio::test]
+async fn a_renderer_declaring_diff_support_keeps_it() {
+    let pool = scratch("renderer_commands_diff").await;
+    let mut drawing = draft("PlantUML", "plantuml -tsvg -pipe", CommandOutput::Svg);
+    drawing.diff = true;
+    let saved = renderers::save(&pool, &[drawing]).await.unwrap();
+    assert!(saved[0].diff);
+    assert!(renderers::list(&pool).await.unwrap()[0].diff);
 }
 
 /// A command with an unclosed quote, or none at all, is refused by name.

@@ -20,18 +20,30 @@
 //! commands, which wrote those templates, are gone (#1481); a database that
 //! holds one still reads it here.
 //!
-//! # The only values are from this disk (ADR-0016)
+//! # What reaches an argument (ADR-0016, ADR-0034)
 //!
-//! [`open`] fills a command from the checkout `resolve` found on this machine
-//! and a file path it has checked is inside that checkout on disk. No field of
-//! the mirrored repository reaches a spawned process.
+//! [`open_object`] fills a command from the checkout `resolve` found on this
+//! machine and a file path it has checked is inside that checkout on disk.
+//! A code object's own values (`{sha}`, `{base}`, `{head}`, `{pr}`,
+//! `{branch}`) are held to the grammar `knobas_core::checkout::open` gives,
+//! and `{url}` is [`page`]: the source's typed base URL and the page its
+//! adapter declares. No other field of the mirror reaches a spawned process.
+//!
+//! # Every object, one runner (#2274)
+//!
+//! A repository, a file, a commit, a range and a pull request all go through
+//! [`open_object`] and the one [`spawn`]; an application is offered for an
+//! object only when it has a command for it.
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
-use knobas_core::checkout::open::{self as rules, Application, Draft, Fill};
+use knobas_core::checkout::open::{self as rules, Application, Code, Draft, Fill, Object};
+use knobas_core::entity::EntityRef;
+use knobas_source::code_pages::{self, Page};
+use knobas_sync::scheduler::AdapterRegistry;
 
 use super::working_tree::{self, TreeRead};
 use crate::IpcError;
@@ -105,7 +117,7 @@ async fn load_with(pool: &PgPool, shipped: Vec<Application>) -> Result<Stored, I
                 id: id.to_owned(),
                 name: name.to_owned(),
                 command: template,
-                file_command: None,
+                ..Application::default()
             }),
         }
     }
@@ -216,32 +228,67 @@ pub async fn set_applications(
 
 /// Run a saved application at this entity's checkout (the default when
 /// `application` is `None`), at a file in it when one is named. Answers the
-/// argument vector it started.
-///
-/// The program is always a template from `knobas.setting` (ADR-0016): *Try
-/// it* saves the draft first and opens it by its id (#1643), so nothing the
-/// webview sends names a program.
-///
-/// The file is a path relative to the checkout, and it must be a file inside
-/// it **on disk**: the words are checked first ([`rules::inside`]), and then
-/// the canonical path, which is where a symlink out of the checkout is caught.
-/// With a file, the application's file command runs, else its command.
+/// argument vector it started. [`open_object`] for a repository or a file,
+/// with no page for `{url}`.
 ///
 /// # Errors
 ///
-/// [`Invalid`](crate::IpcErrorCode::Invalid) for an unknown application, no
-/// application at all, a file that is not inside the checkout, a command that
-/// cannot be run, or a program that would not start;
-/// [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror does not hold the
-/// entity or it has no checkout on this machine;
-/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure, or a launch
-/// whose blocking task did not finish.
+/// As [`open_object`].
 pub async fn open(
     pool: &PgPool,
     entity_id: &str,
     application: Option<&str>,
     file: Option<&str>,
     line: Option<u32>,
+) -> Result<Vec<String>, IpcError> {
+    open_object(pool, None, entity_id, application, &file_object(file, line)).await
+}
+
+/// The object `open_checkout` names: a file when it names one, else the
+/// repository.
+#[must_use]
+pub fn file_object(file: Option<&str>, line: Option<u32>) -> Object {
+    match file.map(str::trim).filter(|file| !file.is_empty()) {
+        Some(path) => Object::File {
+            path: path.to_owned(),
+            line,
+            at: None,
+        },
+        None => Object::Repository,
+    }
+}
+
+/// Run a saved application on `object` of this entity's repository (the
+/// default when `application` is `None`), at its checkout. Answers the
+/// argument vector it started.
+///
+/// The program is always a template from `knobas.setting` (ADR-0016): *Try
+/// it* saves the draft first and opens it by its id (#1643), so nothing the
+/// webview sends names a program. The template is the application's command
+/// for the object's kind; an application without one is refused, and the
+/// menu never offers it.
+///
+/// A file is a path relative to the checkout, and it must be a file inside
+/// it **on disk**: the words are checked first ([`rules::inside`]), and then
+/// the canonical path, which is where a symlink out of the checkout is caught.
+/// `{url}` is [`page`] when `registry` is given and the source declares one.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an unknown application, no
+/// application at all, one that does not accept the object, a file that is
+/// not inside the checkout, a command that cannot be run or an object value
+/// it refuses, or a program that would not start;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror does not hold the
+/// entity or it has no checkout on this machine;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure, or a launch
+/// whose blocking task did not finish.
+pub async fn open_object(
+    pool: &PgPool,
+    registry: Option<&dyn AdapterRegistry>,
+    entity_id: &str,
+    application: Option<&str>,
+    object: &Object,
 ) -> Result<Vec<String>, IpcError> {
     let checkout = super::resolve(pool, entity_id).await?;
     let path = checkout.path.ok_or_else(|| {
@@ -250,9 +297,9 @@ pub async fn open(
         ))
     })?;
     let checkout = PathBuf::from(path);
-    let file = match file.map(str::trim).filter(|file| !file.is_empty()) {
-        Some(relative) => Some(file_inside(&checkout, relative).await?),
-        None => None,
+    let (file, line) = match object {
+        Object::File { path, line, .. } => (Some(file_inside(&checkout, path).await?), *line),
+        _ => (None, None),
     };
     let stored = load(pool).await?;
     let wanted = application
@@ -270,16 +317,31 @@ pub async fn open(
                  Checkouts",
             ),
         })?;
-    let template = match (&file, &app.file_command) {
-        (Some(_), Some(file_command)) => file_command.clone(),
-        _ => app.command.clone(),
+    let kind = object.kind();
+    let template = app
+        .command_for(kind)
+        .ok_or_else(|| {
+            IpcError::invalid(format!(
+                "{} has no {}, so it does not open one: add it in Settings › Checkouts",
+                app.name,
+                kind.command_word()
+            ))
+        })?
+        .to_owned();
+    let url = match registry {
+        Some(registry) if template.contains("{url}") => {
+            page(pool, registry, entity_id, object).await?
+        }
+        _ => None,
     };
+    let code = Code::of(object, url);
     let argv = rules::fill(
         &template,
         &Fill {
             checkout: &checkout,
             file: file.as_deref(),
             line,
+            code: &code,
         },
     )
     .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))?;
@@ -290,6 +352,118 @@ pub async fn open(
         .map_err(IpcError::internal)?
         .map_err(|error| IpcError::invalid(format!("'{template}' could not be run: {error}")))?;
     Ok(argv)
+}
+
+/// The page `object` of this entity's repository has at its source: what
+/// *Open in › Browser* opens and `{url}` is (#2274). `None` when the source's
+/// adapter declares no code pages, or a file is not read at a commit or
+/// branch.
+///
+/// Built as ADR-0023 builds a clone URL: the instance's typed base URL, the
+/// template the adapter declares (`knobas_source::code_pages`), and the
+/// values, the repository's `owner/name` checked as *Clone* checks it and the
+/// object's held to the grammar its placeholders are, each percent-encoded.
+/// The item's stored `web_url` is never read.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an address that is not a
+/// repository or a branch, or an object value refused;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror does not hold the
+/// repository or its source is gone;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn page(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+    object: &Object,
+) -> Result<Option<String>, IpcError> {
+    let repo_id = super::repo_of(pool, entity_id)
+        .await?
+        .entity_id
+        .ok_or_else(|| {
+            IpcError::not_found(format!(
+                "{entity_id} is a branch whose repository is not in the mirror, so it has no page"
+            ))
+        })?;
+    let source: Option<(String, String)> = sqlx::query_as(
+        "select s.kind, s.base_url
+           from sync.item i join knobas.source_config s on s.id = i.source_id
+          where i.entity_id = $1",
+    )
+    .bind(&repo_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    let (kind, base_url) = source.ok_or_else(|| {
+        IpcError::not_found(format!("{repo_id}'s source is no longer configured"))
+    })?;
+    let Some(pages) = registry
+        .descriptors()
+        .into_iter()
+        .find(|d| d.adapter_kind == kind)
+        .and_then(|d| d.code_pages)
+    else {
+        return Ok(None);
+    };
+    let key = EntityRef::parse(&repo_id).map_err(IpcError::invalid)?.key;
+    let name = knobas_core::checkout::clone::FullName::parse(&key).map_err(IpcError::invalid)?;
+    let repo = format!("{}/{}", name.owner(), name.repo());
+    let refuse = |what: &str, value: &str| {
+        IpcError::invalid(format!(
+            "{what} '{value}' is not a name knobas opens a page for"
+        ))
+    };
+    let rev = |what: &str, value: &str, caret: bool| {
+        if rules::is_ref_name(value, caret) {
+            Ok(value.to_owned())
+        } else {
+            Err(refuse(what, value))
+        }
+    };
+    let (which, values): (Page, Vec<(&str, String)>) = match object {
+        Object::Repository => (Page::Repository, vec![]),
+        Object::File { path, line, at } => {
+            let Some(at) = at else { return Ok(None) };
+            if rules::inside(Path::new("/"), path).is_none() {
+                return Err(refuse("the file", path));
+            }
+            (
+                Page::File,
+                vec![
+                    ("ref", rev("the commit or branch", at, false)?),
+                    ("file", path.trim_start_matches("./").to_owned()),
+                    ("line", line.unwrap_or(1).to_string()),
+                ],
+            )
+        }
+        Object::Commit { sha } => {
+            if !rules::is_sha(sha) {
+                return Err(refuse("the commit", sha));
+            }
+            (Page::Commit, vec![("sha", sha.clone())])
+        }
+        Object::Range { base, head } => (
+            Page::Range,
+            vec![
+                ("base", rev("the base", base, true)?),
+                ("head", rev("the head", head, false)?),
+            ],
+        ),
+        Object::PullRequest {
+            number, base, head, ..
+        } => (
+            Page::PullRequest,
+            vec![
+                ("pr", number.to_string()),
+                ("base", base.clone()),
+                ("head", head.clone()),
+            ],
+        ),
+    };
+    let mut all: Vec<(&str, &str)> = vec![("repo", repo.as_str())];
+    all.extend(values.iter().map(|(k, v)| (*k, v.as_str())));
+    Ok(code_pages::page(&base_url, pages.template(which), &all))
 }
 
 /// `relative` inside `checkout`, as a file that is there.
@@ -408,6 +582,7 @@ mod tests {
                 checkout: Path::new("/"),
                 file: None,
                 line: None,
+                code: &Code::NONE,
             },
         )
         .unwrap();

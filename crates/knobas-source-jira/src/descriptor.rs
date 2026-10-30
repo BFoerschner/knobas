@@ -52,6 +52,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        code_pages: None,
         write_ops: vec![
             WRITE_OP_COMMENT.to_owned(),
             WRITE_OP_TRANSITION.to_owned(),

@@ -382,6 +382,8 @@ pub fn run() {
             commands::entity::entity_checkout,
             commands::entity::set_checkout_override,
             commands::entity::open_checkout,
+            commands::entity::open_object,
+            commands::entity::object_page,
             commands::search::search,
             commands::search::launcher_home,
             commands::search::smart_lists,

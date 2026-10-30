@@ -6,14 +6,27 @@
  * from this disk (`knobas_core::checkout::open`); what is filled here is only
  * drawn, as prototype-6's `fill`.
  */
-import type { CheckoutApplication, CheckoutSettings, CloneFailureCause } from "../../ipc/entity";
+import type {
+  CheckoutApplication,
+  CheckoutSettings,
+  CloneFailureCause,
+  DiffFile,
+  OpenObject,
+  OpenObjectKind,
+} from "../../ipc/entity";
 
-/** The four placeholders, in the dialog's order, with what each one is (R-8.23). */
+/** The placeholders, in the dialog's order, with what each one is (R-8.23, #2274). */
 export const PLACEHOLDERS: readonly { name: string; says: string }[] = [
   { name: "{path}", says: "the checkout folder" },
   { name: "{file}", says: "the file you have open, inside the checkout" },
   { name: "{line}", says: "the line you are on, or 1" },
   { name: "{name}", says: "the repository name" },
+  { name: "{sha}", says: "the commit, in a commit command" },
+  { name: "{base}", says: "where a range or pull request starts" },
+  { name: "{head}", says: "where it ends" },
+  { name: "{pr}", says: "the pull request’s number" },
+  { name: "{branch}", says: "the pull request’s branch" },
+  { name: "{url}", says: "its page at the source" },
 ];
 
 /** A checkout the dialog's preview fills from and *Try it* runs at. */
@@ -137,4 +150,71 @@ export function cloneFailure(cause: CloneFailureCause, reason: string, repoUrl: 
   }
   if (cause === "disk_full") return "The disk is full. Free some space, then try again.";
   return reason;
+}
+
+// -- code objects (#2274) ------------------------------------------------------
+
+/** What each object's placeholders are, for the dialog and the preview. */
+export const OBJECT_PLACEHOLDERS: Readonly<Record<OpenObjectKind, readonly string[]>> = {
+  repository: ["{path}", "{file}", "{line}", "{name}", "{url}"],
+  file: ["{path}", "{file}", "{line}", "{name}", "{url}"],
+  commit: ["{path}", "{name}", "{sha}", "{url}"],
+  range: ["{path}", "{name}", "{base}", "{head}", "{url}"],
+  pull_request: ["{path}", "{name}", "{pr}", "{base}", "{head}", "{branch}", "{url}"],
+};
+
+/** The command an application runs for an object of `kind`, or `null` when it does not accept one. */
+export function objectCommand(app: CheckoutApplication, kind: OpenObjectKind): string | null {
+  switch (kind) {
+    case "repository":
+      return app.command;
+    case "file":
+      return app.file_command ?? app.command;
+    case "commit":
+      return app.commit_command ?? null;
+    case "range":
+      return app.range_command ?? null;
+    case "pull_request":
+      return app.pull_request_command ?? null;
+  }
+}
+
+/** The menu for an object: the applications that accept it, the default first (R-8.22). */
+export function objectMenu(settings: CheckoutSettings, kind: OpenObjectKind): { app: CheckoutApplication; isDefault: boolean }[] {
+  return menuOrder(settings).filter((row) => objectCommand(row.app, kind) !== null);
+}
+
+/** What an object's command is drawn with: the checkout, and the object's own values. */
+export interface ObjectFill {
+  path: string;
+  object: OpenObject;
+  url: string | null;
+}
+
+/** A command with its placeholders drawn in for an object, as the backend fills them. */
+export function fillObject(command: string, at: ObjectFill): string {
+  const { object } = at;
+  const file = object.kind === "file" ? `${at.path}/${object.path}` : null;
+  const line = object.kind === "file" ? object.line : null;
+  let out = fill(command, { path: at.path, file, line });
+  const value = (name: string, given: string | number | null | undefined) => {
+    if (given !== null && given !== undefined) out = out.replaceAll(`{${name}}`, String(given));
+  };
+  value("url", at.url);
+  if (object.kind === "commit") value("sha", object.sha);
+  if (object.kind === "range" || object.kind === "pull_request") {
+    value("base", object.base);
+    value("head", object.head);
+  }
+  if (object.kind === "pull_request") {
+    value("pr", object.number);
+    value("branch", object.branch);
+  }
+  return out;
+}
+
+/** The line a diff file opens at: its first added line, else its first line after the change. */
+export function firstLine(file: DiffFile): number | null {
+  const lines = file.hunks.flatMap((hunk) => hunk.lines);
+  return lines.find((line) => line.kind === "add")?.new ?? lines.find((line) => line.new !== null)?.new ?? null;
 }

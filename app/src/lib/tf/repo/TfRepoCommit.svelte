@@ -15,6 +15,8 @@
   import type { ChoiceOption, DiffFile, EntityDetail } from "../../ipc/entity";
   import { commitContext, parentOf } from "../diff/context";
   import TfDiffView from "../diff/TfDiffView.svelte";
+  import { shaOfCommit } from "../diff/address";
+  import TfOpenObject from "../openin/TfOpenObject.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import { branchFrom, repoHash, shaOf } from "./repo";
@@ -27,7 +29,7 @@
     onNewBranch,
     refreshed = 0,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity">;
+    ports: Pick<RepoPorts, "entityView" | "getEntity" | "fileBytes">;
     repoId: string;
     commitId: string;
     now: Date;
@@ -90,6 +92,8 @@
   }
 
   const sha = $derived(shaOf(commitId));
+  /** The whole sha, for *Open in…*: a merge commit opens as any commit does. */
+  const whole = $derived(shaOfCommit(commitId));
 
   function branchHere() {
     if (start !== null && start.disabled === null) onNewBranch(start.from);
@@ -114,6 +118,7 @@
         onclick={branchHere}>New branch from here…</button>
     {/if}
     <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}>All commits</a>
+    {#if whole !== null}<TfOpenObject entityId={repoId} object={{ kind: "commit", sha: whole }} />{/if}
   </span>
 </h2>
 {#if failed !== null}
@@ -121,5 +126,10 @@
 {:else if files !== null && files.length === 0}
   <div class="tf-empty">This commit changes no file.</div>
 {:else if files !== null}
-  <TfDiffView {files} {cut} context={commitContext(ports.entityView, commitId, parent)} />
+  <TfDiffView
+    {files}
+    {cut}
+    context={commitContext(ports.entityView, commitId, parent, ports.fileBytes)}
+    openAt={whole === null ? null : { entityId: repoId, at: whole }}
+  />
 {/if}

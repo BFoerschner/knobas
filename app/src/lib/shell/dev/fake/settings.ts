@@ -84,7 +84,7 @@ export function handlers(): Handlers {
   };
 
   let renderers: UserRenderer[] = [
-    { id: "cat", name: "Cat", command: "cat", patterns: ["*.cat.html"], fences: ["cat"], input: "text", output: "html", timeout_secs: 10 },
+    { id: "cat", name: "Cat", command: "cat", patterns: ["*.cat.html"], fences: ["cat"], input: "text", output: "html", timeout_secs: 10, diff: false },
   ];
 
   // The default renderer per file pattern (#2263): none until one is made.
@@ -108,6 +108,7 @@ export function handlers(): Handlers {
         input: d.input,
         output: d.output,
         timeout_secs: Math.min(120, Math.max(1, d.timeout_secs ?? 10)),
+        diff: d.diff,
       }));
       return renderers;
     },

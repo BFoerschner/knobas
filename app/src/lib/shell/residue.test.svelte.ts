@@ -351,6 +351,7 @@ const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
 const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
+const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
 const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
@@ -394,6 +395,7 @@ const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
 const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
 const TfDiffView = (await import("../tf/diff/TfDiffView.svelte")).default;
+const TfDiffRendered = (await import("../tf/diff/TfDiffRendered.svelte")).default;
 const TfItem = (await import("../tf/item/TfItem.svelte")).default;
 const TfDetailRefresh = (await import("../tf/TfDetailRefresh.svelte")).default;
 const { createDetailRefresh } = await import("../tf/refresh.svelte");
@@ -1239,6 +1241,30 @@ const CASES: Case[] = [
     },
   },
   {
+    /** *Open in…* on a code object (#2274): open, its menu registers a layer and a window click listener. */
+    name: "TfOpenObject",
+    source: "lib/tf/openin/TfOpenObject.svelte",
+    open: (target) => ({
+      app: mount(TfOpenObject, {
+        target,
+        props: {
+          entityId: "mock:tidewater/payout-service",
+          object: { kind: "commit", sha: "c90d11e4a7b2" },
+          apps: residueApps(),
+          layers: createLayers(),
+          ports: {
+            entityCheckout: () => deferred(CLONED),
+            objectPage: () => deferred(null),
+            openExternal: () => deferred(undefined),
+          },
+        },
+      }),
+    }),
+    exercise: (target) => {
+      target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
+    },
+  },
+  {
     /** *Local changes* (#847) reads the diff again when the window gets focus. */
     name: "TfRepoLocal",
     source: "lib/tf/repo/TfRepoLocal.svelte",
@@ -1776,6 +1802,24 @@ const CASES: Case[] = [
               threads: [],
             },
           ],
+        },
+      }),
+    }),
+  },
+  // A rendered diff (#2279): asks the view for its sides; the view keeps them.
+  {
+    name: "TfDiffRendered",
+    source: "lib/tf/diff/TfDiffRendered.svelte",
+    open: (target) => ({
+      app: mount(TfDiffRendered, {
+        target,
+        props: {
+          plan: { renderer: { id: "markdown", name: "Markdown", patterns: ["*.md"], fences: [], input: "text", output: "html", diff: true }, sides: ["old", "new"], swipe: false },
+          path: "README.md",
+          sides: ["old", "new"],
+          swipe: false,
+          sideOf: (side: "old" | "new") => ({ kind: "drawn", content: side === "old" ? "# Before" : "# After" }),
+          load: () => {},
         },
       }),
     }),
