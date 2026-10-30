@@ -13,6 +13,9 @@
   /* The type scale. Rounding of half a pixel to two against prototype-6 is expected. */
   --t-2xs: 11px; --t-xs: 12px; --t-sm: 13px; --t-md: 14px; --t-lg: 15px; --t-xl: 17px;
   --t-2xl: 20px; --t-3xl: 24px; --t-d1: 34px; --t-d2: 44px; --t-d3: 64px;
+  /* Highlighting (#2254, spec #2234 step 5): the two themes are these tokens' light and dark values,
+     as the Code area mockup (mockups/code-area/base.css) draws them. */
+  --hl-kw: #7A3EB1; --hl-str: var(--ok); --hl-num: var(--warn); --hl-com: var(--muted); --hl-fn: var(--info); --hl-ty: #A2461B;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -24,6 +27,7 @@
     --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
     --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
     --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
+    --hl-kw: #C79BF2; --hl-ty: #F0A274;
     color-scheme: dark;
   }
 }
@@ -35,6 +39,7 @@
   --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
   --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
   --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
+  --hl-kw: #C79BF2; --hl-ty: #F0A274;
   color-scheme: dark;
 }
 
