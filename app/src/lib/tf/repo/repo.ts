@@ -452,6 +452,14 @@ export function repoRefusals(
  * repository row's declared `default_branch`, so the page draws its tabs
  * before the live branch list answers. `null` where the row names none, and
  * the page waits for the list.
+ *
+ * A payload read outside the adapter (ADR-0007), in this one statement: the
+ * code host's declared `default_branch` path covers a branch's row, not a
+ * repository's, and no DTO field carries it yet. It misses, never guesses:
+ * an absent or non-text key is `null`, the page waiting for the list as
+ * before #2243 (pinned in `repo.test.ts` and `TfRepo.test`). A stale name only
+ * labels the selector until the list answers: on the default branch the tabs
+ * read through the repository entity, whose source names its own default.
  */
 export function mirrorDefault(detail: EntityDetail | null): string | null {
   const payload = detail?.payload;

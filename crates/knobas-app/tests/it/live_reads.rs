@@ -157,17 +157,19 @@ impl Source for Fake {
             .lock()
             .unwrap()
             .push((entity.to_owned(), section.map(str::to_owned)));
+        // Taken when the read is sent, as a server answers the state it
+        // had then: a push during a slow read is not in its answer.
+        let version = if key(entity).starts_with("moving/") {
+            self.seen.version.load(Ordering::SeqCst)
+        } else {
+            0
+        };
         if key(entity).starts_with("commit/slow") || key(entity).starts_with("moving/slow") {
             tokio::time::sleep(SLOW).await;
         }
         if self.seen.failing.load(Ordering::SeqCst) {
             return Err(SourceError::protocol("down"));
         }
-        let version = if key(entity).starts_with("moving/") {
-            self.seen.version.load(Ordering::SeqCst)
-        } else {
-            0
-        };
         let padding = key(entity)
             .strip_prefix("commit/big:")
             .and_then(|rest| rest.split(':').next())
@@ -665,16 +667,39 @@ async fn a_moving_view_does_not_wait_for_its_read_behind() {
     f.live.settled().await;
 }
 
-/// Reads behind one key do not pile up: two asks while one is under way
-/// start one read.
+/// Reads behind one key do not pile up: asks while one is under way start
+/// no second beside it, and one more after it, however many they were.
 #[tokio::test]
 async fn one_read_behind_runs_at_a_time_per_view() {
     let f = fixture().await;
     f.read("moving/slow", Some("branches")).await.unwrap();
     f.read("moving/slow", Some("branches")).await.unwrap();
     f.read("moving/slow", Some("branches")).await.unwrap();
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    assert_eq!(f.seen.reads(), 2, "the first, and one behind at a time");
     f.live.settled().await;
-    assert_eq!(f.seen.reads(), 2, "the first, and one behind");
+    assert_eq!(f.seen.reads(), 3, "and one more after it, for the asks meanwhile");
+}
+
+/// A push after a read behind was sent is not lost behind it: the ask that
+/// came after the push, while that read was under way, is read once more
+/// when it ends, and the next ask has the push (a write's echo, #2242).
+#[tokio::test]
+async fn an_ask_during_a_read_behind_is_read_again_after_it() {
+    let f = fixture().await;
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    // The read behind is sent, at v0, and under way for 400 ms.
+    while f.seen.reads() < 2 {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    f.push();
+    let meanwhile = f.read("moving/slow", Some("branches")).await.unwrap();
+    assert!(meanwhile.contains("v0"), "the kept answer, at once: {meanwhile}");
+    f.live.settled().await;
+    let after = f.read("moving/slow", Some("branches")).await.unwrap();
+    assert!(after.contains("v1"), "the push, after both reads behind: {after}");
+    f.live.settled().await;
 }
 
 /// A read behind that fails keeps the kept answer and tells nobody.
@@ -752,4 +777,38 @@ async fn grants_are_kept_and_read_again_behind() {
     f.refused("ticket/1").await;
     f.refused("ticket/1").await;
     assert_eq!(f.seen.grants.load(Ordering::SeqCst) - before, 2, "live");
+}
+
+/// A new credential while a read behind is under way: the read, made with
+/// the old one, lands nowhere and tells nobody, and the next read is made
+/// with the new credential (ADR-0032: a new credential may read less).
+#[tokio::test]
+async fn a_read_behind_across_a_new_credential_lands_nowhere() {
+    let f = fixture().await;
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let ear = heard.clone();
+    f.live
+        .on_fresh(move |fresh| ear.lock().unwrap().push(fresh));
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    while f.seen.reads() < 2 {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    f.push();
+    sources::crud::set_secret(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &f.live,
+        &f.id,
+        SecretInput::of("second-pat"),
+    )
+    .await
+    .unwrap();
+    f.live.settled().await;
+    assert!(heard.lock().unwrap().is_empty(), "nothing told");
+    let next = f.read("moving/slow", Some("branches")).await.unwrap();
+    assert!(next.contains("second-pat"), "the new credential's read: {next}");
+    assert_eq!(f.seen.reads(), 3, "read again, not answered from the old one");
+    f.live.settled().await;
 }

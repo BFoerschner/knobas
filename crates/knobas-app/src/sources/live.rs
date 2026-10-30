@@ -44,7 +44,7 @@
 //! rule-7 check against the mirror, a row's commit hint -- is done on every
 //! read, because the mirror moves under a fixed view.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -79,8 +79,9 @@ struct Inner {
     /// Advanced by every [`LiveSources::forget`]. A build that saw it move
     /// since it read the configuration row is lent to its own read only.
     forgets: AtomicU64,
-    /// The keys a read behind is under way for: one at a time each.
-    behind: Mutex<HashSet<Key>>,
+    /// The keys a read behind is under way for: one at a time each, and
+    /// whether it was asked for again meanwhile, so one more runs after it.
+    behind: Mutex<HashMap<Key, bool>>,
     /// How many reads behind are under way, and their end's signal.
     pending: AtomicUsize,
     idle: tokio::sync::Notify,
@@ -139,7 +140,7 @@ impl LiveSources {
             reads: Mutex::new(Reads::new(bound)),
             builds: AtomicU64::new(0),
             forgets: AtomicU64::new(0),
-            behind: Mutex::new(HashSet::new()),
+            behind: Mutex::new(HashMap::new()),
             pending: AtomicUsize::new(0),
             idle: tokio::sync::Notify::new(),
             fresh: Mutex::new(None),
@@ -293,7 +294,7 @@ impl LiveSources {
         };
         if let Some(Answer::View(kept)) = self.reads().get(&key) {
             if behind {
-                self.read_behind(lent, vec![key]);
+                self.read_behind(&lent.source, vec![key]);
             }
             return Ok(kept);
         }
@@ -337,7 +338,7 @@ impl LiveSources {
             }
         }
         if !kept_keys.is_empty() {
-            self.read_behind(lent, kept_keys);
+            self.read_behind(&lent.source, kept_keys);
         }
         if !ask_now.is_empty() {
             let fresh = lent.source.refused_writes(&ask_now).await?;
@@ -359,15 +360,29 @@ impl LiveSources {
             .collect())
     }
 
-    /// Read `keys` again behind the answer just given from the cache, each
-    /// unless a read of it is under way: a view's own read, or the writes'
-    /// asks together, as they were asked. An answer replaces the kept one
-    /// where the cache still holds it, and a moved view is told.
-    fn read_behind(&self, lent: &Lent, keys: Vec<Key>) {
+    /// Read `keys` again behind the answer just given from the cache: a
+    /// view's own read, or the writes' asks together, as they were asked. An
+    /// answer replaces the kept one where the cache still holds it, and a
+    /// moved view is told.
+    ///
+    /// One read per key at a time. A key asked for while its read is under
+    /// way is read once more after it, however often it was asked: the read
+    /// under way may have been sent before what the later ask comes after (a
+    /// write's echo), and must not stand for it.
+    fn read_behind(&self, source: &Arc<dyn Source>, keys: Vec<Key>) {
         let keys: Vec<Key> = {
             let mut behind = self.0.behind.lock().expect("the reads behind");
             keys.into_iter()
-                .filter(|key| behind.insert(key.clone()))
+                .filter(|key| match behind.get_mut(key) {
+                    Some(again) => {
+                        *again = true;
+                        false
+                    }
+                    None => {
+                        behind.insert(key.clone(), false);
+                        true
+                    }
+                })
                 .collect()
         };
         if keys.is_empty() {
@@ -375,7 +390,7 @@ impl LiveSources {
         }
         self.0.pending.fetch_add(1, Ordering::SeqCst);
         let this = self.clone();
-        let source = Arc::clone(&lent.source);
+        let source = Arc::clone(source);
         let work = async move {
             let mut views = Vec::new();
             let mut asks = Vec::new();
@@ -422,11 +437,16 @@ impl LiveSources {
                     }
                 }
             }
-            {
+            let again: Vec<Key> = {
                 let mut behind = this.0.behind.lock().expect("the reads behind");
-                for key in &keys {
-                    behind.remove(key);
-                }
+                keys.into_iter()
+                    .filter(|key| behind.remove(key) == Some(true))
+                    .collect()
+            };
+            // Started before this one counts as ended, so `settled` waits
+            // for it too.
+            if !again.is_empty() {
+                this.read_behind(&source, again);
             }
             if this.0.pending.fetch_sub(1, Ordering::SeqCst) == 1 {
                 this.0.idle.notify_waiters();
