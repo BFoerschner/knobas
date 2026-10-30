@@ -524,9 +524,25 @@ async fn a_gitea_without_contents_ext_draws_the_blob_from_contents() {
         own("src/main.rs", "main", 13),
     )
     .await;
-    let drawn = file(read(&server, ENTITY, "file:src/main.rs").await);
-    assert_eq!(drawn.text, "fn main() {}\n");
-    assert_eq!(drawn.sha, Some(blob("src/main.rs", "main")));
+    let source = source(&server);
+    for _ in 0..2 {
+        let view = source
+            .view(ENTITY, Some(&named("main", "file:src/main.rs")))
+            .await
+            .unwrap()
+            .unwrap();
+        let drawn = file(view.sections.into_iter().next().unwrap());
+        assert_eq!(drawn.text, "fn main() {}\n");
+        assert_eq!(drawn.sha, Some(blob("src/main.rs", "main")));
+    }
+    let missing_route = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path().contains("/contents-ext/"))
+        .count();
+    assert_eq!(missing_route, 1, "a route found missing is not asked again (#2241)");
 }
 
 /// A Markdown file says so, so the shell can draw it rendered.

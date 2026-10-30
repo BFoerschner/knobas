@@ -281,6 +281,15 @@ async fn a_file_opened_from_the_tree_costs_at_most_two_requests() {
         .expect("the README opens");
     println!("README opens as {readme}");
 
+    // First, so a forge without `contents-ext` (Forgejo) pays its one 404
+    // here: the client asks `contents` straight away after.
+    let (unknown, unknown_sent, _) = app.view_of(&repo, FILE).await;
+    println!("no sha:      {unknown_sent} requests");
+    assert!(
+        matches!(unknown.sections[0].blocks.as_slice(), [Block::File { text, .. }] if !text.is_empty()),
+        "a file read with no sha opens"
+    );
+
     let (file, sent, took) = app.view_of(&repo, &readme).await;
     println!("file open:   {sent} requests, {took:?}");
     assert!(
@@ -294,12 +303,6 @@ async fn a_file_opened_from_the_tree_costs_at_most_two_requests() {
     let (_, again, _) = app.view_of(&repo, &readme).await;
     assert_eq!(again, 0, "kept, and never read behind");
 
-    let (unknown, unknown_sent, _) = app.view_of(&repo, FILE).await;
-    println!("no sha:      {unknown_sent} requests");
-    assert!(
-        matches!(unknown.sections[0].blocks.as_slice(), [Block::File { text, .. }] if !text.is_empty()),
-        "a file read with no sha opens"
-    );
 }
 
 /// **Grants once per repository** (#2241): *New branch…* and *Commit
@@ -345,19 +348,25 @@ async fn a_pushed_branch_is_the_read_after_the_read_behind() {
         .await
         .expect("Gitea answers");
     assert!(made.status().is_success(), "the branch is pushed: {}", made.status());
-    struct Delete(reqwest::Client, String, String);
+    // Deleted again however the test ends: from a thread of its own, with
+    // a client of its own (a pooled connection is the test runtime's).
+    struct Delete(String, String);
     impl Drop for Delete {
         fn drop(&mut self) {
-            let (http, url, auth) = (self.0.clone(), self.1.clone(), self.2.clone());
+            let (url, auth) = (self.0.clone(), self.1.clone());
             let _ = std::thread::spawn(move || {
                 tokio::runtime::Runtime::new().unwrap().block_on(async move {
-                    let _ = http.delete(url).header("Authorization", auth).send().await;
+                    let _ = reqwest::Client::new()
+                        .delete(url)
+                        .header("Authorization", auth)
+                        .send()
+                        .await;
                 });
             })
             .join();
         }
     }
-    let _delete = Delete(http, format!("{api}/{pushed}"), auth);
+    let _delete = Delete(format!("{api}/{pushed}"), auth);
 
     let (second, second_sent, took) = app.view_of(&repo, "branches").await;
     println!("again:       {second_sent} requests, {took:?}");
