@@ -142,7 +142,7 @@ async function printOf(lib: PdfLib, page: PDFPageProxy): Promise<PdfPrint> {
       unsure = true;
       return "?";
     }
-    if (obj.data !== undefined && typeof obj.data === "object") return `img:${obj.width}x${obj.height}:${bytesDigest(obj.data)}`;
+    if (obj.data !== undefined && obj.data !== null && typeof obj.data === "object") return `img:${obj.width}x${obj.height}:${bytesDigest(obj.data)}`;
     if (obj.bitmap !== undefined) {
       unsure = true;
       return `img:${obj.width}x${obj.height}`;
