@@ -1070,15 +1070,25 @@ mod tests {
     /// Each platform's shipped list, in its order (#2275); none elsewhere.
     #[test]
     fn macos_linux_and_windows_ship_their_applications_and_the_others_none() {
-        let names = |os: &str| -> Vec<String> { shipped_on(os).into_iter().map(|a| a.name).collect() };
-        assert_eq!(names("macos"), ["VS Code", "Terminal", "Fork", "IntelliJ IDEA"]);
+        let names =
+            |os: &str| -> Vec<String> { shipped_on(os).into_iter().map(|a| a.name).collect() };
+        assert_eq!(
+            names("macos"),
+            ["VS Code", "Terminal", "Fork", "IntelliJ IDEA"]
+        );
         assert_eq!(names("linux"), ["VS Code", "Terminal", "Files"]);
-        assert_eq!(names("windows"), ["VS Code", "Windows Terminal", "File Explorer"]);
+        assert_eq!(
+            names("windows"),
+            ["VS Code", "Windows Terminal", "File Explorer"]
+        );
         for os in ["freebsd", "MACOS", "Linux", ""] {
             assert!(shipped_on(os).is_empty(), "{os}");
         }
         for os in ["macos", "linux", "windows"] {
-            assert!(shipped_on(os).iter().any(|a| a.id == SHIPPED_DEFAULT), "{os}");
+            assert!(
+                shipped_on(os).iter().any(|a| a.id == SHIPPED_DEFAULT),
+                "{os}"
+            );
         }
     }
 
@@ -1105,8 +1115,12 @@ mod tests {
             .map(|a| {
                 [
                     Some(filled(&a.command, &at(None))),
-                    a.file_command.as_deref().map(|c| filled(c, &at(Some(file)))),
-                    a.pull_request_command.as_deref().map(|c| filled(c, &at(None))),
+                    a.file_command
+                        .as_deref()
+                        .map(|c| filled(c, &at(Some(file)))),
+                    a.pull_request_command
+                        .as_deref()
+                        .map(|c| filled(c, &at(None))),
                 ]
             })
             .collect()
@@ -1149,7 +1163,10 @@ mod tests {
     /// A path with a space stays one argument, and `{file}:{line}` is one.
     #[test]
     fn the_linux_commands_fill_to_the_documented_argv() {
-        let (checkout, file) = ("/home/mara/my code/payout", "/home/mara/my code/payout/src/lib.rs");
+        let (checkout, file) = (
+            "/home/mara/my code/payout",
+            "/home/mara/my code/payout/src/lib.rs",
+        );
         assert_eq!(
             shipped_argv("linux", checkout, file),
             [
@@ -1159,9 +1176,15 @@ mod tests {
                     s(&["code", checkout]),
                 ],
                 [
-                    s(&["gnome-terminal", "--working-directory=/home/mara/my code/payout"]),
+                    s(&[
+                        "gnome-terminal",
+                        "--working-directory=/home/mara/my code/payout"
+                    ]),
                     None,
-                    s(&["gnome-terminal", "--working-directory=/home/mara/my code/payout"]),
+                    s(&[
+                        "gnome-terminal",
+                        "--working-directory=/home/mara/my code/payout"
+                    ]),
                 ],
                 [s(&["xdg-open", checkout]), None, s(&["xdg-open", checkout])],
             ]
@@ -1170,20 +1193,23 @@ mod tests {
 
     #[test]
     fn the_windows_commands_fill_to_the_documented_argv() {
-        let (checkout, file) = (r"C:\Users\Mara\code\pay out", r"C:\Users\Mara\code\pay out\src\lib.rs");
+        let (checkout, file) = (
+            r"C:\Users\Mara\code\pay out",
+            r"C:\Users\Mara\code\pay out\src\lib.rs",
+        );
         assert_eq!(
             shipped_argv("windows", checkout, file),
             [
                 [
                     s(&["code.cmd", checkout]),
-                    s(&["code.cmd", "--goto", r"C:\Users\Mara\code\pay out\src\lib.rs:3"]),
+                    s(&[
+                        "code.cmd",
+                        "--goto",
+                        r"C:\Users\Mara\code\pay out\src\lib.rs:3"
+                    ]),
                     s(&["code.cmd", checkout]),
                 ],
-                [
-                    s(&["wt", "-d", checkout]),
-                    None,
-                    s(&["wt", "-d", checkout]),
-                ],
+                [s(&["wt", "-d", checkout]), None, s(&["wt", "-d", checkout]),],
                 [s(&["explorer", checkout]), None, s(&["explorer", checkout])],
             ]
         );

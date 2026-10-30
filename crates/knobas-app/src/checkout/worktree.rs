@@ -311,7 +311,15 @@ pub async fn open(
     if let Err(why) = fetched {
         if made {
             // Empty, and this open's: take it back, and its record.
-            let _ = run(&git, Step::Discard { worktree: &worktree }.args(), LOCAL_TIMEOUT).await;
+            let _ = run(
+                &git,
+                Step::Discard {
+                    worktree: &worktree,
+                }
+                .args(),
+                LOCAL_TIMEOUT,
+            )
+            .await;
             records.retain(|r| Path::new(&r.path) != worktree);
             save(pool, &records).await?;
         }
@@ -319,14 +327,21 @@ pub async fn open(
             "git could not fetch pull request #{number} from {url}: {why}"
         )));
     }
-    run(&git, Step::Move { worktree: &worktree }.args(), LOCAL_TIMEOUT)
-        .await
-        .map_err(|why| {
-            IpcError::conflict(format!(
-                "{shown} stays where it was, because git would not move it to the pull \
+    run(
+        &git,
+        Step::Move {
+            worktree: &worktree,
+        }
+        .args(),
+        LOCAL_TIMEOUT,
+    )
+    .await
+    .map_err(|why| {
+        IpcError::conflict(format!(
+            "{shown} stays where it was, because git would not move it to the pull \
                  request's new head: {why}"
-            ))
-        })?;
+        ))
+    })?;
     drop(_busy);
 
     if let Err(error) = sweep_but(pool, Some(&worktree)).await {
@@ -411,17 +426,20 @@ pub async fn remove(pool: &PgPool, path: &str) -> Result<Vec<PullRequestWorktree
         let at = records
             .iter()
             .position(|r| r.path == path)
-            .ok_or_else(|| {
-                IpcError::not_found(format!("{path} is not a worktree knobas made"))
-            })?;
+            .ok_or_else(|| IpcError::not_found(format!("{path} is not a worktree knobas made")))?;
         let worktree = PathBuf::from(path);
         if exists(&worktree).await {
             let git = git().await?;
-            run(&git, Step::Remove { worktree: &worktree }.args(), LOCAL_TIMEOUT)
-                .await
-                .map_err(|why| {
-                    IpcError::conflict(format!("git would not remove {path}: {why}"))
-                })?;
+            run(
+                &git,
+                Step::Remove {
+                    worktree: &worktree,
+                }
+                .args(),
+                LOCAL_TIMEOUT,
+            )
+            .await
+            .map_err(|why| IpcError::conflict(format!("git would not remove {path}: {why}")))?;
         }
         records.remove(at);
         save(pool, &records).await?;
@@ -493,12 +511,14 @@ pub async fn open_diff_tool(
     base: &str,
     head: &str,
 ) -> Result<Vec<String>, IpcError> {
-    let argv = diff_tool(pool, entity_id, base, head).await?.ok_or_else(|| {
-        IpcError::invalid(format!(
-            "the Diff tool opens two commits this repository's checkout holds, and \
+    let argv = diff_tool(pool, entity_id, base, head)
+        .await?
+        .ok_or_else(|| {
+            IpcError::invalid(format!(
+                "the Diff tool opens two commits this repository's checkout holds, and \
              {base}...{head} is not that"
-        ))
-    })?;
+            ))
+        })?;
     let to_run = argv.clone();
     tokio::task::spawn_blocking(move || {
         let (program, arguments) = to_run.split_first().expect("git and its arguments");

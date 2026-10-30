@@ -64,7 +64,10 @@ fn standing(checkout: &Path) -> (String, String, String) {
     (
         git(checkout, &["branch", "--show-current"]),
         git(checkout, &["rev-parse", "HEAD"]),
-        git(checkout, &["status", "--porcelain=v1", "--untracked-files=all"]),
+        git(
+            checkout,
+            &["status", "--porcelain=v1", "--untracked-files=all"],
+        ),
     )
 }
 
@@ -95,7 +98,10 @@ impl World {
         fs::create_dir_all(&server).unwrap();
         git(&server, &["init", "-q", "--bare", "-b", "main"]);
         let author = dirs.path().join("author");
-        git(dirs.path(), &["clone", "-q", &server.to_string_lossy(), "author"]);
+        git(
+            dirs.path(),
+            &["clone", "-q", &server.to_string_lossy(), "author"],
+        );
         fs::write(author.join("README"), "one\n").unwrap();
         fs::write(author.join("lib.rs"), "fn main() {}\n").unwrap();
         git(&author, &["add", "."]);
@@ -105,7 +111,10 @@ impl World {
         // The person's own checkout, on a branch of theirs, with a change
         // they have not committed and a file git does not know.
         let checkout = dirs.path().join("mine");
-        git(dirs.path(), &["clone", "-q", &server.to_string_lossy(), "mine"]);
+        git(
+            dirs.path(),
+            &["clone", "-q", &server.to_string_lossy(), "mine"],
+        );
         git(&checkout, &["checkout", "-qb", "my-work"]);
         fs::write(checkout.join("README"), "mine, uncommitted\n").unwrap();
         fs::write(checkout.join("notes.txt"), "untracked\n").unwrap();
@@ -184,7 +193,12 @@ impl World {
         git(&self.author, &["commit", "-qm", text.trim()]);
         git(
             &self.author,
-            &["push", "-qf", "origin", &format!("{branch}:refs/pull/{n}/head")],
+            &[
+                "push",
+                "-qf",
+                "origin",
+                &format!("{branch}:refs/pull/{n}/head"),
+            ],
         );
         git(&self.author, &["rev-parse", "HEAD"])
     }
@@ -222,7 +236,11 @@ impl World {
         answer
     }
 
-    async fn open_only(&self, n: u64, item: Option<&str>) -> Result<Vec<String>, knobas_app::IpcError> {
+    async fn open_only(
+        &self,
+        n: u64,
+        item: Option<&str>,
+    ) -> Result<Vec<String>, knobas_app::IpcError> {
         open_object_admitting(
             &self.pool,
             Some(&Registry::for_process()),
@@ -320,9 +338,20 @@ async fn a_pull_request_opens_in_a_worktree_at_its_head_and_the_checkout_is_unto
     assert_eq!(recorded(&w.record).await, expected);
     assert_eq!(argv[1..], expected);
     assert_eq!(git(&wt, &["rev-parse", "HEAD"]), head);
-    assert_eq!(fs::read_to_string(wt.join("lib.rs")).unwrap(), "fn pay() {}\n");
-    assert_eq!(git(&wt, &["status", "--porcelain=v1"]), "", "a clean worktree");
-    assert_eq!(standing(&w.checkout), before, "the person's checkout is untouched");
+    assert_eq!(
+        fs::read_to_string(wt.join("lib.rs")).unwrap(),
+        "fn pay() {}\n"
+    );
+    assert_eq!(
+        git(&wt, &["status", "--porcelain=v1"]),
+        "",
+        "a clean worktree"
+    );
+    assert_eq!(
+        standing(&w.checkout),
+        before,
+        "the person's checkout is untouched"
+    );
     assert_eq!(
         fs::read_to_string(w.checkout.join("README")).unwrap(),
         "mine, uncommitted\n"
@@ -393,7 +422,10 @@ async fn a_closed_pull_requests_worktree_is_removed_on_the_next_open() {
     w.open(8, None).await.unwrap();
 
     assert!(!w.worktree(7).exists(), "closed: removed");
-    assert!(w.worktree(9).join("wip.txt").exists(), "an untracked file keeps it");
+    assert!(
+        w.worktree(9).join("wip.txt").exists(),
+        "an untracked file keeps it"
+    );
     let listed: Vec<(u64, bool)> = worktree::list(&w.pool)
         .await
         .unwrap()
@@ -402,7 +434,10 @@ async fn a_closed_pull_requests_worktree_is_removed_on_the_next_open() {
         .collect();
     assert_eq!(listed, [(9, true), (8, false)]);
     let registered = git(&w.checkout, &["worktree", "list", "--porcelain"]);
-    assert!(!registered.contains(&format!("{}-7", w.name())), "{registered}");
+    assert!(
+        !registered.contains(&format!("{}-7", w.name())),
+        "{registered}"
+    );
     assert_eq!(standing(&w.checkout), before);
 }
 
@@ -433,7 +468,11 @@ async fn settings_removes_a_worktree_and_git_refuses_one_with_changes() {
     let error = worktree::remove(&w.pool, &w.checkout.to_string_lossy())
         .await
         .unwrap_err();
-    assert_eq!(error.code, IpcErrorCode::NotFound, "the person's checkout is never one");
+    assert_eq!(
+        error.code,
+        IpcErrorCode::NotFound,
+        "the person's checkout is never one"
+    );
     assert!(w.checkout.join("README").exists());
 }
 
@@ -449,7 +488,10 @@ async fn a_folder_knobas_did_not_make_is_refused_and_a_failed_fetch_leaves_nothi
 
     let error = w.open(7, None).await.unwrap_err();
     assert_eq!(error.code, IpcErrorCode::Conflict, "{error:?}");
-    assert_eq!(fs::read_to_string(squatter.join("mine.txt")).unwrap(), "keep\n");
+    assert_eq!(
+        fs::read_to_string(squatter.join("mine.txt")).unwrap(),
+        "keep\n"
+    );
 
     let before = standing(&w.checkout);
     let error = w.open(41, None).await.unwrap_err();
@@ -473,7 +515,10 @@ async fn the_diff_tool_is_offered_for_two_local_shas_and_runs_the_configured_too
     let short = &head[..12];
 
     // Not in the checkout yet: not offered.
-    assert_eq!(diff_tool(&w.pool, &w.repo, &base, &head).await.unwrap(), None);
+    assert_eq!(
+        diff_tool(&w.pool, &w.repo, &base, &head).await.unwrap(),
+        None
+    );
     w.open(7, None).await.unwrap();
     let offered = diff_tool(&w.pool, &w.repo, &base, short)
         .await
@@ -494,11 +539,26 @@ async fn the_diff_tool_is_offered_for_two_local_shas_and_runs_the_configured_too
         ]
     );
     let parent = format!("{short}^");
-    assert!(diff_tool(&w.pool, &w.repo, &parent, short).await.unwrap().is_some());
-    for (b, h) in [("main", short), (base.as_str(), "pr-7"), ("0123456789ab", short)] {
-        assert_eq!(diff_tool(&w.pool, &w.repo, b, h).await.unwrap(), None, "{b} {h}");
+    assert!(
+        diff_tool(&w.pool, &w.repo, &parent, short)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    for (b, h) in [
+        ("main", short),
+        (base.as_str(), "pr-7"),
+        ("0123456789ab", short),
+    ] {
+        assert_eq!(
+            diff_tool(&w.pool, &w.repo, b, h).await.unwrap(),
+            None,
+            "{b} {h}"
+        );
     }
-    let error = open_diff_tool(&w.pool, &w.repo, "main", short).await.unwrap_err();
+    let error = open_diff_tool(&w.pool, &w.repo, "main", short)
+        .await
+        .unwrap_err();
     assert_eq!(error.code, IpcErrorCode::Invalid);
 
     // The person's tool: a stub that lists the head's side of the diff.
@@ -526,7 +586,13 @@ async fn the_diff_tool_is_offered_for_two_local_shas_and_runs_the_configured_too
     );
     let _ = fs::remove_file(&w.record);
     let before = standing(&w.checkout);
-    open_diff_tool(&w.pool, &w.repo, &base, &head).await.unwrap();
-    assert_eq!(recorded(&w.record).await, ["lib.rs"], "the one file the range changes");
+    open_diff_tool(&w.pool, &w.repo, &base, &head)
+        .await
+        .unwrap();
+    assert_eq!(
+        recorded(&w.record).await,
+        ["lib.rs"],
+        "the one file the range changes"
+    );
     assert_eq!(standing(&w.checkout), before);
 }

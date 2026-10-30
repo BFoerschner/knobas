@@ -369,8 +369,15 @@ pub async fn open_object_admitting(
         .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))?;
     let checkout = match (object, registry) {
         (Object::PullRequest { number, item, .. }, Some(registry)) => {
-            super::worktree::open(pool, registry, entity_id, *number, item.as_deref(), protocols)
-                .await?
+            super::worktree::open(
+                pool,
+                registry,
+                entity_id,
+                *number,
+                item.as_deref(),
+                protocols,
+            )
+            .await?
         }
         (Object::PullRequest { .. }, None) => {
             return Err(IpcError::invalid(
