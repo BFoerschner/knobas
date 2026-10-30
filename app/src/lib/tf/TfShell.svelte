@@ -71,6 +71,7 @@
   import { escStep } from "./escape";
   import { keptPages as sharedKeptPages, type KeptPagesSetting } from "./kept-pages.svelte";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
+  import { onReady } from "./on-ready.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { parseTfHash, sectionOf } from "./route";
   import { theme as sharedTheme, type Theme } from "./theme.svelte";
@@ -319,35 +320,13 @@
    */
   const heldSources = $derived(health.all.map((row) => row.source_id).join("\n"));
 
+  const ready = () => lifecycle.ready;
   // *Pages kept open* as stored (#2247): until it answers, the default holds.
-  $effect(() => {
-    if (!lifecycle.ready) return;
-    const read = untrack(() => ports.pagesKeptOpen);
-    if (read === undefined) return;
-    void read()
-      .then((count) => kept.set(count))
-      .catch(() => {});
-  });
-
+  onReady(ready, () => ports.pagesKeptOpen, (count) => kept.set(count));
   // The command renderers (#2262): until they answer, the built-ins draw everything.
-  $effect(() => {
-    if (!lifecycle.ready) return;
-    const read = untrack(() => ports.userRenderers);
-    if (read === undefined) return;
-    void read()
-      .then((saved) => installCommands(saved))
-      .catch(() => {});
-  });
-
+  onReady(ready, () => ports.userRenderers, (saved) => installCommands(saved));
   // The default renderer per file pattern (#2263): until it answers, the registry's order decides.
-  $effect(() => {
-    if (!lifecycle.ready) return;
-    const read = untrack(() => ports.rendererDefaults);
-    if (read === undefined) return;
-    void read()
-      .then((list) => heldDefaults.hold(list))
-      .catch(() => {});
-  });
+  onReady(ready, () => ports.rendererDefaults, (list) => heldDefaults.hold(list));
 
   // Every diff's default pipeline per file (#2270) is the viewer's (#2265): read from the held stores at each ask, so a
   // pipeline edited in Settings, or a default saved from the viewer, reaches the diffs too. Installed once.
@@ -359,19 +338,8 @@
   });
 
   // The named pipelines and command steps (#2265): until they answer, no file opens through a default pipeline.
-  $effect(() => {
-    if (!lifecycle.ready) return;
-    const pipelines = untrack(() => ports.namedPipelines);
-    const steps = untrack(() => ports.commandSteps);
-    if (pipelines !== undefined)
-      void pipelines()
-        .then((list) => heldPipelines.hold(list))
-        .catch(() => {});
-    if (steps !== undefined)
-      void steps()
-        .then((list) => heldCommandSteps.hold(list))
-        .catch(() => {});
-  });
+  onReady(ready, () => ports.namedPipelines, (list) => heldPipelines.hold(list));
+  onReady(ready, () => ports.commandSteps, (list) => heldCommandSteps.hold(list));
 
   $effect(() => {
     if (!lifecycle.ready) return;
