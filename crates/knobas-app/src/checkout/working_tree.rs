@@ -251,6 +251,25 @@ pub(crate) async fn git_on_path() -> Result<PathBuf, TreeRead> {
     })
 }
 
+/// The variables that point git at a repository other than the one `-C`
+/// names. Every git knobas runs has them removed.
+pub(super) const REPOSITORY_VARIABLES: [&str; 6] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+];
+
+/// The variables that would override the `-c protocol.*` flags of a git that
+/// reaches the network (ADR-0023).
+pub(super) const PROTOCOL_VARIABLES: [&str; 3] = [
+    "GIT_ALLOW_PROTOCOL",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+];
+
 /// `git -C <path>` with ADR-0021's read-only terms, before the subcommand:
 /// no optional locks, no fsmonitor, no terminal prompt, git's own English, an
 /// inherited repository location removed, stdin closed and the process killed
@@ -266,19 +285,15 @@ pub(super) fn git_at(git: &Path, path: &Path) -> tokio::process::Command {
         // git's own words, untranslated: `not a git repository` is matched in
         // English.
         .env("LC_ALL", "C")
-        // A repository is named by `-C` and nothing else: an inherited
-        // `GIT_DIR` (or one of its parts) would point the read somewhere the
-        // path does not.
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env_remove("GIT_COMMON_DIR")
-        .env_remove("GIT_OBJECT_DIRECTORY")
-        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // A repository is named by `-C` and nothing else: an inherited `GIT_DIR`
+    // (or one of its parts) would point the read somewhere the path does not.
+    for name in REPOSITORY_VARIABLES {
+        command.env_remove(name);
+    }
     command
 }
 

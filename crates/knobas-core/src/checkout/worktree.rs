@@ -21,7 +21,7 @@
 //! *Clone* builds one (ADR-0023), and its refspec holds one number.
 //!
 //! [`difftool_args`] is the *Diff tool*'s one command, read-only: two shas
-//! that are already in the checkout.
+//! that are already in the checkout, each first read with [`verify_args`].
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -188,6 +188,26 @@ pub fn difftool_args(checkout: &Path, base: &str, head: &str) -> Option<Vec<OsSt
     Some(args)
 }
 
+/// The read that tells whether `end`, already held to [`is_diff_end`], is a
+/// commit `checkout` holds: `git -C <checkout> --no-optional-locks rev-parse
+/// --verify --quiet --end-of-options <end>^{commit}`, the program left out.
+#[must_use]
+pub fn verify_args(checkout: &Path, end: &str) -> Vec<OsString> {
+    let mut args = vec!["-C".into(), checkout.as_os_str().to_owned()];
+    args.extend(
+        [
+            "--no-optional-locks",
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+        ]
+        .map(OsString::from),
+    );
+    args.push(format!("{end}^{{commit}}").into());
+    args
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,6 +330,11 @@ mod tests {
         assert_eq!(
             strings(&difftool_args(at, "7be0e4f15c60^", "c90d11e4a7b2").unwrap()).join(" "),
             "-C /code/payout-service difftool --dir-diff --gui --no-prompt 7be0e4f15c60^ c90d11e4a7b2 --"
+        );
+        assert_eq!(
+            strings(&verify_args(at, "7be0e4f15c60^")).join(" "),
+            "-C /code/payout-service --no-optional-locks rev-parse --verify --quiet \
+             --end-of-options 7be0e4f15c60^^{commit}"
         );
         for (base, head) in [
             ("main", "c90d11e4a7b2"),

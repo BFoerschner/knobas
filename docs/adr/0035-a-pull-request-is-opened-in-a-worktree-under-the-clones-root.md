@@ -32,4 +32,4 @@ Amends [ADR-0016](0016-a-spawned-command-takes-no-argument-from-the-mirror.md) a
 
 - The IPC seam runs the real git against a bare repository serving `refs/pull/<n>/head` and holds every open to the person's checkout's branch, `HEAD` and `git status`, before and after (`crates/knobas-app/tests/it/pull_request_worktree.rs`); the argument lists, and that none pushes and only `worktree add` runs at the checkout, are pinned in `knobas_core::checkout::worktree`'s tests. The network half fetches a seeded pull request from the testenv Gitea and Forgejo (`tests/clone_live.rs`).
 - The desktop witness covers the editor opening at the worktree (spec #2234, *Testing Decisions*).
-- Four IPC commands with their §10.8 entries: `diff_tool`, `open_diff_tool`, `pull_request_worktrees`, `remove_pull_request_worktree`; and `OpenObject`'s pull request gains an optional `item`, its entity id.
+- Four IPC commands, announced under *Frozen surface* in the pull request (§10.8): `diff_tool`, `open_diff_tool`, `pull_request_worktrees`, `remove_pull_request_worktree`; and `OpenObject`'s pull request gains an optional `item`, its entity id.

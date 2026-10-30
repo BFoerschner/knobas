@@ -51,10 +51,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
-use knobas_core::checkout::worktree::{self as rules, Step, difftool_args};
+use knobas_core::checkout::worktree::{self as rules, Step, difftool_args, verify_args};
 use knobas_sync::scheduler::AdapterRegistry;
 
-use super::working_tree;
+use super::working_tree::{self, PROTOCOL_VARIABLES, REPOSITORY_VARIABLES};
 use crate::IpcError;
 use crate::settings::{read_value, write_value};
 
@@ -150,19 +150,13 @@ async fn run(
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("LC_ALL", "C")
-        .env_remove("GIT_ALLOW_PROTOCOL")
-        .env_remove("GIT_CONFIG_PARAMETERS")
-        .env_remove("GIT_CONFIG_COUNT")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env_remove("GIT_COMMON_DIR")
-        .env_remove("GIT_OBJECT_DIRECTORY")
-        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    for name in PROTOCOL_VARIABLES.into_iter().chain(REPOSITORY_VARIABLES) {
+        command.env_remove(name);
+    }
     let child = working_tree::spawn_off_runtime(command)
         .await
         .map_err(|error| error.to_string())?
@@ -257,7 +251,7 @@ pub async fn open(
     let (url, name) = super::clone::url_of(pool, registry, &repo_id, protocols).await?;
     let git = git().await?;
 
-    let _busy = BUSY.lock().await;
+    let busy = BUSY.lock().await;
     let mut records = load(pool).await?;
     let known = records
         .iter()
@@ -357,7 +351,7 @@ pub async fn open(
                  request's new head: {why}"
         ))
     })?;
-    drop(_busy);
+    drop(busy);
 
     if let Err(error) = sweep_but(pool, Some(&worktree)).await {
         tracing::warn!(%error, "the closed pull requests' worktrees were not swept");
@@ -512,19 +506,10 @@ pub async fn diff_tool(
         return Ok(None);
     };
     for end in [base, head] {
-        let mut read: Vec<std::ffi::OsString> = vec!["-C".into(), checkout.as_os_str().to_owned()];
-        read.extend(
-            [
-                "--no-optional-locks",
-                "rev-parse",
-                "--verify",
-                "--quiet",
-                "--end-of-options",
-            ]
-            .map(Into::into),
-        );
-        read.push(format!("{end}^{{commit}}").into());
-        if run(&git, read, LOCAL_TIMEOUT).await.is_err() {
+        if run(&git, verify_args(&checkout, end), LOCAL_TIMEOUT)
+            .await
+            .is_err()
+        {
             return Ok(None);
         }
     }
@@ -562,15 +547,12 @@ pub async fn open_diff_tool(
         command
             .args(arguments)
             .env("GIT_TERMINAL_PROMPT", "0")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
-            .env_remove("GIT_COMMON_DIR")
-            .env_remove("GIT_OBJECT_DIRECTORY")
-            .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        for name in REPOSITORY_VARIABLES {
+            command.env_remove(name);
+        }
         for (name, _) in std::env::vars_os() {
             if name.as_encoded_bytes().starts_with(b"KNOBAS_") {
                 command.env_remove(name);

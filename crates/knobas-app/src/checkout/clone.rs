@@ -50,7 +50,7 @@ use knobas_sync::scheduler::AdapterRegistry;
 
 use crate::IpcError;
 
-use super::working_tree;
+use super::working_tree::{self, PROTOCOL_VARIABLES, REPOSITORY_VARIABLES};
 
 /// At most one progress event per this long, per clone, besides one on each
 /// change of step. `activity:new`'s rate, and for its reason: events carry
@@ -451,7 +451,7 @@ pub(super) async fn url_of(
     .map_err(IpcError::internal)?;
     let (kind, base_url, config) = source.ok_or_else(|| {
         IpcError::not_found(format!(
-            "{repo_id}'s source is no longer configured, so there is no address to clone from"
+            "{repo_id}'s source is no longer configured, so there is no address to reach it at"
         ))
     })?;
 
@@ -565,21 +565,15 @@ async fn spawn_into(
         .env("GIT_TERMINAL_PROMPT", "0")
         // git's own words, untranslated: `failure_cause` matches English.
         .env("LC_ALL", "C")
-        // Each of these would override the `-c protocol.*` flags or point git
-        // at a repository other than the new folder.
-        .env_remove("GIT_ALLOW_PROTOCOL")
-        .env_remove("GIT_CONFIG_PARAMETERS")
-        .env_remove("GIT_CONFIG_COUNT")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env_remove("GIT_COMMON_DIR")
-        .env_remove("GIT_OBJECT_DIRECTORY")
-        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // Each of these would override the `-c protocol.*` flags or point git at
+    // a repository other than the new folder.
+    for name in PROTOCOL_VARIABLES.into_iter().chain(REPOSITORY_VARIABLES) {
+        command.env_remove(name);
+    }
     // The folder made above goes whenever git did not start, also when the
     // spawn's task did not finish.
     let spawned = spawn_off_runtime(command).await;
