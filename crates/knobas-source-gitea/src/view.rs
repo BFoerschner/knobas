@@ -25,6 +25,7 @@ use crate::source::GiteaSource;
 mod act;
 mod branch;
 mod checks;
+mod compare;
 mod files;
 mod grants;
 mod pr;
@@ -67,6 +68,13 @@ pub(crate) async fn draw(
             repo,
             branch,
         } => branch::draw(source, entity, owner, repo, branch, section).await?,
+        // Any two commits' diff (#2271): the compare alone, no record read.
+        GiteaKey::Repo { owner, repo } if section.is_some_and(compare::owns) => {
+            let section = section.unwrap_or_default();
+            SourceView::new(vec![
+                compare::read(source, entity, owner, repo, section).await?,
+            ])
+        }
         GiteaKey::Repo { owner, repo } => repo::draw(source, entity, owner, repo, section).await?,
         // An issue's detail is the ticket's, drawn from the mirror (#1206).
         GiteaKey::Issue { .. } => return Ok(None),
@@ -81,7 +89,8 @@ pub(crate) async fn draw(
 
 /// What the view of `entity` at `section` stands at (ADR-0032, #2239):
 /// [`Standing::Fixed`] for a commit's diff and its tree's sections at a full
-/// sha, which no push can change and which offer no write; everything else
+/// sha, and a repository's compare between two full shas ([`compare`]),
+/// which no push can change and which offer no write; everything else
 /// is live. A commit's overview is not fixed (its checks move), and neither
 /// is its whole view (its toolbar reads the repository).
 ///
@@ -98,6 +107,7 @@ pub(crate) fn standing(
         {
             Standing::Fixed
         }
+        (Ok(GiteaKey::Repo { .. }), Some(id)) if compare::fixed(id) => Standing::Fixed,
         _ => Standing::Live,
     }
 }
