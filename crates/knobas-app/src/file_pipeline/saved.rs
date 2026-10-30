@@ -74,23 +74,6 @@ pub struct NamedPipelineDraft {
     pub steps: Vec<PipeStep>,
 }
 
-/// `given` when it is a free slug, else one made from `name`, `-2` and on
-/// for a clash.
-fn settled_id(given: Option<&str>, name: &str, fallback: &str, taken: &[&str]) -> String {
-    let given = given.map(str::trim).unwrap_or_default();
-    if crate::slug::is_slug(given) && !taken.contains(&given) {
-        return given.to_owned();
-    }
-    let base = crate::slug::slug(name, fallback);
-    let mut id = base.clone();
-    let mut n = 2;
-    while taken.contains(&id.as_str()) {
-        id = format!("{base}-{n}");
-        n += 1;
-    }
-    id
-}
-
 /// The saved command steps, in the person's order.
 ///
 /// # Errors
@@ -102,12 +85,8 @@ pub async fn command_steps(pool: &PgPool) -> Result<Vec<CommandStep>, IpcError> 
 
 /// [`command_steps`] as a read error, for the pipeline over a file.
 pub(super) async fn stored_command_steps(pool: &PgPool) -> Result<Vec<CommandStep>, sqlx::Error> {
-    let value: Option<serde_json::Value> =
-        sqlx::query_scalar("select value from knobas.setting where key = $1")
-            .bind(STEPS_KEY)
-            .fetch_optional(pool)
-            .await?;
-    Ok(value
+    Ok(crate::settings::stored_value(pool, STEPS_KEY)
+        .await?
         .and_then(|value| serde_json::from_value(value).ok())
         .unwrap_or_default())
 }
@@ -133,15 +112,9 @@ pub async fn save_command_steps(
                 index + 1
             )));
         }
-        let command = draft.command.trim();
-        let words = knobas_core::checkout::open::words(command).map_err(|error| {
-            IpcError::invalid(format!("{name}'s command cannot be run: {error}"))
-        })?;
-        if words.is_empty() {
-            return Err(IpcError::invalid(format!("{name} has no command")));
-        }
+        let command = crate::settings::checked_command(name, &draft.command)?;
         let taken: Vec<&str> = out.iter().map(|step| step.id.as_str()).collect();
-        let id = settled_id(draft.id.as_deref(), name, "step", &taken);
+        let id = crate::slug::settled_id(draft.id.as_deref(), name, "step", &taken);
         out.push(CommandStep {
             id,
             name: name.to_owned(),
@@ -201,7 +174,7 @@ pub async fn save_named_pipelines(
             )));
         }
         let taken: Vec<&str> = out.iter().map(|pipeline| pipeline.id.as_str()).collect();
-        let id = settled_id(draft.id.as_deref(), name, "pipeline", &taken);
+        let id = crate::slug::settled_id(draft.id.as_deref(), name, "pipeline", &taken);
         out.push(NamedPipeline {
             id,
             name: name.to_owned(),

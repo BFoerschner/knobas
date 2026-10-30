@@ -83,11 +83,33 @@ pub async fn write(pool: &PgPool, key: &str, value: Option<&str>) -> Result<(), 
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the query fails.
 pub async fn read_value(pool: &PgPool, key: &str) -> Result<Option<serde_json::Value>, IpcError> {
+    stored_value(pool, key).await.map_err(IpcError::internal)
+}
+
+/// [`read_value`] as the database's own error, for a read that reports it
+/// its own way (the pipeline over a file).
+pub(crate) async fn stored_value(
+    pool: &PgPool,
+    key: &str,
+) -> Result<Option<serde_json::Value>, sqlx::Error> {
     sqlx::query_scalar("select value from knobas.setting where key = $1")
         .bind(key)
         .fetch_optional(pool)
         .await
-        .map_err(IpcError::internal)
+}
+
+/// A saved list's command (a user renderer's, a pipeline step's), trimmed:
+/// run without a shell, so it has to split into words, and an empty one
+/// cannot run.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid), naming `name`.
+pub(crate) fn checked_command<'a>(name: &str, command: &'a str) -> Result<&'a str, IpcError> {
+    let command = command.trim();
+    knobas_core::checkout::open::words(command)
+        .map_err(|error| IpcError::invalid(format!("{name}'s command cannot be run: {error}")))?;
+    Ok(command)
 }
 
 /// Store one `knobas.setting` row as JSON.
@@ -219,6 +241,19 @@ pub async fn set_pages_kept_open(pool: &PgPool, count: u32) -> Result<u32, IpcEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A saved command (a renderer's, a pipeline step's) is trimmed, and one
+    /// that is empty or does not split into words is refused by its owner's
+    /// name.
+    #[test]
+    fn a_saved_command_is_trimmed_and_refused_by_name_when_it_cannot_run() {
+        assert_eq!(checked_command("Cat", "  cat -n ").unwrap(), "cat -n");
+        let empty = checked_command("Empty", "   ").unwrap_err();
+        assert_eq!(empty.code, crate::IpcErrorCode::Invalid);
+        assert!(empty.message.contains("Empty"), "{}", empty.message);
+        let quote = checked_command("Bad", "cat 'x").unwrap_err();
+        assert!(quote.message.starts_with("Bad's command cannot be run"), "{}", quote.message);
+    }
 
     /// The write has to be an upsert, and it has to touch exactly the key
     /// [`sources_and_first_run`] reads.

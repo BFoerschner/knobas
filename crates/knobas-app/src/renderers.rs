@@ -186,24 +186,9 @@ fn settle(drafts: &[UserRendererDraft]) -> Result<Vec<UserRenderer>, IpcError> {
                 index + 1
             )));
         }
-        let command = draft.command.trim();
-        knobas_core::checkout::open::words(command).map_err(|error| {
-            IpcError::invalid(format!("{name}'s command cannot be run: {error}"))
-        })?;
-        let given = draft.id.as_deref().map(str::trim).unwrap_or_default();
-        let taken = |id: &str| out.iter().any(|r| r.id == id);
-        let id = if crate::slug::is_slug(given) && !taken(given) {
-            given.to_owned()
-        } else {
-            let base = crate::slug::slug(name, "renderer");
-            let mut id = base.clone();
-            let mut n = 2;
-            while taken(&id) {
-                id = format!("{base}-{n}");
-                n += 1;
-            }
-            id
-        };
+        let command = crate::settings::checked_command(name, &draft.command)?;
+        let taken: Vec<&str> = out.iter().map(|r| r.id.as_str()).collect();
+        let id = crate::slug::settled_id(draft.id.as_deref(), name, "renderer", &taken);
         let list = |items: &[String], lower: bool| -> Vec<String> {
             items
                 .iter()
