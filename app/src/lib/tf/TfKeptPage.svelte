@@ -7,11 +7,13 @@
   at, and tells the components inside it through `pageVisible()`. It draws the
   role frame (#2106) for a page that names a `role`: *Sync now* into its header
   as `sync`, and `syncRevision`, which also moves each time the page is shown
-  again, so a role view re-reads on its return as it does after a run.
+  again, so a role view re-reads on its return as it does after a run. It
+  keeps the page's scroll across a hide (`keepScroll`, #2248).
 -->
 <script lang="ts">
   import { untrack } from "svelte";
   import { providePageVisible } from "./kept-pages.svelte";
+  import { keepScroll } from "./while-shown.svelte";
   import type { RoleFrameProps, TfPageContext, TfPageEntry } from "./page-entry";
   import { SECTION_NAME, type TfRoute } from "./route";
   import TfCrumbs from "./TfCrumbs.svelte";
@@ -35,6 +37,9 @@
   } = $props();
 
   providePageVisible(() => visible);
+  // The shell's one scroller is every page's: each page shows again where it was left (#2248).
+  let wrapper = $state<HTMLElement>();
+  keepScroll(() => wrapper, () => visible);
 
   const pageCtx = $derived<TfPageContext>({ ...ctx, route, visible });
 
@@ -70,7 +75,7 @@
   {#if roleSync !== null}<TfSyncNow sync={roleSync} />{/if}
 {/snippet}
 
-<div class="tf-kept" hidden={!visible}>
+<div class="tf-kept" hidden={!visible} bind:this={wrapper}>
   {#if page.crumbs && route.view === "full"}
     <div class="tf-full">
       <TfCrumbs job={ctx.job} jobAt={ctx.jobAt} name={SECTION_NAME[route.section]} />
