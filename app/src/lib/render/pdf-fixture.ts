@@ -21,6 +21,8 @@ export interface FakePage {
   links?: FakeLink[];
   /** A text field on the page whose keystroke action is JavaScript (a form the viewer must not draw as one). */
   field?: string;
+  /** A one-colour image on the page (`rrggbb`, 2×2 pixels drawn 120 pt wide), so a page can change by its image alone. */
+  image?: string;
 }
 
 export interface FakePdfSpec {
@@ -62,9 +64,16 @@ export function fakePdf(spec: FakePdfSpec): Uint8Array {
       annots.push(field);
       fields.push(field);
     }
-    const text = page.lines.map((line, i) => `BT /F1 ${i === 0 ? 20 : 12} Tf 72 ${720 - i * 28} Td (${escape(line)}) Tj ET`).join("\n");
+    const image =
+      page.image === undefined
+        ? null
+        : add(`<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 25 >>\nstream\n${page.image.repeat(4)}>\nendstream`);
+    const text =
+      page.lines.map((line, i) => `BT /F1 ${i === 0 ? 20 : 12} Tf 72 ${720 - i * 28} Td (${escape(line)}) Tj ET`).join("\n") +
+      (image === null ? "" : "\nq 120 0 0 120 72 300 cm /Im1 Do Q");
+    const xobject = image === null ? "" : ` /XObject << /Im1 ${image} 0 R >>`;
     objects[pageId(k)] =
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${pageId(k) + 1} 0 R` +
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >>${xobject} >> /Contents ${pageId(k) + 1} 0 R` +
       (annots.length > 0 ? ` /Annots [${annots.map((a) => `${a} 0 R`).join(" ")}]` : "") +
       " >>";
     objects[pageId(k) + 1] = `<< /Length ${text.length} >>\nstream\n${text}\nendstream`;

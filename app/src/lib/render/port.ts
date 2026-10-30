@@ -94,6 +94,22 @@ export interface PdfPage {
   /** Fills `into` with the page's text as transparent spans over the drawing, so it can be selected. */
   text(into: HTMLElement, scale: number): Promise<void>;
   links(): Promise<PdfLink[]>;
+  /** What the page is made of, to tell it from another page without drawing it (#2282, `render/pdf-diff.ts`). */
+  print(): Promise<PdfPrint>;
+  /** The page drawn at `scale` on a canvas off screen, its RGBA pixels; `null` where nothing draws (jsdom). */
+  pixels(scale: number): Promise<Uint8ClampedArray | null>;
+}
+
+/**
+ * A page's print: a digest of its size and its operator list (the text it
+ * shows and where, its paths and colours, its images' pixels), equal for two
+ * pages that draw the same. `unsure` when the list paints something the
+ * digest could not read (an image handed over as a bitmap): equal prints
+ * then need the pixels to agree as well.
+ */
+export interface PdfPrint {
+  key: string;
+  unsure: boolean;
 }
 
 export interface PdfDocument {

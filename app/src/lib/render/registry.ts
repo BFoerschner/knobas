@@ -112,7 +112,7 @@ export const GRAPHVIZ: Renderer = {
  * PDF (#2260): a `.pdf` file's bytes, opened by pdf.js with scripting and
  * form actions off (`render/pdf-core.ts`) and painted page by page into
  * canvases (`tf/render/TfPdf.svelte`). pdf.js loads with the first PDF.
- * Its diff, page by page, is #2282's.
+ * Its diff is page by page, the changed pages marked (#2282, `render/pdf-diff.ts`).
  */
 export const PDF: Renderer = {
   id: "pdf",
@@ -121,7 +121,7 @@ export const PDF: Renderer = {
   fences: [],
   input: "bytes",
   output: "image",
-  diff: false,
+  diff: true,
 };
 
 /** The most a byte read hands a renderer (`view::BYTES_CAP`, #2256): past it the read is refused, never cut. */
