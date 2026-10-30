@@ -628,12 +628,17 @@ pub async fn bring_up<R: tauri::Runtime>(
         background,
     )
     .await?;
+    let live = live::LiveSources::default();
+    let fresh_to = app.clone();
+    live.on_fresh(move |fresh| {
+        crate::events::emit(&fresh_to, None, crate::events::VIEW_FRESH, fresh);
+    });
     Ok(SourcesState {
         pool: deps.pool,
         scheduler,
         secrets: deps.secrets,
         registry,
-        live: live::LiveSources::default(),
+        live,
     })
 }
 

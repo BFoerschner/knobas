@@ -99,6 +99,11 @@ pub mod events {
     /// and whether it was refreshed, gone or failed. Broadcast: every view
     /// that shows the item re-reads it, and a write's echo settles on it.
     pub const ITEM_REFRESHED: &str = "item:refreshed";
+    /// Payload: `sources::live::ViewFresh` -- a source view the shell was
+    /// answered from memory was read again behind the answer, and the
+    /// answer moved (#2242, ADR-0032): the entity and the section. Broadcast:
+    /// every page showing that view reads it again.
+    pub const VIEW_FRESH: &str = "view:fresh";
 
     /// Send `payload` to the frontend as `name` -- to every window, or to the
     /// one labelled `target` -- from the main thread, whichever thread asks.

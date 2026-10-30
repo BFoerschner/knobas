@@ -27,15 +27,30 @@
 //! the old instance's are dropped with it: a new address may be another
 //! server, a new credential may read less.
 //!
+//! # Moving reads (#2242) and grants (#2241)
+//!
+//! A view the adapter says is [`Standing::Moving`] -- keyed by a branch name,
+//! a branch list, a tree by branch -- is kept the same way, and the same ask
+//! again is answered from here at once while it is read again behind the
+//! answer: one read per view at a time, whose answer replaces the kept one
+//! for the next ask. A read behind that fails leaves the kept answer and
+//! says nothing; one whose answer differs tells [`LiveSources::on_fresh`]'s
+//! listener, which tells the shell (`view:fresh`), so a page showing it
+//! draws it again. [`LiveSources::refused`] keeps a write's grants the same
+//! way where the adapter says they move (`Source::refusal_standing`): Gitea's
+//! probe is asked once per repository, not once per file opened.
+//!
 //! What is kept is the adapter's answer. The app's own work on it -- the
 //! rule-7 check against the mirror, a row's commit hint -- is done on every
 //! read, because the mirror moves under a fixed view.
 
-use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use knobas_secrets::SecretStore;
+use knobas_source::grants::{RefusedWrite, WriteAsk};
 use knobas_source::view::{SourceView, Standing};
 use knobas_source::{AuthMethod, Source, SourceError};
 use knobas_sync::scheduler::AdapterRegistry;
@@ -64,6 +79,25 @@ struct Inner {
     /// Advanced by every [`LiveSources::forget`]. A build that saw it move
     /// since it read the configuration row is lent to its own read only.
     forgets: AtomicU64,
+    /// The keys a read behind is under way for: one at a time each.
+    behind: Mutex<HashSet<Key>>,
+    /// How many reads behind are under way, and their end's signal.
+    pending: AtomicUsize,
+    idle: tokio::sync::Notify,
+    /// Told of a read behind whose answer moved.
+    fresh: Mutex<Option<Listener>>,
+}
+
+type Listener = Arc<dyn Fn(ViewFresh) + Send + Sync>;
+
+/// The payload of the shell's `view:fresh` event (#2242): a view the shell
+/// was answered from memory was read again behind, and its answer moved, so
+/// a page showing it reads it again (from memory, now the fresh answer).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct ViewFresh {
+    pub entity_id: String,
+    pub section: Option<String>,
 }
 
 /// A source as built, and what it was built from.
@@ -105,7 +139,29 @@ impl LiveSources {
             reads: Mutex::new(Reads::new(bound)),
             builds: AtomicU64::new(0),
             forgets: AtomicU64::new(0),
+            behind: Mutex::new(HashSet::new()),
+            pending: AtomicUsize::new(0),
+            idle: tokio::sync::Notify::new(),
+            fresh: Mutex::new(None),
         }))
+    }
+
+    /// Tell `listener` of every read behind whose answer moved: the shell's
+    /// `view:fresh`, where the app wires it.
+    pub fn on_fresh(&self, listener: impl Fn(ViewFresh) + Send + Sync + 'static) {
+        *self.0.fresh.lock().expect("the listener") = Some(Arc::new(listener));
+    }
+
+    /// Once every read behind under way has ended: for a test that counts
+    /// them, and asks again after.
+    pub async fn settled(&self) {
+        loop {
+            let idle = self.0.idle.notified();
+            if self.0.pending.load(Ordering::SeqCst) == 0 {
+                return;
+            }
+            idle.await;
+        }
     }
 
     /// The built source that owns `entity_id`, built the way a scheduled run
@@ -211,8 +267,9 @@ impl LiveSources {
         }
     }
 
-    /// The view of `entity` at `section`, from the cache where the adapter
-    /// says the answer is fixed and the cache holds it, read live otherwise.
+    /// The view of `entity` at `section`: from the cache where the adapter
+    /// says the answer is fixed or moving and the cache holds it -- a moving
+    /// one read again behind the answer -- and read live otherwise.
     ///
     /// # Errors
     ///
@@ -223,24 +280,143 @@ impl LiveSources {
         entity: &str,
         section: Option<&str>,
     ) -> Result<Option<SourceView>, SourceError> {
-        if lent.source.view_standing(entity, section) == Standing::Live {
-            return lent.source.view(entity, section).await;
-        }
-        let key = (
-            lent.generation,
-            entity.to_owned(),
-            section.map(str::to_owned),
-        );
-        if let Some(kept) = self.0.reads.lock().expect("the read cache").get(&key) {
+        let standing = lent.source.view_standing(entity, section);
+        let behind = match standing {
+            Standing::Live => return lent.source.view(entity, section).await,
+            Standing::Fixed => false,
+            Standing::Moving => true,
+        };
+        let key = Key {
+            generation: lent.generation,
+            entity: entity.to_owned(),
+            ask: Ask::View(section.map(str::to_owned)),
+        };
+        if let Some(Answer::View(kept)) = self.reads().get(&key) {
+            if behind {
+                self.read_behind(lent, key);
+            }
             return Ok(kept);
         }
         let view = lent.source.view(entity, section).await?;
-        self.0
-            .reads
-            .lock()
-            .expect("the read cache")
-            .put(key, view.clone());
+        self.reads().put(key, Answer::View(view.clone()));
         Ok(view)
+    }
+
+    /// The asks among `asks` the source's credential cannot make, as
+    /// `Source::refused_writes` answers: each ask the adapter says moves is
+    /// answered from the cache where it holds it, and asked again behind;
+    /// the rest are asked now, together.
+    ///
+    /// # Errors
+    ///
+    /// The adapter's; a failed ask is never kept.
+    pub(crate) async fn refused(
+        &self,
+        lent: &Lent,
+        asks: &[WriteAsk],
+    ) -> Result<Vec<RefusedWrite>, SourceError> {
+        let mut answered: Vec<RefusedWrite> = Vec::new();
+        let mut kept_keys = Vec::new();
+        let mut ask_now: Vec<WriteAsk> = Vec::new();
+        for ask in asks {
+            let key = match lent.source.refusal_standing(ask) {
+                Standing::Live => {
+                    ask_now.push(ask.clone());
+                    continue;
+                }
+                Standing::Fixed | Standing::Moving => Key::of_ask(lent.generation, ask),
+            };
+            match self.reads().get(&key) {
+                Some(Answer::Refused(kept)) => {
+                    answered.extend(kept);
+                    if lent.source.refusal_standing(ask) == Standing::Moving {
+                        kept_keys.push(key);
+                    }
+                }
+                _ => ask_now.push(ask.clone()),
+            }
+        }
+        for key in kept_keys {
+            self.read_behind(lent, key);
+        }
+        if !ask_now.is_empty() {
+            let fresh = lent.source.refused_writes(&ask_now).await?;
+            let mut reads = self.reads();
+            for ask in &ask_now {
+                let refusal = fresh.iter().find(|r| r.refuses(ask)).cloned();
+                if lent.source.refusal_standing(ask) != Standing::Live {
+                    reads.put(
+                        Key::of_ask(lent.generation, ask),
+                        Answer::Refused(refusal.clone()),
+                    );
+                }
+                answered.extend(refusal);
+            }
+        }
+        Ok(asks
+            .iter()
+            .filter_map(|ask| answered.iter().find(|r| r.refuses(ask)).cloned())
+            .collect())
+    }
+
+    /// Read `key` again behind the answer just given from the cache, unless
+    /// such a read is under way: its answer replaces the kept one where the
+    /// cache still holds it, and a moved view is told.
+    fn read_behind(&self, lent: &Lent, key: Key) {
+        if !self.0.behind.lock().expect("the reads behind").insert(key.clone()) {
+            return;
+        }
+        self.0.pending.fetch_add(1, Ordering::SeqCst);
+        let this = self.clone();
+        let source = Arc::clone(&lent.source);
+        let work = async move {
+            let fresh = match &key.ask {
+                Ask::View(section) => source
+                    .view(&key.entity, section.as_deref())
+                    .await
+                    .map(Answer::View),
+                Ask::Write { op, field } => {
+                    let ask = WriteAsk {
+                        entity: key.entity.clone(),
+                        op: op.clone(),
+                        field: field.clone(),
+                    };
+                    source
+                        .refused_writes(std::slice::from_ref(&ask))
+                        .await
+                        .map(|fresh| Answer::Refused(fresh.into_iter().find(|r| r.refuses(&ask))))
+                }
+            };
+            match fresh {
+                Ok(answer) => {
+                    let moved = this.reads().replace(&key, answer);
+                    if moved && let Ask::View(section) = &key.ask {
+                        let listener = this.0.fresh.lock().expect("the listener").clone();
+                        if let Some(listener) = listener {
+                            listener(ViewFresh {
+                                entity_id: key.entity.clone(),
+                                section: section.clone(),
+                            });
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::debug!(entity = %key.entity, %error, "a read behind failed; the kept answer stands");
+                }
+            }
+            this.0.behind.lock().expect("the reads behind").remove(&key);
+            if this.0.pending.fetch_sub(1, Ordering::SeqCst) == 1 {
+                this.0.idle.notify_waiters();
+            }
+        };
+        // A test's request counter counts the read behind as the ask's own.
+        #[cfg(feature = "test-util")]
+        let work = knobas_http::counted::inherit(work);
+        tokio::spawn(work);
+    }
+
+    fn reads(&self) -> std::sync::MutexGuard<'_, Reads> {
+        self.0.reads.lock().expect("the read cache")
     }
 
     fn drop_reads(&self, generation: u64) {
@@ -252,8 +428,54 @@ impl LiveSources {
     }
 }
 
-/// `(build, entity, section)`.
-type Key = (u64, String, Option<String>);
+/// What is kept, by the build it was read through and the entity.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Key {
+    generation: u64,
+    entity: String,
+    ask: Ask,
+}
+
+/// A view's section, or a write's grants.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum Ask {
+    View(Option<String>),
+    Write { op: String, field: Option<String> },
+}
+
+impl Key {
+    fn of_ask(generation: u64, ask: &WriteAsk) -> Self {
+        Self {
+            generation,
+            entity: ask.entity.clone(),
+            ask: Ask::Write {
+                op: ask.op.clone(),
+                field: ask.field.clone(),
+            },
+        }
+    }
+}
+
+/// A kept answer: a view, or whether one write is refused and why.
+#[derive(Clone)]
+enum Answer {
+    View(Option<SourceView>),
+    Refused(Option<RefusedWrite>),
+}
+
+impl Answer {
+    /// Its JSON, the size it is measured by and what a moved one is told by.
+    fn json(&self) -> Option<Vec<u8>> {
+        match self {
+            Self::View(view) => serde_json::to_vec(view).ok(),
+            Self::Refused(refused) => Some(
+                refused
+                    .as_ref()
+                    .map_or_else(Vec::new, |r| r.reason.clone().into_bytes()),
+            ),
+        }
+    }
+}
 
 /// The kept views, least recently used first by `order`.
 struct Reads {
@@ -266,9 +488,17 @@ struct Reads {
 }
 
 struct Kept {
-    view: Option<SourceView>,
+    answer: Answer,
     bytes: usize,
+    /// Its JSON's hash, against which a read behind is compared.
+    digest: u64,
     used: u64,
+}
+
+fn digest(json: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    json.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl Reads {
@@ -287,27 +517,52 @@ impl Reads {
         self.clock
     }
 
-    fn get(&mut self, key: &Key) -> Option<Option<SourceView>> {
+    fn get(&mut self, key: &Key) -> Option<Answer> {
         let now = self.tick();
         let kept = self.entries.get_mut(key)?;
         self.order.remove(&kept.used);
         kept.used = now;
         self.order.insert(now, key.clone());
-        Some(kept.view.clone())
+        Some(kept.answer.clone())
     }
 
-    fn put(&mut self, key: Key, view: Option<SourceView>) {
-        // What the view takes as the JSON the shell is sent: the measure of
+    /// Replace `key`'s answer where it is still kept (a forget or the bound
+    /// may have dropped it since), and say whether the answer moved.
+    fn replace(&mut self, key: &Key, answer: Answer) -> bool {
+        let Some(before) = self.entries.get(key).map(|kept| kept.digest) else {
+            return false;
+        };
+        let moved = answer.json().map(|json| digest(&json)) != Some(before);
+        if moved {
+            self.put(key.clone(), answer);
+        }
+        moved
+    }
+
+    fn put(&mut self, key: Key, answer: Answer) {
+        // What the answer takes as the JSON the shell is sent: the measure of
         // its size the app already has, and close to what it holds.
-        let bytes = serde_json::to_vec(&view).map_or(usize::MAX, |json| json.len());
+        let Some(json) = answer.json() else {
+            return;
+        };
+        let bytes = json.len();
         if bytes > self.bound {
+            self.remove(&key);
             return;
         }
         self.remove(&key);
         let used = self.tick();
         self.held += bytes;
         self.order.insert(used, key.clone());
-        self.entries.insert(key, Kept { view, bytes, used });
+        self.entries.insert(
+            key,
+            Kept {
+                answer,
+                bytes,
+                digest: digest(&json),
+                used,
+            },
+        );
         while self.held > self.bound {
             let Some((_, oldest)) = self.order.pop_first() else {
                 break;
@@ -329,7 +584,7 @@ impl Reads {
         let gone: Vec<Key> = self
             .entries
             .keys()
-            .filter(|(of, _, _)| *of == generation)
+            .filter(|key| key.generation == generation)
             .cloned()
             .collect();
         for key in gone {
