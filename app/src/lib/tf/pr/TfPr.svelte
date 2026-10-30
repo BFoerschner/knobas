@@ -823,7 +823,7 @@
                 <div class="tf-prpick" role="group" aria-label="Ask for a review">
                   {#each askable as option (option.value)}
                     <button type="button" onclick={() => void requestReview(option.value)}
-                      ><span class="tf-av" aria-hidden="true">{initials(option.label)}</span>{option.label}</button
+                      ><span class="tf-av" aria-hidden="true">{initials(option.label)}</span> {option.label}</button
                     >
                   {/each}
                 </div>
@@ -836,7 +836,7 @@
                     {@const own = me !== null && reviewer.who === me}
                     <div class="tf-prit">
                       <span class="tf-av" class:tf-me={own} aria-hidden="true">{initials(reviewer.who)}</span>
-                      <span class="tf-prgrow">{own ? "you" : reviewer.who}{#if reviewer.note !== null}<span class="tf-dim"> · {reviewer.note}</span>{/if}</span>
+                      <span class="tf-prgrow">{own ? "you" : reviewer.who}{#if reviewer.note !== null}<span class="tf-dim">{` · ${reviewer.note}`}</span>{/if}</span>
                       <span class="tf-chip tf-{reviewer.tone ?? 'muted'}">{reviewer.state}</span>
                     </div>
                   {/each}
