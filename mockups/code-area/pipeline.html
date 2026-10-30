@@ -1,0 +1,106 @@
+<!doctype html>
+<!--
+  #2252: the pipeline editor on a file. A pipeline is the steps between the file's bytes and its renderer, edited in
+  place: add, remove, reorder (grip), arguments inline (the jq filter), save as the default for a pattern.
+  States: suggested (no default matches; the bytes look gzipped: a suggestion, never applied on its own) |
+  editing (gunzip → jq → Source, the Add step menu open) | failed (a step fails: it names itself, its stderr, its input).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipeline editor</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="base.css"><link rel="stylesheet" href="code.css">
+<script src="mockup.js"></script>
+</head>
+<body data-page="pipeline" data-kind="repo" data-tab="repo" data-states="editing suggested failed">
+<div class="tf">
+<div id="chrome"></div>
+<main><div class="body"><div class="repo">
+  <aside class="tree" aria-label="Files">
+    <header><span class="tf-minif" data-ic="search"><span>Go to file</span><kbd>T</kbd></span><button class="tf-iconbtn tf-sm" title="Collapse all" data-ic="collapse"></button></header>
+    <div class="rows">
+      <a class="row dir" href="#" data-ic="folder">.gitea</a>
+      <a class="row dir" href="#" data-ic="folder">docs</a>
+      <a class="row dir" href="#" data-ic="folder-open">fixtures</a>
+      <a class="row d1" href="#" aria-current="true" data-ic="file">events.json.gz</a>
+      <a class="row d1" href="#" data-ic="file">webhooks.json.b64</a>
+      <a class="row dir" href="#" data-ic="folder">migrations</a>
+      <a class="row dir" href="#" data-ic="folder">src</a>
+      <a class="row" href="#" data-ic="file">Cargo.lock</a>
+      <a class="row" href="#" data-ic="file">Cargo.toml</a>
+      <a class="row" href="repo.html" data-ic="file">README.md</a>
+    </div>
+    <footer><span><kbd>T</kbd> go to file</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span></footer>
+  </aside>
+
+  <article class="fileview">
+    <header><span class="p"><span class="dim">fixtures /</span> events.json.gz</span><span class="meta">48.2 KB · bytes · at <span class="mono">4c1d0aa</span></span>
+      <div class="tf-acts">
+        <button class="tf-select tf-sm"><span class="lab">Render as</span><b>Source</b><svg class="i s" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></button>
+        <button class="tf-btn tf-sm" data-ic="plus" data-when="suggested">Pipeline</button>
+        <span data-openin="tf-sm"></span><button class="tf-iconbtn tf-sm" title="More" data-ic="more"></button>
+      </div></header>
+
+    <!-- No default for *.json.gz and the bytes start 1f 8b: offered, not applied. -->
+    <div class="suggest" data-when="suggested"><b>These bytes look gzip-compressed.</b><span>Nothing has been applied; you see the raw bytes as a hex dump.</span>
+      <div class="tf-acts"><button class="tf-btn tf-sm tf-primary">Unwrap with gunzip</button><button class="tf-btn tf-sm tf-ghost">Not now</button></div></div>
+
+    <div class="pipe" data-not="suggested"><div class="steps"><span class="lab">Pipeline</span><span class="src">bytes</span><span class="arrow">→</span>
+      <span class="step"><span class="grip" data-ic="grip" data-icc="s"></span><span class="name">gunzip</span><button class="x" title="Remove" data-ic="x" data-icc="s"></button></span><span class="arrow">→</span>
+      <span class="step" data-not="failed"><span class="grip" data-ic="grip" data-icc="s"></span><span class="name">jq</span><span class="arg focus">.events[] | select(.level == "error") | {at, code, msg}</span><button class="x" title="Remove" data-ic="x" data-icc="s"></button></span>
+      <span class="step bad" data-when="failed"><span class="grip" data-ic="grip" data-icc="s"></span><span class="name">jq</span><span class="arg">.events[] | select(.level == "error") | .msg | ascii_downcase</span><button class="x" title="Remove" data-ic="x" data-icc="s"></button></span>
+      <span class="arrow">→</span><span class="step renderer"><span class="name">Source · JSON</span></span>
+      <div class="menuwrap"><button class="tf-btn tf-sm tf-ghost" data-ic="plus">Add step</button>
+        <div class="tf-menu" data-when="editing" style="width:300px">
+          <div class="mh">Built in</div>
+          <button>base64 decode<span class="kb dim small">text → bytes</span></button>
+          <button>gzip · zstd · bzip2 · xz decompress<span class="kb dim small">bytes → bytes</span></button>
+          <button class="on">jq<span class="kb dim small">JSON → JSON</span></button>
+          <button>Pretty-print JSON · YAML · TOML</button>
+          <button>Convert JSON ⇄ YAML ⇄ TOML</button>
+          <button>Hex dump<span class="kb dim small">bytes → text</span></button>
+          <hr><div class="mh">Your commands</div>
+          <button>protoc --decode_raw<span class="kb dim small mono">cmd</span></button>
+          <button>Add a command step…<span class="kb dim small">Settings › Renderers</span></button>
+        </div></div></div>
+      <div class="tf-acts"><span class="dim small">Not saved</span><button class="tf-btn tf-sm">Save as default for <span class="mono">*.json.gz</span>…</button><button class="tf-btn tf-sm tf-ghost">Reset</button></div>
+    </div>
+
+    <div class="stepfail" data-when="failed"><b>Step 2, jq, failed: ascii_downcase cannot be applied to null (the event at index 3 has no msg).</b>
+      <div class="cols"><div><b>stderr</b><pre>jq: error (at &lt;stdin&gt;:0): null (null) cannot be ascii_downcased</pre></div>
+        <div><b>Its input, the output of step 1 (gunzip), 212 KB</b><pre>{ "events": [
+  { "at": "2026-10-29T08:14:02Z", "level": "info", "code": 200, "msg": "delivered" },
+  { "at": "2026-10-29T08:14:09Z", "level": "error", "code": 503 },
+  …</pre></div></div></div>
+
+    <div class="code" data-when="editing">
+      <div class="l"><span>1</span><span><span class="p">{</span></span></div>
+      <div class="l"><span>2</span><span>  <span class="f">"at"</span><span class="p">:</span> <span class="s">"2026-10-29T08:14:09Z"</span><span class="p">,</span></span></div>
+      <div class="l"><span>3</span><span>  <span class="f">"code"</span><span class="p">:</span> <span class="n">503</span><span class="p">,</span></span></div>
+      <div class="l"><span>4</span><span>  <span class="f">"msg"</span><span class="p">:</span> <span class="s">"subscriber returned 503, retry 1 in 2 s"</span></span></div>
+      <div class="l"><span>5</span><span><span class="p">}</span></span></div>
+      <div class="l"><span>6</span><span><span class="p">{</span></span></div>
+      <div class="l"><span>7</span><span>  <span class="f">"at"</span><span class="p">:</span> <span class="s">"2026-10-29T08:14:11Z"</span><span class="p">,</span></span></div>
+      <div class="l"><span>8</span><span>  <span class="f">"code"</span><span class="p">:</span> <span class="n">503</span><span class="p">,</span></span></div>
+      <div class="l"><span>9</span><span>  <span class="f">"msg"</span><span class="p">:</span> <span class="s">"subscriber returned 503, retry 2 in 4 s"</span></span></div>
+      <div class="l"><span>10</span><span><span class="p">}</span></span></div>
+      <div class="l"><span>11</span><span><span class="p">{</span></span></div>
+      <div class="l"><span>12</span><span>  <span class="f">"at"</span><span class="p">:</span> <span class="s">"2026-10-29T08:14:15Z"</span><span class="p">,</span></span></div>
+      <div class="l"><span>13</span><span>  <span class="f">"code"</span><span class="p">:</span> <span class="k">null</span><span class="p">,</span></span></div>
+      <div class="l"><span>14</span><span>  <span class="f">"msg"</span><span class="p">:</span> <span class="s">"connection reset by peer"</span></span></div>
+      <div class="l"><span>15</span><span><span class="p">}</span></span></div>
+    </div>
+    <div class="code" data-when="suggested">
+      <div class="l"><span>0000</span><span><span class="n">1f 8b 08 00 00 00 00 00</span>  <span class="n">00 03 ed 5d 5b 73 db 36</span>  <span class="c">.......]  [s.6</span></span></div>
+      <div class="l"><span>0010</span><span><span class="n">16 7e cf af 40 f4 d0 87</span>  <span class="n">6e 9b 9a 04 c1 4b 12 4f</span>  <span class="c">.~..@...  n....K.O</span></span></div>
+      <div class="l"><span>0020</span><span><span class="n">a7 93 c4 76 9c b4 e3 38</span>  <span class="n">89 b3 69 d3 99 1d 0f 44</span>  <span class="c">...v...8  ..i....D</span></span></div>
+      <div class="l"><span>0030</span><span><span class="n">42 12 62 8a 54 49 ca 97</span>  <span class="n">34 d3 ff be e7 00 a4 28</span>  <span class="c">B.b.TI..  4......(</span></span></div>
+      <div class="l"><span>0040</span><span><span class="n">5e 2c 51 b6 ec 5d 76 e7</span>  <span class="n">a1 6d 49 24 0e 0e ce fd</span>  <span class="c">^,Q..]v.  .mI$....</span></span></div>
+    </div>
+  </article>
+</div></div></main>
+<footer class="tf-status"><span>Gitea · synced 1 min ago</span><span>3 sources healthy</span></footer>
+</div>
+</body>
+</html>

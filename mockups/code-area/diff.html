@@ -1,0 +1,221 @@
+<!doctype html>
+<!--
+  #2252: the one diff component, on a pull request's Files changed (the same component draws commit, compare and
+  local changes; commenting is passed in only where the source offers a review).
+  Toolbar: range picker (all, one, a range, since my last review), Unified/Split (remembered app-wide, unified
+  below a width), Run pipelines toggle, Ignore whitespace (local diffs only; disabled with the reason otherwise),
+  where the diff came from, Viewed progress. Left: file tree with filter and badges (A, D, R with similarity, mode,
+  binary, M). Files: collapse, expand context, word-level changes, threads, the pipeline named in the header,
+  lock/generated files collapsed by default, Load diff above 1,500 lines, Open in at the line.
+  States: unified | split | range (the picker open, since my last review chosen, diff from Gitea) | refresh.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diff</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="base.css"><link rel="stylesheet" href="code.css"><link rel="stylesheet" href="diff.css">
+<script src="mockup.js"></script>
+</head>
+<body data-page="diff" data-kind="pr" data-tab="diff" data-states="unified split range refresh">
+<div class="tf">
+<div id="chrome"></div>
+<main>
+<div class="dtool">
+  <div class="menuwrap range">
+    <button class="tf-select tf-sm" data-not="range"><span class="lab">Commits</span><b>All 6</b><span class="mono dim">e02b7d1…9f3e1c2</span><svg class="i s" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></button>
+    <button class="tf-select tf-sm" data-when="range"><span class="lab">Commits</span><b>Since your last review</b><span class="mono dim">3c9d2b4…9f3e1c2</span><svg class="i s" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></button>
+    <div class="tf-menu left" data-when="range">
+      <button><span class="tick"></span>All commits<span class="kb dim small">6</span></button>
+      <button class="on"><span class="tick">✓</span><span>Since your last review<span class="sub">You reviewed 3c9d2b4 yesterday · 2 commits since</span></span></button>
+      <hr><div class="mh">One commit, or click then shift-click for a range</div>
+      <label class="c"><span class="box"></span><span class="mono">a41f0e2</span><span>Add backoff schedule</span><span class="dim small">2 d</span></label>
+      <label class="c"><span class="box"></span><span class="mono">b07c911</span><span>Keep attempt count on the outbox</span><span class="dim small">2 d</span></label>
+      <label class="c"><span class="box"></span><span class="mono">c5d3a80</span><span>Tests for the retry worker</span><span class="dim small">2 d</span></label>
+      <label class="c"><span class="box"></span><span class="mono">3c9d2b4</span><span>Regenerate schema</span><span class="dim small">1 d</span></label>
+      <label class="c sel first"><span class="box">✓</span><span class="mono">7aa01f9</span><span>Jitter ±20 %</span><span class="dim small">5 h</span></label>
+      <label class="c sel last"><span class="box">✓</span><span class="mono">9f3e1c2</span><span>Fix clippy</span><span class="dim small">5 h</span></label>
+      <div class="foot">The range has its own address: link it, go back to it.<button class="tf-btn tf-sm tf-ghost" data-ic="ext">Open in Diff tool</button></div>
+    </div>
+  </div>
+  <div class="tf-seg" role="group" aria-label="Layout"><button data-when="unified range refresh" aria-pressed="true">Unified</button><button data-when="split">Unified</button><button data-when="split" aria-pressed="true">Split</button><button data-when="unified range refresh">Split</button></div>
+  <button class="tf-pill" aria-pressed="true" data-ic="check" data-icc="s">Run pipelines</button>
+  <button class="tf-pill" data-not="range">Ignore whitespace</button>
+  <button class="tf-pill" aria-disabled="true" data-when="range" title="Gitea's compare does not honour it; 7aa01f9 is not in your checkout yet">Ignore whitespace</button>
+  <span class="why" data-not="range">from local git · <span class="mono">~/src/payments-api</span></span>
+  <span class="why" data-when="range">from Gitea's compare: <span class="mono">7aa01f9</span> is not in your checkout yet. <a href="#" style="text-decoration:underline">Fetch</a></span>
+  <span class="reading" data-when="refresh">Re-reading at the new head…</span>
+  <div class="tf-acts"><span class="prog"><span class="track"><i></i></span>2 of 11 viewed</span><button class="tf-btn tf-sm tf-ghost" title="Keyboard">Keys <kbd>?</kbd></button></div>
+</div>
+
+<div class="dgrid">
+  <aside class="dtree" aria-label="Changed files">
+    <header><span class="tf-minif" data-ic="search"><span>Filter files</span></span><button class="tf-iconbtn tf-sm" title="Collapse all" data-ic="collapse"></button></header>
+    <div class="rows">
+      <div class="row dir">.gitea/workflows</div>
+      <a class="row d1 viewed" href="#"><span class="bd M">M</span><span class="nm">ci.yml</span><span class="end"><span class="addn">+4</span><span class="deln">−1</span><span class="vtick">✓</span></span></a>
+      <div class="row dir">assets</div>
+      <a class="row d1" href="#"><span class="bd B">BIN</span><span class="nm">logo.png</span><span class="end"></span></a>
+      <a class="row" href="#"><span class="bd M">M</span><span class="nm">Cargo.lock</span><span class="end dim">generated</span></a>
+      <div class="row dir">docs</div>
+      <a class="row d1 viewed" href="#"><span class="bd D">D</span><span class="nm">old-retry.md</span><span class="end"><span class="deln">−40</span><span class="vtick">✓</span></span></a>
+      <div class="row dir">fixtures</div>
+      <a class="row d1" href="#"><span class="bd M">M</span><span class="nm">webhooks.json.b64</span><span class="end"><span class="addn">+3</span><span class="deln">−1</span></span></a>
+      <div class="row dir">scripts</div>
+      <a class="row d1" href="#"><span class="bd X">+x</span><span class="nm">deploy.sh</span><span class="end"><span class="dim">644 → 755</span></span></a>
+      <div class="row dir">src</div>
+      <a class="row d1" href="#"><span class="bd M">M</span><span class="nm">generated/schema.rs</span><span class="end"><span class="addn">+1,912</span><span class="deln">−1,640</span></span></a>
+      <a class="row d1" href="#"><span class="bd R">R 92%</span><span class="nm">queue/legacy.rs</span><span class="end"><span class="addn">+3</span><span class="deln">−3</span></span></a>
+      <a class="row d1" href="#" aria-current="true"><span class="bd M">M</span><span class="nm">retry.rs</span><span class="end"><span class="addn">+34</span><span class="deln">−8</span></span></a>
+      <a class="row d1" href="#"><span class="bd M">M</span><span class="nm">webhook.rs</span><span class="end"><span class="addn">+12</span><span class="deln">−5</span></span></a>
+      <div class="row dir">tests</div>
+      <a class="row d1" href="#"><span class="bd A">A</span><span class="nm">retry_test.rs</span><span class="end"><span class="addn">+88</span></span></a>
+    </div>
+    <footer class="kbdline"><span><kbd>j</kbd><kbd>k</kbd> files</span><span><kbd>n</kbd><kbd>p</kbd> hunks</span><span><kbd>v</kbd> viewed</span><span><kbd>c</kbd> comment</span><span><kbd>s</kbd> split</span></footer>
+  </aside>
+
+  <section data-dim>
+    <article class="df closed"><header><button class="tf-iconbtn tf-sm caret" data-ic="chev-r"></button><span class="bd M">M</span><span class="path">.gitea/workflows/ci.yml</span><span class="addn small">+4</span><span class="deln small">−1</span>
+      <div class="tf-acts"><span class="viewed on"><span class="box">✓</span>Viewed</span><span data-openin="tf-sm"></span></div></header>
+      <div class="why">Collapsed because you marked it viewed.</div></article>
+
+    <article class="df"><header><button class="tf-iconbtn tf-sm caret" data-ic="chev-d"></button><span class="bd B">BIN</span><span class="path">assets/logo.png</span><span class="dim small">12.4 KB → 13.1 KB</span>
+      <div class="tf-acts"><div class="tf-seg"><button aria-pressed="true">Rendered</button><button>Bytes</button></div><span class="viewed"><span class="box"></span>Viewed</span></div></header>
+      <div class="ba"><div><span class="img">◐</span>before · 256 × 256</div><div><span class="img">◑</span>after · 256 × 256</div></div></article>
+
+    <article class="df closed"><header><button class="tf-iconbtn tf-sm caret" data-ic="chev-r"></button><span class="bd M">M</span><span class="path">Cargo.lock</span><span class="addn small">+46</span><span class="deln small">−12</span><span class="tf-chip">generated</span>
+      <div class="tf-acts"><span class="viewed"><span class="box"></span>Viewed</span></div></header></article>
+
+    <article class="df closed"><header><button class="tf-iconbtn tf-sm caret" data-ic="chev-r"></button><span class="bd D">D</span><span class="path">docs/old-retry.md</span><span class="deln small">−40</span>
+      <div class="tf-acts"><span class="viewed on"><span class="box">✓</span>Viewed</span></div></header></article>
+
+    <!-- The same pipeline on both sides: a diff of decoded JSON, not of two base64 blobs; the header names it. -->
+    <article class="df"><header><button class="tf-iconbtn tf-sm caret" data-ic="chev-d"></button><span class="bd M">M</span><span class="path">fixtures/webhooks.json.b64</span>
+      <span class="ran" data-ic="check" data-icc="s">base64 decode → pretty JSON</span><span class="dim small">default for *.json.b64</span>
+      <div class="tf-acts"><button class="tf-btn tf-sm tf-ghost">Show raw</button><span class="viewed"><span class="box"></span>Viewed</span><span data-openin="tf-sm"></span></div></header>
+      <div class="dl u" data-not="split">
+        <div class="hunk">@@ -3,6 +3,8 @@ subscribers</div>
+        <div class="ln"><span class="no">3</span><span class="no">3</span><span class="sg"> </span><span>  { <span class="f">"url"</span>: <span class="s">"https://ledger.internal/hook"</span>,</span></div>
+        <div class="ln del"><span class="no">4</span><span class="no"></span><span class="sg">−</span><span>    <span class="f">"timeout_ms"</span>: <del><span class="n">5000</span></del> },</span></div>
+        <div class="ln add"><span class="no"></span><span class="no">4</span><span class="sg">+</span><span>    <span class="f">"timeout_ms"</span>: <ins><span class="n">2000</span></ins>,</span></div>
+        <div class="ln add"><span class="no"></span><span class="no">5</span><span class="sg">+</span><span>    <span class="f">"retry"</span>: { <span class="f">"max"</span>: <span class="n">10</span>, <span class="f">"base_s"</span>: <span class="n">2</span> },</span></div>
+        <div class="ln add"><span class="no"></span><span class="no">6</span><span class="sg">+</span><span>    <span class="f">"jitter"</span>: <span class="n">0.2</span> },</span></div>
+        <div class="ln"><span class="no">5</span><span class="no">7</span><span class="sg"> </span><span>  { <span class="f">"url"</span>: <span class="s">"https://mail.internal/hook"</span> }</span></div>
+      </div>
+      <div class="dl s2" data-when="split">
+        <div class="side"><div class="hunk">@@ -3,6</div>
+          <div class="ln"><span class="no">3</span><span class="sg"> </span><span>  { <span class="f">"url"</span>: <span class="s">"https://ledger.internal/hook"</span>,</span></div>
+          <div class="ln del"><span class="no">4</span><span class="sg">−</span><span>    <span class="f">"timeout_ms"</span>: <del><span class="n">5000</span></del> },</span></div>
+          <div class="ln pad"><span class="no"></span><span class="sg"></span><span></span></div><div class="ln pad"><span class="no"></span><span class="sg"></span><span></span></div>
+          <div class="ln"><span class="no">5</span><span class="sg"> </span><span>  { <span class="f">"url"</span>: <span class="s">"https://mail.internal/hook"</span> }</span></div></div>
+        <div class="side"><div class="hunk">+3,8</div>
+          <div class="ln"><span class="no">3</span><span class="sg"> </span><span>  { <span class="f">"url"</span>: <span class="s">"https://ledger.internal/hook"</span>,</span></div>
+          <div class="ln add"><span class="no">4</span><span class="sg">+</span><span>    <span class="f">"timeout_ms"</span>: <ins><span class="n">2000</span></ins>,</span></div>
+          <div class="ln add"><span class="no">5</span><span class="sg">+</span><span>    <span class="f">"retry"</span>: { <span class="f">"max"</span>: <span class="n">10</span>, <span class="f">"base_s"</span>: <span class="n">2</span> },</span></div>
+          <div class="ln add"><span class="no">6</span><span class="sg">+</span><span>    <span class="f">"jitter"</span>: <span class="n">0.2</span> },</span></div>
+          <div class="ln"><span class="no">7</span><span class="sg"> </span><span>  { <span class="f">"url"</span>: <span class="s">"https://mail.internal/hook"</span> }</span></div></div>
+      </div></article>
+
+    <article class="df"><header><button class="tf-iconbtn tf-sm caret" data-ic="chev-d"></button><span class="bd X">+x</span><span class="path">scripts/deploy.sh</span>
+      <div class="tf-acts"><span class="viewed"><span class="box"></span>Viewed</span></div></header>
+      <div class="why">File mode changed from <span class="mono">100644</span> to <span class="mono">100755</span>. No content change.</div></article>
+
+    <article class="df"><header><button class="tf-iconbtn tf-sm caret" data-ic="chev-d"></button><span class="bd M">M</span><span class="path">src/generated/schema.rs</span><span class="addn small">+1,912</span><span class="deln small">−1,640</span><span class="tf-chip">generated</span>
+      <div class="tf-acts"><span class="viewed"><span class="box"></span>Viewed</span><span data-openin="tf-sm"></span></div></header>
+      <div class="why">Generated, and over 1,500 lines (3,552 changed): not loaded until you ask; nothing is cut.
+        <div class="tf-acts"><button class="tf-btn tf-sm">Load diff</button></div></div></article>
+
+    <article class="df"><header><button class="tf-iconbtn tf-sm caret" data-ic="chev-d"></button><span class="bd R">R 92%</span><span class="path"><span class="old">src/old_queue.rs →</span> src/queue/legacy.rs</span><span class="addn small">+3</span><span class="deln small">−3</span>
+      <div class="tf-acts"><span class="viewed"><span class="box"></span>Viewed</span><span data-openin="tf-sm"></span></div></header>
+      <div class="why">Renamed with 92 % similarity. 3 lines changed: <a href="#" style="text-decoration:underline">show</a></div></article>
+
+    <!-- The file the tree has selected: expand context, word-level marks, a thread, a pending comment. -->
+    <article class="df"><header><button class="tf-iconbtn tf-sm caret" data-ic="chev-d"></button><span class="bd M">M</span><span class="path">src/retry.rs</span><span class="addn small">+34</span><span class="deln small">−8</span>
+      <span class="ran off">no pipeline</span>
+      <div class="tf-acts"><span class="viewed"><span class="box"></span>Viewed <kbd>v</kbd></span><button class="tf-btn tf-sm tf-ghost" data-ic="ext">Open in Zed at 42</button><button class="tf-iconbtn tf-sm" title="More" data-ic="more"></button></div></header>
+      <div class="dl u" data-not="split">
+        <div class="hunk"><button class="exp" data-ic="chev-u" data-icc="s">Expand 18 lines</button>@@ -19,12 +19,24 @@ impl Retry</div>
+        <div class="ln"><span class="no">19</span><span class="no">19</span><span class="sg"> </span><span><span class="k">pub struct</span> <span class="t">Retry</span> {</span></div>
+        <div class="ln del"><span class="no">20</span><span class="no"></span><span class="sg">−</span><span>    attempts: <del><span class="t">u8</span></del>,</span></div>
+        <div class="ln add"><span class="no"></span><span class="no">20</span><span class="sg">+</span><span>    attempts: <ins><span class="t">u32</span></ins>,</span></div>
+        <div class="ln add"><span class="no"></span><span class="no">21</span><span class="sg">+</span><span>    jitter: <span class="t">f64</span>,</span></div>
+        <div class="ln"><span class="no">21</span><span class="no">22</span><span class="sg"> </span><span>}</span></div>
+        <div class="ln"><span class="no">22</span><span class="no">23</span><span class="sg"> </span><span></span></div>
+        <div class="ln"><span class="no">23</span><span class="no">24</span><span class="sg"> </span><span><span class="k">impl</span> <span class="t">Retry</span> {</span></div>
+        <div class="ln del"><span class="no">24</span><span class="no"></span><span class="sg">−</span><span>    <span class="c">/// Waits a fixed second between tries.</span></span></div>
+        <div class="ln add"><span class="no"></span><span class="no">25</span><span class="sg">+</span><span>    <span class="c">/// Waits <ins>2ⁿ seconds, ±jitter,</ins> between tries<ins>, capped at 512 s</ins>.</span></span></div>
+        <div class="ln del"><span class="no">25</span><span class="no"></span><span class="sg">−</span><span>    <span class="k">pub fn</span> <span class="f">delay</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Duration</span> { <span class="t">Duration</span>::<span class="f">from_secs</span>(<del><span class="n">1</span></del>) }</span></div>
+        <div class="ln add"><span class="no"></span><span class="no">26</span><span class="sg">+</span><span>    <span class="k">pub fn</span> <span class="f">delay</span>(&amp;<span class="k">self</span>, <ins>rng: &amp;<span class="k">mut</span> <span class="k">impl</span> <span class="t">Rng</span></ins>) -&gt; <span class="t">Duration</span> {</span></div>
+        <div class="ln add hov"><span class="no"></span><span class="no">27</span><span class="sg">+</span><span>        <span class="k">let</span> base = <span class="n">2f64</span>.<span class="f">powi</span>(<span class="k">self</span>.attempts <span class="k">as</span> <span class="t">i32</span>).<span class="f">min</span>(<span class="n">512.0</span>);</span></div>
+        <div class="thr"><div class="m"><span class="av d">JK</span><div><b>jonas</b> <span class="dim small">1 day ago</span><p>Without jitter every subscriber that failed together retries together. Add ±20 %?</p></div></div>
+          <div class="m"><span class="av b">ML</span><div><b>mara</b> <span class="dim small">5 h ago</span><p>Done in 7aa01f9, line 28.</p></div></div>
+          <footer><span class="reply">Reply…</span><button class="tf-btn tf-sm">Resolve</button></footer></div>
+        <div class="ln add"><span class="no"></span><span class="no">28</span><span class="sg">+</span><span>        <span class="k">let</span> spread = rng.<span class="f">gen_range</span>(-<span class="k">self</span>.jitter..=<span class="k">self</span>.jitter);</span></div>
+        <div class="ln add"><span class="no"></span><span class="no">29</span><span class="sg">+</span><span>        <span class="t">Duration</span>::<span class="f">from_secs_f64</span>(base * (<span class="n">1.0</span> + spread))</span></div>
+        <div class="thr pending"><div class="m"><span class="av">BF</span><div><b>you</b> <span class="tf-chip warn">Pending</span><p>A negative spread at attempt 0 gives 0.8 s; is a sub-second first retry intended?</p></div></div>
+          <footer><button class="tf-btn tf-sm tf-ghost">Edit</button><button class="tf-btn tf-sm tf-ghost tf-danger">Delete</button><span class="spacer"></span><span class="dim small">Kept as a draft until you submit; survives a restart.</span></footer></div>
+        <div class="ln add"><span class="no"></span><span class="no">30</span><span class="sg">+</span><span>    }</span></div>
+        <div class="ln"><span class="no">26</span><span class="no">31</span><span class="sg"> </span><span></span></div>
+        <div class="ln"><span class="no">27</span><span class="no">32</span><span class="sg"> </span><span>    <span class="k">pub fn</span> <span class="f">exhausted</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">bool</span> {</span></div>
+        <div class="ln del"><span class="no">28</span><span class="no"></span><span class="sg">−</span><span>        <span class="k">self</span>.attempts &gt;= <del><span class="n">3</span></del></span></div>
+        <div class="ln add"><span class="no"></span><span class="no">33</span><span class="sg">+</span><span>        <span class="k">self</span>.attempts &gt;= <ins><span class="t">MAX_ATTEMPTS</span></ins></span></div>
+        <div class="ln"><span class="no">29</span><span class="no">34</span><span class="sg"> </span><span>    }</span></div>
+        <div class="hunk"><button class="exp" data-ic="chev-d" data-icc="s">Expand 22 lines</button><button class="exp" data-ic="chev-u" data-icc="s">Expand all</button>@@ -52,4 +57,26 @@ fn schedule</div>
+        <div class="ln"><span class="no">52</span><span class="no">57</span><span class="sg"> </span><span><span class="k">fn</span> <span class="f">schedule</span>(outbox: &amp;<span class="t">Outbox</span>, row: <span class="t">RowId</span>) {</span></div>
+        <div class="ln add"><span class="no"></span><span class="no">58</span><span class="sg">+</span><span>    <span class="c">// the attempt count lives on the row, so a restart resumes</span></span></div>
+      </div>
+      <div class="dl s2" data-when="split">
+        <div class="side">
+          <div class="hunk"><button class="exp" data-ic="chev-u" data-icc="s">Expand 18 lines</button>@@ -19,12</div>
+          <div class="ln"><span class="no">19</span><span class="sg"> </span><span><span class="k">pub struct</span> <span class="t">Retry</span> {</span></div>
+          <div class="ln del"><span class="no">20</span><span class="sg">−</span><span>    attempts: <del><span class="t">u8</span></del>,</span></div>
+          <div class="ln pad"><span class="no"></span><span class="sg"></span><span></span></div>
+          <div class="ln"><span class="no">21</span><span class="sg"> </span><span>}</span></div>
+          <div class="ln"><span class="no">22</span><span class="sg"> </span><span></span></div>
+          <div class="ln"><span class="no">23</span><span class="sg"> </span><span><span class="k">impl</span> <span class="t">Retry</span> {</span></div>
+          <div class="ln del"><span class="no">24</span><span class="sg">−</span><span>    <span class="c">/// Waits a fixed second between tries.</span></span></div>
+          <div class="ln del"><span class="no">25</span><span class="sg">−</span><span>    <span class="k">pub fn</span> <span class="f">delay</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Duration</span> { <span class="t">Duration</span>::<span class="f">from_secs</span>(<del><span class="n">1</span></del>) }</span></div>
+          <div class="ln pad"><span class="no"></span><span class="sg"></span><span></span></div>
+          <div class="ln pad"><span class="no"></span><span class="sg"></span><span></span></div>
+          <div class="ln pad"><span class="no"></span><span class="sg"></span><span></span></div>
+          <div class="ln pad"><span class="no"></span><span class="sg"></span><span></span></div>
+          <div class="ln pad"><span class="no"></span><span class="sg"></span><span></span></div>
+          <div class="ln"><span class="no">26</span><span class="sg"> </span><span></span></div>
+          <div class="ln"><span class="no">27</span><span class="sg"> </span><span>    <span class="k">pub fn</span> <span class="f">exhausted</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">bool</span> {</span></div>
+          <div class="ln del"><span class="no">28</span><span class="sg">−</span><span>        <span class="k">self</span>.attempts &gt;= <del><span class="n">3</span></del></span></div>
+          <div class="ln"><span class="no">29</span><span class="sg"> </span><span>    }</span></div>
+        </div>
+        <div class="side">
+          <div class="hunk">+19,24 impl Retry</div>
+          <div class="ln"><span class="no">19</span><span class="sg"> </span><span><span class="k">pub struct</span> <span class="t">Retry</span> {</span></div>
+          <div class="ln add"><span class="no">20</span><span class="sg">+</span><span>    attempts: <ins><span class="t">u32</span></ins>,</span></div>
+          <div class="ln add"><span class="no">21</span><span class="sg">+</span><span>    jitter: <span class="t">f64</span>,</span></div>
+          <div class="ln"><span class="no">22</span><span class="sg"> </span><span>}</span></div>
+          <div class="ln"><span class="no">23</span><span class="sg"> </span><span></span></div>
+          <div class="ln"><span class="no">24</span><span class="sg"> </span><span><span class="k">impl</span> <span class="t">Retry</span> {</span></div>
+          <div class="ln add"><span class="no">25</span><span class="sg">+</span><span>    <span class="c">/// Waits <ins>2ⁿ s, ±jitter,</ins> between tries<ins>, ≤ 512 s</ins>.</span></span></div>
+          <div class="ln add"><span class="no">26</span><span class="sg">+</span><span>    <span class="k">pub fn</span> <span class="f">delay</span>(&amp;<span class="k">self</span>, <ins>rng: &amp;<span class="k">mut</span> <span class="k">impl</span> <span class="t">Rng</span></ins>) -&gt; <span class="t">Duration</span> {</span></div>
+          <div class="ln add"><span class="no">27</span><span class="sg">+</span><span>        <span class="k">let</span> base = <span class="n">2f64</span>.<span class="f">powi</span>(<span class="k">self</span>.attempts <span class="k">as</span> <span class="t">i32</span>).<span class="f">min</span>(<span class="n">512.0</span>);</span></div>
+          <div class="ln add"><span class="no">28</span><span class="sg">+</span><span>        <span class="k">let</span> spread = rng.<span class="f">gen_range</span>(-<span class="k">self</span>.jitter..=<span class="k">self</span>.jitter);</span></div>
+          <div class="ln add"><span class="no">29</span><span class="sg">+</span><span>        <span class="t">Duration</span>::<span class="f">from_secs_f64</span>(base * (<span class="n">1.0</span> + spread))</span></div>
+          <div class="thr pending"><div class="m"><span class="av">BF</span><div><b>you</b> <span class="tf-chip warn">Pending</span><p>A negative spread at attempt 0 gives 0.8 s; is a sub-second first retry intended?</p></div></div></div>
+          <div class="ln add"><span class="no">30</span><span class="sg">+</span><span>    }</span></div>
+          <div class="ln"><span class="no">31</span><span class="sg"> </span><span></span></div>
+          <div class="ln"><span class="no">32</span><span class="sg"> </span><span>    <span class="k">pub fn</span> <span class="f">exhausted</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">bool</span> {</span></div>
+          <div class="ln add"><span class="no">33</span><span class="sg">+</span><span>        <span class="k">self</span>.attempts &gt;= <ins><span class="t">MAX_ATTEMPTS</span></ins></span></div>
+          <div class="ln"><span class="no">34</span><span class="sg"> </span><span>    }</span></div>
+        </div>
+      </div>
+    </article>
+
+    <article class="df closed"><header><button class="tf-iconbtn tf-sm caret" data-ic="chev-r"></button><span class="bd M">M</span><span class="path">src/webhook.rs</span><span class="addn small">+12</span><span class="deln small">−5</span>
+      <div class="tf-acts"><span class="viewed"><span class="box"></span>Viewed</span><span data-openin="tf-sm"></span></div></header></article>
+    <article class="df closed"><header><button class="tf-iconbtn tf-sm caret" data-ic="chev-r"></button><span class="bd A">A</span><span class="path">tests/retry_test.rs</span><span class="addn small">+88</span>
+      <div class="tf-acts"><span class="viewed"><span class="box"></span>Viewed</span><span data-openin="tf-sm"></span></div></header></article>
+  </section>
+</div>
+</main>
+<footer class="tf-status"><span>Gitea · synced 1 min ago</span><span>3 sources healthy</span></footer>
+</div>
+</body>
+</html>
