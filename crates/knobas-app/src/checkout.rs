@@ -318,7 +318,9 @@ pub struct RangeDiff {
 ///
 /// # Errors
 ///
-/// What the source's read refuses with, as [`crate::sources::to_ipc`] maps it.
+/// What the source's read refuses with, as [`crate::sources::to_ipc`] maps it;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) when the source draws no diff
+/// block for the range, which is no answer rather than "no changes".
 #[allow(clippy::too_many_arguments)]
 pub async fn range_diff(
     pool: &PgPool,
@@ -363,7 +365,13 @@ pub async fn range_diff(
             })
         })
     });
-    let (files, truncated, range) = block.unwrap_or_default();
+    // A source that draws no diff here has not said "no changes": that is
+    // an empty diff block, and this a refusal the page shows as one.
+    let (files, truncated, range) = block.ok_or_else(|| {
+        IpcError::not_found(format!(
+            "the source draws no diff between {base} and {head}"
+        ))
+    })?;
     Ok(RangeDiff {
         files,
         truncated,

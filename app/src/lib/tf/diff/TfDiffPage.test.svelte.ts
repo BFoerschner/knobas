@@ -249,6 +249,22 @@ test("a diff read at the checkout offers Ignore whitespace, and asks again with 
   expect(target.querySelector(".tf-empty")!.textContent).toContain("Nothing changes");
 });
 
+test("when the source answers after whitespace was asked ignored, the box is not left ticked over a diff that shows it", async () => {
+  const ports: DiffPagePorts = {
+    ...viaSource(answer),
+    // The checkout answers first; with whitespace asked ignored, it no longer can (a commit gone, a slow git).
+    rangeDiff: async (_id, _base, _head, ignoreWhitespace) => ({ files: [file("pay.py")], truncated: false, range: null, read_at: ignoreWhitespace ? "source" : "checkout" }),
+  };
+  view = mount(TfDiffPage, { target, props: { repoId: REPO, base: BASE, head: HEAD, ports } });
+  await settle();
+  target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!.click();
+  await settle();
+  const box = target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!;
+  expect(box.disabled).toBe(true);
+  expect(box.checked).toBe(false);
+  expect(target.querySelector("[data-testid=ws-why]")).not.toBeNull();
+});
+
 test("on a diff the source served, Ignore whitespace is disabled and says why", async () => {
   const ports = viaSource(answer);
   view = mount(TfDiffPage, { target, props: { repoId: REPO, base: `${BASE}^`, head: HEAD, ports } });

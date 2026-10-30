@@ -177,12 +177,22 @@ pub async fn holds_commits_with(search: &OsStr, path: &Path, shas: &[&str]) -> b
 }
 
 /// `git_at` with the network shut: no lazy fetch of a partial clone's
-/// missing object, and no transport at all.
+/// missing object, and no transport at all. An inherited
+/// `GIT_ALLOW_PROTOCOL` beats `protocol.allow`, and inherited
+/// `GIT_CONFIG_*` parameters could turn back on what the `-c` flags here
+/// and in `git_at` turn off, so they are removed, as for `clone`. Replace
+/// refs are the checkout's own rewrite of history, which the source never
+/// sees, so they are not followed: a sha means the commit it names.
 fn git_read(git: &Path, path: &Path) -> tokio::process::Command {
     let mut command = git_at(git, path);
     command
         .args(["-c", "protocol.allow=never"])
-        .env("GIT_NO_LAZY_FETCH", "1");
+        .env("GIT_NO_LAZY_FETCH", "1")
+        .env("GIT_NO_REPLACE_OBJECTS", "1")
+        .env_remove("GIT_ALLOW_PROTOCOL")
+        .env_remove("GIT_CONFIG_PARAMETERS")
+        .env_remove("GIT_CONFIG_COUNT")
+        .env_remove("GIT_EXTERNAL_DIFF");
     command
 }
 
@@ -447,6 +457,25 @@ mod tests {
             read(shallow.path(), &format!("{}^", r.edit), &r.edit, false).await,
             None
         );
+    }
+
+    /// What knobas's own environment could carry to override the network
+    /// shut or the no-driver flags never reaches git.
+    #[test]
+    fn an_inherited_override_never_reaches_git() {
+        let command = git_read(Path::new("git"), Path::new("."));
+        let envs: Vec<(&OsStr, Option<&OsStr>)> = command.as_std().get_envs().collect();
+        for set in ["GIT_NO_LAZY_FETCH", "GIT_NO_REPLACE_OBJECTS"] {
+            assert!(envs.contains(&(OsStr::new(set), Some(OsStr::new("1")))), "{set}");
+        }
+        for removed in [
+            "GIT_ALLOW_PROTOCOL",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_CONFIG_COUNT",
+            "GIT_EXTERNAL_DIFF",
+        ] {
+            assert!(envs.contains(&(OsStr::new(removed), None)), "{removed}");
+        }
     }
 
     /// Every git command the read runs is `rev-parse` or `diff`, with the

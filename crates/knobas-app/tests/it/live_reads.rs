@@ -215,6 +215,25 @@ impl Source for Fake {
             .and_then(|rest| rest.split(':').next())
             .and_then(|n| n.parse().ok())
             .unwrap_or(0);
+        // A compare is a diff block, as Gitea's (#2271); one whose head is
+        // `text` draws none, as a source that cannot compare would.
+        if let Some(range) = section.and_then(|s| s.strip_prefix("compare:"))
+            && !range.ends_with("...text")
+        {
+            return Ok(Some(SourceView::new(vec![ViewSection {
+                id: section.unwrap_or_default().to_owned(),
+                title: "Diff".to_owned(),
+                count: None,
+                deferred: false,
+                blocks: vec![Block::Diff {
+                    files: Vec::new(),
+                    truncated: false,
+                    commentable: None,
+                    gone: Vec::new(),
+                    range: None,
+                }],
+            }])));
+        }
         Ok(Some(SourceView::new(vec![ViewSection {
             id: section.unwrap_or("whole").to_owned(),
             title: "Drawn".to_owned(),
@@ -1118,4 +1137,25 @@ async fn a_branch_name_is_read_from_the_source() {
     let read = range_diff(&f, &id, &one, "feature", false).await;
     assert_eq!(read.read_at, DiffReadAt::Source);
     assert_eq!(f.seen.reads(), 1);
+}
+
+/// A source that draws no diff for a range has not said "no changes": the
+/// read is refused, never an empty diff the page would draw as one.
+#[tokio::test]
+async fn a_source_that_draws_no_diff_is_a_refusal_not_no_changes() {
+    let f = fixture().await;
+    let (id, _dir, one, _) = repo_with_checkout(&f).await;
+    let refused = knobas_app::checkout::range_diff(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &f.live,
+        &id,
+        &one,
+        "text",
+        false,
+    )
+    .await
+    .expect_err("no diff block is no answer");
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::NotFound);
 }

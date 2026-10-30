@@ -184,7 +184,12 @@
   {#if readAt !== null}
     <div class="tf-diffws">
       <label class="tf-ck">
-        <input type="checkbox" bind:checked={ignoreWhitespace} disabled={readAt !== "checkout"} aria-describedby={readAt === "checkout" ? undefined : why} />
+        <input
+          type="checkbox"
+          checked={readAt === "checkout" && ignoreWhitespace}
+          onchange={(event) => (ignoreWhitespace = event.currentTarget.checked)}
+          disabled={readAt !== "checkout"}
+          aria-describedby={readAt === "checkout" ? undefined : why} />
         Ignore whitespace
       </label>
       {#if readAt !== "checkout"}
