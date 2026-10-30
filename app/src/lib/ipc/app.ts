@@ -7,12 +7,27 @@
  * by a test in that module which `include_str!`s this file.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { AppStatus, RenderContent, RendererDefault, RenderRun, UserRenderer, UserRendererDraft } from "./generated/app";
+import type {
+  AppStatus,
+  CommandStep,
+  CommandStepDraft,
+  NamedPipeline,
+  NamedPipelineDraft,
+  RenderContent,
+  RendererDefault,
+  RenderRun,
+  UserRenderer,
+  UserRendererDraft,
+} from "./generated/app";
 
 export type {
   AppStatus,
   CommandOutput,
+  CommandStep,
+  CommandStepDraft,
   DbState,
+  NamedPipeline,
+  NamedPipelineDraft,
   RenderContent,
   RendererDefault,
   RendererInput,
@@ -117,4 +132,24 @@ export function rendererDefaults(): Promise<RendererDefault[]> {
 /** Save the whole list of default renderers per file pattern; answers it as stored (trimmed). */
 export function setRendererDefaults(defaults: RendererDefault[]): Promise<RendererDefault[]> {
   return invoke<RendererDefault[]>("set_renderer_defaults", { defaults });
+}
+
+/** The command steps saved in Settings › Renderers (#2265), in order. */
+export function commandSteps(): Promise<CommandStep[]> {
+  return invoke<CommandStep[]>("command_steps");
+}
+
+/** Save the whole list of command steps; answers it as stored (ids, held timeouts). */
+export function setCommandSteps(steps: CommandStepDraft[]): Promise<CommandStep[]> {
+  return invoke<CommandStep[]>("set_command_steps", { steps });
+}
+
+/** The named pipelines (#2265), in order. */
+export function namedPipelines(): Promise<NamedPipeline[]> {
+  return invoke<NamedPipeline[]>("named_pipelines");
+}
+
+/** Save the whole list of named pipelines; answers it as stored (ids made from new names). */
+export function setNamedPipelines(pipelines: NamedPipelineDraft[]): Promise<NamedPipeline[]> {
+  return invoke<NamedPipeline[]>("set_named_pipelines", { pipelines });
 }

@@ -2800,7 +2800,7 @@ export type PipeRun = { "outcome": "done", name: string, output: PipeOutput, } |
 /**
  * One step of a pipeline.
  */
-export type PipeStep = { "step": "base64_decode" } | { "step": "base64_encode" } | { "step": "gunzip" } | { "step": "unzstd" } | { "step": "bunzip2" } | { "step": "unxz" } | { "step": "jq", filter: string, } | { "step": "pretty", format: PipeFormat, } | { "step": "convert", from: PipeFormat, to: PipeFormat, } | { "step": "hex_dump" };
+export type PipeStep = { "step": "base64_decode" } | { "step": "base64_encode" } | { "step": "gunzip" } | { "step": "unzstd" } | { "step": "bunzip2" } | { "step": "unxz" } | { "step": "jq", filter: string, } | { "step": "pretty", format: PipeFormat, } | { "step": "convert", from: PipeFormat, to: PipeFormat, } | { "step": "hex_dump" } | { "step": "command", id: string, };
 
 /**
  * Why a step stopped.

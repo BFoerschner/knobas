@@ -4,6 +4,7 @@
  * (`entityFilePiped`, `knobas_app::file_pipeline`). This module is the pure half: the *Add step* menu, a step's
  * name, moving a step, and what a run's answer draws as.
  */
+import type { CommandStep, NamedPipelineDraft } from "../ipc/app";
 import type { PipeFormat, PipeRun, PipeStep } from "../ipc/entity";
 
 /** The decompress step's choices, by the name the step goes by. */
@@ -80,9 +81,11 @@ export function decompressorFor(name: string): (typeof DECOMPRESSORS)[number]["s
 
 const LABEL: Record<PipeFormat, string> = { json: "JSON", yaml: "YAML", toml: "TOML" };
 
-/** What the bar and a failure call a step: the backend's `PipeStep::name`. */
-export function stepName(step: PipeStep): string {
+/** What the bar and a failure call a step: the backend's `PipeStep::name`; a command step by its saved name (#2265). */
+export function stepName(step: PipeStep, commands: readonly CommandStep[] = []): string {
   switch (step.step) {
+    case "command":
+      return commands.find((c) => c.id === step.id)?.name ?? step.id;
     case "base64_decode":
       return "base64 decode";
     case "base64_encode":
@@ -135,8 +138,63 @@ export function sized(bytes: number): string {
 }
 
 /** Where a failed step's input came from: the file, or the step before it. */
-export function inputOf(steps: readonly PipeStep[], index: number): string {
+export function inputOf(steps: readonly PipeStep[], index: number, commands: readonly CommandStep[] = []): string {
   if (index === 0) return "the file's bytes";
   const before = steps[index - 1];
-  return before === undefined ? "the step before" : `the output of step ${index} (${stepName(before)})`;
+  return before === undefined ? "the step before" : `the output of step ${index} (${stepName(before, commands)})`;
+}
+
+/**
+ * The pattern *Save as default* offers for a pipeline on `path` (#2265): its last two extensions, lowercase
+ * (`events.json.gz` → `*.json.gz`, so a `.gz` that is not JSON is not taken), or one, or the bare name.
+ */
+export function pipelinePattern(path: string): string {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const parts = name.split(".");
+  if (parts.length < 2 || parts[0] === "") return name;
+  return `*.${parts.slice(-Math.min(2, parts.length - 1)).join(".").toLowerCase()}`;
+}
+
+/**
+ * The named pipelines with `steps` saved as `name` (#2265): the one already called that (any case) changed in
+ * place, keeping its id, so every pattern that names it follows; else one more, new.
+ */
+export function savedAs(
+  list: readonly { id: string; name: string; steps: PipeStep[] }[],
+  name: string,
+  steps: readonly PipeStep[],
+): NamedPipelineDraft[] {
+  const key = name.trim().toLowerCase();
+  const drafts: NamedPipelineDraft[] = list.map((p) => ({ id: p.id, name: p.name, steps: p.steps }));
+  const at = drafts.findIndex((p) => p.name.toLowerCase() === key);
+  if (at === -1) return [...drafts, { id: null, name: name.trim(), steps: [...steps] }];
+  return drafts.map((p, i) => (i === at ? { ...p, steps: [...steps] } : p));
+}
+
+/** An unwrap step the viewer offers (never applies) for bytes that look wrapped, and what they look like. */
+export interface Suggestion {
+  step: PipeStep;
+  kind: "gzip-compressed" | "zstd-compressed" | "base64";
+}
+
+/** At least this many base64 characters before text is taken for base64. */
+const BASE64_AT_LEAST = 16;
+
+/**
+ * What a file looks wrapped in (#2265): gzip or zstd by their magic bytes (`bytes`, a binary file's head, `null`
+ * when not read), or base64 for text that is nothing else: lines of the base64 alphabet only, padded to a multiple
+ * of four, mixing upper case, lower case and digits (hex and plain words don't).
+ */
+export function suggestion(file: { binary: boolean; text: string }, bytes: Uint8Array | null): Suggestion | null {
+  if (file.binary) {
+    if (bytes === null) return null;
+    if (bytes[0] === 0x1f && bytes[1] === 0x8b) return { step: { step: "gunzip" }, kind: "gzip-compressed" };
+    if (bytes[0] === 0x28 && bytes[1] === 0xb5 && bytes[2] === 0x2f && bytes[3] === 0xfd) return { step: { step: "unzstd" }, kind: "zstd-compressed" };
+    return null;
+  }
+  const joined = file.text.trim().replace(/\r?\n/g, "");
+  if (joined.length < BASE64_AT_LEAST || joined.length % 4 !== 0) return null;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(joined)) return null;
+  if (!/[A-Z]/.test(joined) || !/[a-z]/.test(joined) || !/[0-9+/]/.test(joined)) return null;
+  return { step: { step: "base64_decode" }, kind: "base64" };
 }

@@ -250,7 +250,15 @@ pub struct RendererDefault {
     /// A file glob (`*.md`, `docs/*.mmd`), matched without regard to case.
     pub pattern: String,
     /// The renderer's registry id: `source`, `markdown`, `command:<saved id>`.
+    /// Empty when the row only sets a pipeline: the pipeline's output picks
+    /// its renderer by its own name.
     pub renderer: String,
+    /// A named pipeline's id (#2265, `file_pipeline::saved`): files the
+    /// pattern takes open through it. By reference, so editing the pipeline
+    /// changes every pattern that names it. A row stored before the field
+    /// existed reads as none.
+    #[serde(default)]
+    pub pipeline: Option<String>,
 }
 
 /// The default renderers per file pattern, in the person's order.
@@ -269,8 +277,8 @@ pub async fn defaults(pool: &PgPool) -> Result<Vec<RendererDefault>, IpcError> {
 ///
 /// # Errors
 ///
-/// [`Invalid`](crate::IpcErrorCode::Invalid) for a row with no pattern or no
-/// renderer, or a pattern listed twice, naming it;
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a row with no pattern, or
+/// neither a renderer nor a pipeline, or a pattern listed twice, naming it;
 /// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
 pub async fn save_defaults(
     pool: &PgPool,
@@ -286,8 +294,15 @@ pub async fn save_defaults(
             )));
         }
         let renderer = row.renderer.trim();
-        if renderer.is_empty() {
-            return Err(IpcError::invalid(format!("{pattern} names no renderer")));
+        let pipeline = row
+            .pipeline
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        if renderer.is_empty() && pipeline.is_none() {
+            return Err(IpcError::invalid(format!(
+                "{pattern} names no renderer and no pipeline"
+            )));
         }
         if out
             .iter()
@@ -300,6 +315,7 @@ pub async fn save_defaults(
         out.push(RendererDefault {
             pattern: pattern.to_owned(),
             renderer: renderer.to_owned(),
+            pipeline: pipeline.map(str::to_owned),
         });
     }
     let value = serde_json::to_value(&out).map_err(IpcError::internal)?;

@@ -541,7 +541,7 @@ pub async fn renderer_defaults<R: tauri::Runtime>(
 ///
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
 /// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a row with no
-/// pattern or renderer, or a pattern listed twice,
+/// pattern, or neither a renderer nor a pipeline, or a pattern listed twice,
 /// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
 #[tauri::command]
 pub async fn set_renderer_defaults<R: tauri::Runtime>(
@@ -550,6 +550,69 @@ pub async fn set_renderer_defaults<R: tauri::Runtime>(
 ) -> Result<Vec<crate::renderers::RendererDefault>, IpcError> {
     let pool = app.state::<Lifecycle>().pool()?;
     crate::renderers::save_defaults(&pool, &defaults).await
+}
+
+/// The command steps saved in Settings › Renderers (#2265), in order.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn command_steps<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::file_pipeline::saved::CommandStep>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::file_pipeline::saved::command_steps(&pool).await
+}
+
+/// Save the whole list of command steps and answer it as stored: ids made
+/// from new names, timeouts held to 1-120 s.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a step with no
+/// name or a command that cannot be run,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_command_steps<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    steps: Vec<crate::file_pipeline::saved::CommandStepDraft>,
+) -> Result<Vec<crate::file_pipeline::saved::CommandStep>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::file_pipeline::saved::save_command_steps(&pool, &steps).await
+}
+
+/// The named pipelines (#2265), in order.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn named_pipelines<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::file_pipeline::saved::NamedPipeline>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::file_pipeline::saved::named_pipelines(&pool).await
+}
+
+/// Save the whole list of named pipelines and answer it as stored.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a pipeline with
+/// no name or no steps, or a name used twice,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_named_pipelines<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    pipelines: Vec<crate::file_pipeline::saved::NamedPipelineDraft>,
+) -> Result<Vec<crate::file_pipeline::saved::NamedPipeline>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::file_pipeline::saved::save_named_pipelines(&pool, &pipelines).await
 }
 
 #[cfg(test)]
@@ -606,7 +669,7 @@ mod tests {
     #[test]
     fn every_command_in_this_module_has_a_typescript_mirror() {
         let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
-        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 12);
+        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 16);
     }
 
     /// The mirror sends each argument by its Rust name (#2262).
@@ -617,6 +680,8 @@ mod tests {
             ("set_user_renderers", &["renderers"][..]),
             ("run_renderer", &["id", "content"][..]),
             ("set_renderer_defaults", &["defaults"][..]),
+            ("set_command_steps", &["steps"][..]),
+            ("set_named_pipelines", &["pipelines"][..]),
         ] {
             let invocation = crate::commands::mirror::invocation(mirror, command);
             let keys = crate::commands::mirror::keys(invocation);

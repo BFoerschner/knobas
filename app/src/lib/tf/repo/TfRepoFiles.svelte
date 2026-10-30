@@ -64,7 +64,7 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
   import { allRenderers, imageUrl, type Renderer } from "../../render/registry";
-  import { makeDefaultPattern, openWith, withDefault } from "../../render/defaults";
+  import { defaultPipeline, makeDefaultPattern, openWith, withDefault, withPipeline } from "../../render/defaults";
   import { rendererDefaults as appDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
@@ -79,7 +79,13 @@
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
   import TfFilePipeline from "../render/TfFilePipeline.svelte";
   import type { PipeRun, PipeStep } from "../../ipc/entity";
-  import { inputOf, pipedFile, sized } from "../../render/pipeline";
+  import { inputOf, pipedFile, pipelinePattern, savedAs, sized, stepName, suggestion } from "../../render/pipeline";
+  import {
+    commandSteps as appCommandSteps,
+    namedPipelines as appPipelines,
+    type CommandSteps,
+    type NamedPipelines,
+  } from "../../render/pipelines.svelte";
   import { commandIdOf, ipcCommands, type CommandPort } from "../../render/command";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
@@ -124,6 +130,8 @@
     render = renderPort(),
     commands = ipcCommands,
     defaults = appDefaults,
+    pipelines = appPipelines,
+    stepCommands = appCommandSteps,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "piped">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -159,6 +167,10 @@
     commands?: CommandPort;
     /** The default renderer per file pattern (#2263): the app's copy, a fresh one in tests. */
     defaults?: RendererDefaults;
+    /** The named pipelines (#2265): the app's copy, a fresh one in tests. */
+    pipelines?: NamedPipelines;
+    /** The person's command steps (#2265): the app's copy, a fresh one in tests. */
+    stepCommands?: CommandSteps;
   } = $props();
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
@@ -390,7 +402,59 @@
    * step fails, the file is drawn as read.
    */
   const pipes = new SvelteMap<string, PipeStep[]>();
-  const steps = $derived(file === null || editing ? null : (pipes.get(file.path) ?? null));
+  /**
+   * The named pipeline the file's pattern opens it through (#2265, `defaultPipeline`), read from the app's copy
+   * each time: an edit in Settings changes what runs. Edited in the bar, the edit (in `pipes`) stands instead.
+   */
+  const fromDefault = $derived(file === null || editing ? null : defaultPipeline(file.path, defaults.list, pipelines.list));
+  const steps = $derived(file === null || editing ? null : (pipes.get(file.path) ?? fromDefault?.pipeline.steps ?? null));
+  const shownDefault = $derived(
+    file !== null && fromDefault !== null && !pipes.has(file.path) ? { name: fromDefault.pipeline.name, pattern: fromDefault.pattern } : null,
+  );
+
+  async function savePipeline(path: string, name: string, pattern: string) {
+    const chain = $state.snapshot(pipes.get(path) ?? []);
+    try {
+      const stored = await pipelines.save(savedAs(pipelines.list, name, chain));
+      const id = stored.find((p) => p.name.toLowerCase() === name.toLowerCase())?.id;
+      if (id === undefined) throw new Error(`${name} was not stored`);
+      await defaults.save(withPipeline(defaults.list, pattern, id));
+      pipes.delete(path);
+    } catch (cause) {
+      push({ text: `Could not save the pipeline: ${ipcErrorMessage(cause)}`, tone: "err" });
+      throw cause;
+    }
+  }
+
+  /**
+   * **Suggestion chips** (#2265): with no pipeline on the file (none added, none a default), bytes that look gzip,
+   * zstd or base64 offer their unwrap step; it is never applied until clicked. *Not now* puts it away for the tab.
+   * A binary file's head is read through the byte read (kept by sha) only where no renderer reads its bytes.
+   */
+  const notNow = new SvelteSet<string>();
+  let sniffed = $state<{ key: string; head: Uint8Array } | null>(null);
+  $effect(() => {
+    const read = bytesRead;
+    const key = bytesAt;
+    // Only a binary file nothing else draws: a PDF or an image reads its own bytes (and a PDF past its cap none).
+    if (read === null || key === null || steps !== null || renderer?.input === "bytes") return;
+    if (untrack(() => sniffed?.key) === key) return;
+    let live = true;
+    read().then(
+      (bytes) => {
+        if (live) sniffed = { key, head: bytes.slice(0, 8) };
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  });
+  const suggested = $derived.by(() => {
+    if (file === null || editing || steps !== null || ports.piped === undefined || notNow.has(file.path)) return null;
+    const head = file.binary && sniffed !== null && sniffed.key === bytesAt ? sniffed.head : null;
+    return suggestion(file, head);
+  });
   let piped = $state<{ path: string; run: PipeRun } | null>(null);
   let piping = $state(false);
   let pipeRefused = $state<string | null>(null);
@@ -870,7 +934,7 @@
               onmakedefault={(r) => void makeDefault(at, r)}
             />
           {/if}
-          {#if steps === null && ports.piped !== undefined}
+          {#if steps === null && ports.piped !== undefined && suggested === null}
             {@const at = file.path}
             <button type="button" class="tf-btn tf-sm" onclick={() => pipes.set(at, [])}>+ Pipeline</button>
           {/if}
@@ -900,10 +964,27 @@
           {#if file.url}<span class="tf-acts"><a class="tf-btn tf-sm" href={file.url}>The rest on the source</a></span>{/if}
         </div>
       {/if}
+      {#if suggested !== null}
+        {@const at = file.path}
+        {@const chip = suggested}
+        <div class="tf-suggest" role="status">
+          <b>These bytes look {chip.kind}.</b>
+          <span>Nothing has been applied; you see the file as it is.</span>
+          <span class="tf-acts">
+            <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => pipes.set(at, [chip.step])}>Unwrap with {stepName(chip.step)}</button>
+            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => notNow.add(at)}>Not now</button>
+          </span>
+        </div>
+      {/if}
       {#if steps !== null}
         {@const at = file.path}
         <TfFilePipeline
           {steps}
+          commands={stepCommands.list}
+          saved={shownDefault}
+          savePattern={pipelinePattern(file.path)}
+          savedName={fromDefault?.pipeline.name ?? ""}
+          onsave={(name, pattern) => savePipeline(at, name, pattern)}
           path={file.path}
           shownAs={drawn !== null && drawn !== file ? `${renderer?.name ?? "Source"} · ${drawn.path.slice(drawn.path.lastIndexOf("/") + 1)}` : (renderer?.name ?? "Source")}
           failedAt={pipeFailure?.index ?? null}
@@ -916,7 +997,7 @@
             <b>Step {pipeFailure.index + 1}, {pipeFailure.name}, failed.</b>
             <div class="tf-sfcols">
               <div><b>What it said</b><pre>{pipeFailure.error}</pre></div>
-              <div><b>Its input, {inputOf(steps, pipeFailure.index)}, {sized(pipeFailure.input.size)}</b><pre>{pipeFailure.input.head}</pre></div>
+              <div><b>Its input, {inputOf(steps, pipeFailure.index, stepCommands.list)}, {sized(pipeFailure.input.size)}</b><pre>{pipeFailure.input.head}</pre></div>
             </div>
           </div>
         {:else if pipeRefused !== null}

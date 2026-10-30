@@ -17,8 +17,13 @@
  *   `*.txt` to Markdown draws `.txt` files as Markdown, though Markdown's own
  *   patterns don't name them. A binary file still only goes to a renderer that
  *   reads bytes.
+ * - **A mapping may name a pipeline** (#2265): a named pipeline's id, so the
+ *   file opens through it ({@link defaultPipeline}). By reference: editing the
+ *   pipeline in Settings changes every pattern that names it. A row that only
+ *   sets a pipeline has an empty renderer and picks none; the pipeline's output
+ *   picks its own by its name.
  */
-import type { RendererDefault } from "../ipc/app";
+import type { NamedPipeline, RendererDefault } from "../ipc/app";
 import { accepts, type Renderer } from "./registry";
 
 export type { RendererDefault };
@@ -41,6 +46,32 @@ export function specificity(pattern: string): number {
   return (pattern.length - wild) * 16 - wild;
 }
 
+/** The rows of `defaults` whose pattern takes `path`, the one that decides first. */
+function taking(path: string, defaults: readonly RendererDefault[]): RendererDefault[] {
+  return defaults
+    .map((d, at) => ({ d, at }))
+    .filter(({ d }) => accepts(d.pattern, path))
+    .sort((a, b) => specificity(b.d.pattern) - specificity(a.d.pattern) || a.at - b.at)
+    .map(({ d }) => d);
+}
+
+/**
+ * The named pipeline the file at `path` opens through (#2265), and the pattern that chose it: the most specific
+ * pattern that names a pipeline still in `pipelines`; `null` where none does. For the file viewer and for a diff's
+ * sides (#2270).
+ */
+export function defaultPipeline(
+  path: string,
+  defaults: readonly RendererDefault[],
+  pipelines: readonly NamedPipeline[],
+): { pipeline: NamedPipeline; pattern: string } | null {
+  for (const d of taking(path, defaults)) {
+    const pipeline = d.pipeline === null ? undefined : pipelines.find((p) => p.id === d.pipeline);
+    if (pipeline !== undefined) return { pipeline, pattern: d.pattern };
+  }
+  return null;
+}
+
 /** What `file` opens with under `defaults`, among `all` (the registry, in order). */
 export function openWith(
   file: { path: string; binary: boolean },
@@ -48,11 +79,7 @@ export function openWith(
   defaults: readonly RendererDefault[],
 ): Opened {
   const fits = (r: Renderer) => !file.binary || r.input === "bytes";
-  const matching = defaults
-    .map((d, at) => ({ d, at }))
-    .filter(({ d }) => accepts(d.pattern, file.path))
-    .sort((a, b) => specificity(b.d.pattern) - specificity(a.d.pattern) || a.at - b.at)
-    .map(({ d }) => d);
+  const matching = taking(file.path, defaults);
   const offered = all.filter(
     (r) => fits(r) && (r.patterns.some((p) => accepts(p, file.path)) || matching.some((d) => d.renderer === r.id)),
   );
@@ -85,8 +112,17 @@ export function makeDefaultPattern(opened: Opened, path: string): string {
 
 /** `list` with `pattern` mapped to `renderer`: the existing row (same pattern, any case) changed in place, else one more at the end. */
 export function withDefault(list: readonly RendererDefault[], pattern: string, renderer: string): RendererDefault[] {
+  return withRow(list, pattern, { renderer });
+}
+
+/** `list` with `pattern`'s files opened through named pipeline `pipeline` (#2265): its row's renderer kept, or one more row with none. */
+export function withPipeline(list: readonly RendererDefault[], pattern: string, pipeline: string): RendererDefault[] {
+  return withRow(list, pattern, { pipeline });
+}
+
+function withRow(list: readonly RendererDefault[], pattern: string, change: Partial<RendererDefault>): RendererDefault[] {
   const key = pattern.toLowerCase();
   const at = list.findIndex((d) => d.pattern.toLowerCase() === key);
-  if (at === -1) return [...list, { pattern, renderer }];
-  return list.map((d, i) => (i === at ? { pattern: d.pattern, renderer } : d));
+  if (at === -1) return [...list, { pattern, renderer: "", pipeline: null, ...change }];
+  return list.map((d, i) => (i === at ? { ...d, ...change } : d));
 }

@@ -81,6 +81,10 @@ vi.mock("./lib/ipc/app", () => ({
   userRenderers: () => Promise.resolve([]),
   rendererDefaults: () => Promise.resolve([]),
   setRendererDefaults: (list: unknown[]) => Promise.resolve(list),
+  namedPipelines: () => Promise.resolve([]),
+  setNamedPipelines: (list: unknown[]) => Promise.resolve(list),
+  commandSteps: () => Promise.resolve([]),
+  setCommandSteps: (list: unknown[]) => Promise.resolve(list),
 }));
 
 vi.mock("./lib/ipc/sources", () => ({

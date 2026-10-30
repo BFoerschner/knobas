@@ -22,6 +22,8 @@ import TfShell, { type TfShellPorts } from "./TfShell.svelte";
 import { installCommands } from "../render/command";
 import { renderersForFence } from "../render/registry";
 import { rendererDefaults } from "../render/defaults.svelte";
+import { namedPipelines } from "../render/pipelines.svelte";
+import { defaultPipelines } from "./diff/piped";
 import { createTheme, type Theme } from "./theme.svelte";
 import { createRoleSyncs, type RoleSyncPorts, type RoleSyncs } from "./role-sync.svelte";
 import { sourceFacts } from "./job/source-facts.fixture";
@@ -224,6 +226,7 @@ function start(
     pagesKeptOpen?: TfShellPorts["pagesKeptOpen"];
     userRenderers?: TfShellPorts["userRenderers"];
     rendererDefaults?: TfShellPorts["rendererDefaults"];
+    namedPipelines?: TfShellPorts["namedPipelines"];
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -266,6 +269,7 @@ function start(
         ...(over.pagesKeptOpen ? { pagesKeptOpen: over.pagesKeptOpen } : {}),
         ...(over.userRenderers ? { userRenderers: over.userRenderers } : {}),
         ...(over.rendererDefaults ? { rendererDefaults: over.rendererDefaults } : {}),
+        ...(over.namedPipelines ? { namedPipelines: over.namedPipelines } : {}),
       },
       prefersDark: over.prefersDark ?? (() => false),
       onstarttimer: over.onstarttimer ?? (() => {}),
@@ -1400,7 +1404,20 @@ test("the saved command renderers are in the registry once the database answers 
 });
 
 test("the default renderers per file pattern are held once the database answers (#2263)", async () => {
-  start({ rendererDefaults: () => Promise.resolve([{ pattern: "*.md", renderer: "source" }]) });
+  start({ rendererDefaults: () => Promise.resolve([{ pattern: "*.md", renderer: "source", pipeline: null }]) });
   await settle();
-  expect(rendererDefaults.list).toEqual([{ pattern: "*.md", renderer: "source" }]);
+  expect(rendererDefaults.list).toEqual([{ pattern: "*.md", renderer: "source", pipeline: null }]);
+});
+
+test("the named pipelines are held once the database answers, and every diff reads its file's default from them (#2265, #2270)", async () => {
+  start({
+    rendererDefaults: () => Promise.resolve([{ pattern: "*.json.b64", renderer: "", pipeline: "b64" }]),
+    namedPipelines: () => Promise.resolve([{ id: "b64", name: "Base64 JSON", steps: [{ step: "base64_decode" }] }]),
+  });
+  await settle();
+  expect(defaultPipelines.of("fixtures/hooks.json.b64")).toEqual({ name: "Base64 JSON", pattern: "*.json.b64", steps: [{ step: "base64_decode" }] });
+  expect(defaultPipelines.of("README.md")).toBeNull();
+  // An edit in Settings reaches the diffs: the lookup reads the held list at each ask.
+  namedPipelines.hold([{ id: "b64", name: "Base64 JSON", steps: [{ step: "base64_decode" }, { step: "pretty", format: "json" }] }]);
+  expect(defaultPipelines.of("x.json.b64")?.steps).toHaveLength(2);
 });

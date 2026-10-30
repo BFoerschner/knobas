@@ -5,12 +5,16 @@
   `bytes → step → step → renderer`. Each step has a grip (drag it, or focus it and press ← or →), its name, its
   arguments inline (a jq filter, a decompressor, a format) and a remove button. *Add step* lists the built-in
   steps (`render/pipeline.ts`). A changed jq filter is sent a moment after typing stops, or at once on `Enter`;
-  every other change at once. *Reset* drops the pipeline. Saving one as a pattern's default, and the person's own
-  command steps, are #2265's.
+  every other change at once. *Reset* drops the pipeline.
+
+  #2265: *Add step* also lists the person's own command steps (*Your commands*, saved in Settings › Renderers).
+  *Save as default for `*.json.gz`…* asks for a name and a pattern and hands them to `onsave`; a pipeline shown
+  because it is a pattern's default says so where *Not saved* stands.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
 
+  import type { CommandStep } from "../../ipc/app";
   import type { PipeFormat, PipeStep } from "../../ipc/entity";
   import { FORMATS, STEP_CHOICES, moveStep, nameAfter, stepName, withStep } from "../../render/pipeline";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
@@ -23,6 +27,11 @@
     running = false,
     onchange,
     onreset,
+    commands = [],
+    saved = null,
+    savePattern = "",
+    savedName = "",
+    onsave,
     layers = sharedLayers,
   }: {
     steps: PipeStep[];
@@ -35,6 +44,16 @@
     running?: boolean;
     onchange: (steps: PipeStep[]) => void;
     onreset: () => void;
+    /** The person's command steps (#2265), offered under *Your commands*. */
+    commands?: readonly CommandStep[];
+    /** The named pipeline shown, and the pattern it is the default for, when the steps are that default's. */
+    saved?: { name: string; pattern: string } | null;
+    /** The pattern *Save as default* offers. */
+    savePattern?: string;
+    /** The name *Save as default* offers (the default's, when these steps were edited from one). */
+    savedName?: string;
+    /** Saves the steps as `name`, the default for `pattern`; no button without it. */
+    onsave?: ((name: string, pattern: string) => Promise<void>) | undefined;
     layers?: Layers | undefined;
   } = $props();
 
@@ -47,6 +66,24 @@
   let bar = $state<HTMLDivElement | null>(null);
   let typing: ReturnType<typeof setTimeout> | null = null;
   let dragged: number | null = null;
+  /** The *Save as default* form, while it is open. */
+  let saving = $state<{ name: string; pattern: string } | null>(null);
+  let storing = $state(false);
+
+  async function save() {
+    if (saving === null || onsave === undefined) return;
+    const { name, pattern } = saving;
+    if (name.trim() === "" || pattern.trim() === "") return;
+    storing = true;
+    try {
+      await onsave(name.trim(), pattern.trim());
+      saving = null;
+    } catch {
+      // `onsave` said why; the form stays for another try.
+    } finally {
+      storing = false;
+    }
+  }
 
   $effect(() => {
     if (!adding) return;
@@ -72,7 +109,7 @@
   }
 
   function menuKeys(event: KeyboardEvent) {
-    const items = [...(menu?.querySelectorAll<HTMLElement>("button") ?? [])];
+    const items = [...(menu?.querySelectorAll<HTMLElement>("button, a") ?? [])];
     const at = items.indexOf(document.activeElement as HTMLElement);
     if (event.key === "Escape") {
       event.preventDefault();
@@ -138,10 +175,11 @@
   <div class="tf-psteps">
     <span class="tf-plab">Pipeline</span><span class="tf-psrc">bytes</span><span class="tf-parrow" aria-hidden="true">→</span>
     {#each steps as step, i (i)}
-      {@const name = stepName(step)}
+      {@const name = stepName(step, commands)}
       <span
         class="tf-pstep"
         class:tf-pbad={failedAt === i}
+        class:tf-puser={step.step === "command"}
         role="group"
         aria-label="Step {i + 1}, {name}"
         draggable="true"
@@ -221,12 +259,44 @@
               ><span>{choice.label}</span><span class="tf-rsw-kb">{choice.io}</span></button
             >
           {/each}
+          <hr />
+          <div class="tf-rsw-mh">Your commands</div>
+          {#each commands as command (command.id)}
+            <button type="button" role="menuitem" onclick={() => add(() => ({ step: "command", id: command.id }))}
+              ><span>{command.name}</span><span class="tf-rsw-kb tf-pmono">{command.command}</span></button
+            >
+          {/each}
+          <a role="menuitem" href="#/settings/renderers" onclick={() => (adding = false)}
+            ><span>Add a command step…</span><span class="tf-rsw-kb">Settings › Renderers</span></a
+          >
         </div>
       {/if}
     </span>
   </div>
   <div class="tf-acts">
-    <span class="tf-dim tf-small" aria-live="polite">{running ? "Running…" : "Not saved"}</span>
+    <span class="tf-dim tf-small" aria-live="polite"
+      >{running ? "Running…" : saved !== null ? `${saved.name}, the default for ${saved.pattern}` : "Not saved"}</span
+    >
+    {#if onsave !== undefined && saved === null && steps.length > 0 && saving === null}
+      <button type="button" class="tf-btn tf-sm" onclick={() => (saving = { name: savedName, pattern: savePattern })}
+        >Save as default for <span class="tf-pmono">{savePattern}</span>…</button
+      >
+    {/if}
     <button type="button" class="tf-btn tf-sm tf-ghost" onclick={onreset}>Reset</button>
   </div>
+  {#if saving !== null}
+    <form
+      class="tf-psave"
+      onsubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+    >
+      <label>Name <input aria-label="Pipeline name" bind:value={saving.name} placeholder="Gzipped JSON" spellcheck="false" /></label>
+      <label>Default for <input class="tf-pmono" aria-label="File pattern" bind:value={saving.pattern} spellcheck="false" /></label>
+      <span class="tf-dim tf-small">A pipeline of the same name is replaced, and every pattern that uses it follows.</span>
+      <button type="submit" class="tf-btn tf-sm tf-primary" disabled={storing}>Save</button>
+      <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (saving = null)}>Cancel</button>
+    </form>
+  {/if}
 </div>

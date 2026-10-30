@@ -273,6 +273,10 @@ vi.mock("../ipc/app", () => ({
   userRenderers: () => deferred([]),
   rendererDefaults: () => deferred([]),
   setRendererDefaults: (list: unknown[]) => deferred(list),
+  namedPipelines: () => deferred([]),
+  setNamedPipelines: (list: unknown[]) => deferred(list),
+  commandSteps: () => deferred([]),
+  setCommandSteps: (list: unknown[]) => deferred(list),
 }));
 
 /**
@@ -360,6 +364,9 @@ const TfBytesImage = (await import("../tf/render/TfBytesImage.svelte")).default;
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
 const TfPrPicker = (await import("../tf/pr/TfPrPicker.svelte")).default;
 const TfFilePipeline = (await import("../tf/render/TfFilePipeline.svelte")).default;
+const TfPipelinesSettings = (await import("../tf/settings/TfPipelinesSettings.svelte")).default;
+const { createNamedPipelines, createCommandSteps } = await import("../render/pipelines.svelte");
+const { createRendererDefaults } = await import("../render/defaults.svelte");
 const TfCheckoutsSection = (await import("../tf/settings/TfCheckoutsSection.svelte")).default;
 const { createApps } = await import("../tf/openin/apps.svelte");
 const { createClones } = await import("../tf/openin/clones.svelte");
@@ -1402,6 +1409,24 @@ const CASES: Case[] = [
     },
     exercise: (target) => {
       target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
+    },
+  },
+  {
+    /** Settings › Renderers' pipelines half (#2265): its effect reads both lists; the pipeline editor opens inside it. */
+    name: "TfPipelinesSettings",
+    source: "lib/tf/settings/TfPipelinesSettings.svelte",
+    open: (target) => ({
+      app: mount(TfPipelinesSettings, {
+        target,
+        props: {
+          pipelines: createNamedPipelines({ read: () => deferred([]), save: (list) => deferred(list.map((d) => ({ ...d, id: d.id ?? "p" }))) }),
+          stepCommands: createCommandSteps({ read: () => deferred([]), save: () => deferred([]) }),
+          defaults: createRendererDefaults({ read: () => deferred([]), save: (list) => deferred(list) }),
+        },
+      }),
+    }),
+    exercise: (target) => {
+      [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Add a pipeline…")?.click();
     },
   },
   {

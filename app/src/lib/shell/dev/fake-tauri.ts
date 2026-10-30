@@ -53,7 +53,6 @@
  * feature adds a file and a new command edits only its feature's file; two
  * modules answering the same command is an error, not a silent override.
  */
-import { installPipelines } from "../../tf/diff/piped";
 import type { Answers } from "./fake-answers";
 
 /** One fake command. Arguments arrive camelCased, exactly as Tauri sends them. */
@@ -191,11 +190,6 @@ export function installIfRequested(): void {
   const params = new URLSearchParams(location.search);
   if (!params.has("fake-ipc")) return;
   for (const [, feature] of FEATURES) feature.seed?.(params);
-  // `?fake-diff-pipeline` (#2270): a stand-in default pipeline for `*.json.b64` until #2265's store installs the real ones.
-  if (params.has("fake-diff-pipeline"))
-    installPipelines({
-      of: (path) => (path.endsWith(".json.b64") ? { name: null, pattern: "*.json.b64", steps: [{ step: "base64_decode" }, { step: "pretty", format: "json" }] } : null),
-    });
   const bridge = installFakeTauri(holdBack(demoHandlers(params), params));
   for (const [, feature] of FEATURES) feature.attach?.(bridge);
 }

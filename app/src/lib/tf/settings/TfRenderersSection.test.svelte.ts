@@ -178,14 +178,14 @@ test("a command the backend refuses is said beside the form, which stays open", 
 
 const defaultRows = () =>
   [...target.querySelectorAll(".tf-rnd-defaults tbody tr")].map((row) =>
-    [row.querySelector(".tf-mono")?.textContent, row.querySelector("select")?.value, row.querySelector(".tf-dim")?.textContent ?? ""].join(" | "),
+    [row.querySelector(".tf-mono")?.textContent, row.querySelector<HTMLSelectElement>("select[aria-label$=' with']")?.value, row.querySelector(".tf-dim")?.textContent ?? ""].join(" | "),
   );
 
 test("the default renderers are listed, changed and removed here, each change saved whole", async () => {
   const { ports } = backend();
   const { store, saves } = storedDefaults([
-    { pattern: "*.md", renderer: "source" },
-    { pattern: "docs/*.md", renderer: "markdown" },
+    { pattern: "*.md", renderer: "source", pipeline: null },
+    { pattern: "docs/*.md", renderer: "markdown", pipeline: null },
   ]);
   app = mount(TfRenderersSection, { target, props: { ports, defaults: store } });
   await settle();
@@ -196,19 +196,19 @@ test("the default renderers are listed, changed and removed here, each change sa
   pick.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
   expect(saves.at(-1)).toEqual([
-    { pattern: "*.md", renderer: "markdown" },
-    { pattern: "docs/*.md", renderer: "markdown" },
+    { pattern: "*.md", renderer: "markdown", pipeline: null },
+    { pattern: "docs/*.md", renderer: "markdown", pipeline: null },
   ]);
 
   target.querySelectorAll<HTMLButtonElement>(".tf-rnd-defaults button")[1]!.click();
   await settle();
-  expect(saves.at(-1)).toEqual([{ pattern: "*.md", renderer: "markdown" }]);
+  expect(saves.at(-1)).toEqual([{ pattern: "*.md", renderer: "markdown", pipeline: null }]);
   expect(defaultRows()).toEqual(["*.md | markdown | "]);
 });
 
 test("a default is added from a pattern and a renderer; one the backend refuses is said", async () => {
   const { ports } = backend();
-  const { store, saves } = storedDefaults([{ pattern: "*.md", renderer: "source" }]);
+  const { store, saves } = storedDefaults([{ pattern: "*.md", renderer: "source", pipeline: null }]);
   app = mount(TfRenderersSection, { target, props: { ports, defaults: store } });
   await settle();
 
@@ -219,15 +219,15 @@ test("a default is added from a pattern and a renderer; one the backend refuses 
   button("Add").click();
   await settle();
   expect(saves.at(-1)).toEqual([
-    { pattern: "*.md", renderer: "source" },
-    { pattern: "*.mmd", renderer: "source" },
+    { pattern: "*.md", renderer: "source", pipeline: null },
+    { pattern: "*.mmd", renderer: "source", pipeline: null },
   ]);
   expect(defaultRows()).toEqual(["*.md | source | ", "*.mmd | source | "]);
 });
 
 test("a default naming a renderer that was deleted says the built-in default applies", async () => {
   const { ports } = backend();
-  const { store } = storedDefaults([{ pattern: "*.puml", renderer: "command:plantuml" }]);
+  const { store } = storedDefaults([{ pattern: "*.puml", renderer: "command:plantuml", pipeline: null }]);
   app = mount(TfRenderersSection, { target, props: { ports, defaults: store } });
   await settle();
   expect(defaultRows()).toEqual(["*.puml | command:plantuml | Not installed: the built-in default applies."]);

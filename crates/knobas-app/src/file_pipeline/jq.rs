@@ -16,9 +16,11 @@
 //! recursion too: the input and every `fromjson` string are refused past
 //! [`NESTING`] levels, jq's own parse limit.
 //!
-//! Not covered (#2314): a value nested deep at run time without recursion
+//! A value nested deep at run time without recursion
 //! (`reduce range(1e6) as $_ (0; [.])`) is still written, compared and
-//! dropped by recursion below jaq, and can overflow the stack.
+//! dropped by recursion below jaq, and can overflow the stack. That is why
+//! the jq step runs in a child process (`super::child`, #2314): the
+//! overflow ends the child, not the app.
 
 use std::io::Write as _;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -158,8 +160,8 @@ fn layout() -> Pp {
 
 /// `filter` over every value in `input`, written to `out`.
 ///
-/// Runs on a pipeline worker: the evaluation may take [`EVAL_STACK`] below
-/// this call, which a smaller stack does not have.
+/// Runs on the step child's thread (`super::child`): the evaluation may take
+/// [`EVAL_STACK`] below this call, which a smaller stack does not have.
 pub(super) fn run(filter: &str, input: &[u8], out: &mut Capped<'_>) -> Result<(), Failure> {
     let floor = stack_here().saturating_sub(EVAL_STACK);
     let defs = jaq_core::defs()

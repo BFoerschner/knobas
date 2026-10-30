@@ -1,5 +1,6 @@
 //! The built-in steps' work: plain functions over bytes, run on a pipeline
-//! worker thread (`super::on_worker`). Every one writes through [`Capped`], so
+//! worker thread (`super::on_worker`), or for jq in a child process
+//! (`super::child`). Every one writes through [`Capped`], so
 //! the size cap is checked as the output grows, never after it has grown, and
 //! the worker's stop flag is seen at every write.
 
@@ -130,6 +131,12 @@ pub(super) fn run(
         PipeStep::Pretty { format } => pretty(*format, input, &mut out)?,
         PipeStep::Convert { from, to } => convert(*from, *to, input, &mut out)?,
         PipeStep::HexDump => hex_dump(input, &mut out)?,
+        // A program, not Rust: `super::run_command` runs it.
+        PipeStep::Command { .. } => {
+            return Err(Failure::Error(
+                "a command step runs as its own program".to_owned(),
+            ));
+        }
     }
     Ok(out.bytes)
 }

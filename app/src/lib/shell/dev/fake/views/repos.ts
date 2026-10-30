@@ -657,6 +657,8 @@ export function repoFileBytes(entityId: string, path: string): Uint8Array | unde
   const branch = branchAt === -1 ? null : entityId.slice(branchAt + "@refs/heads/".length);
   const files = filesOf(repoId, branch);
   if (files === null) return undefined;
+  // A wrapped fixture's bytes start as gzip's do, so the viewer offers its unwrap (#2265).
+  if (WRAPPED[path] !== undefined) return Uint8Array.of(0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 0, 0x03);
   const image = repoId === PAYOUT ? (binaryOf(path) ?? PAYOUT_IMAGES[path]) : undefined;
   const text = files[path];
   if (image === undefined && text === undefined) throw { code: "not_found", message: `gitea: no file ${path}`, source_id: null };
@@ -865,6 +867,9 @@ export function repoFilePiped(entityId: string, path: string, steps: PipeStep[])
         name = name.replace(/(\.[^./]+)?$/, ".json");
       } else if (step.step === "pretty" && step.format === "json") {
         text = `${JSON.stringify(JSON.parse(text), null, 2)}\n`;
+      } else if (step.step === "command" && step.id === "upper") {
+        // The fake's one command step (#2265), `tr a-z A-Z`.
+        text = text.toUpperCase();
       } else {
         return fail(`the dev fake does not run ${step.step}`);
       }
