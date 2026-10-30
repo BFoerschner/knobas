@@ -577,8 +577,6 @@ mod tests {
         crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 10);
     }
 
-    /// The mirror sends `count`, the argument's name: a mirror sending
-    /// anything else arrives with the value missing (#2247).
     /// The mirror sends each argument by its Rust name (#2262).
     #[test]
     fn the_mirror_sends_the_renderer_arguments() {
@@ -595,6 +593,8 @@ mod tests {
         }
     }
 
+    /// The mirror sends `count`, the argument's name: a mirror sending
+    /// anything else arrives with the value missing (#2247).
     #[test]
     fn the_mirror_sends_the_count_of_pages_kept_open() {
         let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");

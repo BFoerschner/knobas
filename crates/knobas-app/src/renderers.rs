@@ -374,6 +374,10 @@ pub(crate) async fn run_argv(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Its own process group, so a timeout or the cap stops everything it
+    // started (a wrapper script's `java`, a `sh -c` pipeline), not only it.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut built, 0);
     let mut command = tokio::process::Command::from(built);
     command.kill_on_drop(true);
     let mut child = match command.spawn() {
@@ -403,11 +407,11 @@ pub(crate) async fn run_argv(
     writer.abort();
     let ended = match collected {
         Err(_) => {
-            let _ = child.kill().await;
+            stop(&mut child).await;
             Ended::TimedOut { stderr: Vec::new() }
         }
         Ok(None) => {
-            let _ = child.kill().await;
+            stop(&mut child).await;
             stderr_task.abort();
             return Ended::TooLarge;
         }
@@ -434,6 +438,23 @@ pub(crate) async fn run_argv(
         },
         other => other,
     }
+}
+
+/// Kill a run that is still going: on Unix its whole process group (it leads
+/// one, `process_group(0)`), then the child itself, reaped. Windows kills the
+/// child alone.
+async fn stop(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child
+        .id()
+        .and_then(|id| i32::try_from(id).ok())
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        // The child has not been reaped (no `wait` finished), so its pid is
+        // still the group's id and not anyone else's.
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    }
+    let _ = child.kill().await;
 }
 
 /// Everything `reader` writes up to `cap` bytes. Past the cap: `None` when
@@ -485,6 +506,42 @@ mod tests {
         )
         .await;
         assert!(matches!(ended, Ended::TooLarge), "{ended:?}");
+    }
+
+    /// A run stopped at its timeout takes what it started with it: a
+    /// wrapper's background child is killed too, not left running.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_timed_out_run_takes_its_children_with_it() {
+        let marker = std::env::temp_dir().join(format!("knobas-2262-group-{}", std::process::id()));
+        let _ = std::fs::remove_file(&marker);
+        let ended = run_argv(
+            &argv(&["sh", "-c", "sleep 60 & echo $! > \"$0\"; wait", marker.to_str().unwrap()]),
+            Vec::new(),
+            Limits {
+                timeout: Duration::from_secs(1),
+                output_cap: OUTPUT_CAP,
+            },
+            std::env::vars_os().collect(),
+        )
+        .await;
+        assert!(matches!(ended, Ended::TimedOut { .. }), "{ended:?}");
+        let pid = std::fs::read_to_string(&marker).expect("the child wrote its pid");
+        let _ = std::fs::remove_file(&marker);
+        let pid = pid.trim();
+        let alive = || {
+            std::process::Command::new("kill")
+                .args(["-0", pid])
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        };
+        // Killed, then reaped by init: give the reaping a moment.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while alive() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(!alive(), "the background sleep {pid} outlived its renderer");
     }
 
     /// A run gets no `KNOBAS_*` variable (the database URL under `just dev`).

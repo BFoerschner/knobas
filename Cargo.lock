@@ -3137,6 +3137,7 @@ dependencies = [
  "notify-rust",
  "percent-encoding",
  "reqwest",
+ "rustix",
  "serde",
  "serde_json",
  "sqlx",

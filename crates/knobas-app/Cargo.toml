@@ -136,6 +136,12 @@ uuid.workspace = true
 # The derive behind the generated IPC mirror (`src/ipc_mirror.rs`, #1325).
 ts-rs.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+# A user renderer (#2262, ADR-0033) runs in a process group of its own, and
+# the whole group is killed at its timeout: a wrapper script's children go
+# with it. The copy already in the lockfile.
+rustix = { version = "1", features = ["process"] }
+
 [dev-dependencies]
 # The CRUD tests inject an adapter that refuses to connect.
 async-trait.workspace = true
