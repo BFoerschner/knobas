@@ -7066,3 +7066,83 @@ async fn a_token_that_may_not_read_issues_reads_every_view_but_the_discussion() 
         "the issue listing is refused too, and skipped"
     );
 }
+
+/// The pages the descriptor declares (#2274, `SourceDescriptor::code_pages`)
+/// are pages the real server serves: each one, built as *Open in › Browser*
+/// builds it from the typed base URL, answers 200 after Gitea's redirects
+/// (`/src/<ref>/` 303s to `/src/branch/` or `/src/commit/`), for a file read
+/// at a branch and at a sha, a commit, a range of two branches and of
+/// `<sha>^...<sha>`, and a pull request. Read-only: nothing is created.
+///
+/// Prints each page and where it ended, which is the output the PR quotes.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_declared_code_pages_are_pages_the_server_serves() {
+    use knobas_source::code_pages::{Page, page};
+
+    let env = env();
+    let pages = knobas_source_gitea::descriptor_template()
+        .code_pages
+        .expect("Gitea declares its code pages");
+    let full = env.full_name();
+    let http = reqwest::Client::new();
+    let api = |path: String| {
+        http.get(format!("{}/api/v1/repos/{full}/{path}", env.url))
+            .header("Authorization", format!("token {}", env.token))
+            .send()
+    };
+    let branch = "feature/PAY-231-sepa-retry";
+    let head: serde_json::Value = api(format!("commits?sha={branch}&limit=1"))
+        .await
+        .expect("the server answers")
+        .json()
+        .await
+        .expect("a commit listing");
+    let sha = head[0]["sha"]
+        .as_str()
+        .expect("the seeded branch has a commit")
+        .to_owned();
+    let pulls: serde_json::Value = api("pulls?state=all&limit=1".to_owned())
+        .await
+        .expect("the server answers")
+        .json()
+        .await
+        .expect("a pull request listing");
+    let number = pulls[0]["number"]
+        .as_u64()
+        .expect("the seed opens a pull request")
+        .to_string();
+    let based = format!("{sha}^");
+    let cases: [(Page, Vec<(&str, &str)>); 7] = [
+        (Page::Repository, vec![]),
+        (
+            Page::File,
+            vec![("ref", "main"), ("file", "README.md"), ("line", "1")],
+        ),
+        (
+            Page::File,
+            vec![("ref", &sha), ("file", "README.md"), ("line", "1")],
+        ),
+        (Page::Commit, vec![("sha", &sha)]),
+        (Page::Range, vec![("base", "main"), ("head", branch)]),
+        (Page::Range, vec![("base", &based), ("head", &sha)]),
+        (
+            Page::PullRequest,
+            vec![("pr", &number), ("base", "main"), ("head", branch)],
+        ),
+    ];
+    for (which, values) in cases {
+        let mut all = vec![("repo", full.as_str())];
+        all.extend(values);
+        let url = page(&env.url, pages.template(which), &all)
+            .unwrap_or_else(|| panic!("{which:?} builds from {all:?}"));
+        let answer = http.get(&url).send().await.expect("the server answers");
+        println!("{which:?} {url} -> {} {}", answer.status(), answer.url());
+        assert_eq!(answer.status(), reqwest::StatusCode::OK, "{which:?} {url}");
+        assert!(
+            answer.url().path().starts_with(&format!("/{full}")),
+            "{which:?} stayed in the repository: {}",
+            answer.url()
+        );
+    }
+}
