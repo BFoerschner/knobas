@@ -50,7 +50,7 @@ export function svgFrame(markup: string, dark = false): SvgFrame | null {
 
 /**
  * The document a sandboxed frame draws for a command renderer's SVG or HTML
- * `body`, sanitized (#2262's shape, which its `render/command.ts` shares).
+ * `body`, sanitized (#2262; `render/command.ts` re-exports it).
  */
 export function frameDocument(output: "svg" | "html", body: string): string {
   if (output === "html") {
@@ -60,7 +60,7 @@ export function frameDocument(output: "svg" | "html", body: string): string {
     );
   }
   const svg = sanitizeSvg(body);
-  return wrap(svg === null ? "" : imageOf(svg, null, null), null);
+  return wrap(imageOf(svg, null, null), null);
 }
 
 function sizeOf(svg: SVGSVGElement): [number, number] {
@@ -71,16 +71,17 @@ function sizeOf(svg: SVGSVGElement): [number, number] {
   return [Number.isFinite(width) && width > 0 ? Math.ceil(width) : 300, Number.isFinite(height) && height > 0 ? Math.ceil(height) : 150];
 }
 
-function imageOf(svg: SVGSVGElement, width: number | null, height: number | null): string {
+function imageOf(svg: SVGSVGElement | null, width: number | null, height: number | null): string {
   // XMLSerializer writes the SVG namespace an `<img>` needs.
-  const markup = new XMLSerializer().serializeToString(svg);
+  const markup = svg === null ? "" : new XMLSerializer().serializeToString(svg);
   const size = width === null || height === null ? "" : ` width="${width}" height="${height}"`;
   return `<img alt=""${size} src="data:image/svg+xml;base64,${base64Of(new TextEncoder().encode(markup))}">`;
 }
 
+/** The frame's document; a sized drawing (`scheme` given) takes no body margin, so the frame is the drawing's size. */
 function wrap(inner: string, scheme: "light" | "dark" | null): string {
-  const meta = scheme === null ? "" : `<meta name="color-scheme" content="${scheme}">`;
-  return `<!doctype html><html><head><meta charset="utf-8">${meta}</head><body marginwidth="0" marginheight="0">${inner}</body></html>`;
+  if (scheme === null) return `<!doctype html><html><head><meta charset="utf-8"></head><body>${inner}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${scheme}"></head><body marginwidth="0" marginheight="0">${inner}</body></html>`;
 }
 
 function base64Of(bytes: Uint8Array): string {
