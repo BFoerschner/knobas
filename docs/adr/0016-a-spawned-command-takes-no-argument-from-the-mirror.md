@@ -1,5 +1,5 @@
 ---
-status: accepted, amended by ADR-0021 and ADR-0023
+status: accepted, amended by ADR-0021, ADR-0023 and ADR-0033
 ---
 
 # A spawned command takes no argument from the mirror
@@ -7,6 +7,7 @@ status: accepted, amended by ADR-0021 and ADR-0023
 *Open in editor* and *open a terminal at the checkout* are the first features that run a program on the user's machine, and a repo entity is a mirrored item whose every field a remote system wrote. Decided 2026-09-07 (Björn, v1.5 grilling): **a program knobas spawns is built from a command template the user set in settings, and its arguments come only from what knobas found on the local disk or was told by hand, never from a mirrored item.**
 
 - An argument is a [checkout](../../CONTEXT.md) under the clones root or a path the user typed. The Docker importer (ADR-0015) passes a context name a person typed, never a mirror value.
+- [ADR-0033](0033-renderer-and-pipeline-commands-run-under-the-rules-of-open-in.md) widens this to renderer and pipeline commands: the person's own command, no shell, the content (which may be mirrored) on stdin only, never as an argument.
 - The opener plugin stays scoped to `http` and `https`. No `vscode://`, `jetbrains://` or `file://`.
 - Nothing knobas spawns writes to a working tree, with two amendments: [ADR-0021](0021-knobas-reads-a-checkouts-state-with-read-only-git.md) allows read-only `git status` at a checkout path, and [ADR-0023](0023-knobas-clones-a-repository-into-the-clones-root.md) allows `git clone` into a new folder under the clones root with a URL built from the source's configured address. Nothing else that writes is allowed.
 - Command templates are a settings surface with macOS defaults; on another platform the buttons say *not configured* until a template is set.
