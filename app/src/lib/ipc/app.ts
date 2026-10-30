@@ -7,13 +7,14 @@
  * by a test in that module which `include_str!`s this file.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { AppStatus, RenderContent, RenderRun, UserRenderer, UserRendererDraft } from "./generated/app";
+import type { AppStatus, RenderContent, RendererDefault, RenderRun, UserRenderer, UserRendererDraft } from "./generated/app";
 
 export type {
   AppStatus,
   CommandOutput,
   DbState,
   RenderContent,
+  RendererDefault,
   RendererInput,
   RenderRun,
   UserRenderer,
@@ -106,4 +107,14 @@ export function setUserRenderers(renderers: UserRendererDraft[]): Promise<UserRe
  */
 export function runRenderer(id: string, content: RenderContent): Promise<RenderRun> {
   return invoke<RenderRun>("run_renderer", { id, content });
+}
+
+/** The default renderer per file pattern (#2263), in order. */
+export function rendererDefaults(): Promise<RendererDefault[]> {
+  return invoke<RendererDefault[]>("renderer_defaults");
+}
+
+/** Save the whole list of default renderers per file pattern; answers it as stored (trimmed). */
+export function setRendererDefaults(defaults: RendererDefault[]): Promise<RendererDefault[]> {
+  return invoke<RendererDefault[]>("set_renderer_defaults", { defaults });
 }

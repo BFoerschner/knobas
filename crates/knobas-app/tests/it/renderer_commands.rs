@@ -237,3 +237,52 @@ async fn an_unknown_renderer_is_refused() {
     let error = renderers::run(&pool, "nope", text("x")).await.unwrap_err();
     assert!(error.message.contains("nope"), "{}", error.message);
 }
+
+fn mapped(pattern: &str, renderer: &str) -> renderers::RendererDefault {
+    renderers::RendererDefault {
+        pattern: pattern.to_owned(),
+        renderer: renderer.to_owned(),
+    }
+}
+
+/// The default renderer per file pattern (#2263) is a `knobas.setting` row:
+/// a new pool onto the same database (the app started again) reads back what
+/// was saved, trimmed and in order.
+#[tokio::test]
+async fn renderer_defaults_read_back_from_a_new_pool() {
+    let db = knobas_db::test_util::scratch_database("renderer_defaults_round_trip").await;
+    let pool = db.pool(4).await.expect("a pool");
+    assert!(renderers::defaults(&pool).await.unwrap().is_empty());
+
+    let saved = renderers::save_defaults(
+        &pool,
+        &[mapped(" *.md ", "source"), mapped("docs/*.mmd", "command:mmdc")],
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved, [mapped("*.md", "source"), mapped("docs/*.mmd", "command:mmdc")]);
+    pool.close().await;
+
+    let again = db.pool(4).await.expect("a second pool");
+    assert_eq!(renderers::defaults(&again).await.unwrap(), saved);
+}
+
+/// A row with no pattern or no renderer, or a pattern mapped twice (globs
+/// match without regard to case), is refused by its pattern.
+#[tokio::test]
+async fn a_default_without_a_pattern_or_mapped_twice_is_refused() {
+    let pool = scratch("renderer_defaults_refused").await;
+    let error = renderers::save_defaults(&pool, &[mapped("  ", "source")])
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("no file pattern"), "{}", error.message);
+    let error = renderers::save_defaults(&pool, &[mapped("*.md", " ")])
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("*.md"), "{}", error.message);
+    let error = renderers::save_defaults(&pool, &[mapped("*.md", "source"), mapped("*.MD", "markdown")])
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("*.MD"), "{}", error.message);
+    assert!(renderers::defaults(&pool).await.unwrap().is_empty(), "nothing was stored");
+}
