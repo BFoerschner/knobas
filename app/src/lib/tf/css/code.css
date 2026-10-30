@@ -65,6 +65,11 @@
 .tf-code mark.tf-curm { outline: 2px solid var(--ink); }
 .tf-fimage { padding: 18px; display: grid; place-items: center; background: var(--sheet); }
 .tf-fimage img { max-width: 100%; }
+.tf-fdiagram { padding: 18px; display: grid; place-items: center; background: var(--sheet); overflow: auto; }
+/* A diagram (#2258): the sandboxed frame sized to the drawing, and the off-screen box Mermaid measures text in
+   (its own <style> is refused by the bundled app's CSP, so the font is set here; render/mermaid.ts DIAGRAM_FONT). */
+.tf-dframe { display: block; border: 0; max-width: 100%; background: transparent; }
+.tf-diagram-scratch { position: fixed; left: -100000px; top: 0; font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
 .tf-cgroup-h .tf-acts { margin-left: auto; display: flex; gap: 6px; }
 .tf-cgroup-h .tf-rc-who { font-weight: 400; }
 .tf-rcommits td:first-child { width: 110px; }
@@ -136,3 +141,7 @@
   .tf-repo { grid-template-columns: minmax(0, 1fr); }
   .tf-ftree { position: static; }
 }
+
+/* A renderer's failure above the source (mockups/code-area .stepfail), as #2262 draws it. */
+.tf-stepfail { border-bottom: 1px solid var(--rule); background: var(--err-bg); padding: 10px 12px; font-size: var(--t-sm); color: var(--err); display: flex; flex-direction: column; gap: 8px; }
+.tf-stepfail pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; background: var(--paper); color: var(--ink); border-radius: 4px; padding: 8px 10px; white-space: pre-wrap; }

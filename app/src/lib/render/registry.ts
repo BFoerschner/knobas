@@ -63,6 +63,21 @@ export const MARKDOWN: Renderer = {
   diff: true,
 };
 
+/**
+ * Mermaid (#2258): a `mermaid` fence and a `.mmd`/`.mermaid` file, drawn by
+ * Mermaid at its strict security level, sanitized, in the sandboxed frame
+ * (`render/diagram.ts`). Mermaid loads with the first diagram.
+ */
+export const MERMAID: Renderer = {
+  id: "mermaid",
+  name: "Mermaid",
+  patterns: ["*.mmd", "*.mermaid"],
+  fences: ["mermaid"],
+  input: "text",
+  output: "svg",
+  diff: false,
+};
+
 /** Source: the text, highlighted. Takes every text file and every fence, so it is always the last resort. */
 export const SOURCE: Renderer = {
   id: "source",
@@ -75,7 +90,7 @@ export const SOURCE: Renderer = {
 };
 
 /** Built-ins first, in the order that makes the first that accepts the default; Source last. */
-const renderers: Renderer[] = [IMAGE, MARKDOWN, SOURCE];
+const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, SOURCE];
 
 /**
  * Adds a renderer ahead of Source, so it becomes the default for what it
