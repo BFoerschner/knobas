@@ -1,5 +1,7 @@
 /**
- * PDFs for the dev fake and the PDF renderer's tests (#2260), written out by
+ * PDFs for the dev fake (`?fake-binary`) and the PDF renderer's tests (#2260),
+ * here rather than under the dev harness so tests import them statically. Only
+ * the dev fake imports it, so a release build carries none of it. Written out by
  * hand: a few lines of Helvetica per page, link annotations, and, for the
  * hostile one, every way a PDF asks to run something. ASCII only, so a
  * string's length is its byte length and the cross-reference offsets hold.

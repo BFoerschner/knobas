@@ -6,8 +6,8 @@
  */
 import { expect, test } from "vitest";
 
-import { fakePdf, HOSTILE_PDF, SPEC_PDF } from "../shell/dev/fake/views/pdf";
 import { DOCUMENT_OPTIONS, openPdf, type PdfLib } from "./pdf-core";
+import { fakePdf, HOSTILE_PDF, SPEC_PDF } from "./pdf-fixture";
 import type { PdfDocument } from "./port";
 
 const lib = async () => (await import("pdfjs-dist/legacy/build/pdf.mjs")) as unknown as PdfLib;
