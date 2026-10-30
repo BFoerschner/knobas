@@ -8,16 +8,16 @@
  * colours, and each image's size and pixels. That reads every page without
  * drawing one, and it does not depend on the fonts the machine has. Only
  * where a print could not read something it paints (an image pdf.js hands
- * over as a bitmap) are two equal prints checked again by drawing both
- * pages and comparing pixels. Comparing text alone would miss a changed
- * image; drawing every page would be slow on a long document.
+ * over as a bitmap) is the page drawn too, and the drawing's digest joins
+ * its key (`keysOf`). Comparing text alone would miss a changed image;
+ * drawing every page would be slow on a long document.
  *
- * Pages are aligned by the longest common run of equal prints, so a page
+ * Pages are aligned by the longest common run of equal keys, so a page
  * inserted in the middle is one added page and the pages after it still
  * pair with their old selves. Pages left between two matched pages pair up
  * in order as changed; the ones over are added or removed.
  */
-import type { PdfDocument, PdfPrint } from "./port";
+import type { PdfDocument } from "./port";
 
 export type PageMark = "same" | "changed" | "added" | "removed";
 
@@ -63,39 +63,50 @@ export function alignPages(before: readonly string[], after: readonly string[]):
   return rows;
 }
 
-/** Each page's print, in page order. */
-async function printsOf(pdf: PdfDocument): Promise<PdfPrint[]> {
-  const prints: PdfPrint[] = [];
-  for (let n = 1; n <= pdf.pages; n++) prints.push(await (await pdf.page(n)).print());
-  return prints;
+/** The scale an unsure page is drawn at for its key: a page about 400 px wide, enough to see a changed image. */
+const CHECK_SCALE = 0.5;
+
+/** A 53-bit hash of `bytes` (cyrb53 over the bytes themselves), as hex. */
+function pixelDigest(bytes: Uint8ClampedArray): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < bytes.length; i++) {
+    h1 = Math.imul(h1 ^ bytes[i]!, 2654435761);
+    h2 = Math.imul(h2 ^ bytes[i]!, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
 }
 
 /**
- * Two drawings agree only pixel for pixel, no tolerance. Both are drawn by
- * the same pdf.js in the same browser at the same scale, on a canvas read
- * back in software (`willReadFrequently`), from operator lists already
- * equal by print: anti-aliasing and font hinting come out the same both
- * times, so any pixel that differs is a difference in what the page holds
- * (the image pdf.js handed over as a bitmap). A tolerance would let a small
- * changed image through.
+ * Each page's key, in page order: its print, and where the print is unsure
+ * (an image pdf.js handed over as a bitmap) a digest of the page drawn as
+ * well, before the pages are aligned. Otherwise every page of a scan would
+ * print alike (`img:WxH`), and one page inserted into a scan would pair
+ * every page after it with its neighbour.
+ *
+ * The drawing's digest is exact, no tolerance. Both sides are drawn by the
+ * same pdf.js in the same browser at the same scale, on a canvas read back
+ * in software (`willReadFrequently`): anti-aliasing and font hinting come
+ * out the same both times, so two pages that hold the same draw the same
+ * bytes, and any byte that differs is a difference in what the page holds.
+ * A tolerance would let a small changed image through. Where nothing draws
+ * (jsdom) the print alone is the key.
  */
-const samePixels = (a: Uint8ClampedArray, b: Uint8ClampedArray) => a.length === b.length && a.every((value, i) => value === b[i]);
-
-/** The scale the pixel check draws at: a page about 400 px wide, enough to see a changed image. */
-export const CHECK_SCALE = 0.5;
+async function keysOf(pdf: PdfDocument): Promise<string[]> {
+  const keys: string[] = [];
+  for (let n = 1; n <= pdf.pages; n++) {
+    const page = await pdf.page(n);
+    const print = await page.print();
+    const drawn = print.unsure ? await page.pixels(CHECK_SCALE) : null;
+    keys.push(drawn === null ? print.key : `${print.key}:${pixelDigest(drawn)}`);
+  }
+  return keys;
+}
 
 /** `before` and `after` compared page by page (see the module's comment for how). Either may be `null`: an added or deleted PDF. */
 export async function comparePdfs(before: PdfDocument | null, after: PdfDocument | null): Promise<PageRow[]> {
-  const [a, b] = await Promise.all([before ? printsOf(before) : [], after ? printsOf(after) : []]);
-  const rows = alignPages(
-    a.map((print) => print.key),
-    b.map((print) => print.key),
-  );
-  for (const row of rows) {
-    if (row.mark !== "same" || !(a[row.old! - 1]!.unsure || b[row.new! - 1]!.unsure)) continue;
-    const [left, right] = await Promise.all([before!.page(row.old!), after!.page(row.new!)]);
-    const [x, y] = await Promise.all([left.pixels(CHECK_SCALE), right.pixels(CHECK_SCALE)]);
-    if (x !== null && y !== null && !samePixels(x, y)) row.mark = "changed";
-  }
-  return rows;
+  const [a, b] = await Promise.all([before ? keysOf(before) : [], after ? keysOf(after) : []]);
+  return alignPages(a, b);
 }

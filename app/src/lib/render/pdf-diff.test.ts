@@ -100,3 +100,23 @@ test("a page whose only change is a gradient's colour is marked changed; an unch
   const after = [{ ...page("One"), gradient: "0000ff" }, { ...page("Two"), gradient: "00ff00" }];
   expect((await compare(before, after)).map((row) => row.mark)).toEqual(["changed", "same"]);
 });
+
+/** A scan as Chrome's pdf.js sees it: every page's print the same and unsure (its image a bitmap), told apart only by its pixels. */
+function scan(...inks: number[]): PdfDocument {
+  const pageOf = (ink: number) =>
+    ({
+      print: async () => ({ key: "img:612x792", unsure: true }),
+      pixels: async () => new Uint8ClampedArray([ink, ink, ink, 255]),
+    }) as unknown as Awaited<ReturnType<PdfDocument["page"]>>;
+  return { pages: inks.length, page: async (n: number) => pageOf(inks[n - 1]!), close() {} } as unknown as PdfDocument;
+}
+
+test("a page inserted into a scan, whose prints are all alike, is aligned by the pages' pixels", async () => {
+  expect(await comparePdfs(scan(1, 2, 3), scan(1, 9, 2, 3))).toEqual([
+    { old: 1, new: 1, mark: "same" },
+    { old: null, new: 2, mark: "added" },
+    { old: 2, new: 3, mark: "same" },
+    { old: 3, new: 4, mark: "same" },
+  ]);
+  expect((await comparePdfs(scan(1, 2, 3), scan(1, 5, 3))).map((row) => row.mark)).toEqual(["same", "changed", "same"]);
+});

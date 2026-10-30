@@ -116,6 +116,7 @@ function digest(text: string): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
 }
 
+/** `digest` of a byte array, read 4096 bytes at a time into a string. */
 const bytesDigest = (bytes: ArrayLike<number>) => {
   let text = "";
   for (let i = 0; i < bytes.length; i += 4096) text += String.fromCharCode(...Array.from({ length: Math.min(4096, bytes.length - i) }, (_, k) => bytes[i + k]!));

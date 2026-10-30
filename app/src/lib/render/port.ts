@@ -104,8 +104,8 @@ export interface PdfPage {
  * A page's print: a digest of its size and its operator list (the text it
  * shows and where, its paths and colours, its images' pixels), equal for two
  * pages that draw the same. `unsure` when the list paints something the
- * digest could not read (an image handed over as a bitmap): equal prints
- * then need the pixels to agree as well.
+ * digest could not read (an image handed over as a bitmap): the page is
+ * then drawn as well, and its pixels join its key (`render/pdf-diff.ts`).
  */
 export interface PdfPrint {
   key: string;
