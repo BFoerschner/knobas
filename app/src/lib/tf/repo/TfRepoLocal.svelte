@@ -16,6 +16,7 @@
   import { onFocusWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutView, DiffRead } from "../../ipc/entity";
+  import { DIFF_CEILING } from "../diff/diff";
   import TfDiffView from "../diff/TfDiffView.svelte";
   import { treeStanding } from "../code/code";
   import { repoName } from "../openin/openin";
@@ -119,7 +120,9 @@
   {:else}
     <TfDiffView {files} />
     {#if read.unstaged.truncated || read.staged.truncated}
-      <p class="tf-dim tf-local-note">The diff is cut here: it is longer than knobas draws. Your editor has all of it.</p>
+      <p class="tf-dim tf-local-note">
+        The diff is cut here: it is over knobas's ceiling of {DIFF_CEILING.toLocaleString("en-US")} lines. Your editor has all of it.
+      </p>
     {/if}
     {#if untracked.length > 0}
       <div class="tf-panel tf-untracked">

@@ -71,10 +71,28 @@ export interface WindowedOptions<K> {
 
 const ALL: Span = { start: 0, end: 0, before: 0, after: 0 };
 
+/**
+ * The scroll anchor every windowed list shares (#2269): a diff draws one list
+ * per file card, all in one scroller. Each list holding a row of its own and
+ * scrolling to keep it still would move the page once per list; one anchor,
+ * the topmost row on screen across them, moves it once. So is the scroll a
+ * list made to hold it: every list hears that scroll event, and none takes it
+ * for the reader's.
+ */
+const shared: {
+  /** The row, its top, and the box that scrolls it with its scroll then. */
+  anchor: { el: HTMLElement; y: number; box: Element | null; scroll: number } | null;
+  /** The reader's scroll the anchor was taken at. */
+  pinnedAt: Event | null;
+  scrolled: { box: Element; top: number } | null;
+  /** The scroll event a list's own scroll raised, once one list has heard it. */
+  ownEvent: Event | null;
+} = { anchor: null, pinnedAt: null, scrolled: null, ownEvent: null };
+
 export class Windowed<K = string> {
   readonly #options: Required<WindowedOptions<K>>;
   readonly #heights: Heights<K>;
-  /** The viewport, in the list's pixels: its top, and its height. */
+  /** The viewport, in the list's pixels: its top (negative while the list starts below it), and its height. */
   #viewTop = $state(0);
   #viewHeight = $state(typeof window === "undefined" ? 0 : window.innerHeight);
   /** Bumped when a measurement moves a row, so the span is worked out again. */
@@ -85,10 +103,6 @@ export class Windowed<K = string> {
   readonly #keyOf = new WeakMap<Element, K>();
   /** The rows in the DOM now. */
   readonly #drawn = new Set<HTMLElement>();
-  /** A drawn row on screen and its top, taken at each scroll the reader makes, held still through the redraws it causes. */
-  #anchor: { el: HTMLElement; y: number } | null = null;
-  /** The box this list last scrolled itself and where it left it, so the scroll event that raises is not taken for the reader's. */
-  #scrolled: { box: Element; top: number } | null = null;
   /** Where row 0 sits on screen, once `list` is attached. */
   #origin = () => 0;
   readonly #sizes: ResizeObserver | null;
@@ -214,14 +228,20 @@ export class Windowed<K = string> {
         top = Math.max(top, box.top + clip.clientTop);
         bottom = Math.min(bottom, box.top + clip.clientTop + clip.clientHeight);
       }
-      this.#viewTop = Math.max(0, top - origin());
+      // Below 0 while the list starts lower than the screen's top: a list far
+      // under the screen then draws one row, not a screenful (#2269: forty
+      // diff cards, each its own list).
+      // Clipped away whole (a card of its own, below or above the screen):
+      // the screen's edge nearest the list stands for the view, so nothing of
+      // a list far off is drawn but its one row.
+      this.#viewTop = (bottom < top ? bottom : top) - origin();
       this.#viewHeight = Math.max(0, bottom - top);
       // The reader scrolled: hold the row on screen now. Not on a scroll this
       // list made to hold a row, nor on a resize: those arrive after a redraw
       // may have moved the rows, and pinning them there would keep the move
       // (#2211: a summary 5 px under its estimate shifted the list 5 px).
-      if (event?.type === "scroll" && !this.#selfScroll(event.target))
-        this.#pin(top);
+      if (event?.type === "scroll" && !this.#selfScroll(event))
+        this.#pin(top, bottom, event);
     };
     read();
     // Scroll events do not bubble; a capturing listener hears every box's.
@@ -271,7 +291,7 @@ export class Windowed<K = string> {
     const top = this.#heights.reveal(index, this.#viewTop, this.#viewHeight);
     if (top === this.#viewTop) return;
     // The reader moved on purpose: nothing on screen is held where it was.
-    this.#anchor = null;
+    shared.anchor = null;
     this.#scrollBy(top - this.#viewTop);
     this.#viewTop = top;
   }
@@ -282,35 +302,51 @@ export class Windowed<K = string> {
     return this.#origin() + this.#heights.offsetOf(index);
   }
 
-  /** Holds the first drawn row on screen at `top` (client pixels) and where it is. */
-  #pin(top: number) {
-    let best: { el: HTMLElement; y: number } | null = null;
+  /**
+   * Holds the first drawn row on screen (`top` to `bottom`, client pixels)
+   * and where it is: this list's, where it is higher than the one another
+   * list took at the same scroll.
+   */
+  #pin(top: number, bottom: number, event: Event) {
+    if (shared.pinnedAt !== event) {
+      shared.pinnedAt = event;
+      shared.anchor = null;
+    }
+    const scroller = this.#scroller();
     for (const el of this.#drawn) {
       const box = el.getBoundingClientRect();
-      if (box.bottom > top && (best === null || box.top < best.y))
-        best = { el, y: box.top };
+      if (box.bottom > top && box.top < bottom && (shared.anchor === null || box.top < shared.anchor.y))
+        shared.anchor = { el, y: box.top, box: scroller, scroll: scroller?.scrollTop ?? 0 };
     }
-    this.#anchor = best;
   }
 
-  /** Scrolls the nearest box that has something to scroll, else the page. */
-  #scrollBy(px: number) {
+  /** The nearest box that has something to scroll, else the page. */
+  #scroller(): Element | null {
     // jsdom has no `scrollingElement`.
-    const box =
+    return (
       this.#clips.find((clip) => clip.scrollHeight > clip.clientHeight) ??
-      document.scrollingElement;
+      document.scrollingElement
+    );
+  }
+
+  /** Scrolls {@link #scroller}. */
+  #scrollBy(px: number) {
+    const box = this.#scroller();
     if (!box) return;
     box.scrollTop += px;
-    this.#scrolled = { box, top: box.scrollTop };
+    shared.scrolled = { box, top: box.scrollTop };
   }
 
-  /** Whether the scroll event from `target` is the one {@link #scrollBy} raised, and only that. */
-  #selfScroll(target: EventTarget | null): boolean {
-    const own = this.#scrolled;
-    const box = target === document ? document.scrollingElement : target;
+  /** Whether `event` is the scroll a list raised to hold the anchor ({@link #scrollBy}), and only that. */
+  #selfScroll(event: Event): boolean {
+    if (shared.ownEvent === event) return true;
+    const own = shared.scrolled;
+    const box = event.target === document ? document.scrollingElement : event.target;
     if (own === null || box !== own.box) return false;
-    this.#scrolled = null;
-    return own.box.scrollTop === own.top;
+    shared.scrolled = null;
+    if (own.box.scrollTop !== own.top) return false;
+    shared.ownEvent = event;
+    return true;
   }
 
   /** Hands the rows to the arithmetic when they changed (a new array), not on every scroll. */
@@ -333,13 +369,28 @@ export class Windowed<K = string> {
     // whose columns widen for a new row, moves what the reader is looking
     // at; scroll it back to where it was before the rows changed. WebKit
     // has no CSS scroll anchoring to do this.
-    const anchor = this.#anchor;
-    if (this.on && anchor !== null && anchor.el.isConnected) {
-      const off = anchor.el.getBoundingClientRect().top - anchor.y;
+    const anchor = shared.anchor;
+    // Only a row this list's scroller moves, and one still laid out: a row
+    // held on a page keep-alive hid since (`[hidden]`, no box) or in another
+    // scroller is no measure of what this list's redraw moved.
+    if (
+      this.on &&
+      anchor !== null &&
+      anchor.el.isConnected &&
+      anchor.box === this.#scroller() &&
+      anchor.el.closest("[hidden]") === null
+    ) {
+      // A scroll since the anchor was taken that no scroll event has told it
+      // of yet (one set in a frame callback lands after that frame's scroll
+      // events) moved the row too, and is not the redraw's to undo.
+      const since = (anchor.box?.scrollTop ?? 0) - anchor.scroll;
+      const off = anchor.el.getBoundingClientRect().top - (anchor.y - since);
       if (Math.abs(off) >= 0.5) {
         this.#scrollBy(off);
         this.#viewTop += off;
       }
+      anchor.y = anchor.el.getBoundingClientRect().top;
+      anchor.scroll = anchor.box?.scrollTop ?? 0;
     }
     if (moved) this.#remeasured++;
   }

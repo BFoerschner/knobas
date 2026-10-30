@@ -44,12 +44,24 @@ export function lineDiff(path: string, before: string, after: string): DiffFile 
   const near = lines.map((_, at) =>
     lines.slice(Math.max(0, at - CONTEXT), at + CONTEXT + 1).some((line) => line.kind !== "context"),
   );
-  const hunks: DiffFile["hunks"] = [];
+  const runs: { lines: DiffLine[]; old: number; new: number }[] = [];
+  // The last line of each side before the line at hand: where a hunk with none of that side sits.
+  let oldBefore = 0;
+  let newBefore = 0;
   lines.forEach((line, at) => {
-    if (!near[at]) return;
-    if (at === 0 || !near[at - 1]) hunks.push({ header: `@@ -${line.old ?? 0} +${line.new ?? 0} @@`, lines: [] });
-    hunks[hunks.length - 1]!.lines.push(line);
+    if (near[at]) {
+      if (at === 0 || !near[at - 1]) runs.push({ lines: [], old: oldBefore, new: newBefore });
+      runs[runs.length - 1]!.lines.push(line);
+    }
+    oldBefore = line.old ?? oldBefore;
+    newBefore = line.new ?? newBefore;
   });
+  // `@@ -a,b +c,d @@` as git prints it: a side with no lines in the hunk starts after the line before it.
+  const range = (numbers: number[], before: number) => `${numbers.length === 0 ? before : numbers[0]},${numbers.length}`;
+  const hunks: DiffFile["hunks"] = runs.map((run) => ({
+    header: `@@ -${range(run.lines.flatMap((l) => (l.old === null ? [] : [l.old])), run.old)} +${range(run.lines.flatMap((l) => (l.new === null ? [] : [l.new])), run.new)} @@`,
+    lines: run.lines,
+  }));
   return {
     path,
     old_path: null,

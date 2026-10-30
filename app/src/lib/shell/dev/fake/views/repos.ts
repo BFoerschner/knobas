@@ -519,10 +519,21 @@ export function repoRefusals(asks: readonly WriteAsk[]): RefusedWrite[] {
  * commits, or `undefined` for an entity this module does not draw.
  */
 export function repoView(entityId: string, sectionId: string | null): SourceView | undefined {
-  const commit = PAYOUT_COMMITS.find(([sha]) => payoutCommitId(sha) === entityId);
+  const at = PAYOUT_COMMITS.findIndex(([sha]) => payoutCommitId(sha) === entityId);
+  const commit = PAYOUT_COMMITS[at];
   if (commit) {
     const [, , , , path, before, after] = commit;
-    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after)], truncated: false, commentable: null, gone: [] }], 1);
+    // Its file whole at the commit, as a commit at a sha answers it (#2267's expanded context).
+    if (sectionId === `file:${path}`)
+      return { sections: [section(sectionId, "Files", [{ type: "file", trail: [], path, text: after, language: null, size: after.length, truncated: false, binary: false, url: null, sha: blobOf(after) }])], actions: [] } as unknown as SourceView;
+    // The parent: the next commit down, where it changed the same file to this one's `before`.
+    const next = PAYOUT_COMMITS[at + 1];
+    const parent = next && next[4] === path && next[6] === before ? payoutCommitId(next[0]) : null;
+    const overview = section("overview", "Overview", [{ type: "entities", title: "Parent", rows: [{ entity_id: parent, title: next?.[0].slice(0, 10) ?? "", meta: null, tone: null, chip: null, url: null }] }]);
+    // `?fake-diff-lines=<n>` (#2269): forty more files of n/40 added lines each.
+    const bulk = Number(new URLSearchParams(globalThis.location?.search).get("fake-diff-lines") ?? 0) || 0;
+    const more = bulk === 0 ? [] : Array.from({ length: 40 }, (_, f) => diffOf(`bulk/f${String(f).padStart(2, "0")}.rs`, "", Array.from({ length: Math.ceil(bulk / 40) }, (_, i) => `let v${f}_${i} = ${i};`).join("\n")));
+    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
     // The whole view's toolbar (#707): a branch from this commit, its whole sha the value.
     const from = { value: commit[0], label: commit[0].slice(0, 10) };
     const actions =
@@ -536,7 +547,7 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
             }),
           ]
         : [];
-    return { sections: [diff], actions } as SourceView;
+    return { sections: sectionId === null ? [overview, diff] : [diff], actions } as SourceView;
   }
   const branchAt = entityId.indexOf("@refs/heads/");
   const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);

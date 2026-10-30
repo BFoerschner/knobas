@@ -641,7 +641,7 @@ test("From changes the address; a branch holding a key proposes its ticket's tit
 test("Into is the diff's base: picking another reads and draws the change against it (#2271)", async () => {
   await draw(COMPARE("spike/sepa-instant"));
   expect(reads).toContainEqual([REPO, "compare:main...spike/sepa-instant"]);
-  const paths = () => [...target.querySelectorAll(".tf-compare .tf-diff .tf-fh")].map((h) => text(h).split(" ")[0]);
+  const paths = () => [...target.querySelectorAll(".tf-compare .tf-diff .tf-fh .tf-mono")].map((h) => text(h));
   expect(paths()).toEqual(["src/retry.rs"]);
   const into = target.querySelector<HTMLSelectElement>(".tf-compare select")!;
   into.value = "release/1.9";
