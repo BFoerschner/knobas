@@ -217,6 +217,13 @@
     };
   });
 
+  /**
+   * A directory read failed before the file's section was known: no answer is
+   * coming, so the file pane neither waits on skeletons nor stays dimmed; the
+   * tree draws the error.
+   */
+  const fileStranded = $derived(treeFailed !== null && fileSection === null);
+
   const lines = $derived(file === null || file.binary ? [] : fileLines(file.text));
 
   /** Why the file shown cannot be edited, `null` where it can. */
@@ -353,12 +360,12 @@
     {#if treeFailed !== null}
       <p class="tf-cfail">{treeFailed}</p>
     {/if}
-    <TfWaiting phase={waitPhase({ drawn: listings[""] !== undefined, reading: false, failed: false })} columns={1} count={8}>
+    <TfWaiting phase={waitPhase({ drawn: listings[""] !== undefined || treeFailed !== null, reading: false, failed: false })} columns={1} count={8}>
       {@render listing("", 0)}
     </TfWaiting>
   </nav>
   <div class="tf-fileview">
-    {#if file !== null && editing && editable && branch !== null}
+    {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
         <span class="tf-p">{file.path}</span>
         <span class="tf-chip tf-warn">editing on {branch}</span>
@@ -383,7 +390,7 @@
     {:else if shown === null && listings[""] !== undefined}
       <div class="tf-empty"><p>Pick a file in the tree.</p></div>
     {:else}
-      <TfWaiting phase={waitPhase({ drawn: file !== null, reading: fileReading, failed: fileFailed !== null })} error={fileFailed} failClass="tf-fpad" shape="lines">
+      <TfWaiting phase={waitPhase({ drawn: file !== null || fileStranded, reading: fileReading && !fileStranded, failed: fileFailed !== null })} error={fileFailed} failClass="tf-fpad" shape="lines">
       {#if file !== null}
       <header>
         <span class="tf-p">{file.path}</span>

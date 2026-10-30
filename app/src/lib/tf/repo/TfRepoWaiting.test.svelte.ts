@@ -153,6 +153,7 @@ function filesTab(reads: Map<string, ReturnType<typeof held<SourceView>>>, path:
     at: REPO,
     branch: "main" as string | null,
     path: path as string | null,
+    editing: false,
     changed: new Set<string>(),
   });
   view = mount(TfRepoFiles, { target, props });
@@ -211,4 +212,35 @@ test("a file read that fails replaces the dimmed file with its error", async () 
   await settle();
   expect(text(target.querySelector(".tf-fileview .tf-cfail"))).toContain("Gitea did not answer");
   expect(target.querySelector(".tf-fileview .tf-code")).toBeNull();
+});
+
+test("an edit under way yields to the dimmed file while another file is read, so nothing commits over the wrong one", async () => {
+  const listing = held<SourceView>();
+  const readme = held<SourceView>();
+  const lib = held<SourceView>();
+  const props = filesTab(new Map([["files", listing], ["file:README.md", readme], ["file:lib.rs", lib]]), "README.md");
+  listing.answer(tree(["README.md", "lib.rs"]));
+  const editable = fileView("README.md", "# Payout\n");
+  const block = editable.sections[0]!.blocks[0]!;
+  if (block.type === "file") block.sha = "a41f2c0";
+  readme.answer(editable);
+  props.editing = true;
+  await settle();
+  expect(target.querySelector(".tf-fileview textarea")).not.toBeNull();
+
+  props.path = "lib.rs";
+  await settle();
+  expect(target.querySelector(".tf-fileview textarea")).toBeNull();
+  expect(text(target.querySelector(".tf-fileview .tf-wait-dim header"))).toContain("README.md");
+});
+
+test("a tree read that fails ends the skeletons: the tree draws its error and the file pane waits on nothing", async () => {
+  const listing = held<SourceView>();
+  filesTab(new Map([["files", listing]]), "README.md");
+  await settle();
+  listing.refuse({ code: "unavailable", message: "Gitea did not answer" });
+  await settle();
+  expect(text(target.querySelector(".tf-ftree .tf-cfail"))).toContain("Gitea did not answer");
+  expect(target.querySelector(".tf-skel")).toBeNull();
+  expect(target.querySelector(".tf-wait-dim")).toBeNull();
 });

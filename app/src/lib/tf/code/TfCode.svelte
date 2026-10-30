@@ -198,16 +198,14 @@
     const whileLive = (set: (page: EntityPage) => unknown) => (page: EntityPage) => {
       if (live) set(page);
     };
-    const repoRead = whole(filterOf(["repo"], "updated_desc"), again ? undefined : repoPage).then(repoPage, fail);
+    // A first read is handed every page as it lands, the last one too, so
+    // only a re-read sets the list from the whole answer.
+    const read = (filter: EntityFilter, set: (page: EntityPage) => void) =>
+      again ? whole(filter).then(set, fail) : whole(filter, set).then(undefined, fail);
+    const repoRead = read(filterOf(["repo"], "updated_desc"), repoPage);
     const prReads = [
-      whole(filterOf(["pr"], "attention"), again ? undefined : whileLive((page) => (attention = page))).then(
-        whileLive((page) => (attention = page)),
-        fail,
-      ),
-      whole(filterOf(["pr"], "updated_desc"), again ? undefined : whileLive((page) => (everyPr = page))).then(
-        whileLive((page) => (everyPr = page)),
-        fail,
-      ),
+      read(filterOf(["pr"], "attention"), whileLive((page) => (attention = page))),
+      read(filterOf(["pr"], "updated_desc"), whileLive((page) => (everyPr = page))),
     ];
     void repoRead.finally(() => {
       if (live) repoReading = false;
