@@ -40,6 +40,14 @@
 //! way where the adapter says they move (`Source::refusal_standing`): Gitea's
 //! probe is asked once per repository, not once per file opened.
 //!
+//! # Bytes (#2256)
+//!
+//! A file's bytes ([`LiveSources::bytes`]: a README's image, a PDF) are kept
+//! the same way where the adapter says the read is fixed
+//! (`Source::bytes_standing`: at a whole sha), under the same bound,
+//! measured by their length; a refusal over the cap is kept too, as the
+//! nothing it holds. A byte read at a moving name is read every time.
+//!
 //! What is kept is the adapter's answer. The app's own work on it -- the
 //! rule-7 check against the mirror, a row's commit hint -- is done on every
 //! read, because the mirror moves under a fixed view.
@@ -51,7 +59,7 @@ use std::sync::{Arc, Mutex};
 
 use knobas_secrets::SecretStore;
 use knobas_source::grants::{RefusedWrite, WriteAsk};
-use knobas_source::view::{SourceView, Standing};
+use knobas_source::view::{FileBytes, SourceView, Standing};
 use knobas_source::{AuthMethod, Source, SourceError};
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
@@ -59,9 +67,11 @@ use sqlx::PgPool;
 use super::crud::{Credential, instance_from};
 use super::{SecretInput, SourcesError};
 
-/// How many bytes of views the cache holds by default: a few hundred files
-/// at the view's own one-megabyte cap, far more of ordinary ones.
-pub const DEFAULT_BOUND: usize = 64 * 1024 * 1024;
+/// How many bytes of answers the cache holds by default: a few hundred files
+/// at the view's own one-megabyte cap, far more of ordinary ones, beside one
+/// byte read at its 50 MiB cap ([`knobas_source::view::BYTES_CAP`], #2256)
+/// -- which a 64 MiB bound would have kept by dropping nearly every view.
+pub const DEFAULT_BOUND: usize = 128 * 1024 * 1024;
 
 /// The built sources and the read cache, one per app (held by
 /// [`SourcesState`](super::SourcesState)). Cheap to clone: clones share both.
@@ -303,6 +313,49 @@ impl LiveSources {
         Ok(view)
     }
 
+    /// The bytes of the file at `path` in `entity`'s tree, at `commit`, as
+    /// `Source::file_bytes` answers them under `cap`: from the cache where
+    /// the adapter says the read is fixed and the cache holds it, read live
+    /// otherwise (#2256). `None` is an adapter that reads no bytes.
+    ///
+    /// # Errors
+    ///
+    /// The adapter's; a failed read is never kept.
+    pub(crate) async fn bytes(
+        &self,
+        lent: &Lent,
+        entity: &str,
+        path: &str,
+        commit: Option<&str>,
+        cap: u64,
+    ) -> Result<Option<Arc<FileBytes>>, SourceError> {
+        let read = || async {
+            Ok(lent
+                .source
+                .file_bytes(entity, path, commit, cap)
+                .await?
+                .map(Arc::new))
+        };
+        if lent.source.bytes_standing(entity, path, commit) != Standing::Fixed {
+            return read().await;
+        }
+        let key = Key {
+            generation: lent.generation,
+            entity: entity.to_owned(),
+            ask: Ask::Bytes {
+                path: path.to_owned(),
+                commit: commit.map(str::to_owned),
+                cap,
+            },
+        };
+        if let Some(Answer::Bytes(kept)) = self.reads().get(&key) {
+            return Ok(kept);
+        }
+        let answer = read().await?;
+        self.reads().put(key, Answer::Bytes(answer.clone()));
+        Ok(answer)
+    }
+
     /// The asks among `asks` the source's credential cannot make, as
     /// `Source::refused_writes` answers: each ask the adapter says moves is
     /// answered from the cache where it holds it, and asked again behind;
@@ -407,6 +460,8 @@ impl LiveSources {
                             field: field.clone(),
                         },
                     )),
+                    // Kept only where fixed, so never read behind.
+                    Ask::Bytes { .. } => {}
                 }
             }
             for (key, section) in views {
@@ -488,11 +543,19 @@ struct Key {
     ask: Ask,
 }
 
-/// A view's section, or a write's grants.
+/// A view's section, a write's grants, or a file's bytes under a cap.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Ask {
     View(Option<String>),
-    Write { op: String, field: Option<String> },
+    Write {
+        op: String,
+        field: Option<String>,
+    },
+    Bytes {
+        path: String,
+        commit: Option<String>,
+        cap: u64,
+    },
 }
 
 impl Key {
@@ -508,24 +571,37 @@ impl Key {
     }
 }
 
-/// A kept answer: a view, or whether one write is refused and why.
+/// A kept answer: a view, whether one write is refused and why, or a file's
+/// bytes.
 #[derive(Clone)]
 enum Answer {
     View(Option<SourceView>),
     Refused(Option<RefusedWrite>),
+    Bytes(Option<Arc<FileBytes>>),
 }
 
 impl Answer {
-    /// Its JSON, the size it is measured by and what a moved one is told by.
-    fn json(&self) -> Option<Vec<u8>> {
-        match self {
-            Self::View(view) => serde_json::to_vec(view).ok(),
+    /// The bytes it takes and the digest a moved one is told by: a view's and
+    /// a grant's from their JSON, the measure of their size the app already
+    /// has; a file's by its length, since its JSON would be four times it,
+    /// with no digest, since a byte read is kept only where it cannot move.
+    fn measure(&self) -> Option<(usize, u64)> {
+        let json = match self {
+            Self::View(view) => serde_json::to_vec(view).ok()?,
             // Refused with no words is not the same answer as taken.
-            Self::Refused(refused) => Some(refused.as_ref().map_or_else(
+            Self::Refused(refused) => refused.as_ref().map_or_else(
                 || b"taken".to_vec(),
                 |r| [b"refused:", r.reason.as_bytes()].concat(),
-            )),
-        }
+            ),
+            Self::Bytes(read) => {
+                let bytes = match read.as_deref() {
+                    Some(FileBytes::Read(bytes)) => bytes.len(),
+                    Some(FileBytes::TooLarge { .. }) | None => 0,
+                };
+                return Some((bytes, 0));
+            }
+        };
+        Some((json.len(), digest(&json)))
     }
 }
 
@@ -584,7 +660,7 @@ impl Reads {
         let Some(before) = self.entries.get(key).map(|kept| kept.digest) else {
             return false;
         };
-        let moved = answer.json().map(|json| digest(&json)) != Some(before);
+        let moved = answer.measure().map(|(_, digest)| digest) != Some(before);
         if moved {
             self.put(key.clone(), answer);
         }
@@ -592,12 +668,9 @@ impl Reads {
     }
 
     fn put(&mut self, key: Key, answer: Answer) {
-        // What the answer takes as the JSON the shell is sent: the measure of
-        // its size the app already has, and close to what it holds.
-        let Some(json) = answer.json() else {
+        let Some((bytes, digest)) = answer.measure() else {
             return;
         };
-        let bytes = json.len();
         if bytes > self.bound {
             self.remove(&key);
             return;
@@ -611,7 +684,7 @@ impl Reads {
             Kept {
                 answer,
                 bytes,
-                digest: digest(&json),
+                digest,
                 used,
             },
         );

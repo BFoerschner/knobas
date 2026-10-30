@@ -45,7 +45,7 @@ function answer(files: Files, section: string): SourceView {
   const path = section.slice("file:".length);
   const text = files[path];
   if (text === undefined) throw { code: "not_found", message: `gitea: no file ${path} at main` };
-  return one([{ type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: "b10b" }]);
+  return one([{ type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: "b10b", commit: "c0mmit" }]);
 }
 
 /** A read asked and not yet answered: `release` answers it. */
@@ -102,9 +102,11 @@ function draw(
   render?: RenderPort,
   commands?: CommandPort,
   defaults: RendererDefaults = createRendererDefaults(storedDefaults().port),
+  fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>,
 ) {
   const ports = {
     entityView,
+    ...(fileBytes ? { fileBytes } : {}),
     submitWrite: async () => {
       throw { code: "invalid", message: "no write in this suite" };
     },
@@ -174,14 +176,32 @@ test("the deep file draws as soon as its read answers, and the tree fills in as 
   release("files");
   release("files:src");
   await settle();
-  expect(tree()).toEqual(["src/", "psp/", "README.md"]);
+  expect(tree()).toEqual(["src", "psp", "README.md"]);
 
   for (const section of ["files:src/psp", "files:src/psp/gateway", "files:src/psp/gateway/sepa"]) release(section);
   await settle();
-  expect(tree()).toEqual(["src/", "psp/", "gateway/", "sepa/", "codes.rs", "mod.rs", "README.md"]);
+  expect(tree()).toEqual(["src", "psp", "gateway", "sepa", "codes.rs", "mod.rs", "README.md"]);
   // The listing that names the file takes the read already answered: one read each.
   expect(source.asked).toHaveLength(6);
   expect(lineText(0)).toEqual(["1", 'pub const ACCEPTED: &str = "ACCP";']);
+});
+
+test("Collapse all folds every directory open and leaves the file open (#2257)", async () => {
+  const source = heldSource(DEEP_FILES);
+  draw(source.entityView, DEEP);
+  await settle();
+  for (const read of [...source.asked]) read.release();
+  await settle();
+  expect(tree()).toEqual(["src", "psp", "gateway", "sepa", "codes.rs", "mod.rs", "README.md"]);
+
+  target.querySelector<HTMLButtonElement>("button[title='Collapse all']")!.click();
+  flushSync();
+  expect(tree()).toEqual(["src", "README.md"]);
+  expect(text(target.querySelector(".tf-fileview header .tf-p"))).toBe(DEEP);
+  // A directory opened again opens one level: what was below it stays folded.
+  target.querySelector<HTMLButtonElement>(".tf-ftree button.tf-fdir")!.click();
+  flushSync();
+  expect(tree()).toEqual(["src", "psp", "README.md"]);
 });
 
 test("a deep file opened again after its early read reads it afresh", async () => {
@@ -278,7 +298,7 @@ test("a source that names its sections otherwise still opens the deep file, thro
 
   expect(lineText(0)).toEqual(["1", 'pub const ACCEPTED: &str = "ACCP";']);
   expect(target.querySelector(".tf-cfail")).toBeNull();
-  expect(tree()).toEqual(["src/", "psp/", "gateway/", "sepa/", "codes.rs", "mod.rs", "README.md"]);
+  expect(tree()).toEqual(["src", "psp", "gateway", "sepa", "codes.rs", "mod.rs", "README.md"]);
   expect(reads).toContain(`blob:${DEEP}`);
 });
 
@@ -573,6 +593,24 @@ test("the landing renders the README as Markdown: its table, task list, Rust fen
   expect(face()).toBe("Render as Markdown");
 });
 
+test("a README's relative image is read through the byte read at the README's commit and drawn from a blob (#2256)", async () => {
+  const asked: [string, string, string | null][] = [];
+  const create = URL.createObjectURL;
+  URL.createObjectURL = () => "blob:readme/0";
+  try {
+    const files = { ...MD_FILES, "docs/runbook.md": "# Runbook\n\n![flow](img/flow.png)" };
+    draw(openSource(files).entityView, "docs/runbook.md", null, undefined, undefined, undefined, async (entityId, path, commit) => {
+      asked.push([entityId, path, commit]);
+      return new Uint8Array([0x89, 0x50]);
+    });
+    await settle();
+    expect(asked).toEqual([[REPO, "docs/img/flow.png", "c0mmit"]]);
+    expect(rendered()!.querySelector("img")?.getAttribute("src")).toBe("blob:readme/0");
+  } finally {
+    URL.createObjectURL = create;
+  }
+});
+
 test("a Markdown file's relative links open files in the Files tab, resolved against its own directory", async () => {
   draw(openSource(MD_FILES).entityView, "docs/runbook.md");
   await settle();
@@ -725,6 +763,29 @@ test("a .mermaid file that does not parse shows the parser's error above its num
   expect(drawn.querySelector("iframe")).toBeNull();
 });
 
+test("a .d2, a .dot and a .gv file are drawn by their engines in a sandboxed frame, with Source in the switcher (#2259)", async () => {
+  for (const [path, engine, blurb, pattern] of [
+    ["docs/flow.d2", "D2", "WASM", "*.d2"],
+    ["deps.dot", "Graphviz", "viz.js WASM", "*.dot"],
+    ["graphs/deps.gv", "Graphviz", "viz.js WASM", "*.gv"],
+  ] as const) {
+    if (view) unmount(view);
+    view = null;
+    const render = diagramRender();
+    draw(openSource({ [path]: "a -> b" }).entityView, path, null, render.port);
+    await settle();
+    const frame = target.querySelector<HTMLIFrameElement>(".tf-fileview .tf-fdiagram iframe")!;
+    expect([path, frame.getAttribute("sandbox"), frame.title]).toEqual([path, "", `${engine} diagram`]);
+    expect(render.asked).toEqual(["a -> b"]);
+    expect(menuItems()).toEqual([
+      `*${engine} built in · ${blurb} DEFAULT FOR ${pattern}`,
+      "Source built in · highlighted",
+      `Use Source for ${pattern} by default`,
+      "Renderers and defaults… Settings › Renderers",
+    ]);
+  }
+});
+
 // ---- the tree at a commit, moved behind (#2241, #2242) ----
 
 /**
@@ -742,7 +803,7 @@ function commitSource() {
     if (id === "files")
       return one([{ type: "tree", trail: [], entries: [{ name: "main.rs", kind: "file", size: 5, section: `file@${tip}:main.rs` }], truncated: false, url: null }]);
     const at = Number(/^file@(\d+):/.exec(id)?.[1] ?? tip);
-    return one([{ type: "file", trail: [], path: "main.rs", text: texts[at], language: null, size: 5, truncated: false, binary: false, url: null, sha: `b${at}` }]);
+    return one([{ type: "file", trail: [], path: "main.rs", text: texts[at], language: null, size: 5, truncated: false, binary: false, url: null, sha: `b${at}`, commit: null }]);
   };
   return { reads, entityView, push: () => (tip += 1) };
 }

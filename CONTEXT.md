@@ -20,7 +20,7 @@ A [note](#note) made from the global shortcut while another window has the focus
 _Avoid_: quick note, scratch, jot, inbox (that is the stream of things to answer)
 
 **Checkout**:
-A clone of a [repo](#kind) on this machine, found under the **clones root** (a directory setting scanned two levels deep, each clone matched to a repo entity by host and owner/repo) or set by hand per repo. Knobas-owned data about the local disk, never a field of the mirrored repo, and never written to: no checkout, no fetch (ADR-0016). The one exception is *Clone*, which clones into a new folder directly under the clones root (ADR-0023). Where *Open in editor* and *open a terminal here* point.
+A clone of a [repo](#kind) on this machine, found under the **clones root** (a directory setting scanned two levels deep, each clone matched to a repo entity by host and owner/repo) or set by hand per repo. Knobas-owned data about the local disk, never a field of the mirrored repo, and never written to: no checkout, no fetch (ADR-0016). The one exception is *Clone*, which clones into a new folder directly under the clones root (ADR-0023). Where *Open in editor* and *open a terminal here* point; "Open in" on a commit, a range, a pull request or a file at a line runs there too, with that object's checked git names (ADR-0034).
 _Avoid_: clone (as a noun for the record: the clone is the directory, the checkout is what knobas knows about it), working copy, local path, worktree (one more checkout, set by hand)
 
 **Working tree state**:
@@ -224,7 +224,7 @@ What an [adapter](#adapter) draws for one of its own kinds when the detail opens
 _Avoid_: page (a wiki kind), template, layout, widget, panel (the detail is the panel; a view fills it)
 
 **Read cache**:
-The app process's memory of [source views](#source-view), keyed by what each stands at: a view at a whole commit sha is kept for the session and the same ask is answered from memory with no request to the source; anything else is read live. The adapter says which before the read. Bounded by bytes, least recently used out first; never written to the database or to disk, and dropped with the built source it was read through when that source's address, configuration or credential changes (ADR-0032).
+The app process's memory of [source views](#source-view) and of files' bytes (a README's image), keyed by what each stands at: a read at a whole commit sha is kept for the session and the same ask is answered from memory with no request to the source; anything else is read live. The adapter says which before the read. Bounded by bytes, least recently used out first; never written to the database or to disk, and dropped with the built source it was read through when that source's address, configuration or credential changes (ADR-0032).
 _Avoid_: mirror (the database's copy, written by sync), store, snapshot
 
 **Diff**:

@@ -20,6 +20,14 @@
   - **Keys** come from the view: `nextHunk`, `comment` and `scrollTo` are
     this card's part of `n`/`p`, `c` and `j`/`k` (#2268).
 -->
+<script module lang="ts">
+  /** Where a file header's *Open in…* opens the file (#2274): its repository and the commit or branch it is read at. */
+  export interface OpenAt {
+    entityId: string;
+    at: string | null;
+  }
+</script>
+
 <script lang="ts">
   import { flushSync } from "svelte";
   import type { DiffLine, LineComment, LineThread } from "../../ipc/entity";
@@ -33,6 +41,8 @@
   import type { DiffTalk } from "./talk";
   import { badgeOf, isGenerated, isLock, LOAD_OVER, needsLoad } from "./tree";
   import { marked, type Range } from "./words";
+  import { firstLine } from "../openin/openin";
+  import TfOpenObject from "../openin/TfOpenObject.svelte";
 
   let {
     file,
@@ -51,6 +61,7 @@
     tokensOf,
     talk,
     render,
+    openAt = null,
   }: {
     file: DrawnFile;
     split: boolean;
@@ -72,6 +83,8 @@
     talk: DiffTalk;
     /** Draws a line comment's Markdown body (#2261). */
     render: RenderPort;
+    /** *Open in…* in the header, on the file at its first changed line; never on a deleted file. */
+    openAt?: OpenAt | null;
   } = $props();
 
   type Expand = "down" | "up" | "all";
@@ -332,6 +345,11 @@
     {#if chip}<span class="tf-chip">{chip}</span>{/if}
     {#if viewed}
       <label class="tf-fh-viewed"><input type="checkbox" checked={done} onchange={(event) => onviewed(event.currentTarget.checked)} /> Viewed</label>
+    {/if}
+    {#if openAt !== null && file.change !== "deleted"}
+      <span class="tf-fh-open"
+        ><TfOpenObject entityId={openAt.entityId} object={{ kind: "file", path: file.path, line: firstLine(file), at: openAt.at }} /></span
+      >
     {/if}
   </div>
   {#if !closed}

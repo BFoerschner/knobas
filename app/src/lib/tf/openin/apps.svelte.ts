@@ -7,11 +7,13 @@ import { ipcErrorMessage } from "../../ipc";
 import {
   checkoutSettings,
   openCheckout,
+  openObject,
   setCheckoutApplications,
   type CheckoutApplication,
   type CheckoutApplicationDraft,
   type CheckoutSettings,
   type OpenAt,
+  type OpenObject,
 } from "../../ipc/entity";
 import { push } from "../../shell/toasts.svelte";
 import { argvText, defaultApp } from "./openin";
@@ -20,12 +22,15 @@ export interface AppsPorts {
   checkoutSettings: () => Promise<CheckoutSettings>;
   setCheckoutApplications: (drafts: CheckoutApplicationDraft[], defaultApplication: string | null) => Promise<CheckoutSettings>;
   openCheckout: (entityId: string, at: OpenAt) => Promise<string[]>;
+  /** `open_object` (#2274); tests that open no code object leave it out. */
+  openObject?: (entityId: string, application: string | null, object: OpenObject) => Promise<string[]>;
 }
 
 export const realAppsPorts: AppsPorts = {
   checkoutSettings: () => checkoutSettings(),
   setCheckoutApplications: (drafts, defaultApplication) => setCheckoutApplications(drafts, defaultApplication),
   openCheckout: (entityId, at) => openCheckout(entityId, at),
+  openObject: (entityId, application, object) => openObject(entityId, application, object),
 };
 
 export interface Apps {
@@ -39,13 +44,23 @@ export interface Apps {
   save(applications: readonly CheckoutApplication[], defaultApplication: string | null): Promise<void>;
   /** Run a saved application and say so in a toast. */
   run(entityId: string, name: string, at: OpenAt): Promise<void>;
+  /** Run a saved application on a code object (#2274) and say so in a toast. */
+  runObject(entityId: string, name: string, application: string, object: OpenObject): Promise<void>;
   /** Tests only: forget the settings read (#1743). */
   reset(): void;
 }
 
 /** The draft the backend takes for an application that has, or has not yet, an id. */
 export function draftOf(app: CheckoutApplication): CheckoutApplicationDraft {
-  return { id: app.id === "" ? null : app.id, name: app.name, command: app.command, file_command: app.file_command };
+  return {
+    id: app.id === "" ? null : app.id,
+    name: app.name,
+    command: app.command,
+    file_command: app.file_command,
+    commit_command: app.commit_command ?? null,
+    range_command: app.range_command ?? null,
+    pull_request_command: app.pull_request_command ?? null,
+  };
 }
 
 export function createApps(ports: AppsPorts = realAppsPorts): Apps {
@@ -57,6 +72,16 @@ export function createApps(ports: AppsPorts = realAppsPorts): Apps {
       settings = await ports.checkoutSettings();
     } catch {
       // A menu with no list draws only *Add an application…*; Settings says why.
+    }
+  }
+
+  /** Start one, and say what started or why it did not. */
+  async function said(name: string, start: () => Promise<string[]>) {
+    try {
+      const argv = await start();
+      push({ text: `Started ${name}: ${argvText(argv)}` });
+    } catch (cause) {
+      push({ text: `Could not start ${name}: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
   }
 
@@ -80,12 +105,11 @@ export function createApps(ports: AppsPorts = realAppsPorts): Apps {
       pending = null;
     },
     async run(entityId, name, at) {
-      try {
-        const argv = await ports.openCheckout(entityId, at);
-        push({ text: `Started ${name}: ${argvText(argv)}` });
-      } catch (cause) {
-        push({ text: `Could not start ${name}: ${ipcErrorMessage(cause)}`, tone: "err" });
-      }
+      await said(name, () => ports.openCheckout(entityId, at));
+    },
+    async runObject(entityId, name, application, object) {
+      const open = ports.openObject ?? realAppsPorts.openObject!;
+      await said(name, () => open(entityId, application, object));
     },
   };
 }

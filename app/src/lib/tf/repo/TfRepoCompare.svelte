@@ -32,6 +32,7 @@
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
+  import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { compareSection, diffHash } from "../diff/address";
   import { itemHash, resolveTicket } from "../job/job";
   import type { RepoPorts } from "./TfRepo.svelte";
@@ -276,7 +277,12 @@
     <h2 class="tf-cgroup-h tf-cchanges">
       What it changes
       {#if section !== null && head !== null}
-        <span class="tf-acts"><a class="tf-btn tf-sm tf-ghost" href={diffHash(repoId, base, head)}>Open as diff</a></span>
+        <span class="tf-acts"
+          ><a class="tf-btn tf-sm tf-ghost" href={diffHash(repoId, base, head)}>Open as diff</a><TfOpenObject
+            entityId={repoId}
+            object={{ kind: "range", base, head }}
+          /></span
+        >
       {/if}
     </h2>
     {#if listed === null || listed.entityId === null}
@@ -286,7 +292,7 @@
         {#if files !== null && files.length === 0}
           <div class="tf-empty">This branch has no commits that {base} lacks.</div>
         {:else if files !== null}
-          <TfDiffView {files} {cut} />
+          <TfDiffView {files} {cut} openAt={head === null ? null : { entityId: repoId, at: head }} />
         {/if}
       </TfWaiting>
     {/if}

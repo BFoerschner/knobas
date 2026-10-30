@@ -1,8 +1,8 @@
 /**
  * The renderer port (spec #2234 step 5, #2254): every engine a renderer
  * needs, behind one interface, so jsdom tests use a fake and the app uses the
- * workers. Highlighting and diagrams (Mermaid, #2258) so far; D2, Graphviz
- * and pdf.js join them.
+ * workers. Highlighting and diagrams (Mermaid, #2258; D2 and Graphviz,
+ * #2259) so far; pdf.js joins them.
  *
  * Highlighting is a job: `highlight` starts one and returns at once, and the
  * worker answers in pieces through `onLines` (lines `from`… of the text,
@@ -58,7 +58,7 @@ export interface Palette {
 
 /** A diagram to draw: its engine, its source, the palette to draw it in. */
 export interface DiagramRequest {
-  engine: "mermaid";
+  engine: "mermaid" | "d2" | "graphviz";
   code: string;
   palette: Palette;
 }
@@ -73,6 +73,51 @@ export interface RenderPort {
    * {@link plainPort}): the diagram's source stays as it is.
    */
   diagram?(request: DiagramRequest): Promise<DiagramAnswer>;
+}
+
+/** What the port sends the diagram worker (D2, Graphviz). */
+export type DiagramMessage = { id: number } & DiagramRequest;
+
+/** What the diagram worker answers. */
+export interface DiagramReply {
+  id: number;
+  answer: DiagramAnswer;
+}
+
+/**
+ * Diagrams drawn in a worker that speaks `DiagramMessage`s, started on the
+ * first one. A worker that fails (it could not load, or its WASM was
+ * refused) rejects every diagram it holds and is stopped, and the next
+ * diagram starts a new one. Stopping it matters: an uncaught error does not
+ * end a worker, and one left running keeps D2's WASM heap alive.
+ */
+export function workerDiagram(
+  start: () => Pick<Worker, "postMessage" | "addEventListener" | "terminate">,
+): (request: DiagramRequest) => Promise<DiagramAnswer> {
+  let worker: ReturnType<typeof start> | null = null;
+  let next = 0;
+  const live = new Map<number, { resolve: (answer: DiagramAnswer) => void; reject: (error: Error) => void }>();
+  return (request) => {
+    if (worker === null) {
+      const started = (worker = start());
+      started.addEventListener("message", (event) => {
+        const reply = (event as MessageEvent<DiagramReply>).data;
+        live.get(reply.id)?.resolve(reply.answer);
+        live.delete(reply.id);
+      });
+      started.addEventListener("error", (event) => {
+        if (worker === started) worker = null;
+        started.terminate();
+        const error = new Error((event as ErrorEvent).message || "The diagram worker stopped.");
+        for (const held of live.values()) held.reject(error);
+        live.clear();
+      });
+    }
+    const id = (next += 1);
+    const answer = new Promise<DiagramAnswer>((resolve, reject) => live.set(id, { resolve, reject }));
+    worker.postMessage({ id, ...request } satisfies DiagramMessage);
+    return answer;
+  };
 }
 
 /** What the port sends the worker. */
@@ -133,16 +178,25 @@ export const plainPort: RenderPort = {
 
 let shared: RenderPort | null = null;
 
+let wasm: ((request: DiagramRequest) => Promise<DiagramAnswer>) | null = null;
+
 /**
  * Mermaid, loaded on the first diagram: `mermaid.ts` and Mermaid itself are
  * a chunk of their own. It runs on the main thread, since it lays text out
  * in the document.
+ *
+ * D2 and Graphviz are WASM, and run in the diagram worker
+ * (`diagram.worker.ts`), started on the first of them; each engine is a
+ * chunk of its own inside it. Their WASM never runs in the document, so the
+ * document's CSP needs no `'wasm-unsafe-eval'` (#2259).
  */
 export function engineDiagram(request: DiagramRequest): Promise<DiagramAnswer> {
-  return import("./mermaid").then(({ renderMermaid }) => renderMermaid(request.code, request.palette));
+  if (request.engine === "mermaid") return import("./mermaid").then(({ renderMermaid }) => renderMermaid(request.code, request.palette));
+  wasm ??= workerDiagram(() => new Worker(new URL("./diagram.worker.ts", import.meta.url), { type: "module", name: "diagram" }));
+  return wasm(request);
 }
 
-/** The app's port: Shiki in a module worker and Mermaid, or {@link plainPort} where there is no `Worker`. */
+/** The app's port: Shiki in a module worker and the diagram engines, or {@link plainPort} where there is no `Worker`. */
 export function renderPort(): RenderPort {
   shared ??=
     typeof Worker === "undefined"

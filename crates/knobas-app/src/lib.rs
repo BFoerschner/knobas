@@ -381,6 +381,8 @@ pub fn run() {
             commands::entity::entity_checkout,
             commands::entity::set_checkout_override,
             commands::entity::open_checkout,
+            commands::entity::open_object,
+            commands::entity::object_page,
             commands::search::search,
             commands::search::launcher_home,
             commands::search::smart_lists,
@@ -640,6 +642,8 @@ pub fn run() {
             // #2263's default renderer per file pattern, appended at the foot.
             commands::app::renderer_defaults,
             commands::app::set_renderer_defaults,
+            // #2256's byte read, appended at the foot (§10.8).
+            commands::entity::entity_file_bytes,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

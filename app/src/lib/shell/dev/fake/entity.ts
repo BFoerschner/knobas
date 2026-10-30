@@ -11,7 +11,7 @@ import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
 import { fixtureBuildEntity, runView } from "./builds";
 import { pullView } from "./views/pulls";
-import { repoRefusals, repoView } from "./views/repos";
+import { repoFileBytes, repoRefusals, repoView } from "./views/repos";
 
 /**
  * PR #142 and the builds the mirror holds for its head commit (#2278): the
@@ -527,6 +527,11 @@ export function handlers(): Handlers {
     visit_entity: (args) => visitEntity(args),
     reachable_transitions: (args) => fakeTransitions(args),
     entity_view: (args) => entityView(args),
+    entity_file_bytes: (args) => {
+      const read = repoFileBytes(String(args["entityId"]), String(args["path"]));
+      if (read === undefined) throw { code: "invalid", message: `${String(args["entityId"])}'s source reads no file bytes`, source_id: null };
+      return read;
+    },
     // Every fake source's credential may make every write it declares (#2040);
     // a commit onto a repository's protected `main` is refused (#2241).
     refused_writes: (args) => repoRefusals((args["asks"] as Parameters<typeof repoRefusals>[0] | undefined) ?? []),

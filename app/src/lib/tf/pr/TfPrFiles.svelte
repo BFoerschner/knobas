@@ -50,6 +50,7 @@
     listen,
     follower,
     render,
+    openAt = null,
   }: {
     prId: string;
     entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
@@ -67,6 +68,8 @@
     follower?: WriteFollower | undefined;
     /** The renderer port, for tests; the app's by default. */
     render?: RenderPort;
+    /** *Open in…* per file (#2274): the repository and the head the files are read at. */
+    openAt?: { entityId: string; at: string | null } | null;
   } = $props();
 
   /** The surface the replies and resolves queued here are tagged with (#2277). */
@@ -222,6 +225,7 @@
       gone={diff?.gone ?? []}
       viewed={{ paths: viewed, set: (path, on) => void toggle(path, on) }}
       {review}
+      {openAt}
       cut={diff?.truncated ?? false}
       {...render ? { render } : {}}
     />

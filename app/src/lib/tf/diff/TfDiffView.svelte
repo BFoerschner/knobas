@@ -26,6 +26,8 @@
     - `viewed`: a *Viewed* box per file that collapses it.
     - `review`: a `+` per line that opens a comment box; *Add to review*
       keeps the comment pending in the reader's store under its line.
+    - `openAt`: *Open in…* in each file's header (#2274), on the file at its
+      first changed line, read at the diff's head; not on a deleted file.
     Threads the source holds are drawn wherever it answers them: under their
     line, or apart at the end of the file when outdated or not drawn
     (`pr/files.ts`); `gone` lists those on files the diff no longer holds.
@@ -62,6 +64,7 @@
   import { diffLayout, windowNarrow, type DiffLayoutChoice } from "./diff-layout.svelte";
   import type { DiffTalk } from "./talk";
   import TfDiffCard from "./TfDiffCard.svelte";
+  import type { OpenAt } from "./TfDiffCard.svelte";
   import { badgeOf, collapsedAtFirst, isLock, needsLoad, treeOf } from "./tree";
 
   let {
@@ -75,6 +78,7 @@
     render = renderPort(),
     layout = diffLayout,
     narrow = windowNarrow(),
+    openAt = null,
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -91,6 +95,8 @@
     render?: RenderPort;
     layout?: DiffLayoutChoice;
     narrow?: { readonly current: boolean };
+    /** *Open in…* in each file's header (#2274): the repository (or branch) and the commit or branch the files are read at. */
+    openAt?: OpenAt | null;
   } = $props();
 
   let filter = $state("");
@@ -453,6 +459,7 @@
         tokensOf={(side, cell) => tokensOf(file, side, cell)}
         {talk}
         {render}
+        {openAt}
       />
     {/each}
     {#if gone.length > 0 || homeless.length > 0}

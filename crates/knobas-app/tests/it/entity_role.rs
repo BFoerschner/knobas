@@ -54,6 +54,7 @@ impl knobas_sync::scheduler::AdapterRegistry for WithCustom {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            code_pages: None,
             write_ops: Vec::new(),
             entity_kinds: vec![kind("ticket"), kind("pipeline"), kind("survey")],
             config_schema: serde_json::json!({}),

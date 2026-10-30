@@ -25,6 +25,7 @@
 //! against themselves in their own test suite.
 
 pub mod clone_urls;
+pub mod code_pages;
 pub mod contract;
 pub mod diff;
 pub mod docs;
@@ -227,6 +228,18 @@ pub struct SourceDescriptor {
     /// whose items open by their stored address alone.
     #[serde(default)]
     pub url_forms: Vec<url_forms::UrlForm>,
+    /// Where a code host serves the page of a repository, a file, a commit,
+    /// a range and a pull request, after the instance's typed base URL
+    /// (#2274, [`code_pages`]): what *Open in › Browser* and the `{url}`
+    /// placeholder open. [`code_pages::check`] holds it to its rules
+    /// (contract battery clause 14). Read on the Rust side; the shell never
+    /// does.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// decodes as a source with no code pages: *Browser* is then not offered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub code_pages: Option<code_pages::CodePages>,
 }
 
 impl SourceDescriptor {
@@ -2124,6 +2137,40 @@ pub trait Source: Send + Sync {
         let _ = (entity, section);
         view::Standing::Live
     }
+    /// The bytes of the file at `path` in `entity`'s tree (#2256, spec #2234
+    /// step 5), read whole up to `cap` bytes: a README's image, a PDF.
+    ///
+    /// `commit` is a [`Block::File`](view::Block::File)'s `commit`, handed
+    /// back: the read is at that commit, where the file the reader has open
+    /// was read. `None` reads at the entity's own reference (its branch, its
+    /// repository's default branch).
+    ///
+    /// A file longer than `cap` is [`FileBytes::TooLarge`](view::FileBytes::TooLarge)
+    /// with its size; the adapter stops reading past the cap and never
+    /// answers a cut file. A path that is no file is
+    /// [`SourceError::Protocol`].
+    ///
+    /// `Ok(None)` is **this adapter reads no file bytes**, and is the
+    /// default.
+    async fn file_bytes(
+        &self,
+        entity: &str,
+        path: &str,
+        commit: Option<&str>,
+        cap: u64,
+    ) -> Result<Option<view::FileBytes>, SourceError> {
+        let _ = (entity, path, commit, cap);
+        Ok(None)
+    }
+    /// What [`file_bytes`](Source::file_bytes)' answer for the same
+    /// arguments stands at, as [`view_standing`](Source::view_standing) says
+    /// it of a view (ADR-0032, #2256): [`Standing::Fixed`](view::Standing::Fixed)
+    /// only where `commit` names a commit no push can change. The default is
+    /// [`Standing::Live`](view::Standing::Live). Pure: it reads nothing.
+    fn bytes_standing(&self, entity: &str, path: &str, commit: Option<&str>) -> view::Standing {
+        let _ = (entity, path, commit);
+        view::Standing::Live
+    }
     /// A pipeline's settings, read live (ADR-0022, issue #851): the
     /// repositories it builds, its triggers and its parameters, scrubbed of
     /// every credential. `entity` is a pipeline's [`EntityRef`] in string
@@ -2333,6 +2380,7 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            code_pages: None,
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -2389,6 +2437,7 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            code_pages: None,
             ..a_descriptor()
         };
         let mut wire = serde_json::to_value(&declared).unwrap();

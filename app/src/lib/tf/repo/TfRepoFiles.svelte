@@ -19,7 +19,9 @@
   *sent*, until the source holds a newer blob, the file read again on the
   refresh event and a run's end.
 
-  With no file in the address the top directory's README opens.
+  With no file in the address the top directory's README opens, under the
+  branch's last commit (`TfRepoLastCommit`, #2257): the landing is the tree,
+  the last commit and the README, with no second listing of the top.
 
   **Read at a commit** (#2241): the source reads the tree at the branch's tip
   and the sections its listings name stand at that commit, so a file opened
@@ -76,6 +78,7 @@
   import { commandIdOf, ipcCommands, type CommandPort } from "../../render/command";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
+  import TfRepoLastCommit from "./TfRepoLastCommit.svelte";
   import {
     REPO_FILES,
     ancestors,
@@ -116,7 +119,7 @@
     commands = ipcCommands,
     defaults = appDefaults,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen">;
+    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -661,6 +664,13 @@
     return Promise.all(reads);
   }
 
+  /** A Markdown file's relative images, read at the commit the file was (#2256); one function per file and `at`. */
+  const imageRead = $derived.by(() => {
+    const read = ports.fileBytes;
+    const entityId = at;
+    const commit = file?.commit ?? null;
+    return read === undefined ? null : (path: string) => read(entityId, path, commit);
+  });
   /** A relative link in a Markdown file: the file here, at its line where it names one. */
   const fileLink = (to: string, at: number | null) => (at === null ? fileHash(repoId, to) : lineHash(repoId, to, at));
 
@@ -670,6 +680,14 @@
   }
 </script>
 
+{#snippet icon(kind: "dir" | "open" | "file")}
+  <svg class="tf-ficon" viewBox="0 0 16 16" aria-hidden="true"
+    >{#if kind === "dir"}<path d="M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z" />{:else if kind === "open"}<path
+        d="M2.5 4.5h4l1.5 1.5h5.5v1.5M2.5 4.5v8h10l1.5-5h-10l-1.5 5"
+      />{:else}<path d="M4 2h5l3 3v9H4z M9 2v3h3" />{/if}</svg
+  >
+{/snippet}
+
 {#snippet listing(dir: string, depth: number)}
   {#each listings[dir] ?? [] as entry (entry.name)}
     {@const full = join(dir, entry.name)}
@@ -678,7 +696,7 @@
         type="button"
         class="tf-fdir tf-d{Math.min(depth, 8)}"
         aria-expanded={open.has(full)}
-        onclick={() => toggle(full)}>{entry.name}/</button
+        onclick={() => toggle(full)}>{@render icon(open.has(full) ? "open" : "dir")}{entry.name}</button
       >
       {#if open.has(full)}
         {@render listing(full, depth + 1)}
@@ -689,23 +707,34 @@
         class="tf-d{Math.min(depth, 8)}"
         class:tf-changed={changed.has(full)}
         aria-current={full === shown ? "true" : undefined}
-        title={changed.has(full) ? "Changed in your checkout" : undefined}>{entry.name}</a
+        title={changed.has(full) ? "Changed in your checkout" : undefined}>{@render icon("file")}{entry.name}</a
       >
     {:else}
-      <span class="tf-fsub tf-d{Math.min(depth, 8)}">{entry.name}</span>
+      <span class="tf-fsub tf-d{Math.min(depth, 8)}">{@render icon("file")}{entry.name}</span>
     {/if}
   {/each}
 {/snippet}
 
 <div class="tf-repo">
-  <nav class="tf-ftree" aria-label="Files">
-    {#if treeFailed !== null}
-      <p class="tf-cfail">{treeFailed}</p>
-    {/if}
-    <TfWaiting phase={waitPhase({ drawn: listings[""] !== undefined || treeFailed !== null, reading: false, failed: false })} columns={1} count={8}>
-      {@render listing("", 0)}
-    </TfWaiting>
-  </nav>
+  <!-- The tree stays beside every file (#2257, the mockup of #2252): its head folds it, its rows scroll inside it. -->
+  <aside class="tf-ftreebox">
+    <header>
+      <span class="tf-ftree-h">Files</span>
+      <button type="button" class="tf-iconbtn tf-sm" title="Collapse all" disabled={open.size === 0} onclick={() => open.clear()}
+        ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4-3 4 3M4 10l4 3 4-3" /></svg></button
+      >
+    </header>
+    <nav class="tf-ftree" aria-label="Files">
+      {#if treeFailed !== null}
+        <p class="tf-cfail">{treeFailed}</p>
+      {/if}
+      <TfWaiting phase={waitPhase({ drawn: listings[""] !== undefined || treeFailed !== null, reading: false, failed: false })} columns={1} count={8}>
+        {@render listing("", 0)}
+      </TfWaiting>
+    </nav>
+  </aside>
+  <div class="tf-fcol">
+  {#if path === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
   <div class="tf-fileview">
     {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
@@ -734,8 +763,9 @@
     {:else}
       <TfWaiting phase={waitPhase({ drawn: file !== null || fileStranded, reading: fileReading && !fileStranded, failed: fileFailed !== null })} error={fileFailed} failClass="tf-fpad" shape="lines">
       {#if file !== null}
+      {@const cut = file.path.lastIndexOf("/") + 1}
       <header>
-        <span class="tf-p">{file.path}</span>
+        <span class="tf-p">{#if cut > 0}<span class="tf-pdir">{file.path.slice(0, cut)}</span>{/if}{file.path.slice(cut)}</span>
         <span class="tf-dim tf-small"
           >{file.binary ? `${file.size} bytes` : `${lines.length} ${lines.length === 1 ? "line" : "lines"}`}{branch !== null ? `, on ${branch}` : ""}</span
         >
@@ -781,9 +811,9 @@
       {:else if image !== null}
         <div class="tf-fimage"><img src={image} alt={file.path} /></div>
       {:else if drawAs === "markdown"}
-        <TfMarkdown text={file.text} base={parentOf(file.path)} {fileLink} {render} />
-      {:else if drawAs === "mermaid"}
-        <TfDiagram engine="mermaid" code={file.text} {render} />
+        <TfMarkdown text={file.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} />
+      {:else if drawAs === "mermaid" || drawAs === "d2" || drawAs === "graphviz"}
+        <TfDiagram engine={drawAs} code={file.text} {render} />
       {:else if renderer !== null && drawAs === renderer.id && commandIdOf(renderer) !== null}
         <TfCommandOutput {renderer} text={file.text} {commands} />
       {:else}
@@ -808,6 +838,7 @@
       {/if}
       </TfWaiting>
     {/if}
+  </div>
   </div>
 </div>
 

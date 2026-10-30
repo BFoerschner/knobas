@@ -13,7 +13,9 @@
 //! hands out names it (`files@{sha}:src`, `file@{sha}:src/lib.rs`), so a
 //! file opened from the tree reads nothing but itself.
 
-use knobas_source::view::{Block, Crumb, EntryKind, SourceView, TreeEntry, ViewSection};
+use knobas_source::view::{
+    Block, Crumb, EntryKind, FileBytes, SourceView, Standing, TreeEntry, ViewSection,
+};
 use knobas_source::{Source, SourceError};
 use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
@@ -227,6 +229,7 @@ struct Drawn {
     binary: bool,
     url: Option<String>,
     sha: Option<String>,
+    commit: Option<String>,
 }
 
 fn file(section: ViewSection) -> Drawn {
@@ -241,6 +244,7 @@ fn file(section: ViewSection) -> Drawn {
             binary,
             url,
             sha,
+            commit,
         }) => Drawn {
             trail,
             path,
@@ -251,6 +255,7 @@ fn file(section: ViewSection) -> Drawn {
             binary,
             url,
             sha,
+            commit,
         },
         other => panic!("one file block, not {other:#?}"),
     }
@@ -943,4 +948,153 @@ async fn what_names_a_whole_sha_is_fixed_and_what_reads_a_tip_moves() {
             "{entity} {section:?}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// The byte read (#2256): a file whole at the commit a file block names, or
+// refused with its size over the cap, never cut.
+
+/// A file block names the commit it was read at, for the byte read to take
+/// back: a README's images are read at the README's commit.
+#[tokio::test]
+async fn a_file_names_the_commit_it_was_read_at() {
+    let server = gitea().await;
+    let at = "feature/PAY-231-sepa-retry";
+    raw(&server, "README.md", at, b"# hi\n".to_vec()).await;
+    let drawn = file(read(&server, BRANCH, &named(at, "file:README.md")).await);
+    assert_eq!(drawn.commit, Some(tip(at)));
+}
+
+/// The bytes at the commit handed back, whole, from one raw read: no
+/// repository, branch or entry read beside it.
+#[tokio::test]
+async fn the_byte_read_answers_a_file_whole_at_the_commit_handed_back() {
+    let server = gitea().await;
+    let sha = tip("feature/PAY-231-sepa-retry");
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(std::iter::repeat_n(7u8, 2_000));
+    raw_only(&server, "docs/img/logo.png", &sha, png.clone()).await;
+    let read = source(&server)
+        .file_bytes(BRANCH, "docs/img/logo.png", Some(&sha), 10_000)
+        .await
+        .expect("read")
+        .expect("Gitea reads bytes");
+    assert_eq!(read, FileBytes::Read(png));
+    let asked = server.received_requests().await.unwrap();
+    assert_eq!(
+        asked
+            .iter()
+            .map(|r| r.url.path().to_owned())
+            .collect::<Vec<_>>(),
+        vec![format!("{REPO}/raw/docs/img/logo.png")]
+    );
+}
+
+/// Over the cap the file is refused with its whole size, and nothing of it
+/// is answered; at the cap exactly it is read.
+#[tokio::test]
+async fn a_file_over_the_cap_is_refused_with_its_size_never_cut() {
+    let server = gitea().await;
+    let sha = tip("main");
+    raw_only(&server, "big.pdf", &sha, vec![1u8; 2_001]).await;
+    let source = source(&server);
+    let over = source
+        .file_bytes(ENTITY, "big.pdf", Some(&sha), 2_000)
+        .await
+        .expect("read")
+        .expect("Gitea reads bytes");
+    assert_eq!(over, FileBytes::TooLarge { size: 2_001 });
+    let at = source
+        .file_bytes(ENTITY, "big.pdf", Some(&sha), 2_001)
+        .await
+        .expect("read")
+        .expect("Gitea reads bytes");
+    assert_eq!(at, FileBytes::Read(vec![1u8; 2_001]));
+}
+
+/// A refused file whose answer had no length (a compressing proxy) takes
+/// its size from its own entry.
+#[tokio::test]
+async fn a_refused_file_without_a_length_asks_gitea_its_size() {
+    use std::io::Write as _;
+    let server = gitea().await;
+    let text = "z".repeat(50_000);
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    gz.write_all(text.as_bytes()).unwrap();
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/raw/big.txt")))
+        .and(query_param("ref", tip("main").as_str()))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("Content-Encoding", "gzip")
+                .set_body_bytes(gz.finish().unwrap()),
+        )
+        .mount(&server)
+        .await;
+    own_entry(&server, "big.txt", "main", text.len() as u64).await;
+    let refused = source(&server)
+        .file_bytes(ENTITY, "big.txt", Some(&tip("main")), 10_000)
+        .await
+        .expect("read")
+        .expect("Gitea reads bytes");
+    assert_eq!(refused, FileBytes::TooLarge { size: 50_000 });
+}
+
+/// With no commit handed back a branch's file is read at the branch, and a
+/// repository's at its default branch.
+#[tokio::test]
+async fn without_a_commit_the_byte_read_is_at_the_entitys_reference() {
+    let server = gitea().await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/raw/a.txt")))
+        .and(query_param("ref", "feature/PAY-231-sepa-retry"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"branch".to_vec()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/raw/a.txt")))
+        .and(query_param("ref", "main"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"main".to_vec()))
+        .mount(&server)
+        .await;
+    let source = source(&server);
+    let read = |entity: &'static str| {
+        let source = &source;
+        async move {
+            source
+                .file_bytes(entity, "a.txt", None, 100)
+                .await
+                .unwrap()
+                .unwrap()
+        }
+    };
+    assert_eq!(read(BRANCH).await, FileBytes::Read(b"branch".to_vec()));
+    assert_eq!(read(ENTITY).await, FileBytes::Read(b"main".to_vec()));
+}
+
+/// Fixed only at a whole sha: one handed back, or a commit entity's own.
+#[test]
+fn a_byte_read_is_fixed_only_at_a_whole_sha() {
+    let source =
+        knobas_source_gitea::build(instance("http://127.0.0.1:9".into(), TOKEN, json!({})))
+            .expect("builds");
+    let sha = tip("main");
+    let commit = format!("{ENTITY}@{sha}");
+    assert_eq!(
+        source.bytes_standing(BRANCH, "a.png", Some(&sha)),
+        Standing::Fixed
+    );
+    assert_eq!(source.bytes_standing(BRANCH, "a.png", None), Standing::Live);
+    assert_eq!(
+        source.bytes_standing(ENTITY, "a.png", Some("main")),
+        Standing::Live
+    );
+    assert_eq!(
+        source.bytes_standing(&commit, "a.png", None),
+        Standing::Fixed
+    );
+    assert_eq!(
+        source.bytes_standing(&commit[..commit.len() - 30], "a.png", None),
+        Standing::Live
+    );
 }

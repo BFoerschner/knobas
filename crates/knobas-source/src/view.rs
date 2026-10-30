@@ -289,7 +289,33 @@ pub enum Block {
         /// where the source has none; absent on the wire reads as `None`.
         #[serde(default)]
         sha: Option<String>,
+        /// The commit the file was read at (#2256): what
+        /// [`Source::file_bytes`](crate::Source::file_bytes) takes back to
+        /// read this file's bytes, or a file beside it (a README's relative
+        /// image), at the same commit. The source's own id, never parsed by
+        /// the shell; `None` where the source has none, and the byte read
+        /// then reads at the entity's moving reference. Absent on the wire
+        /// reads as `None`.
+        #[serde(default)]
+        commit: Option<String>,
     },
+}
+
+/// The most bytes one [`Source::file_bytes`](crate::Source::file_bytes)
+/// answers (#2256, spec #2234 step 5): 50 MiB. A file over it is refused with
+/// its size ([`FileBytes::TooLarge`]), never cut.
+pub const BYTES_CAP: u64 = 50 * 1024 * 1024;
+
+/// What [`Source::file_bytes`](crate::Source::file_bytes) answers for one
+/// file (#2256). Never on the wire as data: the app hands the bytes to the
+/// shell raw and a refusal as an error naming the size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileBytes {
+    /// The whole file, at most the cap asked for.
+    Read(Vec<u8>),
+    /// The file is longer than the cap asked for; this is its size in bytes,
+    /// and none of it was kept.
+    TooLarge { size: u64 },
 }
 
 /// One step of a [`Block::Tree`]'s or [`Block::File`]'s trail: a
@@ -874,6 +900,7 @@ mod tests {
                 binary: false,
                 url: Some("https://gitea.example/o/r/src/branch/main/README.md".into()),
                 sha: Some("8c2ac7f1e6c4a3b2d1e0f9a8b7c6d5e4f3a2b1c0".into()),
+                commit: Some("1f0e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c".into()),
             },
         ];
         for block in &probes {
@@ -1037,13 +1064,14 @@ mod tests {
             binary: true,
             url: None,
             sha: None,
+            commit: None,
         };
         assert_eq!(
             serde_json::to_value(&file).unwrap(),
             serde_json::json!({
                 "type": "file", "trail": [], "path": "logo.png", "text": "",
                 "language": null, "size": 2048, "truncated": false, "binary": true,
-                "url": null, "sha": null
+                "url": null, "sha": null, "commit": null
             })
         );
         // A file block from before the blob was drawn reads as one without
@@ -1054,7 +1082,17 @@ mod tests {
             "url": null
         }))
         .expect("a file block without a sha reads");
-        assert!(matches!(old, Block::File { sha: None, .. }), "{old:?}");
+        assert!(
+            matches!(
+                old,
+                Block::File {
+                    sha: None,
+                    commit: None,
+                    ..
+                }
+            ),
+            "{old:?}"
+        );
     }
 
     /// The wire shape the TypeScript mirror is written against: blocks are a

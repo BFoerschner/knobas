@@ -512,6 +512,13 @@ where
     //     kind (#2146), and each kind it answers for read back as the sync
     //     emitted it.
     check_refresh(&*s, &d, &sink.0).await;
+    // 14. Code pages (#2274): each template starts with `/` and carries only
+    //     its page's placeholders -- see `code_pages::check`.
+    if let Some(pages) = &d.code_pages
+        && let Err(error) = crate::code_pages::check(pages)
+    {
+        panic!("descriptor.code_pages: {error}");
+    }
 }
 
 /// Clause 13: the read of one item by id ([`crate::Source::refresh`]).
@@ -1994,6 +2001,7 @@ mod tests {
                     _ => Vec::new(),
                 },
                 url_forms: Vec::new(),
+                code_pages: None,
                 entity_kinds: {
                     let kind = |id: &str, label: &str, monogram: &str| KindInfo {
                         id: id.to_owned(),

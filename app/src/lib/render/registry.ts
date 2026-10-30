@@ -78,6 +78,36 @@ export const MERMAID: Renderer = {
   diff: false,
 };
 
+/**
+ * D2 (#2259): a `d2` fence and a `.d2` file, drawn by D2's WASM build in the
+ * diagram worker (`render/diagram.worker.ts`), sanitized, in the sandboxed
+ * frame. D2 loads with the first D2 diagram.
+ */
+export const D2: Renderer = {
+  id: "d2",
+  name: "D2",
+  patterns: ["*.d2"],
+  fences: ["d2"],
+  input: "text",
+  output: "svg",
+  diff: false,
+};
+
+/**
+ * Graphviz (#2259): a `dot` or `graphviz` fence and a `.dot` or `.gv` file,
+ * drawn by viz.js (Graphviz's WASM build) in the diagram worker, sanitized,
+ * in the sandboxed frame. viz.js loads with the first Graphviz diagram.
+ */
+export const GRAPHVIZ: Renderer = {
+  id: "graphviz",
+  name: "Graphviz",
+  patterns: ["*.dot", "*.gv"],
+  fences: ["dot", "graphviz"],
+  input: "text",
+  output: "svg",
+  diff: false,
+};
+
 /** Source: the text, highlighted. Takes every text file and every fence, so it is always the last resort. */
 export const SOURCE: Renderer = {
   id: "source",
@@ -90,7 +120,7 @@ export const SOURCE: Renderer = {
 };
 
 /** Built-ins first, in the order that makes the first that accepts the default; Source last. */
-const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, SOURCE];
+const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, SOURCE];
 
 /**
  * Adds a renderer ahead of Source, so it becomes the default for what it
@@ -138,7 +168,7 @@ export function renderersForFence(lang: string): Renderer[] {
   return renderers.filter((r) => r.fences.includes(wanted) || r.fences.includes("*"));
 }
 
-/** A data URL for an image's bytes (CSP takes `data:` images, not `blob:`). */
+/** A data URL for an image's bytes, for a renderer's output; a Markdown image is a blob instead (`image.ts`, #2256). */
 export function imageUrl(bytes: Uint8Array, path: string): string {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
   const type = ext === "svg" ? "image/svg+xml" : ext === "jpg" ? "image/jpeg" : ext === "ico" ? "image/x-icon" : `image/${ext}`;

@@ -237,7 +237,7 @@ function ports(over: Partial<RepoPorts> = {}): RepoPorts {
       if (section === "files") return one("files", [{ type: "tree", trail: [], entries: [{ name: "README.md", kind: "file", size: 9, section: "file:README.md" }], truncated: false, url: null }]);
       if (section === "file:README.md")
         return one("file:README.md", [
-          { type: "file", trail: [], path: "README.md", text: "# payout\nold line\n", language: null, size: 18, truncated: false, binary: false, url: null, sha: "blob-1" },
+          { type: "file", trail: [], path: "README.md", text: "# payout\nold line\n", language: null, size: 18, truncated: false, binary: false, url: null, sha: "blob-1", commit: null },
         ]);
       if (section === "commits") return one("commits", [{ type: "entities", title: null, rows: [] }]);
       if (id === C1 && section === null) return { ...one("diff", [DIFF], 1), actions: [NEW_BRANCH] };
@@ -572,7 +572,8 @@ const COMPARE = (branch: string) => [REPO, "compare", ...branch.split("/")];
 
 test("the compare page offers Open PR #N where a pull request is already open from the branch", async () => {
   await draw(COMPARE("feature/PAY-231-sepa-retry"), "PAY-231");
-  expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toContain("Pull requests");
+  // Compare is its own tab since #2257 (the mockup's ruling on #2252).
+  expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toBe("Compare");
   expect(text(target.querySelector(".tf-compare .tf-chip.tf-info"))).toBe("PR #142 is already open from this branch");
   expect(button("Open PR #142", target)!.getAttribute("href")).toBe("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
   expect(button("Create pull request", target)).toBeUndefined();

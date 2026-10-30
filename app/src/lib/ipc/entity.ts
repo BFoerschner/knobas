@@ -19,6 +19,7 @@ import type {
   CheckoutApplicationDraft,
   CheckoutSettings,
   CheckoutView,
+  OpenObject,
   CloneAnswer,
   CodeFacts,
   ContextRow,
@@ -100,6 +101,8 @@ export type {
   CheckoutFoundBy,
   CheckoutSettings,
   CheckoutView,
+  OpenObject,
+  OpenObjectKind,
   ChoiceOption,
   CloneAnswer,
   CloneEvent,
@@ -731,6 +734,25 @@ export function entityView(entityId: string, section: string | null = null): Pro
   return invoke<SourceView | null>("entity_view", { entityId, section });
 }
 
+/** What `entity_file_bytes` answers: an `ArrayBuffer` from the bridge, a `Uint8Array` from the dev fake. */
+type RawBytes = ArrayBuffer | ArrayLike<number>;
+
+/**
+ * The bytes of the file at `path` in `entityId`'s tree — `knobas_app::commands::entity::entity_file_bytes`
+ * (#2256, spec #2234 step 5): a README's relative image, a PDF.
+ *
+ * `commit` is the `commit` of the file block the reader has open, handed back unread, so a README's image is read
+ * at the README's commit; `null` reads at the entity's own reference. Answered raw, whole and never cut; kept for
+ * the session where the read is at a whole sha, so a second look costs the source nothing.
+ *
+ * Rejects with `invalid` for a file over 50 MiB (the message names its size and the cap) or a source that reads
+ * no bytes, and otherwise as {@link entityView} does.
+ */
+export async function entityFileBytes(entityId: string, path: string, commit: string | null): Promise<Uint8Array> {
+  const answer = await invoke<RawBytes>("entity_file_bytes", { entityId, path, commit });
+  return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
+}
+
 /**
  * The writes among `asks` their sources' credentials cannot make, each with
  * its reason — `knobas_app::commands::entity::refused_writes` (#2040,
@@ -1214,6 +1236,26 @@ export function openCheckout(entityId: string, at: OpenAt = {}): Promise<string[
     file: at.file ?? null,
     line: at.line ?? null,
   });
+}
+
+/**
+ * Run an application on a code object of this entity's repository —
+ * `open_object` (#2274): a repository, a file at a line, a commit, a range or
+ * a pull request. The application's command for the object's kind runs at
+ * the checkout; one without such a command is refused. Answers the argument
+ * vector it started.
+ */
+export function openObject(entityId: string, application: string | null, object: OpenObject): Promise<string[]> {
+  return invoke<string[]>("open_object", { entityId, application, object });
+}
+
+/**
+ * The page a code object has at its source — `object_page` (#2274): what
+ * *Open in › Browser* opens. Built from the source's typed base URL and the
+ * pages its adapter declares; `null` when it declares none.
+ */
+export function objectPage(entityId: string, object: OpenObject): Promise<string | null> {
+  return invoke<string | null>("object_page", { entityId, object });
 }
 
 /**

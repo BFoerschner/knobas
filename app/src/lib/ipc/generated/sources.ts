@@ -137,6 +137,13 @@ export type BuildParameter = { name: string, value: string, };
 export type CloneFrom = "base_url" | { "config": string };
 
 /**
+ * The pages one code host serves. Gitea's: `/{repo}`,
+ * `/{repo}/src/{ref}/{file}#L{line}`, `/{repo}/commit/{sha}`,
+ * `/{repo}/compare/{base}...{head}`, `/{repo}/pulls/{pr}`.
+ */
+export type CodePages = { repository: string, file: string, commit: string, range: string, pull_request: string, };
+
+/**
  * What *Test connection* found.
  */
 export type ConnectionReport = { ok: boolean, account: string | null, server_version: string | null, secret_expires_at: string | null, 
@@ -1244,7 +1251,19 @@ clone_from: Array<CloneFrom>,
  * -- an external adapter's JSON among them -- decodes as an adapter
  * whose items open by their stored address alone.
  */
-url_forms: Array<UrlForm>, };
+url_forms: Array<UrlForm>, 
+/**
+ * Where a code host serves the page of a repository, a file, a commit,
+ * a range and a pull request, after the instance's typed base URL
+ * (#2274, [`code_pages`]): what *Open in › Browser* and the `{url}`
+ * placeholder open. [`code_pages::check`] holds it to its rules
+ * (contract battery clause 14). Read on the Rust side; the shell never
+ * does.
+ *
+ * `#[serde(default)]`, so a descriptor from a peer that predates this
+ * decodes as a source with no code pages: *Browser* is then not offered.
+ */
+code_pages?: CodePages, };
 
 /**
  * An unsaved (or saved) source to test a connection for.

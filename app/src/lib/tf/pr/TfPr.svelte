@@ -120,6 +120,7 @@
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
+  import TfOpenObject from "../openin/TfOpenObject.svelte";
   import TfPrFiles from "./TfPrFiles.svelte";
   import TfPrMerge from "./TfPrMerge.svelte";
   import TfPrReview from "./TfPrReview.svelte";
@@ -646,6 +647,13 @@
             }}>Merge…</button
           >
         {/if}
+        {#if repo !== null && number !== null && header.base !== null && header.head !== null}
+          <TfOpenObject
+            entityId={repo.entity_id}
+            size="md"
+            object={{ kind: "pull_request", number: Number(number.slice(1)), base: header.base, head: header.head, branch: header.head }}
+          />
+        {/if}
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
       </div>
     </header>
@@ -670,6 +678,7 @@
           source={detail?.source?.id ?? null}
           listen={ports.listen}
           {follower}
+          openAt={repo === null ? null : { entityId: repo.entity_id, at: header.head }}
         />
       {:else}
         <div>
