@@ -8,6 +8,10 @@
 //! (#2242): a second branch-list read answers from memory and reads once
 //! behind it, and a branch pushed between the two is the next read's.
 //!
+//! Then the byte read (#2256): a private repository's README and its
+//! relative PNG and SVG, read at the README's commit as the Files tab reads
+//! them, byte for byte; a second look at each image costs no request.
+//!
 //! The requests are counted by the HTTP client itself
 //! (`knobas_http::counted`), around the app's own read
 //! (`sources::crud::view`), so what is counted is what the shell's
@@ -16,9 +20,10 @@
 //!
 //! # Read-only at Gitea
 //!
-//! Every request here is a read but one: the moving-read test pushes a
+//! Every request here is a read but two: the moving-read test pushes a
 //! branch named `read-cache-<uuid>` from `main` and deletes it again, also
-//! when it fails. What else it writes is a scratch database. The grants
+//! when it fails; the byte-read test creates a private repository
+//! `bytes-<uuid>` of the token's user and deletes it again the same way. What else it writes is a scratch database. The grants
 //! probe's empty-bodied POSTs create nothing (`knobas-source-gitea`'s
 //! `grants.rs`).
 //!
@@ -404,4 +409,177 @@ async fn a_pushed_branch_is_the_read_after_the_read_behind() {
         "the pushed branch is the next read's: {:?}",
         branch_names(&third)
     );
+}
+
+/// A PNG's signature, header and end: the bytes are what is checked, not a picture.
+const PNG: &[u8] = &[
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52, 0, 0, 0,
+    0x60, 0, 0, 0, 0x20, 0x08, 0x02, 0, 0, 0, 0x62, 0x8a, 0xea, 0x83, 0, 0, 0, 0, 0x49, 0x45, 0x4e,
+    0x44, 0xae, 0x42, 0x60, 0x82,
+];
+/// An SVG with a script in it, which the shell's sanitizer drops; the byte
+/// read hands it over as it is.
+const SVG: &str =
+    "<svg width=\"8\" height=\"8\"><script>alert(1)</script><rect width=\"8\" height=\"8\"/></svg>";
+
+/// **The byte read against Gitea** (#2256): a private repository's README
+/// names the commit it was read at; its relative PNG and SVG read at that
+/// commit are the bytes committed; a second look at each costs no request.
+#[tokio::test]
+#[ignore = "needs the testenv Gitea: just gitea-live"]
+async fn a_private_readmes_images_are_read_at_its_commit_and_kept() {
+    use base64::Engine as _;
+    let http = reqwest::Client::new();
+    let base = need("KNOBAS_GITEA_URL");
+    let auth = format!("token {}", need("KNOBAS_GITEA_TOKEN"));
+    let user: serde_json::Value = http
+        .get(format!("{base}/api/v1/user"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("Gitea answers")
+        .json()
+        .await
+        .expect("the token's user");
+    let owner = user["login"].as_str().expect("a login").to_owned();
+    let name = format!("bytes-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let made = http
+        .post(format!("{base}/api/v1/user/repos"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "name": name, "private": true, "auto_init": true, "default_branch": "main" }))
+        .send()
+        .await
+        .expect("Gitea answers");
+    assert!(
+        made.status().is_success(),
+        "the repository is made: {}",
+        made.status()
+    );
+    // Deleted again however the test ends, as the pushed branch is.
+    struct Delete(String, String);
+    impl Drop for Delete {
+        fn drop(&mut self) {
+            let (url, auth) = (self.0.clone(), self.1.clone());
+            let _ = std::thread::spawn(move || {
+                tokio::runtime::Runtime::new()
+                    .unwrap()
+                    .block_on(async move {
+                        let _ = reqwest::Client::new()
+                            .delete(url)
+                            .header("Authorization", auth)
+                            .send()
+                            .await;
+                    });
+            })
+            .join();
+        }
+    }
+    let _delete = Delete(format!("{base}/api/v1/repos/{owner}/{name}"), auth.clone());
+    let b64 = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+    let readme = "# bytes\n\n![logo](docs/img/logo.png)\n\n![flow](docs/img/flow.svg)\n";
+    for (path, content) in [
+        ("docs/img/logo.png", PNG.to_vec()),
+        ("docs/img/flow.svg", SVG.as_bytes().to_vec()),
+        ("README.md", readme.as_bytes().to_vec()),
+    ] {
+        // README.md exists from auto_init: one PUT over it needs its sha.
+        let sha = if path == "README.md" {
+            let entry: serde_json::Value = http
+                .get(format!(
+                    "{base}/api/v1/repos/{owner}/{name}/contents/{path}"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .expect("Gitea answers")
+                .json()
+                .await
+                .expect("the README's entry");
+            entry["sha"].as_str().map(str::to_owned)
+        } else {
+            None
+        };
+        let request = if sha.is_some() {
+            http.put(format!(
+                "{base}/api/v1/repos/{owner}/{name}/contents/{path}"
+            ))
+        } else {
+            http.post(format!(
+                "{base}/api/v1/repos/{owner}/{name}/contents/{path}"
+            ))
+        };
+        let committed = request
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "content": b64(&content), "message": format!("add {path}"), "sha": sha }))
+            .send()
+            .await
+            .expect("Gitea answers");
+        assert!(
+            committed.status().is_success(),
+            "{path} is committed: {}",
+            committed.status()
+        );
+    }
+
+    let mut app = app().await;
+    // A source of its own whose scope is the new repository.
+    app.source = format!("gitea-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    app.secrets
+        .put(
+            &knobas_secrets::KeychainAccount::source(&app.source),
+            &Secret::just(AuthMethod::Pat, need("KNOBAS_GITEA_TOKEN")),
+        )
+        .expect("the token is stored");
+    knobas_sync::config::insert(
+        &app.pool,
+        &knobas_sync::config::InsertConfig {
+            id: app.source.clone(),
+            adapter_kind: "gitea".to_owned(),
+            display_name: app.source.clone(),
+            base_url: base.clone(),
+            auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::Pat),
+            config: serde_json::json!({ "repos": [format!("{owner}/{name}")] }),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .expect("the source row is written");
+    let repo = format!("{}:{owner}/{name}", app.source);
+
+    let (view, _, _) = app.view_of(&repo, FILE).await;
+    let Some(Block::File { text, commit, .. }) = view.sections[0].blocks.first() else {
+        panic!("the README: {view:?}");
+    };
+    assert_eq!(text, readme);
+    let commit = commit.clone().expect("the README names its commit");
+    println!("README at    {commit}");
+
+    for (path, want) in [
+        ("docs/img/logo.png", PNG),
+        ("docs/img/flow.svg", SVG.as_bytes()),
+    ] {
+        let read = || {
+            knobas_http::counted::counted(knobas_app::commands::entity::entity_file_bytes_inner(
+                &app.pool,
+                &app.secrets,
+                &app.registry,
+                &app.live,
+                &repo,
+                path,
+                Some(&commit),
+            ))
+        };
+        let (first, first_sent) = read().await;
+        println!("{path}: {first_sent} requests");
+        assert_eq!(
+            first.expect("the image reads"),
+            want,
+            "{path} byte for byte"
+        );
+        assert!(first_sent >= 1, "the counter sees the read: {first_sent}");
+        let (again, sent) = read().await;
+        assert_eq!(again.expect("the image reads"), want);
+        assert_eq!(sent, 0, "a second look at {path} is the cache's");
+    }
 }

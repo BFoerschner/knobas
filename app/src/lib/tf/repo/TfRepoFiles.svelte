@@ -119,7 +119,7 @@
     commands = ipcCommands,
     defaults = appDefaults,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen">;
+    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -664,6 +664,13 @@
     return Promise.all(reads);
   }
 
+  /** A Markdown file's relative images, read at the commit the file was (#2256); one function per file and `at`. */
+  const imageRead = $derived.by(() => {
+    const read = ports.fileBytes;
+    const entityId = at;
+    const commit = file?.commit ?? null;
+    return read === undefined ? null : (path: string) => read(entityId, path, commit);
+  });
   /** A relative link in a Markdown file: the file here, at its line where it names one. */
   const fileLink = (to: string, at: number | null) => (at === null ? fileHash(repoId, to) : lineHash(repoId, to, at));
 
@@ -804,7 +811,7 @@
       {:else if image !== null}
         <div class="tf-fimage"><img src={image} alt={file.path} /></div>
       {:else if drawAs === "markdown"}
-        <TfMarkdown text={file.text} base={parentOf(file.path)} {fileLink} {render} />
+        <TfMarkdown text={file.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} />
       {:else if drawAs === "mermaid" || drawAs === "d2" || drawAs === "graphviz"}
         <TfDiagram engine={drawAs} code={file.text} {render} />
       {:else if renderer !== null && drawAs === renderer.id && commandIdOf(renderer) !== null}

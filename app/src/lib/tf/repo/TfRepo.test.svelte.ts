@@ -232,6 +232,7 @@ function ports(over: Partial<RepoPorts> = {}, cloned = true): RepoPorts {
             binary: false,
             url: null,
             sha: null,
+            commit: null,
           },
         ]);
       }

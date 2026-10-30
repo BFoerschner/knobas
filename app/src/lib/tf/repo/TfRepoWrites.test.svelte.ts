@@ -237,7 +237,7 @@ function ports(over: Partial<RepoPorts> = {}): RepoPorts {
       if (section === "files") return one("files", [{ type: "tree", trail: [], entries: [{ name: "README.md", kind: "file", size: 9, section: "file:README.md" }], truncated: false, url: null }]);
       if (section === "file:README.md")
         return one("file:README.md", [
-          { type: "file", trail: [], path: "README.md", text: "# payout\nold line\n", language: null, size: 18, truncated: false, binary: false, url: null, sha: "blob-1" },
+          { type: "file", trail: [], path: "README.md", text: "# payout\nold line\n", language: null, size: 18, truncated: false, binary: false, url: null, sha: "blob-1", commit: null },
         ]);
       if (section === "commits") return one("commits", [{ type: "entities", title: null, rows: [] }]);
       if (id === C1 && section === null) return { ...one("diff", [DIFF], 1), actions: [NEW_BRANCH] };
