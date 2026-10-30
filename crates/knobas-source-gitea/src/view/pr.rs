@@ -227,7 +227,7 @@ impl PullView<'_> {
             async { Ok(self.source.resolves().await) },
             self.viewer(),
         )?;
-        let text = self.diff(&pull, &commits, fetched).await?;
+        let (text, unpinned) = self.diff(&pull, &commits, fetched).await?;
         let reviewed = range::reviewed(&reviews, viewer.as_deref());
         let range = range::of(
             &self.source.id,
@@ -247,7 +247,14 @@ impl PullView<'_> {
                     .pull_review_comments(self.owner, self.repo, self.number, id)
             })
             .collect();
-        let answers = threads::all(reads).await?;
+        // The record read that pins a fetched diff runs beside the line
+        // comments: it only has to start after the `.diff` answered.
+        let (answers, ()) = tokio::join!(threads::all(reads), async {
+            if let Some(key) = unpinned {
+                self.keep(&pull, key, std::sync::Arc::clone(&text)).await;
+            }
+        });
+        let answers = answers?;
         let written = commented
             .iter()
             .zip(answers)
@@ -272,20 +279,15 @@ impl PullView<'_> {
 
     /// The diff *Files* draws: `fetched`, read after `commits` was, or the
     /// one kept at the merge base the record names and the head `commits`
-    /// ends on.
-    ///
-    /// A fetched diff is kept only where it is sure to stand at that head:
-    /// the listing named it before the `.diff` was read, so the `.diff` is at
-    /// that head or a later one; the record names the branch's tip, which the
-    /// `.diff` never runs ahead of, so a record read after the `.diff` that
-    /// still names that head and merge base pins it. A listing behind the
-    /// record (Forgejo's queue not caught up) keeps nothing.
+    /// ends on. A diff read here comes with the key it is kept under once
+    /// [`Self::keep`] has pinned it; a kept one, or one with nothing to say
+    /// what it stands at, comes with none.
     async fn diff(
         &self,
         pull: &Pull,
         commits: &[rows::ListedCommit],
         fetched: Option<String>,
-    ) -> Result<std::sync::Arc<str>, SourceError> {
+    ) -> Result<(std::sync::Arc<str>, Option<diffs::DiffKey>), SourceError> {
         let head = pull.head.as_ref().and_then(|h| h.sha.as_deref());
         let tip = commits.first().map(|c| c.record.sha.as_str());
         let key = match (pull.merge_base.as_deref(), tip) {
@@ -297,7 +299,7 @@ impl PullView<'_> {
         let fetched = match fetched {
             Some(text) => text,
             None => match key.as_ref().and_then(|k| self.source.pull_diffs.get(k)) {
-                Some(text) => return Ok(text),
+                Some(text) => return Ok((text, None)),
                 None => {
                     self.source
                         .client
@@ -306,20 +308,24 @@ impl PullView<'_> {
                 }
             },
         };
-        let text: std::sync::Arc<str> = fetched.into();
-        if let Some(key) = key {
-            let after = self.pull().await.ok();
-            let same = after.is_some_and(|after| {
-                after.merge_base == pull.merge_base
-                    && after.head.as_ref().and_then(|h| h.sha.as_deref()) == head
-            });
-            if same {
-                self.source
-                    .pull_diffs
-                    .put(key, std::sync::Arc::clone(&text));
-            }
+        Ok((fetched.into(), key))
+    }
+
+    /// Keep `text`, a `.diff` read after the listing named `key`'s head,
+    /// where it is sure to stand at that head: the `.diff` is at that head or
+    /// a later one; the record names the branch's tip, which the `.diff`
+    /// never runs ahead of, so a record read after the `.diff` that still
+    /// names that head and merge base pins it. A failed read keeps nothing.
+    async fn keep(&self, pull: &Pull, key: diffs::DiffKey, text: std::sync::Arc<str>) {
+        let head = pull.head.as_ref().and_then(|h| h.sha.as_deref());
+        let after = self.pull().await.ok();
+        let same = after.is_some_and(|after| {
+            after.merge_base == pull.merge_base
+                && after.head.as_ref().and_then(|h| h.sha.as_deref()) == head
+        });
+        if same {
+            self.source.pull_diffs.put(key, text);
         }
-        Ok(text)
     }
 
     /// The pull request's commits, at most [`rows::COMMIT_CAP`], ending on
