@@ -32,6 +32,8 @@
   import { itemHash, resolveTicket } from "../job/job";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
+  import TfWaiting from "../TfWaiting.svelte";
+  import { waitPhase } from "../waiting";
   import {
     branchStanding,
     compareHash,
@@ -71,7 +73,9 @@
   const into = $derived(defaultBranch ?? branches[0]?.name ?? "");
 
   let standing = $state<BranchStanding | null>(null);
+  /** What the branch changes: another branch's stays drawn, dimmed, while this one's is read (#2246). */
   let files = $state<DiffFile[] | null>(null);
+  let reading = $state(false);
   let failed = $state<string | null>(null);
   /** *Into*, the default branch proposed once: a new *From* keeps what the reader picked. */
   let base = $state(untrack(() => into));
@@ -87,7 +91,6 @@
     const id = listedId;
     let live = true;
     standing = null;
-    files = null;
     failed = null;
     if (id === null) return;
     readBranch(id, () => live);
@@ -110,14 +113,22 @@
     const fail = (error: unknown) => {
       if (alive() && !again) failed = ipcErrorMessage(error);
     };
+    reading = true;
     const standingRead = ports.entityView(id, null).then((answer) => {
       if (alive()) standing = branchStanding(answer);
     }, fail);
     const diffRead = ports.entityView(id, "diff").then((view) => {
       if (!alive()) return;
+      reading = false;
       const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
       files = block?.type === "diff" ? block.files : [];
-    }, fail);
+    }, (error) => {
+      if (!alive()) return;
+      reading = false;
+      if (again) return;
+      fail(error);
+      files = null;
+    });
     return Promise.all([standingRead, diffRead]);
   }
 
@@ -225,14 +236,16 @@
       </div>
     </form>
     <h2 class="tf-cgroup-h tf-cchanges">What it changes</h2>
-    {#if failed !== null}
-      <p class="tf-cfail">{failed}</p>
-    {:else if listed === null || listed.entityId === null}
+    {#if listed === null || listed.entityId === null}
       <div class="tf-empty">This branch is not on {sourceName(source)} yet, or knobas has not synced it. What it changes shows here once it has.</div>
-    {:else if files !== null && files.length === 0}
-      <div class="tf-empty">This branch has no commits that {defaultBranch ?? into} lacks.</div>
-    {:else if files !== null}
-      <TfDiff {files} />
+    {:else}
+      <TfWaiting phase={waitPhase({ drawn: files !== null, reading, failed: failed !== null })} error={failed} shape="lines">
+        {#if files !== null && files.length === 0}
+          <div class="tf-empty">This branch has no commits that {defaultBranch ?? into} lacks.</div>
+        {:else if files !== null}
+          <TfDiff {files} />
+        {/if}
+      </TfWaiting>
     {/if}
   </div>
   <aside class="tf-side">

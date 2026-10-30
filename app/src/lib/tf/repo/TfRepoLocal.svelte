@@ -20,6 +20,8 @@
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { localFiles } from "./repo";
+  import TfWaiting from "../TfWaiting.svelte";
+  import { waitPhase } from "../waiting";
 
   let {
     repoId,
@@ -96,10 +98,14 @@
     Read with read-only git, when you open this tab and when the window gets focus. knobas never commits, stashes or pushes
     here: do that in your editor or terminal.
   </p>
-  {#if failed !== null}
-    <p class="tf-cfail">Could not read the local changes: {failed}</p>
-  {:else if read === null}
-    <!-- Reading. -->
+  <!-- The focus re-read answers in a blink from local git: it swaps the diff in place, undimmed; only the first read waits here (#2246). -->
+  <TfWaiting
+    phase={waitPhase({ drawn: read !== null, reading: false, failed: failed !== null })}
+    error={failed === null ? null : `Could not read the local changes: ${failed}`}
+    shape="lines"
+  >
+  {#if read === null}
+    <!-- Not drawn: the skeleton stands in. -->
   {:else if read.status === "no_git"}
     <div class="tf-empty"><p>git was not found on this machine, so knobas cannot read the checkout.</p></div>
   {:else if read.status === "not_a_repo"}
@@ -123,6 +129,7 @@
       </div>
     {/if}
   {/if}
+  </TfWaiting>
 {:else}
   <div class="tf-empty">
     Not on this machine yet.

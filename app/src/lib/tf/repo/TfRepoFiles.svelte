@@ -56,6 +56,8 @@
     sourceName,
     type TextPlace,
   } from "./repo";
+  import TfWaiting from "../TfWaiting.svelte";
+  import { waitPhase } from "../waiting";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -111,6 +113,8 @@
   /** Why the source refuses a commit straight onto the branch (#985), `null` where it takes one. */
   let refusal = $state<string | null>(null);
   let fileFailed = $state<string | null>(null);
+  /** The file shown is being read: the one drawn before stays, dimmed, until it answers (#2246). */
+  let fileReading = $state(false);
   /** Directory reads asked and not answered, at the current `at`. */
   let asked = new Set<string>();
   /**
@@ -239,7 +243,7 @@
     const entry = entryOf(shown);
     return entry === undefined || entry.section === null || entry.kind === "dir" ? MISSING : entry.section;
   });
-  /** The section the file drawn was read through. */
+  /** The section the file drawn was read through; the file drawn stays, dimmed, while the next one is read. */
   let drawnSection: string | null = null;
 
   function drawFile(read: ViewSection | undefined, section: string) {
@@ -247,6 +251,7 @@
     file = block?.type === "file" ? block : null;
     drawnSection = section;
     refusal = commitRefusal(read);
+    fileReading = false;
     fileFailed = null;
     draft = null;
     settleCommit(file);
@@ -257,13 +262,27 @@
   $effect(() => {
     const section = fileSection;
     const where = at;
-    if (section !== null && section === untrack(() => drawnSection) && untrack(() => file) !== null) return;
-    file = null;
-    drawnSection = null;
-    refusal = null;
+    // Drawn already, by a deep link's early read or before a step away and back.
+    if (section !== null && section === untrack(() => drawnSection) && untrack(() => file) !== null) {
+      fileReading = false;
+      fileFailed = null;
+      return;
+    }
     fileFailed = null;
+    // Waiting for the directory that says which section opens the file; with no file to show, nothing is drawn.
+    const showing = untrack(() => shown) !== null;
+    fileReading = showing;
+    if (!showing) {
+      file = null;
+      drawnSection = null;
+      refusal = null;
+    }
     if (section === null) return;
     if (section === MISSING) {
+      fileReading = false;
+      file = null;
+      drawnSection = null;
+      refusal = null;
       fileFailed = `There is no file ${untrack(() => shown)} on ${untrack(() => branch) ?? "this branch"}.`;
       return;
     }
@@ -273,13 +292,25 @@
         if (live && !(file !== null && drawnSection === section)) drawFile(read, section);
       },
       (error) => {
-        if (live) fileFailed = ipcErrorMessage(error);
+        if (!live) return;
+        fileReading = false;
+        file = null;
+        drawnSection = null;
+        refusal = null;
+        fileFailed = ipcErrorMessage(error);
       },
     );
     return () => {
       live = false;
     };
   });
+
+  /**
+   * A directory read failed before the file's section was known: no answer is
+   * coming, so the file pane neither waits on skeletons nor stays dimmed; the
+   * tree draws the error.
+   */
+  const fileStranded = $derived(treeFailed !== null && fileSection === null);
 
   const lines = $derived(file === null || file.binary ? [] : fileLines(file.text));
 
@@ -464,10 +495,12 @@
     {#if treeFailed !== null}
       <p class="tf-cfail">{treeFailed}</p>
     {/if}
-    {@render listing("", 0)}
+    <TfWaiting phase={waitPhase({ drawn: listings[""] !== undefined || treeFailed !== null, reading: false, failed: false })} columns={1} count={8}>
+      {@render listing("", 0)}
+    </TfWaiting>
   </nav>
   <div class="tf-fileview">
-    {#if file !== null && editing && editable && branch !== null}
+    {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
         <span class="tf-p">{file.path}</span>
         <span class="tf-chip tf-warn">editing on {branch}</span>
@@ -489,7 +522,11 @@
           oninput={(event) => (draft = (event.currentTarget as HTMLTextAreaElement).value)}
         ></textarea>
       </div>
-    {:else if file !== null}
+    {:else if shown === null && listings[""] !== undefined}
+      <div class="tf-empty"><p>Pick a file in the tree.</p></div>
+    {:else}
+      <TfWaiting phase={waitPhase({ drawn: file !== null || fileStranded, reading: fileReading && !fileStranded, failed: fileFailed !== null })} error={fileFailed} failClass="tf-fpad" shape="lines">
+      {#if file !== null}
       <header>
         <span class="tf-p">{file.path}</span>
         <span class="tf-dim tf-small"
@@ -527,10 +564,8 @@
       {:else}
         <pre class="tf-code" bind:this={code} oncopy={copyLines} {@attach win.list}>{#each win.slice(lines) as text, i (win.start + i)}{@const n = win.start + i + 1}<div class="tf-l" class:tf-at={n === line} data-n={n} {@attach win.row(n - 1)}><span>{n}</span><span>{text || " "}</span></div>{/each}</pre>
       {/if}
-    {:else if fileFailed !== null}
-      <p class="tf-cfail tf-fpad">{fileFailed}</p>
-    {:else if shown === null && listings[""] !== undefined}
-      <div class="tf-empty"><p>Pick a file in the tree.</p></div>
+      {/if}
+      </TfWaiting>
     {/if}
   </div>
 </div>

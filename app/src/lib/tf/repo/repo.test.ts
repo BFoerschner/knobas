@@ -484,3 +484,31 @@ test("readAllRows stops as soon as done is satisfied, and on an empty page", asy
   const shrunk = await readAllRows(async () => ({ rows: [], total: 5, tally: null, groups: null }));
   expect(shrunk).toEqual([]);
 });
+
+test("readAllRows hands each page over as it arrives, the rows so far appended, before the later pages answer (#2245)", async () => {
+  const all = filler(0, 2500);
+  let release!: () => void;
+  const later = new Promise<void>((resolve) => (release = resolve));
+  const handed: string[][] = [];
+  const whole = readAllRows(
+    async (offset) => {
+      if (offset > 0) await later;
+      return { rows: all.slice(offset, offset + 1000), total: all.length, tally: null, groups: null };
+    },
+    undefined,
+    (rows) => handed.push(rows.map((row) => row.title)),
+  );
+  for (let i = 0; i < 5; i += 1) await Promise.resolve();
+  // The first page is in while the rest are held back.
+  expect(handed.map((rows) => rows.length)).toEqual([1000]);
+  expect(handed[0]![0]).toBe("o/r0");
+
+  release();
+  const rows = await whole;
+  expect(handed.map((rows) => rows.length)).toEqual([1000, 2000, 2500]);
+  // Appended behind the first page, never in its place.
+  expect(handed[1]!.slice(0, 1000)).toEqual(handed[0]);
+  expect(handed[2]![2499]).toBe("o/r2499");
+  // Whoever awaits the whole list still gets it in one piece.
+  expect(rows.length).toBe(2500);
+});

@@ -171,15 +171,21 @@ export function repoOfRow(row: Pick<EntityRow, "source_id" | "path">, repos: rea
  * read answers at most `LIST_MOST` rows, so a mirror of more rows than that
  * is read on with `offset` instead of dropping its tail unsaid. An empty page
  * ends the walk, so a room that shrank mid-read cannot loop it.
+ *
+ * `onPage` is handed each page as it lands (#2245), with every row so far in
+ * a new array, so a list can draw its first page at once and append the rest
+ * behind it; whoever awaits the walk still gets the whole list in one piece.
  */
 export async function readAllRows(
   read: (offset: number) => Promise<EntityPage>,
   done: (rows: readonly EntityRow[]) => boolean = () => false,
+  onPage?: (rows: readonly EntityRow[], page: EntityPage) => void,
 ): Promise<EntityRow[]> {
   const rows: EntityRow[] = [];
   for (;;) {
     const page = await read(rows.length);
     rows.push(...page.rows);
+    onPage?.([...rows], page);
     if (page.rows.length === 0 || rows.length >= page.total || done(rows)) return rows;
   }
 }
