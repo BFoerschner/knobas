@@ -30,12 +30,15 @@
 //!
 //! # User command steps (#2265)
 //!
-//! A command step joins [`PipeStep`] as one more variant, run by
-//! `crate::renderers::run_argv` under ADR-0033's rules rather than on a
-//! worker: [`run_step`] is the one place that picks how a step runs.
+//! [`PipeStep::Command`] names a saved [`saved::CommandStep`] by id. It runs
+//! through `crate::renderers::run_argv` under ADR-0033's rules, with its own
+//! timeout and the pipeline's size cap, rather than on a worker: [`run_step`]
+//! is the one place that picks how a step runs. The kept run's key holds the
+//! command each id stood for, so an edited command is run again.
 
 mod child;
 mod jq;
+pub mod saved;
 mod steps;
 
 pub use child::{ARG as CHILD_ARG, main_if_asked};
@@ -125,6 +128,11 @@ pub enum PipeStep {
         to: PipeFormat,
     },
     HexDump,
+    /// One of the person's saved command steps ([`saved::CommandStep`]), by
+    /// id: the webview never sends a program (ADR-0033).
+    Command {
+        id: String,
+    },
 }
 
 impl PipeStep {
@@ -142,6 +150,18 @@ impl PipeStep {
             Self::Pretty { format } => format!("pretty-print {}", format.name()),
             Self::Convert { from, to } => format!("{} to {}", from.name(), to.name()),
             Self::HexDump => "hex dump".to_owned(),
+            Self::Command { id } => id.clone(),
+        }
+    }
+
+    /// [`Self::name`], with a command step called by its saved name.
+    fn called(&self, commands: &[saved::CommandStep]) -> String {
+        match self {
+            Self::Command { id } => commands
+                .iter()
+                .find(|command| &command.id == id)
+                .map_or_else(|| id.clone(), |command| command.name.clone()),
+            other => other.name(),
         }
     }
 
@@ -176,6 +196,7 @@ impl PipeStep {
                 }
             }
             Self::HexDump => format!("{name}.hexdump"),
+            Self::Command { .. } => name.to_owned(),
         }
     }
 }
@@ -331,21 +352,47 @@ impl Carried {
     }
 }
 
-/// `steps` over `bytes`, the file `name`.
+/// `steps` over `bytes`, the file `name`, with no saved command steps (a
+/// [`PipeStep::Command`] fails as not saved).
 pub async fn run_bytes(steps: &[PipeStep], bytes: Vec<u8>, name: &str, limits: Limits) -> PipeRun {
-    run(steps, Carried::PipeStep(Arc::new(bytes)), name, limits).await
+    run_bytes_with(steps, &[], bytes, name, limits).await
 }
 
-async fn run(steps: &[PipeStep], mut carried: Carried, name: &str, limits: Limits) -> PipeRun {
+/// `steps` over `bytes`, the file `name`, a command step run as `commands`
+/// (from [`saved::command_steps`]) say.
+pub async fn run_bytes_with(
+    steps: &[PipeStep],
+    commands: &[saved::CommandStep],
+    bytes: Vec<u8>,
+    name: &str,
+    limits: Limits,
+) -> PipeRun {
+    run(
+        steps,
+        commands,
+        Carried::PipeStep(Arc::new(bytes)),
+        name,
+        limits,
+    )
+    .await
+}
+
+async fn run(
+    steps: &[PipeStep],
+    commands: &[saved::CommandStep],
+    mut carried: Carried,
+    name: &str,
+    limits: Limits,
+) -> PipeRun {
     let mut name = name.to_owned();
     for (index, step) in steps.iter().enumerate() {
-        match run_step(step, carried.clone(), limits).await {
+        match run_step(step, commands, carried.clone(), limits).await {
             Ok(output) => carried = Carried::PipeStep(Arc::new(output)),
             Err((why, error)) => {
                 return PipeRun::Failed {
                     failure: PipeFailure {
                         index: u32::try_from(index).unwrap_or(u32::MAX),
-                        name: step.name(),
+                        name: step.called(commands),
                         why,
                         error,
                         input: shown(carried.bytes()),
@@ -371,14 +418,26 @@ async fn run(steps: &[PipeStep], mut carried: Carried, name: &str, limits: Limit
 /// One step's output, or why it has none and what to say.
 async fn run_step(
     step: &PipeStep,
+    commands: &[saved::CommandStep],
     input: Carried,
     limits: Limits,
 ) -> Result<Vec<u8>, (PipeWhy, String)> {
-    let name = step.name();
+    let name = step.called(commands);
     let size = input.bytes().len() as u64;
+    let mut limits = limits;
     let ran = match step {
         // jq out of process (#2314): see `child`.
         PipeStep::Jq { .. } => child::run(step, input.bytes(), limits).await,
+        PipeStep::Command { id } => {
+            let Some(command) = commands.iter().find(|command| &command.id == id) else {
+                return Err((
+                    PipeWhy::Error,
+                    format!("'{id}' is not one of your command steps: see Settings › Renderers"),
+                ));
+            };
+            limits.timeout = Duration::from_secs(u64::from(command.timeout_secs));
+            run_command(command, input.bytes(), limits).await
+        }
         _ => on_worker(step.clone(), input, limits).await,
     };
     ran.map_err(|failure| match failure {
@@ -403,6 +462,72 @@ async fn run_step(
                 ),
             ),
         })
+}
+
+/// A saved command step over `input` (ADR-0033): its stdout, or its stderr
+/// as the failure.
+async fn run_command(
+    command: &saved::CommandStep,
+    input: &[u8],
+    limits: Limits,
+) -> Result<Vec<u8>, Failure> {
+    use crate::renderers::{Ended, run_argv};
+    let argv = knobas_core::checkout::open::words(&command.command).map_err(|error| {
+        Failure::Error(format!("{}'s command cannot be run: {error}", command.name))
+    })?;
+    let ended = run_argv(
+        &argv,
+        input.to_vec(),
+        crate::renderers::Limits {
+            timeout: limits.timeout,
+            output_cap: usize::try_from(limits.cap).unwrap_or(usize::MAX),
+        },
+        std::env::vars_os().collect(),
+    )
+    .await;
+    match ended {
+        Ended::Exited {
+            status: Some(0),
+            stdout,
+            ..
+        } => Ok(stdout),
+        Ended::Exited { status, stderr, .. } => {
+            let said = String::from_utf8_lossy(&stderr).trim().to_owned();
+            Err(Failure::Error(match (said.is_empty(), status) {
+                (false, _) => said,
+                (true, Some(code)) => format!("{} exited with status {code}", command.name),
+                (true, None) => format!("{} was killed by a signal", command.name),
+            }))
+        }
+        Ended::TimedOut { .. } => Err(Failure::Stopped),
+        Ended::TooLarge => Err(Failure::TooLarge),
+        Ended::NotStarted(reason) => Err(Failure::Error(reason)),
+    }
+}
+
+/// What a kept run over `steps` stands for: the limits, the steps, and the
+/// command each command step's id named when it ran (an edited command is
+/// another pipeline).
+fn pipeline_key(steps: &[PipeStep], commands: &[saved::CommandStep], limits: Limits) -> String {
+    let resolved: Vec<serde_json::Value> = steps
+        .iter()
+        .map(|step| match step {
+            PipeStep::Command { id } => serde_json::json!({
+                "step": "command",
+                "id": id,
+                "ran": commands.iter().find(|command| &command.id == id).map(|command| {
+                    serde_json::json!([command.command, command.timeout_secs])
+                }),
+            }),
+            other => serde_json::to_value(other).unwrap_or_default(),
+        })
+        .collect();
+    format!(
+        "{}:{}:{}",
+        limits.cap,
+        limits.timeout.as_millis(),
+        serde_json::Value::Array(resolved)
+    )
 }
 
 /// A built-in step on a worker thread of its own, waited for until the
@@ -526,12 +651,15 @@ pub async fn run_on_file(
     limits: Limits,
 ) -> Result<Piped, SourcesError> {
     let lent = live.source(pool, secrets, registry, entity_id).await?;
-    let pipeline = format!(
-        "{}:{}:{}",
-        limits.cap,
-        limits.timeout.as_millis(),
-        serde_json::to_string(steps).unwrap_or_default()
-    );
+    let commands = if steps
+        .iter()
+        .any(|step| matches!(step, PipeStep::Command { .. }))
+    {
+        saved::stored_command_steps(pool).await?
+    } else {
+        Vec::new()
+    };
+    let pipeline = pipeline_key(steps, &commands, limits);
     if let Some(kept) = live.kept_run(&lent, entity_id, path, commit, &pipeline) {
         return Ok(Piped::Ran(kept));
     }
@@ -544,7 +672,7 @@ pub async fn run_on_file(
     if let FileBytes::TooLarge { size } = file.as_ref() {
         return Ok(Piped::TooLarge { size: *size });
     }
-    let ran = Arc::new(run(steps, Carried::File(file), path, limits).await);
+    let ran = Arc::new(run(steps, &commands, Carried::File(file), path, limits).await);
     if !ran.timed_out() {
         live.keep_run(&lent, entity_id, path, commit, &pipeline, ran.clone());
     }

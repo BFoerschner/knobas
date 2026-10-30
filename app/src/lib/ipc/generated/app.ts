@@ -1,4 +1,5 @@
 // Generated from the Rust types by ts-rs; do not edit. Regenerate with `cargo test -p knobas-app --lib ipc_mirror` (crates/knobas-app/src/ipc_mirror.rs).
+import type { PipeStep } from "./entity";
 
 /**
  * What the shell needs to decide what to draw.
@@ -26,6 +27,33 @@ secrets_in_memory: boolean, };
 export type CommandOutput = "svg" | "html" | "image";
 
 /**
+ * One saved command step, Settings › Renderers.
+ */
+export type CommandStep = { 
+/**
+ * Made from the name when first saved, kept through a rename.
+ */
+id: string, 
+/**
+ * What the pipeline bar and a failure call it.
+ */
+name: string, 
+/**
+ * The program and its arguments, as typed: quotes group words, no shell.
+ */
+command: string, 
+/**
+ * Killed after this many seconds.
+ */
+timeout_secs: number, };
+
+/**
+ * A command step as Settings sends it: a new one has no id yet, and no
+ * timeout is the default.
+ */
+export type CommandStepDraft = { id: string | null, name: string, command: string, timeout_secs: number | null, };
+
+/**
  * How far the database has got.
  *
  * Interfaces §2.1. Tagged on `state`, so TypeScript reads it as a
@@ -51,6 +79,20 @@ detail: string | null, } | { "state": "migrating" } | { "state": "ready" } | { "
  * Why, shown to the user as text.
  */
 message: string, };
+
+/**
+ * One named pipeline: steps a default per file pattern names by id.
+ */
+export type NamedPipeline = { 
+/**
+ * Made from the name when first saved, kept through a rename.
+ */
+id: string, name: string, steps: Array<PipeStep>, };
+
+/**
+ * A named pipeline as the viewer or Settings sends it: a new one has no id.
+ */
+export type NamedPipelineDraft = { id: string | null, name: string, steps: Array<PipeStep>, };
 
 /**
  * What goes on stdin: text, or bytes in base64.
@@ -83,8 +125,17 @@ export type RendererDefault = {
 pattern: string, 
 /**
  * The renderer's registry id: `source`, `markdown`, `command:<saved id>`.
+ * Empty when the row only sets a pipeline: the pipeline's output picks
+ * its renderer by its own name.
  */
-renderer: string, };
+renderer: string, 
+/**
+ * A named pipeline's id (#2265, `file_pipeline::saved`): files the
+ * pattern takes open through it. By reference, so editing the pipeline
+ * changes every pattern that names it. A row stored before the field
+ * existed reads as none.
+ */
+pipeline: string | null, };
 
 /**
  * What a renderer reads on stdin: the file's text, or its bytes.

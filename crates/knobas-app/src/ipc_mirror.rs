@@ -45,6 +45,10 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::renderers::RenderContent::export_all(cfg)?;
     crate::renderers::RenderRun::export_all(cfg)?;
     crate::renderers::RendererDefault::export_all(cfg)?;
+    crate::file_pipeline::saved::CommandStep::export_all(cfg)?;
+    crate::file_pipeline::saved::CommandStepDraft::export_all(cfg)?;
+    crate::file_pipeline::saved::NamedPipeline::export_all(cfg)?;
+    crate::file_pipeline::saved::NamedPipelineDraft::export_all(cfg)?;
     // entity.ts
     crate::file_pipeline::PipeFormat::export_all(cfg)?;
     crate::file_pipeline::PipeStep::export_all(cfg)?;

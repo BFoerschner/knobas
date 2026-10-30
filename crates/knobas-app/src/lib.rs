@@ -647,6 +647,12 @@ pub fn run() {
             commands::entity::entity_file_bytes,
             // #2264's pipeline over a file's bytes, appended at the foot (§10.8).
             commands::entity::entity_file_piped,
+            // #2265's command steps and named pipelines, appended at the foot
+            // (§10.8).
+            commands::app::command_steps,
+            commands::app::set_command_steps,
+            commands::app::named_pipelines,
+            commands::app::set_named_pipelines,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

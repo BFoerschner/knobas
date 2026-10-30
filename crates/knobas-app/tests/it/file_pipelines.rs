@@ -18,6 +18,8 @@ use std::time::{Duration, Instant};
 use knobas_app::file_pipeline::{
     Limits, PipeFormat, PipeOutput, PipeRun, PipeStep, PipeWhy, Piped, SIZE_CAP, run_on_file,
 };
+use knobas_app::file_pipeline::saved::{self, CommandStepDraft, NamedPipelineDraft};
+use knobas_app::renderers::{self, RendererDefault};
 use knobas_app::sources::live::LiveSources;
 use knobas_app::sources::{self, NewSource, Registry, SecretInput};
 use knobas_secrets::{MemoryStore, SecretStore};
@@ -802,4 +804,156 @@ async fn laying_out_is_stopped_at_the_cap() {
         let run = run_bytes(std::slice::from_ref(&step), input.into_bytes(), "x", limits).await;
         assert_eq!(failure(&run).why, PipeWhy::TooLarge, "{step:?}: {run:?}");
     }
+}
+
+fn command(name: &str, command: &str) -> CommandStepDraft {
+    CommandStepDraft {
+        id: None,
+        name: name.to_owned(),
+        command: command.to_owned(),
+        timeout_secs: None,
+    }
+}
+
+fn step(id: &str) -> PipeStep {
+    PipeStep::Command { id: id.to_owned() }
+}
+
+/// **A command step runs the person's saved command (#2265)**: `tr a-z A-Z`
+/// uppercases the content, which reaches it on stdin; the output keeps the
+/// file's name. A failing one is named by its saved name and says its
+/// stderr; an id that is not saved fails naming it.
+#[tokio::test]
+async fn a_command_step_uppercases_the_content() {
+    let f = fixture().await;
+    let saved = saved::save_command_steps(
+        &f.pool,
+        &[
+            command(" Upper ", "tr a-z A-Z"),
+            command("Breaks", r#"sh -c "echo it broke >&2; exit 3""#),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        saved.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+        ["upper", "breaks"]
+    );
+    f.put("notes.txt", "hello, pipeline");
+    let run = f.pipe("notes.txt", &[step("upper")]).await;
+    assert_eq!(done(&run), ("notes.txt", "HELLO, PIPELINE"));
+
+    let run = f.pipe("notes.txt", &[step("upper"), step("breaks")]).await;
+    let failed = failure(&run);
+    assert_eq!((failed.index, failed.name.as_str()), (1, "Breaks"));
+    assert_eq!(failed.why, PipeWhy::Error);
+    assert_eq!(failed.error, "it broke");
+    assert_eq!(failed.input.head, "HELLO, PIPELINE");
+
+    let run = f.pipe("notes.txt", &[step("gone")]).await;
+    assert!(
+        failure(&run).error.contains("'gone' is not one of your command steps"),
+        "{run:?}"
+    );
+}
+
+/// A kept run stands for the command its step ran: the same id with an
+/// edited command is run again, not answered from the kept run.
+#[tokio::test]
+async fn an_edited_command_step_is_run_again() {
+    let f = fixture().await;
+    saved::save_command_steps(&f.pool, &[command("Upper", "tr a-z A-Z")])
+        .await
+        .unwrap();
+    f.put("a.txt", "abc");
+    assert_eq!(done(&f.pipe("a.txt", &[step("upper")]).await).1, "ABC");
+    let mut edited = command("Upper", "tr a-c x-z");
+    edited.id = Some("upper".to_owned());
+    saved::save_command_steps(&f.pool, &[edited]).await.unwrap();
+    assert_eq!(done(&f.pipe("a.txt", &[step("upper")]).await).1, "xyz");
+}
+
+/// A command step is killed at its own timeout, with everything it started.
+#[tokio::test]
+async fn a_command_step_past_its_timeout_is_stopped() {
+    let f = fixture().await;
+    let mut slow = command("Slow", "sleep 30");
+    slow.timeout_secs = Some(1);
+    saved::save_command_steps(&f.pool, &[slow]).await.unwrap();
+    f.put("a.txt", "abc");
+    let started = Instant::now();
+    let run = f.pipe("a.txt", &[step("slow")]).await;
+    let failed = failure(&run);
+    assert_eq!(failed.why, PipeWhy::TimedOut);
+    assert_eq!(failed.error, "Slow did not finish in 1 s");
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
+/// Named pipelines are one settings row: saved with ids made from their
+/// names, a rename keeping the id; one with no steps, or a name used twice,
+/// is refused by name.
+#[tokio::test]
+async fn named_pipelines_round_trip_and_refuse_by_name() {
+    let f = fixture().await;
+    let draft = |id: Option<&str>, name: &str, steps: Vec<PipeStep>| NamedPipelineDraft {
+        id: id.map(str::to_owned),
+        name: name.to_owned(),
+        steps,
+    };
+    let saved = saved::save_named_pipelines(
+        &f.pool,
+        &[draft(None, " Gzipped JSON ", vec![PipeStep::Gunzip, jq(".")])],
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved[0].id, "gzipped-json");
+    assert_eq!(saved[0].name, "Gzipped JSON");
+    let renamed = saved::save_named_pipelines(
+        &f.pool,
+        &[draft(Some("gzipped-json"), "Events", vec![PipeStep::Gunzip])],
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved::named_pipelines(&f.pool).await.unwrap(), renamed);
+    assert_eq!(renamed[0].id, "gzipped-json");
+
+    let error = saved::save_named_pipelines(&f.pool, &[draft(None, "Empty", vec![])])
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("Empty has no steps"), "{}", error.message);
+    let error = saved::save_named_pipelines(
+        &f.pool,
+        &[
+            draft(None, "Twice", vec![PipeStep::Gunzip]),
+            draft(None, "twice", vec![PipeStep::Gunzip]),
+        ],
+    )
+    .await
+    .unwrap_err();
+    assert!(error.message.contains("twice"), "{}", error.message);
+    assert_eq!(saved::named_pipelines(&f.pool).await.unwrap(), renamed);
+}
+
+/// A default per file pattern may name a pipeline and no renderer (the
+/// output picks its own); one naming neither is refused. A row stored before
+/// the field existed reads as naming no pipeline.
+#[tokio::test]
+async fn a_default_may_name_only_a_pipeline() {
+    let f = fixture().await;
+    let row = |renderer: &str, pipeline: Option<&str>| RendererDefault {
+        pattern: "*.json.gz".to_owned(),
+        renderer: renderer.to_owned(),
+        pipeline: pipeline.map(str::to_owned),
+    };
+    let saved = renderers::save_defaults(&f.pool, &[row("", Some(" events "))])
+        .await
+        .unwrap();
+    assert_eq!(saved, [row("", Some("events"))]);
+    let error = renderers::save_defaults(&f.pool, &[row(" ", Some(" "))])
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("*.json.gz"), "{}", error.message);
+    let old: RendererDefault =
+        serde_json::from_str(r#"{"pattern":"*.md","renderer":"source"}"#).unwrap();
+    assert_eq!(old.pipeline, None);
 }
