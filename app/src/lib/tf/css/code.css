@@ -16,6 +16,22 @@
 
 /* ---------- Repository page (#838, R-8.3 to R-8.5, R-8.7) ---------- */
 .tf-count.tf-warn { background: var(--warn-bg); color: var(--warn); }
+/* The tabs in two groups (#2257, mockups/code-area `.tf-tabs .grp`): the repository at a ref | work in flight. */
+.tf-tabs .tf-tabgrp { flex: none; align-self: center; width: 1px; height: 18px; background: var(--rule); margin: 0 8px; }
+/* The branch picker in the header, at the header's height (#2238 story 6; mockups/code-area `.tf-select`). */
+.tf-bsel {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 4px 0 10px; border: 1px solid var(--rule);
+  background: var(--sheet); border-radius: 4px; color: var(--ink); white-space: nowrap;
+}
+.tf-bsel:hover { border-color: var(--ink-2); }
+.tf-bsel svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.tf-bsel select {
+  height: 100%; border: 0; background: none; color: inherit; cursor: pointer; max-width: 220px;
+  font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none;
+}
+.tf-bsel select:focus-visible { outline: none; }
+.tf-bsel:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.tf-bsel:has(select:disabled) { opacity: .55; }
 /* A tab's filter bar sits in the page's body, not sticky under the tabs. */
 .tf-rbar { margin-bottom: 12px; }
 .tf-rbar .tf-fbar { position: static; padding: 0; border: 0; background: none; }
