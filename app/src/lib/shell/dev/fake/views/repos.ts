@@ -272,6 +272,42 @@ export const PAYOUT_COMMITS: [sha: string, subject: string, author: string, at: 
   ["7be0e4f15c60", "PAY-231: retry SEPA payouts on transient PSP errors", "mara", "2026-08-21T15:30:00Z", "tests/sepa_retry.rs", "", TEST_HEAD],
 ];
 
+/**
+ * `?fake-rendered-diff` (#2279): the newest commit also changes a README, a Mermaid diagram and a PNG, adds a
+ * Markdown file and deletes one, so its diff offers *Rendered*. Each changed file reads whole at that commit
+ * (after) and at its parent (before); the PNG's bytes the same way.
+ */
+const RENDERED_DIFF: Record<string, [before: string | null, after: string | null]> = {
+  "README.md": [
+    "# payout-service\n\nPays out **SEPA** batches once a day.\n\n- retries: 3\n- backoff: none",
+    "# payout-service\n\nPays out **SEPA** batches once a day, retrying transient PSP errors.\n\n- retries: 5\n- backoff: exponential with jitter\n\n> See `docs/backoff.md`.",
+  ],
+  "docs/retry-flow.mmd": ["flowchart LR\n  batch --> PSP --> ledger", "flowchart LR\n  batch --> PSP\n  PSP -->|503| retry\n  retry --> PSP\n  PSP --> ledger"],
+  "docs/rollout.md": [null, "# Rollout\n\n1. Ship behind `retry.enabled`.\n2. Turn it on for one PSP.\n3. Watch the **retry rate** for a day."],
+  "docs/old-retry.md": ["# Old retry notes\n\nRetries were manual: an operator re-sent the batch.", null],
+};
+const LOGO_AFTER =
+  "iVBORw0KGgoAAAANSUhEUgAAAGAAAAAgCAIAAABiouoDAAAAW0lEQVR42u3YIREAIBBE0UtCRDTByITBIAhAAYYA3Jv5ctWTG7uHHiEABAgQIECA/gUqrV4ba17LtgcECBAgQIAAAQIECBAgQIAAAfoNyCXmUQQECBAgQICSdgCzYkA8nT/7cAAAAABJRU5ErkJggg==";
+const renderedDiffOn = () => new URLSearchParams(globalThis.location?.search).has("fake-rendered-diff");
+const bytesOf = (base64: string) => Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+
+/** `?fake-rendered-diff`'s files on the newest commit's diff. */
+function renderedDiffFiles(): DiffFile[] {
+  const text = Object.entries(RENDERED_DIFF).map(([path, [before, after]]) => {
+    const made = lineDiff(path, before ?? "", after ?? "");
+    return { ...made, change: before === null ? "added" : after === null ? "deleted" : made.change } as DiffFile;
+  });
+  const png: DiffFile = { path: "docs/img/logo.png", old_path: null, change: "binary", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [] };
+  return [...text, png];
+}
+
+/** A `?fake-rendered-diff` file at the newest commit (`at` 0, after) or its parent (`at` 1, before); `undefined` for none. */
+function renderedDiffSide(at: number, path: string): string | null | undefined {
+  if (!renderedDiffOn() || (at !== 0 && at !== 1)) return undefined;
+  const sides = RENDERED_DIFF[path];
+  return sides === undefined ? undefined : sides[at === 0 ? 1 : 0];
+}
+
 /** A commit's entity id on `payout-service`, in the Gitea key grammar (`owner/repo@sha`). */
 export const payoutCommitId = (sha: string) => `${PAYOUT}@${sha}`;
 
@@ -505,6 +541,12 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
  * at the entity's branch (the fake's commit is the branch name it was read at). `undefined` for another entity.
  */
 export function repoFileBytes(entityId: string, path: string): Uint8Array | undefined {
+  // `?fake-rendered-diff`'s PNG at the newest commit (after) and its parent (before).
+  const commitAt = PAYOUT_COMMITS.findIndex(([sha]) => payoutCommitId(sha) === entityId);
+  if (commitAt !== -1 && renderedDiffOn()) {
+    if (path === "docs/img/logo.png" && commitAt <= 1) return commitAt === 0 ? bytesOf(LOGO_AFTER) : PAYOUT_IMAGES[path]!();
+    throw { code: "not_found", message: `gitea: no file ${path} at this commit`, source_id: null };
+  }
   const branchAt = entityId.indexOf("@refs/heads/");
   const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);
   const branch = branchAt === -1 ? null : entityId.slice(branchAt + "@refs/heads/".length);
@@ -546,6 +588,14 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
   const commit = PAYOUT_COMMITS[at];
   if (commit) {
     const [, , , , path, before, after] = commit;
+    if (sectionId?.startsWith("file:")) {
+      const wanted = sectionId.slice("file:".length);
+      const side = renderedDiffSide(at, wanted);
+      if (side !== undefined) {
+        if (side === null) throw { code: "not_found", message: `gitea: no file ${wanted}`, source_id: null };
+        return { sections: [section(sectionId, "Files", [{ type: "file", trail: [], path: wanted, text: side, language: null, size: side.length, truncated: false, binary: false, url: null, sha: blobOf(side), commit: null }])], actions: [] } as unknown as SourceView;
+      }
+    }
     // Its file whole at the commit, as a commit at a sha answers it (#2267's expanded context).
     if (sectionId === `file:${path}`)
       return { sections: [section(sectionId, "Files", [{ type: "file", trail: [], path, text: after, language: null, size: after.length, truncated: false, binary: false, url: null, sha: blobOf(after) }])], actions: [] } as unknown as SourceView;
@@ -556,7 +606,7 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
     // `?fake-diff-lines=<n>` (#2269): forty more files of n/40 added lines each.
     const bulk = Number(new URLSearchParams(globalThis.location?.search).get("fake-diff-lines") ?? 0) || 0;
     const more = bulk === 0 ? [] : Array.from({ length: 40 }, (_, f) => diffOf(`bulk/f${String(f).padStart(2, "0")}.rs`, "", Array.from({ length: Math.ceil(bulk / 40) }, (_, i) => `let v${f}_${i} = ${i};`).join("\n")));
-    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
+    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
     // The whole view's toolbar (#707): a branch from this commit, its whole sha the value.
     const from = { value: commit[0], label: commit[0].slice(0, 10) };
     const actions =

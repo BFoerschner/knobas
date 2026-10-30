@@ -11,10 +11,13 @@
  * read, which costs only its highlighting beyond the drawn lines: an
  * expanded line is context, the same text on both sides.
  */
-import type { SourceView } from "../../ipc/entity";
+import { isIpcError } from "../../ipc";
+import type { DiffFile, SourceView } from "../../ipc/entity";
 import type { DiffContext } from "./diff";
 
 type Read = (entityId: string, section: string | null) => Promise<SourceView | null>;
+/** The byte read (#2256): a file's bytes at an entity; `commit` `null` is a commit entity's own sha. */
+type ReadBytes = (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
 
 /** The text of a `file:` read, where it holds the whole file: not cut, not binary. */
 export function wholeFileText(view: SourceView | null): string | null {
@@ -31,8 +34,28 @@ export function parentOf(view: SourceView | null): string | null {
   return null;
 }
 
-export function commitContext(read: Read, commitId: string, parentId: string | null): DiffContext {
+/**
+ * `bytes` (#2279's rendered image diff), where given: a side's bytes at its commit. A binary diff
+ * does not say whether the file was added or deleted, so a side the file is not on (`not_found`)
+ * is `null`; without a parent address the old side is a refusal, not an absence.
+ */
+export function commitContext(read: Read, commitId: string, parentId: string | null, bytes?: ReadBytes): DiffContext {
+  const byteRead = bytes
+    ? {
+        async bytes(file: DiffFile, side: "old" | "new") {
+          const id = side === "new" ? commitId : parentId;
+          if (id === null) throw new Error("the parent commit has no address here, so the file before the change is not read");
+          try {
+            return await bytes(id, side === "old" ? (file.old_path ?? file.path) : file.path, null);
+          } catch (cause) {
+            if (isIpcError(cause) && cause.code === "not_found") return null;
+            throw cause;
+          }
+        },
+      }
+    : {};
   return {
+    ...byteRead,
     async text(file, side) {
       const id = side === "new" ? commitId : parentId;
       if (id === null) return null;

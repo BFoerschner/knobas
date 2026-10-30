@@ -165,7 +165,8 @@ test("the Files section is read when the tab opens; the list names each file wit
   expect(list()).toEqual(["Abackoff.md+1 −0", "Mretry.rs+2 −1"]);
   expect(cards().map((card) => squash(card.querySelector(".tf-fh")))).toEqual([
     "M src/sepa/retry.rs +2 −1 Viewed",
-    "A docs/backoff.md +1 −0 Viewed",
+    // An added Markdown file draws rendered from its hunk (#2279): the mode switch sits before Viewed.
+    "A docs/backoff.md +1 −0 RenderedLines Viewed",
   ]);
   // One hunk after another: a ⋯ row between them.
   expect(cards()[0]!.querySelectorAll(".tf-hunk")).toHaveLength(1);

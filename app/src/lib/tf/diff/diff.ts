@@ -36,6 +36,11 @@ export const EXPAND_STEP = 20;
 /** Expanded context's reader (#2267): a file's whole text on one side, at that side's commit, through the read cache; `null` where it cannot be read whole. */
 export interface DiffContext {
   text(file: DiffFile, side: "old" | "new"): Promise<string | null>;
+  /**
+   * A side's bytes, for a rendered diff of a binary file (#2279): `null` where the file is not on
+   * that side (a binary diff does not say whether it was added or deleted). Absent: none offered.
+   */
+  bytes?(file: DiffFile, side: "old" | "new"): Promise<Uint8Array | null>;
 }
 
 /** *Viewed* per file: which are, and how to change one. */

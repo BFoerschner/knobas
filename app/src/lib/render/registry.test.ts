@@ -14,9 +14,18 @@ test("each built-in declares the spec's six fields", () => {
     fences: [],
     input: "bytes",
     output: "image",
-    diff: false,
+    diff: true,
   });
   expect(source).toEqual({ id: "source", name: "Source", patterns: ["*"], fences: ["*"], input: "text", output: "lines", diff: true });
+});
+
+test("Markdown, Mermaid, D2, Graphviz and Image draw a diff before and after (#2279)", () => {
+  const ids = (path: string) => renderersFor({ path, binary: false }).filter((r) => r.diff).map((r) => r.id);
+  expect(ids("README.md")).toEqual(["markdown", "source"]);
+  expect(ids("docs/flow.mmd")).toEqual(["mermaid", "source"]);
+  expect(ids("docs/flow.d2")).toEqual(["d2", "source"]);
+  expect(ids("docs/flow.gv")).toEqual(["graphviz", "source"]);
+  expect(renderersFor({ path: "logo.png", binary: true }).map((r) => r.diff)).toEqual([true]);
 });
 
 test("a text file is Source's; an image is Image's first; a binary that is no image has none", () => {
@@ -47,8 +56,8 @@ test("D2 and Graphviz are built in: .d2, .dot and .gv files and d2, dot and grap
   expect(names(renderersForFence("d2"))).toEqual(["D2", "Source"]);
   expect(names(renderersForFence("dot"))).toEqual(["Graphviz", "Source"]);
   expect(names(renderersForFence("GraphViz"))).toEqual(["Graphviz", "Source"]);
-  expect(renderersForFence("d2")[0]).toMatchObject({ id: "d2", input: "text", output: "svg", diff: false });
-  expect(renderersForFence("dot")[0]).toMatchObject({ id: "graphviz", input: "text", output: "svg", diff: false });
+  expect(renderersForFence("d2")[0]).toMatchObject({ id: "d2", input: "text", output: "svg", diff: true });
+  expect(renderersForFence("dot")[0]).toMatchObject({ id: "graphviz", input: "text", output: "svg", diff: true });
 });
 
 test("a renderer registered later goes ahead of Source, by file pattern and by fence", () => {

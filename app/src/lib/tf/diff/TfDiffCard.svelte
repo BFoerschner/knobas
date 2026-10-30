@@ -17,6 +17,10 @@
     (`expandable`), each gap offers the hidden lines down from the hunk
     above, up from the hunk below, or all of them; expanded fully, the two
     hunks join. The view reads the file once and keeps it (`onexpand`).
+  - **Rendered** (#2279): where the view offers a rendered mode, the header
+    switches the file between *Rendered* (`TfDiffRendered`), *Swipe* for an
+    image changed on both sides, and its *Lines* (a binary file's *Bytes*).
+    The buttons sit in `.tf-fh-acts`, which later header controls share.
   - **Keys** come from the view: `nextHunk`, `comment` and `scrollTo` are
     this card's part of `n`/`p`, `c` and `j`/`k` (#2268).
 -->
@@ -32,7 +36,10 @@
   import { flushSync } from "svelte";
   import type { DiffLine, LineComment, LineThread } from "../../ipc/entity";
   import { lineName } from "../../detail/view/pending-comments.svelte";
+  import type { CommandPort } from "../../render/command";
   import type { LineTokens, RenderPort } from "../../render/port";
+  import type { DiffMode, RenderedPlan, Side, SideGot } from "./rendered";
+  import TfDiffRendered from "./TfDiffRendered.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import { ago } from "../../shell/time";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
@@ -61,6 +68,12 @@
     tokensOf,
     talk,
     render,
+    rendered,
+    mode,
+    onmode,
+    sideOf,
+    load,
+    commands,
     openAt = null,
   }: {
     file: DrawnFile;
@@ -81,11 +94,34 @@
     onexpand: (hunk: number, how: Expand) => void;
     tokensOf: (side: "old" | "new", drawn: DrawnLine) => LineTokens | undefined;
     talk: DiffTalk;
-    /** Draws a line comment's Markdown body (#2261). */
+    /** Draws a line comment's Markdown body (#2261), and a rendered diff's diagrams and fences. */
     render: RenderPort;
+    /** The file's rendered mode (#2279), or `null` where it has none. */
+    rendered: RenderedPlan | null;
+    mode: DiffMode;
+    onmode: (mode: DiffMode) => void;
+    /** A rendered side as the view read it, and asking it to read one. */
+    sideOf: (side: Side) => SideGot | undefined;
+    load: (side: Side) => void;
+    commands: CommandPort;
     /** *Open in…* in the header, on the file at its first changed line; never on a deleted file. */
     openAt?: OpenAt | null;
   } = $props();
+
+  /** The sides a rendered diff draws: the plan's, less one the reader found no file on. */
+  const sides = $derived(rendered ? rendered.sides.filter((side) => sideOf(side)?.kind !== "absent") : []);
+  const swipes = $derived(rendered !== null && rendered.swipe && sides.length === 2);
+  /** What the card shows: a swipe that cannot swipe (one side absent) shows side by side. */
+  const shows = $derived<DiffMode>(rendered === null ? "lines" : mode === "swipe" && !swipes ? "rendered" : mode);
+  const MODES = $derived<{ mode: DiffMode; label: string }[]>(
+    rendered === null
+      ? []
+      : [
+          { mode: "rendered", label: "Rendered" },
+          ...(swipes ? [{ mode: "swipe" as const, label: "Swipe" }] : []),
+          { mode: "lines", label: file.change === "binary" ? "Bytes" : "Lines" },
+        ],
+  );
 
   type Expand = "down" | "up" | "all";
 
@@ -99,7 +135,7 @@
 
   const lineKey = (cell: DrawnLine | null) => (cell === null ? "-" : cell.extra ? `x${cell.line.new}` : `l${cell.at}`);
   const placed = $derived(placeThreads(file));
-  const drawsLines = $derived(!closed && file.change !== "binary" && (loaded || !needsLoad(file)));
+  const drawsLines = $derived(!closed && shows === "lines" && file.change !== "binary" && (loaded || !needsLoad(file)));
   const marks = $derived(drawsLines ? changedWords(file) : new Map<number, Range[]>());
 
   /** Where each hunk starts among the items: its gap, else its first line. */
@@ -343,6 +379,13 @@
       <span class="tf-del-n">−{file.deletions}</span>
     {/if}
     {#if chip}<span class="tf-chip">{chip}</span>{/if}
+    {#if MODES.length > 0}
+      <span class="tf-fh-acts">
+        <span class="tf-seg" role="group" aria-label="Show {keyOf(file)} as">
+          {#each MODES as m (m.mode)}<button type="button" aria-pressed={shows === m.mode} onclick={() => onmode(m.mode)}>{m.label}</button>{/each}
+        </span>
+      </span>
+    {/if}
     {#if viewed}
       <label class="tf-fh-viewed"><input type="checkbox" checked={done} onchange={(event) => onviewed(event.currentTarget.checked)} /> Viewed</label>
     {/if}
@@ -353,7 +396,9 @@
     {/if}
   </div>
   {#if !closed}
-    {#if file.change === "binary"}
+    {#if rendered !== null && shows !== "lines"}
+      <TfDiffRendered plan={rendered} path={file.path} {sides} swipe={shows === "swipe"} {sideOf} {load} {render} {commands} />
+    {:else if file.change === "binary"}
       <div class="tf-dwhy">A binary file: no lines to draw.</div>
     {:else if !drawsLines}
       <div class="tf-dwhy">
