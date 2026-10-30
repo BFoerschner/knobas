@@ -652,6 +652,20 @@ test("a .mermaid file that does not parse shows the parser's error above its num
   expect(drawn.querySelector("iframe")).toBeNull();
 });
 
+test("a .d2, a .dot and a .gv file are drawn by their engines in a sandboxed frame, with Source beside (#2259)", async () => {
+  for (const [path, engine] of [["docs/flow.d2", "D2"], ["deps.dot", "Graphviz"], ["graphs/deps.gv", "Graphviz"]] as const) {
+    if (view) unmount(view);
+    view = null;
+    const render = diagramRender();
+    draw(openSource({ [path]: "a -> b" }).entityView, path, null, render.port);
+    await settle();
+    const frame = target.querySelector<HTMLIFrameElement>(".tf-fileview .tf-fdiagram iframe")!;
+    expect([path, frame.getAttribute("sandbox"), frame.title]).toEqual([path, "", `${engine} diagram`]);
+    expect(render.asked).toEqual(["a -> b"]);
+    expect(viewButtons()).toEqual(["Rendered*", "Source"]);
+  }
+});
+
 // ---- the tree at a commit, moved behind (#2241, #2242) ----
 
 /**

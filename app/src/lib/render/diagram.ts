@@ -1,8 +1,9 @@
 /**
  * Drawing a diagram into the page (#2258, spec #2234 step 5, stories 32–36):
  * a Markdown fence (`mermaid`) and a diagram file in the file viewer
- * (`*.mmd`, `*.mermaid`) both come here. #2259's D2 and Graphviz are meant
- * to as well, as engines of their own behind the port's `diagram`.
+ * (`*.mmd`, `*.mermaid`) both come here, as do D2 (`d2`, `*.d2`) and
+ * Graphviz (`dot`/`graphviz`, `*.dot`, `*.gv`; #2259), engines of their own
+ * behind the port's `diagram`.
  *
  * - The source shows until the engine answers; where the port has no engine
  *   (jsdom's plain port) it stays.
@@ -19,7 +20,7 @@ import type { DiagramRequest, Palette, RenderPort } from "./port";
 
 export type DiagramEngine = DiagramRequest["engine"];
 
-const NAMES: Record<DiagramEngine, string> = { mermaid: "Mermaid" };
+const NAMES: Record<DiagramEngine, string> = { mermaid: "Mermaid", d2: "D2", graphviz: "Graphviz" };
 
 /** The light tokens (`tf/css/tokens.css`), for a document whose stylesheet holds none (jsdom). */
 const LIGHT: Omit<Palette, "dark"> = {

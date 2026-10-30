@@ -759,8 +759,8 @@
         <div class="tf-fimage"><img src={image} alt={file.path} /></div>
       {:else if drawAs === "markdown"}
         <TfMarkdown text={file.text} base={parentOf(file.path)} {fileLink} {render} />
-      {:else if drawAs === "mermaid"}
-        <TfDiagram engine="mermaid" code={file.text} {render} />
+      {:else if drawAs === "mermaid" || drawAs === "d2" || drawAs === "graphviz"}
+        <TfDiagram engine={drawAs} code={file.text} {render} />
       {:else if renderer !== null && drawAs === renderer.id && commandIdOf(renderer) !== null}
         <TfCommandOutput {renderer} text={file.text} {commands} />
       {:else}
