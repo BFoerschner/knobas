@@ -87,11 +87,12 @@ export interface DiagramReply {
 /**
  * Diagrams drawn in a worker that speaks `DiagramMessage`s, started on the
  * first one. A worker that fails (it could not load, or its WASM was
- * refused) rejects every diagram it holds, and the next diagram starts a
- * new one.
+ * refused) rejects every diagram it holds and is stopped, and the next
+ * diagram starts a new one. Stopping it matters: an uncaught error does not
+ * end a worker, and one left running keeps D2's WASM heap alive.
  */
 export function workerDiagram(
-  start: () => Pick<Worker, "postMessage" | "addEventListener">,
+  start: () => Pick<Worker, "postMessage" | "addEventListener" | "terminate">,
 ): (request: DiagramRequest) => Promise<DiagramAnswer> {
   let worker: ReturnType<typeof start> | null = null;
   let next = 0;
@@ -106,6 +107,7 @@ export function workerDiagram(
       });
       started.addEventListener("error", (event) => {
         if (worker === started) worker = null;
+        started.terminate();
         const error = new Error((event as ErrorEvent).message || "The diagram worker stopped.");
         for (const held of live.values()) held.reject(error);
         live.clear();

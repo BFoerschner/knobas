@@ -17,7 +17,11 @@ function heldWorker() {
   const sent: DiagramMessage[] = [];
   const listeners: Record<string, ((event: unknown) => void)[]> = {};
   let starts = 0;
+  let stopped = 0;
   const worker = {
+    terminate: () => {
+      stopped += 1;
+    },
     postMessage: (message: DiagramMessage) => sent.push(message),
     addEventListener: (type: string, listener: (event: unknown) => void) => (listeners[type] ??= []).push(listener),
   };
@@ -25,6 +29,9 @@ function heldWorker() {
     sent,
     get starts() {
       return starts;
+    },
+    get stopped() {
+      return stopped;
     },
     start: () => {
       starts += 1;
@@ -50,12 +57,13 @@ test("the worker starts on the first diagram, once, and each answer settles its 
   expect(await dot).toEqual({ error: "syntax error in line 1" });
 });
 
-test("a worker that fails rejects what it holds, and the next diagram starts a new one", async () => {
+test("a worker that fails rejects what it holds, is stopped, and the next diagram starts a new one", async () => {
   const held = heldWorker();
   const draw = workerDiagram(held.start);
   const lost = draw({ engine: "d2", code: "a", palette: PALETTE });
   held.fail("WebAssembly.instantiate(): refused by CSP");
   await expect(lost).rejects.toThrow("refused by CSP");
+  expect(held.stopped).toBe(1);
   void draw({ engine: "d2", code: "b", palette: PALETTE });
   expect(held.starts).toBe(2);
 });
