@@ -190,14 +190,70 @@ pub async fn open_checkout(
     line: Option<u32>,
 ) -> Result<Vec<String>, IpcError> {
     let pool = lifecycle.pool()?;
-    crate::checkout::open::open(
+    crate::checkout::open::open_object(
         &pool,
+        Some(lifecycle.registry()),
         &entity_id,
         application.as_deref(),
-        file.as_deref(),
-        line,
+        &crate::checkout::open::file_object(file.as_deref(), line),
     )
     .await
+}
+
+/// Run an application on a code object of this entity's repository (#2274):
+/// a repository, a file at a line, a commit, a range or a pull request
+/// (`OpenObject`), at its checkout. Answers the argument vector it started.
+///
+/// `open_checkout`'s rules, through the same runner: the program is a saved
+/// application's command for the object's kind, `{sha}`, `{base}`, `{head}`,
+/// `{pr}` and `{branch}` are held to a git name's grammar, and `{url}` is
+/// `object_page` (ADR-0016, ADR-0034).
+///
+/// # Errors
+///
+/// As `open_checkout`, and [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid)
+/// for an application with no command for the object or an object value it
+/// refuses.
+#[tauri::command]
+pub async fn open_object(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    application: Option<String>,
+    object: knobas_core::checkout::open::Object,
+) -> Result<Vec<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::open::open_object(
+        &pool,
+        Some(lifecycle.registry()),
+        &entity_id,
+        application.as_deref(),
+        &object,
+    )
+    .await
+}
+
+/// The page a code object of this entity's repository has at its source
+/// (#2274): what *Open in › Browser* hands the opener. Built from the
+/// source's typed base URL and the pages its adapter declares, never from a
+/// stored `web_url`. `null` when the source declares none, or a file has no
+/// commit or branch to be read at.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an address
+/// that is not a repository or a branch or a value refused,
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a repository
+/// the mirror does not hold, [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal)
+/// for a query failure.
+#[tauri::command]
+pub async fn object_page(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    object: knobas_core::checkout::open::Object,
+) -> Result<Option<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::open::page(&pool, lifecycle.registry(), &entity_id, &object).await
 }
 
 /// Settings › Checkouts (#844, R-13a.3): the clones root, the git found, the

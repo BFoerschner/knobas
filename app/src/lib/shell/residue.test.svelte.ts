@@ -351,6 +351,7 @@ const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
 const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
+const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
 const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
@@ -1231,6 +1232,30 @@ const CASES: Case[] = [
           // The real ports: `listen` is this file's mock, a window listener.
           clones: createClones(undefined, residueApps()),
           layers: createLayers(),
+        },
+      }),
+    }),
+    exercise: (target) => {
+      target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
+    },
+  },
+  {
+    /** *Open in…* on a code object (#2274): open, its menu registers a layer and a window click listener. */
+    name: "TfOpenObject",
+    source: "lib/tf/openin/TfOpenObject.svelte",
+    open: (target) => ({
+      app: mount(TfOpenObject, {
+        target,
+        props: {
+          entityId: "mock:tidewater/payout-service",
+          object: { kind: "commit", sha: "c90d11e4a7b2" },
+          apps: residueApps(),
+          layers: createLayers(),
+          ports: {
+            entityCheckout: () => deferred(CLONED),
+            objectPage: () => deferred(null),
+            openExternal: () => deferred(undefined),
+          },
         },
       }),
     }),

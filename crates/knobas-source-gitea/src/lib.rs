@@ -308,6 +308,16 @@ pub fn descriptor_template() -> SourceDescriptor {
         // the read existed (ADR-0023).
         clone_from: vec![knobas_source::clone_urls::CloneFrom::BaseUrl],
         url_forms: Vec::new(),
+        // Measured against the testenv's Gitea 1.27.3 (#2274): `/src/<ref>/`
+        // answers a branch or a sha (a 303 to `/src/branch/` or
+        // `/src/commit/`), and compare takes `<sha>^` as written or encoded.
+        code_pages: Some(knobas_source::code_pages::CodePages {
+            repository: "/{repo}".to_owned(),
+            file: "/{repo}/src/{ref}/{file}#L{line}".to_owned(),
+            commit: "/{repo}/commit/{sha}".to_owned(),
+            range: "/{repo}/compare/{base}...{head}".to_owned(),
+            pull_request: "/{repo}/pulls/{pr}".to_owned(),
+        }),
         // Each kind carries its own `full_sync_exhaustive` -- see
         // `entity_kinds`, which is where the 2026-08-25 budget ruling and
         // ADR-0003 meet.

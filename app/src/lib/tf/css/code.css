@@ -113,6 +113,7 @@
 .tf-cgroup-h .tf-rc-who { font-weight: 400; }
 .tf-rcommits td.tf-rpick { width: 28px; padding-right: 0; }
 .tf-rcommits td:nth-child(2) { width: 110px; }
+.tf-rcommits td.tf-ropen { width: 1%; padding-top: 0; padding-bottom: 0; text-align: right; white-space: nowrap; }
 /* A commit picked for *Diff selected* (#2271). */
 .tf-rcommits tr.tf-picked td { background: var(--info-bg); }
 .tf-rbar.tf-rpickbar { display: flex; align-items: center; gap: 12px; }
@@ -188,6 +189,8 @@
 .tf-flist .tf-n { margin-left: auto; font-family: var(--sans); white-space: nowrap; }
 .tf-flist .tf-viewed { opacity: 0.5; }
 .tf-flist-none { padding: 8px; }
+.tf-diff .tf-fh-open { margin-left: auto; font: 400 var(--t-sm) var(--sans); }
+.tf-diff .tf-fh-viewed + .tf-fh-open { margin-left: 0; }
 .tf-flist .tf-fdir { padding: 6px 10px 2px; border-top: 1px solid var(--rule-2); color: var(--ink-2); font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-flist .tf-fdir:first-child { border-top: 0; }
 .tf-flist .tf-fdir + button { border-top: 0; }
@@ -200,6 +203,8 @@
 /* Header controls (#2279 the mode switch; later ones join it): right-aligned, Viewed after them. */
 .tf-diff .tf-fh-acts { margin-left: auto; display: flex; gap: var(--control-gap); align-items: center; font-weight: 400; }
 .tf-diff .tf-fh-acts + .tf-fh-viewed { margin-left: 0; }
+/* Open in (#2274) follows the mode switch where there is no Viewed: one group at the right. */
+.tf-diff .tf-fh-acts + .tf-fh-open { margin-left: 0; }
 .tf-fh-acts .tf-seg button { padding: 1px 9px; font-size: var(--t-xs); }
 /* A rendered diff (#2279): before and after side by side, `mockups/code-area/diff.html`. */
 .tf-ba { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
