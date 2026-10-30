@@ -19,6 +19,7 @@
     "dompurify": "3.4.17",
     "markdown-it": "15.0.3",
     "mermaid": "11.17.2",
+    "pdfjs-dist": "6.4.299",
     "shiki": "4.5.0"
   },
   "devDependencies": {

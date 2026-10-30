@@ -11,6 +11,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { SourceView, TreeEntry } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
+import TfRepoFilesRefreshed from "./TfRepoFiles.refresh.fixture.svelte";
 import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
 import { installCommands, type CommandPort } from "../../render/command";
 import { createRendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
@@ -851,4 +852,63 @@ test("a deep link's guess that drew the file stands for the section its listing 
   await settle();
   expect(lineText(0)).toEqual(["1", "// one"]);
   expect(source.reads.filter((id) => id.endsWith("main.rs"))).toEqual(["file:main.rs"]);
+});
+
+// -- The scroll a file opens at (#2260's merger) ---------------------------------
+
+test("another file opens at its top, not at the depth the last one was read to; a link to a line keeps its own scroll", async () => {
+  // The shell's one scroller, with the file view 300 px down its content.
+  const main = document.createElement("div");
+  main.className = "tf-main";
+  target.appendChild(main);
+  const rect = (top: number) => ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: top, toJSON: () => ({}) });
+  const real = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    if (this === main) return rect(100);
+    if (this.classList.contains("tf-fileview")) return rect(100 + 300 - main.scrollTop);
+    return real.call(this);
+  };
+  try {
+    const props = $state({
+      ports: { ...openSource(DEEP_FILES), submitWrite: async () => ({}) as never },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      path: "README.md" as string | null,
+      line: null as number | null,
+      refreshed: 0,
+      changed: new Set<string>(),
+      defaults: createRendererDefaults(storedDefaults().port),
+    });
+    view = mount(TfRepoFilesRefreshed, { target: main, props: { props } });
+    await settle();
+
+    // Read far down README.md, then open another file: its top comes to rest 12 px under the scroller's.
+    main.scrollTop = 1500;
+    props.path = "src/psp/gateway/sepa/mod.rs";
+    await settle();
+    expect(text(main.querySelector(".tf-code"))).toContain("pub mod codes;");
+    expect(main.scrollTop).toBe(300 - 12);
+
+    // The file's top already in view: nothing moves.
+    main.scrollTop = 200;
+    props.path = DEEP;
+    await settle();
+    expect(main.scrollTop).toBe(200);
+
+    // A refresh reads the same file again: the reader stays where they are.
+    main.scrollTop = 1500;
+    props.refreshed += 1;
+    await settle();
+    expect(main.scrollTop).toBe(1500);
+
+    // A link to a line scrolls to that line instead (jsdom has no `scrollIntoView`, so it stays put here).
+    main.scrollTop = 1500;
+    props.path = "README.md";
+    props.line = 1;
+    await settle();
+    expect(main.scrollTop).toBe(1500);
+  } finally {
+    Element.prototype.getBoundingClientRect = real;
+  }
 });

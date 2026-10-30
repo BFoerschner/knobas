@@ -106,6 +106,23 @@
 .tf-fimage { padding: 18px; display: grid; place-items: center; background: var(--sheet); }
 .tf-fimage img { max-width: 100%; }
 .tf-fdiagram { padding: 18px; display: grid; place-items: center; background: var(--sheet); overflow: auto; }
+/* A PDF (#2260, tf/render/TfPdf.svelte): the zoom bar stays on top while the pages scroll under it. Each page is a box
+   sized through the CSSOM (render/pdf-view.ts GUTTER is the 18px each side) holding its canvas, the text pdf.js lays
+   over it for selection (transparent, positioned by pdf.js's TextLayer through the CSSOM), and its links. */
+.tf-fpdf { background: var(--sheet); }
+.tf-pdf-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 6px 18px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); }
+.tf-pdf-bar .tf-acts { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.tf-pdf-zoom { min-width: 44px; text-align: center; font: var(--t-sm) var(--mono); font-variant-ligatures: none; font-variant-numeric: tabular-nums; }
+.tf-pdf-pages { padding: 18px; display: flex; flex-direction: column; align-items: center; gap: 14px; overflow-x: auto; }
+.tf-pdf-page { position: relative; flex: none; background: #fff; box-shadow: 0 0 0 1px var(--rule), 0 2px 6px rgb(0 0 0 / 0.12); --scale-round-x: 1px; --scale-round-y: 1px; }
+.tf-pdf-page canvas { position: absolute; inset: 0; display: block; }
+.tf-pdf-text { position: absolute; inset: 0; overflow: clip; line-height: 1; text-align: initial; transform-origin: 0 0; z-index: 1; --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size)); }
+.tf-pdf-text :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
+.tf-pdf-text > span { --font-height: 0; --scale-x: 1; --rotate: 0deg; font-size: calc(var(--text-scale-factor) * var(--font-height)); transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)); }
+.tf-pdf-text ::selection { background: color-mix(in srgb, var(--mark), transparent 30%); color: transparent; }
+.tf-pdf-links { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.tf-pdf-links a { position: absolute; pointer-events: auto; border-radius: 2px; }
+.tf-pdf-links a:hover, .tf-pdf-links a:focus-visible { background: color-mix(in srgb, var(--mark), transparent 55%); outline: none; }
 /* A diagram (#2258): the sandboxed frame sized to the drawing, and the off-screen box Mermaid measures text in
    (its own <style> is refused by the bundled app's CSP, so the font is set here; render/mermaid.ts DIAGRAM_FONT). */
 .tf-dframe { display: block; border: 0; max-width: 100%; background: transparent; }
