@@ -12,7 +12,8 @@ use std::time::Duration;
 use knobas_source::ReviewSide;
 use knobas_source::view::{
     ActionField, Block, ChoiceOption, Commenting, DiffChange, DiffLine, DiffLineKind, Fact,
-    FieldKind, FileThread, Hunk, LineComment, LineComments, LineThread, SourceView, Tone, ViewAction, ViewRow, ViewSection,
+    FieldKind, FileThread, Hunk, LineComment, LineComments, LineThread, SourceView, Tone,
+    ViewAction, ViewRow, ViewSection,
 };
 use knobas_source::{Source, SourceError};
 use serde_json::{Value, json};
@@ -861,7 +862,11 @@ async fn gitea_with_line_comments(pull: Value) -> MockServer {
 /// The hunk [`line_comment`] sends, as the adapter answers it: numbered from
 /// the commented line, its last (#2318), so its first line is `first` on both
 /// sides, then `tail` as (kind, old number, new number, text).
-fn at_first(header: &str, first: u32, tail: &[(DiffLineKind, Option<u32>, Option<u32>, &str)]) -> Hunk {
+fn at_first(
+    header: &str,
+    first: u32,
+    tail: &[(DiffLineKind, Option<u32>, Option<u32>, &str)],
+) -> Hunk {
     let mut lines = vec![DiffLine {
         kind: DiffLineKind::Context,
         old: Some(first),
@@ -921,7 +926,11 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 resolved_by: None,
                 replies: false,
                 commit: Some(FIRST_SHA.into()),
-                hunk: Some(at_first("@@ -6,1 +6,2 @@", 6, &[(DiffLineKind::Add, None, Some(7), "    loop {}")])),
+                hunk: Some(at_first(
+                    "@@ -6,1 +6,2 @@",
+                    6,
+                    &[(DiffLineKind::Add, None, Some(7), "    loop {}")]
+                )),
             },
         }],
         "{view:#?}"
@@ -987,7 +996,11 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 resolved_by: None,
                 replies: false,
                 commit: Some(FIRST_SHA.into()),
-                hunk: Some(at_first("@@ -39,1 +39,2 @@", 39, &[(DiffLineKind::Add, None, Some(40), "    gone")])),
+                hunk: Some(at_first(
+                    "@@ -39,1 +39,2 @@",
+                    39,
+                    &[(DiffLineKind::Add, None, Some(40), "    gone")]
+                )),
             },
         ],
         "{view:#?}"

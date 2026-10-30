@@ -4567,7 +4567,9 @@ async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
         .await
         .expect("a review list");
     for review in &reviews {
-        let Some(rid) = review["id"].as_u64() else { continue };
+        let Some(rid) = review["id"].as_u64() else {
+            continue;
+        };
         let raw: Vec<serde_json::Value> = http
             .get(format!("{api}/pulls/{number}/reviews/{rid}/comments"))
             .header("Authorization", &auth)
@@ -4580,7 +4582,11 @@ async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
         for c in raw {
             println!(
                 "raw comment: commit_id={} original_commit_id={} position={} original_position={} diff_hunk={:?}",
-                c["commit_id"], c["original_commit_id"], c["position"], c["original_position"], c["diff_hunk"]
+                c["commit_id"],
+                c["original_commit_id"],
+                c["position"],
+                c["original_position"],
+                c["diff_hunk"]
             );
         }
     }
@@ -4593,7 +4599,10 @@ async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
         Some(written_on.as_str()),
         "{outdated:#?}"
     );
-    let hunk = outdated.hunk.as_ref().unwrap_or_else(|| panic!("no hunk: {outdated:#?}"));
+    let hunk = outdated
+        .hunk
+        .as_ref()
+        .unwrap_or_else(|| panic!("no hunk: {outdated:#?}"));
     let last = hunk.lines.last().expect("a hunk with lines");
     assert_eq!(
         (last.kind, last.new, last.text.as_str()),
@@ -4605,7 +4614,9 @@ async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
         (&None, &None),
         "{readme:#?}"
     );
-    println!("#{number}: two line comments sent, drawn on their lines, the rewritten one outdated at {written_on}");
+    println!(
+        "#{number}: two line comments sent, drawn on their lines, the rewritten one outdated at {written_on}"
+    );
 }
 
 /// A check row's meta is `<description> · <age>`, or the age alone when the
