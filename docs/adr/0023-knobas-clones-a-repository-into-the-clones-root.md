@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, amended by ADR-0035
 ---
 
 # knobas clones a repository into the clones root
