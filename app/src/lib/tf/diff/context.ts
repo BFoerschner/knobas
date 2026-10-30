@@ -12,7 +12,7 @@
  * expanded line is context, the same text on both sides.
  */
 import { isIpcError } from "../../ipc";
-import type { DiffFile, PipeRun, PipeStep, SourceView } from "../../ipc/entity";
+import type { DiffFile, DiffRange, PipeRun, PipeStep, SourceView } from "../../ipc/entity";
 import type { DiffContext } from "./diff";
 
 type Read = (entityId: string, section: string | null) => Promise<SourceView | null>;
@@ -61,6 +61,44 @@ export function commitContext(read: Read, commitId: string, parentId: string | n
       const id = side === "new" ? commitId : parentId;
       if (id === null) return null;
       return wholeFileText(await read(id, `file:${side === "old" ? (file.old_path ?? file.path) : file.path}`));
+    },
+  };
+}
+
+/** The section of a range's repository that reads `path` whole at the commit `sha`. */
+export function fileAtSection(sha: string, path: string): string {
+  return `file@${sha}:${path}`;
+}
+
+/**
+ * Expanded context's reader for a diff that names its range (#2310): a pull request's, a compare's,
+ * a diff address's. Each side is read in the range's repository at its own whole sha (`base` the
+ * old side, by the file's old path; `head` the new), which stands at a fixed commit, so the app's
+ * read cache answers the second read of a file with no source request (ADR-0032). `bytes`, where
+ * given, reads a side's bytes at that sha for a rendered image diff (#2279), and `piped` runs a file
+ * pipeline on a side there (#2270); `not_found` is no file on that side.
+ */
+export function rangeContext(read: Read, range: DiffRange, bytes?: ReadBytes, piped?: ReadPiped): DiffContext {
+  const at = (file: DiffFile, side: "old" | "new") =>
+    side === "new" ? { sha: range.head, path: file.path } : { sha: range.base, path: file.old_path ?? file.path };
+  /** `ask` at a side's sha and path; a side the file is not on (`not_found`) is `null`. */
+  async function atSide<T>(file: DiffFile, side: "old" | "new", ask: (sha: string, path: string) => Promise<T>): Promise<T | null> {
+    const { sha, path } = at(file, side);
+    try {
+      return await ask(sha, path);
+    } catch (cause) {
+      if (isIpcError(cause) && cause.code === "not_found") return null;
+      throw cause;
+    }
+  }
+  return {
+    ...(bytes ? { bytes: (file: DiffFile, side: "old" | "new") => atSide(file, side, (sha, path) => bytes(range.repository, path, sha)) } : {}),
+    ...(piped
+      ? { piped: (file: DiffFile, side: "old" | "new", steps: PipeStep[]) => atSide(file, side, (sha, path) => piped(range.repository, path, sha, steps)) }
+      : {}),
+    async text(file, side) {
+      const { sha, path } = at(file, side);
+      return wholeFileText(await read(range.repository, fileAtSection(sha, path)));
     },
   };
 }

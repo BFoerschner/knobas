@@ -18,6 +18,7 @@ use crate::source::GiteaSource;
 mod label;
 mod land;
 mod maintain;
+mod range;
 mod request;
 mod review;
 mod threads;
@@ -188,15 +189,31 @@ impl PullView<'_> {
     /// reader may add more (#709): the pull request's state and its reviews
     /// are read beside the diff, then each review that has line comments, all
     /// at once.
+    ///
+    /// The commits the diff is between go with it (#2273, #2310): its merge
+    /// base and head from the record, its commits, and the head the viewer
+    /// last reviewed at, read beside the rest. The commits are for picking
+    /// from, not the diff: a failed read of them lists none and fails nothing.
     async fn files(&self) -> Result<ViewSection, SourceError> {
-        let (pull, text, reviews, resolves) = tokio::try_join!(
+        let (pull, text, reviews, resolves, commits, viewer) = tokio::try_join!(
             self.pull(),
             self.source
                 .client
                 .pull_diff(self.owner, self.repo, self.number),
             self.reviews(),
             async { Ok(self.source.resolves().await) },
+            async { Ok(self.listed().await.map(|(c, _, _)| c).unwrap_or_default()) },
+            self.viewer(),
         )?;
+        let reviewed = range::reviewed(&reviews, viewer.as_deref());
+        let range = range::of(
+            &self.source.id,
+            self.owner,
+            self.repo,
+            &pull,
+            &commits,
+            reviewed,
+        );
         let (mut files, truncated) = knobas_source::diff::parse_view(&text);
         let commented = threads::with_comments(&reviews);
         let reads = commented
@@ -225,6 +242,7 @@ impl PullView<'_> {
                 truncated,
                 commentable: review::commenting(&pull, resolves),
                 gone,
+                range,
             }],
         })
     }
@@ -232,6 +250,40 @@ impl PullView<'_> {
     /// The pull request's commits, at most [`rows::COMMIT_CAP`], ending on
     /// a note where Gitea has more (#678).
     async fn commits(&self, pull: Option<&Pull>) -> Result<ViewSection, SourceError> {
+        let (records, total, cut) = self.listed().await?;
+        let mut rows: Vec<ViewRow> = records
+            .iter()
+            .map(|c| rows::commit_row(&self.source.id, self.owner, self.repo, &c.record))
+            .collect();
+        // The count and the note both say what the tab lists; a record that
+        // did not parse is one the list does not hold.
+        let listed = rows.len();
+        if let Some(mut note) = rows::left_out("commits", listed, total, cut, None) {
+            // Where the rest is: the pull request's own page, read for the
+            // note when this tab was asked for on its own.
+            // A link is not worth failing the tab over: without it the note
+            // still says the list was cut.
+            let page = match pull {
+                Some(pull) => pull.html_url.clone(),
+                None => self.pull().await.ok().and_then(|p| p.html_url),
+            };
+            note.url = page.and_then(|page| rows::under(&page, "/commits"));
+            rows.push(note);
+        }
+        Ok(ViewSection {
+            id: COMMITS.to_owned(),
+            title: "Commits".to_owned(),
+            count: Some(listed as u64),
+            deferred: false,
+            blocks: vec![Block::Entities { title: None, rows }],
+        })
+    }
+
+    /// The pull request's commits as Gitea lists them, newest first, at most
+    /// [`rows::COMMIT_CAP`]; a record that does not parse is left out. With
+    /// them the server's own count, where it sent one, counting the records
+    /// read where they outnumber it, and whether the cap cut the walk.
+    async fn listed(&self) -> Result<(Vec<ListedCommit>, Option<usize>, bool), SourceError> {
         let mut records = Vec::new();
         let mut total = None;
         let mut cut = true;
@@ -252,34 +304,12 @@ impl PullView<'_> {
             }
         }
         let read = records.len();
-        let mut rows: Vec<ViewRow> = records
+        let total = total.map(|t| t.max(read));
+        let records = records
             .into_iter()
             .filter_map(|r| serde_json::from_value::<ListedCommit>(r).ok())
-            .map(|c| rows::commit_row(&self.source.id, self.owner, self.repo, &c.record))
             .collect();
-        // The count and the note both say what the tab lists; a record that
-        // did not parse is one the list does not hold.
-        let listed = rows.len();
-        let total = total.map(|t| t.max(read));
-        if let Some(mut note) = rows::left_out("commits", listed, total, cut, None) {
-            // Where the rest is: the pull request's own page, read for the
-            // note when this tab was asked for on its own.
-            // A link is not worth failing the tab over: without it the note
-            // still says the list was cut.
-            let page = match pull {
-                Some(pull) => pull.html_url.clone(),
-                None => self.pull().await.ok().and_then(|p| p.html_url),
-            };
-            note.url = page.and_then(|page| rows::under(&page, "/commits"));
-            rows.push(note);
-        }
-        Ok(ViewSection {
-            id: COMMITS.to_owned(),
-            title: "Commits".to_owned(),
-            count: Some(listed as u64),
-            deferred: false,
-            blocks: vec![Block::Entities { title: None, rows }],
-        })
+        Ok((records, total, cut))
     }
 
     /// The discussion Gitea keeps on the issue of the same index, oldest
@@ -709,6 +739,10 @@ struct Pull {
     /// (#1194).
     #[serde(default)]
     labels: Vec<label::Label>,
+    /// The commit the head forked from the base at, which the diff is from
+    /// (#2310).
+    #[serde(default)]
+    merge_base: Option<String>,
     /// Who a review is requested from now (#2303); `null` reads as none.
     #[serde(default)]
     requested_reviewers: Option<Vec<UserRef>>,
@@ -772,6 +806,9 @@ struct Review {
     /// As for [`Pull`]'s times, kept as text for [`when_of`].
     #[serde(default)]
     submitted_at: Option<String>,
+    /// The head it was given at (#2273).
+    #[serde(default)]
+    commit_id: Option<String>,
 }
 
 /// Gitea's `Team`, the field a review request names it by.
