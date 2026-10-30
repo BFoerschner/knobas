@@ -337,7 +337,7 @@ test("Files opens the README, marks the locally changed file M, and a changed fi
 test("the landing draws the branch's last commit above the README; a file opened does not (#2257)", async () => {
   await draw([REPO]);
   const strip = target.querySelector(".tf-lastc")!;
-  expect(text(strip)).toBe("c90d11a2b3 PAY-231: jitter in backoff mara · 3 hours ago History");
+  expect(text(strip)).toBe("PAY-231: jitter in backoff c90d11a2b3 mara · 3 hours ago History");
   expect(strip.querySelector("a.tf-mono")!.getAttribute("href")).toBe(
     "#/repo/gitea%3Atidewater%2Fpayout-service/commits/gitea%3Atidewater%2Fpayout-service%40c90d11a2b3c4",
   );
