@@ -232,7 +232,7 @@ The line-by-line difference between two versions of a set of files, as a source 
 _Avoid_: patch (the text before it is parsed), changeset, delta
 
 **File pipeline**:
-The ordered steps between a file's bytes and its renderer (base64 decode, gunzip, jq, pretty-print, …), each taking bytes or text and giving bytes or text. Run in the backend under a size cap and a timeout per step, and kept in the [read cache](#read-cache) by (sha, path, steps). In the viewer it is *Pipeline*, on the open file; in code `file_pipeline`, `PipeStep`, `PipeRun`.
+The ordered steps between a file's bytes and its renderer (base64 decode, gunzip, jq, pretty-print, …), each taking bytes or text and giving bytes or text. Run in the backend under a size cap and a timeout per step, and kept in the [read cache](#read-cache) by (sha, path, steps). In the viewer it is *Pipeline*, on the open file; in code `file_pipeline`, `PipeStep`, `PipeRun`. A **named pipeline** is one saved with a name, which a default per file pattern names by id (so editing it changes every pattern that uses it); a **command step** is one of the person's own programs as a step, under ADR-0033.
 _Avoid_: pipeline alone in code or docs (a CI [pipeline](#pipeline)), filter (jq's word for one step), transform
 
 **Pipeline**:
