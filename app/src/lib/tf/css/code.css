@@ -334,16 +334,22 @@
 .tf-stepfail { border-bottom: 1px solid var(--rule); background: var(--err-bg); padding: 10px 12px; font-size: var(--t-sm); color: var(--err); display: flex; flex-direction: column; gap: 8px; }
 .tf-stepfail pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; background: var(--paper); color: var(--ink); border-radius: 4px; padding: 8px 10px; white-space: pre-wrap; }
 
+/*
+ * The code area's pick menus, one rule for all three (review of spec #2234, Standards 9): the renderer switcher
+ * (.tf-rsw), a pull request's commit picker (.tf-pick) and the pipeline bar's step menu (.tf-pmenu). A face is
+ * "<label> <b>choice</b> ▾"; an item is a row of tick, name and tag; a heading is small capitals.
+ */
+.tf-rsw-face, .tf-pick-face { gap: 6px; }
+.tf-rsw-face b, .tf-pick-face b { font-weight: 600; }
+:is(.tf-rsw, .tf-pick, .tf-pmenu) .tf-menu > :is(button, a) { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }
+:is(.tf-rsw, .tf-pick, .tf-pmenu) .tf-menu > :is(button, a):is(:hover, :focus-visible), :is(.tf-rsw, .tf-pick, .tf-pmenu) .tf-menu > .tf-on { background: var(--sheet-2); }
+:is(.tf-rsw, .tf-pick, .tf-pmenu) .tf-menu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
+.tf-rsw-mh, .tf-pick-mh { padding: 6px 10px 2px; font-size: var(--t-2xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
+
 /* The renderer switcher (#2263; mockups/code-area/file.html, state "switcher"): *Render as <name> ▾*. */
 .tf-rsw { position: relative; display: inline-flex; }
-.tf-rsw-face { gap: 6px; }
-.tf-rsw-face b { font-weight: 600; }
 .tf-rsw-lab { color: var(--ink-2); }
 .tf-rsw .tf-menu { width: 330px; font-size: var(--t-sm); }
-.tf-rsw .tf-menu > button, .tf-rsw .tf-menu > a { display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }
-.tf-rsw .tf-menu > a:hover, .tf-rsw .tf-menu > .tf-on { background: var(--sheet-2); }
-.tf-rsw .tf-menu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
-.tf-rsw-mh { padding: 6px 10px 2px; font-size: var(--t-2xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
 .tf-rsw-tick { width: 14px; flex: none; color: var(--ink); }
 .tf-rsw-name { min-width: 0; }
 .tf-rsw-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
@@ -356,14 +362,8 @@
 /* A pull request's commit picker (#2273; mockups/code-area/diff.html, state "range"): *Commits <choice> base…head ▾*. */
 .tf-pickbar { display: flex; align-items: center; gap: 8px; padding: 0 0 8px; }
 .tf-pick { position: relative; display: inline-flex; }
-.tf-pick-face { gap: 6px; }
-.tf-pick-face b { font-weight: 600; }
 .tf-pick-lab, .tf-pick-ends { color: var(--ink-2); }
 .tf-pick .tf-menu { left: 0; right: auto; width: 420px; max-height: 60vh; overflow: auto; font-size: var(--t-sm); }
-.tf-pick .tf-menu > button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); }
-.tf-pick .tf-menu > button:hover, .tf-pick .tf-menu > .tf-on { background: var(--sheet-2); }
-.tf-pick .tf-menu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
-.tf-pick-mh { padding: 6px 10px 2px; font-size: var(--t-2xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
 .tf-pick-tick { width: 14px; flex: none; }
 .tf-pick-box { width: 14px; height: 14px; flex: none; border: 1px solid var(--rule); border-radius: 3px; display: inline-grid; place-items: center; font-size: var(--t-2xs); }
 .tf-pick-c.tf-on .tf-pick-box { background: var(--ink); color: var(--paper); border-color: var(--ink); }
@@ -391,10 +391,6 @@
 .tf-pstep.tf-prenderer { padding: 0 8px; font-weight: 600; background: var(--info-bg); border-color: var(--info); color: var(--info); }
 .tf-pmenu { position: relative; display: inline-flex; }
 .tf-pmenu .tf-menu { width: 320px; font-size: var(--t-sm); }
-.tf-pmenu .tf-menu > button { display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); }
-.tf-pmenu .tf-menu > a { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }
-.tf-pmenu .tf-menu > a:hover, .tf-pmenu .tf-menu > a:focus-visible { background: var(--sheet-2); }
-.tf-pmenu .tf-menu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
 .tf-pmono { font-family: var(--mono); font-variant-ligatures: none; }
 /* #2265: the person's own command step (mockup `.step.user`), the save form, the suggestion chip (`.suggest`). */
 .tf-pstep.tf-puser .tf-pname::after { content: " cmd"; font: 600 var(--t-2xs) var(--sans); color: var(--ink-2); }
