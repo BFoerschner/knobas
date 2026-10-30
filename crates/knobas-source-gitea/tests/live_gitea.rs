@@ -4497,6 +4497,23 @@ async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
         "Gitea dates its comments: {readme:#?}"
     );
 
+    // The head both comments were written on (#2318).
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let auth = format!("token {}", env.token);
+    let pull_head = || async {
+        let pull: serde_json::Value = http
+            .get(format!("{api}/pulls/{number}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .expect("read the pull request")
+            .json()
+            .await
+            .expect("a pull request record");
+        pull["head"]["sha"].as_str().expect("a head sha").to_owned()
+    };
+    let written_on = pull_head().await;
+
     // 4. A push rewrites the added line: its comment is about a line the diff
     //    no longer holds as it was, so it is outdated; the removed line is
     //    still the removed line.
@@ -4536,7 +4553,59 @@ async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
         [(ReviewSide::Old, false), (ReviewSide::New, true)],
         "{readme:#?}"
     );
-    println!("#{number}: two line comments sent, drawn on their lines, the rewritten one outdated");
+    // 5. The outdated thread is drawn at the commit it was written on, its
+    //    hunk ending on the line as it read there (#2318); the other is not
+    //    outdated and carries neither. Gitea's and Forgejo's raw answer is
+    //    printed: the measurement the adapter's parse rests on.
+    let reviews: Vec<serde_json::Value> = http
+        .get(format!("{api}/pulls/{number}/reviews"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("read the reviews")
+        .json()
+        .await
+        .expect("a review list");
+    for review in &reviews {
+        let Some(rid) = review["id"].as_u64() else { continue };
+        let raw: Vec<serde_json::Value> = http
+            .get(format!("{api}/pulls/{number}/reviews/{rid}/comments"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .expect("read a review's comments")
+            .json()
+            .await
+            .expect("a comment list");
+        for c in raw {
+            println!(
+                "raw comment: commit_id={} original_commit_id={} position={} original_position={} diff_hunk={:?}",
+                c["commit_id"], c["original_commit_id"], c["position"], c["original_position"], c["diff_hunk"]
+            );
+        }
+    }
+    let now_head = pull_head().await;
+    println!("written on {written_on}, head now {now_head}");
+    assert_ne!(written_on, now_head, "the push moved the head");
+    let outdated = &readme.threads[1];
+    assert_eq!(
+        outdated.commit.as_deref(),
+        Some(written_on.as_str()),
+        "{outdated:#?}"
+    );
+    let hunk = outdated.hunk.as_ref().unwrap_or_else(|| panic!("no hunk: {outdated:#?}"));
+    let last = hunk.lines.last().expect("a hunk with lines");
+    assert_eq!(
+        (last.kind, last.new, last.text.as_str()),
+        (DiffLineKind::Add, Some(added), "reviewed from knobas"),
+        "{hunk:#?}"
+    );
+    assert_eq!(
+        (&readme.threads[0].commit, &readme.threads[0].hunk),
+        (&None, &None),
+        "{readme:#?}"
+    );
+    println!("#{number}: two line comments sent, drawn on their lines, the rewritten one outdated at {written_on}");
 }
 
 /// A check row's meta is `<description> · <age>`, or the age alone when the

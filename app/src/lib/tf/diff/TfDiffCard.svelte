@@ -72,6 +72,7 @@
   import { marked, type Range } from "./words";
   import { firstLine } from "../openin/openin";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
+  import TfWrittenAt from "./TfWrittenAt.svelte";
 
   let {
     file,
@@ -97,6 +98,7 @@
     load,
     commands,
     openAt = null,
+    repository = null,
     pipeline = null,
     onpipeline = () => {},
   }: {
@@ -128,6 +130,8 @@
     sideOf: (side: Side) => SideGot | undefined;
     load: (side: Side) => void;
     commands: CommandPort;
+    /** The repository an outdated thread's commit is in (#2318): its *at <sha>* links that commit's diff. */
+    repository?: string | null;
     /** *Open in…* in the header, on the file at its first changed line; never on a deleted file. */
     openAt?: OpenAt | null;
     /** The file's pipeline, or `null` where it has none; `onpipeline` turns it on or off for this file. */
@@ -472,7 +476,7 @@
       <details class="tf-outdated">
         <summary>{placed.apart.length + strays.length} outdated</summary>
         {#each placed.apart as thread, t (t)}
-          <div class="tf-thread" class:tf-resolved={talk.isResolved(thread)}><span class="tf-dim">{lineName(thread.side, thread.line)}</span>{@render conversation(thread)}</div>
+          <div class="tf-thread" class:tf-resolved={talk.isResolved(thread)}><span class="tf-dim">{lineName(thread.side, thread.line)}</span><TfWrittenAt {thread} {repository} />{@render conversation(thread)}</div>
         {/each}
         {#each strays as d (d.id)}
           <div class="tf-thread tf-pending"><p><b>You</b> <span class="tf-chip tf-warn">pending</span> {`${lineName(d.side, d.line)}: ${d.body}`}</p></div>

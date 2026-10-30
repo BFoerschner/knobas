@@ -311,6 +311,7 @@
         {context}
         openAt={openAt && ends ? { entityId: openAt.entityId, at: ends.head } : openAt}
         cut={shown.truncated}
+        repository={range?.repository ?? null}
         {...render ? { render } : {}}
       />
     {/key}

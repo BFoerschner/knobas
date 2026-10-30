@@ -100,7 +100,7 @@ pub(super) fn written(review: &Review, raw: Vec<serde_json::Value>) -> Vec<Writt
                 line,
                 was: c.diff_hunk.as_deref().and_then(last_line),
                 commit: c.commit_id.filter(|sha| !sha.is_empty()),
-                hunk: c.diff_hunk.as_deref().and_then(hunk_of),
+                hunk: c.diff_hunk.as_deref().and_then(|h| hunk_of(h, side, line)),
                 id: c.id,
                 resolver: c
                     .resolver
@@ -150,22 +150,48 @@ fn last_line(hunk: &str) -> Option<String> {
     })
 }
 
-/// `diff_hunk` as a [`Hunk`]: the shared parser reads it as one file's diff,
-/// with a file header put before it where Gitea sent the `@@` line alone.
-/// `None` where it holds no hunk.
-fn hunk_of(diff_hunk: &str) -> Option<Hunk> {
+/// `diff_hunk` as a [`Hunk`], numbered from the commented line: its last
+/// line, which is `line` on `side`. `None` where it holds no hunk.
+///
+/// Gitea's cut hunk comes without a file header, and its `@@` numbers are not
+/// to be trusted: 1.27.3 counts a `\ No newline` note as a line of both sides,
+/// so the hunk starts one short on each (measured live, #2318). The commented
+/// line's number is exact, so every line is moved by what moves that one onto
+/// it, and the header is written again from the lines.
+fn hunk_of(diff_hunk: &str, side: ReviewSide, line: u32) -> Option<Hunk> {
     let text = if diff_hunk.starts_with("diff --git ") {
         diff_hunk.to_owned()
     } else {
         format!("diff --git a/f b/f\n{diff_hunk}")
     };
-    let hunk = knobas_source::diff::parse(&text)
+    let mut hunk = knobas_source::diff::parse(&text)
         .into_iter()
         .next()?
         .hunks
         .into_iter()
         .next()?;
-    (!hunk.lines.is_empty()).then_some(hunk)
+    let last = hunk.lines.last()?;
+    let at = match side {
+        ReviewSide::Old => last.old,
+        ReviewSide::New => last.new,
+    };
+    if let Some(at) = at {
+        let by = i64::from(line) - i64::from(at);
+        let moved = |n: Option<u32>| n.and_then(|n| u32::try_from(i64::from(n) + by).ok());
+        for l in &mut hunk.lines {
+            l.old = moved(l.old);
+            l.new = moved(l.new);
+        }
+        let span = |of: fn(&DiffLine) -> Option<u32>| {
+            let mut on = hunk.lines.iter().filter_map(of);
+            let first = on.next();
+            (first.unwrap_or(0), first.map_or(0, |_| 1 + on.count()))
+        };
+        let (old, olds) = span(|l| l.old);
+        let (new, news) = span(|l| l.new);
+        hunk.header = format!("@@ -{old},{olds} +{new},{news} @@");
+    }
+    Some(hunk)
 }
 
 /// Put each comment in `written` on its file of `files`: one thread per line
