@@ -585,7 +585,7 @@ fn substitute(word: &str, at: &Fill<'_>) -> Result<String, TemplateError> {
             ),
             "url" => out.push_str(checked(name, at.code.url.as_deref(), |v| {
                 (v.starts_with("https://") || v.starts_with("http://"))
-                    && !v.chars().any(char::is_whitespace)
+                    && !v.chars().any(|c| c.is_whitespace() || c.is_control())
             })?),
             other => return Err(TemplateError::UnknownPlaceholder(other.to_owned())),
         }
@@ -922,6 +922,7 @@ mod tests {
             ("branch", "x.lock"),
             ("url", "file:///etc/passwd"),
             ("url", "--help"),
+            ("url", "https://git.example/o/r\u{1b}[2J"),
         ] {
             let mut code = good.clone();
             let slot = match field {

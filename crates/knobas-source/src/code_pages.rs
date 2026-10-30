@@ -8,7 +8,8 @@
 //! the address is never an item's stored `web_url`. It is built the way
 //! ADR-0023 builds a clone URL: the instance's **typed base URL**, then the
 //! template the adapter declares here, then the values, each percent-encoded
-//! so none of them can leave the path segment it is put in.
+//! and none with a `.` or `..` segment, so none of them can leave its place
+//! in the path.
 //!
 //! A template is the address **after the base URL**, starting with `/`, with
 //! these placeholders:
@@ -143,7 +144,9 @@ fn names(template: &str) -> Result<Vec<&str>, ()> {
 /// placeholder replaced by its value from `values`, percent-encoded: every
 /// byte but the unreserved ones and `/` (so `{file}` and a branch named
 /// `feature/x` keep their segments). `None` when the template names a value
-/// `values` does not hold.
+/// `values` does not hold, or a value has a `.` or `..` segment: with `/`
+/// kept, such a value would climb out of its place in the path, and a
+/// browser reads `%2E%2E` as `..` too, so encoding it would not help.
 #[must_use]
 pub fn page(base_url: &str, template: &str, values: &[(&str, &str)]) -> Option<String> {
     let mut out = base_url.trim_end_matches('/').to_owned();
@@ -154,6 +157,9 @@ pub fn page(base_url: &str, template: &str, values: &[(&str, &str)]) -> Option<S
         let close = after.find('}')?;
         let name = &after[..close];
         let value = values.iter().find(|(key, _)| *key == name)?.1;
+        if value.split('/').any(|segment| segment == "." || segment == "..") {
+            return None;
+        }
         encode_into(&mut out, value);
         rest = &after[close + 1..];
     }
@@ -218,6 +224,32 @@ mod tests {
             Some("https://git.example/o/r/src/abc1234/src/a%20b.rs#L42")
         );
         assert_eq!(page("https://g", "/{repo}/{sha}", &[("repo", "o/r")]), None);
+    }
+
+    /// A value keeps its `/`, so one with a dot segment could climb out of
+    /// its place in the path: it has no page.
+    #[test]
+    fn a_value_with_a_dot_segment_has_no_page() {
+        let pages = gitea();
+        for head in ["../../admin", "a/../b", "..", "a/.", "./a"] {
+            assert_eq!(
+                page(
+                    "https://git.example",
+                    pages.template(Page::Range),
+                    &[("repo", "o/r"), ("base", "main"), ("head", head)]
+                ),
+                None,
+                "{head}"
+            );
+        }
+        assert!(
+            page(
+                "https://git.example",
+                pages.template(Page::Range),
+                &[("repo", "o/r"), ("base", "main"), ("head", "a/.b/c..d")]
+            )
+            .is_some()
+        );
     }
 
     #[test]
