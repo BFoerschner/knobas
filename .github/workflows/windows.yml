@@ -1,0 +1,47 @@
+# The Windows-only tests: what a Mac or Linux gate cannot witness (#2232).
+#
+# Today that is `knobas_db::console`'s test, that a console program knobas
+# starts opens no window. The release app has no console, so Windows gave every
+# git the Code view ran a window of its own, and the windows took the focus
+# that started the next read.
+#
+# Narrow on purpose, unlike `check.yml`: one crate's unit tests filtered to the
+# module, on a pull request that changes the builder or this file, or by hand.
+name: windows
+
+on:
+  pull_request:
+    paths:
+      - crates/knobas-db/src/console.rs
+      - .github/workflows/windows.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  console:
+    runs-on: windows-latest
+    # A cold build of knobas-db and its dependencies is minutes; what this
+    # bounds is a probe that never exits.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The channel comes from `rust-toolchain.toml`, as in `check.yml`.
+      - id: toolchain
+        name: Read the pinned toolchain
+        shell: bash
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (same commit as master)
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: console tests
+        run: cargo test -p knobas-db --lib 'console::' -- --nocapture
