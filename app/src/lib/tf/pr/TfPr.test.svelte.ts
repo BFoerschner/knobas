@@ -328,15 +328,94 @@ test("Overview: each check with its state, the one the mirror holds opening its 
 
 test("Ready to merge? reads prototype-6's three lines, approvals, checks and conflicts, each with its dot; the clone beside it", async () => {
   await draw([PR]);
-  const lines = [...target.querySelectorAll(".tf-prready > span")];
-  expect(lines.map((line) => line.textContent?.trim())).toEqual([
-    "Approvals: 1 of 2",
-    "Checks: Payout_IntegrationTests #1187 failure",
-    "No conflicts with main",
+  const lines = [...target.querySelectorAll(".tf-prck")];
+  expect(lines.map((line) => line.textContent?.replace(/\s+/g, " ").trim())).toEqual([
+    "● Approvals: 1 of 2",
+    "✕ Checks: Payout_IntegrationTests #1187 failure",
+    "✓ No conflicts with main",
   ]);
-  expect(lines.map((line) => line.querySelector(".tf-dot")!.className)).toEqual(["tf-dot tf-warn", "tf-dot tf-err", "tf-dot tf-ok"]);
+  expect(lines.map((line) => line.className)).toEqual(["tf-prck tf-warn", "tf-prck tf-err", "tf-prck tf-ok"]);
   expect(text(".tf-prlocal")).toBe("/Users/mara/code/payout-service On this branch, 1 changed file Open in… ▾ Local changes");
   expect(target.querySelector(".tf-prlocal a")!.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/local`);
+});
+
+/** PR #142 as a base that requires ci/test and ci/build sees it (#2278): ci/test failing, a lint that is not required failing too. */
+function railView(conflict = false): SourceView {
+  const base = prView([COMMENT, action("merge_pull_request", "Merge…", { primary: true, disabled: "required check ci/test failed" })]);
+  const overview = base.sections[0]!;
+  return {
+    ...base,
+    sections: [
+      {
+        ...overview,
+        blocks: [
+          {
+            type: "facts",
+            facts: [
+              fact("State", "open", "info"),
+              fact("Branches", "feature/PAY-231-sepa-retry → main"),
+              fact("Approvals", "2 of 2", "ok"),
+              conflict ? fact("Conflicts", "conflicts with main", "warn") : fact("Conflicts", "none with main", "ok"),
+              fact("Required checks", "1 of 2 pass", "err"),
+              fact("Required check", "ci/build"),
+              fact("Required check", "ci/test"),
+              fact("Review", "approved by priya", "ok"),
+              fact("Review", "changes requested by jonas", "warn"),
+            ],
+          },
+          {
+            type: "entities",
+            title: "Checks",
+            rows: [vrow(null, "lint", "failure", "err"), vrow(null, "ci/test", "failure", "err", null, RUN_URL), vrow(null, "ci/build", "success", "ok")],
+          },
+        ],
+      },
+      ...base.sections.slice(1),
+    ],
+  };
+}
+
+const lines = (selector: string) => [...target.querySelectorAll(selector)].map((node) => node.textContent?.replace(/\s+/g, " ").trim());
+
+test("the side rail: a failing required check is the first check, and readiness says not ready (#2278)", async () => {
+  await draw([PR], ports({ pr: railView() }));
+  expect(lines(".tf-prrail-checks .tf-prit")).toEqual(["ci/test Required failure", "lint failure", "ci/build Required success"]);
+  // The mirror holds ci/test's run: the check opens it.
+  expect(target.querySelector(".tf-prrail-checks .tf-prit a")!.getAttribute("href")).toBe(`#/build/${encodeURIComponent(RUN)}`);
+  expect(target.querySelector(".tf-prverdict")!.firstChild!.textContent!.trim()).toBe("Not yet: 2 of 3 met");
+  expect(text(".tf-prverdict .tf-prwhy")).toBe("required check ci/test failed");
+  expect(target.querySelector(".tf-prverdict")!.classList.contains("tf-err")).toBe(true);
+  const required = [...target.querySelectorAll(".tf-prck")].find((line) => line.textContent?.includes("Required checks"))!;
+  expect(required.className).toBe("tf-prck tf-err");
+  expect(required.querySelector(".tf-prwhy")!.textContent).toBe("ci/test failure");
+  expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "JO jonas Changes requested"]);
+  expect(text(".tf-prconflicts")).toBe("Conflicts No conflicts with main.");
+});
+
+test("the side rail says when the pull request conflicts with its base (#2278)", async () => {
+  await draw([PR, "conversation"], ports({ pr: railView(true) }));
+  expect(text(".tf-prconflicts p")).toBe("Conflicts with main. Resolve them in a checkout and push; they cannot be resolved here.");
+  expect(target.querySelector(".tf-prconflicts p")!.classList.contains("tf-prconflict")).toBe(true);
+  expect(lines(".tf-prck")).toContain("● Conflicts with main");
+});
+
+test("the builds of the head the mirror holds link to their runs (#2278)", async () => {
+  const builds = [
+    row(RUN, "build", "Payout_IntegrationTests #1187", { source_id: "teamcity", state: { text: "failed", tone: "err" } }),
+    row("teamcity:Payout_Lint#904", "build", "Payout_Lint #904", { source_id: "teamcity", state: { text: "success", tone: "ok" } }),
+  ];
+  await draw([PR], ports({ getEntity: async () => ({ ...detail("mara"), builds }) as EntityDetail }));
+  const items = [...target.querySelectorAll(".tf-prbuilds .tf-prit")];
+  expect(items.map((item) => item.textContent?.replace(/\s+/g, " ").trim())).toEqual(["Payout_IntegrationTests #1187 failed", "Payout_Lint #904 success"]);
+  expect(items.map((item) => item.querySelector("a")!.getAttribute("href"))).toEqual([
+    `#/build/${encodeURIComponent(RUN)}`,
+    `#/build/${encodeURIComponent("teamcity:Payout_Lint#904")}`,
+  ]);
+  if (view) unmount(view);
+  view = null;
+  // Nothing mirrored ran on the head: no panel.
+  await draw([PR]);
+  expect(target.querySelector(".tf-prbuilds")).toBeNull();
 });
 
 test("a repository not on this machine draws no Local checkout", async () => {
@@ -479,7 +558,7 @@ test("a muted line in Overview is drawn as a line where the source put it, never
   const body = [...target.querySelectorAll(".tf-prline, .tf-cgroup-h, .tf-prdesc")].map((node) => node.textContent?.trim());
   expect(body).toEqual([unread, "Description", "Retries SEPA payouts."]);
   // Where the checks could not be read, *Ready to merge?* says so in their place.
-  expect([...target.querySelectorAll(".tf-prready > span")].map((line) => line.textContent?.trim())).toEqual([
+  expect([...target.querySelectorAll(".tf-prck > span:last-child")].map((line) => line.textContent?.trim())).toEqual([
     "Approvals: 1 of 2",
     unread,
     "No conflicts with main",
@@ -490,7 +569,7 @@ test("a muted line in Overview is drawn as a line where the source put it, never
   await draw([PR], ports({ pr: withBlocks("overview", [facts!, checks!, mutedLine("Two checks are on Gitea only."), description!]) }));
   expect([...target.querySelectorAll(".tf-prchecks tr")].length).toBe(2);
   expect(text(".tf-prchecks + .tf-prline")).toBe("Two checks are on Gitea only.");
-  expect([...target.querySelectorAll(".tf-prready > span")][1]!.textContent?.trim()).toBe("Checks: Payout_IntegrationTests #1187 failure");
+  expect([...target.querySelectorAll(".tf-prck > span:last-child")][1]!.textContent?.trim()).toBe("Checks: Payout_IntegrationTests #1187 failure");
 });
 
 test("a muted line in Commits is drawn as a line, never as a commit; the list after it is the commits (#2065)", async () => {

@@ -11,6 +11,10 @@ import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
 import { fixtureBuildEntity, runView } from "./builds";
 import { pullView } from "./views/pulls";
+
+/** PR #142 and the builds the mirror holds for its head commit (#2278): the job's integration tests, build and lint. */
+const PR_142_HEAD_OF = "mock:payout-service#142";
+const PR_142_BUILDS = ["teamcity:build:Payout_IntegrationTests-1187", "teamcity:build:Payout_Build-1188", "teamcity:build:Payout_Lint-904"];
 import { repoView } from "./views/repos";
 
 /** A handful of log lines, so the History panel has something to draw. */
@@ -264,8 +268,9 @@ function getEntity(args: Record<string, unknown>) {
     deleted_at: entry.deleted_at,
     links: linksOf(id),
     activity: FAKE_ACTIVITY.filter((line) => line.entity_id === id),
-    // The mock corpus gives no build a commit, so nothing ran on any (#710).
-    builds: [],
+    // The mock corpus gives no build a commit (#710); PR #142's head is the
+    // one exception, so the pull request's side rail (#2278) draws its builds.
+    builds: id === PR_142_HEAD_OF ? CORPUS.filter((candidate) => PR_142_BUILDS.includes(candidate.entity_id)).map(mirrorRow) : [],
     // The job card's fields (#816), read from the fixture's flat mock shape:
     // the mock adapter declares `status` and `priority` there. Type and
     // estimate are this fixture's own (`type`, `estimate_h`), which the mock

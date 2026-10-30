@@ -109,3 +109,23 @@
   .tf-flist { position: static; }
 }
 
+/* The side rail (#2278, mockups/code-area/pr.html): readiness as a checklist under its verdict, then lists. */
+.tf-prready { gap: 7px; }
+.tf-prverdict { padding: 8px 10px; border-radius: 4px; font-weight: 600; }
+.tf-prverdict.tf-ok { background: var(--ok-bg); color: var(--ok); }
+.tf-prverdict.tf-err { background: var(--err-bg); color: var(--err); }
+.tf-prverdict.tf-warn { background: var(--warn-bg); color: var(--warn); }
+.tf-prverdict .tf-prwhy { font-weight: 400; }
+.tf-prck { display: grid; grid-template-columns: 18px 1fr; gap: 4px; align-items: start; }
+.tf-prmk { font-weight: 800; text-align: center; color: var(--warn); }
+.tf-prck.tf-ok .tf-prmk { color: var(--ok); }
+.tf-prck.tf-err .tf-prmk { color: var(--err); }
+.tf-prck.tf-info .tf-prmk, .tf-prck.tf-muted .tf-prmk { color: var(--info); }
+.tf-prwhy { display: block; color: var(--ink-2); font-size: var(--t-xs); }
+.tf-prlist { display: flex; flex-direction: column; padding: 0 0 6px; font-size: var(--t-sm); }
+.tf-prit { display: flex; align-items: center; gap: 8px; padding: 5px 12px; min-height: 32px; }
+.tf-prgrow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-prreq { font: 600 var(--t-2xs) var(--sans); text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; }
+.tf-prnote { margin: 0; padding: 0 12px 10px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-prnote.tf-prconflict { color: var(--err); }
+.tf-prbuilds > header .tf-dim { font-size: var(--t-xs); }
