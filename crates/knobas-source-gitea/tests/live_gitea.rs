@@ -1431,13 +1431,20 @@ async fn the_whole_tree_is_every_file_at_the_listings_commit() {
         panic!("a listing");
     };
     let paths = paths.clone().expect("a listing names the whole tree");
-    let sha = trail[0].section.strip_prefix("files@").expect("a sha").to_owned();
+    let sha = trail[0]
+        .section
+        .strip_prefix("files@")
+        .expect("a sha")
+        .to_owned();
     assert_eq!(paths, format!("paths@{sha}"));
 
     let started = std::time::Instant::now();
     let view = source.view(&entity, Some(&paths)).await.unwrap().unwrap();
     println!("whole tree read in {:?}", started.elapsed());
-    let Block::Tree { entries, truncated, .. } = &view.sections[0].blocks[0] else {
+    let Block::Tree {
+        entries, truncated, ..
+    } = &view.sections[0].blocks[0]
+    else {
         panic!("a tree");
     };
     let ours: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
@@ -1446,7 +1453,10 @@ async fn the_whole_tree_is_every_file_at_the_listings_commit() {
 
     let whole = api_json(
         &env,
-        &format!("repos/{}/git/trees/{sha}?recursive=true&per_page=1000", env.full_name()),
+        &format!(
+            "repos/{}/git/trees/{sha}?recursive=true&per_page=1000",
+            env.full_name()
+        ),
     )
     .await;
     let blobs: Vec<&str> = whole["tree"]
@@ -1457,10 +1467,16 @@ async fn the_whole_tree_is_every_file_at_the_listings_commit() {
         .map(|e| e["path"].as_str().unwrap())
         .collect();
     assert_eq!(ours, blobs, "every file, in git's order, nothing else");
-    assert!(ours.iter().any(|p| p.contains('/')), "files below the top, by whole path");
+    assert!(
+        ours.iter().any(|p| p.contains('/')),
+        "files below the top, by whole path"
+    );
     let every = entries.first().and_then(|e| e.section.clone()).unwrap();
     let file = source.view(&entity, Some(&every)).await.unwrap().unwrap();
-    assert!(matches!(file.sections[0].blocks[0], Block::File { .. }), "an entry opens its file");
+    assert!(
+        matches!(file.sections[0].blocks[0], Block::File { .. }),
+        "an entry opens its file"
+    );
 
     // Two to a page: the count is every entry on every page; `truncated`
     // is true on the first, and printed on the last, where forges differ.
@@ -1505,7 +1521,10 @@ async fn the_whole_tree_is_every_file_at_the_listings_commit() {
         .headers()
         .get("x-total-count")
         .and_then(|v| v.to_str().ok()?.parse::<u64>().ok());
-    println!("commits on main: {:?}, Gitea counts {counted:?}", commits.sections[0].count);
+    println!(
+        "commits on main: {:?}, Gitea counts {counted:?}",
+        commits.sections[0].count
+    );
     assert!(counted.is_some_and(|n| n > 0));
     assert_eq!(commits.sections[0].count, counted);
 }

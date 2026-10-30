@@ -310,7 +310,7 @@ test("a 50,000-line file draws fewer than 500 of its lines", async () => {
   draw(openSource({ "BULK.rs": long(50_000) }).entityView, "BULK.rs");
   await settle();
 
-  expect(text(target.querySelector(".tf-fileview header .tf-dim"))).toBe("50000 lines, on main");
+  expect(text(target.querySelector(".tf-fileview header .tf-dim"))).toBe("1.2 MB · 50000 lines · at c0mmit");
   expect(drawnLines().length).toBeGreaterThan(0);
   expect(drawnLines().length).toBeLessThan(500);
   expect(lineText(0)).toEqual(["1", "let value_1 = 1;"]);

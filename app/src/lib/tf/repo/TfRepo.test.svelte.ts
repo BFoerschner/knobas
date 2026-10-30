@@ -318,7 +318,7 @@ test("the compare page lights its own tab, Compare, and Pull requests stays dark
 test("Files opens the README, marks the locally changed file M, and a changed file warns", async () => {
   await draw([REPO]);
   expect(tree()).toEqual(["src", "README.md"]);
-  expect(text(target.querySelector(".tf-fileview header"))).toContain("README.md 2 lines, on main");
+  expect(text(target.querySelector(".tf-fileview header"))).toContain("README.md 20 B · 2 lines");
   // The README renders as Markdown (#2255).
   expect(text(target.querySelector(".tf-fileview .tf-md"))).toBe("// README.md fn main() {}");
   expect(target.querySelector(".tf-banner")).toBeNull();
@@ -395,7 +395,7 @@ test("the branch dropdown sets the branch for Files and for Commits", async () =
   await settle();
 
   expect(tree()).toEqual(["src", "README.md", "NEW.md"]);
-  expect(text(target.querySelector(".tf-fileview header"))).toContain("1 line, on feature/PAY-231-sepa-retry");
+  expect(text(target.querySelector(".tf-fileview header"))).toContain("README.md 20 B · 1 line");
   expect(viewReads.some(([id, s]) => id === FEATURE && s === "file:README.md")).toBe(true);
   unmount(view!);
   view = null;

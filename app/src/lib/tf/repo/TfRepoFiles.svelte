@@ -51,6 +51,17 @@
   and makes one the default for the file's pattern.
   *Find in file* (#2299) marks every hit, "N of M"; `Enter` and `Shift+Enter`
   step through them, drawing a hit's line first where the window left it out.
+
+  **Go to file and the keys** (#2311): the tree's head is *Go to file*, which
+  `T` focuses; typed into, it lists the paths holding every word among every
+  file at the commit -- the source's whole tree, read once the field is
+  first used and kept by its sha -- and `Enter` opens the first. A tree the
+  source cut is searched as far as it was read, and says so; a source with
+  no whole tree is searched among the directories read so far. In the tree,
+  `↑`/`↓` move between the rows, `←`/`→` fold and unfold, `Enter` opens; no
+  key is taken while a field has focus, nor while the page is held hidden.
+  The file's header says its size, its lines or kind and the commit it is
+  read at; *More* (⋯) holds *Edit*, *History* and its page on the source.
 -->
 <script lang="ts">
   import { flushSync, tick, untrack } from "svelte";
@@ -108,6 +119,9 @@
   import TfWaiting from "../TfWaiting.svelte";
   import { pageVisible } from "../kept-pages.svelte";
   import { waitPhase } from "../waiting";
+  import { inTextField } from "../../shell/keys";
+  import { fileMeta, goToFile, treeKey, treeRows } from "./file-tree";
+  import TfFileMore from "./TfFileMore.svelte";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -176,6 +190,8 @@
   /** Each directory read so far at `at`, by its path (`""` the top). */
   let listings = $state<Record<string, TreeEntry[]>>({});
   let treeFailed = $state<string | null>(null);
+  /** The section the top listing names for every file at its commit (#2311), `null` where the source has none. */
+  let pathsSection = $state<string | null>(null);
   const open = new SvelteSet<string>();
   let file = $state<FileBlock | null>(null);
   let fileFailed = $state<string | null>(null);
@@ -238,6 +254,7 @@
         if (mine !== generation) return;
         const block = read?.blocks[0];
         listings[dir] = block?.type === "tree" ? block.entries : [];
+        if (dir === "") pathsSection = block?.type === "tree" ? (block.paths ?? null) : null;
       },
       (error) => {
         if (mine === generation) treeFailed = ipcErrorMessage(error);
@@ -253,6 +270,7 @@
     early = new Map();
     listings = {};
     treeFailed = null;
+    pathsSection = null;
     untrack(() => readDir("", "files"));
   });
 
@@ -757,6 +775,7 @@
         asked = new Set([""]);
         early = new Map();
         listings = { "": block.entries };
+        pathsSection = block.paths ?? null;
       },
       // The tree keeps what it drew.
       () => {},
@@ -832,6 +851,113 @@
     if (open.has(dir)) open.delete(dir);
     else open.add(dir);
   }
+
+  // ---- Go to file and the tree's keys (#2311) ----
+
+  /** What is typed into *Go to file*. */
+  let goTyped = $state("");
+  let goField = $state<HTMLInputElement | null>(null);
+  let tree = $state<HTMLElement | null>(null);
+  /** Every file at the commit, as the source's whole tree answered, by the section it was read through. */
+  let every = $state<{ section: string; paths: string[]; truncated: boolean } | null>(null);
+  let everyReading = $state(false);
+  let everyFailed = $state<string | null>(null);
+
+  /** The whole tree, once: read when *Go to file* is first used at this commit, kept by the app by its sha. */
+  function readEvery() {
+    const section = pathsSection;
+    const where = at;
+    if (section === null || every?.section === section || everyReading) return;
+    everyReading = true;
+    everyFailed = null;
+    readSection(section, where).then(
+      (read) => {
+        everyReading = false;
+        if (where !== at || section !== pathsSection) return;
+        const block = read?.blocks[0];
+        every = block?.type === "tree" ? { section, paths: block.entries.map((entry) => entry.name), truncated: block.truncated } : { section, paths: [], truncated: false };
+      },
+      (error) => {
+        everyReading = false;
+        if (where === at) everyFailed = ipcErrorMessage(error);
+      },
+    );
+  }
+
+  // The commit moved (another branch, a push): the next use reads its whole tree.
+  $effect(() => {
+    void pathsSection;
+    if (untrack(() => goTyped.trim()) !== "") untrack(readEvery);
+  });
+
+  /** The files the directories read so far hold: what is searched without a whole tree. */
+  const known = $derived(
+    Object.entries(listings).flatMap(([dir, entries]) => entries.filter((entry) => entry.kind !== "dir" && entry.section !== null).map((entry) => join(dir, entry.name))),
+  );
+  const searched = $derived(every !== null && every.section === pathsSection ? every : null);
+  const goFound = $derived(goToFile(searched?.paths ?? known, goTyped));
+  const going = $derived(goTyped.trim() !== "");
+
+  function openPath(full: string) {
+    goTyped = "";
+    location.hash = fileHash(repoId, full);
+  }
+
+  function goKeys(event: KeyboardEvent) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const first = goFound[0];
+      if (first !== undefined) openPath(first);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      tree?.querySelector<HTMLElement>(going ? "a.tf-gotof" : "[data-path]")?.focus();
+    } else if (event.key === "Escape" && goTyped !== "") {
+      event.preventDefault();
+      event.stopPropagation();
+      goTyped = "";
+    }
+  }
+
+  /** The tree's own keys: only while focus is on one of its rows, so a field keeps every key. */
+  function treeKeys(event: KeyboardEvent) {
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || inTextField(event.target)) return;
+    if (going) {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      const links = [...(tree?.querySelectorAll<HTMLElement>("a.tf-gotof") ?? [])];
+      const here = links.indexOf(event.target as HTMLElement);
+      if (event.key === "ArrowUp" && here <= 0) goField?.focus();
+      else links[event.key === "ArrowDown" ? Math.min(links.length - 1, here + 1) : here - 1]?.focus();
+      return;
+    }
+    const from = event.target instanceof HTMLElement ? (event.target.closest<HTMLElement>("[data-path]")?.dataset["path"] ?? null) : null;
+    const move = treeKey(treeRows(listings, open), from, event.key);
+    if (move === null) return;
+    event.preventDefault();
+    if ("fold" in move) open.delete(move.fold);
+    else if ("unfold" in move) open.add(move.unfold);
+    else {
+      const row = [...(tree?.querySelectorAll<HTMLElement>("[data-path]") ?? [])].find((el) => el.dataset["path"] === move.focus);
+      row?.focus();
+      row?.scrollIntoView?.({ block: "nearest" });
+    }
+  }
+
+  // `T` focuses *Go to file* from anywhere on the tab, as the mockup's hint says; never while typing.
+  $effect(() => {
+    const onkey = (event: KeyboardEvent) => {
+      // A page or tab keep-alive holds hidden (#2247) takes no keys.
+      if (!shownPage()) return;
+      if (event.key !== "t" && event.key !== "T") return;
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (inTextField(event.target) || inTextField(document.activeElement)) return;
+      if (goField === null) return;
+      event.preventDefault();
+      goField.focus();
+    };
+    window.addEventListener("keydown", onkey);
+    return () => window.removeEventListener("keydown", onkey);
+  });
 </script>
 
 {#snippet icon(kind: "dir" | "open" | "file")}
@@ -849,6 +975,7 @@
       <button
         type="button"
         class="tf-fdir tf-d{Math.min(depth, 8)}"
+        data-path={full}
         aria-expanded={open.has(full)}
         onclick={() => toggle(full)}>{@render icon(open.has(full) ? "open" : "dir")}{entry.name}</button
       >
@@ -858,13 +985,14 @@
     {:else if entry.section !== null}
       <a
         href={fileHash(repoId, full)}
+        data-path={full}
         class="tf-d{Math.min(depth, 8)}"
         class:tf-changed={changed.has(full)}
         aria-current={full === shown ? "true" : undefined}
         title={changed.has(full) ? "Changed in your checkout" : undefined}>{@render icon("file")}{entry.name}</a
       >
     {:else}
-      <span class="tf-fsub tf-d{Math.min(depth, 8)}">{@render icon("file")}{entry.name}</span>
+      <span class="tf-fsub tf-d{Math.min(depth, 8)}" data-path={full} tabindex="-1">{@render icon("file")}{entry.name}</span>
     {/if}
   {/each}
 {/snippet}
@@ -873,19 +1001,62 @@
   <!-- The tree stays beside every file (#2257, the mockup of #2252): its head folds it, its rows scroll inside it. -->
   <aside class="tf-ftreebox">
     <header>
-      <span class="tf-ftree-h">Files</span>
+      <label class="tf-minif tf-gotofile">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
+        <input
+          placeholder="Go to file"
+          aria-label="Go to file"
+          bind:this={goField}
+          value={goTyped}
+          oninput={(event) => {
+            goTyped = event.currentTarget.value;
+            readEvery();
+          }}
+          onfocus={readEvery}
+          onkeydown={goKeys}
+        />
+        {#if !going}<kbd>T</kbd>{/if}
+      </label>
       <button type="button" class="tf-iconbtn tf-sm" title="Collapse all" disabled={open.size === 0} onclick={() => open.clear()}
         ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4-3 4 3M4 10l4 3 4-3" /></svg></button
       >
     </header>
-    <nav class="tf-ftree" aria-label="Files">
-      {#if treeFailed !== null}
-        <p class="tf-cfail">{treeFailed}</p>
+    <!-- The rows are the links and buttons; the arrow keys move between them (#2311). -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <nav class="tf-ftree" aria-label="Files" bind:this={tree} onkeydown={treeKeys}>
+      {#if going}
+        <!-- Go to file's answer in the rows' place (#2311): every path at the commit that holds what is typed. -->
+        {#each goFound as found (found)}
+          {@const cut = found.lastIndexOf("/") + 1}
+          <a class="tf-gotof" href={fileHash(repoId, found)} aria-current={found === shown ? "true" : undefined} onclick={() => (goTyped = "")}
+            >{@render icon("file")}<span>{#if cut > 0}<span class="tf-pdir">{found.slice(0, cut)}</span>{/if}{found.slice(cut)}</span></a
+          >
+        {/each}
+        {#if everyFailed !== null}
+          <p class="tf-gonote">Could not read every path ({everyFailed}); searched the directories opened so far.</p>
+        {:else if everyReading && searched === null}
+          <p class="tf-gonote">Reading every path… meanwhile the directories opened so far.</p>
+        {:else if pathsSection === null}
+          <p class="tf-gonote">The source lists no whole tree: searched the directories opened so far.</p>
+        {/if}
+        {#if goFound.length === 0 && !everyReading}
+          <p class="tf-gonote">No file matches “{goTyped.trim()}”.</p>
+        {/if}
+        {#if searched?.truncated}
+          <p class="tf-gonote">The tree is larger than knobas reads at once: searched its first {searched.paths.length.toLocaleString("en-US")} files.</p>
+        {/if}
+      {:else}
+        {#if treeFailed !== null}
+          <p class="tf-cfail">{treeFailed}</p>
+        {/if}
+        <TfWaiting phase={waitPhase({ drawn: listings[""] !== undefined || treeFailed !== null, reading: false, failed: false })} columns={1} count={8}>
+          {@render listing("", 0)}
+        </TfWaiting>
       {/if}
-      <TfWaiting phase={waitPhase({ drawn: listings[""] !== undefined || treeFailed !== null, reading: false, failed: false })} columns={1} count={8}>
-        {@render listing("", 0)}
-      </TfWaiting>
     </nav>
+    {#if listings[""] !== undefined}
+      <footer class="tf-ftree-keys"><span><kbd>T</kbd> go to file</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>←</kbd><kbd>→</kbd> fold</span></footer>
+    {/if}
   </aside>
   <div class="tf-fcol">
   {#if path === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
@@ -920,9 +1091,7 @@
       {@const cut = file.path.lastIndexOf("/") + 1}
       <header>
         <span class="tf-p">{#if cut > 0}<span class="tf-pdir">{file.path.slice(0, cut)}</span>{/if}{file.path.slice(cut)}</span>
-        <span class="tf-dim tf-small"
-          >{file.binary ? `${file.size} bytes` : `${lines.length} ${lines.length === 1 ? "line" : "lines"}`}{branch !== null ? `, on ${branch}` : ""}</span
-        >
+        <span class="tf-dim tf-small tf-fmeta">{fileMeta(file, lines.length)}</span>
         <span class="tf-acts">
           {#if opened !== null && renderer !== null}
             {@const at = drawn?.path ?? file.path}
@@ -938,13 +1107,8 @@
             {@const at = file.path}
             <button type="button" class="tf-btn tf-sm" onclick={() => pipes.set(at, [])}>+ Pipeline</button>
           {/if}
-          {#if editable}
-            <a class="tf-btn tf-sm" href={editHash(repoId, file.path)}>Edit</a>
-          {:else}
-            <button type="button" class="tf-btn tf-sm" aria-disabled="true" title={notEditable}>Edit</button>
-          {/if}
-          <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}>History</a>
           <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} />
+          <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} page={file.url} sourceName={sourceName(source)} />
         </span>
       </header>
       {#if queued !== null}

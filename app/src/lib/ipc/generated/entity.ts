@@ -3954,7 +3954,18 @@ truncated: boolean,
 /**
  * The directory's page at its source.
  */
-url: string | null, } | { "type": "file", trail: Array<Crumb>, path: string, 
+url: string | null, 
+/**
+ * The section that lists every file of the tree at the commit this
+ * listing was read at (#2311): what *Go to file* filters, named by
+ * the source so the shell builds no id. Its answer is one `Tree`
+ * whose entries are the files below the top, each `name` the whole
+ * path from the top (`src/lib.rs`), in the source's order, and
+ * `truncated` where the source or its cap stopped short. `None`
+ * where the source has no such read, and on that answer itself.
+ * Absent on the wire when `None`.
+ */
+paths?: string, } | { "type": "file", trail: Array<Crumb>, path: string, 
 /**
  * Empty for a binary file.
  */
@@ -4017,7 +4028,13 @@ meta: string | null, tone: Tone | null,
  * A short state word drawn as a chip (`merged`, `failed`), coloured by
  * `tone`.
  */
-chip: string | null, url: string | null, };
+chip: string | null, url: string | null, 
+/**
+ * Who the row is by, as the source names the account (#2311): a
+ * commit's author, for the avatar and name a last-commit strip draws.
+ * `meta` still reads in full without it. Absent on the wire when `None`.
+ */
+author?: string, };
 
 /**
  * One tab of a view.

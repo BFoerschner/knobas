@@ -299,6 +299,11 @@ const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g
 const button = (label: string, root: ParentNode = document) =>
   [...root.querySelectorAll<HTMLButtonElement>("button, a")].find((b) => text(b) === label) as HTMLButtonElement | undefined;
 const dialog = () => document.querySelector(".tf-dialog");
+/** The file header's *More* (⋯), opened: *Edit* is among its items (#2311). */
+async function more() {
+  target.querySelector<HTMLButtonElement>(".tf-fileview header button[aria-label='More']")!.click();
+  await settle();
+}
 const rowOf = (name: string) =>
   [...target.querySelectorAll(".tf-rbranches tbody tr")].find((tr) => text(tr.querySelector("td")).startsWith(name))!;
 
@@ -717,6 +722,7 @@ const editor = () => target.querySelector<HTMLTextAreaElement>(".tf-editor texta
 
 test("Edit turns the file into an editor that says the commit goes to Gitea and the checkout is never written", async () => {
   await draw([REPO, "files", "README.md"]);
+  await more();
   expect(button("Edit", target)!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/edit/README.md");
   unmount(view!);
   view = null;
@@ -838,7 +844,9 @@ test("a file with no blob sha to commit against cannot be edited, and says why",
     return answer;
   };
   await draw([REPO, "files", "README.md"], null, stand);
-  const edit = button("Edit", target)!;
+  await more();
+  const edit = target.querySelector<HTMLElement>(".tf-fmore [role=menuitem][aria-disabled='true']")!;
+  expect(edit.firstChild?.textContent).toBe("Edit");
   expect(edit.getAttribute("aria-disabled")).toBe("true");
   expect(edit.title).toBe("The source did not say which version of the file this is, so a commit could not be checked against it");
 });

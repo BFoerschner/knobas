@@ -1,9 +1,11 @@
 <!--
   The last commit at the branch the tabs read at, above the README on the
-  repository's landing (#2257, mockups/code-area `.lastc`): its message, its
-  sha (to its diff), who and when as the source says it, and *History*
-  to Commits. It is the first row of the source's `commits` section, the
-  read Commits makes, so the app's read cache answers the two together.
+  repository's landing (#2257, mockups/code-area `.lastc`): who made it, an
+  avatar of their initials and their name (#2311), its message, its sha (to
+  its diff), when, and *N commits* to Commits -- the section's count, every
+  commit the branch has where the source counts them, else *History*. It is
+  the first row of the source's `commits` section, the read Commits makes, so
+  the app's read cache answers the two together.
 
   A skeleton while the first read is out; a re-read (another branch, a
   refresh) keeps the commit drawn until it answers. The strip is an extra
@@ -15,6 +17,7 @@
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import { commitHash, repoHash, viewRows } from "./repo";
+  import { authorOf, initials } from "./file-tree";
 
   let {
     ports,
@@ -32,11 +35,16 @@
 
   /** `undefined` before the first answer; `null` where there is none to draw. */
   let last = $state<ViewRow | null | undefined>(undefined);
+  /** How many commits the Commits tab counts, `null` where the source said not. */
+  let total = $state<number | null>(null);
+  const by = $derived(last ? authorOf(last) : null);
 
   function read(where: string, alive: () => boolean, again: boolean): Promise<unknown> {
     return ports.entityView(where, "commits").then(
       (view) => {
-        if (alive()) last = viewRows(view?.sections[0])[0] ?? null;
+        if (!alive()) return;
+        last = viewRows(view?.sections[0])[0] ?? null;
+        total = view?.sections[0]?.count == null ? null : Number(view.sections[0].count);
       },
       () => {
         if (alive() && !again) last = null;
@@ -67,15 +75,20 @@
     <span class="tf-skel-bar"></span><span class="tf-skel-bar"></span>
   </div>
 {:else if last !== null}
-  <!-- The mockup's order: the message, then the sha, then who and when, then the way to the history. -->
+  <!-- The mockup's order: who, the message, the sha, when, then the way to the history. -->
   <div class="tf-lastc">
+    {#if by?.author}
+      <span class="tf-av" aria-hidden="true">{initials(by.author)}</span><b class="tf-lastc-by">{by.author}</b>
+    {/if}
     <span class="tf-lastc-msg">{last.title}</span>
     {#if last.entity_id !== null}
       <a class="tf-mono" href={commitHash(repoId, last.entity_id)}>{last.chip ?? ""}</a>
     {:else if last.chip !== null}
       <span class="tf-mono">{last.chip}</span>
     {/if}
-    {#if last.meta !== null}<span class="tf-dim tf-small">{last.meta}</span>{/if}
-    <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}>History</a>
+    {#if by?.when}<span class="tf-dim tf-small">{by.when}</span>{/if}
+    <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}
+      >{total === null ? "History" : `${total.toLocaleString("en-US")} ${total === 1 ? "commit" : "commits"}`}</a
+    >
   </div>
 {/if}

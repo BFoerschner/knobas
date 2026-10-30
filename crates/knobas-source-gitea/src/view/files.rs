@@ -415,7 +415,10 @@ async fn every(
     repo: &str,
     at: &At<'_>,
 ) -> Result<Block, SourceError> {
-    let first: GitTree = source.client.git_tree_as(owner, repo, at.sha, 1, TREE_PAGE).await?;
+    let first: GitTree = source
+        .client
+        .git_tree_as(owner, repo, at.sha, 1, TREE_PAGE)
+        .await?;
     // No count: a page short of full is the last one, so another is read
     // only after a full one, one at a time.
     let total = first.total_count;
@@ -431,7 +434,11 @@ async fn every(
             for some in rest.chunks(TREE_READS_AT_ONCE) {
                 let reads = some
                     .iter()
-                    .map(|page| source.client.git_tree_as::<GitTree>(owner, repo, at.sha, *page, TREE_PAGE))
+                    .map(|page| {
+                        source
+                            .client
+                            .git_tree_as::<GitTree>(owner, repo, at.sha, *page, TREE_PAGE)
+                    })
                     .collect();
                 pages.extend(super::rows::all_of(reads).await?);
             }
@@ -440,14 +447,22 @@ async fn every(
             let mut page = 1;
             while page < TREE_PAGES && pages.last().is_some_and(|p| p.tree.len() >= TREE_PAGE) {
                 page += 1;
-                pages.push(source.client.git_tree_as(owner, repo, at.sha, page, TREE_PAGE).await?);
+                pages.push(
+                    source
+                        .client
+                        .git_tree_as(owner, repo, at.sha, page, TREE_PAGE)
+                        .await?,
+                );
             }
         }
     }
     let read: usize = pages.iter().map(|p| p.tree.len()).sum();
     let truncated = match total {
         Some(total) => read < total,
-        None => pages.len() as u32 == TREE_PAGES && pages.last().is_some_and(|p| p.tree.len() >= TREE_PAGE),
+        None => {
+            pages.len() as u32 == TREE_PAGES
+                && pages.last().is_some_and(|p| p.tree.len() >= TREE_PAGE)
+        }
     };
     let entries = pages
         .into_iter()

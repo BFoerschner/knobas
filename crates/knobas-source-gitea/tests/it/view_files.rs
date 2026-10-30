@@ -1127,7 +1127,14 @@ async fn git_tree(server: &MockServer, sha: &str, page: u32, entries: Vec<Value>
 
 fn every(section: &ViewSection) -> (Vec<(String, EntryKind, Option<String>)>, bool) {
     match section.blocks.as_slice() {
-        [Block::Tree { entries, truncated, paths, .. }] => {
+        [
+            Block::Tree {
+                entries,
+                truncated,
+                paths,
+                ..
+            },
+        ] => {
             assert_eq!(*paths, None, "the whole tree names no further read");
             (
                 entries
@@ -1145,19 +1152,32 @@ fn every(section: &ViewSection) -> (Vec<(String, EntryKind, Option<String>)>, bo
 #[tokio::test]
 async fn a_listing_names_the_whole_tree_at_its_commit() {
     let server = gitea().await;
-    listing(&server, "", "main", json!([entry("a.rs", "a.rs", "file", 1)])).await;
+    listing(
+        &server,
+        "",
+        "main",
+        json!([entry("a.rs", "a.rs", "file", 1)]),
+    )
+    .await;
     let section = read(&server, ENTITY, "files").await;
     let [Block::Tree { paths, .. }] = section.blocks.as_slice() else {
         panic!("one tree block");
     };
-    assert_eq!(paths.as_deref(), Some(format!("paths@{}", tip("main")).as_str()));
+    assert_eq!(
+        paths.as_deref(),
+        Some(format!("paths@{}", tip("main")).as_str())
+    );
 
     listing(&server, "", SHA, json!([entry("a.rs", "a.rs", "file", 1)])).await;
     let section = read(&server, &at_commit(SHA), "files").await;
     let [Block::Tree { paths, .. }] = section.blocks.as_slice() else {
         panic!("one tree block");
     };
-    assert_eq!(paths.as_deref(), Some("paths"), "a commit's ids name no sha");
+    assert_eq!(
+        paths.as_deref(),
+        Some("paths"),
+        "a commit's ids name no sha"
+    );
 }
 
 /// The whole tree is its files, each by its whole path and opened by the
@@ -1202,14 +1222,29 @@ async fn the_whole_tree_lists_every_file_by_its_path() {
         .into_iter()
         .map(|r| r.url.path().to_owned())
         .collect();
-    assert_eq!(asked, [format!("{REPO}/git/trees/{sha}")], "one read, no tip");
+    assert_eq!(
+        asked,
+        [format!("{REPO}/git/trees/{sha}")],
+        "one read, no tip"
+    );
 
     // A commit's own tree, by its plain id.
-    git_tree(&server, SHA, 1, vec![git_entry("x.rs", "blob", "100644")], 1).await;
+    git_tree(
+        &server,
+        SHA,
+        1,
+        vec![git_entry("x.rs", "blob", "100644")],
+        1,
+    )
+    .await;
     let section = read(&server, &at_commit(SHA), "paths").await;
     assert_eq!(
         every(&section).0,
-        [("x.rs".to_owned(), EntryKind::File, Some("file:x.rs".to_owned()))]
+        [(
+            "x.rs".to_owned(),
+            EntryKind::File,
+            Some("file:x.rs".to_owned())
+        )]
     );
 }
 

@@ -41,8 +41,10 @@
   background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; position: sticky; top: 12px;
   display: flex; flex-direction: column; max-height: calc(100vh - 230px); overflow: hidden;
 }
-.tf-ftreebox > header { display: flex; gap: 6px; align-items: center; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--rule-2); }
-.tf-ftree-h { flex: 1; font-size: var(--t-xs); font-weight: 700; color: var(--ink-2); }
+.tf-ftreebox > header { display: flex; gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid var(--rule-2); }
+/* Go to file (#2311, mockups/code-area `.tree > header .tf-minif`): the head's field, `T` beside it. */
+.tf-ftreebox > header .tf-gotofile { flex: 1; max-width: none; min-width: 0; }
+.tf-gotofile kbd { flex: none; }
 .tf-ftreebox > header .tf-iconbtn { width: 26px; height: 26px; padding: 0; display: inline-grid; place-items: center; }
 .tf-ftreebox > header .tf-iconbtn[disabled] { opacity: .45; cursor: default; background: none; }
 .tf-ftreebox > header .tf-iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -62,6 +64,14 @@
 .tf-ftree .tf-d1 { padding-left: 24px; } .tf-ftree .tf-d2 { padding-left: 38px; } .tf-ftree .tf-d3 { padding-left: 52px; }
 .tf-ftree .tf-d4 { padding-left: 66px; } .tf-ftree .tf-d5 { padding-left: 80px; } .tf-ftree .tf-d6 { padding-left: 94px; }
 .tf-ftree .tf-d7 { padding-left: 108px; } .tf-ftree .tf-d8 { padding-left: 122px; }
+.tf-ftree a:focus-visible, .tf-ftree .tf-fdir:focus-visible, .tf-ftree .tf-fsub:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tf-ftree a.tf-gotof > span { overflow: hidden; text-overflow: ellipsis; }
+.tf-ftree .tf-pdir { color: var(--ink-2); }
+.tf-ftree a[aria-current="true"] .tf-pdir { color: inherit; opacity: .75; }
+.tf-gonote { margin: 6px 10px; font-size: var(--t-xs); color: var(--ink-2); }
+/* The tree's keys (#2311, mockups/code-area `.tree > footer`), drawn once they work. */
+.tf-ftree-keys { padding: 6px 10px; border-top: 1px solid var(--rule-2); font-size: var(--t-xs); color: var(--ink-2); display: flex; gap: 10px; flex-wrap: wrap; }
+.tf-ftree-keys span { display: inline-flex; gap: 3px; align-items: center; }
 .tf-fcol { min-width: 0; }
 /* The last commit at the ref, above the README on the landing (#2257, mockups/code-area `.lastc`). */
 .tf-lastc {
@@ -72,6 +82,8 @@
 .tf-lastc > a.tf-mono:hover { color: var(--ink); text-decoration: underline; }
 .tf-lastc-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .tf-lastc > .tf-dim { white-space: nowrap; }
+.tf-lastc > .tf-av { font-size: 10px; margin: 0; background: var(--info-bg); color: var(--info); border-color: transparent; }
+.tf-lastc-by { font-weight: 600; white-space: nowrap; }
 .tf-lastc.tf-skel .tf-skel-bar:first-child { width: 80px; }
 .tf-lastc.tf-skel .tf-skel-bar:last-child { width: 45%; }
 .tf-fileview { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; min-width: 0; }
@@ -389,3 +401,12 @@
 .tf-suggest .tf-acts { margin-left: auto; }
 .tf-stepfail .tf-sfcols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .tf-stepfail .tf-sfcols b { display: block; font-size: var(--t-xs); margin-bottom: 4px; }
+
+/* The file header's *More* (⋯) (#2311, mockups/code-area/file.html): Edit, History, the source's page. */
+.tf-fmore { position: relative; display: inline-flex; }
+.tf-fmore svg { fill: currentColor; }
+.tf-fmore .tf-menu { font-size: var(--t-sm); }
+.tf-fmore .tf-menu > a, .tf-fmore .tf-menu > span { display: flex; flex-direction: column; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }
+.tf-fmore .tf-menu > a:hover, .tf-fmore .tf-menu > a:focus-visible { background: var(--sheet-2); }
+.tf-fmore .tf-menu > span[aria-disabled="true"] { color: var(--ink-2); cursor: default; }
+.tf-fmore .tf-menu small { font-size: var(--t-xs); max-width: 260px; }

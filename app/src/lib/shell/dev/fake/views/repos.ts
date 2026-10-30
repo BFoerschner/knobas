@@ -473,7 +473,7 @@ const age = (at: string) => {
 };
 
 function commitRow(entityId: string | null, sha: string, subject: string, author: string, at: string): ViewRow {
-  return { entity_id: entityId, title: subject, meta: `${author} · ${age(at)}`, tone: null, chip: sha.slice(0, 10), url: null };
+  return { entity_id: entityId, title: subject, meta: `${author} · ${age(at)}`, tone: null, chip: sha.slice(0, 10), url: null, author };
 }
 
 /** Prototype-6's `lineDiff` and `hunks`, shared with the commit dialog (#845). */
@@ -617,7 +617,14 @@ function branchView(name: string, sectionId: string | null): SourceView | undefi
 function treeSection(files: Record<string, string>, id: string, ref: string) {
   if (id === "files" || id.startsWith("files:")) {
     const dir = id === "files" ? "" : id.slice("files:".length);
-    return section(id, "Files", [{ type: "tree", trail: [], entries: listing(files, dir), truncated: false, url: null }]);
+    return section(id, "Files", [{ type: "tree", trail: [], entries: listing(files, dir), truncated: false, url: null, paths: "paths" }]);
+  }
+  // The whole tree (#2311): every file by its whole path, for *Go to file*.
+  if (id === "paths") {
+    const entries = Object.keys(files)
+      .sort()
+      .map((path) => ({ name: path, kind: "file" as const, size: files[path]!.length, section: `file:${path}` }));
+    return section(id, "Files", [{ type: "tree", trail: [], entries, truncated: false, url: null }]);
   }
   const path = id.slice("file:".length);
   const text = files[path];
@@ -788,9 +795,10 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
         : branch !== null && branch !== "main"
           ? []
           : MAIN_COMMITS.map(([sha, subject, author, at]) => commitRow(null, sha, subject, author, at));
-    return one(section("commits", "Commits", [{ type: "entities", title: null, rows }]));
+    // Every commit main has, as Gitea counts them (#2311); the rows are its latest.
+    return one(section("commits", "Commits", [{ type: "entities", title: null, rows }], branch === null || branch === "main" ? 318 : rows.length));
   }
-  if (sectionId !== null && (sectionId === "files" || sectionId.startsWith("files:") || sectionId.startsWith("file:"))) {
+  if (sectionId !== null && (sectionId === "files" || sectionId === "paths" || sectionId.startsWith("files:") || sectionId.startsWith("file:"))) {
     return one(treeSection(files, sectionId, ref));
   }
   return { sections: [], actions: [] };
