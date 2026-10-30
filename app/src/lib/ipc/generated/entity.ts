@@ -3770,7 +3770,17 @@ url: string | null,
  * of it is made against, `WriteOp::CommitFile`'s `base_sha`. `None`
  * where the source has none; absent on the wire reads as `None`.
  */
-sha: string | null, };
+sha: string | null, 
+/**
+ * The commit the file was read at (#2256): what
+ * [`Source::file_bytes`](crate::Source::file_bytes) takes back to
+ * read this file's bytes, or a file beside it (a README's relative
+ * image), at the same commit. The source's own id, never parsed by
+ * the shell; `None` where the source has none, and the byte read
+ * then reads at the entity's moving reference. Absent on the wire
+ * reads as `None`.
+ */
+commit: string | null, };
 
 /**
  * The payload of the shell's `view:fresh` event (#2242): a view the shell

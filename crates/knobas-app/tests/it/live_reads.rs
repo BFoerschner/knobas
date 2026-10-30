@@ -817,8 +817,14 @@ impl Fixture {
 async fn a_byte_read_at_a_commit_is_read_once() {
     let f = fixture().await;
     let sha = Some("1f0e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c");
-    assert_eq!(f.bytes("repo/r", "logo-5.bin", sha).await.unwrap(), vec![7; 5]);
-    assert_eq!(f.bytes("repo/r", "logo-5.bin", sha).await.unwrap(), vec![7; 5]);
+    assert_eq!(
+        f.bytes("repo/r", "logo-5.bin", sha).await.unwrap(),
+        vec![7; 5]
+    );
+    assert_eq!(
+        f.bytes("repo/r", "logo-5.bin", sha).await.unwrap(),
+        vec![7; 5]
+    );
     assert_eq!(f.seen.reads(), 1, "the second look is the cache's");
     f.bytes("repo/r", "other-5.bin", sha).await.unwrap();
     assert_eq!(f.seen.reads(), 2, "another file at the commit is read");

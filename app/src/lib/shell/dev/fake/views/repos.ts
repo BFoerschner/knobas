@@ -105,6 +105,8 @@ async fn gives_up_after_max_attempts() {
 const PAYOUT_README = [
   "# payout-service",
   "",
+  "![payout-service](docs/img/logo.png)",
+  "",
   "Sends payout batches to the PSP and books them in the ledger. The retry policy is in [src/sepa/retry.rs](src/sepa/retry.rs);",
   "the PSP's own docs are on [their portal](https://psp.example.com/docs).",
   "",
@@ -131,7 +133,38 @@ const PAYOUT_README = [
   "    sepa::batch::schedule().await",
   "}",
   "```",
+  "",
+  "## Architecture",
+  "",
+  "![How a batch flows](docs/img/flow.svg)",
 ].join("\n");
+
+/** `payout-service`'s README images (#2256), read through the byte read: a PNG, and an SVG with a script the sanitizer drops. */
+const PAYOUT_IMAGES: Record<string, () => Uint8Array> = {
+  "docs/img/logo.png": () =>
+    Uint8Array.from(
+      atob(
+        "iVBORw0KGgoAAAANSUhEUgAAAGAAAAAgCAIAAABiouoDAAAAW0lEQVR42u3YsQ0AIAwDsF7CicxczMLCCTxQcUBrKWMmT1Fi35NmrJmmWz8AAQIECBAgQGWBQPz7gAABAgQIEKC6QCAsaUCAAAECBMgfZCha0oAAAQIECFCr/gP3NZ9LUPv2+wAAAABJRU5ErkJggg==",
+      ),
+      (c) => c.charCodeAt(0),
+    ),
+  "docs/img/flow.svg": () =>
+    new TextEncoder().encode(
+      [
+        '<svg width="360" height="60" viewBox="0 0 360 60" onload="window.__pwned = \'svg-image\'">',
+        "<script>window.__pwned = 'svg-image-script'</script>",
+        '<rect x="2" y="12" width="96" height="36" rx="6" fill="#e6f0eb" stroke="#1e786e"/>',
+        '<text x="50" y="35" font-family="sans-serif" font-size="13" text-anchor="middle" fill="#1e786e">batch</text>',
+        '<path d="M100 30 H128" stroke="#1e786e" stroke-width="2"/>',
+        '<rect x="132" y="12" width="96" height="36" rx="6" fill="#e6f0eb" stroke="#1e786e"/>',
+        '<text x="180" y="35" font-family="sans-serif" font-size="13" text-anchor="middle" fill="#1e786e">PSP</text>',
+        '<path d="M230 30 H258" stroke="#1e786e" stroke-width="2"/>',
+        '<rect x="262" y="12" width="96" height="36" rx="6" fill="#e6f0eb" stroke="#1e786e"/>',
+        '<text x="310" y="35" font-family="sans-serif" font-size="13" text-anchor="middle" fill="#1e786e">ledger</text>',
+        "</svg>",
+      ].join(""),
+    ),
+};
 
 /** `?fake-md-hostile`'s file (#2255): raw HTML that must not run, for the sanitizer's headless Chrome witness. */
 const HOSTILE_MD = [
@@ -405,8 +438,25 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
   if (text === undefined) throw { code: "not_found", message: `gitea: no file ${path} at ${ref}`, source_id: null };
   // No action beside the file (#2241): *Commit change…*'s standing is `refused_writes`' ({@link repoRefusals}).
   return section(id, "Files", [
-    { type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: blobOf(text) },
+    { type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: blobOf(text), commit: ref },
   ]);
+}
+
+/**
+ * `entity_file_bytes` for the repositories this module draws (#2256): a README image, or any file's text as bytes,
+ * at the entity's branch (the fake's commit is the branch name it was read at). `undefined` for another entity.
+ */
+export function repoFileBytes(entityId: string, path: string): ArrayBuffer | undefined {
+  const branchAt = entityId.indexOf("@refs/heads/");
+  const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);
+  const branch = branchAt === -1 ? null : entityId.slice(branchAt + "@refs/heads/".length);
+  const files = filesOf(repoId, branch);
+  if (files === null) return undefined;
+  const image = repoId === PAYOUT ? PAYOUT_IMAGES[path] : undefined;
+  const text = files[path];
+  if (image === undefined && text === undefined) throw { code: "not_found", message: `gitea: no file ${path}`, source_id: null };
+  const bytes = image !== undefined ? image() : new TextEncoder().encode(text);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
 /** Why `main` takes no commit straight onto it: protected, as prototype-6 has it (#985). */

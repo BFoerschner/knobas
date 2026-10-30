@@ -976,7 +976,8 @@ pub async fn view(
 }
 
 /// The bytes of the file at `path` in `entity_id`'s tree, at `commit` (a
-/// file block's, handed back), read whole up to `cap` (#2256): routed like
+/// file block's, handed back), read whole up to
+/// [`BYTES_CAP`](knobas_source::view::BYTES_CAP) (#2256): routed like
 /// [`view`], and kept like it where the adapter says the read is fixed. Not
 /// touched by the app: no rule applies to bytes.
 ///
@@ -991,9 +992,9 @@ pub async fn file_bytes(
     entity_id: &str,
     path: &str,
     commit: Option<&str>,
-    cap: u64,
 ) -> Result<Option<Arc<knobas_source::view::FileBytes>>, SourcesError> {
     let source = live.source(pool, secrets, registry, entity_id).await?;
+    let cap = knobas_source::view::BYTES_CAP;
     Ok(live.bytes(&source, entity_id, path, commit, cap).await?)
 }
 

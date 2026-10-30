@@ -1047,7 +1047,14 @@ mod tests {
         }))
         .expect("a file block without a sha reads");
         assert!(
-            matches!(old, Block::File { sha: None, commit: None, .. }),
+            matches!(
+                old,
+                Block::File {
+                    sha: None,
+                    commit: None,
+                    ..
+                }
+            ),
             "{old:?}"
         );
     }

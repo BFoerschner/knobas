@@ -395,11 +395,10 @@ pub async fn entity_file_bytes_inner(
     commit: Option<&str>,
 ) -> Result<Vec<u8>, IpcError> {
     use knobas_source::view::{BYTES_CAP, FileBytes};
-    let read = crate::sources::crud::file_bytes(
-        pool, secrets, registry, live, entity_id, path, commit, BYTES_CAP,
-    )
-    .await
-    .map_err(|error| crate::sources::to_ipc(&error, None))?;
+    let read =
+        crate::sources::crud::file_bytes(pool, secrets, registry, live, entity_id, path, commit)
+            .await
+            .map_err(|error| crate::sources::to_ipc(&error, None))?;
     match read.as_deref() {
         Some(FileBytes::Read(bytes)) => Ok(bytes.clone()),
         Some(FileBytes::TooLarge { size }) => Err(IpcError::invalid(format!(

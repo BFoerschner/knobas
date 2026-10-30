@@ -111,7 +111,7 @@
     commands = ipcCommands,
     views = appViewChoices,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen">;
+    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -641,6 +641,13 @@
   }
 
   /** A relative link in a Markdown file: the file here, at its line where it names one. */
+  /** A Markdown file's relative images, read at the commit the file was (#2256); one function per file and `at`. */
+  const imageRead = $derived.by(() => {
+    const read = ports.fileBytes;
+    const where = at;
+    const commit = file?.commit ?? null;
+    return read === undefined ? null : (path: string) => read(where, path, commit);
+  });
   const fileLink = (to: string, at: number | null) => (at === null ? fileHash(repoId, to) : lineHash(repoId, to, at));
 
   function toggle(dir: string) {
@@ -757,7 +764,7 @@
       {:else if image !== null}
         <div class="tf-fimage"><img src={image} alt={file.path} /></div>
       {:else if drawAs === "markdown"}
-        <TfMarkdown text={file.text} base={parentOf(file.path)} {fileLink} {render} />
+        <TfMarkdown text={file.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} />
       {:else if renderer !== null && drawAs === renderer.id && commandIdOf(renderer) !== null}
         <TfCommandOutput {renderer} text={file.text} {commands} />
       {:else}

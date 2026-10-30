@@ -982,7 +982,10 @@ async fn the_byte_read_answers_a_file_whole_at_the_commit_handed_back() {
     assert_eq!(read, FileBytes::Read(png));
     let asked = server.received_requests().await.unwrap();
     assert_eq!(
-        asked.iter().map(|r| r.url.path().to_owned()).collect::<Vec<_>>(),
+        asked
+            .iter()
+            .map(|r| r.url.path().to_owned())
+            .collect::<Vec<_>>(),
         vec![format!("{REPO}/raw/docs/img/logo.png")]
     );
 }
@@ -1057,7 +1060,13 @@ async fn without_a_commit_the_byte_read_is_at_the_entitys_reference() {
     let source = source(&server);
     let read = |entity: &'static str| {
         let source = &source;
-        async move { source.file_bytes(entity, "a.txt", None, 100).await.unwrap().unwrap() }
+        async move {
+            source
+                .file_bytes(entity, "a.txt", None, 100)
+                .await
+                .unwrap()
+                .unwrap()
+        }
     };
     assert_eq!(read(BRANCH).await, FileBytes::Read(b"branch".to_vec()));
     assert_eq!(read(ENTITY).await, FileBytes::Read(b"main".to_vec()));
@@ -1071,9 +1080,21 @@ fn a_byte_read_is_fixed_only_at_a_whole_sha() {
             .expect("builds");
     let sha = tip("main");
     let commit = format!("{ENTITY}@{sha}");
-    assert_eq!(source.bytes_standing(BRANCH, "a.png", Some(&sha)), Standing::Fixed);
+    assert_eq!(
+        source.bytes_standing(BRANCH, "a.png", Some(&sha)),
+        Standing::Fixed
+    );
     assert_eq!(source.bytes_standing(BRANCH, "a.png", None), Standing::Live);
-    assert_eq!(source.bytes_standing(ENTITY, "a.png", Some("main")), Standing::Live);
-    assert_eq!(source.bytes_standing(&commit, "a.png", None), Standing::Fixed);
-    assert_eq!(source.bytes_standing(&commit[..commit.len() - 30], "a.png", None), Standing::Live);
+    assert_eq!(
+        source.bytes_standing(ENTITY, "a.png", Some("main")),
+        Standing::Live
+    );
+    assert_eq!(
+        source.bytes_standing(&commit, "a.png", None),
+        Standing::Fixed
+    );
+    assert_eq!(
+        source.bytes_standing(&commit[..commit.len() - 30], "a.png", None),
+        Standing::Live
+    );
 }

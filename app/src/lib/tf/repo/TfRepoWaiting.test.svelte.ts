@@ -133,7 +133,7 @@ const fileView = (path: string, text: string): SourceView => ({
       title: path,
       count: null,
       deferred: false,
-      blocks: [{ type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: null }],
+      blocks: [{ type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: null, commit: null }],
     },
   ],
   actions: [],

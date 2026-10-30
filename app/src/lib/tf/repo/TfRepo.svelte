@@ -82,6 +82,8 @@
     refresh?: DetailRefreshPorts;
     /** *New branch…* and *Commit change…*'s standing (#2241); none refused when left out. */
     refusedWrites?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
+    /** The byte read (#2256): a Markdown file's relative images, at the file's commit; none load when left out. */
+    fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
   }
 
   /**
@@ -104,6 +106,7 @@
     codeFacts,
     entityCheckout,
     entityCheckoutDiff,
+    entityFileBytes,
     entityView,
     getEntity,
     jobReach,
@@ -173,6 +176,7 @@
       submitWrite: (payload, linkTo) => submitWrite(payload, linkTo),
       codeFacts: (entityIds) => codeFacts(entityIds),
       refusedWrites: (asks) => refusedWrites(asks),
+      fileBytes: (entityId, path, commit) => entityFileBytes(entityId, path, commit),
     },
     now: fixedNow,
   }: {
