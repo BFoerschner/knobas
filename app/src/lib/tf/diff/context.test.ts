@@ -42,6 +42,22 @@ test("a side the file is not on reads as none; no parent address, or no byte rea
   expect(commitContext(() => Promise.resolve(null), "c", "p").bytes).toBeUndefined();
 });
 
+test("a pipeline runs on each side at its own commit, the old one by its old path; a side the file is not on is none (#2270)", async () => {
+  const asked: string[] = [];
+  const done = { outcome: "done", name: "x", output: { kind: "text", text: "t" } } as const;
+  const piped = (id: string, path: string, commit: string | null, steps: { step: string }[]) => (
+    asked.push(`${id} ${path} ${commit} ${steps.map((s) => s.step)}`), Promise.resolve(done)
+  );
+  const context = commitContext(() => Promise.resolve(null), "g:o/r@new", "g:o/r@older", undefined, piped);
+  expect(await context.piped!(FILE, "new", [{ step: "base64_decode" }])).toEqual(done);
+  expect(await context.piped!(FILE, "old", [{ step: "base64_decode" }])).toEqual(done);
+  expect(asked).toEqual(["g:o/r@new src/new.rs null base64_decode", "g:o/r@older src/old.rs null base64_decode"]);
+  const missing = () => Promise.reject({ code: "not_found", message: "gone" });
+  expect(await commitContext(() => Promise.resolve(null), "c", "p", undefined, missing).piped!(FILE, "old", [])).toBeNull();
+  await expect(commitContext(() => Promise.resolve(null), "c", null, undefined, piped).piped!(FILE, "old", [])).rejects.toThrow(/parent/);
+  expect(commitContext(() => Promise.resolve(null), "c", "p").piped).toBeUndefined();
+});
+
 const RANGE = { repository: "g:o/r", base: "b".repeat(40), head: "h".repeat(40), commits: [] };
 
 test("a range's sides are read in its repository at its two shas, the old one by its old path (#2310)", async () => {
@@ -58,4 +74,19 @@ test("a range's sides are read in its repository at its two shas, the old one by
   const missing = () => Promise.reject({ code: "not_found", message: "not there" });
   expect(await rangeContext(read, RANGE, missing).bytes!(FILE, "new")).toBeNull();
   expect(rangeContext(read, RANGE).bytes).toBeUndefined();
+});
+
+test("a range runs a pipeline on each side in its repository at its two shas (#2270 on #2310's range)", async () => {
+  const asked: string[] = [];
+  const done = { outcome: "done", name: "x", output: { kind: "text", text: "t" } } as const;
+  const piped = (id: string, path: string, commit: string | null, steps: { step: string }[]) => (
+    asked.push(`${id} ${path} ${commit} ${steps.map((s) => s.step)}`), Promise.resolve(done)
+  );
+  const context = rangeContext(() => Promise.resolve(null), RANGE, undefined, piped);
+  expect(await context.piped!(FILE, "new", [{ step: "gunzip" }])).toEqual(done);
+  expect(await context.piped!(FILE, "old", [{ step: "gunzip" }])).toEqual(done);
+  expect(asked).toEqual([`g:o/r src/new.rs ${"h".repeat(40)} gunzip`, `g:o/r src/old.rs ${"b".repeat(40)} gunzip`]);
+  const missing = () => Promise.reject({ code: "not_found", message: "not there" });
+  expect(await rangeContext(() => Promise.resolve(null), RANGE, undefined, missing).piped!(FILE, "old", [])).toBeNull();
+  expect(rangeContext(() => Promise.resolve(null), RANGE).piped).toBeUndefined();
 });

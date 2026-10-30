@@ -15,6 +15,7 @@ import TfPage from "../TfPage.svelte";
 import { diffHash } from "./address";
 import { page as diffPage } from "./page";
 import TfDiffPage, { type DiffPagePorts } from "./TfDiffPage.svelte";
+import { installPipelines, noPipelines } from "./piped";
 
 const bridge = vi.hoisted(() => ({
   entityView: vi.fn<(id: string, section: string | null) => Promise<SourceView | null>>(),
@@ -205,4 +206,42 @@ test("a diff that names its range expands context read whole at its two shas (#2
   expect(asked).toContain(`${REPO} file@${HEAD}:src/retry.rs`);
   expect(asked).toContain(`${REPO} file@${PARENT}:src/retry.rs`);
   expect(target.querySelector(".tf-diff")!.textContent!.replace(/\s+/g, " ")).toMatch(/22 line 2 .*99 line 9/);
+});
+
+test("a diff that names its range runs a file's default pipeline on both sides at its two shas (#2270)", async () => {
+  const B64: DiffFile = {
+    path: "fixtures/hook.json.b64",
+    old_path: null,
+    change: "modified",
+    additions: 1,
+    deletions: 1,
+    hunks: [{ header: "@@ -1 +1 @@", lines: [{ kind: "del", old: 1, new: null, text: "e30=" }, { kind: "add", old: null, new: 1, text: "eyJhIjoxfQ==" }] }],
+    truncated: false,
+    threads: [],
+  };
+  const PARENT = "907900b245f2941018dfd3ee155b876ef701c102";
+  const asked: string[] = [];
+  const ports: DiffPagePorts = {
+    getEntity: async () => detail,
+    entityView: async () =>
+      ({
+        sections: [{ id: "x", title: "Diff", count: 1, deferred: false, blocks: [{ type: "diff", files: [B64], truncated: false, commentable: null, gone: [], range: { repository: REPO, base: PARENT, head: HEAD, commits: [] } }] }],
+        actions: [],
+      }) as unknown as SourceView,
+    piped: async (id, path, commit) => {
+      asked.push(`${id} ${path} ${commit}`);
+      return { outcome: "done", name: "hook.json", output: { kind: "text", text: commit === HEAD ? '{\n  "a": 1\n}\n' : "{}\n" } };
+    },
+  };
+  installPipelines({ of: (path) => (path.endsWith(".json.b64") ? { name: "decode", pattern: "*.json.b64", steps: [{ step: "base64_decode" }] } : null) });
+  try {
+    view = mount(TfDiffPage, { target, props: { repoId: REPO, base: `${BASE}^`, head: HEAD, ports } });
+    await settle();
+    await settle();
+    expect(asked.sort()).toEqual([`${REPO} fixtures/hook.json.b64 ${HEAD}`, `${REPO} fixtures/hook.json.b64 ${PARENT}`].sort());
+    expect(target.querySelector(".tf-fh .tf-ran")?.textContent?.trim()).toBe("decode");
+    expect(target.querySelector(".tf-diff")!.textContent!.replace(/\s+/g, " ")).toContain('"a": 1');
+  } finally {
+    installPipelines(noPipelines);
+  }
 });

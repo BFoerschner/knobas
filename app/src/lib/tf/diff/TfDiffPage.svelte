@@ -20,7 +20,7 @@
   Reads go through `entity_view` and `get_entity`, injectable as `ports`.
 -->
 <script module lang="ts">
-  import { entityFileBytes, entityView, getEntity, type EntityDetail, type SourceView } from "../../ipc/entity";
+  import { entityFileBytes, entityFilePiped, entityView, getEntity, type EntityDetail, type PipeRun, type PipeStep, type SourceView } from "../../ipc/entity";
 
   /** The page's two reads. */
   export interface DiffPagePorts {
@@ -28,6 +28,8 @@
     getEntity: (entityId: string) => Promise<EntityDetail>;
     /** A file's bytes at a commit, for a rendered image diff (#2279). */
     fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
+    /** A file pipeline over a file at a commit, for pipelines on diffs (#2270). */
+    piped?: (entityId: string, path: string, commit: string | null, steps: PipeStep[]) => Promise<PipeRun>;
   }
 
   /** Called through, not bound at load: a test's mock of the bridge may not carry every command. */
@@ -35,6 +37,7 @@
     entityView: (entityId, section) => entityView(entityId, section),
     getEntity: (entityId) => getEntity(entityId),
     fileBytes: (entityId, path, commit) => entityFileBytes(entityId, path, commit),
+    piped: (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
   };
 </script>
 
@@ -74,7 +77,7 @@
   let failed = $state<string | null>(null);
   /** What the drawn diff is between, where the source named it. */
   let range = $state<DiffRange | null>(null);
-  const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes));
+  const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
 
   const section = $derived(compareSection(base, head));
 
