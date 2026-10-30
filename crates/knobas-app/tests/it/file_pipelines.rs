@@ -459,21 +459,25 @@ async fn jq_errors_are_its_own() {
 
 /// A step past its timeout is answered as timed out, and the jq step is
 /// killed there (#2314): it runs in a child process, so a filter that loops
-/// without writing (or composes a closure with itself without end) holds
-/// nothing once its time is up. More of them than there are workers, and a
-/// built-in step after them still gets a worker at once.
+/// without writing holds nothing once its time is up. More of them than
+/// there are workers, and the steps after them still run.
+///
+/// Nothing here races the machine (#2323): the filters never finish, so
+/// only the timeout can end them; 2 s is far above a cold child's start
+/// (about 11 ms); and the kill is read off `ps`, not off a wall clock.
 #[tokio::test]
 async fn a_step_past_its_timeout_is_stopped() {
     let limits = Limits {
-        cap: SIZE_CAP,
-        timeout: Duration::from_millis(300),
+        cap: SIZE_CAP - 2323,
+        timeout: Duration::from_secs(2),
     };
-    let started = Instant::now();
+    // Each loops in constant memory and writes nothing, so it can neither
+    // fail nor reach the cap before its time is up.
     let filters: [&'static str; 4] = [
-        "repeat(1)",
         "last(range(1e18))",
-        "[repeat(1)] | length",
-        "def f(g): f(g | g); f(.)",
+        "reduce range(1e18) as $i (null; .)",
+        "first(range(1e18) | select(. < 0))",
+        "any(range(1e18); . < 0)",
     ];
     let endless: Vec<_> = filters
         .into_iter()
@@ -489,16 +493,17 @@ async fn a_step_past_its_timeout_is_stopped() {
         let run = run.await.unwrap();
         let failed = failure(&run);
         assert_eq!(failed.why, PipeWhy::TimedOut, "{failed:?}");
-        assert_eq!(failed.error, "jq did not finish in 300 ms");
+        assert_eq!(failed.error, "jq did not finish in 2 s");
     }
-    assert!(started.elapsed() < Duration::from_secs(3));
-    let next = Limits {
-        cap: SIZE_CAP,
-        timeout: Duration::from_secs(2),
-    };
-    let run = run_bytes(&[PipeStep::Gunzip], gzip(b"1"), "x.gz", next).await;
+    #[cfg(unix)]
+    assert_eq!(
+        children_with_cap(limits.cap),
+        0,
+        "a jq child outlived its timeout"
+    );
+    let run = run_bytes(&[PipeStep::Gunzip], gzip(b"1"), "x.gz", Limits::default()).await;
     assert_eq!(done(&run).1, "1");
-    let run = run_bytes(&[jq(".")], b"1".to_vec(), "x", next).await;
+    let run = run_bytes(&[jq(".")], b"1".to_vec(), "x", Limits::default()).await;
     assert_eq!(done(&run).1, "1\n");
 }
 
