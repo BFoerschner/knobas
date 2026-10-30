@@ -99,7 +99,12 @@
       </div>
       <label class="tf-swipe-bar"><span>before</span><input type="range" min="0" max="100" bind:value={cut} aria-label="Swipe between {path} before and after" /><span>after</span></label>
     {:else}
-      <p class="tf-dim" aria-live="polite">Reading both sides…</p>
+      {@const failed = plan.sides.map((side) => [side, sideOf(side)] as const).find(([, got]) => got?.kind === "failed")}
+      {#if failed && failed[1]?.kind === "failed"}
+        <p class="tf-stepfail" role="alert">The {NAME[failed[0]]} side could not be read: {failed[1].why}</p>
+      {:else}
+        <p class="tf-dim" aria-live="polite">Reading both sides…</p>
+      {/if}
     {/if}
   </div>
 {:else}

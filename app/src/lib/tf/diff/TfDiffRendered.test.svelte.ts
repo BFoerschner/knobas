@@ -230,6 +230,18 @@ test("a changed PNG opens rendered, side by side from each side's bytes, and swi
   expect(card("assets/logo.png").textContent).toContain("A binary file: no lines to draw.");
 });
 
+test("a swipe whose side cannot be read says so instead of reading on", async () => {
+  const { context } = reader({}, { "assets/logo.png": [pngBytes(1), pngBytes(2)] });
+  const failing = { ...context, bytes: (f: DiffFile, side: "old" | "new") => (side === "new" ? Promise.reject(new Error("refused")) : context.bytes!(f, side)) };
+  draw({ files: [PNG], context: failing });
+  await settle();
+  mode("assets/logo.png", "Swipe");
+  flushSync();
+  const swipe = card("assets/logo.png").querySelector(".tf-swipe")!;
+  expect(swipe.textContent).toContain("The after side could not be read: refused");
+  expect(swipe.textContent).not.toContain("Reading both sides");
+});
+
 test("an image's URLs are let go with the file, and an SVG side is sanitized", async () => {
   const svg = (word: string) => new TextEncoder().encode(`<svg onload="alert(1)"><script>alert(2)</script><text>${word}</text></svg>`);
   const SVG = file("assets/mark.svg", { change: "binary", additions: 0, deletions: 0, hunks: [] });
