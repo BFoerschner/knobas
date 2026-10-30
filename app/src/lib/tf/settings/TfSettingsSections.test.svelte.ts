@@ -2,6 +2,7 @@
  * The Settings sections besides Sources (#831), against stand-ins for every
  * command, so what each control sends is what the test reads.
  */
+import { pageContext } from "../kept-pages.svelte";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -158,6 +159,7 @@ async function open(
 ) {
   view = mount(TfSettings, {
     target,
+    context: hiddenable,
     props: {
       rest: [section],
       job: null,
@@ -635,4 +637,28 @@ test("no section reads before the database answers", async () => {
   await settle();
   expect(p.backupStatus).not.toHaveBeenCalled();
   expect(body().querySelector("h1")?.textContent).toBe("Backup and export");
+});
+
+// A page keep-alive holds hidden (#2249): `open` mounts Settings inside it.
+const page = $state({ shown: true });
+const hiddenable = pageContext(() => page.shown);
+
+test("a hidden Settings page does not read the backup folder on focus, and reads it once when shown again (#2249)", async () => {
+  const p = await open("backup");
+  expect(p.backupStatus).toHaveBeenCalledOnce();
+  try {
+    page.shown = false;
+    flushSync();
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("focus"));
+    await settle();
+    expect(p.backupStatus).toHaveBeenCalledOnce();
+
+    page.shown = true;
+    flushSync();
+    await settle();
+    expect(p.backupStatus).toHaveBeenCalledTimes(2);
+  } finally {
+    page.shown = true;
+  }
 });
