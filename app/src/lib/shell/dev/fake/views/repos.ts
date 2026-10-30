@@ -641,8 +641,23 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
       { type: "file", trail: [], path, text: "", language: null, size: bytes.length, truncated: false, binary: true, url: null, sha: blobOf(path), commit: ref },
     ]);
   // No action beside the file (#2241): *Commit change…*'s standing is `refused_writes`' ({@link repoRefusals}).
+  // Cut at 10,000 lines as Gitea's file view is (`files.rs`' LINE_CAP); the byte read answers it whole (Spec 4).
+  const lines = text.split("\n");
+  const cut = lines.length > 10_000;
   return section(id, "Files", [
-    { type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: blobOf(text), commit: ref },
+    {
+      type: "file",
+      trail: [],
+      path,
+      text: cut ? lines.slice(0, 10_000).join("\n") : text,
+      language: null,
+      size: text.length,
+      truncated: cut,
+      binary: false,
+      url: cut ? `https://gitea.example/tidewater/payout-service/raw/${path}` : null,
+      sha: blobOf(text),
+      commit: ref,
+    },
   ]);
 }
 
