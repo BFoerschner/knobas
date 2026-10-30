@@ -228,6 +228,9 @@ function ports(over: Partial<RepoPorts> = {}): RepoPorts {
         ]);
       if (section === null && BRANCH_VIEWS[id]) return BRANCH_VIEWS[id]!;
       if (section === "diff" && BRANCH_VIEWS[id]) return one("diff", [DIFF], 1);
+      // Any base against any head (#2271): main's diff, and another file against any other base.
+      if (id === REPO && section?.startsWith("compare:"))
+        return one(section, [section.startsWith("compare:main...") ? DIFF : { ...DIFF, files: [{ ...DIFF.files[0]!, path: "CHANGELOG.md" }] }], 1);
       if (section === "files") return one("files", [{ type: "tree", trail: [], entries: [{ name: "README.md", kind: "file", size: 9, section: "file:README.md" }], truncated: false, url: null }]);
       if (section === "file:README.md")
         return one("file:README.md", [
@@ -617,6 +620,24 @@ test("From changes the address; a branch holding a key proposes its ticket's tit
   );
   expect(text(target.querySelector(".tf-compare .tf-empty"))).toBe(
     "This branch is not on Gitea yet, or knobas has not synced it. What it changes shows here once it has.",
+  );
+});
+
+test("Into is the diff's base: picking another reads and draws the change against it (#2271)", async () => {
+  await draw(COMPARE("spike/sepa-instant"));
+  expect(reads).toContainEqual([REPO, "compare:main...spike/sepa-instant"]);
+  const paths = () => [...target.querySelectorAll(".tf-compare .tf-diff .tf-fh")].map((h) => text(h).split(" ")[0]);
+  expect(paths()).toEqual(["src/retry.rs"]);
+  const into = target.querySelector<HTMLSelectElement>(".tf-compare select")!;
+  into.value = "release/1.9";
+  into.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(reads).toContainEqual([REPO, "compare:release/1.9...spike/sepa-instant"]);
+  expect(paths()).toEqual(["CHANGELOG.md"]);
+  expect(text(target.querySelector(".tf-compare .tf-cfiles"))).toBe("1 file changed against release/1.9");
+  // The diff has its own address, from Into to From.
+  expect(button("Open as diff", target)!.getAttribute("href")).toBe(
+    "#/diff/gitea%3Atidewater%2Fpayout-service/release%2F1.9/spike%2Fsepa-instant",
   );
 });
 

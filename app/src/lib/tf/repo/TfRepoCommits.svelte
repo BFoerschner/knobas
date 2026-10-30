@@ -12,6 +12,14 @@
   *Author: Mine* (#973) keeps the commits whose declared author is mine
   (`code_facts`), never a reading of that line: a commit the mirror does not
   hold has no declared author, so the chip leaves it out.
+
+  *Diff selected* (#2271): a commit's box picks it, a shift-click on another's
+  stretches the pick to it, and the button opens the diff address from the
+  commit before the oldest picked to the newest (`diff/address.ts`). The pick
+  is over the rows drawn; commits the filter hides between its ends are in
+  the diff all the same, since it is a range of history. A commit the mirror
+  does not hold has no whole sha, so its box can sit inside a pick but not
+  end one. A new list (another branch, a filter, a refresh) drops the pick.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -23,6 +31,7 @@
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import { commitHash, viewRows, visibleViewRows } from "./repo";
+  import { diffHash, picked, rangeOf, selectRange, wholeShaOf, type RangePick } from "../diff/address";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
 
@@ -115,15 +124,41 @@
     rows === null ? [] : visibleViewRows(rows, filter.text, (filter.chips["who"] ?? []).includes("Mine") ? mine : null),
   );
 
-  /** A row opens its commit; a click on the link inside already did. */
+  /** The commits picked for *Diff selected*, as rows of `shown`. */
+  let pick = $state<RangePick | null>(null);
+  $effect(() => {
+    void shown;
+    pick = null;
+  });
+  const range = $derived(pick === null ? null : rangeOf(shown, pick));
+  const count = $derived(pick === null ? 0 : Math.abs(pick.anchor - pick.end) + 1);
+
+  /** A box clicked: a click picks its commit, a shift-click stretches the pick to it. */
+  function choose(event: MouseEvent, at: number) {
+    pick = selectRange(pick, at, event.shiftKey);
+    for (const [n, box] of boxes.entries()) if (box) box.checked = picked(pick, n);
+  }
+  let boxes = $state<(HTMLInputElement | undefined)[]>([]);
+
+  function diffSelected() {
+    if (range !== null) location.hash = diffHash(repoId, range.base, range.head);
+  }
+
+  /** A row opens its commit; a click on the link or the box inside already did its own. */
   function open(event: MouseEvent, row: ViewRow) {
-    if (row.entity_id === null || (event.target as Element | null)?.closest("a")) return;
+    if (row.entity_id === null || (event.target as Element | null)?.closest("a, input")) return;
     location.hash = commitHash(repoId, row.entity_id);
   }
 </script>
 
-<div class="tf-rbar">
+<div class="tf-rbar tf-rpickbar">
   <FilterBar {config} {filter} shown={rows === null ? null : shown.length} total={rows?.length ?? null} />
+  <button
+    type="button"
+    class="tf-btn tf-sm"
+    disabled={range === null}
+    title={range === null ? "Pick a commit's box, then shift-click another's for a range" : undefined}
+    onclick={diffSelected}>Diff selected{count > 0 ? ` (${count})` : ""}</button>
 </div>
 <TfWaiting phase={waitPhase({ drawn: rows !== null, reading, failed: failed !== null })} error={failed}>
 {#if shown.length === 0}
@@ -132,7 +167,17 @@
   <table class="tf-tbl tf-rcommits">
     <tbody>
       {#each shown as row, n (n)}
-        <tr class:tf-row={row.entity_id !== null} onclick={(event) => open(event, row)}>
+        <tr class:tf-row={row.entity_id !== null} class:tf-picked={picked(pick, n)} onclick={(event) => open(event, row)}>
+          <td class="tf-rpick"
+            ><input
+              type="checkbox"
+              bind:this={boxes[n]}
+              checked={picked(pick, n)}
+              disabled={wholeShaOf(row.entity_id) === null && !picked(pick, n)}
+              aria-label={`Pick ${row.chip ?? row.title}`}
+              onclick={(event) => choose(event, n)}
+            /></td
+          >
           <td class="tf-mono"
             >{#if row.entity_id !== null}<a href={commitHash(repoId, row.entity_id)}
                 ><Marked text={row.chip ?? ""} typed={filter.text} /></a
