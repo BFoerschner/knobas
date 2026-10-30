@@ -86,7 +86,7 @@ pub(super) async fn draw(
                 overview(&pull, &reviews, &landing, checks),
                 files_stub(&pull),
                 commits,
-                conversation(&reviews, &comments),
+                conversation(&reviews, &comments, &at.line_comments(&reviews).await?),
             ]
         }
         Some(OVERVIEW) => {
@@ -101,7 +101,8 @@ pub(super) async fn draw(
         Some(COMMITS) => vec![at.commits(None).await?],
         Some(CONVERSATION) => {
             let (reviews, comments) = tokio::try_join!(at.reviews(), at.comments())?;
-            vec![conversation(&reviews, &comments)]
+            let said = at.line_comments(&reviews).await?;
+            vec![conversation(&reviews, &comments, &said)]
         }
         Some(other) => {
             return Err(SourceError::protocol(format!(
@@ -146,6 +147,39 @@ impl PullView<'_> {
         Ok(reviews
             .into_iter()
             .filter_map(|r| serde_json::from_value(r).ok())
+            .collect())
+    }
+
+    /// Each review's line comments, by review id, for *Conversation* (#2277):
+    /// a reply to a thread is a review of one line comment, and it is said
+    /// there as Gitea's own page says it. Only the reviews Gitea counts any
+    /// for are asked, all at once.
+    async fn line_comments(
+        &self,
+        reviews: &[Review],
+    ) -> Result<Vec<(u64, Vec<String>)>, SourceError> {
+        let commented = threads::with_comments(reviews);
+        let reads = commented
+            .iter()
+            .map(|&(id, _)| {
+                self.source
+                    .client
+                    .pull_review_comments(self.owner, self.repo, self.number, id)
+            })
+            .collect();
+        let answers = threads::all(reads).await?;
+        Ok(commented
+            .iter()
+            .zip(answers)
+            .map(|(&(id, review), raw)| {
+                (
+                    id,
+                    threads::written(review, raw)
+                        .iter()
+                        .map(threads::quoted)
+                        .collect(),
+                )
+            })
             .collect())
     }
 
@@ -331,7 +365,11 @@ impl PullView<'_> {
 /// Comments the token may not read (`Err`, its reason) open the tab on a line
 /// saying so, and the reviews, which are the pull request's own read, follow
 /// (#2042).
-fn conversation(reviews: &[Review], comments: &Result<Vec<PullComment>, String>) -> ViewSection {
+fn conversation(
+    reviews: &[Review],
+    comments: &Result<Vec<PullComment>, String>,
+    line_comments: &[(u64, Vec<String>)],
+) -> ViewSection {
     let (unread, comments) = match comments {
         Ok(comments) => (None, comments.as_slice()),
         Err(reason) => (Some(reason), &[][..]),
@@ -340,11 +378,17 @@ fn conversation(reviews: &[Review], comments: &Result<Vec<PullComment>, String>)
         .iter()
         .filter_map(|review| {
             let verdict = review_verdict(review)?;
+            let lines = review
+                .id
+                .and_then(|id| line_comments.iter().find(|(r, _)| *r == id))
+                .map(|(_, lines)| lines.as_slice())
+                .unwrap_or_default();
             Some(Said {
                 user: review.user.as_ref(),
                 at: review.submitted_at.as_deref(),
                 verdict: Some(verdict),
                 body: review.body.as_deref(),
+                lines,
             })
         })
         .chain(comments.iter().map(|comment| Said {
@@ -352,6 +396,7 @@ fn conversation(reviews: &[Review], comments: &Result<Vec<PullComment>, String>)
             at: comment.created_at.as_deref(),
             verdict: None,
             body: comment.body.as_deref(),
+            lines: &[],
         }))
         .collect();
     // Stable: equal instants, and entries with none (last), keep Gitea's
@@ -376,10 +421,16 @@ fn conversation(reviews: &[Review], comments: &Result<Vec<PullComment>, String>)
             });
         }
         blocks.push(Block::Facts { facts });
+        // The review's words, then its line comments, each quoted under
+        // where it was written (#2277): one text, as the message's body.
         let body = entry.body.map(str::trim_end).unwrap_or_default();
-        if !body.trim().is_empty() {
+        let text: Vec<&str> = std::iter::once(body)
+            .filter(|b| !b.trim().is_empty())
+            .chain(entry.lines.iter().map(String::as_str))
+            .collect();
+        if !text.is_empty() {
             blocks.push(Block::Text {
-                text: body.to_owned(),
+                text: text.join("\n\n"),
                 markdown: true,
             });
         }
@@ -399,6 +450,8 @@ struct Said<'a> {
     at: Option<&'a str>,
     verdict: Option<(String, Option<Tone>)>,
     body: Option<&'a str>,
+    /// A review's line comments, quoted ([`threads::quoted`]).
+    lines: &'a [String],
 }
 
 /// What a review says in *Conversation*, and its tone: an approval ok, a

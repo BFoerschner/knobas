@@ -3176,3 +3176,35 @@ async fn the_author_may_request_and_a_closed_pull_request_offers_none() {
     assert!(request_of(&view).is_none(), "{:#?}", view.actions);
     assert!(!paths(&server).await.contains(&format!("{REPO}/reviewers")));
 }
+
+/// #2277: a reply to a thread is a review of one line comment, so
+/// *Conversation* says each review's line comments under it, quoted beneath
+/// where they were written, as Gitea's own page does; a draft's are nobody's.
+#[tokio::test]
+async fn conversation_quotes_each_reviews_line_comments_under_it() {
+    let server = gitea_with_line_comments(open_pull()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/issues/142/comments")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    let view = source(&server)
+        .view(PR, Some("conversation"))
+        .await
+        .unwrap()
+        .unwrap();
+    let texts: Vec<&str> = view.sections[0]
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        texts.contains(&"On `src/sepa/retry.rs`, line 2:\n\n> Bound the jitter.\n\nOn `src/sepa/retry.rs`, old line 2:\n\n> Why drop the <b>constant</b>?"),
+        "{texts:#?}"
+    );
+    assert!(texts.iter().any(|t| t.contains("> Agreed: `±10 %`.")), "{texts:#?}");
+    assert!(!texts.iter().any(|t| t.contains("draft")), "{texts:#?}");
+}

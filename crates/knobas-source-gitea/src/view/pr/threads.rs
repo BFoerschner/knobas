@@ -108,6 +108,23 @@ pub(super) fn written(review: &Review, raw: Vec<serde_json::Value>) -> Vec<Writt
         .collect()
 }
 
+/// `comment` as *Conversation* says it (#2277): where it was written, then
+/// its words quoted, in Markdown, as Gitea's own page shows a review's line
+/// comments under it.
+pub(super) fn quoted(comment: &Written) -> String {
+    let at = match comment.side {
+        ReviewSide::Old => format!("old line {}", comment.line),
+        ReviewSide::New => format!("line {}", comment.line),
+    };
+    let words: Vec<String> = comment
+        .comment
+        .body
+        .lines()
+        .map(|l| format!("> {l}"))
+        .collect();
+    format!("On `{}`, {at}:\n\n{}", comment.path, words.join("\n"))
+}
+
 /// The text of a hunk's last line of the file -- what the comment was written
 /// on -- without its `+`, `-` or ` ` marker. A `\ No newline` note and the
 /// `@@` header are not lines of the file.
