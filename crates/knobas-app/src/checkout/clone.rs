@@ -358,27 +358,7 @@ async fn start_with(
     protocols: &[&str],
 ) -> Result<CloneAnswer, IpcError> {
     let repo_id = repo_id(pool, entity_id).await?;
-
-    let source: Option<(String, String, serde_json::Value)> = sqlx::query_as(
-        "select s.kind, s.base_url, s.config
-           from sync.item i join knobas.source_config s on s.id = i.source_id
-          where i.entity_id = $1",
-    )
-    .bind(&repo_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(IpcError::internal)?;
-    let (kind, base_url, config) = source.ok_or_else(|| {
-        IpcError::not_found(format!(
-            "{repo_id}'s source is no longer configured, so there is no address to clone from"
-        ))
-    })?;
-
-    let key = EntityRef::parse(&repo_id).map_err(IpcError::invalid)?.key;
-    let name = clone::FullName::parse(&key).map_err(IpcError::invalid)?;
-    let url = resolve_clone_url(
-        registry, &repo_id, &kind, &base_url, &config, &name, protocols,
-    )?;
+    let (url, name) = url_of(pool, registry, &repo_id, protocols).await?;
 
     let root = super::clones_root(pool).await?.ok_or_else(|| {
         IpcError::invalid("no clones root is set: choose where clones go in Settings › Checkouts")
@@ -448,6 +428,39 @@ async fn start_with(
             Err(error)
         }
     }
+}
+
+/// The URL git reaches repository `repo_id` at, and its checked name: the
+/// source's typed address and the full name, as ADR-0023 builds it. What a
+/// clone clones from, and what a pull request's worktree fetches from
+/// (ADR-0035).
+pub(super) async fn url_of(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    repo_id: &str,
+    protocols: &[&str],
+) -> Result<(String, clone::FullName), IpcError> {
+    let source: Option<(String, String, serde_json::Value)> = sqlx::query_as(
+        "select s.kind, s.base_url, s.config
+           from sync.item i join knobas.source_config s on s.id = i.source_id
+          where i.entity_id = $1",
+    )
+    .bind(repo_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    let (kind, base_url, config) = source.ok_or_else(|| {
+        IpcError::not_found(format!(
+            "{repo_id}'s source is no longer configured, so there is no address to clone from"
+        ))
+    })?;
+
+    let key = EntityRef::parse(repo_id).map_err(IpcError::invalid)?.key;
+    let name = clone::FullName::parse(&key).map_err(IpcError::invalid)?;
+    let url = resolve_clone_url(
+        registry, repo_id, &kind, &base_url, &config, &name, protocols,
+    )?;
+    Ok((url, name))
 }
 
 /// The URL git clones `name` from: the code-host read `clone_urls` (#1197).

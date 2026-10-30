@@ -52,6 +52,7 @@ pub mod clone;
 pub mod open;
 pub mod uncommitted;
 pub mod working_tree;
+pub mod worktree;
 
 use working_tree::TreeRead;
 

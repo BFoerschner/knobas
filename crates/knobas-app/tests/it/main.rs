@@ -64,6 +64,7 @@ mod pr_viewed_ipc;
 mod probe_snapshot;
 mod project_census;
 mod protocol_ipc;
+mod pull_request_worktree;
 mod read_plans;
 mod refresh;
 mod refused_writes;
