@@ -15,7 +15,13 @@
     Commits, Branches (#839), Pull requests (and the compare page, #840) and
     Local changes (#847).
   - The checkout is read again when the window gets focus and when a clone
-    finishes (ADR-0021).
+    finishes (ADR-0021); while keep-alive holds the page hidden (#2249) it
+    is not, and it is read once when the page is shown again.
+  - **Kept tabs** (#2248, `repo-tabs.ts`): a tab visited stays mounted,
+    hidden, for the visit to this repository, and shows again as it was left
+    (its scroll, its tree, its file), reading again over what it drew. Its
+    link in the row goes back to where it was left. Another repository
+    starts afresh; another branch keeps only the tab shown.
   - **Refresh** (#2135, `tf/refresh.svelte.ts`): *Refresh* or *Sync now* in
     the header, as the repository's read offers, and the withdrawn and
     turned-off banners under it. A refresh reads the repository's own reads
@@ -143,12 +149,17 @@
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import { provideTabRereads } from "./refreshed.svelte";
+  import { NO_TABS, readShown, SLOTS, slotOf, tabHref, visit, type TabSlot } from "./repo-tabs";
+  import TfRepoTab from "./TfRepoTab.svelte";
+  import { providePageVisible } from "../kept-pages.svelte";
+  import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
 
   let {
     ready,
     rest,
     job,
     jobAt = null,
+    visible = true,
     ports = {
       getEntity: (entityId) => getEntity(entityId),
       listEntities: (filter, limit, offset) => listEntities(filter, limit, offset),
@@ -173,6 +184,8 @@
     job: string | null;
     /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
     jobAt?: string | null;
+    /** Whether keep-alive shows the page (#2247); hidden, it reads nothing on focus (#2249). */
+    visible?: boolean;
     ports?: RepoPorts;
     /** Injectable clock, for the times drawn. */
     now?: Date;
@@ -208,8 +221,7 @@
   let facts = $state<CodeFacts | undefined>(undefined);
   /** The header's *Refresh* or *Sync now* (#2135). */
   const refresh = createDetailRefresh(untrack(() => ports.refresh));
-  /** How many refreshes the page has read again: a tab reads its own sections again on each (#2135). */
-  let refreshed = $state(0);
+  providePageVisible(() => visible);
   /** The open tab's re-reads of a refresh: *Refreshing…* waits for them too, as the job page's does (#2134). */
   const tabRereads = provideTabRereads();
 
@@ -229,13 +241,19 @@
     untrack(() => refresh.reset());
     readRepo(id, alive, false);
     readCheckout(id, alive);
-    const again = () => readCheckout(id, alive);
-    window.addEventListener("focus", again);
     return () => {
       live = false;
-      window.removeEventListener("focus", again);
     };
   });
+
+  /** The checkout again on focus, and once when the page is shown again (#2249). */
+  function checkoutAgain() {
+    const id = repoId;
+    if (ready && id !== null) readCheckout(id, () => repoId === id);
+  }
+  onFocusWhileShown(() => visible, checkoutAgain);
+  // The open tab reads again too, over what it drew, as it does on a refresh.
+  onShownAgain(() => visible, () => (tabs = readShown(tabs)));
 
   /**
    * The repository's own reads: its row, its team and language, its pull
@@ -350,7 +368,7 @@
   async function reread(): Promise<void> {
     const id = repoId;
     if (id === null) return;
-    refreshed += 1;
+    tabs = readShown(tabs);
     await Promise.all([readRepo(id, () => repoId === id, true), tabRereads.settled()]);
   }
 
@@ -414,6 +432,25 @@
   const changed = $derived(changedPaths(local));
   const sentence = $derived(checkoutSentence(checkout));
   const tab = $derived<RepoTabId>(litTab(route.tab));
+
+  /** The tab bodies held for the visit (#2248). */
+  let tabs = $state(NO_TABS);
+  const slot = $derived(slotOf(route));
+  $effect.pre(() => {
+    const now = rest;
+    const reading = at;
+    if (branches === null) return;
+    tabs = visit(untrack(() => tabs), now, reading);
+  });
+  /** The tabs held for this repository: none while the page has not noted the one it now names. */
+  const held = $derived(tabs.repoId === repoId ? tabs : NO_TABS);
+  /** Each slot drawn, in a fixed order so a switch moves no node: the held ones and the one shown. */
+  const drawn = $derived(SLOTS.filter((one) => one === slot || held.places[one] !== undefined));
+  /** The address a slot is drawn at: the page's for the one shown, the one it was left at for the rest. */
+  function placeOf(one: TabSlot) {
+    const left = held.places[one];
+    return one === slot || left === undefined ? route : readRepoRoute(left);
+  }
 
   const openPrs = $derived(prs?.filter((row) => row.state?.text.toLowerCase() === "open").length ?? 0);
   const localCount = $derived(
@@ -504,7 +541,7 @@
     <nav class="tf-tabs" aria-label="Repository">
       {#each REPO_TABS as entry (entry.id)}
         {@const count = countOf(entry.id)}
-        <a href={repoHash(repoId, entry.id)} aria-current={tab === entry.id ? "page" : undefined}
+        <a href={tabHref(held, repoId, entry.id)} aria-current={tab === entry.id ? "page" : undefined}
           >{entry.label}{#if count !== null}{" "}<span class="tf-count" class:tf-warn={count.warn}>{count.n}</span
             >{/if}</a
         >
@@ -513,46 +550,56 @@
     <div class="tf-cbody">
       {#if NOT_BUILT[route.tab] !== undefined}
         <div class="tf-empty"><p>{NOT_BUILT[route.tab]} is not built in the new shell yet.</p></div>
-      {:else if route.tab === "local"}
-        <TfRepoLocal {repoId} title={repo?.title ?? ""} {checkout} readDiff={ports.entityCheckoutDiff} {setPath} />
-      {:else if at === null || branchName === null}
-        <!-- The branch every tab reads at is not known yet: the mirror names none, and the list has not answered. -->
-      {:else if route.tab === "files" || route.tab === "edit"}
-        <TfRepoFiles
-          {ports}
-          {repoId}
-          {at}
-          branch={branchName}
-          path={route.path}
-          line={route.line}
-          {changed}
-          editing={route.tab === "edit"}
-          {job}
-          checkoutBranch={checkout?.tree?.status === "read" ? checkout.tree.branch : null}
-          {checkout}
-          title={repo?.title ?? ""}
-          {source}
-          {refreshed}
-          refusal={commitRefused}
-        />
-      {:else if route.tab === "commits" && route.commit !== null}
-        <TfRepoCommit {ports} {repoId} commitId={route.commit} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />
-      {:else if route.tab === "branches"}
-        <TfRepoBranches {ports} {repoId} {source} {refreshed} />
-      {:else if route.tab === "compare" && branches !== null}
-        <TfRepoCompare
-          {ports}
-          {repoId}
-          {source}
-          branches={branches}
-          head={route.branch ?? proposed}
-          defaultBranch={defaultBranch?.name ?? null}
-          {refreshed}
-        />
-      {:else if route.tab === "commits"}
-        <TfRepoCommits {ports} {repoId} {at} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
-      {:else if route.tab === "prs"}
-        <TfRepoPrs {ports} {repoId} rows={prs} {job} />
+      {:else}
+        {#each drawn as one (one)}
+          {@const refreshed = held.reads[one] ?? 0}
+          {#if one === "local"}
+            <TfRepoTab shown={one === slot}>
+              <TfRepoLocal {repoId} title={repo?.title ?? ""} {checkout} readDiff={ports.entityCheckoutDiff} {setPath} />
+            </TfRepoTab>
+          {:else if at !== null && branchName !== null}
+            <!-- The rest wait for the branch every tab reads at: the mirror's default, or the list's (#2243). -->
+            <TfRepoTab shown={one === slot}>
+              {#if one === "files"}
+                <TfRepoFiles
+                  {ports}
+                  {repoId}
+                  {at}
+                  branch={branchName}
+                  path={placeOf(one).path}
+                  line={placeOf(one).line}
+                  {changed}
+                  editing={placeOf(one).tab === "edit"}
+                  {job}
+                  checkoutBranch={checkout?.tree?.status === "read" ? checkout.tree.branch : null}
+                  {checkout}
+                  title={repo?.title ?? ""}
+                  {source}
+                  {refreshed}
+                  refusal={commitRefused}
+                />
+              {:else if one === "commit" && placeOf(one).commit !== null}
+                <TfRepoCommit {ports} {repoId} commitId={placeOf(one).commit ?? ""} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />
+              {:else if one === "branches"}
+                <TfRepoBranches {ports} {repoId} {source} {refreshed} />
+              {:else if one === "compare" && branches !== null}
+                <TfRepoCompare
+                  {ports}
+                  {repoId}
+                  {source}
+                  branches={branches}
+                  head={placeOf(one).branch ?? proposed}
+                  defaultBranch={defaultBranch?.name ?? null}
+                  {refreshed}
+                />
+              {:else if one === "commits"}
+                <TfRepoCommits {ports} {repoId} {at} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
+              {:else if one === "prs"}
+                <TfRepoPrs {ports} {repoId} rows={prs} {job} />
+              {/if}
+            </TfRepoTab>
+          {/if}
+        {/each}
       {/if}
     </div>
   {/if}

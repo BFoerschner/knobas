@@ -1,0 +1,29 @@
+/* The Markdown component (#2255), as the code-area mockup's `.md` (#2252). Every surface that draws Markdown draws it with these. */
+.tf-md { padding: 22px 32px 30px; font: 400 var(--t-lg)/1.6 var(--sans); overflow-wrap: anywhere; }
+.tf-md > * + * { margin-top: 12px; }
+.tf-md > :first-child { margin-top: 0; }
+.tf-md h1 { font-size: 28px; font-weight: 700; font-variation-settings: "wdth" 85; line-height: 1.2; padding-bottom: 8px; border-bottom: 1px solid var(--rule-2); }
+.tf-md h2 { font-size: var(--t-2xl); font-weight: 700; font-variation-settings: "wdth" 88; margin-top: 26px; padding-bottom: 6px; border-bottom: 1px solid var(--rule-2); }
+.tf-md h3 { font-size: var(--t-xl); font-weight: 700; margin-top: 20px; }
+.tf-md h4, .tf-md h5, .tf-md h6 { font-size: var(--t-lg); font-weight: 700; margin-top: 16px; }
+.tf-md a { color: var(--info); text-decoration: underline; text-underline-offset: 2px; }
+.tf-md a.tf-ext::after { content: " ↗"; font-size: .8em; }
+.tf-md code { font: .88em var(--mono); font-variant-ligatures: none; background: var(--sheet-2); border: 1px solid var(--rule-2); padding: 0 4px; border-radius: 3px; }
+.tf-md ul, .tf-md ol { padding-left: 24px; }
+.tf-md li + li { margin-top: 3px; }
+.tf-md li.tf-task { list-style: none; margin-left: -20px; display: flex; gap: 8px; align-items: baseline; }
+.tf-md .tf-box { width: 13px; height: 13px; border: 1.5px solid var(--ink-2); border-radius: 3px; display: inline-grid; place-items: center; flex: none; transform: translateY(2px); font-size: 10px; line-height: 1; }
+.tf-md .tf-box.tf-on { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+.tf-md .tf-box.tf-on::after { content: "✓"; }
+.tf-md del { color: var(--ink-2); }
+.tf-md table { border-collapse: collapse; font-size: var(--t-md); display: block; overflow-x: auto; }
+.tf-md th, .tf-md td { border: 1px solid var(--rule); padding: 5px 12px; text-align: left; }
+.tf-md th { background: var(--sheet-2); font-weight: 600; }
+.tf-md blockquote { border-left: 3px solid var(--rule); padding-left: 12px; color: var(--ink-2); }
+.tf-md hr { border: 0; border-top: 1px solid var(--rule); }
+.tf-md img { max-width: 100%; }
+.tf-md .tf-fence { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--paper); }
+.tf-md .tf-fence > header { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px; height: 32px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-xs); color: var(--ink-2); background: var(--sheet-2); }
+.tf-md .tf-fence > header .tf-fence-copy { margin-left: auto; }
+.tf-md .tf-fence pre { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; padding: 10px 14px; overflow: auto; margin: 0; }
+.tf-md .tf-fence pre code { font: inherit; font-variant-ligatures: none; background: none; border: 0; padding: 0; }

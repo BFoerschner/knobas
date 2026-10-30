@@ -58,54 +58,30 @@
 /* ---------- Files changed, Submit review, Merge… (#842, #843, R-8.15, R-8.17-R-8.19) ---------- */
 /* *Submit review (N pending)*: prototype-6's warn-edged button. */
 .tf-btn.tf-warnbtn { border-color: var(--warn); color: var(--warn); }
-.tf-prfiles { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
-/* As tall as the diffs beside it, so the file list has room to stick in (#2091). */
-.tf-prfiles-nav { align-self: stretch; }
-.tf-prfiles-nav .tf-minif { max-width: none; margin-bottom: 8px; }
-/* Bounded by the window, with a scroll of its own, so a long list's last file is in reach (#2091). */
-.tf-flist {
-  display: flex; flex-direction: column; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px;
-  font-size: var(--t-sm); position: sticky; top: 64px; max-height: calc(100vh - 160px); overflow: auto;
-}
-.tf-flist button {
-  display: flex; gap: 8px; padding: 6px 10px; border: 0; border-top: 1px solid var(--rule-2); background: none; color: var(--ink);
-  font: var(--t-sm) var(--mono); font-variant-ligatures: none; align-items: center; text-align: left; cursor: pointer;
-}
-.tf-flist button:first-of-type { border-top: 0; }
-.tf-flist button:hover { background: var(--sheet-2); }
-.tf-flist .tf-n { margin-left: auto; font-family: var(--sans); white-space: nowrap; }
-.tf-flist .tf-viewed { opacity: 0.5; }
-.tf-flist-none { padding: 8px; }
-.tf-prdiff .tf-ln { grid-template-columns: 44px 1fr auto; position: relative; }
-.tf-prdiff .tf-fh-viewed { margin-left: auto; font: 400 var(--t-sm) var(--sans); display: flex; gap: 6px; align-items: center; }
-.tf-addc {
-  opacity: 0; border: 0; background: var(--info); color: var(--sheet); border-radius: 4px; width: 18px; height: 18px;
-  line-height: 16px; cursor: pointer; margin: 2px 6px 0; font: 700 var(--t-sm) var(--sans); padding: 0;
-}
-.tf-prdiff .tf-ln:hover .tf-addc, .tf-addc:focus-visible { opacity: 1; }
-.tf-thread {
-  margin: 4px 12px 8px 56px; padding: 6px 10px; border: 1px solid var(--rule); border-left-width: 3px; border-radius: 4px;
-  background: var(--sheet); font: var(--t-sm)/1.5 var(--sans); white-space: normal;
-}
-.tf-thread p { margin: 0 0 4px; overflow-wrap: anywhere; }
-.tf-thread p:last-child { margin-bottom: 0; }
-.tf-thread.tf-pending { border-color: var(--warn); }
-.tf-newc { margin: 4px 12px 8px 56px; display: flex; flex-direction: column; gap: 6px; font-family: var(--sans); }
-.tf-newc textarea {
-  border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); color: var(--ink); min-height: 54px; font: inherit;
-}
-.tf-newc .tf-acts { display: flex; gap: 6px; justify-content: flex-end; }
-.tf-outdated { margin: 6px 12px 10px; font: var(--t-sm) var(--sans); }
-.tf-outdated summary { cursor: pointer; color: var(--ink-2); }
-.tf-outdated .tf-thread { margin-left: 0; }
 .tf-gone { margin: 12px 0 0; }
 .tf-prfiles-cut { margin: 12px 0 0; font-size: var(--t-sm); }
 .tf-prr-line { font-size: var(--t-sm); }
 .tf-prm-ready { padding: 0; }
 .tf-prm-blocked { flex-direction: column; align-items: flex-start; gap: 2px; }
 .tf-prm-note { margin: 0; font-size: var(--t-sm); }
-@media (max-width: 900px) {
-  .tf-prfiles { grid-template-columns: minmax(0, 1fr); }
-  .tf-flist { position: static; }
-}
 
+/* The side rail (#2278, mockups/code-area/pr.html): readiness as a checklist under its verdict, then lists. */
+.tf-prready { gap: 7px; }
+.tf-prverdict { padding: 8px 10px; border-radius: 4px; font-weight: 600; }
+.tf-prverdict.tf-ok { background: var(--ok-bg); color: var(--ok); }
+.tf-prverdict.tf-err { background: var(--err-bg); color: var(--err); }
+.tf-prverdict.tf-warn { background: var(--warn-bg); color: var(--warn); }
+.tf-prverdict .tf-prwhy { font-weight: 400; }
+.tf-prck { display: grid; grid-template-columns: 18px 1fr; gap: 4px; align-items: start; }
+.tf-prmk { font-weight: 800; text-align: center; color: var(--warn); }
+.tf-prck.tf-ok .tf-prmk { color: var(--ok); }
+.tf-prck.tf-err .tf-prmk { color: var(--err); }
+.tf-prck.tf-info .tf-prmk, .tf-prck.tf-muted .tf-prmk { color: var(--info); }
+.tf-prwhy { display: block; color: var(--ink-2); font-size: var(--t-xs); }
+.tf-prlist { display: flex; flex-direction: column; padding: 0 0 6px; font-size: var(--t-sm); }
+.tf-prit { display: flex; align-items: center; gap: 8px; padding: 5px 12px; min-height: 32px; }
+.tf-prgrow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-prreq { font: 600 var(--t-2xs) var(--sans); text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; }
+.tf-prnote { margin: 0; padding: 0 12px 10px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-prnote.tf-prconflict { color: var(--err); }
+.tf-prbuilds > header .tf-dim { font-size: var(--t-xs); }

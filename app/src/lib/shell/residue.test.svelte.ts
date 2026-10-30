@@ -387,6 +387,7 @@ const TfCode = (await import("../tf/code/TfCode.svelte")).default;
 const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
 const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
+const TfDiffView = (await import("../tf/diff/TfDiffView.svelte")).default;
 const TfItem = (await import("../tf/item/TfItem.svelte")).default;
 const TfDetailRefresh = (await import("../tf/TfDetailRefresh.svelte")).default;
 const { createDetailRefresh } = await import("../tf/refresh.svelte");
@@ -1659,6 +1660,30 @@ const CASES: Case[] = [
           viewedFiles: () => deferred([]),
           setViewed: () => deferred([]),
           pending: createPendingComments(() => null),
+        },
+      }),
+    }),
+  },
+  // The one diff component (#2266): a highlight job per file side, cancelled with it.
+  {
+    name: "TfDiffView",
+    source: "lib/tf/diff/TfDiffView.svelte",
+    open: (target) => ({
+      app: mount(TfDiffView, {
+        target,
+        props: {
+          files: [
+            {
+              path: "src/retry.rs",
+              old_path: null,
+              change: "modified",
+              additions: 1,
+              deletions: 0,
+              hunks: [{ header: "@@ -0,0 +1 @@", lines: [{ kind: "add", old: null, new: 1, text: "fn retry() {}" }] }],
+              truncated: false,
+              threads: [],
+            },
+          ],
         },
       }),
     }),

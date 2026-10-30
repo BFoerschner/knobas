@@ -246,6 +246,7 @@ A change to one is announced in the PR body under **Frozen surface**, as
 | `app/src/lib/detail/` | Link helpers and dialogs for an item's detail (`LinksPanel`, `LinkDialog`, `links.ts`, `relations.ts`) and the `view/` folder; there is no slide-over component. |
 | `app/src/lib/sources/` | `FirstRun.svelte` (the first-run wizard) and the helpers behind it: account, connection, diagnostics, schema-form and fixtures. There is no sources view. |
 | `app/src/lib/launcher/` | The ⌘K overlay. It binds its own hotkey and handles its own `Esc`. |
+| `app/src/lib/render/` | The renderer registry (`registry.ts`: what each renderer declares, which accept a file or a fence) and the renderer port (`port.ts`) over the engines; Shiki highlights in a worker (`highlight.worker.ts`, `highlight-core.ts`). `markdown.ts` is the Markdown component's engine (markdown-it, DOMPurify, links, fences to the registry; drawn by `tf/markdown/TfMarkdown.svelte`); `view-choice.svelte.ts` remembers *Rendered* or *Source* per file type. |
 | `app/src/lib/ipc/` | Hand-written mirrors of the command surface, one file per Rust command module in `crates/knobas-app/src/commands/`. |
 | `app/src/lib/{assets,capture,inbox,standup,start-work,time}/` | Feature views. Notes and settings are pages under `tf/` (`tf/note/`, `tf/settings/`). |
 

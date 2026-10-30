@@ -28,6 +28,7 @@ import type {
 import type { WriteSource } from "../../shell/queued-toast";
 import { clockLabel } from "../../time/format";
 import { checkoutLine, prNumber } from "../code/code";
+import type { DrawnFile } from "../diff/diff";
 import { matchesAll } from "../filter/filter";
 
 /**
@@ -288,11 +289,12 @@ const CHANGE_WORD: Record<DiffFile["change"], string> = {
  * not staged", each staged one "modified, staged", in that order, so the
  * one diff block draws them as a pull request's.
  */
-export function localFiles(read: DiffRead | null): DiffFile[] {
+export function localFiles(read: DiffRead | null): DrawnFile[] {
   if (read === null || read.status !== "read") return [];
-  const marked = (file: DiffFile, how: string): DiffFile => ({
+  // A label, not the path: the path's name picks the highlighting's language.
+  const marked = (file: DiffFile, how: string): DrawnFile => ({
     ...file,
-    path: `${file.path} (${CHANGE_WORD[file.change]}, ${how})`,
+    label: `${file.path} (${CHANGE_WORD[file.change]}, ${how})`,
   });
   return [
     ...read.unstaged.files.map((file) => marked(file, "not staged")),

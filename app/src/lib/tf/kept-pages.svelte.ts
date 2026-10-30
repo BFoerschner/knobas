@@ -95,3 +95,11 @@ export function providePageVisible(visible: () => boolean): void {
 export function pageVisible(): () => boolean {
   return getContext<(() => boolean) | undefined>(VISIBLE) ?? (() => true);
 }
+
+/**
+ * The context of a page that `visible` says is shown or hidden, for a test that
+ * mounts one component alone (`mount(C, { context })`) and hides its page.
+ */
+export function pageContext(visible: () => boolean): Map<unknown, unknown> {
+  return new Map<unknown, unknown>([[VISIBLE, visible]]);
+}

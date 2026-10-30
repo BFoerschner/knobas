@@ -3034,7 +3034,7 @@ async fn a_pull_request_merged_the_moment_it_opens_lands_ten_times_in_ten() {
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_required_status_check_holds_the_merge_until_it_passes() {
-    use knobas_source::view::SourceView;
+    use knobas_source::view::{Block, SourceView, Tone};
 
     const CHECK: &str = "knobas/live-check";
     let env = env();
@@ -3132,9 +3132,37 @@ async fn a_required_status_check_holds_the_merge_until_it_passes() {
         }
     };
 
+    // The side rail's facts (#2278) say what *Merge…* says, from the same
+    // standing: *Required checks* counted and toned, *Required check* naming
+    // the context toned by where it stands.
+    let required = |summary: &'static str, tone: Tone, check: Tone| {
+        let (source, id) = (&source, &id);
+        async move {
+            let view = source.view(id, None).await.unwrap().unwrap();
+            let Block::Facts { facts } = &view.sections[0].blocks[0] else {
+                panic!("the overview opens on facts: {view:#?}");
+            };
+            let drawn: Vec<(&str, &str, Option<Tone>)> = facts
+                .iter()
+                .filter(|f| f.label.starts_with("Required check"))
+                .map(|f| (f.label.as_str(), f.value.as_str(), f.tone))
+                .collect();
+            println!("LIVE rail facts: {drawn:?}");
+            assert_eq!(
+                drawn,
+                vec![
+                    ("Required checks", summary, Some(tone)),
+                    ("Required check", CHECK, Some(check)),
+                ],
+                "{facts:#?}"
+            );
+        }
+    };
+
     let waiting = Some(format!("Required check {CHECK} has not reported"));
     assert_eq!(settled(waiting.clone()).await, waiting);
     println!("LIVE no status: Merge… says {waiting:?}");
+    required("0 of 1 pass", Tone::Info, Tone::Info).await;
 
     // Gitea agrees, and its 405 is a refusal at once, not a wait.
     let started = std::time::Instant::now();
@@ -3172,15 +3200,18 @@ async fn a_required_status_check_holds_the_merge_until_it_passes() {
     report("pending").await;
     let pending = Some(format!("Required check {CHECK} is pending"));
     assert_eq!(settled(pending.clone()).await, pending);
+    required("0 of 1 pass", Tone::Info, Tone::Info).await;
     report("failure").await;
     let failed = Some(format!("Required check {CHECK} failed"));
     assert_eq!(settled(failed.clone()).await, failed);
+    required("0 of 1 pass", Tone::Err, Tone::Err).await;
     report("success").await;
     assert_eq!(
         settled(None).await,
         None,
         "a passed check leaves Merge… enabled"
     );
+    required("1 of 1 pass", Tone::Ok, Tone::Ok).await;
     // The check's row carries its time (#994): reported a moment ago, with
     // no description, so its meta is the age alone.
     let view = source.view(&id, None).await.unwrap().unwrap();

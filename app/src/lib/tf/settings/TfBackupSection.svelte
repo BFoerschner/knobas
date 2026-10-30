@@ -20,6 +20,8 @@
   `open_backup_folder` command picks the running profile's (#1704).
 -->
 <script lang="ts">
+  import { pageVisible } from "../kept-pages.svelte";
+  import { onFocusWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import { shareDefaults, type ArchiveFile, type BackupSchedule, type BackupStatus, type ShareParts } from "../../ipc/backup";
   import { latestRead } from "../../shell/latest-read";
@@ -94,13 +96,9 @@
     void load();
   }
 
-  $effect(() => {
-    // A file dropped in Finder shows when the reader comes back (#1470),
-    // as the repo page's *Local changes* does.
-    const again = () => void load();
-    window.addEventListener("focus", again);
-    return () => window.removeEventListener("focus", again);
-  });
+  // A file dropped in Finder shows when the reader comes back (#1470), as the
+  // repo page's *Local changes* does; not while the page is hidden (#2249).
+  onFocusWhileShown(pageVisible(), () => void load());
 
   async function openFolder() {
     try {

@@ -14,8 +14,10 @@
   credential cannot make: that one is drawn disabled with the reason.
 -->
 <script lang="ts">
+  import { pageVisible } from "../kept-pages.svelte";
+  import { everyWhileShown } from "../while-shown.svelte";
   import { clockLabel } from "../../time/format";
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import {
@@ -83,11 +85,9 @@
   /** Moved every thirty seconds, as the Day and Week tabs do, so a row says *yesterday* and *Tomorrow* means tomorrow once midnight passes. */
   // svelte-ignore state_referenced_locally
   let clock = $state(new Date());
-  onMount(() => {
-    if (fixedNow) return;
-    const tick = setInterval(() => (clock = new Date()), 30_000);
-    return () => clearInterval(tick);
-  });
+  // Paused while keep-alive holds the page hidden, read at once on its return (#2249).
+  const shown = pageVisible();
+  everyWhileShown(() => !fixedNow && shown(), 30_000, () => (clock = new Date()));
   const now = $derived(fixedNow ?? clock);
 
   const filter = sessionFilter("inbox");

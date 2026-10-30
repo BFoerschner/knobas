@@ -11,6 +11,9 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { SourceView, TreeEntry } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
+import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
+import { createViewChoices } from "../../render/view-choice.svelte";
+import { fileHash, lineHash } from "./repo";
 
 const REPO = "gitea:tidewater/payout-service";
 
@@ -89,7 +92,12 @@ afterEach(() => {
   target.remove();
 });
 
-function draw(entityView: (at: string, section: string | null) => Promise<SourceView>, path: string | null, line: number | null = null) {
+function draw(
+  entityView: (at: string, section: string | null) => Promise<SourceView>,
+  path: string | null,
+  line: number | null = null,
+  render?: RenderPort,
+) {
   const ports = {
     entityView,
     submitWrite: async () => {
@@ -98,7 +106,17 @@ function draw(entityView: (at: string, section: string | null) => Promise<Source
   };
   view = mount(TfRepoFiles, {
     target,
-    props: { ports, repoId: REPO, at: REPO, branch: "main", path, line, changed: new Set<string>() },
+    props: {
+      ports,
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      path,
+      line,
+      changed: new Set<string>(),
+      views: createViewChoices(() => null),
+      ...(render ? { render } : {}),
+    },
   });
   flushSync();
 }
@@ -311,6 +329,257 @@ test("copying a selection across lines gives the selected text, without the line
   expect(event.defaultPrevented).toBe(true);
 });
 
+/** A renderer port whose highlighting answers only when the test says, with what each job was asked and focused on. */
+function heldRender() {
+  const jobs: { request: HighlightRequest; handlers: HighlightHandlers; focus: [number, number][]; cancelled: boolean }[] = [];
+  const port: RenderPort = {
+    highlight(request, handlers) {
+      const job = { request, handlers, focus: [] as [number, number][], cancelled: false };
+      jobs.push(job);
+      return { focus: (from, to) => job.focus.push([from, to]), cancel: () => (job.cancelled = true) };
+    },
+  };
+  return { jobs, port };
+}
+
+const colored = () => [...target.querySelectorAll(".tf-fileview .tf-code [class^='tf-hl-']")].map((el) => `${el.className}:${el.textContent}`);
+
+test("a file draws as plain text first and gains colour when the highlighter answers", async () => {
+  const render = heldRender();
+  draw(openSource({ "src/main.rs": "fn main() {\n    run(42);\n}" }).entityView, "src/main.rs", null, render.port);
+  await settle();
+
+  expect(lineText(0)).toEqual(["1", "fn main() {"]);
+  expect(colored()).toEqual([]);
+  expect(render.jobs.map((job) => job.request.path)).toEqual(["src/main.rs"]);
+
+  render.jobs[0]!.handlers.onLines(0, [[["fn", "kw"], [" main() {", ""]], [["    run(", ""], ["42", "num"], [");", ""]], [["}", ""]]]);
+  flushSync();
+
+  expect(colored()).toEqual(["tf-hl-kw:fn", "tf-hl-num:42"]);
+  expect(lineText(1)).toEqual(["2", "    run(42);"]);
+});
+
+test("a file in a language the highlighter does not know stays plain text, with no error", async () => {
+  const render = heldRender();
+  draw(openSource({ "notes/plan.zzq": "fn main() {}" }).entityView, "notes/plan.zzq", null, render.port);
+  await settle();
+  render.jobs[0]!.handlers.onPlain?.();
+  flushSync();
+
+  expect(lineText(0)).toEqual(["1", "fn main() {}"]);
+  expect(colored()).toEqual([]);
+  expect(target.querySelector(".tf-cfail")).toBeNull();
+});
+
+test("the highlighter is asked for the lines in view of a long file first, and told when the view moves", async () => {
+  const render = heldRender();
+  draw(openSource({ "BULK.rs": long(50_000) }).entityView, "BULK.rs", 40_000, render.port);
+  await settle();
+
+  const job = render.jobs.at(-1)!;
+  const asked = [job.request.focus!, ...job.focus];
+  const last = asked.at(-1)!;
+  const drawn = [...drawnLines()].map((row) => Number((row as HTMLElement).dataset["n"]) - 1);
+  expect(last[1] - last[0]).toBeLessThan(500);
+  expect(last[0]).toBeLessThanOrEqual(Math.min(...drawn));
+  expect(last[1]).toBeGreaterThan(Math.max(...drawn));
+  expect(drawn).toContain(39_999);
+});
+
+test("closing the file viewer cancels its highlighting, and a late answer draws nothing", async () => {
+  const render = heldRender();
+  draw(openSource({ "src/main.rs": "fn main() {}" }).entityView, "src/main.rs", null, render.port);
+  await settle();
+  const job = render.jobs[0]!;
+  expect(job.cancelled).toBe(false);
+
+  unmount(view!);
+  view = null;
+  expect(job.cancelled).toBe(true);
+  job.handlers.onLines(0, [[["fn", "kw"], [" main() {}", ""]]]);
+  flushSync();
+  expect(colored()).toEqual([]);
+});
+
+test("an SVG file is drawn as an image", async () => {
+  const svg = '<svg width="4" height="4"/>';
+  draw(openSource({ "docs/logo.svg": svg }).entityView, "docs/logo.svg");
+  await settle();
+
+  const img = target.querySelector<HTMLImageElement>(".tf-fileview img");
+  expect(img?.getAttribute("src")).toBe(`data:image/svg+xml;base64,${btoa(svg)}`);
+  expect(drawnLines()).toHaveLength(0);
+});
+
+// -- Find in file (#2299) ------------------------------------------------------
+
+const findField = () => target.querySelector<HTMLInputElement>("input[aria-label='Find in file']")!;
+const findSays = () => text(target.querySelector(".tf-findbar .tf-lqn"));
+const current = () => target.querySelector(".tf-code mark.tf-curm");
+const rowOf = (el: Element | null) => (el?.closest(".tf-l") as HTMLElement | null)?.dataset["n"];
+
+function find(typed: string) {
+  findField().value = typed;
+  findField().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+}
+
+function press(shift = false) {
+  findField().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: shift, bubbles: true, cancelable: true }));
+  flushSync();
+}
+
+test("find in a file drawn whole marks every hit and steps through them with Enter and Shift+Enter", async () => {
+  draw(openSource({ "src/sepa/retry.rs": "retry once\nnothing\nretry twice, Retry thrice" }).entityView, "src/sepa/retry.rs");
+  await settle();
+
+  find("retry");
+  expect(findSays()).toBe("1 of 3");
+  expect(target.querySelectorAll(".tf-code mark")).toHaveLength(3);
+  expect(rowOf(current())).toBe("1");
+
+  press();
+  expect(findSays()).toBe("2 of 3");
+  expect(rowOf(current())).toBe("3");
+  press();
+  expect(text(current())).toBe("Retry");
+  press(true);
+  press(true);
+  expect(findSays()).toBe("1 of 3");
+  expect(rowOf(current())).toBe("1");
+
+  find("absent");
+  expect(findSays()).toBe("0 found");
+  expect(target.querySelectorAll(".tf-code mark")).toHaveLength(0);
+});
+
+test("find in a long file draws a hit's line the window left out before marking it", async () => {
+  const lines = long(50_000).split("\n");
+  lines[44_443] = "let needle = 1;";
+  lines[9] = "let needle = 0;";
+  draw(openSource({ "BULK.rs": lines.join("\n") }).entityView, "BULK.rs");
+  await settle();
+
+  find("needle");
+  expect(findSays()).toBe("1 of 2");
+  expect(target.querySelector(".tf-l[data-n='44444']")).toBeNull();
+
+  press();
+  expect(findSays()).toBe("2 of 2");
+  expect(rowOf(current())).toBe("44444");
+  expect(drawnLines().length).toBeLessThan(500);
+  press();
+  expect(rowOf(current())).toBe("10");
+});
+
+// -- Markdown (#2255) -----------------------------------------------------------
+
+const MD_FILES: Files = {
+  "README.md": [
+    "# payout-service",
+    "",
+    "| Area | State |",
+    "|---|---|",
+    "| Card | live |",
+    "",
+    "- [x] Retry with backoff",
+    "- [ ] Dead-letter queue",
+    "",
+    "```rust",
+    "fn main() {}",
+    "```",
+    "",
+    "See [the runbook](docs/runbook.md).",
+  ].join("\n"),
+  "docs/runbook.md": "# Runbook\n\n[Back](../README.md), [the retry](../src/retry.rs#L3).",
+  "docs/logo.svg": '<svg width="4" height="4"/>',
+  "src/retry.rs": "fn retry() {}\n\n\n",
+};
+
+const rendered = () => target.querySelector(".tf-fileview .tf-md");
+const viewButtons = () =>
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-fileview [aria-label='View'] button")].map(
+    (button) => `${button.textContent}${button.getAttribute("aria-pressed") === "true" ? "*" : ""}`,
+  );
+function pickView(name: string) {
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-fileview [aria-label='View'] button")].find((b) => b.textContent === name)!.click();
+  flushSync();
+}
+
+test("the landing renders the README as Markdown: its table, task list, Rust fence and relative link", async () => {
+  draw(openSource(MD_FILES).entityView, null);
+  await settle();
+
+  expect(drawnLines()).toHaveLength(0);
+  expect(text(rendered()!.querySelector("h1"))).toBe("payout-service");
+  expect([...rendered()!.querySelectorAll("td")].map(text)).toEqual(["Card", "live"]);
+  expect(rendered()!.querySelectorAll("li.tf-task")).toHaveLength(2);
+  expect(text(rendered()!.querySelector(".tf-fence pre"))).toBe("fn main() {}");
+  expect(rendered()!.querySelector("a")?.getAttribute("href")).toBe(fileHash(REPO, "docs/runbook.md"));
+  expect(viewButtons()).toEqual(["Rendered*", "Source"]);
+});
+
+test("a Markdown file's relative links open files in the Files tab, resolved against its own directory", async () => {
+  draw(openSource(MD_FILES).entityView, "docs/runbook.md");
+  await settle();
+
+  expect([...rendered()!.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual([
+    fileHash(REPO, "README.md"),
+    lineHash(REPO, "src/retry.rs", 3),
+  ]);
+});
+
+test("Source shows a Markdown file's lines, and the choice holds for the next file of its type only", async () => {
+  const props = $state({
+    ports: { ...openSource(MD_FILES), submitWrite: async () => ({}) as never },
+    repoId: REPO,
+    at: REPO,
+    branch: "main",
+    path: "README.md" as string | null,
+    changed: new Set<string>(),
+    views: createViewChoices(() => null),
+  });
+  view = mount(TfRepoFiles, { target, props });
+  await settle();
+
+  pickView("Source");
+  expect(rendered()).toBeNull();
+  expect(lineText(0)).toEqual(["1", "# payout-service"]);
+  expect(viewButtons()).toEqual(["Rendered", "Source*"]);
+
+  props.path = "docs/runbook.md";
+  await settle();
+  expect(rendered()).toBeNull();
+  expect(lineText(0)).toEqual(["1", "# Runbook"]);
+
+  props.path = "docs/logo.svg";
+  await settle();
+  expect(target.querySelector(".tf-fileview img")).not.toBeNull();
+  expect(viewButtons()).toEqual(["Rendered*", "Source"]);
+
+  props.path = "README.md";
+  await settle();
+  pickView("Rendered");
+  expect(text(rendered()!.querySelector("h1"))).toBe("payout-service");
+});
+
+test("the view choice is remembered across a remount, per file type", async () => {
+  const stored = new Map<string, string>();
+  const storage = { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => void stored.set(key, value) };
+  const first = createViewChoices(() => storage);
+  first.pick("README.md", "source");
+  const again = createViewChoices(() => storage);
+  expect(again.of("docs/OTHER.MD")).toBe("source");
+  expect(again.of("logo.svg")).toBe("rendered");
+});
+
+test("a file with no renderer but Source has no view toggle", async () => {
+  draw(openSource(MD_FILES).entityView, "src/retry.rs");
+  await settle();
+  expect(viewButtons()).toEqual([]);
+});
+
 // ---- the tree at a commit, moved behind (#2241, #2242) ----
 
 /**
@@ -319,16 +588,16 @@ test("copying a selection across lines gives the selected text, without the line
  */
 function commitSource() {
   let tip = 1;
-  const texts: Record<number, string> = { 1: "# one", 2: "# two" };
+  const texts: Record<number, string> = { 1: "// one", 2: "// two" };
   const reads: string[] = [];
   const entityView = async (_at: string, section: string | null): Promise<SourceView> => {
     const id = section ?? "";
     reads.push(id);
     const one = (blocks: unknown[]) => ({ sections: [{ id, title: "Files", count: null, deferred: false, blocks }], actions: [] }) as unknown as SourceView;
     if (id === "files")
-      return one([{ type: "tree", trail: [], entries: [{ name: "README.md", kind: "file", size: 5, section: `file@${tip}:README.md` }], truncated: false, url: null }]);
+      return one([{ type: "tree", trail: [], entries: [{ name: "main.rs", kind: "file", size: 5, section: `file@${tip}:main.rs` }], truncated: false, url: null }]);
     const at = Number(/^file@(\d+):/.exec(id)?.[1] ?? tip);
-    return one([{ type: "file", trail: [], path: "README.md", text: texts[at], language: null, size: 5, truncated: false, binary: false, url: null, sha: `b${at}` }]);
+    return one([{ type: "file", trail: [], path: "main.rs", text: texts[at], language: null, size: 5, truncated: false, binary: false, url: null, sha: `b${at}` }]);
   };
   return { reads, entityView, push: () => (tip += 1) };
 }
@@ -346,9 +615,9 @@ test("the app's view:fresh for the top directory reads the tree at the new commi
       return () => {};
     },
   };
-  view = mount(TfRepoFiles, { target, props: { ports, repoId: REPO, at: REPO, branch: "main", path: null, changed: new Set<string>() } });
+  view = mount(TfRepoFiles, { target, props: { ports, repoId: REPO, at: REPO, branch: "main", path: "main.rs", changed: new Set<string>() } });
   await settle();
-  expect(lineText(0)).toEqual(["1", "# one"]);
+  expect(lineText(0)).toEqual(["1", "// one"]);
 
   const tell = (entity_id: string, section: string) => {
     for (const hear of heard) hear({ payload: { entity_id, section } });
@@ -357,23 +626,23 @@ test("the app's view:fresh for the top directory reads the tree at the new commi
   tell(REPO, "files");
   await settle();
   expect(source.reads.slice(before)).toEqual(["files"]);
-  expect(lineText(0)).toEqual(["1", "# one"]);
+  expect(lineText(0)).toEqual(["1", "// one"]);
 
   source.push();
   tell(`${REPO}@refs/heads/other`, "files");
   await settle();
-  expect(lineText(0)).toEqual(["1", "# one"]);
+  expect(lineText(0)).toEqual(["1", "// one"]);
 
   tell(REPO, "files");
   await settle();
-  expect(lineText(0)).toEqual(["1", "# two"]);
-  expect(source.reads).toContain("file@2:README.md");
+  expect(lineText(0)).toEqual(["1", "// two"]);
+  expect(source.reads).toContain("file@2:main.rs");
 });
 
 test("a deep link's guess that drew the file stands for the section its listing names, so the file is not read twice", async () => {
   const source = commitSource();
-  draw(source.entityView, "README.md");
+  draw(source.entityView, "main.rs");
   await settle();
-  expect(lineText(0)).toEqual(["1", "# one"]);
-  expect(source.reads.filter((id) => id.endsWith("README.md"))).toEqual(["file:README.md"]);
+  expect(lineText(0)).toEqual(["1", "// one"]);
+  expect(source.reads.filter((id) => id.endsWith("main.rs"))).toEqual(["file:main.rs"]);
 });

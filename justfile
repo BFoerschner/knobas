@@ -262,6 +262,15 @@ front-changed base="origin/main": deps
 shot slot out +routes:
     scripts/shot.sh "$@"
 
+# Keep-alive's budget and memory witness (#2250, testenv/README.md *Scripts*):
+# headless Chrome against the `?fake-ipc` dev server on 5300 + slot. Times the
+# return to a visited repository tab (Files with a 10,000-line file, after
+# Commits) and fails when the median is over 50 ms; prints the JS heap and DOM
+# node count with five pages held, at *Pages kept open* 5 and 0, and the load.
+# A timing: read it beside `scripts/machine-load.sh`'s line, which it prints.
+keep-alive-budget slot:
+    scripts/keep-alive-budget.sh "{{slot}}"
+
 # The merge gate: `check-front` when `scripts/gate-scope.sh BASE` says the head
 # is frontend-only against BASE, the full `check` otherwise.
 #

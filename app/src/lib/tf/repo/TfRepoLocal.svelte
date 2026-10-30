@@ -6,15 +6,17 @@
     *Open in…*); the line that knobas only reads here; then the uncommitted
     diff (`entity_checkout_diff`, ADR-0026), each file marked "modified, not
     staged" or "modified, staged", drawn by the pull request's diff block
-    (`TfDiff`); untracked files listed by name. Read when the tab opens and
+    (`TfDiffView`); untracked files listed by name. Read when the tab opens and
     when the window gets focus.
   - **Not on this machine**: *Clone*, and *It is already cloned somewhere
     else…*, which sets the path by hand (`set_checkout_override`).
 -->
 <script lang="ts">
+  import { pageVisible } from "../kept-pages.svelte";
+  import { onFocusWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutView, DiffRead } from "../../ipc/entity";
-  import TfDiff from "../code/TfDiff.svelte";
+  import TfDiffView from "../diff/TfDiffView.svelte";
   import { treeStanding } from "../code/code";
   import { repoName } from "../openin/openin";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
@@ -68,10 +70,10 @@
   $effect(() => {
     if (path === null) return;
     void load();
-    const again = () => void load();
-    window.addEventListener("focus", again);
-    return () => window.removeEventListener("focus", again);
   });
+  // Read again on focus, and once when the tab or its page is shown again;
+  // nothing while either is hidden (#2248, #2249).
+  onFocusWhileShown(pageVisible(), () => void load());
 
   async function save() {
     const value = typed.trim();
@@ -115,7 +117,7 @@
   {:else if files.length === 0 && untracked.length === 0}
     <div class="tf-empty">Working tree clean.</div>
   {:else}
-    <TfDiff {files} />
+    <TfDiffView {files} />
     {#if read.unstaged.truncated || read.staged.truncated}
       <p class="tf-dim tf-local-note">The diff is cut here: it is longer than knobas draws. Your editor has all of it.</p>
     {/if}

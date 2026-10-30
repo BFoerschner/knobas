@@ -189,7 +189,8 @@ test("switching files with the read held back keeps the previous file drawn, dim
   const dimmed = target.querySelector(".tf-fileview .tf-wait-dim");
   expect(dimmed).not.toBeNull();
   expect(text(dimmed!.querySelector("header"))).toContain("README.md");
-  expect(text(dimmed!.querySelector(".tf-code"))).toContain("# Payout");
+  // The README renders as Markdown (#2255).
+  expect(text(dimmed!.querySelector(".tf-md h1"))).toBe("Payout");
 
   lib.answer(fileView("lib.rs", "fn main() {}\n"));
   await settle();

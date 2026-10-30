@@ -113,7 +113,7 @@ async function settle() {
 
 const squash = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 const list = () => [...target.querySelectorAll(".tf-flist button")].map(squash);
-const cards = () => [...target.querySelectorAll<HTMLElement>(".tf-prdiff")];
+const cards = () => [...target.querySelectorAll<HTMLElement>(".tf-diff")];
 
 test("the Files section is read when the tab opens; the list names each file with its counts", async () => {
   await draw();
@@ -195,5 +195,5 @@ test("+ on a removed line opens a box on its old side; Add to review keeps it pe
 test("a diff the source takes no comments on draws no +", async () => {
   await draw(filesView(false));
   expect(target.querySelector(".tf-addc")).toBeNull();
-  expect(target.querySelectorAll(".tf-prdiff .tf-ln").length).toBeGreaterThan(0);
+  expect(target.querySelectorAll(".tf-diff .tf-ln").length).toBeGreaterThan(0);
 });
