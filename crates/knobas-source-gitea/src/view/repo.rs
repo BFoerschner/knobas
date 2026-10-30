@@ -33,7 +33,7 @@ use crate::source::GiteaSource;
 
 const OVERVIEW: &str = "overview";
 const PULLS: &str = "pulls";
-const BRANCHES: &str = "branches";
+pub(super) const BRANCHES: &str = "branches";
 const COMMITS: &str = "commits";
 
 /// How many branches a *New pull request…* asks whether they are ahead, the
@@ -62,6 +62,12 @@ pub(super) async fn draw(
     repo: &str,
     section: Option<&str>,
 ) -> Result<SourceView, SourceError> {
+    // The tree reads the repository only for a tip it does not name (#2241).
+    if let Some(id) = section.filter(|id| files::owns(id)) {
+        return Ok(SourceView::new(vec![
+            files::read(source, owner, repo, files::Of::Repository, id).await?,
+        ]));
+    }
     let record: RepoRecord = source.client.repo_as(owner, repo).await?;
     let sections = match section {
         // Side by side over the one record (#703): each section is its own
@@ -102,19 +108,6 @@ pub(super) async fn draw(
             vec![branches(source, &record, owner, repo, &listing)]
         }
         Some(COMMITS) => vec![commits(source, &record, owner, repo).await?],
-        Some(id) if files::owns(id) => {
-            vec![
-                files::read(
-                    source,
-                    &record,
-                    owner,
-                    repo,
-                    files::At::Branch(record.default_branch()),
-                    id,
-                )
-                .await?,
-            ]
-        }
         Some(other) => {
             return Err(SourceError::protocol(format!(
                 "gitea: a repository's view has no section {other:?} (asked for {entity:?})"

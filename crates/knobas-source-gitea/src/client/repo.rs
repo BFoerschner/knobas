@@ -60,6 +60,13 @@ impl GiteaClient {
         Ok((labels.unwrap_or_default(), total))
     }
 
+    /// Whether `path` is a path in a tree this client would put in a route
+    /// (no empty, `.` or `..` segment): asked before anything is sent for
+    /// it, a tip included (#2241).
+    pub(crate) fn tree_path(path: &str) -> Result<(), SourceError> {
+        escaped_path(path).map(drop)
+    }
+
     /// `GET /repos/{o}/{r}/branches/{branch}` -- one branch and its tip.
     pub(crate) async fn branch_as<T: serde::de::DeserializeOwned>(
         &self,
@@ -362,7 +369,8 @@ impl GiteaClient {
     /// beside a raw read capped at 1 MB (1.27.3, measured 2026-10-16), and
     /// `contents-ext` answered the same entry in 784 bytes. A Gitea from
     /// before `contents-ext` (1.24) answers its route 404, and the file's
-    /// [`Self::contents_entry_as`] is read instead.
+    /// [`Self::contents_entry_as`] is read instead -- from then on straight
+    /// away, once `contents` found the file the 404 was for (#2241).
     pub(crate) async fn file_entry_as<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,
@@ -373,6 +381,10 @@ impl GiteaClient {
         #[derive(serde::Deserialize)]
         struct Ext<T> {
             file_contents: Option<T>,
+        }
+        use std::sync::atomic::Ordering;
+        if self.no_contents_ext.load(Ordering::Relaxed) {
+            return self.contents_entry_as(owner, repo, file, at).await;
         }
         let route = format!(
             "/repos/{}/{}/contents-ext/{}",
@@ -393,7 +405,13 @@ impl GiteaClient {
                 "gitea: {file:?} at {at:?} is not a file"
             ))),
             Err(error) if error.status() == Some(404) => {
-                self.contents_entry_as(owner, repo, file, at).await
+                let entry = self.contents_entry_as(owner, repo, file, at).await;
+                // Only where `contents` found the file: then it was the
+                // route that was missing, not the file.
+                if entry.is_ok() {
+                    self.no_contents_ext.store(true, Ordering::Relaxed);
+                }
+                entry
             }
             Err(error) => Err(error),
         }

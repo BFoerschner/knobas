@@ -877,16 +877,22 @@ pub async fn refused_writes(
             registry.clone(),
             live.clone(),
         );
-        asked.spawn(async move {
-            let answer = match adapter_for(&pool, &secrets, &registry, &live, &of[0].entity).await {
-                Ok(source) => source.refused_writes(&of).await.map_err(SourcesError::from),
+        let work = async move {
+            // Kept where the adapter says the answer moves (#2241): Gitea's
+            // probe is asked once per repository, then behind the answer.
+            let answer = match live.source(&pool, &secrets, &registry, &of[0].entity).await {
+                Ok(lent) => live.refused(&lent, &of).await.map_err(SourcesError::from),
                 Err(error) => Err(error),
             };
             answer.unwrap_or_else(|error| {
                 tracing::debug!(source = %id, %error, "refused_writes: no verdict");
                 Vec::new()
             })
-        });
+        };
+        // A test's request counter counts each source's asks as the call's.
+        #[cfg(feature = "test-util")]
+        let work = knobas_http::counted::inherit(work);
+        asked.spawn(work);
     }
     let answered: Vec<_> = asked.join_all().await.into_iter().flatten().collect();
     asks.iter()

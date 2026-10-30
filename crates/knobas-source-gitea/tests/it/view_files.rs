@@ -7,6 +7,11 @@
 //! and drawn in the same tab. Listings come from `contents/{path}?ref=`, files
 //! from `raw/{path}?ref=` (Gitea 1.27.3's routes; `tests/live_gitea.rs`
 //! re-asserts them against the seeded repository).
+//!
+//! A branch's and a repository's tree are read at the commit their tip is
+//! (#2241): an id without a sha reads the tip first, and every id the answer
+//! hands out names it (`files@{sha}:src`, `file@{sha}:src/lib.rs`), so a
+//! file opened from the tree reads nothing but itself.
 
 use knobas_source::view::{Block, Crumb, EntryKind, SourceView, TreeEntry, ViewSection};
 use knobas_source::{Source, SourceError};
@@ -42,11 +47,51 @@ async fn gitea() -> MockServer {
         .respond_with(ResponseTemplate::new(200).set_body_json(record(false)))
         .mount(&server)
         .await;
+    for branch in ["main", "feature/PAY-231-sepa-retry"] {
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "{REPO}/branches/{}",
+                branch.replace('/', "%2F")
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "name": branch, "protected": false, "commit": { "id": tip(branch) }
+            })))
+            .mount(&server)
+            .await;
+    }
     server
 }
 
-/// `contents/{dir}?ref={at}` answers `listing`.
-async fn listing(server: &MockServer, dir: &str, at: &str, listing: Value) {
+/// The commit `branches/{at}` names as a branch's tip: 40 hex digits folded
+/// from its name. A whole sha is its own.
+fn tip(at: &str) -> String {
+    if at.len() == 40 && at.chars().all(|c| c.is_ascii_hexdigit()) {
+        return at.to_owned();
+    }
+    let fold = |seed: u64| {
+        at.bytes().fold(seed, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        })
+    };
+    format!("{:016x}{:016x}{:08x}", fold(7), fold(8), fold(9) as u32)
+}
+
+/// Gitea's page of `path` at `at`'s commit, as its entries name it.
+fn page_at(at: &str, path: &str) -> String {
+    format!("{WEB}/src/commit/{}/{path}", tip(at))
+}
+
+/// `contents/{dir}?ref={at}` answers `listing`, at the commit `at` names
+/// ([`tip`]), each entry with its page.
+async fn listing(server: &MockServer, dir: &str, at: &str, mut listing: Value) {
+    for entry in listing.as_array_mut().into_iter().flatten() {
+        let path = entry["path"].as_str().unwrap_or_default().to_owned();
+        entry["html_url"] = json!(page_at(at, &path));
+    }
+    if listing.is_object() {
+        let path = listing["path"].as_str().unwrap_or_default().to_owned();
+        listing["html_url"] = json!(page_at(at, &path));
+    }
     let route = if dir.is_empty() {
         format!("{REPO}/contents")
     } else {
@@ -54,7 +99,7 @@ async fn listing(server: &MockServer, dir: &str, at: &str, listing: Value) {
     };
     Mock::given(method("GET"))
         .and(path(route))
-        .and(query_param("ref", at))
+        .and(query_param("ref", tip(at).as_str()))
         .and(header("Authorization", format!("token {TOKEN}").as_str()))
         .respond_with(ResponseTemplate::new(200).set_body_json(listing))
         .mount(server)
@@ -72,7 +117,7 @@ async fn raw(server: &MockServer, file: &str, at: &str, body: Vec<u8>) {
 async fn raw_only(server: &MockServer, file: &str, at: &str, body: Vec<u8>) {
     Mock::given(method("GET"))
         .and(path(format!("{REPO}/raw/{file}")))
-        .and(query_param("ref", at))
+        .and(query_param("ref", tip(at).as_str()))
         .and(header("Authorization", format!("token {TOKEN}").as_str()))
         .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
         .mount(server)
@@ -84,7 +129,7 @@ async fn raw_only(server: &MockServer, file: &str, at: &str, body: Vec<u8>) {
 async fn own_entry(server: &MockServer, file: &str, at: &str, size: u64) {
     Mock::given(method("GET"))
         .and(path(format!("{REPO}/contents-ext/{file}")))
-        .and(query_param("ref", at))
+        .and(query_param("ref", tip(at).as_str()))
         .and(header("Authorization", format!("token {TOKEN}").as_str()))
         .respond_with(
             ResponseTemplate::new(200)
@@ -99,6 +144,7 @@ fn own(file: &str, at: &str, size: u64) -> Value {
     let name = file.rsplit('/').next().unwrap_or(file);
     let mut own = entry(name, file, "file", size);
     own["sha"] = json!(blob(file, at));
+    own["html_url"] = json!(page_at(at, file));
     own
 }
 
@@ -140,6 +186,26 @@ fn crumbs(pairs: &[(&str, &str)]) -> Vec<Crumb> {
         .map(|(name, section)| Crumb {
             name: (*name).into(),
             section: (*section).into(),
+        })
+        .collect()
+}
+
+/// `id` as a tree read at `at` hands it out: naming `at`'s commit.
+fn named(at: &str, id: &str) -> String {
+    let sha = tip(at);
+    match id.strip_prefix("files") {
+        Some(rest) => format!("files@{sha}{rest}"),
+        None => format!("file@{sha}{}", id.strip_prefix("file").unwrap_or(id)),
+    }
+}
+
+/// [`crumbs`], each section as a tree read at `at` hands it out.
+fn crumbs_at(at: &str, pairs: &[(&str, &str)]) -> Vec<Crumb> {
+    pairs
+        .iter()
+        .map(|(name, section)| Crumb {
+            name: (*name).into(),
+            section: named(at, section),
         })
         .collect()
 }
@@ -259,31 +325,27 @@ async fn the_top_directory_lists_directories_first() {
     let (trail, entries) = tree(&section);
     assert_eq!(
         trail,
-        crumbs(&[("main", "files")]),
-        "the ref is the top crumb"
+        crumbs_at("main", &[("main", "files")]),
+        "the ref is the top crumb, opened at the tip"
     );
     let listed: Vec<_> = entries
         .iter()
-        .map(|e| (e.name.as_str(), e.kind, e.size, e.section.as_deref()))
+        .map(|e| (e.name.as_str(), e.kind, e.size, e.section.clone()))
         .collect();
+    let at = |id: &str| Some(named("main", id));
     assert_eq!(
         listed,
         [
-            (".github", EntryKind::Dir, None, Some("files:.github")),
-            ("src", EntryKind::Dir, None, Some("files:src")),
+            (".github", EntryKind::Dir, None, at("files:.github")),
+            ("src", EntryKind::Dir, None, at("files:src")),
             (
                 "Cargo.toml",
                 EntryKind::File,
                 Some(410),
-                Some("file:Cargo.toml")
+                at("file:Cargo.toml")
             ),
-            ("current", EntryKind::Symlink, Some(7), Some("file:current")),
-            (
-                "README.md",
-                EntryKind::File,
-                Some(60),
-                Some("file:README.md")
-            ),
+            ("current", EntryKind::Symlink, Some(7), at("file:current")),
+            ("README.md", EntryKind::File, Some(60), at("file:README.md")),
             ("vendor", EntryKind::Submodule, None, None),
         ]
     );
@@ -304,20 +366,36 @@ async fn a_nested_directory_is_read_by_the_section_its_entry_names() {
         ]),
     )
     .await;
-    let section = read(&server, ENTITY, "files:src/lib").await;
+    let id = named("main", "files:src/lib");
+    let section = read(&server, ENTITY, &id).await;
     let (trail, entries) = tree(&section);
+    let short = &tip("main")[..10];
     assert_eq!(
         trail,
-        crumbs(&[
-            ("main", "files"),
-            ("src", "files:src"),
-            ("lib", "files:src/lib")
-        ])
+        crumbs_at(
+            "main",
+            &[
+                (short, "files"),
+                ("src", "files:src"),
+                ("lib", "files:src/lib")
+            ]
+        ),
+        "a repository's read at a sha names it by the sha"
     );
-    let opens: Vec<_> = entries.iter().map(|e| e.section.as_deref()).collect();
+    let opens: Vec<_> = entries.iter().map(|e| e.section.clone()).collect();
     assert_eq!(
         opens,
-        [Some("files:src/lib/diff"), Some("file:src/lib/view.rs")]
+        [
+            Some(named("main", "files:src/lib/diff")),
+            Some(named("main", "file:src/lib/view.rs"))
+        ]
+    );
+    let asked = server.received_requests().await.unwrap();
+    assert_eq!(
+        asked.len(),
+        1,
+        "a directory at a sha reads its listing alone: {:?}",
+        asked.iter().map(|r| r.url.path()).collect::<Vec<_>>()
     );
 }
 
@@ -352,10 +430,7 @@ async fn a_directory_over_the_entry_cap_is_cut_at_it() {
     assert!(*truncated);
     assert_eq!(entries.len(), 1_000);
     assert_eq!(entries.last().map(|e| e.name.as_str()), Some("f0999.txt"));
-    assert_eq!(
-        url.as_deref(),
-        Some(format!("{WEB}/src/branch/main/gen").as_str())
-    );
+    assert_eq!(url.as_deref(), Some(page_at("main", "gen").as_str()));
 
     // Exactly at the cap is not cut.
     let at: Vec<Value> = (0..1_000)
@@ -388,8 +463,18 @@ async fn a_branch_reads_its_tree_at_the_branch() {
     .await;
     let section = read(&server, BRANCH, "files").await;
     let (trail, entries) = tree(&section);
-    assert_eq!(trail, crumbs(&[("feature/PAY-231-sepa-retry", "files")]));
+    let at = "feature/PAY-231-sepa-retry";
+    assert_eq!(trail, crumbs_at(at, &[(at, "files")]));
     assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].section, Some(named(at, "file:retry.rs")));
+    let [Block::Tree { url, .. }] = section.blocks.as_slice() else {
+        panic!("one tree block");
+    };
+    assert_eq!(
+        url.as_deref(),
+        Some(format!("{WEB}/src/branch/feature/PAY-231-sepa-retry").as_str()),
+        "a branch's pages are named by the branch"
+    );
 }
 
 /// A file's text, with the trail to it, a language hint from its name, its
@@ -402,11 +487,15 @@ async fn a_file_is_read_raw_at_the_ref() {
     let drawn = file(read(&server, ENTITY, "file:src/main.rs").await);
     assert_eq!(
         drawn.trail,
-        crumbs(&[
-            ("main", "files"),
-            ("src", "files:src"),
-            ("main.rs", "file:src/main.rs")
-        ])
+        crumbs_at(
+            "main",
+            &[
+                ("main", "files"),
+                ("src", "files:src"),
+                ("main.rs", "file:src/main.rs")
+            ]
+        ),
+        "a file read with no sha reads the tip first, and its trail names it"
     );
     assert_eq!(drawn.path, "src/main.rs");
     assert_eq!(drawn.text, text);
@@ -416,7 +505,7 @@ async fn a_file_is_read_raw_at_the_ref() {
     assert!(!drawn.binary);
     assert_eq!(
         drawn.url.as_deref(),
-        Some(format!("{WEB}/src/branch/main/src/main.rs").as_str())
+        Some(page_at("main", "src/main.rs").as_str())
     );
     assert_eq!(
         drawn.sha,
@@ -452,9 +541,28 @@ async fn a_gitea_without_contents_ext_draws_the_blob_from_contents() {
         own("src/main.rs", "main", 13),
     )
     .await;
-    let drawn = file(read(&server, ENTITY, "file:src/main.rs").await);
-    assert_eq!(drawn.text, "fn main() {}\n");
-    assert_eq!(drawn.sha, Some(blob("src/main.rs", "main")));
+    let source = source(&server);
+    for _ in 0..2 {
+        let view = source
+            .view(ENTITY, Some(&named("main", "file:src/main.rs")))
+            .await
+            .unwrap()
+            .unwrap();
+        let drawn = file(view.sections.into_iter().next().unwrap());
+        assert_eq!(drawn.text, "fn main() {}\n");
+        assert_eq!(drawn.sha, Some(blob("src/main.rs", "main")));
+    }
+    let missing_route = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path().contains("/contents-ext/"))
+        .count();
+    assert_eq!(
+        missing_route, 1,
+        "a route found missing is not asked again (#2241)"
+    );
 }
 
 /// A Markdown file says so, so the shell can draw it rendered.
@@ -521,7 +629,7 @@ async fn a_cut_file_without_a_length_asks_gitea_its_size() {
     let body = gz.finish().unwrap();
     Mock::given(method("GET"))
         .and(path(format!("{REPO}/raw/big.txt")))
-        .and(query_param("ref", "main"))
+        .and(query_param("ref", tip("main").as_str()))
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header("Content-Encoding", "gzip")
@@ -578,77 +686,133 @@ async fn a_path_that_walks_out_is_refused() {
 }
 
 /// `branches/main` answers whether it is protected and whether this account
-/// may push to it anyway.
+/// may push to it anyway, over [`gitea`]'s own answer.
 async fn branch_main(server: &MockServer, protected: bool, user_can_push: bool) {
     Mock::given(method("GET"))
         .and(path(format!("{REPO}/branches/main")))
         .and(header("Authorization", format!("token {TOKEN}").as_str()))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "name": "main", "protected": protected, "user_can_push": user_can_push,
-            "commit": { "id": "c90d11aa" }
+            "commit": { "id": tip("main") }
         })))
+        .with_priority(1)
         .mount(server)
         .await;
 }
 
-/// The file section's own actions: the `commit_file` it declares, if any.
-fn commit_action(section: &ViewSection) -> Option<&knobas_source::view::ViewAction> {
-    section.blocks.iter().find_map(|block| match block {
-        Block::Actions { actions } => actions.iter().find(|a| a.write_op == "commit_file"),
-        _ => None,
-    })
-}
-
-/// #985 (R-8.6, story 94): a file on a protected branch this account may not
-/// push to declares its *Commit change…* disabled, with the reason the flush
-/// refuses it with (#822's rule and sentence), so the dialog can say it
-/// before the reader writes the message.
+/// **A file opened from the tree costs two requests** (#2241): its own entry
+/// and its bytes at the sha the id names. Nothing of the repository, nothing
+/// of the branch, no grants probe, and no action beside it: *Commit change…*'s
+/// standing is `refused_writes`'.
 #[tokio::test]
-async fn a_file_on_a_protected_branch_declares_its_commit_disabled_with_the_reason() {
+async fn a_file_at_the_sha_its_id_names_reads_only_itself() {
     let server = gitea().await;
     raw(&server, "src/main.rs", "main", b"fn main() {}\n".to_vec()).await;
     branch_main(&server, true, false).await;
-    let section = read(&server, ENTITY, "file:src/main.rs").await;
-    assert!(
-        matches!(section.blocks.first(), Some(Block::File { .. })),
-        "the file comes first, its actions after it"
-    );
-    let action = commit_action(&section).expect("the file declares its commit");
+    for entity in [ENTITY, BRANCH] {
+        let id = named("main", "file:src/main.rs");
+        let section = read(&server, entity, &id).await;
+        assert_eq!(section.blocks.len(), 1, "no action: {:#?}", section.blocks);
+        assert_eq!(file(section).text, "fn main() {}\n");
+    }
+    let mut asked: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| format!("{} {}", r.method, r.url.path()))
+        .collect();
+    asked.sort();
+    let entry = format!("GET {REPO}/contents-ext/src/main.rs");
+    let bytes = format!("GET {REPO}/raw/src/main.rs");
     assert_eq!(
-        action.disabled.as_deref(),
-        Some(
-            "main is a protected branch that this account may not push to: commit to a new \
-             branch and open a pull request instead"
-        )
+        asked,
+        [entry.clone(), entry, bytes.clone(), bytes],
+        "only the file's own two reads, once per entity"
     );
 }
 
-/// A protected branch the account may push to anyway, and an unprotected
-/// one, take the commit: declared, and enabled.
+/// #985 (R-8.6, story 94), now asked through `refused_writes` (#2241): a
+/// commit onto a protected branch this account may not push to is refused
+/// with the reason the flush refuses it with (#822's rule and sentence), so
+/// the dialog can say it before the reader writes the message; one it may
+/// push to, or an unprotected one, is not.
 #[tokio::test]
-async fn a_file_on_a_branch_the_account_may_push_to_declares_its_commit_enabled() {
-    for (protected, user_can_push) in [(true, true), (false, true)] {
+async fn a_commit_onto_a_protected_branch_is_refused_with_the_flushs_reason() {
+    for (protected, user_can_push, refused) in [
+        (true, false, true),
+        (true, true, false),
+        (false, true, false),
+    ] {
         let server = gitea().await;
-        raw(&server, "src/main.rs", "main", b"fn main() {}\n".to_vec()).await;
         branch_main(&server, protected, user_can_push).await;
-        let section = read(&server, ENTITY, "file:src/main.rs").await;
-        let action = commit_action(&section).expect("the file declares its commit");
-        assert_eq!(action.disabled, None, "protected: {protected}");
+        let ask = knobas_source::grants::WriteAsk {
+            entity: ENTITY.to_owned(),
+            op: "commit_file".to_owned(),
+            field: None,
+        };
+        let answer = source(&server)
+            .refused_writes(std::slice::from_ref(&ask))
+            .await
+            .unwrap();
+        let reasons: Vec<_> = answer.iter().map(|r| r.reason.as_str()).collect();
+        if refused {
+            assert_eq!(
+                reasons,
+                [
+                    "main is a protected branch that this account may not push to: commit to a \
+                     new branch and open a pull request instead"
+                ]
+            );
+        } else {
+            assert!(reasons.is_empty(), "protected {protected}: {reasons:?}");
+        }
     }
 }
 
-/// A branch Gitea does not answer for declares nothing: the reader is not
-/// told a reason knobas did not read, and the flush stays the backstop.
+/// *New branch…* asked through `refused_writes` (#2243, as the repository's
+/// toolbar draws it): refused in a mirror and in an empty repository, with
+/// the toolbar's own sentences; offered in a plain one.
 #[tokio::test]
-async fn a_file_whose_branch_does_not_answer_declares_no_commit() {
-    let server = gitea().await;
-    raw(&server, "src/main.rs", "main", b"fn main() {}\n".to_vec()).await;
-    let section = read(&server, ENTITY, "file:src/main.rs").await;
-    assert_eq!(section.blocks.len(), 1, "{:#?}", section.blocks);
-    assert!(commit_action(&section).is_none());
+async fn a_new_branch_is_refused_in_a_mirror_and_an_empty_repository() {
+    for (mirror, empty, reason) in [
+        (
+            true,
+            false,
+            Some("A mirror: its branches come from upstream"),
+        ),
+        (false, true, Some("The repository is empty")),
+        (false, false, None),
+    ] {
+        let server = gitea().await;
+        let mut held = record(empty);
+        held["mirror"] = json!(mirror);
+        Mock::given(method("GET"))
+            .and(path(REPO))
+            .respond_with(ResponseTemplate::new(200).set_body_json(held))
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        let ask = knobas_source::grants::WriteAsk {
+            entity: ENTITY.to_owned(),
+            op: "create_branch".to_owned(),
+            field: None,
+        };
+        let answer = source(&server)
+            .refused_writes(std::slice::from_ref(&ask))
+            .await
+            .unwrap();
+        let reasons: Vec<_> = answer.iter().map(|r| r.reason.as_str()).collect();
+        assert_eq!(
+            reasons,
+            reason.into_iter().collect::<Vec<_>>(),
+            "mirror {mirror}, empty {empty}"
+        );
+    }
 }
 
-/// A directory takes no commit, and reads no branch for one.
+/// A directory takes no commit, and reads no branch for one once it knows
+/// its sha.
 #[tokio::test]
 async fn a_directory_declares_no_commit() {
     let server = gitea().await;
@@ -659,9 +823,13 @@ async fn a_directory_declares_no_commit() {
         json!([entry("a.rs", "a.rs", "file", 3)]),
     )
     .await;
-    branch_main(&server, true, false).await;
-    let section = read(&server, ENTITY, "files").await;
-    assert!(commit_action(&section).is_none());
+    let section = read(&server, ENTITY, &named("main", "files")).await;
+    assert!(
+        section
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Actions { .. }))
+    );
 }
 
 // -- the tree at a commit (#2239) ---------------------------------------------
@@ -720,11 +888,14 @@ async fn a_commit_lists_its_directories_at_its_sha() {
 }
 
 /// What the app may keep (ADR-0032): a commit's tree and diff at a whole
-/// sha. A branch moves, a short sha is only unique today, a commit's
-/// overview carries checks that move, and its whole view a toolbar.
+/// sha, and a branch's or repository's tree read at the sha its id names
+/// (#2241). A branch's tree by its tip, and a repository's branch list, move
+/// (#2242). A short sha is only unique today, a commit's overview carries
+/// checks that move, and a whole view a toolbar.
 #[tokio::test]
-async fn only_a_whole_shas_tree_and_diff_are_fixed() {
-    use knobas_source::view::Standing::{Fixed, Live};
+async fn what_names_a_whole_sha_is_fixed_and_what_reads_a_tip_moves() {
+    use knobas_source::view::Standing::{Fixed, Live, Moving};
+    let leak = |id: String| -> &'static str { Box::leak(id.into_boxed_str()) };
     let server = gitea().await;
     let source = source(&server);
     let sha256 = "a".repeat(64);
@@ -738,8 +909,28 @@ async fn only_a_whole_shas_tree_and_diff_are_fixed() {
         (at_commit(SHA), None, Live),
         (at_commit(&SHA[..12]), Some("file:src/lib.rs"), Live),
         (at_commit(&"g".repeat(40)), Some("files"), Live),
-        (BRANCH.to_owned(), Some("file:src/lib.rs"), Live),
-        (ENTITY.to_owned(), Some("file:src/lib.rs"), Live),
+        (BRANCH.to_owned(), Some("file:src/lib.rs"), Moving),
+        (ENTITY.to_owned(), Some("file:src/lib.rs"), Moving),
+        (ENTITY.to_owned(), Some("files"), Moving),
+        (ENTITY.to_owned(), Some("branches"), Moving),
+        (ENTITY.to_owned(), Some("overview"), Live),
+        (ENTITY.to_owned(), None, Live),
+        (BRANCH.to_owned(), None, Live),
+        (
+            BRANCH.to_owned(),
+            Some(leak(named("main", "file:src/lib.rs"))),
+            Fixed,
+        ),
+        (
+            ENTITY.to_owned(),
+            Some(leak(named("main", "files:src"))),
+            Fixed,
+        ),
+        (
+            ENTITY.to_owned(),
+            Some(leak(format!("files@{}", &SHA[..12]))),
+            Live,
+        ),
         (
             "other:tidewater/payout-service@x".to_owned(),
             Some("files"),

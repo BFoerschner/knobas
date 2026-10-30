@@ -542,6 +542,18 @@ impl Source for GiteaSource {
         crate::view::draw(self, entity, section).await
     }
 
+    /// Every write's grants move (#2241): the account may be given or lose
+    /// a push, the repository turned from a mirror, the branch protected.
+    /// Kept by the app and asked again behind, so a repository's probe is
+    /// sent once and not beside every file opened.
+    fn refusal_standing(
+        &self,
+        ask: &knobas_source::grants::WriteAsk,
+    ) -> knobas_source::view::Standing {
+        let _ = ask;
+        knobas_source::view::Standing::Moving
+    }
+
     /// A commit's diff and its tree at a full sha are fixed (#2239); see
     /// [`crate::view::standing`].
     fn view_standing(&self, entity: &str, section: Option<&str>) -> knobas_source::view::Standing {
