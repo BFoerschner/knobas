@@ -83,6 +83,13 @@ fn held(
     (by_head, by_blob)
 }
 
+/// Whether two blob names, each abbreviated as a diff's `index` line printed
+/// it, name one blob: git lengthens its abbreviations as a repository grows,
+/// so the same blob may be named by a longer prefix after a new commit.
+fn same_blob(a: &str, b: &str) -> bool {
+    !a.is_empty() && !b.is_empty() && (a.starts_with(b) || b.starts_with(a))
+}
+
 /// The paths viewed now, in path order: a file whose blob the diff names
 /// (`blobs`) is viewed where it was ticked on that blob (#2276); one whose
 /// blob it does not name, where it was ticked on this head (#842).
@@ -98,7 +105,7 @@ fn viewed_now(
         .chain(
             by_blob
                 .iter()
-                .filter(|(path, blob)| blobs.get(*path) == Some(*blob))
+                .filter(|(path, blob)| blobs.get(*path).is_some_and(|now| same_blob(now, blob)))
                 .map(|(path, _)| path.clone()),
         )
         .collect();
@@ -201,4 +208,20 @@ pub async fn set_file(
         .await?;
     tx.commit().await?;
     Ok(viewed_now(&by_head, &by_blob, blobs))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2276: a blob ticked under a 7-character name stays viewed when the
+    /// diff names it by 8, and a different blob does not.
+    #[test]
+    fn a_blob_named_by_a_longer_prefix_is_the_same_blob() {
+        let ticked: BTreeMap<String, String> = [("a.rs".to_owned(), "7aa01f9".to_owned())].into();
+        let longer = [("a.rs".to_owned(), "7aa01f9c".to_owned())].into();
+        assert_eq!(viewed_now(&[], &ticked, &longer), ["a.rs"]);
+        let other = [("a.rs".to_owned(), "7aa01f8c".to_owned())].into();
+        assert!(viewed_now(&[], &ticked, &other).is_empty());
+    }
 }
