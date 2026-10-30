@@ -302,7 +302,8 @@ test("Files opens the README, marks the locally changed file M, and a changed fi
   await draw([REPO]);
   expect(tree()).toEqual(["src/", "README.md"]);
   expect(text(target.querySelector(".tf-fileview header"))).toContain("README.md 2 lines, on main");
-  expect([...target.querySelectorAll(".tf-code .tf-l")].map(text)).toEqual(["1// README.md", "2fn main() {}"]);
+  // The README renders as Markdown (#2255).
+  expect(text(target.querySelector(".tf-fileview .tf-md"))).toBe("// README.md fn main() {}");
   expect(target.querySelector(".tf-banner")).toBeNull();
   unmount(view!);
   view = null;
@@ -535,7 +536,8 @@ test("Refresh on a repository reads it from its source, then its row, its branch
   expect(refreshButton()?.textContent).toBe("Refresh");
   expect(text(target.querySelector("h1"))).toBe("tidewater/payout-service");
   expect(tree()).toEqual(["src/", "README.md"]);
-  expect([...target.querySelectorAll(".tf-code .tf-l")].map(text)).toEqual(["1// README.md", "2fn main() {}"]);
+  // The README renders as Markdown (#2255).
+  expect(text(target.querySelector(".tf-fileview .tf-md"))).toBe("// README.md fn main() {}");
 });
 
 test("a refresh reads Commits, a commit, the compare page and Branches again over what they drew", async () => {
