@@ -33,13 +33,18 @@ export function imageType(path: string): string {
   return TYPES[ext] ?? "application/octet-stream";
 }
 
-/** The SVG text `svg`, with nothing left in it that is not drawing; `""` where no `<svg>` survives. */
-export function sanitizeSvg(svg: string): string {
-  const fragment = DOMPurify.sanitize(svg, {
-    USE_PROFILES: { svg: true, svgFilters: true },
-    RETURN_DOM_FRAGMENT: true,
-  });
-  const root = fragment.querySelector("svg");
+/**
+ * `markup`'s first `<svg>`, with nothing left in it that is not drawing (no
+ * script, no handler, no `javascript:` link), or `null`. The one SVG
+ * sanitizer: an image here, the sandboxed frame (`frame.ts`) too.
+ */
+export function sanitizeSvg(markup: string): SVGSVGElement | null {
+  return DOMPurify.sanitize(markup, { USE_PROFILES: { svg: true, svgFilters: true }, RETURN_DOM_FRAGMENT: true }).querySelector("svg");
+}
+
+/** The SVG text `svg`, sanitized and written back out as XML; `""` where no `<svg>` survives. */
+function sanitizedSvgText(svg: string): string {
+  const root = sanitizeSvg(svg);
   return root === null ? "" : new XMLSerializer().serializeToString(root);
 }
 
@@ -55,7 +60,7 @@ export function imageBlob(bytes: Uint8Array, path: string): Blob {
  */
 export function typedImageBlob(bytes: Uint8Array, type: string): Blob {
   const known = Object.values(TYPES).includes(type) ? type : "application/octet-stream";
-  if (known === "image/svg+xml") return new Blob([sanitizeSvg(new TextDecoder().decode(bytes))], { type: known });
+  if (known === "image/svg+xml") return new Blob([sanitizedSvgText(new TextDecoder().decode(bytes))], { type: known });
   return new Blob([bytes as Uint8Array<ArrayBuffer>], { type: known });
 }
 

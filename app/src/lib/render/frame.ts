@@ -18,17 +18,14 @@
  */
 import DOMPurify from "dompurify";
 
+import { base64Of } from "./bytes";
+import { sanitizeSvg } from "./image";
+
 /** A frame's document and the size it draws at, in CSS pixels. */
 export interface SvgFrame {
   srcdoc: string;
   width: number;
   height: number;
-}
-
-/** `markup`'s first `<svg>`, sanitized (no script, no handler, no `javascript:` link), or `null`. */
-export function sanitizeSvg(markup: string): SVGSVGElement | null {
-  const root = DOMPurify.sanitize(markup, { USE_PROFILES: { svg: true, svgFilters: true }, RETURN_DOM: true }) as unknown as Element;
-  return root.querySelector("svg");
 }
 
 /**
@@ -82,10 +79,4 @@ function imageOf(svg: SVGSVGElement | null, width: number | null, height: number
 function wrap(inner: string, scheme: "light" | "dark" | null): string {
   if (scheme === null) return `<!doctype html><html><head><meta charset="utf-8"></head><body>${inner}</body></html>`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${scheme}"></head><body marginwidth="0" marginheight="0">${inner}</body></html>`;
-}
-
-function base64Of(bytes: Uint8Array): string {
-  let binary = "";
-  for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
-  return btoa(binary);
 }

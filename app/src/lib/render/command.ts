@@ -21,6 +21,7 @@ import { runRenderer, type RenderContent, type RenderRun, type UserRenderer } fr
 import { mount, unmount } from "svelte";
 
 import TfCommandOutput from "../tf/render/TfCommandOutput.svelte";
+import { base64Of } from "./bytes";
 import { registerFence } from "./markdown";
 import { register, type Renderer } from "./registry";
 
@@ -83,12 +84,6 @@ export function savedCommand(renderer: Renderer): UserRenderer | null {
 export function contentFor(renderer: Pick<Renderer, "input">, text: string): RenderContent {
   if (renderer.input === "text") return { kind: "text", text };
   return { kind: "bytes", base64: base64Of(new TextEncoder().encode(text)) };
-}
-
-function base64Of(bytes: Uint8Array): string {
-  let binary = "";
-  for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
-  return btoa(binary);
 }
 
 /** The sandboxed frame's document for a run's SVG or HTML, sanitized: the one frame diagrams use too (`frame.ts`, #2258). */
