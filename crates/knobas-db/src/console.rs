@@ -16,8 +16,19 @@ use std::process::Command;
 /// `program` as a [`Command`] that opens no window on Windows. Elsewhere it is
 /// `Command::new`. A tokio caller takes it with `tokio::process::Command::from`.
 pub fn command(program: impl AsRef<OsStr>) -> Command {
-    Command::new(program)
+    #[allow(unused_mut, reason = "only Windows sets a flag on it")]
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
 }
+
+/// The program gets a console, as a console program needs, but no window.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[cfg(all(test, windows))]
 mod tests {
