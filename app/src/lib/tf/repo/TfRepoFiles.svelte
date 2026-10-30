@@ -205,14 +205,20 @@
       for (const [dir, section] of Object.entries(likely.dirs))
         if (!asked.has(dir) && listings[dir] === undefined && !early.has(section)) askEarly(section);
       let live = true;
-      askEarly(likely.file).then(
+      const asking = askEarly(likely.file);
+      // Answered, it is spent: a later open of the file reads it again.
+      const spent = () => {
+        if (early.get(likely.file) === asking) early.delete(likely.file);
+      };
+      asking.then(
         (read) => {
+          spent();
           if (!live || where !== at || (fileSection !== null && fileSection !== likely.file)) return;
           if (file !== null && drawnSection === likely.file) return;
           drawFile(read, likely.file);
         },
         // Its directory's listing says whether there is such a file.
-        () => {},
+        spent,
       );
       return () => {
         live = false;

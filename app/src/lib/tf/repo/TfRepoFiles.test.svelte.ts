@@ -160,6 +160,35 @@ test("the deep file draws as soon as its read answers, and the tree fills in as 
   expect(lineText(0)).toEqual(["1", 'pub const ACCEPTED: &str = "ACCP";']);
 });
 
+test("a deep file opened again after its early read reads it afresh", async () => {
+  const files: Files = { ...DEEP_FILES };
+  const reads: string[] = [];
+  const entityView = async (_at: string, section: string | null) => {
+    reads.push(section ?? "");
+    return answer(files, section ?? "");
+  };
+  const ports = {
+    entityView,
+    submitWrite: async () => {
+      throw { code: "invalid", message: "no write in this suite" };
+    },
+  };
+  const props = $state({ ports, repoId: REPO, at: REPO, branch: "main", path: DEEP as string | null, line: null, changed: new Set<string>() });
+  view = mount(TfRepoFiles, { target, props });
+  flushSync();
+  await settle();
+  expect(lineText(0)).toEqual(["1", 'pub const ACCEPTED: &str = "ACCP";']);
+
+  files[DEEP] = "pub const ACCEPTED: &str = \"ACSC\";\n";
+  props.path = "src/psp/gateway/sepa/mod.rs";
+  await settle();
+  props.path = DEEP;
+  await settle();
+
+  expect(lineText(0)).toEqual(["1", 'pub const ACCEPTED: &str = "ACSC";']);
+  expect(reads.filter((read) => read === `file:${DEEP}`)).toHaveLength(2);
+});
+
 test("a link to a file that does not exist says so once its directory is read", async () => {
   const missing = "src/psp/gateway/sepa/gone.rs";
   const source = heldSource(DEEP_FILES);
