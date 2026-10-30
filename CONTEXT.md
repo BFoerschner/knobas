@@ -224,7 +224,7 @@ What an [adapter](#adapter) draws for one of its own kinds when the detail opens
 _Avoid_: page (a wiki kind), template, layout, widget, panel (the detail is the panel; a view fills it)
 
 **Read cache**:
-The app process's memory of [source views](#source-view), keyed by what each stands at: a view at a whole commit sha is kept for the session and the same ask is answered from memory with no request to the source; anything else is read live. The adapter says which before the read. Bounded by bytes, least recently used out first; never written to the database or to disk, and dropped with the built source it was read through when that source's address, configuration or credential changes (ADR-0032).
+The app process's memory of [source views](#source-view) and of files' bytes (a README's image), keyed by what each stands at: a read at a whole commit sha is kept for the session and the same ask is answered from memory with no request to the source; anything else is read live. The adapter says which before the read. Bounded by bytes, least recently used out first; never written to the database or to disk, and dropped with the built source it was read through when that source's address, configuration or credential changes (ADR-0032).
 _Avoid_: mirror (the database's copy, written by sync), store, snapshot
 
 **Diff**:

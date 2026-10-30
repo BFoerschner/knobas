@@ -45,7 +45,7 @@ function answer(files: Files, section: string): SourceView {
   const path = section.slice("file:".length);
   const text = files[path];
   if (text === undefined) throw { code: "not_found", message: `gitea: no file ${path} at main` };
-  return one([{ type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: "b10b" }]);
+  return one([{ type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: "b10b", commit: "c0mmit" }]);
 }
 
 /** A read asked and not yet answered: `release` answers it. */
@@ -102,9 +102,11 @@ function draw(
   render?: RenderPort,
   commands?: CommandPort,
   defaults: RendererDefaults = createRendererDefaults(storedDefaults().port),
+  fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>,
 ) {
   const ports = {
     entityView,
+    ...(fileBytes ? { fileBytes } : {}),
     submitWrite: async () => {
       throw { code: "invalid", message: "no write in this suite" };
     },
@@ -591,6 +593,24 @@ test("the landing renders the README as Markdown: its table, task list, Rust fen
   expect(face()).toBe("Render as Markdown");
 });
 
+test("a README's relative image is read through the byte read at the README's commit and drawn from a blob (#2256)", async () => {
+  const asked: [string, string, string | null][] = [];
+  const create = URL.createObjectURL;
+  URL.createObjectURL = () => "blob:readme/0";
+  try {
+    const files = { ...MD_FILES, "docs/runbook.md": "# Runbook\n\n![flow](img/flow.png)" };
+    draw(openSource(files).entityView, "docs/runbook.md", null, undefined, undefined, undefined, async (entityId, path, commit) => {
+      asked.push([entityId, path, commit]);
+      return new Uint8Array([0x89, 0x50]);
+    });
+    await settle();
+    expect(asked).toEqual([[REPO, "docs/img/flow.png", "c0mmit"]]);
+    expect(rendered()!.querySelector("img")?.getAttribute("src")).toBe("blob:readme/0");
+  } finally {
+    URL.createObjectURL = create;
+  }
+});
+
 test("a Markdown file's relative links open files in the Files tab, resolved against its own directory", async () => {
   draw(openSource(MD_FILES).entityView, "docs/runbook.md");
   await settle();
@@ -760,7 +780,7 @@ function commitSource() {
     if (id === "files")
       return one([{ type: "tree", trail: [], entries: [{ name: "main.rs", kind: "file", size: 5, section: `file@${tip}:main.rs` }], truncated: false, url: null }]);
     const at = Number(/^file@(\d+):/.exec(id)?.[1] ?? tip);
-    return one([{ type: "file", trail: [], path: "main.rs", text: texts[at], language: null, size: 5, truncated: false, binary: false, url: null, sha: `b${at}` }]);
+    return one([{ type: "file", trail: [], path: "main.rs", text: texts[at], language: null, size: 5, truncated: false, binary: false, url: null, sha: `b${at}`, commit: null }]);
   };
   return { reads, entityView, push: () => (tip += 1) };
 }

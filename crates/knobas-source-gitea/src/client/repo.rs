@@ -466,6 +466,32 @@ impl GiteaClient {
         at: &str,
         cap: usize,
     ) -> Result<RawFile, SourceError> {
+        self.raw_read(owner, repo, file, at, cap, false).await
+    }
+
+    /// The same read for a file wanted whole or not at all (#2256): an
+    /// answer whose length is already over `cap` is cut before any of its
+    /// body is read, so a refused file costs its headers.
+    pub(crate) async fn raw_whole(
+        &self,
+        owner: &str,
+        repo: &str,
+        file: &str,
+        at: &str,
+        cap: usize,
+    ) -> Result<RawFile, SourceError> {
+        self.raw_read(owner, repo, file, at, cap, true).await
+    }
+
+    async fn raw_read(
+        &self,
+        owner: &str,
+        repo: &str,
+        file: &str,
+        at: &str,
+        cap: usize,
+        whole: bool,
+    ) -> Result<RawFile, SourceError> {
         let path = format!(
             "{API_ROOT}/repos/{}/{}/raw/{}",
             segment(owner)?,
@@ -478,6 +504,13 @@ impl GiteaClient {
             .query(&[("ref", at.to_owned())]);
         let mut response = self.http.send(request).await?;
         let length = response.content_length();
+        if whole && length.is_some_and(|length| length > cap as u64) {
+            return Ok(RawFile {
+                bytes: Vec::new(),
+                cut: true,
+                size: length,
+            });
+        }
         let mut bytes = Vec::new();
         let mut cut = false;
         while let Some(chunk) = response.chunk().await.map_err(|error| {
