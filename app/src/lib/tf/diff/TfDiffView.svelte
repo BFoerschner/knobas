@@ -20,6 +20,14 @@
     offers *Rendered* in its header, the file drawn before and after by its
     renderer (`TfDiffRendered`); an image also swipes. Its sides come from
     `context`, read once and kept beside expanded context's reads.
+  - **File pipelines** (#2270): where the caller runs pipelines (`context.piped`)
+    and a file's pattern has a default pipeline (`pipelines`), both sides
+    run through it and the outputs are diffed (`piped.ts`); the header names
+    the pipeline. *Run pipelines on diffs* (`piping`, on by default) decides
+    unless the toolbar's *Run pipelines* (this diff) or the file's own *Show
+    raw* / *Run pipeline* says otherwise. A piped diff takes no comments and
+    does not expand: its lines are not the file's. A side that fails draws
+    the raw diff under the step's error.
   - **Keys** (`list`, #2268): `j`/`k` files, `n`/`p` hunks, `v` viewed, `c`
     comment, `s` split; none while typing, none on a hidden page.
   - **Ceiling** (`cut`): a diff the parser stopped at 50,000 lines says so.
@@ -75,6 +83,8 @@
   import { hunkText, renderedPlan, type DiffMode, type Side, type SideGot } from "./rendered";
   import type { OpenAt } from "./TfDiffCard.svelte";
   import { badgeOf, collapsedAtFirst, isLock, needsLoad, treeOf } from "./tree";
+  import { diffPipelines, type DiffPipelinesSetting } from "./diff-pipelines.svelte";
+  import { defaultPipelines, pipedDiff, pipelineLabel, type DiffPipeline, type DiffPipelines, type PipedDiff } from "./piped";
 
   let {
     files,
@@ -90,6 +100,8 @@
     layout = diffLayout,
     narrow = windowNarrow(),
     openAt = null,
+    pipelines = defaultPipelines,
+    piping = diffPipelines,
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -112,6 +124,10 @@
     narrow?: { readonly current: boolean };
     /** *Open in…* in each file's header (#2274): the repository (or branch) and the commit or branch the files are read at. */
     openAt?: OpenAt | null;
+    /** Each file's default pipeline (#2270): the app's lookup by default. Runs only where `context.piped` is given. */
+    pipelines?: DiffPipelines;
+    /** *Run pipelines on diffs*: the app's setting by default. */
+    piping?: Pick<DiffPipelinesSetting, "on">;
   } = $props();
 
   let filter = $state("");
@@ -178,13 +194,82 @@
     opened = { ...opened, [key]: { ...opened[key], [hunk]: now } };
   }
 
+  /** Each file's pipeline (by `keyOf`), where this diff runs pipelines and its pattern has one. */
+  const pipes = $derived(new Map(files.map((file) => [keyOf(file), context?.piped ? pipelines.of(file.path) : null] as const)));
+  const anyPipe = $derived([...pipes.values()].some((pipe) => pipe !== null));
+  /** This diff's toggle (`null`: the setting decides) and each file's own (absent: the diff's decides). */
+  let pipeAll = $state<boolean | null>(null);
+  let pipeOne = $state.raw<Record<string, boolean>>({});
+  const pipeOn = (key: string) => pipeOne[key] ?? pipeAll ?? piping.on;
+  /** Each file's piped diff, under `key\nsteps`, once both sides answered; and the runs asked. */
+  let runs = $state.raw<Record<string, PipedDiff>>({});
+  const running = new Set<string>();
+  const runName = (key: string, pipe: DiffPipeline) => `${key}\n${JSON.stringify(pipe.steps)}`;
+
+  function runPipe(file: DrawnFile, pipe: DiffPipeline) {
+    const name = runName(keyOf(file), pipe);
+    const reader = context;
+    if (!reader?.piped || running.has(name)) return;
+    running.add(name);
+    const one = async (side: Side) => {
+      if (side === "old" ? file.change === "added" : file.change === "deleted") return { side, run: null };
+      try {
+        return { side, run: await reader.piped!(file, side, pipe.steps) };
+      } catch (cause) {
+        return { side, why: `reading it: ${ipcErrorMessage(cause)}` };
+      }
+    };
+    void Promise.all([one("old"), one("new")]).then(([old, nu]) => {
+      const refused = [old, nu].find((got) => "why" in got);
+      const made: PipedDiff =
+        refused && "why" in refused ? { kind: "failed", side: refused.side, why: refused.why } : pipedDiff(file, "run" in old ? old.run : null, "run" in nu ? nu.run : null);
+      // A refused read is asked again the next time the pipeline is turned on.
+      if (refused) running.delete(name);
+      runs = { ...runs, [name]: made };
+    });
+  }
+  $effect(() => {
+    for (const file of files) {
+      const pipe = pipes.get(keyOf(file));
+      if (pipe && pipeOn(keyOf(file))) untrack(() => runPipe(file, pipe));
+    }
+  });
+  /** A file's pipeline as its header shows it: on or off, running, or the side that failed. */
+  const pipeShown = (file: DrawnFile) => {
+    const key = keyOf(file);
+    const pipe = pipes.get(key);
+    if (!pipe) return null;
+    const on = pipeOn(key);
+    const got = on ? runs[runName(key, pipe)] : undefined;
+    // A piped diff draws no thread or draft (`quiet`): they sit on the raw lines. The header counts them instead.
+    const hidden = file.threads.length + drafts.filter((d) => d.path === file.path).length;
+    return { label: pipelineLabel(pipe), pattern: pipe.pattern, on, running: on && got === undefined, failed: got?.kind === "failed" ? got : null, hidden };
+  };
+  /** The piped diff a file draws in place of its own, where its pipeline is on and ran on both sides. */
+  const pipedOf = (file: DrawnFile) => {
+    const key = keyOf(file);
+    const pipe = pipes.get(key);
+    const got = pipe && pipeOn(key) ? runs[runName(key, pipe)] : undefined;
+    return got?.kind === "diff" ? got : null;
+  };
+
   /**
    * Each file's two sides (by `keyOf`), and their tokens as they arrive, under `side\nkey`. A re-read
    * that hands over the same texts (Local changes on every focus, a refreshed commit) keeps its
    * tokens and starts no job; a side whose text changed (a file read whole for its context) drops
    * its tokens and is highlighted anew.
    */
-  const sides = $derived(new Map(files.map((file) => [keyOf(file), sidesOf(file, wholes[keyOf(file)])])));
+  const sides = $derived(
+    new Map(
+      files.map((file) => {
+        const piped = pipedOf(file);
+        if (piped === null) return [keyOf(file), sidesOf(file, wholes[keyOf(file)])] as const;
+        // A piped diff is highlighted as its output: `events.json.b64` decoded is JSON.
+        const both = sidesOf(piped.file);
+        return [keyOf(file), { ...both, old: { ...both.old, path: piped.name }, new: { ...both.new, path: piped.name } }] as const;
+      }),
+    ),
+  );
   let tokens = $state.raw<Record<string, (LineTokens | undefined)[]>>({});
   const jobs = new Map<string, { text: string; port: RenderPort; job: HighlightJob }>();
   $effect(() => {
@@ -355,6 +440,13 @@
     },
     queuedOn: (thread) => review?.queued?.(thread) ?? [],
   };
+  /** The talk of a piped diff: its lines are the pipeline's, so it takes no comment and draws no draft. */
+  const quiet: DiffTalk = Object.create(talk, {
+    review: { get: () => null },
+    drafts: { get: () => [] },
+    draftsAt: { value: () => [] },
+    isOpen: { value: () => false },
+  });
 
   /** The reply box open under one thread (#2277), by the thread's id, and its words. */
   let replying = $state<string | null>(null);
@@ -454,6 +546,19 @@
     <button type="button" aria-pressed={layout.chosen === "unified"} onclick={() => layout.set("unified")}>Unified</button>
     <button type="button" aria-pressed={layout.chosen === "split"} onclick={() => layout.set("split")}>Split</button>
   </div>
+  {#if anyPipe}
+    {@const all = pipeAll ?? piping.on}
+    <button
+      type="button"
+      class="tf-pill"
+      aria-pressed={all}
+      title="Run each file's default pipeline on both sides of this diff"
+      onclick={() => {
+        pipeAll = !all;
+        pipeOne = {};
+      }}>Run pipelines</button
+    >
+  {/if}
   {#if layout.chosen === "split" && narrow.current}
     <span class="tf-dim tf-dtool-why">Unified while the window is too narrow for split.</span>
   {/if}
@@ -508,9 +613,12 @@
   <div class="tf-dfiles">
     {#each drawn as file (keyOf(file))}
       {@const key = keyOf(file)}
+      {@const piped = pipedOf(file)}
       <TfDiffCard
         bind:this={cards[key]}
-        {file}
+        file={piped?.file ?? file}
+        pipeline={pipeShown(file)}
+        onpipeline={(on) => (pipeOne = { ...pipeOne, [key]: on })}
         {split}
         closed={isClosed(file)}
         ontoggle={() => (folds = { ...folds, [key]: !isClosed(file) })}
@@ -520,17 +628,17 @@
         loaded={loads[key] === true}
         onload={() => (loads = { ...loads, [key]: true })}
         current={current === key}
-        rendered={plans.get(key) ?? null}
+        rendered={piped ? null : (plans.get(key) ?? null)}
         mode={modeOf(file)}
         onmode={(mode) => (modes = { ...modes, [key]: mode })}
         sideOf={(side) => sideOf(file, side)}
         load={(side) => loadSide(file, side)}
         {commands}
-        expandable={context !== null}
-        expanded={expandedOf(key)}
+        expandable={context !== null && piped === null}
+        expanded={piped ? undefined : expandedOf(key)}
         onexpand={(hunk, how) => void expand(file, hunk, how)}
         tokensOf={(side, cell) => tokensOf(file, side, cell)}
-        {talk}
+        talk={piped ? quiet : talk}
         {render}
         {openAt}
       />

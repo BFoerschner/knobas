@@ -61,7 +61,7 @@
     defaultBranch,
     refreshed = 0,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes">;
+    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -88,7 +88,7 @@
   let cut = $state(false);
   /** What the compare's diff is between, where the source settled it (#2310): context reads at its shas. */
   let range = $state<DiffRange | null>(null);
-  const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes));
+  const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
   let failed = $state<string | null>(null);
   /** *Into*, the default branch proposed once: a new *From* keeps what the reader picked. */
   let base = $state(untrack(() => into));

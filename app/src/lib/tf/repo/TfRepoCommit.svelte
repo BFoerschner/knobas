@@ -29,7 +29,7 @@
     onNewBranch,
     refreshed = 0,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "fileBytes">;
+    ports: Pick<RepoPorts, "entityView" | "getEntity" | "fileBytes" | "piped">;
     repoId: string;
     commitId: string;
     now: Date;
@@ -129,7 +129,7 @@
   <TfDiffView
     {files}
     {cut}
-    context={commitContext(ports.entityView, commitId, parent, ports.fileBytes)}
+    context={commitContext(ports.entityView, commitId, parent, ports.fileBytes, ports.piped)}
     openAt={whole === null ? null : { entityId: repoId, at: whole }}
   />
 {/if}

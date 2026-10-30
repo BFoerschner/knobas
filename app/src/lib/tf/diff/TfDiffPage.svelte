@@ -28,10 +28,13 @@
 <script module lang="ts">
   import {
     entityFileBytes,
+    entityFilePiped,
     entityRangeDiff,
     entityView,
     getEntity,
     type EntityDetail,
+    type PipeRun,
+    type PipeStep,
     type RangeDiff,
     type SourceView,
   } from "../../ipc/entity";
@@ -45,6 +48,8 @@
     getEntity: (entityId: string) => Promise<EntityDetail>;
     /** A file's bytes at a commit, for a rendered image diff (#2279). */
     fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
+    /** A file pipeline over a file at a commit, for pipelines on diffs (#2270). */
+    piped?: (entityId: string, path: string, commit: string | null, steps: PipeStep[]) => Promise<PipeRun>;
   }
 
   /** Called through, not bound at load: a test's mock of the bridge may not carry every command. */
@@ -53,6 +58,7 @@
     entityView: (entityId, section) => entityView(entityId, section),
     getEntity: (entityId) => getEntity(entityId),
     fileBytes: (entityId, path, commit) => entityFileBytes(entityId, path, commit),
+    piped: (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
   };
 </script>
 
@@ -97,7 +103,7 @@
   let ignoreWhitespace = $state(false);
   const uid = $props.id();
   const why = `${uid}-ws-why`;
-  const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes));
+  const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
 
   const section = $derived(compareSection(base, head));
 
