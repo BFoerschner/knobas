@@ -59,14 +59,23 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
-/// Where the person's checkout stands: branch, `HEAD`, `git status`.
-fn standing(checkout: &Path) -> (String, String, String) {
+/// Where the person's checkout stands: branch, `HEAD`, `git status`, and
+/// its list of branches (a worktree added on a branch would add one).
+fn standing(checkout: &Path) -> (String, String, String, String) {
     (
         git(checkout, &["branch", "--show-current"]),
         git(checkout, &["rev-parse", "HEAD"]),
         git(
             checkout,
             &["status", "--porcelain=v1", "--untracked-files=all"],
+        ),
+        git(
+            checkout,
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/heads",
+            ],
         ),
     )
 }
@@ -595,4 +604,40 @@ async fn the_diff_tool_is_offered_for_two_local_shas_and_runs_the_configured_too
         "the one file the range changes"
     );
     assert_eq!(standing(&w.checkout), before);
+}
+
+/// A worktree folder whose `.git` is gone is no repository of its own: git
+/// run there would find the repository holding the clones root and move
+/// that. The open is refused, Settings refuses to remove it, and the
+/// repository above is untouched.
+#[tokio::test]
+async fn a_worktree_whose_git_file_is_gone_is_left_alone_and_the_repository_above_untouched() {
+    let w = World::new().await;
+    fs::create_dir_all(&w.root).unwrap();
+    git(&w.root, &["init", "-q", "-b", "home"]);
+    fs::write(w.root.join("dotfile"), "mine\n").unwrap();
+    git(&w.root, &["add", "dotfile"]);
+    git(&w.root, &["commit", "-qm", "home"]);
+    w.push(7, "a.txt", "seven\n");
+    w.open(7, None).await.unwrap();
+    let wt = w.worktree(7);
+    fs::remove_file(wt.join(".git")).unwrap();
+    w.push(7, "a.txt", "seven, again\n");
+    let above = standing(&w.root);
+
+    let error = w.open(7, None).await.unwrap_err();
+    assert_eq!(error.code, IpcErrorCode::Conflict, "{error:?}");
+    assert!(error.message.contains(".git"), "{}", error.message);
+    let error = worktree::remove(&w.pool, &wt.to_string_lossy())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, IpcErrorCode::Conflict, "{error:?}");
+
+    assert_eq!(
+        standing(&w.root),
+        above,
+        "the repository above is untouched"
+    );
+    assert!(!w.root.join(".git/FETCH_HEAD").exists());
+    assert_eq!(fs::read_to_string(wt.join("a.txt")).unwrap(), "seven\n");
 }

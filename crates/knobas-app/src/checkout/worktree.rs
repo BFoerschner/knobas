@@ -30,8 +30,8 @@
 //!
 //! # Removed when closed, on the next open, or from Settings
 //!
-//! Every open of a pull request first removes the worktrees of pull requests
-//! the mirror now holds closed or merged ([`sweep`]); Settings › Checkouts
+//! Every open of a pull request, once its own worktree is at the head,
+//! removes the worktrees of pull requests the mirror now holds closed or merged ([`sweep`]); Settings › Checkouts
 //! lists them and removes one by hand ([`remove`]). Not on sync: the sync
 //! engine runs no git, and a git write nobody clicked for is what ADR-0016
 //! keeps out. `worktree remove` refuses a worktree with changes or untracked
@@ -198,6 +198,16 @@ async fn exists(path: &Path) -> bool {
     tokio::fs::symlink_metadata(path).await.is_ok()
 }
 
+/// Whether the folder at `path` is still a linked worktree: its `.git` is a
+/// file. A folder whose `.git` is gone is no repository of its own, and git
+/// run there would look upward and find whatever repository holds the clones
+/// root, so nothing is run there.
+async fn is_worktree(path: &Path) -> bool {
+    tokio::fs::symlink_metadata(path.join(".git"))
+        .await
+        .is_ok_and(|meta| meta.is_file())
+}
+
 /// Open pull request `number` of this entity's repository in its worktree:
 /// make it on the first open, fetch its head and move there on every open.
 /// Answers the worktree's path, for the application's `{path}`.
@@ -263,29 +273,21 @@ pub async fn open(
         )));
     }
 
-    let made = if exists(&worktree).await {
-        if known.is_none() {
-            return Err(IpcError::conflict(format!(
-                "{shown} is already there and knobas did not make it, so it is left alone"
-            )));
-        }
-        false
-    } else {
-        if let Some(parent) = worktree.parent() {
-            tokio::fs::create_dir_all(parent).await.map_err(|error| {
-                IpcError::internal(format!("could not make {}: {error}", parent.display()))
-            })?;
-        }
-        let add = Step::Add {
-            checkout: &checkout,
-            worktree: &worktree,
-            again: known.is_some(),
-        };
-        run(&git, add.args(), LOCAL_TIMEOUT)
-            .await
-            .map_err(|why| IpcError::invalid(format!("git could not add {shown}: {why}")))?;
-        true
-    };
+    let there = exists(&worktree).await;
+    if there && known.is_none() {
+        return Err(IpcError::conflict(format!(
+            "{shown} is already there and knobas did not make it, so it is left alone"
+        )));
+    }
+    if there && !is_worktree(&worktree).await {
+        return Err(IpcError::conflict(format!(
+            "{shown} is no longer a git worktree (its .git is gone), so it is left alone: \
+             remove the folder by hand"
+        )));
+    }
+    // The record is written before the worktree is added: an app that dies
+    // between the two leaves a record whose folder is missing, which the next
+    // open adds again, never a folder knobas would then refuse as not its own.
     match known {
         Some(at) => {
             if item.is_some() {
@@ -300,6 +302,19 @@ pub async fn open(
         }),
     }
     save(pool, &records).await?;
+    let made = !there;
+    if made {
+        let added = add(&git, &checkout, &worktree, known.is_some()).await;
+        if let Err(why) = added {
+            if known.is_none() {
+                records.retain(|r| Path::new(&r.path) != worktree);
+                save(pool, &records).await?;
+            }
+            return Err(IpcError::invalid(format!(
+                "git could not add {shown}: {why}"
+            )));
+        }
+    }
 
     let fetch = Step::Fetch {
         worktree: &worktree,
@@ -350,6 +365,21 @@ pub async fn open(
     Ok(worktree)
 }
 
+/// Make the folder's parents and add the worktree there.
+async fn add(git: &Path, checkout: &Path, worktree: &Path, again: bool) -> Result<(), String> {
+    if let Some(parent) = worktree.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|error| format!("could not make {}: {error}", parent.display()))?;
+    }
+    let add = Step::Add {
+        checkout,
+        worktree,
+        again,
+    };
+    run(git, add.args(), LOCAL_TIMEOUT).await.map(drop)
+}
+
 /// Remove the worktree of every pull request the mirror holds closed or
 /// merged, and forget the ones whose folder is gone. A worktree git will not
 /// remove (changes, untracked files) stays. Answers the paths removed.
@@ -376,7 +406,7 @@ async fn sweep_but(pool: &PgPool, keep: Option<&Path>) -> Result<Vec<String>, Ip
         if !exists(&path).await {
             continue;
         }
-        if !closed(pool, record.item.as_deref()).await? {
+        if !closed(pool, record.item.as_deref()).await? || !is_worktree(&path).await {
             kept.push(record);
             continue;
         }
@@ -429,6 +459,12 @@ pub async fn remove(pool: &PgPool, path: &str) -> Result<Vec<PullRequestWorktree
             .ok_or_else(|| IpcError::not_found(format!("{path} is not a worktree knobas made")))?;
         let worktree = PathBuf::from(path);
         if exists(&worktree).await {
+            if !is_worktree(&worktree).await {
+                return Err(IpcError::conflict(format!(
+                    "{path} is no longer a git worktree (its .git is gone), so knobas leaves \
+                     it alone: remove the folder by hand"
+                )));
+            }
             let git = git().await?;
             run(
                 &git,
