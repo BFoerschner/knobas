@@ -4527,32 +4527,29 @@ async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
     .await;
     // Gitea's pull request diff is current at once; Forgejo updates a pull
     // request's head through a queue (#1195, measured on 17.0.0: a few seconds
-    // behind the push), so read until the diff holds the pushed line.
-    let mut waited = 0;
-    let (readme, _) = loop {
-        let (readme, rest) = files().await;
-        let pushed = readme
-            .hunks
+    // behind the push), and marks the comments outdated after that, so the
+    // diff can hold the pushed line while the thread is not yet outdated
+    // (#2320). Read until the threads are as asserted, for at most 120 s: the
+    // queue runs behind under a busy machine.
+    let want = [(ReviewSide::Old, false), (ReviewSide::New, true)];
+    let started = std::time::Instant::now();
+    let (readme, state) = loop {
+        let (readme, _) = files().await;
+        let state: Vec<(ReviewSide, bool)> = readme
+            .threads
             .iter()
-            .flat_map(|h| &h.lines)
-            .any(|l| l.text == "reviewed again from knobas");
-        if pushed || waited >= 40 {
-            break (readme, rest);
+            .map(|t| (t.side, t.outdated))
+            .collect();
+        if state == want || started.elapsed() >= std::time::Duration::from_secs(120) {
+            break (readme, state);
         }
-        waited += 1;
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     };
-    let state: Vec<(ReviewSide, bool)> = readme
-        .threads
-        .iter()
-        .map(|t| (t.side, t.outdated))
-        .collect();
-    println!("after the push: {state:?}");
-    assert_eq!(
-        state,
-        [(ReviewSide::Old, false), (ReviewSide::New, true)],
-        "{readme:#?}"
+    println!(
+        "after the push: {state:?}, after {} ms",
+        started.elapsed().as_millis()
     );
+    assert_eq!(state, want, "{readme:#?}");
     // 5. The outdated thread is drawn at the commit it was written on, its
     //    hunk ending on the line as it read there (#2318); the other is not
     //    outdated and carries neither. Gitea's and Forgejo's raw answer is
