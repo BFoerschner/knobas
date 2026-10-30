@@ -90,7 +90,7 @@ export const D2: Renderer = {
   fences: ["d2"],
   input: "text",
   output: "svg",
-  diff: false,
+  diff: true,
 };
 
 /**
@@ -105,7 +105,7 @@ export const GRAPHVIZ: Renderer = {
   fences: ["dot", "graphviz"],
   input: "text",
   output: "svg",
-  diff: false,
+  diff: true,
 };
 
 /** Source: the text, highlighted. Takes every text file and every fence, so it is always the last resort. */

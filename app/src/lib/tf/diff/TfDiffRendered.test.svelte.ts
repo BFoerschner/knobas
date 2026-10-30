@@ -230,6 +230,26 @@ test("a changed PNG opens rendered, side by side from each side's bytes, and swi
   expect(card("assets/logo.png").textContent).toContain("A binary file: no lines to draw.");
 });
 
+test("a changed D2 and Graphviz file draw before and after through the diagram engine", async () => {
+  const { context } = reader({ "docs/flow.d2": ["a -> b", "a -> c"], "docs/flow.gv": ["digraph { a -> b }", "digraph { a -> c }"] });
+  draw({ files: [file("docs/flow.d2"), file("docs/flow.gv")], context });
+  for (const path of ["docs/flow.d2", "docs/flow.gv"]) {
+    expect(modes(path)).toEqual(["Rendered", "Lines*"]);
+    mode(path, "Rendered");
+  }
+  await settle();
+  for (const [path, codes] of [
+    ["docs/flow.d2", ["a -> b", "a -> c"]],
+    ["docs/flow.gv", ["digraph { a -> b }", "digraph { a -> c }"]],
+  ] as const) {
+    const panes = [...card(path).querySelectorAll(".tf-ba > figure .tf-fdiagram")];
+    // jsdom's port has no engine, so each side keeps its source (numbered lines).
+    expect(panes).toHaveLength(2);
+    codes.forEach((code, at) => expect(panes[at]!.textContent).toContain(code));
+    expect(panes[0]!.textContent).not.toContain(codes[1]);
+  }
+});
+
 test("a swipe whose side cannot be read says so instead of reading on", async () => {
   const { context } = reader({}, { "assets/logo.png": [pngBytes(1), pngBytes(2)] });
   const failing = { ...context, bytes: (f: DiffFile, side: "old" | "new") => (side === "new" ? Promise.reject(new Error("refused")) : context.bytes!(f, side)) };
