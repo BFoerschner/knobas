@@ -533,7 +533,11 @@ async fn a_never_writing_jq_child_is_killed_at_its_timeout() {
     }
     let run = run.await.unwrap();
     assert_eq!(failure(&run).why, PipeWhy::TimedOut, "{:?}", failure(&run));
-    assert_eq!(children_with_cap(limits.cap), 0, "the jq child outlived its timeout");
+    assert_eq!(
+        children_with_cap(limits.cap),
+        0,
+        "the jq child outlived its timeout"
+    );
 }
 
 /// **A value nested deep at run time fails the step, not the app (#2314).**

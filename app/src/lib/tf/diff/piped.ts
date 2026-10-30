@@ -47,7 +47,7 @@ export function installPipelines(lookup: DiffPipelines): void {
 
 /** What the header calls a pipeline: its name, else its steps in order. */
 export function pipelineLabel(pipeline: DiffPipeline): string {
-  return pipeline.name ?? pipeline.steps.map(stepName).join(" → ");
+  return pipeline.name ?? pipeline.steps.map((step) => stepName(step)).join(" → ");
 }
 
 /** The diff of the two outputs, or the side that gave none and why, worded to follow "failed on the file before the change, ". */
