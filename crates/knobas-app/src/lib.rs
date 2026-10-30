@@ -667,6 +667,8 @@ pub fn run() {
             // #2234), appended at the foot (§10.8).
             commands::app::diff_pipelines,
             commands::app::set_diff_pipelines,
+            // #2319's commit diff, local-first, appended at the foot (§10.8).
+            commands::entity::entity_commit_diff,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

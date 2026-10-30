@@ -280,7 +280,8 @@ pub async fn local_changes(
 ///
 /// - `checkout`: local read-only git at the repository's checkout, which
 ///   holds both commits (ADR-0036).
-/// - `source`: the source's compare read, kept by sha pair (ADR-0032).
+/// - `source`: the source's compare read, kept by sha pair (ADR-0032), or
+///   for one commit its own diff section, kept by sha (#2319).
 ///
 /// Issue #2272.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
@@ -333,27 +334,94 @@ pub async fn range_diff(
     head: &str,
     ignore_whitespace: bool,
 ) -> Result<RangeDiff, IpcError> {
-    if let Some(path) = resolve(pool, entity_id).await.ok().and_then(|c| c.path)
-        && let Some(local) = range::read(Path::new(&path), base, head, ignore_whitespace).await
-    {
-        return Ok(RangeDiff {
-            files: local.files,
-            truncated: local.truncated,
-            range: local.base.map(|base| knobas_source::view::DiffRange {
-                repository: entity_id.to_owned(),
-                base,
-                head: local.head,
-                commits: Vec::new(),
-                reviewed: None,
-            }),
-            read_at: DiffReadAt::Checkout,
-        });
+    if let Some(local) = local_diff(pool, entity_id, base, head, ignore_whitespace).await {
+        return Ok(local);
     }
     let section = format!("compare:{base}...{head}");
-    let view = crate::sources::crud::view(pool, secrets, registry, live, entity_id, Some(&section))
+    source_diff(pool, secrets, registry, live, entity_id, &section)
+        .await?
+        .ok_or_else(|| {
+            IpcError::not_found(format!(
+                "the source draws no diff between {base} and {head}"
+            ))
+        })
+}
+
+/// The change one commit made (#2319, story 78): `sha` against its first
+/// parent, from local read-only git when the checkout of `repo` holds it
+/// (whitespace ignored when asked; a root against the empty tree);
+/// otherwise the commit entity `commit`'s own `diff` section, through the
+/// read cache.
+///
+/// The source half is the one read the commit tab made before it went
+/// local-first, and deliberately not [`range_diff`]'s compare of
+/// `<sha>^...<sha>`: Forgejo answers a compare in two requests and refuses
+/// it on a private repository, and a root commit's compare in three.
+///
+/// # Errors
+///
+/// As [`range_diff`]: what the source's read refuses with, and
+/// [`NotFound`](crate::IpcErrorCode::NotFound) when it draws no diff.
+#[allow(clippy::too_many_arguments)]
+pub async fn commit_diff(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    repo: &str,
+    commit: &str,
+    sha: &str,
+    ignore_whitespace: bool,
+) -> Result<RangeDiff, IpcError> {
+    if let Some(local) = local_diff(pool, repo, &format!("{sha}^"), sha, ignore_whitespace).await {
+        return Ok(local);
+    }
+    source_diff(pool, secrets, registry, live, commit, "diff")
+        .await?
+        .ok_or_else(|| IpcError::not_found(format!("the source draws no diff for {commit}")))
+}
+
+/// [`range_diff`]'s local half: `None` when `entity_id` has no checkout or
+/// its checkout does not hold both ends ([`range::read`]).
+async fn local_diff(
+    pool: &PgPool,
+    entity_id: &str,
+    base: &str,
+    head: &str,
+    ignore_whitespace: bool,
+) -> Option<RangeDiff> {
+    let path = resolve(pool, entity_id).await.ok().and_then(|c| c.path)?;
+    let local = range::read(Path::new(&path), base, head, ignore_whitespace).await?;
+    Some(RangeDiff {
+        files: local.files,
+        truncated: local.truncated,
+        range: local.base.map(|base| knobas_source::view::DiffRange {
+            repository: entity_id.to_owned(),
+            base,
+            head: local.head,
+            commits: Vec::new(),
+            reviewed: None,
+        }),
+        read_at: DiffReadAt::Checkout,
+    })
+}
+
+/// The diff block of `entity`'s `section`, read through the cache; `None`
+/// when the source draws none there. A source that draws no diff has not
+/// said "no changes": that is an empty diff block, and `None` a refusal the
+/// page shows as one.
+async fn source_diff(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity: &str,
+    section: &str,
+) -> Result<Option<RangeDiff>, IpcError> {
+    let view = crate::sources::crud::view(pool, secrets, registry, live, entity, Some(section))
         .await
         .map_err(|error| crate::sources::to_ipc(&error, None))?;
-    let block = view.and_then(|view| {
+    Ok(view.and_then(|view| {
         view.sections.into_iter().next().and_then(|section| {
             section.blocks.into_iter().find_map(|block| match block {
                 knobas_source::view::Block::Diff {
@@ -361,24 +429,16 @@ pub async fn range_diff(
                     truncated,
                     range,
                     ..
-                } => Some((files, truncated, range)),
+                } => Some(RangeDiff {
+                    files,
+                    truncated,
+                    range,
+                    read_at: DiffReadAt::Source,
+                }),
                 _ => None,
             })
         })
-    });
-    // A source that draws no diff here has not said "no changes": that is
-    // an empty diff block, and this a refusal the page shows as one.
-    let (files, truncated, range) = block.ok_or_else(|| {
-        IpcError::not_found(format!(
-            "the source draws no diff between {base} and {head}"
-        ))
-    })?;
-    Ok(RangeDiff {
-        files,
-        truncated,
-        range,
-        read_at: DiffReadAt::Source,
-    })
+    }))
 }
 
 /// [`view`] without the working tree read: where the checkout is, and no git.
