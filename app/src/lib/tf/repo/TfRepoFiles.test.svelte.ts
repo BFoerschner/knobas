@@ -12,6 +12,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { SourceView, TreeEntry } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
+import { installCommands, type CommandPort } from "../../render/command";
 import { createViewChoices } from "../../render/view-choice.svelte";
 import { fileHash, lineHash } from "./repo";
 
@@ -97,6 +98,7 @@ function draw(
   path: string | null,
   line: number | null = null,
   render?: RenderPort,
+  commands?: CommandPort,
 ) {
   const ports = {
     entityView,
@@ -116,6 +118,7 @@ function draw(
       changed: new Set<string>(),
       views: createViewChoices(() => null),
       ...(render ? { render } : {}),
+      ...(commands ? { commands } : {}),
     },
   });
   flushSync();
@@ -471,6 +474,29 @@ test("find in a long file draws a hit's line the window left out before marking 
   expect(drawnLines().length).toBeLessThan(500);
   press();
   expect(rowOf(current())).toBe("10");
+});
+
+test("a file a saved command renderer accepts is run by its id and drawn in the sandboxed frame (#2262)", async () => {
+  installCommands([{ id: "cat", name: "Cat", command: "cat", patterns: ["*.page"], fences: [], input: "text", output: "html", timeout_secs: 10 }]);
+  const asked: string[] = [];
+  const commands: CommandPort = {
+    run: async (id, content) => {
+      asked.push(id);
+      return { outcome: "drawn", output: "html", body: content.kind === "text" ? content.text : "" };
+    },
+  };
+  try {
+    draw(openSource({ "docs/index.page": "<p>Hi</p><script>alert(1)</script>" }).entityView, "docs/index.page", null, undefined, commands);
+    await settle();
+
+    expect(asked).toEqual(["cat"]);
+    const frame = target.querySelector(".tf-fileview iframe")!;
+    expect(frame.getAttribute("sandbox")).toBe("");
+    expect(frame.getAttribute("srcdoc")).toContain("<p>Hi</p>");
+    expect(frame.getAttribute("srcdoc")).not.toMatch(/<script/i);
+  } finally {
+    installCommands([]);
+  }
 });
 
 // -- Markdown (#2255) -----------------------------------------------------------

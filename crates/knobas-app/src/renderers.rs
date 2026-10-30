@@ -1,0 +1,586 @@
+//! User command renderers (#2262, spec #2234 step 5, ADR-0033): a program
+//! the person names in Settings › Renderers, which turns a file's text or
+//! bytes into SVG, HTML or an image.
+//!
+//! # One settings row
+//!
+//! The list is one `knobas.setting` row, [`RENDERERS_KEY`], a JSON array of
+//! [`UserRenderer`], for the *Open in…* list's reason (`checkout::open`): a
+//! short list a person types once is not a relation. No migration. A row
+//! that does not parse reads as no renderers.
+//!
+//! # The rules of "Open in" (ADR-0016, amended by ADR-0033)
+//!
+//! - The program and every argument are what the person typed in settings,
+//!   split into words by [`knobas_core::checkout::open::words`]; the webview
+//!   names a renderer by its id and never sends a program. **No shell**: `;`,
+//!   `|` and `$HOME` are literal text in an argument.
+//! - The content (a file, a Markdown fence, the test pane's sample) goes on
+//!   **stdin only**, never into an argument. It may come from the mirror;
+//!   stdin is data the program reads, not a word it runs.
+//! - The output is stdout, capped at [`OUTPUT_CAP`]; stderr is kept to
+//!   [`STDERR_CAP`]. The run is killed at its timeout (1 to
+//!   [`MAX_TIMEOUT_SECS`] seconds, [`DEFAULT_TIMEOUT_SECS`] unless set).
+//! - It runs in the system temp directory, never in a checkout, with no
+//!   `KNOBAS_*` variable, under `knobas_db::console`'s builder (no window on
+//!   Windows).
+//!
+//! What the frontend does with the output (DOMPurify, a sandboxed frame) is
+//! `app/src/lib/render/command.ts`.
+
+use std::process::Stdio;
+use std::time::Duration;
+
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+
+use crate::IpcError;
+use crate::settings::{read_value, write_value};
+
+/// The `knobas.setting` key holding the list.
+pub const RENDERERS_KEY: &str = "render.commands";
+
+/// The timeout a renderer gets until the person sets one.
+pub const DEFAULT_TIMEOUT_SECS: u32 = 10;
+/// The longest timeout a renderer may ask for.
+pub const MAX_TIMEOUT_SECS: u32 = 120;
+/// The most stdout a run may write; past it the run is stopped.
+pub const OUTPUT_CAP: usize = 16 * 1024 * 1024;
+/// How much stderr a failure shows; the rest is read and dropped.
+pub const STDERR_CAP: usize = 64 * 1024;
+
+/// What a renderer reads on stdin: the file's text, or its bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "app.ts")]
+pub enum RendererInput {
+    Text,
+    Bytes,
+}
+
+/// What a renderer writes on stdout: SVG or HTML (drawn sanitized, in a
+/// sandboxed frame), or an image's bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "app.ts")]
+pub enum CommandOutput {
+    Svg,
+    Html,
+    Image,
+}
+
+/// One saved command renderer (#2262), Settings › Renderers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "app.ts")]
+pub struct UserRenderer {
+    /// Made from the name when first saved, kept through a rename.
+    pub id: String,
+    /// What the switcher shows.
+    pub name: String,
+    /// The program and its arguments, as typed: quotes group words, no shell.
+    pub command: String,
+    /// File globs it accepts (`*.puml`, `docs/*.uml`).
+    pub patterns: Vec<String>,
+    /// Markdown fence languages it accepts, lowercase.
+    pub fences: Vec<String>,
+    pub input: RendererInput,
+    pub output: CommandOutput,
+    /// Killed after this many seconds.
+    pub timeout_secs: u32,
+}
+
+/// A renderer as Settings › Renderers sends it: a new one has no id yet, and
+/// no timeout is the default.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[ts(export_to = "app.ts")]
+pub struct UserRendererDraft {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub patterns: Vec<String>,
+    #[serde(default)]
+    pub fences: Vec<String>,
+    pub input: RendererInput,
+    pub output: CommandOutput,
+    #[serde(default)]
+    pub timeout_secs: Option<u32>,
+}
+
+/// What goes on stdin: text, or bytes in base64.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export_to = "app.ts")]
+pub enum RenderContent {
+    Text { text: String },
+    Bytes { base64: String },
+}
+
+/// How a run ended. A run that failed is an answer, not an error: the viewer
+/// draws the source and what the command said.
+///
+/// - `drawn`: exit 0. `body` is the SVG or HTML as text, or for an image a
+///   `data:` URL of the type its first bytes name.
+/// - `failed`: a non-zero exit (`status` is `None` for a signal), with stderr.
+/// - `timed_out`: stopped at its timeout, with the stderr it had written.
+/// - `too_large`: stopped when stdout passed the cap.
+/// - `not_started`: the program could not be started (not on `PATH`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+#[ts(export_to = "app.ts")]
+pub enum RenderRun {
+    Drawn { output: CommandOutput, body: String },
+    Failed { status: Option<i32>, stderr: String },
+    TimedOut { seconds: u32, stderr: String },
+    TooLarge { cap_bytes: u32 },
+    NotStarted { reason: String },
+}
+
+/// The saved renderers, in the person's order.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn list(pool: &PgPool) -> Result<Vec<UserRenderer>, IpcError> {
+    Ok(read_value(pool, RENDERERS_KEY)
+        .await?
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default())
+}
+
+/// Save the whole list, checked and trimmed, and answer it as stored.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a renderer with no name or a
+/// command that cannot be run, naming it;
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn save(
+    pool: &PgPool,
+    drafts: &[UserRendererDraft],
+) -> Result<Vec<UserRenderer>, IpcError> {
+    let settled = settle(drafts)?;
+    let value = serde_json::to_value(&settled).map_err(IpcError::internal)?;
+    write_value(pool, RENDERERS_KEY, &value).await?;
+    Ok(settled)
+}
+
+fn settle(drafts: &[UserRendererDraft]) -> Result<Vec<UserRenderer>, IpcError> {
+    let mut out: Vec<UserRenderer> = Vec::with_capacity(drafts.len());
+    for (index, draft) in drafts.iter().enumerate() {
+        let name = draft.name.trim();
+        if name.is_empty() {
+            return Err(IpcError::invalid(format!(
+                "renderer {} has no name",
+                index + 1
+            )));
+        }
+        let command = draft.command.trim();
+        knobas_core::checkout::open::words(command).map_err(|error| {
+            IpcError::invalid(format!("{name}'s command cannot be run: {error}"))
+        })?;
+        let given = draft.id.as_deref().map(str::trim).unwrap_or_default();
+        let taken = |id: &str| out.iter().any(|r| r.id == id);
+        let id = if crate::slug::is_slug(given) && !taken(given) {
+            given.to_owned()
+        } else {
+            let base = crate::slug::slug(name, "renderer");
+            let mut id = base.clone();
+            let mut n = 2;
+            while taken(&id) {
+                id = format!("{base}-{n}");
+                n += 1;
+            }
+            id
+        };
+        let list = |items: &[String], lower: bool| -> Vec<String> {
+            items
+                .iter()
+                .map(|item| item.trim())
+                .filter(|item| !item.is_empty())
+                .map(|item| {
+                    if lower {
+                        item.to_lowercase()
+                    } else {
+                        item.to_owned()
+                    }
+                })
+                .collect()
+        };
+        out.push(UserRenderer {
+            id,
+            name: name.to_owned(),
+            command: command.to_owned(),
+            patterns: list(&draft.patterns, false),
+            fences: list(&draft.fences, true),
+            input: draft.input,
+            output: draft.output,
+            timeout_secs: draft
+                .timeout_secs
+                .unwrap_or(DEFAULT_TIMEOUT_SECS)
+                .clamp(1, MAX_TIMEOUT_SECS),
+        });
+    }
+    Ok(out)
+}
+
+/// Run saved renderer `id` with `content` on stdin.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an id that is not saved,
+/// bytes that are not base64, or a saved command that no longer splits;
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn run(pool: &PgPool, id: &str, content: RenderContent) -> Result<RenderRun, IpcError> {
+    let renderer = list(pool)
+        .await?
+        .into_iter()
+        .find(|r| r.id == id)
+        .ok_or_else(|| {
+            IpcError::invalid(format!(
+                "'{id}' is not one of your renderers: see Settings › Renderers"
+            ))
+        })?;
+    let argv = knobas_core::checkout::open::words(&renderer.command).map_err(|error| {
+        IpcError::invalid(format!(
+            "{}'s command cannot be run: {error}",
+            renderer.name
+        ))
+    })?;
+    let stdin = match content {
+        RenderContent::Text { text } => text.into_bytes(),
+        RenderContent::Bytes { base64 } => STANDARD
+            .decode(base64.trim())
+            .map_err(|error| IpcError::invalid(format!("the bytes are not base64: {error}")))?,
+    };
+    let limits = Limits {
+        timeout: Duration::from_secs(u64::from(renderer.timeout_secs)),
+        output_cap: OUTPUT_CAP,
+    };
+    let parent: Vec<_> = std::env::vars_os().collect();
+    let ended = run_argv(&argv, stdin, limits, parent).await;
+    Ok(match ended {
+        Ended::Exited {
+            status: Some(0),
+            stdout,
+            ..
+        } => drawn(renderer.output, stdout),
+        Ended::Exited { status, stderr, .. } => RenderRun::Failed {
+            status,
+            stderr: lossy(stderr),
+        },
+        Ended::TimedOut { stderr } => RenderRun::TimedOut {
+            seconds: renderer.timeout_secs,
+            stderr: lossy(stderr),
+        },
+        Ended::TooLarge => RenderRun::TooLarge {
+            cap_bytes: u32::try_from(OUTPUT_CAP).unwrap_or(u32::MAX),
+        },
+        Ended::NotStarted(reason) => RenderRun::NotStarted { reason },
+    })
+}
+
+fn lossy(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes)
+        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
+}
+
+fn drawn(output: CommandOutput, stdout: Vec<u8>) -> RenderRun {
+    let body = match output {
+        CommandOutput::Svg | CommandOutput::Html => lossy(stdout),
+        CommandOutput::Image => format!(
+            "data:{};base64,{}",
+            image_type(&stdout),
+            STANDARD.encode(&stdout)
+        ),
+    };
+    RenderRun::Drawn { output, body }
+}
+
+/// The image type its first bytes name; SVG for text that opens with `<`.
+fn image_type(bytes: &[u8]) -> &'static str {
+    match bytes {
+        [0x89, b'P', b'N', b'G', ..] => "image/png",
+        [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
+        [b'G', b'I', b'F', b'8', ..] => "image/gif",
+        [
+            b'R',
+            b'I',
+            b'F',
+            b'F',
+            _,
+            _,
+            _,
+            _,
+            b'W',
+            b'E',
+            b'B',
+            b'P',
+            ..,
+        ] => "image/webp",
+        _ if bytes.trim_ascii_start().starts_with(b"<") => "image/svg+xml",
+        _ => "application/octet-stream",
+    }
+}
+
+/// How long a run may take and how much it may write.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Limits {
+    pub timeout: Duration,
+    pub output_cap: usize,
+}
+
+/// How a program ended.
+#[derive(Debug)]
+pub(crate) enum Ended {
+    Exited {
+        status: Option<i32>,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    },
+    TimedOut {
+        stderr: Vec<u8>,
+    },
+    TooLarge,
+    NotStarted(String),
+}
+
+/// Start `argv[0]` with the rest as its arguments -- **no shell** -- write
+/// `stdin` to it, and collect stdout and stderr within `limits`.
+/// The environment is `parent`'s less every `KNOBAS_*` variable.
+pub(crate) async fn run_argv(
+    argv: &[String],
+    stdin: Vec<u8>,
+    limits: Limits,
+    parent: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+) -> Ended {
+    let Some((program, arguments)) = argv.split_first() else {
+        return Ended::NotStarted("the command has no program in it".to_owned());
+    };
+    let mut built = knobas_db::console::command(program);
+    built
+        .args(arguments)
+        .env_clear()
+        .envs(
+            parent
+                .into_iter()
+                .filter(|(name, _)| !name.as_encoded_bytes().starts_with(b"KNOBAS_")),
+        )
+        .current_dir(std::env::temp_dir())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    // Its own process group, so a timeout or the cap stops everything it
+    // started (a wrapper script's `java`, a `sh -c` pipeline), not only it.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut built, 0);
+    let mut command = tokio::process::Command::from(built);
+    command.kill_on_drop(true);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => return Ended::NotStarted(format!("{program} could not be started: {error}")),
+    };
+    let (Some(mut input), Some(stdout), Some(stderr)) =
+        (child.stdin.take(), child.stdout.take(), child.stderr.take())
+    else {
+        return Ended::NotStarted("the program's streams could not be opened".to_owned());
+    };
+    // A program that exits without reading its stdin closes the pipe; the
+    // write fails then, and that is not the program's failure.
+    let writer = tokio::spawn(async move {
+        let _ = input.write_all(&stdin).await;
+        drop(input);
+    });
+    let stderr_task = tokio::spawn(read_capped(stderr, STDERR_CAP, false));
+    let collected = tokio::time::timeout(limits.timeout, async {
+        let out = read_capped(stdout, limits.output_cap, true).await;
+        match out {
+            Some(stdout) => Some((stdout, child.wait().await)),
+            None => None,
+        }
+    })
+    .await;
+    writer.abort();
+    let ended = match collected {
+        Err(_) => {
+            stop(&mut child).await;
+            Ended::TimedOut { stderr: Vec::new() }
+        }
+        Ok(None) => {
+            stop(&mut child).await;
+            stderr_task.abort();
+            return Ended::TooLarge;
+        }
+        Ok(Some((stdout, status))) => Ended::Exited {
+            status: status.ok().and_then(|s| s.code()),
+            stdout,
+            stderr: Vec::new(),
+        },
+    };
+    // The child is gone, so its stderr is at its end (or a grandchild holds
+    // it: give up after a moment rather than wait on it).
+    let stderr = tokio::time::timeout(Duration::from_millis(500), stderr_task)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten()
+        .unwrap_or_default();
+    match ended {
+        Ended::TimedOut { .. } => Ended::TimedOut { stderr },
+        Ended::Exited { status, stdout, .. } => Ended::Exited {
+            status,
+            stdout,
+            stderr,
+        },
+        other => other,
+    }
+}
+
+/// Kill a run that is still going: on Unix its whole process group (it leads
+/// one, `process_group(0)`), then the child itself, reaped. Windows kills the
+/// child alone.
+async fn stop(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child
+        .id()
+        .and_then(|id| i32::try_from(id).ok())
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        // The child has not been reaped (no `wait` finished), so its pid is
+        // still the group's id and not anyone else's.
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    }
+    let _ = child.kill().await;
+}
+
+/// Everything `reader` writes up to `cap` bytes. Past the cap: `None` when
+/// `refuse`, else the first `cap` bytes, the rest read and dropped so the
+/// writer never blocks.
+async fn read_capped(
+    mut reader: impl AsyncRead + Unpin,
+    cap: usize,
+    refuse: bool,
+) -> Option<Vec<u8>> {
+    let mut kept = Vec::new();
+    let mut chunk = vec![0_u8; 64 * 1024];
+    loop {
+        let n = reader.read(&mut chunk).await.ok()?;
+        if n == 0 {
+            return Some(kept);
+        }
+        let room = cap.saturating_sub(kept.len());
+        if n > room {
+            if refuse {
+                return None;
+            }
+            kept.extend_from_slice(&chunk[..room]);
+        } else {
+            kept.extend_from_slice(&chunk[..n]);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| (*w).to_owned()).collect()
+    }
+
+    /// A run that writes past the cap is stopped and refused, not cut.
+    #[tokio::test]
+    async fn output_past_the_cap_is_too_large() {
+        let ended = run_argv(
+            &argv(&["yes"]),
+            Vec::new(),
+            Limits {
+                timeout: Duration::from_secs(5),
+                output_cap: 1000,
+            },
+            std::env::vars_os().collect(),
+        )
+        .await;
+        assert!(matches!(ended, Ended::TooLarge), "{ended:?}");
+    }
+
+    /// A run stopped at its timeout takes what it started with it: a
+    /// wrapper's background child is killed too, not left running.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_timed_out_run_takes_its_children_with_it() {
+        let marker = std::env::temp_dir().join(format!("knobas-2262-group-{}", std::process::id()));
+        let _ = std::fs::remove_file(&marker);
+        let ended = run_argv(
+            &argv(&[
+                "sh",
+                "-c",
+                "sleep 60 & echo $! > \"$0\"; wait",
+                marker.to_str().unwrap(),
+            ]),
+            Vec::new(),
+            Limits {
+                timeout: Duration::from_secs(1),
+                output_cap: OUTPUT_CAP,
+            },
+            std::env::vars_os().collect(),
+        )
+        .await;
+        assert!(matches!(ended, Ended::TimedOut { .. }), "{ended:?}");
+        let pid = std::fs::read_to_string(&marker).expect("the child wrote its pid");
+        let _ = std::fs::remove_file(&marker);
+        let pid = pid.trim();
+        let alive = || {
+            std::process::Command::new("kill")
+                .args(["-0", pid])
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        };
+        // Killed, then reaped by init: give the reaping a moment.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while alive() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(!alive(), "the background sleep {pid} outlived its renderer");
+    }
+
+    /// A run gets no `KNOBAS_*` variable (the database URL under `just dev`).
+    #[tokio::test]
+    async fn a_run_inherits_no_knobas_variable() {
+        let parent = vec![
+            ("PATH".into(), std::env::var_os("PATH").expect("a PATH")),
+            ("KNOBAS_RENDER_TEST_2262".into(), "hunter2".into()),
+        ];
+        let ended = run_argv(
+            &argv(&["env"]),
+            Vec::new(),
+            Limits {
+                timeout: Duration::from_secs(5),
+                output_cap: OUTPUT_CAP,
+            },
+            parent,
+        )
+        .await;
+        let Ended::Exited { stdout, .. } = ended else {
+            panic!("{ended:?}")
+        };
+        let printed = String::from_utf8(stdout).unwrap();
+        assert!(!printed.contains("KNOBAS_RENDER_TEST_2262"), "{printed}");
+        assert!(printed.contains("PATH="), "{printed}");
+    }
+
+    #[test]
+    fn an_image_type_is_read_from_its_first_bytes() {
+        assert_eq!(image_type(b"\x89PNG\r\n"), "image/png");
+        assert_eq!(image_type(b"\xFF\xD8\xFF\xE0"), "image/jpeg");
+        assert_eq!(image_type(b"GIF89a"), "image/gif");
+        assert_eq!(image_type(b"RIFF\0\0\0\0WEBPVP8 "), "image/webp");
+        assert_eq!(image_type(b"  <svg/>"), "image/svg+xml");
+        assert_eq!(image_type(b"??"), "application/octet-stream");
+    }
+}

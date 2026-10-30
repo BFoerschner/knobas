@@ -42,6 +42,7 @@ pub mod notes_export;
 pub mod notify;
 mod profile;
 pub mod protocol;
+pub mod renderers;
 pub mod run_presets;
 pub mod settings;
 mod slug;
@@ -631,6 +632,11 @@ pub fn run() {
             commands::sources::sync_role,
             // #2107's *Refresh* on an item's detail, appended at the foot.
             commands::sources::refresh_entity,
+            // #2262's command renderers, appended at the foot: the list is
+            // append-only (§10.8).
+            commands::app::user_renderers,
+            commands::app::set_user_renderers,
+            commands::app::run_renderer,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

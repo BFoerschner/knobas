@@ -136,3 +136,8 @@
   .tf-repo { grid-template-columns: minmax(0, 1fr); }
   .tf-ftree { position: static; }
 }
+
+/* A command renderer's run (#2262): the sandboxed frame, and a failure above the source (mockups/code-area .stepfail). */
+.tf-rframe { display: block; width: 100%; min-height: 60vh; border: 0; background: var(--paper); }
+.tf-stepfail { border-bottom: 1px solid var(--rule); background: var(--err-bg); padding: 10px 12px; font-size: var(--t-sm); color: var(--err); display: flex; flex-direction: column; gap: 8px; }
+.tf-stepfail pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; background: var(--paper); color: var(--ink); border-radius: 4px; padding: 8px 10px; white-space: pre-wrap; }

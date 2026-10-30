@@ -78,6 +78,7 @@ vi.mock("./lib/ipc/app", () => ({
   ping: () => Promise.resolve("pong"),
   pagesKeptOpen: () => Promise.resolve(5),
   setPagesKeptOpen: (count: number) => Promise.resolve(count),
+  userRenderers: () => Promise.resolve([]),
 }));
 
 vi.mock("./lib/ipc/sources", () => ({
