@@ -3205,6 +3205,9 @@ async fn conversation_quotes_each_reviews_line_comments_under_it() {
         texts.contains(&"On `src/sepa/retry.rs`, line 2:\n\n> Bound the jitter.\n\nOn `src/sepa/retry.rs`, old line 2:\n\n> Why drop the <b>constant</b>?"),
         "{texts:#?}"
     );
-    assert!(texts.iter().any(|t| t.contains("> Agreed: `±10 %`.")), "{texts:#?}");
+    assert!(
+        texts.iter().any(|t| t.contains("> Agreed: `±10 %`.")),
+        "{texts:#?}"
+    );
     assert!(!texts.iter().any(|t| t.contains("draft")), "{texts:#?}");
 }

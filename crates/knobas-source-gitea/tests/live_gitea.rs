@@ -7108,7 +7108,11 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
     )
     .await;
     let number = litter
-        .open_pull_as("jonas.becker", &branch, &format!("knobas thread check {stamp}"))
+        .open_pull_as(
+            "jonas.becker",
+            &branch,
+            &format!("knobas thread check {stamp}"),
+        )
         .await;
     let id = format!("gitea:{}#{number}", env.full_name());
     let version: serde_json::Value = http
@@ -7119,7 +7123,10 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
         .json()
         .await
         .unwrap();
-    let forgejo = version["version"].as_str().unwrap_or_default().contains("+gitea-");
+    let forgejo = version["version"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("+gitea-");
     let files = || async {
         let view = source.view(&id, Some("files")).await.unwrap().unwrap();
         let Some(Block::Diff {
@@ -7129,7 +7136,10 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
             panic!("the files tab is a diff: {view:#?}");
         };
         let readme = files.into_iter().find(|f| f.path == "README.md").unwrap();
-        (readme, commentable.expect("an open pull request's diff takes comments"))
+        (
+            readme,
+            commentable.expect("an open pull request's diff takes comments"),
+        )
     };
     let (readme, commentable) = files().await;
     assert_eq!(commentable.reply.as_deref(), Some("reply_to_thread"));
@@ -7138,13 +7148,23 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
         (!forgejo).then_some("resolve_thread"),
         "resolve is offered on Gitea and not on Forgejo ({version})"
     );
-    assert!(commentable.head.is_some(), "the head the comments are kept by");
-    assert!(readme.blob.is_some(), "the blob Viewed is kept by: {readme:#?}");
+    assert!(
+        commentable.head.is_some(),
+        "the head the comments are kept by"
+    );
+    assert!(
+        readme.blob.is_some(),
+        "the blob Viewed is kept by: {readme:#?}"
+    );
     let added = readme
         .hunks
         .iter()
         .flat_map(|h| &h.lines)
-        .find_map(|l| (l.kind == knobas_source::view::DiffLineKind::Add).then_some(l.new).flatten())
+        .find_map(|l| {
+            (l.kind == knobas_source::view::DiffLineKind::Add)
+                .then_some(l.new)
+                .flatten()
+        })
         .expect("an added line");
 
     // 1. A thread on the added line.
@@ -7196,11 +7216,17 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
     let answered = thread(&readme);
     let bodies: Vec<&str> = answered.comments.iter().map(|c| c.body.as_str()).collect();
     assert_eq!(bodies, [opened.as_str(), reply.as_str()], "{answered:#?}");
-    assert_eq!(answered.id.as_deref(), Some(thread_id.as_str()), "the thread keeps its id");
+    assert_eq!(
+        answered.id.as_deref(),
+        Some(thread_id.as_str()),
+        "the thread keeps its id"
+    );
     let whole = source.view(&id, None).await.unwrap().unwrap();
     let conversation = said(&whole, "conversation");
     assert!(
-        conversation.iter().any(|l| l.contains(&format!("> {reply}"))),
+        conversation
+            .iter()
+            .any(|l| l.contains(&format!("> {reply}"))),
         "{conversation:#?}"
     );
 
@@ -7211,7 +7237,10 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
         resolved,
     };
     if forgejo {
-        let error = source.write(resolve(true)).await.expect_err("Forgejo cannot resolve");
+        let error = source
+            .write(resolve(true))
+            .await
+            .expect_err("Forgejo cannot resolve");
         assert_eq!(error.status(), Some(405), "{error:?}");
     } else {
         source.write(resolve(true)).await.expect("Gitea resolves");
@@ -7244,7 +7273,11 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
         .await
         .expect("Gitea takes the request");
     let pull: serde_json::Value = http
-        .get(format!("{}/api/v1/repos/{}/pulls/{number}", env.url, env.full_name()))
+        .get(format!(
+            "{}/api/v1/repos/{}/pulls/{number}",
+            env.url,
+            env.full_name()
+        ))
         .header("Authorization", format!("token {}", env.token))
         .send()
         .await
@@ -7272,8 +7305,18 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
         .await
         .expect_err("an unknown reviewer is refused");
     println!("an unknown reviewer: {error:?}");
-    assert!(matches!(error, knobas_source::SourceError::Protocol { .. }), "{error:?}");
-    println!("thread {thread_id} answered{} and {who} asked on #{number}", if forgejo { "" } else { ", resolved and reopened" });
+    assert!(
+        matches!(error, knobas_source::SourceError::Protocol { .. }),
+        "{error:?}"
+    );
+    println!(
+        "thread {thread_id} answered{} and {who} asked on #{number}",
+        if forgejo {
+            ""
+        } else {
+            ", resolved and reopened"
+        }
+    );
 }
 
 /// The pages the descriptor declares (#2274, `SourceDescriptor::code_pages`)
