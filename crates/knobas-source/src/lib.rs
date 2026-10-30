@@ -1994,7 +1994,9 @@ pub trait Source: Send + Sync {
     /// The **source view** this adapter draws for one of its own entities
     /// (ADR-0020, `CONTEXT.md` *Source view*): sections of typed blocks from
     /// the fixed vocabulary in [`view`], read live when a detail opens and
-    /// never stored.
+    /// never stored in the database. What
+    /// [`view_standing`](Source::view_standing) says is fixed the app keeps in
+    /// memory (ADR-0032).
     ///
     /// `entity` is an [`EntityRef`] in string form, the address
     /// [`reachable_transitions`](Source::reachable_transitions) takes.

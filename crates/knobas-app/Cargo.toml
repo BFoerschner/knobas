@@ -146,6 +146,10 @@ knobas-mockd = { path = "../knobas-mockd" }
 # `AppState::over_pool`, `bring_up` and `shutdown` (same convention as
 # `knobas-db`'s `test_util`).
 knobas-app = { path = ".", features = ["test-util"] }
+# The request counter (`knobas_http::counted`, #2239) the round-trip budgets
+# of the live reads are asserted through. A dev-dependency only: the shipped
+# binary has no counter.
+knobas-http = { path = "../knobas-http", features = ["test-util"] }
 # The fixture component's loader, for the registry's tests and
 # `tests/it/external_adapter.rs`.
 knobas-wasm-host = { path = "../knobas-wasm-host", features = ["test-util"] }

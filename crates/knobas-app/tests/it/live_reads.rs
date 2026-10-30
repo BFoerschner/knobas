@@ -68,6 +68,11 @@ struct Fake {
 
 /// In every view the fake draws, so the database can be searched for it.
 const MARK: &str = "kept-in-memory-only-7f3a";
+/// How long the fake takes over a key under `commit/slow`: a source further
+/// away than any the spec's budget allows for.
+const SLOW: std::time::Duration = std::time::Duration::from_millis(400);
+/// The spec's budget for a second open of a file at one sha (#2234, Seam 1).
+const CACHED_BUDGET: std::time::Duration = std::time::Duration::from_millis(150);
 
 fn key(entity: &str) -> &str {
     entity.split_once(':').map_or("", |(_, key)| key)
@@ -120,6 +125,9 @@ impl Source for Fake {
             .lock()
             .unwrap()
             .push((entity.to_owned(), section.map(str::to_owned)));
+        if key(entity).starts_with("commit/slow") {
+            tokio::time::sleep(SLOW).await;
+        }
         let padding = key(entity)
             .strip_prefix("commit/big:")
             .and_then(|rest| rest.split(':').next())
@@ -418,6 +426,21 @@ async fn a_fixed_view_is_read_once_and_a_live_one_every_time() {
     f.read("branch/main", Some("file:src/lib.rs")).await.unwrap();
     f.read("branch/main", Some("file:src/lib.rs")).await.unwrap();
     assert_eq!(f.seen.reads(), 5, "a live view is never kept");
+}
+
+/// **The cached open's budget** (#2239): over a source that takes 400 ms, a
+/// second open at the same sha answers in under 150 ms. Against the real
+/// Gitea the same budget is `tests/read_cache_live.rs`'s.
+#[tokio::test]
+async fn a_second_open_at_a_sha_answers_within_the_budget() {
+    let f = fixture().await;
+    let started = std::time::Instant::now();
+    f.read("commit/slow", Some("file:README.md")).await.unwrap();
+    assert!(started.elapsed() >= SLOW, "the first open is the source's");
+    let started = std::time::Instant::now();
+    f.read("commit/slow", Some("file:README.md")).await.unwrap();
+    let took = started.elapsed();
+    assert!(took < CACHED_BUDGET, "a cached open took {took:?}");
 }
 
 /// Past its bound the cache drops the view used longest ago, and a dropped

@@ -6,7 +6,8 @@
 //! [`pr`]'s, a **branch** is [`branch`]'s and a **repository** is
 //! [`repo`]'s (#663).
 //!
-//! Every read here is live and nothing is stored (rule 1). A refusal is the
+//! Every read here is live and nothing is stored (rule 1); what stands at a
+//! whole commit sha the app may keep in memory ([`standing`], ADR-0032). A refusal is the
 //! error it maps to, so the detail says *Showing the mirror* and why. A few
 //! parts of a view are drawn without what they could not read, saying so: a
 //! pull request's checks (#710) and labels (#1194) on any failure, and its
