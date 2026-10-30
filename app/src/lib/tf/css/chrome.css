@@ -131,3 +131,23 @@
 .tf-run-remove { color: var(--err); white-space: nowrap; }
 /* A windowed table's room for its undrawn rows (`shell/windowed.svelte.ts`, #2209): no padding or rule of its own. */
 tr.tf-wgap > td { padding: 0; border: 0; }
+
+/* Waiting states (#2246, `TfWaiting.svelte`): a replaced read dims what it drew; a first read draws skeleton rows. */
+.tf-waiting { min-width: 0; }
+.tf-wait-dim { opacity: 0.5; pointer-events: none; transition: opacity 120ms ease-out; }
+.tf-skel .tf-skel-bar { display: block; height: 10px; border-radius: 3px; background: var(--rule-2); animation: tf-skel-pulse 1.2s ease-in-out infinite alternate; }
+.tf-skel td { padding: 12px 10px; }
+.tf-skel tr td:first-child .tf-skel-bar { width: 70%; }
+.tf-skel tr:nth-child(3n + 2) td:nth-child(2) .tf-skel-bar { width: 55%; }
+.tf-skel tr:nth-child(3n) td:nth-child(2) .tf-skel-bar { width: 80%; }
+.tf-skel tr td:last-child:not(:first-child) .tf-skel-bar { width: 40%; }
+.tf-skel-lines { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
+.tf-skel-lines .tf-skel-bar:nth-child(4n + 1) { width: 62%; }
+.tf-skel-lines .tf-skel-bar:nth-child(4n + 2) { width: 84%; }
+.tf-skel-lines .tf-skel-bar:nth-child(4n + 3) { width: 45%; }
+.tf-skel-lines .tf-skel-bar:nth-child(4n) { width: 72%; }
+@keyframes tf-skel-pulse { from { opacity: 1; } to { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) {
+  .tf-skel .tf-skel-bar { animation: none; }
+  .tf-wait-dim { transition: none; }
+}
