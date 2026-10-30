@@ -36,11 +36,13 @@ use std::path::Path;
 use std::time::Duration;
 
 use knobas_core::checkout::open::is_sha;
+use knobas_core::checkout::worktree::is_diff_end;
 use knobas_source::diff::{DiffFile, parse_view};
 
 use super::uncommitted::{READ_BYTES, READ_LINES, run_capped};
 use super::working_tree::{
-    APPLE_SHIM, command_line_tools_installed, git_at, is_dir_off_runtime, locate,
+    APPLE_SHIM, PROTOCOL_VARIABLES, command_line_tools_installed, git_at, is_dir_off_runtime,
+    locate,
 };
 
 /// How long the whole local read may take, as for the uncommitted diff.
@@ -139,9 +141,10 @@ pub async fn read_with(
     tokio::time::timeout(TIMEOUT, all).await.ok().flatten()
 }
 
-/// Whether the checkout at `path` holds every one of `shas` as a commit:
-/// each a checked sha (ADR-0034) that `rev-parse` resolves locally, never
-/// fetched. What *Diff tool* (#2275) asks before it is offered.
+/// Whether the checkout at `path` holds every one of `ends` as a commit:
+/// each a checked sha (ADR-0034), which may end in one `^` for its parent,
+/// that `rev-parse` resolves locally, never fetched. What *Diff tool*
+/// (#2275) asks before it is offered.
 pub async fn holds_commits(path: &Path, shas: &[&str]) -> bool {
     let search = std::env::var_os("PATH").unwrap_or_default();
     holds_commits_with(&search, path, shas).await
@@ -149,7 +152,7 @@ pub async fn holds_commits(path: &Path, shas: &[&str]) -> bool {
 
 /// [`holds_commits`] with the `PATH` to find `git` on.
 pub async fn holds_commits_with(search: &OsStr, path: &Path, shas: &[&str]) -> bool {
-    if shas.iter().any(|sha| !is_sha(sha)) {
+    if shas.iter().any(|sha| !is_diff_end(sha, true)) {
         return false;
     }
     let Ok(git) = locate(
@@ -183,24 +186,33 @@ pub async fn holds_commits_with(search: &OsStr, path: &Path, shas: &[&str]) -> b
 /// and in `git_at` turn off, so they are removed, as for `clone`. Replace
 /// refs are the checkout's own rewrite of history, which the source never
 /// sees, so they are not followed: a sha means the commit it names.
+///
+/// git looks for the repository at `path` and no higher
+/// (`GIT_CEILING_DIRECTORIES` is its parent): a checkout whose `.git` is
+/// gone is no repository, never the one some folder above it belongs to.
 fn git_read(git: &Path, path: &Path) -> tokio::process::Command {
     let mut command = git_at(git, path);
     command
         .args(["-c", "protocol.allow=never"])
         .env("GIT_NO_LAZY_FETCH", "1")
         .env("GIT_NO_REPLACE_OBJECTS", "1")
-        .env_remove("GIT_ALLOW_PROTOCOL")
-        .env_remove("GIT_CONFIG_PARAMETERS")
-        .env_remove("GIT_CONFIG_COUNT")
         .env_remove("GIT_EXTERNAL_DIFF");
+    for name in PROTOCOL_VARIABLES {
+        command.env_remove(name);
+    }
+    match path.parent() {
+        Some(parent) if path.is_absolute() => command.env("GIT_CEILING_DIRECTORIES", parent),
+        // A relative path or a root has nothing above it to stop at.
+        _ => command.env_remove("GIT_CEILING_DIRECTORIES"),
+    };
     command
 }
 
 /// The whole sha of the commit `name` names at the checkout, if it holds it.
-/// `name` is a checked sha, or one with a `^` this module added.
+/// `name` is a checked sha, or one with a `^`.
 async fn commit(git: &Path, path: &Path, name: &str) -> Option<String> {
     let mut command = git_read(git, path);
-    command.args(["rev-parse", "--verify", "--quiet"]);
+    command.args(["rev-parse", "--verify", "--quiet", "--end-of-options"]);
     command.arg(format!("{name}^{{commit}}"));
     let (out, cut) = run_capped(command, 2, 1024).await.ok()?;
     let sha = String::from_utf8_lossy(&out).trim().to_owned();
@@ -457,6 +469,28 @@ mod tests {
             read(shallow.path(), &format!("{}^", r.edit), &r.edit, false).await,
             None
         );
+    }
+
+    /// A folder with no `.git` of its own is no checkout, even inside a
+    /// repository that holds both commits: git does not walk up to it.
+    #[tokio::test]
+    async fn a_folder_inside_a_repository_is_not_read_as_it() {
+        let r = repo();
+        let inner = r.dir.path().join("not-a-checkout");
+        std::fs::create_dir(&inner).unwrap();
+        assert!(read(r.dir.path(), &r.root, &r.edit, false).await.is_some());
+        assert_eq!(read(&inner, &r.root, &r.edit, false).await, None);
+        assert!(!holds_commits(&inner, &[&r.root]).await);
+    }
+
+    /// The Diff tool's base may be a parent: held when the commit and its
+    /// parent are here, not for a root, which has none.
+    #[tokio::test]
+    async fn a_parent_is_held_when_the_commit_has_one() {
+        let r = repo();
+        assert!(holds_commits(r.dir.path(), &[&format!("{}^", r.edit), &r.edit]).await);
+        assert!(!holds_commits(r.dir.path(), &[&format!("{}^", r.root)]).await);
+        assert!(!holds_commits(r.dir.path(), &[&format!("{}^^", r.edit)]).await);
     }
 
     /// What knobas's own environment could carry to override the network

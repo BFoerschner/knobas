@@ -3,9 +3,9 @@
  * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
  * `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
-import type { CheckoutSettings, CheckoutView, CloneAnswer, DiffFile, DiffRead, OpenObject, RangeDiff } from "../../../ipc/entity";
+import type { CheckoutSettings, CheckoutView, CloneAnswer, DiffFile, DiffRead, OpenObject, PullRequestWorktree, RangeDiff } from "../../../ipc/entity";
 import { repoView } from "./views/repos";
-import { fillObject, objectCommand } from "../../../tf/openin/openin";
+import { fillObject, isDiffEnd, objectCommand, worktreeOf } from "../../../tf/openin/openin";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 import { CORPUS } from "./corpus";
@@ -73,7 +73,7 @@ function fakeRangeDiff(entityId: string, base: string, head: string, ignoreWhite
   const view = repoView(entityId, `compare:${base}...${head}`);
   const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
   if (block?.type !== "diff") throw { code: "not_found", message: `no compare of ${entityId}`, source_id: null };
-  const shas = /^[0-9a-f]{7,64}\^?$/.test(base) && /^[0-9a-f]{7,64}$/.test(head);
+  const shas = isDiffEnd(base, true) && isDiffEnd(head, false);
   const local = shas && fakeCheckout(entityId).path !== null;
   const bare = (file: DiffFile, kind: "add" | "del") =>
     file.hunks.flatMap((hunk) => hunk.lines.filter((line) => line.kind === kind).map((line) => line.text.replace(/\s+/g, ""))).join("\n");
@@ -181,7 +181,8 @@ function fakeCheckoutDiff(entityId: string): DiffRead {
 }
 
 /**
- * The *Open in…* applications (#844): macOS's shipped four, transcribed,
+ * The *Open in…* applications (#844): macOS's shipped four, transcribed (each
+ * opening a pull request at its worktree since #2285),
  * because the browser this runs in has no platform to ask. The list a
  * session saves replaces them, as the backend's one settings row does.
  */
@@ -196,10 +197,22 @@ interface FakeApp {
 }
 
 const SHIPPED: FakeApp[] = [
-  { id: "vscode", name: "VS Code", command: 'open -a "Visual Studio Code" {path}', file_command: 'open -a "Visual Studio Code" {file}' },
-  { id: "terminal", name: "Terminal", command: "open -a Terminal {path}", file_command: null },
-  { id: "fork", name: "Fork", command: "open -a Fork {path}", file_command: null },
-  { id: "jetbrains", name: "IntelliJ IDEA", command: 'open -a "IntelliJ IDEA" {path}', file_command: 'open -a "IntelliJ IDEA" {file}' },
+  {
+    id: "vscode",
+    name: "VS Code",
+    command: 'open -a "Visual Studio Code" {path}',
+    file_command: 'open -a "Visual Studio Code" {file}',
+    pull_request_command: 'open -a "Visual Studio Code" {path}',
+  },
+  { id: "terminal", name: "Terminal", command: "open -a Terminal {path}", file_command: null, pull_request_command: "open -a Terminal {path}" },
+  { id: "fork", name: "Fork", command: "open -a Fork {path}", file_command: null, pull_request_command: "open -a Fork {path}" },
+  {
+    id: "jetbrains",
+    name: "IntelliJ IDEA",
+    command: 'open -a "IntelliJ IDEA" {path}',
+    file_command: 'open -a "IntelliJ IDEA" {file}',
+    pull_request_command: 'open -a "IntelliJ IDEA" {path}',
+  },
 ];
 
 let fakeApps: FakeApp[] = SHIPPED.map((app) => ({ ...app }));
@@ -359,7 +372,27 @@ function fakeOpenObject(args: Record<string, unknown>) {
   if (template === null) {
     throw { code: "invalid", message: `${app.name} does not open this: add it in Settings › Checkouts`, source_id: null };
   }
-  return words(template).map((word) => fillObject(word, { path: checkout.path!, object, url: fakePage(entityId, object) }));
+  // A pull request opens in its worktree under the clones root (#2285), which the fake lists.
+  let path = checkout.path;
+  if (object.kind === "pull_request") {
+    path = worktreeOf(fakeClonesRoot, checkout.repo_entity_id, object.number) ?? path;
+    if (!fakeWorktrees.some((one) => one.path === path)) {
+      fakeWorktrees.push({ repo_entity_id: checkout.repo_entity_id ?? entityId, number: object.number, path, closed: false });
+    }
+  }
+  return words(template).map((word) => fillObject(word, { path, object, url: fakePage(entityId, object) }));
+}
+
+/** The pull request worktrees `open_object` made this session (#2285). */
+let fakeWorktrees: PullRequestWorktree[] = [];
+
+/** `diff_tool` (#2275): offered when the repository is cloned and both ends are shas. */
+function fakeDiffTool(args: Record<string, unknown>): string[] | null {
+  const checkout = fakeCheckout(String(args["entityId"] ?? ""));
+  const base = String(args["base"] ?? "");
+  const head = String(args["head"] ?? "");
+  if (checkout.path === null || !isDiffEnd(base, true) || !isDiffEnd(head, false)) return null;
+  return ["/usr/bin/git", "-C", checkout.path, "difftool", "--dir-diff", "--gui", "--no-prompt", base, head, "--"];
 }
 
 /**
@@ -447,6 +480,21 @@ export function handlers(): Handlers {
     open_checkout: (args) => fakeOpen(args),
     open_object: (args) => fakeOpenObject(args),
     object_page: (args) => fakePage(String(args["entityId"] ?? ""), args["object"] as OpenObject),
+    diff_tool: (args) => fakeDiffTool(args),
+    open_diff_tool: (args) => {
+      const argv = fakeDiffTool(args);
+      if (argv === null) throw { code: "invalid", message: "the Diff tool opens two commits this repository's checkout holds", source_id: null };
+      return argv;
+    },
+    pull_request_worktrees: () => fakeWorktrees,
+    remove_pull_request_worktree: (args) => {
+      const path = String(args["path"] ?? "");
+      if (!fakeWorktrees.some((one) => one.path === path)) {
+        throw { code: "not_found", message: `${path} is not a worktree knobas made`, source_id: null };
+      }
+      fakeWorktrees = fakeWorktrees.filter((one) => one.path !== path);
+      return fakeWorktrees;
+    },
     checkout_settings: () => fakeSettings(),
     set_checkout_applications: (args) => fakeSetApps(args["applications"], args["defaultApplication"]),
     entity_checkout_diff: (args) => fakeCheckoutDiff(String(args["entityId"] ?? "")),
@@ -485,6 +533,7 @@ export function attach(installed: FakeBridge): void {
 const atLoad = seedOf({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge });
 onFakeReset(() => {
   for (const timer of fakeCloning.values()) clearInterval(timer);
+  fakeWorktrees = [];
   ({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge } = atLoad());
 });
 keepSeed(fakeOverrides, fakeCloning, fakeCloned);

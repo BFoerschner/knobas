@@ -1373,7 +1373,9 @@ async fn each_object_expands_its_placeholders_in_its_own_command() {
     let registry = knobas_app::sources::Registry::for_process();
     let web = format!("https://{HOST}/{}/{}", repo.owner, repo.name);
     let at = checkout.to_string_lossy().into_owned();
-    let cases: [(Object, Vec<String>); 5] = [
+    // A pull request's command runs in its worktree, which needs a real
+    // repository: `pull_request_worktree.rs`.
+    let cases: [(Object, Vec<String>); 4] = [
         (
             Object::Repository,
             vec!["repository".into(), at.clone(), web.clone()],
@@ -1413,22 +1415,6 @@ async fn each_object_expands_its_placeholders_in_its_own_command() {
                 format!("{web}/compare/7be0e4f15c60%5E...c90d11e4a7b2"),
             ],
         ),
-        (
-            Object::PullRequest {
-                number: 12,
-                base: "main".into(),
-                head: "feature/PAY-231-sepa-retry".into(),
-                branch: "feature/PAY-231-sepa-retry".into(),
-            },
-            vec![
-                "pull-request".into(),
-                "12".into(),
-                "main".into(),
-                "feature/PAY-231-sepa-retry".into(),
-                "feature/PAY-231-sepa-retry".into(),
-                format!("{web}/pulls/12"),
-            ],
-        ),
     ];
     for (object, expected) in cases {
         let _ = fs::remove_file(&record);
@@ -1461,6 +1447,7 @@ async fn the_browser_page_of_each_object_is_built_from_the_typed_base_url() {
             base: "main".into(),
             head: "owner/fork:x".into(),
             branch: "owner/fork:x".into(),
+            item: None,
         })
         .await
         .unwrap(),

@@ -2,11 +2,18 @@
   Settings › Checkouts and Open in… (#844, R-13a.3), prototype-6's
   `STGV.checkouts` over `checkout_settings`: the clones root (*Change…*
   edits it, `set_clones_root`), the git knobas found, and the *Open in…*
-  applications with *Make default* and *Edit applications…*.
+  applications with *Make default* and *Edit applications…*. Then the pull
+  request worktrees knobas made under the clones root (#2285, ADR-0035), each
+  with *Remove*: a closed one also goes on the next pull request opened.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import { setClonesRoot } from "../../ipc/entity";
+  import {
+    pullRequestWorktrees,
+    removePullRequestWorktree,
+    setClonesRoot,
+    type PullRequestWorktree,
+  } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { apps as sharedApps, type Apps } from "../openin/apps.svelte";
@@ -15,12 +22,17 @@
   let {
     apps = sharedApps,
     saveRoot = (path: string | null) => setClonesRoot(path),
+    worktreePorts = { list: () => pullRequestWorktrees(), remove: (path: string) => removePullRequestWorktree(path) },
     layers = sharedLayers,
   }: {
     apps?: Apps;
     saveRoot?: (path: string | null) => Promise<void>;
+    /** The pull request worktrees (#2285): the list, and removing one. */
+    worktreePorts?: { list: () => Promise<PullRequestWorktree[]>; remove: (path: string) => Promise<PullRequestWorktree[]> };
     layers?: Layers;
   } = $props();
+
+  let worktrees = $state<PullRequestWorktree[] | null>(null);
 
   let editingRoot = $state(false);
   let typed = $state("");
@@ -30,7 +42,19 @@
 
   $effect(() => {
     void apps.reload();
+    worktreePorts.list().then(
+      (list) => (worktrees = list),
+      () => (worktrees = []),
+    );
   });
+
+  async function removeWorktree(path: string) {
+    try {
+      worktrees = await worktreePorts.remove(path);
+    } catch (cause) {
+      push({ text: `Could not remove the worktree: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
 
   async function saveTyped() {
     try {
@@ -72,7 +96,10 @@
   </div>
   <div class="tf-stg-row">
     <div class="tf-stg-l">
-      git<small>knobas runs git to read a checkout, show its uncommitted diff and clone. Never to commit, fetch or pull.</small>
+      git<small
+        >knobas runs git to read a checkout, show its uncommitted diff, clone, and fetch a pull request into its own worktree. Never to
+        commit, pull or push.</small
+      >
     </div>
     <div class="tf-stg-c">
       {#if settings.git.status === "found"}
@@ -108,6 +135,33 @@
       </tbody>
     </table>
     <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn" onclick={() => (managing = true)}>Edit applications…</button></div>
+  </div>
+  <div class="tf-stg-sec">
+    <h2>Pull request worktrees</h2>
+    <p class="tf-stg-p">
+      A pull request opens in a worktree of its own under the clones root, so your checkout is never touched. A closed one is removed
+      the next time you open a pull request; one with changes in it stays until you remove it.
+    </p>
+    {#if worktrees !== null && worktrees.length > 0}
+      <table class="tf-tbl">
+        <thead><tr><th>Pull request</th><th>Worktree</th><th><span class="tf-sr">Remove</span></th></tr></thead>
+        <tbody>
+          {#each worktrees as tree (tree.path)}
+            <tr>
+              <td>#{tree.number}{#if tree.closed}{" "}<span class="tf-chip">closed</span>{/if}</td>
+              <td class="tf-small"><span class="tf-mono">{tree.path}</span></td>
+              <td class="tf-right"
+                ><button class="tf-btn tf-sm tf-ghost" title="Remove {tree.path}" onclick={() => void removeWorktree(tree.path)}
+                  >Remove</button
+                ></td
+              >
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {:else if worktrees !== null}
+      <p class="tf-dim">None yet.</p>
+    {/if}
   </div>
 {/if}
 

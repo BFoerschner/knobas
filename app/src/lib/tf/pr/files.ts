@@ -79,3 +79,17 @@ export function matchesPath(path: string, query: string): boolean {
   const q = query.trim().toLowerCase();
   return q === "" || path.toLowerCase().includes(q);
 }
+
+/**
+ * The two shas the pull request's diff is between (#2273's `range`: its merge
+ * base and its head), for *Open in › Diff tool* (#2275). `null` before the
+ * files are read or from a source that names none.
+ */
+export function rangeOf(view: SourceView | null): { base: string; head: string } | null {
+  const files = view?.sections.find((section) => section.id === "files");
+  for (const block of files?.blocks ?? []) {
+    if (block.type !== "diff") continue;
+    return block.range ? { base: block.range.base, head: block.range.head } : null;
+  }
+  return null;
+}

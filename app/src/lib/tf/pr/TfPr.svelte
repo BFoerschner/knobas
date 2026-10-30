@@ -121,7 +121,7 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
-  import { diffOf } from "./files";
+  import { diffOf, rangeOf } from "./files";
   import TfPrFiles from "./TfPrFiles.svelte";
   import TfPrMerge from "./TfPrMerge.svelte";
   import TfPrReview from "./TfPrReview.svelte";
@@ -652,7 +652,8 @@
           <TfOpenObject
             entityId={repo.entity_id}
             size="md"
-            object={{ kind: "pull_request", number: Number(number.slice(1)), base: header.base, head: header.head, branch: header.head }}
+            object={{ kind: "pull_request", number: Number(number.slice(1)), base: header.base, head: header.head, branch: header.head, item: prId }}
+            ends={() => (prId === null ? Promise.resolve(null) : ports.entityView(prId, "files").then(rangeOf))}
           />
         {/if}
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
