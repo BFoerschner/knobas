@@ -259,9 +259,11 @@ async fn one_section_is_read_on_its_own() {
         .collect();
     assert_eq!(paths, [format!("{REPO}/git/commits/{SHA}.diff")]);
 
-    let refused = source.view(COMMIT, Some("files")).await;
+    // `files` is a commit's section since #2239 (its tree at the sha); a
+    // name no commit's view has is refused.
+    let refused = source.view(COMMIT, Some("branches")).await;
     assert!(
-        matches!(refused, Err(SourceError::Protocol { ref message, .. }) if message.contains("files")),
+        matches!(refused, Err(SourceError::Protocol { ref message, .. }) if message.contains("branches")),
         "{refused:?}"
     );
 }
