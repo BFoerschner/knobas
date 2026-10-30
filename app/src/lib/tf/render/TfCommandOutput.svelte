@@ -6,7 +6,8 @@
   until it answers, the source shows plain under *Running*. SVG and HTML are
   sanitized and drawn in a frame with `sandbox=""` (`render/command.ts`): no
   script runs in it and its origin is opaque, so nothing in it reaches the
-  app. An image is the backend's data URL decoded and drawn from a blob,
+  app. In the app, HTML is served from the backend's `knobas-render` scheme
+  under its own policy, so its styles apply (#2304, `render/frame.ts`). An image is the backend's data URL decoded and drawn from a blob,
   an SVG sanitized (`render/image.ts`). A failure,
   a timeout or too much output draws what the command said above the source,
   as the mockup's broken renderer does.
@@ -14,7 +15,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import type { RenderRun } from "../../ipc/app";
-  import { commandIdOf, contentFor, failureLine, frameDocument, ipcCommands, type CommandPort } from "../../render/command";
+  import { commandIdOf, contentFor, failureLine, frameSource, ipcCommands, tauriBridge, type CommandPort, type FrameBridge } from "../../render/command";
   import { dataUrlImage } from "../../render/image";
   import type { Renderer } from "../../render/registry";
   import TfBytesImage from "./TfBytesImage.svelte";
@@ -23,11 +24,14 @@
     renderer,
     text,
     commands = ipcCommands,
+    bridge = tauriBridge,
   }: {
     renderer: Renderer;
     text: string;
     /** Runs the renderer: the IPC, a fake in tests. */
     commands?: CommandPort;
+    /** Where the frame's document is served from (#2304): the app's bridge, a stand-in in tests. */
+    bridge?: FrameBridge;
   } = $props();
 
   let run = $state<RenderRun | null>(null);
@@ -66,7 +70,8 @@
       <TfBytesImage read={imageBytes} path={renderer.name} size={image.bytes.length} type={image.type} />
     {/if}
   {:else}
-    <iframe class="tf-rframe" sandbox="" title={renderer.name} srcdoc={frameDocument(run.output, run.body)}></iframe>
+    {@const frame = frameSource(run.output, run.body, bridge)}
+    <iframe class="tf-rframe" sandbox="" title={renderer.name} src={"src" in frame ? frame.src : undefined} srcdoc={"srcdoc" in frame ? frame.srcdoc : undefined}></iframe>
   {/if}
 {:else}
   {#if failed !== null}

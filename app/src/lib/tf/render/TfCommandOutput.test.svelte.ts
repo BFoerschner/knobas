@@ -124,3 +124,18 @@ test("a bytes renderer gets the text's UTF-8 bytes", async () => {
 
   expect(asked[0]![1]).toEqual({ kind: "bytes", base64: "w6k=" });
 });
+
+test("in the app a renderer's HTML frame is served from knobas-render, not a srcdoc (#2304)", async () => {
+  const html = `<p style="color: red">red</p>`;
+  const { port } = answering({ outcome: "drawn", output: "html", body: html });
+  const bridge = { isTauri: () => true, convertFileSrc: (path: string, protocol: string) => `${protocol}://localhost/${path}` };
+  app = mount(TfCommandOutput, { target, props: { renderer: CAT, text: html, commands: port, bridge } });
+  await Promise.resolve();
+  await Promise.resolve();
+  flushSync();
+
+  const frame = target.querySelector("iframe")!;
+  expect(frame.getAttribute("sandbox")).toBe("");
+  expect(frame.getAttribute("src")?.startsWith("knobas-render://localhost/")).toBe(true);
+  expect(frame.hasAttribute("srcdoc")).toBe(false);
+});

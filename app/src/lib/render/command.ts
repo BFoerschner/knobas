@@ -18,6 +18,7 @@
  *   the frame's document.
  */
 import { runRenderer, type RenderContent, type RenderRun, type UserRenderer } from "../ipc/app";
+import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { mount, unmount } from "svelte";
 
 import TfCommandOutput from "../tf/render/TfCommandOutput.svelte";
@@ -87,7 +88,10 @@ export function contentFor(renderer: Pick<Renderer, "input">, text: string): Ren
 }
 
 /** The sandboxed frame's document for a run's SVG or HTML, sanitized: the one frame diagrams use too (`frame.ts`, #2258). */
-export { frameDocument } from "./frame";
+export { frameDocument, frameSource, type FrameBridge } from "./frame";
+
+/** The app's bridge for a frame's source (#2304): the real one's `isTauri` and `convertFileSrc`. */
+export const tauriBridge: import("./frame").FrameBridge = { isTauri, convertFileSrc };
 
 /** Why a run drew nothing, in a line, or `null` for a run that drew. */
 export function failureLine(run: RenderRun): string | null {

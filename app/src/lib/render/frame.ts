@@ -51,8 +51,10 @@ export function svgFrame(markup: string, dark = false): SvgFrame | null {
  */
 export function frameDocument(output: "svg" | "html", body: string): string {
   if (output === "html") {
+    // `<style>` is kept: in the app the frame is served under a policy of its own (`frameSource`), where styles
+    // apply and nothing they name is fetched. `FORCE_BODY` keeps a `<style>` that opens the output.
     return wrap(
-      DOMPurify.sanitize(body, { USE_PROFILES: { html: true, svg: true }, FORBID_TAGS: ["style", "form", "iframe", "object", "embed"] }),
+      DOMPurify.sanitize(body, { USE_PROFILES: { html: true, svg: true }, FORBID_TAGS: ["form", "iframe", "object", "embed"], FORCE_BODY: true }),
       null,
     );
   }
@@ -79,4 +81,30 @@ function imageOf(svg: SVGSVGElement | null, width: number | null, height: number
 function wrap(inner: string, scheme: "light" | "dark" | null): string {
   if (scheme === null) return `<!doctype html><html><head><meta charset="utf-8"></head><body>${inner}</body></html>`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${scheme}"></head><body marginwidth="0" marginheight="0">${inner}</body></html>`;
+}
+
+/** The part of Tauri's bridge a frame's source needs: `@tauri-apps/api/core`'s, a stand-in in tests. */
+export interface FrameBridge {
+  isTauri(): boolean;
+  convertFileSrc(path: string, protocol: string): string;
+}
+
+/** The scheme the backend serves a frame's document from (`knobas_app::renderers::FRAME_SCHEME`). */
+export const FRAME_SCHEME = "knobas-render";
+/** Past this a document is drawn from `srcdoc` (unstyled in the app) rather than carried in a URL. */
+const URL_DOCUMENT_CAP = 1_500_000;
+
+/**
+ * Where a frame draws a command renderer's output from (#2304). A `srcdoc` document inherits the app's CSP
+ * (`style-src 'self'`), which refuses every `style` attribute and `<style>` in an HTML output. So under the app's
+ * bridge the sanitized HTML is served from the backend's `knobas-render` scheme, its own origin, under a policy of
+ * its own (inline styles and data images, no script, no request): the document travels in the URL, base64url, and
+ * the frame keeps `sandbox=""`. SVG is drawn as an image, which its styles survive, so it stays a `srcdoc`; so does
+ * everything in dev and tests, where there is no bridge (and no CSP), and a document too large for a URL.
+ */
+export function frameSource(output: "svg" | "html", body: string, bridge: FrameBridge): { src: string } | { srcdoc: string } {
+  const document = frameDocument(output, body);
+  if (output !== "html" || !bridge.isTauri()) return { srcdoc: document };
+  const path = base64Of(new TextEncoder().encode(document)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return path.length > URL_DOCUMENT_CAP ? { srcdoc: document } : { src: bridge.convertFileSrc(path, FRAME_SCHEME) };
 }

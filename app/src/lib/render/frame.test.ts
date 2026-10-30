@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { svgFrame } from "./frame";
+import { frameDocument, frameSource, svgFrame } from "./frame";
 
 /** The SVG inside a frame's `<img>`, decoded. */
 function imageIn(srcdoc: string): string {
@@ -41,4 +41,33 @@ test("the frame's document takes the drawing's colour scheme", () => {
 
 test("markup with no SVG in it gives no frame", () => {
   expect(svgFrame("<p>not a drawing</p>")).toBeNull();
+});
+
+// -- A command renderer's HTML from its own origin (#2304) --------------------
+
+const bridge = { isTauri: () => true, convertFileSrc: (path: string, protocol: string) => `${protocol}://localhost/${encodeURIComponent(path)}` };
+const decoded = (src: string) => {
+  const b64 = decodeURIComponent(src.slice("knobas-render://localhost/".length)).replace(/-/g, "+").replace(/_/g, "/");
+  return new TextDecoder().decode(Uint8Array.from(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4)), (c) => c.charCodeAt(0)));
+};
+
+test("under the app's bridge, HTML is served from knobas-render with its styles kept and its script gone", () => {
+  const html = `<style>h1 { color: red }</style><h1 style="font-size: 2em">Title é</h1><script>parent.x = 1</script>`;
+  const frame = frameSource("html", html, bridge);
+
+  expect("srcdoc" in frame).toBe(false);
+  const src = (frame as { src: string }).src;
+  expect(src.startsWith("knobas-render://localhost/")).toBe(true);
+  const doc = decoded(src);
+  expect(doc).toContain("<style>h1 { color: red }</style>");
+  expect(doc).toContain('style="font-size: 2em"');
+  expect(doc).toContain("Title é");
+  expect(doc).not.toMatch(/<script/i);
+});
+
+test("without the bridge (dev, tests) and for SVG, the frame is a srcdoc as before", () => {
+  const html = "<p>x</p>";
+  expect(frameSource("html", html, { isTauri: () => false, convertFileSrc: bridge.convertFileSrc })).toEqual({ srcdoc: frameDocument("html", html) });
+  const svg = '<svg viewBox="0 0 2 2"><rect width="2" height="2"/></svg>';
+  expect(frameSource("svg", svg, bridge)).toEqual({ srcdoc: frameDocument("svg", svg) });
 });

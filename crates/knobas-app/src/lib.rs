@@ -230,7 +230,12 @@ pub fn run() {
     // old one.
     let demo = Profile::demo_in(std::env::args());
 
-    let builder = tauri::Builder::default();
+    // A command renderer's HTML frame is served from its own origin under its
+    // own policy (#2304, `renderers::frame_response`).
+    let builder = tauri::Builder::default()
+        .register_uri_scheme_protocol(renderers::FRAME_SCHEME, |_context, request| {
+            renderers::frame_response(request.uri().path())
+        });
     // The single-instance guard (#748), registered **first**: its setup runs
     // before the builder's `setup` closure, so a second launch exits before it
     // can start the database or the scheduler (whose startup closes every

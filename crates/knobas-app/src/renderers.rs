@@ -437,6 +437,42 @@ fn image_type(bytes: &[u8]) -> &'static str {
     }
 }
 
+/// The scheme a command renderer's HTML frame is served from (#2304): its
+/// own origin, so the app's `style-src 'self'` is not the frame's. A `srcdoc`
+/// frame inherits the app's policy, and with it every `style` attribute and
+/// `<style>` in the output was refused. The frame keeps `sandbox=""` (no
+/// script, an opaque origin); the app's CSP names this scheme in `frame-src`
+/// and nothing else changes in it.
+pub const FRAME_SCHEME: &str = "knobas-render";
+
+/// The frame document's own policy: inline styles and data images, nothing
+/// else. No script runs and no request leaves the frame, whatever reaches it.
+pub const FRAME_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; img-src data:";
+
+/// The answer to `knobas-render://localhost/<document>`: the document is the
+/// path, base64url without padding (the shell sanitized it first,
+/// `render/frame.ts`), served as HTML under [`FRAME_CSP`]. Stateless: the URL
+/// is the document. A path that is no document is a 400 with no body.
+#[must_use]
+pub fn frame_response(path: &str) -> tauri::http::Response<Vec<u8>> {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let document = URL_SAFE_NO_PAD
+        .decode(path.trim_start_matches('/'))
+        .ok()
+        .filter(|bytes| !bytes.is_empty());
+    let built = match document {
+        Some(body) => tauri::http::Response::builder()
+            .status(200)
+            .header("content-type", "text/html; charset=utf-8")
+            .header("content-security-policy", FRAME_CSP)
+            .header("x-content-type-options", "nosniff")
+            .header("cache-control", "no-store")
+            .body(body),
+        None => tauri::http::Response::builder().status(400).body(Vec::new()),
+    };
+    built.unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
 /// How long a run may take and how much it may write.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Limits {
@@ -602,6 +638,38 @@ async fn read_capped(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The frame's own origin (#2304): the document in the path comes back
+    /// as HTML under a policy of its own, inline styles and data images only,
+    /// so no script and no request leaves it; a path that is no document is
+    /// a 400 with nothing in it.
+    #[test]
+    fn a_frame_document_is_served_under_its_own_policy() {
+        let doc = "<!doctype html><p style=\"color: red\">é</p>";
+        let path = format!("/{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(doc));
+        let answer = frame_response(&path);
+        assert_eq!(answer.status(), 200);
+        assert_eq!(answer.body().as_slice(), doc.as_bytes());
+        let header = |name: &str| answer.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned);
+        assert_eq!(header("content-type").as_deref(), Some("text/html; charset=utf-8"));
+        assert_eq!(
+            header("content-security-policy").as_deref(),
+            Some("default-src 'none'; style-src 'unsafe-inline'; img-src data:")
+        );
+        assert_eq!(header("x-content-type-options").as_deref(), Some("nosniff"));
+
+        // The app frames that scheme and nothing else changes in its policy:
+        // its own styles stay `'self'` only.
+        let conf = include_str!("../tauri.conf.json");
+        assert!(conf.contains("frame-src 'self' knobas-render: http://knobas-render.localhost;"));
+        assert!(conf.contains("style-src 'self';") && !conf.contains("unsafe-inline"));
+
+        for bad in ["/not base64!", "/", "/%2F%2F"] {
+            let refused = frame_response(bad);
+            assert_eq!(refused.status(), 400, "{bad}");
+            assert!(refused.body().is_empty());
+        }
+    }
 
     /// A pipeline step's limits are a run's: the same timeout, the cap as the
     /// output cap, one past `usize` held at its most.
