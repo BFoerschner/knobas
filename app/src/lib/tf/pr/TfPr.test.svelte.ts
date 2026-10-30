@@ -326,7 +326,7 @@ test("Overview: each check with its state, the one the mirror holds opening its 
   expect(text(".tf-prdesc")).toBe("Retries SEPA payouts.");
 });
 
-test("Ready to merge? reads prototype-6's three lines, approvals, checks and conflicts, each with its dot; the clone beside it", async () => {
+test("Ready to merge? reads prototype-6's three lines, approvals, checks and conflicts, each with its mark; the clone beside it", async () => {
   await draw([PR]);
   const lines = [...target.querySelectorAll(".tf-prck")];
   expect(lines.map((line) => line.textContent?.replace(/\s+/g, " ").trim())).toEqual([
@@ -357,8 +357,8 @@ function railView(conflict = false): SourceView {
               fact("Approvals", "2 of 2", "ok"),
               conflict ? fact("Conflicts", "conflicts with main", "warn") : fact("Conflicts", "none with main", "ok"),
               fact("Required checks", "1 of 2 pass", "err"),
-              fact("Required check", "ci/build"),
-              fact("Required check", "ci/test"),
+              fact("Required check", "ci/build", "ok"),
+              fact("Required check", "ci/test", "err"),
               fact("Review", "approved by priya", "ok"),
               fact("Review", "changes requested by jonas", "warn"),
             ],

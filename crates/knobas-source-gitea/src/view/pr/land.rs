@@ -360,6 +360,9 @@ enum Standing {
 /// beyond `*` and `?` is left out (not judged).
 fn required_standing(checks: &Checks) -> Vec<(String, Standing)> {
     let context = |status: &Status| status.context.clone().unwrap_or_default();
+    // Named as the checks list names its row (trimmed, `checks.rs`), so the
+    // shell finds the row; matched as Gitea matches, untrimmed.
+    let name = |status: &Status| context(status).trim().to_owned();
     let standing = |status: &Status| match status.status.as_deref().unwrap_or_default() {
         "success" | "skipped" => Standing::Passed,
         "error" | "failure" | "warning" => Standing::Failed,
@@ -373,7 +376,7 @@ fn required_standing(checks: &Checks) -> Vec<(String, Standing)> {
     };
     if checks.required.is_empty() {
         for status in &checks.reported {
-            add(context(status), standing(status));
+            add(name(status), standing(status));
         }
         return named;
     }
@@ -390,7 +393,7 @@ fn required_standing(checks: &Checks) -> Vec<(String, Standing)> {
             add(pattern.clone(), Standing::Unreported);
         }
         for status in matched {
-            add(context(status), standing(status));
+            add(name(status), standing(status));
         }
     }
     named
@@ -399,13 +402,21 @@ fn required_standing(checks: &Checks) -> Vec<(String, Standing)> {
 /// *Required checks* and one *Required check* per required context, for
 /// the pull request's side rail (#2278): the passed of all required, toned
 /// by the loudest standing (a failure err, a pending or unreported one info,
-/// all passed ok). Nothing where the base's protection does not enable the
-/// status check, or its statuses could not be read.
+/// all passed ok). Each *Required check* is toned by its own standing (ok
+/// where it passed, `skipped` included, which the checks list leaves
+/// untoned), so the shell names the ones in the way without reading Gitea's
+/// states. Nothing where the base's protection does not enable the status
+/// check, or its statuses could not be read, or every pattern it names is
+/// one [`required_standing`] leaves unjudged: *Merge…* is then left enabled
+/// (ADR-0004), and a count of none would hold the rail's verdict back.
 fn required_facts(landing: &Landing) -> Vec<Fact> {
     let Some(checks) = landing.checks.as_ref() else {
         return Vec::new();
     };
     let named = required_standing(checks);
+    if named.is_empty() && !checks.required.is_empty() {
+        return Vec::new();
+    }
     let passed = named
         .iter()
         .filter(|(_, at)| *at == Standing::Passed)
@@ -427,10 +438,14 @@ fn required_facts(landing: &Landing) -> Vec<Fact> {
         value,
         tone: Some(tone),
     }];
-    facts.extend(named.into_iter().map(|(name, _)| Fact {
+    facts.extend(named.into_iter().map(|(name, at)| Fact {
         label: "Required check".to_owned(),
         value: name,
-        tone: None,
+        tone: Some(match at {
+            Standing::Passed => Tone::Ok,
+            Standing::Failed => Tone::Err,
+            Standing::Pending | Standing::Unreported => Tone::Info,
+        }),
     }));
     facts
 }

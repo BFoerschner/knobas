@@ -249,9 +249,9 @@ const RAIL = (merge: ViewAction | null, ...extra: ReturnType<typeof fact>[]): So
             fact("Approvals", "2 of 2", "ok"),
             fact("Conflicts", "none with main", "ok"),
             fact("Required checks", "1 of 3 pass", "err"),
-            fact("Required check", "ci/build"),
-            fact("Required check", "ci/test"),
-            fact("Required check", "deploy"),
+            fact("Required check", "ci/build", "ok"),
+            fact("Required check", "ci/test", "err"),
+            fact("Required check", "deploy", "info"),
             fact("Review", "approved by sven", "ok"),
             fact("Review", "changes requested by jonas", "warn"),
             fact("Review", "requested from priya", "muted"),
@@ -287,6 +287,42 @@ test("the rail's checks: a failing required check first, each marked required, a
   expect(railChecks(VIEW).map((check) => check.required)).toEqual([false, false, false]);
 });
 
+test("the rail's checks stand where the source's required check says: a required warning fails, a skipped one passes", () => {
+  const view: SourceView = {
+    actions: [],
+    sections: [
+      {
+        id: "overview",
+        title: "Overview",
+        count: null,
+        deferred: false,
+        blocks: [
+          {
+            type: "facts",
+            facts: [
+              fact("Approvals", "none required", "ok"),
+              fact("Required checks", "1 of 2 pass", "err"),
+              fact("Required check", "ci/lint", "err"),
+              fact("Required check", "ci/docs", "ok"),
+            ],
+          },
+          {
+            type: "entities",
+            title: "Checks",
+            rows: [vrow("coverage", "failure", "err"), vrow("ci/lint", "warning", "warn"), vrow("ci/docs", "skipped", null)],
+          },
+        ],
+      },
+    ],
+  };
+  expect(railChecks(view).map((check) => [check.row.title, check.standing])).toEqual([
+    ["ci/lint", "err"],
+    ["coverage", "err"],
+    ["ci/docs", "ok"],
+  ]);
+  expect(readyLines(view)[1]).toEqual({ text: "Required checks: 1 of 2 pass", tone: "err", why: "ci/lint warning" });
+});
+
 test("Ready to merge? reads the required checks from the source, saying which ones stand in the way", () => {
   expect(readyLines(RAIL(null))).toEqual([
     { text: "Approvals: 2 of 2", tone: "ok" },
@@ -309,6 +345,30 @@ test("readiness: not ready while a line is unmet or Merge is refused, ready only
     ],
   };
   expect(readiness(allMet).verdict).toEqual({ text: "Ready: 2 of 2 met", tone: "ok", why: null });
+  // A line unmet while Merge is offered (the source has not caught up with ci/test): not ready, no reason to quote.
+  expect(readiness(RAIL(action("merge_pull_request", "Merge…"))).verdict).toEqual({ text: "Not yet: 2 of 3 met", tone: "err", why: null });
+  // Every required check passed: ready with the required checks among the lines.
+  const passed: SourceView = {
+    actions: [action("merge_pull_request", "Merge…")],
+    sections: [
+      {
+        ...passing,
+        blocks: [
+          {
+            type: "facts",
+            facts: [
+              fact("Approvals", "2 of 2", "ok"),
+              fact("Conflicts", "none with main", "ok"),
+              fact("Required checks", "1 of 1 pass", "ok"),
+              fact("Required check", "ci/build", "ok"),
+            ],
+          },
+          { type: "entities", title: "Checks", rows: [vrow("ci/build", "success", "ok")] },
+        ],
+      },
+    ],
+  };
+  expect(readiness(passed).verdict).toEqual({ text: "Ready: 3 of 3 met", tone: "ok", why: null });
   // Every line met, Merge still refused (a head behind a protected base): not ready, saying why.
   const behind: SourceView = { ...allMet, actions: [action("merge_pull_request", "Merge…", { disabled: "the head is behind main" })] };
   expect(readiness(behind).verdict).toEqual({ text: "Not yet: 2 of 2 met", tone: "warn", why: "the head is behind main" });

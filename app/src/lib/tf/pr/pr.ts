@@ -204,29 +204,38 @@ export function readyLines(view: SourceView | null): ReadyLine[] {
   const required = all.find((fact) => fact.label === "Required checks");
   if (required) lines.push(requiredLine(view, required.value, required.tone ?? "muted"));
   else if (checks) lines.push(checks);
-  if (conflicts) {
-    const none = conflicts.value.startsWith("none ");
-    const text = none ? `No conflicts ${conflicts.value.slice("none ".length)}` : opening(conflicts.value);
-    lines.push({ text, tone: conflicts.tone ?? (none ? "ok" : "warn") });
-  }
+  const said = conflictsOf(view);
+  if (conflicts && said) lines.push({ text: said.text, tone: conflicts.tone ?? (said.conflicts ? "warn" : "ok") });
   return lines;
 }
 
-/** *Required checks: 1 of 3 pass*, and each required check that has not passed by its name and state. */
+/**
+ * *Required checks: 1 of 3 pass*, and each required check that has not
+ * passed by its name and state. Whether one passed is its *Required check*
+ * fact's tone where the source gives one (Gitea passes a `skipped` status,
+ * which its checks list leaves untoned), else its row's.
+ */
 function requiredLine(view: SourceView | null, value: string, tone: Tone): ReadyLine {
-  const open = railChecks(view).filter((check) => check.required && check.row.tone !== "ok");
+  const open = railChecks(view).filter((check) => check.required && check.standing !== "ok");
   const line: ReadyLine = { text: `Required checks: ${value}`, tone };
   if (open.length > 0) line.why = open.map((check) => `${check.row.title} ${check.row.chip ?? ""}`.trim()).join(", ");
   return line;
 }
 
-/** One check in the side rail (#2278): the source's row, and whether the base requires it. */
+/**
+ * One check in the side rail (#2278): the source's row, whether the base
+ * requires it, and where it stands: a required check's *Required check*
+ * fact's tone where the source gives one (Gitea fails a `warning` and passes
+ * a `skipped` status, which its checks list tones warn and not at all), else
+ * the row's.
+ */
 export interface RailCheck {
   row: ViewRow;
   required: boolean;
+  standing: Tone | null;
 }
 
-const CHECK_RANK: (Tone | null)[] = ["err", "warn", "info", "ok"];
+const CHECK_RANK: Tone[] = ["err", "warn", "info", "ok"];
 
 /**
  * The side rail's *Checks* (#2278): the head commit's checks, failing first
@@ -236,18 +245,27 @@ const CHECK_RANK: (Tone | null)[] = ["err", "warn", "info", "ok"];
  * drawn last, *not reported*; the source names it by its pattern.
  */
 export function railChecks(view: SourceView | null): RailCheck[] {
-  const names = facts(view)
-    .filter((fact) => fact.label === "Required check")
-    .map((fact) => fact.value);
+  const required = facts(view).filter((fact) => fact.label === "Required check");
   const rows = headerOf(view).checks;
   const rank = (check: RailCheck) => {
-    const at = CHECK_RANK.indexOf(check.row.tone);
+    const at = check.standing === null ? -1 : CHECK_RANK.indexOf(check.standing);
     return (at < 0 ? CHECK_RANK.length : at) * 2 + (check.required ? 0 : 1);
   };
-  const drawn = rows.map((row) => ({ row, required: names.includes(row.title) })).sort((a, b) => rank(a) - rank(b));
-  const unreported = names
-    .filter((name) => !rows.some((row) => row.title === name))
-    .map((name): RailCheck => ({ row: { entity_id: null, title: name, meta: null, tone: "info", chip: "not reported", url: null }, required: true }));
+  const drawn = rows
+    .map((row): RailCheck => {
+      const fact = required.find((candidate) => candidate.value === row.title);
+      return { row, required: fact !== undefined, standing: fact?.tone ?? row.tone };
+    })
+    .sort((a, b) => rank(a) - rank(b));
+  const unreported = required
+    .filter((fact) => !rows.some((row) => row.title === fact.value))
+    .map(
+      (fact): RailCheck => ({
+        row: { entity_id: null, title: fact.value, meta: null, tone: "info", chip: "not reported", url: null },
+        required: true,
+        standing: "info",
+      }),
+    );
   return [...drawn, ...unreported];
 }
 

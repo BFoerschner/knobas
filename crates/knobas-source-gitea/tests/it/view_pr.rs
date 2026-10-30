@@ -1651,8 +1651,9 @@ async fn required_status_checks_block_until_they_pass() {
 /// apart: *Required checks* counts the passed against all required, toned
 /// err where one failed, info where one is pending or never reported, ok
 /// where all passed; one *Required check* fact names each required context
-/// (a pattern that matched nothing is named itself), so the shell can mark
-/// those rows of *Checks*. Where the status check is off nothing is declared.
+/// (a pattern that matched nothing is named itself), toned by its own
+/// standing, so the shell can mark those rows of *Checks* and name the ones
+/// in the way. Where the status check is off nothing is declared.
 #[tokio::test]
 async fn the_overview_declares_its_required_checks() {
     let cases = [
@@ -1661,42 +1662,60 @@ async fn the_overview_declares_its_required_checks() {
             json!(["ci/build"]),
             json!([status("ci/build", "success"), status("ci/lint", "failure")]),
             Some(("1 of 1 pass", Tone::Ok)),
-            vec!["ci/build"],
+            vec![("ci/build", Tone::Ok)],
         ),
         (
             "an error and a warning fail",
             json!(["ci/*"]),
             json!([status("ci/build", "error"), status("ci/lint", "warning")]),
             Some(("0 of 2 pass", Tone::Err)),
-            vec!["ci/build", "ci/lint"],
+            vec![("ci/build", Tone::Err), ("ci/lint", Tone::Err)],
         ),
         (
             "never reported",
             json!(["ci/build"]),
             json!([]),
             Some(("0 of 1 pass", Tone::Info)),
-            vec!["ci/build"],
+            vec![("ci/build", Tone::Info)],
         ),
         (
             "one pending",
             json!(["ci/*"]),
             json!([status("ci/build", "success"), status("ci/lint", "pending")]),
             Some(("1 of 2 pass", Tone::Info)),
-            vec!["ci/build", "ci/lint"],
+            vec![("ci/build", Tone::Ok), ("ci/lint", Tone::Info)],
         ),
         (
             "a failure is louder than a pending one",
             json!(["ci/*", "deploy"]),
             json!([status("ci/build", "failure"), status("ci/lint", "pending")]),
             Some(("0 of 3 pass", Tone::Err)),
-            vec!["ci/build", "ci/lint", "deploy"],
+            vec![
+                ("ci/build", Tone::Err),
+                ("ci/lint", Tone::Info),
+                ("deploy", Tone::Info),
+            ],
         ),
         (
             "no contexts named: every status reported is required",
             json!([]),
             json!([status("deploy", "success"), status("ci/lint", "error")]),
             Some(("1 of 2 pass", Tone::Err)),
-            vec!["deploy", "ci/lint"],
+            vec![("deploy", Tone::Ok), ("ci/lint", Tone::Err)],
+        ),
+        (
+            "a skipped check passes, and a context is named trimmed as its row is",
+            json!(["ci/*"]),
+            json!([status("ci/build ", "success"), status("ci/docs", "skipped")]),
+            Some(("2 of 2 pass", Tone::Ok)),
+            vec![("ci/build", Tone::Ok), ("ci/docs", Tone::Ok)],
+        ),
+        (
+            "every pattern unjudged: nothing declared, as Merge… judges nothing",
+            json!(["ci/[ab]uild"]),
+            json!([status("ci/build", "failure")]),
+            None,
+            vec![],
         ),
         (
             "no contexts named and nothing reported",
@@ -1719,10 +1738,10 @@ async fn the_overview_declares_its_required_checks() {
         let drawn = fact(facts, "Required checks").map(|f| (f.value.as_str(), f.tone));
         let expected = summary.map(|(value, tone)| (value, Some(tone)));
         assert_eq!(drawn, expected, "{what}");
-        let required: Vec<&str> = facts
+        let required: Vec<(&str, Tone)> = facts
             .iter()
             .filter(|f| f.label == "Required check")
-            .map(|f| f.value.as_str())
+            .map(|f| (f.value.as_str(), f.tone.expect("a required check is toned")))
             .collect();
         assert_eq!(required, named, "{what}");
     }
