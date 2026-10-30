@@ -885,7 +885,12 @@ async fn a_path_the_commit_does_not_hold_is_not_found() {
         .bytes("repo/r", "gone.bin", Some("c0ffee"))
         .await
         .expect_err("no file there");
-    assert_eq!(gone.code, knobas_app::IpcErrorCode::NotFound, "{}", gone.message);
+    assert_eq!(
+        gone.code,
+        knobas_app::IpcErrorCode::NotFound,
+        "{}",
+        gone.message
+    );
     let other = f
         .bytes("repo/r", "unsized", Some("c0ffee"))
         .await
