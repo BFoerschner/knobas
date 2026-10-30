@@ -430,3 +430,22 @@ test("Sync now's re-read keeps the repositories drawn, dimmed, until the new lis
   expect(target.querySelector(".tf-wait-dim")).toBeNull();
   expect(target.querySelectorAll(".tf-tbl tbody tr").length).toBe(3);
 });
+
+test("the Pull requests count is the mirror's total while the later pages are held back (#2245)", async () => {
+  const settled = Array.from({ length: 1500 }, (_, n) => pr(9000 + n, `Old change ${n}`, "merged"));
+  const every = [...OPEN, ...settled];
+  await draw(
+    ["prs"],
+    null,
+    ports({
+      listEntities: async (filter, limit, offset) => {
+        if (filter.kinds.includes("repo")) return page(REPOS);
+        if (filter.kinds.includes("branch")) return page([]);
+        if (filter.order === "attention") return page(OPEN, GROUPS);
+        if (offset > 0) return new Promise<EntityPage>(() => {});
+        return { rows: every.slice(0, limit), total: every.length, tally: null, groups: null };
+      },
+    }),
+  );
+  expect(text(target.querySelector(".tf-tabs a:last-child"))).toBe("Pull requests 1503");
+});
