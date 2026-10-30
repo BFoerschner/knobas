@@ -222,7 +222,7 @@ test("a fence goes to the renderer the registry names for its language", async (
 test("a fence in a saved command renderer's language is run by it and drawn in its sandboxed frame (#2262)", async () => {
   const ran: [string, RenderContent][] = [];
   installCommands(
-    [{ id: "cat", name: "Cat", command: "cat", patterns: [], fences: ["cat"], input: "text", output: "html", timeout_secs: 10 }],
+    [{ id: "cat", name: "Cat", command: "cat", patterns: [], fences: ["cat"], input: "text", output: "html", timeout_secs: 10, diff: false }],
     {
       run: async (id, content) => {
         ran.push([id, content]);

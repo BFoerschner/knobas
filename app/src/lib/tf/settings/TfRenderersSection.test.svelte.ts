@@ -98,7 +98,7 @@ test("a renderer added here is saved whole, in the registry at once, and runs in
   await settle();
 
   expect(sent).toEqual([
-    [{ id: null, name: "Cat", command: "cat", patterns: ["*.page", "docs/*.htm"], fences: ["Cat"], input: "text", output: "html", timeout_secs: 3 }],
+    [{ id: null, name: "Cat", command: "cat", patterns: ["*.page", "docs/*.htm"], fences: ["Cat"], input: "text", output: "html", timeout_secs: 3, diff: false }],
   ]);
   expect(renderersFor({ path: "a.page", binary: false }).map((r) => r.id)).toEqual(["command:cat", "source"]);
   expect(renderersForFence("cat").map((r) => r.id)).toEqual(["command:cat", "source"]);
@@ -115,8 +115,35 @@ test("a renderer added here is saved whole, in the registry at once, and runs in
   expect(frame.getAttribute("srcdoc")).not.toMatch(/<script/i);
 });
 
+test("a renderer that draws diffs says so in its form, and an edit keeps it (#2279)", async () => {
+  const { ports, sent } = backend();
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+
+  button("Add a renderer…").click();
+  flushSync();
+  type("Name", "Cat");
+  type("Command", "cat");
+  type("File patterns", "*.page");
+  const box = () => [...target.querySelectorAll<HTMLInputElement>("input[type=checkbox]")].find((el) => target.querySelector(`label[for="${el.id}"]`)?.textContent?.startsWith("Diffs"))!;
+  expect(box().checked).toBe(false);
+  box().click();
+  flushSync();
+  button("Save").click();
+  await settle();
+  expect(sent.at(-1)?.[0]?.diff).toBe(true);
+  expect(renderersFor({ path: "a.page", binary: false })[0]?.diff).toBe(true);
+
+  button("Edit").click();
+  flushSync();
+  expect(box().checked).toBe(true);
+  button("Save").click();
+  await settle();
+  expect(sent.at(-1)?.[0]?.diff).toBe(true);
+});
+
 test("Remove saves the list without it, and the registry drops it", async () => {
-  const cat: UserRenderer = { id: "cat", name: "Cat", command: "cat", patterns: ["*.page"], fences: [], input: "text", output: "html", timeout_secs: 10 };
+  const cat: UserRenderer = { id: "cat", name: "Cat", command: "cat", patterns: ["*.page"], fences: [], input: "text", output: "html", timeout_secs: 10, diff: false };
   const { ports, sent } = backend([cat]);
   app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
   await settle();

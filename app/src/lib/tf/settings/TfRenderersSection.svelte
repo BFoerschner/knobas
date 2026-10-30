@@ -52,7 +52,7 @@
   let saved = $state<UserRenderer[] | null>(null);
   /** The renderer being edited: an index into `saved`, `"new"`, or none. */
   let editing = $state<number | "new" | null>(null);
-  let form = $state({ name: "", command: "", patterns: "", fences: "", input: "text" as RendererInput, output: "svg" as CommandOutput, timeout: "10" });
+  let form = $state({ name: "", command: "", patterns: "", fences: "", input: "text" as RendererInput, output: "svg" as CommandOutput, timeout: "10", diff: false });
   let refusal = $state<string | null>(null);
 
   /** The test pane: which saved renderer, the sample, and the run asked for. */
@@ -109,6 +109,7 @@
     input: r.input,
     output: r.output,
     timeout_secs: r.timeout_secs,
+    diff: r.diff,
   });
 
   function edit(at: number | "new") {
@@ -121,6 +122,7 @@
       input: r?.input ?? "text",
       output: r?.output ?? "svg",
       timeout: String(r?.timeout_secs ?? 10),
+      diff: r?.diff ?? false,
     };
     refusal = null;
     editing = at;
@@ -152,6 +154,7 @@
       input: form.input,
       output: form.output,
       timeout_secs: Number.isFinite(timeout) ? timeout : null,
+      diff: form.diff,
     };
     const list = saved.map(draftOf);
     if (editing === "new") list.push(draft);
@@ -171,7 +174,7 @@
     const r = saved?.find((one) => one.id === testId);
     if (!r) return;
     trying = {
-      renderer: { id: `${COMMAND_PREFIX}${r.id}`, name: r.name, patterns: r.patterns, fences: r.fences, input: r.input, output: r.output, diff: false },
+      renderer: { id: `${COMMAND_PREFIX}${r.id}`, name: r.name, patterns: r.patterns, fences: r.fences, input: r.input, output: r.output, diff: r.diff },
       text: sample,
       at: (trying?.at ?? 0) + 1,
     };
@@ -249,6 +252,10 @@
         <div class="tf-stg-row">
           <label class="tf-stg-l" for="tf-rnd-time">Timeout<small>1 to 120 seconds; the command is stopped after it.</small></label>
           <div class="tf-stg-c tf-stg-inl"><input id="tf-rnd-time" type="number" min="1" max="120" class="tf-stg-in tf-stg-n70" bind:value={form.timeout} /><span>seconds</span></div>
+        </div>
+        <div class="tf-stg-row">
+          <label class="tf-stg-l" for="tf-rnd-diff">Diffs<small>A diff of a file it draws offers <i>Rendered</i>: before and after, each drawn by this command.</small></label>
+          <div class="tf-stg-c tf-stg-inl"><input id="tf-rnd-diff" type="checkbox" bind:checked={form.diff} /><span>Draws diffs</span></div>
         </div>
         {#if refusal !== null}<p class="tf-stg-errt" role="alert">{refusal}</p>{/if}
         <div class="tf-stg-acts">

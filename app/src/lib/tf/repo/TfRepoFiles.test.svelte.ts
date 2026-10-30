@@ -498,7 +498,7 @@ test("find in a long file draws a hit's line the window left out before marking 
 });
 
 test("a file a saved command renderer accepts is run by its id and drawn in the sandboxed frame (#2262)", async () => {
-  installCommands([{ id: "cat", name: "Cat", command: "cat", patterns: ["*.page"], fences: [], input: "text", output: "html", timeout_secs: 10 }]);
+  installCommands([{ id: "cat", name: "Cat", command: "cat", patterns: ["*.page"], fences: [], input: "text", output: "html", timeout_secs: 10, diff: false }]);
   const asked: string[] = [];
   const commands: CommandPort = {
     run: async (id, content) => {

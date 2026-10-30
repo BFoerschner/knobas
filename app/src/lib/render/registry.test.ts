@@ -14,9 +14,16 @@ test("each built-in declares the spec's six fields", () => {
     fences: [],
     input: "bytes",
     output: "image",
-    diff: false,
+    diff: true,
   });
   expect(source).toEqual({ id: "source", name: "Source", patterns: ["*"], fences: ["*"], input: "text", output: "lines", diff: true });
+});
+
+test("Markdown, Mermaid and Image draw a diff before and after (#2279)", () => {
+  const ids = (path: string) => renderersFor({ path, binary: false }).filter((r) => r.diff).map((r) => r.id);
+  expect(ids("README.md")).toEqual(["markdown", "source"]);
+  expect(ids("docs/flow.mmd")).toEqual(["mermaid", "source"]);
+  expect(renderersFor({ path: "logo.png", binary: true }).map((r) => r.diff)).toEqual([true]);
 });
 
 test("a text file is Source's; an image is Image's first; a binary that is no image has none", () => {

@@ -14,6 +14,7 @@ const PLANTUML: UserRenderer = {
   input: "text",
   output: "svg",
   timeout_secs: 10,
+  diff: false,
 };
 
 afterEach(() => installCommands([]));
@@ -30,6 +31,13 @@ test("a saved renderer accepts its file patterns and fence languages, ahead of S
   expect(commandIdOf(first!)).toBe("plantuml");
   expect(savedCommand(first!)?.command).toBe("plantuml -tsvg -pipe");
   expect(commandIdOf(renderersForFence("rust")[0]!)).toBeNull();
+});
+
+test("a saved renderer draws diffs only where it declares so (#2279)", () => {
+  installCommands([PLANTUML, { ...PLANTUML, id: "d2", name: "D2 CLI", patterns: ["*.d2"], fences: [], diff: true }]);
+
+  expect(renderersFor({ path: "docs/flow.puml", binary: false })[0]?.diff).toBe(false);
+  expect(renderersFor({ path: "docs/flow.d2", binary: false })[0]?.diff).toBe(true);
 });
 
 test("installing the list again replaces the last one, so a removed renderer is gone", () => {
