@@ -256,6 +256,7 @@ async fn fixture(name: &str, timing: SchedulerTiming, door_shut: bool) -> Fixtur
 
     Fixture {
         state: SourcesState {
+            live: Default::default(),
             pool,
             scheduler,
             secrets,

@@ -261,6 +261,7 @@ async fn app(name: &str) -> (SourcesState, Arc<Wrote>) {
 
     (
         SourcesState {
+            live: Default::default(),
             pool,
             scheduler,
             secrets,

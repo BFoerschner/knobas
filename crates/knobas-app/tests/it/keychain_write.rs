@@ -286,6 +286,7 @@ async fn state_on(
     .await
     .expect("a scheduler");
     SourcesState {
+        live: Default::default(),
         pool,
         scheduler,
         secrets,
@@ -394,6 +395,7 @@ async fn a_pause_pressed_while_the_keychain_is_locked_goes_once_the_credential_i
         &f.state.pool,
         &f.state.secrets,
         &f.state.registry,
+        &f.state.live,
         &f.source,
         SecretInput {
             value: None,

@@ -85,7 +85,7 @@ pub(super) async fn draw(
             diff(source, owner, repo, &base, branch).await?,
         ])),
         Some(id) if files::owns(id) => Ok(SourceView::new(vec![
-            files::read(source, &record, owner, repo, branch, id).await?,
+            files::read(source, &record, owner, repo, files::At::Branch(branch), id).await?,
         ])),
         Some(OVERVIEW | COMMITS) | None => {
             whole(source, &record, owner, repo, branch, section).await

@@ -167,6 +167,7 @@ async fn refused(f: &Fixture, asks: &[WriteAsk]) -> Vec<RefusedWrite> {
         &f.pool,
         &f.secrets,
         &crate::support::shared(NarrowRegistry(f.asked.clone())),
+        &knobas_app::sources::live::LiveSources::default(),
         asks,
     )
     .await
