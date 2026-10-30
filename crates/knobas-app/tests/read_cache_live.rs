@@ -582,4 +582,26 @@ async fn a_private_readmes_images_are_read_at_its_commit_and_kept() {
         assert_eq!(again.expect("the image reads"), want);
         assert_eq!(sent, 0, "a second look at {path} is the cache's");
     }
+
+    // A path the commit does not hold, read as a rendered diff reads a side
+    // (#2279): at the commit entity, its own sha. A binary diff does not say
+    // added or deleted, so `not_found` here is "no file on that side".
+    let absent = knobas_app::commands::entity::entity_file_bytes_inner(
+        &app.pool,
+        &app.secrets,
+        &app.registry,
+        &app.live,
+        &format!("{repo}@{commit}"),
+        "docs/img/gone.png",
+        None,
+    )
+    .await
+    .expect_err("no file there");
+    println!("absent path: {:?} {}", absent.code, absent.message);
+    assert_eq!(
+        absent.code,
+        knobas_app::IpcErrorCode::NotFound,
+        "{}",
+        absent.message
+    );
 }
