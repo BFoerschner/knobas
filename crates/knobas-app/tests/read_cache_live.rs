@@ -722,6 +722,33 @@ async fn a_pull_requests_range_is_picked_from_and_read_whole_at_its_shas() {
     assert!(first >= 1 && again == 0, "{first} then {again}");
 }
 
+/// Spec #2234 step 1: a pull request's diff at its head is kept for the
+/// session. *Files* carries the reviews' threads, which move, so the tab is
+/// read again; the `.diff` inside it is not, while the record names the same
+/// merge base and the commits listing the same head (#2321). A rebuilt source
+/// keeps nothing: read cold after a forget, then warm. The cold read sends
+/// the `.diff` and, to keep it, the record again after it; the warm read
+/// sends neither, so exactly two requests fewer.
+#[tokio::test]
+#[ignore = "needs the testenv Gitea: just gitea-live"]
+async fn a_pull_requests_diff_is_read_once_at_its_head() {
+    let app = app().await;
+    let pull = format!("{}:{SEEDED}#{}", app.source, sepa_pull().await);
+    // Warm what the process keeps whatever the source (who the token is).
+    let (first, _, _) = app.view_of(&pull, "files").await;
+    app.live.forget(&app.source);
+    let (cold, sent_cold, _) = app.view_of(&pull, "files").await;
+    let (warm, sent_warm, took) = app.view_of(&pull, "files").await;
+    println!("files: cold {sent_cold}, warm {sent_warm} requests ({took:?})");
+    assert_eq!(cold, first, "a rebuilt source reads the same tab");
+    assert_eq!(warm, cold, "the kept diff draws the same tab");
+    assert_eq!(
+        sent_warm + 2,
+        sent_cold,
+        "neither the .diff nor the record after it is asked again"
+    );
+}
+
 /// Spec #2234 story 16: a text file past Gitea's file view (10,000 lines or
 /// 1 MB) is cut in the view, and the byte read the viewer then makes at the
 /// commit it was read at answers it whole, byte for byte; a second look is

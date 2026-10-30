@@ -3311,3 +3311,165 @@ async fn conversation_without_its_line_comments_still_says_the_reviews() {
     assert!(said.contains("priya.nair"), "{said}");
     assert!(!said.contains("> Bound the jitter."), "{said}");
 }
+
+// -- a pull request's diff, kept at what its .diff stands at (#2321) ---------
+
+/// The merge base the kept-diff tests' records name.
+const MERGE_BASE: &str = "907900b245f2941018dfd3ee155b876ef701c10a";
+/// A head pushed after [`HEAD_SHA`].
+const PUSHED_SHA: &str = "d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f70819203";
+/// What `git diff` prints once [`PUSHED_SHA`] is in: one file added.
+const PUSHED_DIFF: &str = "diff --git a/src/sepa/pushed.rs b/src/sepa/pushed.rs
+new file mode 100644
+index 0000000..6112a3c
+--- /dev/null
++++ b/src/sepa/pushed.rs
+@@ -0,0 +1 @@
++pub fn pushed() {}
+";
+
+/// Over `server`'s answers, at `priority`: the record names `head` and
+/// [`MERGE_BASE`], the commits listing has `tip` newest (as Gitea and Forgejo
+/// list them, measured #2321), and the `.diff` is `diff`.
+async fn standing(server: &MockServer, head: &str, tip: &str, diff: &str, priority: u8) {
+    let mut pull = open_pull();
+    pull["head"]["sha"] = json!(head);
+    pull["merge_base"] = json!(MERGE_BASE);
+    record_says(server, pull, priority, None).await;
+    let mut listed = pr_commits();
+    listed[1]["sha"] = json!(tip);
+    let listed = json!([listed[1], listed[0]]);
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls/142/commits")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("X-Total-Count", "2")
+                .set_body_json(listed),
+        )
+        .with_priority(priority)
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls/142.diff")))
+        .respond_with(ResponseTemplate::new(200).set_body_string(diff))
+        .with_priority(priority)
+        .mount(server)
+        .await;
+}
+
+/// The record answers `pull` at `priority`, `times` times or for good.
+async fn record_says(server: &MockServer, pull: Value, priority: u8, times: Option<u64>) {
+    let mock = Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls/142")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(pull))
+        .with_priority(priority);
+    let mock = match times {
+        Some(n) => mock.up_to_n_times(n),
+        None => mock,
+    };
+    mock.mount(server).await;
+}
+
+async fn diffs_read(server: &MockServer) -> usize {
+    paths(server)
+        .await
+        .iter()
+        .filter(|p| p.ends_with("142.diff"))
+        .count()
+}
+
+async fn files_tab(source: &dyn Source) -> String {
+    let view = source
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    format!("{:?}", view.sections[0].blocks)
+}
+
+/// A pull request's diff is kept for the session at what its `.diff` stands
+/// at (spec #2234 step 1, ADR-0032): the *Files* tab read again at the same
+/// merge base and listed head reads the record, the reviews and the rest, but
+/// not the `.diff`; a pushed head is read again. A record that does not name
+/// its merge base keeps nothing.
+#[tokio::test]
+async fn a_pull_requests_diff_is_read_once_per_head_and_merge_base() {
+    let server = gitea(open_pull(), reviews()).await;
+    standing(&server, HEAD_SHA, HEAD_SHA, DIFF, 3).await;
+    let source = source(&server);
+
+    let first = files_tab(&*source).await;
+    let again = files_tab(&*source).await;
+    assert_eq!(first, again, "the kept diff draws the same tab");
+    assert_eq!(
+        diffs_read(&server).await,
+        1,
+        "the second read sent no .diff"
+    );
+
+    standing(&server, PUSHED_SHA, PUSHED_SHA, PUSHED_DIFF, 2).await;
+    let pushed = files_tab(&*source).await;
+    assert!(pushed.contains("pushed.rs"), "{pushed}");
+    assert_eq!(diffs_read(&server).await, 2, "a pushed head is read again");
+    files_tab(&*source).await;
+    assert_eq!(diffs_read(&server).await, 2, "and then kept");
+
+    // No merge base: nothing names what the diff stands at, so nothing is kept.
+    let unnamed = gitea(open_pull(), reviews()).await;
+    standing(&unnamed, HEAD_SHA, HEAD_SHA, DIFF, 3).await;
+    record_says(&unnamed, open_pull(), 2, None).await;
+    let source = source_of(&unnamed);
+    files_tab(&*source).await;
+    files_tab(&*source).await;
+    assert_eq!(diffs_read(&unnamed).await, 2);
+}
+
+/// Forgejo's record names a pushed head at once, while its `.diff` and its
+/// commits listing follow `refs/pull/N/head`, which a queue moves seconds
+/// later (#1195, measured again in #2321). A read in that window draws the
+/// `.diff` as it stands and keeps nothing, so the read once the queue has
+/// caught up draws the pushed diff, not the one from before the push.
+#[tokio::test]
+async fn a_diff_read_while_the_record_runs_ahead_of_it_is_not_kept() {
+    let server = gitea(open_pull(), reviews()).await;
+    standing(&server, PUSHED_SHA, HEAD_SHA, DIFF, 3).await;
+    let source = source(&server);
+
+    let lagging = files_tab(&*source).await;
+    assert!(!lagging.contains("pushed.rs"), "{lagging}");
+    files_tab(&*source).await;
+    assert_eq!(diffs_read(&server).await, 2, "nothing kept while it lags");
+
+    standing(&server, PUSHED_SHA, PUSHED_SHA, PUSHED_DIFF, 2).await;
+    let caught_up = files_tab(&*source).await;
+    assert!(caught_up.contains("pushed.rs"), "{caught_up}");
+    assert_eq!(diffs_read(&server).await, 3);
+}
+
+/// The `.diff` is read after the listing named its head, and kept only when
+/// the record read after it still names that head: a push that lands between
+/// the listing and the `.diff` cannot be kept under the head before it. Here
+/// the record names the head, then the pushed head (read after the `.diff`),
+/// then the head again: the first read keeps nothing, so the second reads the
+/// `.diff` again.
+#[tokio::test]
+async fn a_diff_is_kept_only_when_the_record_read_after_it_names_the_same_head() {
+    let server = gitea(open_pull(), reviews()).await;
+    standing(&server, HEAD_SHA, HEAD_SHA, DIFF, 3).await;
+    let mut pull = open_pull();
+    pull["merge_base"] = json!(MERGE_BASE);
+    record_says(&server, pull.clone(), 1, Some(1)).await;
+    pull["head"]["sha"] = json!(PUSHED_SHA);
+    record_says(&server, pull, 1, Some(1)).await;
+    let source = source(&server);
+
+    files_tab(&*source).await;
+    files_tab(&*source).await;
+    assert_eq!(diffs_read(&server).await, 2, "the first .diff was not kept");
+    files_tab(&*source).await;
+    assert_eq!(diffs_read(&server).await, 2, "the second was");
+}
+
+fn source_of(server: &MockServer) -> Box<dyn Source> {
+    knobas_source_gitea::build(instance(server.uri(), TOKEN, json!({}))).expect("builds")
+}

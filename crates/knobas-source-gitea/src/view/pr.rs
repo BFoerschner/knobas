@@ -15,6 +15,7 @@ use super::{fact, login, when_of};
 use crate::model::UserRef;
 use crate::source::GiteaSource;
 
+pub(crate) mod diffs;
 mod label;
 mod land;
 mod maintain;
@@ -194,17 +195,39 @@ impl PullView<'_> {
     /// base and head from the record, its commits, and the head the viewer
     /// last reviewed at, read beside the rest. The commits are for picking
     /// from, not the diff: a failed read of them lists none and fails nothing.
+    ///
+    /// The `.diff` is read after the commits, and not at all where one is
+    /// kept at the head they end on (`diffs`, #2321).
     async fn files(&self) -> Result<ViewSection, SourceError> {
-        let (pull, text, reviews, resolves, commits, viewer) = tokio::try_join!(
+        let (pull, (commits, fetched), reviews, resolves, viewer) = tokio::try_join!(
             self.pull(),
-            self.source
-                .client
-                .pull_diff(self.owner, self.repo, self.number),
+            async {
+                let commits = self.listed().await.map(|(c, _, _)| c).unwrap_or_default();
+                let kept = commits.first().is_some_and(|tip| {
+                    self.source.pull_diffs.holds_at(
+                        self.owner,
+                        self.repo,
+                        self.number,
+                        &tip.record.sha,
+                    )
+                });
+                let fetched = if kept {
+                    None
+                } else {
+                    Some(
+                        self.source
+                            .client
+                            .pull_diff(self.owner, self.repo, self.number)
+                            .await?,
+                    )
+                };
+                Ok((commits, fetched))
+            },
             self.reviews(),
             async { Ok(self.source.resolves().await) },
-            async { Ok(self.listed().await.map(|(c, _, _)| c).unwrap_or_default()) },
             self.viewer(),
         )?;
+        let text = self.diff(&pull, &commits, fetched).await?;
         let reviewed = range::reviewed(&reviews, viewer.as_deref());
         let range = range::of(
             &self.source.id,
@@ -245,6 +268,58 @@ impl PullView<'_> {
                 range,
             }],
         })
+    }
+
+    /// The diff *Files* draws: `fetched`, read after `commits` was, or the
+    /// one kept at the merge base the record names and the head `commits`
+    /// ends on.
+    ///
+    /// A fetched diff is kept only where it is sure to stand at that head:
+    /// the listing named it before the `.diff` was read, so the `.diff` is at
+    /// that head or a later one; the record names the branch's tip, which the
+    /// `.diff` never runs ahead of, so a record read after the `.diff` that
+    /// still names that head and merge base pins it. A listing behind the
+    /// record (Forgejo's queue not caught up) keeps nothing.
+    async fn diff(
+        &self,
+        pull: &Pull,
+        commits: &[rows::ListedCommit],
+        fetched: Option<String>,
+    ) -> Result<std::sync::Arc<str>, SourceError> {
+        let head = pull.head.as_ref().and_then(|h| h.sha.as_deref());
+        let tip = commits.first().map(|c| c.record.sha.as_str());
+        let key = match (pull.merge_base.as_deref(), tip) {
+            (Some(base), Some(tip)) if head.is_some_and(|h| h.eq_ignore_ascii_case(tip)) => {
+                diffs::DiffKey::of(self.owner, self.repo, self.number, base, tip)
+            }
+            _ => None,
+        };
+        let fetched = match fetched {
+            Some(text) => text,
+            None => match key.as_ref().and_then(|k| self.source.pull_diffs.get(k)) {
+                Some(text) => return Ok(text),
+                None => {
+                    self.source
+                        .client
+                        .pull_diff(self.owner, self.repo, self.number)
+                        .await?
+                }
+            },
+        };
+        let text: std::sync::Arc<str> = fetched.into();
+        if let Some(key) = key {
+            let after = self.pull().await.ok();
+            let same = after.is_some_and(|after| {
+                after.merge_base == pull.merge_base
+                    && after.head.as_ref().and_then(|h| h.sha.as_deref()) == head
+            });
+            if same {
+                self.source
+                    .pull_diffs
+                    .put(key, std::sync::Arc::clone(&text));
+            }
+        }
+        Ok(text)
     }
 
     /// The pull request's commits, at most [`rows::COMMIT_CAP`], ending on
