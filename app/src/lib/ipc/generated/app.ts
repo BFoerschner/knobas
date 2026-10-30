@@ -71,6 +71,22 @@ export type RenderContent = { "kind": "text", text: string, } | { "kind": "bytes
 export type RenderRun = { "outcome": "drawn", output: CommandOutput, body: string, } | { "outcome": "failed", status: number | null, stderr: string, } | { "outcome": "timed_out", seconds: number, stderr: string, } | { "outcome": "too_large", cap_bytes: number, } | { "outcome": "not_started", reason: string, };
 
 /**
+ * One default renderer per file pattern (#2263): files `pattern` takes open
+ * with `renderer`. Which of several matching patterns decides, and what
+ * happens when the renderer is gone, is the frontend's
+ * (`app/src/lib/render/defaults.ts`): the backend runs no built-in renderer.
+ */
+export type RendererDefault = { 
+/**
+ * A file glob (`*.md`, `docs/*.mmd`), matched without regard to case.
+ */
+pattern: string, 
+/**
+ * The renderer's registry id: `source`, `markdown`, `command:<saved id>`.
+ */
+renderer: string, };
+
+/**
  * What a renderer reads on stdin: the file's text, or its bytes.
  */
 export type RendererInput = "text" | "bytes";

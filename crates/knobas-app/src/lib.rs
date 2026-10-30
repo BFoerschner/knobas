@@ -637,6 +637,9 @@ pub fn run() {
             commands::app::user_renderers,
             commands::app::set_user_renderers,
             commands::app::run_renderer,
+            // #2263's default renderer per file pattern, appended at the foot.
+            commands::app::renderer_defaults,
+            commands::app::set_renderer_defaults,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
