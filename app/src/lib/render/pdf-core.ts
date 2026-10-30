@@ -110,11 +110,11 @@ function pageOf(lib: PdfLib, doc: PDFDocumentProxy, page: PDFPageProxy): PdfPage
     draw(canvas, scale) {
       const viewport = page.getViewport({ scale: scale * CSS_PER_POINT });
       const ratio = globalThis.devicePixelRatio || 1;
-      canvas.width = Math.floor(viewport.width * ratio);
-      canvas.height = Math.floor(viewport.height * ratio);
+      canvas.width = Math.round(viewport.width * ratio);
+      canvas.height = Math.round(viewport.height * ratio);
       // Through the CSSOM: the app's CSP refuses `style=""` in markup, not this.
-      canvas.style.width = `${Math.floor(viewport.width)}px`;
-      canvas.style.height = `${Math.floor(viewport.height)}px`;
+      canvas.style.width = `${Math.round(viewport.width)}px`;
+      canvas.style.height = `${Math.round(viewport.height)}px`;
       const task = page.render({
         canvas,
         viewport,

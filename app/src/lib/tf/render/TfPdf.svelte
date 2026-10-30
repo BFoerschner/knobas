@@ -91,8 +91,8 @@
     return (node: HTMLElement) => {
       const at = scale;
       // Through the CSSOM: the app's CSP refuses `style=""` in markup, not this.
-      node.style.width = `${Math.floor(width * at)}px`;
-      node.style.height = `${Math.floor(height * at)}px`;
+      node.style.width = `${Math.round(width * at)}px`;
+      node.style.height = `${Math.round(height * at)}px`;
       let stop = () => {};
       const go = () => (stop = paint(pdf, n, node, at));
       if (typeof IntersectionObserver === "undefined") {

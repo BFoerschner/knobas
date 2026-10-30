@@ -10,14 +10,16 @@
  * in the document, and text the text layer sets as `textContent` (never as
  * markup). See `pdf-core.ts` for what is off and why.
  */
-import { AnnotationMode, getDocument, GlobalWorkerOptions, TextLayer } from "pdfjs-dist";
+import { AnnotationMode, getDocument, PDFWorker, TextLayer } from "pdfjs-dist";
 import PdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?worker";
 
 import { openPdf } from "./pdf-core";
 import type { PdfAnswer } from "./port";
 
+let worker: PDFWorker | null = null;
+
 export function renderPdf(bytes: Uint8Array): Promise<PdfAnswer> {
-  // pdf.js makes one `PDFWorker` of this port and hands it to every document.
-  GlobalWorkerOptions.workerPort ??= new PdfjsWorker({ name: "pdf" });
-  return openPdf({ getDocument, TextLayer, AnnotationMode }, bytes);
+  // Handed to each document, so closing one does not stop it (a worker pdf.js made itself would go with its document).
+  if (worker === null || worker.destroyed) worker = PDFWorker.create({ port: new PdfjsWorker({ name: "pdf" }) });
+  return openPdf({ getDocument, TextLayer, AnnotationMode }, bytes, { worker });
 }

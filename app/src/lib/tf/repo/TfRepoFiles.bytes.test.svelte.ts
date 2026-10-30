@@ -197,7 +197,7 @@ test("zooming in and out draws every page again at the new zoom, and sizes its b
   button("Zoom out").click();
   await settle();
   expect(text(target.querySelector(".tf-pdf-zoom"))).toBe("80%");
-  expect(sizes()).toEqual(["652pxx844px", "652pxx844px"]);
+  expect(sizes()).toEqual(["653pxx845px", "653pxx845px"]);
 });
 
 test("an external link goes to the opener on a click and a middle click; a link to a page scrolls to it", async () => {
