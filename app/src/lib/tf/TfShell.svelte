@@ -32,6 +32,8 @@
     pagesKeptOpen?: () => Promise<number>;
     /** The command renderers saved in Settings › Renderers (#2262), installed in the registry once the database answers. */
     userRenderers?: () => Promise<import("../ipc/app").UserRenderer[]>;
+    /** The default renderer per file pattern (#2263), held once the database answers. */
+    rendererDefaults?: () => Promise<import("../ipc/app").RendererDefault[]>;
   }
 </script>
 
@@ -40,7 +42,8 @@
   import { onMount, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
-  import { pagesKeptOpen, userRenderers } from "../ipc/app";
+  import { pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
+  import { rendererDefaults as heldDefaults } from "../render/defaults.svelte";
   import { installCommands } from "../render/command";
   import { listSources, syncStatus, type SourceSummary, type SourceSyncStatus } from "../ipc/sources";
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
@@ -94,6 +97,7 @@
       listen: (event, handler) => tauriListen(event, handler),
       pagesKeptOpen,
       userRenderers,
+      rendererDefaults,
     },
     prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches,
     onstarttimer = () => {},
@@ -323,6 +327,16 @@
     if (read === undefined) return;
     void read()
       .then((saved) => installCommands(saved))
+      .catch(() => {});
+  });
+
+  // The default renderer per file pattern (#2263): until it answers, the registry's order decides.
+  $effect(() => {
+    if (!lifecycle.ready) return;
+    const read = untrack(() => ports.rendererDefaults);
+    if (read === undefined) return;
+    void read()
+      .then((list) => heldDefaults.hold(list))
       .catch(() => {});
   });
 

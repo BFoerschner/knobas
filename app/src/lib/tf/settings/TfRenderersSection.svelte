@@ -10,6 +10,11 @@
   backend stored in the registry (`render/command.ts`), so the file viewer
   and Markdown use it at once.
 
+  *Default renderers* (#2263) is the global list from file pattern to the
+  renderer a file opens with (`render/defaults.ts`), Source included: added
+  here or from the file viewer's *Render as ▾*, changed or removed here. A
+  row naming a renderer that is gone says the built-in default applies.
+
   The test pane runs a *saved* renderer on pasted text: the webview never
   sends a program (ADR-0016), so a renderer is saved before it is tried, as
   *Try it* does for *Open in…* (#1643).
@@ -35,11 +40,13 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { CommandOutput, RendererInput } from "../../ipc/app";
   import { COMMAND_PREFIX, installCommands } from "../../render/command";
-  import type { Renderer } from "../../render/registry";
+  import { allRenderers, type Renderer } from "../../render/registry";
+  import { withDefault } from "../../render/defaults";
+  import { rendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import { push } from "../../shell/toasts.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
 
-  let { ports = realRendererPorts }: { ports?: RendererPorts } = $props();
+  let { ports = realRendererPorts, defaults = rendererDefaults }: { ports?: RendererPorts; defaults?: RendererDefaults } = $props();
 
   /** `null` until the read answers. */
   let saved = $state<UserRenderer[] | null>(null);
@@ -53,12 +60,40 @@
   let sample = $state("");
   let trying = $state<{ renderer: Renderer; text: string; at: number } | null>(null);
 
+  /** Counts installs, so the renderers a default can name are read again after one. */
+  let installs = $state(0);
+  const choices = $derived((void installs, allRenderers()));
+  const nameOf = (id: string) => choices.find((r) => r.id === id)?.name ?? null;
+  /** The default being added. */
+  let adding = $state({ pattern: "", renderer: "source" });
+  let defaultsRefusal = $state<string | null>(null);
+
+  $effect(() => {
+    void defaults.load().catch((cause) => push({ text: `Could not read the default renderers: ${ipcErrorMessage(cause)}`, tone: "err" }));
+  });
+
+  async function storeDefaults(list: { pattern: string; renderer: string }[]): Promise<boolean> {
+    try {
+      await defaults.save(list);
+      defaultsRefusal = null;
+      return true;
+    } catch (cause) {
+      defaultsRefusal = ipcErrorMessage(cause);
+      return false;
+    }
+  }
+
+  async function addDefault() {
+    if (await storeDefaults(withDefault(defaults.list, adding.pattern.trim(), adding.renderer))) adding = { pattern: "", renderer: "source" };
+  }
+
   $effect(() => {
     void ports
       .userRenderers()
       .then((read) => {
         saved = read;
         installCommands(read);
+        installs += 1;
         testId = read[0]?.id ?? "";
       })
       .catch((cause) => push({ text: `Could not read the renderers: ${ipcErrorMessage(cause)}`, tone: "err" }));
@@ -96,6 +131,7 @@
       const stored = await ports.setUserRenderers(list);
       saved = stored;
       installCommands(stored);
+      installs += 1;
       if (!stored.some((r) => r.id === testId)) testId = stored[0]?.id ?? "";
       return true;
     } catch (cause) {
@@ -221,6 +257,54 @@
         </div>
       </div>
     {/if}
+  </div>
+
+  <div class="tf-stg-sec">
+    <h2>Default renderers</h2>
+    <p class="tf-stg-p">
+      Which renderer a file opens with, by file pattern. Where two patterns take a file, the more specific one decides; a file no
+      pattern takes opens with the first renderer that accepts it.
+    </p>
+    {#if defaults.list.length === 0}
+      <p class="tf-dim">No defaults yet: every file opens with the first renderer that accepts it.</p>
+    {:else}
+      <table class="tf-tbl tf-rnd-defaults">
+        <thead><tr><th>Files</th><th>Open with</th><th><span class="tf-sr">Actions</span></th></tr></thead>
+        <tbody>
+          {#each defaults.list as d, at (d.pattern)}
+            <tr>
+              <td class="tf-mono">{d.pattern}</td>
+              <td>
+                <select
+                  class="tf-select"
+                  aria-label="Open {d.pattern} with"
+                  value={d.renderer}
+                  onchange={(event) => void storeDefaults(defaults.list.map((row, i) => (i === at ? { ...row, renderer: event.currentTarget.value } : row)))}
+                >
+                  {#each choices as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
+                  {#if nameOf(d.renderer) === null}<option value={d.renderer}>{d.renderer}</option>{/if}
+                </select>
+                {#if nameOf(d.renderer) === null}<span class="tf-small tf-dim">Not installed: the built-in default applies.</span>{/if}
+              </td>
+              <td class="tf-right">
+                <button class="tf-btn tf-sm tf-ghost" onclick={() => void storeDefaults(defaults.list.filter((_, i) => i !== at))}>Remove</button>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
+    <div class="tf-stg-row">
+      <label class="tf-stg-l" for="tf-rnd-dpat">Add a default<small>A file pattern, such as <span class="tf-mono">*.md</span> or <span class="tf-mono">docs/*.mmd</span>.</small></label>
+      <div class="tf-stg-c tf-stg-inl">
+        <input id="tf-rnd-dpat" class="tf-stg-in tf-mono" bind:value={adding.pattern} placeholder="*.md" />
+        <select class="tf-select" aria-label="Open with" bind:value={adding.renderer}>
+          {#each choices as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
+        </select>
+        <button class="tf-btn" disabled={adding.pattern.trim() === ""} onclick={() => void addDefault()}>Add</button>
+      </div>
+    </div>
+    {#if defaultsRefusal !== null}<p class="tf-stg-errt" role="alert">{defaultsRefusal}</p>{/if}
   </div>
 
   {#if saved.length > 0}

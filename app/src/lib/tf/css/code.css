@@ -147,3 +147,19 @@
 .tf-rframe { display: block; width: 100%; min-height: 60vh; border: 0; background: var(--paper); }
 .tf-stepfail { border-bottom: 1px solid var(--rule); background: var(--err-bg); padding: 10px 12px; font-size: var(--t-sm); color: var(--err); display: flex; flex-direction: column; gap: 8px; }
 .tf-stepfail pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; background: var(--paper); color: var(--ink); border-radius: 4px; padding: 8px 10px; white-space: pre-wrap; }
+
+/* The renderer switcher (#2263; mockups/code-area/file.html, state "switcher"): *Render as <name> ▾*. */
+.tf-rsw { position: relative; display: inline-flex; }
+.tf-rsw-face { gap: 6px; }
+.tf-rsw-face b { font-weight: 600; }
+.tf-rsw-lab { color: var(--ink-2); }
+.tf-rsw .tf-menu { width: 330px; font-size: var(--t-sm); }
+.tf-rsw .tf-menu > button, .tf-rsw .tf-menu > a { display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }
+.tf-rsw .tf-menu > a:hover, .tf-rsw .tf-menu > .tf-on { background: var(--sheet-2); }
+.tf-rsw .tf-menu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
+.tf-rsw-mh { padding: 6px 10px 2px; font-size: var(--t-2xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
+.tf-rsw-tick { width: 14px; flex: none; color: var(--ink); }
+.tf-rsw-name { min-width: 0; }
+.tf-rsw-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-rsw-tag { margin-left: auto; font-size: var(--t-2xs); color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+.tf-rsw-kb { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); }
