@@ -61,6 +61,9 @@ struct Inner {
     reads: Mutex<Reads>,
     /// Each build's number, which the views read through it are keyed by.
     builds: AtomicU64,
+    /// Advanced by every [`LiveSources::forget`]. A build that saw it move
+    /// since it read the configuration row is lent to its own read only.
+    forgets: AtomicU64,
 }
 
 /// A source as built, and what it was built from.
@@ -101,6 +104,7 @@ impl LiveSources {
             built: Mutex::new(HashMap::new()),
             reads: Mutex::new(Reads::new(bound)),
             builds: AtomicU64::new(0),
+            forgets: AtomicU64::new(0),
         }))
     }
 
@@ -128,6 +132,12 @@ impl LiveSources {
         let parsed = knobas_core::entity::EntityRef::parse(entity_id)
             .map_err(|error| SourcesError::Invalid(error.to_string()))?;
         let id = parsed.namespace;
+        // Read before the row: a *Remove* that lands between the row read and
+        // the slot below would otherwise let this read put an instance built
+        // from the removed source (its row, and its credential or none) into
+        // a fresh slot, where a source added again under the id with the same
+        // row would be lent it.
+        let forgets = self.0.forgets.load(Ordering::SeqCst);
         let Some(cfg) = knobas_sync::config::get(pool, &id).await? else {
             self.forget(&id);
             return Err(SourcesError::NotFound(id));
@@ -177,6 +187,9 @@ impl LiveSources {
         .await?
         .into();
         let generation = self.0.builds.fetch_add(1, Ordering::Relaxed);
+        if self.0.forgets.load(Ordering::SeqCst) != forgets {
+            return Ok(Lent { source, generation });
+        }
         *slot = Some(Built {
             recipe,
             generation,
@@ -189,6 +202,7 @@ impl LiveSources {
     /// credential changed or it was removed, so the next read builds it
     /// again and asks the keychain again.
     pub fn forget(&self, id: &str) {
+        self.0.forgets.fetch_add(1, Ordering::SeqCst);
         let slot = self.0.built.lock().expect("the built sources").remove(id);
         // A slot a build holds right now is let go: whatever it builds is
         // lent to that read alone, and the next read starts a slot anew.
