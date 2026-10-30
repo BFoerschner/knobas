@@ -38,12 +38,12 @@
 .tf-ftree .tf-d4 { padding-left: 58px; } .tf-ftree .tf-d5 { padding-left: 70px; } .tf-ftree .tf-d6 { padding-left: 82px; }
 .tf-ftree .tf-d7 { padding-left: 94px; } .tf-ftree .tf-d8 { padding-left: 106px; }
 .tf-fileview { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; min-width: 0; }
-.tf-fileview > header {
+.tf-fileview > header, .tf-fileview > .tf-waiting > header {
   display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--rule);
   background: var(--sheet-2); flex-wrap: wrap;
 }
-.tf-fileview > header .tf-p { font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none; }
-.tf-fileview > header .tf-acts { margin-left: auto; display: flex; gap: 6px; }
+.tf-fileview > header .tf-p, .tf-fileview > .tf-waiting > header .tf-p { font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none; }
+.tf-fileview > header .tf-acts, .tf-fileview > .tf-waiting > header .tf-acts { margin-left: auto; display: flex; gap: 6px; }
 .tf-fileview .tf-fpad { padding: 12px; }
 .tf-banner { display: flex; gap: 10px; align-items: center; padding: 8px 12px; font-size: var(--t-sm); border-bottom: 1px solid var(--rule); }
 .tf-banner.tf-warn { background: var(--warn-bg); color: var(--warn); }

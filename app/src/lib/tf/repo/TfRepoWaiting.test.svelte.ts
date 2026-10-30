@@ -7,8 +7,9 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { SourceView, ViewRow } from "../../ipc/entity";
+import type { SourceView, TreeEntry, ViewRow } from "../../ipc/entity";
 import TfRepoCommits from "./TfRepoCommits.svelte";
+import TfRepoFiles from "./TfRepoFiles.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
 const FEATURE = `${REPO}@refs/heads/feature/x`;
@@ -116,4 +117,98 @@ test("a read that fails replaces the dimmed commits with its error, not an empty
   expect(text(target.querySelector(".tf-cfail"))).toContain("Gitea did not answer");
   expect(target.querySelector(".tf-rcommits")).toBeNull();
   expect(target.querySelector(".tf-wait-dim")).toBeNull();
+});
+
+// ---- Files ----
+
+const entry = (name: string): TreeEntry => ({ name, kind: "file", size: 10, section: `file:${name}` });
+const tree = (names: string[]): SourceView => ({
+  sections: [{ id: "files", title: "files", count: null, deferred: false, blocks: [{ type: "tree", trail: [], entries: names.map(entry), truncated: false, url: null }] }],
+  actions: [],
+});
+const fileView = (path: string, text: string): SourceView => ({
+  sections: [
+    {
+      id: `file:${path}`,
+      title: path,
+      count: null,
+      deferred: false,
+      blocks: [{ type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: null }],
+    },
+  ],
+  actions: [],
+});
+
+/** Files over reads keyed by section, each held until answered. */
+function filesTab(reads: Map<string, ReturnType<typeof held<SourceView>>>, path: string) {
+  const props = $state({
+    ports: {
+      entityView: (_id: string, section: string | null) => reads.get(section ?? "")!.promise,
+      submitWrite: async () => {
+        throw new Error("no write here");
+      },
+      listen: async () => () => {},
+    },
+    repoId: REPO,
+    at: REPO,
+    branch: "main" as string | null,
+    path: path as string | null,
+    changed: new Set<string>(),
+  });
+  view = mount(TfRepoFiles, { target, props });
+  return props;
+}
+
+test("Files draws skeleton lines for the tree and the file until their first reads answer", async () => {
+  const listing = held<SourceView>();
+  const readme = held<SourceView>();
+  filesTab(new Map([["files", listing], ["file:README.md", readme]]), "README.md");
+  await settle();
+  expect(target.querySelector(".tf-ftree .tf-skel")).not.toBeNull();
+  expect(target.querySelector(".tf-fileview .tf-skel-lines")).not.toBeNull();
+
+  listing.answer(tree(["README.md", "lib.rs"]));
+  readme.answer(fileView("README.md", "# Payout\n"));
+  await settle();
+  expect(target.querySelector(".tf-skel")).toBeNull();
+  expect(text(target.querySelector(".tf-fileview header"))).toContain("README.md");
+});
+
+test("switching files with the read held back keeps the previous file drawn, dimmed, until the new one arrives", async () => {
+  const listing = held<SourceView>();
+  const readme = held<SourceView>();
+  const lib = held<SourceView>();
+  const props = filesTab(new Map([["files", listing], ["file:README.md", readme], ["file:lib.rs", lib]]), "README.md");
+  listing.answer(tree(["README.md", "lib.rs"]));
+  readme.answer(fileView("README.md", "# Payout\n"));
+  await settle();
+
+  props.path = "lib.rs";
+  await settle();
+  const dimmed = target.querySelector(".tf-fileview .tf-wait-dim");
+  expect(dimmed).not.toBeNull();
+  expect(text(dimmed!.querySelector("header"))).toContain("README.md");
+  expect(text(dimmed!.querySelector(".tf-code"))).toContain("# Payout");
+
+  lib.answer(fileView("lib.rs", "fn main() {}\n"));
+  await settle();
+  expect(target.querySelector(".tf-wait-dim")).toBeNull();
+  expect(text(target.querySelector(".tf-fileview header"))).toContain("lib.rs");
+});
+
+test("a file read that fails replaces the dimmed file with its error", async () => {
+  const listing = held<SourceView>();
+  const readme = held<SourceView>();
+  const lib = held<SourceView>();
+  const props = filesTab(new Map([["files", listing], ["file:README.md", readme], ["file:lib.rs", lib]]), "README.md");
+  listing.answer(tree(["README.md", "lib.rs"]));
+  readme.answer(fileView("README.md", "# Payout\n"));
+  await settle();
+
+  props.path = "lib.rs";
+  await settle();
+  lib.refuse({ code: "unavailable", message: "Gitea did not answer" });
+  await settle();
+  expect(text(target.querySelector(".tf-fileview .tf-cfail"))).toContain("Gitea did not answer");
+  expect(target.querySelector(".tf-fileview .tf-code")).toBeNull();
 });
