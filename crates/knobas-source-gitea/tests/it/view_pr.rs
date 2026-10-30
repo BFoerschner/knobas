@@ -569,10 +569,14 @@ async fn the_files_tab_is_read_on_its_own_from_the_pull_requests_diff() {
     };
     assert!(!truncated);
     // An open pull request's diff takes line comments, sent as a review (#709).
+    // A reply goes beside them (#2277); this Gitea did not say its version,
+    // so nothing is offered that a Forgejo could not take: no resolve.
     assert_eq!(
         commentable,
         &Some(Commenting {
-            write_op: "submit_review".into()
+            write_op: "submit_review".into(),
+            reply: Some("reply_to_thread".into()),
+            resolve: None,
         })
     );
     let summary: Vec<_> = files
@@ -599,6 +603,8 @@ async fn the_files_tab_is_read_on_its_own_from_the_pull_requests_diff() {
             format!("{REPO}/pulls/142"),
             format!("{REPO}/pulls/142.diff"),
             format!("{REPO}/pulls/142/reviews"),
+            // Whether the server resolves threads (#2277).
+            "/api/v1/version".to_owned(),
         ]
     );
 }
@@ -665,25 +671,33 @@ async fn gitea_with_line_comments(pull: Value) -> MockServer {
         "A second retry loop?",
     );
     on_dropped_file["path"] = json!("src/sepa/legacy.rs");
+    on_dropped_file["id"] = json!(204);
+    // Gitea's comment ids (#2277), and Olu's resolve of Priya's thread on
+    // new line 2, which Gitea keeps on the comment that opened it.
+    let with_id = |mut c: Value, id: u64| {
+        c["id"] = json!(id);
+        c
+    };
+    let mut opened = with_id(
+        line_comment("priya.nair", "2026-08-22T09:00:00Z", 2, 0, "-    30\n+    30 + jitter()", "Bound the jitter."),
+        101,
+    );
+    opened["resolver"] = json!({ "login": "olu" });
     let by_review = [
         (
             21,
             json!([
-                line_comment(
-                    "priya.nair",
-                    "2026-08-22T09:00:00Z",
-                    2,
-                    0,
-                    "-    30\n+    30 + jitter()",
-                    "Bound the jitter."
-                ),
-                line_comment(
-                    "priya.nair",
-                    "2026-08-22T09:00:00Z",
-                    0,
-                    2,
-                    "-    30",
-                    "Why drop the <b>constant</b>?"
+                opened,
+                with_id(
+                    line_comment(
+                        "priya.nair",
+                        "2026-08-22T09:00:00Z",
+                        0,
+                        2,
+                        "-    30",
+                        "Why drop the <b>constant</b>?"
+                    ),
+                    102
                 ),
             ]),
         ),
@@ -691,31 +705,40 @@ async fn gitea_with_line_comments(pull: Value) -> MockServer {
             23,
             json!([
                 // A reply on Priya's line, later.
-                line_comment(
-                    "olu",
-                    "2026-08-22T11:00:00Z",
-                    2,
-                    0,
-                    "-    30\n+    30 + jitter()",
-                    "Agreed: `±10 %`."
+                with_id(
+                    line_comment(
+                        "olu",
+                        "2026-08-22T11:00:00Z",
+                        2,
+                        0,
+                        "-    30\n+    30 + jitter()",
+                        "Agreed: `±10 %`."
+                    ),
+                    201
                 ),
                 // Written on a new line 3 that read `    35`; it reads `}` now.
-                line_comment(
-                    "olu",
-                    "2026-08-22T11:00:00Z",
-                    3,
-                    0,
-                    "-    30\n+    35",
-                    "Why 35?"
+                with_id(
+                    line_comment(
+                        "olu",
+                        "2026-08-22T11:00:00Z",
+                        3,
+                        0,
+                        "-    30\n+    35",
+                        "Why 35?"
+                    ),
+                    202
                 ),
                 // A line the diff no longer has at all.
-                line_comment(
-                    "olu",
-                    "2026-08-22T11:00:00Z",
-                    40,
-                    0,
-                    "+    gone",
-                    "And this?"
+                with_id(
+                    line_comment(
+                        "olu",
+                        "2026-08-22T11:00:00Z",
+                        40,
+                        0,
+                        "+    gone",
+                        "And this?"
+                    ),
+                    203
                 ),
                 // A file a later push dropped from the pull request.
                 on_dropped_file,
@@ -791,6 +814,9 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 line: 7,
                 outdated: true,
                 comments: vec![said("olu", "2026-08-22T11:00:00Z", "A second retry loop?")],
+                id: Some("204".into()),
+                resolved_by: None,
+                replies: false,
             },
         }],
         "{view:#?}"
@@ -807,6 +833,9 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                     "2026-08-22T09:00:00Z",
                     "Why drop the <b>constant</b>?"
                 )],
+                id: Some("102".into()),
+                resolved_by: None,
+                replies: true,
             },
             LineThread {
                 side: ReviewSide::New,
@@ -816,18 +845,29 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                     said("priya.nair", "2026-08-22T09:00:00Z", "Bound the jitter."),
                     said("olu", "2026-08-22T11:00:00Z", "Agreed: `±10 %`."),
                 ],
+                // The opening comment's id and its resolver (#2277).
+                id: Some("101".into()),
+                resolved_by: Some("olu".into()),
+                replies: true,
             },
             LineThread {
                 side: ReviewSide::New,
                 line: 3,
                 outdated: true,
                 comments: vec![said("olu", "2026-08-22T11:00:00Z", "Why 35?")],
+                // Outdated: Gitea would place a reply on today's line 3.
+                id: Some("202".into()),
+                resolved_by: None,
+                replies: false,
             },
             LineThread {
                 side: ReviewSide::New,
                 line: 40,
                 outdated: true,
                 comments: vec![said("olu", "2026-08-22T11:00:00Z", "And this?")],
+                id: Some("203".into()),
+                resolved_by: None,
+                replies: false,
             },
         ],
         "{view:#?}"
@@ -837,6 +877,37 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
         assert!(
             !asked.contains(&format!("{REPO}/pulls/142/reviews/{unasked}/comments")),
             "review {unasked} was asked for line comments: {asked:?}"
+        );
+    }
+}
+
+/// Resolve is offered where the server resolves threads (#2277): Gitea
+/// 1.27.3 does, Forgejo 17 has no endpoint for it (405, the fact note of
+/// 2026-10-30), and says what it is in its version.
+#[tokio::test]
+async fn resolve_is_offered_on_gitea_and_not_on_forgejo() {
+    for (version, resolve) in [
+        ("1.27.3", Some("resolve_thread".to_owned())),
+        ("17.0.0+gitea-1.22.0", None),
+    ] {
+        let server = gitea_with_line_comments(open_pull()).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/version"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "version": version })))
+            .mount(&server)
+            .await;
+        let view = source(&server)
+            .view(PR, Some("files"))
+            .await
+            .unwrap()
+            .unwrap();
+        let Block::Diff { commentable, .. } = &view.sections[0].blocks[0] else {
+            panic!("a diff: {view:#?}");
+        };
+        assert_eq!(
+            commentable.as_ref().and_then(|c| c.resolve.clone()),
+            resolve,
+            "{version}"
         );
     }
 }
@@ -1956,8 +2027,9 @@ async fn a_section_read_carries_no_toolbar() {
 /// once the record is in, the reviews, the commits, the comments, who the
 /// token is (#705), landing's three -- the base branch, the head branch,
 /// whether the head is behind (#708) -- the head commit's statuses (#710) and
-/// the repository's labels (#1194) and its organisation's (#1235) are in
-/// flight together. Read in turn, one is.
+/// the repository's labels (#1194) and its organisation's (#1235), and who a
+/// review can be requested from (#2303) are in flight together. Read in
+/// turn, one is.
 #[tokio::test]
 async fn a_pull_requests_tabs_are_read_at_the_same_time() {
     // A token of its own, so who it is has not been read before (see
@@ -1971,7 +2043,7 @@ async fn a_pull_requests_tabs_are_read_at_the_same_time() {
         .expect("reads")
         .expect("a pull request draws a view");
     assert_eq!(view.sections.len(), 4);
-    assert_eq!(flight.most(), 10, "the tabs' reads in flight at once");
+    assert_eq!(flight.most(), 11, "the tabs' reads in flight at once");
 }
 
 // -- Comment… and the review actions (issue #705) ----------------------------
@@ -3026,4 +3098,72 @@ async fn a_token_without_the_organisation_scope_is_told_on_add_label() {
              it lacks the read:organization scope"
         )
     );
+}
+
+// -- Request… (issue #2303) ---------------------------------------------------
+
+/// [`gitea`] over `pull`, answering who a review can be requested from.
+async fn gitea_with_candidates(pull: Value, candidates: Value) -> MockServer {
+    let server = gitea(pull, reviews()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/reviewers")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(candidates))
+        .mount(&server)
+        .await;
+    server
+}
+
+fn request_of(view: &SourceView) -> Option<&ViewAction> {
+    view.actions
+        .iter()
+        .find(|a| a.write_op == "request_reviewers")
+}
+
+/// *Request…* offers the people Gitea says a review can be requested from,
+/// less the author and those already asked, to a reader who may push to the
+/// base; a reader who may not, or is not the author, is offered nothing, as
+/// Gitea would refuse them (ADR-0020 rule 4).
+#[tokio::test]
+async fn request_is_offered_to_a_pusher_with_the_people_gitea_names() {
+    let candidates = json!([
+        { "login": "mara.lindqvist" }, { "login": "olu" }, { "login": "kai" }, { "login": "sven" }
+    ]);
+    let mut pusher = open_pull();
+    pusher["base"]["repo"]["permissions"] = json!({ "push": true });
+    pusher["requested_reviewers"] = json!([{ "login": "kai" }]);
+    let server = gitea_with_candidates(pusher, candidates.clone()).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    let request = request_of(&view).expect("offered to a pusher");
+    assert_eq!(request.label, "Request…");
+    let FieldKind::Choice { options } = &request.fields[0].kind else {
+        panic!("a choice: {request:#?}");
+    };
+    let offered: Vec<&str> = options.iter().map(|o| o.value.as_str()).collect();
+    assert_eq!(offered, ["olu", "sven"]);
+
+    let mut reader = open_pull();
+    reader["base"]["repo"]["permissions"] = json!({ "push": false });
+    let server = gitea_with_candidates(reader, candidates).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert!(request_of(&view).is_none(), "{:#?}", view.actions);
+}
+
+/// The author may ask for reviews without push access; on a closed pull
+/// request nobody is offered *Request…*, and who could be asked is not read.
+#[tokio::test]
+async fn the_author_may_request_and_a_closed_pull_request_offers_none() {
+    let candidates = json!([{ "login": "olu" }]);
+    let mut own = open_pull();
+    own["user"]["login"] = json!(VIEWER);
+    let server = gitea_with_candidates(own, candidates.clone()).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert!(request_of(&view).is_some(), "{:#?}", view.actions);
+
+    let mut closed = open_pull();
+    closed["state"] = json!("closed");
+    closed["base"]["repo"]["permissions"] = json!({ "push": true });
+    let server = gitea_with_candidates(closed, candidates).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert!(request_of(&view).is_none(), "{:#?}", view.actions);
+    assert!(!paths(&server).await.contains(&format!("{REPO}/reviewers")));
 }

@@ -18,6 +18,7 @@ use crate::source::GiteaSource;
 mod label;
 mod land;
 mod maintain;
+mod request;
 mod review;
 mod threads;
 
@@ -53,7 +54,9 @@ pub(super) async fn draw(
             // landing holds against the base's required checks (#721).
             // And the repository's labels and its organisation's, which *Add
             // label…* offers (#1194, #1235).
-            let (reviews, commits, comments, viewer, landing, statuses, labels) = tokio::try_join!(
+            // And who a review can be requested from (#2303), for
+            // *Request…*.
+            let (reviews, commits, comments, viewer, landing, statuses, labels, candidates) = tokio::try_join!(
                 at.reviews(),
                 at.commits(Some(&pull)),
                 at.comments(),
@@ -61,6 +64,7 @@ pub(super) async fn draw(
                 at.landing(&pull),
                 at.statuses(&pull),
                 at.labels(),
+                at.candidates(&pull),
             )?;
             let landing = landing.with_statuses(statuses.as_ref());
             let checks = statuses.as_ref().and_then(super::checks::block_of);
@@ -71,6 +75,13 @@ pub(super) async fn draw(
             actions.extend(maintain::actions(&pull));
             actions.push(label::action(&pull, at.owner, &labels));
             actions.extend(land::actions(&pull, &reviews, &landing));
+            // Drawn in the Reviewers panel, not the toolbar (#2303).
+            actions.extend(request::action(
+                &pull,
+                viewer.as_deref(),
+                &candidates,
+                &pull.requested(),
+            ));
             vec![
                 overview(&pull, &reviews, &landing, checks),
                 files_stub(&pull),
@@ -143,12 +154,13 @@ impl PullView<'_> {
     /// are read beside the diff, then each review that has line comments, all
     /// at once.
     async fn files(&self) -> Result<ViewSection, SourceError> {
-        let (pull, text, reviews) = tokio::try_join!(
+        let (pull, text, reviews, resolves) = tokio::try_join!(
             self.pull(),
             self.source
                 .client
                 .pull_diff(self.owner, self.repo, self.number),
             self.reviews(),
+            async { Ok(self.source.resolves().await) },
         )?;
         let (mut files, truncated) = knobas_source::diff::parse_view(&text);
         let commented = threads::with_comments(&reviews);
@@ -176,7 +188,7 @@ impl PullView<'_> {
             blocks: vec![Block::Diff {
                 files,
                 truncated,
-                commentable: review::commenting(&pull),
+                commentable: review::commenting(&pull, resolves),
                 gone,
             }],
         })
@@ -282,6 +294,21 @@ impl PullView<'_> {
     /// never the view.
     async fn labels(&self) -> Result<Result<Vec<label::Label>, String>, SourceError> {
         Ok(label::read(self.source, self.owner, self.repo).await)
+    }
+
+    /// Who a review of `pull` can be requested from (#2303): asked only on
+    /// an open pull request, and a failed read is nobody, which costs
+    /// *Request…* and never the view.
+    async fn candidates(&self, pull: &Pull) -> Result<Vec<UserRef>, SourceError> {
+        if !pull.is_open() {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .source
+            .client
+            .repo_reviewers(self.owner, self.repo)
+            .await
+            .unwrap_or_default())
     }
 
     /// The login the token belongs to, or `None` where Gitea would not say
@@ -557,6 +584,25 @@ impl Pull {
         self.base.as_ref().and_then(|b| b.r#ref.as_deref())
     }
 
+    /// Whether the token's account may push to the base repository, as
+    /// Gitea says on the record (`base.repo.permissions.push`).
+    fn may_push(&self) -> bool {
+        self.base
+            .as_ref()
+            .and_then(|b| b.repo.as_ref())
+            .and_then(|r| r.permissions.as_ref())
+            .is_some_and(|p| p.push)
+    }
+
+    /// The logins a review is requested from now (`requested_reviewers`).
+    fn requested(&self) -> Vec<String> {
+        self.requested_reviewers
+            .iter()
+            .flatten()
+            .filter_map(|u| login(Some(u)))
+            .collect()
+    }
+
     /// The head lives in the base's repository, not a fork's.
     fn head_in_base_repo(&self) -> bool {
         let repo = |b: &Option<PullBranch>| {
@@ -609,6 +655,9 @@ struct Pull {
     /// (#1194).
     #[serde(default)]
     labels: Vec<label::Label>,
+    /// Who a review is requested from now (#2303); `null` reads as none.
+    #[serde(default)]
+    requested_reviewers: Option<Vec<UserRef>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -627,6 +676,16 @@ struct PullBranch {
 struct PullRepo {
     #[serde(default)]
     full_name: Option<String>,
+    /// What the token's account may do there (#2303).
+    #[serde(default)]
+    permissions: Option<RepoPermissions>,
+}
+
+/// Gitea's `Permission` on a repository record.
+#[derive(Debug, serde::Deserialize)]
+struct RepoPermissions {
+    #[serde(default)]
+    push: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]

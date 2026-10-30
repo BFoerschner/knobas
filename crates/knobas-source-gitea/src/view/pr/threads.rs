@@ -32,11 +32,20 @@ pub(super) struct Written {
     /// line, without its marker. `None` where Gitea sent no hunk.
     was: Option<String>,
     comment: LineComment,
+    /// Gitea's id for the comment, which resolve and unresolve name (#2277).
+    id: Option<u64>,
+    /// Who resolved the conversation this comment opens, as Gitea keeps it
+    /// on the comment (`resolver`); `None` while open.
+    resolver: Option<String>,
 }
 
 /// The fields of Gitea's `PullReviewComment` placing reads.
 #[derive(Debug, serde::Deserialize)]
 pub(super) struct ReviewLineComment {
+    #[serde(default)]
+    id: Option<u64>,
+    #[serde(default)]
+    resolver: Option<UserRef>,
     #[serde(default)]
     user: Option<UserRef>,
     #[serde(default)]
@@ -84,6 +93,11 @@ pub(super) fn written(review: &Review, raw: Vec<serde_json::Value>) -> Vec<Writt
                 side,
                 line,
                 was: c.diff_hunk.as_deref().and_then(last_line),
+                id: c.id,
+                resolver: c
+                    .resolver
+                    .as_ref()
+                    .map(|r| login(Some(r)).unwrap_or_else(|| "someone".to_owned())),
                 comment: LineComment {
                     author,
                     body: c.body.unwrap_or_default(),
@@ -129,15 +143,10 @@ pub(super) fn place(files: &mut [DiffFile], written: Vec<Written>) -> Vec<FileTh
                     && g.thread.side == comment.side
                     && g.thread.line == comment.line
             }) {
-                Some(g) => g.thread.comments.push(comment.comment),
+                Some(g) => join(&mut g.thread, comment),
                 None => gone.push(FileThread {
-                    path: comment.path,
-                    thread: LineThread {
-                        side: comment.side,
-                        line: comment.line,
-                        outdated: true,
-                        comments: vec![comment.comment],
-                    },
+                    path: comment.path.clone(),
+                    thread: opened(comment, true),
                 }),
             }
             continue;
@@ -153,18 +162,16 @@ pub(super) fn place(files: &mut [DiffFile], written: Vec<Written>) -> Vec<FileTh
             .iter_mut()
             .find(|t| t.side == comment.side && t.line == comment.line && t.outdated == outdated)
         {
-            Some(thread) => thread.comments.push(comment.comment),
-            None => file.threads.push(LineThread {
-                side: comment.side,
-                line: comment.line,
-                outdated,
-                comments: vec![comment.comment],
-            }),
+            Some(thread) => join(thread, comment),
+            None => file.threads.push(opened(comment, outdated)),
         }
     }
     for file in files.iter_mut() {
         for thread in &mut file.threads {
             oldest_first(&mut thread.comments);
+            // Gitea places a reply by line on the current head (#2277): an
+            // outdated thread's line is not that line, so it takes none.
+            thread.replies = thread.id.is_some() && !thread.outdated;
         }
         file.threads
             .sort_by_key(|t| (t.outdated, t.line, t.side == ReviewSide::New));
@@ -180,6 +187,35 @@ pub(super) fn place(files: &mut [DiffFile], written: Vec<Written>) -> Vec<FileTh
         ))
     });
     gone
+}
+
+/// A thread opened by `comment`. Its id and its resolver are the first
+/// comment's, which [`join`] keeps the oldest.
+fn opened(comment: Written, outdated: bool) -> LineThread {
+    LineThread {
+        side: comment.side,
+        line: comment.line,
+        outdated,
+        id: comment.id.map(|id| id.to_string()),
+        resolved_by: comment.resolver,
+        replies: false,
+        comments: vec![comment.comment],
+    }
+}
+
+/// `comment` added to `thread`. Gitea keeps a conversation's resolution on
+/// the comment that opened it (the fact note of 2026-10-30, #2253), and its
+/// ids grow with time, so the thread's id and resolver are those of its
+/// lowest-numbered comment: the one the web page resolves.
+fn join(thread: &mut LineThread, comment: Written) {
+    let first = thread.id.as_deref().and_then(|id| id.parse::<u64>().ok());
+    if let Some(id) = comment.id
+        && first.is_none_or(|first| id < first)
+    {
+        thread.id = Some(id.to_string());
+        thread.resolved_by = comment.resolver;
+    }
+    thread.comments.push(comment.comment);
 }
 
 /// A thread's replies oldest first. Stable: equal instants, and comments
