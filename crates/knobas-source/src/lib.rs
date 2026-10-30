@@ -25,6 +25,7 @@
 //! against themselves in their own test suite.
 
 pub mod clone_urls;
+pub mod code_pages;
 pub mod contract;
 pub mod diff;
 pub mod docs;
@@ -227,6 +228,18 @@ pub struct SourceDescriptor {
     /// whose items open by their stored address alone.
     #[serde(default)]
     pub url_forms: Vec<url_forms::UrlForm>,
+    /// Where a code host serves the page of a repository, a file, a commit,
+    /// a range and a pull request, after the instance's typed base URL
+    /// (#2274, [`code_pages`]): what *Open in › Browser* and the `{url}`
+    /// placeholder open. [`code_pages::check`] holds it to its rules
+    /// (contract battery clause 14). Read on the Rust side; the shell never
+    /// does.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// decodes as a source with no code pages: *Browser* is then not offered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub code_pages: Option<code_pages::CodePages>,
 }
 
 impl SourceDescriptor {
@@ -2248,6 +2261,7 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            code_pages: None,
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -2304,6 +2318,7 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            code_pages: None,
             ..a_descriptor()
         };
         let mut wire = serde_json::to_value(&declared).unwrap();

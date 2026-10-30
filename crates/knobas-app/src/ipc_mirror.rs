@@ -155,6 +155,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::checkout::working_tree::TreeRead::export_all(cfg)?;
     knobas_core::checkout::open::Application::export_all(cfg)?;
     knobas_core::checkout::open::Draft::export_all(cfg)?;
+    knobas_core::checkout::open::Object::export_all(cfg)?;
+    knobas_core::checkout::open::ObjectKind::export_all(cfg)?;
     crate::checkout::open::GitFound::export_all(cfg)?;
     crate::checkout::open::CheckoutSettings::export_all(cfg)?;
     crate::checkout::clone::FailureCause::export_all(cfg)?;

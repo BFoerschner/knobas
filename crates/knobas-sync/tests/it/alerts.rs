@@ -96,6 +96,7 @@ impl Source for Monitors {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            code_pages: None,
             write_ops: Vec::new(),
             entity_kinds: self
                 .kinds

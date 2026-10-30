@@ -19,6 +19,7 @@ import type {
   CheckoutApplicationDraft,
   CheckoutSettings,
   CheckoutView,
+  OpenObject,
   CloneAnswer,
   CodeFacts,
   ContextRow,
@@ -100,6 +101,8 @@ export type {
   CheckoutFoundBy,
   CheckoutSettings,
   CheckoutView,
+  OpenObject,
+  OpenObjectKind,
   ChoiceOption,
   CloneAnswer,
   CloneEvent,
@@ -1213,6 +1216,26 @@ export function openCheckout(entityId: string, at: OpenAt = {}): Promise<string[
     file: at.file ?? null,
     line: at.line ?? null,
   });
+}
+
+/**
+ * Run an application on a code object of this entity's repository —
+ * `open_object` (#2274): a repository, a file at a line, a commit, a range or
+ * a pull request. The application's command for the object's kind runs at
+ * the checkout; one without such a command is refused. Answers the argument
+ * vector it started.
+ */
+export function openObject(entityId: string, application: string | null, object: OpenObject): Promise<string[]> {
+  return invoke<string[]>("open_object", { entityId, application, object });
+}
+
+/**
+ * The page a code object has at its source — `object_page` (#2274): what
+ * *Open in › Browser* opens. Built from the source's typed base URL and the
+ * pages its adapter declares; `null` when it declares none.
+ */
+export function objectPage(entityId: string, object: OpenObject): Promise<string | null> {
+  return invoke<string | null>("object_page", { entityId, object });
 }
 
 /**

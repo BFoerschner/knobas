@@ -25,14 +25,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use knobas_app::IpcErrorCode;
-use knobas_app::checkout::open::{APPLICATIONS_KEY, GitFound, legacy_key, open};
+use knobas_app::checkout::open::{
+    APPLICATIONS_KEY, GitFound, legacy_key, open, open_object, page,
+};
 use knobas_app::checkout::uncommitted::DiffRead;
 use knobas_app::checkout::working_tree::TreeRead;
 use knobas_app::checkout::{
     CheckoutView, FoundBy, clones_root, local_changes, set_applications, set_clones_root,
     set_override, settings, view,
 };
-use knobas_core::checkout::open::{Draft, shipped};
+use knobas_core::checkout::open::{Draft, Object, shipped};
 use sqlx::PgPool;
 
 const HOST: &str = "gitea.example.com";
@@ -853,6 +855,7 @@ fn app(id: Option<&str>, name: &str, command: &str, file: Option<&str>) -> Draft
         name: name.to_owned(),
         command: command.to_owned(),
         file_command: file.map(str::to_owned),
+        ..Draft::default()
     }
 }
 
@@ -1218,7 +1221,7 @@ async fn the_shipped_list_with_501s_templates_is_the_list_until_one_is_saved() {
             id: "terminal".to_owned(),
             name: "Terminal".to_owned(),
             command: "my-term {path}".to_owned(),
-            file_command: None,
+            ..Default::default()
         }),
     }
     assert_eq!(first.applications, expected);
@@ -1317,4 +1320,244 @@ async fn a_relative_clones_root_is_refused_and_leaves_the_stored_one() {
         clones_root(&pool).await.unwrap().as_deref(),
         Some("/srv/clones")
     );
+}
+
+// -- code objects (#2274) -----------------------------------------------------
+
+/// The base URL a person typed for `repo`'s source, as a Gitea instance: the
+/// one address `{url}` and *Browser* are built from. Its trailing `/` is the
+/// typed one, and goes.
+async fn gitea_source(pool: &PgPool, repo: &Repo) {
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ($1, 'gitea', $1, $2, 'token', '{}'::jsonb)",
+    )
+    .bind(&repo.source)
+    .bind(format!("https://{HOST}/"))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// One application with a command for every object, each recording its own
+/// word first, so a test reads which command ran.
+#[cfg(unix)]
+fn every_object(stub: &Path) -> Draft {
+    let s = stub.display();
+    Draft {
+        id: Some("all".to_owned()),
+        name: "All".to_owned(),
+        command: format!("{s} repository {{path}} {{url}}"),
+        file_command: Some(format!("{s} file {{file}}:{{line}} {{url}}")),
+        commit_command: Some(format!("{s} commit {{sha}} {{name}} {{url}}")),
+        range_command: Some(format!("{s} range {{base}} {{head}} {{url}}")),
+        pull_request_command: Some(format!(
+            "{s} pull-request {{pr}} {{base}} {{head}} {{branch}} {{url}}"
+        )),
+    }
+}
+
+/// Each object fills its own placeholders, in its own command, and its
+/// `{url}` is the page Gitea serves it at, built from the typed base URL
+/// (ADR-0034). One assertion per object, spelled out.
+#[cfg(unix)]
+#[tokio::test]
+async fn each_object_expands_its_placeholders_in_its_own_command() {
+    let pool = pool().await;
+    let (repo, root, stub, record, _workshop) = scanned(&pool).await;
+    gitea_source(&pool, &repo).await;
+    let checkout = root.path().join(&repo.name);
+    fs::create_dir_all(checkout.join("src/sepa")).unwrap();
+    fs::write(checkout.join("src/sepa/retry.rs"), "fn retry() {}\n").unwrap();
+    set_applications(&pool, &[every_object(&stub)], None)
+        .await
+        .unwrap();
+    let registry = knobas_app::sources::Registry::for_process();
+    let web = format!("https://{HOST}/{}/{}", repo.owner, repo.name);
+    let at = checkout.to_string_lossy().into_owned();
+    let cases: [(Object, Vec<String>); 5] = [
+        (
+            Object::Repository,
+            vec!["repository".into(), at.clone(), web.clone()],
+        ),
+        (
+            Object::File {
+                path: "src/sepa/retry.rs".into(),
+                line: Some(42),
+                at: Some("c90d11e4a7b2".into()),
+            },
+            vec![
+                "file".into(),
+                format!("{at}/src/sepa/retry.rs:42"),
+                format!("{web}/src/c90d11e4a7b2/src/sepa/retry.rs#L42"),
+            ],
+        ),
+        (
+            Object::Commit {
+                sha: "c90d11e4a7b2".into(),
+            },
+            vec![
+                "commit".into(),
+                "c90d11e4a7b2".into(),
+                repo.name.clone(),
+                format!("{web}/commit/c90d11e4a7b2"),
+            ],
+        ),
+        (
+            Object::Range {
+                base: "7be0e4f15c60^".into(),
+                head: "c90d11e4a7b2".into(),
+            },
+            vec![
+                "range".into(),
+                "7be0e4f15c60^".into(),
+                "c90d11e4a7b2".into(),
+                format!("{web}/compare/7be0e4f15c60%5E...c90d11e4a7b2"),
+            ],
+        ),
+        (
+            Object::PullRequest {
+                number: 12,
+                base: "main".into(),
+                head: "feature/PAY-231-sepa-retry".into(),
+                branch: "feature/PAY-231-sepa-retry".into(),
+            },
+            vec![
+                "pull-request".into(),
+                "12".into(),
+                "main".into(),
+                "feature/PAY-231-sepa-retry".into(),
+                "feature/PAY-231-sepa-retry".into(),
+                format!("{web}/pulls/12"),
+            ],
+        ),
+    ];
+    for (object, expected) in cases {
+        let _ = fs::remove_file(&record);
+        let argv = open_object(&pool, Some(&registry), &repo.id, Some("all"), &object)
+            .await
+            .unwrap_or_else(|error| panic!("{object:?}: {error:?}"));
+        assert_eq!(recorded(&record).await, expected, "{object:?}");
+        assert_eq!(argv[1..], expected, "{object:?}: the answer is the argv");
+    }
+}
+
+/// *Browser*'s page per object, from the same declaration: a pull request
+/// opens its Gitea page, a diff file header its file at the line.
+#[tokio::test]
+async fn the_browser_page_of_each_object_is_built_from_the_typed_base_url() {
+    let pool = pool().await;
+    let repo = repo(&pool).await;
+    gitea_source(&pool, &repo).await;
+    let registry = knobas_app::sources::Registry::for_process();
+    let web = format!("https://{HOST}/{}/{}", repo.owner, repo.name);
+    let page_of = |object: Object| {
+        let pool = pool.clone();
+        let id = repo.id.clone();
+        let registry = &registry;
+        async move { page(&pool, registry, &id, &object).await }
+    };
+    assert_eq!(
+        page_of(Object::PullRequest {
+            number: 144,
+            base: "main".into(),
+            head: "owner/fork:x".into(),
+            branch: "owner/fork:x".into(),
+        })
+        .await
+        .unwrap(),
+        Some(format!("{web}/pulls/144")),
+        "a fork's head is in no Gitea pull request page, so it refuses nothing"
+    );
+    assert_eq!(
+        page_of(Object::File {
+            path: "docs/a b.md".into(),
+            line: Some(7),
+            at: Some("feature/x".into()),
+        })
+        .await
+        .unwrap(),
+        Some(format!("{web}/src/feature/x/docs/a%20b.md#L7"))
+    );
+    assert_eq!(
+        page_of(Object::File {
+            path: "README.md".into(),
+            line: None,
+            at: None,
+        })
+        .await
+        .unwrap(),
+        None,
+        "a file read at no commit or branch has no page"
+    );
+    for refused in [
+        Object::Commit {
+            sha: "--upload-pack=x".into(),
+        },
+        Object::Range {
+            base: "main".into(),
+            head: "-x".into(),
+        },
+        Object::File {
+            path: "../../etc/passwd".into(),
+            line: None,
+            at: Some("main".into()),
+        },
+    ] {
+        let error = page_of(refused.clone()).await.unwrap_err();
+        assert_eq!(error.code, IpcErrorCode::Invalid, "{refused:?}");
+    }
+    // A branch of the repository answers the repository's pages.
+    let branch = branch_of(&pool, &repo, "main").await;
+    assert_eq!(
+        page(&pool, &registry, &branch, &Object::Repository)
+            .await
+            .unwrap(),
+        Some(web)
+    );
+}
+
+/// An application with no command for an object is not offered for it, and
+/// named so if asked; a value that is not a plain git name runs nothing.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_object_the_application_does_not_accept_or_a_refused_value_runs_nothing() {
+    let pool = pool().await;
+    let (repo, _root, stub, record, _workshop) = scanned(&pool).await;
+    gitea_source(&pool, &repo).await;
+    set_applications(
+        &pool,
+        &[
+            app(Some("plain"), "Plain", &format!("{} {{path}}", stub.display()), None),
+            every_object(&stub),
+        ],
+        None,
+    )
+    .await
+    .unwrap();
+    let registry = knobas_app::sources::Registry::for_process();
+    let commit = Object::Commit {
+        sha: "c90d11e4a7b2".into(),
+    };
+    let error = open_object(&pool, Some(&registry), &repo.id, Some("plain"), &commit)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, IpcErrorCode::Invalid);
+    assert!(error.message.contains("Plain has no commit command"), "{error:?}");
+    let error = open_object(
+        &pool,
+        Some(&registry),
+        &repo.id,
+        Some("all"),
+        &Object::Range {
+            base: "--output=/tmp/x".into(),
+            head: "main".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, IpcErrorCode::Invalid);
+    assert!(error.message.contains("--output=/tmp/x"), "{error:?}");
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(!record.exists(), "nothing ran");
 }
