@@ -15,7 +15,7 @@
  * `payout-service` and its `genericFiles` for every other repository. A
  * divergence: the mock adapter draws no view for a repository at all.
  */
-import type { DiffFile, SourceView, TreeEntry, ViewAction, ViewRow } from "../../../../ipc/entity";
+import type { DiffFile, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/code/line-diff";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
 
@@ -343,15 +343,31 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
   const path = id.slice("file:".length);
   const text = files[path];
   if (text === undefined) throw { code: "not_found", message: `gitea: no file ${path} at ${ref}`, source_id: null };
-  // The file's own *Commit change…* (#985): `main` is protected, as prototype-6 has it.
-  const refusal =
-    ref === "main"
-      ? "main is a protected branch that this account may not push to: commit to a new branch and open a pull request instead"
-      : null;
+  // No action beside the file (#2241): *Commit change…*'s standing is `refused_writes`' ({@link repoRefusals}).
   return section(id, "Files", [
     { type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: blobOf(text) },
-    { type: "actions", actions: [branchAction("commit_file", "Commit change…", { entity: null, disabled: refusal })] },
   ]);
+}
+
+/** Why `main` takes no commit straight onto it: protected, as prototype-6 has it (#985). */
+export const MAIN_PROTECTED =
+  "main is a protected branch that this account may not push to: commit to a new branch and open a pull request instead";
+
+/**
+ * `refused_writes` for the repositories this module draws (#2241): a commit
+ * onto `main` (the repository itself, or its `main` branch) is refused, as
+ * Gitea's answer for a protected branch says it; every other ask is taken.
+ */
+export function repoRefusals(asks: readonly WriteAsk[]): RefusedWrite[] {
+  return asks
+    .filter((ask) => {
+      if (ask.op !== "commit_file") return false;
+      const branchAt = ask.entity.indexOf("@refs/heads/");
+      const repoId = branchAt === -1 ? ask.entity : ask.entity.slice(0, branchAt);
+      const branch = branchAt === -1 ? "main" : ask.entity.slice(branchAt + "@refs/heads/".length);
+      return branch === "main" && filesOf(repoId, null) !== null;
+    })
+    .map((ask) => ({ ...ask, reason: MAIN_PROTECTED }));
 }
 
 /**

@@ -26,6 +26,14 @@
     (`CreateBranch`), a branch's *Delete…* (`DeleteBranch`), *Create pull
     request* (`CreatePullRequest`) and an edit's commit (`CommitFile`).
 
+  **Without waiting** (#2243): the tabs draw at once on the default branch
+  the mirror holds (`mirrorDefault`), or the branch picked this session; the
+  *Branch* selector fills in when the live branch list arrives, and the tab
+  does not read again for it. *New branch…* and the file's *Commit change…*
+  are offered or refused by `refused_writes` (#2241), asked together, never
+  by a read of the whole repository view. A branch list the app answered from
+  memory and then read again behind (`view:fresh`, #2242) is read again here.
+
   The repository is read through its source's own view (`entity_view`), so a
   repository nobody cloned reads the same as one on this disk; the checkout
   only adds the `M` marks and the warning on a changed file.
@@ -40,7 +48,9 @@
     EntityDetail,
     EntityFilter,
     EntityPage,
+    RefusedWrite,
     SourceView,
+    WriteAsk,
   } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { WriteSource } from "../../shell/queued-toast";
@@ -63,13 +73,16 @@
     listen?: EchoListen;
     /** The header's *Refresh* (#2135); the bridge's when left out. */
     refresh?: DetailRefreshPorts;
+    /** *New branch…* and *Commit change…*'s standing (#2241); none refused when left out. */
+    refusedWrites?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
   }
 
   /**
    * The branch each repository is read at, by its entity id, as prototype-6's
-   * `S.repoBranch`: held for the session, never written anywhere.
+   * `S.repoBranch`: held for the session, never written anywhere. Its entity
+   * id is held too, so the tabs read at it before the branch list answers.
    */
-  const chosen: Record<string, string> = $state({});
+  const chosen: Record<string, { name: string; entityId: string | null }> = $state({});
 
   /** Forget every repository's branch: a new session, which is what each test is. */
   export function forgetBranches(): void {
@@ -79,7 +92,7 @@
 
 <script lang="ts">
   import { untrack } from "svelte";
-  import { ipcErrorMessage } from "../../ipc";
+  import { EVENTS, ipcErrorMessage } from "../../ipc";
   import {
     codeFacts,
     entityCheckout,
@@ -89,11 +102,13 @@
     jobReach,
     listContexts,
     listEntities,
+    refusedWrites,
     setCheckoutOverride,
     submitWrite,
     type EntityRow,
   } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
+  import { listen as tauriListen } from "@tauri-apps/api/event";
   import { jobHash } from "../route";
   import {
     branchOptions,
@@ -102,11 +117,13 @@
     headLine,
     litTab,
     readAllRows,
+    mirrorDefault,
     readRepoRoute,
+    repoAsks,
     repoHash,
     repoPrs,
+    repoRefusals,
     REPO_TABS,
-    toolbarRefusal,
     type BranchOption,
     type RepoTab,
     type RepoTabId,
@@ -143,6 +160,7 @@
       jobReach: (entityId) => jobReach(entityId),
       submitWrite: (payload, linkTo) => submitWrite(payload, linkTo),
       codeFacts: (entityIds) => codeFacts(entityIds),
+      refusedWrites: (asks) => refusedWrites(asks),
     },
     now: fixedNow,
   }: {
@@ -180,6 +198,8 @@
    * where it offers the branch.
    */
   let branchRefused = $state<string | null>(null);
+  /** Why a commit straight onto the branch the tabs read at is refused (#985, #2241); `null` where it is taken. */
+  let commitRefused = $state<string | null>(null);
   let checkout = $state<CheckoutView | undefined>(undefined);
   let local = $state<DiffRead | null>(null);
   let prs = $state<EntityRow[] | null>(null);
@@ -239,16 +259,60 @@
         if (alive() && !again) branches = [];
       },
     );
-    // Whether the source offers a branch here is its toolbar's answer
-    // (ADR-0020 rule 4); a view that does not answer leaves the button be.
-    const toolbarRead = ports.entityView(id, null).then(
-      (view) => {
-        if (alive()) branchRefused = toolbarRefusal(view, "create_branch");
+    await Promise.all([factsRead, branchesRead, readRow(id, alive, again)]);
+  }
+
+  /** The branch list again, where the app read it again behind its answer and it moved (#2242). */
+  $effect(() => {
+    if (!ready || repoId === null) return;
+    const id = repoId;
+    const listen = untrack(() => ports.listen) ?? ((event, handler) => tauriListen(event, handler));
+    let live = true;
+    let stop: (() => void) | null = null;
+    void listen(EVENTS.viewFresh, ({ payload }) => {
+      const fresh = payload as { entity_id: string; section: string | null };
+      if (!live || fresh.entity_id !== id || fresh.section !== "branches") return;
+      ports.entityView(id, "branches").then(
+        (view) => {
+          if (live && repoId === id) branches = branchOptions(view?.sections[0] ?? null);
+        },
+        () => {},
+      );
+    }).then(
+      (unlisten) => {
+        if (live) stop = unlisten;
+        else unlisten();
+      },
+      // No bridge to hear it on (a test without `listen`): nothing is told.
+      () => {},
+    );
+    return () => {
+      live = false;
+      stop?.();
+    };
+  });
+
+  // Whether the source offers *New branch…* and a commit onto the branch is
+  // its answer to `refused_writes` (ADR-0020 rule 4, #2241), asked together;
+  // one that does not answer refuses nothing.
+  $effect(() => {
+    if (!ready || repoId === null || at === null) return;
+    const [id, where] = [repoId, at];
+    let live = true;
+    const ask = untrack(() => ports.refusedWrites) ?? (async () => []);
+    ask(repoAsks(id, where)).then(
+      (refused) => {
+        if (!live) return;
+        const answer = repoRefusals(refused, id, where);
+        branchRefused = answer.branch;
+        commitRefused = answer.commit;
       },
       () => {},
     );
-    await Promise.all([factsRead, branchesRead, toolbarRead, readRow(id, alive, again)]);
-  }
+    return () => {
+      live = false;
+    };
+  });
 
   /** The repository's row, then its pull requests. */
   async function readRow(id: string, alive: () => boolean, again: boolean): Promise<void> {
@@ -325,10 +389,21 @@
     checkout = await ports.setCheckoutOverride(repoId, path);
   }
 
-  const defaultBranch = $derived(branches?.find((option) => option.isDefault) ?? null);
-  const selected = $derived(
-    (repoId !== null && branches?.find((option) => option.name === chosen[repoId])) || defaultBranch,
+  /** The default branch: the live list's, else the mirror's (#2243), `null` while neither has said. */
+  const defaultBranch = $derived<BranchOption | null>(
+    branches?.find((option) => option.isDefault) ??
+      (branches === null && mirrorDefault(detail) !== null
+        ? { name: mirrorDefault(detail)!, entityId: null, isDefault: true }
+        : null),
   );
+  /** The branch picked this session, while the list has not answered or still holds it. */
+  const picked = $derived.by((): BranchOption | null => {
+    const held = repoId === null ? undefined : chosen[repoId];
+    if (held === undefined) return null;
+    if (branches === null) return { name: held.name, entityId: held.entityId, isDefault: false };
+    return branches.find((option) => option.name === held.name) ?? null;
+  });
+  const selected = $derived(picked ?? defaultBranch);
   /**
    * The entity every tab reads at: the repository itself on its default
    * branch (or before the branches answer none), the branch on any other.
@@ -361,7 +436,9 @@
 
   function pick(event: Event) {
     if (repoId === null) return;
-    chosen[repoId] = (event.currentTarget as HTMLSelectElement).value;
+    const name = (event.currentTarget as HTMLSelectElement).value;
+    const option = branches?.find((candidate) => candidate.name === name);
+    chosen[repoId] = { name, entityId: option?.entityId ?? null };
   }
 
   const NOT_BUILT: Partial<Record<RepoTab, string>> = {};
@@ -437,8 +514,8 @@
         <div class="tf-empty"><p>{NOT_BUILT[route.tab]} is not built in the new shell yet.</p></div>
       {:else if route.tab === "local"}
         <TfRepoLocal {repoId} title={repo?.title ?? ""} {checkout} readDiff={ports.entityCheckoutDiff} {setPath} />
-      {:else if branches === null || at === null}
-        <!-- The branch every tab reads at is not known yet. -->
+      {:else if at === null || branchName === null}
+        <!-- The branch every tab reads at is not known yet: the mirror names none, and the list has not answered. -->
       {:else if route.tab === "files" || route.tab === "edit"}
         <TfRepoFiles
           {ports}
@@ -455,12 +532,13 @@
           title={repo?.title ?? ""}
           {source}
           {refreshed}
+          refusal={commitRefused}
         />
       {:else if route.tab === "commits" && route.commit !== null}
         <TfRepoCommit {ports} {repoId} commitId={route.commit} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />
       {:else if route.tab === "branches"}
         <TfRepoBranches {ports} {repoId} {source} {refreshed} />
-      {:else if route.tab === "compare"}
+      {:else if route.tab === "compare" && branches !== null}
         <TfRepoCompare
           {ports}
           {repoId}

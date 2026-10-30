@@ -14,6 +14,7 @@ import type {
   CodeFacts,
   DiffFile,
   DiffRead,
+  EntityDetail,
   EntityPage,
   EntityRow,
   SourceView,
@@ -21,6 +22,8 @@ import type {
   ViewAction,
   ViewRow,
   ViewSection,
+  RefusedWrite,
+  WriteAsk,
 } from "../../ipc/entity";
 import type { WriteSource } from "../../shell/queued-toast";
 import { clockLabel } from "../../time/format";
@@ -418,13 +421,41 @@ export function branchFrom(view: SourceView | null): { from: ChoiceOption; disab
 }
 
 /**
- * Why the view's toolbar draws `writeOp` disabled, in the source's words: a
- * mirror, a token that cannot write (#2030). `null` where it offers the write
- * enabled, or says nothing about it. Whether a write is offered is the
- * source's answer (ADR-0020 rule 4).
+ * The asks the repository page makes of `refused_writes` (#2241, #2243):
+ * *New branch…* in the repository and *Commit change…* onto the branch the
+ * tabs read at, together, so the source probes the repository once. Whether
+ * either is refused is the source's answer, kept by the app and asked again
+ * behind it (ADR-0032); the shell never reads protection or grants itself.
  */
-export function toolbarRefusal(view: SourceView | null, writeOp: string): string | null {
-  return toolbarAction(view, writeOp)?.disabled ?? null;
+export function repoAsks(repoId: string, at: string): WriteAsk[] {
+  return [
+    { entity: repoId, op: "create_branch" },
+    { entity: at, op: "commit_file" },
+  ];
+}
+
+/** What `refused_writes` answered for {@link repoAsks}: each write's reason, `null` where it is taken. */
+export function repoRefusals(
+  refused: readonly RefusedWrite[],
+  repoId: string,
+  at: string,
+): { branch: string | null; commit: string | null } {
+  const reason = (entity: string, op: string) =>
+    refused.find((write) => write.entity === entity && write.op === op)?.reason ?? null;
+  return { branch: reason(repoId, "create_branch"), commit: reason(at, "commit_file") };
+}
+
+/**
+ * The repository's default branch as the mirror holds it (#2243): the
+ * repository row's declared `default_branch`, so the page draws its tabs
+ * before the live branch list answers. `null` where the row names none, and
+ * the page waits for the list.
+ */
+export function mirrorDefault(detail: EntityDetail | null): string | null {
+  const payload = detail?.payload;
+  if (payload === null || typeof payload !== "object") return null;
+  const named = (payload as Record<string, unknown>)["default_branch"];
+  return typeof named === "string" && named !== "" ? named : null;
 }
 
 /** The view's toolbar action for `writeOp`, where it offers one. */
@@ -567,23 +598,6 @@ export function commitPrefill(job: string | null, path: string): { message: stri
     message: job === null ? `update ${file}` : `${job}: update ${file}`,
     branch: job === null ? `fix/${stem}` : `fix/${job}-${stem}`,
   };
-}
-
-/**
- * Why a commit straight onto the file's branch is refused (#985, R-8.6): the
- * reason the source declares on the file section's own `commit_file` action
- * (Gitea: a protected branch this account may not push to). `null` where it
- * declares the commit taken, or says nothing, and the flush stays the
- * backstop. Whether a write is offered is the source's answer (ADR-0020
- * rule 4); the shell never reads protection itself.
- */
-export function commitRefusal(section: ViewSection | undefined): string | null {
-  for (const block of section?.blocks ?? []) {
-    if (block.type !== "actions") continue;
-    const offer = block.actions.find((action) => action.write_op === "commit_file");
-    if (offer !== undefined) return offer.disabled ?? null;
-  }
-  return null;
 }
 
 /** What the repository page calls its source in a sentence: the display name, else the id, else a role word ("the code host", lower case; a sentence that opens with it spells its own capital). */

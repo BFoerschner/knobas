@@ -11,7 +11,7 @@ import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
 import { fixtureBuildEntity, runView } from "./builds";
 import { pullView } from "./views/pulls";
-import { repoView } from "./views/repos";
+import { repoRefusals, repoView } from "./views/repos";
 
 /** A handful of log lines, so the History panel has something to draw. */
 const FAKE_ACTIVITY = [
@@ -518,8 +518,9 @@ export function handlers(): Handlers {
     visit_entity: (args) => visitEntity(args),
     reachable_transitions: (args) => fakeTransitions(args),
     entity_view: (args) => entityView(args),
-    // Every fake source's credential may make every write it declares (#2040).
-    refused_writes: () => [],
+    // Every fake source's credential may make every write it declares (#2040);
+    // a commit onto a repository's protected `main` is refused (#2241).
+    refused_writes: (args) => repoRefusals((args["asks"] as Parameters<typeof repoRefusals>[0] | undefined) ?? []),
     resolve_url: (args) => resolveUrl(args),
     create_link: (args) => {
       const from = String(args["fromId"]);
