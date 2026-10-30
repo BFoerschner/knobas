@@ -435,3 +435,12 @@ test("a diff the ceiling cut says so, naming the ceiling", () => {
     "This diff is over knobas's ceiling of 50,000 lines: it is drawn up to there, and the source's own page has the rest.",
   );
 });
+
+test("a generated file over the Load diff limit starts open on its Load diff line; a small one collapsed", () => {
+  const big = file("src/generated/schema.rs", { additions: 1_912, deletions: 1_640 });
+  draw({ files: [big, file("src/generated/small.rs")], layout: createDiffLayout(() => null) });
+  expect(squash(cardOf("src/generated/schema.rs").querySelector(".tf-dwhy"))).toBe(
+    "Generated, and over 1,500 lines (3,552 changed): not loaded until you ask; nothing is cut. Load diff",
+  );
+  expect(cardOf("src/generated/small.rs").querySelector(".tf-fh-caret")!.getAttribute("aria-expanded")).toBe("false");
+});

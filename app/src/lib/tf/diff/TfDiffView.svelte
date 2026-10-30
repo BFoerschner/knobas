@@ -61,7 +61,7 @@
   import { diffLayout, windowNarrow, type DiffLayoutChoice } from "./diff-layout.svelte";
   import type { DiffTalk } from "./talk";
   import TfDiffCard from "./TfDiffCard.svelte";
-  import { badgeOf, collapsedAtFirst, treeOf } from "./tree";
+  import { badgeOf, collapsedAtFirst, isLock, needsLoad, treeOf } from "./tree";
 
   let {
     files,
@@ -198,9 +198,14 @@
     return toks && toks.map(([part]) => part).join("") === cell.line.text ? toks : undefined;
   };
 
-  /** Collapsed by hand (`true`) or opened by hand (`false`); otherwise viewed, lock and generated files start collapsed. */
+  /**
+   * Collapsed by hand (`true`) or opened by hand (`false`); otherwise viewed, lock and generated files start
+   * collapsed. A generated file over the *Load diff* limit starts open on its *Load diff* line, its collapsed
+   * form (ruling on #2252: `src/generated/schema.rs`).
+   */
   let folds = $state<Record<string, boolean>>({});
-  const isClosed = (file: DrawnFile) => folds[keyOf(file)] ?? (isViewed(file.path) || collapsedAtFirst(file.path));
+  const isClosed = (file: DrawnFile) =>
+    folds[keyOf(file)] ?? (isViewed(file.path) || (collapsedAtFirst(file.path) && (isLock(file.path) || !needsLoad(file))));
   /** Files over the *Load diff* limit the reader loaded. */
   let loads = $state<Record<string, true>>({});
 
