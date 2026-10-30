@@ -116,6 +116,20 @@ pub struct LineThread {
     /// Absent on the wire reads as `false`.
     #[serde(default)]
     pub replies: bool,
+    /// The commit an outdated thread was written on, its whole sha as the
+    /// source names it (#2318, spec #2234 story 84): where its words still
+    /// read in context. `None` on a thread that is not outdated, and where
+    /// the source names none. Absent on the wire reads as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub commit: Option<String>,
+    /// An outdated thread's line as it read at [`commit`](Self::commit):
+    /// the hunk the source kept with the comment, ending on that line
+    /// (#2318). `None` on a thread that is not outdated, and where the
+    /// source kept none. Absent on the wire reads as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hunk: Option<Hunk>,
 }
 
 /// A [`LineThread`] on a file the diff no longer holds (issue #709): written

@@ -85,6 +85,7 @@
   import { badgeOf, collapsedAtFirst, isLock, needsLoad, treeOf } from "./tree";
   import { diffPipelines, type DiffPipelinesSetting } from "./diff-pipelines.svelte";
   import { defaultPipelines, pipedDiff, pipelineLabel, type DiffPipeline, type DiffPipelines, type PipedDiff } from "./piped";
+  import TfWrittenAt from "./TfWrittenAt.svelte";
 
   let {
     files,
@@ -100,6 +101,7 @@
     layout = diffLayout,
     narrow = windowNarrow(),
     openAt = null,
+    repository = null,
     pipelines = defaultPipelines,
     piping = diffPipelines,
   }: {
@@ -124,6 +126,8 @@
     narrow?: { readonly current: boolean };
     /** *Open in…* in each file's header (#2274): the repository (or branch) and the commit or branch the files are read at. */
     openAt?: OpenAt | null;
+    /** The repository the diff is in (its range's): an outdated thread's *at <sha>* links that commit's diff (#2318); none, the sha is plain. */
+    repository?: string | null;
     /** Each file's default pipeline (#2270): the app's lookup by default. Runs only where `context.piped` is given. */
     pipelines?: DiffPipelines;
     /** *Run pipelines on diffs*: the app's setting by default. */
@@ -641,13 +645,14 @@
         talk={piped ? quiet : talk}
         {render}
         {openAt}
+        {repository}
       />
     {/each}
     {#if gone.length > 0 || homeless.length > 0}
       <details class="tf-outdated tf-gone">
         <summary>On files this change no longer holds</summary>
         {#each gone as g, n (n)}
-          <div class="tf-thread"><span class="tf-mono tf-dim">{g.path}, {lineName(g.thread.side, g.thread.line)}</span>{@render said(g.thread.comments)}</div>
+          <div class="tf-thread"><span class="tf-mono tf-dim">{g.path}, {lineName(g.thread.side, g.thread.line)}</span><TfWrittenAt thread={g.thread} {repository} />{@render said(g.thread.comments)}</div>
         {/each}
         {#each homeless as d (d.id)}
           {@render mine(`${d.path}, ${lineName(d.side, d.line)}: ${d.body}`)}

@@ -309,6 +309,14 @@
 .tf-outdated { margin: 6px 12px 10px; font: var(--t-sm) var(--sans); }
 .tf-outdated summary { cursor: pointer; color: var(--ink-2); }
 .tf-outdated .tf-thread { margin-left: 0; }
+/* An outdated thread at the commit it was written on (#2318): the sha, then the hunk as it read there. */
+.tf-was { margin: 2px 0 6px; }
+.tf-was-at { color: var(--ink-2); font-size: var(--t-xs); }
+.tf-was-hunk { border: 1px solid var(--rule-2); border-radius: 4px; overflow-x: auto; font: var(--t-xs)/1.6 var(--mono); font-variant-ligatures: none; }
+.tf-was-hunk .tf-ln, .tf-diff.tf-split .tf-was-hunk .tf-ln { display: grid; grid-template-columns: 40px 40px 1fr; white-space: pre; overflow: visible; }
+.tf-was-hunk .tf-no { color: var(--ink-2); text-align: right; padding-right: 8px; user-select: none; }
+.tf-was-hunk .tf-add { background: var(--ok-bg); }
+.tf-was-hunk .tf-del { background: var(--err-bg); }
 .tf-diff.tf-split .tf-thread.tf-on-new, .tf-diff.tf-split .tf-newc.tf-on-new { margin-left: calc(50% + 56px); }
 /* A thread's footer, its reply and resolve (#2277; mockups/code-area .thr footer), and a resolved thread as one line. */
 .tf-thr-f, .tf-thr-h { display: flex; align-items: center; gap: var(--control-gap); margin: 6px -10px -6px; padding: 6px 8px; border-top: 1px solid var(--rule-2); background: var(--sheet-2); }

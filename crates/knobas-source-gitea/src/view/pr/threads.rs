@@ -17,7 +17,7 @@ use std::pin::Pin;
 use std::task::Poll;
 
 use knobas_source::ReviewSide;
-use knobas_source::view::{DiffFile, DiffLine, FileThread, LineComment, LineThread};
+use knobas_source::view::{DiffFile, DiffLine, FileThread, Hunk, LineComment, LineThread};
 
 use super::super::login;
 use super::Review;
@@ -31,6 +31,10 @@ pub(super) struct Written {
     /// The commented line's text when it was written: the `diff_hunk`'s last
     /// line, without its marker. `None` where Gitea sent no hunk.
     was: Option<String>,
+    /// The head the comment was written on (`commit_id`), and the hunk Gitea
+    /// kept with it, parsed: what an outdated thread is drawn at (#2318).
+    commit: Option<String>,
+    hunk: Option<Hunk>,
     comment: LineComment,
     /// Gitea's id for the comment, which resolve and unresolve name (#2277).
     id: Option<u64>,
@@ -56,6 +60,8 @@ pub(super) struct ReviewLineComment {
     original_position: u32,
     #[serde(default)]
     diff_hunk: Option<String>,
+    #[serde(default)]
+    commit_id: Option<String>,
     #[serde(default)]
     body: Option<String>,
     #[serde(default)]
@@ -93,6 +99,8 @@ pub(super) fn written(review: &Review, raw: Vec<serde_json::Value>) -> Vec<Writt
                 side,
                 line,
                 was: c.diff_hunk.as_deref().and_then(last_line),
+                commit: c.commit_id.filter(|sha| !sha.is_empty()),
+                hunk: c.diff_hunk.as_deref().and_then(|h| hunk_of(h, side, line)),
                 id: c.id,
                 resolver: c
                     .resolver
@@ -140,6 +148,50 @@ fn last_line(hunk: &str) -> Option<String> {
         Some(b'+' | b'-' | b' ') => line[1..].to_owned(),
         _ => line.to_owned(),
     })
+}
+
+/// `diff_hunk` as a [`Hunk`], numbered from the commented line: its last
+/// line, which is `line` on `side`. `None` where it holds no hunk.
+///
+/// Gitea's cut hunk comes without a file header, and its `@@` numbers are not
+/// to be trusted: 1.27.3 counts a `\ No newline` note as a line of both sides,
+/// so the hunk starts one short on each (measured live, #2318). The commented
+/// line's number is exact, so every line is moved by what moves that one onto
+/// it, and the header is written again from the lines.
+fn hunk_of(diff_hunk: &str, side: ReviewSide, line: u32) -> Option<Hunk> {
+    let text = if diff_hunk.starts_with("diff --git ") {
+        diff_hunk.to_owned()
+    } else {
+        format!("diff --git a/f b/f\n{diff_hunk}")
+    };
+    let mut hunk = knobas_source::diff::parse(&text)
+        .into_iter()
+        .next()?
+        .hunks
+        .into_iter()
+        .next()?;
+    let last = hunk.lines.last()?;
+    let at = match side {
+        ReviewSide::Old => last.old,
+        ReviewSide::New => last.new,
+    };
+    if let Some(at) = at {
+        let by = i64::from(line) - i64::from(at);
+        let moved = |n: Option<u32>| n.and_then(|n| u32::try_from(i64::from(n) + by).ok());
+        for l in &mut hunk.lines {
+            l.old = moved(l.old);
+            l.new = moved(l.new);
+        }
+        let span = |of: fn(&DiffLine) -> Option<u32>| {
+            let mut on = hunk.lines.iter().filter_map(of);
+            let first = on.next();
+            (first.unwrap_or(0), first.map_or(0, |_| 1 + on.count()))
+        };
+        let (old, olds) = span(|l| l.old);
+        let (new, news) = span(|l| l.new);
+        hunk.header = format!("@@ -{old},{olds} +{new},{news} @@");
+    }
+    Some(hunk)
 }
 
 /// Put each comment in `written` on its file of `files`: one thread per line
@@ -208,7 +260,15 @@ pub(super) fn place(files: &mut [DiffFile], written: Vec<Written>) -> Vec<FileTh
 
 /// A thread opened by `comment`. Its id and its resolver are the first
 /// comment's, which [`join`] keeps the oldest.
+///
+/// An outdated thread carries the commit and hunk of that first comment: the
+/// line as the thread was opened on it (#2318).
 fn opened(comment: Written, outdated: bool) -> LineThread {
+    let (commit, hunk) = if outdated {
+        (comment.commit, comment.hunk)
+    } else {
+        (None, None)
+    };
     LineThread {
         side: comment.side,
         line: comment.line,
@@ -217,6 +277,8 @@ fn opened(comment: Written, outdated: bool) -> LineThread {
         resolved_by: comment.resolver,
         replies: false,
         comments: vec![comment.comment],
+        commit,
+        hunk,
     }
 }
 
@@ -231,6 +293,10 @@ fn join(thread: &mut LineThread, comment: Written) {
     {
         thread.id = Some(id.to_string());
         thread.resolved_by = comment.resolver;
+        if thread.outdated {
+            thread.commit = comment.commit;
+            thread.hunk = comment.hunk;
+        }
     }
     thread.comments.push(comment.comment);
 }

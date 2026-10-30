@@ -867,6 +867,8 @@ mod tests {
                         id: None,
                         resolved_by: None,
                         replies: false,
+                        commit: None,
+                        hunk: None,
                     }];
                     files
                 },
@@ -891,6 +893,8 @@ mod tests {
                         id: None,
                         resolved_by: None,
                         replies: false,
+                        commit: None,
+                        hunk: None,
                     },
                 }],
                 range: Some(DiffRange {
@@ -1207,6 +1211,8 @@ mod tests {
             id: None,
             resolved_by: None,
             replies: false,
+            commit: None,
+            hunk: None,
         }];
         let diff = serde_json::to_value(Block::Diff {
             files,
@@ -1231,6 +1237,8 @@ mod tests {
                     id: None,
                     resolved_by: None,
                     replies: false,
+                    commit: None,
+                    hunk: None,
                 },
             }],
             range: None,

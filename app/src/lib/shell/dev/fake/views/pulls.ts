@@ -24,7 +24,7 @@
  * Answers no command of its own: `entity_view` is `entity.ts`'s, which asks
  * {@link pullView} after the repository page's views.
  */
-import type { DiffFile, Fact, SourceView, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../../../ipc/entity";
+import type { DiffFile, Fact, FileThread, SourceView, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../../../ipc/entity";
 import { CORPUS } from "../corpus";
 import { JOB_ROWS } from "../job-reach";
 import { PAYOUT_COMMITS, PAYOUT_MAIN_SHA, payoutCommitId, payoutPrFiles } from "./repos";
@@ -340,6 +340,40 @@ function plainView(entityId: string): SourceView | undefined {
 /** The jitter line of PR #142's retry, on the new side, where Jonas asked about it. */
 const JITTER_LINE = 14;
 
+/** The commit PR #142's outdated threads were written on (#2318): `a41f2c`, the second of its three. */
+const WRITTEN_ON = PAYOUT_COMMITS[1]![0];
+
+/**
+ * A thread on a file PR #142 no longer holds (#709): `src/sepa/backoff.rs`, which a41f2c added and c90d11
+ * folded back into `retry.rs`. Drawn in the diff's own outdated list, at the commit it was written on (#2318).
+ */
+function gone142(): FileThread[] {
+  return [
+    {
+      path: "src/sepa/backoff.rs",
+      thread: {
+        side: "new",
+        line: 4,
+        outdated: true,
+        comments: [{ author: "jonas", body: "A module of its own for three lines?", at: "2026-08-22T08:30:00Z" }],
+        id: "4075",
+        resolved_by: null,
+        replies: false,
+        commit: WRITTEN_ON,
+        hunk: {
+          header: "@@ -0,0 +1,4 @@",
+          lines: [
+            { kind: "add", old: null, new: 1, text: "use std::time::Duration;" },
+            { kind: "add", old: null, new: 2, text: "" },
+            { kind: "add", old: null, new: 3, text: "/// The delay before attempt `n`." },
+            { kind: "add", old: null, new: 4, text: "pub fn backoff(n: u32) -> Duration { Duration::from_secs(30 << n) }" },
+          ],
+        },
+      },
+    },
+  ];
+}
+
 /** PR #142's *Files* once asked for (#842): its three files, Jonas's thread and an outdated one of Priya's. */
 function files142(): DiffFile[] {
   const [retry, ...rest] = payoutPrFiles();
@@ -375,6 +409,19 @@ function files142(): DiffFile[] {
       id: "4060",
       resolved_by: null,
       replies: false,
+      // Written on a41f2c, where line 8 read `MAX_ATTEMPTS: u32 = 10` (#2318).
+      commit: WRITTEN_ON,
+      hunk: {
+        header: "@@ -3,3 +4,5 @@",
+        lines: [
+          { kind: "context", old: 3, new: 4, text: "use crate::psp::errors::PspError;" },
+          { kind: "context", old: 4, new: 5, text: "" },
+          { kind: "del", old: 5, new: null, text: "pub const RETRY_DELAY: Duration = Duration::from_secs(60);" },
+          { kind: "add", old: null, new: 6, text: "pub const BASE: Duration = Duration::from_secs(30);" },
+          { kind: "add", old: null, new: 7, text: "pub const FACTOR: u32 = 2;" },
+          { kind: "add", old: null, new: 8, text: "pub const MAX_ATTEMPTS: u32 = 10;" },
+        ],
+      },
     },
   ];
   return [{ ...retry!, threads }, ...rest];
@@ -446,7 +493,7 @@ function filesSection(entityId: string, title: string): ViewSection {
           reviewed: PAYOUT_COMMITS.at(-1)![0],
         }
       : undefined;
-  return section("files", "Files", [{ type: "diff", files, truncated: false, commentable, gone: [], ...(range ? { range } : {}) }], files.length);
+  return section("files", "Files", [{ type: "diff", files, truncated: false, commentable, gone: entityId === PR_142 && bulk === 0 ? gone142() : [], ...(range ? { range } : {}) }], files.length);
 }
 
 /** A pull request's whole view, or one of its sections; `undefined` for anything else. */
