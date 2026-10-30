@@ -207,6 +207,16 @@ pub fn is_sha(sha: &str) -> bool {
     (7..=64).contains(&sha.len()) && sha.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// Whether `sha` is a whole object id, SHA-1's 40 hex digits or SHA-256's
+/// 64: a shorter one names whichever commit it is unique to today, so only a
+/// whole one fixes what a read answers. The one such check (the Gitea
+/// adapter's read cache and compare, the diff address's shortening in TS
+/// mirror it, `app/src/lib/tf/diff/sha.ts`).
+#[must_use]
+pub fn is_full_sha(sha: &str) -> bool {
+    matches!(sha.len(), 40 | 64) && is_sha(sha)
+}
+
 /// Whether `name` is a git name knobas passes to a program: `[A-Za-z0-9._/-]`,
 /// not starting with `-`, `.` or `/`, no `..` or `//`, not ending in `/` or
 /// `.lock`, at most 255 bytes; with `caret`, one trailing `^` may follow.
@@ -809,6 +819,19 @@ fn slug(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sha names a commit by 7 to 64 hex digits; a whole one is exactly
+    /// SHA-1's 40 or SHA-256's 64, the only kind a read may be kept for.
+    #[test]
+    fn a_whole_sha_is_forty_or_sixty_four_hex_digits() {
+        let forty = "a".repeat(40);
+        let sixty_four = "B".repeat(64);
+        assert!(is_full_sha(&forty) && is_full_sha(&sixty_four));
+        for not in ["abc1234", &"a".repeat(41), &"a".repeat(63), &format!("{}g", "a".repeat(39)), ""] {
+            assert!(!is_full_sha(not), "{not:?}");
+        }
+        assert!(is_sha("abc1234") && is_sha(&sixty_four) && !is_sha("abc123") && !is_sha(&"a".repeat(65)));
+    }
 
     const CHECKOUT: &str = "/Users/mara/code/payout-service";
 

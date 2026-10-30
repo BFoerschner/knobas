@@ -111,7 +111,7 @@ pub(crate) fn standing(
     use knobas_source::view::Standing;
     match (source.key_of(entity), section) {
         (Ok(GiteaKey::Commit { sha, .. }), Some(id))
-            if full_sha(&sha) && (id == DIFF || files::owns(id)) =>
+            if is_full_sha(&sha) && (id == DIFF || files::owns(id)) =>
         {
             Standing::Fixed
         }
@@ -176,18 +176,15 @@ pub(crate) fn bytes_standing(
         (Ok(GiteaKey::Commit { sha, .. }), None) => Some(sha),
         (Ok(_), None) => None,
     };
-    if at.is_some_and(|sha| full_sha(&sha)) {
+    if at.is_some_and(|sha| is_full_sha(&sha)) {
         Standing::Fixed
     } else {
         Standing::Live
     }
 }
 
-/// Whether `sha` is a whole object id, SHA-1's 40 hex characters or
-/// SHA-256's 64: a shorter one names whichever commit it is unique to today.
-pub(crate) fn full_sha(sha: &str) -> bool {
-    matches!(sha.len(), 40 | 64) && sha.chars().all(|c| c.is_ascii_hexdigit())
-}
+/// Whether `sha` is a whole object id (`knobas_core`'s one check).
+pub(crate) use knobas_core::checkout::open::is_full_sha;
 
 /// A commit: *Overview* and *Diff*, neither deferred -- reading a commit's
 /// change is why it is opened (spec #660, story 1).

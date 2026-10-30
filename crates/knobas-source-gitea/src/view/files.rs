@@ -95,7 +95,7 @@ impl<'a> Named<'a> {
     fn parse(id: &'a str) -> Option<Self> {
         if let Some(rest) = id.strip_prefix(PATHS) {
             let sha = match rest.strip_prefix('@') {
-                Some(sha) if super::full_sha(sha) => Some(sha),
+                Some(sha) if super::is_full_sha(sha) => Some(sha),
                 None if rest.is_empty() => None,
                 _ => return None,
             };
@@ -112,7 +112,7 @@ impl<'a> Named<'a> {
         let (sha, rest) = match rest.strip_prefix('@') {
             Some(at) => {
                 let (sha, tail) = at.split_once(':').map_or((at, None), |(s, t)| (s, Some(t)));
-                if !super::full_sha(sha) {
+                if !super::is_full_sha(sha) {
                     return None;
                 }
                 (Some(sha), tail)
@@ -264,7 +264,7 @@ pub(super) async fn read(
             resolved = tip
                 .commit
                 .map(|c| c.id)
-                .filter(|sha| super::full_sha(sha))
+                .filter(|sha| super::is_full_sha(sha))
                 .ok_or_else(|| {
                     SourceError::protocol(format!("gitea: {name:?} answered no tip commit"))
                 })?;

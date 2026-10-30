@@ -64,6 +64,7 @@
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
+  import { shortEnd } from "./sha";
   import type { DiffFile, DiffRange, DiffReadAt } from "../../ipc/entity";
   import TfWaiting from "../TfWaiting.svelte";
   import { repoHash } from "../repo/repo";
@@ -169,10 +170,7 @@
   }
 
   /** A whole sha shortened as the source shortens it; anything else as written. */
-  function shown(end: string): string {
-    const found = /^([0-9a-f]{40}|[0-9a-f]{64})(\^?)$/i.exec(end);
-    return found ? `${found[1]!.slice(0, 10)}${found[2]}` : end;
-  }
+  const shown = shortEnd;
 </script>
 
 <div class="tf-diffpage">

@@ -13,6 +13,7 @@
  *
  * Pure: the shell parses the hash; this reads its segments.
  */
+import { isSha } from "./sha";
 
 /** What `#/diff/...` names. */
 export interface DiffAddress {
@@ -64,8 +65,8 @@ export function picked(pick: RangePick | null, at: number): boolean {
  * the whole one), `null` for an id without one.
  */
 export function shaOfCommit(commitId: string | null): string | null {
-  const found = commitId === null ? null : /@([0-9a-f]{7,64})$/i.exec(commitId);
-  return found ? found[1]! : null;
+  const sha = commitId === null || !commitId.includes("@") ? null : commitId.slice(commitId.lastIndexOf("@") + 1);
+  return sha !== null && isSha(sha) ? sha : null;
 }
 
 /**

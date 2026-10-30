@@ -7,6 +7,7 @@
  * drawn, as prototype-6's `fill`.
  */
 import { keyOf } from "../../time/format";
+import { caretOf, isSha } from "../diff/sha";
 import type {
   CheckoutApplication,
   CheckoutSettings,
@@ -237,5 +238,5 @@ export function worktreeOf(clonesRoot: string | null, repoEntityId: string | nul
 
 /** Whether `end` is a sha the Diff tool takes: 7 to 64 hex digits, a base with one `^` allowed. */
 export function isDiffEnd(end: string, base: boolean): boolean {
-  return (base ? /^[0-9a-f]{7,64}\^?$/i : /^[0-9a-f]{7,64}$/i).test(end);
+  return isSha(base ? caretOf(end)[0] : end);
 }

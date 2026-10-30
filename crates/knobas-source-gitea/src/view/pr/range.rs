@@ -31,7 +31,7 @@ pub(super) fn reviewed(reviews: &[Review], viewer: Option<&str>) -> Option<Strin
         .find_map(|r| {
             r.commit_id
                 .clone()
-                .filter(|sha| super::super::full_sha(sha))
+                .filter(|sha| super::super::is_full_sha(sha))
         })
 }
 
@@ -50,12 +50,12 @@ pub(super) fn of(
     let base = pull
         .merge_base
         .clone()
-        .filter(|s| super::super::full_sha(s))?;
+        .filter(|s| super::super::is_full_sha(s))?;
     let head = pull
         .head
         .as_ref()
         .and_then(|h| h.sha.clone())
-        .filter(|s| super::super::full_sha(s))?;
+        .filter(|s| super::super::is_full_sha(s))?;
     let commits = commits
         .iter()
         .map(|c| {

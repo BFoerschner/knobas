@@ -44,7 +44,7 @@ pub(super) fn ends(section: &str) -> Option<(&str, &str)> {
 /// Whether both ends stand still: whole shas, the base possibly with one `^`.
 pub(super) fn fixed(section: &str) -> bool {
     ends(section).is_some_and(|(base, head)| {
-        super::full_sha(base.strip_suffix('^').unwrap_or(base)) && super::full_sha(head)
+        super::is_full_sha(base.strip_suffix('^').unwrap_or(base)) && super::is_full_sha(head)
     })
 }
 
@@ -178,7 +178,7 @@ fn between(listing: &Listing, base: &str, head: &str) -> Option<(String, String)
         .collect();
     let mut tips = commits.iter().filter(|c| !parents.contains(c.sha.as_str()));
     let tip = tips.next()?;
-    if tips.next().is_some() || (super::full_sha(head) && !tip.sha.eq_ignore_ascii_case(head)) {
+    if tips.next().is_some() || (super::is_full_sha(head) && !tip.sha.eq_ignore_ascii_case(head)) {
         return None;
     }
     let mut outside: Vec<&str> = Vec::new();
@@ -189,7 +189,7 @@ fn between(listing: &Listing, base: &str, head: &str) -> Option<(String, String)
             }
         }
     }
-    let asked = if super::full_sha(base) {
+    let asked = if super::is_full_sha(base) {
         Some(base)
     } else {
         base.strip_suffix('^').and_then(|child| {
@@ -205,7 +205,7 @@ fn between(listing: &Listing, base: &str, head: &str) -> Option<(String, String)
         _ if outside.len() == 1 => outside[0],
         _ => return None,
     };
-    super::full_sha(merge_base).then(|| (merge_base.to_owned(), tip.sha.clone()))
+    super::is_full_sha(merge_base).then(|| (merge_base.to_owned(), tip.sha.clone()))
 }
 
 #[cfg(test)]
