@@ -1,7 +1,9 @@
 /**
  * *Open in… ▾* on a code object (#2274): the menu offers the applications
  * that accept the object and *Browser*, runs the one picked on the object,
- * and hands *Browser*'s page to the opener.
+ * and hands *Browser*'s page to the opener. *Diff tool* (#2275) is offered for
+ * a range or a pull request whose two shas the checkout holds, and a pull
+ * request's applications open its worktree (#2285).
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -51,12 +53,20 @@ let app: ReturnType<typeof mount> | null = null;
 let apps: Apps;
 let checkoutPath: string | null;
 let pageOf: (object: OpenObject) => string | null;
-const calls = { objects: [] as [string, string | null, OpenObject][], opened: [] as string[], pages: [] as OpenObject[] };
+const calls = {
+  objects: [] as [string, string | null, OpenObject][],
+  opened: [] as string[],
+  pages: [] as OpenObject[],
+  diffs: [] as [string, string][],
+};
+/** The shas this test's checkout holds; the Diff tool is offered for two of them. */
+let local: string[];
 
 beforeEach(() => {
   for (const list of Object.values(calls)) list.length = 0;
   toasts.items = [];
   checkoutPath = "/Users/mara/code/payout-service";
+  local = [];
   pageOf = (object) => (object.kind === "commit" ? `${WEB}/commit/${object.sha}` : null);
   apps = createApps({
     checkoutSettings: () => Promise.resolve(settings()),
@@ -87,12 +97,15 @@ async function settle() {
 
 const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 
-async function openMenu(object: OpenObject) {
+const argvOf = (base: string, head: string) => ["git", "-C", "/Users/mara/code/payout-service", "difftool", "--dir-diff", "--gui", "--no-prompt", base, head, "--"];
+
+async function openMenu(object: OpenObject, ends?: () => Promise<{ base: string; head: string } | null>) {
   app = mount(TfOpenObject, {
     target,
     props: {
       entityId: REPO,
       object,
+      ...(ends ? { ends } : {}),
       apps,
       layers: createLayers(),
       ports: {
@@ -104,6 +117,12 @@ async function openMenu(object: OpenObject) {
         openExternal: (url: string) => {
           calls.opened.push(url);
           return Promise.resolve();
+        },
+        diffTool: (_entityId: string, base: string, head: string) =>
+          Promise.resolve(local.includes(base.replace(/\^$/, "")) && local.includes(head) ? argvOf(base, head) : null),
+        openDiffTool: (_entityId: string, base: string, head: string) => {
+          calls.diffs.push([base, head]);
+          return Promise.resolve(argvOf(base, head));
         },
       },
     },
@@ -178,4 +197,46 @@ test("with nothing to open it here, the menu says why", async () => {
   await openMenu({ kind: "range", base: "main", head: "feature/x" });
   expect(items()).toEqual([]);
   expect(text(target.querySelector(".tf-appmenu"))).toContain("not on this machine");
+});
+
+test("a range whose two shas the checkout holds offers the Diff tool, and it runs on them", async () => {
+  local = ["7be0e4f15c60", "c90d11e4a7b2"];
+  await openMenu({ kind: "range", base: "7be0e4f15c60^", head: "c90d11e4a7b2" });
+  expect(names()).toEqual(["VS Code (default)", "Diff tool"]);
+  expect(text(items()[1])).toContain("git -C /Users/mara/code/payout-service difftool --dir-diff --gui --no-prompt 7be0e4f15c60^ c90d11e4a7b2");
+  items()[1]!.click();
+  await settle();
+  expect(calls.diffs).toEqual([["7be0e4f15c60^", "c90d11e4a7b2"]]);
+  expect(toasts.items.map((toast) => toast.text)[0]).toMatch(/^Started the Diff tool: git -C/);
+});
+
+test("a range with a sha the checkout lacks has no Diff tool", async () => {
+  local = ["c90d11e4a7b2"];
+  await openMenu({ kind: "range", base: "7be0e4f15c60^", head: "c90d11e4a7b2" });
+  expect(names()).toEqual(["VS Code (default)"]);
+});
+
+test("a pull request's applications open its worktree, and its Diff tool takes the files' two shas", async () => {
+  local = ["4b1c0ffee000", "9e2dfeed1111"];
+  const withPr = settings();
+  withPr.applications[2]!.pull_request_command = "code {path}";
+  apps = createApps({
+    checkoutSettings: () => Promise.resolve(withPr),
+    setCheckoutApplications: () => Promise.resolve(withPr),
+    openCheckout: () => Promise.reject(new Error("never")),
+    openObject: () => Promise.resolve([]),
+  });
+  const pr: OpenObject = { kind: "pull_request", number: 12, base: "main", head: "feature/x", branch: "feature/x", item: "gitea:tidewater/payout-service#12" };
+  await openMenu(pr, () => Promise.resolve({ base: "4b1c0ffee000", head: "9e2dfeed1111" }));
+  expect(names()).toEqual(["VS Code (default)", "Diff tool"]);
+  expect(text(items()[0])).toContain("code /Users/mara/code/pull-requests/tidewater/payout-service-12");
+  items()[1]!.click();
+  await settle();
+  expect(calls.diffs).toEqual([["4b1c0ffee000", "9e2dfeed1111"]]);
+});
+
+test("a pull request whose files are not read yet has no Diff tool", async () => {
+  local = ["4b1c0ffee000", "9e2dfeed1111"];
+  await openMenu({ kind: "pull_request", number: 12, base: "main", head: "feature/x", branch: "feature/x" }, () => Promise.resolve(null));
+  expect(names()).toEqual([]);
 });

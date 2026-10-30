@@ -1257,6 +1257,8 @@ const CASES: Case[] = [
             entityCheckout: () => deferred(CLONED),
             objectPage: () => deferred(null),
             openExternal: () => deferred(undefined),
+            diffTool: () => deferred(null),
+            openDiffTool: () => deferred([]),
           },
         },
       }),
@@ -1369,7 +1371,12 @@ const CASES: Case[] = [
     open: (target) => ({
       app: mount(TfCheckoutsSection, {
         target,
-        props: { apps: residueApps(), saveRoot: () => deferred(undefined), layers: createLayers() },
+        props: {
+          apps: residueApps(),
+          saveRoot: () => deferred(undefined),
+          worktreePorts: { list: () => deferred([]), remove: () => deferred([]) },
+          layers: createLayers(),
+        },
       }),
     }),
   },
