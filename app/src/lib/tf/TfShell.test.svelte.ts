@@ -1342,3 +1342,29 @@ test("⌘R on an item's page runs its Refresh, as a click does", async () => {
   await settle();
   expect(refreshed).toEqual(["surveys:survey-1"]);
 });
+
+// ---- a page keep-alive holds hidden (#2247) ----
+
+test("a page kept hidden takes no keys: / focuses nothing in it", async () => {
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
+  for (const view of ["#/tickets", "#/docs", "#/builds", "#/deps"]) {
+    await at(view);
+  }
+  for (const view of ["#/time", "#/settings"]) {
+    await at(view);
+    (document.activeElement as HTMLElement | null)?.blur();
+    press("/");
+    expect(document.activeElement?.closest("[hidden]") ?? null, view).toBeNull();
+  }
+});
+
+test("⌘R never presses the Sync now of a page kept hidden", async () => {
+  const { asked, syncs } = roleSyncHarness();
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }], roleSyncs: syncs });
+  await at("#/docs");
+  await at("#/settings");
+  expect(seen(".tf-syncnow")).toHaveLength(0);
+  cmdR();
+  await settle();
+  expect(asked).toEqual([]);
+});
