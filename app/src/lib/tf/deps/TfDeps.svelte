@@ -104,6 +104,7 @@
   import TfDepsViewMenu from "./TfDepsViewMenu.svelte";
   import { depViewState, type DepViewState } from "./views.svelte";
   import { ENVIRONMENTS } from "./views";
+  import { pageVisible } from "../kept-pages.svelte";
 
   type Ports = {
     dependencies: () => Promise<Dependencies>;
@@ -482,8 +483,11 @@
   let findField = $state<HTMLInputElement | null>(null);
 
   /** `/` focuses Find (R-2.4, R-14), in FilterBar's shape: not while typing elsewhere, not with a modifier. */
+  const pageShown = pageVisible();
   onMount(() => {
     const onkey = (event: KeyboardEvent) => {
+      // A page keep-alive holds hidden (#2247) takes no keys.
+      if (!pageShown()) return;
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       const at = document.activeElement;
       if (at instanceof HTMLElement && inTextField(at)) return;

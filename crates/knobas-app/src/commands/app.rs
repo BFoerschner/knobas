@@ -438,6 +438,36 @@ pub async fn complete_first_run<R: tauri::Runtime>(
         .map_err(IpcError::internal)
 }
 
+/// *Pages kept open* (#2247): how many pages the shell keeps mounted and hidden
+/// besides the one in front, 5 until set (`crate::settings::pages_kept_open`).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn pages_kept_open<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<u32, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::settings::pages_kept_open(&pool).await
+}
+
+/// Store *Pages kept open*, held to 15, and answer what is now stored, so
+/// Settings › Performance draws what the database holds rather than what was
+/// typed -- the rule `set_passive_attribution` follows.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_pages_kept_open<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    count: u32,
+) -> Result<u32, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::settings::set_pages_kept_open(&pool, count).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -492,7 +522,19 @@ mod tests {
     #[test]
     fn every_command_in_this_module_has_a_typescript_mirror() {
         let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
-        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 5);
+        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 7);
+    }
+
+    /// The mirror sends `count`, the argument's name: a mirror sending
+    /// anything else arrives with the value missing (#2247).
+    #[test]
+    fn the_mirror_sends_the_count_of_pages_kept_open() {
+        let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
+        let invocation = crate::commands::mirror::invocation(mirror, "set_pages_kept_open");
+        assert!(
+            crate::commands::mirror::keys(invocation).contains(&"count"),
+            "the mirror calls set_pages_kept_open without passing count: {invocation}"
+        );
     }
 
     #[test]

@@ -227,7 +227,8 @@ try {
     return `
       const want = ${want};
       const enabled = (x) => !x.disabled && x.getAttribute("aria-disabled") !== "true";
-      const boxed = (x) => !${pointer} || x.getClientRects().length > 0;
+      // A page keep-alive holds hidden (#2247) is never a step's target.
+      const boxed = (x) => !x.closest(".tf-kept[hidden]") && (!${pointer} || x.getClientRects().length > 0);
       let el;
       if (${byId}) {
         el = [...document.querySelectorAll("[data-testid]")].find((x) => x.getAttribute("data-testid") === want && enabled(x) && boxed(x));
@@ -278,7 +279,7 @@ try {
     return `(() => {
       const want = ${want};
       const all = [...document.querySelectorAll("input, textarea, select, [contenteditable=true], [contenteditable='']")]
-        .filter((x) => !x.disabled && x.getAttribute("aria-disabled") !== "true");
+        .filter((x) => !x.disabled && x.getAttribute("aria-disabled") !== "true" && !x.closest(".tf-kept[hidden]"));
       const labelled = (x) => [x.getAttribute("aria-label"), x.getAttribute("placeholder"), ...[...(x.labels ?? [])].map((l) => l.textContent)]
         .some((text) => text?.trim() === want);
       const el = ${byId} ? all.find((x) => x.getAttribute("data-testid") === want) : all.find(labelled);
@@ -295,7 +296,7 @@ try {
     const option = JSON.stringify(rest.slice(at + 1));
     return `(() => {
       const want = ${want}, option = ${option};
-      const all = [...document.querySelectorAll("select")].filter((x) => !x.disabled);
+      const all = [...document.querySelectorAll("select")].filter((x) => !x.disabled && !x.closest(".tf-kept[hidden]"));
       const labelled = (x) => [x.getAttribute("aria-label"), ...[...(x.labels ?? [])].map((l) => l.textContent)]
         .some((text) => text?.trim() === want);
       const el = ${byId} ? all.find((x) => x.getAttribute("data-testid") === want) : all.find(labelled);
@@ -310,7 +311,7 @@ try {
   const scrollJs = (arg) => {
     if (arg.startsWith("testid=")) {
       return `(() => {
-        const el = [...document.querySelectorAll("[data-testid]")].find((x) => x.getAttribute("data-testid") === ${JSON.stringify(arg.slice(7))});
+        const el = [...document.querySelectorAll("[data-testid]")].find((x) => x.getAttribute("data-testid") === ${JSON.stringify(arg.slice(7))} && !x.closest(".tf-kept[hidden]"));
         if (!el) return false;
         el.scrollIntoView({ block: "start" });
         return true;

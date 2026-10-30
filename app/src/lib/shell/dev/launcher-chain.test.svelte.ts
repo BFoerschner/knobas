@@ -191,7 +191,8 @@ test("a link asked for and left behind does not open on a later visit to the job
   await openOn("#/time", "Time");
   linkRequest.ask("PAY-231", { entity_id: "asset:knobas-estate", title: FIRST_UNMONITORED, kind: "asset" });
   location.hash = "#/tickets";
-  await until(() => target.querySelector(".tf-crumbs") === null, "Tickets never replaced Time");
+  // Time stays mounted and hidden behind Tickets (keep-alive, #2247): its breadcrumb is not seen.
+  await until(() => target.querySelector(".tf-kept:not([hidden]) .tf-crumbs") === null, "Tickets never replaced Time");
   location.hash = "#/job/PAY-231";
   await until(() => currentJob.entityId !== null, "the job never drew");
   flushSync();

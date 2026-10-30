@@ -268,6 +268,8 @@ vi.mock("../ipc/app", () => ({
   retryDatabase: () => deferred(undefined),
   completeFirstRun: () => deferred(undefined),
   ping: () => deferred("pong"),
+  pagesKeptOpen: () => deferred(5),
+  setPagesKeptOpen: (count: number) => deferred(count),
 }));
 
 /**
@@ -509,6 +511,8 @@ function settingsPorts() {
 /** The other Settings sections' commands (#831), every read late. */
 function sectionPorts() {
   return {
+    pagesKeptOpen: () => deferred(5),
+    setPagesKeptOpen: (count: number) => deferred(count),
     passiveAttribution: () => deferred(true),
     setPassiveAttribution: (on: boolean) => deferred(on),
     notify: () => deferred(undefined),
@@ -1894,6 +1898,7 @@ const CASES: Case[] = [
   sectionCase("TfMonitoringSection", "monitoring"),
   sectionCase("TfBackupSection", "backup"),
   sectionCase("TfLogsSection", "logs"),
+  sectionCase("TfPerformanceSection", "performance"),
   {
     /**
      * The write queue panel (#1425): a layer on the stack, and a title read

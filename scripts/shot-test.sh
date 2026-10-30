@@ -38,6 +38,7 @@ case $elsewhere in *"root=$checkout "*) ;; *) fail "run from /, the root is not 
 # event can, and the `click:` after it misses (exit 1) unless the step worked.
 # `Hovered` stands only while the row is under the pointer, so the hover holds
 # through later steps to the capture. A miss on each new step exits 1 naming it.
+# A step never targets an element of a page keep-alive holds hidden (#2247).
 if [ ! -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
     echo "shot-test: no Chrome at the path shot-steps.mjs starts; the pointer-step and start-up cases skipped"
     if [ "$failures" -gt 0 ]; then echo "shot-test: $failures failure(s)" >&2; exit 1; fi
@@ -59,6 +60,7 @@ cat >"$fixture/index.html" <<'HTML'
 <div id="row" style="padding:8px">A row <button aria-label="Row menu" style="opacity:0">…</button></div>
 <ul><li id="item"><span>PAY-1</span> a title, its key the only exact text</li></ul>
 <button id="twice">Twice</button> <button id="aux">Aux</button>
+<div class="tf-kept" hidden><button>Kept</button></div><button id="kept">Kept</button>
 <p id="out"></p>
 <script>
 const shown = (name, on) => {
@@ -72,6 +74,8 @@ setInterval(() => shown("Hovered", row.matches(":hover")), 30);
 setTimeout(() => shown("Late", true), 12000);
 twice.addEventListener("dblclick", () => shown("Doubled", true));
 item.addEventListener("dblclick", () => shown("Opened", true));
+// Only the shown page's Kept draws Live: one keep-alive holds hidden comes first (#2247).
+kept.addEventListener("click", () => shown("Live", true));
 // As the app does (TfShell, #693): the press is the page's, not a history step.
 for (const type of ["mousedown", "auxclick"]) addEventListener(type, (e) => e.button > 2 && e.preventDefault());
 addEventListener("mouseup", (e) => {
@@ -97,7 +101,7 @@ chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 printf '#!/bin/sh\nsleep 20\nexec "%s" "$@"\n' "$chrome" >"$fixture/stalled-chrome"
 chmod +x "$fixture/stalled-chrome"
 SHOT_CHROME=$fixture/stalled-chrome steps stalled '#/ + click:Late' & stalled=$!
-steps pointer '#/ + hover:Row menu + wait:200 + click:Hovered + wait:200 + dblclick:Twice + click:Doubled + dblclick:PAY-1 + click:Opened + back:Aux + click:Went back + forward:Aux + click:Went forward' \
+steps pointer '#/ + hover:Row menu + wait:200 + click:Hovered + wait:200 + dblclick:Twice + click:Doubled + dblclick:PAY-1 + click:Opened + back:Aux + click:Went back + forward:Aux + click:Went forward + click:Kept + click:Live' \
     || fail "pointer steps: $(cat "$fixture/pointer.err")"
 [ -s "$fixture/pointer.png" ] || fail "pointer steps wrote no image"
 for verb in hover dblclick back forward; do

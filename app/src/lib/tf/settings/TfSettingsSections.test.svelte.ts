@@ -10,6 +10,7 @@ import type { InboxCategory, WriteAsk } from "../../ipc/entity";
 import type { SourceSummary } from "../../ipc/sources";
 import { createHealth } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
+import { keptPages } from "../kept-pages.svelte";
 import { createLayers } from "../layers.svelte";
 import { createTheme, type Theme } from "../theme.svelte";
 import type { SectionPorts, SettingsPorts } from "./ports";
@@ -75,6 +76,8 @@ const sourcePorts: SettingsPorts = {
 
 function sectionPorts(over: Partial<SectionPorts> = {}) {
   return {
+    pagesKeptOpen: vi.fn(() => Promise.resolve(5)),
+    setPagesKeptOpen: vi.fn((count: number) => Promise.resolve(Math.min(15, count))),
     passiveAttribution: vi.fn(() => Promise.resolve(true)),
     setPassiveAttribution: vi.fn((on: boolean) => Promise.resolve(on)),
     notify: vi.fn(() => Promise.resolve()),
@@ -217,6 +220,26 @@ test("Time: the passive switch writes passive_attribution and draws what came ba
   await settle();
   expect(p.setPassiveAttribution).toHaveBeenCalledWith(false);
   expect(switchFor("Passive blocks").getAttribute("aria-checked")).toBe("false");
+});
+
+test("Performance: Pages kept open writes set_pages_kept_open and hands the page host what was stored", async () => {
+  const p = await open("performance");
+  expect(body().querySelector("h1")?.textContent).toBe("Performance");
+  const field = body().querySelector<HTMLInputElement>("#tf-perf-kept")!;
+  expect(field.value).toBe("5");
+
+  field.value = "2";
+  field.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(p.setPagesKeptOpen).toHaveBeenCalledWith(2);
+  expect(keptPages.value, "the page host reads it at once").toBe(2);
+
+  field.value = "40";
+  field.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(p.setPagesKeptOpen).toHaveBeenLastCalledWith(15);
+  expect(field.value).toBe("15");
+  expect(keptPages.value).toBe(15);
 });
 
 test("Desktop notifications: a switch per inbox kind over the notifier's store, and a test notification", async () => {

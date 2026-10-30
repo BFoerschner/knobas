@@ -108,6 +108,11 @@ afterEach(() => {
   document.querySelectorAll("[data-test-field]").forEach((el) => el.remove());
 });
 
+/** The elements matching `selector` a reader sees: none inside a page keep-alive holds hidden (#2247). */
+function seen<E extends Element = HTMLElement>(selector: string): E[] {
+  return [...target.querySelectorAll<E>(selector)].filter((element) => element.closest("[hidden]") === null);
+}
+
 async function settle() {
   for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   flushSync();
@@ -213,6 +218,7 @@ function start(
     jobPorts?: JobPorts;
     dialogs?: Snippet<[SourceSyncStatus[]]>;
     health?: Pick<Health, "all">;
+    pagesKeptOpen?: TfShellPorts["pagesKeptOpen"];
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -252,6 +258,7 @@ function start(
             )),
         syncStatus: () => Promise.resolve(sync),
         listen: over.listen ?? (() => Promise.resolve(() => {})),
+        ...(over.pagesKeptOpen ? { pagesKeptOpen: over.pagesKeptOpen } : {}),
       },
       prefersDark: over.prefersDark ?? (() => false),
       onstarttimer: over.onstarttimer ?? (() => {}),
@@ -342,7 +349,7 @@ test("an address the new shell has no place for names itself", async () => {
   expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Link sets");
   expect(target.textContent).not.toContain("is not built in the new shell yet");
   await at("#/nowhere");
-  expect(target.querySelector(".tf-empty")?.textContent).toContain("Nothing lives at #/nowhere in the new shell.");
+  expect(seen(".tf-empty")[0]?.textContent).toContain("Nothing lives at #/nowhere in the new shell.");
 });
 
 // #1085: a rooms-UI address lands where the new shell keeps that thing, in
@@ -1172,7 +1179,7 @@ function roleSyncHarness() {
 
 function syncButton(): HTMLButtonElement | null {
   return (
-    [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+    seen<HTMLButtonElement>("button").find((button) =>
       ["Sync now", "Syncing…"].includes(button.textContent?.trim() ?? ""),
     ) ?? null
   );
@@ -1182,7 +1189,7 @@ test("every role view's header draws Sync now, once, and a view of no role draws
   start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
   for (const view of ROLE_VIEWS) {
     await at(view);
-    const buttons = [...target.querySelectorAll("button")].filter((button) => button.textContent?.trim() === "Sync now");
+    const buttons = seen("button").filter((button) => button.textContent?.trim() === "Sync now");
     expect(buttons, view).toHaveLength(1);
   }
   await at("#/inbox");
@@ -1336,4 +1343,38 @@ test("⌘R on an item's page runs its Refresh, as a click does", async () => {
   cmdR();
   await settle();
   expect(refreshed).toEqual(["surveys:survey-1"]);
+});
+
+// ---- a page keep-alive holds hidden (#2247) ----
+
+test("a page kept hidden takes no keys: / focuses nothing in it", async () => {
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
+  for (const view of ["#/tickets", "#/docs", "#/builds", "#/deps"]) {
+    await at(view);
+  }
+  for (const view of ["#/time", "#/settings"]) {
+    await at(view);
+    (document.activeElement as HTMLElement | null)?.blur();
+    press("/");
+    expect(document.activeElement?.closest("[hidden]") ?? null, view).toBeNull();
+  }
+});
+
+test("⌘R never presses the Sync now of a page kept hidden", async () => {
+  const { asked, syncs } = roleSyncHarness();
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }], roleSyncs: syncs });
+  await at("#/docs");
+  await at("#/settings");
+  expect(seen(".tf-syncnow")).toHaveLength(0);
+  cmdR();
+  await settle();
+  expect(asked).toEqual([]);
+});
+
+test("the stored Pages kept open reaches the page host once the database answers", async () => {
+  start({ pagesKeptOpen: () => Promise.resolve(0) });
+  await settle();
+  await at("#/time");
+  await at("#/inbox");
+  expect(target.querySelectorAll(".tf-kept"), "none kept besides the page in front").toHaveLength(1);
 });

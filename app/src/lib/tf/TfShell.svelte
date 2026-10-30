@@ -28,6 +28,8 @@
     listSources: () => Promise<(Pick<Summary, "id" | "display_name" | "roles" | "role_misses"> & Partial<Pick<Summary, "enabled">>)[]>;
     syncStatus: () => Promise<SyncRow[]>;
     listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
+    /** *Pages kept open* as stored (#2247), read once the database answers; the default stands without it. */
+    pagesKeptOpen?: () => Promise<number>;
   }
 </script>
 
@@ -36,6 +38,7 @@
   import { onMount, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
+  import { pagesKeptOpen } from "../ipc/app";
   import { listSources, syncStatus, type SourceSummary, type SourceSyncStatus } from "../ipc/sources";
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
   import { health as sharedHealth, type Health } from "../shell/health.svelte";
@@ -53,6 +56,7 @@
   } from "../shell/write-queue.svelte";
   import { badges as sharedBadges, type Badges } from "./badges.svelte";
   import { escStep } from "./escape";
+  import { keptPages as sharedKeptPages, type KeptPagesSetting } from "./kept-pages.svelte";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { parseTfHash, sectionOf } from "./route";
@@ -85,6 +89,7 @@
       listSources,
       syncStatus,
       listen: (event, handler) => tauriListen(event, handler),
+      pagesKeptOpen,
     },
     prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches,
     onstarttimer = () => {},
@@ -95,6 +100,7 @@
     roleSyncs = sharedRoleSyncs,
     ontimechanged,
     nav = { back: () => history.back(), forward: () => history.forward() },
+    kept = sharedKeptPages,
   }: {
     lifecycle: Pick<Lifecycle, "ready">;
     /** Open the launcher. */
@@ -131,6 +137,8 @@
     roleSyncs?: RoleSyncs;
     /** History's back and forward (#693, #1086); the window's when omitted. */
     nav?: { back: () => void; forward: () => void };
+    /** *Pages kept open* (#2247), which the page host reads; the window's when omitted. */
+    kept?: KeptPagesSetting;
   } = $props();
 
   let hash = $state(location.hash);
@@ -293,6 +301,16 @@
    * source the store did not hold changes it too.
    */
   const heldSources = $derived(health.all.map((row) => row.source_id).join("\n"));
+
+  // *Pages kept open* as stored (#2247): until it answers, the default holds.
+  $effect(() => {
+    if (!lifecycle.ready) return;
+    const read = untrack(() => ports.pagesKeptOpen);
+    if (read === undefined) return;
+    void read()
+      .then((count) => kept.set(count))
+      .catch(() => {});
+  });
 
   $effect(() => {
     if (!lifecycle.ready) return;
@@ -479,6 +497,7 @@
   />
   <main class="tf-main" tabindex="-1">
     <TfPage
+      {kept}
       ctx={{
         route,
         ready: lifecycle.ready,

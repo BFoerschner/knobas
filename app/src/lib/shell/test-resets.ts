@@ -45,6 +45,7 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "inbox/notify.svelte.ts#notifications": async () => (await import("../inbox/notify.svelte")).notifications.reset(),
   "shell/timer.svelte.ts#timer": async () => (await import("./timer.svelte")).timer.reset(),
   "tf/badges.svelte.ts#badges": async () => (await import("../tf/badges.svelte")).badges.reset(),
+  "tf/kept-pages.svelte.ts#keptPages": async () => (await import("../tf/kept-pages.svelte")).keptPages.reset(),
   "tf/role-sync.svelte.ts#roleSyncs": async () => (await import("../tf/role-sync.svelte")).roleSyncs.forget(),
   "tf/role-sync.svelte.ts#sourceSyncs": async () => (await import("../tf/role-sync.svelte")).sourceSyncs.forget(),
   "tf/deps/views.svelte.ts#depViewState": async () => (await import("../tf/deps/views.svelte")).depViewState.reset(),
