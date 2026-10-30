@@ -13,8 +13,10 @@ import type { SourceView, TreeEntry } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
 import { installCommands, type CommandPort } from "../../render/command";
-import { createViewChoices } from "../../render/view-choice.svelte";
+import { createRendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
+import type { RendererDefault } from "../../render/defaults";
 import { fileHash, lineHash } from "./repo";
+import { toasts } from "../../shell/toasts.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
 
@@ -99,6 +101,7 @@ function draw(
   line: number | null = null,
   render?: RenderPort,
   commands?: CommandPort,
+  defaults: RendererDefaults = createRendererDefaults(storedDefaults().port),
   fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>,
 ) {
   const ports = {
@@ -118,7 +121,7 @@ function draw(
       path,
       line,
       changed: new Set<string>(),
-      views: createViewChoices(() => null),
+      defaults,
       ...(render ? { render } : {}),
       ...(commands ? { commands } : {}),
     },
@@ -173,14 +176,32 @@ test("the deep file draws as soon as its read answers, and the tree fills in as 
   release("files");
   release("files:src");
   await settle();
-  expect(tree()).toEqual(["src/", "psp/", "README.md"]);
+  expect(tree()).toEqual(["src", "psp", "README.md"]);
 
   for (const section of ["files:src/psp", "files:src/psp/gateway", "files:src/psp/gateway/sepa"]) release(section);
   await settle();
-  expect(tree()).toEqual(["src/", "psp/", "gateway/", "sepa/", "codes.rs", "mod.rs", "README.md"]);
+  expect(tree()).toEqual(["src", "psp", "gateway", "sepa", "codes.rs", "mod.rs", "README.md"]);
   // The listing that names the file takes the read already answered: one read each.
   expect(source.asked).toHaveLength(6);
   expect(lineText(0)).toEqual(["1", 'pub const ACCEPTED: &str = "ACCP";']);
+});
+
+test("Collapse all folds every directory open and leaves the file open (#2257)", async () => {
+  const source = heldSource(DEEP_FILES);
+  draw(source.entityView, DEEP);
+  await settle();
+  for (const read of [...source.asked]) read.release();
+  await settle();
+  expect(tree()).toEqual(["src", "psp", "gateway", "sepa", "codes.rs", "mod.rs", "README.md"]);
+
+  target.querySelector<HTMLButtonElement>("button[title='Collapse all']")!.click();
+  flushSync();
+  expect(tree()).toEqual(["src", "README.md"]);
+  expect(text(target.querySelector(".tf-fileview header .tf-p"))).toBe(DEEP);
+  // A directory opened again opens one level: what was below it stays folded.
+  target.querySelector<HTMLButtonElement>(".tf-ftree button.tf-fdir")!.click();
+  flushSync();
+  expect(tree()).toEqual(["src", "psp", "README.md"]);
 });
 
 test("a deep file opened again after its early read reads it afresh", async () => {
@@ -277,7 +298,7 @@ test("a source that names its sections otherwise still opens the deep file, thro
 
   expect(lineText(0)).toEqual(["1", 'pub const ACCEPTED: &str = "ACCP";']);
   expect(target.querySelector(".tf-cfail")).toBeNull();
-  expect(tree()).toEqual(["src/", "psp/", "gateway/", "sepa/", "codes.rs", "mod.rs", "README.md"]);
+  expect(tree()).toEqual(["src", "psp", "gateway", "sepa", "codes.rs", "mod.rs", "README.md"]);
   expect(reads).toContain(`blob:${DEEP}`);
 });
 
@@ -526,13 +547,37 @@ const MD_FILES: Files = {
 };
 
 const rendered = () => target.querySelector(".tf-fileview .tf-md");
-const viewButtons = () =>
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-fileview [aria-label='View'] button")].map(
-    (button) => `${button.textContent}${button.getAttribute("aria-pressed") === "true" ? "*" : ""}`,
+/** The switcher's face, "Render as <name>". */
+const face = () => text(target.querySelector(".tf-fileview .tf-rsw-face"));
+/** Opens the switcher and reads its items: a tick `*` on the one shown, then its name and tag. */
+function menuItems(): string[] {
+  if (target.querySelector(".tf-rsw .tf-menu") === null) {
+    target.querySelector<HTMLButtonElement>(".tf-rsw-face")!.click();
+    flushSync();
+  }
+  return [...target.querySelectorAll<HTMLElement>(".tf-rsw .tf-menu [role^='menuitem']")].map(
+    (item) => `${item.getAttribute("aria-checked") === "true" ? "*" : ""}${text(item).replace(/^✓ ?/, "")}`,
   );
-function pickView(name: string) {
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-fileview [aria-label='View'] button")].find((b) => b.textContent === name)!.click();
+}
+function choose(start: string) {
+  menuItems();
+  [...target.querySelectorAll<HTMLElement>(".tf-rsw .tf-menu [role^='menuitem']")].find((item) => text(item).replace(/^✓ ?/, "").startsWith(start))!.click();
   flushSync();
+}
+
+/** A backend's `render.defaults` row: what was saved is what the next read answers, as after a restart. */
+function storedDefaults(start: RendererDefault[] = []) {
+  let row = start;
+  const saves: RendererDefault[][] = [];
+  const port = {
+    read: async () => row,
+    save: async (list: RendererDefault[]) => {
+      saves.push(list);
+      row = list;
+      return list;
+    },
+  };
+  return { port, saves };
 }
 
 test("the landing renders the README as Markdown: its table, task list, Rust fence and relative link", async () => {
@@ -545,7 +590,7 @@ test("the landing renders the README as Markdown: its table, task list, Rust fen
   expect(rendered()!.querySelectorAll("li.tf-task")).toHaveLength(2);
   expect(text(rendered()!.querySelector(".tf-fence pre"))).toBe("fn main() {}");
   expect(rendered()!.querySelector("a")?.getAttribute("href")).toBe(fileHash(REPO, "docs/runbook.md"));
-  expect(viewButtons()).toEqual(["Rendered*", "Source"]);
+  expect(face()).toBe("Render as Markdown");
 });
 
 test("a README's relative image is read through the byte read at the README's commit and drawn from a blob (#2256)", async () => {
@@ -554,7 +599,7 @@ test("a README's relative image is read through the byte read at the README's co
   URL.createObjectURL = () => "blob:readme/0";
   try {
     const files = { ...MD_FILES, "docs/runbook.md": "# Runbook\n\n![flow](img/flow.png)" };
-    draw(openSource(files).entityView, "docs/runbook.md", null, undefined, undefined, async (entityId, path, commit) => {
+    draw(openSource(files).entityView, "docs/runbook.md", null, undefined, undefined, undefined, async (entityId, path, commit) => {
       asked.push([entityId, path, commit]);
       return new Uint8Array([0x89, 0x50]);
     });
@@ -576,7 +621,29 @@ test("a Markdown file's relative links open files in the Files tab, resolved aga
   ]);
 });
 
-test("Source shows a Markdown file's lines, and the choice holds for the next file of its type only", async () => {
+test("a .md file mapped to Source opens as source, and the switcher offers Markdown (#2263)", async () => {
+  const defaults = createRendererDefaults(storedDefaults([{ pattern: "*.md", renderer: "source" }]).port);
+  await defaults.load();
+  draw(openSource(MD_FILES).entityView, "README.md", null, undefined, undefined, defaults);
+  await settle();
+
+  expect(rendered()).toBeNull();
+  expect(lineText(0)).toEqual(["1", "# payout-service"]);
+  expect(face()).toBe("Render as Source");
+  expect(menuItems()).toEqual([
+    "Markdown built in",
+    "*Source built in · highlighted DEFAULT FOR *.md",
+    "Use Markdown for *.md by default",
+    "Renderers and defaults… Settings › Renderers",
+  ]);
+
+  choose("Markdown built in");
+  expect(text(rendered()!.querySelector("h1"))).toBe("payout-service");
+  expect(face()).toBe("Render as Markdown");
+});
+
+test("a pick in the switcher holds for that file; Make default writes the pattern, and a restart reads it back (#2263)", async () => {
+  const backend = storedDefaults();
   const props = $state({
     ports: { ...openSource(MD_FILES), submitWrite: async () => ({}) as never },
     repoId: REPO,
@@ -584,46 +651,65 @@ test("Source shows a Markdown file's lines, and the choice holds for the next fi
     branch: "main",
     path: "README.md" as string | null,
     changed: new Set<string>(),
-    views: createViewChoices(() => null),
+    defaults: createRendererDefaults(backend.port),
   });
   view = mount(TfRepoFiles, { target, props });
   await settle();
+  expect(menuItems()).toEqual([
+    "*Markdown built in DEFAULT FOR *.md",
+    "Source built in · highlighted",
+    "Use Source for *.md by default",
+    "Renderers and defaults… Settings › Renderers",
+  ]);
 
-  pickView("Source");
-  expect(rendered()).toBeNull();
+  choose("Source built in");
   expect(lineText(0)).toEqual(["1", "# payout-service"]);
-  expect(viewButtons()).toEqual(["Rendered", "Source*"]);
-
   props.path = "docs/runbook.md";
   await settle();
-  expect(rendered()).toBeNull();
-  expect(lineText(0)).toEqual(["1", "# Runbook"]);
-
-  props.path = "docs/logo.svg";
-  await settle();
-  expect(target.querySelector(".tf-fileview img")).not.toBeNull();
-  expect(viewButtons()).toEqual(["Rendered*", "Source"]);
-
+  expect(face()).toBe("Render as Markdown");
   props.path = "README.md";
   await settle();
-  pickView("Rendered");
-  expect(text(rendered()!.querySelector("h1"))).toBe("payout-service");
+  expect(face()).toBe("Render as Source");
+  expect(backend.saves).toEqual([]);
+
+  choose("Use Source for *.md by default");
+  await settle();
+  expect(backend.saves).toEqual([[{ pattern: "*.md", renderer: "source" }]]);
+  props.path = "docs/runbook.md";
+  await settle();
+  expect(face()).toBe("Render as Source");
+
+  // The app again: a new copy reads what the backend holds.
+  unmount(view);
+  const again = createRendererDefaults(backend.port);
+  await again.load();
+  draw(openSource(MD_FILES).entityView, "README.md", null, undefined, undefined, again);
+  await settle();
+  expect(face()).toBe("Render as Source");
+  expect(lineText(0)).toEqual(["1", "# payout-service"]);
 });
 
-test("the view choice is remembered across a remount, per file type", async () => {
-  const stored = new Map<string, string>();
-  const storage = { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => void stored.set(key, value) };
-  const first = createViewChoices(() => storage);
-  first.pick("README.md", "source");
-  const again = createViewChoices(() => storage);
-  expect(again.of("docs/OTHER.MD")).toBe("source");
-  expect(again.of("logo.svg")).toBe("rendered");
+test("Make default that the backend refuses says so and changes nothing (#2263)", async () => {
+  const defaults = createRendererDefaults({
+    read: async () => [],
+    save: async () => {
+      throw { code: "invalid", message: "*.md has a default already" };
+    },
+  });
+  draw(openSource(MD_FILES).entityView, "README.md", null, undefined, undefined, defaults);
+  await settle();
+  choose("Use Source for *.md by default");
+  await settle();
+  expect(defaults.list).toEqual([]);
+  expect(face()).toBe("Render as Markdown");
+  expect(toasts.items.map((t) => t.text)).toEqual(["Could not make Source the default: *.md has a default already"]);
 });
 
-test("a file with no renderer but Source has no view toggle", async () => {
+test("a file only Source takes still shows the switcher, with nothing to make default", async () => {
   draw(openSource(MD_FILES).entityView, "src/retry.rs");
   await settle();
-  expect(viewButtons()).toEqual([]);
+  expect(face()).toBe("Render as Source");
+  expect(menuItems()).toEqual(["*Source built in · highlighted DEFAULT FOR *.rs", "Renderers and defaults… Settings › Renderers"]);
 });
 
 // -- Mermaid files (#2258) --------------------------------------------------------
@@ -650,9 +736,14 @@ test("a .mmd file is drawn as a diagram in a sandboxed frame, and Source shows i
   expect(frame.getAttribute("sandbox")).toBe("");
   expect([frame.width, frame.height]).toEqual(["300", "120"]);
   expect(render.asked).toEqual(["flowchart LR\n  a --> b"]);
-  expect(viewButtons()).toEqual(["Rendered*", "Source"]);
+  expect(menuItems()).toEqual([
+    "*Mermaid built in · strict security DEFAULT FOR *.mmd",
+    "Source built in · highlighted",
+    "Use Source for *.mmd by default",
+    "Renderers and defaults… Settings › Renderers",
+  ]);
 
-  pickView("Source");
+  choose("Source built in");
   await settle();
   expect(target.querySelector(".tf-fileview iframe")).toBeNull();
   expect(lineText(1)).toEqual(["2", "  a --> b"]);

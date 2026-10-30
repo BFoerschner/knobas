@@ -3,7 +3,7 @@
  * function, so a Rust rename that regenerates the mirror turns the fixture red in svelte-check (#1670).
  * One line per `invoke("<command>")` in `app/src/lib/ipc/*.ts`; a command missing here is simply untyped.
  */
-import type { appStatus, completeFirstRun, frontendReady, pagesKeptOpen, ping, retryDatabase, runRenderer, setPagesKeptOpen, setUserRenderers, userRenderers } from "../../ipc/app";
+import type { appStatus, completeFirstRun, frontendReady, pagesKeptOpen, ping, rendererDefaults, retryDatabase, runRenderer, setPagesKeptOpen, setRendererDefaults, setUserRenderers, userRenderers } from "../../ipc/app";
 import type { ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, createDepLayer, createRoute, deleteAsset, deleteDepLayer, deleteDepView, deleteRoute, depViews, dependencies, dependsOnThis, editAsset, editRoute, getAsset, getRoute, monitorRoster, monitoringSettings, moveAsset, openAlerts, orderDepLayers, placeDepKind, previewEstateImport, produceEstateFile, renameDepLayer, saveDepView, setDepViewDefaults, setMonitoringSettings, unmonitoredAssets } from "../../ipc/assets";
 import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBackupSchedule, shareExport } from "../../ipc/backup";
 import type { acceptSuggestion, actionItemTicket, artifactPreview, captureContext, captureShortcut, checkoutSettings, cloneRepo, codeFacts, completeInboxItem, createActionItemTicket, createLink, createNote, deleteLinkSet, deleteNote, deleteRunPreset, dismissSuggestion, docsCreatePage, docsEditSection, docsExportMarkdown, docsPage, docsSearch, docsTree, downloadRunFile, entityCheckout, entityCheckoutDiff, entityFileBytes, entityThread, entityView, exportNotesMarkdown, followMerges, getEntity, getNote, hideLinkSetMember, inboxCount, inboxItems, jobLinkSets, jobPipelines, jobReach, linkSet, linkSetHints, linkSets, listContexts, listEntities, listProjects, miniBoard, moveNotesToConfluence, notificationKinds, notify, olderPipelineRuns, openCheckout, owedTickets, parentLinks, pipelineRuns, pipelineSettings, pipelines, prViewedFiles, previewLinkSetPattern, previewLinkSetRule, promoteContext, proposalEvidence, publishStandupProtocol, reachableTransitions, recordCaptureContext, refusedWrites, resolveUrl, revealNote, roomSuggestions, runArtifacts, runChain, runLog, runPresets, runTests, saveLinkSet, saveNote, saveRunPreset, setCaptureShortcut, setCheckoutApplications, setCheckoutOverride, setClonesRoot, setNotesShown, setNotificationKinds, setParentLinks, setPipelinePinned, setPrFileViewed, setStandupPublishTarget, snoozeInboxItem, standupDigest, standupProtocol, standupPublishTarget, startWorkAmend, startWorkFlow, startWorkRetry, startWorkRun, startWorkSkip, submitWrite, testHistory, unlink, visitEntity } from "../../ipc/entity";
@@ -152,6 +152,7 @@ export interface Answers {
   reindex_fts: Answer<typeof reindexFts>;
   rename_dep_layer: Answer<typeof renameDepLayer>;
   rename_smart_list: Answer<typeof renameSmartList>;
+  renderer_defaults: Answer<typeof rendererDefaults>;
   resolve_url: Answer<typeof resolveUrl>;
   restore_backup: Answer<typeof restoreBackup>;
   retry_database: Answer<typeof retryDatabase>;
@@ -182,6 +183,7 @@ export interface Answers {
   set_parent_links: Answer<typeof setParentLinks>;
   set_passive_attribution: Answer<typeof setPassiveAttribution>;
   set_pipeline_pinned: Answer<typeof setPipelinePinned>;
+  set_renderer_defaults: Answer<typeof setRendererDefaults>;
   set_pr_file_viewed: Answer<typeof setPrFileViewed>;
   set_source_secret: Answer<typeof setSourceSecret>;
   set_standup_publish_target: Answer<typeof setStandupPublishTarget>;

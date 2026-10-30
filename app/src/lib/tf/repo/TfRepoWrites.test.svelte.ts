@@ -572,7 +572,8 @@ const COMPARE = (branch: string) => [REPO, "compare", ...branch.split("/")];
 
 test("the compare page offers Open PR #N where a pull request is already open from the branch", async () => {
   await draw(COMPARE("feature/PAY-231-sepa-retry"), "PAY-231");
-  expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toContain("Pull requests");
+  // Compare is its own tab since #2257 (the mockup's ruling on #2252).
+  expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toBe("Compare");
   expect(text(target.querySelector(".tf-compare .tf-chip.tf-info"))).toBe("PR #142 is already open from this branch");
   expect(button("Open PR #142", target)!.getAttribute("href")).toBe("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
   expect(button("Create pull request", target)).toBeUndefined();

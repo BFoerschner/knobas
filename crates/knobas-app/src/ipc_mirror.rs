@@ -44,6 +44,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::renderers::UserRendererDraft::export_all(cfg)?;
     crate::renderers::RenderContent::export_all(cfg)?;
     crate::renderers::RenderRun::export_all(cfg)?;
+    crate::renderers::RendererDefault::export_all(cfg)?;
     // entity.ts
     knobas_core::entity_list::EntityRow::export_all(cfg)?;
     knobas_core::tone::Tone::export_all(cfg)?;

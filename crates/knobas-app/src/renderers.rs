@@ -228,6 +228,77 @@ fn settle(drafts: &[UserRendererDraft]) -> Result<Vec<UserRenderer>, IpcError> {
     Ok(out)
 }
 
+/// The `knobas.setting` key holding the default renderer per file pattern
+/// (#2263).
+pub const DEFAULTS_KEY: &str = "render.defaults";
+
+/// One default renderer per file pattern (#2263): files `pattern` takes open
+/// with `renderer`. Which of several matching patterns decides, and what
+/// happens when the renderer is gone, is the frontend's
+/// (`app/src/lib/render/defaults.ts`): the backend runs no built-in renderer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "app.ts")]
+pub struct RendererDefault {
+    /// A file glob (`*.md`, `docs/*.mmd`), matched without regard to case.
+    pub pattern: String,
+    /// The renderer's registry id: `source`, `markdown`, `command:<saved id>`.
+    pub renderer: String,
+}
+
+/// The default renderers per file pattern, in the person's order.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn defaults(pool: &PgPool) -> Result<Vec<RendererDefault>, IpcError> {
+    Ok(read_value(pool, DEFAULTS_KEY)
+        .await?
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default())
+}
+
+/// Save the whole list of defaults, trimmed, and answer it as stored.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a row with no pattern or no
+/// renderer, or a pattern listed twice, naming it;
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn save_defaults(
+    pool: &PgPool,
+    list: &[RendererDefault],
+) -> Result<Vec<RendererDefault>, IpcError> {
+    let mut out: Vec<RendererDefault> = Vec::with_capacity(list.len());
+    for (index, row) in list.iter().enumerate() {
+        let pattern = row.pattern.trim();
+        if pattern.is_empty() {
+            return Err(IpcError::invalid(format!(
+                "default {} has no file pattern",
+                index + 1
+            )));
+        }
+        let renderer = row.renderer.trim();
+        if renderer.is_empty() {
+            return Err(IpcError::invalid(format!("{pattern} names no renderer")));
+        }
+        if out
+            .iter()
+            .any(|d| d.pattern.to_lowercase() == pattern.to_lowercase())
+        {
+            return Err(IpcError::invalid(format!(
+                "{pattern} has a default already"
+            )));
+        }
+        out.push(RendererDefault {
+            pattern: pattern.to_owned(),
+            renderer: renderer.to_owned(),
+        });
+    }
+    let value = serde_json::to_value(&out).map_err(IpcError::internal)?;
+    write_value(pool, DEFAULTS_KEY, &value).await?;
+    Ok(out)
+}
+
 /// Run saved renderer `id` with `content` on stdin.
 ///
 /// # Errors

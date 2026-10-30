@@ -386,10 +386,16 @@ test("every sticky side column is bounded by the window and scrolls on its own, 
   const columns = sticky.filter(([selector]) => !STICKY_BARS.includes(selector));
   // The columns this test was written against: it keeps finding them.
   expect(columns.map(([selector]) => selector)).toEqual(
-    expect.arrayContaining([".tf-ftree", ".tf-flist", ".tf-rd-outline", ".tf-dp-rail", ".tf-dp-panel"]),
+    expect.arrayContaining([".tf-ftreebox", ".tf-flist", ".tf-rd-outline", ".tf-dp-rail", ".tf-dp-panel"]),
   );
+  // A column whose head stays put scrolls in an inner box instead (#2257: the file tree's rows under its head).
+  const INNER: Record<string, string> = { ".tf-ftreebox": ".tf-ftree" };
+  const scrolls = (selector: string, body: string) =>
+    INNER[selector] === undefined
+      ? /overflow(-y)?:\s*auto/.test(body)
+      : /overflow:\s*hidden/.test(body) && /display:\s*flex/.test(body) && /overflow(-y)?:\s*auto/.test(block(code, INNER[selector]!));
   const unbounded = columns
-    .filter(([, body]) => !/max-height:\s*calc\(100vh - \d+px\)/.test(body) || !/overflow(-y)?:\s*auto/.test(body))
+    .filter(([selector, body]) => !/max-height:\s*calc\(100vh - \d+px\)/.test(body) || !scrolls(selector, body))
     .map(([selector]) => selector);
   expect(unbounded).toEqual([]);
   // Below the open find bar the outline sticks lower, and is shorter by as much.

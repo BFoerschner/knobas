@@ -64,8 +64,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/queued.svelte.ts#asked": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#follows": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/review/decisions.svelte.ts#decisions": async () => (await import("../tf/review/decisions.svelte")).decisions.reset(),
-  // *Rendered* or *Source* per file type (#2255).
-  "render/view-choice.svelte.ts#viewChoices": async () => (await import("../render/view-choice.svelte")).viewChoices.forget(),
+  // The default renderer per file pattern (#2263), as the backend answered it.
+  "render/defaults.svelte.ts#rendererDefaults": async () => (await import("../render/defaults.svelte")).rendererDefaults.reset(),
   "tf/theme.svelte.ts#theme": async () => (await import("../tf/theme.svelte")).theme.reset(),
   // Each view's filter, and the set hints *Not now* put away (#1983).
   "tf/filter/filter-state.svelte.ts#kept": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),

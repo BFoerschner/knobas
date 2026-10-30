@@ -19,7 +19,9 @@
   *sent*, until the source holds a newer blob, the file read again on the
   refresh event and a run's end.
 
-  With no file in the address the top directory's README opens.
+  With no file in the address the top directory's README opens, under the
+  branch's last commit (`TfRepoLastCommit`, #2257): the landing is the tree,
+  the last commit and the README, with no second listing of the top.
 
   **Read at a commit** (#2241): the source reads the tree at the branch's tip
   and the sections its listings name stand at that commit, so a file opened
@@ -42,15 +44,17 @@
   a command renderer (#2262) runs on the backend and draws in a sandboxed
   frame (`../render/TfCommandOutput.svelte`).
   A Markdown file is drawn by the Markdown component (#2255): its relative
-  links open files here, external ones go to the browser. *Rendered* and
-  *Source* switch any file whose renderer is not Source to its lines and
-  back, remembered per file type (`render/view-choice.svelte.ts`).
+  links open files here, external ones go to the browser. Which renderer a
+  file opens with is the default per file pattern (#2263, `render/defaults.ts`);
+  the header's *Render as ▾* (`../render/TfRendererSwitch.svelte`) switches
+  this file to any other renderer that takes it, for as long as the tab lives,
+  and makes one the default for the file's pattern.
   *Find in file* (#2299) marks every hit, "N of M"; `Enter` and `Shift+Enter`
   step through them, drawing a hit's line first where the window left it out.
 -->
 <script lang="ts">
   import { flushSync, tick, untrack } from "svelte";
-  import { SvelteSet } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { EVENTS, ipcErrorMessage } from "../../ipc";
@@ -59,8 +63,10 @@
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
-  import { imageUrl, renderersFor } from "../../render/registry";
-  import { viewChoices as appViewChoices, type ViewChoice } from "../../render/view-choice.svelte";
+  import { allRenderers, imageUrl, type Renderer } from "../../render/registry";
+  import { makeDefaultPattern, openWith, withDefault } from "../../render/defaults";
+  import { rendererDefaults as appDefaults, type RendererDefaults } from "../../render/defaults.svelte";
+  import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import TfDiagram from "../render/TfDiagram.svelte";
   import { findCount, stepMatch } from "../builds/run-reads";
@@ -72,6 +78,7 @@
   import { commandIdOf, ipcCommands, type CommandPort } from "../../render/command";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
+  import TfRepoLastCommit from "./TfRepoLastCommit.svelte";
   import {
     REPO_FILES,
     ancestors,
@@ -110,7 +117,7 @@
     refusal = null,
     render = renderPort(),
     commands = ipcCommands,
-    views = appViewChoices,
+    defaults = appDefaults,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -144,8 +151,8 @@
     render?: RenderPort;
     /** Runs a command renderer (#2262): the IPC, a fake in tests. */
     commands?: CommandPort;
-    /** *Rendered* or *Source*, per file type (#2255): the app's store, a fresh one in tests. */
-    views?: { of(path: string): ViewChoice; pick(path: string, choice: ViewChoice): void };
+    /** The default renderer per file pattern (#2263): the app's copy, a fresh one in tests. */
+    defaults?: RendererDefaults;
   } = $props();
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
@@ -378,12 +385,28 @@
   const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: 20.8, from: WHOLE_UP_TO + 1 });
   let code = $state<HTMLElement | null>(null);
 
-  /** What draws the file (#2254): the first renderer that accepts it. */
-  const renderer = $derived(file === null ? null : (renderersFor(file)[0] ?? null));
-  /** A text file whose renderer is not Source has *Rendered* and *Source* (#2255). */
-  const toggles = $derived(file !== null && !file.binary && renderer !== null && renderer.id !== "source");
-  /** What draws the file now: its renderer, or Source where the reader picked it. */
-  const drawAs = $derived(toggles && file !== null && views.of(file.path) === "source" ? "source" : (renderer?.id ?? null));
+  /** What takes the file and what it opens with (#2254, #2263): the default for its pattern, else the registry's first. */
+  const opened = $derived(file === null ? null : openWith(file, allRenderers(), defaults.list));
+  /** The renderer picked in the switcher per file, for as long as the tab lives (#2263). */
+  const picks = new SvelteMap<string, string>();
+  /** What draws the file now: the one picked, else the default. */
+  const renderer = $derived.by((): Renderer | null => {
+    if (opened === null || file === null) return null;
+    const picked = picks.get(file.path);
+    return opened.offered.find((r) => r.id === picked) ?? opened.renderer;
+  });
+  const drawAs = $derived(renderer?.id ?? null);
+  /** The pattern *Make default* writes: the one that chose the default, unless broader than the file's extension. */
+  const switchPattern = $derived(file === null || opened === null ? "" : makeDefaultPattern(opened, file.path));
+
+  async function makeDefault(path: string, chosen: Renderer) {
+    try {
+      await defaults.save(withDefault(defaults.list, switchPattern, chosen.id));
+      picks.delete(path);
+    } catch (cause) {
+      push({ text: `Could not make ${chosen.name} the default: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
   const image = $derived(
     drawAs === "image" && file !== null && !file.binary ? imageUrl(new TextEncoder().encode(file.text), file.path) : null,
   );
@@ -657,6 +680,14 @@
   }
 </script>
 
+{#snippet icon(kind: "dir" | "open" | "file")}
+  <svg class="tf-ficon" viewBox="0 0 16 16" aria-hidden="true"
+    >{#if kind === "dir"}<path d="M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z" />{:else if kind === "open"}<path
+        d="M2.5 4.5h4l1.5 1.5h5.5v1.5M2.5 4.5v8h10l1.5-5h-10l-1.5 5"
+      />{:else}<path d="M4 2h5l3 3v9H4z M9 2v3h3" />{/if}</svg
+  >
+{/snippet}
+
 {#snippet listing(dir: string, depth: number)}
   {#each listings[dir] ?? [] as entry (entry.name)}
     {@const full = join(dir, entry.name)}
@@ -665,7 +696,7 @@
         type="button"
         class="tf-fdir tf-d{Math.min(depth, 8)}"
         aria-expanded={open.has(full)}
-        onclick={() => toggle(full)}>{entry.name}/</button
+        onclick={() => toggle(full)}>{@render icon(open.has(full) ? "open" : "dir")}{entry.name}</button
       >
       {#if open.has(full)}
         {@render listing(full, depth + 1)}
@@ -676,23 +707,34 @@
         class="tf-d{Math.min(depth, 8)}"
         class:tf-changed={changed.has(full)}
         aria-current={full === shown ? "true" : undefined}
-        title={changed.has(full) ? "Changed in your checkout" : undefined}>{entry.name}</a
+        title={changed.has(full) ? "Changed in your checkout" : undefined}>{@render icon("file")}{entry.name}</a
       >
     {:else}
-      <span class="tf-fsub tf-d{Math.min(depth, 8)}">{entry.name}</span>
+      <span class="tf-fsub tf-d{Math.min(depth, 8)}">{@render icon("file")}{entry.name}</span>
     {/if}
   {/each}
 {/snippet}
 
 <div class="tf-repo">
-  <nav class="tf-ftree" aria-label="Files">
-    {#if treeFailed !== null}
-      <p class="tf-cfail">{treeFailed}</p>
-    {/if}
-    <TfWaiting phase={waitPhase({ drawn: listings[""] !== undefined || treeFailed !== null, reading: false, failed: false })} columns={1} count={8}>
-      {@render listing("", 0)}
-    </TfWaiting>
-  </nav>
+  <!-- The tree stays beside every file (#2257, the mockup of #2252): its head folds it, its rows scroll inside it. -->
+  <aside class="tf-ftreebox">
+    <header>
+      <span class="tf-ftree-h">Files</span>
+      <button type="button" class="tf-iconbtn tf-sm" title="Collapse all" disabled={open.size === 0} onclick={() => open.clear()}
+        ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4-3 4 3M4 10l4 3 4-3" /></svg></button
+      >
+    </header>
+    <nav class="tf-ftree" aria-label="Files">
+      {#if treeFailed !== null}
+        <p class="tf-cfail">{treeFailed}</p>
+      {/if}
+      <TfWaiting phase={waitPhase({ drawn: listings[""] !== undefined || treeFailed !== null, reading: false, failed: false })} columns={1} count={8}>
+        {@render listing("", 0)}
+      </TfWaiting>
+    </nav>
+  </aside>
+  <div class="tf-fcol">
+  {#if path === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
   <div class="tf-fileview">
     {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
@@ -721,18 +763,22 @@
     {:else}
       <TfWaiting phase={waitPhase({ drawn: file !== null || fileStranded, reading: fileReading && !fileStranded, failed: fileFailed !== null })} error={fileFailed} failClass="tf-fpad" shape="lines">
       {#if file !== null}
+      {@const cut = file.path.lastIndexOf("/") + 1}
       <header>
-        <span class="tf-p">{file.path}</span>
+        <span class="tf-p">{#if cut > 0}<span class="tf-pdir">{file.path.slice(0, cut)}</span>{/if}{file.path.slice(cut)}</span>
         <span class="tf-dim tf-small"
           >{file.binary ? `${file.size} bytes` : `${lines.length} ${lines.length === 1 ? "line" : "lines"}`}{branch !== null ? `, on ${branch}` : ""}</span
         >
         <span class="tf-acts">
-          {#if toggles}
-            {@const choice = views.of(file.path)}
-            <span class="tf-seg" role="group" aria-label="View">
-              <button type="button" aria-pressed={choice === "rendered"} onclick={() => views.pick(file!.path, "rendered")}>Rendered</button>
-              <button type="button" aria-pressed={choice === "source"} onclick={() => views.pick(file!.path, "source")}>Source</button>
-            </span>
+          {#if opened !== null && renderer !== null}
+            {@const at = file.path}
+            <TfRendererSwitch
+              {opened}
+              shown={renderer}
+              pattern={switchPattern}
+              onpick={(r) => picks.set(at, r.id)}
+              onmakedefault={(r) => void makeDefault(at, r)}
+            />
           {/if}
           {#if editable}
             <a class="tf-btn tf-sm" href={editHash(repoId, file.path)}>Edit</a>
@@ -792,6 +838,7 @@
       {/if}
       </TfWaiting>
     {/if}
+  </div>
   </div>
 </div>
 

@@ -4,7 +4,8 @@
  *
  * Answers `user_renderers`, `set_user_renderers`, `run_renderer` (#2262: one saved
  * renderer, `cat`, which the fake runs by echoing its input; any other command
- * fails with that said on stderr), `pages_kept_open`, `set_pages_kept_open` (#2247), `passive_attribution`, `set_passive_attribution`,
+ * fails with that said on stderr), `renderer_defaults`, `set_renderer_defaults` (#2263, none until
+ * one is made), `pages_kept_open`, `set_pages_kept_open` (#2247), `passive_attribution`, `set_passive_attribution`,
  * `monitoring_settings`, `set_monitoring_settings`, `backup_status`,
  * `backup_now`, `set_backup_schedule` and `open_backup_folder` (which opens
  * nothing: a browser has no file manager to show the folder in).
@@ -29,7 +30,7 @@
  */
 import type { BackupRecord, BackupSchedule, BackupStatus } from "../../../ipc/backup";
 import type { MonitoringSettings } from "../../../ipc/assets";
-import type { RenderContent, UserRenderer, UserRendererDraft } from "../../../ipc/app";
+import type { RenderContent, RendererDefault, UserRenderer, UserRendererDraft } from "../../../ipc/app";
 import type { Handlers } from "../fake-tauri";
 
 const DIRECTORY = "~/Library/Application Support/knobas/backups";
@@ -86,7 +87,15 @@ export function handlers(): Handlers {
     { id: "cat", name: "Cat", command: "cat", patterns: ["*.cat.html"], fences: ["cat"], input: "text", output: "html", timeout_secs: 10 },
   ];
 
+  // The default renderer per file pattern (#2263): none until one is made.
+  let defaults: RendererDefault[] = [];
+
   return {
+    renderer_defaults: () => defaults,
+    set_renderer_defaults: (args) => {
+      defaults = (args["defaults"] as RendererDefault[]).map((d) => ({ pattern: d.pattern.trim(), renderer: d.renderer.trim() }));
+      return defaults;
+    },
     user_renderers: () => renderers,
     set_user_renderers: (args) => {
       const drafts = args["renderers"] as UserRendererDraft[];

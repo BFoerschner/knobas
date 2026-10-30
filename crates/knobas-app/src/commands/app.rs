@@ -520,6 +520,38 @@ pub async fn run_renderer<R: tauri::Runtime>(
     crate::renderers::run(&pool, &id, content).await
 }
 
+/// The default renderer per file pattern (#2263), in order.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn renderer_defaults<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::renderers::RendererDefault>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::defaults(&pool).await
+}
+
+/// Save the whole list of default renderers per file pattern and answer it
+/// as stored, trimmed.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a row with no
+/// pattern or renderer, or a pattern listed twice,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_renderer_defaults<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    defaults: Vec<crate::renderers::RendererDefault>,
+) -> Result<Vec<crate::renderers::RendererDefault>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::save_defaults(&pool, &defaults).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,7 +606,7 @@ mod tests {
     #[test]
     fn every_command_in_this_module_has_a_typescript_mirror() {
         let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
-        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 10);
+        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 12);
     }
 
     /// The mirror sends each argument by its Rust name (#2262).
@@ -584,6 +616,7 @@ mod tests {
         for (command, args) in [
             ("set_user_renderers", &["renderers"][..]),
             ("run_renderer", &["id", "content"][..]),
+            ("set_renderer_defaults", &["defaults"][..]),
         ] {
             let invocation = crate::commands::mirror::invocation(mirror, command);
             let keys = crate::commands::mirror::keys(invocation);

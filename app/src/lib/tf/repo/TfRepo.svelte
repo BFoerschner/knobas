@@ -8,12 +8,14 @@
     language (`code_facts`, #973), its last push and its
     checkout (`entity_checkout`: where it is cloned and how it stands, or *Not
     on this machine yet*); the *Branch* dropdown, which sets the branch every
-    tab reads at and is held per repository for the session; *New branch…*,
-    *New pull request* (the compare page, #840) and *Open in…* (#844), or
-    *Clone* for a repository not on this machine (#846).
-  - **The tabs**, `REPO_TABS` in `repo.ts`: Files (and its edit, #845),
-    Commits, Branches (#839), Pull requests (and the compare page, #840) and
-    Local changes (#847).
+    tab reads at and is held per repository for the session; *New pull
+    request* (the compare page, #840) first as the primary, *New branch…*
+    and *Open in…* (#844), or *Clone* for a repository not on this machine
+    (#846), in #2238's order.
+  - **The tabs**, `REPO_TABS` in `repo.ts`, in two groups split by a rule
+    (#2257, the mockup of #2252): the repository at a ref, Files (and its
+    edit, #845), Commits, Branches (#839) and Compare (#840); then work in
+    flight, Pull requests and Local changes (#847).
   - The checkout is read again when the window gets focus and when a clone
     finishes (ADR-0021); while keep-alive holds the page hidden (#2249) it
     is not, and it is read once when the page is shown again.
@@ -517,9 +519,17 @@
           {/if}
         </div>
       </div>
+      <!-- #2238's order, as the mockup (#2252) draws it: the primary, the others, Open in, Refresh last. -->
       <div class="tf-acts">
-        <label class="tf-fsel"
-          >Branch<select aria-label="Branch" value={branchName ?? ""} onchange={pick} disabled={branches === null || branches.length === 0}>
+        {#if proposed !== null}
+          <a class="tf-btn tf-primary" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
+        {/if}
+        <label class="tf-bsel"
+          ><svg viewBox="0 0 16 16" aria-hidden="true"
+            ><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="5" r="1.5" /><path
+              d="M4.5 5v6M11.5 6.5c0 3-7 2-7 4.5"
+            /></svg
+          ><select aria-label="Branch" value={branchName ?? ""} onchange={pick} disabled={branches === null || branches.length === 0}>
             {#each branches ?? [] as option (option.name)}
               <option value={option.name}>{option.name}</option>
             {/each}
@@ -534,17 +544,15 @@
           onclick={() => {
             if (branchRefused === null) newBranch = { from: null };
           }}>New branch…</button>
-        {#if proposed !== null}
-          <a class="tf-btn" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
-        {/if}
         <TfOpenIn entityId={repoId} title={repo?.title ?? ""} {checkout} size="md" />
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
       </div>
     </header>
     {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
     <nav class="tf-tabs" aria-label="Repository">
-      {#each REPO_TABS as entry (entry.id)}
+      {#each REPO_TABS as entry, n (entry.id)}
         {@const count = countOf(entry.id)}
+        {#if n > 0 && REPO_TABS[n - 1]!.group !== entry.group}<span class="tf-tabgrp" aria-hidden="true"></span>{/if}
         <a href={tabHref(held, repoId, entry.id)} aria-current={tab === entry.id ? "page" : undefined}
           >{entry.label}{#if count !== null}{" "}<span class="tf-count" class:tf-warn={count.warn}>{count.n}</span
             >{/if}</a

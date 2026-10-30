@@ -21,6 +21,7 @@ import { jobHash, NAV, SECTION_NAME } from "./route";
 import TfShell, { type TfShellPorts } from "./TfShell.svelte";
 import { installCommands } from "../render/command";
 import { renderersForFence } from "../render/registry";
+import { rendererDefaults } from "../render/defaults.svelte";
 import { createTheme, type Theme } from "./theme.svelte";
 import { createRoleSyncs, type RoleSyncPorts, type RoleSyncs } from "./role-sync.svelte";
 import { sourceFacts } from "./job/source-facts.fixture";
@@ -222,6 +223,7 @@ function start(
     health?: Pick<Health, "all">;
     pagesKeptOpen?: TfShellPorts["pagesKeptOpen"];
     userRenderers?: TfShellPorts["userRenderers"];
+    rendererDefaults?: TfShellPorts["rendererDefaults"];
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -263,6 +265,7 @@ function start(
         listen: over.listen ?? (() => Promise.resolve(() => {})),
         ...(over.pagesKeptOpen ? { pagesKeptOpen: over.pagesKeptOpen } : {}),
         ...(over.userRenderers ? { userRenderers: over.userRenderers } : {}),
+        ...(over.rendererDefaults ? { rendererDefaults: over.rendererDefaults } : {}),
       },
       prefersDark: over.prefersDark ?? (() => false),
       onstarttimer: over.onstarttimer ?? (() => {}),
@@ -1394,4 +1397,10 @@ test("the saved command renderers are in the registry once the database answers 
   } finally {
     installCommands([]);
   }
+});
+
+test("the default renderers per file pattern are held once the database answers (#2263)", async () => {
+  start({ rendererDefaults: () => Promise.resolve([{ pattern: "*.md", renderer: "source" }]) });
+  await settle();
+  expect(rendererDefaults.list).toEqual([{ pattern: "*.md", renderer: "source" }]);
 });

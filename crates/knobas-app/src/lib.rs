@@ -637,6 +637,9 @@ pub fn run() {
             commands::app::user_renderers,
             commands::app::set_user_renderers,
             commands::app::run_renderer,
+            // #2263's default renderer per file pattern, appended at the foot.
+            commands::app::renderer_defaults,
+            commands::app::set_renderer_defaults,
             // #2256's byte read, appended at the foot (§10.8).
             commands::entity::entity_file_bytes,
         ])
