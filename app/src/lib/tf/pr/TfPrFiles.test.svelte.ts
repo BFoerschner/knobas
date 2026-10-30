@@ -34,7 +34,7 @@ const RETRY: DiffFile = {
   truncated: false,
   threads: [
     { side: "new", line: 21, outdated: false, comments: [{ author: "jonas", body: "Should the jitter be bounded?", at: null }] },
-    { side: "new", line: 8, outdated: true, comments: [{ author: "priya", body: "Ten attempts is a lot.", at: null }] },
+    { side: "new", line: 8, outdated: true, comments: [{ author: "priya", body: "Ten attempts is **a lot**.", at: null }] },
   ],
 };
 const NOTE: DiffFile = {
@@ -163,10 +163,13 @@ test("a thread sits under its line; an outdated one is kept apart at the end of 
   const retry = cards()[0]!;
   const thread = retry.querySelector(".tf-thread")!;
   expect(squash(thread.previousElementSibling)).toBe("21+ let jitter = rng.gen_range(-JITTER..JITTER); +");
-  expect(squash(thread)).toBe("jonas: Should the jitter be bounded?");
+  // The author line and the Markdown body are two blocks since #2261, so no colon joins them.
+  expect(squash(thread)).toBe("jonas Should the jitter be bounded?");
   const apart = retry.querySelector("details.tf-outdated")!;
   expect(apart.hasAttribute("open")).toBe(false);
-  expect(squash(apart)).toBe("1 outdated line 8priya: Ten attempts is a lot.");
+  expect(squash(apart)).toBe("1 outdated line 8priya Ten attempts is a lot.");
+  // A line comment's body is the source's Markdown (#2261).
+  expect(apart.querySelector(".tf-thread .tf-md strong")?.textContent).toBe("a lot");
 });
 
 test("+ on a removed line opens a box on its old side; Add to review keeps it pending under the line", async () => {
