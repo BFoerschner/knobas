@@ -29,7 +29,7 @@ mod checks;
 mod compare;
 mod files;
 mod grants;
-pub(crate) mod pr;
+mod pr;
 mod repo;
 mod rows;
 
