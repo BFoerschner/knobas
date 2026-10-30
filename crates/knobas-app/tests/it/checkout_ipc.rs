@@ -1550,14 +1550,15 @@ async fn an_object_the_application_does_not_accept_or_a_refused_value_runs_nothi
         &repo.id,
         Some("all"),
         &Object::Range {
-            base: "--output=/tmp/x".into(),
+            // Only the leading `-` makes it an option: no `=`, `/` or space to refuse it by.
+            base: "--no-index".into(),
             head: "main".into(),
         },
     )
     .await
     .unwrap_err();
     assert_eq!(error.code, IpcErrorCode::Invalid);
-    assert!(error.message.contains("--output=/tmp/x"), "{error:?}");
+    assert!(error.message.contains("--no-index"), "{error:?}");
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     assert!(!record.exists(), "nothing ran");
 }
