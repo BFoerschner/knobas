@@ -665,6 +665,22 @@ test("Into is the diff's base: picking another reads and draws the change agains
   );
 });
 
+test("Open as diff names the compare's two commits once the source settled them, so the diff page can read it locally (Spec 5)", async () => {
+  const [mergeBase, tip] = ["907900b245f2941018dfd3ee155b876ef701c10a", "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192"];
+  const base = ports();
+  await draw(COMPARE("spike/sepa-instant"), null, {
+    ...base,
+    entityView: async (id, section) => {
+      const answer = await base.entityView(id, section);
+      if (id !== REPO || section !== "compare:main...spike/sepa-instant" || answer === null) return answer;
+      const block = answer.sections[0]!.blocks.find((b) => b.type === "diff");
+      if (block?.type === "diff") block.range = { repository: REPO, base: mergeBase, head: tip, commits: [], reviewed: null };
+      return answer;
+    },
+  });
+  expect(button("Open as diff", target)!.getAttribute("href")).toBe(`#/diff/gitea%3Atidewater%2Fpayout-service/${mergeBase}/${tip}`);
+});
+
 test("Into picked stays picked when From changes, and is the base queued", async () => {
   // The shell keeps the page mounted and hands it the new address.
   const props = $state({ ready: true, rest: COMPARE("chore/bump-tokio"), job: null as string | null, ports: ports(), now: NOW });

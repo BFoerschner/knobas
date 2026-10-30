@@ -64,7 +64,7 @@
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import { shortEnd } from "./sha";
+  import { caretOf, isSha, shortEnd } from "./sha";
   import type { DiffFile, DiffRange, DiffReadAt } from "../../ipc/entity";
   import TfWaiting from "../TfWaiting.svelte";
   import { repoHash } from "../repo/repo";
@@ -171,6 +171,8 @@
 
   /** A whole sha shortened as the source shortens it; anything else as written. */
   const shown = shortEnd;
+  /** Whether an end is a branch name (Spec 5): such a diff is never read at a checkout, whatever it holds. */
+  const byName = $derived(!isSha(caretOf(base)[0]) || !isSha(head));
 </script>
 
 <div class="tf-diffpage">
@@ -191,7 +193,11 @@
         Ignore whitespace
       </label>
       {#if readAt !== "checkout"}
-        <span class="tf-cnote" id={why} data-testid="ws-why">Read from the source, whose API cannot leave whitespace out. A checkout holding both commits can.</span>
+        <span class="tf-cnote" id={why} data-testid="ws-why"
+          >{byName
+            ? "Read from the source, whose API cannot leave whitespace out. A branch name is read where it lives, never at a checkout; open the diff from its commits to read it locally."
+            : "Read from the source, whose API cannot leave whitespace out. A checkout holding both commits can."}</span
+        >
       {/if}
     </div>
   {/if}

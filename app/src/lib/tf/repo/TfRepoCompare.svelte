@@ -101,6 +101,12 @@
 
   /** The diff read: from *Into* to the branch, once the mirror holds the branch. */
   const section = $derived(listedId === null || head === null || base === "" ? null : compareSection(base, head));
+  /**
+   * What *Open as diff* and *Open in…* name (Spec 5 of the review of spec #2234): the two commits the source settled
+   * the drawn compare between, so the diff page can read it at a checkout that holds both (ADR-0036; a branch name is
+   * never read locally); the branch names until the compare has answered, or where it settled none.
+   */
+  const ends = $derived(range !== null && filesFor === section && head !== null ? { base: range.base, head: range.head } : { base, head: head ?? "" });
 
   // The branch's view, read for each branch the address names.
   $effect(() => {
@@ -283,9 +289,9 @@
       What it changes
       {#if section !== null && head !== null}
         <span class="tf-acts"
-          ><a class="tf-btn tf-sm tf-ghost" href={diffHash(repoId, base, head)}>Open as diff</a><TfOpenObject
+          ><a class="tf-btn tf-sm tf-ghost" href={diffHash(repoId, ends.base, ends.head)}>Open as diff</a><TfOpenObject
             entityId={repoId}
-            object={{ kind: "range", base, head }}
+            object={{ kind: "range", base: ends.base, head: ends.head }}
           /></span
         >
       {/if}

@@ -273,7 +273,20 @@ test("on a diff the source served, Ignore whitespace is disabled and says why", 
   expect(box.disabled).toBe(true);
   const why = document.getElementById(box.getAttribute("aria-describedby")!);
   expect(why?.textContent).toContain("cannot leave whitespace out");
+  expect(why?.textContent).toContain("A checkout holding both commits can.");
   expect(why).toBe(target.querySelector("[data-testid=ws-why]"));
+});
+
+test("a diff between branch names says a checkout never reads it, rather than that one holding both commits could (Spec 5)", async () => {
+  const ports: DiffPagePorts = {
+    ...viaSource(answer),
+    rangeDiff: async () => ({ files: [file("pay.py")], truncated: false, range: null, read_at: "source" }),
+  };
+  view = mount(TfDiffPage, { target, props: { repoId: REPO, base: "main", head: "spike/sepa-instant", ports } });
+  await settle();
+  const why = target.querySelector("[data-testid=ws-why]");
+  expect(why?.textContent).toContain("A branch name is read where it lives, never at a checkout");
+  expect(why?.textContent).not.toContain("A checkout holding both commits can.");
 });
 
 test("a diff that names its range runs a file's default pipeline on both sides at its two shas (#2270)", async () => {
