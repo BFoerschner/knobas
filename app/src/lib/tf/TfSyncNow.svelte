@@ -11,6 +11,7 @@
   import { sourceRoles } from "./roles.svelte";
   import { push } from "../shell/toasts.svelte";
   import { pageRefresh } from "./page-refresh.svelte";
+  import { pageVisible } from "./kept-pages.svelte";
 
   let { sync }: { sync: RoleSync } = $props();
 
@@ -29,9 +30,11 @@
   }
 
   const drawn = $derived(sourceRoles.syncs(sync.role));
-  // While drawn, ⌘R presses it, unless the page draws a detail's own.
+  // While drawn on the shown page (not one keep-alive holds hidden, #2247),
+  // ⌘R presses it, unless the page draws a detail's own.
+  const shown = pageVisible();
   $effect(() => {
-    if (drawn) return untrack(() => pageRefresh.add({ kind: "role", press }));
+    if (drawn && shown()) return untrack(() => pageRefresh.add({ kind: "role", press }));
   });
 </script>
 

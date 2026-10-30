@@ -108,6 +108,11 @@ afterEach(() => {
   document.querySelectorAll("[data-test-field]").forEach((el) => el.remove());
 });
 
+/** The elements matching `selector` a reader sees: none inside a page keep-alive holds hidden (#2247). */
+function seen<E extends Element = HTMLElement>(selector: string): E[] {
+  return [...target.querySelectorAll<E>(selector)].filter((element) => element.closest("[hidden]") === null);
+}
+
 async function settle() {
   for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   flushSync();
@@ -342,7 +347,7 @@ test("an address the new shell has no place for names itself", async () => {
   expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Link sets");
   expect(target.textContent).not.toContain("is not built in the new shell yet");
   await at("#/nowhere");
-  expect(target.querySelector(".tf-empty")?.textContent).toContain("Nothing lives at #/nowhere in the new shell.");
+  expect(seen(".tf-empty")[0]?.textContent).toContain("Nothing lives at #/nowhere in the new shell.");
 });
 
 // #1085: a rooms-UI address lands where the new shell keeps that thing, in
@@ -1172,7 +1177,7 @@ function roleSyncHarness() {
 
 function syncButton(): HTMLButtonElement | null {
   return (
-    [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+    seen<HTMLButtonElement>("button").find((button) =>
       ["Sync now", "Syncing…"].includes(button.textContent?.trim() ?? ""),
     ) ?? null
   );
@@ -1182,7 +1187,7 @@ test("every role view's header draws Sync now, once, and a view of no role draws
   start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
   for (const view of ROLE_VIEWS) {
     await at(view);
-    const buttons = [...target.querySelectorAll("button")].filter((button) => button.textContent?.trim() === "Sync now");
+    const buttons = seen("button").filter((button) => button.textContent?.trim() === "Sync now");
     expect(buttons, view).toHaveLength(1);
   }
   await at("#/inbox");

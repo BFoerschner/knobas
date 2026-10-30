@@ -72,6 +72,9 @@
 
 /* ---------- main, full views, breadcrumb ---------- */
 .tf-main { overflow: auto; min-height: 0; min-width: 0; }
+/* A page keep-alive holds (#2247): the shown one lays out as if the wrapper were not there, a hidden one is not drawn. */
+.tf-kept { display: contents; }
+.tf-kept[hidden] { display: none; }
 .tf-full { display: flex; flex-direction: column; min-height: 100%; }
 .tf-crumbs {
   display: flex; align-items: center; gap: 8px; padding: 9px 22px; background: var(--sheet);

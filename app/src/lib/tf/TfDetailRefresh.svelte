@@ -12,6 +12,7 @@
   import type { DetailRefresh, RefreshSubject } from "./refresh.svelte";
   import { push } from "../shell/toasts.svelte";
   import { pageRefresh } from "./page-refresh.svelte";
+  import { pageVisible } from "./kept-pages.svelte";
 
   let {
     detail,
@@ -60,8 +61,10 @@
 
   const drawn = $derived(offer === "refresh" || sync !== null);
   // While drawn, ⌘R presses it.
+  // Only on the shown page: ⌘R never presses a page keep-alive holds hidden (#2247).
+  const shown = pageVisible();
   $effect(() => {
-    if (page && drawn) return untrack(() => pageRefresh.add({ kind: "detail", press }));
+    if (page && drawn && shown()) return untrack(() => pageRefresh.add({ kind: "detail", press }));
   });
 </script>
 

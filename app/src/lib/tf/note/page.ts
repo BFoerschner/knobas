@@ -12,5 +12,6 @@ type NoteRoute = Extract<TfRoute, { view: "note" }>;
 export const page = definePage({
   matches: (route): route is NoteRoute => route.view === "note",
   component: TfNote,
+  address: (route) => route.id,
   props: ({ route, ready, job, layers }) => ({ id: route.id, ready, job, layers }),
 });

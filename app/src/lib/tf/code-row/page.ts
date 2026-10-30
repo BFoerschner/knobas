@@ -15,5 +15,6 @@ export const page = definePage({
     route.view === "full" && route.section === "code" && (route.head === "branch" || route.head === "commit") && !!route.rest[0],
   component: TfCodeRow,
   crumbs: true,
+  address: (route) => `${route.head}/${route.rest[0]}`,
   props: ({ route, ready }) => ({ head: route.head, id: route.rest[0]!, ready }),
 });

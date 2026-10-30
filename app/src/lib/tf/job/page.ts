@@ -12,6 +12,8 @@ type OpenJob = Extract<TfRoute, { view: "job" }> & { key: string };
 export const page = definePage({
   matches: (route): route is OpenJob => route.view === "job" && route.key !== null,
   component: TfJob,
+  // One job per ticket address; its tabs are that page drawn again (#2247).
+  address: (route) => route.key,
   props: ({ route, timer, layers, ontimer, onstarttimer, jobPorts }) => ({
     segment: route.key,
     tab: route.tab,
