@@ -7,6 +7,7 @@
 //! server, the pool and the schema; it has no opinion about queries over them.
 
 pub mod backup;
+pub mod console;
 pub mod embedded;
 pub mod migrate;
 
