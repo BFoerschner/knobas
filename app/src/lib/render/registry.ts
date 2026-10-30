@@ -157,6 +157,11 @@ export function renderersFor(file: { path: string; binary: boolean }): Renderer[
   );
 }
 
+/** Every renderer registered, in the default order (the switcher's and Settings' list, #2263). */
+export function allRenderers(): readonly Renderer[] {
+  return [...renderers];
+}
+
 /** Every renderer that accepts a Markdown fence of `lang`, the default first. */
 export function renderersForFence(lang: string): Renderer[] {
   const wanted = lang.trim().toLowerCase();

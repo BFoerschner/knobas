@@ -79,6 +79,8 @@ vi.mock("./lib/ipc/app", () => ({
   pagesKeptOpen: () => Promise.resolve(5),
   setPagesKeptOpen: (count: number) => Promise.resolve(count),
   userRenderers: () => Promise.resolve([]),
+  rendererDefaults: () => Promise.resolve([]),
+  setRendererDefaults: (list: unknown[]) => Promise.resolve(list),
 }));
 
 vi.mock("./lib/ipc/sources", () => ({
