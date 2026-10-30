@@ -8,6 +8,19 @@
 
 use knobas_app::commands::entity::{pr_viewed_files_inner, set_pr_file_viewed_inner};
 
+/// No file's blob known: ticks are kept by the head (#842).
+fn none() -> std::collections::BTreeMap<String, String> {
+    std::collections::BTreeMap::new()
+}
+
+/// The blob each named file holds in the diff drawn (#2276).
+fn blobs(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(p, b)| ((*p).to_owned(), (*b).to_owned()))
+        .collect()
+}
+
 /// A Gitea source nothing else in this database uses.
 async fn source(pool: &sqlx::PgPool) -> String {
     let id = format!("gt{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
@@ -59,7 +72,7 @@ async fn a_file_is_viewed_until_it_is_unticked_or_the_head_moves() {
     let pr = pull(&pool, &source, "c90d11").await;
 
     assert!(
-        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &pr)
+        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &pr, &none())
             .await
             .unwrap()
             .is_empty()
@@ -70,7 +83,8 @@ async fn a_file_is_viewed_until_it_is_unticked_or_the_head_moves() {
             &knobas_app::sources::Registry::for_process(),
             &pr,
             "src/sepa/retry.rs",
-            true
+            true,
+            &none(),
         )
         .await
         .unwrap(),
@@ -83,6 +97,7 @@ async fn a_file_is_viewed_until_it_is_unticked_or_the_head_moves() {
         &pr,
         "src/sepa/retry.rs",
         true,
+        &none(),
     )
     .await
     .unwrap();
@@ -92,14 +107,15 @@ async fn a_file_is_viewed_until_it_is_unticked_or_the_head_moves() {
             &knobas_app::sources::Registry::for_process(),
             &pr,
             "docs/backoff.md",
-            true
+            true,
+            &none(),
         )
         .await
         .unwrap(),
         ["docs/backoff.md", "src/sepa/retry.rs"]
     );
     assert_eq!(
-        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &pr)
+        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &pr, &none())
             .await
             .unwrap(),
         ["docs/backoff.md", "src/sepa/retry.rs"]
@@ -111,7 +127,8 @@ async fn a_file_is_viewed_until_it_is_unticked_or_the_head_moves() {
             &knobas_app::sources::Registry::for_process(),
             &pr,
             "docs/backoff.md",
-            false
+            false,
+            &none(),
         )
         .await
         .unwrap(),
@@ -122,7 +139,7 @@ async fn a_file_is_viewed_until_it_is_unticked_or_the_head_moves() {
     // starts its own set.
     push(&pool, &pr, "e41a07").await;
     assert!(
-        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &pr)
+        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &pr, &none())
             .await
             .unwrap()
             .is_empty()
@@ -133,7 +150,8 @@ async fn a_file_is_viewed_until_it_is_unticked_or_the_head_moves() {
             &knobas_app::sources::Registry::for_process(),
             &pr,
             "tests/sepa_retry.rs",
-            true
+            true,
+            &none(),
         )
         .await
         .unwrap(),
@@ -153,6 +171,7 @@ async fn each_pull_request_keeps_its_own_ticks() {
         &one,
         "a.rs",
         true,
+        &none(),
     )
     .await
     .unwrap();
@@ -162,17 +181,18 @@ async fn each_pull_request_keeps_its_own_ticks() {
         &two,
         "b.rs",
         true,
+        &none(),
     )
     .await
     .unwrap();
     assert_eq!(
-        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &one)
+        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &one, &none())
             .await
             .unwrap(),
         ["a.rs"]
     );
     assert_eq!(
-        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &two)
+        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &two, &none())
             .await
             .unwrap(),
         ["b.rs"]
@@ -186,6 +206,7 @@ async fn what_is_not_an_entity_id_is_refused() {
         &pool,
         &knobas_app::sources::Registry::for_process(),
         "not an id",
+        &none(),
     )
     .await
     .unwrap_err();
@@ -196,8 +217,53 @@ async fn what_is_not_an_entity_id_is_refused() {
         "not an id",
         "a.rs",
         true,
+        &none(),
     )
     .await
     .unwrap_err();
     assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
+}
+
+/// #2276: a file whose blob the diff names is viewed by that blob, so a new
+/// commit that changes one file takes *Viewed* off that file alone.
+#[tokio::test]
+async fn a_file_stays_viewed_through_a_new_commit_until_its_blob_changes() {
+    let pool = pool().await;
+    let registry = knobas_app::sources::Registry::for_process();
+    let source = source(&pool).await;
+    let pr = pull(&pool, &source, "c90d11").await;
+    let before = blobs(&[("a.rs", "1111111"), ("b.rs", "2222222")]);
+    for path in ["a.rs", "b.rs"] {
+        set_pr_file_viewed_inner(&pool, &registry, &pr, path, true, &before)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        pr_viewed_files_inner(&pool, &registry, &pr, &before)
+            .await
+            .unwrap(),
+        ["a.rs", "b.rs"]
+    );
+    // A new commit changes b.rs alone.
+    push(&pool, &pr, "e41a07").await;
+    let after = blobs(&[("a.rs", "1111111"), ("b.rs", "3333333")]);
+    assert_eq!(
+        pr_viewed_files_inner(&pool, &registry, &pr, &after)
+            .await
+            .unwrap(),
+        ["a.rs"]
+    );
+    // Ticking b.rs again keeps it by its new blob, a.rs untouched.
+    assert_eq!(
+        set_pr_file_viewed_inner(&pool, &registry, &pr, "b.rs", true, &after)
+            .await
+            .unwrap(),
+        ["a.rs", "b.rs"]
+    );
+    assert_eq!(
+        set_pr_file_viewed_inner(&pool, &registry, &pr, "a.rs", false, &after)
+            .await
+            .unwrap(),
+        ["b.rs"]
+    );
 }
