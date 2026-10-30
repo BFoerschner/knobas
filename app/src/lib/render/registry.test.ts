@@ -26,6 +26,13 @@ test("a text file is Source's; an image is Image's first; a binary that is no im
   expect(names(renderersFor({ path: "bin/tool", binary: true }))).toEqual([]);
 });
 
+test("a Markdown file is Markdown's first, then Source's; a fence is never Markdown's (#2255)", () => {
+  expect(names(renderersFor({ path: "README.md", binary: false }))).toEqual(["Markdown", "Source"]);
+  expect(names(renderersFor({ path: "docs/Guide.MARKDOWN", binary: false }))).toEqual(["Markdown", "Source"]);
+  expect(names(renderersFor({ path: "README", binary: false }))).toEqual(["Source"]);
+  expect(names(renderersForFence("markdown"))).toEqual(["Source"]);
+});
+
 test("a renderer registered later goes ahead of Source, by file pattern and by fence", () => {
   const undo = register({ id: "mermaid", name: "Mermaid", patterns: ["*.mmd", "docs/*.mermaid"], fences: ["mermaid"], input: "text", output: "svg", diff: false });
   try {

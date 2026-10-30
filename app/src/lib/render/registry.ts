@@ -49,6 +49,20 @@ export const IMAGE: Renderer = {
   diff: false,
 };
 
+/**
+ * Markdown (#2255): drawn by the Markdown component (`tf/markdown/TfMarkdown.svelte`),
+ * its HTML through the sanitizer. A diff of it is drawn before and after (spec story 71).
+ */
+export const MARKDOWN: Renderer = {
+  id: "markdown",
+  name: "Markdown",
+  patterns: ["*.md", "*.markdown", "*.mdown", "*.mkd"],
+  fences: [],
+  input: "text",
+  output: "html",
+  diff: true,
+};
+
 /** Source: the text, highlighted. Takes every text file and every fence, so it is always the last resort. */
 export const SOURCE: Renderer = {
   id: "source",
@@ -61,7 +75,7 @@ export const SOURCE: Renderer = {
 };
 
 /** Built-ins first, in the order that makes the first that accepts the default; Source last. */
-const renderers: Renderer[] = [IMAGE, SOURCE];
+const renderers: Renderer[] = [IMAGE, MARKDOWN, SOURCE];
 
 /**
  * Adds a renderer ahead of Source, so it becomes the default for what it
