@@ -287,6 +287,21 @@ export function ancestors(path: string): string[] {
 }
 
 /**
+ * The sections a link to `path` is likely read through, asked before the
+ * listings above it have named them (#2244, spec #2234 step 2): each
+ * directory above it (`""` the top) and the file. The ids are Gitea's
+ * adapter's (`files`, `files:<dir>`, `file:<path>`), the one tree a source
+ * draws today, and only a guess: the section a listing names is the one the
+ * tab keeps, and a guess it names too is answered by the read already asked.
+ * The shell never takes an id apart (ADR-0020 rule 3).
+ */
+export function likelySections(path: string): { dirs: Record<string, string>; file: string } {
+  const dirs: Record<string, string> = { "": "files" };
+  for (const dir of ancestors(path)) dirs[dir] = `files:${dir}`;
+  return { dirs, file: `file:${path}` };
+}
+
+/**
  * The file that opens when the address names none: the top directory's
  * README, a Markdown one first, as Gitea's own page prefers it.
  */

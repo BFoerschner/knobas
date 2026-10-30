@@ -42,6 +42,7 @@
     editHash,
     fileHash,
     fileLines,
+    likelySections,
     pickDefaultFile,
     repoHash,
     sourceName,
@@ -100,6 +101,11 @@
   let fileFailed = $state<string | null>(null);
   /** Directory reads asked and not answered, at the current `at`. */
   let asked = new Set<string>();
+  /**
+   * Reads a deep link asked before a listing named their section (#2244), by
+   * section, at the current `at`: the listing that names one takes it.
+   */
+  let early = new Map<string, Promise<ViewSection | undefined>>();
   let generation = 0;
 
   const join = (dir: string, name: string) => (dir === "" ? name : `${dir}/${name}`);
@@ -117,11 +123,28 @@
     return view?.sections[0];
   }
 
+  /** The read of `section` asked early, once, else a new one. */
+  function take(section: string, where = at): Promise<ViewSection | undefined> {
+    const read = early.get(section);
+    if (read === undefined) return readSection(section, where);
+    early.delete(section);
+    return read;
+  }
+
+  /** Asks for `section` now, for the listing that names it later. */
+  function askEarly(section: string): Promise<ViewSection | undefined> {
+    const read = readSection(section);
+    // A wrong guess fails unheard; the listing's own section is read instead.
+    read.catch(() => {});
+    early.set(section, read);
+    return read;
+  }
+
   function readDir(dir: string, section: string) {
     if (asked.has(dir) || listings[dir] !== undefined) return;
     asked.add(dir);
     const mine = generation;
-    readSection(section).then(
+    take(section).then(
       (read) => {
         if (mine !== generation) return;
         const block = read?.blocks[0];
@@ -138,6 +161,7 @@
     void at;
     generation += 1;
     asked = new Set();
+    early = new Map();
     listings = {};
     treeFailed = null;
     untrack(() => readDir("", "files"));
@@ -156,6 +180,34 @@
     }
   });
 
+  // A link to a file below directories not read yet asks for each of them
+  // and the file at once (#2244); the file draws as soon as it answers, and
+  // the tree fills in as its listings arrive.
+  $effect(() => {
+    const where = at;
+    const target = path;
+    if (target === null) return;
+    return untrack(() => {
+      if (listings[parentOf(target)] !== undefined) return;
+      const likely = likelySections(target);
+      for (const [dir, section] of Object.entries(likely.dirs))
+        if (!asked.has(dir) && listings[dir] === undefined && !early.has(section)) askEarly(section);
+      let live = true;
+      askEarly(likely.file).then(
+        (read) => {
+          if (!live || where !== at || (fileSection !== null && fileSection !== likely.file)) return;
+          if (file !== null && drawnSection === likely.file) return;
+          drawFile(read, likely.file);
+        },
+        // Its directory's listing says whether there is such a file.
+        () => {},
+      );
+      return () => {
+        live = false;
+      };
+    });
+  });
+
   const shown = $derived(path ?? pickDefaultFile(listings[""] ?? []));
 
   const MISSING = "\u0000missing";
@@ -169,11 +221,27 @@
     const entry = entryOf(shown);
     return entry === undefined || entry.section === null || entry.kind === "dir" ? MISSING : entry.section;
   });
-  // The file, once its directory has said which section opens it.
+  /** The section the file drawn was read through. */
+  let drawnSection: string | null = null;
+
+  function drawFile(read: ViewSection | undefined, section: string) {
+    const block = read?.blocks[0];
+    file = block?.type === "file" ? block : null;
+    drawnSection = section;
+    refusal = commitRefusal(read);
+    fileFailed = null;
+    draft = null;
+    settleCommit(file);
+  }
+
+  // The file, once its directory has said which section opens it; a deep
+  // link's early read that drew it already stands.
   $effect(() => {
     const section = fileSection;
     const where = at;
+    if (section !== null && section === untrack(() => drawnSection) && untrack(() => file) !== null) return;
     file = null;
+    drawnSection = null;
     refusal = null;
     fileFailed = null;
     if (section === null) return;
@@ -182,14 +250,9 @@
       return;
     }
     let live = true;
-    readSection(section, where).then(
+    take(section, where).then(
       (read) => {
-        if (!live) return;
-        const block = read?.blocks[0];
-        file = block?.type === "file" ? block : null;
-        refusal = commitRefusal(read);
-        draft = null;
-        settleCommit(file);
+        if (live && !(file !== null && drawnSection === section)) drawFile(read, section);
       },
       (error) => {
         if (live) fileFailed = ipcErrorMessage(error);
