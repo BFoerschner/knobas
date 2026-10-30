@@ -226,9 +226,9 @@ test("the checks line: every check passing, else each one that is not, the loude
 
 test("the conversation is one message per facts block: who, when, the review's verdict, then the words", () => {
   expect(conversationOf(VIEW)).toEqual([
-    { who: "jonas", at: "2026-08-22 09:30", verdict: { text: "changes requested", tone: "warn" }, body: "Should the jitter be bounded?" },
-    { who: "mara", at: "2026-08-22 10:20", verdict: null, body: "Bounded to ±10 % in c90d11." },
-    { who: "priya", at: "2026-08-22 11:00", verdict: { text: "approved", tone: "ok" }, body: "" },
+    { who: "jonas", at: "2026-08-22 09:30", verdict: { text: "changes requested", tone: "warn" }, body: "Should the jitter be bounded?", markdown: true },
+    { who: "mara", at: "2026-08-22 10:20", verdict: null, body: "Bounded to ±10 % in c90d11.", markdown: true },
+    { who: "priya", at: "2026-08-22 11:00", verdict: { text: "approved", tone: "ok" }, body: "", markdown: false },
   ]);
   expect(conversationOf(null)).toEqual([]);
 });

@@ -128,6 +128,25 @@ const PAYOUT_README = [
   "- [x] Book each batch in the ledger",
   "- [ ] Dead-letter queue with replay",
   "",
+  "## How a delivery flows",
+  "",
+  "```mermaid",
+  "flowchart LR",
+  "  pay[Payment] --> outbox[(outbox)]",
+  "  outbox --> worker[retry worker]",
+  "  worker -->|5xx: backoff| worker",
+  "  worker --> psp[PSP]",
+  "```",
+  "",
+  "```mermaid",
+  "sequenceDiagram",
+  "  participant S as Scheduler",
+  "  participant P as PSP",
+  "  S->>P: POST /batches",
+  "  P-->>S: 202 Accepted",
+  "  Note over S,P: retried with backoff on 5xx",
+  "```",
+  "",
   "```rust",
   "pub async fn run() -> anyhow::Result<()> {",
   "    sepa::batch::schedule().await",
@@ -166,6 +185,21 @@ const PAYOUT_IMAGES: Record<string, () => Uint8Array> = {
     ),
 };
 
+/** Diagram files (#2258): one that draws, with a click directive that must not run, and one that does not parse. */
+const DIAGRAMS = {
+  "docs/architecture.mmd": [
+    "flowchart TB",
+    "  %% payments-api and what it talks to",
+    '  shop["shop frontend"] -->|POST /pay| api["payments-api"]',
+    '  api --> psp["card PSP"]',
+    '  api --> sepa["SEPA bank"]',
+    '  api --> db[("postgres · payments")]',
+    '  click api href "javascript:window.__pwned = \'click\'"',
+    "  click psp call evil()",
+  ].join("\n"),
+  "docs/broken.mermaid": ["flowchart TB", '  shop["shop frontend"] --> api', "  api --> |outbox worker"].join("\n"),
+};
+
 /** `?fake-md-hostile`'s file (#2255): raw HTML that must not run, for the sanitizer's headless Chrome witness. */
 const HOSTILE_MD = [
   "# Hostile",
@@ -185,6 +219,7 @@ const HOSTILE_MD = [
 const PAYOUT_MAIN: Record<string, string> = {
   "Cargo.toml": `[package]\nname = "payout-service"\nversion = "1.9.0-rc1"\nedition = "2021"\n\n[dependencies]\ntokio = { version = "1.40", features = ["full"] }\nreqwest = "0.12"\nrand = "0.8"\nthiserror = "1"`,
   "README.md": PAYOUT_README,
+  ...DIAGRAMS,
   "src/main.rs": `use payout_service::run;\n\n#[tokio::main]\nasync fn main() {\n    run().await.expect("payout-service failed");\n}`,
   "src/lib.rs": `pub mod psp;\npub mod sepa;\n\npub async fn run() -> anyhow::Result<()> {\n    sepa::batch::schedule().await\n}`,
   "src/psp/client.rs": `use crate::psp::errors::PspError;\n\npub struct PspClient { base_url: String }\n\nimpl PspClient {\n    pub async fn send_batch(&self, body: &[u8]) -> Result<(), PspError> {\n        todo!("POST {}/batches", self.base_url)\n    }\n}`,
