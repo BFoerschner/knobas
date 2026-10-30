@@ -387,7 +387,7 @@ async fn toolbar(
     let empty = record
         .repo
         .empty
-        .then(|| "The repository is empty".to_owned());
+        .then(|| super::EMPTY.to_owned());
     let mut actions = vec![act::new_branch(
         None,
         act::default_first(default, names(), None),

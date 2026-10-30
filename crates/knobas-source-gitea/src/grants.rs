@@ -264,7 +264,7 @@ async fn standing(
         let why = match ask.op.as_str() {
             crate::WRITE_OP_CREATE_BRANCH => record.as_ref().and_then(|held| {
                 if held.empty {
-                    Some("The repository is empty".to_owned())
+                    Some(crate::view::EMPTY.to_owned())
                 } else {
                     held.mirror.then(|| crate::view::MIRRORED.to_owned())
                 }

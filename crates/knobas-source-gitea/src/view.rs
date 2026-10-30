@@ -23,7 +23,7 @@ use crate::model::{CommitDetail, Signature, UserRef};
 use crate::source::GiteaSource;
 
 mod act;
-pub(crate) use act::MIRRORED;
+pub(crate) use act::{EMPTY, MIRRORED};
 mod branch;
 mod checks;
 mod files;

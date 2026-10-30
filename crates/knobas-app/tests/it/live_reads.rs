@@ -678,7 +678,11 @@ async fn one_read_behind_runs_at_a_time_per_view() {
     f.read("moving/slow", Some("branches")).await.unwrap();
     assert_eq!(f.seen.reads(), 2, "the first, and one behind at a time");
     f.live.settled().await;
-    assert_eq!(f.seen.reads(), 3, "and one more after it, for the asks meanwhile");
+    assert_eq!(
+        f.seen.reads(),
+        3,
+        "and one more after it, for the asks meanwhile"
+    );
 }
 
 /// A push after a read behind was sent is not lost behind it: the ask that
@@ -695,10 +699,16 @@ async fn an_ask_during_a_read_behind_is_read_again_after_it() {
     }
     f.push();
     let meanwhile = f.read("moving/slow", Some("branches")).await.unwrap();
-    assert!(meanwhile.contains("v0"), "the kept answer, at once: {meanwhile}");
+    assert!(
+        meanwhile.contains("v0"),
+        "the kept answer, at once: {meanwhile}"
+    );
     f.live.settled().await;
     let after = f.read("moving/slow", Some("branches")).await.unwrap();
-    assert!(after.contains("v1"), "the push, after both reads behind: {after}");
+    assert!(
+        after.contains("v1"),
+        "the push, after both reads behind: {after}"
+    );
     f.live.settled().await;
 }
 
@@ -808,7 +818,14 @@ async fn a_read_behind_across_a_new_credential_lands_nowhere() {
     f.live.settled().await;
     assert!(heard.lock().unwrap().is_empty(), "nothing told");
     let next = f.read("moving/slow", Some("branches")).await.unwrap();
-    assert!(next.contains("second-pat"), "the new credential's read: {next}");
-    assert_eq!(f.seen.reads(), 3, "read again, not answered from the old one");
+    assert!(
+        next.contains("second-pat"),
+        "the new credential's read: {next}"
+    );
+    assert_eq!(
+        f.seen.reads(),
+        3,
+        "read again, not answered from the old one"
+    );
     f.live.settled().await;
 }

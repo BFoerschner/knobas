@@ -310,7 +310,9 @@ impl LiveSources {
     ///
     /// # Errors
     ///
-    /// The adapter's; a failed ask is never kept.
+    /// The adapter's; an ask it answers with an error is never kept. An
+    /// adapter that answers a failed read as taken (Gitea's probe) has that
+    /// answer kept, until the next ask's read behind.
     pub(crate) async fn refused(
         &self,
         lent: &Lent,
@@ -518,11 +520,11 @@ impl Answer {
     fn json(&self) -> Option<Vec<u8>> {
         match self {
             Self::View(view) => serde_json::to_vec(view).ok(),
-            Self::Refused(refused) => Some(
-                refused
-                    .as_ref()
-                    .map_or_else(Vec::new, |r| r.reason.clone().into_bytes()),
-            ),
+            // Refused with no words is not the same answer as taken.
+            Self::Refused(refused) => Some(refused.as_ref().map_or_else(
+                || b"taken".to_vec(),
+                |r| [b"refused:", r.reason.as_bytes()].concat(),
+            )),
         }
     }
 }
@@ -640,5 +642,26 @@ impl Reads {
         for key in gone {
             self.remove(&key);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A refusal with no words and no refusal are two answers: a read behind
+    /// that moves from one to the other replaces the kept one.
+    #[test]
+    fn a_wordless_refusal_is_not_taken() {
+        let ask = WriteAsk {
+            entity: "s:o/r".to_owned(),
+            op: "commit_file".to_owned(),
+            field: None,
+        };
+        let key = Key::of_ask(0, &ask);
+        let mut reads = Reads::new(1 << 20);
+        reads.put(key.clone(), Answer::Refused(None));
+        assert!(reads.replace(&key, Answer::Refused(Some(RefusedWrite::of(&ask, String::new())))));
+        assert!(!reads.replace(&key, Answer::Refused(Some(RefusedWrite::of(&ask, String::new())))));
     }
 }
