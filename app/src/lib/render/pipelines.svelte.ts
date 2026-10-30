@@ -1,5 +1,6 @@
 /**
- * The app's copies of what the person saves for pipelines (#2265): their named pipelines and their command steps.
+ * The app's copies of what the person saves for pipelines (#2265): their named pipelines and their command steps
+ * (and, through `createSaved`, the renderer defaults, `defaults.svelte.ts`).
  * Read from the backend once the database answers (`TfShell`), replaced by what the backend stored after every
  * save, from the file viewer (*Save as default for …*) and from Settings › Renderers alike. A default per file
  * pattern names a pipeline by id (`defaults.ts`'s `defaultPipeline`), so a viewer reading `namedPipelines.list`
@@ -32,7 +33,7 @@ export interface SavedList<T, D> {
   reset(): void;
 }
 
-function createSaved<T, D>(port: SavedPort<T, D>): SavedList<T, D> {
+export function createSaved<T, D>(port: SavedPort<T, D>): SavedList<T, D> {
   let list = $state<T[]>([]);
   return {
     get list() {
