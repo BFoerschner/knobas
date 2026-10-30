@@ -1,7 +1,7 @@
 /**
  * The diff of two versions of one file, worked out here rather than read from
  * a source: what an edit changes before it is committed (#845, R-8.6), drawn
- * by `TfDiff` exactly as a source's diff is. Prototype-6's `lineDiff` and
+ * by `TfDiffView` exactly as a source's diff is. Prototype-6's `lineDiff` and
  * `hunks`: the longest common run of lines, then one hunk per run of changes
  * with three lines of context around it.
  *

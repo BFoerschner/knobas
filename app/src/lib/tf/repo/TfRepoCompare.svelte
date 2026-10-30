@@ -14,7 +14,7 @@
   - **A pull request already open** from the branch is the source's overview's
     row: the page says so and offers *Open PR #N* instead.
   - **What it changes**: the branch's own view, its deferred *Diff* (Gitea's
-    `compare_diff` against the default branch) drawn by `TfDiff`, and beside
+    `compare_diff` against the default branch) drawn by the one diff component (`TfDiffView`), and beside
     it what it carries (its *Commits*).
 
   A branch the mirror does not hold yet (one this session's edit queued) has
@@ -28,7 +28,7 @@
   import type { DiffFile } from "../../ipc/entity";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
-  import TfDiff from "../code/TfDiff.svelte";
+  import TfDiffView from "../diff/TfDiffView.svelte";
   import { itemHash, resolveTicket } from "../job/job";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
@@ -243,7 +243,7 @@
         {#if files !== null && files.length === 0}
           <div class="tf-empty">This branch has no commits that {defaultBranch ?? into} lacks.</div>
         {:else if files !== null}
-          <TfDiff {files} />
+          <TfDiffView {files} />
         {/if}
       </TfWaiting>
     {/if}
