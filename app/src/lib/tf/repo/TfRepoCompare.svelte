@@ -76,6 +76,8 @@
   /** What the branch changes: another branch's stays drawn, dimmed, while this one's is read (#2246). */
   let files = $state<DiffFile[] | null>(null);
   let reading = $state(false);
+  /** The diff hit the parser's ceiling. */
+  let cut = $state(false);
   let failed = $state<string | null>(null);
   /** *Into*, the default branch proposed once: a new *From* keeps what the reader picked. */
   let base = $state(untrack(() => into));
@@ -122,6 +124,7 @@
       reading = false;
       const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
       files = block?.type === "diff" ? block.files : [];
+      cut = block?.type === "diff" && block.truncated;
     }, (error) => {
       if (!alive()) return;
       reading = false;
@@ -243,7 +246,7 @@
         {#if files !== null && files.length === 0}
           <div class="tf-empty">This branch has no commits that {defaultBranch ?? into} lacks.</div>
         {:else if files !== null}
-          <TfDiffView {files} />
+          <TfDiffView {files} {cut} />
         {/if}
       </TfWaiting>
     {/if}

@@ -118,7 +118,8 @@
       let read = reads.get(key);
       if (!read) {
         read = Promise.all([
-          file.change === "added" ? null : reader.text(file, "old"),
+          // The old side only highlights: a failed read of it costs that, not the expansion.
+          file.change === "added" ? null : reader.text(file, "old").catch(() => null),
           file.change === "deleted" ? null : reader.text(file, "new"),
         ]).then(([old, nu]) => ({ old, new: nu }));
         reads.set(key, read);

@@ -118,10 +118,11 @@ const cards = () => [...target.querySelectorAll<HTMLElement>(".tf-diff")];
 test("the Files section is read when the tab opens; the list names each file with its counts", async () => {
   await draw();
   expect(asked).toEqual(["files"]);
-  expect(list()).toEqual(["retry.rs+2 −1", "backoff.md+1 −0"]);
+  // The tree (#2268): directories by name, each file with its badge.
+  expect(list()).toEqual(["Abackoff.md+1 −0", "Mretry.rs+2 −1"]);
   expect(cards().map((card) => squash(card.querySelector(".tf-fh")))).toEqual([
-    "src/sepa/retry.rs +2 −1 Viewed",
-    "docs/backoff.md +1 −0 new file Viewed",
+    "M src/sepa/retry.rs +2 −1 Viewed",
+    "A docs/backoff.md +1 −0 Viewed",
   ]);
   // One hunk after another: a ⋯ row between them.
   expect(cards()[0]!.querySelectorAll(".tf-hunk")).toHaveLength(1);
@@ -133,7 +134,7 @@ test("the filter narrows the list and the diffs; nothing matching says so", asyn
   filter.value = "BACKOFF";
   filter.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  expect(list()).toEqual(["backoff.md+1 −0"]);
+  expect(list()).toEqual(["Abackoff.md+1 −0"]);
   expect(cards()).toHaveLength(1);
   filter.value = "nothing";
   filter.dispatchEvent(new Event("input", { bubbles: true }));
@@ -144,7 +145,7 @@ test("the filter narrows the list and the diffs; nothing matching says so", asyn
 test("Viewed collapses a file and ticks it in the list, through the command; unticked, it opens again", async () => {
   viewed = ["docs/backoff.md"];
   await draw();
-  expect(list()).toEqual(["retry.rs+2 −1", "backoff.md+1 −0 ✓"]);
+  expect(list()).toEqual(["Abackoff.md+1 −0 ✓", "Mretry.rs+2 −1"]);
   expect(cards()[1]!.classList.contains("tf-viewed")).toBe(true);
   expect(cards()[1]!.querySelectorAll(".tf-ln")).toHaveLength(0);
   const box = cards()[0]!.querySelector<HTMLInputElement>(".tf-fh input[type=checkbox]")!;
