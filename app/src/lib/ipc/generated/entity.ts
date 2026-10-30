@@ -3819,6 +3819,13 @@ url: string | null,
 sha: string | null, };
 
 /**
+ * The payload of the shell's `view:fresh` event (#2242): a view the shell
+ * was answered from memory was read again behind, and its answer moved, so
+ * a page showing it reads it again (from memory, now the fresh answer).
+ */
+export type ViewFresh = { entity_id: string, section: string | null, };
+
+/**
  * One row of an [`Block::Entities`] list.
  *
  * `entity_id` is an address only where the mirror holds that entity: the

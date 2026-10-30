@@ -32,6 +32,7 @@
   import { untrack } from "svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
   import { ago } from "../../shell/time";
+  import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { push } from "../../shell/toasts.svelte";
   import { matchesPath, placeThreads, sameTarget, targetOf } from "../pr/files";
   import { keyOf, shownLayout, sidesOf, splitRows, unifiedRows, type DiffReview, type DiffViewed, type DrawnFile, type DrawnLine, type SideText } from "./diff";
@@ -153,7 +154,11 @@
 
 {#snippet said(comments: readonly LineComment[])}
   {#each comments as comment, n (n)}
-    <p><b>{comment.author}</b>{comment.at ? ` ${ago(comment.at)}` : ""}: {comment.body}</p>
+    <!-- A line comment's body is the source's Markdown (`LineComment`), drawn by the Markdown component (#2261). -->
+    <div class="tf-said">
+      <p><b>{comment.author}</b>{comment.at ? ` ${ago(comment.at)}` : ""}</p>
+      <TfMarkdown text={comment.body} {render} />
+    </div>
   {/each}
 {/snippet}
 

@@ -15,7 +15,7 @@
  * `payout-service` and its `genericFiles` for every other repository. A
  * divergence: the mock adapter draws no view for a repository at all.
  */
-import type { DiffFile, SourceView, TreeEntry, ViewAction, ViewRow } from "../../../../ipc/entity";
+import type { DiffFile, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/code/line-diff";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
 
@@ -126,12 +126,46 @@ const PAYOUT_README = [
   "- [x] Book each batch in the ledger",
   "- [ ] Dead-letter queue with replay",
   "",
+  "## How a delivery flows",
+  "",
+  "```mermaid",
+  "flowchart LR",
+  "  pay[Payment] --> outbox[(outbox)]",
+  "  outbox --> worker[retry worker]",
+  "  worker -->|5xx: backoff| worker",
+  "  worker --> psp[PSP]",
+  "```",
+  "",
+  "```mermaid",
+  "sequenceDiagram",
+  "  participant S as Scheduler",
+  "  participant P as PSP",
+  "  S->>P: POST /batches",
+  "  P-->>S: 202 Accepted",
+  "  Note over S,P: retried with backoff on 5xx",
+  "```",
+  "",
   "```rust",
   "pub async fn run() -> anyhow::Result<()> {",
   "    sepa::batch::schedule().await",
   "}",
   "```",
 ].join("\n");
+
+/** Diagram files (#2258): one that draws, with a click directive that must not run, and one that does not parse. */
+const DIAGRAMS = {
+  "docs/architecture.mmd": [
+    "flowchart TB",
+    "  %% payments-api and what it talks to",
+    '  shop["shop frontend"] -->|POST /pay| api["payments-api"]',
+    '  api --> psp["card PSP"]',
+    '  api --> sepa["SEPA bank"]',
+    '  api --> db[("postgres · payments")]',
+    '  click api href "javascript:window.__pwned = \'click\'"',
+    "  click psp call evil()",
+  ].join("\n"),
+  "docs/broken.mermaid": ["flowchart TB", '  shop["shop frontend"] --> api', "  api --> |outbox worker"].join("\n"),
+};
 
 /** `?fake-md-hostile`'s file (#2255): raw HTML that must not run, for the sanitizer's headless Chrome witness. */
 const HOSTILE_MD = [
@@ -152,6 +186,7 @@ const HOSTILE_MD = [
 const PAYOUT_MAIN: Record<string, string> = {
   "Cargo.toml": `[package]\nname = "payout-service"\nversion = "1.9.0-rc1"\nedition = "2021"\n\n[dependencies]\ntokio = { version = "1.40", features = ["full"] }\nreqwest = "0.12"\nrand = "0.8"\nthiserror = "1"`,
   "README.md": PAYOUT_README,
+  ...DIAGRAMS,
   "src/main.rs": `use payout_service::run;\n\n#[tokio::main]\nasync fn main() {\n    run().await.expect("payout-service failed");\n}`,
   "src/lib.rs": `pub mod psp;\npub mod sepa;\n\npub async fn run() -> anyhow::Result<()> {\n    sepa::batch::schedule().await\n}`,
   "src/psp/client.rs": `use crate::psp::errors::PspError;\n\npub struct PspClient { base_url: String }\n\nimpl PspClient {\n    pub async fn send_batch(&self, body: &[u8]) -> Result<(), PspError> {\n        todo!("POST {}/batches", self.base_url)\n    }\n}`,
@@ -403,15 +438,31 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
   const path = id.slice("file:".length);
   const text = files[path];
   if (text === undefined) throw { code: "not_found", message: `gitea: no file ${path} at ${ref}`, source_id: null };
-  // The file's own *Commit change…* (#985): `main` is protected, as prototype-6 has it.
-  const refusal =
-    ref === "main"
-      ? "main is a protected branch that this account may not push to: commit to a new branch and open a pull request instead"
-      : null;
+  // No action beside the file (#2241): *Commit change…*'s standing is `refused_writes`' ({@link repoRefusals}).
   return section(id, "Files", [
     { type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: blobOf(text) },
-    { type: "actions", actions: [branchAction("commit_file", "Commit change…", { entity: null, disabled: refusal })] },
   ]);
+}
+
+/** Why `main` takes no commit straight onto it: protected, as prototype-6 has it (#985). */
+export const MAIN_PROTECTED =
+  "main is a protected branch that this account may not push to: commit to a new branch and open a pull request instead";
+
+/**
+ * `refused_writes` for the repositories this module draws (#2241): a commit
+ * onto `main` (the repository itself, or its `main` branch) is refused, as
+ * Gitea's answer for a protected branch says it; every other ask is taken.
+ */
+export function repoRefusals(asks: readonly WriteAsk[]): RefusedWrite[] {
+  return asks
+    .filter((ask) => {
+      if (ask.op !== "commit_file") return false;
+      const branchAt = ask.entity.indexOf("@refs/heads/");
+      const repoId = branchAt === -1 ? ask.entity : ask.entity.slice(0, branchAt);
+      const branch = branchAt === -1 ? "main" : ask.entity.slice(branchAt + "@refs/heads/".length);
+      return branch === "main" && filesOf(repoId, null) !== null;
+    })
+    .map((ask) => ({ ...ask, reason: MAIN_PROTECTED }));
 }
 
 /**

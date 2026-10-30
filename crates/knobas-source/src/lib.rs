@@ -1970,6 +1970,17 @@ pub trait Source: Send + Sync {
         let _ = asks;
         Ok(Vec::new())
     }
+    /// What the answer [`refused_writes`](Source::refused_writes) gives
+    /// for `ask` stands at, said before it is asked, as
+    /// [`view_standing`](Source::view_standing) says it of a view (ADR-0032,
+    /// #2241): [`Standing::Live`](view::Standing::Live), the default, is
+    /// asked every time; [`Standing::Moving`](view::Standing::Moving) is
+    /// answered from memory where the app holds it and asked again behind.
+    /// Pure: it reads nothing from the source.
+    fn refusal_standing(&self, ask: &grants::WriteAsk) -> view::Standing {
+        let _ = ask;
+        view::Standing::Live
+    }
     /// The statuses this entity's workflow offers **from where it stands right
     /// now**, in the source's own spelling (`CONTEXT.md`: *reachable
     /// transition*).

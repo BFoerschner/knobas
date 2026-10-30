@@ -251,6 +251,7 @@ export type {
   UrlMatch,
   ViewAction,
   ViewBlock,
+  ViewFresh,
   ViewRow,
   ViewSection,
   WorkingTreeState,

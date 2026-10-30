@@ -27,3 +27,10 @@
 .tf-md .tf-fence > header .tf-fence-copy { margin-left: auto; }
 .tf-md .tf-fence pre { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; padding: 10px 14px; overflow: auto; margin: 0; }
 .tf-md .tf-fence pre code { font: inherit; font-variant-ligatures: none; background: none; border: 0; padding: 0; }
+/* A diagram fence (#2258), as the mockup's `.fence .diagram`. */
+.tf-md .tf-fence .tf-diagram { padding: 18px; display: grid; place-items: center; background: var(--sheet); overflow: auto; }
+.tf-md .tf-fence .tf-stepfail pre { font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; padding: 8px 10px; white-space: pre-wrap; }
+/* Markdown inside a panel or a comment (#2261, the mockup's `.cmt .md`): the holder pads it, and the type is the panel's. */
+.tf-prdesc .tf-md, .tf-msg-body .tf-md, .tf-item-textp .tf-md { padding: 0; font-size: var(--t-md); }
+.tf-thread .tf-md { padding: 0; font-size: var(--t-sm); line-height: 1.5; }
+.tf-msg-body .tf-md p, .tf-thread .tf-md p { white-space: normal; }

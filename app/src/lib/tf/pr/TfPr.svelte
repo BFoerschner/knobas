@@ -124,6 +124,7 @@
   import TfPrFiles from "./TfPrFiles.svelte";
   import TfPrMerge from "./TfPrMerge.svelte";
   import TfPrReview from "./TfPrReview.svelte";
+  import TfMarkdown from "../markdown/TfMarkdown.svelte";
 
   let {
     ready,
@@ -668,7 +669,9 @@
                 </table>
               {:else}
                 <h2 class="tf-cgroup-h">Description</h2>
-                <div class="tf-panel tf-prdesc"><p>{part.description}</p></div>
+                <div class="tf-panel tf-prdesc">
+                  {#if part.markdown}<TfMarkdown text={part.description} />{:else}<p>{part.description}</p>{/if}
+                </div>
               {/if}
             {/each}
           {:else if tab === "conversation"}
@@ -686,7 +689,7 @@
                       <b>{own ? "You" : message.who}</b>{message.at}
                       {#if message.verdict !== null}<span class="tf-chip tf-{message.verdict.tone ?? 'muted'}">{message.verdict.text}</span>{/if}
                     </div>
-                    {#if message.body !== ""}<p>{message.body}</p>{/if}
+                    {#if message.body !== "" && message.markdown}<TfMarkdown text={message.body} />{:else if message.body !== ""}<p>{message.body}</p>{/if}
                   </div>
                 </article>
                 {/if}

@@ -340,6 +340,36 @@ async fn the_request_counter_counts_what_reached_the_server() {
     );
 }
 
+/// **Spawned work counts where it inherits the counter** (#2242): a task
+/// spawned through `inherit` inside a counted scope counts into it; one
+/// spawned bare does not.
+#[tokio::test(flavor = "multi_thread")]
+async fn spawned_work_counts_into_its_spawners_counter_only_when_it_inherits() {
+    let server = CountingServer::always(500, "");
+    let client = std::sync::Arc::new(HttpClient::new(config(server.url())).expect("client"));
+
+    let (_, sent) = knobas_http::counted::counted({
+        let client = client.clone();
+        async move {
+            let inherited = client.clone();
+            tokio::spawn(knobas_http::counted::inherit(async move {
+                let _ = inherited.get_json::<serde_json::Value>("/thing", &[]).await;
+            }))
+            .await
+            .unwrap();
+            let bare = client.clone();
+            tokio::spawn(async move {
+                let _ = bare.get_json::<serde_json::Value>("/thing", &[]).await;
+            })
+            .await
+            .unwrap();
+        }
+    })
+    .await;
+    assert_eq!(sent, 1, "the inherited spawn only");
+    assert_eq!(server.hits(), 2, "both reached the server");
+}
+
 /// A non-transient failure is not retried at all: one request, one answer.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_deterministic_failure_is_asked_once() {

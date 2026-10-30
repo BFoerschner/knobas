@@ -823,3 +823,119 @@ test("a hidden repository page does not read its checkout on window focus, and r
   await settle();
   expect(checkouts).toBe(mounted + 2);
 });
+
+// ---- pages that don't wait for the branch list (#2243) and branch lists read behind (#2242) ----
+
+/** A read the test answers when it chooses. */
+function heldBack<T>() {
+  let answer!: (value: T) => void;
+  const promise = new Promise<T>((ok) => {
+    answer = ok;
+  });
+  return { promise, answer };
+}
+
+/** `ports()` with the branch list held back, and the repository row's mirror payload `payload`. */
+function holdingBranches(payload: unknown) {
+  const base = ports();
+  const branches = heldBack<SourceView | null>();
+  const stand: RepoPorts = {
+    ...base,
+    getEntity: async (id) => ({ ...(await base.getEntity(id)), payload }) as EntityDetail,
+    entityView: (id, sectionId) => {
+      if (id === REPO && sectionId === "branches") {
+        viewReads.push([id, sectionId]);
+        return branches.promise;
+      }
+      return base.entityView(id, sectionId);
+    },
+  };
+  return { stand, release: async () => branches.answer(await base.entityView(REPO, "branches")) };
+}
+
+const branchSelect = () => target.querySelector<HTMLSelectElement>("select[aria-label='Branch']")!;
+
+test("with the branch list held back, Files draws on the mirror's default branch, and the list fills the selector without reading the tab again", async () => {
+  const { stand, release } = holdingBranches({ default_branch: "main" });
+  await draw([REPO], stand);
+
+  expect(tree()).toContain("README.md");
+  expect(target.querySelector(".tf-fileview header")).not.toBeNull();
+  expect(branchSelect().options.length).toBe(0);
+  expect(branchSelect().disabled).toBe(true);
+  const tabReads = () => viewReads.filter(([id, sectionId]) => id === REPO && sectionId !== "branches").length;
+  const before = tabReads();
+  expect(before).toBeGreaterThan(0);
+
+  await release();
+  await settle();
+  expect([...branchSelect().options].map((option) => option.value)).toEqual(["main", "feature/PAY-231-sepa-retry"]);
+  expect(branchSelect().value).toBe("main");
+  expect(tabReads()).toBe(before);
+  expect(tree()).toContain("README.md");
+});
+
+test("a repository whose mirror row names no default branch draws its tab once the branch list answers", async () => {
+  const { stand, release } = holdingBranches({});
+  await draw([REPO], stand);
+  expect(target.querySelector(".tf-ftree")).toBeNull();
+
+  await release();
+  await settle();
+  expect(tree()).toContain("README.md");
+});
+
+test("New branch… is the source's refused_writes answer, asked with the commit's, and the page never reads the whole repository view", async () => {
+  const asked: unknown[] = [];
+  await draw(
+    [REPO],
+    ports({
+      refusedWrites: async (asks) => {
+        asked.push(asks);
+        return [{ entity: REPO, op: "create_branch", reason: "A mirror: its branches come from upstream" }];
+      },
+    }),
+  );
+  const newBranch = [...target.querySelectorAll<HTMLButtonElement>(".tf-fhead button")].find((b) => text(b) === "New branch…")!;
+  expect(newBranch.getAttribute("aria-disabled")).toBe("true");
+  expect(newBranch.title).toBe("A mirror: its branches come from upstream");
+  expect(asked).toEqual([
+    [
+      { entity: REPO, op: "create_branch" },
+      { entity: REPO, op: "commit_file" },
+    ],
+  ]);
+  expect(viewReads.filter(([, sectionId]) => sectionId === null)).toEqual([]);
+});
+
+test("a branch list the app read again behind its answer is read again when it moved (#2242)", async () => {
+  let pushed = false;
+  const base = ports();
+  const heard: ((event: { payload: unknown }) => void)[] = [];
+  const stand: RepoPorts = {
+    ...base,
+    listen: async (event, handler) => {
+      if (event === "view:fresh") heard.push(handler);
+      return () => {};
+    },
+    entityView: async (id, sectionId) => {
+      const answer = await base.entityView(id, sectionId);
+      if (id === REPO && sectionId === "branches" && pushed) {
+        const block = answer!.sections[0]!.blocks[0]!;
+        if (block.type === "entities") block.rows.push(vrow(`${REPO}@refs/heads/pushed`, "pushed"));
+      }
+      return answer;
+    },
+  };
+  await draw([REPO], stand);
+  expect([...branchSelect().options].map((option) => option.value)).not.toContain("pushed");
+
+  pushed = true;
+  for (const hear of heard) hear({ payload: { entity_id: `${REPO}-other`, section: "branches" } });
+  await settle();
+  expect([...branchSelect().options].map((option) => option.value)).not.toContain("pushed");
+
+  for (const hear of heard) hear({ payload: { entity_id: REPO, section: "branches" } });
+  await settle();
+  expect([...branchSelect().options].map((option) => option.value)).toContain("pushed");
+});

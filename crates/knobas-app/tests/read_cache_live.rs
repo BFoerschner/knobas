@@ -2,6 +2,12 @@
 //! opened a second time at the same commit costs no request to Gitea and
 //! answers in under 150 ms; the same path at another commit is read again.
 //!
+//! Then the round trips (#2241): a file opened from the repository's tree
+//! costs at most two requests and answers in under 400 ms; a repository's
+//! grants are asked once and then behind the answer. And moving reads
+//! (#2242): a second branch-list read answers from memory and reads once
+//! behind it, and a branch pushed between the two is the next read's.
+//!
 //! The requests are counted by the HTTP client itself
 //! (`knobas_http::counted`), around the app's own read
 //! (`sources::crud::view`), so what is counted is what the shell's
@@ -10,9 +16,11 @@
 //!
 //! # Read-only at Gitea
 //!
-//! Every request here is a read, so nothing spends `live_gitea_capped`'s
-//! budget and there is no litter to take back. What it writes is a scratch
-//! database.
+//! Every request here is a read but one: the moving-read test pushes a
+//! branch named `read-cache-<uuid>` from `main` and deletes it again, also
+//! when it fails. What else it writes is a scratch database. The grants
+//! probe's empty-bodied POSTs create nothing (`knobas-source-gitea`'s
+//! `grants.rs`).
 //!
 //! ```text
 //! just gitea-live
@@ -36,6 +44,8 @@ const SEEDED: &str = "tidewater/payout-service";
 const FILE: &str = "file:README.md";
 /// The spec's budget for a second open (#2234, Seam 1).
 const CACHED_BUDGET: Duration = Duration::from_millis(150);
+/// The spec's budget for an uncached open (#2234, Seam 1; #2241).
+const UNCACHED_BUDGET: Duration = Duration::from_millis(400);
 
 fn need(name: &str) -> String {
     std::env::var(name)
@@ -174,5 +184,224 @@ async fn a_file_opened_again_at_its_sha_costs_no_request() {
     assert!(
         other_sent >= 2,
         "another sha is read from Gitea: {other_sent}"
+    );
+}
+
+impl App {
+    fn repo(&self) -> String {
+        format!("{}:{SEEDED}", self.source)
+    }
+
+    /// `section` of `entity` as `entity_view` reads it, with the requests
+    /// it sent -- the ones behind it too, once they ended -- and how long
+    /// the answer took.
+    async fn view_of(
+        &self,
+        entity: &str,
+        section: &str,
+    ) -> (knobas_source::view::SourceView, u64, Duration) {
+        let ((view, took), sent) = knobas_http::counted::counted(async {
+            let started = Instant::now();
+            let view = knobas_app::sources::crud::view(
+                &self.pool,
+                &self.secrets,
+                &self.registry,
+                &self.live,
+                entity,
+                Some(section),
+            )
+            .await;
+            let took = started.elapsed();
+            self.live.settled().await;
+            (view, took)
+        })
+        .await;
+        let view = view
+            .unwrap_or_else(|e| panic!("{section} reads: {e}"))
+            .expect("Gitea draws it");
+        (view, sent, took)
+    }
+
+    /// The asks' refusals, and the requests they sent, behind the answer too.
+    async fn refused(&self, asks: &[(&str, &str)]) -> (Vec<String>, u64) {
+        let asks: Vec<_> = asks
+            .iter()
+            .map(|(entity, op)| knobas_source::grants::WriteAsk {
+                entity: (*entity).to_owned(),
+                op: (*op).to_owned(),
+                field: None,
+            })
+            .collect();
+        let (refused, sent) = knobas_http::counted::counted(async {
+            let refused = knobas_app::sources::crud::refused_writes(
+                &self.pool,
+                &self.secrets,
+                &self.registry,
+                &self.live,
+                &asks,
+            )
+            .await;
+            self.live.settled().await;
+            refused
+        })
+        .await;
+        (refused.into_iter().map(|r| r.reason).collect(), sent)
+    }
+}
+
+fn branch_names(view: &knobas_source::view::SourceView) -> Vec<String> {
+    view.sections[0]
+        .blocks
+        .iter()
+        .flat_map(|block| match block {
+            Block::Entities { rows, .. } => rows.iter().map(|r| r.title.clone()).collect(),
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+/// **A file open costs at most two round trips** (#2241): the repository's
+/// tree read once, the README opened from it costs at most two requests and
+/// answers in under 400 ms, and never reads behind (a sha-keyed read, #2242).
+/// A file read with no known sha still opens, reading the tip first.
+#[tokio::test]
+#[ignore = "needs the testenv Gitea: just gitea-live"]
+async fn a_file_opened_from_the_tree_costs_at_most_two_requests() {
+    let app = app().await;
+    let repo = app.repo();
+    let (tree, tree_sent, _) = app.view_of(&repo, "files").await;
+    println!("tree:        {tree_sent} requests");
+    let Some(Block::Tree { entries, .. }) = tree.sections[0].blocks.first() else {
+        panic!("a listing: {tree:?}");
+    };
+    let readme = entries
+        .iter()
+        .find(|e| e.name == "README.md")
+        .and_then(|e| e.section.clone())
+        .expect("the README opens");
+    println!("README opens as {readme}");
+
+    // First, so a forge without `contents-ext` (Forgejo) pays its one 404
+    // here: the client asks `contents` straight away after.
+    let (unknown, unknown_sent, _) = app.view_of(&repo, FILE).await;
+    println!("no sha:      {unknown_sent} requests");
+    assert!(
+        matches!(unknown.sections[0].blocks.as_slice(), [Block::File { text, .. }] if !text.is_empty()),
+        "a file read with no sha opens"
+    );
+
+    let (file, sent, took) = app.view_of(&repo, &readme).await;
+    println!("file open:   {sent} requests, {took:?}");
+    assert!(
+        matches!(file.sections[0].blocks.as_slice(), [Block::File { .. }]),
+        "the file alone, no action beside it"
+    );
+    assert!(sent >= 1, "the counter sees the file's reads: {sent}");
+    assert!(
+        sent <= 2,
+        "an uncached open costs at most two requests: {sent}"
+    );
+    assert!(took < UNCACHED_BUDGET, "an uncached open took {took:?}");
+
+    let (_, again, _) = app.view_of(&repo, &readme).await;
+    assert_eq!(again, 0, "kept, and never read behind");
+}
+
+/// **Grants once per repository** (#2241): *New branch…* and *Commit
+/// change…* asked together probe Gitea; asked again they are the cache's,
+/// asked once behind the answer, for the same cost again and no more. The
+/// seeded token may write, so nothing is refused.
+#[tokio::test]
+#[ignore = "needs the testenv Gitea: just gitea-live"]
+async fn a_repositorys_grants_are_asked_once_and_then_behind() {
+    let app = app().await;
+    let repo = app.repo();
+    let asks = [
+        (repo.as_str(), "create_branch"),
+        (repo.as_str(), "commit_file"),
+    ];
+    let (first, first_sent) = app.refused(&asks).await;
+    println!("grants:       {first_sent} requests, {first:?}");
+    assert!(first_sent >= 1, "the probe is counted: {first_sent}");
+    assert!(first.is_empty(), "the seeded token writes: {first:?}");
+    let (again, again_sent) = app.refused(&asks).await;
+    println!("grants again: {again_sent} requests (behind the answer)");
+    assert_eq!(again, first);
+    assert_eq!(again_sent, first_sent, "one ask behind, not more");
+}
+
+/// **Stale, then fresh** (#2242): a second branch-list read answers from the
+/// cache at once and reads once behind it; a branch pushed between the two
+/// is in the third read, with no refresh asked.
+#[tokio::test]
+#[ignore = "needs the testenv Gitea: just gitea-live"]
+async fn a_pushed_branch_is_the_read_after_the_read_behind() {
+    let app = app().await;
+    let repo = app.repo();
+    let (first, first_sent, _) = app.view_of(&repo, "branches").await;
+    println!(
+        "branches:    {first_sent} requests, {:?}",
+        branch_names(&first)
+    );
+
+    let pushed = format!(
+        "read-cache-{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
+    let http = reqwest::Client::new();
+    let api = format!(
+        "{}/api/v1/repos/{SEEDED}/branches",
+        need("KNOBAS_GITEA_URL")
+    );
+    let auth = format!("token {}", need("KNOBAS_GITEA_TOKEN"));
+    let made = http
+        .post(&api)
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "new_branch_name": pushed, "old_branch_name": "main" }))
+        .send()
+        .await
+        .expect("Gitea answers");
+    assert!(
+        made.status().is_success(),
+        "the branch is pushed: {}",
+        made.status()
+    );
+    // Deleted again however the test ends: from a thread of its own, with
+    // a client of its own (a pooled connection is the test runtime's).
+    struct Delete(String, String);
+    impl Drop for Delete {
+        fn drop(&mut self) {
+            let (url, auth) = (self.0.clone(), self.1.clone());
+            let _ = std::thread::spawn(move || {
+                tokio::runtime::Runtime::new()
+                    .unwrap()
+                    .block_on(async move {
+                        let _ = reqwest::Client::new()
+                            .delete(url)
+                            .header("Authorization", auth)
+                            .send()
+                            .await;
+                    });
+            })
+            .join();
+        }
+    }
+    let _delete = Delete(format!("{api}/{pushed}"), auth);
+
+    let (second, second_sent, took) = app.view_of(&repo, "branches").await;
+    println!("again:       {second_sent} requests, {took:?}");
+    assert_eq!(
+        branch_names(&second),
+        branch_names(&first),
+        "the kept list, at once"
+    );
+    assert!(took < CACHED_BUDGET, "a stale answer took {took:?}");
+    assert_eq!(second_sent, first_sent, "exactly one read behind it");
+
+    let (third, _, _) = app.view_of(&repo, "branches").await;
+    assert!(
+        branch_names(&third).contains(&pushed),
+        "the pushed branch is the next read's: {:?}",
+        branch_names(&third)
     );
 }

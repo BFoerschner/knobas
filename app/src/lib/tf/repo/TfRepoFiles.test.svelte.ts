@@ -605,3 +605,116 @@ test("a file with no renderer but Source has no view toggle", async () => {
   await settle();
   expect(viewButtons()).toEqual([]);
 });
+
+// -- Mermaid files (#2258) --------------------------------------------------------
+
+function diagramRender() {
+  const asked: string[] = [];
+  const port: RenderPort = {
+    ...heldRender().port,
+    async diagram(request) {
+      asked.push(request.code);
+      if (request.code.includes("-->|")) return { error: "Parse error on line 2:\nExpecting 'SEMI', got 'PIPE'" };
+      return { svg: '<svg viewBox="0 0 300 120"><text>drawn</text></svg>' };
+    },
+  };
+  return { asked, port };
+}
+
+test("a .mmd file is drawn as a diagram in a sandboxed frame, and Source shows its lines", async () => {
+  const render = diagramRender();
+  draw(openSource({ "docs/flow.mmd": "flowchart LR\n  a --> b" }).entityView, "docs/flow.mmd", null, render.port);
+  await settle();
+
+  const frame = target.querySelector<HTMLIFrameElement>(".tf-fileview .tf-fdiagram iframe")!;
+  expect(frame.getAttribute("sandbox")).toBe("");
+  expect([frame.width, frame.height]).toEqual(["300", "120"]);
+  expect(render.asked).toEqual(["flowchart LR\n  a --> b"]);
+  expect(viewButtons()).toEqual(["Rendered*", "Source"]);
+
+  pickView("Source");
+  await settle();
+  expect(target.querySelector(".tf-fileview iframe")).toBeNull();
+  expect(lineText(1)).toEqual(["2", "  a --> b"]);
+});
+
+test("a .mermaid file that does not parse shows the parser's error above its numbered source", async () => {
+  draw(openSource({ "flow.mermaid": "flowchart TB\n  api -->|outbox worker" }).entityView, "flow.mermaid", null, diagramRender().port);
+  await settle();
+
+  const drawn = target.querySelector(".tf-fileview .tf-fdiagram")!;
+  expect(text(drawn.querySelector(".tf-stepfail b"))).toBe("Mermaid could not draw this.");
+  expect(drawn.querySelector(".tf-stepfail pre")?.textContent).toContain("Expecting 'SEMI', got 'PIPE'");
+  expect([...drawn.querySelectorAll(".tf-code .tf-l")].map((row) => [...row.children].map((span) => span.textContent))).toEqual([
+    ["1", "flowchart TB"],
+    ["2", "  api -->|outbox worker"],
+  ]);
+  expect(drawn.querySelector("iframe")).toBeNull();
+});
+
+// ---- the tree at a commit, moved behind (#2241, #2242) ----
+
+/**
+ * A source whose listings name the commit they were read at, as Gitea's do
+ * (`file@<n>:<path>`), and whose branch `push()` moves to a new one.
+ */
+function commitSource() {
+  let tip = 1;
+  const texts: Record<number, string> = { 1: "// one", 2: "// two" };
+  const reads: string[] = [];
+  const entityView = async (_at: string, section: string | null): Promise<SourceView> => {
+    const id = section ?? "";
+    reads.push(id);
+    const one = (blocks: unknown[]) => ({ sections: [{ id, title: "Files", count: null, deferred: false, blocks }], actions: [] }) as unknown as SourceView;
+    if (id === "files")
+      return one([{ type: "tree", trail: [], entries: [{ name: "main.rs", kind: "file", size: 5, section: `file@${tip}:main.rs` }], truncated: false, url: null }]);
+    const at = Number(/^file@(\d+):/.exec(id)?.[1] ?? tip);
+    return one([{ type: "file", trail: [], path: "main.rs", text: texts[at], language: null, size: 5, truncated: false, binary: false, url: null, sha: `b${at}` }]);
+  };
+  return { reads, entityView, push: () => (tip += 1) };
+}
+
+test("the app's view:fresh for the top directory reads the tree at the new commit and the file there; one that did not move reads nothing more", async () => {
+  const source = commitSource();
+  const heard: ((event: { payload: unknown }) => void)[] = [];
+  const ports = {
+    entityView: source.entityView,
+    submitWrite: async () => {
+      throw { code: "invalid", message: "no write in this suite" };
+    },
+    listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
+      if (event === "view:fresh") heard.push(handler);
+      return () => {};
+    },
+  };
+  view = mount(TfRepoFiles, { target, props: { ports, repoId: REPO, at: REPO, branch: "main", path: "main.rs", changed: new Set<string>() } });
+  await settle();
+  expect(lineText(0)).toEqual(["1", "// one"]);
+
+  const tell = (entity_id: string, section: string) => {
+    for (const hear of heard) hear({ payload: { entity_id, section } });
+  };
+  const before = source.reads.length;
+  tell(REPO, "files");
+  await settle();
+  expect(source.reads.slice(before)).toEqual(["files"]);
+  expect(lineText(0)).toEqual(["1", "// one"]);
+
+  source.push();
+  tell(`${REPO}@refs/heads/other`, "files");
+  await settle();
+  expect(lineText(0)).toEqual(["1", "// one"]);
+
+  tell(REPO, "files");
+  await settle();
+  expect(lineText(0)).toEqual(["1", "// two"]);
+  expect(source.reads).toContain("file@2:main.rs");
+});
+
+test("a deep link's guess that drew the file stands for the section its listing names, so the file is not read twice", async () => {
+  const source = commitSource();
+  draw(source.entityView, "main.rs");
+  await settle();
+  expect(lineText(0)).toEqual(["1", "// one"]);
+  expect(source.reads.filter((id) => id.endsWith("main.rs"))).toEqual(["file:main.rs"]);
+});

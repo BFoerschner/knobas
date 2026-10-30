@@ -169,6 +169,9 @@ export const CORPUS: {
   {
     ...row("mock:tidewater/payout-service", "repo", "tidewater/payout-service", "2026-08-22T10:30:00Z", "mara", {
       full_name: "tidewater/payout-service",
+      // Gitea's repository record names it; the repository page draws on it
+      // before the branch list answers (#2243).
+      default_branch: "main",
       description: "Payout scheduling and SEPA retries.",
       teams: ["Payments"],
       language: "Rust",

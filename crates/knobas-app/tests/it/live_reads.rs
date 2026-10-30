@@ -32,6 +32,12 @@ use sqlx::PgPool;
 struct Seen {
     builds: AtomicUsize,
     reads: Mutex<Vec<(String, Option<String>)>>,
+    /// What a moving key reads as: bumped by a test, as a push moves a branch.
+    version: AtomicUsize,
+    /// Every read fails while set.
+    failing: std::sync::atomic::AtomicBool,
+    /// How many times `refused_writes` was asked.
+    grants: AtomicUsize,
 }
 
 impl Seen {
@@ -111,9 +117,35 @@ impl Source for Fake {
     fn view_standing(&self, entity: &str, _section: Option<&str>) -> Standing {
         if key(entity).starts_with("commit/") {
             Standing::Fixed
+        } else if key(entity).starts_with("moving/") {
+            Standing::Moving
         } else {
             Standing::Live
         }
+    }
+    fn refusal_standing(&self, ask: &knobas_source::grants::WriteAsk) -> Standing {
+        if key(&ask.entity).starts_with("moving/") {
+            Standing::Moving
+        } else {
+            Standing::Live
+        }
+    }
+    /// Refuses every `commit_file` ask, naming the version, so a changed
+    /// answer shows.
+    async fn refused_writes(
+        &self,
+        asks: &[knobas_source::grants::WriteAsk],
+    ) -> Result<Vec<knobas_source::grants::RefusedWrite>, SourceError> {
+        self.seen.grants.fetch_add(1, Ordering::SeqCst);
+        if self.seen.failing.load(Ordering::SeqCst) {
+            return Err(SourceError::protocol("down"));
+        }
+        let version = self.seen.version.load(Ordering::SeqCst);
+        Ok(asks
+            .iter()
+            .filter(|ask| ask.op == "commit_file")
+            .map(|ask| knobas_source::grants::RefusedWrite::of(ask, format!("v{version}")))
+            .collect())
     }
     async fn view(
         &self,
@@ -125,8 +157,18 @@ impl Source for Fake {
             .lock()
             .unwrap()
             .push((entity.to_owned(), section.map(str::to_owned)));
-        if key(entity).starts_with("commit/slow") {
+        // Taken when the read is sent, as a server answers the state it
+        // had then: a push during a slow read is not in its answer.
+        let version = if key(entity).starts_with("moving/") {
+            self.seen.version.load(Ordering::SeqCst)
+        } else {
+            0
+        };
+        if key(entity).starts_with("commit/slow") || key(entity).starts_with("moving/slow") {
             tokio::time::sleep(SLOW).await;
+        }
+        if self.seen.failing.load(Ordering::SeqCst) {
+            return Err(SourceError::protocol("down"));
         }
         let padding = key(entity)
             .strip_prefix("commit/big:")
@@ -140,7 +182,7 @@ impl Source for Fake {
             deferred: false,
             blocks: vec![Block::Text {
                 text: format!(
-                    "{MARK} {} {} {}",
+                    "{MARK} {} {} v{version} {}",
                     self.instance.base_url,
                     self.instance.secret.as_deref().unwrap_or("-"),
                     "x".repeat(padding)
@@ -566,4 +608,224 @@ async fn nothing_the_cache_holds_reaches_the_database() {
         .unwrap();
         assert_eq!(found, 0, "{schema}.{table} holds a cached view");
     }
+}
+
+// -- moving reads (#2242) and grants (#2241) ---------------------------------
+
+impl Fixture {
+    fn push(&self) {
+        self.seen.version.fetch_add(1, Ordering::SeqCst);
+    }
+
+    async fn refused(&self, key: &str) -> Vec<String> {
+        sources::crud::refused_writes(
+            &self.pool,
+            &self.secrets,
+            &self.registry,
+            &self.live,
+            &[knobas_source::grants::WriteAsk {
+                entity: self.entity(key),
+                op: "commit_file".to_owned(),
+                field: None,
+            }],
+        )
+        .await
+        .into_iter()
+        .map(|r| r.reason)
+        .collect()
+    }
+}
+
+/// **Stale, then fresh** (#2242): a second read of a moving view answers
+/// what the cache holds and starts exactly one read behind it; a push between
+/// the two is the third read's answer.
+#[tokio::test]
+async fn a_moving_view_answers_from_the_cache_and_reads_again_behind() {
+    let f = fixture().await;
+    let first = f.read("moving/repo", Some("branches")).await.unwrap();
+    assert!(first.contains("v0"), "{first}");
+    assert_eq!(f.seen.reads(), 1);
+    f.push();
+    let second = f.read("moving/repo", Some("branches")).await.unwrap();
+    assert_eq!(second, first, "the kept answer, at once");
+    f.live.settled().await;
+    assert_eq!(f.seen.reads(), 2, "one read behind it");
+    let third = f.read("moving/repo", Some("branches")).await.unwrap();
+    assert!(third.contains("v1"), "the push is the next read's: {third}");
+}
+
+/// The kept answer does not wait for the read behind it: over a source that
+/// takes 400 ms, the second read answers within the cached budget.
+#[tokio::test]
+async fn a_moving_view_does_not_wait_for_its_read_behind() {
+    let f = fixture().await;
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    let started = std::time::Instant::now();
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    let took = started.elapsed();
+    assert!(took < CACHED_BUDGET, "a stale answer took {took:?}");
+    f.live.settled().await;
+}
+
+/// Reads behind one key do not pile up: asks while one is under way start
+/// no second beside it, and one more after it, however many they were.
+#[tokio::test]
+async fn one_read_behind_runs_at_a_time_per_view() {
+    let f = fixture().await;
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    assert_eq!(f.seen.reads(), 2, "the first, and one behind at a time");
+    f.live.settled().await;
+    assert_eq!(
+        f.seen.reads(),
+        3,
+        "and one more after it, for the asks meanwhile"
+    );
+}
+
+/// A push after a read behind was sent is not lost behind it: the ask that
+/// came after the push, while that read was under way, is read once more
+/// when it ends, and the next ask has the push (a write's echo, #2242).
+#[tokio::test]
+async fn an_ask_during_a_read_behind_is_read_again_after_it() {
+    let f = fixture().await;
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    // The read behind is sent, at v0, and under way for 400 ms.
+    while f.seen.reads() < 2 {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    f.push();
+    let meanwhile = f.read("moving/slow", Some("branches")).await.unwrap();
+    assert!(
+        meanwhile.contains("v0"),
+        "the kept answer, at once: {meanwhile}"
+    );
+    f.live.settled().await;
+    let after = f.read("moving/slow", Some("branches")).await.unwrap();
+    assert!(
+        after.contains("v1"),
+        "the push, after both reads behind: {after}"
+    );
+    f.live.settled().await;
+}
+
+/// A read behind that fails keeps the kept answer and tells nobody.
+#[tokio::test]
+async fn a_failed_read_behind_keeps_the_answer_and_says_nothing() {
+    let f = fixture().await;
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let ear = heard.clone();
+    f.live
+        .on_fresh(move |fresh| ear.lock().unwrap().push(fresh));
+    let first = f.read("moving/repo", Some("branches")).await.unwrap();
+    f.seen.failing.store(true, Ordering::SeqCst);
+    f.push();
+    assert_eq!(
+        f.read("moving/repo", Some("branches")).await.unwrap(),
+        first
+    );
+    f.live.settled().await;
+    assert_eq!(
+        f.read("moving/repo", Some("branches")).await.unwrap(),
+        first
+    );
+    f.live.settled().await;
+    assert!(heard.lock().unwrap().is_empty(), "nothing said");
+}
+
+/// A read behind whose answer differs tells the shell which view moved;
+/// one that answers the same says nothing.
+#[tokio::test]
+async fn a_read_behind_that_moved_is_told() {
+    let f = fixture().await;
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let ear = heard.clone();
+    f.live
+        .on_fresh(move |fresh| ear.lock().unwrap().push(fresh));
+    f.read("moving/repo", Some("branches")).await.unwrap();
+    f.read("moving/repo", Some("branches")).await.unwrap();
+    f.live.settled().await;
+    assert!(heard.lock().unwrap().is_empty(), "the same answer");
+    f.push();
+    f.read("moving/repo", Some("branches")).await.unwrap();
+    f.live.settled().await;
+    let heard = heard.lock().unwrap().clone();
+    assert_eq!(heard.len(), 1, "{heard:?}");
+    assert_eq!(heard[0].entity_id, f.entity("moving/repo"));
+    assert_eq!(heard[0].section.as_deref(), Some("branches"));
+}
+
+/// A fixed view is never read behind (#2239's stay put).
+#[tokio::test]
+async fn a_fixed_view_is_never_read_behind() {
+    let f = fixture().await;
+    f.read("commit/aaa", Some("file:a")).await.unwrap();
+    f.read("commit/aaa", Some("file:a")).await.unwrap();
+    f.live.settled().await;
+    assert_eq!(f.seen.reads(), 1);
+}
+
+/// **Grants** (#2241): a moving answer is asked once while kept, read again
+/// behind, and a changed answer is the next ask's; a live one is asked
+/// every time.
+#[tokio::test]
+async fn grants_are_kept_and_read_again_behind() {
+    let f = fixture().await;
+    assert_eq!(f.refused("moving/repo").await, ["v0"]);
+    assert_eq!(f.seen.grants.load(Ordering::SeqCst), 1);
+    f.push();
+    assert_eq!(f.refused("moving/repo").await, ["v0"], "kept");
+    f.live.settled().await;
+    assert_eq!(f.seen.grants.load(Ordering::SeqCst), 2, "once behind");
+    assert_eq!(f.refused("moving/repo").await, ["v1"], "changed grants");
+    f.live.settled().await;
+
+    let before = f.seen.grants.load(Ordering::SeqCst);
+    f.refused("ticket/1").await;
+    f.refused("ticket/1").await;
+    assert_eq!(f.seen.grants.load(Ordering::SeqCst) - before, 2, "live");
+}
+
+/// A new credential while a read behind is under way: the read, made with
+/// the old one, lands nowhere and tells nobody, and the next read is made
+/// with the new credential (ADR-0032: a new credential may read less).
+#[tokio::test]
+async fn a_read_behind_across_a_new_credential_lands_nowhere() {
+    let f = fixture().await;
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let ear = heard.clone();
+    f.live
+        .on_fresh(move |fresh| ear.lock().unwrap().push(fresh));
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    f.read("moving/slow", Some("branches")).await.unwrap();
+    while f.seen.reads() < 2 {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    f.push();
+    sources::crud::set_secret(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &f.live,
+        &f.id,
+        SecretInput::of("second-pat"),
+    )
+    .await
+    .unwrap();
+    f.live.settled().await;
+    assert!(heard.lock().unwrap().is_empty(), "nothing told");
+    let next = f.read("moving/slow", Some("branches")).await.unwrap();
+    assert!(
+        next.contains("second-pat"),
+        "the new credential's read: {next}"
+    );
+    assert_eq!(
+        f.seen.reads(),
+        3,
+        "read again, not answered from the old one"
+    );
+    f.live.settled().await;
 }
