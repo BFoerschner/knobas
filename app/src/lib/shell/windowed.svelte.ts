@@ -370,7 +370,16 @@ export class Windowed<K = string> {
     // at; scroll it back to where it was before the rows changed. WebKit
     // has no CSS scroll anchoring to do this.
     const anchor = shared.anchor;
-    if (this.on && anchor !== null && anchor.el.isConnected) {
+    // Only a row this list's scroller moves, and one still laid out: a row
+    // held on a page keep-alive hid since (`[hidden]`, no box) or in another
+    // scroller is no measure of what this list's redraw moved.
+    if (
+      this.on &&
+      anchor !== null &&
+      anchor.el.isConnected &&
+      anchor.box === this.#scroller() &&
+      anchor.el.closest("[hidden]") === null
+    ) {
       // A scroll since the anchor was taken that no scroll event has told it
       // of yet (one set in a frame callback lands after that frame's scroll
       // events) moved the row too, and is not the redraw's to undo.

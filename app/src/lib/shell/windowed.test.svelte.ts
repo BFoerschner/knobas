@@ -231,3 +231,54 @@ test("a list inside a box that clips it (a diff's file card), the box below the 
   expect(win.end - win.start).toBe(1);
   stop();
 });
+
+test("a row held on a page keep-alive hid does not scroll the page shown after it when that page's rows are measured (#2267 merger)", () => {
+  // Every ResizeObserver, so a row's measurement can be reported by hand.
+  const observers: { targets: Element[]; report: (entries: ResizeObserverEntry[]) => void }[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      targets: Element[] = [];
+      constructor(report: (entries: ResizeObserverEntry[]) => void) {
+        observers.push({ targets: this.targets, report });
+      }
+      observe(el: Element) {
+        this.targets.push(el);
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  // A hidden page lays out nothing; a shown row sits 100 px down the screen.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const [top, height] = this.closest("[hidden]") ? [0, 0] : this.classList.contains("main") ? [0, 1_000] : [100, 20];
+    return { width: 200, height, top, bottom: top + height, left: 0, right: 200, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+  });
+  document.body.innerHTML =
+    '<div class="main" style="overflow-y: auto"><div class="a"><div class="la"><div class="ra"></div></div></div><div class="b" hidden><div class="lb"><div class="rb"></div></div></div></div>';
+  const main = document.querySelector<HTMLElement>(".main")!;
+  let scrolled = 500;
+  Object.defineProperty(main, "scrollTop", { get: () => scrolled, set: (px: number) => (scrolled = px) });
+  Object.defineProperty(main, "clientHeight", { value: 1_000 });
+  Object.defineProperty(main, "scrollHeight", { value: 50_000 });
+  const a = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+  const b = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+  const stop = $effect.root(() => {
+    a.list(document.querySelector(".la")!);
+    a.row(0)(document.querySelector(".ra")!);
+    b.list(document.querySelector(".lb")!);
+    b.row(0)(document.querySelector(".rb")!);
+  });
+  flushSync();
+  // The reader scrolls page A: its row is held.
+  main.dispatchEvent(new Event("scroll"));
+  // Page B is shown instead, and its row comes out 30 px, not 20.
+  document.querySelector<HTMLElement>(".a")!.hidden = true;
+  document.querySelector<HTMLElement>(".b")!.hidden = false;
+  const rb = document.querySelector(".rb")!;
+  const sizes = observers.find((o) => o.targets.includes(rb))!;
+  sizes.report([{ target: rb, borderBoxSize: [{ blockSize: 30, inlineSize: 200 }], contentRect: { height: 30 } } as unknown as ResizeObserverEntry]);
+  expect(scrolled).toBe(500);
+  stop();
+  vi.unstubAllGlobals();
+});
