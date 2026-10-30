@@ -115,6 +115,62 @@ pub(crate) fn standing(
     }
 }
 
+/// The bytes of the file at `path` in `entity`'s tree (#2256): at `commit`
+/// where the shell hands one back from a file block, else at the entity's own
+/// reference -- a commit's sha, a branch, a repository's default branch.
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`] for an id that is not this source's, a kind
+/// with no tree (a pull request, an issue), or a path that is no file;
+/// otherwise whatever Gitea's answer maps to.
+pub(crate) async fn file_bytes(
+    source: &GiteaSource,
+    entity: &str,
+    path: &str,
+    commit: Option<&str>,
+    cap: u64,
+) -> Result<knobas_source::view::FileBytes, SourceError> {
+    let key = source.key_of(entity)?;
+    let at = match (&key, commit) {
+        (GiteaKey::Pr { .. } | GiteaKey::Issue { .. }, _) => {
+            return Err(SourceError::protocol(format!(
+                "gitea: {entity:?} has no tree to read {path:?} from"
+            )));
+        }
+        (_, Some(commit)) => commit.to_owned(),
+        (GiteaKey::Commit { sha, .. }, None) => sha.clone(),
+        (GiteaKey::Branch { branch, .. }, None) => branch.clone(),
+        (GiteaKey::Repo { owner, repo }, None) => {
+            let record: rows::RepoRecord = source.client.repo_as(owner, repo).await?;
+            record.default_branch().to_owned()
+        }
+    };
+    let (owner, repo) = key.repository();
+    files::bytes(source, owner, repo, &at, path, cap).await
+}
+
+/// What [`file_bytes`] stands at: fixed where the read is at a full sha (one
+/// handed back, or a commit entity's own), live where it reads by a name.
+pub(crate) fn bytes_standing(
+    source: &GiteaSource,
+    entity: &str,
+    commit: Option<&str>,
+) -> knobas_source::view::Standing {
+    use knobas_source::view::Standing;
+    let at = match (source.key_of(entity), commit) {
+        (Ok(GiteaKey::Pr { .. } | GiteaKey::Issue { .. }) | Err(_), _) => None,
+        (Ok(_), Some(sha)) => Some(sha.to_owned()),
+        (Ok(GiteaKey::Commit { sha, .. }), None) => Some(sha),
+        (Ok(_), None) => None,
+    };
+    if at.is_some_and(|sha| full_sha(&sha)) {
+        Standing::Fixed
+    } else {
+        Standing::Live
+    }
+}
+
 /// Whether `sha` is a whole object id, SHA-1's 40 hex characters or
 /// SHA-256's 64: a shorter one names whichever commit it is unique to today.
 pub(crate) fn full_sha(sha: &str) -> bool {

@@ -32,7 +32,7 @@
 //! and its page.
 
 use knobas_source::SourceError;
-use knobas_source::view::{Block, Crumb, EntryKind, TreeEntry, ViewSection};
+use knobas_source::view::{Block, Crumb, EntryKind, FileBytes, TreeEntry, ViewSection};
 
 use super::rows::RepoRecord;
 use crate::map;
@@ -386,7 +386,43 @@ async fn file(
         binary,
         url: at.page(own.html_url.as_deref()),
         sha: own.sha,
+        // The byte read of this file, or of one beside it, takes it back.
+        commit: Some(at.sha.to_owned()),
     })
+}
+
+/// The bytes of the file at `path`, read at `at` (a commit sha or a branch
+/// name), whole or refused with its size where it is over `cap` (#2256):
+/// one raw read, and a refusal whose answer gave no length asks the file's
+/// own entry for it.
+pub(super) async fn bytes(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    at: &str,
+    path: &str,
+    cap: u64,
+) -> Result<FileBytes, SourceError> {
+    crate::client::GiteaClient::tree_path(path)?;
+    let cap_bytes = usize::try_from(cap).unwrap_or(usize::MAX);
+    let raw = source
+        .client
+        .raw_whole(owner, repo, path, at, cap_bytes)
+        .await?;
+    if !raw.cut {
+        return Ok(FileBytes::Read(raw.bytes));
+    }
+    let size = match raw.size {
+        Some(size) => size,
+        None => {
+            source
+                .client
+                .file_entry_as::<Listed>(owner, repo, path, at)
+                .await?
+                .size
+        }
+    };
+    Ok(FileBytes::TooLarge { size })
 }
 
 /// A file's text within both caps, and whether either cut it. `cut` says the
