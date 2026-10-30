@@ -174,3 +174,79 @@ test("a link to a file that does not exist says so once its directory is read", 
   await settle();
   expect(text(target.querySelector(".tf-fileview .tf-cfail"))).toBe(`There is no file ${missing} on main.`);
 });
+
+test("a source that names its sections otherwise still opens the deep file, through the sections its listings name", async () => {
+  // `dir:`/`blob:` in place of Gitea's `files:`/`file:`: every early guess is refused.
+  const theirs = (id: string) => id.replace(/^files:/, "dir:").replace(/^file:/, "blob:");
+  const ours = (id: string) => id.replace(/^dir:/, "files:").replace(/^blob:/, "file:");
+  const reads: string[] = [];
+  const entityView = async (_at: string, section: string | null) => {
+    const id = section ?? "";
+    reads.push(id);
+    if (id !== "files" && ours(id) === id) throw { code: "invalid", message: `no section ${id}` };
+    const view = answer(DEEP_FILES, ours(id));
+    const block = view.sections[0]!.blocks[0]!;
+    if (block.type === "tree") for (const entry of block.entries) entry.section = entry.section && theirs(entry.section);
+    return view;
+  };
+  draw(entityView, DEEP);
+  await settle();
+
+  expect(lineText(0)).toEqual(["1", 'pub const ACCEPTED: &str = "ACCP";']);
+  expect(target.querySelector(".tf-cfail")).toBeNull();
+  expect(tree()).toEqual(["src/", "psp/", "gateway/", "sepa/", "codes.rs", "mod.rs", "README.md"]);
+  expect(reads).toContain(`blob:${DEEP}`);
+});
+
+/** A file of `n` numbered lines. */
+const long = (n: number) => Array.from({ length: n }, (_, i) => `let value_${i + 1} = ${i + 1};`).join("\n");
+
+test("a 50,000-line file draws fewer than 500 of its lines", async () => {
+  draw(openSource({ "BULK.rs": long(50_000) }).entityView, "BULK.rs");
+  await settle();
+
+  expect(text(target.querySelector(".tf-fileview header .tf-dim"))).toBe("50000 lines, on main");
+  expect(drawnLines().length).toBeGreaterThan(0);
+  expect(drawnLines().length).toBeLessThan(500);
+  expect(lineText(0)).toEqual(["1", "let value_1 = 1;"]);
+});
+
+test("a 1,999-line file draws whole", async () => {
+  draw(openSource({ "BULK.rs": long(1_999) }).entityView, "BULK.rs");
+  await settle();
+
+  expect(drawnLines()).toHaveLength(1_999);
+  expect(lineText(1_998)).toEqual(["1999", "let value_1999 = 1999;"]);
+});
+
+test("a link to line 40,000 of a long file draws and marks that line", async () => {
+  draw(openSource({ "BULK.rs": long(50_000) }).entityView, "BULK.rs", 40_000);
+  await settle();
+
+  const marked = target.querySelectorAll(".tf-fileview .tf-code .tf-l.tf-at");
+  expect(marked).toHaveLength(1);
+  expect([...marked[0]!.children].map((span) => span.textContent)).toEqual(["40000", "let value_40000 = 40000;"]);
+  expect(drawnLines().length).toBeLessThan(500);
+});
+
+test("copying a selection across lines gives the selected text, without the line numbers", async () => {
+  draw(openSource({ "src/main.rs": "fn main() {\n    run();\n}\n" }).entityView, "src/main.rs");
+  await settle();
+
+  // From after `fn ` on line 1 to after `}` on line 3, as a drag leaves it.
+  const body = (i: number) => drawnLines()[i]!.lastElementChild!.firstChild!;
+  const range = document.createRange();
+  range.setStart(body(0), 3);
+  range.setEnd(body(2), 1);
+  const selection = document.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+  const copied: Record<string, string> = {};
+  const event = Object.assign(new Event("copy", { bubbles: true, cancelable: true }), {
+    clipboardData: { setData: (type: string, value: string) => (copied[type] = value) },
+  });
+  body(1).parentElement!.dispatchEvent(event);
+
+  expect(copied["text/plain"]).toBe("main() {\n    run();\n}");
+  expect(event.defaultPrevented).toBe(true);
+});

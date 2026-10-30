@@ -317,6 +317,12 @@ test("Files opens the README, marks the locally changed file M, and a changed fi
   expect(target.querySelector(".tf-banner a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/local");
 });
 
+test("a line link opens Files on the file with that line marked (#2251)", async () => {
+  await draw([REPO, "line", "2", "src", "lib.rs"]);
+  expect(text(target.querySelector(".tf-fileview header .tf-p"))).toBe("src/lib.rs");
+  expect([...target.querySelectorAll(".tf-code .tf-l.tf-at")].map(text)).toEqual(["2fn main() {}"]);
+});
+
 test("an uncloned repository reads its files through the source and says it is not on this machine", async () => {
   // With nothing declared the header starts at the push (#973).
   await draw([REPO, "files", "src", "lib.rs"], ports({ codeFacts: async () => [] }, false));

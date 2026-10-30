@@ -20,15 +20,22 @@
   refresh event and a run's end.
 
   With no file in the address the top directory's README opens.
+
+  A file over 2,000 lines is a windowed list (#2251, `shell/windowed.svelte.ts`):
+  only the lines near the viewport are drawn, the rest are room above and
+  below. A line link (`line/<n>/<path>`) draws its line, marks it and scrolls
+  it to the middle. Copying a selection across lines copies their text from
+  the file, not from the drawn nodes, so the lines between need not be drawn.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { flushSync, tick, untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutView, TreeEntry, ViewBlock, ViewSection } from "../../ipc/entity";
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
+  import { Windowed } from "../../shell/windowed.svelte";
   import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
@@ -45,7 +52,9 @@
     likelySections,
     pickDefaultFile,
     repoHash,
+    selectedText,
     sourceName,
+    type TextPlace,
   } from "./repo";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
@@ -57,6 +66,7 @@
     at,
     branch,
     path,
+    line = null,
     changed,
     editing = false,
     job = null,
@@ -75,6 +85,8 @@
     branch: string | null;
     /** The file the address names, or `null`. */
     path: string | null;
+    /** The line a line link marks, from 1; `null` for none. */
+    line?: number | null;
     /** The paths the local checkout changed. */
     changed: ReadonlySet<string>;
     /** The address is the file's edit (`edit/<path>`). */
@@ -264,6 +276,53 @@
   });
 
   const lines = $derived(file === null || file.binary ? [] : fileLines(file.text));
+
+  /** Files of more lines than this draw only the lines in view and a margin (#2251). */
+  const WHOLE_UP_TO = 2_000;
+  // A line is 13 px at 1.6.
+  const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: 20.8, from: WHOLE_UP_TO + 1 });
+  let code = $state<HTMLElement | null>(null);
+
+  /** The file and line last scrolled to, so a refresh of the file leaves the reader where they are. */
+  let shownLine: string | null = null;
+  $effect(() => {
+    const at = line;
+    const read = file;
+    if (at === null || read === null || read.binary || editing) return;
+    const key = `${read.path}\u0000${at}`;
+    if (key === shownLine) return;
+    shownLine = key;
+    void tick().then(() => {
+      win.reveal(at - 1);
+      flushSync();
+      code?.querySelector(".tf-l.tf-at")?.scrollIntoView?.({ block: "center" });
+    });
+  });
+
+  /** Where `node` at `offset` sits in the file's text, if it is inside a drawn line's text. */
+  function placeOf(node: Node | null, offset: number): TextPlace | null {
+    const el = node instanceof Element ? node : (node?.parentElement ?? null);
+    const row = el?.closest<HTMLElement>(".tf-l");
+    if (!row || !code?.contains(row)) return null;
+    const n = Number(row.dataset["n"]) - 1;
+    const body = row.lastElementChild;
+    if (body === null || !body.contains(node)) return { line: n, offset: 0 };
+    const before = document.createRange();
+    before.setStart(body, 0);
+    before.setEnd(node!, offset);
+    return { line: n, offset: Math.min(before.toString().length, lines[n]?.length ?? 0) };
+  }
+
+  /** Copies the file's own text between the selection's ends: no line numbers, every line between. */
+  function copyLines(event: ClipboardEvent) {
+    const selection = document.getSelection();
+    if (selection === null || selection.isCollapsed || event.clipboardData === null) return;
+    const from = placeOf(selection.anchorNode, selection.anchorOffset);
+    const to = placeOf(selection.focusNode, selection.focusOffset);
+    if (from === null || to === null) return;
+    event.clipboardData.setData("text/plain", selectedText(lines, from, to));
+    event.preventDefault();
+  }
 
   /** Why the file shown cannot be edited, `null` where it can. */
   const notEditable = $derived(
@@ -460,7 +519,7 @@
       {#if file.binary}
         <div class="tf-empty"><p>A binary file, not drawn.</p></div>
       {:else}
-        <pre class="tf-code">{#each lines as line, n (n)}<div class="tf-l"><span>{n + 1}</span><span>{line || " "}</span></div>{/each}</pre>
+        <pre class="tf-code" bind:this={code} oncopy={copyLines} {@attach win.list}>{#each win.slice(lines) as text, i (win.start + i)}{@const n = win.start + i + 1}<div class="tf-l" class:tf-at={n === line} data-n={n} {@attach win.row(n - 1)}><span>{n}</span><span>{text || " "}</span></div>{/each}</pre>
       {/if}
     {:else if fileFailed !== null}
       <p class="tf-cfail tf-fpad">{fileFailed}</p>
