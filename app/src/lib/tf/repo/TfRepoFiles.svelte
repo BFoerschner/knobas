@@ -422,12 +422,14 @@
       live = false;
     };
   });
-  const pipeFailure = $derived(piped !== null && piped.run.outcome === "failed" ? piped.run.failure : null);
+  /** The run that answered for the file open now; another file's, until the effect above clears it, is not. */
+  const ran = $derived(piped !== null && file !== null && piped.path === file.path ? piped.run : null);
+  const pipeFailure = $derived(ran !== null && ran.outcome === "failed" ? ran.failure : null);
   /** The file as it is drawn: the pipeline's output where it finished, else the file as read. */
   const drawn = $derived.by((): FileBlock | null => {
     if (file === null) return null;
-    if (steps === null || steps.length === 0 || piped === null || piped.run.outcome !== "done") return file;
-    return { ...file, ...pipedFile(piped.run) };
+    if (steps === null || steps.length === 0 || ran === null || ran.outcome !== "done") return file;
+    return { ...file, ...pipedFile(ran) };
   });
 
   const lines = $derived(drawn === null || drawn.binary ? [] : fileLines(drawn.text));

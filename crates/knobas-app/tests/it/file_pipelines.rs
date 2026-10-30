@@ -344,7 +344,7 @@ async fn every_decompressor_stops_at_the_cap_as_it_streams() {
     let mib = vec![0u8; 1024 * 1024];
     let limits = Limits {
         cap: 1024 * 1024,
-        timeout: Duration::from_secs(30),
+        timeout: Duration::from_secs(8),
     };
     let zstd =
         ruzstd::encoding::compress_to_vec(&mib[..], ruzstd::encoding::CompressionLevel::Fastest);
@@ -645,4 +645,113 @@ async fn a_binary_input_is_shown_as_hex() {
         "{}",
         input.head
     );
+}
+
+/// **A filter that recurses without end is refused, by name (#2314).** Each
+/// of these overflowed the worker's stack and aborted the process; now the
+/// evaluation is unwound at its stack budget and the step says why. That
+/// this test process is still here to assert is half of the claim.
+#[tokio::test]
+async fn a_recursive_filter_is_refused_with_the_steps_name() {
+    for filter in ["def f: 1 + f; f", "def f: [f]; f", "def f: {a: f}; f"] {
+        let run = run_bytes(
+            &[PipeStep::Gunzip, jq(filter)],
+            gzip(b"0"),
+            "x.json.gz",
+            Limits::default(),
+        )
+        .await;
+        let failed = failure(&run);
+        assert_eq!((failed.index, failed.name.as_str()), (1, "jq"), "{filter}");
+        assert_eq!(failed.why, PipeWhy::Error, "{filter}: {failed:?}");
+        assert!(
+            failed.error.starts_with("the filter recursed too deep"),
+            "{filter}: {failed:?}"
+        );
+    }
+    // Honest recursion still runs.
+    let run = run_bytes(
+        &[jq("def f: if . < 10000 then . + 1 | f else . end; f")],
+        b"0".to_vec(),
+        "x.json",
+        Limits::default(),
+    )
+    .await;
+    assert_eq!(done(&run).1, "10000\n");
+}
+
+/// JSON nested past jq's own parse limit is refused, as a step's input and
+/// as a `fromjson` string, rather than parsed by recursion off the stack.
+#[tokio::test]
+async fn json_nested_too_deep_is_refused() {
+    let deep = format!("{}{}", "[".repeat(5_000_000), "]".repeat(5_000_000));
+    for step in [
+        jq("."),
+        PipeStep::Pretty {
+            format: PipeFormat::Json,
+        },
+    ] {
+        let run = run_bytes(
+            std::slice::from_ref(&step),
+            deep.clone().into_bytes(),
+            "x.json",
+            Limits::default(),
+        )
+        .await;
+        let failed = failure(&run);
+        assert_eq!(
+            failed.error, "the input nests deeper than 10000 levels",
+            "{step:?}"
+        );
+    }
+    let quoted = serde_json::to_vec(&deep).unwrap();
+    let run = run_bytes(&[jq("fromjson")], quoted, "x.json", Limits::default()).await;
+    let failed = failure(&run);
+    assert!(
+        failed
+            .error
+            .starts_with("fromjson was given JSON that nests deeper"),
+        "{failed:?}"
+    );
+    // Within the limit it parses, brackets in strings not counted.
+    let run = run_bytes(
+        &[jq("fromjson | .[0][0]")],
+        br#""[[\"[[[[\"]]""#.to_vec(),
+        "x.json",
+        Limits::default(),
+    )
+    .await;
+    assert_eq!(done(&run).1, "\"[[[[\"\n");
+}
+
+/// Pretty-print and convert write through the cap too: indenting a nested
+/// value multiplies it, so 10 KB of brackets would lay out as 50 MB. (The
+/// answer is the same when the cap is checked after the whole layout; what
+/// changed is that the 50 MB is never built.)
+#[tokio::test]
+async fn laying_out_is_stopped_at_the_cap() {
+    let limits = Limits {
+        cap: 1024 * 1024,
+        timeout: Duration::from_secs(10),
+    };
+    let nested = format!("{}{}", "[".repeat(5_000), "]".repeat(5_000));
+    let yaml = format!("- {}\n", "x".repeat(2 * 1024 * 1024));
+    for (step, input) in [
+        (
+            PipeStep::Pretty {
+                format: PipeFormat::Json,
+            },
+            nested.clone(),
+        ),
+        (
+            PipeStep::Convert {
+                from: PipeFormat::Yaml,
+                to: PipeFormat::Json,
+            },
+            yaml,
+        ),
+    ] {
+        let run = run_bytes(std::slice::from_ref(&step), input.into_bytes(), "x", limits).await;
+        assert_eq!(failure(&run).why, PipeWhy::TooLarge, "{step:?}: {run:?}");
+    }
 }

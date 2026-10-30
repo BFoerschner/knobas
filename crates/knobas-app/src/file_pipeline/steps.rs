@@ -49,6 +49,8 @@ pub(super) struct Capped<'a> {
     pub(super) bytes: Vec<u8>,
     cap: u64,
     stop: &'a AtomicBool,
+    /// A write was refused at the cap, whatever error the writer made of it.
+    over: bool,
 }
 
 impl<'a> Capped<'a> {
@@ -57,6 +59,7 @@ impl<'a> Capped<'a> {
             bytes: Vec::new(),
             cap,
             stop,
+            over: false,
         }
     }
 }
@@ -67,6 +70,7 @@ impl Write for Capped<'_> {
             return Err(io::Error::other(Halted));
         }
         if self.bytes.len() as u64 + buf.len() as u64 > self.cap {
+            self.over = true;
             return Err(io::Error::other(OverCap));
         }
         self.bytes.extend_from_slice(buf);
@@ -84,6 +88,17 @@ pub(super) fn io_failure(error: &io::Error) -> Failure {
         Some(inner) if inner.is::<OverCap>() => Failure::TooLarge,
         Some(inner) if inner.is::<Halted>() => Failure::Stopped,
         _ => Failure::Error(error.to_string()),
+    }
+}
+
+/// A writer's error as a step's failure, for writers (serde's) that wrap the
+/// I/O error they were given: the cap is known by [`Capped::over`].
+fn written<E: std::fmt::Display>(result: Result<(), E>, out: &Capped<'_>) -> Result<(), Failure> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(_) if out.over => Err(Failure::TooLarge),
+        Err(_) if out.stop.load(Ordering::Relaxed) => Err(Failure::Stopped),
+        Err(error) => Err(Failure::Error(error.to_string())),
     }
 }
 
@@ -112,14 +127,8 @@ pub(super) fn run(
             })?;
         }
         PipeStep::Jq { filter } => super::jq::run(filter, input, &mut out)?,
-        PipeStep::Pretty { format } => {
-            let text = pretty(*format, input)?;
-            out.write_all(text.as_bytes()).map_err(|e| io_failure(&e))?;
-        }
-        PipeStep::Convert { from, to } => {
-            let text = convert(*from, *to, input)?;
-            out.write_all(text.as_bytes()).map_err(|e| io_failure(&e))?;
-        }
+        PipeStep::Pretty { format } => pretty(*format, input, &mut out)?,
+        PipeStep::Convert { from, to } => convert(*from, *to, input, &mut out)?,
         PipeStep::HexDump => hex_dump(input, &mut out)?,
     }
     Ok(out.bytes)
@@ -182,19 +191,24 @@ fn text(input: &[u8]) -> Result<&str, Failure> {
 }
 
 /// `input` in `format`, laid out again. JSON goes through jaq's reader and
-/// writer, so key order and every number's digits stay as written.
-fn pretty(format: PipeFormat, input: &[u8]) -> Result<String, Failure> {
+/// writer, so key order and every number's digits stay as written. JSON and
+/// YAML are written through the cap as they grow: indenting a deeply nested
+/// value multiplies its size.
+fn pretty(format: PipeFormat, input: &[u8], out: &mut Capped<'_>) -> Result<(), Failure> {
     match format {
-        PipeFormat::Json => super::jq::pretty(input),
+        PipeFormat::Json => super::jq::pretty(input, out),
         PipeFormat::Yaml => {
             let value: serde_norway::Value = serde_norway::from_str(text(input)?)
                 .map_err(|error| Failure::Error(format!("not YAML: {error}")))?;
-            serde_norway::to_string(&value).map_err(|error| Failure::Error(error.to_string()))
+            let result = serde_norway::to_writer(&mut *out, &value);
+            written(result, out)
         }
         PipeFormat::Toml => {
             let value: toml::Table = toml::from_str(text(input)?)
                 .map_err(|error| Failure::Error(format!("not TOML: {error}")))?;
-            toml::to_string_pretty(&value).map_err(|error| Failure::Error(error.to_string()))
+            let text = toml::to_string_pretty(&value)
+                .map_err(|error| Failure::Error(error.to_string()))?;
+            out.write_all(text.as_bytes()).map_err(|e| io_failure(&e))
         }
     }
 }
@@ -202,7 +216,12 @@ fn pretty(format: PipeFormat, input: &[u8]) -> Result<String, Failure> {
 /// `input`, read as `from` and written as `to`. The value between them is a
 /// YAML one, whose maps keep their order; a TOML date-time crosses as its
 /// text.
-fn convert(from: PipeFormat, to: PipeFormat, input: &[u8]) -> Result<String, Failure> {
+fn convert(
+    from: PipeFormat,
+    to: PipeFormat,
+    input: &[u8],
+    out: &mut Capped<'_>,
+) -> Result<(), Failure> {
     let input = text(input)?;
     let value: serde_norway::Value = match from {
         PipeFormat::Json => serde_json::from_str(input)
@@ -215,21 +234,25 @@ fn convert(from: PipeFormat, to: PipeFormat, input: &[u8]) -> Result<String, Fai
             from_toml(toml::Value::Table(table))
         }
     };
-    let written = match to {
-        PipeFormat::Json => serde_json::to_string_pretty(&value).map_err(|e| e.to_string()),
-        PipeFormat::Yaml => serde_norway::to_string(&value).map_err(|e| e.to_string()),
-        PipeFormat::Toml => {
-            toml::to_string_pretty(&value).map_err(|e| format!("TOML cannot hold it: {e}"))
+    match to {
+        PipeFormat::Json => {
+            let result = serde_json::to_writer_pretty(&mut *out, &value);
+            written(result, out)?;
         }
-    };
-    written
-        .map(|mut text| {
-            if !text.ends_with('\n') {
-                text.push('\n');
-            }
-            text
-        })
-        .map_err(Failure::Error)
+        PipeFormat::Yaml => {
+            let result = serde_norway::to_writer(&mut *out, &value);
+            written(result, out)?;
+        }
+        PipeFormat::Toml => {
+            let text = toml::to_string_pretty(&value)
+                .map_err(|e| Failure::Error(format!("TOML cannot hold it: {e}")))?;
+            out.write_all(text.as_bytes()).map_err(|e| io_failure(&e))?;
+        }
+    }
+    if !out.bytes.ends_with(b"\n") {
+        out.write_all(b"\n").map_err(|e| io_failure(&e))?;
+    }
+    Ok(())
 }
 
 fn from_toml(value: toml::Value) -> serde_norway::Value {
