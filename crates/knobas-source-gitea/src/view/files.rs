@@ -10,6 +10,10 @@
 //! * `files:{dir}` -- a directory below it (`files:src/lib`);
 //! * `file:{path}` -- a file (`file:src/lib.rs`), read raw.
 //!
+//! A commit's view answers the same sections at its sha (#2239), with no
+//! *Commit change…*: nothing is committed onto a commit. What a section reads
+//! there cannot change, so the app keeps it for the session (ADR-0032).
+//!
 //! A directory keeps its first [`ENTRY_CAP`] entries in order, and a file
 //! [`BYTE_CAP`] bytes and [`LINE_CAP`] lines, cut at a line; either says it
 //! was cut and where the rest is (ADR-0020 rule 6). A file with a NUL byte in
@@ -77,6 +81,31 @@ pub(super) fn owns(section: &str) -> bool {
     Place::parse(section).is_some()
 }
 
+/// Where a section is read: a branch's tip, or a commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum At<'a> {
+    Branch(&'a str),
+    Commit(&'a str),
+}
+
+impl<'a> At<'a> {
+    /// The ref Gitea is asked at, which the trail's first step is named by.
+    fn name(self) -> &'a str {
+        match self {
+            Self::Branch(name) | Self::Commit(name) => name,
+        }
+    }
+
+    /// The part of a Gitea page's path that says where: `branch/{name}` or
+    /// `commit/{sha}`.
+    fn page(self) -> String {
+        match self {
+            Self::Branch(name) => format!("branch/{}", map::url_path(name)),
+            Self::Commit(sha) => format!("commit/{}", map::url_path(sha)),
+        }
+    }
+}
+
 /// The deferred stub the whole view carries.
 pub(super) fn tab() -> ViewSection {
     ViewSection {
@@ -94,13 +123,15 @@ pub(super) async fn read(
     record: &RepoRecord,
     owner: &str,
     repo: &str,
-    at: &str,
+    at: At<'_>,
     id: &str,
 ) -> Result<ViewSection, SourceError> {
     let blocks = match Place::parse(id) {
         Some(Place::File(path)) => {
             let mut blocks = vec![file(source, record, owner, repo, at, path).await?];
-            blocks.extend(commit(source, owner, repo, at).await);
+            if let At::Branch(branch) = at {
+                blocks.extend(commit(source, owner, repo, branch).await);
+            }
             blocks
         }
         // `files:` with nothing after it is not the top's spelling.
@@ -168,10 +199,13 @@ async fn directory(
     record: &RepoRecord,
     owner: &str,
     repo: &str,
-    at: &str,
+    at: At<'_>,
     dir: &str,
 ) -> Result<Block, SourceError> {
-    let listing: Vec<Listed> = source.client.contents_at_as(owner, repo, dir, at).await?;
+    let listing: Vec<Listed> = source
+        .client
+        .contents_at_as(owner, repo, dir, at.name())
+        .await?;
     let mut entries: Vec<TreeEntry> = listing
         .into_iter()
         .map(|listed| {
@@ -222,7 +256,7 @@ async fn file(
     record: &RepoRecord,
     owner: &str,
     repo: &str,
-    at: &str,
+    at: At<'_>,
     path: &str,
 ) -> Result<Block, SourceError> {
     // The file's own entry first: its blob sha at `at` (#883), and its size
@@ -231,10 +265,13 @@ async fn file(
     // made against it is held as moved (#822). The other order, or both at
     // once, could draw a newer blob beside older text, and an edit of that
     // text would land over the push unseen.
-    let own: Listed = source.client.file_entry_as(owner, repo, path, at).await?;
+    let own: Listed = source
+        .client
+        .file_entry_as(owner, repo, path, at.name())
+        .await?;
     let raw = source
         .client
-        .raw_capped(owner, repo, path, at, BYTE_CAP)
+        .raw_capped(owner, repo, path, at.name(), BYTE_CAP)
         .await?;
     let binary = raw.bytes.iter().take(SNIFF).any(|b| *b == 0);
     let (text, truncated) = if binary {
@@ -260,8 +297,8 @@ async fn file(
 }
 
 /// The Gitea page of `path` (a directory or a file; `""` the top) at `at`.
-fn page(record: &RepoRecord, at: &str, path: &str) -> Option<String> {
-    let mut tail = format!("/src/branch/{}", map::url_path(at));
+fn page(record: &RepoRecord, at: At<'_>, path: &str) -> Option<String> {
+    let mut tail = format!("/src/{}", at.page());
     if !path.is_empty() {
         tail.push('/');
         tail.push_str(&map::url_path(path));
@@ -298,9 +335,9 @@ fn capped(bytes: &[u8], cut: bool) -> (String, bool) {
 
 /// The steps from the tree's top (named by the ref) to `path`: a directory's
 /// each, and where `is_file`, the file's own last.
-fn trail(at: &str, path: &str, is_file: bool) -> Vec<Crumb> {
+fn trail(at: At<'_>, path: &str, is_file: bool) -> Vec<Crumb> {
     let mut crumbs = vec![Crumb {
-        name: at.to_owned(),
+        name: at.name().to_owned(),
         section: FILES.to_owned(),
     }];
     if path.is_empty() {

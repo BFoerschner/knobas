@@ -2022,6 +2022,21 @@ pub trait Source: Send + Sync {
         entity: &str,
         section: Option<&str>,
     ) -> Result<Option<view::SourceView>, SourceError>;
+    /// What the answer [`view`](Source::view) gives for `entity` and
+    /// `section` stands at (ADR-0032, #2239), said before it is read: whether
+    /// the app may keep it in memory and answer the next ask for the same
+    /// pair from there.
+    ///
+    /// [`Standing::Live`](view::Standing::Live) is the default and is never
+    /// kept. An adapter answers [`Standing::Fixed`](view::Standing::Fixed)
+    /// only where the pair names something that cannot change -- a file at a
+    /// full commit sha -- and the answer carries nothing that can: no
+    /// toolbar a credential narrows, no status that moves. Pure: it reads
+    /// nothing from the source.
+    fn view_standing(&self, entity: &str, section: Option<&str>) -> view::Standing {
+        let _ = (entity, section);
+        view::Standing::Live
+    }
     /// A pipeline's settings, read live (ADR-0022, issue #851): the
     /// repositories it builds, its triggers and its parameters, scrubbed of
     /// every credential. `entity` is a pipeline's [`EntityRef`] in string

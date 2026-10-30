@@ -663,3 +663,80 @@ async fn a_directory_declares_no_commit() {
     let section = read(&server, ENTITY, "files").await;
     assert!(commit_action(&section).is_none());
 }
+
+// -- the tree at a commit (#2239) ---------------------------------------------
+
+const SHA: &str = "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192";
+
+fn at_commit(sha: &str) -> String {
+    format!("{ENTITY}@{sha}")
+}
+
+/// A commit's view reads the tree's sections at its sha: the file at that
+/// commit, its page at the commit, and no *Commit change…*, since nothing is
+/// committed onto a commit (so no branch is read for it either).
+#[tokio::test]
+async fn a_commit_reads_its_files_at_its_sha() {
+    let server = gitea().await;
+    raw(&server, "retry.rs", "main", b"tip\n".to_vec()).await;
+    raw(&server, "retry.rs", SHA, b"then\n".to_vec()).await;
+    let section = read(&server, &at_commit(SHA), "file:retry.rs").await;
+    assert_eq!(section.blocks.len(), 1, "no action beside the file");
+    let drawn = file(section);
+    assert_eq!(drawn.text, "then\n");
+    assert_eq!(drawn.sha, Some(blob("retry.rs", SHA)));
+    assert_eq!(drawn.trail, crumbs(&[(SHA, "files"), ("retry.rs", "file:retry.rs")]));
+    assert_eq!(
+        drawn.url.as_deref(),
+        Some(format!("{WEB}/src/commit/{SHA}/retry.rs").as_str())
+    );
+    let branch_reads = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.url.path().contains("/branches/"))
+        .count();
+    assert_eq!(branch_reads, 0, "a commit has no branch to commit onto");
+}
+
+#[tokio::test]
+async fn a_commit_lists_its_directories_at_its_sha() {
+    let server = gitea().await;
+    listing(&server, "", SHA, json!([entry("retry.rs", "retry.rs", "file", 5)])).await;
+    let section = read(&server, &at_commit(SHA), "files").await;
+    let (trail, entries) = tree(&section);
+    assert_eq!(trail, crumbs(&[(SHA, "files")]));
+    assert_eq!(entries[0].section.as_deref(), Some("file:retry.rs"));
+}
+
+/// What the app may keep (ADR-0032): a commit's tree and diff at a whole
+/// sha. A branch moves, a short sha is only unique today, a commit's
+/// overview carries checks that move, and its whole view a toolbar.
+#[tokio::test]
+async fn only_a_whole_shas_tree_and_diff_are_fixed() {
+    use knobas_source::view::Standing::{Fixed, Live};
+    let server = gitea().await;
+    let source = source(&server);
+    let sha256 = "a".repeat(64);
+    for (entity, section, standing) in [
+        (at_commit(SHA), Some("file:src/lib.rs"), Fixed),
+        (at_commit(SHA), Some("files:src"), Fixed),
+        (at_commit(SHA), Some("files"), Fixed),
+        (at_commit(SHA), Some("diff"), Fixed),
+        (at_commit(&sha256), Some("files"), Fixed),
+        (at_commit(SHA), Some("overview"), Live),
+        (at_commit(SHA), None, Live),
+        (at_commit(&SHA[..12]), Some("file:src/lib.rs"), Live),
+        (at_commit(&"g".repeat(40)), Some("files"), Live),
+        (BRANCH.to_owned(), Some("file:src/lib.rs"), Live),
+        (ENTITY.to_owned(), Some("file:src/lib.rs"), Live),
+        ("other:tidewater/payout-service@x".to_owned(), Some("files"), Live),
+    ] {
+        assert_eq!(
+            source.view_standing(&entity, section),
+            standing,
+            "{entity} {section:?}"
+        );
+    }
+}
