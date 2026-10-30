@@ -73,7 +73,8 @@
   let standing = $state<BranchStanding | null>(null);
   let files = $state<DiffFile[] | null>(null);
   let failed = $state<string | null>(null);
-  let base = $state("");
+  /** *Into*, the default branch proposed once: a new *From* keeps what the reader picked. */
+  let base = $state(untrack(() => into));
   let title = $state("");
   let body = $state("");
   /** The ticket the branch's key names, and that key: what *Link the PR to <key>* links to (#984). */
@@ -121,11 +122,11 @@
   }
 
   // The form, proposed for each branch: from its ticket where it names one.
-  // Only a new branch proposes anew; nothing else may wipe what was typed.
+  // Only a new branch proposes anew; nothing else may wipe what was typed,
+  // and *Into* is not the branch's to propose.
   $effect(() => {
     const name = head ?? "";
     let live = true;
-    base = untrack(() => into);
     ({ title, body } = proposal(name, null));
     ticket = null;
     link = true;

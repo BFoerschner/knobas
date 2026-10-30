@@ -620,6 +620,28 @@ test("From changes the address; a branch holding a key proposes its ticket's tit
   );
 });
 
+test("Into picked stays picked when From changes, and is the base queued", async () => {
+  // The shell keeps the page mounted and hands it the new address.
+  const props = $state({ ready: true, rest: COMPARE("chore/bump-tokio"), job: null as string | null, ports: ports(), now: NOW });
+  view = mount(TfRepo, { target, props });
+  await settle();
+  const [into, from] = [...target.querySelectorAll<HTMLSelectElement>(".tf-compare select")];
+  into!.value = "release/1.9";
+  into!.dispatchEvent(new Event("change", { bubbles: true }));
+  from!.value = "spike/sepa-instant";
+  from!.dispatchEvent(new Event("change", { bubbles: true }));
+  props.rest = COMPARE("spike/sepa-instant");
+  await settle();
+  expect(target.querySelectorAll<HTMLSelectElement>(".tf-compare select")[0]!.value).toBe("release/1.9");
+
+  type(target.querySelector<HTMLInputElement>(".tf-compare input[type=text]")!, "Instant SEPA spike");
+  button("Create pull request", target)!.click();
+  await settle();
+  expect(writes).toEqual([
+    { CreatePullRequest: { entity: REPO, title: "Instant SEPA spike", body: "", head: "spike/sepa-instant", base: "release/1.9" } },
+  ]);
+});
+
 test("a branch holding a key offers Link the PR to <key> in knobas, ticked; it asks for the pull request to be linked (#984)", async () => {
   await draw(COMPARE("fix/PAY-231-README"), "PAY-231");
   const box = target.querySelector<HTMLInputElement>(".tf-compare input[type=checkbox]")!;
