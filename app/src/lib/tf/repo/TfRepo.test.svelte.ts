@@ -316,7 +316,7 @@ test("the compare page lights its own tab, Compare, and Pull requests stays dark
 
 test("Files opens the README, marks the locally changed file M, and a changed file warns", async () => {
   await draw([REPO]);
-  expect(tree()).toEqual(["src/", "README.md"]);
+  expect(tree()).toEqual(["src", "README.md"]);
   expect(text(target.querySelector(".tf-fileview header"))).toContain("README.md 2 lines, on main");
   // The README renders as Markdown (#2255).
   expect(text(target.querySelector(".tf-fileview .tf-md"))).toBe("// README.md fn main() {}");
@@ -325,7 +325,7 @@ test("Files opens the README, marks the locally changed file M, and a changed fi
   view = null;
 
   await draw([REPO, "files", "src", "retry.rs"]);
-  expect(tree()).toEqual(["src/", "lib.rs", "retry.rs", "README.md"]);
+  expect(tree()).toEqual(["src", "lib.rs", "retry.rs", "README.md"]);
   const changed = [...target.querySelectorAll(".tf-ftree a")].find((a) => text(a) === "retry.rs")!;
   expect(changed.classList.contains("tf-changed")).toBe(true);
   expect(changed.getAttribute("aria-current")).toBe("true");
@@ -356,7 +356,7 @@ test("the branch dropdown sets the branch for Files and for Commits", async () =
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
 
-  expect(tree()).toEqual(["src/", "README.md", "NEW.md"]);
+  expect(tree()).toEqual(["src", "README.md", "NEW.md"]);
   expect(text(target.querySelector(".tf-fileview header"))).toContain("1 line, on feature/PAY-231-sepa-retry");
   expect(viewReads.some(([id, s]) => id === FEATURE && s === "file:README.md")).toBe(true);
   unmount(view!);
@@ -541,7 +541,7 @@ test("Refresh on a repository reads it from its source, then its row, its branch
   refreshButton()!.click();
   await settle();
   expect(refreshButton()?.textContent).toBe("Refreshing…");
-  expect(tree()).toEqual(["src/", "README.md"]);
+  expect(tree()).toEqual(["src", "README.md"]);
 
   answer();
   await settle();
@@ -551,7 +551,7 @@ test("Refresh on a repository reads it from its source, then its row, its branch
   expect(again).toEqual(expect.arrayContaining([[REPO, "branches"], [REPO, "files"], [REPO, "file:README.md"]]));
   expect(refreshButton()?.textContent).toBe("Refresh");
   expect(text(target.querySelector("h1"))).toBe("tidewater/payout-service");
-  expect(tree()).toEqual(["src/", "README.md"]);
+  expect(tree()).toEqual(["src", "README.md"]);
   // The README renders as Markdown (#2255).
   expect(text(target.querySelector(".tf-fileview .tf-md"))).toBe("// README.md fn main() {}");
 });
@@ -733,11 +733,11 @@ function twoRepos(): RepoPorts {
 
 test("Files, then Commits, then back to Files keeps the open file and the expanded tree, with no remount (#2248)", async () => {
   await drawLive([REPO, "files", "src", "lib.rs"]);
-  expect(shownTree()).toEqual(["src/", "lib.rs", "retry.rs", "README.md"]);
+  expect(shownTree()).toEqual(["src", "lib.rs", "retry.rs", "README.md"]);
   // Folded by hand: a remount would open it again from the address.
-  openDir("src/");
+  openDir("src");
   await settle();
-  expect(shownTree()).toEqual(["src/", "README.md"]);
+  expect(shownTree()).toEqual(["src", "README.md"]);
   const drawn = fileView();
   expect(text(drawn?.querySelector("header") ?? null)).toContain("lib.rs");
 
@@ -750,9 +750,28 @@ test("Files, then Commits, then back to Files keeps the open file and the expand
   const before = viewReads.length;
   await go([REPO, "files", "src", "lib.rs"]);
   expect(fileView()).toBe(drawn);
-  expect(shownTree()).toEqual(["src/", "README.md"]);
+  expect(shownTree()).toEqual(["src", "README.md"]);
   // Shown again, it reads the file in the background over what it drew.
   expect(viewReads.slice(before)).toContainEqual([REPO, "file:src/lib.rs"]);
+});
+
+test("moving between files keeps the tree, its folds and its scroll: one tree, never drawn again (#2257)", async () => {
+  await drawLive([REPO, "files", "src", "lib.rs"]);
+  const box = shownTab()!.querySelector(".tf-ftree")!;
+  const first = [...box.querySelectorAll("a")].find((a) => text(a) === "README.md")!;
+  box.scrollTop = 40;
+
+  await go([REPO, "files", "src", "retry.rs"]);
+  expect(shownTab()!.querySelector(".tf-ftree")).toBe(box);
+  expect(text(fileView()!.querySelector("header .tf-p"))).toBe("src/retry.rs");
+  expect(box.querySelector("a[aria-current='true']")!.getAttribute("href")).toContain("retry.rs");
+
+  // The README at the top opens beside the same tree, src still unfolded, the rows the same nodes.
+  await go([REPO, "files", "README.md"]);
+  expect(shownTab()!.querySelector(".tf-ftree")).toBe(box);
+  expect(shownTree()).toEqual(["src", "lib.rs", "retry.rs", "README.md"]);
+  expect([...box.querySelectorAll("a")].find((a) => text(a) === "README.md")).toBe(first);
+  expect(box.scrollTop).toBe(40);
 });
 
 test("a tab shown again at another place reads that place, and a tab never left reads nothing again (#2248)", async () => {
@@ -794,9 +813,9 @@ test("a hidden tab has visible false: Local changes reads its diff on focus only
 test("opening another repository starts its tabs fresh (#2248)", async () => {
   await drawLive([REPO], twoRepos());
   // Opened by hand: nothing in the address opens it.
-  openDir("src/");
+  openDir("src");
   await settle();
-  expect(shownTree()).toEqual(["src/", "lib.rs", "retry.rs", "README.md"]);
+  expect(shownTree()).toEqual(["src", "lib.rs", "retry.rs", "README.md"]);
   await go([REPO, "commits"]);
   expect(hiddenTabs()).toBe(1);
   const left = target.querySelector(".tf-fileview");
@@ -806,7 +825,7 @@ test("opening another repository starts its tabs fresh (#2248)", async () => {
   expect(hiddenTabs()).toBe(0);
   // Mounted afresh, so no tab carries what the reader did into this repository.
   expect(fileView()).not.toBe(left);
-  expect(shownTree()).toEqual(["src/", "README.md"]);
+  expect(shownTree()).toEqual(["src", "README.md"]);
   expect(text(fileView()?.querySelector("header") ?? null)).toContain("README.md");
   expect(target.querySelector(".tf-tabs a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fledger/files");
 

@@ -35,24 +35,33 @@
 /* A tab's filter bar sits in the page's body, not sticky under the tabs. */
 .tf-rbar { margin-bottom: 12px; }
 .tf-rbar .tf-fbar { position: static; padding: 0; border: 0; background: none; }
-.tf-repo { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 18px; align-items: start; }
-.tf-ftree {
-  background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 0; font-size: var(--t-sm);
-  position: sticky; top: 12px; max-height: calc(100vh - 220px); overflow: auto;
+.tf-repo { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start; }
+/* The persistent tree (#2257, mockups/code-area `.tree`): a box that stays in view, its head fixed, its rows scrolling. */
+.tf-ftreebox {
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; position: sticky; top: 12px;
+  display: flex; flex-direction: column; max-height: calc(100vh - 230px); overflow: hidden;
 }
+.tf-ftreebox > header { display: flex; gap: 6px; align-items: center; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--rule-2); }
+.tf-ftree-h { flex: 1; font-size: var(--t-xs); font-weight: 700; color: var(--ink-2); }
+.tf-ftreebox > header .tf-iconbtn { width: 26px; height: 26px; padding: 0; display: inline-grid; place-items: center; }
+.tf-ftreebox > header .tf-iconbtn[disabled] { opacity: .45; cursor: default; background: none; }
+.tf-ftreebox > header .tf-iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.tf-ftree { overflow: auto; padding: 4px 0; font-size: var(--t-sm); }
 .tf-ftree a, .tf-ftree .tf-fdir, .tf-ftree .tf-fsub {
-  display: block; width: 100%; text-align: left; padding: 3px 10px; text-decoration: none; font-family: var(--mono); font-variant-ligatures: none;
-  font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink);
+  display: flex; align-items: center; gap: 6px; width: 100%; height: 24px; text-align: left; padding: 0 10px; text-decoration: none;
+  font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; color: var(--ink);
 }
-.tf-ftree .tf-fdir { border: 0; background: none; cursor: pointer; color: var(--ink-2); font-weight: 600; font-size: var(--t-xs); }
+.tf-ftree .tf-ficon { width: 14px; height: 14px; flex: none; fill: none; stroke: var(--ink-2); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.tf-ftree .tf-fdir { border: 0; background: none; cursor: pointer; font-weight: 600; }
 .tf-ftree .tf-fsub { color: var(--ink-2); }
 .tf-ftree a:hover, .tf-ftree .tf-fdir:hover { background: var(--sheet-2); }
 .tf-ftree a[aria-current="true"] { background: var(--ink); color: var(--sheet); }
-.tf-ftree a.tf-changed::after { content: " M"; color: var(--warn); font-weight: 700; }
+.tf-ftree a[aria-current="true"] .tf-ficon { stroke: var(--sheet); }
+.tf-ftree a.tf-changed::after { content: "M"; margin-left: auto; font: 700 var(--t-2xs) var(--sans); color: var(--warn); }
 .tf-ftree a[aria-current="true"].tf-changed::after { color: inherit; }
-.tf-ftree .tf-d1 { padding-left: 22px; } .tf-ftree .tf-d2 { padding-left: 34px; } .tf-ftree .tf-d3 { padding-left: 46px; }
-.tf-ftree .tf-d4 { padding-left: 58px; } .tf-ftree .tf-d5 { padding-left: 70px; } .tf-ftree .tf-d6 { padding-left: 82px; }
-.tf-ftree .tf-d7 { padding-left: 94px; } .tf-ftree .tf-d8 { padding-left: 106px; }
+.tf-ftree .tf-d1 { padding-left: 24px; } .tf-ftree .tf-d2 { padding-left: 38px; } .tf-ftree .tf-d3 { padding-left: 52px; }
+.tf-ftree .tf-d4 { padding-left: 66px; } .tf-ftree .tf-d5 { padding-left: 80px; } .tf-ftree .tf-d6 { padding-left: 94px; }
+.tf-ftree .tf-d7 { padding-left: 108px; } .tf-ftree .tf-d8 { padding-left: 122px; }
 .tf-fileview { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; min-width: 0; }
 .tf-fileview > header, .tf-fileview > .tf-waiting > header {
   display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--rule);
@@ -161,7 +170,7 @@
   .tf-dgrid { grid-template-columns: minmax(0, 1fr); }
   .tf-flist { position: static; }
   .tf-repo { grid-template-columns: minmax(0, 1fr); }
-  .tf-ftree { position: static; }
+  .tf-ftreebox { position: static; max-height: none; }
 }
 
 /* A command renderer's run (#2262): the sandboxed frame, and a failure above the source (mockups/code-area .stepfail). */
