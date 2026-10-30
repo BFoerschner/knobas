@@ -26,6 +26,12 @@
 # full `check`'s `witness-unit`, and `loop/stages.sh` is a script. The loop's
 # docs-only self-merge (`.claude/commands/ticket-loop.md`) draws the same line.
 #
+# `app/package.json` is front unless a changed line names `@tauri-apps/plugin-`
+# (#2301, Björn approved 2026-10-30). `crates/knobas-app/tests/it/wiring.rs`
+# reads only those lines (the opener and notification pins match their crates,
+# global-shortcut is absent), so a new npm dependency cannot fail it and cost a
+# full gate it could not fail. Every other `app/...` path `crates/` names stays full.
+#
 # Usage: scripts/gate-scope.sh [BASE]   (default origin/main)
 set -euo pipefail
 base=${1:-origin/main}
@@ -69,7 +75,13 @@ while IFS= read -r f; do
       echo "gate-scope: full: $f is generated from the Rust types" >&2; echo full; exit 0 ;;
     app/*)
       rel=${f#app/}
-      if grep -rhF --include='*.rs' --include='*.toml' --include='*.json' "app/$rel" "$root/crates" 2>/dev/null \
+      if [ "$f" = app/package.json ]; then
+        # Changed lines only, captured first so `grep -q` cannot SIGPIPE a pipefail pipeline.
+        lines=$(git -C "$root" diff -U0 "$mb" HEAD -- "$f" | grep -E '^[-+]' | grep -vE '^(\+\+\+|---) ' || true)
+        if grep -qF '@tauri-apps/plugin-' <<< "$lines"; then
+          echo "gate-scope: full: $f changes a @tauri-apps/plugin- line, which crates/knobas-app/tests/it/wiring.rs reads" >&2; echo full; exit 0
+        fi
+      elif grep -rhF --include='*.rs' --include='*.toml' --include='*.json' "app/$rel" "$root/crates" 2>/dev/null \
            | grep -qvE '^[[:space:]]*//'; then
         echo "gate-scope: full: crates/ reads $f" >&2; echo full; exit 0
       fi
