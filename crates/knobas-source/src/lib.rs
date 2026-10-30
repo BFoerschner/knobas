@@ -681,6 +681,9 @@ impl SourceError {
 /// | [`UpdatePullRequestBranch`](Self::UpdatePullRequestBranch) | `"update_pull_request_branch"` | git workflows, spec #701 (Gitea, #708) |
 /// | [`CommitFile`](Self::CommitFile) | `"commit_file"` | ticket-first, spec #808 (Gitea, #822) |
 /// | [`SourceAction`](Self::SourceAction) | `"source_action"` | roles, spec #1192 (Gitea, #1194) |
+/// | [`ReplyToThread`](Self::ReplyToThread) | `"reply_to_thread"` | code area, spec #2234 (Gitea, #2277) |
+/// | [`ResolveThread`](Self::ResolveThread) | `"resolve_thread"` | code area, spec #2234 (Gitea, #2277) |
+/// | [`RequestReviewers`](Self::RequestReviewers) | `"request_reviewers"` | code area, spec #2234 (Gitea, #2303) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -1280,6 +1283,58 @@ pub enum WriteOp {
         #[serde(default)]
         fields: std::collections::BTreeMap<String, String>,
     },
+    /// Identifier `"reply_to_thread"`. Answer one review thread on a pull
+    /// request's diff (spec #2234 step 6d, issue #2277). `entity` is the
+    /// **pull request**.
+    ///
+    /// `thread` is the source's own id for the thread, as the diff's
+    /// [`LineThread::id`](crate::view::LineThread::id) hands it out, and
+    /// `comment` is the reply placed where the thread is: a source that
+    /// threads by id (GitHub's `in_reply_to`) reads `thread`, one that threads
+    /// by place (Gitea groups a conversation by path and line) reads
+    /// `comment`'s place. The shell copies both from the thread it answers.
+    ///
+    /// Hold detection is a comment's: the declared state only. A second
+    /// arrival is a second reply.
+    ReplyToThread {
+        /// The **pull request** (#2277).
+        entity: String,
+        /// The thread's id, as the diff handed it out.
+        thread: String,
+        /// The reply, at the thread's path, side and line.
+        comment: ReviewComment,
+    },
+    /// Identifier `"resolve_thread"`. Mark one review thread resolved, or
+    /// open again (`resolved: false`), on a pull request (spec #2234 step 6d,
+    /// issue #2277). `entity` is the **pull request**, `thread` the id the
+    /// diff handed out.
+    ///
+    /// A source that cannot resolve threads does not declare the op, or does
+    /// not offer it on the diff ([`Commenting::resolve`](crate::view::Commenting::resolve)):
+    /// Forgejo 17 has no such endpoint (the 2026-10-30 Gitea fact note). The
+    /// same state twice is one, so a resend is harmless.
+    ResolveThread {
+        /// The **pull request** (#2277).
+        entity: String,
+        /// The thread's id, as the diff handed it out.
+        thread: String,
+        /// `true` resolves, `false` opens it again.
+        resolved: bool,
+    },
+    /// Identifier `"request_reviewers"`. Ask one or more people to review a
+    /// pull request (spec #2234 step 6d, issue #2303). `entity` is the **pull
+    /// request**; `reviewers` are logins as the source names them, picked
+    /// from the ones the view's action offers.
+    ///
+    /// Asking somebody already asked asks them again and adds nobody, so a
+    /// resend is harmless. Hold detection is the declared state only: a push
+    /// to the pull request is no reason to hold a request for a review of it.
+    RequestReviewers {
+        /// The **pull request** (#2303).
+        entity: String,
+        /// Who is asked, by login.
+        reviewers: Vec<String>,
+    },
 }
 
 /// The identifier of [`WriteOp::SourceAction`], which a descriptor lists in
@@ -1553,6 +1608,9 @@ impl WriteOp {
             WriteOp::UpdatePullRequestBranch { .. } => "update_pull_request_branch",
             WriteOp::CommitFile { .. } => "commit_file",
             WriteOp::SourceAction { .. } => SOURCE_ACTION,
+            WriteOp::ReplyToThread { .. } => "reply_to_thread",
+            WriteOp::ResolveThread { .. } => "resolve_thread",
+            WriteOp::RequestReviewers { .. } => "request_reviewers",
         }
     }
 
@@ -1585,13 +1643,23 @@ impl WriteOp {
             WriteOp::SourceAction { .. } => conservative,
             // They add to a discussion and hold only on its declared state
             // (#752); a second arrival is a second comment or review.
-            WriteOp::Comment { .. } | WriteOp::Approve { .. } | WriteOp::SubmitReview { .. } => {
-                Delivery {
-                    projection: Projection::DeclaredState,
-                    can_leave_unclaimed: false,
-                    ..conservative
-                }
-            }
+            WriteOp::Comment { .. }
+            | WriteOp::Approve { .. }
+            | WriteOp::SubmitReview { .. }
+            | WriteOp::ReplyToThread { .. } => Delivery {
+                projection: Projection::DeclaredState,
+                can_leave_unclaimed: false,
+                ..conservative
+            },
+            // They set a state on the discussion, and the same state twice is
+            // one (#2277, #2303): Gitea answers a repeated resolve 204 and a
+            // repeated request adds nobody.
+            WriteOp::ResolveThread { .. } | WriteOp::RequestReviewers { .. } => Delivery {
+                projection: Projection::DeclaredState,
+                resend_harmless: true,
+                can_leave_unclaimed: false,
+                ..conservative
+            },
             // A judgement on the target's current state; a second arrival is
             // a second move.
             WriteOp::Transition { .. } => Delivery {
@@ -1719,7 +1787,10 @@ impl WriteOp {
                 | WriteOp::DeleteBranch { entity }
                 | WriteOp::EditPullRequest { entity, .. }
                 | WriteOp::UpdatePullRequestBranch { entity, .. }
-                | WriteOp::SourceAction { entity, .. } => Some(entity),
+                | WriteOp::SourceAction { entity, .. }
+                | WriteOp::ReplyToThread { entity, .. }
+                | WriteOp::ResolveThread { entity, .. }
+                | WriteOp::RequestReviewers { entity, .. } => Some(entity),
                 WriteOp::CreatePage { .. } | WriteOp::CommitFile { .. } => None,
             },
         };
@@ -1840,7 +1911,10 @@ impl WriteOp {
             | WriteOp::DeleteBranch { .. }
             | WriteOp::EditPullRequest { .. }
             | WriteOp::UpdatePullRequestBranch { .. }
-            | WriteOp::SourceAction { .. } => false,
+            | WriteOp::SourceAction { .. }
+            | WriteOp::ReplyToThread { .. }
+            | WriteOp::ResolveThread { .. }
+            | WriteOp::RequestReviewers { .. } => false,
         }
     }
 }
@@ -2707,6 +2781,25 @@ mod tests {
                 id: "add_label".into(),
                 fields: [("label".to_owned(), "7".to_owned())].into(),
             },
+            WriteOp::ReplyToThread {
+                entity: "gitea:tidewater/payout-service#142".into(),
+                thread: "4088".into(),
+                comment: ReviewComment {
+                    path: "src/retry.rs".into(),
+                    line: 27,
+                    side: ReviewSide::New,
+                    body: "Done in 7aa01f9.".into(),
+                },
+            },
+            WriteOp::ResolveThread {
+                entity: "gitea:tidewater/payout-service#142".into(),
+                thread: "4088".into(),
+                resolved: true,
+            },
+            WriteOp::RequestReviewers {
+                entity: "gitea:tidewater/payout-service#142".into(),
+                reviewers: vec!["olu".into(), "kai".into()],
+            },
         ];
         for op in &probes {
             match op {
@@ -2732,7 +2825,10 @@ mod tests {
                 | WriteOp::EditPullRequest { .. }
                 | WriteOp::UpdatePullRequestBranch { .. }
                 | WriteOp::CommitFile { .. }
-                | WriteOp::SourceAction { .. } => {}
+                | WriteOp::SourceAction { .. }
+                | WriteOp::ReplyToThread { .. }
+                | WriteOp::ResolveThread { .. }
+                | WriteOp::RequestReviewers { .. } => {}
             }
         }
         probes
@@ -3207,7 +3303,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 23, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 26, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also

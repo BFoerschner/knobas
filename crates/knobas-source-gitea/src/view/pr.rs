@@ -18,6 +18,7 @@ use crate::source::GiteaSource;
 mod label;
 mod land;
 mod maintain;
+mod request;
 mod review;
 mod threads;
 
@@ -53,7 +54,9 @@ pub(super) async fn draw(
             // landing holds against the base's required checks (#721).
             // And the repository's labels and its organisation's, which *Add
             // label…* offers (#1194, #1235).
-            let (reviews, commits, comments, viewer, landing, statuses, labels) = tokio::try_join!(
+            // And who a review can be requested from (#2303), for
+            // *Request…*.
+            let (reviews, commits, comments, viewer, landing, statuses, labels, candidates) = tokio::try_join!(
                 at.reviews(),
                 at.commits(Some(&pull)),
                 at.comments(),
@@ -61,6 +64,7 @@ pub(super) async fn draw(
                 at.landing(&pull),
                 at.statuses(&pull),
                 at.labels(),
+                at.candidates(&pull),
             )?;
             let landing = landing.with_statuses(statuses.as_ref());
             let checks = statuses.as_ref().and_then(super::checks::block_of);
@@ -71,11 +75,18 @@ pub(super) async fn draw(
             actions.extend(maintain::actions(&pull));
             actions.push(label::action(&pull, at.owner, &labels));
             actions.extend(land::actions(&pull, &reviews, &landing));
+            // Drawn in the Reviewers panel, not the toolbar (#2303).
+            actions.extend(request::action(
+                &pull,
+                viewer.as_deref(),
+                &candidates,
+                &pull.requested(),
+            ));
             vec![
                 overview(&pull, &reviews, &landing, checks),
                 files_stub(&pull),
                 commits,
-                conversation(&reviews, &comments),
+                conversation(&reviews, &comments, &at.line_comments(&reviews).await),
             ]
         }
         Some(OVERVIEW) => {
@@ -90,7 +101,8 @@ pub(super) async fn draw(
         Some(COMMITS) => vec![at.commits(None).await?],
         Some(CONVERSATION) => {
             let (reviews, comments) = tokio::try_join!(at.reviews(), at.comments())?;
-            vec![conversation(&reviews, &comments)]
+            let said = at.line_comments(&reviews).await;
+            vec![conversation(&reviews, &comments, &said)]
         }
         Some(other) => {
             return Err(SourceError::protocol(format!(
@@ -138,17 +150,52 @@ impl PullView<'_> {
             .collect())
     }
 
+    /// Each review's line comments, by review id, for *Conversation* (#2277):
+    /// a reply to a thread is a review of one line comment, and it is said
+    /// there as Gitea's own page says it. Only the reviews Gitea counts any
+    /// for are asked, all at once. A failed read quotes nothing: it costs the
+    /// quotes, never the pull request's page (the Files tab still draws the
+    /// threads, or says why it cannot).
+    async fn line_comments(&self, reviews: &[Review]) -> Vec<(u64, Vec<String>)> {
+        let commented = threads::with_comments(reviews);
+        let reads = commented
+            .iter()
+            .map(|&(id, _)| {
+                self.source
+                    .client
+                    .pull_review_comments(self.owner, self.repo, self.number, id)
+            })
+            .collect();
+        let Ok(answers) = threads::all(reads).await else {
+            return Vec::new();
+        };
+        commented
+            .iter()
+            .zip(answers)
+            .map(|(&(id, review), raw)| {
+                (
+                    id,
+                    threads::written(review, raw)
+                        .iter()
+                        .map(threads::quoted)
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
     /// The diff, its reviews' line comments on their lines, and whether the
     /// reader may add more (#709): the pull request's state and its reviews
     /// are read beside the diff, then each review that has line comments, all
     /// at once.
     async fn files(&self) -> Result<ViewSection, SourceError> {
-        let (pull, text, reviews) = tokio::try_join!(
+        let (pull, text, reviews, resolves) = tokio::try_join!(
             self.pull(),
             self.source
                 .client
                 .pull_diff(self.owner, self.repo, self.number),
             self.reviews(),
+            async { Ok(self.source.resolves().await) },
         )?;
         let (mut files, truncated) = knobas_source::diff::parse_view(&text);
         let commented = threads::with_comments(&reviews);
@@ -176,7 +223,7 @@ impl PullView<'_> {
             blocks: vec![Block::Diff {
                 files,
                 truncated,
-                commentable: review::commenting(&pull),
+                commentable: review::commenting(&pull, resolves),
                 gone,
             }],
         })
@@ -284,6 +331,21 @@ impl PullView<'_> {
         Ok(label::read(self.source, self.owner, self.repo).await)
     }
 
+    /// Who a review of `pull` can be requested from (#2303): asked only on
+    /// an open pull request, and a failed read is nobody, which costs
+    /// *Request…* and never the view.
+    async fn candidates(&self, pull: &Pull) -> Result<Vec<UserRef>, SourceError> {
+        if !pull.is_open() {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .source
+            .client
+            .repo_reviewers(self.owner, self.repo)
+            .await
+            .unwrap_or_default())
+    }
+
     /// The login the token belongs to, or `None` where Gitea would not say
     /// ([`GiteaSource::viewer`], read once per token and server).
     async fn viewer(&self) -> Result<Option<String>, SourceError> {
@@ -304,7 +366,11 @@ impl PullView<'_> {
 /// Comments the token may not read (`Err`, its reason) open the tab on a line
 /// saying so, and the reviews, which are the pull request's own read, follow
 /// (#2042).
-fn conversation(reviews: &[Review], comments: &Result<Vec<PullComment>, String>) -> ViewSection {
+fn conversation(
+    reviews: &[Review],
+    comments: &Result<Vec<PullComment>, String>,
+    line_comments: &[(u64, Vec<String>)],
+) -> ViewSection {
     let (unread, comments) = match comments {
         Ok(comments) => (None, comments.as_slice()),
         Err(reason) => (Some(reason), &[][..]),
@@ -313,11 +379,17 @@ fn conversation(reviews: &[Review], comments: &Result<Vec<PullComment>, String>)
         .iter()
         .filter_map(|review| {
             let verdict = review_verdict(review)?;
+            let lines = review
+                .id
+                .and_then(|id| line_comments.iter().find(|(r, _)| *r == id))
+                .map(|(_, lines)| lines.as_slice())
+                .unwrap_or_default();
             Some(Said {
                 user: review.user.as_ref(),
                 at: review.submitted_at.as_deref(),
                 verdict: Some(verdict),
                 body: review.body.as_deref(),
+                lines,
             })
         })
         .chain(comments.iter().map(|comment| Said {
@@ -325,6 +397,7 @@ fn conversation(reviews: &[Review], comments: &Result<Vec<PullComment>, String>)
             at: comment.created_at.as_deref(),
             verdict: None,
             body: comment.body.as_deref(),
+            lines: &[],
         }))
         .collect();
     // Stable: equal instants, and entries with none (last), keep Gitea's
@@ -349,10 +422,16 @@ fn conversation(reviews: &[Review], comments: &Result<Vec<PullComment>, String>)
             });
         }
         blocks.push(Block::Facts { facts });
+        // The review's words, then its line comments, each quoted under
+        // where it was written (#2277): one text, as the message's body.
         let body = entry.body.map(str::trim_end).unwrap_or_default();
-        if !body.trim().is_empty() {
+        let text: Vec<&str> = std::iter::once(body)
+            .filter(|b| !b.trim().is_empty())
+            .chain(entry.lines.iter().map(String::as_str))
+            .collect();
+        if !text.is_empty() {
             blocks.push(Block::Text {
-                text: body.to_owned(),
+                text: text.join("\n\n"),
                 markdown: true,
             });
         }
@@ -372,6 +451,8 @@ struct Said<'a> {
     at: Option<&'a str>,
     verdict: Option<(String, Option<Tone>)>,
     body: Option<&'a str>,
+    /// A review's line comments, quoted ([`threads::quoted`]).
+    lines: &'a [String],
 }
 
 /// What a review says in *Conversation*, and its tone: an approval ok, a
@@ -557,6 +638,25 @@ impl Pull {
         self.base.as_ref().and_then(|b| b.r#ref.as_deref())
     }
 
+    /// Whether the token's account may push to the base repository, as
+    /// Gitea says on the record (`base.repo.permissions.push`).
+    fn may_push(&self) -> bool {
+        self.base
+            .as_ref()
+            .and_then(|b| b.repo.as_ref())
+            .and_then(|r| r.permissions.as_ref())
+            .is_some_and(|p| p.push)
+    }
+
+    /// The logins a review is requested from now (`requested_reviewers`).
+    fn requested(&self) -> Vec<String> {
+        self.requested_reviewers
+            .iter()
+            .flatten()
+            .filter_map(|u| login(Some(u)))
+            .collect()
+    }
+
     /// The head lives in the base's repository, not a fork's.
     fn head_in_base_repo(&self) -> bool {
         let repo = |b: &Option<PullBranch>| {
@@ -609,6 +709,9 @@ struct Pull {
     /// (#1194).
     #[serde(default)]
     labels: Vec<label::Label>,
+    /// Who a review is requested from now (#2303); `null` reads as none.
+    #[serde(default)]
+    requested_reviewers: Option<Vec<UserRef>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -627,6 +730,16 @@ struct PullBranch {
 struct PullRepo {
     #[serde(default)]
     full_name: Option<String>,
+    /// What the token's account may do there (#2303).
+    #[serde(default)]
+    permissions: Option<RepoPermissions>,
+}
+
+/// Gitea's `Permission` on a repository record.
+#[derive(Debug, serde::Deserialize)]
+struct RepoPermissions {
+    #[serde(default)]
+    push: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]

@@ -96,3 +96,47 @@ test("a review settles only what it sent as sent: one edited since stays, with i
   drafts.settle(PR, sent);
   expect(drafts.of(PR).map((d) => d.body)).toEqual(["second words", "written meanwhile"]);
 });
+
+test("#2276: two comments and the review's words survive a restart, and submitting clears them", () => {
+  const storage = memoryStorage();
+  const before = createPendingComments(() => storage);
+  before.seen(PR, "c90d11");
+  before.add(PR, { path: "src/retry.rs", side: "new", line: 27, body: "Is a sub-second retry intended?" });
+  before.add(PR, { path: "src/retry.rs", side: "old", line: 28, body: "Why 3?" });
+  before.setBody(PR, "Close, two questions.");
+
+  // The app again: a new store over the same storage.
+  const after = createPendingComments(() => storage);
+  expect(after.of(PR).map((d) => d.body)).toEqual(["Is a sub-second retry intended?", "Why 3?"]);
+  expect(after.body(PR)).toBe("Close, two questions.");
+
+  // Submitted: what it sent goes, the words with it.
+  after.settle(PR, after.of(PR), "Close, two questions.");
+  expect(after.of(PR)).toEqual([]);
+  expect(after.body(PR)).toBe("");
+  const again = createPendingComments(() => storage);
+  expect([again.of(PR), again.body(PR)]).toEqual([[], ""]);
+});
+
+test("#2276: comments written on an earlier head are kept apart, and are not the review's", () => {
+  const drafts = createPendingComments(() => null);
+  drafts.seen(PR, "c90d11");
+  drafts.add(PR, { path: "a", side: "new", line: 1, body: "on the first head" });
+  drafts.seen(PR, "c90d11");
+  expect(drafts.of(PR)).toHaveLength(1);
+
+  // The head moved: the comment is no longer on the lines drawn.
+  drafts.seen(PR, "e41a07");
+  expect(drafts.of(PR)).toEqual([]);
+  expect(drafts.stale(PR).map((d) => [d.body, d.head])).toEqual([["on the first head", "c90d11"]]);
+  drafts.add(PR, { path: "a", side: "new", line: 2, body: "on the second" });
+  expect(drafts.of(PR).map((d) => d.body)).toEqual(["on the second"]);
+});
+
+test("#2276: words edited after the review was sent stay as the next review's", () => {
+  const drafts = createPendingComments(() => null);
+  drafts.setBody(PR, "sent");
+  drafts.setBody(PR, "changed since");
+  drafts.settle(PR, [], "sent");
+  expect(drafts.body(PR)).toBe("changed since");
+});

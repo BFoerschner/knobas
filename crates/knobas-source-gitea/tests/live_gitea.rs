@@ -3765,7 +3765,9 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
             "Edit…",
             "Close",
             "Add label…",
-            "Merge…"
+            "Merge…",
+            // The author may ask for a review (#2303).
+            "Request…"
         ],
         "{:#?}",
         own_view.actions
@@ -7064,6 +7066,262 @@ async fn a_token_that_may_not_read_issues_reads_every_view_but_the_discussion() 
     assert!(
         of_kind(&sink.0, "ticket").is_empty(),
         "the issue listing is refused too, and skipped"
+    );
+}
+
+// -- replies, resolve and review requests (#2277, #2303) ---------------------
+
+/// Spec #2234 step 6d, against the real server: on a pull request opened
+/// here, a line comment's thread takes a reply through the adapter's
+/// `reply_to_thread` -- the call the write queue's flush makes -- which the
+/// *Files* tab read again draws in the thread and *Conversation* quotes.
+/// Gitea resolves and reopens the thread, and a fresh read says so; Forgejo
+/// 17 offers no resolve and refuses one sent anyway with 405. *Request…*
+/// asks a seeded user, whom Gitea then lists in `requested_reviewers`, and
+/// the view names as requested.
+///
+/// Never a seeded pull request: it is opened on a `knobas-` branch of its
+/// own, and [`Litter`] deletes both, with its reviews, whether this passes
+/// or panics.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
+    use knobas_source::view::{Block, FieldKind, LineThread};
+    use knobas_source::{ReviewComment, ReviewSide, ReviewVerdict, WriteOp};
+
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let branch = format!("knobas-threads-{stamp}");
+    litter.branch_off_main(&branch).await;
+    // "# payout-service\nreviewed from knobas\nRust\n"
+    rewrite_readme(
+        &http,
+        &env,
+        &branch,
+        "IyBwYXlvdXQtc2VydmljZQpyZXZpZXdlZCBmcm9tIGtub2JhcwpSdXN0Cg==",
+    )
+    .await;
+    let number = litter
+        .open_pull_as(
+            "jonas.becker",
+            &branch,
+            &format!("knobas thread check {stamp}"),
+        )
+        .await;
+    let id = format!("gitea:{}#{number}", env.full_name());
+    let version: serde_json::Value = http
+        .get(format!("{}/api/v1/version", env.url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let forgejo = version["version"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("+gitea-");
+    let files = || async {
+        let view = source.view(&id, Some("files")).await.unwrap().unwrap();
+        let Some(Block::Diff {
+            files, commentable, ..
+        }) = view.sections[0].blocks.first().cloned()
+        else {
+            panic!("the files tab is a diff: {view:#?}");
+        };
+        let readme = files.into_iter().find(|f| f.path == "README.md").unwrap();
+        (
+            readme,
+            commentable.expect("an open pull request's diff takes comments"),
+        )
+    };
+    let (readme, commentable) = files().await;
+    assert_eq!(commentable.reply.as_deref(), Some("reply_to_thread"));
+    assert_eq!(
+        commentable.resolve.as_deref(),
+        (!forgejo).then_some("resolve_thread"),
+        "resolve is offered on Gitea and not on Forgejo ({version})"
+    );
+    assert!(
+        commentable.head.is_some(),
+        "the head the comments are kept by"
+    );
+    assert!(
+        readme.blob.is_some(),
+        "the blob Viewed is kept by: {readme:#?}"
+    );
+    let added = readme
+        .hunks
+        .iter()
+        .flat_map(|h| &h.lines)
+        .find_map(|l| {
+            (l.kind == knobas_source::view::DiffLineKind::Add)
+                .then_some(l.new)
+                .flatten()
+        })
+        .expect("an added line");
+
+    // 1. A thread on the added line.
+    let opened = format!("say what reviewed it, {stamp}");
+    source
+        .write(WriteOp::SubmitReview {
+            entity: id.clone(),
+            verdict: ReviewVerdict::Comment,
+            body: String::new(),
+            comments: vec![ReviewComment {
+                path: "README.md".into(),
+                line: u64::from(added),
+                side: ReviewSide::New,
+                body: opened.clone(),
+            }],
+        })
+        .await
+        .expect("Gitea takes a review of a line comment");
+    let thread = |file: &knobas_source::view::DiffFile| -> LineThread {
+        file.threads
+            .iter()
+            .find(|t| t.line == added && t.side == ReviewSide::New)
+            .cloned()
+            .unwrap_or_else(|| panic!("no thread on line {added}: {file:#?}"))
+    };
+    let (readme, _) = files().await;
+    let first = thread(&readme);
+    let thread_id = first.id.clone().expect("Gitea's comment id");
+    assert!(first.replies, "{first:#?}");
+    assert_eq!(first.resolved_by, None);
+
+    // 2. A reply joins the thread, and Conversation says it.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let reply = format!("the knobas reply, {stamp}");
+    source
+        .write(WriteOp::ReplyToThread {
+            entity: id.clone(),
+            thread: thread_id.clone(),
+            comment: ReviewComment {
+                path: "README.md".into(),
+                line: u64::from(added),
+                side: ReviewSide::New,
+                body: reply.clone(),
+            },
+        })
+        .await
+        .expect("Gitea takes the reply");
+    let (readme, _) = files().await;
+    let answered = thread(&readme);
+    let bodies: Vec<&str> = answered.comments.iter().map(|c| c.body.as_str()).collect();
+    assert_eq!(bodies, [opened.as_str(), reply.as_str()], "{answered:#?}");
+    assert_eq!(
+        answered.id.as_deref(),
+        Some(thread_id.as_str()),
+        "the thread keeps its id"
+    );
+    let whole = source.view(&id, None).await.unwrap().unwrap();
+    let conversation = said(&whole, "conversation");
+    assert!(
+        conversation
+            .iter()
+            .any(|l| l.contains(&format!("> {reply}"))),
+        "{conversation:#?}"
+    );
+
+    // 3. Resolve: Gitea's, read back by a fresh read; Forgejo refuses it.
+    let resolve = |resolved| WriteOp::ResolveThread {
+        entity: id.clone(),
+        thread: thread_id.clone(),
+        resolved,
+    };
+    if forgejo {
+        let error = source
+            .write(resolve(true))
+            .await
+            .expect_err("Forgejo cannot resolve");
+        assert_eq!(error.status(), Some(405), "{error:?}");
+    } else {
+        source.write(resolve(true)).await.expect("Gitea resolves");
+        let (readme, _) = files().await;
+        assert_eq!(thread(&readme).resolved_by, Some(env.login().await));
+        source.write(resolve(false)).await.expect("Gitea reopens");
+        let (readme, _) = files().await;
+        assert_eq!(thread(&readme).resolved_by, None);
+    }
+
+    // 4. Request…: offered to the token (an admin), and Gitea lists who it asked.
+    let request = whole
+        .actions
+        .iter()
+        .find(|a| a.write_op == "request_reviewers")
+        .unwrap_or_else(|| panic!("no Request… in {:#?}", whole.actions));
+    let FieldKind::Choice { options } = &request.fields[0].kind else {
+        panic!("{request:#?}");
+    };
+    // Never the reader: Forgejo's `/reviewers` lists the token's account.
+    let me = env.login().await;
+    assert!(
+        options.iter().all(|o| o.value != me),
+        "{me} is offered to themself: {options:#?}"
+    );
+    let who = options
+        .iter()
+        .map(|o| o.value.clone())
+        .find(|w| w != "jonas.becker")
+        .unwrap_or_else(|| panic!("nobody to ask: {options:#?}"));
+    source
+        .write(WriteOp::RequestReviewers {
+            entity: id.clone(),
+            reviewers: vec![who.clone()],
+        })
+        .await
+        .expect("Gitea takes the request");
+    let pull: serde_json::Value = http
+        .get(format!(
+            "{}/api/v1/repos/{}/pulls/{number}",
+            env.url,
+            env.full_name()
+        ))
+        .header("Authorization", format!("token {}", env.token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let asked: Vec<&str> = pull["requested_reviewers"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|u| u["login"].as_str()).collect())
+        .unwrap_or_default();
+    assert!(asked.contains(&who.as_str()), "{asked:?} {pull}");
+    let after = source.view(&id, None).await.unwrap().unwrap();
+    assert!(
+        said(&after, "overview").contains(&format!("Review=requested from {who}")),
+        "{:#?}",
+        said(&after, "overview")
+    );
+    // An unknown login is refused with Gitea's sentence.
+    let error = source
+        .write(WriteOp::RequestReviewers {
+            entity: id.clone(),
+            reviewers: vec![format!("nobody-{stamp}")],
+        })
+        .await
+        .expect_err("an unknown reviewer is refused");
+    println!("an unknown reviewer: {error:?}");
+    assert!(
+        matches!(error, knobas_source::SourceError::Protocol { .. }),
+        "{error:?}"
+    );
+    println!(
+        "thread {thread_id} answered{} and {who} asked on #{number}",
+        if forgejo {
+            ""
+        } else {
+            ", resolved and reopened"
+        }
     );
 }
 

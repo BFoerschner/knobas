@@ -42,6 +42,21 @@ fn viewers() -> &'static Mutex<HashMap<u64, String>> {
     VIEWERS.get_or_init(Default::default)
 }
 
+/// Whether each server resolves review threads, by
+/// [`GiteaSource::viewer_key`], for the life of the process (#2277).
+fn resolvers() -> &'static Mutex<HashMap<u64, bool>> {
+    static RESOLVERS: OnceLock<Mutex<HashMap<u64, bool>>> = OnceLock::new();
+    RESOLVERS.get_or_init(Default::default)
+}
+
+/// Whether the server answering `version` resolves review threads through
+/// its API (#2277, the Gitea fact note of 2026-10-30): Gitea 1.27.3 does
+/// (`POST …/pulls/comments/{id}/resolve`), Forgejo 17 has no such route and
+/// answers 405. Forgejo says what it is in its version (`17.0.0+gitea-1.22.0`).
+pub(crate) fn version_resolves(version: &str) -> bool {
+    !version.contains("+gitea-")
+}
+
 /// Build an adapter for one configured source (ruling P6).
 ///
 /// Everything that can be wrong with the configuration is wrong *here* -- an
@@ -113,6 +128,30 @@ impl GiteaSource {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(self.viewer_key, login.clone());
         Some(login)
+    }
+
+    /// Whether this server resolves review threads through its API (#2277):
+    /// not Forgejo ([`version_resolves`]). Read once per token and server
+    /// for the life of the process, as [`viewer`](Self::viewer) is. A failed
+    /// read is not cached and offers no resolve: a source that cannot is
+    /// never offered it, and one that can is offered it on the next read.
+    pub(crate) async fn resolves(&self) -> bool {
+        if let Some(known) = resolvers()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&self.viewer_key)
+        {
+            return *known;
+        }
+        let Ok(Some(version)) = self.client.version().await else {
+            return false;
+        };
+        let resolves = version_resolves(&version);
+        resolvers()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(self.viewer_key, resolves);
+        resolves
     }
 
     /// The key half of an entity id this source owns, parsed into Gitea's own
@@ -387,6 +426,27 @@ impl Source for GiteaSource {
                 let (owner, repo, index) = self.pull_of(entity)?;
                 write::submit_review(&self.client, &owner, &repo, index, *verdict, body, comments)
                     .await?;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::ReplyToThread {
+                entity, comment, ..
+            } => {
+                let (owner, repo, index) = self.pull_of(entity)?;
+                write::reply_to_thread(&self.client, &owner, &repo, index, comment).await?;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::ResolveThread {
+                entity,
+                thread,
+                resolved,
+            } => {
+                let (owner, repo, _) = self.pull_of(entity)?;
+                write::resolve_thread(&self.client, &owner, &repo, thread, *resolved).await?;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::RequestReviewers { entity, reviewers } => {
+                let (owner, repo, index) = self.pull_of(entity)?;
+                write::request_reviewers(&self.client, &owner, &repo, index, reviewers).await?;
                 Ok(WriteReceipt::none())
             }
             WriteOp::DeleteBranch { entity } => {

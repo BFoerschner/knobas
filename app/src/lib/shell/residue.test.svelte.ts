@@ -358,6 +358,7 @@ const TfPdf = (await import("../tf/render/TfPdf.svelte")).default;
 const TfPdfDiff = (await import("../tf/render/TfPdfDiff.svelte")).default;
 const TfBytesImage = (await import("../tf/render/TfBytesImage.svelte")).default;
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
+const TfFilePipeline = (await import("../tf/render/TfFilePipeline.svelte")).default;
 const TfCheckoutsSection = (await import("../tf/settings/TfCheckoutsSection.svelte")).default;
 const { createApps } = await import("../tf/openin/apps.svelte");
 const { createClones } = await import("../tf/openin/clones.svelte");
@@ -1397,6 +1398,32 @@ const CASES: Case[] = [
       };
     },
     exercise: (target) => {
+      target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
+    },
+  },
+  {
+    /** The pipeline bar (#2264): *Add step* registers a layer and a window click listener; a typed filter a timer. */
+    name: "TfFilePipeline",
+    source: "lib/tf/render/TfFilePipeline.svelte",
+    open: (target) => ({
+      app: mount(TfFilePipeline, {
+        target,
+        props: {
+          steps: [{ step: "gunzip" }, { step: "jq", filter: "." }],
+          path: "events.json.gz",
+          shownAs: "Source",
+          onchange: () => {},
+          onreset: () => {},
+          layers: createLayers(),
+        },
+      }),
+    }),
+    exercise: (target) => {
+      const filter = target.querySelector<HTMLInputElement>("input[aria-label='jq filter']");
+      if (filter !== null) {
+        filter.value = ".a";
+        filter.dispatchEvent(new Event("input", { bubbles: true }));
+      }
       target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
     },
   },

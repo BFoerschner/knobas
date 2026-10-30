@@ -19,6 +19,22 @@ impl GiteaClient {
         self.get_json(&pulls_path(owner, repo, number)?, &[]).await
     }
 
+    /// `GET /repos/{o}/{r}/reviewers` -- the users a review can be requested
+    /// from in the repository (#2303), as Gitea and Forgejo both answer it.
+    pub(crate) async fn repo_reviewers(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<crate::model::UserRef>, SourceError> {
+        let users: Option<Vec<crate::model::UserRef>> = self
+            .get_json(
+                &format!("/repos/{}/{}/reviewers", segment(owner)?, segment(repo)?),
+                &[],
+            )
+            .await?;
+        Ok(users.unwrap_or_default())
+    }
+
     /// `GET /repos/{o}/{r}/pulls/{n}/reviews` -- every review, oldest first,
     /// a review request among them (`REQUEST_REVIEW`).
     pub(crate) async fn pull_reviews(

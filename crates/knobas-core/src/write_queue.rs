@@ -422,7 +422,10 @@ pub async fn target_of(pool: &PgPool, entity: &EntityRef) -> Result<Option<Targe
 /// argued here.
 ///
 /// **The declared state** ([`Projection::DeclaredState`]) -- `"comment"`,
-/// `"approve"` and `"submit_review"` (the deputy's ruling on #752, for Björn). These add to
+/// `"approve"` and `"submit_review"` (the deputy's ruling on #752, for Björn), and
+/// `"reply_to_thread"`, `"resolve_thread"` and `"request_reviewers"` for the
+/// same reason (#2277, #2303; the last two set a state, so a resend is
+/// harmless). These add to
 /// a discussion rather than overwrite anything in it, and the reader works at
 /// their own speed: a second comment typed right after the first must not be
 /// held because the first one's re-sync moved the item's text. So what holds
