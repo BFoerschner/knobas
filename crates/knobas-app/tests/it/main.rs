@@ -58,6 +58,7 @@ mod link_sets_ipc;
 mod monitor_on_its_way_ipc;
 mod notes_export_ipc;
 mod notes_search_ipc;
+mod pages_kept_open;
 mod pr_viewed_ipc;
 mod probe_snapshot;
 mod project_census;
