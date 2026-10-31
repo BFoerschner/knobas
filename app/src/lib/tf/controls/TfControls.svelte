@@ -71,7 +71,7 @@
         <div class="tf-trail">
           <button type="button" class="tf-btn tf-sm">Open</button>
           <button type="button" class="tf-btn tf-sm tf-danger">Delete</button>
-          <button type="button" class="tf-iconbtn" aria-label="Toggle colour theme">
+          <button type="button" class="tf-iconbtn tf-sm" aria-label="Toggle colour theme">
             <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
               <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 12.5v-11a5.5 5.5 0 0 1 0 11z" />
             </svg>
