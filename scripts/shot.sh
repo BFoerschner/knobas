@@ -78,7 +78,10 @@ for route in "$@"; do
   # text, so that left `&?fake-…` in the query and every switch went unread (#1396).
   case $route in \?*'#'*) extra=${route%%#*}; extra="&${extra#\?}"; path=${route#*#} ;; esac
   case $path in '#/'*) path=${path#'#/'} ;; '#'*|/*) path=${path#?} ;; esac
-  file="$out/$(printf '%s' "$path" | tr '/?&=' '____' | sed 's/^$/root/').png"
+  # Not `sed 's/^$/root/'`: sed reads no line from an empty name, so the root
+  # route saved as `.png` (#2339).
+  name=$(printf '%s' "$path" | tr '/?&=' '____')
+  file="$out/${name:-root}.png"
   case $route in
     *' > '*|*' + '*)
       name=$(printf '%s' "$route" | sed 's/#\/\{0,1\}//g; s/ [>+] /--/g; s/click://g' | tr -c 'A-Za-z0-9._\n-' '_')

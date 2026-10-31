@@ -30,6 +30,13 @@ b=$(SHOT_DRY_RUN=1 "$shot" 9 "$out" "${long}2" | sed 's/.* file=//')
 [ "$a" != "$b" ] || fail "two long routes share one image: $a"
 [ "$(basename "$a" .png | wc -c)" -le 121 ] || fail "a cut name is longer than 120: $a"
 
+# The root route, however written, saves as root.png, not `.png` (#2339): sed
+# reads no line from an empty name, so its `s/^$/root/` never ran.
+for r in '#/' '#' '/'; do
+    line=$(SHOT_DRY_RUN=1 "$shot" 9 "$out" "$r")
+    case $line in *"file=$out/root.png") ;; *) fail "root route '$r' file: $line" ;; esac
+done
+
 elsewhere=$(SHOT_DRY_RUN=1 env -C / "$checkout/scripts/shot.sh" 9 "$out" '#/time')
 case $elsewhere in *"root=$checkout "*) ;; *) fail "run from /, the root is not the script's checkout: $elsewhere" ;; esac
 
