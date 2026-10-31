@@ -1,5 +1,5 @@
 # The SHA-384 sqlx records for each migration (`_sqlx_migrations.checksum`),
-# one line per file: version, checksum, file name. `tests/migration_checksums.rs`
+# one line per file: version, checksum, file name. The test in `src/migrate.rs`
 # compares every file in `migrations/` against this list.
 #
 # Append only. A migration, comments included, is frozen once released: sqlx
@@ -7,7 +7,7 @@
 # applied it from starting (#2327). Change the schema with a new migration.
 #
 # A new migration gets its line from the test: run
-# `cargo test -p knobas-db --test migration_checksums`; it fails and prints the
+# `cargo test -p knobas-db --lib migrate::`; it fails and prints the
 # line to append here.
 0001 43748d81f8888b057fe4ff3d9a50be35eb0294e60b9a76d9ede98382ce8c79a71c7bc446479a45fcfee9b78c88036caa 0001_init.sql
 0002 21b275d8115506267960b82542addd66f3ae116623d10976a0d648ce37d7eeea5d7d81b53a9bb3e8a93041fc6c1211c3 0002_m1_cockpit.sql
