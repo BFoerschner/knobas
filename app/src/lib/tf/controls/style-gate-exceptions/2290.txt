@@ -1,8 +1,0 @@
-# Style gate allowlist for #2290: Top bar.
-# Read by app/src/lib/tf/controls/style-gate.test.ts (#2281).
-# Each line: `<rule a|b|c> <file under app/src/> <selector or class>  <reason>`,
-# two spaces before the reason. #2290 deletes its lines as it fixes them, and the
-# file once none is left. Never add a line here for new work: follow
-# the design-system spec's Controls section instead.
-
-# No violation the gate can see was present when it landed (#2281).
