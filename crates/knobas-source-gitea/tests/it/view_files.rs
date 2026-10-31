@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::support::{TOKEN, instance};
+use crate::support::{TOKEN, instance, write_probe};
 
 const REPO: &str = "/api/v1/repos/tidewater/payout-service";
 const ENTITY: &str = "gitea:tidewater/payout-service";
@@ -751,6 +751,7 @@ async fn a_commit_onto_a_protected_branch_is_refused_with_the_flushs_reason() {
     ] {
         let server = gitea().await;
         branch_main(&server, protected, user_can_push).await;
+        may_write(&server).await;
         let ask = knobas_source::grants::WriteAsk {
             entity: ENTITY.to_owned(),
             op: "commit_file".to_owned(),
@@ -790,6 +791,7 @@ async fn a_new_branch_is_refused_in_a_mirror_and_an_empty_repository() {
         (false, false, None),
     ] {
         let server = gitea().await;
+        may_write(&server).await;
         let mut held = record(empty);
         held["mirror"] = json!(mirror);
         Mock::given(method("GET"))
@@ -814,6 +816,70 @@ async fn a_new_branch_is_refused_in_a_mirror_and_an_empty_repository() {
             "mirror {mirror}, empty {empty}"
         );
     }
+}
+
+/// The token may write, as `refused_writes` asks beside the record.
+async fn may_write(server: &MockServer) {
+    write_probe(
+        server,
+        format!("{REPO}/branches"),
+        422,
+        "[BranchName]: Required",
+    )
+    .await;
+}
+
+/// **A record or branch read that fails is no verdict, and no verdict is
+/// an error** (#2306), never "nothing refused": the app keeps the answer
+/// and reads it again behind, so a failure read as taken would stand, or
+/// replace a kept refusal.
+#[tokio::test]
+async fn a_failed_record_or_branch_read_fails_the_ask() {
+    for (op, failing) in [
+        ("create_branch", REPO.to_owned()),
+        ("commit_file", REPO.to_owned()),
+        ("commit_file", format!("{REPO}/branches/main")),
+    ] {
+        let server = gitea().await;
+        may_write(&server).await;
+        Mock::given(method("GET"))
+            .and(path(failing.as_str()))
+            .respond_with(ResponseTemplate::new(500).set_body_json(json!({"message": "boom"})))
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        let ask = knobas_source::grants::WriteAsk {
+            entity: ENTITY.to_owned(),
+            op: op.to_owned(),
+            field: None,
+        };
+        let answer = source(&server)
+            .refused_writes(std::slice::from_ref(&ask))
+            .await;
+        assert!(answer.is_err(), "{op} with {failing} failing: {answer:?}");
+    }
+}
+
+/// An empty repository has no branch to read for *Commit change…*: the
+/// toolbar's asks are answered without one (its default branch would 404),
+/// and only *New branch…* is refused.
+#[tokio::test]
+async fn an_empty_repository_reads_no_branch_for_a_commit() {
+    let server = MockServer::builder().start().await;
+    Mock::given(method("GET"))
+        .and(path(REPO))
+        .respond_with(ResponseTemplate::new(200).set_body_json(record(true)))
+        .mount(&server)
+        .await;
+    may_write(&server).await;
+    let asks = ["create_branch", "commit_file"].map(|op| knobas_source::grants::WriteAsk {
+        entity: ENTITY.to_owned(),
+        op: op.to_owned(),
+        field: None,
+    });
+    let answer = source(&server).refused_writes(&asks).await.unwrap();
+    let reasons: Vec<_> = answer.iter().map(|r| (r.op.as_str(), r.reason.as_str())).collect();
+    assert_eq!(reasons, [("create_branch", "The repository is empty")]);
 }
 
 /// A directory takes no commit, and reads no branch for one once it knows

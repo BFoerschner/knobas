@@ -190,10 +190,9 @@ async fn each_repository_is_probed_for_the_categories_it_is_asked_about() {
 }
 
 /// What this source does not answer is not asked about: another source's
-/// entity, an id it did not issue, and an op it does not declare. A probe
-/// that meets anything but the two measured answers is no verdict.
+/// entity, an id it did not issue, and an op it does not declare.
 #[tokio::test]
-async fn what_this_source_cannot_answer_is_no_verdict() {
+async fn what_this_source_cannot_answer_is_not_asked() {
     let server = MockServer::builder().start().await;
     let refused = source(&server)
         .refused_writes(&[
@@ -209,11 +208,37 @@ async fn what_this_source_cannot_answer_is_no_verdict() {
         Vec::<String>::new(),
         "nothing is probed"
     );
+}
 
-    // Unmounted, so the probe meets wiremock's 404.
-    let refused = source(&server)
-        .refused_writes(&[ask(issue(), "comment")])
-        .await
-        .unwrap();
-    assert_eq!(refused, []);
+/// **A probe that meets anything but the two measured answers is no
+/// verdict, and no verdict is an error, never "taken"** (#2306): the app
+/// keeps a grants answer and asks it again behind, so a failure answered as
+/// taken would be kept, or replace a kept refusal. A 5xx, a 404 (wiremock's
+/// unmounted route) and a 401 each fail the call.
+#[tokio::test]
+async fn a_probe_without_a_verdict_fails_the_ask() {
+    for (status, message) in [
+        (500, "internal error"),
+        (404, "not found"),
+        (401, "token is required"),
+    ] {
+        let server = MockServer::builder().start().await;
+        write_probe(&server, format!("{REPO}/issues"), status, message).await;
+        let answer = source(&server)
+            .refused_writes(&[ask(issue(), "comment")])
+            .await;
+        assert!(answer.is_err(), "{status}: {answer:?}");
+    }
+}
+
+/// One category without a verdict fails the whole ask, though the other
+/// category answered: `refused_writes` cannot say "taken" for one ask and
+/// "unknown" for another, and an ask left out of an `Ok` reads as taken.
+#[tokio::test]
+async fn one_probe_without_a_verdict_fails_the_asks_beside_it() {
+    let server = MockServer::builder().start().await;
+    write_probe(&server, format!("{REPO}/issues"), 403, SCOPE_ISSUE).await;
+    write_probe(&server, format!("{REPO}/branches"), 503, "maintenance").await;
+    let answer = source(&server).refused_writes(&asks()).await;
+    assert!(answer.is_err(), "{answer:?}");
 }

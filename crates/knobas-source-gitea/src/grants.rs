@@ -48,8 +48,11 @@
 //! only those are disabled for it.
 //!
 //! Anything else the probe meets -- a 401, a 5xx, a timeout, an archived
-//! repository's 423 -- is no verdict, and the writes stay as drawn: the probe
-//! narrows what is offered and never fails a view or a surface.
+//! repository's 423 -- is no verdict. A view draws its writes as before then
+//! (the probe narrows what a view offers and never fails it). Asked by
+//! [`Source::refused_writes`], no verdict is an error and never "nothing
+//! refused" (#2306): the app keeps that answer and asks it again behind, so
+//! a failure answered as taken would be kept, or replace a kept refusal.
 //!
 //! [`Source::refused_writes`]: knobas_source::Source::refused_writes
 
@@ -133,7 +136,8 @@ enum Refusal {
 }
 
 /// What the probes learned about one repository: a refusal per category, or
-/// none where the category was not asked or the probe gave no verdict.
+/// none where the category was not asked or the probe gave no verdict
+/// ([`probe`] says which).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Grants {
     repository: Option<Refusal>,
@@ -166,25 +170,52 @@ impl Grants {
 }
 
 /// Ask Gitea what the token may write in `owner/repo`, probing only the
-/// categories `ops` fall in, side by side.
+/// categories `ops` fall in, side by side. A view's narrowing: a probe
+/// without a verdict refuses nothing ([`verdicts`] says it instead).
 pub(crate) async fn probe(source: &GiteaSource, owner: &str, repo: &str, ops: &[&str]) -> Grants {
+    let (repository, issue) = verdicts(source, owner, repo, ops).await;
+    Grants {
+        repository: repository.ok().flatten(),
+        issue: issue.ok().flatten(),
+    }
+}
+
+/// [`probe`], keeping a probe without a verdict as its error.
+async fn verdicts(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    ops: &[&str],
+) -> (Verdict, Verdict) {
     let wants = |category| ops.iter().any(|op| self::category(op) == category);
     let ask = |category| async move {
         if wants(category) {
             probe_one(source, owner, repo, category).await
         } else {
-            None
+            Ok(None)
         }
     };
-    let (repository, issue) = tokio::join!(ask(Category::Repository), ask(Category::Issue));
-    Grants { repository, issue }
+    tokio::join!(ask(Category::Repository), ask(Category::Issue))
 }
+
+/// One category's verdict: refused, `Ok(None)` for taken (or not asked), or
+/// the failure that gave none.
+type Verdict = Result<Option<Refusal>, SourceError>;
 
 /// The asks among `asks` the token cannot make (#2054): each repository the
 /// asks name is probed once, for the categories its asks fall in. An ask of
 /// another source, an id this adapter did not issue and an op it does not
 /// declare are not answered, and send nothing.
-pub(crate) async fn refused(source: &GiteaSource, asks: &[WriteAsk]) -> Vec<RefusedWrite> {
+///
+/// # Errors
+///
+/// A probe without a verdict, or a failed record or branch read, for any
+/// repository asked about (#2306): an answer cannot say "unknown" of one ask
+/// beside the others, and an ask left out of it reads as taken.
+pub(crate) async fn refused(
+    source: &GiteaSource,
+    asks: &[WriteAsk],
+) -> Result<Vec<RefusedWrite>, SourceError> {
     let declared = crate::descriptor_template().write_ops;
     let mut by_repository: Vec<((String, String), Vec<&WriteAsk>)> = Vec::new();
     for ask in asks {
@@ -206,10 +237,15 @@ pub(crate) async fn refused(source: &GiteaSource, asks: &[WriteAsk]) -> Vec<Refu
     let mut answered: Vec<RefusedWrite> = Vec::new();
     for ((owner, repo), repo_asks) in &by_repository {
         let ops: Vec<&str> = repo_asks.iter().map(|a| a.op.as_str()).collect();
-        let (grants, standing) = tokio::join!(
-            probe(source, owner, repo, &ops),
+        let ((repository, issue), standing) = tokio::join!(
+            verdicts(source, owner, repo, &ops),
             standing(source, owner, repo, repo_asks),
         );
+        let grants = Grants {
+            repository: repository?,
+            issue: issue?,
+        };
+        let standing = standing?;
         answered.extend(repo_asks.iter().zip(standing).filter_map(|(ask, held)| {
             grants
                 .refusal(&ask.op)
@@ -217,9 +253,10 @@ pub(crate) async fn refused(source: &GiteaSource, asks: &[WriteAsk]) -> Vec<Refu
                 .map(|why| RefusedWrite::of(ask, why))
         }));
     }
-    asks.iter()
+    Ok(asks
+        .iter()
         .filter_map(|ask| answered.iter().find(|r| r.refuses(ask)).cloned())
-        .collect()
+        .collect())
 }
 
 /// What a repository's record says of a write, beside the token's grants.
@@ -239,13 +276,14 @@ struct Held {
 /// and *Commit change…* onto a protected branch the account may not push to
 /// ([`crate::write::PushGuard`], #985). This is what a file view used to read
 /// beside every file; asked here, the app keeps it with the grants. A read
-/// that fails says nothing, as a probe without a verdict does.
+/// that fails is no verdict, and the error (#2306). An empty repository has
+/// no branch to read: its default branch would answer 404.
 async fn standing(
     source: &GiteaSource,
     owner: &str,
     repo: &str,
     asks: &[&WriteAsk],
-) -> Vec<Option<String>> {
+) -> Result<Vec<Option<String>>, SourceError> {
     let needs_record = asks.iter().any(|ask| {
         ask.op == crate::WRITE_OP_CREATE_BRANCH
             || (ask.op == crate::WRITE_OP_COMMIT_FILE
@@ -255,7 +293,7 @@ async fn standing(
                 ))
     });
     let record: Option<Held> = if needs_record {
-        source.client.repo_as(owner, repo).await.ok()
+        Some(source.client.repo_as(owner, repo).await?)
     } else {
         None
     };
@@ -274,6 +312,7 @@ async fn standing(
                     Ok(crate::keys::GiteaKey::Branch { branch, .. }) => Some(branch),
                     Ok(crate::keys::GiteaKey::Repo { .. }) => record
                         .as_ref()
+                        .filter(|held| !held.empty)
                         .and_then(|held| held.default_branch.clone())
                         .filter(|b| !b.is_empty()),
                     _ => None,
@@ -282,9 +321,8 @@ async fn standing(
                     Some(branch) => source
                         .client
                         .branch_as::<crate::write::PushGuard>(owner, repo, &branch)
-                        .await
-                        .ok()
-                        .and_then(|guard| guard.refusal(&branch)),
+                        .await?
+                        .refusal(&branch),
                     None => None,
                 }
             }
@@ -292,7 +330,7 @@ async fn standing(
         };
         out.push(why);
     }
-    out
+    Ok(out)
 }
 
 /// One probe: the category's write with an empty body (the module docs).
@@ -301,26 +339,31 @@ async fn probe_one(
     owner: &str,
     repo: &str,
     category: Category,
-) -> Option<Refusal> {
-    let owner = crate::client::GiteaClient::path_segment(owner).ok()?;
-    let repo = crate::client::GiteaClient::path_segment(repo).ok()?;
+) -> Verdict {
+    let owner = crate::client::GiteaClient::path_segment(owner)?;
+    let repo = crate::client::GiteaClient::path_segment(repo)?;
     let answer = source
         .client
         .post_once(&category.probe_path(owner, repo), &json!({}))
         .await;
-    refusal_of(category, answer.err().as_ref())
+    match answer {
+        Ok(_) => Ok(None),
+        Err(failure) => refusal_of(category, failure),
+    }
 }
 
-/// What a probe's failure says: the scope refusal ([`is_scope_refusal`]), or
-/// any other 403, which `knobas-http` reads as a refusal carrying Gitea's
-/// sentence.
-fn refusal_of(category: Category, failure: Option<&SourceError>) -> Option<Refusal> {
-    match failure? {
-        scope if is_scope_refusal(scope) => Some(Refusal::Scope),
+/// What a probe's failure says: the scope refusal ([`is_scope_refusal`]),
+/// any other 403 on the branch probe, which `knobas-http` reads as a refusal
+/// carrying Gitea's sentence, or the body's 422, which is taken. Anything
+/// else is no verdict, and comes back as the error.
+fn refusal_of(category: Category, failure: SourceError) -> Verdict {
+    match failure {
+        scope if is_scope_refusal(&scope) => Ok(Some(Refusal::Scope)),
         other if other.status() == Some(403) && category == Category::Repository => {
-            Some(Refusal::Account)
+            Ok(Some(Refusal::Account))
         }
-        _ => None,
+        invalid if invalid.status() == Some(422) => Ok(None),
+        other => Err(other),
     }
 }
 
@@ -328,31 +371,41 @@ fn refusal_of(category: Category, failure: Option<&SourceError>) -> Option<Refus
 mod tests {
     use super::*;
 
+    fn verdict(category: Category, failure: SourceError) -> Option<Option<Refusal>> {
+        refusal_of(category, failure).ok()
+    }
+
     #[test]
     fn a_probe_answer_reads_as_the_measured_table_says() {
-        let scope = SourceError::Unauthorized { status: Some(403) };
-        let account = SourceError::Protocol {
+        let scope = || SourceError::Unauthorized { status: Some(403) };
+        let account = || SourceError::Protocol {
             status: Some(403),
             message: "HTTP 403 Forbidden: user should have a permission to write to a repo".into(),
         };
-        let invalid = SourceError::Protocol {
+        let invalid = || SourceError::Protocol {
             status: Some(422),
             message: "HTTP 422 Unprocessable Entity: [BranchName]: Required".into(),
         };
+        let down = || SourceError::Protocol {
+            status: Some(502),
+            message: "HTTP 502 Bad Gateway".into(),
+        };
         for category in [Category::Repository, Category::Issue] {
-            assert_eq!(refusal_of(category, Some(&scope)), Some(Refusal::Scope));
-            assert_eq!(refusal_of(category, Some(&invalid)), None);
-            assert_eq!(refusal_of(category, None), None);
+            assert_eq!(verdict(category, scope()), Some(Some(Refusal::Scope)));
+            assert_eq!(verdict(category, invalid()), Some(None), "taken");
+            // No verdict (#2306): the failure, never taken.
+            assert_eq!(verdict(category, SourceError::unauthorized()), None);
+            assert_eq!(verdict(category, down()), None);
             assert_eq!(
-                refusal_of(category, Some(&SourceError::unauthorized())),
+                verdict(category, SourceError::Unreachable("timed out".into())),
                 None
             );
         }
         assert_eq!(
-            refusal_of(Category::Repository, Some(&account)),
-            Some(Refusal::Account)
+            verdict(Category::Repository, account()),
+            Some(Some(Refusal::Account))
         );
         // Unmeasured on the issue probe, so no verdict.
-        assert_eq!(refusal_of(Category::Issue, Some(&account)), None);
+        assert_eq!(verdict(Category::Issue, account()), None);
     }
 }
