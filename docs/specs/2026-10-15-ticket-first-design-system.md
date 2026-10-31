@@ -182,7 +182,7 @@ A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end
 - **(d)** an allowlist entry has no reason;
 - **(e)** an allowlist entry matches nothing.
 
-The allowlist is `app/src/lib/tf/controls/style-gate-exceptions/`, one `<ticket>.txt` per #2238 cleanup ticket. It holds the violations present when the gate landed, and each cleanup ticket deletes its own lines. New work doesn't add entries: it follows this section.
+The gate still reads an allowlist at `app/src/lib/tf/controls/style-gate-exceptions/`, one `<ticket>.txt` per ticket, which rules (d) and (e) check. It held the violations present when the gate landed; the #2238 cleanup tickets deleted every line, and the directory with them. New work doesn't bring it back: it follows this section.
 
 ### Adding a control
 
