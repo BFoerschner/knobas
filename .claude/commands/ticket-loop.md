@@ -16,7 +16,7 @@ First iteration of a session: read `docs/agents/working-model.md` and `docs/agen
 
 ## What a ticket is
 
-Every open issue labelled `ready-for-agent`, in any milestone or none, except a **spec** (title begins `Spec:`, or has sub-issues); specs are never claimed. The body is the brief. A ticket is **blocked** when `issue_dependencies_summary.blocked_by` > 0, or a number in its `## Blocked by` list is open. A **milestone exit** (title begins `Milestone exit`) never goes to an implementer (Step 3); everything else does.
+Every open issue labelled `ready-for-agent`, in any milestone or none, except a **spec** (title begins `Spec:`, or has sub-issues); specs are never claimed. A sub-issue of a spec that has a `spec-<N>` branch on `origin` belongs to that spec's `/implement-spec` run (`docs/agents/integration-branch.md`) and is never claimed here either; check with `git ls-remote --heads origin spec-<N>`. The body is the brief. A ticket is **blocked** when `issue_dependencies_summary.blocked_by` > 0, or a number in its `## Blocked by` list is open. A **milestone exit** (title begins `Milestone exit`) never goes to an implementer (Step 3); everything else does.
 
 ## Decisions (orchestrator's side; the briefs carry the workers' side)
 
