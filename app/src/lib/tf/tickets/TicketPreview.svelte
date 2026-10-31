@@ -80,7 +80,7 @@
     {/if}
   </div>
   <div class="tf-go">
-    <a class="tf-btn tf-primary" href={jobHash(card.entity_id)}>{action.label}</a>
+    <a class="tf-btn tf-primary tf-lg" href={jobHash(card.entity_id)}>{action.label}</a>
     <small>{action.note}</small>
   </div>
 </svelte:element>
