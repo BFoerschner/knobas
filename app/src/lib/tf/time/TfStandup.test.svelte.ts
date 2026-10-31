@@ -336,7 +336,7 @@ test("Create ticket files the action item, shows it queued, then its key and sta
   expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("queued");
   hears.get(9)!(undefined);
   await settle();
-  expect(target.querySelector(".tf-su-ai a")?.getAttribute("href")).toBe("#/job/jira%3AOPS-131");
+  expect(target.querySelector(".tf-su-ai a")?.getAttribute("href")).toBe("#/ticket/jira%3AOPS-131");
   expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("To Do");
 });
 
@@ -422,7 +422,7 @@ test("an item whose ticket the protocol already links shows its key and status, 
   expect(rows[0]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket");
   // The linked one reads the ticket's key and status, as a create that landed in this session does.
   expect(rows[1]!.querySelector("button")).toBeNull();
-  expect(rows[1]!.querySelector("a")?.getAttribute("href")).toBe("#/job/jira%3AOPS-131");
+  expect(rows[1]!.querySelector("a")?.getAttribute("href")).toBe("#/ticket/jira%3AOPS-131");
   expect(rows[1]!.querySelector("a")?.textContent).toBe("OPS-131");
   expect(rows[1]!.querySelector(".tf-chip")?.textContent).toBe("To Do");
 });

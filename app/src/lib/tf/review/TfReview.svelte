@@ -30,7 +30,7 @@
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import type { Layers } from "../layers.svelte";
-  import { jobHash } from "../route";
+  import { entityAddress } from "../address";
   import { decisions as sessionDecisions, UNDO_MS, type Decisions } from "./decisions.svelte";
   import {
     aboutTicket,
@@ -270,7 +270,7 @@
           <h1>Is this a real connection?</h1>
           <span class="tf-dim"
             >{list.indexOf(current) + 1} of {list.length}{#if about !== null}, about <a
-                href={jobHash(about.entityId)}
+                href={entityAddress("ticket", about.entityId)}
                 class="tf-mono">{about.key}</a
               >{/if}</span
           >

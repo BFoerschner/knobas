@@ -137,7 +137,7 @@ test("each layer is a band with its summary, what is wrong and its tiles, proble
   const vm = band("Machines").querySelector(".tf-dp-t")!;
   expect(vm.className).toContain("tf-dp-none");
   expect(vm.textContent).toContain("no check");
-  expect(band("Work").querySelector("a[href='#/job/jira%3APAY-231']")!.textContent).toContain("In Progress");
+  expect(band("Work").querySelector("a[href='#/ticket/jira%3APAY-231']")!.textContent).toContain("In Progress");
   expect(band("Work").querySelector(".tf-dp-t.tf-dp-info")!.textContent).toContain("open");
 });
 

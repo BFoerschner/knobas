@@ -863,7 +863,7 @@ test("a blocked ticket shows the red banner naming the blocker, with a button to
   expect(banner.textContent).toContain("Staging needs the updated runbook.");
   const button = banner.querySelector("a")!;
   expect(button.textContent).toBe("Open OPS-77");
-  expect(button.getAttribute("href")).toBe("#/job/jira%3AOPS-77");
+  expect(button.getAttribute("href")).toBe("#/ticket/jira%3AOPS-77");
 });
 
 test("the banner opens the blocker of its own source when two sources hold the key (#1676)", async () => {
@@ -877,7 +877,7 @@ test("the banner opens the blocker of its own source when two sources hold the k
   });
   open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(blocked) : Promise.reject({ code: "not_found" })) }) });
   await settle();
-  expect(target.querySelector(".tf-blocked a")?.getAttribute("href")).toBe("#/job/gitea%3AOPS-77");
+  expect(target.querySelector(".tf-blocked a")?.getAttribute("href")).toBe("#/ticket/gitea%3AOPS-77");
 });
 
 test("an unblocked ticket draws no banner", async () => {

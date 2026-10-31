@@ -9,7 +9,7 @@
 -->
 <script lang="ts">
   import type { DocPage, DocSpace } from "../../ipc/entity";
-  import { jobHash } from "../route";
+  import { entityAddress } from "../address";
   import { backlinkGroups, linkedFromHeading, pageHash } from "./docs";
 
   let { page, spaces }: { page: DocPage; spaces: readonly DocSpace[] } = $props();
@@ -23,7 +23,7 @@
     <ul>
       {#each page.work as work (work.entity_id)}
         <li>
-          <a href={jobHash(work.entity_id)}><span class="tf-mono">{work.key}</span> {work.title}</a
+          <a href={entityAddress("ticket", work.entity_id)}><span class="tf-mono">{work.key}</span> {work.title}</a
           >{#if work.status}<span class="tf-s">{work.status}</span>{/if}
         </li>
       {/each}
