@@ -7,7 +7,14 @@
 # script that answers `full` for everything would pass. `app/package.json`
 # (#2301): a new dependency line answers `front` though `crates/` reads the
 # file; a changed `@tauri-apps/plugin-*` line answers `full`, and so does any
-# other app file `crates/` names.
+# other app file `crates/` names. The `scripts` scope (#2334): a head that
+# changes only `scripts/`, `testenv/` and prose answers `scripts`, unless one of
+# its paths is named by `crates/` or `app/src` (a directory named pins its
+# contents; a comment or a bare `testenv/` pins nothing), is one the full gate
+# runs (`scripts/gate-slot.sh` and the rest of the list in gate-scope.sh), or
+# the head also touches the justfile or an app file. A Markdown file there is
+# prose unless a crate opens it (`join("…/README.md")`): naming it in a panic
+# message reads nothing.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 scope=$here/gate-scope.sh
@@ -17,7 +24,7 @@ trap 'rm -rf "$scratch"' EXIT
 # No excludes file: the machine's global one ignores `.claude/*`, which the repo tracks.
 g() { git -C "$scratch" -c core.excludesFile=/dev/null -c user.name=t -c user.email=t@t "$@"; }
 g init -q -b main
-mkdir -p "$scratch/app/src/lib/tf/note" "$scratch/app/src/lib/tf/free" "$scratch/app/src/lib/other" "$scratch/app/src/lib/slash" "$scratch/crates" "$scratch/testenv" "$scratch/docs" "$scratch/.claude/commands"
+mkdir -p "$scratch/scripts" "$scratch/testenv/specs" "$scratch/testenv/drivers" "$scratch/app/src/lib/shell" "$scratch/app/src/lib/tf/note" "$scratch/app/src/lib/tf/free" "$scratch/app/src/lib/other" "$scratch/app/src/lib/slash" "$scratch/crates" "$scratch/testenv" "$scratch/docs" "$scratch/.claude/commands"
 echo a > "$scratch/app/src/lib/launcher.svelte"
 echo a > "$scratch/app/src/lib/tf/note/TfNote.svelte"
 echo a > "$scratch/app/src/lib/tf/free/Free.svelte"
@@ -42,6 +49,18 @@ cat > "$scratch/crates/wiring.rs" <<'EOS'
 const PACKAGE: &str = include_str!("../app/package.json");
 const READ: &str = include_str!("../app/src/lib/read.ts");
 EOS
+for f in shot-test.sh rust-reads.sh commented.sh bash-guard.py gate-slot.sh; do echo a > "$scratch/scripts/$f"; done
+echo a > "$scratch/testenv/specs/README.md"
+echo a > "$scratch/testenv/README.md"
+echo a > "$scratch/testenv/drivers/capture.sh"
+echo a > "$scratch/justfile"
+cat > "$scratch/crates/scripts.rs" <<'EOS'
+// scripts/commented.sh is only mentioned here, which reads nothing.
+const SEED: &str = include_str!("../scripts/rust-reads.sh");
+fn specs() -> PathBuf { dir.join("../testenv/specs/README.md") }
+fn hint() { panic!("run ./seed from testenv/ (testenv/README.md)") }
+EOS
+echo 'const drivers = import.meta.glob("../../../../testenv/drivers/*.sh");' > "$scratch/app/src/lib/shell/witness.ts"
 echo '{}' > "$scratch/.claude/settings.json"
 echo a > "$scratch/.claude/commands/loop.md"
 cat > "$scratch/testenv/w-test.sh" <<'EOS'
@@ -61,16 +80,18 @@ g commit -q -m base
 base=$(g rev-parse HEAD)
 
 failures=0
-check() { # check <front|full> <label>: commit the worktree and ask gate-scope
+check() { # check <front|scripts|full> <label>: commit the worktree and ask gate-scope
     local want=$1 label=$2 got
     g commit -q -am change
     got=$(cd "$scratch" && "$scope" "$base" 2>/dev/null)
     if [ "$got" != "$want" ]; then echo "FAIL: $label (wanted $want, got $got)" >&2; failures=$((failures + 1)); fi
 }
-expect() { # expect <front|full> <label> <path>: append a line to path
+expect() { # expect <front|scripts|full> <label> <path>...: append a line to each path
+    local want=$1 label=$2 p
+    shift 2
     g checkout -q -B work "$base"
-    echo b >> "$scratch/$3"
-    check "$1" "$2"
+    for p in "$@"; do echo b >> "$scratch/$p"; done
+    check "$want" "$label"
 }
 edit_package() { # edit_package <front|full> <label> <perl -pi expression> [lock]
     g checkout -q -B work "$base"
@@ -90,6 +111,17 @@ expect front "a prose file" docs/x.md
 expect full "the hook wiring, which bash-guard-test.sh tests (#1982)" .claude/settings.json
 expect front "a Markdown command under .claude/" .claude/commands/loop.md
 expect full "an app file crates/ reads" app/src/lib/read.ts
+expect scripts "a script nothing reads (#2334)" scripts/shot-test.sh
+expect scripts "a testenv script and a prose file (#2334)" testenv/w-test.sh docs/x.md
+expect scripts "a script only a crates/ comment names (#2334)" scripts/commented.sh
+expect full "a script beside the justfile (#2334)" scripts/shot-test.sh justfile
+expect full "a script beside an app file (#2334)" scripts/shot-test.sh app/src/lib/other/Plain.svelte
+expect full "a script crates/ reads (#2334)" scripts/rust-reads.sh
+expect full "a testenv file under a directory app/src names (#2334)" testenv/drivers/capture.sh
+expect full "the Bash guard, which .claude/settings.json wires in (#2334)" scripts/bash-guard.py
+expect full "a script the full gate's cargo half runs (#2334)" scripts/gate-slot.sh
+expect full "a testenv Markdown file a crate opens (#2334)" testenv/specs/README.md
+expect front "a testenv Markdown file a crate only names in a message (#2334)" testenv/README.md
 # The perl expressions are single-quoted on purpose: `$1` and `$_` are perl's.
 # shellcheck disable=SC2016
 edit_package front "a new npm dependency with its lockfile (#2301)" \

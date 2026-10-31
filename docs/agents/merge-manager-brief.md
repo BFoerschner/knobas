@@ -4,7 +4,7 @@ You review, fix, gate, squash-merge and clean up the one pull request in your di
 
 ## Before you start
 
-Read `CLAUDE.md`, `docs/agents/issue-tracker.md` and the `CONTEXT.md` entries the ticket names. In the worktree from your dispatch: `git fetch && git status`; the branch must be pushed and clean, else report, never force. Pre-build unless `scripts/gate-scope.sh` says `front`: `env -C <worktree> env -u RUSTUP_TOOLCHAIN CARGO_BUILD_JOBS=4 cargo test --workspace --no-run` in the background (`env -C`, never `cd <worktree> &&`), log in the scratchpad; wait for it or kill it before the pre-gate.
+Read `CLAUDE.md`, `docs/agents/issue-tracker.md` and the `CONTEXT.md` entries the ticket names. In the worktree from your dispatch: `git fetch && git status`; the branch must be pushed and clean, else report, never force. Pre-build unless `scripts/gate-scope.sh` says `front` or `scripts`: `env -C <worktree> env -u RUSTUP_TOOLCHAIN CARGO_BUILD_JOBS=4 cargo test --workspace --no-run` in the background (`env -C`, never `cd <worktree> &&`), log in the scratchpad; wait for it or kill it before the pre-gate.
 
 ## Decisions
 
@@ -23,7 +23,7 @@ Yours is the ticket's only review. Start as soon as the PR opens, even as a draf
 
 ## The gate
 
-Yours are the ticket's only full gates: `just gate` on the head you merge, rebased onto `origin/main`, once before the lock and again under the lock only when `origin/main` moved since. Foreground, Bash timeout 600000, `export CARGO_BUILD_JOBS=4` first; under the lock always as `env -C <worktree> bash <lock> hold <PR> just gate`. It picks `check-front` for a frontend-only head, else `just check`; report which. Expect about 200 s with the slot free and 300 to 350 s when another gate's test run holds it. Red is yours to diagnose.
+Yours are the ticket's only full gates: `just gate` on the head you merge, rebased onto `origin/main`, once before the lock and again under the lock only when `origin/main` moved since. Foreground, Bash timeout 600000, `export CARGO_BUILD_JOBS=4` first; under the lock always as `env -C <worktree> bash <lock> hold <PR> just gate`. It picks `check-front` for a frontend-only head, `check-scripts` (the script checks, no cargo, no pre-gate) for a head that changes only `scripts/`, `testenv/` and prose that no crate or app file reads, else `just check`; report which. Expect about 200 s with the slot free and 300 to 350 s when another gate's test run holds it. Red is yours to diagnose.
 
 - `just gate` runs `just pre-gate` first, which fixes formatting and the generated IPC mirror. If it ends with "pre-gate changed files", commit them before the merge: the gate ran on them.
 - The gate waits at most 150 s for the test slot (`KNOBAS_GATE_SLOT_WAIT`) and exits 75 naming the holders. Exit 75 is a queue timeout, not a red gate: rerun with `KNOBAS_GATE_SLOT_WAIT=900` in the background (under `hold` when under the lock), its log ending in an exit line, and wait per the implementer brief's *Waiting*. A `just *-live` recipe that queues on a machine-wide lock runs the same way.
@@ -61,7 +61,7 @@ Exactly this shape, one line each, `none` where empty:
 
 ```
 Merged: #<PR> → <sha> (closes #<N>)
-Gate: <check|check-front> exit <n>, <s> s, Rust <passed>/<failed>, front <tests>
+Gate: <check|check-front|check-scripts> exit <n>, <s> s, Rust <passed>/<failed>, front <tests>
 Review: <what the review and deep pass found>
 Fixes: <commits>
 Rulings: <one line each>

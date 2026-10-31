@@ -36,7 +36,11 @@ cargo half adds `test`'s build and run times and its ten slowest test binaries.
 
 `just gate` runs `check-front` instead on a frontend-only head: the
 doc-list check, the conflict-marker scan, `svelte-check`, the Vitest files the change can reach
-(`just front-changed`) and `vite build`.
+(`just front-changed`) and `vite build`. On a head that changes only scripts
+under `scripts/` or `testenv/` (and prose) it runs `check-scripts`: the
+doc-list check and `check`'s script half (`shell`, `test-layout`,
+`witness-unit`, `conflict-markers`), no cargo. `scripts/gate-scope.sh` says
+which, and why.
 
 `just front` alone is the fast loop for frontend work. `just pre-gate` formats,
 refreshes the IPC mirror and the contract index, and runs a few quick checks.
