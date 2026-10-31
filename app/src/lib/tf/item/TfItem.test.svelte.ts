@@ -219,6 +219,15 @@ test("the header runs the source's actions, then a ghost Open in, then Refresh l
   ]);
 });
 
+test("the header puts the source's primary action first, then the others in its order (#2288)", async () => {
+  const close: ViewAction = { ...BOOK_REPAIR, label: "Close survey…", values: { id: "close" }, primary: true };
+  const later: ViewAction = { ...BOOK_REPAIR, label: "Flag…", values: { id: "flag" } };
+  await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(surveyView([BOOK_REPAIR, close, later])) });
+
+  const acts = [...target.querySelectorAll(".tf-fhead .tf-acts > button")].map((el) => el.textContent?.trim());
+  expect(acts.slice(0, 3)).toEqual(["Close survey", "Book repair", "Flag"]);
+});
+
 test("a view with no actions draws no toolbar", async () => {
   await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(SURVEY_VIEW) });
 

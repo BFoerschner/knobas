@@ -142,6 +142,8 @@
 
   const kindLabel = $derived(detail === null ? "" : (detail.kind_info?.label ?? detail.row.kind));
   const actions = $derived(view?.actions ?? []);
+  /** The header runs the primary first, then the others in the source's order (Controls: header order, #2288). */
+  const headerActions = $derived([...actions.filter((action) => action.primary), ...actions.filter((action) => !action.primary)]);
 
   /** The action whose dialog is open. */
   let shown = $state<ViewAction | null>(null);
@@ -223,7 +225,7 @@
       </div>
       {#if detail.web_url !== null || actions.length > 0 || refresh.offer(detail) !== null}
         <div class="tf-acts">
-          {@render buttonsOf(actions, false)}
+          {@render buttonsOf(headerActions, false)}
           {#if detail.web_url !== null}
             <a class="tf-btn tf-ghost" href={detail.web_url} target="_blank" rel="noreferrer">Open in {detail.source.display_name}</a>
           {/if}
