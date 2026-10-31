@@ -75,8 +75,8 @@
   <div class="sec-h">
     <span class="lab">Linked items</span>
     <span class="k muted">{links.length}</span>
-    <span class="acts">
-      <button class="btn sm" onclick={onlink}>Link to…</button>
+    <span class="tf-trail">
+      <button class="tf-btn tf-sm" onclick={onlink}>Link to…</button>
     </span>
   </div>
 
@@ -90,7 +90,7 @@
     <div class="empty">
       <p>Nothing linked yet.</p>
       <p>Link this to the ticket it implements, the build it broke, or the page that documents it.</p>
-      <button class="btn" onclick={onlink}>Link to…</button>
+      <button class="tf-btn tf-sm" onclick={onlink}>Link to…</button>
     </div>
   {:else}
     {#each groups as group (group.reading)}
@@ -120,7 +120,7 @@
             {labelOf(entry.other.kind)} · {ago(entry.link.created_at)}
           </span>
           <button
-            class="btn sm"
+            class="tf-btn tf-sm"
             title="Remove this link. Linking again is one action."
             onclick={() => onunlink(entry)}
           >
@@ -181,6 +181,12 @@
   /* knobas' words, not the user's: fainter, so the two are not one voice. */
   .lwhy {
     color: var(--faint);
+  }
+
+  /* The empty state's invitation sits below its two lines: placement only, the
+     margin `unported.css`' deleted `.empty .btn` gave it (#2292). */
+  .empty .tf-btn {
+    margin-top: 8px;
   }
 
   .lnote {

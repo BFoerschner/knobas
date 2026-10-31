@@ -95,7 +95,7 @@
     <span class="tf-mono">{path}</span>
     {#if tree !== null}<span>on <span class="tf-mono">{tree.branch ?? "a detached head"}</span></span>{/if}
     {#if where !== null}<span>{where}</span>{/if}
-    <span class="tf-acts"><TfOpenIn entityId={repoId} {title} {checkout} /></span>
+    <span class="tf-trail"><TfOpenIn entityId={repoId} {title} {checkout} /></span>
   </div>
   <p class="tf-dim tf-local-note">
     Read with read-only git, when you open this tab and when the window gets focus. knobas never commits, stashes or pushes

@@ -404,7 +404,9 @@
       *Flush now* is impatience, not a decision: the scheduler already retries
       on its own tick. It is deliberately incapable of releasing a held write,
       and the line beside it says which rows it moves so that pressing it is
-      never mistaken for answering a conflict.
+      never mistaken for answering a conflict. It is still the footer's primary,
+      after a ghost *Close*, since it is the one thing the panel itself does
+      (the Controls section's dialog footer, #2289).
 
       Beneath it, the guarantee knobas cannot keep, in ADR-0012's words: no
       transaction spans the send and the settle, so a write in flight when
@@ -416,8 +418,8 @@
       <p>Retries the waiting writes. Held writes are untouched.</p>
       {@render guarantee()}
     </div>
-    <button class="tf-btn" disabled={queue.busy || queue.flushing} onclick={() => queue.flush(null)}>Flush now</button>
     <button class="tf-btn tf-ghost" onclick={onclose}>Close</button>
+    <button class="tf-btn tf-primary" disabled={queue.busy || queue.flushing} onclick={() => queue.flush(null)}>Flush now</button>
   {/snippet}
 </TfDialog>
 

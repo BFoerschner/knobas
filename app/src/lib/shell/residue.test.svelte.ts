@@ -441,7 +441,6 @@ const TfBoardsAndFilters = (await import("../tf/settings/TfBoardsAndFilters.svel
 const TfAddSource = (await import("../tf/settings/TfAddSource.svelte")).default;
 const TfInstalledAdapters = (await import("../tf/settings/TfInstalledAdapters.svelte")).default;
 const { listen: mockedListen } = await import("@tauri-apps/api/event");
-const ModalFixture = (await import("./Modal.fixture.svelte")).default;
 const TimerPicker = (await import("./TimerPicker.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
@@ -2622,11 +2621,6 @@ const CASES: Case[] = [
         },
       }),
     }),
-  },
-  {
-    name: "Modal",
-    source: "lib/shell/Modal.svelte",
-    open: (target) => ({ app: mount(ModalFixture, { target, props: { onclose: () => {} } }) }),
   },
   {
     /**

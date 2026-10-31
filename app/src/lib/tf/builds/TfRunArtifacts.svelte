@@ -165,7 +165,7 @@
   </div>
   {#if any}
     <div class="tf-aall">
-      <button type="button" class="tf-btn" onclick={() => download({ kind: "all" }, "the artifacts")}>Download all as zip</button>
+      <button type="button" class="tf-btn tf-sm" onclick={() => download({ kind: "all" }, "the artifacts")}>Download all as zip</button>
       <span class="tf-dim">Downloads go through knobas with the {sourceName} sign-in it already has, into ~/Downloads.</span>
     </div>
   {/if}
@@ -178,7 +178,7 @@
     <div class="tf-fileview">
       <header>
         <span class="tf-p">{preview.path}</span>
-        <span class="tf-acts">
+        <span class="tf-trail">
           <button type="button" class="tf-btn tf-sm" onclick={() => preview && download({ kind: "file", path: preview.path }, name)}>Download</button>
           <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (preview = null)}>Close</button>
         </span>

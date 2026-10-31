@@ -239,3 +239,13 @@ test("the box turns autocorrect, autocapitalize and spellcheck off (issue #1468)
   expect(box().getAttribute("autocapitalize")).toBe("off");
   expect(box().getAttribute("spellcheck")).toBe("false");
 });
+
+/**
+ * #2238 / #2292: the window's one action is the Controls' small button, the
+ * size of a row's action in a body. (The unported `.btn` can't come back:
+ * style-gate rule (b) reads every component's classes.)
+ */
+test("Open in knobas is a small Controls button", () => {
+  render();
+  expect([...button().classList].filter((name) => name.startsWith("tf-"))).toEqual(["tf-btn", "tf-sm"]);
+});

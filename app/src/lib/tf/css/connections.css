@@ -34,12 +34,9 @@
 .tf-compose .tf-acts { display: flex; justify-content: flex-end; }
 
 /* ---------- the Connections button and drawer (#820, R-4.3, R-6.1) ---------- */
-.tf-conn {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--rule);
-  background: var(--sheet); padding: 4px 10px; border-radius: 4px; cursor: pointer; color: var(--ink-2);
-  font-size: var(--t-sm); margin-bottom: 6px;
-}
-.tf-conn:hover { color: var(--ink); border-color: var(--ink-2); }
+/* A small button in the job's tab strip's trailing group (#2294): its count and proposals only. */
+.tf-conn { color: var(--ink-2); }
+.tf-conn:hover { color: var(--ink); }
 .tf-conn b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .tf-conn .tf-p { color: var(--info); font-weight: 600; }
 .tf-scrim { position: fixed; inset: 0; background: rgba(10,15,20,.35); z-index: 20; animation: tf-fade .15s ease-out; }
@@ -54,7 +51,7 @@
 .tf-drawer header h2 { font-size: var(--t-xl); margin-right: auto; }
 .tf-dfilter { padding: 0 16px 10px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 8px; }
 .tf-dfilter .tf-fsearch { flex: none; max-width: none; }
-.tf-dacts { display: flex; gap: 6px; flex-wrap: wrap; }
+.tf-dacts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
 .tf-dbody { overflow: auto; padding: 4px 0 20px; flex: 1; }
 .tf-dbody h3 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 12px 16px 4px; display: flex; gap: 6px; }
 .tf-lk { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; padding: 6px 16px; align-items: center; }
@@ -93,7 +90,6 @@
 .tf-rvq { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-rvq .tf-fbar { position: static; padding: 10px 12px; }
 .tf-rvq .tf-fsearch { max-width: none; flex-basis: 200px; }
-.tf-rvq .tf-fchips button { padding: 1px 9px; }
 .tf-ql { overflow: auto; flex: 1; }
 .tf-ql a {
   display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 2px 8px; padding: 8px 12px;
@@ -138,7 +134,7 @@
 }
 .tf-against { font-size: var(--t-sm); color: var(--ink-2); display: flex; flex-direction: column; gap: 4px; }
 .tf-against strong { color: var(--ink); }
-.tf-decide { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tf-decide { display: flex; gap: var(--control-gap); align-items: center; flex-wrap: wrap; }
 .tf-decide .tf-yes { background: var(--ok); border-color: var(--ok); color: var(--sheet); font-weight: 600; }
 .tf-decide .tf-yes kbd { background: transparent; color: inherit; border-color: currentColor; }
 .tf-decide .tf-no { color: var(--err); border-color: var(--err); }

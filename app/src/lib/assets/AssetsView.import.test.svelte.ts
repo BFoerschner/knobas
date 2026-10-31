@@ -482,7 +482,7 @@ test("Import applies the chosen file and the Tree re-reads", async () => {
 
   const before = calls.reads;
   const apply = [...target.querySelectorAll("button")].find(
-    (candidate) => candidate.textContent?.trim() === "Import" && candidate.closest(".dlg") !== null,
+    (candidate) => candidate.textContent?.trim() === "Import" && candidate.closest(".tf-dialog") !== null,
   );
   expect(apply?.disabled).toBe(false);
   apply?.click();
@@ -515,7 +515,7 @@ test("the chooser offers the estate file and sends it with both calls", async ()
   button("Import")?.click();
   flushSync();
 
-  const chooser = target.querySelector<HTMLSelectElement>(".dlg select");
+  const chooser = target.querySelector<HTMLSelectElement>(".tf-dialog select");
   expect(chooser).not.toBeNull();
   expect([...(chooser?.options ?? [])].map((option) => [option.value, option.text])).toEqual([
     ["estate_file", "Estate file"],
@@ -526,7 +526,7 @@ test("the chooser offers the estate file and sends it with both calls", async ()
 
   await choose('{"assets":[]}');
   const apply = [...target.querySelectorAll("button")].find(
-    (candidate) => candidate.textContent?.trim() === "Import" && candidate.closest(".dlg") !== null,
+    (candidate) => candidate.textContent?.trim() === "Import" && candidate.closest(".tf-dialog") !== null,
   );
   apply?.click();
   await settle();
@@ -557,7 +557,7 @@ test("a file the backend refuses says so in the dialog and cannot be applied", a
   expect(target.querySelector('[role="alert"]')?.textContent).toContain("not an estate file");
   expect(groups()).toEqual([]);
   const apply = [...target.querySelectorAll("button")].find(
-    (candidate) => candidate.textContent?.trim() === "Import" && candidate.closest(".dlg") !== null,
+    (candidate) => candidate.textContent?.trim() === "Import" && candidate.closest(".tf-dialog") !== null,
   );
   expect(apply?.disabled).toBe(true);
   expect(calls.applied).toEqual([]);
@@ -577,7 +577,7 @@ test("a file the backend refuses says so in the dialog and cannot be applied", a
 
 /** Pick one of the chooser's importer entries, the way a reader picks it. */
 function chooseImporter(id = "hcloud") {
-  const chooser = target.querySelector<HTMLSelectElement>(".dlg select");
+  const chooser = target.querySelector<HTMLSelectElement>(".tf-dialog select");
   if (!chooser) throw new Error("the dialog draws no chooser");
   chooser.value = id;
   chooser.dispatchEvent(new Event("change", { bubbles: true }));
@@ -586,7 +586,7 @@ function chooseImporter(id = "hcloud") {
 
 /** The token field, or `null` when the dialog is not asking for one. */
 function tokenField(): HTMLInputElement | null {
-  return target.querySelector<HTMLInputElement>('.dlg input[type="password"]');
+  return target.querySelector<HTMLInputElement>('.tf-dialog input[type="password"]');
 }
 
 /**
@@ -654,7 +654,7 @@ test("land under is asked only when the importer found a server the estate lacks
   await settle();
 
   expect(quiet.produces).toEqual([["hcloud", null, null]]);
-  expect(target.querySelector(".dlg .pick")).toBeNull();
+  expect(target.querySelector(".tf-dialog .pick")).toBeNull();
   expect(target.textContent).not.toContain("Land under");
 
   unmount(app!);
@@ -686,7 +686,7 @@ test("land under is asked only when the importer found a server the estate lacks
   // `?fake-ipc` walk, which is why it is asserted here.
   expect(tokenField()).toBeNull();
   expect(target.textContent).toContain("knobas-scratch");
-  expect(target.querySelector(".dlg .pick")).not.toBeNull();
+  expect(target.querySelector(".tf-dialog .pick")).not.toBeNull();
 
   // **The picker opens at the top of the estate, and the top is an answer.**
   // This is the half that was missing until the second ruling of 2026-09-08:
@@ -698,14 +698,14 @@ test("land under is asked only when the importer found a server the estate lacks
   button("Put them in the top of the estate")?.click();
   await settle();
   expect(asked.produces.at(-1)).toEqual(["hcloud", null, { parent: null }]);
-  expect(target.querySelector(".dlg .pick")).toBeNull();
+  expect(target.querySelector(".tf-dialog .pick")).toBeNull();
 
   // …and then the walk-in, which is the ordinary case.
   button("Read Hetzner Cloud")?.click();
   await settle();
   // The picker walks the estate: the top level holds the one asset this
   // fixture has, and standing on it is what says where the servers land.
-  const into = [...target.querySelectorAll<HTMLButtonElement>(".dlg .into")];
+  const into = [...target.querySelectorAll<HTMLButtonElement>(".tf-dialog .into")];
   expect(into.map((row) => row.textContent?.trim())).toEqual(["knobas test estate"]);
   into[0]?.click();
   await settle();
@@ -740,7 +740,7 @@ test("the produced file is offered for download", async () => {
   button("Read Hetzner Cloud")?.click();
   await settle();
 
-  const link = target.querySelector<HTMLAnchorElement>(".dlg a.dl");
+  const link = target.querySelector<HTMLAnchorElement>(".tf-dialog a.dl");
   expect(link).not.toBeNull();
   expect(link?.getAttribute("download")).toBe("hcloud-estate.json");
   expect(link?.getAttribute("href")).toMatch(/^blob:/);
@@ -788,14 +788,14 @@ test("the Docker importer asks for no token and no landing, and names what it sk
 
   expect(calls.produces).toEqual([["docker", null, null]]);
   expect(tokenField()).toBeNull();
-  expect(target.querySelector(".dlg .pick")).toBeNull();
+  expect(target.querySelector(".tf-dialog .pick")).toBeNull();
   expect(target.textContent).not.toContain("Land under");
   expect(calls.previewed).toEqual([FILE]);
   expect(calls.producers).toEqual(["docker"]);
 
   expect(target.textContent).toContain("1 container engine was");
   expect(target.textContent).toContain("Docker engine (OrbStack)");
-  expect(target.querySelector<HTMLAnchorElement>(".dlg a.dl")?.getAttribute("download")).toBe(
+  expect(target.querySelector<HTMLAnchorElement>(".tf-dialog a.dl")?.getAttribute("download")).toBe(
     "docker-estate.json",
   );
 });
@@ -823,7 +823,7 @@ test("choosing another producer drops the preview the last one drew", async () =
   expect(calls.previewed).toEqual(['{"assets":[]}']);
   expect(groups().length).toBeGreaterThan(0);
   const importButton = () =>
-    [...target.querySelectorAll<HTMLButtonElement>(".dlg button")].find(
+    [...target.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find(
       (candidate) => candidate.textContent?.trim() === "Import",
     );
   expect(importButton()?.disabled).toBe(false);
@@ -833,7 +833,7 @@ test("choosing another producer drops the preview the last one drew", async () =
 
   expect(groups()).toEqual([]);
   expect(importButton()?.disabled).toBe(true);
-  expect(target.querySelector(".dlg a.dl")).toBeNull();
+  expect(target.querySelector(".tf-dialog a.dl")).toBeNull();
   // And nothing was sent on the way past: the chooser is a choice, not a run.
   expect(calls.previewed).toEqual(['{"assets":[]}']);
   expect(calls.produces).toEqual([]);
@@ -916,7 +916,7 @@ test.each([
   chooseImporter();
   button("Read Hetzner Cloud")?.click();
   await settle();
-  const hint = target.querySelector(".dlg .hint")?.textContent ?? "";
+  const hint = target.querySelector(".tf-dialog .hint")?.textContent ?? "";
   expect(hint).toContain(words);
   expect(hint).not.toContain(inMemory ? "keychain" : "session only");
 });

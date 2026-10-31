@@ -119,7 +119,7 @@
     PropertyValue,
   } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
-  import Modal from "../shell/Modal.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
   import { readSecretsInMemory, tokenKeptHint } from "../shell/secret-store";
 
   let {
@@ -376,10 +376,11 @@
   );
 </script>
 
-<Modal
+<TfDialog
+  closeButton
   title="Import an estate file"
   subtitle={chosen ?? "Nothing is written until you press Import"}
-  wide
+  className="tf-dwide"
   {onclose}
 >
   {#snippet body()}
@@ -467,7 +468,7 @@
         {/if}
 
         <div class="fld">
-          <button class="btn" disabled={busy} onclick={() => void run()}>
+          <button class="tf-btn tf-sm" disabled={busy} onclick={() => void run()}>
             {#if busy}
               Reading…
             {:else if landing !== null}
@@ -642,16 +643,16 @@
   {/snippet}
 
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
-      class="btn pri"
+      class="tf-btn tf-primary"
       disabled={busy || preview === null}
       onclick={() => void submit()}
     >
       {busy ? "Working…" : "Import"}
     </button>
   {/snippet}
-</Modal>
+</TfDialog>
 
 <style>
   .fields {

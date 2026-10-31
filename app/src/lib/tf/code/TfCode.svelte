@@ -437,7 +437,6 @@
     </div>
   </div>
   <div class="tf-acts">
-    {@render sync?.()}
     {#if compare !== null}
       <a class="tf-btn" href={compare}>New pull request</a>
     {:else}
@@ -449,6 +448,8 @@
         title={job === null ? "Open a job to propose its branch" : `${job} has no branch yet`}>New pull request</button
       >
     {/if}
+    <!-- *Sync now* last in the header (#2238 header order). -->
+    {@render sync?.()}
   </div>
 </header>
 <nav class="tf-tabs" aria-label="Code">

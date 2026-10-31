@@ -226,7 +226,7 @@
     <button type="button" aria-pressed={wrap} onclick={() => (wrap = !wrap)}>Wrap lines</button>
     <button type="button" aria-pressed={stamps} onclick={() => (stamps = !stamps)}>Timestamps</button>
   </div>
-  <span class="tf-logacts">
+  <span class="tf-trail">
     {#if failed && firstError !== null}
       <button type="button" class="tf-btn tf-sm" onclick={() => firstError && show(`.tf-ll[data-n="${firstError.number}"]`, firstError)}
         >Jump to the first error</button

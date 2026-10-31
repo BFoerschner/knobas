@@ -15,17 +15,21 @@
 
   **Right**, the page in the reading face, nothing in it capped in width
   (#2081, R-10.9): the breadcrumb, the title, who edited it when, who created it (#2080), the
-  version, the reading time and the labels (each searches for itself), the
-  actions row with *More ▾* (#2082) and, at its end, *Refresh* or *Sync now*
-  (#2136: `TfDetailRefresh` over `get_entity` of the page) with the withdrawn,
-  turned-off and failed-refresh banners under it, the blocks by section (*Edit section*),
+  version, the reading time and the labels (each searches for itself). The
+  title line is the canonical header (#2286): on its right the actions with
+  *More ▾* (#2082), "Open in <source>" as a ghost, the page's *Refresh* or
+  *Sync now* (#2136: `TfDetailRefresh` over `get_entity` of the page), and last
+  the view's *Sync now* (the role frame's `sync`, #2106), left out while the
+  page's own button is a *Sync now* (one per header, #2287). A reader pane
+  with no page draws the view's *Sync now* in a plain *Docs* header. The withdrawn, turned-off and
+  failed-refresh banners sit under the meta line, then the blocks by section (*Edit section*),
   the page foot (*Work it belongs to*, *Linked from*, `TfDocFoot`) and the
   comments with the composer (R-10.9 to R-10.15). A page opened from a hit
   keeps the query: every match is marked and the find bar steps through them
   (R-10.5, R-10.12). The outline (`TfDocOutline`, R-10.15) is the page's own
   right column, sticking while the page scrolls; below 1240px
-  (`READER_NARROW`, read through Svelte's `MediaQuery`) it folds between the actions
-  row and the first section instead. `#/docs` opens the page read last, and every
+  (`READER_NARROW`, read through Svelte's `MediaQuery`) it folds between the meta
+  line and the first section instead. `#/docs` opens the page read last, and every
   page opened is a visit (`visit_entity`), which is what "read last" reads.
 
   Drawn over the declared Docs frame (ADR-0022): `docs_tree`, `docs_page`,
@@ -89,7 +93,8 @@
   import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes, type Echo } from "../queued.svelte";
   import { createDetailRefresh, DETAIL_REFRESH_BRIDGE, type DetailRefreshPorts } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
-  import TfDetailRefresh from "../TfDetailRefresh.svelte";
+  import TfBareHeader from "../TfBareHeader.svelte";
+  import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocBody from "./TfDocBody.svelte";
@@ -151,7 +156,7 @@
      * two banners. A row that cannot be read draws neither.
      */
     getEntity: typeof realGetEntity;
-    /** The actions row's *Refresh* (#2136); the bridge's when omitted. */
+    /** The header's *Refresh* (#2136); the bridge's when omitted. */
     refresh?: DetailRefreshPorts;
     openExternal: (url: string) => Promise<void>;
     copy: (text: string) => Promise<void>;
@@ -346,7 +351,7 @@
   /** The open page's row (`get_entity`), `null` until read or when it cannot be. */
   let detail = $state<EntityDetail | null>(null);
   let detailAsked = 0;
-  /** The actions row's *Refresh* or *Sync now*. */
+  /** The header's *Refresh* or *Sync now*. */
   const refresh = createDetailRefresh(untrack(() => io.refresh ?? DETAIL_REFRESH_BRIDGE));
 
   /** Read page `id`'s row; a `quiet` read that fails keeps the row drawn. */
@@ -942,7 +947,6 @@
         <kbd>/</kbd>
       </label>
       <div class="tf-dl-hint"><code>"…"</code> phrase, <code>-word</code> leave out, <code>by:</code> <code>updated:7d</code></div>
-      {@render sync?.()}
     </div>
     <div class="tf-dl-body">
       {#if treeError !== null}
@@ -1040,6 +1044,10 @@
         <button type="button" class="tf-findx" onclick={() => (find = "")} aria-label="Stop highlighting">✕</button>
       </div>
     {/if}
+    {#if page === null && (pageError !== null || treeError !== null || (tree !== null && target === null))}
+      <!-- No page to head (#2286): the view's own header, so *Sync now* is still where every view puts it. -->
+      <TfBareHeader title="Docs" {sync} />
+    {/if}
     {#if pageError !== null}
       <div class="tf-empty"><p>Could not open this page: {pageError}</p></div>
     {:else if page !== null}
@@ -1072,9 +1080,42 @@
             <!-- Where `Esc` goes, as every breadcrumb names it (spec #2227, story 35). -->
             {#if back !== null}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
           </div>
-          <h1 class="tf-rd-title">
-            <TfMarked text={p.title} {stems} />
-          </h1>
+          <!-- The canonical header (#2238, #2286): the title, and on its line the actions in the
+               Controls order, "Open in" a ghost, the page's Refresh and the view's Sync now last. -->
+          <div class="tf-fhead tf-rd-head">
+            <h1 class="tf-rd-title">
+              <TfMarked text={p.title} {stems} />
+            </h1>
+            <div class="tf-acts">
+              {#if job !== null && linkPorts}
+                {@const key = job}
+                {@const ref = jobAt ?? job}
+                <button type="button" class="tf-btn" onclick={() => linkToJob(p, ref, key)}>Link to {key}</button>
+              {/if}
+              {#if linkPorts}
+                <button type="button" class="tf-btn" onclick={() => (linking = true)}>Link to…</button>
+              {/if}
+              {#if p.writes.includes("create_page")}
+                <button
+                  type="button"
+                  class="tf-btn"
+                  {...refusedAttrs(refusal("create_page"))}
+                  onclick={() => {
+                    if (refusal("create_page") === null) newPage = { space: pageSpace ? spaceId(pageSpace) : null, parent: p.entity_id };
+                  }}
+                  >New page here</button>
+              {/if}
+              <button type="button" class="tf-btn" onclick={() => copyLink(p)}>Copy link</button>
+              {#if p.readable}
+                <TfDocMore onexport={() => exportMarkdown(p)} />
+              {/if}
+              {#if p.web_url}
+                {@const url = p.web_url}
+                <button type="button" class="tf-btn tf-ghost" onclick={() => open(url)}>Open in {p.source_name}</button>
+              {/if}
+              <TfHeaderRefresh {detail} {refresh} {reread} {sync} />
+            </div>
+          </div>
           <div class="tf-rd-meta">
             {#if p.editor !== null || p.updated_at !== null}
               <span>{person(p.editor, p.editor_name, p.me)} edited {clockLabel(p.updated_at)}</span>
@@ -1088,35 +1129,6 @@
               <button type="button" class="tf-chip" title="Search for {label}" onclick={(event) => searchLabel(label, event.currentTarget)}
                 >{label}</button>
             {/each}
-          </div>
-          <div class="tf-rd-acts">
-            {#if job !== null && linkPorts}
-              {@const key = job}
-              {@const ref = jobAt ?? job}
-              <button type="button" class="tf-btn tf-sm" onclick={() => linkToJob(p, ref, key)}>Link to {key}</button>
-            {/if}
-            {#if linkPorts}
-              <button type="button" class="tf-btn tf-sm" onclick={() => (linking = true)}>Link to…</button>
-            {/if}
-            {#if p.writes.includes("create_page")}
-              <button
-                type="button"
-                class="tf-btn tf-sm"
-                {...refusedAttrs(refusal("create_page"))}
-                onclick={() => {
-                  if (refusal("create_page") === null) newPage = { space: pageSpace ? spaceId(pageSpace) : null, parent: p.entity_id };
-                }}
-                >New page here</button>
-            {/if}
-            <button type="button" class="tf-btn tf-sm" onclick={() => copyLink(p)}>Copy link</button>
-            {#if p.web_url}
-              {@const url = p.web_url}
-              <button type="button" class="tf-btn tf-sm" onclick={() => open(url)}>Open in {p.source_name}</button>
-            {/if}
-            {#if p.readable}
-              <TfDocMore onexport={() => exportMarkdown(p)} />
-            {/if}
-            {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
           </div>
           {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
           {#if narrow.current}

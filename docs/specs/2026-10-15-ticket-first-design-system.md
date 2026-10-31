@@ -104,7 +104,7 @@ Buttons and the controls that sit beside them follow one set of rules (#2238). T
 | `--control-h-lg` | 40 px | large button height |
 | `--control-gap` | 6 px | the gap between neighbouring buttons |
 
-They are on `:root` in `tokens.css`. A button takes a fixed `height` from its size token and horizontal padding only, so its height never depends on line-height or on its content: a `<kbd>` hint inside a button doesn't change its height. Every control's radius is 4 px.
+They are on `:root` in `tokens.css`. A button takes a fixed `height` from its size token and horizontal padding only, so its height never depends on line-height or on its content: a `<kbd>` hint inside a button doesn't change its height. Every control's radius is 4 px, except the pill toggles, which are round.
 
 ### Three sizes, chosen by place
 
@@ -114,13 +114,13 @@ They are on `:root` in `tokens.css`. A button takes a fixed `height` from its si
 
 Three sizes is the complete set. A rule outside `chrome.css` doesn't set a button's height, padding, font size or radius.
 
-- **Icon-only buttons** are square at their row's height. The top bar's icon buttons are at the header height.
-- **Form controls:** a `select` or `input` sitting in a row of buttons takes the row's control height.
+- **Icon-only buttons** (`.tf-iconbtn`) are square at their row's height: `--control-h` by default, `--control-h-sm` with `.tf-sm` in a page body's row. The top bar's icon buttons are at the header height.
+- **Form controls:** a `select` or `input` sitting in a row of buttons takes the row's control height from its token, with horizontal padding only. The filter bar is a page body's toolbar, so its search (`.tf-fsearch`) and its selects (`.tf-fsel select`) are `--control-h-sm`, as the segmented control and the pill toggles beside them are.
 - **Exempt:** the × removers inside chips and links (the view editor's ×, a link's ×) are part of the chip, not controls.
 
 ### Gap
 
-Neighbouring buttons are `var(--control-gap)` apart, in headers, rows, dialog footers, strips and Settings alike.
+Neighbouring buttons are `var(--control-gap)` apart, in headers, rows, dialog footers, strips, panel toolbars (the filter bar and its pill toggles), the large decision buttons and Settings alike.
 
 ### Header
 
@@ -157,6 +157,7 @@ There is no third way to draw danger.
 | Section heading with a small action | `.tf-ext-h .tf-btn.tf-sm` |
 | Tab strip with trailing small actions | `.tf-wtabs .tf-trail .tf-btn.tf-sm` |
 | Panel toolbar with a select | `.tf-fbar select` |
+| Panel toolbar's search field | `.tf-fbar .tf-fsearch input` |
 | Segmented control | `.tf-fbar .tf-seg button` |
 | Pill toggles | `.tf-fbar .tf-fchips button` |
 | Row with small actions | `.tf-ext-row .tf-trail .tf-btn.tf-sm` |
@@ -168,6 +169,20 @@ There is no third way to draw danger.
 | Large decision with a `<kbd>` hint | `.tf-btn.tf-lg kbd` |
 
 A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end, centred on the strip, `var(--control-gap)` apart.
+
+### The style gate
+
+`app/src/lib/tf/controls/style-gate.test.ts` reads every stylesheet and component under `app/src/` (a component's `<style>` blocks count) and fails when:
+
+- **(a)** a rule outside `chrome.css` sets `height`, `min-height`, `padding`, `font-size` (or the `font` shorthand) or `border-radius` on a control, or a disabled control's `opacity` or `cursor` (the disabled look is one rule): a selector whose subject names `.tf-btn`, `.tf-sm`, `.tf-lg`, `.tf-iconbtn` or `.tf-refresh`, or is a `button` inside `.tf-seg` or `.tf-fchips`;
+- **(b)** the unported button classes `btn`, `tb-btn` or `x` appear in a stylesheet or in a component's `class`;
+- **(c)** a row of buttons has a `gap` other than `var(--control-gap)`: an actions container (`.tf-acts`, any local `…acts` row with or without the hyphen, the bare `.acts`, `.tf-trail`, a dialog's `footer`; a `…facts` name is not one), or a row of controls under another name (the filter bar `.tf-fbar`, the pill toggles `.tf-fchips`, the large decision `.tf-decide`, any `…-btns` row);
+- **(f)** a field in a row of buttons (`.tf-fsearch`, or a `select` or `input` inside a row of buttons or a `.tf-fsel`) sets a literal `height` or `min-height`, or vertical padding: it takes `height: var(--control-h…)`;
+- **(g)** an actions container outside a page header (`.tf-fhead`, `.tf-stg-h`) is pushed to the end and laid out by hand (`margin-left: auto` with `display: flex`): a strip's or a row's trailing group is `.tf-trail`;
+- **(d)** an allowlist entry has no reason;
+- **(e)** an allowlist entry matches nothing.
+
+The gate still reads an allowlist at `app/src/lib/tf/controls/style-gate-exceptions/`, one `<ticket>.txt` per ticket, which rules (d) and (e) check. It held the violations present when the gate landed; the #2238 cleanup tickets deleted every line, and the directory with them. New work doesn't bring it back: it follows this section.
 
 ### Adding a control
 

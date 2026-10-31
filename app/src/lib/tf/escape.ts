@@ -34,10 +34,10 @@
  * reads too, so the hint and the key cannot disagree.
  *
  * Pure: the shell describes what is open and acts on the answer. Every dialog
- * registers on the layer stack (`TfDialog`, and the rooms UI's `Modal` the
- * asset tree still draws, #1527), so rung 1 sees it even when focus is
- * outside it. `Modal` also answers an `Esc` pressed inside it and stops the
- * event, so that press never reaches the shell.
+ * registers on the layer stack (`TfDialog`, the one dialog shell, #1527), so
+ * rung 1 sees it even when focus is outside it. `TfDialog` also answers an
+ * `Esc` pressed inside it and stops the event, so that press never reaches the
+ * shell.
  */
 import { segmentKey } from "./job/job";
 import { HEAD_NAME, isTopPage, jobHash, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";

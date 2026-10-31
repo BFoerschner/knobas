@@ -38,16 +38,22 @@
   }
 </script>
 
-<header class="tf-stg-h">
-  <h1>Desktop notifications</h1>
-  <p>
-    A desktop notification for each new inbox item you choose here, only while knobas is not in front. Clicking it
-    opens the item.
-  </p>
+<header class="tf-stg-h tf-stg-hline">
+  <div>
+    <h1>Desktop notifications</h1>
+    <p>
+      A desktop notification for each new inbox item you choose here, only while knobas is not in front. Clicking it
+      opens the item.
+    </p>
+  </div>
+  {#if store.error !== null && !store.loaded}
+    <div class="tf-acts"><button class="tf-btn" onclick={() => void store.reseed()}>Try again</button></div>
+  {:else if store.loaded}
+    <div class="tf-acts"><button class="tf-btn" onclick={() => void test()}>Send a test desktop notification</button></div>
+  {/if}
 </header>
 {#if store.error !== null && !store.loaded}
   <p class="tf-stg-p tf-stg-errt">Could not read the desktop notification settings: {store.error}</p>
-  <div class="tf-stg-acts"><button class="tf-btn" onclick={() => void store.reseed()}>Try again</button></div>
 {:else if store.loaded}
   {#each NOTIFY_KINDS as kind (kind.id)}
     {@const on = store.kinds.includes(kind.id)}
@@ -73,5 +79,4 @@
   {:else if store.error !== null}
     <p class="tf-stg-note tf-stg-errt" role="status">Could not save: {store.error}</p>
   {/if}
-  <div class="tf-stg-acts"><button class="tf-btn tf-sm" onclick={() => void test()}>Send a test desktop notification</button></div>
 {/if}

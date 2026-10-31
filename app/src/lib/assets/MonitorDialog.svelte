@@ -51,7 +51,7 @@
   import type { AssetDetail, editAsset, MonitorTarget } from "../ipc/assets";
   import type { submitWrite } from "../ipc/entity";
   import { followWrite } from "../shell/follow-write";
-  import Modal from "../shell/Modal.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
   import { prefillFor } from "./create-monitor";
 
   let {
@@ -131,12 +131,12 @@
   }
 </script>
 
-<Modal title="Create monitor" subtitle={`For ${detail.asset.name}`} {onclose}>
+<TfDialog closeButton title="Create monitor" subtitle={`For ${detail.asset.name}`} {onclose}>
   {#snippet body()}
     <div class="fields">
       <div class="fld">
         <label class="l" for="{fieldId}-name">Name</label>
-        <!-- `Modal` focuses the first focusable control, which is this one. -->
+        <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
           id="{fieldId}-name"
@@ -195,12 +195,12 @@
   {/snippet}
 
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>Cancel</button>
-    <button class="btn pri" disabled={!ready} onclick={() => void submit()}>
+    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-primary" disabled={!ready} onclick={() => void submit()}>
       {writing ? "Queueing…" : "Create"}
     </button>
   {/snippet}
-</Modal>
+</TfDialog>
 
 <style>
   .fields {
@@ -217,9 +217,9 @@
     margin-bottom: 4px;
   }
 
-  /* `.inp`, `.btn` and `.fail` are `unported.css`' -- redeclaring them here is how
-     two dialogs come to look different. `RouteDialog` styles the same three
-     things and no more. */
+  /* `.inp` and `.fail` are `unported.css`' and the buttons are `.tf-btn`
+     (`chrome.css`) -- redeclaring any of them here is how two dialogs come to
+     look different. */
   .hint {
     margin-top: 6px;
     font-size: 11px;

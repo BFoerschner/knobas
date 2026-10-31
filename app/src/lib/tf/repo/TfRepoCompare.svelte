@@ -290,7 +290,7 @@
     <h2 class="tf-cgroup-h tf-cchanges">
       What it changes
       {#if section !== null && head !== null}
-        <span class="tf-acts"
+        <span class="tf-trail"
           ><a class="tf-btn tf-sm tf-ghost" href={diffHash(repoId, ends.base, ends.head)}>Open as diff</a><TfOpenObject
             entityId={repoId}
             object={{ kind: "range", base: ends.base, head: ends.head }}

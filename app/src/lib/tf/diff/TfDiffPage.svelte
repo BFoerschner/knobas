@@ -179,7 +179,7 @@
   <h2 class="tf-cgroup-h">
     <a href={repoHash(repoId, "commits")}>{title ?? repoId}</a>
     <span class="tf-mono" data-testid="diff-range">{shown(base)} … {shown(head)}</span>
-    <span class="tf-acts"><TfOpenObject entityId={repoId} object={{ kind: "range", base, head }} /></span>
+    <span class="tf-trail"><TfOpenObject entityId={repoId} object={{ kind: "range", base, head }} /></span>
   </h2>
   {#if readAt !== null}
     <div class="tf-diffws">

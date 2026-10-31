@@ -171,7 +171,7 @@
         <span
           >You linked <b>{offer.title}</b> by hand to {hintTickets(offer)}. Add it to <b>{offer.set_name}</b>?</span
         >
-        <span class="tf-acts">
+        <span class="tf-trail">
           <button type="button" class="tf-btn tf-sm" disabled={adding} onclick={() => void addHinted(offer)}
             >Add to {offer.set_name}</button
           >

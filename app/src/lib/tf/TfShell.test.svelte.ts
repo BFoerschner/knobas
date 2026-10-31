@@ -11,7 +11,7 @@ import type { RunningTimer } from "../ipc/time";
 import { writeQueuePanel, type WriteQueue } from "../shell/write-queue.svelte";
 import { createHealth, type Health } from "../shell/health.svelte";
 import { push, toasts } from "../shell/toasts.svelte";
-import Modal from "../shell/Modal.fixture.svelte";
+import Modal from "./settings/TfDialog.fixture.svelte";
 import { createBadges } from "./badges.svelte";
 import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
@@ -551,7 +551,7 @@ test("an address the new shell has no place for names itself", async () => {
   start();
   // Link sets was the last section still drawn as "not built yet" (#866).
   await at("#/sets");
-  expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Link sets");
+  expect(seen(".tf-fhead h1")[0]?.textContent).toBe("Link sets");
   expect(target.textContent).not.toContain("is not built in the new shell yet");
   await at("#/nowhere");
   expect(seen(".tf-empty")[0]?.textContent).toContain("Nothing lives at #/nowhere in the new shell.");
@@ -993,11 +993,11 @@ test("a dialog opened over the write queue panel closes first on Esc, then the p
 });
 
 /**
- * A rooms-UI `Modal` under this shell (the asset tree's dialogs, #1527) is a
- * layer like a `TfDialog`: with focus outside it, the window's `Esc` closes it
+ * A `TfDialog` with a header Close (the asset tree's dialogs, #1527) is a
+ * layer like any dialog: with focus outside it, the window's `Esc` closes it
  * and the page stays, and history does not move while it is up (#1086).
  */
-test("Esc on the window closes a Modal and leaves the page; history waits for it (#1527)", async () => {
+test("Esc on the window closes an asset dialog and leaves the page; history waits for it (#1527)", async () => {
   const nav = { back: vi.fn(), forward: vi.fn() };
   const layers = createLayers();
   start({ nav, layers });
@@ -1387,7 +1387,7 @@ test("an item's page draws the kind's label as its breadcrumb; with no parent an
   expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
   expect(crumbs.querySelector("strong")?.textContent).toBe("Survey");
   expect(escHint()).toBeNull();
-  expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Quay crane 4 inspection");
+  expect(seen(".tf-fhead h1")[0]?.textContent).toBe("Quay crane 4 inspection");
 
   const event = press("Escape");
   await settle();
@@ -1511,6 +1511,33 @@ test("every role view's header draws Sync now, once, and a view of no role draws
   }
   await at("#/inbox");
   expect(syncButton()).toBeNull();
+});
+
+test("Docs draws its Sync now last in its header (#2286)", async () => {
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
+  await at("#/docs");
+  expect(syncButton()?.parentElement?.matches(".tf-fhead .tf-acts")).toBe(true);
+  expect(syncButton()?.parentElement?.lastElementChild).toBe(syncButton());
+});
+
+test("Code's Sync now is a default-size header button, last after New pull request (#2238, #2295)", async () => {
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
+  await at("#/code");
+  const acts = seen(".tf-fhead .tf-acts").find((el) => el.contains(syncButton()));
+  const names = [...(acts?.children ?? [])].map((el) => el.textContent?.trim());
+  expect(names).toEqual(["New pull request", "Sync now"]);
+  expect(syncButton()!.classList.contains("tf-btn")).toBe(true);
+  expect(syncButton()!.classList.contains("tf-sm"), "a header button is default size").toBe(false);
+});
+
+test("every role view's Sync now is a header's default-size button, and Builds' is last in its header (#2287)", async () => {
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
+  for (const view of ROLE_VIEWS) {
+    await at(view);
+    expect(syncButton()?.classList.contains("tf-sm"), view).toBe(false);
+  }
+  await at("#/builds");
+  expect(syncButton()?.closest(".tf-fhead .tf-acts")?.lastElementChild).toBe(syncButton());
 });
 
 test("a role with no enabled source draws no Sync now", async () => {

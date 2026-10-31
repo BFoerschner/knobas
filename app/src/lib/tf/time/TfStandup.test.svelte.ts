@@ -285,6 +285,16 @@ test("Copy as text copies the digest", async () => {
   expect(calls.copied[0]).toContain("Infrastructure\n- payout-api health check was down 12 min, from 03:10");
 });
 
+test("each panel heading's action is a plain small button on the heading line, not dressed as a link (#2288)", async () => {
+  open();
+  await settle();
+  const headed = [...target.querySelectorAll(".tf-su .tf-panel > header .tf-btn")].map((b) => [b.textContent?.trim(), b.className]);
+  expect(headed).toEqual([
+    ["Copy as text", "tf-btn tf-sm tf-ghost"],
+    ["Publish to Confluence", "tf-btn tf-sm tf-primary"],
+  ]);
+});
+
 test("the protocol draws who was there, their notes, and the action items, from the note's body", async () => {
   open();
   await settle();

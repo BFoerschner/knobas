@@ -67,7 +67,7 @@
                 >{app.command}{#if app.file_command}<br />{app.file_command}{/if}</span
               ></span
             >
-            <span class="tf-appacts">
+            <span class="tf-trail">
               <button type="button" class="tf-btn tf-sm tf-ghost" disabled={index === 0} aria-label="Move up" onclick={() => up(index)}
                 >↑</button
               >
@@ -79,7 +79,7 @@
       <span class="tf-dim tf-dnote">Pick the default with the round button.</span>
     {/snippet}
     {#snippet footer()}
-      <button type="button" class="tf-btn" onclick={() => (editing = "add")}>Add an application…</button>
+      <button type="button" class="tf-btn tf-first" onclick={() => (editing = "add")}>Add an application…</button>
       <button type="button" class="tf-btn tf-primary" onclick={onclose}>Done</button>
     {/snippet}
   </TfDialog>

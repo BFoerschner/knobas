@@ -288,10 +288,12 @@
   {/snippet}
   {#snippet footer()}
     {#if editing}
-      <button type="button" class="tf-btn tf-ghost tf-remove" disabled={busy} onclick={remove}>Remove</button>
+      <button type="button" class="tf-btn tf-ghost tf-danger" class:tf-first={sample === null} disabled={busy} onclick={remove}
+        >Remove</button
+      >
     {/if}
     {#if sample !== null}
-      <button type="button" class="tf-btn" disabled={!ready} onclick={() => void tryIt()}>Try it on {sample.name}</button>
+      <button type="button" class="tf-btn tf-first" disabled={!ready} onclick={() => void tryIt()}>Try it on {sample.name}</button>
     {/if}
     <button type="button" class="tf-btn tf-ghost" onclick={dismiss}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-app-form" disabled={!ready}>{editing ? "Save" : "Add application"}</button>

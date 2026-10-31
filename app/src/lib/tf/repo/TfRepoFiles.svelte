@@ -1101,7 +1101,7 @@
       <header>
         <span class="tf-p">{file.path}</span>
         <span class="tf-chip tf-warn">editing on {branch}</span>
-        <span class="tf-acts">
+        <span class="tf-trail">
           <a class="tf-btn tf-sm tf-ghost" href={fileHash(repoId, file.path)}>Cancel</a>
           <button type="button" class="tf-btn tf-sm tf-primary" onclick={openCommit}>Commit change…</button>
         </span>
@@ -1128,7 +1128,7 @@
       <header>
         <span class="tf-p">{#if cut > 0}<span class="tf-pdir">{file.path.slice(0, cut)}</span>{/if}{file.path.slice(cut)}</span>
         <span class="tf-dim tf-small tf-fmeta">{fileMeta(file, lines.length)}</span>
-        <span class="tf-acts">
+        <span class="tf-trail">
           {#if opened !== null && renderer !== null}
             {@const at = drawn?.path ?? file.path}
             <TfRendererSwitch
@@ -1155,13 +1155,13 @@
       {#if changed.has(file.path)}
         <div class="tf-banner tf-warn">
           Your checkout has an uncommitted change to this file.
-          <span class="tf-acts"><a class="tf-btn tf-sm" href={repoHash(repoId, "local")}>See local changes</a></span>
+          <span class="tf-trail"><a class="tf-btn tf-sm" href={repoHash(repoId, "local")}>See local changes</a></span>
         </div>
       {/if}
       {#if shownFile?.truncated}
         <div class="tf-banner tf-info">
           The file is longer than knobas shows.
-          {#if file.url}<span class="tf-acts"><a class="tf-btn tf-sm" href={file.url}>The rest on the source</a></span>{/if}
+          {#if file.url}<span class="tf-trail"><a class="tf-btn tf-sm" href={file.url}>The rest on the source</a></span>{/if}
         </div>
       {/if}
       {#if suggested !== null}
@@ -1170,7 +1170,7 @@
         <div class="tf-suggest" role="status">
           <b>These bytes look {chip.kind}.</b>
           <span>Nothing has been applied; you see the file as it is.</span>
-          <span class="tf-acts">
+          <span class="tf-trail">
             <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => pipes.set(at, [chip.step])}>Unwrap with {stepName(chip.step)}</button>
             <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => notNow.add(at)}>Not now</button>
           </span>

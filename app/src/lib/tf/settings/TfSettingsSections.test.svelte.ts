@@ -394,8 +394,9 @@ test("a link set draws its tick after Links, on by default, and switching it off
   expect(p.shareExport).toHaveBeenLastCalledWith(expect.objectContaining({ link_sets: false }));
 });
 
-/** The file names the open dialog lists. */
-const listedFiles = () => [...target.querySelectorAll('[role="dialog"] tbody tr td:first-child')].map((el) => el.textContent);
+/** The file names the open dialog lists, one pick each. */
+const listedFiles = () =>
+  [...target.querySelectorAll<HTMLInputElement>('[role="dialog"] [role="radiogroup"] input[type="radio"]')].map((el) => el.value);
 
 test("Restore from a file… lists the backups and Import… the share exports, each restoring that file", async () => {
   const p = await open("backup");
@@ -662,3 +663,124 @@ test("a hidden Settings page does not read the backup folder on focus, and reads
     page.shown = true;
   }
 });
+
+/**
+ * #2284: a Settings page's actions sit on the right of its title line, as every
+ * other page's do (the Controls section's header), never in a row of their own
+ * under it. Section rows (a form's Save, a table's Edit…) stay in their section.
+ */
+const headerActions = () => [...target.querySelectorAll<HTMLElement>(".tf-stg-h .tf-acts .tf-btn")].map((b) => b.textContent!.trim());
+const loneRows = () => body().querySelectorAll(":scope > .tf-stg-acts").length;
+
+test.each([
+  ["notifications", ["Send a test desktop notification"]],
+  ["backup", ["Back up now", "Restore from a file…"]],
+  ["logs", ["Open the log folder", "Re-index search"]],
+])("Settings › %s puts its actions on the title line", async (section, actions) => {
+  await open(section, sectionPorts(), section === "notifications" ? { notifications: notificationsStub([]) } : {});
+  expect(headerActions()).toEqual(actions);
+  expect(loneRows()).toBe(0);
+});
+
+test("a section that could not read puts Try again on the title line", async () => {
+  await open("backup", sectionPorts({ backupStatus: vi.fn(() => Promise.reject(new Error("locked"))) }));
+  expect(body().textContent).toContain("Could not read the backup settings");
+  expect(headerActions()).toEqual(["Try again"]);
+  expect(loneRows()).toBe(0);
+});
+
+const footerOf = () =>
+  [...target.querySelectorAll<HTMLElement>('[role="dialog"] footer .tf-btn')].map((b) => [b.textContent!.trim(), b.className]);
+
+test("Standup's Change… and Backup's Restore from a file… draw Cancel as a ghost (#2284)", async () => {
+  await open("standup");
+  button("Change…").click();
+  await settle();
+  expect(footerOf()).toEqual([
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Save", "tf-btn tf-primary"],
+  ]);
+  unmount(view!);
+  view = null;
+  await open("backup");
+  button("Restore from a file…").click();
+  await settle();
+  expect(footerOf()).toEqual([
+    ["Open the backup folder", "tf-btn tf-first"],
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Restore", "tf-btn tf-primary"],
+  ]);
+});
+
+/** The radio for one listed file in the open dialog. */
+const pickFor = (file: string) =>
+  target.querySelector<HTMLInputElement>(`[role="dialog"] [role="radiogroup"] input[type="radio"][value="${file}"]`)!;
+
+test("Restore from a file… is a pick and a footer primary: the first file is picked, another can be (#2343)", async () => {
+  const p = await open("backup", sectionPorts({ backupStatus: vi.fn(() => Promise.resolve(statusWith("knobas-20261014-020000.knobas", false))) }));
+  button("Restore from a file…").click();
+  await settle();
+  expect(target.querySelector('[role="dialog"] [role="radiogroup"]')?.getAttribute("aria-label")).toBe("Backups");
+  expect(listedFiles()).toEqual(["knobas-20261015-020000.knobas", "knobas-20261014-020000.knobas"]);
+  expect(pickFor("knobas-20261015-020000.knobas").checked).toBe(true);
+  expect(
+    [...target.querySelectorAll('[role="dialog"] button')].filter((b) => b.textContent!.trim() === "Restore"),
+    "one Restore, the footer's, none per row",
+  ).toHaveLength(1);
+  pickFor("knobas-20261014-020000.knobas").click();
+  flushSync();
+  button("Restore").click();
+  await settle();
+  expect(p.restoreBackup).toHaveBeenCalledExactlyOnceWith("knobas-20261014-020000.knobas");
+});
+
+test("Import… names its picks Share exports and its primary Import (#2343)", async () => {
+  await open("backup");
+  button("Import…").click();
+  await settle();
+  expect(target.querySelector('[role="dialog"] [role="radiogroup"]')?.getAttribute("aria-label")).toBe("Share exports");
+  expect(footerOf().at(-1)).toEqual(["Import", "tf-btn tf-primary"]);
+});
+
+test("with nothing in the folder the primary is there and disabled (#2343)", async () => {
+  await open("backup", sectionPorts({ backupStatus: vi.fn(() => Promise.resolve({ ...status(), archives: [] })) }));
+  button("Restore from a file…").click();
+  await settle();
+  expect(body().textContent).toContain("No backups there yet.");
+  expect(button("Restore").disabled).toBe(true);
+});
+
+test("Standup puts a failed read's Try again on the title line (#2284)", async () => {
+  await open("standup", sectionPorts({ standupPublishTarget: vi.fn(() => Promise.reject(new Error("locked"))) }));
+  expect(headerActions()).toEqual(["Try again"]);
+  expect(loneRows()).toBe(0);
+});
+
+test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "performance", "renderers", "keyboard", "logs", "checkouts"])(
+  "Settings › %s draws no action row of its own under the title (#2284)",
+  async (section) => {
+    await open(section, sectionPorts(), section === "notifications" ? { notifications: notificationsStub([]) } : {});
+    expect(body().querySelector("h1")).not.toBeNull();
+    expect(loneRows()).toBe(0);
+  },
+);
+
+/**
+ * #2343: "Small: everything inside a page body" (Controls). Every button in a
+ * Settings page body is small, except the title line's actions, which are the
+ * header's, and a dialog's, which have their own footer rule.
+ */
+const bodyButtonsAtDefault = () =>
+  [...body().querySelectorAll<HTMLElement>(".tf-btn")]
+    .filter((b) => !b.closest(".tf-stg-h") && !b.closest('[role="dialog"]') && !b.classList.contains("tf-sm"))
+    .map((b) => b.textContent!.trim());
+
+// Renderers and Checkouts draw their bodies in their own files' fixtures, and are checked there.
+test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "performance", "keyboard", "logs", "notes"])(
+  "Settings › %s draws its body buttons small (#2343)",
+  async (section) => {
+    await open(section, sectionPorts(), section === "notifications" ? { notifications: notificationsStub([]) } : {});
+    expect(body().querySelector("h1")).not.toBeNull();
+    expect(bodyButtonsAtDefault()).toEqual([]);
+  },
+);

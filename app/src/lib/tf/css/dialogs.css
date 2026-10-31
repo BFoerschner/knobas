@@ -9,9 +9,17 @@
 }
 .tf-dialog header { padding: 14px 18px; border-bottom: 1px solid var(--rule); }
 .tf-dialog header h2 { font-size: var(--t-xl); }
+/* TfDialog's title line: the title block on the left, an optional Close on the right. The negative margin
+   keeps the 32px icon button from growing the header: placement only, no size. */
+.tf-dhead { display: flex; align-items: flex-start; gap: 10px; }
+.tf-dtitle { flex: 1; min-width: 0; }
+.tf-dhead .tf-dclose { margin: -5px -8px -5px 0; }
+.tf-dclose svg { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; }
+/* The import dialog's width (a dialog of its own width passes `className` to TfDialog). */
+.tf-dialog.tf-dwide { width: min(820px, calc(100vw - 32px)); }
 .tf-dialog .tf-body { padding: 14px 18px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
 .tf-dialog footer {
-  padding: 12px 18px; border-top: 1px solid var(--rule); display: flex; gap: 8px; justify-content: flex-end;
+  padding: 12px 18px; border-top: 1px solid var(--rule); display: flex; gap: var(--control-gap); justify-content: flex-end;
   background: var(--sheet-2);
 }
 .tf-dialog footer .tf-first { margin-right: auto; }
@@ -38,15 +46,11 @@
 .tf-dur .tf-dim { font-size: var(--t-xs); flex-basis: 100%; }
 
 .tf-hidden { visibility: hidden; }
-.tf-fhead .tf-acts { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+/* The canonical header's actions (Controls, *Header*): a page's `.tf-fhead`, and a Settings page's `.tf-stg-h`. */
+.tf-fhead .tf-acts, .tf-stg-h .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); flex-wrap: wrap; }
 
 /* ---------- tabs ---------- */
 .tf-tabs { display: flex; gap: 2px; padding: 0 22px; border-bottom: 1px solid var(--rule); overflow-x: auto; }
-.tf-tabs a {
-  border: 0; background: none; padding: 8px 12px; color: var(--ink-2); border-bottom: 2px solid transparent;
-  margin-bottom: -1px; white-space: nowrap; text-decoration: none;
-}
-.tf-tabs [aria-current="page"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
 
 /* ---------- forms in a dialog ---------- */
 .tf-dform { display: contents; }

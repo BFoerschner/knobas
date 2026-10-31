@@ -40,9 +40,13 @@
 .tf-timer-stop { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 3px; background: rgba(0,0,0,.12); }
 .tf-timer.tf-off .tf-timer-stop { background: none; }
 .tf-timer-stop i { width: 9px; height: 9px; background: currentColor; border-radius: 1px; }
+/* An icon-only button is square at its row's height: the top bar's at the header height, a body row's `.tf-sm` (Controls). */
 .tf-iconbtn {
-  display: inline-flex; border: 0; background: none; cursor: pointer; color: var(--ink-2); padding: 6px; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: var(--control-h); height: var(--control-h); padding: 0;
+  border: 0; background: none; cursor: pointer; color: var(--ink-2); border-radius: 4px;
 }
+.tf-iconbtn.tf-sm { width: var(--control-h-sm); height: var(--control-h-sm); }
 .tf-iconbtn:hover { background: var(--sheet-2); color: var(--ink); }
 .tf-iconbtn[aria-current="page"] { color: var(--ink); background: var(--sheet-2); }
 .tf-iconbtn svg { width: 16px; height: 16px; }
@@ -87,7 +91,7 @@
 .tf-fhead { padding: 16px 22px 12px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
 .tf-fhead h1 { font-size: var(--t-3xl); line-height: 1.15; font-weight: 700; font-variation-settings: "wdth" 85; }
 .tf-fhead .tf-sub { color: var(--ink-2); margin-top: 4px; font-size: var(--t-sm); }
-/* A role view's *Sync now* (#2106): its own width in a column head (the Docs tree's, the Builds rail's). */
+/* A role view's *Sync now* (#2106): the last of its header's actions (#2238), at its own height, not stretched to the row. */
 .tf-syncnow { align-self: flex-start; }
 
 /* An empty state: centred, says what would fill it, offers the action. */
@@ -110,7 +114,8 @@
 .tf-btn.tf-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .tf-btn.tf-ghost { border-color: transparent; background: none; }
 .tf-btn.tf-ghost:hover { background: var(--sheet-2); }
-.tf-btn[disabled], .tf-btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.tf-btn[disabled], .tf-btn[aria-disabled="true"], .tf-iconbtn[disabled] { opacity: .55; cursor: not-allowed; }
+.tf-iconbtn[disabled]:hover { background: none; }
 .tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: var(--t-sm); }
 .tf-btn.tf-lg { height: var(--control-h-lg); padding: 0 16px; font-size: var(--t-md); }
 
@@ -120,6 +125,32 @@
 
 /* A strip's or a row's trailing group of actions: at the end, centred on the strip, the control gap apart. */
 .tf-trail { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
+
+/* An underline tab strip (#2294): a page's `.tf-tabs` (the current tab `aria-current`) and the job's
+   `.tf-wtabs` (`role="tab"`, `aria-selected`) draw their tabs with this one rule. */
+:is(.tf-tabs, .tf-wtabs) a {
+  border: 0; background: none; padding: 8px 12px; color: var(--ink-2); border-bottom: 2px solid transparent;
+  margin-bottom: -1px; white-space: nowrap; text-decoration: none;
+}
+:is(.tf-tabs, .tf-wtabs) a:is([aria-current="page"], [aria-selected="true"]) {
+  color: var(--ink); border-bottom-color: var(--ink); font-weight: 600;
+}
+
+/* The segmented control and the pill toggles are page-body controls: small (Controls). The segment's
+   buttons sit inside its 1px border, so the whole switch is `--control-h-sm` tall, as a small button is. */
+.tf-seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; flex: none; }
+.tf-seg button {
+  height: calc(var(--control-h-sm) - 2px); padding: 0 10px; font-size: var(--t-sm);
+  border: 0; background: var(--sheet); cursor: pointer; color: var(--ink-2);
+}
+.tf-seg button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
+.tf-fchips { display: inline-flex; gap: var(--control-gap); flex-wrap: wrap; }
+.tf-fchips button {
+  height: var(--control-h-sm); padding: 0 10px; font-size: var(--t-sm); border-radius: 12px;
+  border: 1px solid var(--rule); background: var(--sheet); cursor: pointer; color: var(--ink-2);
+}
+.tf-fchips button:hover { border-color: var(--ink-2); }
+.tf-fchips button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 
 /* ---------- chips, signals, small text ---------- */
 .tf-chip {

@@ -21,7 +21,8 @@
     (`listRows`): headings, pipelines and the summaries of folds, a fold's
     rows following its summary while it is open.
   - **Right**, the selected pipeline's page (#851, `TfPipeline.svelte`):
-    header with *Pin*, history chart, and the Runs, Parameters and Triggers
+    header with *Pin* and, last, the view's *Sync now* (#2287; a bare
+    *Builds* header holds it while no pipeline is drawn), history chart, and the Runs, Parameters and Triggers
     tabs.
 
   `#/builds` selects the first failing pipeline, else the first;
@@ -57,6 +58,7 @@
 </script>
 
 <script lang="ts">
+  import TfBareHeader from "../TfBareHeader.svelte";
   import { flushSync, onMount, tick, untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
 
@@ -322,6 +324,11 @@
   }
 </script>
 
+<!-- The header while no pipeline or run is drawn: the view's name and its *Sync now* (#2287). -->
+{#snippet bare()}
+  <TfBareHeader title="Builds" {sync} />
+{/snippet}
+
 {#snippet crumbs(parts: Crumb[])}
   <TfCrumbs {parts} {back} />
 {/snippet}
@@ -390,7 +397,6 @@
           <button type="button" aria-pressed={chips.includes(chip)} onclick={() => toggle(chip)}>{chip}</button>
         {/each}
       </div>
-      {@render sync?.()}
     </div>
     <div class="tf-pl-list" bind:this={list}>
       {#if failed !== null}
@@ -424,9 +430,10 @@
   </nav>
   <section class="tf-bmain">
     {#if head === "build" && selected !== null && rest.length >= 2}
-      <TfRun pipeline={selected} {rest} {job} runs={ports.runs} {crumbs} />
+      <TfRun pipeline={selected} {rest} {job} runs={ports.runs} {crumbs} {sync} />
     {:else if head === "build"}
       {@render crumbs([{ name: "Builds", href: "#/builds" }, { name: "Run" }])}
+      {@render bare()}
       {#if all !== null && (rest.length !== 1 || lost === rest[0])}
         <div class="tf-empty"><p>No run at this address. Pick a pipeline on the left.</p></div>
       {/if}
@@ -436,12 +443,22 @@
         ...(selected.group !== null ? [{ name: selected.group, href: "#/builds" }] : []),
         { name: selected.name },
       ])}
-      <TfPipeline pipeline={selected} {rest} {job} runs={ports.runs} onpin={() => togglePin(selected!)} rereadRow={rereadPipelines} />
+      <TfPipeline
+        pipeline={selected}
+        {rest}
+        {job}
+        runs={ports.runs}
+        onpin={() => togglePin(selected!)}
+        rereadRow={rereadPipelines}
+        {sync}
+      />
     {:else if all !== null && all.length > 0}
       {@render crumbs([{ name: "Builds" }])}
+      {@render bare()}
       <div class="tf-empty"><p>No pipeline at this address. Pick one on the left.</p></div>
     {:else}
       {@render crumbs([{ name: "Builds" }])}
+      {@render bare()}
     {/if}
   </section>
 </div>

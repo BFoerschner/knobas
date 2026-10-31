@@ -25,7 +25,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
   import type { AssetRow, AssetType, createAsset } from "../ipc/assets";
-  import Modal from "../shell/Modal.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
   import { defaultTypeId, typeChoices, usualHere } from "./editing";
 
   let {
@@ -89,7 +89,8 @@
   }
 </script>
 
-<Modal
+<TfDialog
+  closeButton
   title="New asset"
   subtitle={at.parent === null ? "At the top of the estate" : `In ${at.parent.name}`}
   {onclose}
@@ -98,7 +99,7 @@
     <div class="fields">
       <div class="fld">
         <label class="l" for="{fieldId}-name">Name</label>
-        <!-- `Modal` focuses the first focusable control, which is this one. -->
+        <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
           id="{fieldId}-name"
@@ -152,16 +153,16 @@
   {/snippet}
 
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
-      class="btn pri"
+      class="tf-btn tf-primary"
       disabled={writing || name.trim() === "" || typeId === ""}
       onclick={() => void submit()}
     >
       {writing ? "Creating…" : "Create"}
     </button>
   {/snippet}
-</Modal>
+</TfDialog>
 
 <style>
   .fields {

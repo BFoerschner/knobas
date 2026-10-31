@@ -57,7 +57,7 @@
     Visibility,
   } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
-  import Modal from "../shell/Modal.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
   import { inputTypeFor, parseProperty, propertyEdit, PROPERTY_KINDS } from "./editing";
 
   let {
@@ -283,12 +283,12 @@
   }
 </script>
 
-<Modal title={editing ? "Edit route" : "New route"} subtitle={`On ${asset.name}`} {onclose}>
+<TfDialog closeButton title={editing ? "Edit route" : "New route"} subtitle={`On ${asset.name}`} {onclose}>
   {#snippet body()}
     <div class="fields">
       <div class="fld">
         <label class="l" for="{fieldId}-name">Name</label>
-        <!-- `Modal` focuses the first focusable control, which is this one. -->
+        <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
           id="{fieldId}-name"
@@ -416,7 +416,7 @@
               oninput={(event) => (property.value = event.currentTarget.value)}
             />
             <button
-              class="btn sm"
+              class="tf-btn tf-sm"
               title="Remove {property.key || 'this property'}"
               onclick={() => properties.splice(index, 1)}
             >
@@ -425,7 +425,7 @@
           </div>
         {/each}
         <button
-          class="btn sm"
+          class="tf-btn tf-sm"
           onclick={() => properties.push({ key: "", kind: "text", value: "" })}
         >
           Add a property
@@ -440,18 +440,18 @@
 
   {#snippet footer()}
     {#if editing}
-      <button class="btn danger" disabled={writing} onclick={() => void drop()}>Delete</button>
+      <button class="tf-btn tf-ghost tf-danger tf-first" disabled={writing} onclick={() => void drop()}>Delete</button>
     {/if}
-    <button class="btn" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
-      class="btn pri"
+      class="tf-btn tf-primary"
       disabled={writing || name.trim() === "" || url.trim() === ""}
       onclick={() => void submit()}
     >
       {writing ? "Saving…" : editing ? "Save" : "Expose"}
     </button>
   {/snippet}
-</Modal>
+</TfDialog>
 
 <style>
   .fields {

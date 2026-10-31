@@ -307,7 +307,7 @@ test("a refusal that is not a conflict keeps the backend's sentence", async () =
 /**
  * Story 23's ladder: one rung per press. A search somebody typed is a step, so
  * the first Esc undoes it and the dialog stays; only an empty box lets the key
- * through to `Modal`.
+ * through to `TfDialog`.
  */
 test("Esc clears the search first and only then closes the dialog", async () => {
   answer = () => Promise.resolve(response([hit({ id: "mock:PAY-228", title: "Payout retries" })]));
@@ -412,6 +412,34 @@ test("picking monitored-by from an asset writes the same row", async () => {
     relation: "monitored-by",
     note: "",
   });
+
+  screen.done();
+});
+
+/**
+ * #2238 / #2292: the canonical dialog footer, a ghost *Cancel* then the
+ * primary, and the body's *Change* at the small size.
+ */
+test("the footer is a ghost Cancel then the primary Link, and Change is small", async () => {
+  answer = () => Promise.resolve(response([hit({ id: "mock:PAY-228", title: "Payout retries" })]));
+  const screen = render();
+  const classes = (button: Element) =>
+    [...button.classList].filter((name) => name.startsWith("tf-")).join(" ");
+
+  expect(
+    [...screen.target.querySelectorAll(".tf-dialog footer .tf-btn")].map((button) => [
+      button.textContent?.trim(),
+      classes(button),
+    ]),
+  ).toEqual([
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Link", "tf-btn tf-primary"],
+  ]);
+
+  screen.type(screen.picker(), "payout");
+  await waitFor(() => expect(screen.options()).toHaveLength(1));
+  screen.press(screen.picker(), "Enter");
+  expect(classes(screen.button("Change"))).toBe("tf-btn tf-sm");
 
   screen.done();
 });

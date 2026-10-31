@@ -268,7 +268,7 @@
       >{set.description}</div>
     </div>
     {/key}
-    <div class="tf-acts"><button type="button" class="tf-btn" onclick={() => void remove()}>Delete</button></div>
+    <div class="tf-acts"><button type="button" class="tf-btn tf-danger" onclick={() => void remove()}>Delete</button></div>
   </header>
   <div class="tf-cbody tf-set">
     <div class="tf-set-panels">

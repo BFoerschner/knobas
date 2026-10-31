@@ -246,18 +246,14 @@ test("a link asked for and left behind does not open on a later visit to the job
 
 /**
  * #1422: the launcher is a ticket-first dialog. It mounts inside `.tf` through
- * the shell's `dialogs`, on `TfDialog`, and nothing it draws reads the
- * unported sheet's `.scrim` or `.dlg`.
+ * the shell's `dialogs`, on `TfDialog`.
  */
-test("the launcher opens inside .tf on the shell's dialog, with no .scrim or .dlg", async () => {
+test("the launcher opens inside .tf on the shell's dialog", async () => {
   await openOn("#/tickets", "Tickets");
   await search("PAY-231");
   const dialog = launcher()!;
   expect(dialog.classList.contains("tf-dialog")).toBe(true);
   expect(dialog.closest(".tf-modal")?.parentElement?.closest(".tf")).not.toBeNull();
-  expect(dialog.closest(".scrim, .dlg")).toBeNull();
-  expect(dialog.querySelector(".scrim, .dlg")).toBeNull();
-  expect(target.querySelector(".scrim, .dlg")).toBeNull();
   expect(dialog.getAttribute("aria-labelledby")).toBeTruthy();
   expect(document.getElementById(dialog.getAttribute("aria-labelledby")!)?.textContent).toBe("Search and actions");
 });

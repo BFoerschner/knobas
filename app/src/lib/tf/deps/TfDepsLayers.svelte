@@ -115,11 +115,11 @@
     {#each read.layers as layer, index (layer.id)}
       <div class="tf-dp-lrow">
         <span class="tf-dp-arrows">
-          <button type="button" class="tf-btn tf-sm tf-ghost" disabled={index === 0} aria-label="Move {layer.name} up" onclick={() => move(index, -1)}>↑</button>
-          <button type="button" class="tf-btn tf-sm tf-ghost" disabled={index === read.layers.length - 1} aria-label="Move {layer.name} down" onclick={() => move(index, 1)}>↓</button>
+          <button type="button" class="tf-iconbtn tf-sm" disabled={index === 0} aria-label="Move {layer.name} up" onclick={() => move(index, -1)}>↑</button>
+          <button type="button" class="tf-iconbtn tf-sm" disabled={index === read.layers.length - 1} aria-label="Move {layer.name} down" onclick={() => move(index, 1)}>↓</button>
         </span>
         <input type="text" value={layer.name} aria-label="Name of the layer" data-layer-name={layer.id} onchange={(e) => void rename(layer, e.currentTarget)} />
-        <button type="button" class="tf-btn tf-sm tf-ghost" aria-label="Remove {layer.name}" title="Remove the layer from every view; what was in it goes to no layer" onclick={() => remove(layer)}>✕</button>
+        <button type="button" class="tf-iconbtn tf-sm" aria-label="Remove {layer.name}" title="Remove the layer from every view; what was in it goes to no layer" onclick={() => remove(layer)}>✕</button>
         <span class="tf-dp-lkinds tf-dim">{layer.kinds.length ? layer.kinds.map((kind) => kindOf(read.kinds, kind).label).join(", ") : "Nothing yet: place kinds below"}</span>
         {#if errors[layer.id]}<p class="tf-dp-lerr" role="alert">{errors[layer.id]}</p>{/if}
       </div>

@@ -339,7 +339,11 @@ test("it opens in the ticket-first dialog with the label field focused, and typi
   const { picked } = render();
 
   expect(target.querySelector(".tf-modal > .tf-dialog[role=dialog]"), "not the tf dialog shell").not.toBeNull();
-  expect(target.querySelector(".dlg, .scrim"), "still shell/Modal").toBeNull();
+  // The canonical footer (design system, Controls, *Dialog footer*): a ghost Cancel, then the primary.
+  expect([...target.querySelectorAll(".tf-dialog footer button")].map((b) => [b.textContent, b.className])).toEqual([
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Start", "tf-btn tf-primary"],
+  ]);
   expect(document.activeElement).toBe(labelField());
   expect(labelField().labels?.[0]?.textContent).toBe("A label");
 

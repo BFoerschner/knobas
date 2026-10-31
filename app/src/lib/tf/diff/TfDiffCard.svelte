@@ -417,7 +417,7 @@
       {#if pipeline.pattern !== null}<span class="tf-ran-why">default for {pipeline.pattern}</span>{/if}
     {/if}
     {#if MODES.length > 0 || pipeline !== null}
-      <span class="tf-fh-acts">
+      <span class="tf-fh-acts tf-trail">
         {#if pipeline !== null}
           <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => onpipeline(!pipeline.on)}>{pipeline.on ? "Show raw" : "Run pipeline"}</button>
         {/if}

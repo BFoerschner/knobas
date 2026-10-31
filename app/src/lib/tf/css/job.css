@@ -51,11 +51,6 @@
   display: flex; align-items: center; gap: 2px; padding: 10px 22px 0; border-bottom: 1px solid var(--rule);
   background: var(--paper); position: sticky; top: 0; z-index: 6;
 }
-.tf-wtabs a {
-  padding: 8px 12px; text-decoration: none; color: var(--ink-2); border-bottom: 2px solid transparent;
-  margin-bottom: -1px; white-space: nowrap;
-}
-.tf-wtabs a[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
 .tf-wbody { padding: 18px 22px 40px; display: flex; flex-direction: column; gap: 18px; }
 .tf-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
 
@@ -75,7 +70,6 @@
   margin: 0 12px 8px; padding: 8px 10px; border-radius: 6px; background: var(--sheet-2);
   display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: var(--t-sm);
 }
-.tf-checkout .tf-acts { margin-left: auto; display: flex; gap: 6px; }
 .tf-openin { position: relative; }
 .tf-menu {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; display: flex; flex-direction: column;
@@ -144,10 +138,12 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-step select { max-width: 260px; }
 .tf-step .tf-state { grid-row: 1 / span 2; grid-column: 3; font-size: var(--t-xs); }
 .tf-step .tf-swdetail { grid-column: 2; margin: 0; color: var(--ink-2); }
+/* The canonical footer (#2294): the note on the left, the primary on the right. */
 .tf-steps footer {
-  display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--rule); background: var(--sheet-2);
+  display: flex; justify-content: flex-end; gap: var(--control-gap); padding: 12px 14px; border-top: 1px solid var(--rule); background: var(--sheet-2);
   border-radius: 0 0 6px 6px; align-items: center; flex-wrap: wrap;
 }
+.tf-steps footer .tf-swhint { margin-right: auto; }
 
 /* ---------- dialog parts: a form grid and radio cards (the dialog itself is below) ---------- */
 .tf-dlg-note { font-size: var(--t-xs); color: var(--ink-2); }
@@ -162,6 +158,3 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-radio label:has(input:checked) { border-color: var(--ink); background: var(--sheet-2); }
 .tf-radio label:has(> input:disabled) { cursor: not-allowed; color: var(--ink-2); }
 .tf-radio small { display: block; color: var(--ink-2); }
-
-/* The ticket's *Refresh* or *Sync now* (#2134) ends the tab bar, after Connections, on its baseline. */
-.tf-wtabs .tf-refresh { margin: 0 0 6px 6px; }

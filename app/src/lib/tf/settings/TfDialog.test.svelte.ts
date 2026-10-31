@@ -1,15 +1,20 @@
 /**
- * What `<dialog>`-shaped behaviour a hand-rolled modal has to reproduce.
+ * The one dialog shell (`TfDialog`), and what `<dialog>`-shaped behaviour it
+ * reproduces by hand. These tests were `shell/Modal.svelte`'s, the second shell
+ * the asset tree drew until the review of #2238 moved its callers here.
  *
  * The mockup got all of this for free from a browser `dialog()` and a single
  * global key handler over one re-rendered DOM. A component port loses every
  * one of them silently: nothing throws, the dialog just stops being a dialog.
  */
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
+
 import { flushSync, mount, unmount } from "svelte";
 import { expect, test, vi } from "vitest";
 
-import { createLayers } from "../tf/layers.svelte";
-import Modal from "./Modal.fixture.svelte";
+import { createLayers } from "../layers.svelte";
+import Modal from "./TfDialog.fixture.svelte";
 
 /** An opener button, focused, as a real caller would have. */
 function opener(): HTMLButtonElement {
@@ -39,12 +44,38 @@ test("moves focus inside on mount and restores it on unmount", () => {
   flushSync();
 
   expect(document.activeElement).not.toBe(button);
-  expect(target.querySelector(".dlg")?.contains(document.activeElement)).toBe(true);
+  expect(target.querySelector(".tf-dialog")?.contains(document.activeElement)).toBe(true);
 
   unmount(app);
   expect(document.activeElement).toBe(button);
 
   button.remove();
+  target.remove();
+});
+
+/**
+ * A layer opened over this dialog (a draft over the write queue panel, #1474) is
+ * the one `Esc` closes, even with focus still in this dialog: the press goes on
+ * to the shell, which closes the topmost layer.
+ */
+test("Escape inside it, with another layer on top, is left to the shell", () => {
+  const layers = createLayers();
+  const onclose = vi.fn();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose, layers } });
+  flushSync();
+  const above = vi.fn();
+  const off = layers.add({ kind: "dialog", close: above });
+  const shell = vi.fn();
+  document.addEventListener("keydown", shell);
+
+  press("Escape");
+  expect(onclose).not.toHaveBeenCalled();
+  expect(shell).toHaveBeenCalledOnce();
+
+  document.removeEventListener("keydown", shell);
+  off();
+  unmount(app);
   target.remove();
 });
 
@@ -73,10 +104,10 @@ test("a click on the scrim closes it; a click inside the dialog does not", () =>
   const app = mount(Modal, { target, props: { onclose } });
   flushSync();
 
-  target.querySelector<HTMLElement>(".dlg")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  target.querySelector<HTMLElement>(".tf-dialog")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   expect(onclose).not.toHaveBeenCalled();
 
-  target.querySelector<HTMLElement>(".scrim")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  target.querySelector<HTMLElement>(".tf-modal")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   expect(onclose).toHaveBeenCalledTimes(1);
 
   unmount(app);
@@ -112,7 +143,7 @@ test("announces itself as a dialog labelled by its title", () => {
   const app = mount(Modal, { target, props: { onclose: () => {} } });
   flushSync();
 
-  const dialog = target.querySelector(".dlg");
+  const dialog = target.querySelector(".tf-dialog");
   expect(dialog?.getAttribute("role")).toBe("dialog");
   expect(dialog?.getAttribute("aria-modal")).toBe("true");
   const labelledBy = dialog?.getAttribute("aria-labelledby");
@@ -134,7 +165,7 @@ test("opens with focus on the first field in its body, not the header's Close", 
   const app = mount(Modal, { target, props: { onclose: () => {}, content: "input" } });
   flushSync();
 
-  expect(document.activeElement).toBe(target.querySelector(".dlg-b input"));
+  expect(document.activeElement).toBe(target.querySelector(".tf-body input"));
 
   unmount(app);
   behind.remove();
@@ -174,5 +205,82 @@ test("sits on the layer stack while open, and the stack's close is its own", () 
 
   unmount(app);
   expect(layers.open).toEqual([]);
+  target.remove();
+});
+
+/** The header's Close is drawn only when asked for: the Settings dialogs close from their footer. */
+test("draws no Close unless asked", () => {
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, closeButton: false } });
+  flushSync();
+
+  expect(target.querySelector('header button[aria-label="Close"]')).toBeNull();
+  expect(target.querySelector("header h2")?.textContent).toBe("Add source");
+
+  unmount(app);
+  target.remove();
+});
+
+/** A dialog of its own width passes a class beside `tf-dialog` (Shell conventions); the import dialog's is `tf-dwide`. */
+test("a dialog of its own width carries its class beside tf-dialog", () => {
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, className: "tf-dwide" } });
+  flushSync();
+
+  expect(target.querySelector(".tf-modal > .tf-dialog.tf-dwide[role=dialog]")).not.toBeNull();
+
+  unmount(app);
+  target.remove();
+});
+
+/**
+ * **One dialog shell** (review of #2238). `TfDialog` is the only component that
+ * draws the scrim and the sheet; a dialog of another width passes `className`.
+ * Hand-drawn `.tf-dialog` markup inside a scrim of its own is a second shell.
+ */
+test("TfDialog is the only component that draws the dialog's scrim", () => {
+  const root = join(process.cwd(), "src");
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory() ? walk(join(dir, entry.name)) : entry.name.endsWith(".svelte") ? [join(dir, entry.name)] : [],
+    );
+  const shells = walk(root)
+    .filter((file) => !file.endsWith(".fixture.svelte"))
+    .filter((file) => /class="tf-modal"/.test(readFileSync(file, "utf8")))
+    .map((file) => relative(root, file));
+  expect(shells).toEqual([
+    // Still hand-drawn, each waiting on something TfDialog doesn't take yet (#2346).
+    "lib/tf/TfWorklogDraft.svelte",
+    "lib/tf/settings/TfDialog.svelte",
+    "lib/tf/time/TfBlockDialog.svelte",
+    "lib/tf/time/TfLogAll.svelte",
+  ]);
+});
+
+/**
+ * **The ticket-first dialog** (#2292). The asset tree's dialogs were the last
+ * drawn with `unported.css`'s `.scrim` / `.dlg` and its old `×`; they take the
+ * same sheet, header and canonical footer as every dialog (design-system spec,
+ * Controls, *Dialog footer*), and their Close is a Controls icon button.
+ */
+test("draws as the ticket-first dialog, with the canonical footer", () => {
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {} } });
+  flushSync();
+
+  const dialog = target.querySelector(".tf-modal > .tf-dialog[role=dialog]");
+  expect(dialog, "the ticket-first sheet").not.toBeNull();
+  expect(dialog!.querySelector("header h2")?.textContent).toBe("Add source");
+  expect(dialog!.querySelector("header .tf-dsub")?.textContent).toBe("Step 1 of 5");
+  expect(dialog!.querySelector('header button[aria-label="Close"]')?.classList.contains("tf-iconbtn")).toBe(true);
+  expect(dialog!.querySelector(".tf-body button")).not.toBeNull();
+  expect(
+    [...dialog!.querySelectorAll("footer .tf-btn")].map((button) => [button.textContent, button.className]),
+  ).toEqual([
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Add", "tf-btn tf-primary"],
+  ]);
+
+  unmount(app);
   target.remove();
 });

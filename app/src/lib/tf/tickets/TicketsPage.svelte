@@ -646,38 +646,42 @@
   </nav>
 
   <section class="tf-board-wrap">
-    <div class="tf-board-head">
-      <h1>{view?.name ?? (viewId === null ? "All tickets" : "")}</h1>
-      {#if view && view.saved_view_source === null}<span class="tf-q"
-          >{view.query.trim() === "" ? "every synced ticket" : view.query}</span
-        >{/if}
-      {#if view !== undefined && (view === null || view.unreadable === null)}
-        <div class="tf-seg" role="group" aria-label="Layout">
-          <button type="button" aria-pressed={showing.layout === "board"} onclick={() => reader.chooseLayout("board")}
-            >Board</button
+    <header class="tf-fhead tf-board-head">
+      <div class="tf-board-title">
+        <h1>{view?.name ?? (viewId === null ? "All tickets" : "")}</h1>
+        {#if view && view.saved_view_source === null}<span class="tf-q"
+            >{view.query.trim() === "" ? "every synced ticket" : view.query}</span
+          >{/if}
+      </div>
+      <div class="tf-acts">
+        {#if view !== undefined && (view === null || view.unreadable === null)}
+          <div class="tf-seg" role="group" aria-label="Layout">
+            <button type="button" aria-pressed={showing.layout === "board"} onclick={() => reader.chooseLayout("board")}
+              >Board</button
+            >
+            <button type="button" aria-pressed={showing.layout === "list"} onclick={() => reader.chooseLayout("list")}
+              >List</button
+            >
+          </div>
+        {/if}
+        {#if view}
+          <button type="button" class="tf-btn" onclick={() => editView(view)}
+            >{view.saved_view_source === null ? "Edit view" : "View settings"}</button
           >
-          <button type="button" aria-pressed={showing.layout === "list"} onclick={() => reader.chooseLayout("list")}
-            >List</button
-          >
-        </div>
-      {/if}
-      {#if view}
-        <button type="button" class="tf-btn tf-sm" onclick={() => editView(view)}
-          >{view.saved_view_source === null ? "Edit view" : "View settings"}</button
-        >
-        <ViewMenu
-          name="this view"
-          savedViewKind={view.saved_view_source?.kind ?? null}
-          copies={offersCopy(view)}
-          className="tf-btn tf-sm tf-ghost"
-          onedit={() => editView(view)}
-          onduplicate={() => copyView(view)}
-          ondelete={() => remove(view)}
-          onhide={() => void setHidden(view, true)}
-        />
-      {/if}
-      {@render sync?.()}
-    </div>
+          <ViewMenu
+            name="this view"
+            savedViewKind={view.saved_view_source?.kind ?? null}
+            copies={offersCopy(view)}
+            className="tf-btn tf-ghost"
+            onedit={() => editView(view)}
+            onduplicate={() => copyView(view)}
+            ondelete={() => remove(view)}
+            onhide={() => void setHidden(view, true)}
+          />
+        {/if}
+        {@render sync?.()}
+      </div>
+    </header>
     {#if view?.saved_view_source && view.saved_view}
       <SavedViewSourceLine
         savedViewSource={view.saved_view_source}

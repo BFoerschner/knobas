@@ -87,12 +87,12 @@
       <div class="tf-checkout">
         <span><span class="tf-dim">Local</span> <span class="tf-mono">{checkout.path}</span>{#if tree?.branch}{" on "}<span class="tf-mono">{tree.branch}</span>{/if}</span>
         {#if changed > 0}<span class="tf-chip tf-warn">{changed} changed</span>{/if}
-        <span class="tf-acts"><TfOpenIn entityId={checkoutOf} title={repoTitle} {checkout} {layers} {apps} /></span>
+        <span class="tf-trail"><TfOpenIn entityId={checkoutOf} title={repoTitle} {checkout} {layers} {apps} /></span>
       </div>
     {:else if checkout !== null && checkoutOf !== null}
       <div class="tf-checkout">
         <span><span class="tf-mono">{repoTitle}</span> <span class="tf-dim">is not on this machine yet.</span></span>
-        <span class="tf-acts"><TfOpenIn entityId={checkoutOf} title={repoTitle} {checkout} {layers} {apps} /></span>
+        <span class="tf-trail"><TfOpenIn entityId={checkoutOf} title={repoTitle} {checkout} {layers} {apps} /></span>
       </div>
     {/if}
   {/snippet}

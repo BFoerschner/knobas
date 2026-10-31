@@ -282,16 +282,16 @@ test("somebody else's pull request names its author and offers Review…", async
   if (facts.type === "facts") facts.facts[1] = fact("Author", "jonas");
   await draw([PR], ports({ author: "jonas", pr: theirs }));
   expect(text(".tf-fhead .tf-sub")).toBe("open feature/PAY-231-sepa-retry into main, by jonas");
-  expect(buttons()).toEqual(["Review…", "Edit", "Merge…"]);
+  expect(buttons()).toEqual(["Merge…", "Review…", "Edit"]);
   // *Open in…* on the pull request (#2274): a ghost after the actions, before Refresh (#2238).
   const all = [...target.querySelectorAll(".tf-fhead .tf-acts > *")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
   expect(all.slice(-2, -1)).toEqual(["Open in… ▾"]);
   expect(target.querySelector(".tf-fhead .tf-acts [aria-haspopup=menu]")!.className).toContain("tf-ghost");
 });
 
-test("the toolbar draws what the source offers, in prototype-6's order: Review…, Update branch, Edit, Close, Merge…", async () => {
+test("the toolbar draws what the source offers, the primary first (#2238 header order): Merge…, Review…, Update branch, Edit, Close", async () => {
   await draw([PR], ports({ pr: prView([APPROVE, COMMENT, EDIT, CLOSE, UPDATE, MERGE]) }));
-  expect(buttons()).toEqual(["Review…", "Update branch", "Edit", "Close", "Merge…"]);
+  expect(buttons()).toEqual(["Merge…", "Review…", "Update branch", "Edit", "Close"]);
   // Blocked by the source, Merge… says so (#1441) and its tooltip says why; it still opens its dialog with the reasons (#843, below).
   const merge = button("Merge…")!;
   expect(merge.getAttribute("aria-disabled")).toBe("true");
@@ -456,6 +456,26 @@ test("Close asks the source's sentence and queues the closed state", async () =>
   expect(text(".tf-fhead .tf-sub")).toContain("close queued");
 });
 
+/** #2289: a destructive confirm is filled red; any other confirm is the plain primary. */
+test("the entity-action dialog's destructive confirm is filled red, after a ghost Cancel", async () => {
+  await draw([PR]);
+  button("Close")!.click();
+  flushSync();
+  const footer = () => [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].map((b) => [b.textContent?.trim(), b.className]);
+  expect(footer()).toEqual([
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Close", "tf-btn tf-primary tf-danger"],
+  ]);
+  document.querySelector<HTMLButtonElement>(".tf-dialog footer .tf-ghost")!.click();
+  flushSync();
+  button("Edit")!.click();
+  flushSync();
+  expect(footer()).toEqual([
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Edit", "tf-btn tf-primary"],
+  ]);
+});
+
 test("Update branch queues the style picked", async () => {
   await draw([PR]);
   button("Update branch")!.click();
@@ -480,7 +500,7 @@ test("a source action draws the dialog its source declares and queues SourceActi
     values: { id: "stamp_release" },
   });
   await draw([PR], ports({ pr: prView([EDIT, stamp, MERGE]) }));
-  expect(buttons()).toEqual(["Edit", "Stamp release", "Merge…"]);
+  expect(buttons()).toEqual(["Merge…", "Edit", "Stamp release"]);
   button("Stamp release")!.click();
   flushSync();
   const dialog = document.querySelector(".tf-dialog")!;
@@ -514,6 +534,8 @@ test("Conversation: each entry's who, when and verdict, then a comment queued an
   expect(messages()).toEqual(["JO jonas2026-08-22 09:30 commented Should the jitter be bounded?", "MA You2026-08-22 10:20 Bounded to ±10 %."]);
   const box = target.querySelector<HTMLTextAreaElement>(".tf-compose textarea")!;
   expect(box.placeholder).toBe("Comment on PR #142");
+  // In the page body, so small (#2238 Controls).
+  expect(button("Comment")!.classList.contains("tf-sm")).toBe(true);
   box.value = "Thanks, looks good.";
   box.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
@@ -655,7 +677,8 @@ test("line comments waiting turn Review… into Submit review (N pending), which
   pending.add(PR, { path: "src/sepa/retry.rs", side: "new", line: 14, body: "Bound it." });
   pending.add(PR, { path: "src/sepa/retry.rs", side: "old", line: 9, body: "Why was this 60 s?" });
   await draw([PR], ports({ author: "jonas", pr: prView([SUBMIT, COMMENT, APPROVE_SENDS, CHANGES, EDIT, MERGE]) }));
-  expect(buttons()[0]).toBe("Submit review (2 pending)");
+  // In Review…'s place, after the primary (#2238 header order).
+  expect(buttons().slice(0, 2)).toEqual(["Merge…", "Submit review (2 pending)"]);
   expect(button("Submit review (2 pending)")!.classList.contains("tf-warnbtn")).toBe(true);
   button("Submit review (2 pending)")!.click();
   flushSync();
@@ -690,7 +713,7 @@ test("line comments waiting turn Review… into Submit review (N pending), which
   ]);
   // The review took them: none waits, the toolbar is Review… again, the header says so.
   expect(pending.of(PR)).toEqual([]);
-  expect(buttons()[0]).toBe("Review…");
+  expect(buttons().slice(0, 2)).toEqual(["Merge…", "Review…"]);
   expect(text(".tf-fhead .tf-sub")).toContain("review queued");
 });
 
@@ -773,7 +796,7 @@ test("a token that may not comment or review draws Comment and each verdict disa
 
 test("one's own pull request: no Review…, but Submit review once a line comment waits, Comment its only verdict", async () => {
   await draw([PR], ports({ pr: prView([SUBMIT, COMMENT, EDIT, MERGE]) }));
-  expect(buttons()).toEqual(["Edit", "Merge…"]);
+  expect(buttons()).toEqual(["Merge…", "Edit"]);
   if (view) unmount(view);
   pending.add(PR, { path: "docs/backoff.md", side: "new", line: 3, body: "Say ±10 %." });
   await draw([PR], ports({ pr: prView([SUBMIT, COMMENT, EDIT, MERGE]) }));

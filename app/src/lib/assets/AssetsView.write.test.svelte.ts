@@ -995,7 +995,7 @@ test("a type table that will not load is said out loud, not left as a dead plus"
 });
 
 /**
- * The tree's dialogs are rooms-UI `Modal`s under the ticket-first shell, and
+ * The tree's dialogs are `TfDialog`s with a header Close, and
  * each sits on the shell's layer stack while open (#1527): the stack's close,
  * which the window's `Esc` calls when focus is outside the dialog, shuts it,
  * and nothing is left on the stack for history to wait on (#1086).
@@ -1019,6 +1019,52 @@ test.each([
   flushSync();
   expect(target.querySelector('[role="dialog"]')).toBeNull();
   expect(layers.open).toEqual([]);
+});
+
+/**
+ * How a footer button is drawn, in the words of the design system's Controls
+ * section (#2291): the default size is the only one a footer takes, *Cancel* is
+ * a ghost, the confirm is the primary (filled red when it destroys), and an
+ * edit dialog's extra action sits apart on the far left as red text.
+ */
+function drawnAs(control: Element): string {
+  const has = (name: string) => control.classList.contains(name);
+  if (!has("tf-btn") || has("tf-sm") || has("tf-lg")) return "not a default .tf-btn";
+  if (has("tf-primary")) return has("tf-danger") ? "confirm, red" : "primary";
+  if (has("tf-first")) return has("tf-danger") ? "far left, red" : "far left";
+  return has("tf-ghost") ? "ghost" : "plain";
+}
+
+/**
+ * **Every dialog the pane opens has the one footer: ghost *Cancel*, then the
+ * primary; an edit dialog's *Delete* on the far left** (#2291, spec #2238
+ * stories 26-28 and 32).
+ */
+test.each([
+  ["New asset in vm-db-01", ["Cancel: ghost", "Create: primary"]],
+  ["Move…", ["Cancel: ghost", "Move into hel1: primary"]],
+  ["Delete", ["Cancel: ghost", "Delete: confirm, red"]],
+  ["Add a route", ["Cancel: ghost", "Expose: primary"]],
+  ["Edit…", ["Delete: far left, red", "Cancel: ghost", "Save: primary"]],
+])("%s opens a dialog with the canonical footer", async (opener, footer) => {
+  const store = estate(seed(), [
+    {
+      id: "route:pg",
+      asset_id: "asset:vm-db-01",
+      target_id: "asset:postgres",
+      name: "Postgres UI",
+      url: "https://pg.hel1.example/",
+      visibility: "internal",
+      properties: {},
+    },
+  ]);
+  render("#/asset/asset:vm-db-01", store);
+  await waitFor(() => expect(text()).toContain("Postgres UI"));
+
+  click(opener);
+  const dialog = target.querySelector('[role="dialog"]')!;
+  const foot = [...dialog.querySelectorAll("footer button")];
+  expect(foot.map((control) => `${(control.textContent ?? "").trim()}: ${drawnAs(control)}`)).toEqual(footer);
 });
 
 /**
@@ -1076,7 +1122,7 @@ test("renaming writes the old-to-new line and redraws the column", async () => {
  * `Escape` from anywhere in the view (a reader in the pane means the same
  * thing by it as one in a column), and #429's editors close on it. One press
  * must not do both -- cancelling the edit *and* walking the selection out of
- * the asset being edited is the rung-skipping `Modal` stops for a dialog.
+ * the asset being edited is the rung-skipping `TfDialog` stops for a dialog.
  *
  * The witness is the **address**, which is what a walk changes and what a
  * cancelled edit leaves alone, plus the draft that was never written.

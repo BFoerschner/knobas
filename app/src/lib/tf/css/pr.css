@@ -6,7 +6,7 @@
 .tf-prready, .tf-prlocal { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); }
 .tf-prready > span { display: flex; gap: 6px; align-items: baseline; }
 .tf-prlocal { gap: 6px; }
-.tf-prlocal-acts { display: flex; gap: 6px; }
+.tf-prlocal-acts { display: flex; gap: var(--control-gap); }
 .tf-prchecks td:first-child { white-space: nowrap; }
 .tf-prchecks td:first-child .tf-dot { margin-right: 6px; }
 .tf-prdesc { padding: 12px 14px; }
@@ -39,12 +39,10 @@
 .tf-phb { border: 1px solid var(--rule); background: var(--sheet); border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-phb .tf-mono { color: var(--ink); font-weight: 600; }
 .tf-log { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; background: var(--paper); border-radius: 4px; padding: 8px 10px; overflow: auto; color: var(--ink); white-space: pre-wrap; }
-.tf-dialog .tf-remove { margin-right: auto; color: var(--err); }
 .tf-applist { display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 4px; }
 .tf-approw { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-approw:last-child { border-bottom: 0; }
 .tf-approw .tf-appname .tf-mono { display: block; font-size: var(--t-xs); }
-.tf-approw .tf-appacts { margin-left: auto; display: flex; gap: 4px; }
 .tf-dnote { font-size: var(--t-sm); }
 .tf-clonefail { font-size: var(--t-sm); color: var(--err); max-width: 60ch; }
 .tf-banner.tf-err { background: var(--err-bg); color: var(--err); }
@@ -52,7 +50,7 @@
 .tf .tf-right { text-align: right; }
 .tf-local-line { margin: 0 0 12px; }
 .tf-local-note { margin: 0 0 10px; font-size: var(--t-sm); }
-.tf-local-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.tf-local-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; justify-content: center; }
 .tf-untracked { margin-top: 14px; }
 .tf-untracked ul { margin: 0; padding: 0 12px 12px 30px; font-size: var(--t-sm); }
 

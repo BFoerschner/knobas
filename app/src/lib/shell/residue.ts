@@ -37,7 +37,7 @@
  * an internal that will drift.
  *
  * That costs nothing today because this codebase puts global handlers on
- * `window` on purpose — `keys.ts` and `Modal.svelte` both record why (a
+ * `window` on purpose — `keys.ts` and `TfDialog.svelte` both record why (a
  * propagation stopped anywhere below `window` never reaches the global
  * handler). A component that installs a `document` listener of its own is
  * outside this net, and should not be doing that.
