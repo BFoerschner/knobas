@@ -4,7 +4,7 @@
 --
 -- Single-writer (orchestrator), like every migration: a later ticket that
 -- needs more schema takes 0037 and never edits this file. Recorded as an
--- exception in `docs/archive/contract-10.8/871-migration-0036-layers-and-the-dependencies-read.md`.
+-- exception in `docs/contract/10.8/871-migration-0036-layers-and-the-dependencies-read.md`.
 --
 -- ## What a layer is
 --

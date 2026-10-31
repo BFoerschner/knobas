@@ -257,7 +257,7 @@ Mitigated here, not fixed: `knobas_http::SEND_BUDGET` bounds any single `send` t
 
 Each of the following is a frozen surface. A change to one is ruled by the agent on the work (`docs/agents/working-model.md`, *Process*), announced in the PR as this section says, and never made on the side inside an unrelated ticket:
 
-- migration `0003` (and `crates/knobas-db/migrations/**` at all — `0001` and `0002` are never edited: sqlx checksums applied migrations and an edit fails startup on every existing database),
+- migration `0003` (and `crates/knobas-db/migrations/**` at all — `0001` and `0002` are never edited: sqlx checksums applied migrations and an edit fails startup on every existing database. A migration's file, comments included, is frozen once released: sqlx checksums the whole file, so a comment edit fails startup the same way (#2327). A schema change is a new migration; `crates/knobas-db/migrations.sha384` pins every file's checksum, append only, and the test in `crates/knobas-db/src/migrate.rs` fails when a file no longer matches its line),
 - any change to `crates/knobas-source/src/**` (the `Source` trait, its DTOs, the contract battery),
 - the IPC command and event schema, including the `commands/` + `ipc/` module layout and the two append-only barrels (`crates/knobas-app/src/lib.rs`'s handler list, `app/src/lib/ipc/index.ts`),
 - `crates/knobas-http/**`,
