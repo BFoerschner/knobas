@@ -1520,6 +1520,16 @@ test("Docs draws its Sync now last in its header (#2286)", async () => {
   expect(syncButton()?.parentElement?.lastElementChild).toBe(syncButton());
 });
 
+test("Code's Sync now is a default-size header button, last after New pull request (#2238, #2295)", async () => {
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
+  await at("#/code");
+  const acts = seen(".tf-fhead .tf-acts").find((el) => el.contains(syncButton()));
+  const names = [...(acts?.children ?? [])].map((el) => el.textContent?.trim());
+  expect(names).toEqual(["New pull request", "Sync now"]);
+  expect(syncButton()!.classList.contains("tf-btn")).toBe(true);
+  expect(syncButton()!.classList.contains("tf-sm"), "a header button is default size").toBe(false);
+});
+
 test("every role view's Sync now is a header's default-size button, and Builds' is last in its header (#2287)", async () => {
   start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
   for (const view of ROLE_VIEWS) {
