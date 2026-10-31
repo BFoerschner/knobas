@@ -202,7 +202,7 @@
   const chosen = $derived(reading ? null : (listed.find((archive) => archive.file === pickedFile) ?? listed[0] ?? null));
 </script>
 
-<header class="tf-stg-h tf-stg-srch">
+<header class="tf-stg-h tf-stg-hline">
   <div>
     <h1>Backup and export</h1>
     <p>The database is yours. Back it up, restore it, or share part of it.</p>

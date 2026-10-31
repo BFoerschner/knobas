@@ -52,7 +52,7 @@
   }
 </script>
 
-<header class="tf-stg-h tf-stg-srch">
+<header class="tf-stg-h tf-stg-hline">
   <h1>Logs and database</h1>
   <div class="tf-acts">
     <button class="tf-btn" onclick={() => void openLogs()}>Open the log folder</button>

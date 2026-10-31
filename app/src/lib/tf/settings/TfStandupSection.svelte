@@ -94,7 +94,7 @@
   }
 </script>
 
-<header class="tf-stg-h tf-stg-srch">
+<header class="tf-stg-h tf-stg-hline">
   <div><h1>Standup</h1><p>Where the standup protocol is published.</p></div>
   {#if failure !== null}
     <div class="tf-acts"><button class="tf-btn" onclick={() => void load()}>Try again</button></div>

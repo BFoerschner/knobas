@@ -242,7 +242,7 @@
       {:else if place.section === "notes"}
         <TfNotesSection {layers} />
       {:else if error !== null && sources === null}
-        <header class="tf-stg-h tf-stg-srch">
+        <header class="tf-stg-h tf-stg-hline">
           <h1>Sources</h1>
           <div class="tf-acts"><button class="tf-btn" onclick={() => void load()}>Try again</button></div>
         </header>
@@ -268,7 +268,7 @@
           onchanged={() => void loadAdapters()}
         />
       {:else if current === null}
-        <header class="tf-stg-h tf-stg-srch">
+        <header class="tf-stg-h tf-stg-hline">
           <h1>{sourceId}</h1>
           <div class="tf-acts"><a class="tf-btn" href="#/settings">All sources</a></div>
         </header>

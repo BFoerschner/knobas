@@ -47,7 +47,7 @@
   }
 </script>
 
-<header class="tf-stg-h tf-stg-srch">
+<header class="tf-stg-h tf-stg-hline">
   <div>
     <h1>Sources</h1>
     <p>Where knobas reads from. Each source syncs on its own schedule; writes go back through the queue.</p>

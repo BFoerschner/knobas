@@ -38,7 +38,7 @@
   }
 </script>
 
-<header class="tf-stg-h tf-stg-srch">
+<header class="tf-stg-h tf-stg-hline">
   <div>
     <h1>Desktop notifications</h1>
     <p>

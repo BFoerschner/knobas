@@ -11,9 +11,10 @@
   font-size: var(--t-3xl); font-weight: 700; font-variation-settings: "wdth" 85; display: flex; align-items: center; gap: 10px;
 }
 .tf-stg-h p { margin-top: 4px; color: var(--ink-2); font-size: var(--t-md); max-width: 70ch; }
-.tf-stg-srch { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
-/* A page's actions on the right of its title line (#2284), as the Controls section's header puts them. */
-.tf-stg-h .tf-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; justify-content: flex-end; flex: none; }
+/* A Settings page whose header carries actions: the title block on the left, `.tf-acts` on the right of its
+   title line (#2284), laid out by the canonical header's rule in dialogs.css. */
+.tf-stg-hline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.tf-stg-h .tf-acts { justify-content: flex-end; flex: none; }
 .tf-stg-sec { margin-top: 26px; }
 .tf-stg-sec h2 { font-size: var(--t-lg); margin: 0 0 8px; font-weight: 700; }
 .tf-stg-p { font-size: var(--t-sm); color: var(--ink-2); margin: 0 0 10px; max-width: 72ch; }

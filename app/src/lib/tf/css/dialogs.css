@@ -46,7 +46,8 @@
 .tf-dur .tf-dim { font-size: var(--t-xs); flex-basis: 100%; }
 
 .tf-hidden { visibility: hidden; }
-.tf-fhead .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); flex-wrap: wrap; }
+/* The canonical header's actions (Controls, *Header*): a page's `.tf-fhead`, and a Settings page's `.tf-stg-h`. */
+.tf-fhead .tf-acts, .tf-stg-h .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); flex-wrap: wrap; }
 
 /* ---------- tabs ---------- */
 .tf-tabs { display: flex; gap: 2px; padding: 0 22px; border-bottom: 1px solid var(--rule); overflow-x: auto; }

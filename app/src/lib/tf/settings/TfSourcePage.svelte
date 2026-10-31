@@ -475,7 +475,7 @@
   }
 </script>
 
-<header class="tf-stg-h tf-stg-srch">
+<header class="tf-stg-h tf-stg-hline">
   <div>
     <h1><span class="tf-dot tf-{reading.tone}"></span> {name}</h1>
     <p>{sourceLine(source, adapter?.name ?? source.adapter_kind, status, now)}</p>

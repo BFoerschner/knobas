@@ -49,7 +49,7 @@
   font-family: var(--serif); font-size: 40px; line-height: 1.1; font-weight: 600; margin: 8px 0 10px; letter-spacing: -.01em;
 }
 .tf-rd-meta { font-size: var(--t-sm); color: var(--ink-2); display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; }
-/* The reader's header (#2286): the title and, on its line, `.tf-acts` (chrome's canonical header),
+/* The reader's header (#2286): the title and, on its line, `.tf-acts` (the canonical header's, in dialogs.css),
    inside the sheet's own padding. The meta line under it closes the head with the rule. */
 .tf-fhead.tf-rd-head { padding: 0; margin: 8px 0 10px; }
 .tf .tf-rd-head .tf-rd-title { margin: 0; flex: 1 1 320px; min-width: 0; }

@@ -695,7 +695,7 @@ test("a source of an adapter just installed in Add a source opens with its descr
 
   props.rest = ["source", "harbour"];
   await settle();
-  expect(target.querySelector(".tf-stg-srch p")?.textContent).toContain("Harbour surveys");
+  expect(target.querySelector(".tf-stg-hline p")?.textContent).toContain("Harbour surveys");
   expect(section("What it syncs").querySelector("#tf-src-cfg-fault")).not.toBeNull();
 });
 

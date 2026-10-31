@@ -163,7 +163,7 @@
   });
 </script>
 
-<header class="tf-stg-h tf-stg-srch">
+<header class="tf-stg-h tf-stg-hline">
   <div>
     <h1>Notes and capture</h1>
     <p>Pages are the place for documents in this version. Your notes are kept, and can come back.</p>
