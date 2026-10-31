@@ -115,16 +115,6 @@ pub const KIND_COMMIT: &str = "commit";
 /// Tickets draws it beside Jira's.
 pub const KIND_TICKET: &str = "ticket";
 
-/// The kinds this adapter emits, with the display metadata the launcher renders
-/// groups, chips and monograms from (spec §3a -- nothing downstream carries a
-/// per-adapter table). Monograms are fixed by interfaces §4.2.
-///
-/// Each kind also declares whether a cursor-less run emits **its** complete
-/// corpus, which is the engine's licence to tombstone what that kind stopped
-/// returning (ADR-0003). This adapter splits two ways and is the reason the
-/// declaration is per kind at all -- see
-/// `tests::exactly_the_unbudgeted_code_host_kinds_are_exhaustive_and_the_ticket_is_not`, and `sync`'s module
-/// docs for what makes the `true` half honest.
 /// How the tree of a kind's view names its sections by path (#2298): the
 /// repository's, a branch's and a commit's *Files* tab, `None` for a kind
 /// that draws no tree. What the app carries on the entity's detail, so a deep
@@ -136,6 +126,16 @@ pub fn tree_sections(kind: &str) -> Option<knobas_source::view::TreeSections> {
         .then(view::tree_sections)
 }
 
+/// The kinds this adapter emits, with the display metadata the launcher renders
+/// groups, chips and monograms from (spec §3a -- nothing downstream carries a
+/// per-adapter table). Monograms are fixed by interfaces §4.2.
+///
+/// Each kind also declares whether a cursor-less run emits **its** complete
+/// corpus, which is the engine's licence to tombstone what that kind stopped
+/// returning (ADR-0003). This adapter splits two ways and is the reason the
+/// declaration is per kind at all -- see
+/// `tests::exactly_the_unbudgeted_code_host_kinds_are_exhaustive_and_the_ticket_is_not`, and `sync`'s module
+/// docs for what makes the `true` half honest.
 #[must_use]
 pub fn entity_kinds() -> Vec<KindInfo> {
     vec![
@@ -412,7 +412,9 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// * `default_branch` is a branch's repository's default branch. Gitea's
 ///   branch record does not say, so `map` writes the repository's
 ///   `default_branch` into the `repository` object it already writes, and a
-///   branch titled so is the default (#718).
+///   branch titled so is the default (#718). On a repository it is the
+///   record's own `default_branch`, which its detail carries to the
+///   repository page (#2307).
 ///
 /// **No project for the code kinds.** Gitea has no project grouping in knobas
 /// (ADR-0010 says so in as many words: "Gitea has no such thing here and gets

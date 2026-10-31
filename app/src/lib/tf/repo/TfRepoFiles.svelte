@@ -293,8 +293,9 @@
   });
 
   // A link to a file below directories not read yet asks for each of them
-  // and the file at once (#2244), by the scheme its source declares (#2298); the file draws as soon as it answers, and
-  // the tree fills in as its listings arrive.
+  // and the file at once (#2244), by the scheme its source declares (#2298);
+  // the file draws as soon as it answers, and the tree fills in as its
+  // listings arrive.
   $effect(() => {
     const where = at;
     const target = path;

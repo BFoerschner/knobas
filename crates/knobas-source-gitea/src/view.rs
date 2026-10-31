@@ -183,8 +183,8 @@ pub(crate) fn bytes_standing(
     }
 }
 
-/// Whether `sha` is a whole object id (`knobas_core`'s one check).
 pub(crate) use files::tree_sections;
+/// Whether `sha` is a whole object id (`knobas_core`'s one check).
 pub(crate) use knobas_core::checkout::open::is_full_sha;
 
 /// A commit: *Overview* and *Diff*. The diff is deferred (#2319, ADR-0036):
