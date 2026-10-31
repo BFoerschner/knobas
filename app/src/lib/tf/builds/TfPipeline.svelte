@@ -29,11 +29,12 @@
   the pipeline as `get_entity` reads it (`TfDetailRefresh`), with the
   withdrawn and turned-off banners under the header (`TfDetailBanners`). A
   refresh reads the pipeline's row (the list's), its runs, its settings and
-  its item again, over what the page drew.
+  its item again, over what the page drew. The Builds view's *Sync now*
+  (`sync`, #2287) comes after it, last.
 -->
 <script lang="ts">
   import { secondsLabel } from "../../time/format";
-  import { onDestroy, onMount, untrack } from "svelte";
+  import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { EntityDetail, PipelineRow, PipelineSettings, RunRow, Setting } from "../../ipc/entity";
@@ -106,6 +107,7 @@
     runs: readRuns,
     onpin,
     rereadRow,
+    sync: syncNow,
     ports = BRIDGE,
   }: {
     pipeline: PipelineRow;
@@ -119,6 +121,8 @@
     onpin?: () => void;
     /** Read the pipeline's row again, the list's (#2137): a *Refresh* asks it before the page's own reads. */
     rereadRow?: () => Promise<void> | void;
+    /** The Builds view's *Sync now* (#2106), last in the header (#2287). */
+    sync?: Snippet;
     ports?: PipelinePorts;
   } = $props();
 
@@ -560,6 +564,7 @@
       <button type="button" class="tf-btn tf-ghost" onclick={openInSource}>Open in {pipeline.source_name}</button>
     {/if}
     {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={refreshRead} page />{/if}
+    {@render syncNow?.()}
   </div>
 </header>
 {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}

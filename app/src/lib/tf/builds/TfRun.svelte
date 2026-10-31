@@ -36,7 +36,8 @@
     *Refresh* or *Sync now* at the end of the header's actions
     (`TfDetailRefresh`), and the withdrawn and turned-off banners under the
     header (`TfDetailBanners`). A refresh reads the run again as a finished
-    sync does, over what the page drew.
+    sync does, over what the page drew. The Builds view's *Sync now*
+    (`sync`, #2287) comes after it, last.
 -->
 <script lang="ts">
   import { clockLabel, secondsLabel } from "../../time/format";
@@ -106,6 +107,7 @@
     job,
     runs: readRuns,
     crumbs,
+    sync: syncNow,
     ports = RUN_BRIDGE,
   }: {
     pipeline: PipelineRow;
@@ -116,6 +118,8 @@
     runs: (pipelineId: string) => Promise<RunRow[]>;
     /** The breadcrumb, drawn by the Builds page. */
     crumbs: Snippet<[{ name: string; href?: string }[]]>;
+    /** The Builds view's *Sync now* (#2106), last in the header (#2287). */
+    sync?: Snippet;
     ports?: RunPorts;
   } = $props();
 
@@ -480,6 +484,7 @@
         <button type="button" class="tf-btn tf-ghost" onclick={() => openExternal(run.web_url)}>Open in {pipeline.source_name}</button>
       {/if}
       {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={rereadRun} page />{/if}
+      {@render syncNow?.()}
     </div>
   </header>
   {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}

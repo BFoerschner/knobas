@@ -39,7 +39,7 @@
 </script>
 
 {#if drawn}
-  <button type="button" class="tf-btn tf-sm tf-syncnow" disabled={sync.running} {title} onclick={press}
+  <button type="button" class="tf-btn tf-syncnow" disabled={sync.running} {title} onclick={press}
     >{sync.running ? "Syncing…" : "Sync now"}</button
   >
 {/if}
