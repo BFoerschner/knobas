@@ -1022,6 +1022,57 @@ test.each([
 });
 
 /**
+ * How a footer button is drawn, in the words of the design system's Controls
+ * section (#2291): the default size is the only one a footer takes, *Cancel* is
+ * a ghost, the confirm is the primary (filled red when it destroys), and an
+ * edit dialog's extra action sits apart on the far left as red text.
+ */
+function drawnAs(control: Element): string {
+  const has = (name: string) => control.classList.contains(name);
+  if (!has("tf-btn") || has("tf-sm") || has("tf-lg")) return "not a default .tf-btn";
+  if (has("tf-primary")) return has("tf-danger") ? "confirm, red" : "primary";
+  if (has("tf-first")) return has("tf-danger") ? "far left, red" : "far left";
+  return has("tf-ghost") ? "ghost" : "plain";
+}
+
+/**
+ * **Every dialog the pane opens has the one footer: ghost *Cancel*, then the
+ * primary; an edit dialog's *Delete* on the far left** (#2291, spec #2238
+ * stories 26-28 and 32). The view and its dialogs draw no unported `.btn`.
+ */
+test.each([
+  ["New asset in vm-db-01", ["Cancel: ghost", "Create: primary"]],
+  ["Move…", ["Cancel: ghost", "Move into hel1: primary"]],
+  ["Delete", ["Cancel: ghost", "Delete: confirm, red"]],
+  ["Add a route", ["Cancel: ghost", "Expose: primary"]],
+  ["Edit…", ["Delete: far left, red", "Cancel: ghost", "Save: primary"]],
+])("%s opens a dialog with the canonical footer", async (opener, footer) => {
+  const store = estate(seed(), [
+    {
+      id: "route:pg",
+      asset_id: "asset:vm-db-01",
+      target_id: "asset:postgres",
+      name: "Postgres UI",
+      url: "https://pg.hel1.example/",
+      visibility: "internal",
+      properties: {},
+    },
+  ]);
+  render("#/asset/asset:vm-db-01", store);
+  await waitFor(() => expect(text()).toContain("Postgres UI"));
+  // The Links panel (`.sec`, `detail/LinksPanel.svelte`) is drawn inside the
+  // pane but is #2292's to move, so it is left out here.
+  const unported = [...target.querySelectorAll(".btn, .tb-btn")].filter((control) => control.closest(".sec") === null);
+  expect(unported, "the pane on the unported button").toEqual([]);
+
+  click(opener);
+  const dialog = target.querySelector('[role="dialog"]')!;
+  const foot = [...dialog.querySelectorAll(".dlg-f button")];
+  expect(foot.map((control) => `${(control.textContent ?? "").trim()}: ${drawnAs(control)}`)).toEqual(footer);
+  expect(dialog.querySelector(".btn"), "the dialog on the unported button").toBeNull();
+});
+
+/**
  * **A dialog does not outlive the selection it was opened on.**
  *
  * *Move to…* and the delete confirmation both name the selected asset and act

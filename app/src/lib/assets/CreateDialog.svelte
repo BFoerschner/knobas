@@ -152,9 +152,9 @@
   {/snippet}
 
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
-      class="btn pri"
+      class="tf-btn tf-primary"
       disabled={writing || name.trim() === "" || typeId === ""}
       onclick={() => void submit()}
     >

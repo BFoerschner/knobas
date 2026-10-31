@@ -171,8 +171,8 @@
   {/snippet}
 
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>Cancel</button>
-    <button class="btn pri" disabled={writing} onclick={() => void submit()}>
+    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-primary" disabled={writing} onclick={() => void submit()}>
       {writing ? "Moving…" : `Move into ${here}`}
     </button>
   {/snippet}

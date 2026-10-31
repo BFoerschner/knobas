@@ -467,7 +467,7 @@
         {/if}
 
         <div class="fld">
-          <button class="btn" disabled={busy} onclick={() => void run()}>
+          <button class="tf-btn tf-sm" disabled={busy} onclick={() => void run()}>
             {#if busy}
               Reading…
             {:else if landing !== null}
@@ -642,9 +642,9 @@
   {/snippet}
 
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
-      class="btn pri"
+      class="tf-btn tf-primary"
       disabled={busy || preview === null}
       onclick={() => void submit()}
     >

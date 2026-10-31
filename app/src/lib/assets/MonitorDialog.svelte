@@ -195,8 +195,8 @@
   {/snippet}
 
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>Cancel</button>
-    <button class="btn pri" disabled={!ready} onclick={() => void submit()}>
+    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-primary" disabled={!ready} onclick={() => void submit()}>
       {writing ? "Queueing…" : "Create"}
     </button>
   {/snippet}
@@ -217,9 +217,9 @@
     margin-bottom: 4px;
   }
 
-  /* `.inp`, `.btn` and `.fail` are `unported.css`' -- redeclaring them here is how
-     two dialogs come to look different. `RouteDialog` styles the same three
-     things and no more. */
+  /* `.inp` and `.fail` are `unported.css`' and the buttons are `.tf-btn`
+     (`chrome.css`) -- redeclaring any of them here is how two dialogs come to
+     look different. */
   .hint {
     margin-top: 6px;
     font-size: 11px;
