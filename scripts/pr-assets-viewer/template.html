@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR Assets Viewer</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1d2128; --muted: #626b78; --line: #e2e5ea;
+  --accent: #2f6fde; --accent-soft: #e6eefc; --ok: #1f8a4c; --ok-soft: #e3f4ea;
+  --done: #7a4fd0; --done-soft: #efe8fb; --bad: #c43d3d; --bad-soft: #fbe7e7;
+  --code: #f0f2f5; --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111317; --panel: #191c21; --ink: #e5e8ed; --muted: #9099a6; --line: #2a2f37;
+    --accent: #6b9cf0; --accent-soft: #1d2a40; --ok: #4fbf7f; --ok-soft: #173024;
+    --done: #a688e8; --done-soft: #2a2140; --bad: #ec7272; --bad-soft: #3a1c1c;
+    --code: #22262d; --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111317; --panel: #191c21; --ink: #e5e8ed; --muted: #9099a6; --line: #2a2f37;
+  --accent: #6b9cf0; --accent-soft: #1d2a40; --ok: #4fbf7f; --ok-soft: #173024;
+  --done: #a688e8; --done-soft: #2a2140; --bad: #ec7272; --bad-soft: #3a1c1c;
+  --code: #22262d; --shadow: none;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+
+.app { display: grid; grid-template-columns: 290px 1fr; height: 100vh; }
+aside { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.side-head { padding: 14px 14px 10px; border-bottom: 1px solid var(--line); }
+.side-head h1 { font-size: 15px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.side-head h1 span { flex: 1; }
+.side-head input { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; }
+.meta-line { color: var(--muted); font-size: 12px; margin-top: 6px; display: flex; justify-content: space-between; gap: 6px; }
+button { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: progress; }
+.list { overflow: auto; flex: 1; padding: 6px; }
+.item { display: block; width: 100%; text-align: left; border: 0; border-radius: 7px; padding: 8px 10px; margin-bottom: 2px; background: transparent; }
+.item:hover { background: var(--bg); }
+.item.active { background: var(--accent-soft); }
+.item .nm { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.item .sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.count { margin-left: auto; color: var(--muted); font-weight: 400; font-size: 12px; }
+
+main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.top { padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.top h2 { margin: 0; font-size: 17px; }
+.top .msg { color: var(--muted); margin-top: 2px; }
+.top .links { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; }
+.split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(340px, 42%) 1fr; }
+.col { overflow: auto; padding: 16px 20px 40px; min-width: 0; }
+.col + .col { border-left: 1px solid var(--line); }
+
+.tabs { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+.tab { border-radius: 999px; padding: 4px 12px; }
+.tab.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; box-shadow: var(--shadow); margin-bottom: 14px; }
+.card h3 { margin: 0 0 4px; font-size: 16px; line-height: 1.35; }
+.card .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; color: var(--muted); font-size: 12.5px; }
+.pill { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+.st-OPEN { background: var(--ok-soft); color: var(--ok); }
+.st-CLOSED { background: var(--bad-soft); color: var(--bad); }
+.st-MERGED { background: var(--done-soft); color: var(--done); }
+.st-DRAFT { background: var(--code); color: var(--muted); }
+.label { background: var(--code); color: var(--muted); font-weight: 500; }
+.md { overflow-wrap: anywhere; }
+.md img { max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
+.md pre { background: var(--code); padding: 10px 12px; border-radius: 6px; overflow: auto; }
+.md code { background: var(--code); padding: 1px 4px; border-radius: 4px; }
+.md pre code { background: none; padding: 0; }
+.md table { border-collapse: collapse; display: block; overflow: auto; font-size: 13px; }
+.md th, .md td { border: 1px solid var(--line); padding: 5px 8px; vertical-align: top; }
+.md blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.md h1, .md h2, .md h3 { font-size: 15px; margin: 18px 0 6px; }
+details.comment { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+details.comment summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+details.comment summary b { color: var(--ink); }
+.empty { color: var(--muted); padding: 30px 0; text-align: center; }
+
+.shots-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.shots-head h3 { margin: 0; font-size: 15px; flex: 1; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; }
+.seg button.on { background: var(--accent-soft); color: var(--accent); }
+.group { margin-bottom: 22px; }
+.group h4 { margin: 0 0 8px; font-size: 13px; font-family: ui-monospace, Menlo, monospace; font-weight: 600; }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.grid1 .pair { grid-template-columns: 1fr; }
+figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+figure img { display: block; width: 100%; height: auto; cursor: zoom-in; background: repeating-conic-gradient(var(--code) 0 25%, transparent 0 50%) 0 0/16px 16px; min-height: 60px; }
+figcaption { padding: 6px 10px; font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+figcaption .tag { font-weight: 700; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
+.tag-before { color: var(--bad); } .tag-after { color: var(--ok); }
+figcaption a { margin-left: auto; }
+
+.lb { position: fixed; inset: 0; background: rgba(8,10,14,.92); display: none; z-index: 10; flex-direction: column; }
+.lb.on { display: flex; }
+.lb-bar { color: #dfe3ea; padding: 10px 16px; display: flex; gap: 12px; align-items: center; font-size: 13px; }
+.lb-bar span { flex: 1; }
+.lb-bar button { background: #222731; color: #dfe3ea; border-color: #353b47; }
+.lb-img { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 0 16px 16px; }
+.lb-img img { max-width: 100%; cursor: zoom-in; }
+.lb-img.full img { max-width: none; cursor: zoom-out; }
+.err { background: var(--bad-soft); color: var(--bad); padding: 12px 14px; border-radius: 8px; margin: 16px; white-space: pre-wrap; }
+
+@media (max-width: 1100px) {
+  .split { display: block; overflow: auto; }
+  .col { overflow: visible; }
+  .col + .col { border-left: 0; border-top: 1px solid var(--line); }
+}
+@media (max-width: 720px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; min-height: 100vh; }
+  aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
+  .top, .col { padding-left: 16px; padding-right: 16px; }
+  .split { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="side-head">
+      <h1><span>pr-assets</span><button id="refresh" title="Re-list branches from GitHub (r)">Refresh</button></h1>
+      <input id="filter" placeholder="Filter by branch, ticket, title…" autocomplete="off">
+      <div class="meta-line"><span id="stamp">Loading…</span><span>j / k to move</span></div>
+    </div>
+    <div class="list" id="list"></div>
+  </aside>
+  <main id="main"><div class="empty">Loading branches from GitHub…</div></main>
+</div>
+<div class="lb" id="lb">
+  <div class="lb-bar"><span id="lb-title"></span><button id="lb-prev">← Prev</button><button id="lb-next">Next →</button><button id="lb-close">Close (Esc)</button></div>
+  <div class="lb-img" id="lb-img"><img alt=""></div>
+</div>
+<script>
+const EMBED = /*__DATA__*/null;
+const LIVE = !EMBED;
+let DATA = null, current = null, shownSha = null, lbList = [], lbIdx = 0;
+const state = { pane: 'ticket', theme: 'all', layout: 'pair' };
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('pav:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('pav:' + k, JSON.stringify(v)); } catch {} },
+};
+Object.assign(state, store.get('state', {}));
+
+function md(src) {
+  if (!src) return '<p class="empty" style="padding:6px 0;text-align:left">No description.</p>';
+  const linked = src.replace(/(^|[\s(])#(\d{2,5})\b/g, (m, pre, n) => `${pre}[#${n}](https://github.com/${DATA.repo}/issues/${n})`);
+  const out = window.marked ? marked.parse(linked, { gfm: true, breaks: false }) : '<pre>' + esc(src) + '</pre>';
+  const clean = window.DOMPurify ? DOMPurify.sanitize(out) : esc(src);
+  return clean.replace(/<a /g, '<a target="_blank" rel="noopener" ');
+}
+const ago = iso => {
+  const s = (Date.now() - new Date(iso)) / 1000;
+  if (s < 3600) return Math.max(1, Math.round(s / 60)) + ' min ago';
+  if (s < 86400) return Math.round(s / 3600) + ' h ago';
+  return Math.round(s / 86400) + ' d ago';
+};
+const prState = p => p.isDraft && p.state === 'OPEN' ? 'DRAFT' : p.state;
+const ticketTitle = n => DATA.issues[n]?.title || '';
+
+async function load(force) {
+  const btn = $('#refresh');
+  if (!LIVE) { DATA = EMBED; btn.style.display = 'none'; return render(); }
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await fetch('data.json' + (force ? '?refresh=1' : ''));
+    if (!r.ok) throw new Error(await r.text());
+    DATA = await r.json();
+    render();
+  } catch (e) {
+    $('#main').innerHTML = `<div class="err">Could not load from GitHub.\n${esc(e.message)}</div>`;
+  } finally { btn.disabled = false; btn.textContent = 'Refresh'; }
+}
+
+function render() {
+  const seen = new Set(store.get('seen', []));
+  const firstRun = !store.get('seen', null);
+  $('#stamp').textContent = `${DATA.branches.length} branches · ${LIVE ? 'live' : 'snapshot'} ${ago(DATA.generated)}`;
+  const q = $('#filter').value.trim().toLowerCase();
+  const shown = DATA.branches.filter(b => !q || [b.name, b.message, ...b.tickets.map(n => '#' + n + ' ' + ticketTitle(n)), ...b.prs.map(n => '#' + n)].join(' ').toLowerCase().includes(q));
+  $('#list').innerHTML = shown.map(b => {
+    const isNew = !firstRun && !seen.has(b.name + '@' + b.sha);
+    const sub = b.tickets.length ? b.tickets.map(n => `#${n} ${ticketTitle(n)}`).join(' · ') : b.message;
+    return `<button class="item${b.name === current ? ' active' : ''}" data-b="${esc(b.name)}">
+      <div class="nm">${isNew ? '<span class="dot" title="New or updated since you last looked"></span>' : ''}${esc(b.name)}<span class="count">${b.files.length} · ${ago(b.date)}</span></div>
+      <div class="sub" title="${esc(sub)}">${esc(sub)}</div></button>`;
+  }).join('') || '<div class="empty">No branch matches.</div>';
+  if (firstRun) store.set('seen', DATA.branches.map(b => b.name + '@' + b.sha));
+  const want = decodeURIComponent(location.hash.slice(1));
+  const pick = DATA.branches.find(b => b.name === want) || (current && DATA.branches.find(b => b.name === current)) || shown[0];
+  const cur = current && DATA.branches.find(b => b.name === current);
+  if (cur && pick === cur && shownSha === cur.sha && document.querySelector('#right')) return;
+  if (pick) select(pick.name, true); else $('#main').innerHTML = '<div class="empty">No pr-assets branches.</div>';
+}
+
+function select(name, keepScroll) {
+  const b = DATA.branches.find(x => x.name === name); if (!b) return;
+  current = name; shownSha = b.sha;
+  if (location.hash.slice(1) !== encodeURIComponent(name)) history.replaceState(null, '', '#' + encodeURIComponent(name));
+  const seen = new Set(store.get('seen', [])); seen.add(b.name + '@' + b.sha); store.set('seen', [...seen]);
+  document.querySelectorAll('.item').forEach(el => {
+    const on = el.dataset.b === name; el.classList.toggle('active', on);
+    if (on) { el.querySelector('.dot')?.remove(); if (!keepScroll) el.scrollIntoView({ block: 'nearest' }); }
+  });
+  const repo = DATA.repo;
+  const ticketLinks = b.tickets.map(n => `<a href="https://github.com/${repo}/issues/${n}" target="_blank">ticket #${n}</a>`);
+  const prLinks = b.prs.map(n => `<a href="${DATA.prs[n].url}" target="_blank">PR #${n}</a>`);
+  $('#main').innerHTML = `
+    <div class="top">
+      <h2 class="mono">pr-assets/${esc(b.name)}</h2>
+      <div class="msg">${esc(b.message.split('\n')[0])}</div>
+      <div class="links">${[...ticketLinks, ...prLinks,
+        `<a href="https://github.com/${repo}/tree/${b.sha}" target="_blank" class="mono">${b.sha.slice(0, 8)}</a>`,
+        `<span style="color:var(--muted)">pushed ${new Date(b.date).toLocaleString()}</span>`].join('')}</div>
+    </div>
+    <div class="split"><div class="col" id="left"></div><div class="col" id="right"></div></div>`;
+  renderLeft(b); renderShots(b);
+}
+
+function issueCard(n) {
+  const i = DATA.issues[n];
+  const comments = (i.comments || []).map(c => `
+    <details class="comment"><summary><b>${esc(c.author?.login || '?')}</b> · ${esc(new Date(c.createdAt).toLocaleString())} · ${esc((c.body || '').split('\n')[0].slice(0, 90))}</summary>
+    <div class="md">${md(c.body)}</div></details>`).join('');
+  return `<div class="card">
+    <h3><a href="${i.url}" target="_blank">#${i.number}</a> ${esc(i.title)}</h3>
+    <div class="row"><span class="pill st-${i.state}">${i.state}</span>${(i.labels || []).map(l => `<span class="pill label">${esc(l.name)}</span>`).join('')}
+      ${(i.closedByPullRequestsReferences || []).map(p => `<span>closed by <a href="https://github.com/${DATA.repo}/pull/${p.number}" target="_blank">#${p.number}</a></span>`).join('')}</div>
+    <div class="md">${md(i.body)}</div>
+    ${comments ? `<div style="margin-top:12px;font-size:12.5px;color:var(--muted)">${i.comments.length} comment${i.comments.length > 1 ? 's' : ''}</div>${comments}` : ''}
+  </div>`;
+}
+function prCard(n) {
+  const p = DATA.prs[n], st = prState(p);
+  const closes = (p.closingIssuesReferences || []).map(c => c.number);
+  return `<div class="card">
+    <h3><a href="${p.url}" target="_blank">#${p.number}</a> ${esc(p.title)}</h3>
+    <div class="row"><span class="pill st-${st}">${st}</span><span class="mono">${esc(p.headRefName)}</span>
+      ${p.mergedAt ? `<span>merged ${new Date(p.mergedAt).toLocaleDateString()}</span>` : ''}
+      ${closes.length ? `<span>closes ${closes.length > 6 ? closes.length + ' tickets' : closes.map(c => '#' + c).join(' ')}</span>` : ''}</div>
+    <div class="md">${md(p.body)}</div>
+  </div>`;
+}
+function renderLeft(b) {
+  const tabs = [...b.tickets.map(n => ['t' + n, `Ticket #${n}`]), ...b.prs.map(n => ['p' + n, `PR #${n}`])];
+  if (!tabs.length) { $('#left').innerHTML = '<div class="empty">No ticket or PR found for this branch.<br>Its commit message is the only note.</div>'; return; }
+  let on = tabs.find(t => t[0] === state.paneKey?.[b.name]) ? state.paneKey[b.name] : tabs[0][0];
+  const draw = () => {
+    $('#left').innerHTML = `<div class="tabs">${tabs.map(([k, l]) => `<button class="tab${k === on ? ' on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>`
+      + (on[0] === 't' ? issueCard(+on.slice(1)) : prCard(+on.slice(1)));
+    $('#left').querySelectorAll('.tab').forEach(t => t.onclick = () => {
+      on = t.dataset.k; state.paneKey = { ...(state.paneKey || {}), [b.name]: on }; store.set('state', state); draw();
+    });
+    $('#left').querySelectorAll('.md img').forEach(img => img.onclick = () => openLb([{ url: img.src, path: img.alt || 'image' }], 0));
+  };
+  draw();
+}
+
+// Group files by name with before/after and light/dark taken out, so a pair sits side by side.
+function groups(files) {
+  const map = new Map();
+  for (const f of files) {
+    const base = f.path.replace(/\.[a-z]+$/i, '');
+    const role = /(^|[-_.])before([-_.]|$)/i.test(base) ? 'before' : /(^|[-_.])after([-_.]|$)/i.test(base) ? 'after' : '';
+    const theme = /(^|[-_.])dark([-_.]|$)/i.test(base) ? 'dark' : /(^|[-_.])light([-_.]|$)/i.test(base) ? 'light' : '';
+    const k = (role || theme) ? (base.replace(/(^|[-_.])(before|after|light|dark)(?=[-_.]|$)/ig, '$1').replace(/^\d+[-_]/, '').replace(/[-_.]{2,}/g, '-').replace(/^[-_.]|[-_.]$/g, '') || base) : base;
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push({ ...f, role, theme });
+  }
+  for (const list of map.values()) list.sort((a, b) => (a.role === 'after') - (b.role === 'after') || (a.theme === 'dark') - (b.theme === 'dark') || a.path.localeCompare(b.path));
+  return [...map.entries()];
+}
+function renderShots(b) {
+  const imgs = b.files.filter(f => /\.(png|jpe?g|gif|webp|svg)$/i.test(f.path));
+  const other = b.files.filter(f => !imgs.includes(f));
+  const themes = new Set(imgs.map(f => /(^|[-_.])dark([-_.]|$)/i.test(f.path) ? 'dark' : /(^|[-_.])light([-_.]|$)/i.test(f.path) ? 'light' : ''));
+  const hasThemes = themes.has('dark') && themes.has('light');
+  const draw = () => {
+    const vis = imgs.filter(f => !hasThemes || state.theme === 'all' || new RegExp(`(^|[-_.])${state.theme}([-_.]|$)`, 'i').test(f.path));
+    const gs = groups(vis);
+    lbList = gs.flatMap(([, l]) => l);
+    $('#right').innerHTML = `
+      <div class="shots-head"><h3>Screenshots <span style="color:var(--muted);font-weight:400">${vis.length}${vis.length !== imgs.length ? ' of ' + imgs.length : ''}</span></h3>
+        ${hasThemes ? `<div class="seg" id="seg-theme">${['all', 'light', 'dark'].map(t => `<button data-v="${t}" class="${state.theme === t ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>` : ''}
+        <div class="seg" id="seg-layout">${[['pair', 'Side by side'], ['stack', 'Stacked']].map(([v, l]) => `<button data-v="${v}" class="${state.layout === v ? 'on' : ''}">${l}</button>`).join('')}</div>
+      </div>
+      <div class="${state.layout === 'stack' ? 'grid1' : ''}">
+      ${gs.map(([k, list]) => `<div class="group">${list.length > 1 || list[0].role || list[0].theme ? `<h4>${esc(k)}</h4>` : ''}<div class="pair">${list.map(f => `
+        <figure><img loading="lazy" src="${f.url}" alt="${esc(f.path)}" data-i="${lbList.indexOf(f)}">
+        <figcaption>${f.role ? `<span class="tag tag-${f.role}">${f.role}</span>` : ''}${f.theme && list.some(o => o.theme !== f.theme) ? `<span class="tag">${f.theme}</span>` : ''}<span class="mono">${esc(f.path)}</span><a href="${f.url}" target="_blank">open</a></figcaption></figure>`).join('')}
+      </div></div>`).join('') || '<div class="empty">No images on this branch.</div>'}
+      </div>
+      ${other.length ? `<div class="card"><b>Other files</b><ul>${other.map(f => `<li><a href="${f.url}" target="_blank" class="mono">${esc(f.path)}</a></li>`).join('')}</ul></div>` : ''}`;
+    $('#right').querySelectorAll('figure img').forEach(img => img.onclick = () => openLb(lbList, +img.dataset.i));
+    $('#right').querySelectorAll('#seg-theme button').forEach(x => x.onclick = () => { state.theme = x.dataset.v; store.set('state', state); draw(); });
+    $('#right').querySelectorAll('#seg-layout button').forEach(x => x.onclick = () => { state.layout = x.dataset.v; store.set('state', state); draw(); });
+  };
+  draw();
+}
+
+let lbItems = [];
+function openLb(items, i) { lbItems = items; lbIdx = i; $('#lb').classList.add('on'); showLb(); }
+function showLb() {
+  const f = lbItems[lbIdx]; if (!f) return;
+  $('#lb-img').classList.remove('full');
+  $('#lb-img img').src = f.url;
+  $('#lb-title').textContent = `${f.role ? f.role.toUpperCase() + ' · ' : ''}${f.path}  (${lbIdx + 1}/${lbItems.length})`;
+  $('#lb-prev').disabled = lbIdx === 0; $('#lb-next').disabled = lbIdx === lbItems.length - 1;
+}
+const closeLb = () => $('#lb').classList.remove('on');
+$('#lb-close').onclick = closeLb;
+$('#lb-prev').onclick = () => { if (lbIdx > 0) { lbIdx--; showLb(); } };
+$('#lb-next').onclick = () => { if (lbIdx < lbItems.length - 1) { lbIdx++; showLb(); } };
+$('#lb-img img').onclick = e => { e.stopPropagation(); $('#lb-img').classList.toggle('full'); };
+$('#lb-img').onclick = e => { if (e.target.id === 'lb-img') closeLb(); };
+
+$('#list').onclick = e => { const it = e.target.closest('.item'); if (it) select(it.dataset.b); };
+$('#filter').oninput = render;
+$('#refresh').onclick = () => load(true);
+window.addEventListener('hashchange', () => { const n = decodeURIComponent(location.hash.slice(1)); if (n !== current) select(n); });
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') { if (e.key === 'Escape') e.target.blur(); return; }
+  if ($('#lb').classList.contains('on')) {
+    if (e.key === 'Escape') closeLb();
+    if (e.key === 'ArrowLeft') $('#lb-prev').click();
+    if (e.key === 'ArrowRight') $('#lb-next').click();
+    return;
+  }
+  const items = [...document.querySelectorAll('.item')];
+  const at = items.findIndex(x => x.dataset.b === current);
+  if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); items[Math.min(at + 1, items.length - 1)] && select(items[Math.min(at + 1, items.length - 1)].dataset.b); }
+  if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); items[Math.max(at - 1, 0)] && select(items[Math.max(at - 1, 0)].dataset.b); }
+  if (e.key === '/') { e.preventDefault(); $('#filter').focus(); }
+  if (e.key === 'r' && LIVE) load(true);
+});
+// In live mode, pick up branches pushed while the page is open.
+if (LIVE) setInterval(() => { if (!document.hidden) load(false); }, 5 * 60 * 1000);
+load(false);
+</script>
+</body>
+</html>
