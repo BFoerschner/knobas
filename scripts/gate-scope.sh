@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Which gate a head needs: prints `front` or `full`, and on stderr why.
+# Which gate a head needs: prints `front`, `scripts` or `full`, and on stderr why.
 #
 # `front` only when every path changed since the merge base with BASE is
 # frontend or prose, and no Rust file names it: the crates `include_str!`
@@ -31,6 +31,25 @@
 # reads only those lines (the opener and notification pins match their crates,
 # global-shortcut is absent), so a new npm dependency cannot fail it and cost a
 # full gate it could not fail. Every other `app/...` path `crates/` names stays full.
+#
+# `scripts` (#2334) when every path is under `scripts/` or `testenv/`, or prose,
+# and at least one is a script: `just gate` then runs the script checks and no
+# cargo, since no Rust can fail on such a head. A path there stays `full` when
+# - `crates/` or `app/src` names it, or a directory holding it, on a line that
+#   is not a comment (`include_str!("../../testenv/estate.json")`, the mockd
+#   tests' `testenv/specs`, test-witness.ts's `testenv/desktop-witness/drivers`).
+#   A bare `testenv/` in a panic message names no file and pins nothing.
+# - the full gate runs it in place: `bash-guard.py` (`.claude/settings.json`
+#   wires it in), `gate-slot.sh` (sourced by `test`), `ipc-mirror-check.sh`
+#   (`ipc-mirror`), `changed-crates.sh` (`pre-gate`) and this script, which
+#   picks its own gate. Their unit tests are in `witness-unit`, but only the
+#   full gate runs the scripts themselves where they are used.
+# A Markdown file under them is prose unless a crate opens it
+# (`.join("../../testenv/specs/README.md")` in teamcity_contract.rs); before
+# #2334 `*.md` matched first and that README could change under `front`.
+# A head that mixes a script with an app file is `full`: neither `front` nor
+# `scripts` runs the other's half. Live recipes run in no gate at all, so a
+# script only they use earns nothing from the full one.
 #
 # Usage: scripts/gate-scope.sh [BASE]   (default origin/main)
 set -euo pipefail
@@ -69,11 +88,22 @@ pinned=$(for s in "$root"/testenv/*.sh; do [ -f "$s" ] && awk '
     }
     while ((p = path(line)) != "") { print p; line = substr(line, index(line, p) + length(p)) }
   }' "$s"; done 2>/dev/null | sed -E 's#/*$##' | sort -u || true)
+# Every `scripts/...` or `testenv/...` path named on a non-comment line of
+# crates/ or app/src; a directory pins its contents.
+named=$(grep -rhE --include='*.rs' --include='*.toml' --include='*.json' --include='*.ts' \
+          --include='*.js' --include='*.mjs' --include='*.svelte' \
+          '(^|[^A-Za-z0-9_-])(scripts|testenv)/' "$root/crates" "$root/app/src" 2>/dev/null \
+        | grep -vE '^[[:space:]]*(//|#[^[!]|\*|/\*)' \
+        | grep -oE '(^|[^A-Za-z0-9_-])(scripts|testenv)/[A-Za-z0-9_.@+/-]*' \
+        | sed -E 's#^[^st]*##; s#[/.]+$##' | grep / | sort -u || true)
+run_in_place=" scripts/bash-guard.py scripts/gate-slot.sh scripts/ipc-mirror-check.sh scripts/changed-crates.sh scripts/gate-scope.sh "
+saw_app='' saw_script=''
 while IFS= read -r f; do
   case $f in
     app/src/lib/ipc/generated/*)
       echo "gate-scope: full: $f is generated from the Rust types" >&2; echo full; exit 0 ;;
     app/*)
+      saw_app=$f
       rel=${f#app/}
       if [ "$f" = app/package.json ]; then
         # Changed lines only, captured first so `grep -q` cannot SIGPIPE a pipefail pipeline.
@@ -91,9 +121,36 @@ while IFS= read -r f; do
           echo "gate-scope: full: testenv/ pins $f (via $pin)" >&2; echo full; exit 0
         fi
       done <<< "$pinned" ;;
-    docs/*|mockups/*|*.md) ;;
-    *) echo "gate-scope: full: $f is outside app/ and the prose dirs" >&2; echo full; exit 0 ;;
+    docs/*|mockups/*) ;;
+    scripts/*|testenv/*)
+      if [ "${run_in_place#* "$f" }" != "$run_in_place" ]; then
+        echo "gate-scope: full: the full gate runs $f" >&2; echo full; exit 0
+      fi
+      case $f in
+        *.md)
+          # Opened, not just named: a panic message citing a README reads nothing.
+          if grep -rqE --include='*.rs' "(include_str!|join|Path::new|read_to_string)\(\"[^\"]*$f\"" "$root/crates" 2>/dev/null; then
+            echo "gate-scope: full: crates/ opens $f" >&2; echo full; exit 0
+          fi
+          continue ;;
+      esac
+      while IFS= read -r pin; do
+        [ -n "$pin" ] || continue
+        if [ "$f" = "$pin" ] || [ "${f#"$pin"/}" != "$f" ]; then
+          echo "gate-scope: full: crates/ or app/src names $f (as $pin)" >&2; echo full; exit 0
+        fi
+      done <<< "$named"
+      saw_script=$f ;;
+    *.md) ;;
+    *) echo "gate-scope: full: $f is outside app/, scripts/, testenv/ and the prose dirs" >&2; echo full; exit 0 ;;
   esac
 done <<< "$changed"
+if [ -n "$saw_script" ] && [ -n "$saw_app" ]; then
+  echo "gate-scope: full: $saw_script is a script and $saw_app is frontend; no narrower gate runs both" >&2; echo full; exit 0
+fi
+if [ -n "$saw_script" ]; then
+  echo "gate-scope: scripts: $(wc -l <<< "$changed" | tr -d ' ') files, all scripts or prose, none read by crates/ or app/src or run by the full gate" >&2
+  echo scripts; exit 0
+fi
 echo "gate-scope: front: $(wc -l <<< "$changed" | tr -d ' ') files, all frontend or prose, none read by crates/" >&2
 echo front
