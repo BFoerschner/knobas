@@ -2,7 +2,7 @@
  * Docs (#859): what a reader sees over the IPC mirror. The bridge is injected;
  * what the backend reads is `crates/knobas-app/tests/it/docs_ipc.rs`'s.
  */
-import { flushSync, mount, tick, unmount } from "svelte";
+import { createRawSnippet, flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, type MockInstance, test, vi } from "vitest";
 
 import type { DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, WriteAsk } from "../../ipc/entity";
@@ -625,13 +625,13 @@ test("a wide window puts the outline in the page's right column, with match coun
   location.hash = "";
 });
 
-test("a narrow window folds the outline between the actions row and the first section, closed, counting sections and matches (#2081)", async () => {
+test("a narrow window folds the outline between the meta line and the first section, closed, counting sections and matches (#2081)", async () => {
   windowWidth(1100);
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => OUTLINED), docsSearch: vi.fn(async () => HITS) }));
   expect(margin()).toBeNull();
   const f = fold()!;
   expect(f.open).toBe(false);
-  expect(f.previousElementSibling?.classList.contains("tf-rd-acts")).toBe(true);
+  expect(f.previousElementSibling?.classList.contains("tf-rd-meta")).toBe(true);
   expect(f.nextElementSibling?.classList.contains("tf-doc")).toBe(true);
   expect(f.querySelector("summary")?.textContent).toBe("On this page2 sections");
   expect(outlineOf(f)).toEqual([
@@ -1343,11 +1343,13 @@ test("This job and Link to <job> use the ticket the reader opened when two sourc
   expect(links.createLink).toHaveBeenCalledWith("confluence:2", "tidewater:PAY-231", "documents");
 });
 
-const actions = () => [...target.querySelectorAll(".tf-rd-acts button")].map((b) => b.textContent?.trim());
+/** The reader's header actions: the `.tf-acts` on the title line (#2286). */
+const headActs = () => target.querySelector<HTMLElement>(".tf-rd-page .tf-fhead .tf-acts");
+const actions = () => [...(headActs()?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim());
 
-test("the actions row reads Link to <job> from a job, Link to…, New page here, Copy link, Open in, More; no Comment (#2082)", async () => {
+test("the actions read Link to <job> from a job, Link to…, New page here, Copy link, More, then Open in; no Comment (#2082, #2286)", async () => {
   await drawJob(["confluence:2"], undefined, ports({ jobReach: vi.fn(async () => REACH), docsPage: vi.fn(async () => RICH) }));
-  expect(actions()).toEqual(["Link to PAY-231", "Link to…", "New page here", "Copy link", "Open in Confluence", "More"]);
+  expect(actions()).toEqual(["Link to PAY-231", "Link to…", "New page here", "Copy link", "More", "Open in Confluence"]);
 
   if (view) unmount(view);
   target.innerHTML = "";
@@ -1356,9 +1358,51 @@ test("the actions row reads Link to <job> from a job, Link to…, New page here,
     props: { ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage: vi.fn(async () => RICH) }), linkPorts: linkPorts() as never },
   });
   await settle();
-  expect(actions()).toEqual(["Link to…", "New page here", "Copy link", "Open in Confluence", "More"]);
+  expect(actions()).toEqual(["Link to…", "New page here", "Copy link", "More", "Open in Confluence"]);
   // The comment box at the foot is the way to comment.
   expect(button("Comment")?.closest(".tf-compose")).not.toBeNull();
+});
+
+test("the reader's actions sit on the right of the title line at the header size, Open in a ghost, and no row sits under the meta line (#2286)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  const head = headActs()!.parentElement!;
+  expect(head.querySelector(":scope > h1.tf-rd-title")?.textContent).toBe("On-call handbook");
+  expect(head.lastElementChild).toBe(headActs());
+  const buttons = [...headActs()!.querySelectorAll("button")];
+  expect(buttons.filter((b) => b.classList.contains("tf-sm"))).toEqual([]);
+  expect(buttons.every((b) => b.classList.contains("tf-btn"))).toBe(true);
+  expect(buttons.filter((b) => b.classList.contains("tf-ghost")).map((b) => b.textContent)).toEqual(["Open in Confluence"]);
+  expect(target.querySelector(".tf-rd-acts")).toBeNull();
+  // The meta line follows the header; no actions follow the meta line.
+  expect(head.nextElementSibling?.classList.contains("tf-rd-meta")).toBe(true);
+});
+
+/** The role frame's *Sync now* (#2106), as `TfKeptPage` hands it to the view. */
+const syncSnippet = createRawSnippet(() => ({ render: () => `<button type="button" class="tf-btn tf-syncnow">Sync now</button>` }));
+const syncNow = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-syncnow")];
+
+test("Sync now is last in the reader's header and no longer in the tree column (#2286)", async () => {
+  view = mount(TfDocs, {
+    target,
+    props: { ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage: vi.fn(async () => RICH) }), sync: syncSnippet },
+  });
+  await settle();
+  expect(syncNow()).toHaveLength(1);
+  expect(headActs()!.lastElementChild).toBe(syncNow()[0]);
+  expect(target.querySelector(".tf-rd-tree .tf-syncnow")).toBeNull();
+});
+
+test("with no page to draw, Docs still draws its header with Sync now (#2286)", async () => {
+  view = mount(TfDocs, {
+    target,
+    props: { ready: true, rest: [], job: null, ports: ports({ docsTree: vi.fn(async (): Promise<DocsTree> => ({ ...TREE, spaces: [], last_read: null })) }), sync: syncSnippet },
+  });
+  await settle();
+  expect(target.textContent).toContain("Nothing to read yet");
+  const head = target.querySelector(".tf-rd-main .tf-fhead")!;
+  expect(head.querySelector("h1")?.textContent).toBe("Docs");
+  expect([...head.querySelectorAll(".tf-acts > *")]).toEqual(syncNow());
+  expect(syncNow()).toHaveLength(1);
 });
 
 test("More opens a menu holding Export as Markdown, closing on Esc, a pick or a click outside (#2082)", async () => {
@@ -2012,10 +2056,10 @@ function pageDetail(over: Partial<EntityDetail> = {}): EntityDetail {
   } as unknown as EntityDetail;
 }
 
-const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-rd-acts .tf-refresh");
+const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-rd-head .tf-acts .tf-refresh");
 const docBanners = () => [...target.querySelectorAll(".tf-withdrawn, .tf-turnedoff, .tf-refresh-failed")].map(squash);
 
-test("Refresh ends the actions row, reads the page from its source, then the tree, the page and its row again, keeping what the reader had open (#2136)", async () => {
+test("Refresh ends the header actions, reads the page from its source, then the tree, the page and its row again, keeping what the reader had open (#2136)", async () => {
   const r = refreshProbe();
   const getEntity = vi.fn(async () => pageDetail());
   const io = ports({ docsPage: vi.fn(async () => RICH), docsSearch: vi.fn(async () => HITS), getEntity, refresh: r.ports });
@@ -2068,14 +2112,14 @@ test("the page is drawn while a refresh is out, and the button says Refreshing�
   expect(io.docsPage).toHaveBeenCalledTimes(2);
 });
 
-test("a refresh that failed keeps the page and says why under the actions row (#2136)", async () => {
+test("a refresh that failed keeps the page and says why under the meta line (#2136, #2286)", async () => {
   const r = refreshProbe({ answer: async () => ({ outcome: "failed", reason: "502 Bad Gateway" }) });
   const io = ports({ getEntity: vi.fn(async () => pageDetail()), refresh: r.ports });
   await draw(["confluence:2"], io);
   refreshButton()!.click();
   await settle();
   expect(docBanners()).toEqual(["Couldn't refresh: 502 Bad Gateway"]);
-  expect(target.querySelector(".tf-refresh-failed")?.previousElementSibling?.classList.contains("tf-rd-acts")).toBe(true);
+  expect(target.querySelector(".tf-refresh-failed")?.previousElementSibling?.classList.contains("tf-rd-meta")).toBe(true);
   expect(io.docsPage).toHaveBeenCalledTimes(1);
   expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
 });

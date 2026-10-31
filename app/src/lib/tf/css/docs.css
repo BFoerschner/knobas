@@ -49,16 +49,16 @@
   font-family: var(--serif); font-size: 40px; line-height: 1.1; font-weight: 600; margin: 8px 0 10px; letter-spacing: -.01em;
 }
 .tf-rd-meta { font-size: var(--t-sm); color: var(--ink-2); display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; }
-.tf-rd-acts {
-  display: flex; gap: 6px; flex-wrap: wrap; margin: 16px 0 4px; padding-bottom: 14px; border-bottom: 1px solid var(--rule);
-}
-/* The shared Refresh (#2136) at the row's small size, as `tf-sm` draws the others. */
-.tf-rd-acts .tf-refresh { padding: 3px 8px; font-size: var(--t-sm); }
-/* The withdrawn, turned-off and failed-refresh banners under the actions row (#2136). */
+/* The reader's header (#2286): the title and, on its line, `.tf-acts` (chrome's canonical header),
+   inside the sheet's own padding. The meta line under it closes the head with the rule. */
+.tf-fhead.tf-rd-head { padding: 0; margin: 8px 0 10px; }
+.tf .tf-rd-head .tf-rd-title { margin: 0; flex: 1 1 320px; min-width: 0; }
+.tf-rd-head + .tf-rd-meta { padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--rule); }
+/* The withdrawn, turned-off and failed-refresh banners under the meta line (#2136). */
 .tf-rd-page > .tf-banner { margin: 10px 0 0; }
 .tf-rd-more { position: relative; display: inline-flex; }
 .tf-rd-more > button::after { content: "▾"; font-size: var(--t-2xs); color: var(--ink-2); margin-left: 4px; }
-.tf-rd-more .tf-menu { left: 0; right: auto; }
+.tf-rd-more .tf-menu { left: auto; right: 0; }
 .tf-rd-more .tf-menu button { display: flex; align-items: center; gap: 8px; font: var(--t-sm) var(--sans); color: var(--ink); }
 .tf-rd-more .tf-menu svg { width: 14px; height: 14px; flex: none; }
 .tf-doc { font-family: var(--serif); font-size: 17.5px; line-height: 1.65; color: var(--ink); }
@@ -86,7 +86,7 @@
   border: 1px solid var(--rule); border-bottom-color: var(--rule-2); border-radius: 6px 6px 0 0;
   font: var(--t-xs) var(--sans); color: var(--ink-2);
 }
-.tf-pre-bar .tf-btn { margin-left: auto; font-size: var(--t-xs); padding: 2px 8px; }
+.tf-pre-bar .tf-btn { margin-left: auto; }
 .tf-doc pre {
   font: var(--t-md)/1.55 var(--mono); font-variant-ligatures: none; background: var(--sheet-2); border: 1px solid var(--rule);
   border-top: 0; border-radius: 0 0 6px 6px; padding: 12px 14px; overflow: auto; margin: 0; white-space: pre;
@@ -228,7 +228,7 @@
   width: 100%; min-height: 150px; font: 17.5px/1.65 var(--serif); border: 1px solid var(--rule); border-radius: 4px;
   padding: 10px; background: var(--paper); color: var(--ink); resize: vertical;
 }
-.tf-sec-edit .tf-acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; align-items: center; }
+.tf-sec-edit .tf-acts { display: flex; gap: var(--control-gap); justify-content: flex-end; margin-top: 8px; align-items: center; }
 .tf-sec-edit .tf-acts .tf-dim { font-size: var(--t-xs); margin-right: auto; }
 .tf-cmts .tf-compose { margin-top: 12px; }
 .tf-np-text {
