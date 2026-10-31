@@ -82,7 +82,7 @@
       <p class="sub">Nothing is kept until you type.</p>
     {/if}
     <button
-      class="btn"
+      class="tf-btn tf-sm"
       aria-label="Open in knobas"
       disabled={capture.noteId === null || capture.busy}
       onclick={() => void capture.openInMain()}
