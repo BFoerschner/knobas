@@ -12,6 +12,8 @@
 }
 .tf-stg-h p { margin-top: 4px; color: var(--ink-2); font-size: var(--t-md); max-width: 70ch; }
 .tf-stg-srch { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+/* A page's actions on the right of its title line (#2284), as the Controls section's header puts them. */
+.tf-stg-h .tf-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; justify-content: flex-end; flex: none; }
 .tf-stg-sec { margin-top: 26px; }
 .tf-stg-sec h2 { font-size: var(--t-lg); margin: 0 0 8px; font-weight: 700; }
 .tf-stg-p { font-size: var(--t-sm); color: var(--ink-2); margin: 0 0 10px; max-width: 72ch; }
@@ -28,8 +30,7 @@
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--sheet); color: var(--ink);
   font-size: var(--t-md); width: min(420px, 100%);
 }
-.tf-stg-acts { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; }
-.tf-stg-acts.tf-stg-flush { margin: 0; }
+.tf-stg-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; margin: 12px 0 0; }
 .tf-stg-sw {
   width: 36px; height: 20px; border-radius: 10px; border: 1px solid var(--rule); background: var(--rule-2);
   position: relative; cursor: pointer; flex: none; padding: 0;

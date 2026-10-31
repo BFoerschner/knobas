@@ -4,7 +4,6 @@
 .tf-dialog.tf-vw-dialog { width: min(1080px, calc(100vw - 32px)); max-height: 88vh; }
 .tf-vw-dialog .tf-body { padding: 0; overflow: hidden; display: flex; min-height: 0; flex: 1; }
 .tf-vw-dialog footer { align-items: center; }
-.tf-dialog .tf-vw-del { color: var(--err); }
 .tf-vw-body { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); min-height: 0; flex: 1; overflow: hidden; }
 .tf-vw-edit { overflow: auto; padding: 4px 20px 18px; border-right: 1px solid var(--rule); }
 .tf-vw-prev { overflow: auto; padding: 16px 18px; background: var(--paper); }

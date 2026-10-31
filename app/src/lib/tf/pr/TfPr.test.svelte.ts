@@ -456,6 +456,26 @@ test("Close asks the source's sentence and queues the closed state", async () =>
   expect(text(".tf-fhead .tf-sub")).toContain("close queued");
 });
 
+/** #2289: a destructive confirm is filled red; any other confirm is the plain primary. */
+test("the entity-action dialog's destructive confirm is filled red, after a ghost Cancel", async () => {
+  await draw([PR]);
+  button("Close")!.click();
+  flushSync();
+  const footer = () => [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].map((b) => [b.textContent?.trim(), b.className]);
+  expect(footer()).toEqual([
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Close", "tf-btn tf-primary tf-danger"],
+  ]);
+  document.querySelector<HTMLButtonElement>(".tf-dialog footer .tf-ghost")!.click();
+  flushSync();
+  button("Edit")!.click();
+  flushSync();
+  expect(footer()).toEqual([
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Edit", "tf-btn tf-primary"],
+  ]);
+});
+
 test("Update branch queues the style picked", async () => {
   await draw([PR]);
   button("Update branch")!.click();

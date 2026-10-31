@@ -1,9 +1,0 @@
-# Style gate allowlist for #2284: Settings pages and the Notes, Standup and Backup dialogs.
-# Read by app/src/lib/tf/controls/style-gate.test.ts (#2281).
-# Each line: `<rule a|b|c> <file under app/src/> <selector or class>  <reason>`,
-# two spaces before the reason. #2284 deletes its lines as it fixes them, and the
-# file once none is left. Never add a line here for new work: follow
-# the design-system spec's Controls section instead.
-
-c lib/tf/css/settings.css .tf-stg-acts  Settings' action row below the title, 8px apart; it moves into the header
-c lib/tf/css/first-run.css .tf-fr-acts  first-run source setup's actions, 8px apart (ruled to Settings: it is the sources setup)

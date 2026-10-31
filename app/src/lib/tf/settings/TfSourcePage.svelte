@@ -480,7 +480,7 @@
     <h1><span class="tf-dot tf-{reading.tone}"></span> {name}</h1>
     <p>{sourceLine(source, adapter?.name ?? source.adapter_kind, status, now)}</p>
   </div>
-  <div class="tf-stg-acts tf-stg-flush">
+  <div class="tf-acts">
     <button class="tf-btn" disabled={status?.running === true} onclick={() => void syncNow()}>Sync now</button>
   </div>
 </header>

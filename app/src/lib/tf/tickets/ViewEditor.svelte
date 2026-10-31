@@ -691,7 +691,7 @@
   {/snippet}
   {#snippet footer()}
     {#if editing && ondelete && fixedSource === null}
-      <button type="button" class="tf-btn tf-ghost tf-vw-del" onclick={ondelete}>Delete view</button>
+      <button type="button" class="tf-btn tf-ghost tf-danger" onclick={ondelete}>Delete view</button>
     {/if}
     <span class="tf-first tf-dim tf-vw-store"
       >{fixedSource !== null

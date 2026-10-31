@@ -52,7 +52,13 @@
   }
 </script>
 
-<header class="tf-stg-h"><h1>Logs and database</h1></header>
+<header class="tf-stg-h tf-stg-srch">
+  <h1>Logs and database</h1>
+  <div class="tf-acts">
+    <button class="tf-btn" onclick={() => void openLogs()}>Open the log folder</button>
+    <button class="tf-btn tf-ghost" disabled={indexing} onclick={() => void reindex()}>Re-index search</button>
+  </div>
+</header>
 <div class="tf-stg-row">
   <div class="tf-stg-l">Database</div>
   <div class="tf-stg-c">
@@ -66,8 +72,4 @@
 <div class="tf-stg-row">
   <div class="tf-stg-l">Version</div>
   <div class="tf-stg-c"><span>{version === null ? "—" : `knobas ${version}`}</span></div>
-</div>
-<div class="tf-stg-acts">
-  <button class="tf-btn" onclick={() => void openLogs()}>Open the log folder</button>
-  <button class="tf-btn tf-ghost" disabled={indexing} onclick={() => void reindex()}>Re-index search</button>
 </div>
