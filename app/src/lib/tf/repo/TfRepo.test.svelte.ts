@@ -309,6 +309,10 @@ test("the header names the repository, its last push and its checkout; the tabs 
   expect(text(acts[0]!)).toBe("New pull request");
   expect(acts[1]!.querySelector("select")).toBe(select);
   expect(text(acts[2]!)).toBe("New branch…");
+  // "Open in" is always a ghost, at the header's default size (#2238, #2296).
+  const openIn = acts[3]!.matches("button") ? acts[3]! : acts[3]!.querySelector("button")!;
+  expect(text(openIn)).toMatch(/^Open in/);
+  expect(openIn.matches(".tf-btn.tf-ghost:not(.tf-sm):not(.tf-primary)")).toBe(true);
   expect(text(acts.at(-1)!)).toBe("Refresh");
 });
 

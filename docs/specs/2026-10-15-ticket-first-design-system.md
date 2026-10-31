@@ -114,7 +114,7 @@ They are on `:root` in `tokens.css`. A button takes a fixed `height` from its si
 
 Three sizes is the complete set. A rule outside `chrome.css` doesn't set a button's height, padding, font size or radius.
 
-- **Icon-only buttons** are square at their row's height. The top bar's icon buttons are at the header height.
+- **Icon-only buttons** (`.tf-iconbtn`) are square at their row's height: `--control-h` by default, `--control-h-sm` with `.tf-sm` in a page body's row. The top bar's icon buttons are at the header height.
 - **Form controls:** a `select` or `input` sitting in a row of buttons takes the row's control height.
 - **Exempt:** the × removers inside chips and links (the view editor's ×, a link's ×) are part of the chip, not controls.
 
@@ -168,6 +168,18 @@ There is no third way to draw danger.
 | Large decision with a `<kbd>` hint | `.tf-btn.tf-lg kbd` |
 
 A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end, centred on the strip, `var(--control-gap)` apart.
+
+### The style gate
+
+`app/src/lib/tf/controls/style-gate.test.ts` reads every stylesheet and component under `app/src/` (a component's `<style>` blocks count) and fails when:
+
+- **(a)** a rule outside `chrome.css` sets `height`, `min-height`, `padding`, `font-size` (or the `font` shorthand) or `border-radius` on a control: a selector whose subject names `.tf-btn`, `.tf-sm`, `.tf-lg`, `.tf-iconbtn` or `.tf-refresh`, or is a `button` inside `.tf-seg` or `.tf-fchips`;
+- **(b)** the unported button classes `btn`, `tb-btn` or `x` appear in a stylesheet or in a component's `class`;
+- **(c)** an actions container (`.tf-acts` or any local `…-acts` row, `.tf-trail`, a dialog's `footer`) has a `gap` other than `var(--control-gap)`;
+- **(d)** an allowlist entry has no reason;
+- **(e)** an allowlist entry matches nothing.
+
+The allowlist is `app/src/lib/tf/controls/style-gate-exceptions/`, one `<ticket>.txt` per #2238 cleanup ticket. It holds the violations present when the gate landed, and each cleanup ticket deletes its own lines. New work doesn't add entries: it follows this section.
 
 ### Adding a control
 

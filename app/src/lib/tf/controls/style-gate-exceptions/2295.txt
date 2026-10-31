@@ -1,0 +1,17 @@
+# Style gate allowlist for #2295: Code and pull-request headers.
+# Read by app/src/lib/tf/controls/style-gate.test.ts (#2281).
+# Each line: `<rule a|b|c> <file under app/src/> <selector or class>  <reason>`,
+# two spaces before the reason. #2295 deletes its lines as it fixes them, and the
+# file once none is left. Never add a line here for new work: follow
+# the design-system spec's Controls section instead.
+
+a lib/tf/css/code.css .tf-ftreebox > header .tf-iconbtn  the file tree's icon buttons sized locally
+a lib/tf/css/code.css .tf-fmore > .tf-iconbtn  the file view's more button sized locally
+a lib/tf/css/code.css .tf-fh-acts .tf-seg button  the file header's segmented control sized locally
+c lib/tf/css/code.css .tf-fileview > header .tf-acts  the file view header's actions, a literal 6px
+c lib/tf/css/code.css .tf-fileview > .tf-waiting > header .tf-acts  the waiting file view header's actions, a literal 6px
+c lib/tf/css/code.css .tf-banner .tf-acts  the code banner's actions, a literal 6px
+c lib/tf/css/code.css .tf-pdf-bar .tf-acts  the PDF bar's actions, a literal 6px
+c lib/tf/css/code.css .tf-cgroup-h .tf-acts  the change group heading's actions, a literal 6px
+c lib/tf/css/code.css .tf-newc .tf-acts  the new comment's actions, a literal 6px
+c lib/tf/css/pr.css .tf-prlocal-acts  the PR's local-checkout actions, a literal 6px

@@ -1,0 +1,11 @@
+# Style gate allowlist for #2286: Docs view and reader.
+# Read by app/src/lib/tf/controls/style-gate.test.ts (#2281).
+# Each line: `<rule a|b|c> <file under app/src/> <selector or class>  <reason>`,
+# two spaces before the reason. #2286 deletes its lines as it fixes them, and the
+# file once none is left. Never add a line here for new work: follow
+# the design-system spec's Controls section instead.
+
+c lib/tf/css/docs.css .tf-rd-acts  the reader's action row below the meta line, a literal 6px
+a lib/tf/css/docs.css .tf-rd-acts .tf-refresh  the reader's local copy of the small size on Refresh
+a lib/tf/css/docs.css .tf-pre-bar .tf-btn  the preview bar's fourth button size (12px)
+c lib/tf/css/docs.css .tf-sec-edit .tf-acts  the section editor's actions, a literal 6px
