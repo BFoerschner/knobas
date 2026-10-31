@@ -52,7 +52,7 @@
 .tf .tf-right { text-align: right; }
 .tf-local-line { margin: 0 0 12px; }
 .tf-local-note { margin: 0 0 10px; font-size: var(--t-sm); }
-.tf-local-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.tf-local-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; justify-content: center; }
 .tf-untracked { margin-top: 14px; }
 .tf-untracked ul { margin: 0; padding: 0 12px 12px 30px; font-size: var(--t-sm); }
 
