@@ -14,7 +14,7 @@ How a whole spec is built on one integration branch with one PR to `main` at the
   2. Run a whole-branch `code-review` (both axes) against the merge base, and give the fixes to one implementer.
   3. Run a final landing with the full `just gate origin/main` and the **whole** `just gitea-live` and `just gitea-live forgejo`, plus any other live suite the spec's tickets ran.
   4. Merge the PR under the merge-tail lock, as the merge-manager brief says.
-- **Two specs at once on two machines.** The merge-tail lock lives in `$TMPDIR`, so it serializes only one machine. Land the two final PRs one after the other: after the first merges, merge `main` into the second spec's branch and gate it again.
+- **Two specs at once on two machines.** The merge-tail lock's holder slot is a ref on `origin` (`refs/locks/merge-tail`, #2335), so it serializes both machines: only one final PR merges at a time. The second one's `gated` then sees `main` moved: merge `main` into the second spec's branch and gate it again under the lock, as the merge-manager brief says.
 - **One spec on two machines.** Each machine runs its own orchestrator; the `in-progress` label is no lock between them.
   - **Split the tickets up front**, before the first dispatch, and post the split as a comment on #`<N>`. Each orchestrator claims only its own tickets. Tickets that share a stylesheet, a component or a file stay on one machine. A ticket every other ticket waits on runs alone on the owning machine; the other machine joins once it lands.
   - **One machine owns the run**: it creates `spec-<N>`, opens the draft PR, and does everything under *Before the PR goes ready*. The other only lands tickets.
