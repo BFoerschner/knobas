@@ -6,7 +6,8 @@
  *
  * - (a) a rule outside the controls stylesheet (`lib/tf/css/chrome.css`) sets
  *   a button's `height`, `min-height`, `padding`, `font-size` or
- *   `border-radius` (a `font` shorthand counts, it sets the size);
+ *   `border-radius` (a `font` shorthand counts, it sets the size), or a disabled control's
+ *   `opacity` or `cursor` (the disabled look is one rule in that stylesheet);
  * - (b) the unported button classes (`btn`, `tb-btn`, the old `x`) appear in a
  *   stylesheet or a component;
  * - (c) a row of buttons (an actions container: `.tf-acts`, a local `…acts` row or the bare `.acts`,
@@ -57,6 +58,9 @@ const CONTROL = /\.(?:tf-btn|tf-sm|tf-lg|tf-iconbtn|tf-refresh)(?![\w-])/;
 /** The segmented control and the pill toggles: their `button`s are controls. */
 const BUTTON_GROUP = /\.(?:tf-seg|tf-fchips)(?![\w-])/;
 const SIZING = /^(?:height|min-height|padding(?:-[a-z-]+)?|font-size|font|border(?:-[a-z]+)*-radius)$/;
+/** A disabled control's subject, and the properties that draw it disabled (rule a). */
+const DISABLED = /\[disabled\]|:disabled|\[aria-disabled/;
+const DISABLED_LOOK = /^(?:opacity|cursor)$/;
 /** The unported button classes (rule b). */
 const UNPORTED = ["btn", "tb-btn", "x"];
 /**
@@ -254,7 +258,8 @@ function scan(root: string): Violation[] {
     const text = readFileSync(join(root, file), "utf8");
     for (const { selectors, decls } of rules(stylesheet(file, text))) {
       for (const selector of selectors) {
-        const sizing = decls.filter(([prop]) => SIZING.test(prop)).map(([prop]) => prop);
+        const disabled = DISABLED.test(compounds(selector).at(-1) ?? "");
+        const sizing = decls.filter(([prop]) => SIZING.test(prop) || (disabled && DISABLED_LOOK.test(prop))).map(([prop]) => prop);
         if (file !== CONTROLS_SHEET && sizing.length > 0 && targetsControl(selector)) {
           add({ rule: "a", file, key: selector, detail: `sets ${sizing.join(", ")} on a control outside ${CONTROLS_SHEET}` });
         }
@@ -406,6 +411,21 @@ test("(a) a control sized outside the controls stylesheet fails, and the same ru
       ].join("\n"),
     }),
   ).toEqual([]);
+});
+
+test("(a) a disabled control's look set outside the controls stylesheet fails", () => {
+  for (const css of [
+    ".tf-ftreebox > header .tf-iconbtn[disabled] { opacity: .45; cursor: default; background: none; }",
+    ".tf-x .tf-btn:disabled { cursor: default; }",
+    ".tf-x .tf-btn[aria-disabled=\"true\"] { opacity: .3; }",
+  ]) {
+    const failures = planted({ "lib/tf/css/view.css": css });
+    expect(failures, css).toHaveLength(1);
+    expect(failures[0], css).toMatch(/^\(a\) lib\/tf\/css\/view\.css `[^`]+` sets (opacity|cursor).* on a control outside lib\/tf\/css\/chrome\.css\. See /);
+  }
+  // The clean twins: in the controls stylesheet, a disabled control's placement, an enabled control's cursor.
+  expect(planted({ [CONTROLS_SHEET]: ".tf-btn[disabled], .tf-iconbtn[disabled] { opacity: .55; cursor: not-allowed; }" })).toEqual([]);
+  expect(planted({ "lib/tf/css/view.css": ".tf-x .tf-btn[disabled] { margin-left: auto; }\n.tf-x .tf-btn { cursor: grab; }" })).toEqual([]);
 });
 
 test("(a) a component's <style> block is a stylesheet too", () => {

@@ -174,7 +174,7 @@ A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end
 
 `app/src/lib/tf/controls/style-gate.test.ts` reads every stylesheet and component under `app/src/` (a component's `<style>` blocks count) and fails when:
 
-- **(a)** a rule outside `chrome.css` sets `height`, `min-height`, `padding`, `font-size` (or the `font` shorthand) or `border-radius` on a control: a selector whose subject names `.tf-btn`, `.tf-sm`, `.tf-lg`, `.tf-iconbtn` or `.tf-refresh`, or is a `button` inside `.tf-seg` or `.tf-fchips`;
+- **(a)** a rule outside `chrome.css` sets `height`, `min-height`, `padding`, `font-size` (or the `font` shorthand) or `border-radius` on a control, or a disabled control's `opacity` or `cursor` (the disabled look is one rule): a selector whose subject names `.tf-btn`, `.tf-sm`, `.tf-lg`, `.tf-iconbtn` or `.tf-refresh`, or is a `button` inside `.tf-seg` or `.tf-fchips`;
 - **(b)** the unported button classes `btn`, `tb-btn` or `x` appear in a stylesheet or in a component's `class`;
 - **(c)** a row of buttons has a `gap` other than `var(--control-gap)`: an actions container (`.tf-acts`, any local `…acts` row with or without the hyphen, the bare `.acts`, `.tf-trail`, a dialog's `footer`; a `…facts` name is not one), or a row of controls under another name (the filter bar `.tf-fbar`, the pill toggles `.tf-fchips`, the large decision `.tf-decide`, any `…-btns` row);
 - **(f)** a field in a row of buttons (`.tf-fsearch`, or a `select` or `input` inside a row of buttons or a `.tf-fsel`) sets a literal `height` or `min-height`, or vertical padding: it takes `height: var(--control-h…)`;

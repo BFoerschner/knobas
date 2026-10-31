@@ -46,7 +46,6 @@
 /* An input in a row of buttons takes the row's height, here the small one (#2238). */
 .tf-ftreebox > header .tf-gotofile { flex: 1; max-width: none; min-width: 0; height: var(--control-h-sm); }
 .tf-gotofile kbd { flex: none; }
-.tf-ftreebox > header .tf-iconbtn[disabled] { opacity: .45; cursor: default; background: none; }
 .tf-ftreebox > header .tf-iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .tf-ftree { overflow: auto; padding: 4px 0; font-size: var(--t-sm); }
 .tf-ftree a, .tf-ftree .tf-fdir, .tf-ftree .tf-fsub {
