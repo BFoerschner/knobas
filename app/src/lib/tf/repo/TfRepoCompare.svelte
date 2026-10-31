@@ -28,6 +28,7 @@
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
+  import { proseMarkdown } from "../../render/prose";
   import type { DiffFile, DiffRange } from "../../ipc/entity";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
@@ -196,7 +197,10 @@
       try {
         const found = await resolveTicket(key, await ports.listSources(), ports.getEntity);
         if (!live || found === null) return;
-        const from: ProposedFrom = { key, summary: found.row.title, description: found.body_text };
+        // The ticket's description, not its search text, written as Markdown
+        // for the pull request's body (#2308).
+        const description = found.description === null ? "" : (proseMarkdown(found.description, found.markup) ?? found.description);
+        const from: ProposedFrom = { key, summary: found.row.title, description };
         ({ title, body } = proposal(name, from));
         ticket = { key, id: found.row.entity_id };
       } catch {
