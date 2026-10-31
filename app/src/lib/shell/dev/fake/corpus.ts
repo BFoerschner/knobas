@@ -5,7 +5,7 @@
  */
 import type { AttentionGroup, CodeFacts, ContextKind, ContextRow, LaneField, Signal, StateChip } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
-import { keepSeed } from "../fake-seed";
+import { keepSeed, onFakeReset } from "../fake-seed";
 import { wordAlternatives } from "../../../tf/tickets/needles";
 import { JOB_ROWS, fakeReach } from "./job-reach";
 import { fakeJiraBoard, fakeLanes } from "./ticket-views";
@@ -860,8 +860,36 @@ export function fakeRoleScope(role: string): { sources: string[]; kinds: string[
   return { sources: fillers.map((source) => source.id), kinds: [...new Set(kinds)].sort() };
 }
 
-/** `list_entities`, filtered, ordered and paged the way the real one is. */
+/**
+ * `list_entities`, filtered, ordered and paged the way the real one is.
+ *
+ * A first page works the answer out over the corpus as it is now; a later
+ * page with the same filter cuts the answer the first one kept (#2221).
+ * `readAllRows` reads on in 1,000-row pages, and each one filtered, sorted and
+ * mirrored the whole corpus again: at `?fake-code-rows=10000`, 66 ms of a
+ * 149 ms Code remount. A write between two pages of one walk is not seen until
+ * the next walk.
+ */
 function listEntities(args: Record<string, unknown>) {
+  const limit = Number(args["limit"] ?? 50);
+  const offset = Number(args["offset"] ?? 0);
+  const key = JSON.stringify(args["filter"] ?? {});
+  if (offset === 0 || listed?.key !== key) listed = { key, answer: listAnswer(args) };
+  const { rows, total, tally, groups } = listed.answer;
+  return { rows: rows.slice(offset, offset + limit), total, tally, groups };
+}
+
+/** The last answer {@link listEntities} worked out, by its filter. */
+let listed: { key: string; answer: ReturnType<typeof listAnswer> } | null = null;
+/** How many times {@link listAnswer} has run: a test's witness that a walk's pages reuse one answer. */
+export let corpusListBuilds = 0;
+onFakeReset(() => {
+  listed = null;
+});
+
+/** Every row `list_entities` answers for `args`' filter, unpaged. */
+function listAnswer(args: Record<string, unknown>) {
+  corpusListBuilds += 1;
   const filter = (args["filter"] ?? {}) as {
     sources?: string[];
     kinds?: string[];
@@ -872,8 +900,6 @@ function listEntities(args: Record<string, unknown>) {
     reach?: string | null;
     role?: string | null;
   };
-  const limit = Number(args["limit"] ?? 50);
-  const offset = Number(args["offset"] ?? 0);
 
   // The tile orders (#680) count what they drew; the plain orders do not.
   // Spelled out rather than `tile-count.ts`'s `isTileOrder`: this bridge
@@ -921,7 +947,7 @@ function listEntities(args: Record<string, unknown>) {
         count: mirrored.filter((row) => row.kind === kind).length,
       }))
     : null;
-  return { rows: mirrored.slice(offset, offset + limit), total: rows.length, tally, groups: groups?.tally ?? null };
+  return { rows: mirrored, total: rows.length, tally, groups: groups?.tally ?? null };
 }
 
 /** The attention groups of pull requests (#712), for the fixture's identity: rows group by group, newest first in each. */
