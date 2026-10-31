@@ -957,7 +957,7 @@ pin_label $tf/tickets/TicketsPage.svelte 'placeholder: "Filter by key, summary, 
 for go in 'label: "Start work"' 'label: "Open job"' 'label: "Resume work"'; do
     pin_label $tf/tickets/tickets.ts "$go" "the ticket preview still words its job link $go"
 done
-pin_label $tf/tickets/TicketPreview.svelte 'href={address}>{action.label}</a>' \
+pin_label $tf/tickets/TicketPreview.svelte 'href={jobHash(card.entity_id)}>{action.label}</a>' \
     "the ticket preview's button is still a link to the job"
 pin_label ../fixtures/tidewater/work.json '"summary": "Retry failed SEPA payouts"' \
     "the demo's PAY-231 still has the summary the capture driver waits for"
