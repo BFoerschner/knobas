@@ -693,6 +693,44 @@ pin_label $tf/repo/TfRepo.svelte '<TfOpenIn entityId={repoId}' \
 pin_label ../crates/knobas-source-mock/src/lib.rs 'https://tidewater.example' \
     "the demo corpus still lives under the host the driver's clone points at"
 
+# The pull-request-open-in driver's own names (#2316): Settings › Sources'
+# *Add a source* and *Remove…*, the application's pull-request command, and
+# the pull request header's *Open in…* menu.
+pin_label $tf/settings/settings.ts '["sources", "Sources"]' \
+    "Settings still lists the Sources section pull-request-open-in opens"
+pin_label $tf/settings/TfSources.svelte 'onclick={onadd}>+ Add a source</button>' \
+    "Sources still offers + Add a source"
+pin_label ../crates/knobas-source-gitea/src/lib.rs 'name: "Gitea".to_owned()' \
+    "the Gitea adapter is still called Gitea, the radio the driver clicks"
+pin_label $tf/settings/TfAddSource.svelte '<label for="tf-add-address">Address</label>' \
+    "Add a source's address field is still labelled Address"
+pin_label $tf/settings/TfAddSource.svelte '"Password" : "Token"' \
+    "Add a source still labels a token field Token"
+pin_label $tf/settings/TfAddSource.svelte '<label for="tf-add-name">Name</label>' \
+    "Add a source's name field is still labelled Name"
+pin_label $tf/settings/TfAddSource.svelte '<label for="tf-add-id">Id</label>' \
+    "Add a source's id field is still labelled Id"
+pin_label $tf/settings/TfAddSource.svelte 'onclick={() => void test()}>Test connection</button>' \
+    "Add a source still tests with Test connection"
+pin_label $tf/settings/TfAddSource.svelte 'onclick={() => void add()}>Add source</button>' \
+    "Add a source still adds with Add source"
+pin_label $tf/settings/TfSourcePage.svelte '}}>Remove…</button>' \
+    "a source's page still offers Remove…"
+pin_label $tf/settings/TfSourcePage.svelte '<span>Delete what it synced<small>' \
+    "removing a source still offers Delete what it synced"
+pin_label $tf/settings/TfSourcePage.svelte 'onclick={() => void remove()}>Remove</button>' \
+    "removing a source is still confirmed with Remove"
+pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-pr">For a pull request</label>' \
+    "the application dialog's pull-request command is still labelled For a pull request"
+pin_label $tf/openin/TfOpenObject.svelte '}}>Open in… <span class="tf-dim" aria-hidden="true">▾</span></button' \
+    "the pull request's menu button is still named Open in…, its arrow hidden"
+pin_label $tf/openin/TfOpenObject.svelte '<b>Diff tool</b>' \
+    "the menu's Diff tool item still starts Diff tool"
+pin_label $tf/openin/TfOpenObject.svelte '<b>Browser</b><span class="tf-mono">{page}</span>' \
+    "the menu's Browser item still starts Browser and names the page"
+pin_label $tf/pr/TfPr.svelte 'header.base !== null && header.head !== null' \
+    "the pull request header draws Open in… once the source view names both branches"
+
 # --- names are rendered text, and the new shell transforms none ------------
 #
 # Measured on the dev Mac on 2026-09-08: WebKit names an element by its
@@ -1276,6 +1314,39 @@ said=$(sized none 0)
 check_contains "a window the window server cannot find is refused" "no window on screen" "$said"
 check_contains "and fails the step" "status 1" "$said"
 rm -rf "$size_tmp"
+
+# --- the pull-request-open-in driver's pure parts (#2316) -------------------
+#
+# Where ADR-0035 puts a pull request's worktree, and the line git leaves in the
+# worktree's own FETCH_HEAD: the driver's proof that knobas fetched the head
+# over https, rather than finding it in the clone the driver made.
+
+check "a pull request's worktree is three levels under the clones root" \
+    "/tmp/w/clones/pull-requests/tidewater/payout-service-142" \
+    "$(pr_worktree /tmp/w/clones tidewater payout-service 142)"
+
+# check_fetched <what> <yes|no> <FETCH_HEAD> <ref> <url>
+check_fetched() {
+    local outcome=no
+    fetched_ref "$3" "$4" "$5" && outcome=yes
+    check "$1" "$2" "$outcome"
+}
+# Recorded from git 2.50 on the dev Mac, 2026-10-31: git drops `.git` from the
+# URL it names, and the ref is quoted.
+fetch_head=$(printf "1262a5b610480702cfed4a1f3f76c87bf68fae55\t\t'refs/pull/142/head' of https://knobas-gitea.orb.local/tidewater/payout-service\n")
+check_fetched "the pull request's ref, from the URL knobas clones from" yes "$fetch_head" \
+    refs/pull/142/head https://knobas-gitea.orb.local/tidewater/payout-service.git
+check_fetched "the URL may be given without .git" yes "$fetch_head" \
+    refs/pull/142/head https://knobas-gitea.orb.local/tidewater/payout-service
+check_fetched "another pull request's ref is not this one" no "$fetch_head" \
+    refs/pull/14/head https://knobas-gitea.orb.local/tidewater/payout-service.git
+check_fetched "the same ref from another host is not this fetch" no "$fetch_head" \
+    refs/pull/142/head http://127.0.0.1:3000/tidewater/payout-service.git
+check_fetched "a line without a sha is not a fetch" no \
+    "$(printf "\t\t'refs/pull/142/head' of https://knobas-gitea.orb.local/tidewater/payout-service\n")" \
+    refs/pull/142/head https://knobas-gitea.orb.local/tidewater/payout-service
+check_fetched "no FETCH_HEAD is no fetch" no "" \
+    refs/pull/142/head https://knobas-gitea.orb.local/tidewater/payout-service
 
 # --- verdict ----------------------------------------------------------------
 
