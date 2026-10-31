@@ -169,6 +169,18 @@ There is no third way to draw danger.
 
 A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end, centred on the strip, `var(--control-gap)` apart.
 
+### The style gate
+
+`app/src/lib/tf/controls/style-gate.test.ts` reads every stylesheet and component under `app/src/` (a component's `<style>` blocks count) and fails when:
+
+- **(a)** a rule outside `chrome.css` sets `height`, `min-height`, `padding`, `font-size` (or the `font` shorthand) or `border-radius` on a control: a selector whose subject names `.tf-btn`, `.tf-sm`, `.tf-lg`, `.tf-iconbtn` or `.tf-refresh`, or is a `button` inside `.tf-seg` or `.tf-fchips`;
+- **(b)** the unported button classes `btn`, `tb-btn` or `x` appear in a stylesheet or in a component's `class`;
+- **(c)** an actions container (`.tf-acts` or any local `…-acts` row, `.tf-trail`, a dialog's `footer`) has a `gap` other than `var(--control-gap)`;
+- **(d)** an allowlist entry has no reason;
+- **(e)** an allowlist entry matches nothing.
+
+The allowlist is `app/src/lib/tf/controls/style-gate-exceptions/`, one `<ticket>.txt` per #2238 cleanup ticket. It holds the violations present when the gate landed, and each cleanup ticket deletes its own lines. New work doesn't add entries: it follows this section.
+
 ### Adding a control
 
 A control this section doesn't name is added by amending this section, the `#/controls` specimen and the style gate in the same PR. It is never a rule local to one view.

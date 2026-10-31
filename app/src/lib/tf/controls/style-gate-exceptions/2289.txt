@@ -1,0 +1,9 @@
+# Style gate allowlist for #2289: Shared dialog footer, Apply-set, entity-action.
+# Read by app/src/lib/tf/controls/style-gate.test.ts (#2281).
+# Each line: `<rule a|b|c> <file under app/src/> <selector or class>  <reason>`,
+# two spaces before the reason. #2289 deletes its lines as it fixes them, and the
+# file once none is left. Never add a line here for new work: follow
+# the design-system spec's Controls section instead.
+
+c lib/tf/css/dialogs.css .tf-dialog footer  every dialog footer's buttons 8px apart
+c lib/tf/css/write-queue.css .tf-wq-acts  the write-queue dialog's actions, a literal 6px
