@@ -181,6 +181,8 @@ const JOB_PORTS: JobPorts = {
           issue_type: null,
           priority: null,
           estimate_seconds: null,
+          description: null,
+          markup: "text",
         })
       : Promise.reject({ code: "not_found", message: "", source_id: null }),
   promoteContext: (id) => Promise.resolve({ id: "ctx:1", kind: "ticket", title: "", anchor_id: id, created_at: "", archived_at: null }),

@@ -79,6 +79,8 @@ function detail(id: string, title: string, path: string | null, links: LinkEntry
     issue_type: null,
     priority: null,
     estimate_seconds: null,
+    description: null,
+    markup: "text",
   };
 }
 

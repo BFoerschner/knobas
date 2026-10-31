@@ -21,7 +21,7 @@ const NOW = new Date(2026, 9, 15, 14, 0);
 const VISIT = "2026-10-15T07:00:00Z";
 
 function said(author: string, at: string | null, body: string, over: Partial<ThreadComment> = {}): ThreadComment {
-  return { author, at, body, mine: false, mentions_me: false, ...over };
+  return { author, at, body, mine: false, mentions_me: false, markup: "text", ...over };
 }
 
 /** Eight old comments, then the reader's own and two new ones, one naming the reader. */
@@ -34,7 +34,7 @@ function thread(): Thread {
       ...old,
       said("Mara Lindqvist", "2026-10-15T07:30:00Z", "mine, after the visit", { mine: true }),
       said("Jonas Becker", "2026-10-15T08:00:00Z", "left a note"),
-      said("Lena Hoffmann", "2026-10-15T09:00:00Z", "[~mara] will it get an SLA?", { mentions_me: true }),
+      said("Lena Hoffmann", "2026-10-15T09:00:00Z", "[~mara] will it get an SLA?", { mentions_me: true, markup: "text" }),
     ],
     me: ["mara"],
   };

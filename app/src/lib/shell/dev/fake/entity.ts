@@ -289,6 +289,9 @@ function getEntity(args: Record<string, unknown>) {
     // Gitea declares both (#2307, #2298): the repository page's demo rows are
     // Gitea-shaped (`repoView`).
     ...(entry.kind === "repo" ? repoDeclared(entry.payload) : {}),
+    // The mock adapter declares a ticket's `description` as Markdown (#2308).
+    description: entry.kind === "ticket" ? fakeText(entry.payload["description"]) : null,
+    markup: entry.kind === "ticket" ? ("markdown" as const) : ("text" as const),
   };
 }
 
@@ -509,6 +512,7 @@ function entityThread(args: Record<string, unknown>): Thread {
       body,
       mine: who === "ML",
       mentions_me: /@mara(?![\p{L}\p{N}_.-])/u.test(body),
+      markup: "markdown" as const,
     })),
     me: ["mara"],
   };

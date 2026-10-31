@@ -472,6 +472,8 @@ function jobTicket(): EntityDetail {
     issue_type: "Story",
     priority: "High",
     estimate_seconds: null,
+    description: null,
+    markup: "text",
   } as EntityDetail;
 }
 

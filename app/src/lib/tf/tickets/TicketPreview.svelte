@@ -15,6 +15,8 @@
 -->
 <script lang="ts">
   import { clockLabel } from "../../time/format";
+  import { proseMarkdown, type Prose } from "../../render/prose";
+  import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { jobHash } from "../route";
   import { columnName, epicLine, previewAction, type AroundLine, type TicketFacts } from "./tickets";
 
@@ -27,8 +29,8 @@
   }: {
     /** The ticket; its status is its own, whatever column it stands in (#1423). */
     card: TicketFacts;
-    /** The description, or `null` while it is read. */
-    description: string | null;
+    /** The description as its source wrote it, and how (#2308); `null` while it is read or where there is none. */
+    description: Prose | null;
     /** *Around this ticket*, or `null` while it is read. */
     around: AroundLine[] | null;
     /** Whether the timer runs on this ticket. */
@@ -39,6 +41,7 @@
 
   const action = $derived(previewAction(card, timerOnIt));
   const epic = $derived(epicLine(card));
+  const markdown = $derived(description === null ? null : proseMarkdown(description.text, description.markup));
 </script>
 
 <svelte:element
@@ -62,7 +65,8 @@
     <dt>Updated</dt>
     <dd>{clockLabel(card.updated_at)}</dd>
   </dl>
-  {#if description}<p class="tf-desc">{description}</p>{/if}
+  {#if markdown !== null}<div class="tf-desc"><TfMarkdown text={markdown} /></div>
+  {:else if description !== null && description.text.trim() !== ""}<p class="tf-desc">{description.text}</p>{/if}
   <div>
     <div class="tf-pane-h">Around this ticket</div>
     {#if around !== null && around.length > 0}
