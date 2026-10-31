@@ -302,5 +302,6 @@ holds the shared notes (`assets.md`, `capabilities.md`, `dataset.md`).
 They are historical since 2026-10-31 (#2238) and decide nothing: UI work is
 held to `docs/specs/2026-10-15-ticket-first-design-system.md` (its Controls
 section for buttons and their placement), the dev-only `#/controls` specimen,
-and before/after screenshots. Prototype-6's CSS became the global stylesheet. Its rendering approach (string templates and one
-`innerHTML` swap per frame) did not carry over.
+and before/after screenshots. Prototype-6's CSS became the global stylesheet.
+Its rendering approach (string templates and one `innerHTML` swap per frame)
+did not carry over.
