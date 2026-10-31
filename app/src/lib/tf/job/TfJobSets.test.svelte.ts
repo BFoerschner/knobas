@@ -198,7 +198,7 @@ test("Apply a link set… lists the sets with what they hold, marks the one that
   expect(squash(dialog().querySelector("h2"))).toBe("Apply a link set to PAY-231");
   expect([...dialog().querySelectorAll(".tf-pickrow")].map(squash)).toEqual([
     "Ledger stack1 repository, 1 page already applies",
-    "Payout stack1 repository, 1 page Apply",
+    "Payout stack1 repository, 1 page",
   ]);
   expect(squash(dialog())).toContain("Link sets stay in knobas and are never written to a source.");
   const field = dialog().querySelector<HTMLInputElement>("input[aria-label='Filter link sets']")!;
@@ -214,6 +214,7 @@ test("Apply adds a by-hand rule, re-reads the job, and Undo takes the rule out a
   const before = setReads;
   button(target.querySelector(".tf-setsbar")!, "Apply a link set…").click();
   await settle();
+  pick("Payout stack");
   button(dialog(), "Apply Payout stack").click();
   await settle();
   expect(saved.at(-1)?.rules).toEqual([{ kind: "manual", value: ID }]);
@@ -226,6 +227,67 @@ test("Apply adds a by-hand rule, re-reads the job, and Undo takes the rule out a
   await settle();
   expect(saved.at(-1)?.rules).toEqual([]);
   expect(saved.at(-1)?.id).toBe("payout-stack");
+});
+
+/** Picks a set in the Apply dialog by its name, as a click on its row does. */
+function pick(name: string) {
+  const row = [...dialog().querySelectorAll<HTMLElement>(".tf-pickrow")].find((r) => squash(r.querySelector("b")) === name)!;
+  row.querySelector<HTMLInputElement>("input[type=radio]")!.click();
+  flushSync();
+}
+
+const footer = () => [...dialog().querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [squash(b), b.className]);
+
+/** #2289: the dialog's primary says what Enter does, so the first set that can apply is picked from the start. */
+test("Apply a link set… has a primary that applies the picked set, the first one that can apply until another is picked", async () => {
+  open(LEDGER_APPLIES);
+  await settle();
+  button(target.querySelector(".tf-setsbar")!, "Apply a link set…").click();
+  await settle();
+  const radios = [...dialog().querySelectorAll<HTMLInputElement>(".tf-pickrow input[type=radio]")];
+  expect(radios.map((r) => [r.checked, r.disabled])).toEqual([
+    [false, true],
+    [true, false],
+  ]);
+  expect(footer()).toEqual([
+    ["Manage link sets", "tf-btn tf-first"],
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Apply Payout stack", "tf-btn tf-primary"],
+  ]);
+});
+
+test("Enter in the filter applies the first set the filter leaves", async () => {
+  open();
+  await settle();
+  button(target.querySelector(".tf-setsbar")!, "Apply a link set…").click();
+  await settle();
+  expect(footer().at(-1)?.[0]).toBe("Apply Ledger stack");
+  const field = dialog().querySelector<HTMLInputElement>("input[aria-label='Filter link sets']")!;
+  field.value = "payout";
+  field.dispatchEvent(new Event("input"));
+  flushSync();
+  expect(footer().at(-1)?.[0]).toBe("Apply Payout stack");
+  // A text field's Enter is its form's implicit submission.
+  field.form!.requestSubmit();
+  await settle();
+  expect(saved.at(-1)?.id).toBe("payout-stack");
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+});
+
+test("Apply is disabled when no set the filter leaves can apply", async () => {
+  open(LEDGER_APPLIES);
+  await settle();
+  button(target.querySelector(".tf-setsbar")!, "Apply a link set…").click();
+  await settle();
+  const field = dialog().querySelector<HTMLInputElement>("input[aria-label='Filter link sets']")!;
+  field.value = "ledger";
+  field.dispatchEvent(new Event("input"));
+  flushSync();
+  const primary = dialog().querySelector<HTMLButtonElement>("footer .tf-primary")!;
+  expect([squash(primary), primary.disabled]).toEqual(["Apply", true]);
+  field.form!.requestSubmit();
+  await settle();
+  expect(saved).toEqual([]);
 });
 
 test("the drawer offers Apply a link set… and Save as a link set… beside Link to…", async () => {
