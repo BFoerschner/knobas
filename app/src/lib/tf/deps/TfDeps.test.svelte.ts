@@ -363,6 +363,20 @@ test("the layers panel refuses a taken name in place and says every view uses a 
   expect(calls.find((call) => call[0] === "placeDepKind")!.slice(1)).toEqual(["network", "machines"]);
 });
 
+test("a layer row's move and remove buttons are icon-only, square at the small size (#2288)", async () => {
+  render();
+  await settle();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Layers…")!.click();
+  flushSync();
+  const panel = target.querySelector("aside[aria-label='Layers']")!;
+  const label = (name: string) => panel.querySelector<HTMLButtonElement>(`button[aria-label='${name}']`)!.className;
+  expect([label("Move Machines up"), label("Move Machines down"), label("Remove Machines")]).toEqual([
+    "tf-iconbtn tf-sm",
+    "tf-iconbtn tf-sm",
+    "tf-iconbtn tf-sm",
+  ]);
+});
+
 test("clicking an asset opens its editor; a ticket follows its link", async () => {
   render(READ, true, {
     getAsset: () => new Promise(() => {}),

@@ -114,7 +114,7 @@
 .tf-btn.tf-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .tf-btn.tf-ghost { border-color: transparent; background: none; }
 .tf-btn.tf-ghost:hover { background: var(--sheet-2); }
-.tf-btn[disabled], .tf-btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.tf-btn[disabled], .tf-btn[aria-disabled="true"], .tf-iconbtn[disabled] { opacity: .55; cursor: not-allowed; }
 .tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: var(--t-sm); }
 .tf-btn.tf-lg { height: var(--control-h-lg); padding: 0 16px; font-size: var(--t-md); }
 

@@ -616,7 +616,7 @@
                     <span class="tf-dim">no asset</span>
                   {/each}
                 </td>
-                <td class="tf-mon-acts">
+                <td class="tf-mon-acts"><div class="tf-trail">
                   {#if down}
                     <button type="button" class="tf-btn tf-sm" disabled={row.entity_id in acked} title={row.entity_id in acked ? `Acked ${acked[row.entity_id]}` : undefined} onclick={() => void ack(row)}
                       >{row.entity_id in acked ? "Acked" : "Ack"}</button
@@ -630,8 +630,8 @@
                       <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
                     {/each}
                   {/if}
-                  {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} />{/if}
-                </td>
+                  {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} small />{/if}
+                </div></td>
               </tr>
             {/if}
           {/each}

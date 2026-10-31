@@ -9,11 +9,11 @@
 .tf-mon .tf-mon-type { font-size: var(--t-xs); }
 .tf-mon .tf-mon-asset { font-size: var(--t-xs); color: inherit; }
 .tf-mon-acts { white-space: nowrap; text-align: right; }
-.tf-mon-acts .tf-btn + .tf-btn { margin-left: 4px; }
+.tf-mon-acts .tf-trail { justify-content: flex-end; flex-wrap: nowrap; }
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
 .tf-mon .tf-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-/* A monitor's *Refresh* or *Sync now* (#2138) ends its row's actions, sized and drawn as *Pause*. */
-.tf-mon-acts .tf-refresh { margin-left: 4px; padding: 3px 8px; font-size: var(--t-sm); border-color: transparent; background: none; }
+/* A monitor's *Refresh* or *Sync now* (#2138) ends its row's actions: small (TfDetailRefresh's `small`), drawn as *Pause*. */
+.tf-mon-acts .tf-refresh { border-color: transparent; background: none; }
 .tf-mon-acts .tf-refresh:hover:not(:disabled) { background: var(--sheet-2); }
 .tf-mon .tf-mon-failed > td { padding-top: 0; border-top: 0; }

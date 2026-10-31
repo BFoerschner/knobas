@@ -144,6 +144,10 @@ test("focus is 2px --focus, and --card-ink on a card surface", () => {
   expect(code).toMatch(/\.tf \.tf-card:focus-visible, \.tf \.tf-card :focus-visible \{ outline-color: var\(--card-ink\); \}/);
 });
 
+test("a disabled icon-only button is dimmed like a disabled button (#2288)", () => {
+  expect(code).toMatch(/\.tf-iconbtn\[disabled\][^{]*\{ opacity: \.55; cursor: not-allowed; \}/);
+});
+
 test("reduced motion stops the pulse and every other animation in the shell", () => {
   expect(block(code, ".tf-dot.tf-run")).toMatch(/animation: tf-pulse 1\.4s/);
   const reduced = code.slice(code.indexOf("@media (prefers-reduced-motion: reduce)"));
