@@ -47,16 +47,18 @@
   }
 </script>
 
-<header class="tf-stg-h">
-  <h1>Sources</h1>
-  <p>Where knobas reads from. Each source syncs on its own schedule; writes go back through the queue.</p>
+<header class="tf-stg-h tf-stg-srch">
+  <div>
+    <h1>Sources</h1>
+    <p>Where knobas reads from. Each source syncs on its own schedule; writes go back through the queue.</p>
+  </div>
+  <div class="tf-acts">
+    <button class="tf-btn tf-primary" onclick={onadd}>+ Add a source</button>
+    {#if sources.length > 0}
+      <button class="tf-btn" onclick={() => void syncAll()}>Sync all</button>
+    {/if}
+  </div>
 </header>
-<div class="tf-stg-acts">
-  <button class="tf-btn tf-primary" onclick={onadd}>+ Add a source</button>
-  {#if sources.length > 0}
-    <button class="tf-btn" onclick={() => void syncAll()}>Sync all</button>
-  {/if}
-</div>
 {#if sources.length === 0}
   <p class="tf-stg-p tf-stg-gap">
     No sources yet. Add one and its tickets, pull requests, builds and pages come into knobas.

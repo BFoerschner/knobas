@@ -187,7 +187,7 @@
   <section class="tf-stg-gap" aria-labelledby="tf-ext-h">
     <div class="tf-ext-h">
       <h2 id="tf-ext-h">Installed adapters</h2>
-      <button class="tf-btn" disabled={checking} onclick={() => void check()}>Check for updates</button>
+      <button class="tf-btn tf-sm" disabled={checking} onclick={() => void check()}>Check for updates</button>
     </div>
     <div class="tf-stg-srcs">
       {#each rows as row (row.adapter_kind)}
@@ -201,13 +201,13 @@
               <span class="tf-stg-si {said.err ? 'tf-stg-errt' : ''}">{said.text}</span>
             {/if}
           </span>
-          <span class="tf-stg-acts tf-stg-flush">
+          <span class="tf-trail">
             {#if row.update?.state === "available" && row.refused === null}
-              <button class="tf-btn tf-primary" disabled={updating !== null} onclick={() => void update(row)}>
+              <button class="tf-btn tf-sm tf-primary" disabled={updating !== null} onclick={() => void update(row)}>
                 {updating === row.adapter_kind ? "Updating…" : "Update"}
               </button>
             {/if}
-            <button class="tf-btn" aria-label="Uninstall {row.name}…" onclick={() => askUninstall(row)}>Uninstall…</button>
+            <button class="tf-btn tf-sm tf-danger" aria-label="Uninstall {row.name}…" onclick={() => askUninstall(row)}>Uninstall…</button>
           </span>
         </div>
       {/each}

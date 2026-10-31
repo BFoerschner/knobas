@@ -31,7 +31,6 @@
   font-size: var(--t-md); width: min(420px, 100%);
 }
 .tf-stg-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; margin: 12px 0 0; }
-.tf-stg-acts.tf-stg-flush { margin: 0; }
 .tf-stg-sw {
   width: 36px; height: 20px; border-radius: 10px; border: 1px solid var(--rule); background: var(--rule-2);
   position: relative; cursor: pointer; flex: none; padding: 0;

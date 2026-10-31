@@ -242,9 +242,11 @@
       {:else if place.section === "notes"}
         <TfNotesSection {layers} />
       {:else if error !== null && sources === null}
-        <header class="tf-stg-h"><h1>Sources</h1></header>
+        <header class="tf-stg-h tf-stg-srch">
+          <h1>Sources</h1>
+          <div class="tf-acts"><button class="tf-btn" onclick={() => void load()}>Try again</button></div>
+        </header>
         <p class="tf-stg-p tf-stg-errt">Could not read the sources: {error}</p>
-        <div class="tf-stg-acts"><button class="tf-btn" onclick={() => void load()}>Try again</button></div>
       {:else if sources === null}
         <header class="tf-stg-h"><h1>Sources</h1></header>
       {:else if sourceId === null}
@@ -266,9 +268,11 @@
           onchanged={() => void loadAdapters()}
         />
       {:else if current === null}
-        <header class="tf-stg-h"><h1>{sourceId}</h1></header>
+        <header class="tf-stg-h tf-stg-srch">
+          <h1>{sourceId}</h1>
+          <div class="tf-acts"><a class="tf-btn" href="#/settings">All sources</a></div>
+        </header>
         <p class="tf-stg-p">There is no source called {sourceId}. It may have been removed.</p>
-        <div class="tf-stg-acts"><a class="tf-btn" href="#/settings">All sources</a></div>
       {:else}
         {#key current.id}
           <TfSourcePage
