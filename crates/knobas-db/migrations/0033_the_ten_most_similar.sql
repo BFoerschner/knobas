@@ -5,7 +5,7 @@
 -- Single-writer (orchestrator), like every migration: a stream that needs more
 -- schema requests 0034 and never edits this file or its predecessors -- sqlx
 -- checksums applied migrations. Signed off under the deputy's 2026-10-14
--- ruling on #771 and recorded in `docs/archive/contract-10.8/771-*.md`.
+-- ruling on #771 and recorded in `docs/contract/10.8/771-*.md`.
 --
 -- ## Why
 --

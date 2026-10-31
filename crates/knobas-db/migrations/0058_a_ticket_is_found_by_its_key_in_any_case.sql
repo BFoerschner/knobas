@@ -4,7 +4,7 @@
 -- Single-writer (orchestrator), like every migration: a ticket that needs
 -- more schema takes the next number and never edits this file or its
 -- predecessors. `0057` is #1864's. Recorded in `docs/contract.md` section
--- 10.8 (`docs/archive/contract-10.8/1850-migration-0058-tickets-by-lowercased-key.md`).
+-- 10.8 (`docs/contract/10.8/1850-migration-0058-tickets-by-lowercased-key.md`).
 --
 -- ## Why
 --

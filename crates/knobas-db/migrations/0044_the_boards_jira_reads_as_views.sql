@@ -5,7 +5,7 @@
 -- Single-writer, like every migration: a ticket that needs more schema takes
 -- the next number and never edits this file or its predecessors. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/archive/contract-10.8/877-migration-0044-jira-views-and-their-members.md`).
+-- (`docs/contract/10.8/877-migration-0044-jira-views-and-their-members.md`).
 --
 -- ## Where the rows come from
 --

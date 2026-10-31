@@ -4,7 +4,7 @@
 --
 -- Single-writer (orchestrator), like every migration: a stream that needs more
 -- schema requests 0044 and never edits this file or its predecessors. Recorded
--- in `docs/archive/contract-10.8/1019-project-path-and-migration-0043.md`.
+-- in `docs/contract/10.8/1019-project-path-and-migration-0043.md`.
 --
 -- ## Why
 --

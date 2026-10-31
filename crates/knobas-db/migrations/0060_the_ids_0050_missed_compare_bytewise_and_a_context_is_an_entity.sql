@@ -6,7 +6,7 @@
 -- Single-writer, like every migration: a ticket that needs more schema takes
 -- the next number and never edits this file or its predecessors. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/archive/contract-10.8/1708-migration-0060-context-entity-key.md`) and
+-- (`docs/contract/10.8/1708-migration-0060-context-entity-key.md`) and
 -- ADR-0027. Transactional, as sqlx runs every file without
 -- `-- no-transaction`: a failure leaves the database as `0059` did.
 --

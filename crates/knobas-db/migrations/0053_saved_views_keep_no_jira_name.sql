@@ -4,7 +4,7 @@
 -- Single-writer, like every migration: a ticket that needs more schema takes
 -- the next number and never edits this file or its predecessors. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/archive/contract-10.8/1245-migration-0053-saved-views-keep-no-jira-name.md`).
+-- (`docs/contract/10.8/1245-migration-0053-saved-views-keep-no-jira-name.md`).
 --
 -- ## Why
 --
