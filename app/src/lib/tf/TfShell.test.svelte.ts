@@ -1513,6 +1513,19 @@ test("every role view's header draws Sync now, once, and a view of no role draws
   expect(syncButton()).toBeNull();
 });
 
+test("every role view's Sync now is at the header size, and Docs draws it last in its header (#2238, #2286)", async () => {
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
+  for (const view of ROLE_VIEWS) {
+    await at(view);
+    const button = syncButton()!;
+    expect(button.classList.contains("tf-btn"), view).toBe(true);
+    expect(button.classList.contains("tf-sm"), view).toBe(false);
+  }
+  await at("#/docs");
+  expect(syncButton()?.parentElement?.matches(".tf-fhead .tf-acts")).toBe(true);
+  expect(syncButton()?.parentElement?.lastElementChild).toBe(syncButton());
+});
+
 test("a role with no enabled source draws no Sync now", async () => {
   start({
     sources: [
