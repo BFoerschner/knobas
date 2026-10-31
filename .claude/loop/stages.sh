@@ -6,7 +6,7 @@
 # Columns: merged_at pr issue model claim→draft draft→ready ready→merged total(min) gate gate_s batched agents load
 set -euo pipefail
 pr=$1 kind=$2 secs=$3 batched=$4 model=$5 agents=$6
-log=/Users/dev/Projects/knobas/.worktrees/.throughput.tsv
+log=/Users/dev/knobas/.worktrees/.throughput.tsv
 repo=BFoerschner/knobas
 read -r created merged issue < <(gh pr view "$pr" --repo $repo --json createdAt,mergedAt,closingIssuesReferences \
   --jq '"\(.createdAt) \(.mergedAt // "-") \(.closingIssuesReferences[0].number // "-")"')

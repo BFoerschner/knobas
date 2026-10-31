@@ -187,7 +187,7 @@ suites, and the closing `live-down`. A run that finds it held **waits**,
 saying once who holds it and since when:
 
 ```text
-live: teamcity-live-seeded: the JVM lock is held by 'teamcity-live-seeded' in /Users/dev/Projects/knobas/.worktrees/issue-683 (pid 51234, since 14:02:11); waiting up to 2700s
+live: teamcity-live-seeded: the JVM lock is held by 'teamcity-live-seeded' in /Users/dev/knobas/.worktrees/issue-683 (pid 51234, since 14:02:11); waiting up to 2700s
 live: teamcity-live-seeded: took the JVM lock after 312s
 ```
 

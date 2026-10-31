@@ -55,7 +55,7 @@ check_contains() {
 
 # --- normalise_app_path -----------------------------------------------------
 
-built=/Users/dev/Projects/knobas/target/debug/bundle/macos/knobas.app
+built=/Users/dev/knobas/target/debug/bundle/macos/knobas.app
 
 check "a plain bundle path is left alone" \
     "$built" "$(normalise_app_path "$built")"
@@ -64,7 +64,7 @@ check "Launch Services' trailing slash is dropped" \
 check "several trailing slashes are dropped" \
     "$built" "$(normalise_app_path "$built///")"
 check "doubled separators collapse" \
-    "$built" "$(normalise_app_path "/Users/dev//Projects/knobas/target/debug//bundle/macos/knobas.app")"
+    "$built" "$(normalise_app_path "/Users/dev//knobas/target/debug//bundle/macos/knobas.app")"
 check "a root path survives" "/" "$(normalise_app_path /)"
 
 # --- paths_match ------------------------------------------------------------
@@ -83,7 +83,7 @@ check_matches "an installed copy does not match the built bundle" no \
 # Two worktrees build the same bundle name at two paths, and the difference is
 # in the middle of the string rather than at either end.
 check_matches "another worktree's bundle does not match" no \
-    "$built" "/Users/dev/Projects/knobas/.worktrees/issue-500/target/debug/bundle/macos/knobas.app"
+    "$built" "/Users/dev/knobas/.worktrees/issue-500/target/debug/bundle/macos/knobas.app"
 
 # A prefix is not a match: `.../knobas.app` and `.../knobas.app.old` differ by
 # a suffix that a `case`-style prefix test would swallow.
@@ -93,7 +93,7 @@ check_matches "a longer path with the same prefix does not match" no \
 # `*` is legal in a filename, and an unquoted `[[ == ]]` right-hand side would
 # read it as a glob that matches the built path.
 check_matches "a wildcard in a path is compared literally, not matched" no \
-    "$built" "/Users/dev/Projects/knobas/target/debug/bundle/macos/*"
+    "$built" "/Users/dev/knobas/target/debug/bundle/macos/*"
 
 # --- the copies the opt-in step unregisters (#1176) -------------------------
 #
@@ -102,7 +102,7 @@ check_matches "a wildcard in a path is compared literally, not matched" no \
 # path), with: the bundle under test, the root checkout's debug and release
 # bundles, a sibling worktree, an installed copy, a lookalike directory that
 # merely shares the root's name as a prefix, and a record of another app.
-root=/Users/dev/Projects/knobas
+root=/Users/dev/knobas
 under_test=$root/.worktrees/issue-1176/target/debug/bundle/macos/knobas.app
 fake_dump="--------------------------------------------------------------------------------
 bundle id:                  knobas (0x1)
