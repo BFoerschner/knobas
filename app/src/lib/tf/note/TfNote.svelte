@@ -149,7 +149,7 @@
         <div class="tf-sub">A note, read-only in this release.</div>
       </div>
       <div class="tf-acts">
-        <button type="button" class="tf-btn tf-danger-t" disabled={deleting} onclick={() => (confirming = true)}>Delete</button>
+        <button type="button" class="tf-btn tf-danger" disabled={deleting} onclick={() => (confirming = true)}>Delete</button>
       </div>
     </header>
     <div class="tf-item-body">

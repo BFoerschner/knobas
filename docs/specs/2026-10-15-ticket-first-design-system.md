@@ -1,8 +1,8 @@
 # Ticket-first design system
 
-The design section of the ticket-first spec. The spec includes this file by reference. It writes down what `mockups/ticket-first/prototype-6.html` already draws, so every UI ticket builds against one system instead of reading CSS out of a 600 KB mockup. It adds no new look.
+The design section of the ticket-first spec. The spec includes this file by reference. It writes down what `mockups/ticket-first/prototype-6.html` already draws, so every UI ticket builds against one system instead of reading CSS out of a 600 KB mockup. It adds no new look, except where [Controls](#controls) settles what the prototype drew inconsistently.
 
-Acceptance stays as `requirements.md` sets it: a screenshot of the real app beside prototype-6 at the same route, same theme, 1440 × 900. This file decides the cases the prototype leaves open: a size it uses once, a state it never draws, a screen it doesn't have.
+Acceptance for UI work is this file, the `#/controls` specimen (see [Controls](#controls)) and before/after screenshots of the real app at the same route, same theme, 1440 × 900. Prototype-6 is historical since 2026-10-31 (#2238): it decides nothing, and where the app and the prototype differ, this file decides. Its "acceptance is the match" rule in `requirements.md` is superseded.
 
 It replaces `requirements.md` §16, which is a short version of the same content.
 
@@ -89,7 +89,89 @@ Radii come in four steps. 3 px for chips, marks and the focus ring; 4 px for but
 
 `--shadow` is only for things that float: the drawer, dialogs, menus, popovers, the combo-box list, and the selected ticket card, which lifts off the board. A resting panel has a border and no shadow. The prototype uses the shadow in exactly those nine places, so this is the rule it already follows.
 
-Spacing follows the prototype's values, which already sit on a 2 px grid with 4, 6, 8, 10, 12 and 16 doing most of the work. Gaps inside a row are 6 to 8 px, padding inside a panel is 12 to 14 px, and gaps between panels are 16 px. There is no spacing token set; a rule the prototype already follows doesn't need one, and reviewers check it against the screenshot.
+Spacing follows the prototype's values, which already sit on a 2 px grid with 4, 6, 8, 10, 12 and 16 doing most of the work. Gaps inside a row are 6 to 8 px, padding inside a panel is 12 to 14 px, and gaps between panels are 16 px. There is no spacing token set beyond the four control tokens in [Controls](#controls); reviewers check the rest against the screenshot.
+
+## Controls
+
+Buttons and the controls that sit beside them follow one set of rules (#2238). The visual reference is the dev-only specimen page at `#/controls` (`app/src/lib/tf/controls/`), drawn with the real components and stylesheets; `just shot <slot> <dir> '#/controls'` captures it. The style gate (#2281) enforces the rules.
+
+### Tokens
+
+| Token | Value | Use |
+|---|---|---|
+| `--control-h` | 32 px | default button height |
+| `--control-h-sm` | 26 px | small button height |
+| `--control-h-lg` | 40 px | large button height |
+| `--control-gap` | 6 px | the gap between neighbouring buttons |
+
+They are on `:root` in `tokens.css`. A button takes a fixed `height` from its size token and horizontal padding only, so its height never depends on line-height or on its content: a `<kbd>` hint inside a button doesn't change its height. Every control's radius is 4 px.
+
+### Three sizes, chosen by place
+
+- **Default** (`.tf-btn`): page headers (`.tf-acts`), dialog footers and the top bar.
+- **Small** (`.tf-btn.tf-sm`): everything inside a page body. Rows, section headings, panel toolbars, tab strips, side rails, segmented-control buttons and pill toggles.
+- **Large** (`.tf-btn.tf-lg`): only the one decision a screen exists for (the link review's *Link them* / *Not related* / *Decide later*, the ticket preview's go button). No other button is large.
+
+Three sizes is the complete set. A rule outside `chrome.css` doesn't set a button's height, padding, font size or radius.
+
+- **Icon-only buttons** are square at their row's height. The top bar's icon buttons are at the header height.
+- **Form controls:** a `select` or `input` sitting in a row of buttons takes the row's control height.
+- **Exempt:** the × removers inside chips and links (the view editor's ×, a link's ×) are part of the chip, not controls.
+
+### Gap
+
+Neighbouring buttons are `var(--control-gap)` apart, in headers, rows, dialog footers, strips and Settings alike.
+
+### Header
+
+The title block on the left and `.tf-acts` on the right, on the title line, top-aligned to it. Every page uses this layout; none puts its actions on a line of their own. The actions come in this order:
+
+1. the primary;
+2. the other actions;
+3. "Open in <source>", always a ghost button;
+4. *Sync now* / *Refresh*, always last.
+
+A section heading that carries an action puts it on the right of the heading line at the small size. A page with no header (the job) ends the tab strip it draws with its small actions, centred on the strip.
+
+### Dialog footer
+
+Right-aligned, `var(--control-gap)` apart, at the default size. A ghost *Cancel* comes first, then the primary. An extra action (an edit dialog's *Delete*) goes on the far left. Every dialog has a primary.
+
+### Danger
+
+- `.tf-danger`: red text, at the size of its place. It marks a button that starts a destructive action (a header's or a row's *Delete*).
+- `.tf-primary.tf-danger`: filled red. It marks the confirm button of a destructive dialog.
+
+There is no third way to draw danger.
+
+### The specimen
+
+`#/controls` draws one example of every control and arrangement below, each found by its selector. `controls/TfControls.test.svelte.ts` reads this table, so a row added here without its example on the page fails.
+
+| Control | Selector |
+|---|---|
+| Canonical header and its actions | `.tf-fhead .tf-acts` |
+| Default button | `.tf-fhead .tf-acts .tf-btn:not(.tf-sm):not(.tf-lg)` |
+| Primary | `.tf-fhead .tf-acts .tf-btn.tf-primary` |
+| Ghost "Open in <source>" | `.tf-fhead .tf-acts .tf-btn.tf-ghost` |
+| Section heading with a small action | `.tf-ext-h .tf-btn.tf-sm` |
+| Tab strip with trailing small actions | `.tf-wtabs .tf-trail .tf-btn.tf-sm` |
+| Panel toolbar with a select | `.tf-fbar select` |
+| Segmented control | `.tf-fbar .tf-seg button` |
+| Pill toggles | `.tf-fbar .tf-fchips button` |
+| Row with small actions | `.tf-ext-row .tf-trail .tf-btn.tf-sm` |
+| Icon-only button | `.tf-ext-row .tf-trail .tf-iconbtn` |
+| Dialog footer with an extra action | `.tf-dialog footer .tf-btn.tf-first` |
+| Dialog footer's ghost *Cancel* | `.tf-dialog footer .tf-btn.tf-ghost` |
+| Danger, starting | `.tf-btn.tf-danger:not(.tf-primary)` |
+| Danger, confirming | `.tf-btn.tf-primary.tf-danger` |
+| Large decision with a `<kbd>` hint | `.tf-btn.tf-lg kbd` |
+
+A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end, centred on the strip, `var(--control-gap)` apart.
+
+### Adding a control
+
+A control this section doesn't name is added by amending this section, the `#/controls` specimen and the style gate in the same PR. It is never a rule local to one view.
 
 ## Layout
 

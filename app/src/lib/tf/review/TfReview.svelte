@@ -310,9 +310,9 @@
           {/if}
         </div>
         <div class="tf-decide">
-          <button type="button" class="tf-btn tf-yes" onclick={() => decide("yes")}>Link them <kbd>Y</kbd></button>
-          <button type="button" class="tf-btn tf-no" onclick={() => decide("no")}>Not related <kbd>N</kbd></button>
-          <button type="button" class="tf-btn tf-ghost" onclick={() => decide("skip")}>Decide later <kbd>S</kbd></button>
+          <button type="button" class="tf-btn tf-lg tf-yes" onclick={() => decide("yes")}>Link them <kbd>Y</kbd></button>
+          <button type="button" class="tf-btn tf-lg tf-no" onclick={() => decide("no")}>Not related <kbd>N</kbd></button>
+          <button type="button" class="tf-btn tf-lg tf-ghost" onclick={() => decide("skip")}>Decide later <kbd>S</kbd></button>
           <span class="tf-hint">Not related is remembered.</span>
         </div>
       </div>

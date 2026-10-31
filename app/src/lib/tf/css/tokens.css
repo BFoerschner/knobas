@@ -13,6 +13,8 @@
   /* The type scale. Rounding of half a pixel to two against prototype-6 is expected. */
   --t-2xs: 11px; --t-xs: 12px; --t-sm: 13px; --t-md: 14px; --t-lg: 15px; --t-xl: 17px;
   --t-2xl: 20px; --t-3xl: 24px; --t-d1: 34px; --t-d2: 44px; --t-d3: 64px;
+  /* The control tokens (design system, Controls; #2280): a button's three heights and the gap between buttons. */
+  --control-h: 32px; --control-h-sm: 26px; --control-h-lg: 40px; --control-gap: 6px;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {

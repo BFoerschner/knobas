@@ -1,5 +1,7 @@
 # Ticket-first UI: requirements
 
+> **Historical since 2026-10-31 (#2238, #2280).** This folder decides nothing. It stays because old tickets and PRs link into it. UI work is held to the design system (`docs/specs/2026-10-15-ticket-first-design-system.md`, its Controls section above all), the `#/controls` specimen in a dev build, and before/after screenshots of the real app. Where the app and prototype-6 differ, the design system decides; nothing is changed back to match the prototype.
+
 Written 2026-10-14 against `main` at `0681cc12`. This document says what the app has to do so the real UI matches the ticket-first prototypes. Read it next to the prototypes:
 
 - `prototype-1.html` has the flow: pick a ticket, work on its job, open full views.
@@ -24,7 +26,7 @@ IDs (`R-3.4`) are stable. Refer to them in tickets and PRs.
 
 - **Match prototype-6; leave performance for later.** No ticket in this round optimises a read, adds a summary or paged read, or measures a new budget. Every read is written the straightforward way. This defers, among others, the paged summary read of section 11d at estate scale, any tuning of the *This job* scope (R-2.9), and perf-gate work for ticket-view counts (D6). They come back as their own tickets after the round.
 - **Two guardrails stay.** The existing perf gate in `just check` stays green and unchanged; a change that trips it is fixed, not waved through. And each screen has to be usable on testenv's real data, judged by eye during the desktop check. A screen too slow to use there gets one follow-up ticket, not a redesign inside the ticket that found it.
-- **Acceptance is the match.** Each UI ticket names the prototype-6 route or routes it builds, for example `#/time/week`. Its PR shows a screenshot of the real app at that route next to prototype-6 at the same route, in the same theme and at 1440 × 900. A difference is either fixed or named in the PR with its reason, such as data the real sources do not have. Copy follows prototype-6 word for word unless the PR says why not.
+- **Acceptance is the match.** *Superseded 2026-10-31 (#2238): acceptance is the design system, the `#/controls` specimen, and before/after screenshots.* Each UI ticket names the prototype-6 route or routes it builds, for example `#/time/week`. Its PR shows a screenshot of the real app at that route next to prototype-6 at the same route, in the same theme and at 1440 × 900. A difference is either fixed or named in the PR with its reason, such as data the real sources do not have. Copy follows prototype-6 word for word unless the PR says why not.
 
 ---
 

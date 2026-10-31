@@ -175,6 +175,13 @@ test("the queue lists each proposal by its item, strength and target, newest fir
   expect(target.querySelector(".tf-ql a[aria-current='true']")?.getAttribute("href")).toBe("#/review/l1");
 });
 
+test("the three decisions are the screen's one large decision (design system, Controls; #2280)", async () => {
+  await open();
+  for (const text of ["Link them", "Not related", "Decide later"]) {
+    expect(button(text).classList.contains("tf-lg"), text).toBe(true);
+  }
+});
+
 test("the address opens the proposal it names", async () => {
   await open({ sid: "l2" });
   expect(names()).toEqual(["SEPA retry design", "PAY-231 Retry failed SEPA payouts"]);

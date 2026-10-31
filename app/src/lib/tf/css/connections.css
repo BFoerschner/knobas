@@ -139,7 +139,6 @@
 .tf-against { font-size: var(--t-sm); color: var(--ink-2); display: flex; flex-direction: column; gap: 4px; }
 .tf-against strong { color: var(--ink); }
 .tf-decide { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.tf-decide .tf-btn { padding: 9px 16px; font-size: var(--t-md); }
 .tf-decide .tf-yes { background: var(--ok); border-color: var(--ok); color: var(--sheet); font-weight: 600; }
 .tf-decide .tf-yes kbd { background: transparent; color: inherit; border-color: currentColor; }
 .tf-decide .tf-no { color: var(--err); border-color: var(--err); }

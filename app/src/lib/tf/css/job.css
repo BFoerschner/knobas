@@ -149,9 +149,6 @@ a.tf-r:hover { background: var(--sheet-2); }
   display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--rule); background: var(--sheet-2);
   border-radius: 0 0 6px 6px; align-items: center; flex-wrap: wrap;
 }
-/* ---------- a red button ---------- */
-.tf-btn.tf-danger-t { color: var(--err); }
-.tf-btn.tf-primary.tf-danger { background: var(--err); border-color: var(--err); color: var(--sheet); }
 
 /* ---------- dialog parts: a form grid and radio cards (the dialog itself is below) ---------- */
 .tf-dlg-note { font-size: var(--t-xs); color: var(--ink-2); }

@@ -37,7 +37,6 @@
 .tf-dur b { font-size: var(--t-3xl); font-weight: 800; font-variation-settings: "wdth" 62; margin-left: 6px; font-variant-numeric: tabular-nums; }
 .tf-dur .tf-dim { font-size: var(--t-xs); flex-basis: 100%; }
 
-.tf-btn.tf-danger { color: var(--err); }
 .tf-hidden { visibility: hidden; }
 .tf-fhead .tf-acts { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
 

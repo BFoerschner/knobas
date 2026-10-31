@@ -8,6 +8,7 @@ import { page as buildsPage } from "./builds/page";
 import { page as assetTreePage } from "./asset-tree/page";
 import { page as codePage } from "./code/page";
 import { page as codeRowPage } from "./code-row/page";
+import { page as controlsPage } from "./controls/page";
 import { page as depsPage } from "./deps/page";
 import { page as inboxPage } from "./inbox/page";
 import { page as jobPage } from "./job/page";
@@ -35,6 +36,7 @@ test("the glob finds every feature's page", () => {
   expect(PAGES).toContain(repoPage);
   expect(PAGES).toContain(setsPage);
   expect(PAGES).toContain(codeRowPage);
+  expect(PAGES).toContain(controlsPage);
 });
 
 const ADDRESSES = [
@@ -71,6 +73,9 @@ const ADDRESSES = [
   ["#/inbox", "inbox"],
   ["#/sets", "sets"],
   ["#/sets/payout-stack", "sets"],
+  // The controls specimen (#2280): a dev build only, which the tests are.
+  ["#/controls", "controls"],
+  ["#/controls/more", "shell"],
   ["#/nowhere", "shell"],
 ] as const;
 
@@ -91,6 +96,7 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
     [prPage, "pr"],
     [setsPage, "sets"],
     [codeRowPage, "code row"],
+    [controlsPage, "controls"],
   ]);
   const name = found === undefined ? "shell" : (names.get(found) ?? "other");
   expect(name).toBe(expected);
