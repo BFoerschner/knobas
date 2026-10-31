@@ -3,11 +3,10 @@
 
   The rooms UI and its stylesheet, `app.css`, went in #881. What is left here
   are the rules of that sheet that a surviving component still reaches: the
-  asset tree (`#/assets`) and its dialogs, the shell's `Modal`, and the
-  capture window. Every rule whose
+  asset tree (`#/assets`), the Links panel and the capture window. Every rule whose
   class only the rooms UI drew went with it. A component ported to `tf.css`
   takes its rules out of here (the first-run wizard and the rooms *Add a
-  source* did with #1400, the write queue with #1425, the ⌘T picker and the ad-hoc dialog with #1432, the launcher with #1422, which read only rules others still read); when nothing reads
+  source* did with #1400, the write queue with #1425, the ⌘T picker and the ad-hoc dialog with #1432, the launcher with #1422, which read only rules others still read; the old buttons, `×` and the `Modal` sheet went with #2292); when nothing reads
   this file it goes too.
 
   **The palette is the design system's.** The tokens live on `:root` in
@@ -45,11 +44,6 @@
 .tab:hover{color:var(--text);background:var(--raised)}
 .tab.on{color:var(--text);border-bottom-color:var(--text)}
 .tab .dot{width:6px;height:6px;border-radius:50%;background:var(--amber)}
-.tb-btn{display:flex;align-items:center;gap:7px;height:30px;padding:0 9px;border-radius:2px;color:var(--muted);font-size:12px;white-space:nowrap;flex:none}
-.tb-btn:hover{background:var(--raised);color:var(--text)}
-.tb-btn.on{color:var(--text);background:var(--raised)}
-.tb-btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
-.tb-btn .k{font-size:12px}
 .mg{display:inline-flex;align-items:center;justify-content:center;width:22px;height:16px;border:1px solid var(--hair2);border-radius:2px;font:500 10px/1 var(--mono);color:var(--muted);letter-spacing:.04em;flex:none}
 
 /* ---- a view's header bar: the asset tree ---- */
@@ -59,7 +53,6 @@
 .room-bar .acts{margin-left:auto;display:flex;gap:4px;flex:none}
 .kind{font:600 10px/1 var(--disp);text-transform:uppercase;letter-spacing:.1em;color:var(--faint);border:1px solid var(--hair);padding:4px 5px 3px;border-radius:2px}
 .empty{padding:14px 12px;color:var(--muted);font-size:12px;line-height:1.5}
-.empty .btn{margin-top:8px}
 .view{height:100%;display:grid;grid-template-rows:auto 1fr;min-height:0;min-width:0}
 .view>*{min-width:0}
 .view .room-bar h1{font-size:22px}
@@ -91,18 +84,7 @@
 .sec .row{margin:0 -14px;padding-left:10px;padding-right:14px}
 .sec .row:last-of-type{border-bottom:0}
 
-/* ---- buttons and fields ---- */
-.btn{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid var(--hair2);border-radius:2px;font:500 12px var(--sans);color:var(--text);white-space:nowrap;background:transparent}
-.btn:hover{background:var(--raised)}
-.btn.pri{background:var(--text);color:var(--bg);border-color:var(--text)}
-.btn.pri:hover{background:var(--ink-2);border-color:var(--ink-2)}
-.btn.sm{height:20px;padding:0 6px;font-size:11px}
-.btn.danger{color:var(--fail);border-color:var(--fail)}
-.btn:disabled{opacity:.4;cursor:default}
-.btn[aria-disabled="true"]{opacity:.4;cursor:default}
-.btn[aria-disabled="true"]:hover{background:transparent}
-.btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
-.btn .k{font-size:11px}
+/* ---- fields ---- */
 .inp{height:26px;padding:0 8px;border:1px solid var(--hair2);border-radius:2px;background:var(--bg);color:var(--text);width:100%}
 .inp:focus{border-color:var(--link);outline:0}
 .inp.k{font-family:var(--mono);font-size:12px}
@@ -122,21 +104,5 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
 .src .st{display:block;font:400 11.5px var(--mono)}
 .src.err{background:var(--err-bg)}
 
-/* ---- overlays ---- */
-@keyframes fade{from{opacity:0}}
-.scrim{position:fixed;inset:0;background:rgba(21,23,26,.72);z-index:40;display:flex;align-items:flex-start;justify-content:center;padding-top:80px}
-.dlg{background:var(--panel);border:1px solid var(--hair2);border-radius:2px;width:560px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;animation:fade .12s}
-.dlg.wide{width:820px}
-.dlg-h{display:flex;align-items:center;gap:10px;height:40px;padding:0 10px 0 14px;border-bottom:1px solid var(--hair);flex:none}
-.dlg-h h2{font:600 16px var(--disp);letter-spacing:.01em}
-.dlg-h .x{margin-left:auto}
-.dlg-b{padding:14px;overflow:auto}
-.dlg-f{display:flex;gap:6px;justify-content:flex-end;padding:10px 14px;border-top:1px solid var(--hair);flex:none;align-items:center}
-.dlg-f .l{margin-right:auto;font:400 11px var(--mono);color:var(--faint);white-space:nowrap}
-.x{width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border-radius:2px;color:var(--muted)}
-.x:hover{background:var(--raised);color:var(--text)}
-.x svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}
-
 @media (max-width:1340px){.tab{max-width:132px}}
 @media (max-width:1240px){.src{grid-template-columns:34px 130px 1fr 176px 196px 118px}.tab{max-width:120px}}
-@media (prefers-reduced-motion:reduce){.dlg{animation:none}}

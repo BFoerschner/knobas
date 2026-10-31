@@ -12,9 +12,9 @@
     reads the same tokens as the shell. `.tf` paints its own paper and fills
     the window.
   - **Every class here starts with `tf-`.** `src/unported.css` still styles
-    bare class names globally (`.btn`, `.inp`, `.dlg`) for the components
-    not yet ported to this design system (the asset tree, the shell's
-    `Modal`), and a rule there would leak onto any element of the new shell
+    bare class names globally (`.inp`, `.row`, `.sec`) for the components
+    not yet ported to this design system (the asset tree, the Links panel),
+    and a rule there would leak onto any element of the new shell
     carrying the same name. The prefix is the cheapest wall;
     `tf-css.test.ts` holds it. The prototype's names follow the prefix, so
     `.btn.primary` is `.tf-btn.tf-primary` here.

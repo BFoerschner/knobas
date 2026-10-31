@@ -454,13 +454,6 @@
 </Modal>
 
 <style>
-  /* An edit's *Delete* sits apart on the far left of the footer (design system,
-     Controls, *Dialog footer*). `dialogs.css` does this for `.tf-dialog`; Modal's
-     `.dlg-f` is not one yet (#2292). Placement only, no size. */
-  .tf-first {
-    margin-right: auto;
-  }
-
   .fields {
     display: grid;
     gap: 12px;

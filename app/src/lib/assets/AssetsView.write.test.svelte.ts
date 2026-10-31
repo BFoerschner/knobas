@@ -1060,14 +1060,13 @@ test.each([
   ]);
   render("#/asset/asset:vm-db-01", store);
   await waitFor(() => expect(text()).toContain("Postgres UI"));
-  // The Links panel (`.sec`, `detail/LinksPanel.svelte`) is drawn inside the
-  // pane but is #2292's to move, so it is left out here.
-  const unported = [...target.querySelectorAll(".btn, .tb-btn")].filter((control) => control.closest(".sec") === null);
-  expect(unported, "the pane on the unported button").toEqual([]);
+  // The Links panel (`detail/LinksPanel.svelte`) moved with #2292, so nothing
+  // in the pane is left out.
+  expect([...target.querySelectorAll(".btn, .tb-btn")], "the pane on the unported button").toEqual([]);
 
   click(opener);
   const dialog = target.querySelector('[role="dialog"]')!;
-  const foot = [...dialog.querySelectorAll(".dlg-f button")];
+  const foot = [...dialog.querySelectorAll("footer button")];
   expect(foot.map((control) => `${(control.textContent ?? "").trim()}: ${drawnAs(control)}`)).toEqual(footer);
   expect(dialog.querySelector(".btn"), "the dialog on the unported button").toBeNull();
 });
