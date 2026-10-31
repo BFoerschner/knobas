@@ -1,0 +1,20 @@
+/* ---------- controls (#2238, #2280): the design system's Controls section, drawn on `#/controls` ----------
+   Three sizes, each a fixed height from its token and horizontal padding only, so a row of buttons is one
+   height whatever their line-height or a `<kbd>` inside. Default in headers, dialog footers and the top bar;
+   small everywhere in a page body; large only for the one decision a screen exists for. */
+.tf-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: var(--control-h); padding: 0 11px; border: 1px solid var(--rule); border-radius: 4px;
+  background: var(--sheet); font-weight: 500; cursor: pointer; white-space: nowrap; text-decoration: none;
+}
+.tf-btn:hover { border-color: var(--ink-2); }
+.tf-btn.tf-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.tf-btn.tf-ghost { border-color: transparent; background: none; }
+.tf-btn.tf-ghost:hover { background: var(--sheet-2); }
+.tf-btn[disabled], .tf-btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: var(--t-sm); }
+.tf-btn.tf-lg { height: var(--control-h-lg); padding: 0 16px; font-size: var(--t-md); }
+
+/* Danger, one pair: red text starts a destructive action, filled red confirms it. */
+.tf-btn.tf-danger { color: var(--err); }
+.tf-btn.tf-primary.tf-danger { background: var(--err); border-color: var(--err); color: var(--sheet); }

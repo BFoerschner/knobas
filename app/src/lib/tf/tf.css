@@ -45,6 +45,7 @@
 */
 @import "./css/tokens.css";
 @import "./css/chrome.css";
+@import "./css/controls.css";
 @import "./css/job.css";
 @import "./css/settings.css";
 @import "./css/dialogs.css";
