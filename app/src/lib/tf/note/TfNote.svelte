@@ -18,6 +18,7 @@
 -->
 <script module lang="ts">
   import { captureShortcut, deleteNote, getNote, type NoteDetail } from "../../ipc/entity";
+  import { replaceAddress } from "../opener";
 
   /** The page's reads, its one write, and where it sends the reader. */
   export interface NotePorts {
@@ -40,7 +41,7 @@
     getNote: (noteId) => getNote(noteId),
     deleteNote: (noteId) => deleteNote(noteId),
     notesShown: async () => (await captureShortcut()).shown,
-    replace: (hash) => location.replace(hash),
+    replace: replaceAddress,
     canGoBack: () => history.length > 1,
     back: () => history.back(),
   };

@@ -71,10 +71,11 @@
     type WriteQueue as Queue,
   } from "../shell/write-queue.svelte";
   import { badges as sharedBadges, type Badges } from "./badges.svelte";
-  import { escStep, escTarget } from "./escape";
+  import { escStep, escTarget, openerName } from "./escape";
   import { keptPages as sharedKeptPages, type KeptPagesSetting } from "./kept-pages.svelte";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
+  import { goWithoutOpener, samePage, stamped, stampOf, takeTold, type Opened } from "./opener";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { parseTfHash, sectionOf } from "./route";
   import { theme as sharedTheme, type Theme } from "./theme.svelte";
@@ -166,11 +167,54 @@
   let hash = $state(location.hash);
   const route = $derived(parseTfHash(hash));
 
-  /** Put `next` in place of the address the reader is on, without a step back to it. */
+  /**
+   * How the entry the reader is on was opened (`opener.ts`, #2229): the page
+   * it was opened from, which `Esc` returns to, and the entry before it. The
+   * window's first address was opened by nothing.
+   */
+  let here = $state<Opened>({ opener: null, prev: null });
+  history.replaceState(stamped(history.state, { opener: null, prev: null }), "");
+
+  /** Put `next` in place of the address the reader is on, without a step back to it; a rooms address opened nothing. */
   function replaceHash(next: string) {
-    history.replaceState(history.state, "", next);
+    here = { opener: null, prev: here.prev };
+    history.replaceState(stamped(history.state, $state.snapshot(here)), "", next);
     // The state itself, not a `hashchange`: on the first pass the listener (an `onMount`) is not there yet.
     hash = next;
+  }
+
+  let main: HTMLElement | undefined = $state();
+
+  /** The name the shown page's breadcrumb gives the page itself, read as it is left, or `null`. */
+  function ownName(): string | null {
+    for (const crumbs of main?.querySelectorAll(".tf-crumbs") ?? []) {
+      if (crumbs.closest("[hidden]") !== null) continue;
+      const own = [...crumbs.querySelectorAll("strong")].at(-1);
+      return own?.textContent?.trim() || null;
+    }
+    return null;
+  }
+
+  /**
+   * The address moved (#2229). An entry already stamped is one history
+   * stepped to, or one replaced in place: it keeps its stamp. A new entry is
+   * stamped here, before the page it left is gone: opened by nothing when it
+   * was told so (`goWithoutOpener`), the page's own opener on a tab switch,
+   * otherwise the page it left.
+   */
+  function arrive() {
+    const now = location.hash;
+    const how = takeTold(now);
+    const had = stampOf(history.state);
+    if (how !== "replace" && had !== null) {
+      here = had;
+    } else {
+      if (how === "unopened") here = { opener: null, prev: hash };
+      else if (how === null && samePage(hash, now)) here = { opener: here.opener, prev: hash };
+      else if (how === null) here = { opener: { hash, name: openerName(route, ownName()) }, prev: hash };
+      history.replaceState(stamped(history.state, $state.snapshot(here)), "");
+    }
+    hash = now;
   }
 
   /**
@@ -234,7 +278,7 @@
    * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228):
    * the ladder's own rungs, so the hint names what the key does.
    */
-  const back = $derived(escTarget(route));
+  const back = $derived(escTarget(route, here.opener));
 
   /** What the timer runs on, as a ticket key; an asset or a label is no job. */
   const timedTicket = $derived.by(() => {
@@ -477,6 +521,7 @@
               text: field instanceof HTMLInputElement ? field.value : "",
             },
       route,
+      opener: here.opener,
     });
     if (step.do === "nothing") return;
     event.preventDefault();
@@ -485,7 +530,9 @@
       field.value = "";
       field.dispatchEvent(new Event("input", { bubbles: true }));
     } else if (step.do === "blur") field?.blur();
-    else if (step.do === "go") go(step.hash);
+    // The opener is the entry before: step back to it, so `⌘]` comes forward to this page again.
+    else if (step.do === "go" && step.opened && step.hash === here.prev) nav.back();
+    else if (step.do === "go") goWithoutOpener(step.hash);
   }
 
   // A forced theme is on `<html>`, where the tokens are, so everything in the
@@ -512,7 +559,7 @@
   const MOUSE = ["mousedown", "mouseup", "auxclick"] as const;
 
   onMount(() => {
-    const onhash = () => (hash = location.hash);
+    const onhash = () => arrive();
     window.addEventListener("hashchange", onhash);
     window.addEventListener("keydown", onkeydown);
     for (const type of MOUSE) window.addEventListener(type, onmouse);
@@ -536,7 +583,7 @@
     {ontimer}
     ontheme={() => theme.toggle(prefersDark())}
   />
-  <main class="tf-main" tabindex="-1">
+  <main class="tf-main" tabindex="-1" bind:this={main}>
     <TfPage
       {kept}
       ctx={{

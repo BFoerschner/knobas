@@ -17,6 +17,7 @@ import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
 import { entityAddress } from "./address";
 import { sourceRoles } from "./roles.svelte";
+import { goWithoutOpener, replaceAddress } from "./opener";
 import { jobHash, NAV, SECTION_NAME } from "./route";
 import TfShell, { type TfShellPorts } from "./TfShell.svelte";
 import { installCommands } from "../render/command";
@@ -125,6 +126,12 @@ async function settle() {
 
 async function at(hash: string) {
   location.hash = hash;
+  await settle();
+}
+
+/** Go to `hash` with no opener, as the ⌘K launcher, a deep link and an `Esc` step do (#2229). */
+async function reached(hash: string) {
+  goWithoutOpener(hash);
   await settle();
 }
 
@@ -350,7 +357,7 @@ test("Esc on every nav entry's top page and on Settings does nothing, and no bre
   }
 });
 
-test("Esc on a detail page goes to its structural parent; deeper inside a section, to the section's top page", async () => {
+test("Esc on a detail page reached with no opener goes to its structural parent; deeper inside a section, to the section's top page", async () => {
   start();
   const parents: [string, string][] = [
     ["#/build/pipe-1/run-4812", "#/builds"],
@@ -374,17 +381,147 @@ test("Esc on a detail page goes to its structural parent; deeper inside a sectio
     ["#/settings/appearance", "#/settings"],
   ];
   for (const [from, parent] of parents) {
-    await at(from);
+    await reached(from);
     press("Escape");
     await settle();
     expect(location.hash, `Esc on ${from}`).toBe(parent);
   }
 });
 
+/** The window's own history, so `Esc` stepping back and `⌘]` going forward move the address for real. */
+const windowNav = { back: () => history.back(), forward: () => history.forward() };
+
+test("a run opened from the Job page: Esc returns to the Job page, and the hint said Back to Job", async () => {
+  start({ nav: windowNav });
+  await at("#/job/PAY-231/builds");
+  await at("#/build/pipe-1/run-4812");
+  expect(escHint()).toBe("Back to Job Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231/builds");
+});
+
+test("a job's row opens a run by its bare id; the address the run page puts in its place keeps the Job page as opener", async () => {
+  start({ nav: windowNav });
+  await at("#/job/PAY-231");
+  await at("#/build/run-4812");
+  // What Builds does once it knows the run's pipeline.
+  replaceAddress("#/build/pipe-1/run-4812");
+  await settle();
+  expect(escHint()).toBe("Back to Job Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231");
+});
+
+test("a run opened from the Builds list: Esc returns to the Builds list", async () => {
+  start({ nav: windowNav });
+  await at("#/builds/pipe-1");
+  await at("#/build/pipe-1/run-4812");
+  expect(escHint()).toBe("Back to Builds Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/builds/pipe-1");
+});
+
+test("a run opened from another run's link: Esc returns to that run, and a second Esc to that run's own opener", async () => {
+  start({ nav: windowNav });
+  await at("#/job/PAY-231");
+  await at("#/build/pipe-1/run-4811");
+  await at("#/build/pipe-1/run-4812");
+  expect(escHint()).toMatch(/^Back to Run\b/);
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/build/pipe-1/run-4811");
+  expect(escHint()).toBe("Back to Job Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231");
+});
+
+test("a run reached by ⌘K or by a deep link: Esc goes to Builds, its structural parent", async () => {
+  start({ nav: windowNav });
+  await at("#/job/PAY-231");
+  // The launcher's pick, as `App.svelte` makes it.
+  goWithoutOpener("#/build/pipe-1/run-4812");
+  await settle();
+  expect(escHint()).toBe("Back to Builds Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/builds");
+
+  unmount(shell!);
+  shell = null;
+  await openedOn("#/build/pipe-1/run-4812");
+  start({ nav: windowNav });
+  await settle();
+  expect(escHint()).toBe("Back to Builds Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/builds");
+});
+
+test("a pull request opened from Code, switched to its Files tab: Esc returns to Code, not to the previous tab", async () => {
+  start({ nav: windowNav });
+  await at("#/code/repos");
+  await at("#/pr/gh:pr-12");
+  await at("#/pr/gh:pr-12/files");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/code/repos");
+});
+
+test("after an Esc that stepped back, ⌘] goes forward to the detail again", async () => {
+  start({ nav: windowNav });
+  await at("#/job/PAY-231");
+  await at("#/build/pipe-1/run-4812");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231");
+  press("]", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/build/pipe-1/run-4812");
+  expect(escHint(), "the entry kept its own opener").toBe("Back to Job Esc");
+});
+
+test("after ⌘[ and ⌘] through history, Esc on an entry still uses that entry's own opener", async () => {
+  start({ nav: windowNav });
+  await at("#/builds");
+  await at("#/build/pipe-1/run-4811");
+  await at("#/job/PAY-231");
+  await at("#/build/pipe-1/run-4812");
+  press("[", { metaKey: true });
+  await settle();
+  press("[", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/build/pipe-1/run-4811");
+  expect(escHint()).toBe("Back to Builds Esc");
+  press("]", { metaKey: true });
+  await settle();
+  press("]", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/build/pipe-1/run-4812");
+  expect(escHint()).toBe("Back to Job Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231");
+});
+
+test("a top page never navigates on Esc, even when it has an opener", async () => {
+  start({ nav: windowNav });
+  await at("#/build/pipe-1/run-4812");
+  await at("#/inbox");
+  const event = press("Escape");
+  await settle();
+  expect(event.defaultPrevented).toBe(false);
+  expect(location.hash).toBe("#/inbox");
+  expect(escHint()).toBeNull();
+});
+
 test("the breadcrumb on a full view shows the path with no job chip, and its hint names where Esc goes", async () => {
   start();
   await at("#/job/PAY-231");
-  await at("#/asset/assets:svc-1");
+  await reached("#/asset/assets:svc-1");
   let crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector(".tf-jobchip"), "no last job's chip").toBeNull();
   const parent = crumbs.querySelector<HTMLAnchorElement>("a.tf-crumb")!;
@@ -392,7 +529,7 @@ test("the breadcrumb on a full view shows the path with no job chip, and its hin
   expect(parent.getAttribute("href")).toBe("#/deps");
   expect(escHint()).toBe("Back to Dependencies Esc");
 
-  await at("#/settings/appearance");
+  await reached("#/settings/appearance");
   crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
   expect(crumbs.querySelector("strong")?.textContent).toBe("Appearance");
@@ -868,7 +1005,7 @@ test("a running timer names the Job tab but is not a job the breadcrumb or Esc r
     elapsed: "1:00",
   };
   start({ timer });
-  await at("#/build/pipe-1/run-4812");
+  await reached("#/build/pipe-1/run-4812");
   expect(target.querySelector(".tf-crumbs .tf-jobchip")).toBeNull();
   press("Escape");
   await settle();
@@ -1134,11 +1271,11 @@ test("an item of a custom-role source opens its block view, and the role gets no
   expect(entries.filter((a) => a.getAttribute("aria-current") === "page")).toEqual([]);
 });
 
-test("an item's page draws the kind's label as its breadcrumb; with no parent, Esc does nothing and no hint names it (#1408)", async () => {
+test("an item's page draws the kind's label as its breadcrumb; with no parent and no opener, Esc does nothing and no hint names it (#1408)", async () => {
   start({ sources: [{ id: "surveys", display_name: "Harbour surveys", roles: [{ role: "wasm-fixture:survey-desk", reads: [] }] }] });
   await at("#/job/PAY-231");
   const item = entityAddress("survey", "surveys:survey-1");
-  await at(item);
+  await reached(item);
 
   const crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
@@ -1152,15 +1289,22 @@ test("an item's page draws the kind's label as its breadcrumb; with no parent, E
   expect(location.hash).toBe(item);
 });
 
-test("a note's page has no parent: Esc does nothing and no hint names it", async () => {
-  start();
+test("a note's page has no parent: with no opener Esc does nothing and no hint names it; opened from the Job page, it returns there", async () => {
+  start({ nav: windowNav });
   await at("#/job/PAY-231");
-  await at("#/note/note-1");
+  await reached("#/note/note-1");
   expect(escHint()).toBeNull();
   const event = press("Escape");
   await settle();
   expect(event.defaultPrevented).toBe(false);
   expect(location.hash).toBe("#/note/note-1");
+
+  await at("#/job/PAY-231");
+  await at("#/note/note-1");
+  expect(escHint()).toBe("Back to Job Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231");
 });
 
 // #1415: a window opened on an old address (a bookmark, a notification) lands

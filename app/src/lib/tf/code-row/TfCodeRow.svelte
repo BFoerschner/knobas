@@ -14,6 +14,7 @@
 -->
 <script module lang="ts">
   import { getEntity, listEntities, type EntityDetail, type EntityFilter, type EntityPage } from "../../ipc/entity";
+  import { replaceAddress } from "../opener";
 
   /** The page's two reads, and where it sends the reader. */
   export interface CodeRowPorts {
@@ -27,7 +28,7 @@
   const BRIDGE: CodeRowPorts = {
     getEntity: (entityId) => getEntity(entityId),
     listEntities: (filter, limit, offset) => listEntities(filter, limit, offset),
-    replace: (hash) => location.replace(hash),
+    replace: replaceAddress,
   };
 
   /** A source's repositories, as the pull request page reads them for its header. */
