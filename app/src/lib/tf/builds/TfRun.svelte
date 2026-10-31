@@ -646,7 +646,7 @@
         {#if !inFlight}
           <button
             type="button"
-            class="tf-btn tf-runagain"
+            class="tf-btn tf-sm tf-runagain"
             {...refusedAttrs(cannotRun)}
             onclick={runAgain}>Run again with these…</button
           >

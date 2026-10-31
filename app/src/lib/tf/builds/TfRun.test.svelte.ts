@@ -555,6 +555,8 @@ test("Parameters pairs each value in this run with its default, then the branch,
     ["test.filter", "(empty)", "(empty)"],
     ["branch", FEATURE, "main"],
   ]);
+  // A page body's button is small (the Controls section, #2287).
+  expect(button("Run again with these…")!.classList.contains("tf-sm")).toBe(true);
   button("Run again with these…")!.click();
   await settle();
   expect(target.querySelector(".tf-run-dialog")).not.toBeNull();
