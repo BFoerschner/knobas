@@ -662,3 +662,28 @@ test("a hidden Settings page does not read the backup folder on focus, and reads
     page.shown = true;
   }
 });
+
+/**
+ * #2284: a Settings page's actions sit on the right of its title line, as every
+ * other page's do (the Controls section's header), never in a row of their own
+ * under it. Section rows (a form's Save, a table's Edit…) stay in their section.
+ */
+const headerActions = () => [...target.querySelectorAll<HTMLElement>(".tf-stg-h .tf-acts .tf-btn")].map((b) => b.textContent!.trim());
+const loneRows = () => body().querySelectorAll(":scope > .tf-stg-acts").length;
+
+test.each([
+  ["notifications", ["Send a test desktop notification"]],
+  ["backup", ["Back up now", "Restore from a file…"]],
+  ["logs", ["Open the log folder", "Re-index search"]],
+])("Settings › %s puts its actions on the title line", async (section, actions) => {
+  await open(section, sectionPorts(), section === "notifications" ? { notifications: notificationsStub([]) } : {});
+  expect(headerActions()).toEqual(actions);
+  expect(loneRows()).toBe(0);
+});
+
+test("a section that could not read puts Try again on the title line", async () => {
+  await open("backup", sectionPorts({ backupStatus: vi.fn(() => Promise.reject(new Error("locked"))) }));
+  expect(body().textContent).toContain("Could not read the backup settings");
+  expect(headerActions()).toEqual(["Try again"]);
+  expect(loneRows()).toBe(0);
+});

@@ -195,13 +195,22 @@
   const listed = $derived(status?.archives.filter((archive) => archive.share === (choosing === "share")) ?? []);
 </script>
 
-<header class="tf-stg-h">
-  <h1>Backup and export</h1>
-  <p>The database is yours. Back it up, restore it, or share part of it.</p>
+<header class="tf-stg-h tf-stg-srch">
+  <div>
+    <h1>Backup and export</h1>
+    <p>The database is yours. Back it up, restore it, or share part of it.</p>
+  </div>
+  {#if error !== null}
+    <div class="tf-acts"><button class="tf-btn" onclick={() => void load()}>Try again</button></div>
+  {:else if status !== null}
+    <div class="tf-acts">
+      <button class="tf-btn" disabled={busy} onclick={() => void backUpNow()}>Back up now</button>
+      <button class="tf-btn tf-ghost" onclick={() => choose("backup")}>Restore from a file…</button>
+    </div>
+  {/if}
 </header>
 {#if error !== null}
   <p class="tf-stg-p tf-stg-errt">Could not read the backup settings: {error}</p>
-  <div class="tf-stg-acts"><button class="tf-btn" onclick={() => void load()}>Try again</button></div>
 {:else if status !== null}
   {@const current = status}
   <div class="tf-stg-row">
@@ -240,10 +249,6 @@
       />
       <span>backups</span>
     </div>
-  </div>
-  <div class="tf-stg-acts">
-    <button class="tf-btn" disabled={busy} onclick={() => void backUpNow()}>Back up now</button>
-    <button class="tf-btn tf-ghost" onclick={() => choose("backup")}>Restore from a file…</button>
   </div>
   <div class="tf-stg-sec">
     <h2>Share with a colleague</h2>
