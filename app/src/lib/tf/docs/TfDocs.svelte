@@ -93,7 +93,7 @@
   import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes, type Echo } from "../queued.svelte";
   import { createDetailRefresh, DETAIL_REFRESH_BRIDGE, type DetailRefreshPorts } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
-  import TfDetailRefresh from "../TfDetailRefresh.svelte";
+  import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocBody from "./TfDocBody.svelte";
@@ -1115,9 +1115,7 @@
                 {@const url = p.web_url}
                 <button type="button" class="tf-btn tf-ghost" onclick={() => open(url)}>Open in {p.source_name}</button>
               {/if}
-              {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
-              <!-- The view's *Sync now*, unless the page's button already is one (#2287): one *Sync now* per header. -->
-              {#if detail === null || refresh.offer(detail) !== "sync"}{@render sync?.()}{/if}
+              <TfHeaderRefresh {detail} {refresh} {reread} {sync} />
             </div>
           </div>
           <div class="tf-rd-meta">

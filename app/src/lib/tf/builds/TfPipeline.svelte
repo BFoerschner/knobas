@@ -51,7 +51,7 @@
   import { echoOn, echoWrite, echoesOn, sentWrites, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
-  import TfDetailRefresh from "../TfDetailRefresh.svelte";
+  import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { runHash, runTone, shortTime } from "./builds";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
@@ -564,9 +564,7 @@
     {#if pipeline.web_url !== null}
       <button type="button" class="tf-btn tf-ghost" onclick={openInSource}>Open in {pipeline.source_name}</button>
     {/if}
-    {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={refreshRead} page />{/if}
-    <!-- The view's *Sync now*, unless the detail's button already is one (#2287): one *Sync now* per header. -->
-    {#if detail === null || refresh.offer(detail) !== "sync"}{@render syncNow?.()}{/if}
+    <TfHeaderRefresh {detail} {refresh} reread={refreshRead} sync={syncNow} />
   </div>
 </header>
 {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
