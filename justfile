@@ -55,6 +55,10 @@ export CARGO_BUILD_JOBS := env("CARGO_BUILD_JOBS", "4")
 # with `devUrl` set takes the empty default asset set and never looks at
 # `app/dist`. Nothing here may create that directory either: a missing one is
 # exactly how `tauri build` refuses to bundle an app with no frontend in it.
+# `check`'s script half, and with `docs-check` all of `check-scripts`: one
+# list, so the two cannot drift apart (#2334). None takes an argument.
+script_recipes := "shell test-layout witness-unit conflict-markers"
+
 check:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -65,7 +69,7 @@ check:
     # The script checks are a half of their own (#920): none of them runs
     # cargo or reads `target/`, and in the cargo chain their 23 s (warm,
     # quiet, 2026-10-15) were paid in full ahead of `clippy`.
-    script_recipes=(shell test-layout witness-unit conflict-markers)
+    script_recipes=({{script_recipes}})
     cargo_recipes=(fmt clippy clippy-libs test-build ipc-mirror test)
     descendants() {
         local p
@@ -188,6 +192,14 @@ check-front base="origin/main":
     just front-changed "{{base}}"
     @echo "check-front: ok"
 
+# `check`'s script half alone, with the doc-list check: enough for a head
+# `scripts/gate-scope.sh` calls `scripts` (#2334). Every path it changed is a
+# script or prose that nothing in `crates/` or `app/src` reads, so neither the
+# cargo half nor `front` can fail on it. No cargo, no `node_modules`.
+check-scripts:
+    just docs-check {{script_recipes}}
+    @echo "check-scripts: ok"
+
 # The two checks that guard a docs-only change, nothing else: the doc-list
 # check (#1919: a crate, `app/src/lib/` directory, live-suite recipe or live
 # product a hand-written table lists, or misses) and the conflict-marker
@@ -272,7 +284,8 @@ keep-alive-budget slot:
     scripts/keep-alive-budget.sh "{{slot}}"
 
 # The merge gate: `check-front` when `scripts/gate-scope.sh BASE` says the head
-# is frontend-only against BASE, the full `check` otherwise.
+# is frontend-only against BASE, `check-scripts` when it says the head changes
+# only scripts and prose (#2334), the full `check` otherwise.
 #
 # A full gate runs `pre-gate` first. Of 112 failed gate runs in Oct 10-19,
 # 32 full gates failed on rustfmt (12) or clippy (20), both of which pre-gate
@@ -281,7 +294,8 @@ keep-alive-budget slot:
 # implementer's pre-gate. What pre-gate changes is left uncommitted and named,
 # so the merge-manager commits it before merging; the gate itself ran on it.
 # A frontend-only head skips it: nothing pre-gate fixes applies to one, and
-# `check-front` already runs its svelte-check and its three vitest guards.
+# `check-front` already runs its svelte-check and its three vitest guards. A
+# `scripts` head skips it too: it changes no Rust and no app source.
 gate base="origin/main":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -289,6 +303,8 @@ gate base="origin/main":
     echo "gate: $scope"
     if [ "$scope" = front ]; then
         just check-front "{{base}}"
+    elif [ "$scope" = scripts ]; then
+        just check-scripts
     else
         just pre-gate
         just check
