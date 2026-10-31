@@ -144,8 +144,8 @@ pub struct FileThread {
 }
 
 /// One comment of a [`LineThread`]. Source text, like every string of a view:
-/// `body` is the source's Markdown, drawn legibly and never as markup
-/// (ADR-0020 rule 5).
+/// `body` is the source's Markdown, drawn by the shell's one Markdown
+/// component, sanitized (ADR-0020 rule 5, #2261).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct LineComment {

@@ -166,8 +166,9 @@ pub struct ViewSection {
 /// - `facts`: Label and value pairs: a commit's sha and author, a build's
 ///   outcome.
 /// - `text`: Prose: a commit message, a pull request's description. `markdown`
-///   says the source writes Markdown there; the shell still draws it as text,
-///   never as markup (ADR-0020 rule 5).
+///   says the source writes Markdown there, and the shell draws it with its
+///   one Markdown component, sanitized (ADR-0020 rule 5, #2261); without it
+///   the text is drawn as text.
 /// - `entities`: A list of things, each of which may be an address (ADR-0020
 ///   rule 7): a commit's parents, a pull request's commits, a build's changes.
 /// - `diff`: A diff, parsed by [`crate::diff`] and capped there. `truncated`
@@ -217,8 +218,9 @@ pub struct ViewSection {
 ///   (the source's own: Gitea's adapter keeps 1 MB and 10,000 lines), and `url`
 ///   is the file's page at the source, where the rest is. `language` is a hint
 ///   from the file's name (`"rust"`, `"markdown"`), `None` where the source has
-///   none; the shell may draw a `"markdown"` file rendered, with the raw text a
-///   toggle away, and never highlights.
+///   none. The shell picks how to draw a file from its name, not from this
+///   hint: it highlights every file's text (#2254), and may draw a Markdown
+///   file rendered, with the raw text a toggle away.
 ///
 /// Named `ViewBlock` in the generated TypeScript (#1326), because the shell's
 /// barrel already exports a time-tracking `Block`.
