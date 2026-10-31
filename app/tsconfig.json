@@ -28,6 +28,7 @@
   "include": [
     "src/**/*.ts",
     "src/**/*.svelte",
-    "vite.config.ts"
+    "vite.config.ts",
+    "vite-pdfjs-assets.ts"
   ]
 }

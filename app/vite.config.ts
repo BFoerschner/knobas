@@ -2,12 +2,14 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vitest/config";
 
 import { HOOK_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./src/lib/shell/test-budget";
+import { pdfjsAssets } from "./vite-pdfjs-assets";
 
 // Tauri owns this dev server: `tauri.conf.json`'s `devUrl` points at the port
 // below, so it is fixed and `strictPort` makes a clash a hard error rather
 // than a silent move to 1421 that the window would then fail to load.
 export default defineConfig(({ mode }) => ({
-  plugins: [svelte()],
+  // `pdfjsAssets`: pdf.js's decoders, fonts and CMaps under `/pdfjs/` (#2313).
+  plugins: [svelte(), pdfjsAssets()],
   // Tauri's CLI prints the Rust build output into the same terminal; letting
   // Vite clear the screen would eat compiler errors.
   clearScreen: false,

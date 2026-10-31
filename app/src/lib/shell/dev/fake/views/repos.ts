@@ -18,7 +18,7 @@
 import type { DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/diff/line-diff";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
-import { fakePdf, HOSTILE_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
+import { fakePdf, HOSTILE_PDF, SCAN_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
 
 const RETRY_MAIN = `use std::time::Duration;
 
@@ -404,11 +404,12 @@ const WRAPPED: Record<string, { inner: string; size: number }> = {
 /**
  * `?fake-binary`'s files (#2260): binary files in payout-service's tree, read through the byte read. A three-page
  * PDF with an external link and a link to a page, a hostile PDF (JavaScript on open, script and launch links, a
- * scripted field) and the README's PNG.
+ * scripted field), a PDF with a JPEG 2000 image (#2313) and the README's PNG.
  */
 const BINARY: Record<string, () => Uint8Array> = {
   "docs/spec.pdf": SPEC_PDF,
   "docs/hostile.pdf": HOSTILE_PDF,
+  "docs/scan.pdf": SCAN_PDF,
   "docs/img/logo.png": () => PAYOUT_IMAGES["docs/img/logo.png"]!(),
 };
 const binaryOf = (path: string) => (new URLSearchParams(globalThis.location?.search).has("fake-binary") ? BINARY[path] : undefined);
