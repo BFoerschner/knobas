@@ -40,6 +40,40 @@ done
 elsewhere=$(SHOT_DRY_RUN=1 env -C / "$checkout/scripts/shot.sh" 9 "$out" '#/time')
 case $elsewhere in *"root=$checkout "*) ;; *) fail "run from /, the root is not the script's checkout: $elsewhere" ;; esac
 
+# A run that fails stops the dev server it started, grandchildren too (#2339).
+# On Linux npx runs vite under a shell (npm -> sh -> node), out of reach of a
+# kill of the wrapper and its children; the survivor served the next run's
+# shots from the old tree. A fake npx starts a server the same way, as a
+# grandchild, and a fake node fails the first shot.
+fakes=$(mktemp -d "${TMPDIR:-/tmp}/knobas-shot-leak.XXXXXX")
+cat >"$fakes/npx" <<'SH'
+#!/bin/sh
+# npx vite --port <port> --strictPort: the server is a grandchild, as on Linux.
+# Not `exec`: npx stays the parent of the shell that starts the server.
+sh -c 'python3 -I -m http.server --bind 127.0.0.1 "$1" >/dev/null 2>&1 & echo $! >"$0/server.pid"; wait' "$(dirname "$0")" "$3"
+exit $?
+SH
+printf '#!/bin/sh\nexit 1\n' >"$fakes/node"
+chmod +x "$fakes/npx" "$fakes/node"
+if ! command -v python3 >/dev/null; then
+    echo "shot-test: no python3 for the fake dev server; the dev-server leak case skipped"
+elif curl -fsS -o /dev/null http://localhost:5309/ 2>/dev/null; then
+    echo "shot-test: :5309 already answers; the dev-server leak case skipped"
+else
+    if PATH="$fakes:$PATH" SHOT_START_WAIT_S=30 "$shot" 9 "$fakes/out" '#/time' >/dev/null 2>&1; then
+        fail "a run whose shot fails passed"
+    fi
+    from=$SECONDS
+    until ! kill -0 "$(cat "$fakes/server.pid" 2>/dev/null || echo 0)" 2>/dev/null || [ $((SECONDS - from)) -ge 10 ]; do sleep 0.2; done
+    if [ ! -s "$fakes/server.pid" ]; then
+        fail "the fake dev server never started"
+    elif kill -0 "$(cat "$fakes/server.pid")" 2>/dev/null; then
+        fail "a failed run left its dev server (a grandchild) running"
+        kill "$(cat "$fakes/server.pid")" 2>/dev/null || true
+    fi
+fi
+rm -rf "$fakes"
+
 # scripts/chrome-path.mjs, the Chrome the steps start: SHOT_CHROME wins; unset, a
 # Chromium on PATH is found by name, google-chrome before it (the macOS app, where
 # it is installed, before both); a PATH with none and no macOS app finds nothing.

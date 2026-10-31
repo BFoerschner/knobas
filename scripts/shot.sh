@@ -57,12 +57,23 @@ profile="${TMPDIR:-/tmp}/knobas-shot-profile-$slot"
 mkdir -p "$out" "$profile"
 up() { curl -fsS -o /dev/null "http://localhost:$port/" 2>/dev/null; }
 vite_pid=
-stop() { [ -z "$vite_pid" ] || { pkill -TERM -P "$vite_pid" 2>/dev/null || true; kill "$vite_pid" 2>/dev/null || true; wait "$vite_pid" 2>/dev/null || true; }; }
+# The server runs in its own process group (`set -m` below), and the whole group
+# is stopped: on Linux vite is a grandchild (npm -> sh -> node), which a kill of
+# the wrapper and its children missed, and the survivor served the next run's
+# shots from the old tree (#2339). Bash's job control, not `setsid`: macOS has
+# no `setsid` binary.
+stop() {
+  [ -n "$vite_pid" ] || return 0
+  kill -TERM -- "-$vite_pid" 2>/dev/null || { pkill -TERM -P "$vite_pid" 2>/dev/null || true; kill "$vite_pid" 2>/dev/null || true; }
+  wait "$vite_pid" 2>/dev/null || true
+}
 trap stop EXIT
 if [ -z "$dry" ] && ! up; then
   log="${TMPDIR:-/tmp}/knobas-shot-vite-$slot.log"
+  set -m
   (cd "$root/app" && exec npx vite --port "$port" --strictPort >"$log" 2>&1) &
   vite_pid=$!
+  set +m
   # Polled until it answers (#1957): a loaded machine starts vite slowly, so the
   # guard is sized past that, and a vite that died fails at once.
   from=$SECONDS
