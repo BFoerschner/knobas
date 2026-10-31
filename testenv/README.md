@@ -1694,6 +1694,24 @@ for the capture driver's job: the same day the demo profile's launcher
 answered `PAY-231` with pages, commits and a branch, and `#PAY-231` with no
 match at all.
 
+`pull-request-open-in` (#2316) is a pull request's *Open in…*: the worktree
+(#2285, ADR-0035), *Diff tool* (#2275) and *Browser* (#2274). The demo's mock
+cannot carry it (no source view, repositories with no owner, short shas), so it
+uses the testenv Gitea, over **https at OrbStack's container domain**
+(`https://knobas-gitea.orb.local`, a certificate from OrbStack's root, which
+OrbStack installs as trusted for SSL; `KNOBAS_WITNESS_GITEA` names another https
+front). Needs `just live-up gitea` from the same tree, for the token in
+`./seed --env`. It clones the repository into a scratch clones root and names a
+stub as the clone's `diff.guitool`, adds the Gitea in Settings › *Sources*
+(*+ Add a source*, *Test connection*, *Add source*) and an application with a
+pull-request command, opens `SEPA retry with exponential backoff` from ⌘K once
+the source has synced it, and asserts: the application ran with the worktree
+as its only argument, the worktree is at the head and its own `FETCH_HEAD`
+records `refs/pull/<n>/head` from the https address, the clone's branch, `HEAD`
+and status are unchanged; the diff tool's right-hand folder holds every file
+the pull request changes; the *Browser* item names the page and the default
+browser comes to the front. It then removes the source with what it synced.
+
 `capture` (#503, ported by #1084) is the **global** shortcut, which is the one
 keystroke in knobas that has to arrive while knobas is not the application
 being typed at. In Settings › *Notes and capture* it turns notes on if they
