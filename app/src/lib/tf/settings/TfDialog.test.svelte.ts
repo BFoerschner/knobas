@@ -267,7 +267,6 @@ test("TfDialog is the only component that draws the dialog's scrim", () => {
     // Still hand-drawn, each waiting on something TfDialog doesn't take yet (#2346).
     "lib/tf/settings/TfDialog.svelte",
     "lib/tf/time/TfBlockDialog.svelte",
-    "lib/tf/time/TfLogAll.svelte",
   ]);
 });
 
