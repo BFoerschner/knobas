@@ -40,6 +40,9 @@ struct Adapter {
     /// The Docs writes in the source's markup (#862), for an adapter whose
     /// pages knobas edits and creates.
     doc_writes: Option<knobas_source::docs::DocWrites>,
+    /// How the tree of a kind's view names its sections by path (#2298), for
+    /// an adapter whose views draw one.
+    tree: Option<fn(&str) -> Option<knobas_source::view::TreeSections>>,
 }
 
 /// The table. One row per adapter crate.
@@ -56,6 +59,7 @@ const ADAPTERS: &[Adapter] = &[
         build: knobas_source_mock::build,
         doc: Some(knobas_source_mock::doc_content),
         doc_writes: None,
+        tree: None,
     },
     Adapter {
         kind: "jira",
@@ -63,6 +67,7 @@ const ADAPTERS: &[Adapter] = &[
         build: knobas_source_jira::build,
         doc: None,
         doc_writes: None,
+        tree: None,
     },
     Adapter {
         kind: "teamcity",
@@ -70,6 +75,7 @@ const ADAPTERS: &[Adapter] = &[
         build: knobas_source_teamcity::build,
         doc: None,
         doc_writes: None,
+        tree: None,
     },
     Adapter {
         kind: "gitea",
@@ -77,6 +83,7 @@ const ADAPTERS: &[Adapter] = &[
         build: knobas_source_gitea::build,
         doc: None,
         doc_writes: None,
+        tree: Some(knobas_source_gitea::tree_sections),
     },
     Adapter {
         kind: "confluence",
@@ -84,6 +91,7 @@ const ADAPTERS: &[Adapter] = &[
         build: knobas_source_confluence::build,
         doc: Some(knobas_source_confluence::doc_content),
         doc_writes: Some(knobas_source_confluence::DOC_WRITES),
+        tree: None,
     },
     Adapter {
         kind: "kuma",
@@ -91,6 +99,7 @@ const ADAPTERS: &[Adapter] = &[
         build: knobas_source_kuma::build,
         doc: None,
         doc_writes: None,
+        tree: None,
     },
 ];
 
@@ -328,6 +337,22 @@ impl Registry {
         ADAPTERS.iter().find(|a| a.kind == kind).and_then(|a| a.doc)
     }
 
+    /// How the tree of `entity_kind`'s view names its sections by path, for
+    /// an adapter of `kind` (#2298). `None` for a kind that draws no tree or
+    /// an adapter that declares none, an external one among them.
+    #[must_use]
+    pub fn tree_sections(
+        &self,
+        kind: &str,
+        entity_kind: &str,
+    ) -> Option<knobas_source::view::TreeSections> {
+        ADAPTERS
+            .iter()
+            .find(|a| a.kind == kind)
+            .and_then(|a| a.tree)
+            .and_then(|tree| tree(entity_kind))
+    }
+
     /// The Docs writes of an adapter kind (#862): a section edit and a new
     /// page's body in its own markup. `None` for a kind knobas writes no
     /// pages for.
@@ -355,6 +380,14 @@ impl knobas_sync::scheduler::AdapterRegistry for Registry {
 
     fn doc_writes(&self, kind: &str) -> Option<knobas_source::docs::DocWrites> {
         Registry::doc_writes(self, kind)
+    }
+
+    fn tree_sections(
+        &self,
+        kind: &str,
+        entity_kind: &str,
+    ) -> Option<knobas_source::view::TreeSections> {
+        Registry::tree_sections(self, kind, entity_kind)
     }
 
     /// Build an instance, routing on [`SourceInstance::kind`].

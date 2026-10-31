@@ -130,6 +130,8 @@ function draw(path: string, render: RenderPort, fileBytes: ((entityId: string, p
       path,
       line: null,
       changed: new Set<string>(),
+      // The stand-ins are Gitea-shaped and list a deep file at the top: it opens by the declared scheme (#2298).
+      treeSections: { dir: "files:", file: "file:" },
       defaults: createRendererDefaults({ read: async () => [], save: async (list) => list }),
       render,
     },
@@ -335,6 +337,8 @@ function drawCut(path: string, whole: string, cut: number, fileBytes: ((entityId
       path,
       line,
       changed: new Set<string>(),
+      // The stand-ins are Gitea-shaped and list a deep file at the top: it opens by the declared scheme (#2298).
+      treeSections: { dir: "files:", file: "file:" },
       defaults: createRendererDefaults({ read: async () => [], save: async (list) => list }),
       render: plainPort,
     },
@@ -387,6 +391,8 @@ test("a cut file past the byte cap, or with no byte read, keeps the cut and says
       path: "data/huge.csv",
       line: null,
       changed: new Set<string>(),
+      // The stand-ins are Gitea-shaped and list a deep file at the top: it opens by the declared scheme (#2298).
+      treeSections: { dir: "files:", file: "file:" },
       defaults: createRendererDefaults({ read: async () => [], save: async (list) => list }),
       render: plainPort,
     },

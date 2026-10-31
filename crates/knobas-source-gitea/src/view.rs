@@ -183,6 +183,7 @@ pub(crate) fn bytes_standing(
     }
 }
 
+pub(crate) use files::tree_sections;
 /// Whether `sha` is a whole object id (`knobas_core`'s one check).
 pub(crate) use knobas_core::checkout::open::is_full_sha;
 

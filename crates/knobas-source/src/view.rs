@@ -157,6 +157,26 @@ pub struct ViewSection {
     pub blocks: Vec<Block>,
 }
 
+/// How a source names the sections of a tree by their path (#2298): what a
+/// link to a file several directories deep reads before any listing has
+/// named its sections (#2244). The id of a directory below the top is `dir`
+/// followed by its path from the top (`src/lib`), a file's `file` followed
+/// by its path (`src/lib.rs`); the top is the tab's own section.
+///
+/// Declared by the adapter for each kind whose view draws a tree, and carried
+/// to the shell on the entity's detail, so the shell builds an id only from
+/// the source's own words and never takes one apart (ADR-0020 rule 3). Only a
+/// prefetch: the section a listing names is the one the shell keeps, and an
+/// id the source refuses goes unheard.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct TreeSections {
+    /// What a directory's path follows in its section id (Gitea: `files:`).
+    pub dir: String,
+    /// What a file's path follows in its section id (Gitea: `file:`).
+    pub file: String,
+}
+
 /// One typed piece of a section. The vocabulary the shell draws, and nothing
 /// else.
 ///

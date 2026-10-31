@@ -630,6 +630,7 @@
                   {source}
                   {refreshed}
                   refusal={commitRefused}
+                  treeSections={detail?.tree ?? null}
                 />
               {:else if one === "commit" && placeOf(one).commit !== null}
                 <TfRepoCommit {ports} {repoId} commitId={placeOf(one).commit ?? ""} {now} {refreshed} onNewBranch={(from) => (newBranch = { from })} />

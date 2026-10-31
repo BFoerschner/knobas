@@ -263,6 +263,7 @@ export type {
   Tone,
   TreeEntry,
   TreeRead,
+  TreeSections,
   UncommittedDiff,
   UrlMatch,
   ViewAction,

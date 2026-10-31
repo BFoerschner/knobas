@@ -75,6 +75,18 @@ pub trait AdapterRegistry: Send + Sync + 'static {
         None
     }
 
+    /// How the tree of `entity_kind`'s view names its sections by path, for
+    /// an adapter of `kind` (#2298): what the entity's detail carries so a
+    /// deep link's reads start before any listing names them. `None` for a
+    /// kind that draws no tree or a registry that does not hold the adapter.
+    fn tree_sections(
+        &self,
+        _kind: &str,
+        _entity_kind: &str,
+    ) -> Option<knobas_source::view::TreeSections> {
+        None
+    }
+
     /// The registry itself, for a caller that must reach its concrete type:
     /// the install flow adds, replaces and removes adapters, which the trait
     /// has no method for (#1323). `None` for a registry that is not meant to
