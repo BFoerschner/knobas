@@ -119,7 +119,7 @@
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
       type="submit"
-      class="tf-btn {action.danger ? 'tf-danger' : 'tf-primary'}"
+      class="tf-btn tf-primary" class:tf-danger={action.danger}
       form="tf-pra-{uid}"
       aria-label={actionName(action.label)}
       disabled={busy || missing.length > 0}>{actionName(action.label)}</button

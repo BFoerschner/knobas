@@ -1971,3 +1971,60 @@ test("Settings stops its clock while its page is hidden and reads it once when s
     page.shown = true;
   }
 });
+
+/**
+ * #2284: Settings' pages put their actions on the right of the title line, as
+ * every other page does, and a section heading's action is small, on the right
+ * of the heading line. Section rows (a form's Save) stay in their section.
+ */
+const headerActions = () => [...target.querySelectorAll<HTMLElement>(".tf-stg-h .tf-acts .tf-btn")].map((b) => b.textContent!.trim());
+const loneRows = () => target.querySelectorAll(".tf-stg-body > .tf-stg-acts").length;
+
+test("Sources and a source's page put their actions on the title line, in the header's order", async () => {
+  await open([]);
+  expect(headerActions()).toEqual(["+ Add a source", "Sync all"]);
+  expect(loneRows()).toBe(0);
+  unmount(view!);
+  view = null;
+  await open(["source", "jira"]);
+  expect(headerActions()).toEqual(["Sync now"]);
+  expect(loneRows()).toBe(0);
+});
+
+test("a source that is gone offers All sources on the title line", async () => {
+  await open(["source", "nowhere"]);
+  expect(target.querySelector(".tf-stg-h h1")?.textContent).toBe("nowhere");
+  expect([...target.querySelectorAll<HTMLElement>(".tf-stg-h .tf-acts .tf-btn")].map((b) => b.textContent)).toEqual(["All sources"]);
+  expect(loneRows()).toBe(0);
+});
+
+test("Installed adapters: Check for updates is small on the heading line; a row's actions are small and trail it", async () => {
+  await open(
+    [],
+    ports({
+      listInstalledAdapters: vi.fn(() =>
+        Promise.resolve([adapterRow({ update: { state: "available", tag: "v0.2.0", adapter_version: "0.2.0" } })]),
+      ),
+    }),
+  );
+  const heading = adaptersSection().querySelector(".tf-ext-h")!;
+  expect([...heading.querySelectorAll<HTMLElement>(".tf-btn")].map((b) => [b.textContent!.trim(), b.className])).toEqual([
+    ["Check for updates", "tf-btn tf-sm"],
+  ]);
+  const row = adaptersSection().querySelector(".tf-ext-row")!;
+  expect([...row.querySelectorAll<HTMLElement>(".tf-trail .tf-btn")].map((b) => [b.textContent!.trim(), b.className])).toEqual([
+    ["Update", "tf-btn tf-sm tf-primary"],
+    ["Uninstall…", "tf-btn tf-sm tf-danger"],
+  ]);
+});
+
+test("Add a source's footer: Test connection on the far left, a ghost Cancel, then Add source", async () => {
+  await open([]);
+  button("+ Add a source").click();
+  await settle();
+  expect([...dialog().querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [b.textContent!.trim(), b.className])).toEqual([
+    ["Test connection", "tf-btn tf-first"],
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Add source", "tf-btn tf-primary"],
+  ]);
+});

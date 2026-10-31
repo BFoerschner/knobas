@@ -4,7 +4,7 @@
  * yellow selected card and the preview.
  */
 import { needles } from "./needles";
-import { flushSync, mount, unmount } from "svelte";
+import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type {
@@ -918,6 +918,35 @@ test("Find a view narrows the pane by name and by query, and marks the name", as
   expect(target.querySelector(".tf-vlist")!.textContent).not.toContain("All tickets");
 });
 
+test("the board head is the canonical header: title left, one group right with the switch, the actions at default size, Sync now last (#2293)", async () => {
+  const h = harness([], [view("mine", "My open bugs", "Mine", 0, { query: "assignee:@me issuetype:Bug" })]);
+  const sync = createRawSnippet(() => ({ render: () => '<button type="button" class="tf-btn tf-syncnow">Sync now</button>' }));
+  page = mount(TicketsPage, { target, props: { ready: true, timedTicket: null, ports: h.ports, viewId: "mine", typingPause: 0, sync } });
+  await settle();
+  const head = target.querySelector<HTMLElement>(".tf-board-head")!;
+  expect(head.matches("header.tf-fhead")).toBe(true);
+  const [title, acts, ...rest] = [...head.children];
+  expect(rest).toEqual([]);
+  expect(title!.querySelector("h1")!.textContent).toBe("My open bugs");
+  expect(title!.querySelector(".tf-q")!.textContent).toBe("assignee:@me issuetype:Bug");
+  expect(acts!.matches(".tf-acts")).toBe(true);
+  expect(acts!.firstElementChild!.matches('.tf-seg[aria-label="Layout"]')).toBe(true);
+  const buttons = [...acts!.querySelectorAll<HTMLButtonElement>(":scope > button, :scope > * > button")].filter((b) => !b.closest(".tf-seg"));
+  expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Edit view", "⋯", "Sync now"]);
+  for (const b of buttons) {
+    expect(b.classList.contains("tf-btn")).toBe(true);
+    expect(b.classList.contains("tf-sm")).toBe(false);
+  }
+  expect(acts!.lastElementChild!.textContent).toBe("Sync now");
+});
+
+test("the preview's go button is the large decision (#2293)", async () => {
+  await open(harness());
+  const go = preview().querySelector(".tf-go .tf-primary")!;
+  expect(go.classList.contains("tf-btn")).toBe(true);
+  expect(go.classList.contains("tf-lg")).toBe(true);
+});
+
 test("a view opens with its text as the filter bar's base, its name and text in the header, and its own layout", async () => {
   const h = harness([], [view("mine", "My open bugs", "Mine", 0, { query: "assignee:@me issuetype:Bug", layout: "list" })]);
   await open(h, null, "mine");
@@ -1225,6 +1254,8 @@ test("Delete view in the editor deletes it, with Undo in the toast", async () =>
   await open(h, null, "backlog");
   [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view")!.click();
   await previewed(h);
+  // #2289: an extra action that starts a destructive one, drawn by the Controls classes alone.
+  expect(inDialog("Delete view").className).toBe("tf-btn tf-ghost tf-danger");
   inDialog("Delete view").click();
   await settle();
   expect(dialog()).toBeNull();
@@ -1594,7 +1625,7 @@ test("View settings on a Jira view says Jira decides, locks its columns, and sav
     ["In flight", true],
     ["Shipped", true],
   ]);
-  expect(box.querySelector(".tf-vw-del")).toBeNull();
+  expect([...box.querySelectorAll("button")].some((b) => b.textContent!.trim() === "Delete view")).toBe(false);
   expect(box.textContent).toContain("Only how it looks here. Jira still decides which tickets.");
 
   const lanes = box.querySelector<HTMLSelectElement>('select[aria-label="Lanes"]')!;

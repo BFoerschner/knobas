@@ -12,20 +12,10 @@
 .tf-fsearch input { border: 0; background: none; outline: none; color: var(--ink); flex: 1; min-width: 0; padding: 1px 0; }
 .tf-fsearch input:focus-visible { outline: none; }
 .tf-fclear { border: 0; background: none; cursor: pointer; color: var(--ink-2); padding: 0 2px; }
-.tf-fchips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
-.tf-fchips button {
-  border: 1px solid var(--rule); background: var(--sheet); border-radius: 12px; padding: 1px 10px;
-  font-size: var(--t-sm); cursor: pointer; color: var(--ink-2);
-}
-.tf-fchips button:hover { border-color: var(--ink-2); }
-.tf-fchips button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .tf-fsel { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-fsel select {
   border: 1px solid var(--rule); background: var(--sheet); border-radius: 4px; padding: 2px 6px; color: var(--ink); max-width: 180px;
 }
 .tf-fsel select.tf-set { border-color: var(--ink); font-weight: 600; }
 .tf-fcount { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.tf-seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; flex: none; }
-.tf-seg button { border: 0; background: var(--sheet); padding: 3px 10px; cursor: pointer; color: var(--ink-2); font-size: var(--t-sm); }
-.tf-seg button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
 

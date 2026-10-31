@@ -1022,6 +1022,21 @@ test("flush now retries the waiting writes and releases nothing", async () => {
   screen.done();
 });
 
+/** #2289: the canonical footer, its line on the far left, a ghost *Close*, then *Flush now* as the primary. */
+test("the footer reads its line, a ghost Close, then Flush now as the primary", async () => {
+  rows = [write()];
+  counts = { pending: 1, held: 0, refused: 0 };
+  const screen = await render();
+  const footer = screen.dialogs()[0]!.querySelector("footer")!;
+  expect([...footer.children].map((child) => child.className)).toEqual([
+    "tf-wq-foot tf-first",
+    "tf-btn tf-ghost",
+    "tf-btn tf-primary",
+  ]);
+  expect([...footer.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual(["Close", "Flush now"]);
+  screen.done();
+});
+
 /**
  * The guarantee the queue cannot keep, said where a re-send is contemplated
  * (ADR-0012, issue #224). No transaction spans the send and the settle, so a
