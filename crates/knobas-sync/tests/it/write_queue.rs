@@ -454,6 +454,7 @@ fn fake_descriptor(id: &str) -> SourceDescriptor {
         source_actions: vec!["add_label".to_owned()],
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        code_pages: None,
         // Every op these tests queue, and no other: the flush refuses one the
         // source does not declare before handing it over (#1950), and
         // `an_op_the_source_does_not_declare_is_refused_without_reaching_it`

@@ -14,6 +14,7 @@ import type {
   CodeFacts,
   DiffFile,
   DiffRead,
+  EntityDetail,
   EntityPage,
   EntityRow,
   SourceView,
@@ -21,10 +22,13 @@ import type {
   ViewAction,
   ViewRow,
   ViewSection,
+  RefusedWrite,
+  WriteAsk,
 } from "../../ipc/entity";
 import type { WriteSource } from "../../shell/queued-toast";
 import { clockLabel } from "../../time/format";
 import { checkoutLine, prNumber } from "../code/code";
+import type { DrawnFile } from "../diff/diff";
 import { matchesAll } from "../filter/filter";
 
 /**
@@ -58,32 +62,32 @@ export const REPO_BRANCHES = "repo-branches";
 export const REPO_FILES = "repo-files";
 
 /**
- * The page's tabs, in prototype-6's order. A later ticket that builds one
- * replaces its `NOT_BUILT` entry in `TfRepo.svelte` with an arm drawing its
- * component; the tab row is this list.
+ * The page's tabs, in the order of the approved mockup (#2252, #2257): the
+ * repository at a ref (Files, Commits, Branches, Compare), then work in
+ * flight (Pull requests, Local changes); `group` is which, and the row draws
+ * a rule between the two. Compare takes any base and head (#2271), so it is
+ * its own tab beside the history rather than under Pull requests. A later
+ * ticket that builds one replaces its `NOT_BUILT` entry in `TfRepo.svelte`
+ * with an arm drawing its component; the tab row is this list.
  */
 export const REPO_TABS = [
-  { id: "files", label: "Files" },
-  { id: "commits", label: "Commits" },
-  { id: "branches", label: "Branches" },
-  { id: "prs", label: "Pull requests" },
-  { id: "local", label: "Local changes" },
+  { id: "files", label: "Files", group: "ref" },
+  { id: "commits", label: "Commits", group: "ref" },
+  { id: "branches", label: "Branches", group: "ref" },
+  { id: "compare", label: "Compare", group: "ref" },
+  { id: "prs", label: "Pull requests", group: "work" },
+  { id: "local", label: "Local changes", group: "work" },
 ] as const;
 
 /** A tab of the row. */
 export type RepoTabId = (typeof REPO_TABS)[number]["id"];
 
-/**
- * What an address can open: a tab, or one of the two places that light a tab
- * without being it (an edit lights Files, the compare page Pull requests).
- */
-export type RepoTab = RepoTabId | "edit" | "compare";
+/** What an address can open: a tab, or an edit, which lights Files without being it. */
+export type RepoTab = RepoTabId | "edit";
 
 /** Which tab of the row an address lights. */
 export function litTab(tab: RepoTab): RepoTabId {
-  if (tab === "edit") return "files";
-  if (tab === "compare") return "prs";
-  return tab;
+  return tab === "edit" ? "files" : tab;
 }
 
 /** What `#/repo/<repo entity id>/...` names. */
@@ -93,13 +97,15 @@ export interface RepoRoute {
   tab: RepoTab;
   /** Files and edit: the file's path in the tree. */
   path: string | null;
+  /** Files: the line a line link (`line/<n>/<path>`, #2251) marks, from 1; `null` for none. */
+  line: number | null;
   /** Commits: the commit's entity id, whose diff opens. */
   commit: string | null;
   /** Compare: the branch proposed (#837's `compare/<branch>`). */
   branch: string | null;
 }
 
-const TABS = new Set<string>([...REPO_TABS.map((tab) => tab.id), "edit", "compare"]);
+const TABS = new Set<string>([...REPO_TABS.map((tab) => tab.id), "edit"]);
 
 /**
  * Read what follows `repo` in the address. The route has decoded every
@@ -108,12 +114,17 @@ const TABS = new Set<string>([...REPO_TABS.map((tab) => tab.id), "edit", "compar
  */
 export function readRepoRoute(rest: readonly string[]): RepoRoute {
   const repoId = rest[0] || null;
+  if (rest[1] === LINE) {
+    const n = /^\d+$/.test(rest[2] ?? "") ? Number(rest[2]) : 0;
+    return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: n > 0 ? n : null, commit: null, branch: null };
+  }
   const tab = (TABS.has(rest[1] ?? "") ? rest[1] : "files") as RepoTab;
   const tail = rest.slice(2).join("/") || null;
   return {
     repoId,
     tab,
     path: tab === "files" || tab === "edit" ? tail : null,
+    line: null,
     commit: tab === "commits" ? (rest[2] ?? null) : null,
     branch: tab === "compare" ? tail : null,
   };
@@ -129,6 +140,17 @@ export function repoHash(repoId: string, tab?: RepoTab, ...tail: string[]): stri
 /** The Files tab with `path` open; each segment encoded, the slashes kept. */
 export function fileHash(repoId: string, path: string): string {
   return repoHash(repoId, "files", ...path.split("/").map(encodeURIComponent));
+}
+
+/** The segment a line link starts with: not a tab, the Files tab lit. */
+const LINE = "line";
+
+/**
+ * The Files tab with `path` open at `line` (from 1), marked (#2251). The line
+ * comes before the path: a path's segments are any names a tree holds.
+ */
+export function lineHash(repoId: string, path: string, line: number): string {
+  return [repoHash(repoId), LINE, String(line), ...path.split("/").map(encodeURIComponent)].join("/");
 }
 
 /** A commit's diff under the Commits tab. */
@@ -153,15 +175,21 @@ export function repoOfRow(row: Pick<EntityRow, "source_id" | "path">, repos: rea
  * read answers at most `LIST_MOST` rows, so a mirror of more rows than that
  * is read on with `offset` instead of dropping its tail unsaid. An empty page
  * ends the walk, so a room that shrank mid-read cannot loop it.
+ *
+ * `onPage` is handed each page as it lands (#2245), with every row so far in
+ * a new array, so a list can draw its first page at once and append the rest
+ * behind it; whoever awaits the walk still gets the whole list in one piece.
  */
 export async function readAllRows(
   read: (offset: number) => Promise<EntityPage>,
   done: (rows: readonly EntityRow[]) => boolean = () => false,
+  onPage?: (rows: readonly EntityRow[], page: EntityPage) => void,
 ): Promise<EntityRow[]> {
   const rows: EntityRow[] = [];
   for (;;) {
     const page = await read(rows.length);
     rows.push(...page.rows);
+    onPage?.([...rows], page);
     if (page.rows.length === 0 || rows.length >= page.total || done(rows)) return rows;
   }
 }
@@ -261,11 +289,12 @@ const CHANGE_WORD: Record<DiffFile["change"], string> = {
  * not staged", each staged one "modified, staged", in that order, so the
  * one diff block draws them as a pull request's.
  */
-export function localFiles(read: DiffRead | null): DiffFile[] {
+export function localFiles(read: DiffRead | null): DrawnFile[] {
   if (read === null || read.status !== "read") return [];
-  const marked = (file: DiffFile, how: string): DiffFile => ({
+  // A label, not the path: the path's name picks the highlighting's language.
+  const marked = (file: DiffFile, how: string): DrawnFile => ({
     ...file,
-    path: `${file.path} (${CHANGE_WORD[file.change]}, ${how})`,
+    label: `${file.path} (${CHANGE_WORD[file.change]}, ${how})`,
   });
   return [
     ...read.unstaged.files.map((file) => marked(file, "not staged")),
@@ -280,10 +309,45 @@ export function fileLines(text: string): string[] {
   return lines;
 }
 
+/** A place in a file's text: a line (from 0) and a character in it. */
+export interface TextPlace {
+  line: number;
+  offset: number;
+}
+
+/**
+ * The text between two places of a file's lines, in either order, its lines
+ * joined by newlines (#2251): what a selection across the file viewer copies,
+ * whether or not the lines between are drawn.
+ */
+export function selectedText(lines: readonly string[], a: TextPlace, b: TextPlace): string {
+  const [from, to] = a.line < b.line || (a.line === b.line && a.offset <= b.offset) ? [a, b] : [b, a];
+  if (from.line === to.line) return (lines[from.line] ?? "").slice(from.offset, to.offset);
+  const out = [(lines[from.line] ?? "").slice(from.offset)];
+  for (let n = from.line + 1; n < to.line; n += 1) out.push(lines[n] ?? "");
+  out.push((lines[to.line] ?? "").slice(0, to.offset));
+  return out.join("\n");
+}
+
 /** The directories above a path, outermost first: `src`, `src/sepa`. */
 export function ancestors(path: string): string[] {
   const parts = path.split("/").slice(0, -1);
   return parts.map((_, at) => parts.slice(0, at + 1).join("/"));
+}
+
+/**
+ * The sections a link to `path` is likely read through, asked before the
+ * listings above it have named them (#2244, spec #2234 step 2): each
+ * directory above it (`""` the top) and the file. The ids are Gitea's
+ * adapter's (`files`, `files:<dir>`, `file:<path>`), the one tree a source
+ * draws today, and only a guess: the section a listing names is the one the
+ * tab keeps, and a guess it names too is answered by the read already asked.
+ * The shell never takes an id apart (ADR-0020 rule 3).
+ */
+export function likelySections(path: string): { dirs: Record<string, string>; file: string } {
+  const dirs: Record<string, string> = { "": "files" };
+  for (const dir of ancestors(path)) dirs[dir] = `files:${dir}`;
+  return { dirs, file: `file:${path}` };
 }
 
 /**
@@ -359,13 +423,49 @@ export function branchFrom(view: SourceView | null): { from: ChoiceOption; disab
 }
 
 /**
- * Why the view's toolbar draws `writeOp` disabled, in the source's words: a
- * mirror, a token that cannot write (#2030). `null` where it offers the write
- * enabled, or says nothing about it. Whether a write is offered is the
- * source's answer (ADR-0020 rule 4).
+ * The asks the repository page makes of `refused_writes` (#2241, #2243):
+ * *New branch…* in the repository and *Commit change…* onto the branch the
+ * tabs read at, together, so the source probes the repository once. Whether
+ * either is refused is the source's answer, kept by the app and asked again
+ * behind it (ADR-0032); the shell never reads protection or grants itself.
  */
-export function toolbarRefusal(view: SourceView | null, writeOp: string): string | null {
-  return toolbarAction(view, writeOp)?.disabled ?? null;
+export function repoAsks(repoId: string, at: string): WriteAsk[] {
+  return [
+    { entity: repoId, op: "create_branch" },
+    { entity: at, op: "commit_file" },
+  ];
+}
+
+/** What `refused_writes` answered for {@link repoAsks}: each write's reason, `null` where it is taken. */
+export function repoRefusals(
+  refused: readonly RefusedWrite[],
+  repoId: string,
+  at: string,
+): { branch: string | null; commit: string | null } {
+  const reason = (entity: string, op: string) =>
+    refused.find((write) => write.entity === entity && write.op === op)?.reason ?? null;
+  return { branch: reason(repoId, "create_branch"), commit: reason(at, "commit_file") };
+}
+
+/**
+ * The repository's default branch as the mirror holds it (#2243): the
+ * repository row's declared `default_branch`, so the page draws its tabs
+ * before the live branch list answers. `null` where the row names none, and
+ * the page waits for the list.
+ *
+ * A payload read outside the adapter (ADR-0007), in this one statement: the
+ * code host's declared `default_branch` path covers a branch's row, not a
+ * repository's, and no DTO field carries it yet. It misses, never guesses:
+ * an absent or non-text key is `null`, the page waiting for the list as
+ * before #2243 (pinned in `repo.test.ts` and `TfRepo.test`). A stale name only
+ * labels the selector until the list answers: on the default branch the tabs
+ * read through the repository entity, whose source names its own default.
+ */
+export function mirrorDefault(detail: EntityDetail | null): string | null {
+  const payload = detail?.payload;
+  if (payload === null || typeof payload !== "object") return null;
+  const named = (payload as Record<string, unknown>)["default_branch"];
+  return typeof named === "string" && named !== "" ? named : null;
 }
 
 /** The view's toolbar action for `writeOp`, where it offers one. */
@@ -508,23 +608,6 @@ export function commitPrefill(job: string | null, path: string): { message: stri
     message: job === null ? `update ${file}` : `${job}: update ${file}`,
     branch: job === null ? `fix/${stem}` : `fix/${job}-${stem}`,
   };
-}
-
-/**
- * Why a commit straight onto the file's branch is refused (#985, R-8.6): the
- * reason the source declares on the file section's own `commit_file` action
- * (Gitea: a protected branch this account may not push to). `null` where it
- * declares the commit taken, or says nothing, and the flush stays the
- * backstop. Whether a write is offered is the source's answer (ADR-0020
- * rule 4); the shell never reads protection itself.
- */
-export function commitRefusal(section: ViewSection | undefined): string | null {
-  for (const block of section?.blocks ?? []) {
-    if (block.type !== "actions") continue;
-    const offer = block.actions.find((action) => action.write_op === "commit_file");
-    if (offer !== undefined) return offer.disabled ?? null;
-  }
-  return null;
 }
 
 /** What the repository page calls its source in a sentence: the display name, else the id, else a role word ("the code host", lower case; a sentence that opens with it spells its own capital). */

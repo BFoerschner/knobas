@@ -2,7 +2,7 @@
  * `?fake-ipc`: One entity: the detail and the job page's reads, the reachable
  * transitions, the conversation, and the URL resolver.
  */
-import type { LinkEntry, LinkRow, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
+import type { LinkEntry, LinkRow, PipeStep, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
@@ -11,7 +11,15 @@ import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
 import { fixtureBuildEntity, runView } from "./builds";
 import { pullView } from "./views/pulls";
-import { repoView } from "./views/repos";
+import { repoFileBytes, repoFilePiped, repoRefusals, repoView } from "./views/repos";
+
+/**
+ * PR #142 and the builds the mirror holds for its head commit (#2278): the
+ * job's integration tests, build and lint. The corpus gives no build a
+ * commit, so they hang on the pull request's own detail.
+ */
+const PR_142 = "mock:payout-service#142";
+const PR_142_BUILDS = ["teamcity:build:Payout_IntegrationTests-1187", "teamcity:build:Payout_Build-1188", "teamcity:build:Payout_Lint-904"];
 
 /** A handful of log lines, so the History panel has something to draw. */
 const FAKE_ACTIVITY = [
@@ -264,8 +272,9 @@ function getEntity(args: Record<string, unknown>) {
     deleted_at: entry.deleted_at,
     links: linksOf(id),
     activity: FAKE_ACTIVITY.filter((line) => line.entity_id === id),
-    // The mock corpus gives no build a commit, so nothing ran on any (#710).
-    builds: [],
+    // The mock corpus gives no build a commit (#710); PR #142 is the one
+    // exception, so the pull request's side rail (#2278) draws its builds.
+    builds: id === PR_142 ? CORPUS.filter((candidate) => PR_142_BUILDS.includes(candidate.entity_id)).map(mirrorRow) : [],
     // The job card's fields (#816), read from the fixture's flat mock shape:
     // the mock adapter declares `status` and `priority` there. Type and
     // estimate are this fixture's own (`type`, `estimate_h`), which the mock
@@ -518,8 +527,19 @@ export function handlers(): Handlers {
     visit_entity: (args) => visitEntity(args),
     reachable_transitions: (args) => fakeTransitions(args),
     entity_view: (args) => entityView(args),
-    // Every fake source's credential may make every write it declares (#2040).
-    refused_writes: () => [],
+    entity_file_bytes: (args) => {
+      const read = repoFileBytes(String(args["entityId"]), String(args["path"]));
+      if (read === undefined) throw { code: "invalid", message: `${String(args["entityId"])}'s source reads no file bytes`, source_id: null };
+      return read;
+    },
+    entity_file_piped: (args) => {
+      const run = repoFilePiped(String(args["entityId"]), String(args["path"]), (args["steps"] as PipeStep[] | undefined) ?? []);
+      if (run === undefined) throw { code: "invalid", message: `${String(args["entityId"])}'s source reads no file bytes`, source_id: null };
+      return run;
+    },
+    // Every fake source's credential may make every write it declares (#2040);
+    // a commit onto a repository's protected `main` is refused (#2241).
+    refused_writes: (args) => repoRefusals((args["asks"] as Parameters<typeof repoRefusals>[0] | undefined) ?? []),
     resolve_url: (args) => resolveUrl(args),
     create_link: (args) => {
       const from = String(args["fromId"]);

@@ -104,6 +104,7 @@ fn descriptor() -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        code_pages: None,
         write_ops: vec![
             "comment".to_owned(),
             "create_branch".to_owned(),
@@ -230,6 +231,7 @@ async fn fixture_on(
 
     Fixture {
         state: SourcesState {
+            live: Default::default(),
             pool,
             scheduler,
             secrets,

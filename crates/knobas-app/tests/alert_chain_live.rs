@@ -384,6 +384,7 @@ async fn app(env: &Env) -> SourcesState {
     .expect("a scheduler over the scratch database");
 
     SourcesState {
+        live: Default::default(),
         pool,
         scheduler,
         secrets,

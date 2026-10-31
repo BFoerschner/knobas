@@ -51,6 +51,29 @@ pub(crate) fn first_free(base: &str, taken: &[String]) -> String {
     candidate
 }
 
+/// A saved list's id (user renderers, command steps): `given` when it is a
+/// free slug, else one made from `name` (`fallback` for a name with no
+/// letters), `-2` and on for a clash with `taken`.
+pub(crate) fn settled_id(
+    given: Option<&str>,
+    name: &str,
+    fallback: &str,
+    taken: &[&str],
+) -> String {
+    let given = given.map(str::trim).unwrap_or_default();
+    if is_slug(given) && !taken.contains(&given) {
+        return given.to_owned();
+    }
+    let base = slug(name, fallback);
+    let mut id = base.clone();
+    let mut n = 2;
+    while taken.contains(&id.as_str()) {
+        id = format!("{base}-{n}");
+        n += 1;
+    }
+    id
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,6 +92,26 @@ mod tests {
         }
         assert_eq!(slug("...", "set"), "set");
         assert!(slug(&"a".repeat(200), "view").len() <= MAX_ID_CHARS);
+    }
+
+    /// A saved list's id (renderers, command steps): the draft's own when it
+    /// is a free slug, else one from the name, counted up past a clash.
+    #[test]
+    fn a_settled_id_keeps_a_free_given_one_and_counts_up_a_made_one() {
+        assert_eq!(settled_id(Some(" kept "), "Cat", "renderer", &[]), "kept");
+        assert_eq!(
+            settled_id(Some("kept"), "Cat", "renderer", &["kept"]),
+            "cat"
+        );
+        assert_eq!(
+            settled_id(Some("Not A Slug"), "Cat", "renderer", &[]),
+            "cat"
+        );
+        assert_eq!(
+            settled_id(None, "Cat", "renderer", &["cat", "cat-2"]),
+            "cat-3"
+        );
+        assert_eq!(settled_id(None, "...", "step", &[]), "step");
     }
 
     #[test]

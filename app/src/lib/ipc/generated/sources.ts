@@ -137,6 +137,13 @@ export type BuildParameter = { name: string, value: string, };
 export type CloneFrom = "base_url" | { "config": string };
 
 /**
+ * The pages one code host serves. Gitea's: `/{repo}`,
+ * `/{repo}/src/{ref}/{file}#L{line}`, `/{repo}/commit/{sha}`,
+ * `/{repo}/compare/{base}...{head}`, `/{repo}/pulls/{pr}`.
+ */
+export type CodePages = { repository: string, file: string, commit: string, range: string, pull_request: string, };
+
+/**
  * What *Test connection* found.
  */
 export type ConnectionReport = { ok: boolean, account: string | null, server_version: string | null, secret_expires_at: string | null, 
@@ -1244,7 +1251,19 @@ clone_from: Array<CloneFrom>,
  * -- an external adapter's JSON among them -- decodes as an adapter
  * whose items open by their stored address alone.
  */
-url_forms: Array<UrlForm>, };
+url_forms: Array<UrlForm>, 
+/**
+ * Where a code host serves the page of a repository, a file, a commit,
+ * a range and a pull request, after the instance's typed base URL
+ * (#2274, [`code_pages`]): what *Open in › Browser* and the `{url}`
+ * placeholder open. [`code_pages::check`] holds it to its rules
+ * (contract battery clause 14). Read on the Rust side; the shell never
+ * does.
+ *
+ * `#[serde(default)]`, so a descriptor from a peer that predates this
+ * decodes as a source with no code pages: *Browser* is then not offered.
+ */
+code_pages?: CodePages, };
 
 /**
  * An unsaved (or saved) source to test a connection for.
@@ -1752,6 +1771,9 @@ export type WaitReason = "unreachable" | "unauthorized";
  * | [`UpdatePullRequestBranch`](Self::UpdatePullRequestBranch) | `"update_pull_request_branch"` | git workflows, spec #701 (Gitea, #708) |
  * | [`CommitFile`](Self::CommitFile) | `"commit_file"` | ticket-first, spec #808 (Gitea, #822) |
  * | [`SourceAction`](Self::SourceAction) | `"source_action"` | roles, spec #1192 (Gitea, #1194) |
+ * | [`ReplyToThread`](Self::ReplyToThread) | `"reply_to_thread"` | code area, spec #2234 (Gitea, #2277) |
+ * | [`ResolveThread`](Self::ResolveThread) | `"resolve_thread"` | code area, spec #2234 (Gitea, #2277) |
+ * | [`RequestReviewers`](Self::RequestReviewers) | `"request_reviewers"` | code area, spec #2234 (Gitea, #2303) |
  *
  * The enum grows per milestone and **each growth is a §10.8 ratified
  * exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -1983,7 +2005,39 @@ id: string,
  * The answers of the dialog the adapter declared, by field name. The
  * shell copies `id` and these from the action and never reads them.
  */
-fields: { [key in string]: string }, } };
+fields: { [key in string]: string }, } } | { "ReplyToThread": { 
+/**
+ * The **pull request** (#2277).
+ */
+entity: string, 
+/**
+ * The thread's id, as the diff handed it out.
+ */
+thread: string, 
+/**
+ * The reply, at the thread's path, side and line.
+ */
+comment: ReviewComment, } } | { "ResolveThread": { 
+/**
+ * The **pull request** (#2277).
+ */
+entity: string, 
+/**
+ * The thread's id, as the diff handed it out.
+ */
+thread: string, 
+/**
+ * `true` resolves, `false` opens it again.
+ */
+resolved: boolean, } } | { "RequestReviewers": { 
+/**
+ * The **pull request** (#2303).
+ */
+entity: string, 
+/**
+ * Who is asked, by login.
+ */
+reviewers: Array<string>, } };
 
 /**
  * What the queue will do about a write next.

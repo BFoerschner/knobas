@@ -17,7 +17,8 @@
 //! the reverse compare, which would list every commit it counts.
 //!
 //! The default branch itself is measured against nothing: it says *default
-//! branch*, its *Commits* are its latest twenty, and it has no *Diff*.
+//! branch*, its *Commits* are its latest twenty (counted by every commit it
+//! has, #2311), and it has no *Diff*.
 //!
 //! The whole view's toolbar (#707, [`super::act`]): *Open pull request…*
 //! where no pull request is open from the branch (disabled with nothing
@@ -76,6 +77,12 @@ pub(super) async fn draw(
     branch: &str,
     section: Option<&str>,
 ) -> Result<SourceView, SourceError> {
+    // The tree reads nothing of the repository (#2241).
+    if let Some(id) = section.filter(|id| files::owns(id)) {
+        return Ok(SourceView::new(vec![
+            files::read(source, owner, repo, files::Of::Branch(branch), id).await?,
+        ]));
+    }
     let record: RepoRecord = source.client.repo_as(owner, repo).await?;
     let base = record.default_branch().to_owned();
     let is_default = branch == base;
@@ -83,9 +90,6 @@ pub(super) async fn draw(
     match section {
         Some(DIFF) if !is_default => Ok(SourceView::new(vec![
             diff(source, owner, repo, &base, branch).await?,
-        ])),
-        Some(id) if files::owns(id) => Ok(SourceView::new(vec![
-            files::read(source, &record, owner, repo, branch, id).await?,
         ])),
         Some(OVERVIEW | COMMITS) | None => {
             whole(source, &record, owner, repo, branch, section).await
@@ -361,14 +365,15 @@ async fn read_carried(
 ) -> Result<Carried, SourceError> {
     let base = record.default_branch();
     if branch == base {
-        let latest: Vec<ListedCommit> = source
+        // The latest twenty, counted by every commit the branch has (#2311).
+        let (latest, count): (Vec<ListedCommit>, _) = source
             .client
-            .latest_commits_as(owner, repo, branch, rows::LATEST_COMMITS)
+            .latest_commits_counted(owner, repo, branch, rows::LATEST_COMMITS)
             .await?;
         return Ok(Carried {
             facts: vec![fact("Branch", "default branch".to_owned())],
             commits: latest,
-            count: None,
+            count,
             ahead: None,
             files: None,
             note: None,
@@ -452,6 +457,7 @@ async fn diff(
             truncated,
             commentable: None,
             gone: Vec::new(),
+            range: None,
         }],
     })
 }

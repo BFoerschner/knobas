@@ -438,6 +438,211 @@ pub async fn complete_first_run<R: tauri::Runtime>(
         .map_err(IpcError::internal)
 }
 
+/// *Pages kept open* (#2247): how many pages the shell keeps mounted and hidden
+/// besides the one in front, 5 until set (`crate::settings::pages_kept_open`).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn pages_kept_open<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<u32, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::settings::pages_kept_open(&pool).await
+}
+
+/// Store *Pages kept open*, held to 15, and answer what is now stored, so
+/// Settings › Performance draws what the database holds rather than what was
+/// typed -- the rule `set_passive_attribution` follows.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_pages_kept_open<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    count: u32,
+) -> Result<u32, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::settings::set_pages_kept_open(&pool, count).await
+}
+
+/// The command renderers saved in Settings › Renderers (#2262), in order.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn user_renderers<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::renderers::UserRenderer>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::list(&pool).await
+}
+
+/// Save the whole list of command renderers and answer it as stored: ids
+/// made from new names, fence languages lowercase, timeouts held to 1-120 s.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a renderer with
+/// no name or a command that cannot be run,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_user_renderers<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    renderers: Vec<crate::renderers::UserRendererDraft>,
+) -> Result<Vec<crate::renderers::UserRenderer>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::save(&pool, &renderers).await
+}
+
+/// Run saved renderer `id` with `content` on its stdin (ADR-0033): the
+/// program and its arguments are the saved ones, never the webview's, and
+/// no shell runs. A failure, a timeout or too much output is an answer.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an unknown id
+/// or bytes that are not base64,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn run_renderer<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+    content: crate::renderers::RenderContent,
+) -> Result<crate::renderers::RenderRun, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::run(&pool, &id, content).await
+}
+
+/// The default renderer per file pattern (#2263), in order.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn renderer_defaults<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::renderers::RendererDefault>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::defaults(&pool).await
+}
+
+/// Save the whole list of default renderers per file pattern and answer it
+/// as stored, trimmed.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a row with no
+/// pattern, or neither a renderer nor a pipeline, or a pattern listed twice,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_renderer_defaults<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    defaults: Vec<crate::renderers::RendererDefault>,
+) -> Result<Vec<crate::renderers::RendererDefault>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::save_defaults(&pool, &defaults).await
+}
+
+/// *Run pipelines on diffs* (#2270): on until set
+/// (`crate::renderers::diff_pipelines`).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn diff_pipelines<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<bool, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::diff_pipelines(&pool).await
+}
+
+/// Store *Run pipelines on diffs* and answer what is now stored.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_diff_pipelines<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    on: bool,
+) -> Result<bool, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::renderers::set_diff_pipelines(&pool, on).await
+}
+
+/// The command steps saved in Settings › Renderers (#2265), in order.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn command_steps<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::file_pipeline::saved::CommandStep>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::file_pipeline::saved::command_steps(&pool).await
+}
+
+/// Save the whole list of command steps and answer it as stored: ids made
+/// from new names, timeouts held to 1-120 s.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a step with no
+/// name or a command that cannot be run,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_command_steps<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    steps: Vec<crate::file_pipeline::saved::CommandStepDraft>,
+) -> Result<Vec<crate::file_pipeline::saved::CommandStep>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::file_pipeline::saved::save_command_steps(&pool, &steps).await
+}
+
+/// The named pipelines (#2265), in order.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn named_pipelines<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::file_pipeline::saved::NamedPipeline>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::file_pipeline::saved::named_pipelines(&pool).await
+}
+
+/// Save the whole list of named pipelines and answer it as stored.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a pipeline with
+/// no name or no steps, or a name used twice,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_named_pipelines<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    pipelines: Vec<crate::file_pipeline::saved::NamedPipelineDraft>,
+) -> Result<Vec<crate::file_pipeline::saved::NamedPipeline>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::file_pipeline::saved::save_named_pipelines(&pool, &pipelines).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -492,7 +697,50 @@ mod tests {
     #[test]
     fn every_command_in_this_module_has_a_typescript_mirror() {
         let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
-        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 5);
+        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 16);
+    }
+
+    /// The mirror sends each argument by its Rust name (#2262).
+    #[test]
+    fn the_mirror_sends_the_renderer_arguments() {
+        let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
+        for (command, args) in [
+            ("set_user_renderers", &["renderers"][..]),
+            ("run_renderer", &["id", "content"][..]),
+            ("set_renderer_defaults", &["defaults"][..]),
+            ("set_command_steps", &["steps"][..]),
+            ("set_named_pipelines", &["pipelines"][..]),
+        ] {
+            let invocation = crate::commands::mirror::invocation(mirror, command);
+            let keys = crate::commands::mirror::keys(invocation);
+            for arg in args {
+                assert!(keys.contains(arg), "{command} without {arg}: {invocation}");
+            }
+        }
+    }
+
+    /// The mirror sends `count`, the argument's name: a mirror sending
+    /// anything else arrives with the value missing (#2247).
+    #[test]
+    fn the_mirror_sends_the_count_of_pages_kept_open() {
+        let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
+        let invocation = crate::commands::mirror::invocation(mirror, "set_pages_kept_open");
+        assert!(
+            crate::commands::mirror::keys(invocation).contains(&"count"),
+            "the mirror calls set_pages_kept_open without passing count: {invocation}"
+        );
+    }
+
+    /// The mirror sends `on`, the argument's name (review of spec #2234,
+    /// Standards 6).
+    #[test]
+    fn the_mirror_sends_whether_pipelines_run_on_diffs() {
+        let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
+        let invocation = crate::commands::mirror::invocation(mirror, "set_diff_pipelines");
+        assert!(
+            crate::commands::mirror::keys(invocation).contains(&"on"),
+            "the mirror calls set_diff_pipelines without passing on: {invocation}"
+        );
     }
 
     #[test]

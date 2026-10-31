@@ -33,6 +33,7 @@ pub mod conversation;
 pub mod docs;
 pub mod downloads;
 mod error;
+pub mod file_pipeline;
 pub mod inbox;
 #[cfg(test)]
 mod ipc_mirror;
@@ -42,6 +43,7 @@ pub mod notes_export;
 pub mod notify;
 mod profile;
 pub mod protocol;
+pub mod renderers;
 pub mod run_presets;
 pub mod settings;
 mod slug;
@@ -99,6 +101,11 @@ pub mod events {
     /// and whether it was refreshed, gone or failed. Broadcast: every view
     /// that shows the item re-reads it, and a write's echo settles on it.
     pub const ITEM_REFRESHED: &str = "item:refreshed";
+    /// Payload: `sources::live::ViewFresh` -- a source view the shell was
+    /// answered from memory was read again behind the answer, and the
+    /// answer moved (#2242, ADR-0032): the entity and the section. Broadcast:
+    /// every page showing that view reads it again.
+    pub const VIEW_FRESH: &str = "view:fresh";
 
     /// Send `payload` to the frontend as `name` -- to every window, or to the
     /// one labelled `target` -- from the main thread, whichever thread asks.
@@ -223,7 +230,12 @@ pub fn run() {
     // old one.
     let demo = Profile::demo_in(std::env::args());
 
-    let builder = tauri::Builder::default();
+    // A command renderer's HTML frame is served from its own origin under its
+    // own policy (#2304, `renderers::frame_response`).
+    let builder = tauri::Builder::default()
+        .register_uri_scheme_protocol(renderers::FRAME_SCHEME, |_context, request| {
+            renderers::frame_response(request.uri().path())
+        });
     // The single-instance guard (#748), registered **first**: its setup runs
     // before the builder's `setup` closure, so a second launch exits before it
     // can start the database or the scheduler (whose startup closes every
@@ -329,6 +341,8 @@ pub fn run() {
             commands::app::frontend_ready,
             commands::app::retry_database,
             commands::app::complete_first_run,
+            commands::app::pages_kept_open,
+            commands::app::set_pages_kept_open,
             commands::backup::backup_status,
             commands::backup::backup_now,
             commands::backup::share_export,
@@ -373,6 +387,12 @@ pub fn run() {
             commands::entity::entity_checkout,
             commands::entity::set_checkout_override,
             commands::entity::open_checkout,
+            commands::entity::open_object,
+            commands::entity::object_page,
+            commands::entity::diff_tool,
+            commands::entity::open_diff_tool,
+            commands::entity::pull_request_worktrees,
+            commands::entity::remove_pull_request_worktree,
             commands::search::search,
             commands::search::launcher_home,
             commands::search::smart_lists,
@@ -498,6 +518,7 @@ pub fn run() {
             // #824's uncommitted diff at a checkout, appended at the foot:
             // the list is append-only (§10.8).
             commands::entity::entity_checkout_diff,
+            commands::entity::entity_range_diff,
             // #819's two conversation reads, appended at the foot: the list
             // is append-only (§10.8).
             commands::entity::visit_entity,
@@ -624,6 +645,30 @@ pub fn run() {
             commands::sources::sync_role,
             // #2107's *Refresh* on an item's detail, appended at the foot.
             commands::sources::refresh_entity,
+            // #2262's command renderers, appended at the foot: the list is
+            // append-only (§10.8).
+            commands::app::user_renderers,
+            commands::app::set_user_renderers,
+            commands::app::run_renderer,
+            // #2263's default renderer per file pattern, appended at the foot.
+            commands::app::renderer_defaults,
+            commands::app::set_renderer_defaults,
+            // #2256's byte read, appended at the foot (§10.8).
+            commands::entity::entity_file_bytes,
+            // #2264's pipeline over a file's bytes, appended at the foot (§10.8).
+            commands::entity::entity_file_piped,
+            // #2265's command steps and named pipelines, appended at the foot
+            // (§10.8).
+            commands::app::command_steps,
+            commands::app::set_command_steps,
+            commands::app::named_pipelines,
+            commands::app::set_named_pipelines,
+            // *Run pipelines on diffs* as a setting row (review of spec
+            // #2234), appended at the foot (§10.8).
+            commands::app::diff_pipelines,
+            commands::app::set_diff_pipelines,
+            // #2319's commit diff, local-first, appended at the foot (§10.8).
+            commands::entity::entity_commit_diff,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
@@ -1186,6 +1231,7 @@ mod tests {
             super::events::CAPTURE_OPEN_NOTE,
             super::events::CLONE_PROGRESS,
             super::events::ITEM_REFRESHED,
+            super::events::VIEW_FRESH,
         ];
         names.sort_unstable();
         declared.sort_unstable();

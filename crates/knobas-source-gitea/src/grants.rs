@@ -47,9 +47,23 @@
 //! push need that permission (a reader may still comment and review), so
 //! only those are disabled for it.
 //!
-//! Anything else the probe meets -- a 401, a 5xx, a timeout, an archived
-//! repository's 423 -- is no verdict, and the writes stay as drawn: the probe
-//! narrows what is offered and never fails a view or a surface.
+//! Two more answers are verdicts, since no write can land behind them
+//! (measured on Gitea 1.27 and Forgejo, 2026-10-31, and witnessed by
+//! `tests/live_gitea.rs`; merger of #2306):
+//!
+//! | answer, either probe | what it says |
+//! |---|---|
+//! | 423 `repo is archived` | the repository is archived; every write is refused |
+//! | 404 | the repository is gone or hidden from the token; on the issue probe also a repository with issues and pull requests both switched off |
+//!
+//! A repository with issues off and pull requests on answers the issue probe
+//! 422, as a comment on a pull request still goes through its issue.
+//!
+//! Anything else the probe meets -- a 401, a 5xx, a timeout -- is no verdict. A view draws its writes as before then
+//! (the probe narrows what a view offers and never fails it). Asked by
+//! [`Source::refused_writes`], no verdict is an error and never "nothing
+//! refused" (#2306): the app keeps that answer and asks it again behind, so
+//! a failure answered as taken would be kept, or replace a kept refusal.
 //!
 //! [`Source::refused_writes`]: knobas_source::Source::refused_writes
 
@@ -130,10 +144,17 @@ enum Refusal {
     Scope,
     /// The account may not push here (the branch probe only).
     Account,
+    /// The repository is archived: Gitea answers every write 423.
+    Archived,
+    /// The route is not there for this token: the repository is gone or
+    /// hidden from it, or (the issue probe) its issues and pull requests are
+    /// both switched off. Gitea answers 404.
+    Absent,
 }
 
 /// What the probes learned about one repository: a refusal per category, or
-/// none where the category was not asked or the probe gave no verdict.
+/// none where the category was not asked or the probe gave no verdict
+/// ([`probe`] says which).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Grants {
     repository: Option<Refusal>,
@@ -161,30 +182,74 @@ impl Grants {
             Refusal::Account => {
                 pushes(op).then(|| "This account cannot push to this repository".to_owned())
             }
+            Refusal::Archived => Some("This repository is archived, so it takes no writes".to_owned()),
+            Refusal::Absent => Some(match category {
+                Category::Repository => {
+                    "Gitea does not show this repository to this token".to_owned()
+                }
+                Category::Issue => {
+                    "Gitea does not show this repository's issues to this token: they are switched off, or the repository is gone".to_owned()
+                }
+            }),
         }
     }
 }
 
 /// Ask Gitea what the token may write in `owner/repo`, probing only the
-/// categories `ops` fall in, side by side.
+/// categories `ops` fall in, side by side. A view's narrowing, unchanged by
+/// #2306: a probe without a verdict refuses nothing ([`verdicts`] says it
+/// instead), and so do the 423 and the 404, as they did before #2306 read
+/// them (a view's repository was just read, so it is there).
 pub(crate) async fn probe(source: &GiteaSource, owner: &str, repo: &str, ops: &[&str]) -> Grants {
+    let (repository, issue) = verdicts(source, owner, repo, ops).await;
+    let narrowed = |verdict: Verdict| {
+        verdict
+            .ok()
+            .flatten()
+            .filter(|refusal| matches!(refusal, Refusal::Scope | Refusal::Account))
+    };
+    Grants {
+        repository: narrowed(repository),
+        issue: narrowed(issue),
+    }
+}
+
+/// [`probe`], keeping a probe without a verdict as its error.
+async fn verdicts(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    ops: &[&str],
+) -> (Verdict, Verdict) {
     let wants = |category| ops.iter().any(|op| self::category(op) == category);
     let ask = |category| async move {
         if wants(category) {
             probe_one(source, owner, repo, category).await
         } else {
-            None
+            Ok(None)
         }
     };
-    let (repository, issue) = tokio::join!(ask(Category::Repository), ask(Category::Issue));
-    Grants { repository, issue }
+    tokio::join!(ask(Category::Repository), ask(Category::Issue))
 }
+
+/// One category's verdict: refused, `Ok(None)` for taken (or not asked), or
+/// the failure that gave none.
+type Verdict = Result<Option<Refusal>, SourceError>;
 
 /// The asks among `asks` the token cannot make (#2054): each repository the
 /// asks name is probed once, for the categories its asks fall in. An ask of
 /// another source, an id this adapter did not issue and an op it does not
 /// declare are not answered, and send nothing.
-pub(crate) async fn refused(source: &GiteaSource, asks: &[WriteAsk]) -> Vec<RefusedWrite> {
+///
+/// # Errors
+///
+/// A probe without a verdict, or a failed record or branch read, for any
+/// repository asked about (#2306): an answer cannot say "unknown" of one ask
+/// beside the others, and an ask left out of it reads as taken.
+pub(crate) async fn refused(
+    source: &GiteaSource,
+    asks: &[WriteAsk],
+) -> Result<Vec<RefusedWrite>, SourceError> {
     let declared = crate::descriptor_template().write_ops;
     let mut by_repository: Vec<((String, String), Vec<&WriteAsk>)> = Vec::new();
     for ask in asks {
@@ -206,44 +271,131 @@ pub(crate) async fn refused(source: &GiteaSource, asks: &[WriteAsk]) -> Vec<Refu
     let mut answered: Vec<RefusedWrite> = Vec::new();
     for ((owner, repo), repo_asks) in &by_repository {
         let ops: Vec<&str> = repo_asks.iter().map(|a| a.op.as_str()).collect();
-        let grants = probe(source, owner, repo, &ops).await;
-        answered.extend(repo_asks.iter().filter_map(|ask| {
+        let ((repository, issue), standing) = tokio::join!(
+            verdicts(source, owner, repo, &ops),
+            standing(source, owner, repo, repo_asks),
+        );
+        let grants = Grants {
+            repository: repository?,
+            issue: issue?,
+        };
+        let standing = standing?;
+        answered.extend(repo_asks.iter().zip(standing).filter_map(|(ask, held)| {
             grants
                 .refusal(&ask.op)
+                .or(held)
                 .map(|why| RefusedWrite::of(ask, why))
         }));
     }
-    asks.iter()
+    Ok(asks
+        .iter()
         .filter_map(|ask| answered.iter().find(|r| r.refuses(ask)).cloned())
-        .collect()
+        .collect())
 }
 
-/// One probe: the category's write with an empty body (the module docs).
-async fn probe_one(
+/// What a repository's record says of a write, beside the token's grants.
+#[derive(Debug, serde::Deserialize)]
+struct Held {
+    #[serde(default)]
+    empty: bool,
+    #[serde(default)]
+    mirror: bool,
+    #[serde(default)]
+    default_branch: Option<String>,
+}
+
+/// Why each of `asks` (all in `owner/repo`) is refused by where it would
+/// land rather than by the token, as the views that offer them say (#2241):
+/// *New branch…* in an empty repository or a mirror ([`crate::view::MIRRORED`]),
+/// and *Commit change…* onto a protected branch the account may not push to
+/// ([`crate::write::PushGuard`], #985). This is what a file view used to read
+/// beside every file; asked here, the app keeps it with the grants. A read
+/// that fails is no verdict, and the error (#2306). An empty repository has
+/// no branch to read: its default branch would answer 404.
+async fn standing(
     source: &GiteaSource,
     owner: &str,
     repo: &str,
-    category: Category,
-) -> Option<Refusal> {
-    let owner = crate::client::GiteaClient::path_segment(owner).ok()?;
-    let repo = crate::client::GiteaClient::path_segment(repo).ok()?;
+    asks: &[&WriteAsk],
+) -> Result<Vec<Option<String>>, SourceError> {
+    let needs_record = asks.iter().any(|ask| {
+        ask.op == crate::WRITE_OP_CREATE_BRANCH
+            || (ask.op == crate::WRITE_OP_COMMIT_FILE
+                && matches!(
+                    source.key_of(&ask.entity),
+                    Ok(crate::keys::GiteaKey::Repo { .. })
+                ))
+    });
+    let record: Option<Held> = if needs_record {
+        Some(source.client.repo_as(owner, repo).await?)
+    } else {
+        None
+    };
+    let mut out = Vec::with_capacity(asks.len());
+    for ask in asks {
+        let why = match ask.op.as_str() {
+            crate::WRITE_OP_CREATE_BRANCH => record.as_ref().and_then(|held| {
+                if held.empty {
+                    Some(crate::view::EMPTY.to_owned())
+                } else {
+                    held.mirror.then(|| crate::view::MIRRORED.to_owned())
+                }
+            }),
+            crate::WRITE_OP_COMMIT_FILE => {
+                let branch = match source.key_of(&ask.entity) {
+                    Ok(crate::keys::GiteaKey::Branch { branch, .. }) => Some(branch),
+                    Ok(crate::keys::GiteaKey::Repo { .. }) => record
+                        .as_ref()
+                        .filter(|held| !held.empty)
+                        .and_then(|held| held.default_branch.clone())
+                        .filter(|b| !b.is_empty()),
+                    _ => None,
+                };
+                match branch {
+                    Some(branch) => source
+                        .client
+                        .branch_as::<crate::write::PushGuard>(owner, repo, &branch)
+                        .await?
+                        .refusal(&branch),
+                    None => None,
+                }
+            }
+            _ => None,
+        };
+        out.push(why);
+    }
+    Ok(out)
+}
+
+/// One probe: the category's write with an empty body (the module docs).
+async fn probe_one(source: &GiteaSource, owner: &str, repo: &str, category: Category) -> Verdict {
+    let owner = crate::client::GiteaClient::path_segment(owner)?;
+    let repo = crate::client::GiteaClient::path_segment(repo)?;
     let answer = source
         .client
         .post_once(&category.probe_path(owner, repo), &json!({}))
         .await;
-    refusal_of(category, answer.err().as_ref())
+    match answer {
+        Ok(_) => Ok(None),
+        Err(failure) => refusal_of(category, failure),
+    }
 }
 
-/// What a probe's failure says: the scope refusal ([`is_scope_refusal`]), or
-/// any other 403, which `knobas-http` reads as a refusal carrying Gitea's
-/// sentence.
-fn refusal_of(category: Category, failure: Option<&SourceError>) -> Option<Refusal> {
-    match failure? {
-        scope if is_scope_refusal(scope) => Some(Refusal::Scope),
+/// What a probe's failure says: the scope refusal ([`is_scope_refusal`]),
+/// any other 403 on the branch probe, which `knobas-http` reads as a refusal
+/// carrying Gitea's sentence, the body's 422, which is taken, an archived
+/// repository's 423 or a missing route's 404 (the module docs' second
+/// table). Anything else is no verdict, and comes back as the error.
+fn refusal_of(category: Category, failure: SourceError) -> Verdict {
+    match failure {
+        scope if is_scope_refusal(&scope) => Ok(Some(Refusal::Scope)),
         other if other.status() == Some(403) && category == Category::Repository => {
-            Some(Refusal::Account)
+            Ok(Some(Refusal::Account))
         }
-        _ => None,
+        invalid if invalid.status() == Some(422) => Ok(None),
+        archived if archived.status() == Some(423) => Ok(Some(Refusal::Archived)),
+        absent if absent.status() == Some(404) => Ok(Some(Refusal::Absent)),
+        other => Err(other),
     }
 }
 
@@ -251,31 +403,51 @@ fn refusal_of(category: Category, failure: Option<&SourceError>) -> Option<Refus
 mod tests {
     use super::*;
 
+    fn verdict(category: Category, failure: SourceError) -> Option<Option<Refusal>> {
+        refusal_of(category, failure).ok()
+    }
+
     #[test]
     fn a_probe_answer_reads_as_the_measured_table_says() {
-        let scope = SourceError::Unauthorized { status: Some(403) };
-        let account = SourceError::Protocol {
+        let scope = || SourceError::Unauthorized { status: Some(403) };
+        let account = || SourceError::Protocol {
             status: Some(403),
             message: "HTTP 403 Forbidden: user should have a permission to write to a repo".into(),
         };
-        let invalid = SourceError::Protocol {
+        let invalid = || SourceError::Protocol {
             status: Some(422),
             message: "HTTP 422 Unprocessable Entity: [BranchName]: Required".into(),
         };
+        let down = || SourceError::Protocol {
+            status: Some(502),
+            message: "HTTP 502 Bad Gateway".into(),
+        };
+        let archived = || SourceError::Protocol {
+            status: Some(423),
+            message: "HTTP 423 Locked: repo is archived".into(),
+        };
+        let absent = || SourceError::Protocol {
+            status: Some(404),
+            message: "HTTP 404 Not Found: not found".into(),
+        };
         for category in [Category::Repository, Category::Issue] {
-            assert_eq!(refusal_of(category, Some(&scope)), Some(Refusal::Scope));
-            assert_eq!(refusal_of(category, Some(&invalid)), None);
-            assert_eq!(refusal_of(category, None), None);
+            assert_eq!(verdict(category, scope()), Some(Some(Refusal::Scope)));
+            assert_eq!(verdict(category, invalid()), Some(None), "taken");
+            assert_eq!(verdict(category, archived()), Some(Some(Refusal::Archived)));
+            assert_eq!(verdict(category, absent()), Some(Some(Refusal::Absent)));
+            // No verdict (#2306): the failure, never taken.
+            assert_eq!(verdict(category, SourceError::unauthorized()), None);
+            assert_eq!(verdict(category, down()), None);
             assert_eq!(
-                refusal_of(category, Some(&SourceError::unauthorized())),
+                verdict(category, SourceError::Unreachable("timed out".into())),
                 None
             );
         }
         assert_eq!(
-            refusal_of(Category::Repository, Some(&account)),
-            Some(Refusal::Account)
+            verdict(Category::Repository, account()),
+            Some(Some(Refusal::Account))
         );
         // Unmeasured on the issue probe, so no verdict.
-        assert_eq!(refusal_of(Category::Issue, Some(&account)), None);
+        assert_eq!(verdict(Category::Issue, account()), None);
     }
 }

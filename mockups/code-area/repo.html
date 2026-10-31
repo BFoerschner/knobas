@@ -1,0 +1,110 @@
+<!doctype html>
+<!--
+  #2252: the repository page's landing. The persistent tree beside the content, the README rendered (one Markdown
+  component: GFM tables, task lists, strikethrough, autolinks, a highlighted fence, a Mermaid fence drawn as a diagram),
+  and the tabs regrouped into the repository at a ref (Files, Commits, Branches, Compare) and work in flight
+  (Pull requests, Local changes). States: readme | skeleton (first read) | refresh (re-read: old content dimmed).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repository page</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;600&family=Source+Serif+4:opsz,wght@8..60,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="base.css"><link rel="stylesheet" href="code.css">
+<script src="mockup.js"></script>
+</head>
+<body data-page="repo" data-kind="repo" data-tab="repo" data-states="readme skeleton refresh">
+<div class="tf">
+<div id="chrome"></div>
+<main>
+  <div class="barwrap" data-when="refresh"><div class="bar"></div></div>
+  <div class="body">
+    <div class="repo">
+      <!-- The tree: drawn from the mirror's last listing at once, re-read behind; it stays when a file opens. -->
+      <aside class="tree" aria-label="Files">
+        <header><span class="tf-minif" data-ic="search"><span>Go to file</span><kbd>T</kbd></span><button class="tf-iconbtn tf-sm" title="Collapse all" data-ic="collapse"></button></header>
+        <div class="rows" data-not="skeleton">
+          <a class="row dir" href="#" data-ic="folder">.gitea</a>
+          <a class="row dir" href="#" data-ic="folder-open">docs</a>
+          <a class="row d1" href="file.html" data-ic="file">architecture.mmd</a>
+          <a class="row d1" href="#" data-ic="file">runbook.md</a>
+          <a class="row d1" href="#" data-ic="file">api.pdf</a>
+          <a class="row dir" href="#" data-ic="folder-open">fixtures</a>
+          <a class="row d1" href="pipeline.html" data-ic="file">events.json.gz</a>
+          <a class="row d1" href="#" data-ic="file">webhooks.json.b64</a>
+          <a class="row dir" href="#" data-ic="folder">migrations</a>
+          <a class="row dir" href="#" data-ic="folder-open">src</a>
+          <a class="row dir d1" href="#" data-ic="folder">queue</a>
+          <a class="row d1" href="#" data-ic="file">main.rs</a>
+          <a class="row d1" href="#" data-ic="file">retry.rs<span class="badge">M</span></a>
+          <a class="row d1" href="#" data-ic="file">webhook.rs</a>
+          <a class="row" href="#" data-ic="file">Cargo.lock</a>
+          <a class="row" href="#" data-ic="file">Cargo.toml</a>
+          <a class="row" href="#" aria-current="true" data-ic="file">README.md</a>
+          <a class="row" href="#" data-ic="file">justfile</a>
+        </div>
+        <div class="rows" data-when="skeleton">
+          <div class="skrow"><span class="sk skbox"></span><span class="sk" style="width:70px"></span></div>
+          <div class="skrow"><span class="sk skbox"></span><span class="sk" style="width:52px"></span></div>
+          <div class="skrow"><span class="sk skbox"></span><span class="sk" style="width:84px"></span></div>
+          <div class="skrow"><span class="sk skbox"></span><span class="sk" style="width:96px"></span></div>
+          <div class="skrow"><span class="sk skbox"></span><span class="sk" style="width:40px"></span></div>
+          <div class="skrow"><span class="sk skbox"></span><span class="sk" style="width:110px"></span></div>
+          <div class="skrow"><span class="sk skbox"></span><span class="sk" style="width:76px"></span></div>
+          <div class="skrow"><span class="sk skbox"></span><span class="sk" style="width:64px"></span></div>
+        </div>
+        <footer data-not="skeleton"><span><kbd>T</kbd> go to file</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>←</kbd><kbd>→</kbd> fold</span></footer>
+      </aside>
+
+      <section>
+        <div class="lastc" data-not="skeleton"><span class="av b">ML</span><b>mara</b><span class="msg">Retry webhook deliveries with exponential backoff (#409)</span>
+          <span class="mono dim small">4c1d0aa</span><span class="dim small">2 h ago</span><a class="tf-btn tf-sm tf-ghost" href="#" data-ic="commit">318 commits</a></div>
+        <div class="lastc" data-when="skeleton"><span class="sk" style="width:22px;height:22px;border-radius:50%"></span><span class="sk" style="width:46px"></span><span class="sk" style="width:360px"></span><span class="spacer"></span><span class="sk" style="width:60px"></span></div>
+
+        <div class="fileview" data-when="skeleton">
+          <header><span class="sk" style="width:90px"></span><span class="spacer"></span><span class="reading">Reading README.md</span></header>
+          <div class="md"><span class="sk" style="width:46%;height:20px"></span><span class="sk" style="width:92%;margin-top:18px"></span><span class="sk" style="width:86%;margin-top:9px"></span>
+            <span class="sk" style="width:60%;margin-top:9px"></span><span class="sk" style="width:30%;height:16px;margin-top:26px"></span><span class="sk" style="width:90%;margin-top:14px"></span><span class="sk" style="width:74%;margin-top:9px"></span></div>
+        </div>
+
+        <article class="fileview" data-not="skeleton">
+          <header><span class="p">README.md</span><span class="meta">3.1 KB · Markdown</span>
+            <span class="reading" data-when="refresh">Re-reading main…</span>
+            <div class="tf-acts"><div class="tf-seg" role="group" aria-label="View"><button aria-pressed="true">Rendered</button><button>Source</button></div>
+              <span data-openin="tf-sm"></span><button class="tf-iconbtn tf-sm" title="More" data-ic="more"></button></div></header>
+          <div class="md" data-dim>
+            <h1>payments-api</h1>
+            <p class="badges"><span class="badge"><b>ci</b><i>passing</i></span><span class="badge"><b>msrv</b><i class="blue">1.82</i></span></p>
+            <p>The service that takes card and SEPA payments for the shop and tells the rest of the estate about them over
+              webhooks. It owns the <code>payments</code> schema and nothing else. See <a href="#">docs/runbook.md</a> for operations and
+              <a class="ext" href="#">the Gitea wiki</a> for the history.</p>
+            <h2>Getting started</h2>
+            <div class="fence"><header><span>shell</span><div class="tf-acts"><button class="tf-btn tf-sm tf-ghost" data-ic="copy">Copy</button></div></header>
+<pre><span class="c"># needs Postgres 16 on :5432</span>
+<span class="f">just</span> db-up
+<span class="f">cargo</span> run <span class="p">--</span> --config <span class="s">config/dev.toml</span></pre></div>
+            <h2>How a delivery flows</h2>
+            <div class="fence"><header><span>mermaid · rendered</span><div class="tf-acts"><button class="tf-btn tf-sm tf-ghost">Source</button></div></header>
+              <div class="diagram"><svg class="dg" width="640" height="120" viewBox="0 0 640 120" role="img" aria-label="Delivery flow">
+                <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs>
+                <g class="node"><rect x="4" y="40" width="110" height="40" rx="5"/><text x="59" y="60">Payment</text></g>
+                <g class="node db"><rect x="164" y="40" width="110" height="40" rx="5"/><text x="219" y="60">outbox</text></g>
+                <g class="node hot"><rect x="324" y="40" width="130" height="40" rx="5"/><text x="389" y="60">retry worker</text></g>
+                <g class="node"><rect x="514" y="40" width="120" height="40" rx="5"/><text x="574" y="60">subscriber</text></g>
+                <path class="edge" d="M114 60H162"/><path class="edge" d="M274 60H322"/><path class="edge" d="M454 60H512"/>
+                <path class="edge" d="M560 40C540 6 420 6 400 38"/><text class="elab" x="480" y="12">5xx: backoff 2ⁿ s</text></svg></div></div>
+            <h2>Status</h2>
+            <table><thead><tr><th>Area</th><th>State</th><th>Owner</th></tr></thead>
+              <tbody><tr><td>Card payments</td><td>live</td><td>@mara</td></tr><tr><td>SEPA direct debit</td><td>beta</td><td>@jonas</td></tr><tr><td>Refunds</td><td><del>manual</del> automated</td><td>@mara</td></tr></tbody></table>
+            <ul><li class="task"><span class="box on">✓</span>Retry deliveries with backoff</li><li class="task"><span class="box on">✓</span>Sign payloads (HMAC-SHA256)</li><li class="task"><span class="box"></span>Dead-letter queue with replay from the UI</li></ul>
+            <blockquote>Relative links open the file in Files; external links open in the browser; raw HTML is sanitized.</blockquote>
+          </div>
+        </article>
+      </section>
+    </div>
+  </div>
+</main>
+<footer class="tf-status"><span>Gitea · synced 1 min ago</span><span>3 sources healthy</span></footer>
+</div>
+</body>
+</html>

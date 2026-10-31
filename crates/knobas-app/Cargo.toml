@@ -20,8 +20,9 @@ version.workspace = true
 # `Lifecycle::begin_retry`'s claim, or stop the database outside the exit
 # handler.
 # It turns on knobas-core's own: the test-only derives on the Builds frame's
-# DTOs, which live there (#1318).
-test-util = ["knobas-core/test-util"]
+# DTOs, which live there (#1318), and knobas-http's request counter, which
+# a read run again behind its answer counts into (#2242).
+test-util = ["knobas-core/test-util", "knobas-http/test-util"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -59,6 +60,9 @@ knobas-sync = { path = "../knobas-sync" }
 # External adapters (ADR-0028): a WASM component is one more `Source` the
 # registry builds, beside the compiled-in rows above.
 knobas-wasm-host = { path = "../knobas-wasm-host" }
+# A user renderer's bytes in and its image out cross the bridge as base64
+# (#2262).
+base64 = "0.22"
 # `IpcError` is what every command rejects with, so it has to serialize.
 serde.workspace = true
 # `EntityDetail::payload` is the source record verbatim (§3a), which is a
@@ -133,6 +137,31 @@ uuid.workspace = true
 # The derive behind the generated IPC mirror (`src/ipc_mirror.rs`, #1325).
 ts-rs.workspace = true
 
+# Pipelines' built-in steps (#2264, spec #2234 step 5). Every one is pure
+# Rust, so no C toolchain joins the build, and pinned exactly: a step's output
+# is what a cached pipeline result stands for. Licences: jaq MIT; ruzstd MIT;
+# bzip2 MIT OR Apache-2.0 over libbz2-rs-sys (bzip2-1.0.6, permissive;
+# 0.2.5 in Cargo.lock); lzma-rs MIT; serde_norway (the maintained serde_yaml
+# fork) MIT OR Apache-2.0; flate2 and toml are copies the lock already holds.
+# Below jaq, foldhash 0.1 is Zlib (as the lock's foldhash 0.2 already was) and
+# self_cell is Apache-2.0 OR GPL-2.0-only, taken as Apache-2.0.
+# jq through jaq: the filter is parsed and run in process, no `jq` binary.
+jaq-core = "=3.1.1"
+jaq-std = "=3.0.3"
+jaq-json = "=2.0.3"
+flate2 = "=1.1.9"
+ruzstd = "=0.9.1"
+bzip2 = "=0.6.1"
+lzma-rs = "=0.3.0"
+serde_norway = "=0.9.42"
+toml = { version = "=0.9.12", features = ["preserve_order"] }
+
+[target.'cfg(unix)'.dependencies]
+# A user renderer (#2262, ADR-0033) runs in a process group of its own, and
+# the whole group is killed at its timeout: a wrapper script's children go
+# with it. The copy already in the lockfile.
+rustix = { version = "1", features = ["process"] }
+
 [dev-dependencies]
 # The CRUD tests inject an adapter that refuses to connect.
 async-trait.workspace = true
@@ -146,6 +175,10 @@ knobas-mockd = { path = "../knobas-mockd" }
 # `AppState::over_pool`, `bring_up` and `shutdown` (same convention as
 # `knobas-db`'s `test_util`).
 knobas-app = { path = ".", features = ["test-util"] }
+# The request counter (`knobas_http::counted`, #2239) the round-trip budgets
+# of the live reads are asserted through. A dev-dependency only: the shipped
+# binary has no counter.
+knobas-http = { path = "../knobas-http", features = ["test-util"] }
 # The fixture component's loader, for the registry's tests and
 # `tests/it/external_adapter.rs`.
 knobas-wasm-host = { path = "../knobas-wasm-host", features = ["test-util"] }

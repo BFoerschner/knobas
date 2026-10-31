@@ -17,7 +17,7 @@ use std::pin::Pin;
 use std::task::Poll;
 
 use knobas_source::ReviewSide;
-use knobas_source::view::{DiffFile, DiffLine, FileThread, LineComment, LineThread};
+use knobas_source::view::{DiffFile, DiffLine, FileThread, Hunk, LineComment, LineThread};
 
 use super::super::login;
 use super::Review;
@@ -31,12 +31,25 @@ pub(super) struct Written {
     /// The commented line's text when it was written: the `diff_hunk`'s last
     /// line, without its marker. `None` where Gitea sent no hunk.
     was: Option<String>,
+    /// The head the comment was written on (`commit_id`), and the hunk Gitea
+    /// kept with it, parsed: what an outdated thread is drawn at (#2318).
+    commit: Option<String>,
+    hunk: Option<Hunk>,
     comment: LineComment,
+    /// Gitea's id for the comment, which resolve and unresolve name (#2277).
+    id: Option<u64>,
+    /// Who resolved the conversation this comment opens, as Gitea keeps it
+    /// on the comment (`resolver`); `None` while open.
+    resolver: Option<String>,
 }
 
 /// The fields of Gitea's `PullReviewComment` placing reads.
 #[derive(Debug, serde::Deserialize)]
 pub(super) struct ReviewLineComment {
+    #[serde(default)]
+    id: Option<u64>,
+    #[serde(default)]
+    resolver: Option<UserRef>,
     #[serde(default)]
     user: Option<UserRef>,
     #[serde(default)]
@@ -47,6 +60,8 @@ pub(super) struct ReviewLineComment {
     original_position: u32,
     #[serde(default)]
     diff_hunk: Option<String>,
+    #[serde(default)]
+    commit_id: Option<String>,
     #[serde(default)]
     body: Option<String>,
     #[serde(default)]
@@ -84,6 +99,13 @@ pub(super) fn written(review: &Review, raw: Vec<serde_json::Value>) -> Vec<Writt
                 side,
                 line,
                 was: c.diff_hunk.as_deref().and_then(last_line),
+                commit: c.commit_id.filter(|sha| !sha.is_empty()),
+                hunk: c.diff_hunk.as_deref().and_then(|h| hunk_of(h, side, line)),
+                id: c.id,
+                resolver: c
+                    .resolver
+                    .as_ref()
+                    .map(|r| login(Some(r)).unwrap_or_else(|| "someone".to_owned())),
                 comment: LineComment {
                     author,
                     body: c.body.unwrap_or_default(),
@@ -92,6 +114,23 @@ pub(super) fn written(review: &Review, raw: Vec<serde_json::Value>) -> Vec<Writt
             })
         })
         .collect()
+}
+
+/// `comment` as *Conversation* says it (#2277): where it was written, then
+/// its words quoted, in Markdown, as Gitea's own page shows a review's line
+/// comments under it.
+pub(super) fn quoted(comment: &Written) -> String {
+    let at = match comment.side {
+        ReviewSide::Old => format!("old line {}", comment.line),
+        ReviewSide::New => format!("line {}", comment.line),
+    };
+    let words: Vec<String> = comment
+        .comment
+        .body
+        .lines()
+        .map(|l| format!("> {l}"))
+        .collect();
+    format!("On `{}`, {at}:\n\n{}", comment.path, words.join("\n"))
 }
 
 /// The text of a hunk's last line of the file -- what the comment was written
@@ -109,6 +148,50 @@ fn last_line(hunk: &str) -> Option<String> {
         Some(b'+' | b'-' | b' ') => line[1..].to_owned(),
         _ => line.to_owned(),
     })
+}
+
+/// `diff_hunk` as a [`Hunk`], numbered from the commented line: its last
+/// line, which is `line` on `side`. `None` where it holds no hunk.
+///
+/// Gitea's cut hunk comes without a file header, and its `@@` numbers are not
+/// to be trusted: 1.27.3 counts a `\ No newline` note as a line of both sides,
+/// so the hunk starts one short on each (measured live, #2318). The commented
+/// line's number is exact, so every line is moved by what moves that one onto
+/// it, and the header is written again from the lines.
+fn hunk_of(diff_hunk: &str, side: ReviewSide, line: u32) -> Option<Hunk> {
+    let text = if diff_hunk.starts_with("diff --git ") {
+        diff_hunk.to_owned()
+    } else {
+        format!("diff --git a/f b/f\n{diff_hunk}")
+    };
+    let mut hunk = knobas_source::diff::parse(&text)
+        .into_iter()
+        .next()?
+        .hunks
+        .into_iter()
+        .next()?;
+    let last = hunk.lines.last()?;
+    let at = match side {
+        ReviewSide::Old => last.old,
+        ReviewSide::New => last.new,
+    };
+    if let Some(at) = at {
+        let by = i64::from(line) - i64::from(at);
+        let moved = |n: Option<u32>| n.and_then(|n| u32::try_from(i64::from(n) + by).ok());
+        for l in &mut hunk.lines {
+            l.old = moved(l.old);
+            l.new = moved(l.new);
+        }
+        let span = |of: fn(&DiffLine) -> Option<u32>| {
+            let mut on = hunk.lines.iter().filter_map(of);
+            let first = on.next();
+            (first.unwrap_or(0), first.map_or(0, |_| 1 + on.count()))
+        };
+        let (old, olds) = span(|l| l.old);
+        let (new, news) = span(|l| l.new);
+        hunk.header = format!("@@ -{old},{olds} +{new},{news} @@");
+    }
+    Some(hunk)
 }
 
 /// Put each comment in `written` on its file of `files`: one thread per line
@@ -129,15 +212,10 @@ pub(super) fn place(files: &mut [DiffFile], written: Vec<Written>) -> Vec<FileTh
                     && g.thread.side == comment.side
                     && g.thread.line == comment.line
             }) {
-                Some(g) => g.thread.comments.push(comment.comment),
+                Some(g) => join(&mut g.thread, comment),
                 None => gone.push(FileThread {
-                    path: comment.path,
-                    thread: LineThread {
-                        side: comment.side,
-                        line: comment.line,
-                        outdated: true,
-                        comments: vec![comment.comment],
-                    },
+                    path: comment.path.clone(),
+                    thread: opened(comment, true),
                 }),
             }
             continue;
@@ -153,18 +231,16 @@ pub(super) fn place(files: &mut [DiffFile], written: Vec<Written>) -> Vec<FileTh
             .iter_mut()
             .find(|t| t.side == comment.side && t.line == comment.line && t.outdated == outdated)
         {
-            Some(thread) => thread.comments.push(comment.comment),
-            None => file.threads.push(LineThread {
-                side: comment.side,
-                line: comment.line,
-                outdated,
-                comments: vec![comment.comment],
-            }),
+            Some(thread) => join(thread, comment),
+            None => file.threads.push(opened(comment, outdated)),
         }
     }
     for file in files.iter_mut() {
         for thread in &mut file.threads {
             oldest_first(&mut thread.comments);
+            // Gitea places a reply by line on the current head (#2277): an
+            // outdated thread's line is not that line, so it takes none.
+            thread.replies = thread.id.is_some() && !thread.outdated;
         }
         file.threads
             .sort_by_key(|t| (t.outdated, t.line, t.side == ReviewSide::New));
@@ -180,6 +256,49 @@ pub(super) fn place(files: &mut [DiffFile], written: Vec<Written>) -> Vec<FileTh
         ))
     });
     gone
+}
+
+/// A thread opened by `comment`. Its id and its resolver are the first
+/// comment's, which [`join`] keeps the oldest.
+///
+/// An outdated thread carries the commit and hunk of that first comment: the
+/// line as the thread was opened on it (#2318).
+fn opened(comment: Written, outdated: bool) -> LineThread {
+    let (commit, hunk) = if outdated {
+        (comment.commit, comment.hunk)
+    } else {
+        (None, None)
+    };
+    LineThread {
+        side: comment.side,
+        line: comment.line,
+        outdated,
+        id: comment.id.map(|id| id.to_string()),
+        resolved_by: comment.resolver,
+        replies: false,
+        comments: vec![comment.comment],
+        commit,
+        hunk,
+    }
+}
+
+/// `comment` added to `thread`. Gitea keeps a conversation's resolution on
+/// the comment that opened it (the fact note of 2026-10-30, #2253), and its
+/// ids grow with time, so the thread's id and resolver are those of its
+/// lowest-numbered comment: the one the web page resolves.
+fn join(thread: &mut LineThread, comment: Written) {
+    let first = thread.id.as_deref().and_then(|id| id.parse::<u64>().ok());
+    if let Some(id) = comment.id
+        && first.is_none_or(|first| id < first)
+    {
+        thread.id = Some(id.to_string());
+        thread.resolved_by = comment.resolver;
+        if thread.outdated {
+            thread.commit = comment.commit;
+            thread.hunk = comment.hunk;
+        }
+    }
+    thread.comments.push(comment.comment);
 }
 
 /// A thread's replies oldest first. Stable: equal instants, and comments

@@ -7,9 +7,34 @@
  * by a test in that module which `include_str!`s this file.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { AppStatus } from "./generated/app";
+import type {
+  AppStatus,
+  CommandStep,
+  CommandStepDraft,
+  NamedPipeline,
+  NamedPipelineDraft,
+  RenderContent,
+  RendererDefault,
+  RenderRun,
+  UserRenderer,
+  UserRendererDraft,
+} from "./generated/app";
 
-export type { AppStatus, DbState } from "./generated/app";
+export type {
+  AppStatus,
+  CommandOutput,
+  CommandStep,
+  CommandStepDraft,
+  DbState,
+  NamedPipeline,
+  NamedPipelineDraft,
+  RenderContent,
+  RendererDefault,
+  RendererInput,
+  RenderRun,
+  UserRenderer,
+  UserRendererDraft,
+} from "./generated/app";
 
 /**
  * Liveness probe.
@@ -63,4 +88,78 @@ export function retryDatabase(): Promise<void> {
  */
 export function completeFirstRun(): Promise<void> {
   return invoke<void>("complete_first_run");
+}
+
+/**
+ * *Pages kept open* (#2247): how many pages the shell keeps mounted and hidden
+ * besides the one in front, 0 to 15, 5 until set.
+ */
+export function pagesKeptOpen(): Promise<number> {
+  return invoke<number>("pages_kept_open");
+}
+
+/**
+ * Store *Pages kept open*, and get back what is now stored (held to 15), so
+ * Settings › Performance draws what the database holds.
+ */
+export function setPagesKeptOpen(count: number): Promise<number> {
+  return invoke<number>("set_pages_kept_open", { count });
+}
+
+/** *Run pipelines on diffs* (#2270): on until set in Settings › Renderers. */
+export function diffPipelines(): Promise<boolean> {
+  return invoke<boolean>("diff_pipelines");
+}
+
+/** Store *Run pipelines on diffs*, and get back what is now stored. */
+export function setDiffPipelines(on: boolean): Promise<boolean> {
+  return invoke<boolean>("set_diff_pipelines", { on });
+}
+
+/** The command renderers saved in Settings › Renderers (#2262), in order. */
+export function userRenderers(): Promise<UserRenderer[]> {
+  return invoke<UserRenderer[]>("user_renderers");
+}
+
+/** Save the whole list of command renderers; answers it as stored (ids, lowercase fences, held timeouts). */
+export function setUserRenderers(renderers: UserRendererDraft[]): Promise<UserRenderer[]> {
+  return invoke<UserRenderer[]>("set_user_renderers", { renderers });
+}
+
+/**
+ * Run saved renderer `id` with `content` on its stdin (ADR-0033). A failure,
+ * a timeout or too much output is an answer (`RenderRun`), not a rejection.
+ */
+export function runRenderer(id: string, content: RenderContent): Promise<RenderRun> {
+  return invoke<RenderRun>("run_renderer", { id, content });
+}
+
+/** The default renderer per file pattern (#2263), in order. */
+export function rendererDefaults(): Promise<RendererDefault[]> {
+  return invoke<RendererDefault[]>("renderer_defaults");
+}
+
+/** Save the whole list of default renderers per file pattern; answers it as stored (trimmed). */
+export function setRendererDefaults(defaults: RendererDefault[]): Promise<RendererDefault[]> {
+  return invoke<RendererDefault[]>("set_renderer_defaults", { defaults });
+}
+
+/** The command steps saved in Settings › Renderers (#2265), in order. */
+export function commandSteps(): Promise<CommandStep[]> {
+  return invoke<CommandStep[]>("command_steps");
+}
+
+/** Save the whole list of command steps; answers it as stored (ids, held timeouts). */
+export function setCommandSteps(steps: CommandStepDraft[]): Promise<CommandStep[]> {
+  return invoke<CommandStep[]>("set_command_steps", { steps });
+}
+
+/** The named pipelines (#2265), in order. */
+export function namedPipelines(): Promise<NamedPipeline[]> {
+  return invoke<NamedPipeline[]>("named_pipelines");
+}
+
+/** Save the whole list of named pipelines; answers it as stored (ids made from new names). */
+export function setNamedPipelines(pipelines: NamedPipelineDraft[]): Promise<NamedPipeline[]> {
+  return invoke<NamedPipeline[]>("set_named_pipelines", { pipelines });
 }

@@ -1,12 +1,13 @@
 //! The source views this adapter draws (ADR-0020, issue #661).
 //!
 //! A **commit** opens on its overview (who, when, its parents, its whole
-//! message) and has its diff as a second tab; its toolbar offers *New
+//! message) and has its diff as a second, deferred tab; its toolbar offers *New
 //! branch…* from it ([`act`], #707). A **pull request** is
 //! [`pr`]'s, a **branch** is [`branch`]'s and a **repository** is
 //! [`repo`]'s (#663).
 //!
-//! Every read here is live and nothing is stored (rule 1). A refusal is the
+//! Every read here is live and nothing is stored (rule 1); what stands at a
+//! whole commit sha the app may keep in memory ([`standing`], ADR-0032). A refusal is the
 //! error it maps to, so the detail says *Showing the mirror* and why. A few
 //! parts of a view are drawn without what they could not read, saying so: a
 //! pull request's checks (#710) and labels (#1194) on any failure, and its
@@ -22,11 +23,13 @@ use crate::model::{CommitDetail, Signature, UserRef};
 use crate::source::GiteaSource;
 
 mod act;
+pub(crate) use act::{EMPTY, MIRRORED};
 mod branch;
 mod checks;
+mod compare;
 mod files;
 mod grants;
-mod pr;
+pub(crate) mod pr;
 mod repo;
 mod rows;
 
@@ -66,6 +69,13 @@ pub(crate) async fn draw(
             repo,
             branch,
         } => branch::draw(source, entity, owner, repo, branch, section).await?,
+        // Any two commits' diff (#2271): the compare alone, no record read.
+        GiteaKey::Repo { owner, repo } if section.is_some_and(compare::owns) => {
+            let section = section.unwrap_or_default();
+            SourceView::new(vec![
+                compare::read(source, entity, owner, repo, section).await?,
+            ])
+        }
         GiteaKey::Repo { owner, repo } => repo::draw(source, entity, owner, repo, section).await?,
         // An issue's detail is the ticket's, drawn from the mirror (#1206).
         GiteaKey::Issue { .. } => return Ok(None),
@@ -78,8 +88,108 @@ pub(crate) async fn draw(
     Ok(Some(view))
 }
 
-/// A commit: *Overview* and *Diff*, neither deferred -- reading a commit's
-/// change is why it is opened (spec #660, story 1).
+/// What the view of `entity` at `section` stands at (ADR-0032, #2239):
+/// [`Standing::Fixed`] for a commit's diff and its tree's sections at a full
+/// sha, for a branch's or repository's tree sections that name the sha
+/// they are read at (#2241), and for a repository's compare between two full
+/// shas ([`compare`]), which no push can change and which offer no write.
+/// [`Standing::Moving`] for what is read by a moving reference and offers no
+/// write: a repository's branch list, and a branch's or repository's tree
+/// sections that read the tip first (#2242). A compare by branch names stays
+/// live: the Compare tab is not told of a moved one (`view:fresh`), so a kept
+/// diff would stand until the next ask. Everything else is live. A commit's
+/// overview is not fixed (its checks move), and neither is its whole view
+/// (its toolbar reads the repository).
+///
+/// [`Standing::Fixed`]: knobas_source::view::Standing::Fixed
+/// [`Standing::Moving`]: knobas_source::view::Standing::Moving
+pub(crate) fn standing(
+    source: &GiteaSource,
+    entity: &str,
+    section: Option<&str>,
+) -> knobas_source::view::Standing {
+    use knobas_source::view::Standing;
+    match (source.key_of(entity), section) {
+        (Ok(GiteaKey::Commit { sha, .. }), Some(id))
+            if is_full_sha(&sha) && (id == DIFF || files::owns(id)) =>
+        {
+            Standing::Fixed
+        }
+        (Ok(GiteaKey::Repo { .. }), Some(id)) if compare::fixed(id) => Standing::Fixed,
+        (Ok(GiteaKey::Branch { .. } | GiteaKey::Repo { .. }), Some(id)) if files::names_sha(id) => {
+            Standing::Fixed
+        }
+        (Ok(GiteaKey::Branch { .. } | GiteaKey::Repo { .. }), Some(id)) if files::owns(id) => {
+            Standing::Moving
+        }
+        (Ok(GiteaKey::Repo { .. }), Some(repo::BRANCHES)) => Standing::Moving,
+        _ => Standing::Live,
+    }
+}
+
+/// The bytes of the file at `path` in `entity`'s tree (#2256): at `commit`
+/// where the shell hands one back from a file block, else at the entity's own
+/// reference -- a commit's sha, a branch, a repository's default branch.
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`] for an id that is not this source's, a kind
+/// with no tree (a pull request, an issue), or a path that is no file;
+/// otherwise whatever Gitea's answer maps to.
+pub(crate) async fn file_bytes(
+    source: &GiteaSource,
+    entity: &str,
+    path: &str,
+    commit: Option<&str>,
+    cap: u64,
+) -> Result<knobas_source::view::FileBytes, SourceError> {
+    let key = source.key_of(entity)?;
+    let at = match (&key, commit) {
+        (GiteaKey::Pr { .. } | GiteaKey::Issue { .. }, _) => {
+            return Err(SourceError::protocol(format!(
+                "gitea: {entity:?} has no tree to read {path:?} from"
+            )));
+        }
+        (_, Some(commit)) => commit.to_owned(),
+        (GiteaKey::Commit { sha, .. }, None) => sha.clone(),
+        (GiteaKey::Branch { branch, .. }, None) => branch.clone(),
+        (GiteaKey::Repo { owner, repo }, None) => {
+            let record: rows::RepoRecord = source.client.repo_as(owner, repo).await?;
+            record.default_branch().to_owned()
+        }
+    };
+    let (owner, repo) = key.repository();
+    files::bytes(source, owner, repo, &at, path, cap).await
+}
+
+/// What [`file_bytes`] stands at: fixed where the read is at a full sha (one
+/// handed back, or a commit entity's own), live where it reads by a name.
+pub(crate) fn bytes_standing(
+    source: &GiteaSource,
+    entity: &str,
+    commit: Option<&str>,
+) -> knobas_source::view::Standing {
+    use knobas_source::view::Standing;
+    let at = match (source.key_of(entity), commit) {
+        (Ok(GiteaKey::Pr { .. } | GiteaKey::Issue { .. }) | Err(_), _) => None,
+        (Ok(_), Some(sha)) => Some(sha.to_owned()),
+        (Ok(GiteaKey::Commit { sha, .. }), None) => Some(sha),
+        (Ok(_), None) => None,
+    };
+    if at.is_some_and(|sha| is_full_sha(&sha)) {
+        Standing::Fixed
+    } else {
+        Standing::Live
+    }
+}
+
+/// Whether `sha` is a whole object id (`knobas_core`'s one check).
+pub(crate) use knobas_core::checkout::open::is_full_sha;
+
+/// A commit: *Overview* and *Diff*. The diff is deferred (#2319, ADR-0036):
+/// the commit tab reads it local-first, from a checkout that holds the
+/// commit, and only otherwise as this view's `diff` section, so the whole
+/// view reading it too would cost a request every opening.
 async fn commit(
     source: &GiteaSource,
     entity: &str,
@@ -93,11 +203,17 @@ async fn commit(
             // The whole view's toolbar (#707): a branch from this commit, in
             // its repository -- disabled on a mirror, which Gitea refuses a
             // branch on (#722), as the branch and repository views have it.
-            let (record, overview, diff) = tokio::try_join!(
+            let (record, overview) = tokio::try_join!(
                 source.client.repo_as::<rows::RepoRecord>(owner, repo),
                 commit_overview(source, owner, repo, sha),
-                commit_diff(source, owner, repo, sha),
             )?;
+            let diff = ViewSection {
+                id: DIFF.to_owned(),
+                title: "Diff".to_owned(),
+                count: None,
+                deferred: true,
+                blocks: Vec::new(),
+            };
             let new_branch = act::new_branch(
                 Some(act::repo_id(source, owner, repo)),
                 vec![knobas_source::view::ChoiceOption::new(sha, short(sha))],
@@ -110,6 +226,11 @@ async fn commit(
         }
         Some(OVERVIEW) => vec![commit_overview(source, owner, repo, sha).await?],
         Some(DIFF) => vec![commit_diff(source, owner, repo, sha).await?],
+        // The tree at this commit (#2239): the Files tab's sections, read at
+        // the sha, which no tab of a commit's view names yet.
+        Some(id) if files::owns(id) => {
+            vec![files::read(source, owner, repo, files::Of::Commit(sha), id).await?]
+        }
         Some(other) => {
             return Err(SourceError::protocol(format!(
                 "gitea: a commit's view has no section {other:?} (asked for {entity:?})"
@@ -163,6 +284,7 @@ async fn commit_diff(
             truncated,
             commentable: None,
             gone: Vec::new(),
+            range: None,
         }],
     })
 }
@@ -226,6 +348,7 @@ fn overview_blocks(source_id: &str, owner: &str, repo: &str, record: &CommitDeta
                     chip: None,
                     url: sibling_url(record, &parent.sha),
                     commit: None,
+                    author: None,
                 })
                 .collect(),
         });

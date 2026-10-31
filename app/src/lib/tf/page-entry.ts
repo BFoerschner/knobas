@@ -11,6 +11,25 @@
  * What a page can read is {@link TfPageContext}. A screen that needs a value
  * the shell does not hand out yet adds it there and to the `ctx` that
  * `TfShell.svelte` builds, which is the one shared edit left.
+ *
+ * **Keep-alive** (#2247): the host does not destroy the page you leave. It
+ * keeps it mounted and hidden, up to *Pages kept open* of them (Settings ›
+ * Performance, 0 to 15, 5 until set; 0 is the shell before keep-alive), and
+ * drops the least recently used past that (`kept-pages.svelte.ts`). Going back
+ * to a kept page shows the same instance, with what it drew still there.
+ *
+ * - **One page per address key**: the entry plus {@link TfPageEntry.address}.
+ *   Two addresses with the same key are one page drawn again with new props
+ *   (the job's tabs); two keys are two pages, even of one component (two
+ *   repositories). A page without `address` is one page wherever it is.
+ * - **`visible`** on the context is `true` for the shown page and `false` for a
+ *   hidden one. A hidden page keeps the props of the address it was left at.
+ *   A page that reads `visible` pauses its focus re-reads, polling and timers
+ *   while hidden and re-reads when shown (#2249); a page that ignores it still
+ *   works. A component deep inside a page asks `pageVisible()` instead.
+ * - **Shown again**, a role view's `syncRevision` moves, so it re-reads as it
+ *   does after *Sync now*; the shell's ⌘R and a page's own keys reach only
+ *   the shown page.
  */
 import type { Component, Snippet } from "svelte";
 
@@ -24,6 +43,11 @@ import type { TfRoute } from "./route";
 /** What the shell hands every page. */
 export interface TfPageContext {
   route: TfRoute;
+  /**
+   * Whether this page is the one shown (#2247): `false` while keep-alive holds
+   * it hidden. Set by the page host, not the shell.
+   */
+  visible: boolean;
   /** Whether the database answers yet: a page's reads wait for it. */
   ready: boolean;
   /** The job the reader was last in, as its key. */
@@ -82,6 +106,12 @@ export interface TfPageEntry {
    */
   role?: string;
   /**
+   * What tells two pages of this entry apart (#2247): routes with the same
+   * answer are one page instance, which keep-alive keeps and shows again. Left
+   * out, every route the entry matches is one page.
+   */
+  address?: (route: TfRoute) => string;
+  /**
    * The component's props, read off the shell's context for a matched route.
    * Always the same keys: `TfPage` reads them once per page and hands each
    * as its own signal (#1987), so a key left out on one call is never seen.
@@ -98,6 +128,7 @@ export function definePage<Props extends object, Matched extends TfRoute>(page: 
   component: Component<Props>;
   crumbs?: boolean;
   role?: string;
+  address?: (route: Matched) => string;
   props: (ctx: TfPageContext & { route: Matched }) => Props;
 }): TfPageEntry {
   return page as unknown as TfPageEntry;

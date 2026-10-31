@@ -31,6 +31,8 @@ test("the palette lists every section the shell has an address for, in the top b
     "Settings › Notes and capture",
     "Settings › Backup and export",
     "Settings › Appearance",
+    "Settings › Performance",
+    "Settings › Renderers",
     "Settings › Keyboard",
     "Settings › Logs and database",
   ]);
@@ -70,6 +72,8 @@ test("every row's address parses back to the section it names", () => {
     ["Settings › Notes and capture", "settings/notes"],
     ["Settings › Backup and export", "settings/backup"],
     ["Settings › Appearance", "settings/appearance"],
+    ["Settings › Performance", "settings/performance"],
+    ["Settings › Renderers", "settings/renderers"],
     ["Settings › Keyboard", "settings/keyboard"],
     ["Settings › Logs and database", "settings/logs"],
   ]);

@@ -15,6 +15,8 @@
   import { itemHash } from "../job/job";
   import { jobIndex, readOpenJobs, type OpenJob, type OpenJobPorts } from "../job/open-jobs";
   import { visibleRepoPrs } from "./repo";
+  import TfWaiting from "../TfWaiting.svelte";
+  import { waitPhase } from "../waiting";
 
   let {
     ports,
@@ -62,9 +64,11 @@
 <div class="tf-rbar">
   <FilterBar {config} {filter} shown={rows === null ? null : shown.length} total={rows?.length ?? null} />
 </div>
-{#if rows !== null && shown.length === 0}
+<!-- The page reads the rows; a refresh replaces them in place, so only the first read waits here (#2246). -->
+<TfWaiting phase={waitPhase({ drawn: rows !== null, reading: false, failed: false })} columns={4}>
+{#if shown.length === 0}
   <div class="tf-empty">No pull requests match.</div>
-{:else if shown.length > 0}
+{:else}
   <table class="tf-tbl tf-rprs">
     <tbody>
       {#each shown as row (row.entity_id)}
@@ -78,3 +82,4 @@
     </tbody>
   </table>
 {/if}
+</TfWaiting>

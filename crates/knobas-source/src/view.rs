@@ -19,6 +19,25 @@ pub use crate::diff::{
     DiffChange, DiffFile, DiffLine, DiffLineKind, FileThread, Hunk, LineComment, LineThread,
 };
 
+/// What a view's answer stands at, as
+/// [`Source::view_standing`](crate::Source::view_standing) says before the
+/// read (ADR-0032, #2239). Never on the wire: it is the app's to act on, and
+/// the shell draws a kept answer as it draws a fresh one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Standing {
+    /// Read live every time, and kept nowhere: the default.
+    Live,
+    /// Fixed by the entity and section alone -- something at a full commit
+    /// sha -- so the app keeps it in memory for the session and answers the
+    /// same pair again from there.
+    Fixed,
+    /// Keyed by a reference that moves -- a branch name, a branch list, a
+    /// tree by branch -- so the app answers the pair from memory where it
+    /// holds it and reads it again behind the answer; the next ask gets the
+    /// fresh one (#2242). A re-read that fails leaves the kept answer.
+    Moving,
+}
+
 /// What [`Source::view`](crate::Source::view) answers for one entity: its
 /// sections, in the order the shell draws them as tabs. The first is the one a
 /// detail opens on.
@@ -95,6 +114,15 @@ impl SourceView {
                     {
                         *commentable = None;
                     }
+                    // A reply and a resolve go the same way: dropped where
+                    // the credential cannot make them.
+                    if let Some(c) = commentable.as_mut() {
+                        for op in [&mut c.reply, &mut c.resolve] {
+                            if op.as_deref().is_some_and(|op| refused(op).is_some()) {
+                                *op = None;
+                            }
+                        }
+                    }
                 }
                 Block::Facts { .. }
                 | Block::Text { .. }
@@ -138,8 +166,9 @@ pub struct ViewSection {
 /// - `facts`: Label and value pairs: a commit's sha and author, a build's
 ///   outcome.
 /// - `text`: Prose: a commit message, a pull request's description. `markdown`
-///   says the source writes Markdown there; the shell still draws it as text,
-///   never as markup (ADR-0020 rule 5).
+///   says the source writes Markdown there, and the shell draws it with its
+///   one Markdown component, sanitized (ADR-0020 rule 5, #2261); without it
+///   the text is drawn as text.
 /// - `entities`: A list of things, each of which may be an address (ADR-0020
 ///   rule 7): a commit's parents, a pull request's commits, a build's changes.
 /// - `diff`: A diff, parsed by [`crate::diff`] and capped there. `truncated`
@@ -189,8 +218,9 @@ pub struct ViewSection {
 ///   (the source's own: Gitea's adapter keeps 1 MB and 10,000 lines), and `url`
 ///   is the file's page at the source, where the rest is. `language` is a hint
 ///   from the file's name (`"rust"`, `"markdown"`), `None` where the source has
-///   none; the shell may draw a `"markdown"` file rendered, with the raw text a
-///   toggle away, and never highlights.
+///   none. The shell picks how to draw a file from its name, not from this
+///   hint: it highlights every file's text (#2254), and may draw a Markdown
+///   file rendered, with the raw text a toggle away.
 ///
 /// Named `ViewBlock` in the generated TypeScript (#1326), because the shell's
 /// barrel already exports a time-tracking `Block`.
@@ -219,6 +249,12 @@ pub enum Block {
         /// wire reads as empty.
         #[serde(default)]
         gone: Vec<FileThread>,
+        /// The two commits the diff is between, where the source names them
+        /// (#2273, #2310): what a reader reads a file whole at, and a pull
+        /// request's commits to pick from. Absent on the wire when `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        range: Option<DiffRange>,
     },
     Log {
         text: String,
@@ -240,6 +276,17 @@ pub enum Block {
         truncated: bool,
         /// The directory's page at its source.
         url: Option<String>,
+        /// The section that lists every file of the tree at the commit this
+        /// listing was read at (#2311): what *Go to file* filters, named by
+        /// the source so the shell builds no id. Its answer is one `Tree`
+        /// whose entries are the files below the top, each `name` the whole
+        /// path from the top (`src/lib.rs`), in the source's order, and
+        /// `truncated` where the source or its cap stopped short. `None`
+        /// where the source has no such read, and on that answer itself.
+        /// Absent on the wire when `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        paths: Option<String>,
     },
     File {
         trail: Vec<Crumb>,
@@ -261,7 +308,33 @@ pub enum Block {
         /// where the source has none; absent on the wire reads as `None`.
         #[serde(default)]
         sha: Option<String>,
+        /// The commit the file was read at (#2256): what
+        /// [`Source::file_bytes`](crate::Source::file_bytes) takes back to
+        /// read this file's bytes, or a file beside it (a README's relative
+        /// image), at the same commit. The source's own id, never parsed by
+        /// the shell; `None` where the source has none, and the byte read
+        /// then reads at the entity's moving reference. Absent on the wire
+        /// reads as `None`.
+        #[serde(default)]
+        commit: Option<String>,
     },
+}
+
+/// The most bytes one [`Source::file_bytes`](crate::Source::file_bytes)
+/// answers (#2256, spec #2234 step 5): 50 MiB. A file over it is refused with
+/// its size ([`FileBytes::TooLarge`]), never cut.
+pub const BYTES_CAP: u64 = 50 * 1024 * 1024;
+
+/// What [`Source::file_bytes`](crate::Source::file_bytes) answers for one
+/// file (#2256). Never on the wire as data: the app hands the bytes to the
+/// shell raw and a refusal as an error naming the size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileBytes {
+    /// The whole file, at most the cap asked for.
+    Read(Vec<u8>),
+    /// The file is longer than the cap asked for; this is its size in bytes,
+    /// and none of it was kept.
+    TooLarge { size: u64 },
 }
 
 /// One step of a [`Block::Tree`]'s or [`Block::File`]'s trail: a
@@ -405,6 +478,66 @@ pub struct Commenting {
     /// source's descriptor declares it and the shell can queue it, as for an
     /// action.
     pub write_op: String,
+    /// The identifier a reply to one of the diff's threads goes through
+    /// (`reply_to_thread`, #2277), on the threads that say they take one
+    /// ([`LineThread::replies`](crate::diff::LineThread::replies)); `None`
+    /// offers no reply. Absent on the wire reads as `None`.
+    #[serde(default)]
+    pub reply: Option<String>,
+    /// The identifier resolving or reopening a thread goes through
+    /// (`resolve_thread`, #2277), on every thread with an id; `None` where
+    /// the source cannot resolve threads (Forgejo 17 has no endpoint for it).
+    /// Absent on the wire reads as `None`.
+    #[serde(default)]
+    pub resolve: Option<String>,
+    /// The head commit the diff's line comments are written against, in the
+    /// source's spelling (#2276): the shell keeps the reader's unsent
+    /// comments by pull request and this commit. `None` where the source did
+    /// not say. Absent on the wire reads as `None`.
+    #[serde(default)]
+    pub head: Option<String>,
+}
+
+/// The two commits a [`Block::Diff`] is between (#2273, #2310, spec #2234
+/// step 6): the diff is `base`'s tree to `head`'s.
+///
+/// `repository` is the entity both commits belong to, the one whose sections
+/// read the diff between any two of its commits (`compare:<base>...<head>`)
+/// and a file at one of them (`file@<sha>:<path>`), and whose byte read takes
+/// a commit; at a whole sha each read stands at a fixed commit, so the app
+/// keeps it (ADR-0032). A pull request's diff also lists its `commits`, newest
+/// first, and the head the viewer last reviewed at (`reviewed`), which is
+/// how a reader picks one commit, a range or *since my last review*.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct DiffRange {
+    /// The repository's entity id.
+    pub repository: String,
+    /// The old side's commit, its whole sha: the merge base of a pull
+    /// request, the commit before a range.
+    pub base: String,
+    /// The new side's commit, its whole sha.
+    pub head: String,
+    /// The commits from `base` (not included) to `head`, newest first, where
+    /// the source lists them (a pull request's); empty otherwise.
+    #[serde(default)]
+    pub commits: Vec<RangeCommit>,
+    /// The head's whole sha at the viewer's latest submitted review of a
+    /// pull request; `None` for one the viewer never reviewed, and for any
+    /// other diff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reviewed: Option<String>,
+}
+
+/// One commit of a [`DiffRange`]: its whole sha, its subject and a quiet
+/// second reading (author, age) as a commit row has.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct RangeCommit {
+    pub sha: String,
+    pub title: String,
+    pub meta: Option<String>,
 }
 
 impl ViewAction {
@@ -543,6 +676,12 @@ pub struct ViewRow {
     /// `tone`.
     pub chip: Option<String>,
     pub url: Option<String>,
+    /// Who the row is by, as the source names the account (#2311): a
+    /// commit's author, for the avatar and name a last-commit strip draws.
+    /// `meta` still reads in full without it. Absent on the wire when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub author: Option<String>,
     /// A commit another source may hold, named by where it lives rather than
     /// by an id (issue #665): a TeamCity change knows its sha and its VCS
     /// root's URL, and cannot see a Gitea mirror. **The app's to resolve, not
@@ -697,6 +836,7 @@ mod tests {
                         chip: Some("merged".into()),
                         url: Some("https://gitea.example/c/c90d11".into()),
                         commit: None,
+                        author: None,
                     },
                     ViewRow {
                         entity_id: None,
@@ -709,6 +849,7 @@ mod tests {
                             repo_url: "http://gitea:3000/tidewater/payout-service.git".into(),
                             sha: "179eb1fb0144c3b61ed482890f1a5f4e162736eb".into(),
                         }),
+                        author: None,
                     },
                 ],
             },
@@ -725,12 +866,20 @@ mod tests {
                             body: "Bound the `jitter`.".into(),
                             at: Some("2026-08-22T09:00:00Z".into()),
                         }],
+                        id: None,
+                        resolved_by: None,
+                        replies: false,
+                        commit: None,
+                        hunk: None,
                     }];
                     files
                 },
                 truncated: true,
                 commentable: Some(Commenting {
                     write_op: "submit_review".into(),
+                    reply: None,
+                    resolve: None,
+                    head: None,
                 }),
                 gone: vec![FileThread {
                     path: "src/dropped.rs".into(),
@@ -743,8 +892,24 @@ mod tests {
                             body: "Why a second retry loop?".into(),
                             at: None,
                         }],
+                        id: None,
+                        resolved_by: None,
+                        replies: false,
+                        commit: None,
+                        hunk: None,
                     },
                 }],
+                range: Some(DiffRange {
+                    repository: "gitea-main:tidewater/payout-service".into(),
+                    base: "907900b245f2941018dfd3ee155b876ef701c10a".into(),
+                    head: "1262a5b61048aaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                    commits: vec![RangeCommit {
+                        sha: "1262a5b61048aaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                        title: "Jitter".into(),
+                        meta: Some("mara · 5 h ago".into()),
+                    }],
+                    reviewed: Some("97cb5a8667f8aac8e6cdaeff83ffec9574f56a4b".into()),
+                }),
             },
             Block::Log {
                 text: "[12:00:01] Step 1/3\n[12:00:09] FAILED".into(),
@@ -805,6 +970,7 @@ mod tests {
                 ],
                 truncated: true,
                 url: Some("https://gitea.example/o/r/src/branch/main/src".into()),
+                paths: Some("paths".into()),
             },
             Block::File {
                 trail: vec![Crumb {
@@ -819,6 +985,7 @@ mod tests {
                 binary: false,
                 url: Some("https://gitea.example/o/r/src/branch/main/README.md".into()),
                 sha: Some("8c2ac7f1e6c4a3b2d1e0f9a8b7c6d5e4f3a2b1c0".into()),
+                commit: Some("1f0e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c".into()),
             },
         ];
         for block in &probes {
@@ -958,6 +1125,7 @@ mod tests {
             ],
             truncated: false,
             url: None,
+            paths: None,
         };
         assert_eq!(
             serde_json::to_value(&tree).unwrap(),
@@ -982,13 +1150,14 @@ mod tests {
             binary: true,
             url: None,
             sha: None,
+            commit: None,
         };
         assert_eq!(
             serde_json::to_value(&file).unwrap(),
             serde_json::json!({
                 "type": "file", "trail": [], "path": "logo.png", "text": "",
                 "language": null, "size": 2048, "truncated": false, "binary": true,
-                "url": null, "sha": null
+                "url": null, "sha": null, "commit": null
             })
         );
         // A file block from before the blob was drawn reads as one without
@@ -999,7 +1168,17 @@ mod tests {
             "url": null
         }))
         .expect("a file block without a sha reads");
-        assert!(matches!(old, Block::File { sha: None, .. }), "{old:?}");
+        assert!(
+            matches!(
+                old,
+                Block::File {
+                    sha: None,
+                    commit: None,
+                    ..
+                }
+            ),
+            "{old:?}"
+        );
     }
 
     /// The wire shape the TypeScript mirror is written against: blocks are a
@@ -1031,12 +1210,20 @@ mod tests {
                 body: "nit".into(),
                 at: None,
             }],
+            id: None,
+            resolved_by: None,
+            replies: false,
+            commit: None,
+            hunk: None,
         }];
         let diff = serde_json::to_value(Block::Diff {
             files,
             truncated: false,
             commentable: Some(Commenting {
                 write_op: "submit_review".into(),
+                reply: None,
+                resolve: None,
+                head: None,
             }),
             gone: vec![FileThread {
                 path: "gone.txt".into(),
@@ -1049,8 +1236,14 @@ mod tests {
                         body: "was".into(),
                         at: None,
                     }],
+                    id: None,
+                    resolved_by: None,
+                    replies: false,
+                    commit: None,
+                    hunk: None,
                 },
             }],
+            range: None,
         })
         .unwrap();
         assert_eq!(
@@ -1058,12 +1251,13 @@ mod tests {
             serde_json::json!({
                 "type": "diff",
                 "truncated": false,
-                "commentable": { "write_op": "submit_review" },
+                "commentable": { "write_op": "submit_review", "reply": null, "resolve": null, "head": null },
                 "gone": [{
                     "path": "gone.txt",
                     "thread": {
                         "side": "old", "line": 4, "outdated": true,
-                        "comments": [{ "author": "olu", "body": "was", "at": null }]
+                        "comments": [{ "author": "olu", "body": "was", "at": null }],
+                        "id": null, "resolved_by": null, "replies": false
                     }
                 }],
                 "files": [{
@@ -1073,6 +1267,7 @@ mod tests {
                     "additions": 2,
                     "deletions": 0,
                     "truncated": false,
+                    "blob": "5786b13",
                     "hunks": [{
                         "header": "@@ -0,0 +1,2 @@",
                         "lines": [
@@ -1082,7 +1277,8 @@ mod tests {
                     }],
                     "threads": [{
                         "side": "new", "line": 2, "outdated": false,
-                        "comments": [{ "author": "olu", "body": "nit", "at": null }]
+                        "comments": [{ "author": "olu", "body": "nit", "at": null }],
+                        "id": null, "resolved_by": null, "replies": false
                     }]
                 }]
             })
@@ -1105,6 +1301,20 @@ mod tests {
             panic!("a diff decodes as a diff");
         };
         assert!(files[0].threads.is_empty() && commentable.is_none() && gone.is_empty());
+        // A diff's range (#2273, #2310) is absent on the wire when `None`
+        // (above), and so is its `reviewed`.
+        let range = serde_json::to_value(DiffRange {
+            repository: "g:o/r".into(),
+            base: "b".into(),
+            head: "h".into(),
+            commits: Vec::new(),
+            reviewed: None,
+        })
+        .unwrap();
+        assert_eq!(
+            range,
+            serde_json::json!({ "repository": "g:o/r", "base": "b", "head": "h", "commits": [] })
+        );
         // A row's commit hint is absent on the wire when it is `None`, so the
         // shell's row keeps the shape #661 froze; one sent without it decodes.
         let row = ViewRow {
@@ -1115,6 +1325,7 @@ mod tests {
             chip: None,
             url: None,
             commit: None,
+            author: None,
         };
         let wire = serde_json::to_value(&row).unwrap();
         assert_eq!(

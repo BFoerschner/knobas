@@ -6,7 +6,7 @@
 import { expect, test } from "vitest";
 
 import type { DiffFile, DiffLine, LineThread, SourceView } from "../../ipc/entity";
-import { diffOf, matchesPath, placeThreads, targetOf } from "./files";
+import { diffOf, matchesPath, placeThreads, rangeOf, targetOf } from "./files";
 
 const ctx = (old: number, nu: number, text = ""): DiffLine => ({ kind: "context", old, new: nu, text });
 const add = (nu: number, text = ""): DiffLine => ({ kind: "add", old: null, new: nu, text });
@@ -16,6 +16,9 @@ const thread = (side: "old" | "new", line: number, outdated = false): LineThread
   line,
   outdated,
   comments: [{ author: "jonas", body: `on ${side} ${line}`, at: null }],
+  id: null,
+  resolved_by: null,
+  replies: false,
 });
 
 function file(threads: LineThread[]): DiffFile {
@@ -57,12 +60,12 @@ test("the diff is the Files section's diff block, or nothing before it answered"
         title: "Files",
         count: 1,
         deferred: false,
-        blocks: [{ type: "diff", files: [file([])], truncated: false, commentable: { write_op: "submit_review" }, gone: [] }],
+        blocks: [{ type: "diff", files: [file([])], truncated: false, commentable: { write_op: "submit_review", reply: null, resolve: null, head: null }, gone: [] }],
       },
     ],
     actions: [],
   };
-  expect(diffOf(view)).toMatchObject({ files: [{ path: "src/sepa/retry.rs" }], commentable: { write_op: "submit_review" } });
+  expect(diffOf(view)).toMatchObject({ files: [{ path: "src/sepa/retry.rs" }], commentable: { write_op: "submit_review", reply: null, resolve: null, head: null } });
   expect(diffOf({ sections: [{ id: "files", title: "Files", count: 3, deferred: true, blocks: [] }], actions: [] })).toBeNull();
   expect(diffOf(null)).toBeNull();
 });
@@ -72,4 +75,14 @@ test("the filter matches any part of the path, in any case", () => {
   expect(matchesPath("src/sepa/retry.rs", "RETRY")).toBe(true);
   expect(matchesPath("src/sepa/retry.rs", "sepa/re")).toBe(true);
   expect(matchesPath("docs/backoff.md", "retry")).toBe(false);
+});
+
+test("the Diff tool's ends are the Files diff's range, or nothing without one (#2275)", () => {
+  const block = { type: "diff" as const, files: [file([])], truncated: false, commentable: null, gone: [] };
+  const viewOf = (range: unknown): SourceView =>
+    ({ sections: [{ id: "files", title: "Files", count: 1, deferred: false, blocks: [{ ...block, range }] }], actions: [] }) as unknown as SourceView;
+  const range = { repository: "gitea:tidewater/payout-service", base: "4b1c0ffee000", head: "9e2dfeed1111", commits: [], reviewed: null };
+  expect(rangeOf(viewOf(range))).toEqual({ base: "4b1c0ffee000", head: "9e2dfeed1111" });
+  expect(rangeOf(viewOf(null))).toBeNull();
+  expect(rangeOf(null)).toBeNull();
 });

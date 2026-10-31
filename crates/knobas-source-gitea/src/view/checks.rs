@@ -85,6 +85,7 @@ fn drawn(statuses: &[Status]) -> Option<Block> {
                     chip: (!state.is_empty()).then_some(state),
                     url: nonblank(status.target_url.clone()),
                     commit: None,
+                    author: None,
                 },
             ))
         })

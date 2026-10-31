@@ -1,19 +1,36 @@
 //! *Open in…* (#501, #844, R-8.21 to R-8.24): the applications a person runs
 //! at a checkout, and the argument vector one of them becomes.
 //!
-//! An **application** is a name, a command and an optional command for a
-//! file. Its placeholders are `{path}` (the checkout), `{file}` (a file inside
-//! it), `{line}` (a line number) and `{name}` (the checkout folder's name).
+//! An **application** is a name and one command per [`ObjectKind`] it
+//! accepts (#2274): the repository's, which every application has, and
+//! optionally a file's, a commit's, a range's and a pull request's. One
+//! without a file command opens a file with its repository command, so the
+//! applications saved before #2274 are repository and file applications.
 //!
-//! # Every value comes from this disk (ADR-0016)
+//! # Placeholders
 //!
-//! [`fill`] takes a [`Fill`]: the checkout path knobas resolved on this
-//! machine, a file path the caller has already found *inside* that checkout
-//! on disk ([`inside`] is the lexical half of that check), and a number.
-//! `{name}` is the checkout folder's own name, read off the path, not the
-//! mirrored repository's name. There is no `{branch}`, `{title}` or `{url}`:
-//! each would be a field a remote system wrote, and a placeholder this module
-//! does not know is refused by name.
+//! `{path}` (the checkout), `{file}` (a file inside it), `{line}` (a line
+//! number) and `{name}` (the checkout folder's name) are from this disk.
+//! `{sha}`, `{base}`, `{head}`, `{pr}` and `{branch}` name the code object, and
+//! `{url}` is its page at the source ([`ObjectKind::placeholders`] says which
+//! object carries which).
+//!
+//! # What reaches an argument (ADR-0016, ADR-0034)
+//!
+//! The disk's values are the checkout path knobas resolved on this machine, a
+//! file path the caller has already found *inside* that checkout on disk
+//! ([`inside`] is the lexical half of that check), and a number. `{name}` is
+//! the checkout folder's own name, read off the path.
+//!
+//! The object's values are git names a remote system may have written, so
+//! each is held to a grammar before it becomes an argument ([`fill`] refuses
+//! one that is not): a sha is 7 to 64 hex digits; a base, head or branch is a
+//! git ref name of `[A-Za-z0-9._/-]` that starts with none of `-`, `.` or
+//! `/` (a base may end in one `^`); a pull request is a number; a URL is one
+//! the app built from the source's typed base URL (`knobas_source::code_pages`)
+//! and starts with `http://` or `https://`. None of them can be read as an
+//! option, and there is no shell to read anything else. `{title}`, `{author}`
+//! and the like stay unknown and are refused by name.
 //!
 //! # No shell
 //!
@@ -25,13 +42,209 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// The placeholders a command may carry, in the order the dialog offers them.
-pub const PLACEHOLDERS: [&str; 4] = ["path", "file", "line", "name"];
+pub const PLACEHOLDERS: [&str; 10] = [
+    "path", "file", "line", "name", "sha", "base", "head", "pr", "branch", "url",
+];
+
+/// What an application is opened on (#2274).
+///
+/// - `repository`: the checkout.
+/// - `file`: a file in the repository, relative to it, at a line, read `at` a
+///   commit or branch (the page's; the checkout is the working tree as left).
+/// - `commit`: one commit, by its sha.
+/// - `range`: the diff between two commits or branches, as the diff address
+///   names them (`base` may be `<sha>^`).
+/// - `pull_request`: by its number, with its base and head as the page knows
+///   them, and the head's branch. An application opens it in its worktree
+///   under the clones root (#2285, ADR-0035), never in the person's checkout.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "OpenObject")]
+pub enum Object {
+    Repository,
+    File {
+        path: String,
+        line: Option<u32>,
+        at: Option<String>,
+    },
+    Commit {
+        sha: String,
+    },
+    Range {
+        base: String,
+        head: String,
+    },
+    PullRequest {
+        number: u64,
+        base: String,
+        head: String,
+        branch: String,
+        /// The pull request's own entity id, when the page has one: knobas's
+        /// bookkeeping of its worktree (#2285), read against the mirror to
+        /// tell a closed one. Never an argument and never a placeholder.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        item: Option<String>,
+    },
+}
+
+/// Which kind of [`Object`]: what an application declares it accepts by
+/// having a command for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "OpenObjectKind")]
+pub enum ObjectKind {
+    Repository,
+    File,
+    Commit,
+    Range,
+    PullRequest,
+}
+
+impl ObjectKind {
+    /// Every kind, in the order the dialog draws their commands.
+    pub const ALL: [Self; 5] = [
+        Self::Repository,
+        Self::File,
+        Self::Commit,
+        Self::Range,
+        Self::PullRequest,
+    ];
+
+    /// The placeholders a command for this kind may carry. A repository and
+    /// a file command take the same four as before #2274, and `{url}`.
+    #[must_use]
+    pub const fn placeholders(self) -> &'static [&'static str] {
+        match self {
+            Self::Repository | Self::File => &["path", "file", "line", "name", "url"],
+            Self::Commit => &["path", "name", "sha", "url"],
+            Self::Range => &["path", "name", "base", "head", "url"],
+            Self::PullRequest => &["path", "name", "pr", "base", "head", "branch", "url"],
+        }
+    }
+
+    /// What the messages call this kind's command.
+    #[must_use]
+    pub const fn command_word(self) -> &'static str {
+        match self {
+            Self::Repository => "command",
+            Self::File => "file command",
+            Self::Commit => "commit command",
+            Self::Range => "range command",
+            Self::PullRequest => "pull request command",
+        }
+    }
+}
+
+impl Object {
+    #[must_use]
+    pub const fn kind(&self) -> ObjectKind {
+        match self {
+            Self::Repository => ObjectKind::Repository,
+            Self::File { .. } => ObjectKind::File,
+            Self::Commit { .. } => ObjectKind::Commit,
+            Self::Range { .. } => ObjectKind::Range,
+            Self::PullRequest { .. } => ObjectKind::PullRequest,
+        }
+    }
+}
+
+/// The object's own values for [`fill`], as given: each is checked when it
+/// becomes an argument, so a fork's head no command uses refuses nothing.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Code {
+    pub sha: Option<String>,
+    pub base: Option<String>,
+    pub head: Option<String>,
+    pub pr: Option<u64>,
+    pub branch: Option<String>,
+    /// The object's page, built by the app from the source's typed base URL.
+    pub url: Option<String>,
+}
+
+impl Code {
+    /// No object values: a repository or a file without a page.
+    pub const NONE: Self = Self {
+        sha: None,
+        base: None,
+        head: None,
+        pr: None,
+        branch: None,
+        url: None,
+    };
+
+    /// `object`'s values, and `url` for its page.
+    #[must_use]
+    pub fn of(object: &Object, url: Option<String>) -> Self {
+        let mut code = Self { url, ..Self::NONE };
+        match object {
+            Object::Repository | Object::File { .. } => {}
+            Object::Commit { sha } => code.sha = Some(sha.clone()),
+            Object::Range { base, head } => {
+                code.base = Some(base.clone());
+                code.head = Some(head.clone());
+            }
+            Object::PullRequest {
+                number,
+                base,
+                head,
+                branch,
+                ..
+            } => {
+                code.pr = Some(*number);
+                code.base = Some(base.clone());
+                code.head = Some(head.clone());
+                code.branch = Some(branch.clone());
+            }
+        }
+        code
+    }
+}
+
+/// Whether `sha` is 7 to 64 hex digits.
+#[must_use]
+pub fn is_sha(sha: &str) -> bool {
+    (7..=64).contains(&sha.len()) && sha.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Whether `sha` is a whole object id, SHA-1's 40 hex digits or SHA-256's
+/// 64: a shorter one names whichever commit it is unique to today, so only a
+/// whole one fixes what a read answers. The one such check (the Gitea
+/// adapter's read cache and compare, the diff address's shortening in TS
+/// mirror it, `app/src/lib/tf/diff/sha.ts`).
+#[must_use]
+pub fn is_full_sha(sha: &str) -> bool {
+    matches!(sha.len(), 40 | 64) && is_sha(sha)
+}
+
+/// Whether `name` is a git name knobas passes to a program: `[A-Za-z0-9._/-]`,
+/// not starting with `-`, `.` or `/`, no `..` or `//`, not ending in `/` or
+/// `.lock`, at most 255 bytes; with `caret`, one trailing `^` may follow.
+#[must_use]
+pub fn is_ref_name(name: &str, caret: bool) -> bool {
+    let bare = if caret {
+        name.strip_suffix('^').unwrap_or(name)
+    } else {
+        name
+    };
+    !bare.is_empty()
+        && bare.len() <= 255
+        && bare
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'/' | b'-'))
+        && !bare.starts_with(['-', '.', '/'])
+        && !bare.ends_with('/')
+        && !bare.ends_with(".lock")
+        && !bare.contains("..")
+        && !bare.contains("//")
+}
 
 /// One application on the *Open in…* menu.
 ///
-/// Issue #844, R-8.21. Its commands take `{path}`, `{file}`, `{line}` and
-/// `{name}`, all filled from this disk.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+/// Issue #844, R-8.21, #2274. It accepts the objects it has a command for:
+/// every application a repository and a file, and a commit, a range or a
+/// pull request when it has that command.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts", rename = "CheckoutApplication")]
 pub struct Application {
     /// Stable id: what `open_checkout` takes and the default names.
@@ -42,50 +255,124 @@ pub struct Application {
     pub command: String,
     /// The command that opens a file, if the application has one.
     pub file_command: Option<String>,
+    /// The command that opens a commit; without one the application is not
+    /// offered for a commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub commit_command: Option<String>,
+    /// The command that opens a range of commits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub range_command: Option<String>,
+    /// The command that opens a pull request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub pull_request_command: Option<String>,
+}
+
+impl Application {
+    /// The command this application runs for `kind`, if it accepts it. A file
+    /// without a file command opens with the repository command.
+    #[must_use]
+    pub fn command_for(&self, kind: ObjectKind) -> Option<&str> {
+        match kind {
+            ObjectKind::Repository => Some(&self.command),
+            ObjectKind::File => Some(self.file_command.as_deref().unwrap_or(&self.command)),
+            ObjectKind::Commit => self.commit_command.as_deref(),
+            ObjectKind::Range => self.range_command.as_deref(),
+            ObjectKind::PullRequest => self.pull_request_command.as_deref(),
+        }
+    }
+
+    /// Whether this application is offered for `kind`.
+    #[must_use]
+    pub fn accepts(&self, kind: ObjectKind) -> bool {
+        self.command_for(kind).is_some()
+    }
 }
 
 /// The id of the application the shipped list makes the default.
 pub const SHIPPED_DEFAULT: &str = "vscode";
 
 /// The applications knobas starts with on `os` (`std::env::consts::OS`'s
-/// spelling): VS Code, Terminal, Fork and IntelliJ IDEA on macOS, none
-/// elsewhere.
+/// spelling), so "Open in" works without setup (#2275): an editor, a
+/// terminal and a file manager on each of macOS, Linux and Windows, and
+/// Fork and IntelliJ IDEA besides on macOS. None on any other platform.
 ///
-/// `open -a <application>` and not a CLI name such as `code` or `idea`: an app
-/// started from Finder has `/usr/bin:/bin:/usr/sbin:/sbin` for `PATH`, where
-/// those shims are not, and `open` resolves the application through Launch
-/// Services. `open -a` takes no line number, so the file commands open the
-/// file without one; a person who has the shim edits the command.
+/// Each opens a pull request at its worktree (#2285): the pull request
+/// command is the repository command, whose `{path}` is then the worktree.
+///
+/// - **macOS**: `open -a <application>` and not a CLI name such as `code` or
+///   `idea`: an app started from Finder has `/usr/bin:/bin:/usr/sbin:/sbin`
+///   for `PATH`, where those shims are not, and `open` resolves the
+///   application through Launch Services. `open -a` takes no line number, so
+///   the file commands open the file without one; a person who has the shim
+///   edits the command.
+/// - **Linux**: VS Code's `code`, which takes `--goto <file>:<line>`;
+///   GNOME Terminal, the default desktop's, started in the checkout with
+///   `--working-directory` (another terminal is one edit away); and
+///   `xdg-open`, which hands a folder to the desktop's file manager.
+/// - **Windows**: `code.cmd`, the name VS Code's installer puts on `PATH`
+///   (a `.cmd` is a batch file, which the standard library starts through
+///   `cmd.exe` with its arguments quoted, or refuses one it cannot quote);
+///   Windows Terminal's `wt -d`; and `explorer`.
 ///
 /// The ids `vscode`, `jetbrains` and `terminal` are #501's action ids, so a
 /// caller that still names one of those reaches the same application.
 #[must_use]
 pub fn shipped_on(os: &str) -> Vec<Application> {
-    if os != "macos" {
-        return Vec::new();
-    }
     let app = |id: &str, name: &str, command: &str, file: Option<&str>| Application {
         id: id.to_owned(),
         name: name.to_owned(),
         command: command.to_owned(),
         file_command: file.map(str::to_owned),
+        pull_request_command: Some(command.to_owned()),
+        ..Application::default()
     };
-    vec![
-        app(
-            "vscode",
-            "VS Code",
-            "open -a \"Visual Studio Code\" {path}",
-            Some("open -a \"Visual Studio Code\" {file}"),
-        ),
-        app("terminal", "Terminal", "open -a Terminal {path}", None),
-        app("fork", "Fork", "open -a Fork {path}", None),
-        app(
-            "jetbrains",
-            "IntelliJ IDEA",
-            "open -a \"IntelliJ IDEA\" {path}",
-            Some("open -a \"IntelliJ IDEA\" {file}"),
-        ),
-    ]
+    match os {
+        "macos" => vec![
+            app(
+                "vscode",
+                "VS Code",
+                "open -a \"Visual Studio Code\" {path}",
+                Some("open -a \"Visual Studio Code\" {file}"),
+            ),
+            app("terminal", "Terminal", "open -a Terminal {path}", None),
+            app("fork", "Fork", "open -a Fork {path}", None),
+            app(
+                "jetbrains",
+                "IntelliJ IDEA",
+                "open -a \"IntelliJ IDEA\" {path}",
+                Some("open -a \"IntelliJ IDEA\" {file}"),
+            ),
+        ],
+        "linux" => vec![
+            app(
+                "vscode",
+                "VS Code",
+                "code {path}",
+                Some("code --goto {file}:{line}"),
+            ),
+            app(
+                "terminal",
+                "Terminal",
+                "gnome-terminal --working-directory={path}",
+                None,
+            ),
+            app("files", "Files", "xdg-open {path}", None),
+        ],
+        "windows" => vec![
+            app(
+                "vscode",
+                "VS Code",
+                "code.cmd {path}",
+                Some("code.cmd --goto {file}:{line}"),
+            ),
+            app("terminal", "Windows Terminal", "wt -d {path}", None),
+            app("files", "File Explorer", "explorer {path}", None),
+        ],
+        _ => Vec::new(),
+    }
 }
 
 /// [`shipped_on`] for this machine.
@@ -104,6 +391,9 @@ pub struct Fill<'a> {
     pub file: Option<&'a Path>,
     /// The line; `{line}` is 1 without one.
     pub line: Option<u32>,
+    /// The object's values: `{sha}`, `{base}`, `{head}`, `{pr}`, `{branch}`
+    /// and `{url}`.
+    pub code: &'a Code,
 }
 
 /// Why a command cannot be run. Each `Display` speaks about the person's own
@@ -118,6 +408,14 @@ pub enum TemplateError {
     UnclosedPlaceholder,
     /// A placeholder knobas does not fill, carried so the message can name it.
     UnknownPlaceholder(String),
+    /// A placeholder knobas fills, but not in a command for this object.
+    NotForObject { name: String, object: ObjectKind },
+    /// The object has no value for this placeholder: a `{url}` whose source
+    /// declares no page.
+    NoValue(String),
+    /// The value is not one knobas passes to a program (see the module's
+    /// *What reaches an argument*).
+    Refused { name: String, value: String },
 }
 
 impl std::fmt::Display for TemplateError {
@@ -131,7 +429,35 @@ impl std::fmt::Display for TemplateError {
             Self::UnknownPlaceholder(name) => write!(
                 f,
                 "{{{name}}} is not something knobas fills in: a command may take {{path}}, \
-                 {{file}}, {{line}} and {{name}}, all from this disk"
+                 {{file}}, {{line}}, {{name}}, {{sha}}, {{base}}, {{head}}, {{pr}}, {{branch}} \
+                 and {{url}}"
+            ),
+            Self::NotForObject { name, object } => {
+                let takes: Vec<String> = object
+                    .placeholders()
+                    .iter()
+                    .map(|p| format!("{{{p}}}"))
+                    .collect();
+                write!(
+                    f,
+                    "{{{name}}} has no value in a {}: it takes {}",
+                    object.command_word(),
+                    takes.join(", ")
+                )
+            }
+            Self::NoValue(name) => {
+                if name == "url" {
+                    write!(
+                        f,
+                        "the source declares no web page for this, so {{url}} has no value"
+                    )
+                } else {
+                    write!(f, "there is no {{{name}}} here")
+                }
+            }
+            Self::Refused { name, value } => write!(
+                f,
+                "{{{name}}} would be '{value}', which is not a name knobas passes to a program"
             ),
         }
     }
@@ -152,6 +478,22 @@ pub fn fill(template: &str, at: &Fill<'_>) -> Result<Vec<String>, TemplateError>
     words.iter().map(|word| substitute(word, at)).collect()
 }
 
+/// `command` as an argument vector with no placeholder filled: quotes group
+/// words, nothing else is special, so `a;b` and `$HOME` stay one literal
+/// argument each. A renderer command (#2262, ADR-0033) takes no placeholder,
+/// so a `{` in it is just a character.
+///
+/// # Errors
+///
+/// [`TemplateError::Empty`] for no program, [`TemplateError::UnclosedQuote`].
+pub fn words(command: &str) -> Result<Vec<String>, TemplateError> {
+    let words = split_words(command)?;
+    if words.is_empty() {
+        return Err(TemplateError::Empty);
+    }
+    Ok(words)
+}
+
 /// Whether `template` is one knobas could run, without running anything: the
 /// check a settings write makes. [`fill`] against a stand-in checkout, so there
 /// is one rule.
@@ -160,15 +502,46 @@ pub fn fill(template: &str, at: &Fill<'_>) -> Result<Vec<String>, TemplateError>
 ///
 /// [`TemplateError`], the same ones [`fill`] gives.
 pub fn check(template: &str) -> Result<(), TemplateError> {
-    fill(
-        template,
-        &Fill {
-            checkout: Path::new("/checkout"),
-            file: None,
-            line: None,
-        },
-    )
-    .map(|_| ())
+    check_for(template, ObjectKind::Repository)
+}
+
+/// [`check`] for a command of `object`: one of its placeholders only.
+///
+/// # Errors
+///
+/// [`TemplateError`]; [`TemplateError::NotForObject`] for a placeholder
+/// knobas fills elsewhere.
+pub fn check_for(template: &str, object: ObjectKind) -> Result<(), TemplateError> {
+    let words = split_words(template)?;
+    if words.is_empty() {
+        return Err(TemplateError::Empty);
+    }
+    for word in &words {
+        for name in placeholder_names(word)? {
+            if !PLACEHOLDERS.contains(&name) {
+                return Err(TemplateError::UnknownPlaceholder(name.to_owned()));
+            }
+            if !object.placeholders().contains(&name) {
+                return Err(TemplateError::NotForObject {
+                    name: name.to_owned(),
+                    object,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn placeholder_names(word: &str) -> Result<Vec<&str>, TemplateError> {
+    let mut out = Vec::new();
+    let mut rest = word;
+    while let Some(open) = rest.find('{') {
+        let after = &rest[open + 1..];
+        let close = after.find('}').ok_or(TemplateError::UnclosedPlaceholder)?;
+        out.push(&after[..close]);
+        rest = &after[close + 1..];
+    }
+    Ok(out)
 }
 
 /// `relative` joined onto `checkout`, when it names something below it by
@@ -251,6 +624,26 @@ fn substitute(word: &str, at: &Fill<'_>) -> Result<String, TemplateError> {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default(),
             ),
+            "sha" => out.push_str(checked(name, at.code.sha.as_deref(), is_sha)?),
+            "base" => out.push_str(checked(name, at.code.base.as_deref(), |v| {
+                is_ref_name(v, true)
+            })?),
+            "head" => out.push_str(checked(name, at.code.head.as_deref(), |v| {
+                is_ref_name(v, false)
+            })?),
+            "branch" => out.push_str(checked(name, at.code.branch.as_deref(), |v| {
+                is_ref_name(v, false)
+            })?),
+            "pr" => out.push_str(
+                &at.code
+                    .pr
+                    .ok_or_else(|| TemplateError::NoValue(name.to_owned()))?
+                    .to_string(),
+            ),
+            "url" => out.push_str(checked(name, at.code.url.as_deref(), |v| {
+                (v.starts_with("https://") || v.starts_with("http://"))
+                    && !v.chars().any(|c| c.is_whitespace() || c.is_control())
+            })?),
             other => return Err(TemplateError::UnknownPlaceholder(other.to_owned())),
         }
         rest = &after[close + 1..];
@@ -259,9 +652,26 @@ fn substitute(word: &str, at: &Fill<'_>) -> Result<String, TemplateError> {
     Ok(out)
 }
 
+/// `value` when the object has one and `ok` admits it.
+fn checked<'v>(
+    name: &str,
+    value: Option<&'v str>,
+    ok: impl Fn(&str) -> bool,
+) -> Result<&'v str, TemplateError> {
+    let value = value.ok_or_else(|| TemplateError::NoValue(name.to_owned()))?;
+    if ok(value) {
+        Ok(value)
+    } else {
+        Err(TemplateError::Refused {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        })
+    }
+}
+
 /// An application as a person typed it in the dialog: a new one has no id
 /// yet.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts", rename = "CheckoutApplicationDraft")]
 pub struct Draft {
     /// The id it already has; `None` or blank for a new one.
@@ -272,6 +682,18 @@ pub struct Draft {
     /// Blank is no file command.
     #[serde(default)]
     pub file_command: Option<String>,
+    /// Blank is none: not offered for a commit.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub commit_command: Option<String>,
+    /// Blank is none: not offered for a range.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub range_command: Option<String>,
+    /// Blank is none: not offered for a pull request.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub pull_request_command: Option<String>,
 }
 
 /// Why a list of applications cannot be saved, naming the entry.
@@ -279,11 +701,10 @@ pub struct Draft {
 pub enum ListError {
     /// The entry at this position has a blank name.
     NoName(usize),
-    /// This application's command (or, with `for_file`, its file command)
-    /// cannot be run.
+    /// This application's command for `object` cannot be run.
     Command {
         name: String,
-        for_file: bool,
+        object: ObjectKind,
         error: TemplateError,
     },
 }
@@ -294,12 +715,13 @@ impl std::fmt::Display for ListError {
             Self::NoName(index) => write!(f, "application {} has no name", index + 1),
             Self::Command {
                 name,
-                for_file,
+                object,
                 error,
-            } => {
-                let which = if *for_file { "file command" } else { "command" };
-                write!(f, "{name}'s {which} cannot be run: {error}")
-            }
+            } => write!(
+                f,
+                "{name}'s {} cannot be run: {error}",
+                object.command_word()
+            ),
         }
     }
 }
@@ -323,23 +745,31 @@ pub fn settle(drafts: &[Draft]) -> Result<Vec<Application>, ListError> {
             return Err(ListError::NoName(index));
         }
         let command = draft.command.trim();
-        check(command).map_err(|error| ListError::Command {
+        check_for(command, ObjectKind::Repository).map_err(|error| ListError::Command {
             name: name.to_owned(),
-            for_file: false,
+            object: ObjectKind::Repository,
             error,
         })?;
-        let file_command = draft
-            .file_command
-            .as_deref()
-            .map(str::trim)
-            .filter(|file| !file.is_empty());
-        if let Some(file) = file_command {
-            check(file).map_err(|error| ListError::Command {
-                name: name.to_owned(),
-                for_file: true,
-                error,
-            })?;
-        }
+        let optional = |given: &Option<String>, object: ObjectKind| {
+            let given = given
+                .as_deref()
+                .map(str::trim)
+                .filter(|command| !command.is_empty());
+            match given {
+                Some(command) => check_for(command, object)
+                    .map(|()| Some(command.to_owned()))
+                    .map_err(|error| ListError::Command {
+                        name: name.to_owned(),
+                        object,
+                        error,
+                    }),
+                None => Ok(None),
+            }
+        };
+        let file_command = optional(&draft.file_command, ObjectKind::File)?;
+        let commit_command = optional(&draft.commit_command, ObjectKind::Commit)?;
+        let range_command = optional(&draft.range_command, ObjectKind::Range)?;
+        let pull_request_command = optional(&draft.pull_request_command, ObjectKind::PullRequest)?;
         let given = draft.id.as_deref().map(str::trim).unwrap_or_default();
         let taken = |id: &str| out.iter().any(|app| app.id == id);
         let id = if !given.is_empty() && !taken(given) {
@@ -358,7 +788,10 @@ pub fn settle(drafts: &[Draft]) -> Result<Vec<Application>, ListError> {
             id,
             name: name.to_owned(),
             command: command.to_owned(),
-            file_command: file_command.map(str::to_owned),
+            file_command,
+            commit_command,
+            range_command,
+            pull_request_command,
         });
     }
     Ok(out)
@@ -387,6 +820,30 @@ fn slug(name: &str) -> String {
 mod tests {
     use super::*;
 
+    /// A sha names a commit by 7 to 64 hex digits; a whole one is exactly
+    /// SHA-1's 40 or SHA-256's 64, the only kind a read may be kept for.
+    #[test]
+    fn a_whole_sha_is_forty_or_sixty_four_hex_digits() {
+        let forty = "a".repeat(40);
+        let sixty_four = "B".repeat(64);
+        assert!(is_full_sha(&forty) && is_full_sha(&sixty_four));
+        for not in [
+            "abc1234",
+            &"a".repeat(41),
+            &"a".repeat(63),
+            &format!("{}g", "a".repeat(39)),
+            "",
+        ] {
+            assert!(!is_full_sha(not), "{not:?}");
+        }
+        assert!(
+            is_sha("abc1234")
+                && is_sha(&sixty_four)
+                && !is_sha("abc123")
+                && !is_sha(&"a".repeat(65))
+        );
+    }
+
     const CHECKOUT: &str = "/Users/mara/code/payout-service";
 
     fn at_checkout() -> Fill<'static> {
@@ -394,6 +851,7 @@ mod tests {
             checkout: Path::new(CHECKOUT),
             file: None,
             line: None,
+            code: &Code::NONE,
         }
     }
 
@@ -409,6 +867,7 @@ mod tests {
             checkout: Path::new(CHECKOUT),
             file: Some(file),
             line: Some(42),
+            code: &Code::NONE,
         };
         assert_eq!(
             filled("code --goto {file}:{line}", &at),
@@ -445,6 +904,7 @@ mod tests {
             checkout: Path::new("/Users/mara/My Code/pay; rm -rf ~"),
             file: None,
             line: None,
+            code: &Code::NONE,
         };
         assert_eq!(
             filled("open -a Terminal {path}", &at),
@@ -479,9 +939,9 @@ mod tests {
     /// for one is refused by name.
     #[test]
     fn a_placeholder_for_a_synced_value_is_refused_by_name() {
-        for name in ["branch", "title", "repo_url", "web_url", "PATH", ""] {
+        for name in ["title", "repo_url", "web_url", "author", "PATH", ""] {
             let error = fill(&format!("code {{{name}}} {{path}}"), &at_checkout())
-                .expect_err("only the four placeholders fill");
+                .expect_err("only the ten placeholders fill");
             assert_eq!(error, TemplateError::UnknownPlaceholder(name.to_owned()));
             assert!(
                 error.to_string().contains(&format!("{{{name}}}")),
@@ -505,55 +965,286 @@ mod tests {
         assert_eq!(check("cp {path} {path}"), Ok(()));
     }
 
-    /// The shipped list is R-8.21's four, in its order, on macOS only.
+    /// A mirrored git name reaches an argument only when it cannot be read
+    /// as an option or as anything but a name (ADR-0034).
     #[test]
-    fn macos_ships_four_applications_and_the_others_none() {
-        let names: Vec<String> = shipped_on("macos").into_iter().map(|a| a.name).collect();
-        assert_eq!(names, ["VS Code", "Terminal", "Fork", "IntelliJ IDEA"]);
-        for os in ["linux", "windows", "MACOS", ""] {
-            assert!(shipped_on(os).is_empty(), "{os}");
+    fn an_object_value_that_is_not_a_plain_git_name_is_refused() {
+        let at = |code: &Code| -> Result<Vec<String>, TemplateError> {
+            fill(
+                "tool {sha} {base} {head} {branch} {url}",
+                &Fill {
+                    checkout: Path::new(CHECKOUT),
+                    file: None,
+                    line: None,
+                    code,
+                },
+            )
+        };
+        let good = Code {
+            sha: Some("c90d11e4a7b2".into()),
+            base: Some("7be0e4f15c60^".into()),
+            head: Some("feature/PAY-231".into()),
+            branch: Some("feature/PAY-231".into()),
+            url: Some("https://git.example/o/r".into()),
+            pr: None,
+        };
+        assert!(at(&good).is_ok());
+        for (field, bad) in [
+            ("sha", "--upload-pack=x"),
+            ("sha", "c90d"),
+            ("sha", "c90d11e4a7b2^"),
+            ("base", "-x"),
+            ("base", "a..b"),
+            ("base", "a^^"),
+            ("head", "a^"),
+            ("head", "owner/repo:branch"),
+            ("head", ".hidden"),
+            ("branch", "a b"),
+            ("branch", "x.lock"),
+            ("url", "file:///etc/passwd"),
+            ("url", "--help"),
+            ("url", "https://git.example/o/r\u{1b}[2J"),
+        ] {
+            let mut code = good.clone();
+            let slot = match field {
+                "sha" => &mut code.sha,
+                "base" => &mut code.base,
+                "head" => &mut code.head,
+                "branch" => &mut code.branch,
+                _ => &mut code.url,
+            };
+            *slot = Some(bad.to_owned());
+            assert_eq!(
+                at(&code),
+                Err(TemplateError::Refused {
+                    name: field.to_owned(),
+                    value: bad.to_owned()
+                }),
+                "{field} = {bad}"
+            );
         }
-        assert!(shipped_on("macos").iter().any(|a| a.id == SHIPPED_DEFAULT));
+        assert_eq!(
+            at(&Code { url: None, ..good }),
+            Err(TemplateError::NoValue("url".to_owned()))
+        );
     }
 
-    /// What `open` receives from each shipped command, spelled out rather than
-    /// derived from the list.
+    /// Each object carries its own placeholders and no other's.
     #[test]
-    fn the_shipped_commands_fill_to_the_documented_argv() {
-        let file = Path::new("/Users/mara/code/payout-service/src/lib.rs");
-        let at_file = Fill {
-            checkout: Path::new(CHECKOUT),
-            file: Some(file),
-            line: Some(3),
+    fn a_command_takes_only_its_objects_placeholders() {
+        assert_eq!(
+            check_for("tig show {sha} {path}", ObjectKind::Commit),
+            Ok(())
+        );
+        assert_eq!(
+            check_for("difftool {base} {head}", ObjectKind::Range),
+            Ok(())
+        );
+        assert_eq!(
+            check_for(
+                "x {pr} {branch} {base} {head} {url}",
+                ObjectKind::PullRequest
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            check_for("tig show {head}", ObjectKind::Commit),
+            Err(TemplateError::NotForObject {
+                name: "head".to_owned(),
+                object: ObjectKind::Commit
+            })
+        );
+        assert_eq!(
+            check_for("x {file}", ObjectKind::Range),
+            Err(TemplateError::NotForObject {
+                name: "file".to_owned(),
+                object: ObjectKind::Range
+            })
+        );
+        assert!(
+            check_for("x {sha}", ObjectKind::Repository)
+                .unwrap_err()
+                .to_string()
+                .contains("{path}, {file}, {line}, {name}, {url}")
+        );
+    }
+
+    /// The applications saved before #2274 are repository and file
+    /// applications, and one accepts a commit, a range or a pull request
+    /// only by having that command.
+    #[test]
+    fn an_application_accepts_the_objects_it_has_a_command_for() {
+        let old: Application = serde_json::from_str(
+            r#"{"id":"vscode","name":"VS Code","command":"code {path}","file_command":null}"#,
+        )
+        .unwrap();
+        let kinds = |app: &Application| -> Vec<ObjectKind> {
+            ObjectKind::ALL
+                .into_iter()
+                .filter(|k| app.accepts(*k))
+                .collect()
         };
-        let argv: Vec<(Vec<String>, Option<Vec<String>>)> = shipped_on("macos")
+        assert_eq!(kinds(&old), [ObjectKind::Repository, ObjectKind::File]);
+        assert_eq!(old.command_for(ObjectKind::File), Some("code {path}"));
+        let tig = Application {
+            commit_command: Some("tig show {sha}".into()),
+            ..old.clone()
+        };
+        assert_eq!(
+            kinds(&tig),
+            [ObjectKind::Repository, ObjectKind::File, ObjectKind::Commit]
+        );
+        assert_eq!(
+            serde_json::to_value(&old).unwrap(),
+            serde_json::json!({"id":"vscode","name":"VS Code","command":"code {path}","file_command":null}),
+            "an old application is stored as it was"
+        );
+    }
+
+    /// Each platform's shipped list, in its order (#2275); none elsewhere.
+    #[test]
+    fn macos_linux_and_windows_ship_their_applications_and_the_others_none() {
+        let names =
+            |os: &str| -> Vec<String> { shipped_on(os).into_iter().map(|a| a.name).collect() };
+        assert_eq!(
+            names("macos"),
+            ["VS Code", "Terminal", "Fork", "IntelliJ IDEA"]
+        );
+        assert_eq!(names("linux"), ["VS Code", "Terminal", "Files"]);
+        assert_eq!(
+            names("windows"),
+            ["VS Code", "Windows Terminal", "File Explorer"]
+        );
+        for os in ["freebsd", "MACOS", "Linux", ""] {
+            assert!(shipped_on(os).is_empty(), "{os}");
+        }
+        for os in ["macos", "linux", "windows"] {
+            assert!(
+                shipped_on(os).iter().any(|a| a.id == SHIPPED_DEFAULT),
+                "{os}"
+            );
+        }
+    }
+
+    /// What `open` receives from each shipped command on `os` (the
+    /// repository's, the file's, the pull request's), spelled out rather than
+    /// derived from the list.
+    fn shipped_argv(os: &str, checkout: &str, file: &str) -> Vec<[Option<Vec<String>>; 3]> {
+        let code = Code {
+            pr: Some(7),
+            base: Some("main".into()),
+            head: Some("feature/x".into()),
+            branch: Some("feature/x".into()),
+            ..Code::NONE
+        };
+        let at = |file: Option<&'static Path>| Fill {
+            checkout: Path::new(checkout),
+            file,
+            line: Some(3),
+            code: &code,
+        };
+        let file: &'static Path = Box::leak(Path::new(file).to_path_buf().into_boxed_path());
+        shipped_on(os)
             .iter()
             .map(|a| {
-                (
-                    filled(&a.command, &at_checkout()),
-                    a.file_command.as_deref().map(|c| filled(c, &at_file)),
-                )
+                [
+                    Some(filled(&a.command, &at(None))),
+                    a.file_command
+                        .as_deref()
+                        .map(|c| filled(c, &at(Some(file)))),
+                    a.pull_request_command
+                        .as_deref()
+                        .map(|c| filled(c, &at(None))),
+                ]
             })
-            .collect();
-        let s = |v: &[&str]| v.iter().map(|x| (*x).to_owned()).collect::<Vec<_>>();
+            .collect()
+    }
+
+    fn s(v: &[&str]) -> Option<Vec<String>> {
+        Some(v.iter().map(|x| (*x).to_owned()).collect())
+    }
+
+    #[test]
+    fn the_macos_commands_fill_to_the_documented_argv() {
+        let file = "/Users/mara/code/payout-service/src/lib.rs";
         assert_eq!(
-            argv,
+            shipped_argv("macos", CHECKOUT, file),
             [
-                (
+                [
                     s(&["open", "-a", "Visual Studio Code", CHECKOUT]),
-                    Some(s(&[
-                        "open",
-                        "-a",
-                        "Visual Studio Code",
-                        file.to_str().unwrap()
-                    ]))
-                ),
-                (s(&["open", "-a", "Terminal", CHECKOUT]), None),
-                (s(&["open", "-a", "Fork", CHECKOUT]), None),
-                (
+                    s(&["open", "-a", "Visual Studio Code", file]),
+                    s(&["open", "-a", "Visual Studio Code", CHECKOUT]),
+                ],
+                [
+                    s(&["open", "-a", "Terminal", CHECKOUT]),
+                    None,
+                    s(&["open", "-a", "Terminal", CHECKOUT]),
+                ],
+                [
+                    s(&["open", "-a", "Fork", CHECKOUT]),
+                    None,
+                    s(&["open", "-a", "Fork", CHECKOUT]),
+                ],
+                [
                     s(&["open", "-a", "IntelliJ IDEA", CHECKOUT]),
-                    Some(s(&["open", "-a", "IntelliJ IDEA", file.to_str().unwrap()]))
-                ),
+                    s(&["open", "-a", "IntelliJ IDEA", file]),
+                    s(&["open", "-a", "IntelliJ IDEA", CHECKOUT]),
+                ],
+            ]
+        );
+    }
+
+    /// A path with a space stays one argument, and `{file}:{line}` is one.
+    #[test]
+    fn the_linux_commands_fill_to_the_documented_argv() {
+        let (checkout, file) = (
+            "/home/mara/my code/payout",
+            "/home/mara/my code/payout/src/lib.rs",
+        );
+        assert_eq!(
+            shipped_argv("linux", checkout, file),
+            [
+                [
+                    s(&["code", checkout]),
+                    s(&["code", "--goto", "/home/mara/my code/payout/src/lib.rs:3"]),
+                    s(&["code", checkout]),
+                ],
+                [
+                    s(&[
+                        "gnome-terminal",
+                        "--working-directory=/home/mara/my code/payout"
+                    ]),
+                    None,
+                    s(&[
+                        "gnome-terminal",
+                        "--working-directory=/home/mara/my code/payout"
+                    ]),
+                ],
+                [s(&["xdg-open", checkout]), None, s(&["xdg-open", checkout])],
+            ]
+        );
+    }
+
+    #[test]
+    fn the_windows_commands_fill_to_the_documented_argv() {
+        let (checkout, file) = (
+            r"C:\Users\Mara\code\pay out",
+            r"C:\Users\Mara\code\pay out\src\lib.rs",
+        );
+        assert_eq!(
+            shipped_argv("windows", checkout, file),
+            [
+                [
+                    s(&["code.cmd", checkout]),
+                    s(&[
+                        "code.cmd",
+                        "--goto",
+                        r"C:\Users\Mara\code\pay out\src\lib.rs:3"
+                    ]),
+                    s(&["code.cmd", checkout]),
+                ],
+                [s(&["wt", "-d", checkout]), None, s(&["wt", "-d", checkout]),],
+                [s(&["explorer", checkout]), None, s(&["explorer", checkout])],
             ]
         );
     }
@@ -583,6 +1274,7 @@ mod tests {
             name: name.to_owned(),
             command: command.to_owned(),
             file_command: file.map(str::to_owned),
+            ..Draft::default()
         }
     }
 
@@ -629,8 +1321,11 @@ mod tests {
             error,
             ListError::Command {
                 name: "Viewer".to_owned(),
-                for_file: false,
-                error: TemplateError::UnknownPlaceholder("branch".to_owned()),
+                object: ObjectKind::Repository,
+                error: TemplateError::NotForObject {
+                    name: "branch".to_owned(),
+                    object: ObjectKind::Repository
+                },
             }
         );
         assert!(error.to_string().contains("Viewer's command"), "{error}");
@@ -639,11 +1334,28 @@ mod tests {
             error.to_string().contains("Viewer's file command"),
             "{error}"
         );
+        let error = settle(&[Draft {
+            range_command: Some("d {sha}".into()),
+            ..draft(None, "Diff", "d {path}", None)
+        }])
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("Diff's range command"),
+            "{error}"
+        );
+        let saved = settle(&[Draft {
+            commit_command: Some(" tig show {sha} ".into()),
+            range_command: Some(" ".into()),
+            ..draft(None, "Tig", "tig {path}", None)
+        }])
+        .unwrap();
+        assert_eq!(saved[0].commit_command.as_deref(), Some("tig show {sha}"));
+        assert_eq!(saved[0].range_command, None, "a blank command is none");
         assert_eq!(
             settle(&[draft(None, "Viewer", "  ", None)]).unwrap_err(),
             ListError::Command {
                 name: "Viewer".to_owned(),
-                for_file: false,
+                object: ObjectKind::Repository,
                 error: TemplateError::Empty,
             }
         );

@@ -130,6 +130,7 @@
     spaceOfPage,
     stemsOf,
   } from "./docs";
+  import { pageVisible } from "../kept-pages.svelte";
 
   /** The page's own reads and writes; *Link to…* uses the job's ports. */
   export interface DocsPorts {
@@ -566,8 +567,11 @@
   }
 
   // `/` focuses the search from anywhere in Docs, opening the drawer first below 900px.
+  const pageShown = pageVisible();
   $effect(() => {
     const onkey = (event: KeyboardEvent) => {
+      // A page keep-alive holds hidden (#2247) takes no keys.
+      if (!pageShown()) return;
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
       const at = document.activeElement;
       if (at instanceof HTMLInputElement || at instanceof HTMLTextAreaElement || at instanceof HTMLSelectElement) return;

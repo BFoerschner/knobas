@@ -15,6 +15,8 @@
   status. Only the newest list read may land (`latestRead`, #107).
 -->
 <script lang="ts">
+  import { pageVisible } from "../kept-pages.svelte";
+  import { everyWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage, EVENTS } from "../../ipc";
   import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import { health as sharedHealth, type Health } from "../../shell/health.svelte";
@@ -40,6 +42,8 @@
   import TfNotificationsSection from "./TfNotificationsSection.svelte";
   import TfStandupSection from "./TfStandupSection.svelte";
   import TfTimeSection from "./TfTimeSection.svelte";
+  import TfPerformanceSection from "./TfPerformanceSection.svelte";
+  import TfRenderersSection from "./TfRenderersSection.svelte";
 
   let {
     rest,
@@ -75,7 +79,7 @@
   } = $props();
 
   /** The sections #831 draws whose first paint waits on a read. */
-  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "notes", "backup", "logs", "checkouts"]);
+  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "notes", "backup", "logs", "checkouts", "performance", "renderers"]);
 
   const place = $derived(settingsPlace(rest));
   const sourceId = $derived("source" in place ? place.source : null);
@@ -90,6 +94,8 @@
   let finished = $state(0);
   // svelte-ignore state_referenced_locally
   let clock = $state(now());
+  // Moved every thirty seconds while the page is shown, at once on its return (#2249).
+  everyWhileShown(pageVisible(), 30_000, () => (clock = now()));
 
   const readAdapters = latestRead<SourceDescriptor[]>();
   /**
@@ -139,10 +145,8 @@
       })
       .then((off) => (dead ? off() : offs.push(off)))
       .catch(() => {});
-    const tick = setInterval(() => (clock = now()), 30_000);
     return () => {
       dead = true;
-      clearInterval(tick);
       for (const off of offs.splice(0)) off();
     };
   });
@@ -234,6 +238,10 @@
         <TfBackupSection ports={sectionPorts} {layers} now={clock} onrestored={() => void load()} />
       {:else if place.section === "appearance"}
         <TfAppearanceSection {theme} />
+      {:else if place.section === "performance"}
+        <TfPerformanceSection ports={sectionPorts} />
+      {:else if place.section === "renderers"}
+        <TfRenderersSection {...sectionPorts.renderers ? { ports: sectionPorts.renderers } : {}} />
       {:else if place.section === "keyboard"}
         <TfKeyboardSection />
       {:else if place.section === "logs"}

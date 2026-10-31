@@ -142,6 +142,7 @@
     savedShowing,
     type CopiedFrom,
   } from "./views";
+  import { pageVisible } from "../kept-pages.svelte";
 
   let {
     ready,
@@ -533,8 +534,11 @@
 
   // `Enter` presses the preview's button (R-3.9), from anywhere but a field
   // that types or a control of its own; a card is not one.
+  const pageShown = pageVisible();
   onMount(() => {
     const onkey = (event: KeyboardEvent) => {
+      // A page keep-alive holds hidden (#2247) takes no keys.
+      if (!pageShown()) return;
       if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       const at = document.activeElement;
       if (at instanceof HTMLElement && inTextField(at)) return;

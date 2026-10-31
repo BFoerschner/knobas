@@ -199,6 +199,7 @@ fn descriptor(reads: Reads) -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        code_pages: None,
         write_ops: vec!["comment".to_owned(), "create_ticket".to_owned()],
         entity_kinds: vec![kind("ticket"), kind("build")],
         config_schema: json!({"type": "object", "properties": {}}),
@@ -324,6 +325,7 @@ async fn fixture(name: &str) -> Fixture {
     .expect("a scheduler");
     Fixture {
         state: SourcesState {
+            live: Default::default(),
             pool,
             scheduler,
             secrets,
@@ -807,6 +809,7 @@ async fn scheduled(
     .expect("a scheduler");
     (
         SourcesState {
+            live: Default::default(),
             pool,
             scheduler,
             secrets,

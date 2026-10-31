@@ -435,6 +435,7 @@ impl knobas_sync::scheduler::AdapterRegistry for ProbeRegistry {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            code_pages: None,
             write_ops: Vec::new(),
             entity_kinds: Vec::new(),
             config_schema: serde_json::json!({}),
@@ -514,6 +515,7 @@ fn sources_state(
     tokio::task::block_in_place(|| {
         tauri::async_runtime::block_on(async move {
             knobas_app::sources::SourcesState {
+                live: Default::default(),
                 scheduler: knobas_app::sources::test_scheduler(
                     &handle,
                     db,

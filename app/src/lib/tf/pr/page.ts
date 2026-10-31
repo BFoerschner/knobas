@@ -12,5 +12,7 @@ type PrPageRoute = Extract<TfRoute, { view: "full" }> & { section: "code"; head:
 export const page = definePage({
   matches: (route): route is PrPageRoute => route.view === "full" && route.section === "code" && route.head === "pr",
   component: TfPr,
+  // One page per pull request; its tabs are that page drawn again (#2247).
+  address: (route) => route.rest[0] ?? "",
   props: ({ route, ready, job, jobAt }) => ({ ready, rest: route.rest, job, jobAt }),
 });

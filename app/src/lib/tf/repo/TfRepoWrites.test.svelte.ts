@@ -164,6 +164,9 @@ const DIFF: ViewBlock = {
   ],
 };
 
+/** The change against a base other than main (#2271). */
+const ELSEWHERE: ViewBlock = DIFF.type === "diff" ? { ...DIFF, files: [{ ...DIFF.files[0]!, path: "CHANGELOG.md" }] } : DIFF;
+
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
 let writes: WriteOpPayload[];
@@ -228,10 +231,13 @@ function ports(over: Partial<RepoPorts> = {}): RepoPorts {
         ]);
       if (section === null && BRANCH_VIEWS[id]) return BRANCH_VIEWS[id]!;
       if (section === "diff" && BRANCH_VIEWS[id]) return one("diff", [DIFF], 1);
+      // Any base against any head (#2271): main's diff, and another file against any other base.
+      if (id === REPO && section?.startsWith("compare:"))
+        return one(section, [section.startsWith("compare:main...") ? DIFF : ELSEWHERE], 1);
       if (section === "files") return one("files", [{ type: "tree", trail: [], entries: [{ name: "README.md", kind: "file", size: 9, section: "file:README.md" }], truncated: false, url: null }]);
       if (section === "file:README.md")
         return one("file:README.md", [
-          { type: "file", trail: [], path: "README.md", text: "# payout\nold line\n", language: null, size: 18, truncated: false, binary: false, url: null, sha: "blob-1" },
+          { type: "file", trail: [], path: "README.md", text: "# payout\nold line\n", language: null, size: 18, truncated: false, binary: false, url: null, sha: "blob-1", commit: null },
         ]);
       if (section === "commits") return one("commits", [{ type: "entities", title: null, rows: [] }]);
       if (id === C1 && section === null) return { ...one("diff", [DIFF], 1), actions: [NEW_BRANCH] };
@@ -293,6 +299,11 @@ const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g
 const button = (label: string, root: ParentNode = document) =>
   [...root.querySelectorAll<HTMLButtonElement>("button, a")].find((b) => text(b) === label) as HTMLButtonElement | undefined;
 const dialog = () => document.querySelector(".tf-dialog");
+/** The file header's *More* (⋯), opened: *Edit* is among its items (#2311). */
+async function more() {
+  target.querySelector<HTMLButtonElement>(".tf-fileview header button[aria-label='More']")!.click();
+  await settle();
+}
 const rowOf = (name: string) =>
   [...target.querySelectorAll(".tf-rbranches tbody tr")].find((tr) => text(tr.querySelector("td")).startsWith(name))!;
 
@@ -355,8 +366,9 @@ test("Branches lists main as default, then each branch with ahead and behind or 
   expect(locked.title).toBe("Protected branch: lift its protection on Gitea to delete it");
   expect(text(target.querySelector(".tf-rbranches-note"))).toBe("The first 5 branches; there may be more on Gitea.");
   // Each branch's standing is its own view's read.
-  // Each branch's whole view, and the repository's for its toolbar (#2030).
-  expect(reads.filter(([, section]) => section === null).map(([id]) => id).sort()).toEqual([CHORE, FEATURE, LOCKED, REPO, SPIKE].sort());
+  // Each branch's whole view; the repository's never (#2243): *New branch…*
+  // asks `refused_writes` (#2241).
+  expect(reads.filter(([, section]) => section === null).map(([id]) => id).sort()).toEqual([CHORE, FEATURE, LOCKED, SPIKE].sort());
 });
 
 test("the Branches filter narrows by name, No PR and Merged", async () => {
@@ -517,13 +529,24 @@ test("New branch from here… starts the branch at the commit's whole sha", asyn
 /** What a token that may only read is told, in its source's words (#2030). */
 const READ_ONLY = "This token cannot write: it lacks the write:repository scope";
 
-/** `ports()`, the repository's whole view offering `actions` as its toolbar. */
+/**
+ * `ports()`, the source answering `refused_writes` with `actions`' disabled
+ * reasons (#2241), and the whole repository view, never asked for (#2243),
+ * failing the test if it is.
+ */
 const repoToolbar = (actions: ViewAction[], over: Partial<RepoPorts> = {}): RepoPorts => {
   const base = ports(over);
   return {
     ...base,
-    entityView: async (id, section) =>
-      id === REPO && section === null ? { sections: [], actions } : base.entityView(id, section),
+    entityView: async (id, section) => {
+      if (id === REPO && section === null) throw new Error("the page read the whole repository view");
+      return base.entityView(id, section);
+    },
+    refusedWrites: async (asks) =>
+      asks.flatMap((ask) => {
+        const offered = actions.find((candidate) => candidate.write_op === ask.op);
+        return offered?.disabled ? [{ ...ask, reason: offered.disabled }] : [];
+      }),
   };
 };
 
@@ -554,7 +577,8 @@ const COMPARE = (branch: string) => [REPO, "compare", ...branch.split("/")];
 
 test("the compare page offers Open PR #N where a pull request is already open from the branch", async () => {
   await draw(COMPARE("feature/PAY-231-sepa-retry"), "PAY-231");
-  expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toContain("Pull requests");
+  // Compare is its own tab since #2257 (the mockup's ruling on #2252).
+  expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toBe("Compare");
   expect(text(target.querySelector(".tf-compare .tf-chip.tf-info"))).toBe("PR #142 is already open from this branch");
   expect(button("Open PR #142", target)!.getAttribute("href")).toBe("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
   expect(button("Create pull request", target)).toBeUndefined();
@@ -620,6 +644,57 @@ test("From changes the address; a branch holding a key proposes its ticket's tit
   );
 });
 
+test("Into is the diff's base: picking another reads and draws the change against it (#2271)", async () => {
+  await draw(COMPARE("spike/sepa-instant"));
+  expect(reads).toContainEqual([REPO, "compare:main...spike/sepa-instant"]);
+  const paths = () => [...target.querySelectorAll(".tf-compare .tf-diff .tf-fh .tf-mono")].map((h) => text(h));
+  expect(paths()).toEqual(["src/retry.rs"]);
+  const into = target.querySelector<HTMLSelectElement>(".tf-compare select")!;
+  into.value = "release/1.9";
+  into.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  // Until release/1.9's diff answers, main's count is not offered as release/1.9's.
+  expect(target.querySelector(".tf-compare .tf-cfiles")).toBeNull();
+  await settle();
+  expect(reads).toContainEqual([REPO, "compare:release/1.9...spike/sepa-instant"]);
+  expect(paths()).toEqual(["CHANGELOG.md"]);
+  expect(text(target.querySelector(".tf-compare .tf-cfiles"))).toBe("1 file changed against release/1.9");
+  // The diff has its own address, from Into to From.
+  expect(button("Open as diff", target)!.getAttribute("href")).toBe(
+    "#/diff/gitea%3Atidewater%2Fpayout-service/release%2F1.9/spike%2Fsepa-instant",
+  );
+});
+
+test("Open as diff names the compare's two commits once the source settled them, so the diff page can read it locally (Spec 5)", async () => {
+  const [mergeBase, tip] = ["907900b245f2941018dfd3ee155b876ef701c10a", "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192"];
+  const base = ports();
+  await draw(COMPARE("spike/sepa-instant"), null, {
+    ...base,
+    entityView: async (id, section) => {
+      const answer = await base.entityView(id, section);
+      if (id !== REPO || section !== "compare:main...spike/sepa-instant" || answer === null) return answer;
+      const block = answer.sections[0]!.blocks.find((b) => b.type === "diff");
+      if (block?.type === "diff") block.range = { repository: REPO, base: mergeBase, head: tip, commits: [] };
+      return answer;
+    },
+  });
+  expect(button("Open as diff", target)!.getAttribute("href")).toBe(`#/diff/gitea%3Atidewater%2Fpayout-service/${mergeBase}/${tip}`);
+});
+
+test("Compare reads its diff through the range read, local-first like every diff (Spec 6)", async () => {
+  const asked: string[] = [];
+  const local = { path: "src/local.rs", old_path: null, change: "modified" as const, additions: 1, deletions: 0, hunks: [], truncated: false, threads: [] };
+  await draw(COMPARE("spike/sepa-instant"), null, {
+    ...ports(),
+    rangeDiff: async (id, base, head, ignoreWhitespace) => {
+      asked.push(`${id} ${base}...${head}${ignoreWhitespace ? " -w" : ""}`);
+      return { files: [local], truncated: false, range: null, read_at: "checkout" as const };
+    },
+  });
+  expect(asked).toEqual([`${REPO} main...spike/sepa-instant`]);
+  expect([...target.querySelectorAll(".tf-compare .tf-diff .tf-fh .tf-mono")].map((h) => text(h))).toEqual(["src/local.rs"]);
+});
+
 test("Into picked stays picked when From changes, and is the base queued", async () => {
   // The shell keeps the page mounted and hands it the new address.
   const props = $state({ ready: true, rest: COMPARE("chore/bump-tokio"), job: null as string | null, ports: ports(), now: NOW });
@@ -677,6 +752,7 @@ const editor = () => target.querySelector<HTMLTextAreaElement>(".tf-editor texta
 
 test("Edit turns the file into an editor that says the commit goes to Gitea and the checkout is never written", async () => {
   await draw([REPO, "files", "README.md"]);
+  await more();
   expect(button("Edit", target)!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/edit/README.md");
   unmount(view!);
   view = null;
@@ -707,7 +783,7 @@ test("the commit dialog shows the diff and a message with the job key, and queue
   button("Commit change…", target)!.click();
   flushSync();
   expect(text(dialog()!.querySelector("h2"))).toBe("Commit README.md");
-  expect([...dialog()!.querySelectorAll(".tf-diff .tf-ln")].map(text)).toEqual(["1 # payout", "2− old line", "2+ new line", "3"]);
+  expect([...dialog()!.querySelectorAll(".tf-diff .tf-ln")].map(text)).toEqual(["11 # payout", "2− old line", "2+ new line", "33"]);
   const message = dialog()!.querySelector<HTMLInputElement>("#tf-cf-msg")!;
   expect(message.value).toBe("PAY-231: update README.md");
   const radios = [...dialog()!.querySelectorAll<HTMLInputElement>("input[type=radio]")];
@@ -798,7 +874,9 @@ test("a file with no blob sha to commit against cannot be edited, and says why",
     return answer;
   };
   await draw([REPO, "files", "README.md"], null, stand);
-  const edit = button("Edit", target)!;
+  await more();
+  const edit = target.querySelector<HTMLElement>(".tf-fmore [role=menuitem][aria-disabled='true']")!;
+  expect(edit.firstChild?.textContent).toBe("Edit");
   expect(edit.getAttribute("aria-disabled")).toBe("true");
   expect(edit.title).toBe("The source did not say which version of the file this is, so a commit could not be checked against it");
 });
@@ -806,15 +884,11 @@ test("a file with no blob sha to commit against cannot be edited, and says why",
 const PROTECTED =
   "main is a protected branch that this account may not push to: commit to a new branch and open a pull request instead";
 
-/** The file section declaring its own `commit_file`, disabled with `disabled` where given (#985). */
+/** The source answering `refused_writes` for a commit onto the branch with `disabled` where given (#985, #2241). */
 function declaring(disabled: string | null): RepoPorts {
   const stand = ports();
-  const read = stand.entityView;
-  stand.entityView = async (id, section) => {
-    const answer = await read(id, section);
-    if (section === "file:README.md") answer!.sections[0]!.blocks.push({ type: "actions", actions: [action("commit_file", disabled)] });
-    return answer;
-  };
+  stand.refusedWrites = async (asks) =>
+    disabled === null ? [] : asks.filter((ask) => ask.op === "commit_file").map((ask) => ({ ...ask, reason: disabled }));
   return stand;
 }
 

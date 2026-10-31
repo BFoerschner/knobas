@@ -1,0 +1,73 @@
+import { expect, test } from "vitest";
+
+import { frameDocument, frameSource, svgFrame } from "./frame";
+
+/** The SVG inside a frame's `<img>`, decoded. */
+function imageIn(srcdoc: string): string {
+  const doc = new DOMParser().parseFromString(srcdoc, "text/html");
+  const src = doc.querySelector("img")?.getAttribute("src") ?? "";
+  expect(src).toMatch(/^data:image\/svg\+xml;base64,/);
+  return new TextDecoder().decode(Uint8Array.from(atob(src.split(",")[1]!), (c) => c.charCodeAt(0)));
+}
+
+const HOSTILE =
+  '<svg viewBox="-8 -8 216.4 96" width="100%" style="max-width: 216px"><script>parent.x = 1</script>' +
+  '<a href="javascript:alert(1)"><text onclick="alert(2)">hi</text></a><g onmouseover="alert(3)"><rect width="5" height="5"/></g></svg>';
+
+test("an SVG is drawn as an image in the frame, sized to its viewBox", () => {
+  const frame = svgFrame(HOSTILE)!;
+  expect([frame.width, frame.height]).toEqual([217, 96]);
+  const doc = new DOMParser().parseFromString(frame.srcdoc, "text/html");
+  const img = doc.querySelector("img")!;
+  expect([img.getAttribute("width"), img.getAttribute("height")]).toEqual(["217", "96"]);
+  expect(doc.body.getAttribute("marginwidth")).toBe("0");
+  const svg = imageIn(frame.srcdoc);
+  expect(svg).toContain('width="217"');
+  expect(svg).not.toContain("max-width");
+  expect(svg).toContain(">hi<");
+});
+
+test("the SVG is sanitized first: no script, no handler, no javascript: link", () => {
+  const svg = imageIn(svgFrame(HOSTILE)!.srcdoc);
+  expect(svg).not.toMatch(/<script/i);
+  expect(svg).not.toMatch(/\bon[a-z]+=/i);
+  expect(svg).not.toMatch(/javascript:/i);
+});
+
+test("the frame's document takes the drawing's colour scheme", () => {
+  expect(svgFrame(HOSTILE, true)!.srcdoc).toContain('<meta name="color-scheme" content="dark">');
+  expect(svgFrame(HOSTILE, false)!.srcdoc).toContain('<meta name="color-scheme" content="light">');
+});
+
+test("markup with no SVG in it gives no frame", () => {
+  expect(svgFrame("<p>not a drawing</p>")).toBeNull();
+});
+
+// -- A command renderer's HTML from its own origin (#2304) --------------------
+
+const bridge = { isTauri: () => true, convertFileSrc: (path: string, protocol: string) => `${protocol}://localhost/${encodeURIComponent(path)}` };
+const decoded = (src: string) => {
+  const b64 = decodeURIComponent(src.slice("knobas-render://localhost/".length)).replace(/-/g, "+").replace(/_/g, "/");
+  return new TextDecoder().decode(Uint8Array.from(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4)), (c) => c.charCodeAt(0)));
+};
+
+test("under the app's bridge, HTML is served from knobas-render with its styles kept and its script gone", () => {
+  const html = `<style>h1 { color: red }</style><h1 style="font-size: 2em">Title é</h1><script>parent.x = 1</script>`;
+  const frame = frameSource("html", html, bridge);
+
+  expect("srcdoc" in frame).toBe(false);
+  const src = (frame as { src: string }).src;
+  expect(src.startsWith("knobas-render://localhost/")).toBe(true);
+  const doc = decoded(src);
+  expect(doc).toContain("<style>h1 { color: red }</style>");
+  expect(doc).toContain('style="font-size: 2em"');
+  expect(doc).toContain("Title é");
+  expect(doc).not.toMatch(/<script/i);
+});
+
+test("without the bridge (dev, tests) and for SVG, the frame is a srcdoc as before", () => {
+  const html = "<p>x</p>";
+  expect(frameSource("html", html, { isTauri: () => false, convertFileSrc: bridge.convertFileSrc })).toEqual({ srcdoc: frameDocument("html", html) });
+  const svg = '<svg viewBox="0 0 2 2"><rect width="2" height="2"/></svg>';
+  expect(frameSource("svg", svg, bridge)).toEqual({ srcdoc: frameDocument("svg", svg) });
+});

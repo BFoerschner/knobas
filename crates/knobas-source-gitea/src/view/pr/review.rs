@@ -60,9 +60,16 @@ pub(super) fn takes_reviews(pull: &Pull) -> bool {
 
 /// How a reader comments on `pull`'s diff (#709): through `submit_review`,
 /// while Gitea takes a review of it; `None` once it is closed or merged.
-pub(super) fn commenting(pull: &Pull) -> Option<Commenting> {
+/// A reply to a thread goes the same way (#2277). Resolving one is offered
+/// only where the server `resolves`: Gitea does, Forgejo 17 cannot through
+/// its API (405, the fact note of 2026-10-30), so a Forgejo diff offers
+/// replies and no resolve.
+pub(super) fn commenting(pull: &Pull, resolves: bool) -> Option<Commenting> {
     takes_reviews(pull).then(|| Commenting {
         write_op: crate::WRITE_OP_SUBMIT_REVIEW.to_owned(),
+        reply: Some(crate::WRITE_OP_REPLY_TO_THREAD.to_owned()),
+        resolve: resolves.then(|| crate::WRITE_OP_RESOLVE_THREAD.to_owned()),
+        head: pull.head.as_ref().and_then(|h| h.sha.clone()),
     })
 }
 

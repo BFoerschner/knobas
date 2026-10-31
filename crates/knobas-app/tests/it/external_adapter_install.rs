@@ -624,6 +624,7 @@ async fn the_fixture_s_custom_role_opens_its_block_view() {
         &pool,
         &secrets,
         &crate::support::shared(registry.clone()),
+        &knobas_app::sources::live::LiveSources::default(),
         "surveys:survey-2",
         None,
     )

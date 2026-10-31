@@ -262,6 +262,15 @@ front-changed base="origin/main": deps
 shot slot out +routes:
     scripts/shot.sh "$@"
 
+# Keep-alive's budget and memory witness (#2250, testenv/README.md *Scripts*):
+# headless Chrome against the `?fake-ipc` dev server on 5300 + slot. Times the
+# return to a visited repository tab (Files with a 10,000-line file, after
+# Commits) and fails when the median is over 50 ms; prints the JS heap and DOM
+# node count with five pages held, at *Pages kept open* 5 and 0, and the load.
+# A timing: read it beside `scripts/machine-load.sh`'s line, which it prints.
+keep-alive-budget slot:
+    scripts/keep-alive-budget.sh "{{slot}}"
+
 # The merge gate: `check-front` when `scripts/gate-scope.sh BASE` says the head
 # is frontend-only against BASE, the full `check` otherwise.
 #
@@ -1559,6 +1568,8 @@ gitea-live forge="gitea":
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
       -- --ignored --nocapture --test-threads=1 --exact each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_up_run
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test clone_live \
+      -- --ignored --nocapture --test-threads=1
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test read_cache_live \
       -- --ignored --nocapture --test-threads=1
 
 # The same real container, reconfigured to answer FEWER records than the adapter

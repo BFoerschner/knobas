@@ -52,6 +52,7 @@
     type Strength,
     type Verdict,
   } from "./review";
+  import { pageVisible } from "../kept-pages.svelte";
 
   let {
     ready,
@@ -196,8 +197,11 @@
 
   const KEYS: Record<string, Verdict> = { y: "yes", n: "no", s: "skip" };
 
+  const pageShown = pageVisible();
   onMount(() => {
     const onkey = (event: KeyboardEvent) => {
+      // A page keep-alive holds hidden (#2247) takes no keys.
+      if (!pageShown()) return;
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       const verdict = KEYS[event.key.toLowerCase()];
       if (verdict === undefined || current === null || layers.open.length > 0) return;

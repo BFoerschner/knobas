@@ -26,6 +26,10 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "detail/view-read.ts#flights": async () => (await import("../detail/view-read")).viewMemory.clear(),
   // The pending line comments (#709).
   "detail/view/pending-comments.svelte.ts#pendingComments": async () => (await import("../detail/view/pending-comments.svelte")).pendingComments.forget(),
+  // Split or unified (#2266), stored in `localStorage`: each test starts unified.
+  "tf/diff/diff-layout.svelte.ts#diffLayout": async () => (await import("../tf/diff/diff-layout.svelte")).diffLayout.reset(),
+  // *Run pipelines on diffs* (#2270), stored in `localStorage`: each test starts with it on.
+  "tf/diff/diff-pipelines.svelte.ts#diffPipelines": async () => (await import("../tf/diff/diff-pipelines.svelte")).diffPipelines.reset(),
   // The source list's role claims (#1196), held once per window.
   "tf/roles.svelte.ts#sourceRoles": async () => (await import("../tf/roles.svelte")).sourceRoles.forget(),
   // The stack and its dismiss timers, in one reset.
@@ -45,6 +49,7 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "inbox/notify.svelte.ts#notifications": async () => (await import("../inbox/notify.svelte")).notifications.reset(),
   "shell/timer.svelte.ts#timer": async () => (await import("./timer.svelte")).timer.reset(),
   "tf/badges.svelte.ts#badges": async () => (await import("../tf/badges.svelte")).badges.reset(),
+  "tf/kept-pages.svelte.ts#keptPages": async () => (await import("../tf/kept-pages.svelte")).keptPages.reset(),
   "tf/role-sync.svelte.ts#roleSyncs": async () => (await import("../tf/role-sync.svelte")).roleSyncs.forget(),
   "tf/role-sync.svelte.ts#sourceSyncs": async () => (await import("../tf/role-sync.svelte")).sourceSyncs.forget(),
   "tf/deps/views.svelte.ts#depViewState": async () => (await import("../tf/deps/views.svelte")).depViewState.reset(),
@@ -61,6 +66,10 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/queued.svelte.ts#asked": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#follows": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/review/decisions.svelte.ts#decisions": async () => (await import("../tf/review/decisions.svelte")).decisions.reset(),
+  // The default renderer per file pattern (#2263), as the backend answered it.
+  "render/defaults.svelte.ts#rendererDefaults": async () => (await import("../render/defaults.svelte")).rendererDefaults.reset(),
+  "render/pipelines.svelte.ts#namedPipelines": async () => (await import("../render/pipelines.svelte")).namedPipelines.reset(),
+  "render/pipelines.svelte.ts#commandSteps": async () => (await import("../render/pipelines.svelte")).commandSteps.reset(),
   "tf/theme.svelte.ts#theme": async () => (await import("../tf/theme.svelte")).theme.reset(),
   // Each view's filter, and the set hints *Not now* put away (#1983).
   "tf/filter/filter-state.svelte.ts#kept": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),

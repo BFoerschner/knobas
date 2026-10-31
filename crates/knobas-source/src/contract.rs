@@ -254,6 +254,29 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             id: UNDECLARED_SOURCE_ACTION.into(),
             fields: std::collections::BTreeMap::new(),
         },
+        // A reply, a resolve and a review request (#2277, #2303) would each
+        // speak on somebody's pull request. The target is no pull request's
+        // address -- it has no `#<number>` -- so an adapter that attempted one
+        // anyway is refused on the id's shape before a request leaves.
+        crate::WriteOp::ReplyToThread {
+            entity: target.clone(),
+            thread: "contract-battery".into(),
+            comment: crate::ReviewComment {
+                path: "contract-battery.txt".into(),
+                line: 1,
+                side: crate::ReviewSide::New,
+                body: "contract battery probe".into(),
+            },
+        },
+        crate::WriteOp::ResolveThread {
+            entity: target.clone(),
+            thread: "contract-battery".into(),
+            resolved: true,
+        },
+        crate::WriteOp::RequestReviewers {
+            entity: target.clone(),
+            reviewers: vec!["contract-battery".into()],
+        },
         // A delete could not be taken back. The target is no branch's
         // address -- it has no `@refs/heads/` -- so an adapter that attempted
         // it anyway is refused on the id's shape before a request leaves.
@@ -489,6 +512,13 @@ where
     //     kind (#2146), and each kind it answers for read back as the sync
     //     emitted it.
     check_refresh(&*s, &d, &sink.0).await;
+    // 14. Code pages (#2274): each template starts with `/` and carries only
+    //     its page's placeholders -- see `code_pages::check`.
+    if let Some(pages) = &d.code_pages
+        && let Err(error) = crate::code_pages::check(pages)
+    {
+        panic!("descriptor.code_pages: {error}");
+    }
 }
 
 /// Clause 13: the read of one item by id ([`crate::Source::refresh`]).
@@ -1971,6 +2001,7 @@ mod tests {
                     _ => Vec::new(),
                 },
                 url_forms: Vec::new(),
+                code_pages: None,
                 entity_kinds: {
                     let kind = |id: &str, label: &str, monogram: &str| KindInfo {
                         id: id.to_owned(),

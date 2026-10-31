@@ -232,7 +232,8 @@ async fn gitea(served: Served) -> MockServer {
         .and(query_param("sha", "main"))
         .and(query_param("limit", "20"));
     match served.commits {
-        Some(listing) => commits.respond_with(ok(listing)),
+        // Every commit main has, as Gitea counts them beside the page (#2311).
+        Some(listing) => commits.respond_with(ok(listing).insert_header("X-Total-Count", "318")),
         None => commits.respond_with(
             ResponseTemplate::new(409)
                 .set_body_json(json!({ "message": "Git Repository is empty." }))
@@ -296,7 +297,7 @@ async fn a_repo_view_is_its_overview_pull_requests_branches_and_commits() {
             ("overview", "Overview", None, false),
             ("pulls", "Pull requests", Some(2), false),
             ("branches", "Branches", Some(3), false),
-            ("commits", "Commits", None, false),
+            ("commits", "Commits", Some(318), false),
             ("files", "Files", None, true),
         ]
     );
@@ -334,6 +335,7 @@ async fn a_repo_view_is_its_overview_pull_requests_branches_and_commits() {
             chip: Some("open".into()),
             url: Some("https://gitea.example/tidewater/payout-service/pulls/142".into()),
             commit: None,
+            author: None,
         }
     );
 

@@ -60,6 +60,13 @@ impl GiteaClient {
         Ok((labels.unwrap_or_default(), total))
     }
 
+    /// Whether `path` is a path in a tree this client would put in a route
+    /// (no empty, `.` or `..` segment): asked before anything is sent for
+    /// it, a tip included (#2241).
+    pub(crate) fn tree_path(path: &str) -> Result<(), SourceError> {
+        escaped_path(path).map(drop)
+    }
+
     /// `GET /repos/{o}/{r}/branches/{branch}` -- one branch and its tip.
     pub(crate) async fn branch_as<T: serde::de::DeserializeOwned>(
         &self,
@@ -160,6 +167,26 @@ impl GiteaClient {
     ) -> Result<T, SourceError> {
         self.get_json(&compare_path(owner, repo, base, head)?, &[])
             .await
+    }
+
+    /// The same compare's commits with their parents and no per-commit
+    /// files (`files=false` is honoured there, measured on 1.27.3), for the
+    /// two whole shas a compare's diff is between (#2310).
+    pub(crate) async fn compare_commits<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        base: &str,
+        head: &str,
+    ) -> Result<T, SourceError> {
+        self.get_json(
+            &compare_path(owner, repo, base, head)?,
+            &[
+                ("files", "false".to_owned()),
+                ("verification", "false".to_owned()),
+            ],
+        )
+        .await
     }
 
     /// The same compare as `git diff` prints it (`?output=diff`, Gitea
@@ -292,15 +319,45 @@ impl GiteaClient {
         .await
     }
 
-    /// The newest `limit` commits of `branch`, the listing projections off.
-    /// An empty repository's 409 is no commits, as for [`Self::commits`].
-    pub(crate) async fn latest_commits_as<T: serde::de::DeserializeOwned>(
+    /// One page of `GET /repos/{o}/{r}/git/trees/{sha}?recursive=true`
+    /// (#2311): `per_page` entries of the whole tree at a commit, every
+    /// directory's entries below it, and `total_count`, all of them.
+    pub(crate) async fn git_tree_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+        page: u32,
+        per_page: usize,
+    ) -> Result<T, SourceError> {
+        self.get_json(
+            &format!(
+                "/repos/{}/{}/git/trees/{}",
+                segment(owner)?,
+                segment(repo)?,
+                super::object_id(sha)?
+            ),
+            &[
+                ("recursive", "true".to_owned()),
+                ("page", page.to_string()),
+                ("per_page", per_page.to_string()),
+            ],
+        )
+        .await
+    }
+
+    /// The newest `limit` commits of `branch`, the listing projections off,
+    /// with Gitea's `X-Total-Count` beside them: how many
+    /// commits the branch has in all (#2311, the last-commit strip's *N
+    /// commits*). `None` where Gitea sent no count. An empty repository's
+    /// 409 is no commits, as for [`Self::commits`].
+    pub(crate) async fn latest_commits_counted<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,
         repo: &str,
         branch: &str,
         limit: u32,
-    ) -> Result<Vec<T>, SourceError> {
+    ) -> Result<(Vec<T>, Option<u64>), SourceError> {
         let path = format!("/repos/{}/{}/commits", segment(owner)?, segment(repo)?);
         let query = [
             ("sha", branch.to_owned()),
@@ -310,9 +367,10 @@ impl GiteaClient {
             ("limit", limit.to_string()),
             ("page", "1".to_owned()),
         ];
-        match self.get_json(&path, &query).await {
-            Err(error) if error.status() == Some(409) => Ok(Vec::new()),
-            other => other,
+        match self.get_json_counted::<Option<Vec<T>>>(&path, &query).await {
+            Err(error) if error.status() == Some(409) => Ok((Vec::new(), Some(0))),
+            Err(error) => Err(error),
+            Ok((page, total)) => Ok((page.unwrap_or_default(), total.map(|n| n as u64))),
         }
     }
 
@@ -362,7 +420,8 @@ impl GiteaClient {
     /// beside a raw read capped at 1 MB (1.27.3, measured 2026-10-16), and
     /// `contents-ext` answered the same entry in 784 bytes. A Gitea from
     /// before `contents-ext` (1.24) answers its route 404, and the file's
-    /// [`Self::contents_entry_as`] is read instead.
+    /// [`Self::contents_entry_as`] is read instead -- from then on straight
+    /// away, once `contents` found the file the 404 was for (#2241).
     pub(crate) async fn file_entry_as<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,
@@ -373,6 +432,10 @@ impl GiteaClient {
         #[derive(serde::Deserialize)]
         struct Ext<T> {
             file_contents: Option<T>,
+        }
+        use std::sync::atomic::Ordering;
+        if self.no_contents_ext.load(Ordering::Relaxed) {
+            return self.contents_entry_as(owner, repo, file, at).await;
         }
         let route = format!(
             "/repos/{}/{}/contents-ext/{}",
@@ -393,7 +456,13 @@ impl GiteaClient {
                 "gitea: {file:?} at {at:?} is not a file"
             ))),
             Err(error) if error.status() == Some(404) => {
-                self.contents_entry_as(owner, repo, file, at).await
+                let entry = self.contents_entry_as(owner, repo, file, at).await;
+                // Only where `contents` found the file: then it was the
+                // route that was missing, not the file.
+                if entry.is_ok() {
+                    self.no_contents_ext.store(true, Ordering::Relaxed);
+                }
+                entry
             }
             Err(error) => Err(error),
         }
@@ -448,6 +517,32 @@ impl GiteaClient {
         at: &str,
         cap: usize,
     ) -> Result<RawFile, SourceError> {
+        self.raw_read(owner, repo, file, at, cap, false).await
+    }
+
+    /// The same read for a file wanted whole or not at all (#2256): an
+    /// answer whose length is already over `cap` is cut before any of its
+    /// body is read, so a refused file costs its headers.
+    pub(crate) async fn raw_whole(
+        &self,
+        owner: &str,
+        repo: &str,
+        file: &str,
+        at: &str,
+        cap: usize,
+    ) -> Result<RawFile, SourceError> {
+        self.raw_read(owner, repo, file, at, cap, true).await
+    }
+
+    async fn raw_read(
+        &self,
+        owner: &str,
+        repo: &str,
+        file: &str,
+        at: &str,
+        cap: usize,
+        whole: bool,
+    ) -> Result<RawFile, SourceError> {
         let path = format!(
             "{API_ROOT}/repos/{}/{}/raw/{}",
             segment(owner)?,
@@ -460,6 +555,13 @@ impl GiteaClient {
             .query(&[("ref", at.to_owned())]);
         let mut response = self.http.send(request).await?;
         let length = response.content_length();
+        if whole && length.is_some_and(|length| length > cap as u64) {
+            return Ok(RawFile {
+                bytes: Vec::new(),
+                cut: true,
+                size: length,
+            });
+        }
         let mut bytes = Vec::new();
         let mut cut = false;
         while let Some(chunk) = response.chunk().await.map_err(|error| {

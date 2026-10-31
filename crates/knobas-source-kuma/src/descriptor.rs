@@ -77,6 +77,7 @@ pub(crate) fn for_instance(id: &str, name: &str, writes: bool) -> SourceDescript
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        code_pages: None,
         write_ops: if writes { write_ops() } else { Vec::new() },
         ..template
     }
@@ -133,6 +134,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        code_pages: None,
         write_ops: Vec::new(),
         entity_kinds: vec![KindInfo {
             id: crate::KIND_MONITOR.to_owned(),

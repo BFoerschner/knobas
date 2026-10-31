@@ -190,14 +190,142 @@ pub async fn open_checkout(
     line: Option<u32>,
 ) -> Result<Vec<String>, IpcError> {
     let pool = lifecycle.pool()?;
-    crate::checkout::open::open(
+    crate::checkout::open::open_object(
         &pool,
+        Some(lifecycle.registry()),
         &entity_id,
         application.as_deref(),
-        file.as_deref(),
-        line,
+        &crate::checkout::open::file_object(file.as_deref(), line),
     )
     .await
+}
+
+/// Run an application on a code object of this entity's repository (#2274):
+/// a repository, a file at a line, a commit, a range or a pull request
+/// (`OpenObject`), at its checkout. Answers the argument vector it started.
+///
+/// `open_checkout`'s rules, through the same runner: the program is a saved
+/// application's command for the object's kind, `{sha}`, `{base}`, `{head}`,
+/// `{pr}` and `{branch}` are held to a git name's grammar, and `{url}` is
+/// `object_page` (ADR-0016, ADR-0034).
+///
+/// # Errors
+///
+/// As `open_checkout`, and [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid)
+/// for an application with no command for the object or an object value it
+/// refuses.
+#[tauri::command]
+pub async fn open_object(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    application: Option<String>,
+    object: knobas_core::checkout::open::Object,
+) -> Result<Vec<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::open::open_object(
+        &pool,
+        Some(lifecycle.registry()),
+        &entity_id,
+        application.as_deref(),
+        &object,
+    )
+    .await
+}
+
+/// The page a code object of this entity's repository has at its source
+/// (#2274): what *Open in › Browser* hands the opener. Built from the
+/// source's typed base URL and the pages its adapter declares, never from a
+/// stored `web_url`. `null` when the source declares none, or a file has no
+/// commit or branch to be read at.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an address
+/// that is not a repository or a branch or a value refused,
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a repository
+/// the mirror does not hold, [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal)
+/// for a query failure.
+#[tauri::command]
+pub async fn object_page(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    object: knobas_core::checkout::open::Object,
+) -> Result<Option<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::open::page(&pool, lifecycle.registry(), &entity_id, &object).await
+}
+
+/// What *Open in › Diff tool* would run for `base`..`head` of this entity's
+/// repository (#2275): `git difftool --dir-diff --gui --no-prompt` at its
+/// checkout, `git` first. `null` when the Diff tool is not offered: no
+/// checkout, or an end that is not a sha the checkout holds.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for an entity the
+/// mirror does not hold, [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal)
+/// for a query failure.
+#[tauri::command]
+pub async fn diff_tool(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    base: String,
+    head: String,
+) -> Result<Option<Vec<String>>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::worktree::diff_tool(&pool, &entity_id, &base, &head).await
+}
+
+/// Start the Diff tool on `base`..`head` (#2275). Answers the argument
+/// vector it started.
+///
+/// # Errors
+///
+/// As [`diff_tool`], and [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid)
+/// when it is not offered for this range or git would not start.
+#[tauri::command]
+pub async fn open_diff_tool(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    base: String,
+    head: String,
+) -> Result<Vec<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::worktree::open_diff_tool(&pool, &entity_id, &base, &head).await
+}
+
+/// The pull request worktrees knobas made under the clones root (#2285,
+/// ADR-0035), for Settings › Checkouts.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn pull_request_worktrees(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<crate::checkout::worktree::PullRequestWorktree>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::worktree::list(&pool).await
+}
+
+/// Remove one pull request worktree knobas made (#2285), and answer the list.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a path that
+/// is not one, [`IpcErrorCode::Conflict`](crate::IpcErrorCode::Conflict) when
+/// git refuses (changes or untracked files in it).
+#[tauri::command]
+pub async fn remove_pull_request_worktree(
+    lifecycle: State<'_, Lifecycle>,
+    path: String,
+) -> Result<Vec<crate::checkout::worktree::PullRequestWorktree>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::worktree::remove(&pool, &path).await
 }
 
 /// Settings › Checkouts (#844, R-13a.3): the clones root, the git found, the

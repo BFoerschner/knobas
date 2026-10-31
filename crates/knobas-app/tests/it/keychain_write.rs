@@ -59,6 +59,7 @@ fn descriptor(account: bool) -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        code_pages: None,
         write_ops: if account {
             vec!["pause_monitor".to_owned(), "resume_monitor".to_owned()]
         } else {
@@ -286,6 +287,7 @@ async fn state_on(
     .await
     .expect("a scheduler");
     SourcesState {
+        live: Default::default(),
         pool,
         scheduler,
         secrets,
@@ -394,6 +396,7 @@ async fn a_pause_pressed_while_the_keychain_is_locked_goes_once_the_credential_i
         &f.state.pool,
         &f.state.secrets,
         &f.state.registry,
+        &f.state.live,
         &f.source,
         SecretInput {
             value: None,

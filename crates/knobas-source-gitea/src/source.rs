@@ -27,6 +27,9 @@ pub struct GiteaSource {
     /// Which token on which server this is, for [`Self::viewer`]'s cache: a
     /// hash of the instance id, the base URL and the secret, never the secret.
     viewer_key: u64,
+    /// Pull requests' diffs at what they stand at, for this built
+    /// source's life (`view::pr::diffs`).
+    pub(crate) pull_diffs: crate::view::pr::diffs::PullDiffs,
 }
 
 /// Who each token is, by [`GiteaSource::viewer_key`], for the life of the
@@ -40,6 +43,21 @@ pub struct GiteaSource {
 fn viewers() -> &'static Mutex<HashMap<u64, String>> {
     static VIEWERS: OnceLock<Mutex<HashMap<u64, String>>> = OnceLock::new();
     VIEWERS.get_or_init(Default::default)
+}
+
+/// Whether each server resolves review threads, by
+/// [`GiteaSource::viewer_key`], for the life of the process (#2277).
+fn resolvers() -> &'static Mutex<HashMap<u64, bool>> {
+    static RESOLVERS: OnceLock<Mutex<HashMap<u64, bool>>> = OnceLock::new();
+    RESOLVERS.get_or_init(Default::default)
+}
+
+/// Whether the server answering `version` resolves review threads through
+/// its API (#2277, the Gitea fact note of 2026-10-30): Gitea 1.27.3 does
+/// (`POST …/pulls/comments/{id}/resolve`), Forgejo 17 has no such route and
+/// answers 405. Forgejo says what it is in its version (`17.0.0+gitea-1.22.0`).
+pub(crate) fn version_resolves(version: &str) -> bool {
+    !version.contains("+gitea-")
 }
 
 /// Build an adapter for one configured source (ruling P6).
@@ -86,6 +104,7 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         config,
         client,
         viewer_key,
+        pull_diffs: Default::default(),
     }))
 }
 
@@ -113,6 +132,30 @@ impl GiteaSource {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(self.viewer_key, login.clone());
         Some(login)
+    }
+
+    /// Whether this server resolves review threads through its API (#2277):
+    /// not Forgejo ([`version_resolves`]). Read once per token and server
+    /// for the life of the process, as [`viewer`](Self::viewer) is. A failed
+    /// read is not cached and offers no resolve: a source that cannot is
+    /// never offered it, and one that can is offered it on the next read.
+    pub(crate) async fn resolves(&self) -> bool {
+        if let Some(known) = resolvers()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&self.viewer_key)
+        {
+            return *known;
+        }
+        let Ok(Some(version)) = self.client.version().await else {
+            return false;
+        };
+        let resolves = version_resolves(&version);
+        resolvers()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(self.viewer_key, resolves);
+        resolves
     }
 
     /// The key half of an entity id this source owns, parsed into Gitea's own
@@ -389,6 +432,27 @@ impl Source for GiteaSource {
                     .await?;
                 Ok(WriteReceipt::none())
             }
+            WriteOp::ReplyToThread {
+                entity, comment, ..
+            } => {
+                let (owner, repo, index) = self.pull_of(entity)?;
+                write::reply_to_thread(&self.client, &owner, &repo, index, comment).await?;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::ResolveThread {
+                entity,
+                thread,
+                resolved,
+            } => {
+                let (owner, repo, _) = self.pull_of(entity)?;
+                write::resolve_thread(&self.client, &owner, &repo, thread, *resolved).await?;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::RequestReviewers { entity, reviewers } => {
+                let (owner, repo, index) = self.pull_of(entity)?;
+                write::request_reviewers(&self.client, &owner, &repo, index, reviewers).await?;
+                Ok(WriteReceipt::none())
+            }
             WriteOp::DeleteBranch { entity } => {
                 let (owner, repo, branch) = self.branch_of(entity)?;
                 write::delete_branch(&self.client, &owner, &repo, &branch).await?;
@@ -523,13 +587,13 @@ impl Source for GiteaSource {
     /// The asks the token cannot make (#2054), from the empty-bodied probes a
     /// view sends (#2030), one per repository and scope category asked
     /// about: see [`crate::grants`]. An entity of another source is not
-    /// answered, and a probe without a verdict refuses nothing, so this never
-    /// fails.
+    /// answered. A probe without a verdict, or a failed record or branch
+    /// read, is the error (#2306), never "nothing refused".
     async fn refused_writes(
         &self,
         asks: &[knobas_source::grants::WriteAsk],
     ) -> Result<Vec<knobas_source::grants::RefusedWrite>, SourceError> {
-        Ok(crate::grants::refused(self, asks).await)
+        crate::grants::refused(self, asks).await
     }
 
     /// A commit's overview and diff; `None` for the kinds whose views are
@@ -540,6 +604,50 @@ impl Source for GiteaSource {
         section: Option<&str>,
     ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
         crate::view::draw(self, entity, section).await
+    }
+
+    /// A file's bytes, whole or refused over the cap (#2256); see
+    /// [`crate::view::file_bytes`].
+    async fn file_bytes(
+        &self,
+        entity: &str,
+        path: &str,
+        commit: Option<&str>,
+        cap: u64,
+    ) -> Result<Option<knobas_source::view::FileBytes>, SourceError> {
+        crate::view::file_bytes(self, entity, path, commit, cap)
+            .await
+            .map(Some)
+    }
+
+    /// A byte read at a full sha is fixed (#2256); see
+    /// [`crate::view::bytes_standing`].
+    fn bytes_standing(
+        &self,
+        entity: &str,
+        path: &str,
+        commit: Option<&str>,
+    ) -> knobas_source::view::Standing {
+        let _ = path;
+        crate::view::bytes_standing(self, entity, commit)
+    }
+
+    /// Every write's grants move (#2241): the account may be given or lose
+    /// a push, the repository turned from a mirror, the branch protected.
+    /// Kept by the app and asked again behind, so a repository's probe is
+    /// sent once and not beside every file opened.
+    fn refusal_standing(
+        &self,
+        ask: &knobas_source::grants::WriteAsk,
+    ) -> knobas_source::view::Standing {
+        let _ = ask;
+        knobas_source::view::Standing::Moving
+    }
+
+    /// A commit's diff and its tree at a full sha are fixed (#2239); see
+    /// [`crate::view::standing`].
+    fn view_standing(&self, entity: &str, section: Option<&str>) -> knobas_source::view::Standing {
+        crate::view::standing(self, entity, section)
     }
 }
 

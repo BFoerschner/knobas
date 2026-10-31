@@ -390,7 +390,10 @@ impl Source for JiraSource {
             | WriteOp::EditPullRequest { .. }
             | WriteOp::UpdatePullRequestBranch { .. }
             | WriteOp::CommitFile { .. }
-            | WriteOp::SourceAction { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::SourceAction { .. }
+            | WriteOp::ReplyToThread { .. }
+            | WriteOp::ResolveThread { .. }
+            | WriteOp::RequestReviewers { .. } => Err(SourceError::protocol(format!(
                 "the Jira adapter does not support {:?}",
                 op.identifier()
             ))),

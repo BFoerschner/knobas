@@ -51,6 +51,7 @@ fn row(entity_id: Option<String>, title: &str) -> ViewRow {
         chip: None,
         url: None,
         commit: None,
+        author: None,
     }
 }
 
@@ -257,6 +258,7 @@ async fn view(f: &Fixture, key: &str, section: Option<&str>) -> Result<Option<So
         &f.pool,
         &f.secrets,
         &crate::support::shared(DrawingRegistry(f.asked.clone())),
+        &knobas_app::sources::live::LiveSources::default(),
         &format!("{}:{key}", f.id),
         section,
     )
@@ -317,6 +319,7 @@ async fn the_read_routes_to_the_entitys_source_and_keeps_none_and_failure_apart(
         &f.pool,
         &f.secrets,
         &crate::support::shared(DrawingRegistry(f.asked.clone())),
+        &knobas_app::sources::live::LiveSources::default(),
         "nowhere-configured:x",
         None,
     )

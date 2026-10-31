@@ -28,6 +28,18 @@
     listSources: () => Promise<(Pick<Summary, "id" | "display_name" | "roles" | "role_misses"> & Partial<Pick<Summary, "enabled">>)[]>;
     syncStatus: () => Promise<SyncRow[]>;
     listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
+    /** *Pages kept open* as stored (#2247), read once the database answers; the default stands without it. */
+    pagesKeptOpen?: () => Promise<number>;
+    /** The command renderers saved in Settings › Renderers (#2262), installed in the registry once the database answers. */
+    userRenderers?: () => Promise<import("../ipc/app").UserRenderer[]>;
+    /** The default renderer per file pattern (#2263), held once the database answers. */
+    rendererDefaults?: () => Promise<import("../ipc/app").RendererDefault[]>;
+    /** The named pipelines (#2265), held once the database answers. */
+    namedPipelines?: () => Promise<import("../ipc/app").NamedPipeline[]>;
+    /** The command steps (#2265), held once the database answers. */
+    commandSteps?: () => Promise<import("../ipc/app").CommandStep[]>;
+    /** *Run pipelines on diffs* (#2270), held once the database answers; on without it. */
+    diffPipelines?: () => Promise<boolean>;
   }
 </script>
 
@@ -36,6 +48,13 @@
   import { onMount, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
+  import { commandSteps, diffPipelines, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
+  import { diffPipelines as heldDiffPipelines } from "./diff/diff-pipelines.svelte";
+  import { rendererDefaults as heldDefaults } from "../render/defaults.svelte";
+  import { commandSteps as heldCommandSteps, namedPipelines as heldPipelines } from "../render/pipelines.svelte";
+  import { defaultPipeline } from "../render/defaults";
+  import { installPipelines } from "./diff/piped";
+  import { installCommands } from "../render/command";
   import { listSources, syncStatus, type SourceSummary, type SourceSyncStatus } from "../ipc/sources";
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
   import { health as sharedHealth, type Health } from "../shell/health.svelte";
@@ -53,7 +72,9 @@
   } from "../shell/write-queue.svelte";
   import { badges as sharedBadges, type Badges } from "./badges.svelte";
   import { escStep } from "./escape";
+  import { keptPages as sharedKeptPages, type KeptPagesSetting } from "./kept-pages.svelte";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
+  import { onReady } from "./on-ready.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { parseTfHash, sectionOf } from "./route";
   import { theme as sharedTheme, type Theme } from "./theme.svelte";
@@ -85,6 +106,12 @@
       listSources,
       syncStatus,
       listen: (event, handler) => tauriListen(event, handler),
+      pagesKeptOpen,
+      userRenderers,
+      rendererDefaults,
+      namedPipelines,
+      commandSteps,
+      diffPipelines,
     },
     prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches,
     onstarttimer = () => {},
@@ -95,6 +122,7 @@
     roleSyncs = sharedRoleSyncs,
     ontimechanged,
     nav = { back: () => history.back(), forward: () => history.forward() },
+    kept = sharedKeptPages,
   }: {
     lifecycle: Pick<Lifecycle, "ready">;
     /** Open the launcher. */
@@ -131,6 +159,8 @@
     roleSyncs?: RoleSyncs;
     /** History's back and forward (#693, #1086); the window's when omitted. */
     nav?: { back: () => void; forward: () => void };
+    /** *Pages kept open* (#2247), which the page host reads; the window's when omitted. */
+    kept?: KeptPagesSetting;
   } = $props();
 
   let hash = $state(location.hash);
@@ -293,6 +323,29 @@
    * source the store did not hold changes it too.
    */
   const heldSources = $derived(health.all.map((row) => row.source_id).join("\n"));
+
+  const ready = () => lifecycle.ready;
+  // *Pages kept open* as stored (#2247): until it answers, the default holds.
+  onReady(ready, () => ports.pagesKeptOpen, (count) => kept.set(count));
+  // The command renderers (#2262): until they answer, the built-ins draw everything.
+  onReady(ready, () => ports.userRenderers, (saved) => installCommands(saved));
+  // The default renderer per file pattern (#2263): until it answers, the registry's order decides.
+  onReady(ready, () => ports.rendererDefaults, (list) => heldDefaults.hold(list));
+
+  // Every diff's default pipeline per file (#2270) is the viewer's (#2265): read from the held stores at each ask, so a
+  // pipeline edited in Settings, or a default saved from the viewer, reaches the diffs too. Installed once.
+  installPipelines({
+    of: (path) => {
+      const found = defaultPipeline(path, heldDefaults.list, heldPipelines.list);
+      return found === null ? null : { name: found.pipeline.name, pattern: found.pattern, steps: found.pipeline.steps };
+    },
+  });
+
+  // The named pipelines and command steps (#2265): until they answer, no file opens through a default pipeline.
+  onReady(ready, () => ports.namedPipelines, (list) => heldPipelines.hold(list));
+  onReady(ready, () => ports.commandSteps, (list) => heldCommandSteps.hold(list));
+  // *Run pipelines on diffs* (#2270): until it answers, it is on.
+  onReady(ready, () => ports.diffPipelines, (on) => heldDiffPipelines.hold(on));
 
   $effect(() => {
     if (!lifecycle.ready) return;
@@ -479,6 +532,7 @@
   />
   <main class="tf-main" tabindex="-1">
     <TfPage
+      {kept}
       ctx={{
         route,
         ready: lifecycle.ready,

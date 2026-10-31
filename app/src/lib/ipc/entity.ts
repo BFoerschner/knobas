@@ -19,6 +19,7 @@ import type {
   CheckoutApplicationDraft,
   CheckoutSettings,
   CheckoutView,
+  OpenObject,
   CloneAnswer,
   CodeFacts,
   ContextRow,
@@ -51,12 +52,16 @@ import type {
   NoteLinkInput,
   NotesExport,
   NotificationDraft,
+  PipeRun,
+  PipeStep,
   PipelineRow,
   PipelineSettings,
   Project,
   ProposalEvidence,
   Protocol,
   PublishTarget,
+  PullRequestWorktree,
+  RangeDiff,
   Reached,
   RefusedWrite,
   RuleTicket,
@@ -100,6 +105,8 @@ export type {
   CheckoutFoundBy,
   CheckoutSettings,
   CheckoutView,
+  OpenObject,
+  OpenObjectKind,
   ChoiceOption,
   CloneAnswer,
   CloneEvent,
@@ -113,7 +120,9 @@ export type {
   DiffChange,
   DiffFile,
   DiffLine,
+  DiffRange,
   DiffRead,
+  DiffReadAt,
   DigestLine,
   DocAncestor,
   DocBacklink,
@@ -201,6 +210,13 @@ export type {
   ParameterKind,
   ParameterOption,
   ParameterSpec,
+  PipeFailure,
+  PipeFormat,
+  PipeInput,
+  PipeOutput,
+  PipeRun,
+  PipeStep,
+  PipeWhy,
   PipelineReason,
   PipelineRepository,
   PipelineRow,
@@ -211,6 +227,9 @@ export type {
   Protocol,
   Publication,
   PublishTarget,
+  PullRequestWorktree,
+  RangeCommit,
+  RangeDiff,
   ReachOrigin,
   Reached,
   RefusedWrite,
@@ -248,6 +267,7 @@ export type {
   UrlMatch,
   ViewAction,
   ViewBlock,
+  ViewFresh,
   ViewRow,
   ViewSection,
   WorkingTreeState,
@@ -341,13 +361,13 @@ export function pipelineRuns(pipelineId: string, limit?: number): Promise<RunRow
  * by pull request and the head commit its source declares: once the mirror
  * reads another head they read as none.
  */
-export function prViewedFiles(prId: string): Promise<string[]> {
-  return invoke<string[]>("pr_viewed_files", { prId });
+export function prViewedFiles(prId: string, blobs: Record<string, string> = {}): Promise<string[]> {
+  return invoke<string[]>("pr_viewed_files", { prId, blobs });
 }
 
 /** Mark one file of a pull request *Viewed* or not on its current head (#842), answering the files now viewed. */
-export function setPrFileViewed(prId: string, path: string, viewed: boolean): Promise<string[]> {
-  return invoke<string[]>("set_pr_file_viewed", { prId, path, viewed });
+export function setPrFileViewed(prId: string, path: string, viewed: boolean, blobs: Record<string, string> = {}): Promise<string[]> {
+  return invoke<string[]>("set_pr_file_viewed", { prId, path, viewed, blobs });
 }
 
 /** Pin or unpin a pipeline (#849); answers whether it is now pinned. */
@@ -728,6 +748,37 @@ export function reachableTransitions(entityId: string): Promise<string[]> {
  */
 export function entityView(entityId: string, section: string | null = null): Promise<SourceView | null> {
   return invoke<SourceView | null>("entity_view", { entityId, section });
+}
+
+/** What `entity_file_bytes` answers: an `ArrayBuffer` from the bridge, a `Uint8Array` from the dev fake. */
+type RawBytes = ArrayBuffer | ArrayLike<number>;
+
+/**
+ * The bytes of the file at `path` in `entityId`'s tree — `knobas_app::commands::entity::entity_file_bytes`
+ * (#2256, spec #2234 step 5): a README's relative image, a PDF.
+ *
+ * `commit` is the `commit` of the file block the reader has open, handed back unread, so a README's image is read
+ * at the README's commit; `null` reads at the entity's own reference. Answered raw, whole and never cut; kept for
+ * the session where the read is at a whole sha, so a second look costs the source nothing.
+ *
+ * Rejects with `invalid` for a file over 50 MiB (the message names its size and the cap) or a source that reads
+ * no bytes, and otherwise as {@link entityView} does.
+ */
+export async function entityFileBytes(entityId: string, path: string, commit: string | null): Promise<Uint8Array> {
+  const answer = await invoke<RawBytes>("entity_file_bytes", { entityId, path, commit });
+  return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
+}
+
+/**
+ * A file pipeline over the bytes of the file at `path` in `entityId`'s tree — `knobas_app::commands::entity::entity_file_piped`
+ * (#2264, spec #2234 step 5): `steps` in order, each on the last one's output. Read at `commit` as
+ * {@link entityFileBytes} reads; a run over a file at a whole sha is kept, so the same pipeline again costs nothing.
+ *
+ * A step that fails, passes the 200 MiB cap or its timeout is an answer (`outcome: "failed"`), naming the step, its
+ * error and the head of its input. Rejects as {@link entityFileBytes} does.
+ */
+export function entityFilePiped(entityId: string, path: string, commit: string | null, steps: PipeStep[]): Promise<PipeRun> {
+  return invoke<PipeRun>("entity_file_piped", { entityId, path, commit, steps });
 }
 
 /**
@@ -1216,6 +1267,55 @@ export function openCheckout(entityId: string, at: OpenAt = {}): Promise<string[
 }
 
 /**
+ * Run an application on a code object of this entity's repository —
+ * `open_object` (#2274): a repository, a file at a line, a commit, a range or
+ * a pull request. The application's command for the object's kind runs at
+ * the checkout; one without such a command is refused. Answers the argument
+ * vector it started.
+ */
+export function openObject(entityId: string, application: string | null, object: OpenObject): Promise<string[]> {
+  return invoke<string[]>("open_object", { entityId, application, object });
+}
+
+/**
+ * The page a code object has at its source — `object_page` (#2274): what
+ * *Open in › Browser* opens. Built from the source's typed base URL and the
+ * pages its adapter declares; `null` when it declares none.
+ */
+export function objectPage(entityId: string, object: OpenObject): Promise<string | null> {
+  return invoke<string | null>("object_page", { entityId, object });
+}
+
+/**
+ * What *Open in › Diff tool* would run for `base`..`head` — `diff_tool`
+ * (#2275): `git difftool --dir-diff --gui --no-prompt` at the checkout, `git`
+ * first. `null` when it is not offered: no checkout, or an end that is not a
+ * sha the checkout holds.
+ */
+export function diffTool(entityId: string, base: string, head: string): Promise<string[] | null> {
+  return invoke<string[] | null>("diff_tool", { entityId, base, head });
+}
+
+/** Start the Diff tool on `base`..`head` — `open_diff_tool` (#2275). Answers the argv it started. */
+export function openDiffTool(entityId: string, base: string, head: string): Promise<string[]> {
+  return invoke<string[]>("open_diff_tool", { entityId, base, head });
+}
+
+/** The pull request worktrees knobas made under the clones root — `pull_request_worktrees` (#2285). */
+export function pullRequestWorktrees(): Promise<PullRequestWorktree[]> {
+  return invoke<PullRequestWorktree[]>("pull_request_worktrees");
+}
+
+/**
+ * Remove one pull request worktree knobas made — `remove_pull_request_worktree`
+ * (#2285). git refuses one with changes or untracked files (`conflict`).
+ * Answers the list as it then stands.
+ */
+export function removePullRequestWorktree(path: string): Promise<PullRequestWorktree[]> {
+  return invoke<PullRequestWorktree[]>("remove_pull_request_worktree", { path });
+}
+
+/**
  * Clone a repository into `<clones root>/<name>`, or stop the clone that is
  * running — `clone_repo` (#823, ADR-0023).
  *
@@ -1237,6 +1337,26 @@ export function cloneRepo(entityId: string, stop?: boolean): Promise<CloneAnswer
  */
 export function entityCheckoutDiff(entityId: string): Promise<DiffRead> {
   return invoke<DiffRead>("entity_checkout_diff", { entityId });
+}
+
+/**
+ * The diff from `base` to `head` of a repository — `entity_range_diff`
+ * (#2272, ADR-0036): local read-only git when its checkout holds both
+ * commits (whitespace ignored when asked), else the source's compare read.
+ * `read_at` says which; only `checkout` ignores whitespace.
+ */
+export function entityRangeDiff(entityId: string, base: string, head: string, ignoreWhitespace: boolean): Promise<RangeDiff> {
+  return invoke<RangeDiff>("entity_range_diff", { entityId, base, head, ignoreWhitespace });
+}
+
+/**
+ * The change one commit made — `entity_commit_diff` (#2319, story 78): local
+ * read-only git when the checkout of repository `entityId` holds `sha`
+ * (whitespace ignored when asked), else the commit `commitId`'s own diff
+ * section. `read_at` says which; only `checkout` ignores whitespace.
+ */
+export function entityCommitDiff(entityId: string, commitId: string, sha: string, ignoreWhitespace: boolean): Promise<RangeDiff> {
+  return invoke<RangeDiff>("entity_commit_diff", { entityId, commitId, sha, ignoreWhitespace });
 }
 
 /** What the capture shortcut is set to, and whether it holds — `capture_shortcut` (#503). */

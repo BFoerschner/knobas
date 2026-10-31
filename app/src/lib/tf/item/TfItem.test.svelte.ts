@@ -425,3 +425,13 @@ test("a source run the not-offered answer asked for and was refused says why in 
   expect(toasts.items.map((toast) => toast.text)).toEqual(["Could not sync: the engine is starting"]);
   expect(refreshButton()?.textContent).toBe("Sync now");
 });
+
+test("a text block the source marks Markdown is drawn by the Markdown component; the plain one beside it as written (#2261)", async () => {
+  await open({
+    getEntity: () => Promise.resolve(detail()),
+    entityView: () => Promise.resolve(surveyView([], [{ type: "text", text: "## Findings\n\n- rust on **leg 2**", markdown: true }])),
+  });
+  expect(target.querySelector(".tf-item-textp .tf-md h2")?.textContent).toBe("Findings");
+  expect(target.querySelector(".tf-item-textp .tf-md li strong")?.textContent).toBe("leg 2");
+  expect(target.querySelector(".tf-item-text")?.textContent).toBe(BODY);
+});

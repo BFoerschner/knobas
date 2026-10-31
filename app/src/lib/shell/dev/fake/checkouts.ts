@@ -3,7 +3,9 @@
  * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
  * `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
-import type { CheckoutSettings, CheckoutView, CloneAnswer, DiffRead } from "../../../ipc/entity";
+import type { CheckoutSettings, CheckoutView, CloneAnswer, DiffFile, DiffRead, OpenObject, PullRequestWorktree, RangeDiff } from "../../../ipc/entity";
+import { repoView } from "./views/repos";
+import { fillObject, isDiffEnd, objectCommand, worktreeOf } from "../../../tf/openin/openin";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 import { CORPUS } from "./corpus";
@@ -59,6 +61,35 @@ function fakeRepoOf(entityId: string): string | null {
     (candidate) => candidate.kind === "repo" && entityId.startsWith(candidate.entity_id),
   ).sort((a, b) => b.entity_id.length - a.entity_id.length);
   return repos[0]?.entity_id ?? null;
+}
+
+/**
+ * `entity_range_diff` (#2272): the repository's fake compare, read "at the
+ * checkout" when the repository has one and both ends are shas (as the
+ * backend's local git), else "from the source". Ignoring whitespace drops a
+ * file whose removed and added lines differ only in whitespace.
+ */
+function fakeRangeDiff(entityId: string, base: string, head: string, ignoreWhitespace: boolean): RangeDiff {
+  const shas = isDiffEnd(base, true) && isDiffEnd(head, false);
+  return fakeDiffOf(repoView(entityId, `compare:${base}...${head}`), shas && fakeCheckout(entityId).path !== null, ignoreWhitespace);
+}
+
+/**
+ * `entity_commit_diff` (#2319): the commit's fake `diff` section, read "at the
+ * checkout" when its repository has one and `sha` is one, else "from the source".
+ */
+function fakeCommitDiff(entityId: string, commitId: string, sha: string, ignoreWhitespace: boolean): RangeDiff {
+  return fakeDiffOf(repoView(commitId, "diff"), isDiffEnd(sha, false) && fakeCheckout(entityId).path !== null, ignoreWhitespace);
+}
+
+/** A fake view's diff block as a `RangeDiff`; at a checkout, whitespace-only files drop when asked. */
+function fakeDiffOf(view: ReturnType<typeof repoView>, local: boolean, ignoreWhitespace: boolean): RangeDiff {
+  const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
+  if (block?.type !== "diff") throw { code: "not_found", message: "the source draws no diff here", source_id: null };
+  const bare = (file: DiffFile, kind: "add" | "del") =>
+    file.hunks.flatMap((hunk) => hunk.lines.filter((line) => line.kind === kind).map((line) => line.text.replace(/\s+/g, ""))).join("\n");
+  const files = local && ignoreWhitespace ? block.files.filter((file) => bare(file, "add") !== bare(file, "del")) : block.files;
+  return { files, truncated: block.truncated, range: block.range ?? null, read_at: local ? "checkout" : "source" };
 }
 
 /** `entity_checkout`, including the refusal a non-repo kind gets. */
@@ -161,7 +192,8 @@ function fakeCheckoutDiff(entityId: string): DiffRead {
 }
 
 /**
- * The *Open in…* applications (#844): macOS's shipped four, transcribed,
+ * The *Open in…* applications (#844): macOS's shipped four, transcribed (each
+ * opening a pull request at its worktree since #2285),
  * because the browser this runs in has no platform to ask. The list a
  * session saves replaces them, as the backend's one settings row does.
  */
@@ -170,13 +202,28 @@ interface FakeApp {
   name: string;
   command: string;
   file_command: string | null;
+  commit_command?: string;
+  range_command?: string;
+  pull_request_command?: string;
 }
 
 const SHIPPED: FakeApp[] = [
-  { id: "vscode", name: "VS Code", command: 'open -a "Visual Studio Code" {path}', file_command: 'open -a "Visual Studio Code" {file}' },
-  { id: "terminal", name: "Terminal", command: "open -a Terminal {path}", file_command: null },
-  { id: "fork", name: "Fork", command: "open -a Fork {path}", file_command: null },
-  { id: "jetbrains", name: "IntelliJ IDEA", command: 'open -a "IntelliJ IDEA" {path}', file_command: 'open -a "IntelliJ IDEA" {file}' },
+  {
+    id: "vscode",
+    name: "VS Code",
+    command: 'open -a "Visual Studio Code" {path}',
+    file_command: 'open -a "Visual Studio Code" {file}',
+    pull_request_command: 'open -a "Visual Studio Code" {path}',
+  },
+  { id: "terminal", name: "Terminal", command: "open -a Terminal {path}", file_command: null, pull_request_command: "open -a Terminal {path}" },
+  { id: "fork", name: "Fork", command: "open -a Fork {path}", file_command: null, pull_request_command: "open -a Fork {path}" },
+  {
+    id: "jetbrains",
+    name: "IntelliJ IDEA",
+    command: 'open -a "IntelliJ IDEA" {path}',
+    file_command: 'open -a "IntelliJ IDEA" {file}',
+    pull_request_command: 'open -a "IntelliJ IDEA" {path}',
+  },
 ];
 
 let fakeApps: FakeApp[] = SHIPPED.map((app) => ({ ...app }));
@@ -245,7 +292,19 @@ function fakeSetApps(drafts: unknown, defaultId: unknown) {
     const given = String(draft.id ?? "").trim();
     let id = given !== "" && !out.some((app) => app.id === given) ? given : slug(name);
     for (let n = 2; out.some((app) => app.id === id); n += 1) id = `${slug(name)}-${n}`;
-    out.push({ id, name, command, file_command: file });
+    const optional = (key: "commit_command" | "range_command" | "pull_request_command") => {
+      const given = String(draft[key] ?? "").trim();
+      return given === "" ? {} : { [key]: given };
+    };
+    out.push({
+      id,
+      name,
+      command,
+      file_command: file,
+      ...optional("commit_command"),
+      ...optional("range_command"),
+      ...optional("pull_request_command"),
+    });
   });
   fakeApps = out;
   fakeDefault = typeof defaultId === "string" ? defaultId : null;
@@ -287,6 +346,64 @@ function fakeOpen(args: Record<string, unknown>) {
       .replace(/\{line\}/g, String(line))
       .replace(/\{name\}/g, name),
   );
+}
+
+/** The fake's Gitea pages (#2274), as `code_pages` declares Gitea's, after its base URL. */
+function fakePage(entityId: string, object: OpenObject): string | null {
+  const repo = fakeRepoOf(entityId);
+  const url = repo === null ? null : fakeCheckout(repo).repo_url;
+  if (url === null) return null;
+  const enc = (value: string) => value.split("/").map(encodeURIComponent).join("/");
+  switch (object.kind) {
+    case "repository":
+      return url;
+    case "file":
+      return object.at === null ? null : `${url}/src/${enc(object.at)}/${enc(object.path)}#L${object.line ?? 1}`;
+    case "commit":
+      return `${url}/commit/${object.sha}`;
+    case "range":
+      return `${url}/compare/${enc(object.base)}...${enc(object.head)}`;
+    case "pull_request":
+      return `${url}/pulls/${object.number}`;
+  }
+}
+
+/** `open_object` (#2274): the argv the backend would start, nothing started. */
+function fakeOpenObject(args: Record<string, unknown>) {
+  const entityId = String(args["entityId"] ?? "");
+  const object = args["object"] as OpenObject;
+  const checkout = fakeCheckout(entityId);
+  if (checkout.path === null) {
+    throw { code: "not_found", message: `${entityId} has no checkout on this machine, so there is nothing to open`, source_id: null };
+  }
+  const id = typeof args["application"] === "string" ? args["application"] : fakeSettings().default_application;
+  const app = fakeApps.find((one) => one.id === id);
+  if (!app) throw { code: "invalid", message: `'${id}' is not one of your applications: see Settings › Checkouts`, source_id: null };
+  const template = objectCommand({ ...app }, object.kind);
+  if (template === null) {
+    throw { code: "invalid", message: `${app.name} does not open this: add it in Settings › Checkouts`, source_id: null };
+  }
+  // A pull request opens in its worktree under the clones root (#2285), which the fake lists.
+  let path = checkout.path;
+  if (object.kind === "pull_request") {
+    path = worktreeOf(fakeClonesRoot, checkout.repo_entity_id, object.number) ?? path;
+    if (!fakeWorktrees.some((one) => one.path === path)) {
+      fakeWorktrees.push({ repo_entity_id: checkout.repo_entity_id ?? entityId, number: object.number, path, closed: false });
+    }
+  }
+  return words(template).map((word) => fillObject(word, { path, object, url: fakePage(entityId, object) }));
+}
+
+/** The pull request worktrees `open_object` made this session (#2285). */
+let fakeWorktrees: PullRequestWorktree[] = [];
+
+/** `diff_tool` (#2275): offered when the repository is cloned and both ends are shas. */
+function fakeDiffTool(args: Record<string, unknown>): string[] | null {
+  const checkout = fakeCheckout(String(args["entityId"] ?? ""));
+  const base = String(args["base"] ?? "");
+  const head = String(args["head"] ?? "");
+  if (checkout.path === null || !isDiffEnd(base, true) || !isDiffEnd(head, false)) return null;
+  return ["/usr/bin/git", "-C", checkout.path, "difftool", "--dir-diff", "--gui", "--no-prompt", base, head, "--"];
 }
 
 /**
@@ -372,9 +489,30 @@ export function handlers(): Handlers {
     },
     entity_checkout: (args) => fakeCheckout(String(args["entityId"] ?? "")),
     open_checkout: (args) => fakeOpen(args),
+    open_object: (args) => fakeOpenObject(args),
+    object_page: (args) => fakePage(String(args["entityId"] ?? ""), args["object"] as OpenObject),
+    diff_tool: (args) => fakeDiffTool(args),
+    open_diff_tool: (args) => {
+      const argv = fakeDiffTool(args);
+      if (argv === null) throw { code: "invalid", message: "the Diff tool opens two commits this repository's checkout holds", source_id: null };
+      return argv;
+    },
+    pull_request_worktrees: () => fakeWorktrees,
+    remove_pull_request_worktree: (args) => {
+      const path = String(args["path"] ?? "");
+      if (!fakeWorktrees.some((one) => one.path === path)) {
+        throw { code: "not_found", message: `${path} is not a worktree knobas made`, source_id: null };
+      }
+      fakeWorktrees = fakeWorktrees.filter((one) => one.path !== path);
+      return fakeWorktrees;
+    },
     checkout_settings: () => fakeSettings(),
     set_checkout_applications: (args) => fakeSetApps(args["applications"], args["defaultApplication"]),
     entity_checkout_diff: (args) => fakeCheckoutDiff(String(args["entityId"] ?? "")),
+    entity_range_diff: (args) =>
+      fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), args["ignoreWhitespace"] === true),
+    entity_commit_diff: (args) =>
+      fakeCommitDiff(String(args["entityId"] ?? ""), String(args["commitId"] ?? ""), String(args["sha"] ?? ""), args["ignoreWhitespace"] === true),
     clone_repo: (args) => fakeClone(args),
     set_checkout_override: (args) => {
       const id = String(args["entityId"] ?? "");
@@ -408,6 +546,7 @@ export function attach(installed: FakeBridge): void {
 const atLoad = seedOf({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge });
 onFakeReset(() => {
   for (const timer of fakeCloning.values()) clearInterval(timer);
+  fakeWorktrees = [];
   ({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge } = atLoad());
 });
 keepSeed(fakeOverrides, fakeCloning, fakeCloned);

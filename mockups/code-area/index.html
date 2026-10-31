@@ -1,0 +1,73 @@
+<!doctype html>
+<!-- #2252: the index of the Code area mockup (spec #2234 step 4). Each surface opens in light or dark, in each state. -->
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code area mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="base.css">
+<style>
+  .ix { max-width: 1040px; margin: 0 auto; padding: 32px 22px 60px; }
+  .ix h1 { font-size: var(--t-d1); font-weight: 800; font-variation-settings: "wdth" 70; line-height: 1.1; }
+  .ix .lead { color: var(--ink-2); margin: 8px 0 24px; max-width: 75ch; }
+  .ix h2 { font-size: var(--t-xl); font-weight: 700; margin: 28px 0 10px; }
+  .ix table { width: 100%; border-collapse: collapse; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; font-size: var(--t-sm); }
+  .ix th { text-align: left; font-size: var(--t-xs); color: var(--ink-2); background: var(--sheet-2); padding: 7px 10px; border-bottom: 1px solid var(--rule); }
+  .ix td { padding: 9px 10px; border-bottom: 1px solid var(--rule-2); vertical-align: top; }
+  .ix tr:last-child td { border-bottom: 0; }
+  .ix td a { color: var(--info); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+  .ix td .st { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+  .ix ol { padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: var(--t-md); max-width: 90ch; }
+</style>
+</head>
+<body>
+<div class="ix">
+  <h1>Code area mockup</h1>
+  <p class="lead">The repository page, the pull request and the one diff component as spec #2234 plans them, for Björn's review
+    before steps 5 and 6 are built (ticket #2252). Drawn with knobas's tokens and fonts and with #2238's controls: 32px in page
+    headers, 26px in the page body (rows, panel and file headers, toolbars, the side rail), one 6px gap, header actions on the
+    title line in the order primary, others, ghost <i>Open in</i>, <i>Refresh</i>. Every page carries a yellow mockup bar
+    (bottom left) to switch surface, state and theme; it is not part of the app.</p>
+
+  <table>
+    <thead><tr><th>Surface</th><th>What it shows</th><th>Light</th><th>Dark</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <h2>Choices the mockup makes, for review</h2>
+  <ol>
+    <li><b>Tabs regrouped.</b> Two groups split by a thin rule: the repository at a ref (<i>Files</i>, <i>Commits</i>,
+      <i>Branches</i>, <i>Compare</i>) and work in flight (<i>Pull requests</i>, <i>Local changes</i>). <i>Compare</i> becomes a tab
+      of its own, since it now takes any base and any head, instead of lighting <i>Pull requests</i>.</li>
+    <li><b>The landing is the Files tab with nothing open:</b> the tree on the left, the last commit, then the README. No
+      root listing beside the tree, since the tree is the listing.</li>
+    <li><b>The tree persists</b> across the Files tab: opening a file swaps only the right side. It has <i>Go to file</i> (<kbd>T</kbd>).</li>
+    <li><b>The branch picker stays in the header</b> at header height (#2238: a select in a button row takes the row's height).</li>
+    <li><b>Renderer switcher</b> is a small select in the file header, <i>Render as …</i>; its menu marks the default for the
+      pattern and can change it. <b>Pipeline</b> is a bar under the file header: bytes → steps → renderer, with grips, inline
+      arguments, remove, <i>Add step</i> and <i>Save as default for the pattern</i>.</li>
+    <li><b>Side rail order:</b> Ready to merge? (a checklist with a one-line verdict), Reviewers, Checks, Builds of the head,
+      Conflicts, Local checkout. <i>Merge…</i> stays the header's primary and is disabled until the checklist is met.</li>
+    <li><b>Diff toolbar</b> sits sticky above the tree and files and holds the range picker, layout, <i>Run pipelines</i>,
+      <i>Ignore whitespace</i>, where the diff was read from, and Viewed progress. <i>Run pipelines</i> and <i>Ignore whitespace</i>
+      are pill toggles.</li>
+    <li><b>Collapsed by default:</b> lock and generated files, and files you marked viewed. A file over 1,500 changed lines
+      shows <i>Load diff</i> in place of its lines.</li>
+    <li><b>Waiting:</b> a first read draws skeleton rows shaped like the tree, the commit line and the README; a re-read
+      keeps the old content dimmed under a thin progress line at the top.</li>
+  </ol>
+</div>
+<script>
+  const S = [
+    ["repo", "Repository page", "Persistent tree, README rendered on the landing (GFM table, task list, strikethrough, highlighted fence, a Mermaid fence drawn), regrouped tabs.", ["readme", "skeleton", "refresh"]],
+    ["file", "Renderer switcher", "A diagram file drawn by its default renderer, the switcher open with every renderer that accepts *.mmd; Source highlighted; a broken diagram showing its source and the parser's error.", ["switcher", "source", "broken"]],
+    ["pipeline", "Pipeline editor", "A .json.gz unwrapped by gunzip → jq → Source, edited in place; the gzip suggestion when no default matches; a failed step naming itself, its stderr and its input.", ["editing", "suggested", "failed"]],
+    ["pr", "Pull request", "Conversation with the side rail: merge readiness, reviewers, required checks, builds of the head from the mirror, conflicts.", ["blocked", "ready", "refresh"]],
+    ["diff", "Diff", "The one diff component: file tree with filter and badges, unified and split, word-level changes, expand context, collapse, threads, the pipeline named in a file header, Load diff, the range picker, Ignore whitespace disabled with its reason, a re-read dimmed.", ["unified", "split", "range", "refresh"]],
+  ];
+  const links = (id, states, theme) => states.map((s) => `<a href="${id}.html?theme=${theme}&state=${s}">${s}</a>`).join("");
+  document.getElementById("rows").innerHTML = S.map(([id, name, what, states]) =>
+    `<tr><td><b>${name}</b><br><span class="mono dim small">${id}.html</span></td><td>${what}</td><td><span class="st">${links(id, states, "light")}</span></td><td><span class="st">${links(id, states, "dark")}</span></td></tr>`).join("");
+</script>
+</body>
+</html>

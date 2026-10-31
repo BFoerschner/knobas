@@ -393,6 +393,7 @@ async fn a_feature_branch_reads_ahead_and_behind_its_default_branch() {
                 "https://gitea.example/tidewater/payout-service/commit/{TIP}"
             )),
             commit: None,
+            author: Some("Mara Lindqvist".into()),
         }]
     );
     assert_eq!(
@@ -405,6 +406,7 @@ async fn a_feature_branch_reads_ahead_and_behind_its_default_branch() {
             chip: Some("open".into()),
             url: Some("https://gitea.example/tidewater/payout-service/pulls/142".into()),
             commit: None,
+            author: None,
         }],
         "the open pull request whose head is this branch, and no other"
     );

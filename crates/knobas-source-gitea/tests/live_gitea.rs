@@ -408,7 +408,14 @@ async fn a_seeded_commits_view_carries_the_diff_the_seed_pushed() {
             }
         }
 
-        let diff = &view.sections[1];
+        // Deferred in the whole view (#2319): its own read draws it.
+        assert!(view.sections[1].deferred, "{id}");
+        let diff_view = source
+            .view(&id, Some("diff"))
+            .await
+            .unwrap_or_else(|error| panic!("the diff of {id} failed: {error:?}"))
+            .unwrap_or_else(|| panic!("Gitea draws a commit's diff, and drew nothing for {id}"));
+        let diff = &diff_view.sections[0];
         let Block::Diff {
             files, truncated, ..
         } = &diff.blocks[0]
@@ -1017,6 +1024,136 @@ async fn a_seeded_branchs_view_reads_ahead_with_its_seeded_commits() {
     );
 }
 
+/// The diff between any two commits (#2271): the repository's
+/// `compare:<base>...<head>` section, read from the real server. One commit
+/// as a range (`<sha>^...<sha>`) is that commit's own diff, and the seeded
+/// branch's commits as one range carry every file each of them touched. The
+/// `^` is Gitea's to resolve (1.27.3 does, measured 2026-10-30).
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_diff_between_two_seeded_commits_is_read_from_the_compare() {
+    use knobas_source::view::{Block, Standing};
+
+    let env = env();
+    let source = env.one_repo();
+    let repo = format!("gitea:{}", env.full_name());
+    let branch = format!("{repo}@refs/heads/feature/PAY-231-sepa-retry");
+    let commits = source
+        .view(&branch, Some("commits"))
+        .await
+        .unwrap_or_else(|error| panic!("the commits of {branch} failed: {error:?}"))
+        .expect("Gitea draws a branch");
+    let shas: Vec<String> = commits.sections[0]
+        .blocks
+        .iter()
+        .flat_map(|b| match b {
+            Block::Entities { rows, .. } => rows.clone(),
+            _ => Vec::new(),
+        })
+        .filter_map(|r| r.entity_id)
+        .filter_map(|id| id.rsplit_once('@').map(|(_, sha)| sha.to_owned()))
+        .filter(|sha| sha.len() == 40)
+        .collect();
+    println!("commits {shas:?}");
+    assert!(
+        shas.len() >= 2,
+        "the seed commits at least twice to the branch: {shas:?}"
+    );
+
+    let paths = |view: &knobas_source::view::SourceView| -> Vec<String> {
+        let mut paths: Vec<String> = view
+            .sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .flat_map(|b| match b {
+                Block::Diff { files, .. } => files.iter().map(|f| f.path.clone()).collect(),
+                _ => Vec::new(),
+            })
+            .collect();
+        paths.sort();
+        paths
+    };
+    let compare = async |base: &str, head: &str| {
+        let section = format!("compare:{base}...{head}");
+        assert_eq!(source.view_standing(&repo, Some(&section)), Standing::Fixed);
+        let view = source
+            .view(&repo, Some(&section))
+            .await
+            .unwrap_or_else(|error| panic!("{section} failed: {error:?}"))
+            .expect("Gitea draws a compare");
+        paths(&view)
+    };
+
+    let mut every = Vec::new();
+    for sha in &shas {
+        let own = source
+            .view(&format!("{repo}@{sha}"), Some("diff"))
+            .await
+            .unwrap_or_else(|error| panic!("the diff of {sha} failed: {error:?}"))
+            .expect("Gitea draws a commit");
+        let own = paths(&own);
+        println!("{sha}: {own:?}");
+        assert!(!own.is_empty(), "{sha} changes something");
+        assert_eq!(
+            compare(&format!("{sha}^"), sha).await,
+            own,
+            "{sha} as a range is its own diff"
+        );
+        every.extend(own);
+    }
+    every.sort();
+    every.dedup();
+    let (newest, oldest) = (&shas[0], &shas[shas.len() - 1]);
+    let range = compare(&format!("{oldest}^"), newest).await;
+    println!("{oldest}^...{newest}: {range:?}");
+    assert_eq!(
+        range, every,
+        "the range carries every file its commits touched"
+    );
+    // Its inner bounds leave the oldest commit's change out.
+    let inner = compare(oldest, newest).await;
+    assert_ne!(inner, range, "{oldest}...{newest} is not the range");
+
+    // The repository's first commit (the seed's `auto_init`, the oldest on
+    // `main`) has no commit before it: alone it is its own diff, and a
+    // longer range from it is refused, saying why.
+    let main = format!("{repo}@refs/heads/main");
+    let on_main = source
+        .view(&main, Some("commits"))
+        .await
+        .unwrap_or_else(|error| panic!("the commits of {main} failed: {error:?}"))
+        .expect("Gitea draws a branch");
+    let on_main: Vec<String> = on_main.sections[0]
+        .blocks
+        .iter()
+        .flat_map(|b| match b {
+            Block::Entities { rows, .. } => rows.clone(),
+            _ => Vec::new(),
+        })
+        .filter_map(|r| r.entity_id)
+        .filter_map(|id| id.rsplit_once('@').map(|(_, sha)| sha.to_owned()))
+        .collect();
+    let (tip, root) = (&on_main[0], &on_main[on_main.len() - 1]);
+    let own = source
+        .view(&format!("{repo}@{root}"), Some("diff"))
+        .await
+        .unwrap_or_else(|error| panic!("the diff of {root} failed: {error:?}"))
+        .expect("Gitea draws a commit");
+    assert_eq!(
+        compare(&format!("{root}^"), root).await,
+        paths(&own),
+        "the first commit {root} as a range is its own diff"
+    );
+    if tip != root {
+        let error = source
+            .view(&repo, Some(&format!("compare:{root}^...{tip}")))
+            .await
+            .expect_err("a range from the first commit is refused");
+        println!("{root}^...{tip}: {error}");
+        assert!(error.to_string().contains("first commit"), "{error}");
+    }
+}
+
 /// The seeded repository's source view (#663), read from the real server:
 /// its open pull requests include the fixture's open ones, its branches the
 /// fixture's with `main` first, its README is the one `auto_init` wrote, and
@@ -1208,10 +1345,24 @@ async fn the_seeded_trees_are_walked_and_a_seeded_file_is_drawn() {
     assert_eq!(language.as_deref(), Some("markdown"));
     assert_eq!(size, text.len() as u64);
     assert!(!truncated && !binary);
-    assert!(url.is_some_and(|u| u.ends_with("/src/branch/main/README.md")));
+    // Read at the tip's sha (#2241), a repository's page names the commit.
+    assert!(
+        url.as_deref()
+            .is_some_and(|u| u.contains("/src/commit/") && u.ends_with("/README.md")),
+        "{url:?}"
+    );
+    // A repository's file read at the sha its id names starts its trail at
+    // that commit, short (#2241): such a read knows no branch, and reading
+    // the default branch's name would cost the repository's record per file.
+    let readme_section = readme.section.as_deref().expect("a file opens");
+    let readme_sha = readme_section
+        .strip_prefix("file@")
+        .and_then(|rest| rest.split_once(':'))
+        .map(|(sha, _)| sha)
+        .unwrap_or_else(|| panic!("a repository's file id names its sha: {readme_section}"));
     assert_eq!(
         trail.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
-        ["main", "README.md"]
+        [&readme_sha[..10], "README.md"]
     );
 
     // A branch, walked down one directory at a time to a seeded file.
@@ -1272,6 +1423,126 @@ async fn the_seeded_trees_are_walked_and_a_seeded_file_is_drawn() {
         .expect_err("a path that is not there");
     println!("missing  {missing:?}");
     assert_eq!(missing.status(), Some(404));
+}
+
+/// The whole tree for *Go to file* (#2311): every listing names it at its
+/// own commit, and it holds exactly the files Gitea's recursive tree holds,
+/// by their whole paths. Also what the adapter's paging leans on, at two
+/// entries a page: `total_count` counts every entry on every page, and the
+/// answer's own `truncated` cannot say whether a read has them all (on the
+/// last page Gitea 1.27.3 says false, Forgejo 17 true; measured, #2311). And
+/// the commits section counts what Gitea's `X-Total-Count` counts for the
+/// default branch.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_whole_tree_is_every_file_at_the_listings_commit() {
+    use knobas_source::view::Block;
+
+    let env = env();
+    let source = env.one_repo();
+    let branch = "feature/PAY-231-sepa-retry";
+    let entity = format!("gitea:{}@refs/heads/{branch}", env.full_name());
+    let top = source.view(&entity, Some("files")).await.unwrap().unwrap();
+    let Block::Tree { paths, trail, .. } = &top.sections[0].blocks[0] else {
+        panic!("a listing");
+    };
+    let paths = paths.clone().expect("a listing names the whole tree");
+    let sha = trail[0]
+        .section
+        .strip_prefix("files@")
+        .expect("a sha")
+        .to_owned();
+    assert_eq!(paths, format!("paths@{sha}"));
+
+    let started = std::time::Instant::now();
+    let view = source.view(&entity, Some(&paths)).await.unwrap().unwrap();
+    println!("whole tree read in {:?}", started.elapsed());
+    let Block::Tree {
+        entries, truncated, ..
+    } = &view.sections[0].blocks[0]
+    else {
+        panic!("a tree");
+    };
+    let ours: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+    println!("{} files: {ours:?}", ours.len());
+    assert!(!truncated);
+
+    let whole = api_json(
+        &env,
+        &format!(
+            "repos/{}/git/trees/{sha}?recursive=true&per_page=1000",
+            env.full_name()
+        ),
+    )
+    .await;
+    let blobs: Vec<&str> = whole["tree"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["type"] == "blob")
+        .map(|e| e["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(ours, blobs, "every file, in git's order, nothing else");
+    assert!(
+        ours.iter().any(|p| p.contains('/')),
+        "files below the top, by whole path"
+    );
+    let every = entries.first().and_then(|e| e.section.clone()).unwrap();
+    let file = source.view(&entity, Some(&every)).await.unwrap().unwrap();
+    assert!(
+        matches!(file.sections[0].blocks[0], Block::File { .. }),
+        "an entry opens its file"
+    );
+
+    // Two to a page: the count is every entry on every page; `truncated`
+    // is true on the first, and printed on the last, where forges differ.
+    let total = whole["total_count"].as_u64().expect("a total_count") as usize;
+    assert_eq!(total, whole["tree"].as_array().unwrap().len());
+    assert!(total > 2, "the seeded tree spans pages of two");
+    let last = total.div_ceil(2);
+    for page in [1, last] {
+        let paged = api_json(
+            &env,
+            &format!(
+                "repos/{}/git/trees/{sha}?recursive=true&per_page=2&page={page}",
+                env.full_name()
+            ),
+        )
+        .await;
+        println!(
+            "page {page}: {} entries, total_count {}, truncated {}",
+            paged["tree"].as_array().map_or(0, Vec::len),
+            paged["total_count"],
+            paged["truncated"]
+        );
+        assert_eq!(paged["total_count"].as_u64(), Some(total as u64));
+        if page == 1 {
+            assert_eq!(paged["truncated"], true, "more pages follow the first");
+        }
+    }
+
+    // The commits section's count is Gitea's count of the default branch.
+    let repo = format!("gitea:{}", env.full_name());
+    let commits = source.view(&repo, Some("commits")).await.unwrap().unwrap();
+    let counted = reqwest::Client::new()
+        .get(format!(
+            "{}/api/v1/repos/{}/commits?sha=main&limit=1",
+            env.url,
+            env.full_name()
+        ))
+        .header("Authorization", format!("token {}", env.token))
+        .send()
+        .await
+        .unwrap()
+        .headers()
+        .get("x-total-count")
+        .and_then(|v| v.to_str().ok()?.parse::<u64>().ok());
+    println!(
+        "commits on main: {:?}, Gitea counts {counted:?}",
+        commits.sections[0].count
+    );
+    assert!(counted.is_some_and(|n| n > 0));
+    assert_eq!(commits.sections[0].count, counted);
 }
 
 /// Interfaces §4.2's key forms, against ids the *real* server issued.
@@ -3029,7 +3300,7 @@ async fn a_pull_request_merged_the_moment_it_opens_lands_ten_times_in_ten() {
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_required_status_check_holds_the_merge_until_it_passes() {
-    use knobas_source::view::SourceView;
+    use knobas_source::view::{Block, SourceView, Tone};
 
     const CHECK: &str = "knobas/live-check";
     let env = env();
@@ -3127,9 +3398,37 @@ async fn a_required_status_check_holds_the_merge_until_it_passes() {
         }
     };
 
+    // The side rail's facts (#2278) say what *Merge…* says, from the same
+    // standing: *Required checks* counted and toned, *Required check* naming
+    // the context toned by where it stands.
+    let required = |summary: &'static str, tone: Tone, check: Tone| {
+        let (source, id) = (&source, &id);
+        async move {
+            let view = source.view(id, None).await.unwrap().unwrap();
+            let Block::Facts { facts } = &view.sections[0].blocks[0] else {
+                panic!("the overview opens on facts: {view:#?}");
+            };
+            let drawn: Vec<(&str, &str, Option<Tone>)> = facts
+                .iter()
+                .filter(|f| f.label.starts_with("Required check"))
+                .map(|f| (f.label.as_str(), f.value.as_str(), f.tone))
+                .collect();
+            println!("LIVE rail facts: {drawn:?}");
+            assert_eq!(
+                drawn,
+                vec![
+                    ("Required checks", summary, Some(tone)),
+                    ("Required check", CHECK, Some(check)),
+                ],
+                "{facts:#?}"
+            );
+        }
+    };
+
     let waiting = Some(format!("Required check {CHECK} has not reported"));
     assert_eq!(settled(waiting.clone()).await, waiting);
     println!("LIVE no status: Merge… says {waiting:?}");
+    required("0 of 1 pass", Tone::Info, Tone::Info).await;
 
     // Gitea agrees, and its 405 is a refusal at once, not a wait.
     let started = std::time::Instant::now();
@@ -3167,15 +3466,18 @@ async fn a_required_status_check_holds_the_merge_until_it_passes() {
     report("pending").await;
     let pending = Some(format!("Required check {CHECK} is pending"));
     assert_eq!(settled(pending.clone()).await, pending);
+    required("0 of 1 pass", Tone::Info, Tone::Info).await;
     report("failure").await;
     let failed = Some(format!("Required check {CHECK} failed"));
     assert_eq!(settled(failed.clone()).await, failed);
+    required("0 of 1 pass", Tone::Err, Tone::Err).await;
     report("success").await;
     assert_eq!(
         settled(None).await,
         None,
         "a passed check leaves Merge… enabled"
     );
+    required("1 of 1 pass", Tone::Ok, Tone::Ok).await;
     // The check's row carries its time (#994): reported a moment ago, with
     // no description, so its meta is the age alone.
     let view = source.view(&id, None).await.unwrap().unwrap();
@@ -3599,7 +3901,9 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
             "Edit…",
             "Close",
             "Add label…",
-            "Merge…"
+            "Merge…",
+            // The author may ask for a review (#2303).
+            "Request…"
         ],
         "{:#?}",
         own_view.actions
@@ -4200,6 +4504,23 @@ async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
         "Gitea dates its comments: {readme:#?}"
     );
 
+    // The head both comments were written on (#2318).
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let auth = format!("token {}", env.token);
+    let pull_head = || async {
+        let pull: serde_json::Value = http
+            .get(format!("{api}/pulls/{number}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .expect("read the pull request")
+            .json()
+            .await
+            .expect("a pull request record");
+        pull["head"]["sha"].as_str().expect("a head sha").to_owned()
+    };
+    let written_on = pull_head().await;
+
     // 4. A push rewrites the added line: its comment is about a line the diff
     //    no longer holds as it was, so it is outdated; the removed line is
     //    still the removed line.
@@ -4213,33 +4534,93 @@ async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
     .await;
     // Gitea's pull request diff is current at once; Forgejo updates a pull
     // request's head through a queue (#1195, measured on 17.0.0: a few seconds
-    // behind the push), so read until the diff holds the pushed line.
-    let mut waited = 0;
-    let (readme, _) = loop {
-        let (readme, rest) = files().await;
-        let pushed = readme
-            .hunks
+    // behind the push), and marks the comments outdated after that, so the
+    // diff can hold the pushed line while the thread is not yet outdated
+    // (#2320). Read until the threads are as asserted, for at most 120 s: the
+    // queue runs behind under a busy machine.
+    let want = [(ReviewSide::Old, false), (ReviewSide::New, true)];
+    let started = std::time::Instant::now();
+    let (readme, state) = loop {
+        let (readme, _) = files().await;
+        let state: Vec<(ReviewSide, bool)> = readme
+            .threads
             .iter()
-            .flat_map(|h| &h.lines)
-            .any(|l| l.text == "reviewed again from knobas");
-        if pushed || waited >= 40 {
-            break (readme, rest);
+            .map(|t| (t.side, t.outdated))
+            .collect();
+        if state == want || started.elapsed() >= std::time::Duration::from_secs(120) {
+            break (readme, state);
         }
-        waited += 1;
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     };
-    let state: Vec<(ReviewSide, bool)> = readme
-        .threads
-        .iter()
-        .map(|t| (t.side, t.outdated))
-        .collect();
-    println!("after the push: {state:?}");
+    println!(
+        "after the push: {state:?}, after {} ms",
+        started.elapsed().as_millis()
+    );
+    assert_eq!(state, want, "{readme:#?}");
+    // 5. The outdated thread is drawn at the commit it was written on, its
+    //    hunk ending on the line as it read there (#2318); the other is not
+    //    outdated and carries neither. Gitea's and Forgejo's raw answer is
+    //    printed: the measurement the adapter's parse rests on.
+    let reviews: Vec<serde_json::Value> = http
+        .get(format!("{api}/pulls/{number}/reviews"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("read the reviews")
+        .json()
+        .await
+        .expect("a review list");
+    for review in &reviews {
+        let Some(rid) = review["id"].as_u64() else {
+            continue;
+        };
+        let raw: Vec<serde_json::Value> = http
+            .get(format!("{api}/pulls/{number}/reviews/{rid}/comments"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .expect("read a review's comments")
+            .json()
+            .await
+            .expect("a comment list");
+        for c in raw {
+            println!(
+                "raw comment: commit_id={} original_commit_id={} position={} original_position={} diff_hunk={:?}",
+                c["commit_id"],
+                c["original_commit_id"],
+                c["position"],
+                c["original_position"],
+                c["diff_hunk"]
+            );
+        }
+    }
+    let now_head = pull_head().await;
+    println!("written on {written_on}, head now {now_head}");
+    assert_ne!(written_on, now_head, "the push moved the head");
+    let outdated = &readme.threads[1];
     assert_eq!(
-        state,
-        [(ReviewSide::Old, false), (ReviewSide::New, true)],
+        outdated.commit.as_deref(),
+        Some(written_on.as_str()),
+        "{outdated:#?}"
+    );
+    let hunk = outdated
+        .hunk
+        .as_ref()
+        .unwrap_or_else(|| panic!("no hunk: {outdated:#?}"));
+    let last = hunk.lines.last().expect("a hunk with lines");
+    assert_eq!(
+        (last.kind, last.new, last.text.as_str()),
+        (DiffLineKind::Add, Some(added), "reviewed from knobas"),
+        "{hunk:#?}"
+    );
+    assert_eq!(
+        (&readme.threads[0].commit, &readme.threads[0].hunk),
+        (&None, &None),
         "{readme:#?}"
     );
-    println!("#{number}: two line comments sent, drawn on their lines, the rewritten one outdated");
+    println!(
+        "#{number}: two line comments sent, drawn on their lines, the rewritten one outdated at {written_on}"
+    );
 }
 
 /// A check row's meta is `<description> · <age>`, or the age alone when the
@@ -4839,30 +5220,25 @@ async fn a_file_is_committed_onto_a_branch_a_new_branch_held_when_it_moved_and_r
     );
 
     // 4. The branch is protected: refused with the reason, before a request;
-    //    a new branch from it still goes. The file's view declares its commit
-    //    taken before, and disabled with the same reason after (#985).
+    //    a new branch from it still goes. `refused_writes` takes the commit
+    //    before, and refuses it with the same reason after (#985, asked
+    //    there since #2241 rather than beside every file).
     let branch_entity = format!("{repo_id}@refs/heads/{branch}");
-    let file_section = format!("file:{path}");
     let declared_commit = || async {
-        let view = source
-            .view(&branch_entity, Some(&file_section))
+        source
+            .refused_writes(&[knobas_source::grants::WriteAsk {
+                entity: branch_entity.clone(),
+                op: "commit_file".to_owned(),
+                field: None,
+            }])
             .await
-            .expect("the file's view")
-            .expect("drawn");
-        view.sections[0]
-            .blocks
-            .iter()
-            .find_map(|block| match block {
-                knobas_source::view::Block::Actions { actions } => actions
-                    .iter()
-                    .find(|a| a.write_op == "commit_file")
-                    .cloned(),
-                _ => None,
-            })
-            .expect("the file declares its commit")
+            .expect("refused_writes answers")
+            .into_iter()
+            .next()
+            .map(|refused| refused.reason)
     };
     assert_eq!(
-        declared_commit().await.disabled,
+        declared_commit().await,
         None,
         "an unprotected branch takes the commit"
     );
@@ -4894,8 +5270,7 @@ async fn a_file_is_committed_onto_a_branch_a_new_branch_held_when_it_moved_and_r
     );
     let reason = declared_commit()
         .await
-        .disabled
-        .expect("a protected branch's commit is declared disabled");
+        .expect("a protected branch's commit is refused");
     println!("LIVE the file's commit on a protected branch: {reason:?}");
     assert!(
         matches!(&refused, Err(SourceError::Protocol { message, .. }) if message.ends_with(&reason)),
@@ -6242,10 +6617,12 @@ fn read_of(view: &knobas_source::view::SourceView) -> Vec<(String, Option<u64>, 
 const TESTENV_READER: (&str, &str) = ("jonas.becker", "tidewater-dev");
 
 /// Issue #2030, spec #1192 story 10, against the real server: a token minted
-/// with `read:repository` reads the repository, a branch, a commit, a pull
-/// request and a file as a token that may write does, and is offered every
-/// write there disabled, saying which scope it lacks; the token that may
-/// write is offered none for its scope. An account that may not push to a
+/// with `read:repository` reads the repository, a branch, a commit and a pull
+/// request as a token that may write does, and is offered every write there
+/// disabled, saying which scope it lacks; the token that may write is offered
+/// none for its scope. *Commit change…*, which no file section offers since
+/// #2241, is `refused_writes`' answer for `commit_file` (#2317): refused the
+/// read-only token for its scope, not the other. An account that may not push to a
 /// repository (a seeded person on the admin's mirror) is told so on
 /// *New branch…*. The answers `view::grants` reads are measured here: the
 /// empty-bodied branch and issue writes, refused for the scope or for the
@@ -6407,17 +6784,18 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
                 .expect("drawn"),
         ));
     }
-    // The README, where *Commit change…* is offered (the Files tab's file).
-    let file = "file:README.md";
-    let (a, b) = tokio::join!(
-        narrow.view(&entities[0], Some(file)),
-        wide.view(&entities[0], Some(file))
+    // *Commit change…* on the Files tab: no file section offers a write
+    // since #2241; its standing is `refused_writes`' answer for
+    // `commit_file`, asked of the repository (its default branch).
+    let commit_file = [knobas_source::grants::WriteAsk {
+        entity: entities[0].clone(),
+        op: "commit_file".to_owned(),
+        field: None,
+    }];
+    let (commit_refused, commit_allowed) = tokio::join!(
+        narrow.refused_writes(&commit_file),
+        wide.refused_writes(&commit_file)
     );
-    seen.push((
-        format!("{} {file}", entities[0]),
-        a.expect("the README reads").expect("drawn"),
-        b.expect("the README reads").expect("drawn"),
-    ));
 
     let tip: serde_json::Value = http
         .get(format!("{api}/repos/{mirror}/commits?limit=1"))
@@ -6473,6 +6851,26 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
             );
         }
     }
+    let commit_refused = commit_refused.expect("the read-only token is answered");
+    println!("LIVE commit_file, read-only: {commit_refused:?}");
+    assert_eq!(
+        commit_refused
+            .iter()
+            .map(|r| (r.entity.as_str(), r.op.as_str(), r.reason.as_str()))
+            .collect::<Vec<_>>(),
+        [(
+            entities[0].as_str(),
+            "commit_file",
+            "This token cannot write: it lacks the write:repository scope"
+        )],
+        "Commit change… is refused a token that may only read, naming the scope"
+    );
+    let commit_allowed = commit_allowed.expect("the token that may write is answered");
+    assert_eq!(
+        commit_allowed,
+        [],
+        "Commit change… is not refused a token that may write"
+    );
     let pushless = pushless
         .expect("a reader reads the mirror's commit")
         .expect("drawn");
@@ -6483,6 +6881,121 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
             Some("This account cannot push to this repository".to_owned())
         )],
         "an account without push is told so"
+    );
+}
+
+/// Merger of #2306, against the real server: an archived repository answers
+/// both probes 423, a repository with issues and pull requests switched off
+/// answers the issue probe 404, and so does a repository that is not there.
+/// No write lands behind any of them, so `Source::refused_writes` reads each
+/// as a refusal saying why, never as the error that draws every write of the
+/// call "could not ask". Both repositories are made under the account and
+/// removed again; an earlier killed run's are removed first.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn an_archived_or_missing_repository_is_refused_its_writes_saying_why() {
+    use knobas_source::grants::{RefusedWrite, WriteAsk};
+
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1", env.url);
+    let me: serde_json::Value = http
+        .get(format!("{api}/user"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET /user")
+        .json()
+        .await
+        .expect("a user record");
+    let me = me["login"].as_str().expect("a login").to_owned();
+    let archived = "knobas-live-2306-archived";
+    let no_issues = "knobas-live-2306-no-issues";
+    let nowhere = "knobas-live-2306-nowhere";
+    let remove = async |name: &str| {
+        let _ = http
+            .delete(format!("{api}/repos/{me}/{name}"))
+            .header("Authorization", &auth)
+            .send()
+            .await;
+    };
+    for name in [archived, no_issues, nowhere] {
+        remove(name).await;
+    }
+    let mut made = Vec::new();
+    for name in [archived, no_issues] {
+        let status = http
+            .post(format!("{api}/user/repos"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "name": name, "auto_init": true }))
+            .send()
+            .await
+            .expect("POST /user/repos")
+            .status()
+            .as_u16();
+        made.push(status);
+    }
+    let mut patched = Vec::new();
+    for (name, patch) in [
+        (archived, serde_json::json!({ "archived": true })),
+        (
+            no_issues,
+            serde_json::json!({ "has_issues": false, "has_pull_requests": false }),
+        ),
+    ] {
+        let status = http
+            .patch(format!("{api}/repos/{me}/{name}"))
+            .header("Authorization", &auth)
+            .json(&patch)
+            .send()
+            .await
+            .expect("PATCH the repository")
+            .status()
+            .as_u16();
+        patched.push(status);
+    }
+
+    let repo = |name: &str| format!("gitea:{me}/{name}");
+    let ask = |entity: String, op: &str| WriteAsk {
+        entity,
+        op: op.to_owned(),
+        field: None,
+    };
+    let asks = [
+        ask(repo(archived), "create_branch"),
+        ask(repo(archived), "create_ticket"),
+        ask(repo(no_issues), "create_ticket"),
+        ask(repo(nowhere), "create_ticket"),
+    ];
+    let source = env.source(serde_json::json!({}));
+    let answer = source.refused_writes(&asks).await;
+
+    for name in [archived, no_issues] {
+        remove(name).await;
+    }
+
+    assert_eq!(made, [201, 201], "create both repositories");
+    assert_eq!(
+        patched,
+        [200, 200],
+        "archive one, switch the other's issues off"
+    );
+    let answer = answer.expect("each probe answered a verdict");
+    let gone = "Gitea does not show this repository's issues to this token: \
+                they are switched off, or the repository is gone";
+    let archived_why = "This repository is archived, so it takes no writes";
+    assert_eq!(
+        answer,
+        [
+            RefusedWrite::of(&asks[0], archived_why.to_owned()),
+            RefusedWrite::of(&asks[1], archived_why.to_owned()),
+            RefusedWrite::of(&asks[2], gone.to_owned()),
+            RefusedWrite::of(&asks[3], gone.to_owned()),
+        ]
     );
 }
 
@@ -6905,4 +7418,340 @@ async fn a_token_that_may_not_read_issues_reads_every_view_but_the_discussion() 
         of_kind(&sink.0, "ticket").is_empty(),
         "the issue listing is refused too, and skipped"
     );
+}
+
+// -- replies, resolve and review requests (#2277, #2303) ---------------------
+
+/// Spec #2234 step 6d, against the real server: on a pull request opened
+/// here, a line comment's thread takes a reply through the adapter's
+/// `reply_to_thread` -- the call the write queue's flush makes -- which the
+/// *Files* tab read again draws in the thread and *Conversation* quotes.
+/// Gitea resolves and reopens the thread, and a fresh read says so; Forgejo
+/// 17 offers no resolve and refuses one sent anyway with 405. *Request…*
+/// asks a seeded user, whom Gitea then lists in `requested_reviewers`, and
+/// the view names as requested.
+///
+/// Never a seeded pull request: it is opened on a `knobas-` branch of its
+/// own, and [`Litter`] deletes both, with its reviews, whether this passes
+/// or panics.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
+    use knobas_source::view::{Block, FieldKind, LineThread};
+    use knobas_source::{ReviewComment, ReviewSide, ReviewVerdict, WriteOp};
+
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let branch = format!("knobas-threads-{stamp}");
+    litter.branch_off_main(&branch).await;
+    // "# payout-service\nreviewed from knobas\nRust\n"
+    rewrite_readme(
+        &http,
+        &env,
+        &branch,
+        "IyBwYXlvdXQtc2VydmljZQpyZXZpZXdlZCBmcm9tIGtub2JhcwpSdXN0Cg==",
+    )
+    .await;
+    let number = litter
+        .open_pull_as(
+            "jonas.becker",
+            &branch,
+            &format!("knobas thread check {stamp}"),
+        )
+        .await;
+    let id = format!("gitea:{}#{number}", env.full_name());
+    let version: serde_json::Value = http
+        .get(format!("{}/api/v1/version", env.url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let forgejo = version["version"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("+gitea-");
+    let files = || async {
+        let view = source.view(&id, Some("files")).await.unwrap().unwrap();
+        let Some(Block::Diff {
+            files, commentable, ..
+        }) = view.sections[0].blocks.first().cloned()
+        else {
+            panic!("the files tab is a diff: {view:#?}");
+        };
+        let readme = files.into_iter().find(|f| f.path == "README.md").unwrap();
+        (
+            readme,
+            commentable.expect("an open pull request's diff takes comments"),
+        )
+    };
+    let (readme, commentable) = files().await;
+    assert_eq!(commentable.reply.as_deref(), Some("reply_to_thread"));
+    assert_eq!(
+        commentable.resolve.as_deref(),
+        (!forgejo).then_some("resolve_thread"),
+        "resolve is offered on Gitea and not on Forgejo ({version})"
+    );
+    assert!(
+        commentable.head.is_some(),
+        "the head the comments are kept by"
+    );
+    assert!(
+        readme.blob.is_some(),
+        "the blob Viewed is kept by: {readme:#?}"
+    );
+    let added = readme
+        .hunks
+        .iter()
+        .flat_map(|h| &h.lines)
+        .find_map(|l| {
+            (l.kind == knobas_source::view::DiffLineKind::Add)
+                .then_some(l.new)
+                .flatten()
+        })
+        .expect("an added line");
+
+    // 1. A thread on the added line.
+    let opened = format!("say what reviewed it, {stamp}");
+    source
+        .write(WriteOp::SubmitReview {
+            entity: id.clone(),
+            verdict: ReviewVerdict::Comment,
+            body: String::new(),
+            comments: vec![ReviewComment {
+                path: "README.md".into(),
+                line: u64::from(added),
+                side: ReviewSide::New,
+                body: opened.clone(),
+            }],
+        })
+        .await
+        .expect("Gitea takes a review of a line comment");
+    let thread = |file: &knobas_source::view::DiffFile| -> LineThread {
+        file.threads
+            .iter()
+            .find(|t| t.line == added && t.side == ReviewSide::New)
+            .cloned()
+            .unwrap_or_else(|| panic!("no thread on line {added}: {file:#?}"))
+    };
+    let (readme, _) = files().await;
+    let first = thread(&readme);
+    let thread_id = first.id.clone().expect("Gitea's comment id");
+    assert!(first.replies, "{first:#?}");
+    assert_eq!(first.resolved_by, None);
+
+    // 2. A reply joins the thread, and Conversation says it.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let reply = format!("the knobas reply, {stamp}");
+    source
+        .write(WriteOp::ReplyToThread {
+            entity: id.clone(),
+            thread: thread_id.clone(),
+            comment: ReviewComment {
+                path: "README.md".into(),
+                line: u64::from(added),
+                side: ReviewSide::New,
+                body: reply.clone(),
+            },
+        })
+        .await
+        .expect("Gitea takes the reply");
+    let (readme, _) = files().await;
+    let answered = thread(&readme);
+    let bodies: Vec<&str> = answered.comments.iter().map(|c| c.body.as_str()).collect();
+    assert_eq!(bodies, [opened.as_str(), reply.as_str()], "{answered:#?}");
+    assert_eq!(
+        answered.id.as_deref(),
+        Some(thread_id.as_str()),
+        "the thread keeps its id"
+    );
+    let whole = source.view(&id, None).await.unwrap().unwrap();
+    let conversation = said(&whole, "conversation");
+    assert!(
+        conversation
+            .iter()
+            .any(|l| l.contains(&format!("> {reply}"))),
+        "{conversation:#?}"
+    );
+
+    // 3. Resolve: Gitea's, read back by a fresh read; Forgejo refuses it.
+    let resolve = |resolved| WriteOp::ResolveThread {
+        entity: id.clone(),
+        thread: thread_id.clone(),
+        resolved,
+    };
+    if forgejo {
+        let error = source
+            .write(resolve(true))
+            .await
+            .expect_err("Forgejo cannot resolve");
+        assert_eq!(error.status(), Some(405), "{error:?}");
+    } else {
+        source.write(resolve(true)).await.expect("Gitea resolves");
+        let (readme, _) = files().await;
+        assert_eq!(thread(&readme).resolved_by, Some(env.login().await));
+        source.write(resolve(false)).await.expect("Gitea reopens");
+        let (readme, _) = files().await;
+        assert_eq!(thread(&readme).resolved_by, None);
+    }
+
+    // 4. Request…: offered to the token (an admin), and Gitea lists who it asked.
+    let request = whole
+        .actions
+        .iter()
+        .find(|a| a.write_op == "request_reviewers")
+        .unwrap_or_else(|| panic!("no Request… in {:#?}", whole.actions));
+    let FieldKind::Choice { options } = &request.fields[0].kind else {
+        panic!("{request:#?}");
+    };
+    // Never the reader: Forgejo's `/reviewers` lists the token's account.
+    let me = env.login().await;
+    assert!(
+        options.iter().all(|o| o.value != me),
+        "{me} is offered to themself: {options:#?}"
+    );
+    let who = options
+        .iter()
+        .map(|o| o.value.clone())
+        .find(|w| w != "jonas.becker")
+        .unwrap_or_else(|| panic!("nobody to ask: {options:#?}"));
+    source
+        .write(WriteOp::RequestReviewers {
+            entity: id.clone(),
+            reviewers: vec![who.clone()],
+        })
+        .await
+        .expect("Gitea takes the request");
+    let pull: serde_json::Value = http
+        .get(format!(
+            "{}/api/v1/repos/{}/pulls/{number}",
+            env.url,
+            env.full_name()
+        ))
+        .header("Authorization", format!("token {}", env.token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let asked: Vec<&str> = pull["requested_reviewers"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|u| u["login"].as_str()).collect())
+        .unwrap_or_default();
+    assert!(asked.contains(&who.as_str()), "{asked:?} {pull}");
+    let after = source.view(&id, None).await.unwrap().unwrap();
+    assert!(
+        said(&after, "overview").contains(&format!("Review=requested from {who}")),
+        "{:#?}",
+        said(&after, "overview")
+    );
+    // An unknown login is refused with Gitea's sentence.
+    let error = source
+        .write(WriteOp::RequestReviewers {
+            entity: id.clone(),
+            reviewers: vec![format!("nobody-{stamp}")],
+        })
+        .await
+        .expect_err("an unknown reviewer is refused");
+    println!("an unknown reviewer: {error:?}");
+    assert!(
+        matches!(error, knobas_source::SourceError::Protocol { .. }),
+        "{error:?}"
+    );
+    println!(
+        "thread {thread_id} answered{} and {who} asked on #{number}",
+        if forgejo {
+            ""
+        } else {
+            ", resolved and reopened"
+        }
+    );
+}
+
+/// The pages the descriptor declares (#2274, `SourceDescriptor::code_pages`)
+/// are pages the real server serves: each one, built as *Open in › Browser*
+/// builds it from the typed base URL, answers 200 after Gitea's redirects
+/// (`/src/<ref>/` 303s to `/src/branch/` or `/src/commit/`), for a file read
+/// at a branch and at a sha, a commit, a range of two branches and of
+/// `<sha>^...<sha>`, and a pull request. Read-only: nothing is created.
+///
+/// Prints each page and where it ended, which is the output the PR quotes.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_declared_code_pages_are_pages_the_server_serves() {
+    use knobas_source::code_pages::{Page, page};
+
+    let env = env();
+    let pages = knobas_source_gitea::descriptor_template()
+        .code_pages
+        .expect("Gitea declares its code pages");
+    let full = env.full_name();
+    let http = reqwest::Client::new();
+    let api = |path: String| {
+        http.get(format!("{}/api/v1/repos/{full}/{path}", env.url))
+            .header("Authorization", format!("token {}", env.token))
+            .send()
+    };
+    let branch = "feature/PAY-231-sepa-retry";
+    let head: serde_json::Value = api(format!("commits?sha={branch}&limit=1"))
+        .await
+        .expect("the server answers")
+        .json()
+        .await
+        .expect("a commit listing");
+    let sha = head[0]["sha"]
+        .as_str()
+        .expect("the seeded branch has a commit")
+        .to_owned();
+    let pulls: serde_json::Value = api("pulls?state=all&limit=1".to_owned())
+        .await
+        .expect("the server answers")
+        .json()
+        .await
+        .expect("a pull request listing");
+    let number = pulls[0]["number"]
+        .as_u64()
+        .expect("the seed opens a pull request")
+        .to_string();
+    let based = format!("{sha}^");
+    let cases: [(Page, Vec<(&str, &str)>); 7] = [
+        (Page::Repository, vec![]),
+        (
+            Page::File,
+            vec![("ref", "main"), ("file", "README.md"), ("line", "1")],
+        ),
+        (
+            Page::File,
+            vec![("ref", &sha), ("file", "README.md"), ("line", "1")],
+        ),
+        (Page::Commit, vec![("sha", &sha)]),
+        (Page::Range, vec![("base", "main"), ("head", branch)]),
+        (Page::Range, vec![("base", &based), ("head", &sha)]),
+        (
+            Page::PullRequest,
+            vec![("pr", &number), ("base", "main"), ("head", branch)],
+        ),
+    ];
+    for (which, values) in cases {
+        let mut all = vec![("repo", full.as_str())];
+        all.extend(values);
+        let url = page(&env.url, pages.template(which), &all)
+            .unwrap_or_else(|| panic!("{which:?} builds from {all:?}"));
+        let answer = http.get(&url).send().await.expect("the server answers");
+        println!("{which:?} {url} -> {} {}", answer.status(), answer.url());
+        assert_eq!(answer.status(), reqwest::StatusCode::OK, "{which:?} {url}");
+        assert!(
+            answer.url().path().starts_with(&format!("/{full}")),
+            "{which:?} stayed in the repository: {}",
+            answer.url()
+        );
+    }
 }

@@ -3,10 +3,10 @@
  * function, so a Rust rename that regenerates the mirror turns the fixture red in svelte-check (#1670).
  * One line per `invoke("<command>")` in `app/src/lib/ipc/*.ts`; a command missing here is simply untyped.
  */
-import type { appStatus, completeFirstRun, frontendReady, ping, retryDatabase } from "../../ipc/app";
+import type { appStatus, commandSteps, completeFirstRun, diffPipelines, frontendReady, namedPipelines, pagesKeptOpen, ping, rendererDefaults, retryDatabase, runRenderer, setCommandSteps, setDiffPipelines, setNamedPipelines, setPagesKeptOpen, setRendererDefaults, setUserRenderers, userRenderers } from "../../ipc/app";
 import type { ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, createDepLayer, createRoute, deleteAsset, deleteDepLayer, deleteDepView, deleteRoute, depViews, dependencies, dependsOnThis, editAsset, editRoute, getAsset, getRoute, monitorRoster, monitoringSettings, moveAsset, openAlerts, orderDepLayers, placeDepKind, previewEstateImport, produceEstateFile, renameDepLayer, saveDepView, setDepViewDefaults, setMonitoringSettings, unmonitoredAssets } from "../../ipc/assets";
 import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBackupSchedule, shareExport } from "../../ipc/backup";
-import type { acceptSuggestion, actionItemTicket, artifactPreview, captureContext, captureShortcut, checkoutSettings, cloneRepo, codeFacts, completeInboxItem, createActionItemTicket, createLink, createNote, deleteLinkSet, deleteNote, deleteRunPreset, dismissSuggestion, docsCreatePage, docsEditSection, docsExportMarkdown, docsPage, docsSearch, docsTree, downloadRunFile, entityCheckout, entityCheckoutDiff, entityThread, entityView, exportNotesMarkdown, followMerges, getEntity, getNote, hideLinkSetMember, inboxCount, inboxItems, jobLinkSets, jobPipelines, jobReach, linkSet, linkSetHints, linkSets, listContexts, listEntities, listProjects, miniBoard, moveNotesToConfluence, notificationKinds, notify, olderPipelineRuns, openCheckout, owedTickets, parentLinks, pipelineRuns, pipelineSettings, pipelines, prViewedFiles, previewLinkSetPattern, previewLinkSetRule, promoteContext, proposalEvidence, publishStandupProtocol, reachableTransitions, recordCaptureContext, refusedWrites, resolveUrl, revealNote, roomSuggestions, runArtifacts, runChain, runLog, runPresets, runTests, saveLinkSet, saveNote, saveRunPreset, setCaptureShortcut, setCheckoutApplications, setCheckoutOverride, setClonesRoot, setNotesShown, setNotificationKinds, setParentLinks, setPipelinePinned, setPrFileViewed, setStandupPublishTarget, snoozeInboxItem, standupDigest, standupProtocol, standupPublishTarget, startWorkAmend, startWorkFlow, startWorkRetry, startWorkRun, startWorkSkip, submitWrite, testHistory, unlink, visitEntity } from "../../ipc/entity";
+import type { acceptSuggestion, actionItemTicket, artifactPreview, captureContext, captureShortcut, checkoutSettings, cloneRepo, codeFacts, completeInboxItem, createActionItemTicket, createLink, createNote, deleteLinkSet, deleteNote, deleteRunPreset, diffTool, dismissSuggestion, docsCreatePage, docsEditSection, docsExportMarkdown, docsPage, docsSearch, docsTree, downloadRunFile, entityCheckout, entityCheckoutDiff, entityCommitDiff, entityFileBytes, entityFilePiped, entityRangeDiff, entityThread, entityView, exportNotesMarkdown, followMerges, getEntity, getNote, hideLinkSetMember, inboxCount, inboxItems, jobLinkSets, jobPipelines, jobReach, linkSet, linkSetHints, linkSets, listContexts, listEntities, listProjects, miniBoard, moveNotesToConfluence, notificationKinds, notify, objectPage, olderPipelineRuns, openCheckout, openDiffTool, openObject, owedTickets, parentLinks, pipelineRuns, pipelineSettings, pipelines, prViewedFiles, previewLinkSetPattern, previewLinkSetRule, promoteContext, proposalEvidence, publishStandupProtocol, pullRequestWorktrees, reachableTransitions, recordCaptureContext, refusedWrites, removePullRequestWorktree, resolveUrl, revealNote, roomSuggestions, runArtifacts, runChain, runLog, runPresets, runTests, saveLinkSet, saveNote, saveRunPreset, setCaptureShortcut, setCheckoutApplications, setCheckoutOverride, setClonesRoot, setNotesShown, setNotificationKinds, setParentLinks, setPipelinePinned, setPrFileViewed, setStandupPublishTarget, snoozeInboxItem, standupDigest, standupProtocol, standupPublishTarget, startWorkAmend, startWorkFlow, startWorkRetry, startWorkRun, startWorkSkip, submitWrite, testHistory, unlink, visitEntity } from "../../ipc/entity";
 import type { createSmartList, deleteSmartList, deleteTicketView, filterSuggestions, hideSavedView, launcherHome, openSavedView, renameSmartList, saveTicketView, search, smartLists, ticketViews, translateTicketView } from "../../ipc/search";
 import type { addSource, amendWrite, applyHeldWrite, backfillSource, checkAdapterUpdates, credentialHealth, dbStats, deleteSource, demoLoad, discardWrite, flushWrites, installAdapter, listAdapters, listInstalledAdapters, listSources, listSyncRuns, pendingWrites, previewInstallAdapter, previewUpdateAdapter, refreshEntity, reindexFts, setSourceSecret, syncAll, syncNow, syncNowWithProgress, syncRole, syncStatus, testSource, uninstallAdapter, updateAdapter, updateSource, watchSync, writeQueueCounts } from "../../ipc/sources";
 import type { adHocBlock, createBlock, currentTimer, dayBlocks, deleteBlock, dismissBlock, logAllPreview, logWork, passiveAttribution, setPassiveAttribution, startTimer, stopTimer, timerHeartbeat, updateBlock, weekTimesheet, worklogDraft } from "../../ipc/time";
@@ -79,6 +79,10 @@ export interface Answers {
   edit_route: Answer<typeof editRoute>;
   entity_checkout: Answer<typeof entityCheckout>;
   entity_checkout_diff: Answer<typeof entityCheckoutDiff>;
+  entity_commit_diff: Answer<typeof entityCommitDiff>;
+  entity_file_bytes: Answer<typeof entityFileBytes>;
+  entity_file_piped: Answer<typeof entityFilePiped>;
+  entity_range_diff: Answer<typeof entityRangeDiff>;
   entity_thread: Answer<typeof entityThread>;
   entity_view: Answer<typeof entityView>;
   export_notes_markdown: Answer<typeof exportNotesMarkdown>;
@@ -118,13 +122,20 @@ export interface Answers {
   move_notes_to_confluence: Answer<typeof moveNotesToConfluence>;
   notification_kinds: Answer<typeof notificationKinds>;
   notify: Answer<typeof notify>;
+  object_page: Answer<typeof objectPage>;
+  diff_tool: Answer<typeof diffTool>;
+  open_diff_tool: Answer<typeof openDiffTool>;
+  pull_request_worktrees: Answer<typeof pullRequestWorktrees>;
+  remove_pull_request_worktree: Answer<typeof removePullRequestWorktree>;
   older_pipeline_runs: Answer<typeof olderPipelineRuns>;
   open_alerts: Answer<typeof openAlerts>;
   open_backup_folder: Answer<typeof openBackupFolder>;
   open_checkout: Answer<typeof openCheckout>;
+  open_object: Answer<typeof openObject>;
   open_saved_view: Answer<typeof openSavedView>;
   order_dep_layers: Answer<typeof orderDepLayers>;
   owed_tickets: Answer<typeof owedTickets>;
+  pages_kept_open: Answer<typeof pagesKeptOpen>;
   parent_links: Answer<typeof parentLinks>;
   passive_attribution: Answer<typeof passiveAttribution>;
   pending_writes: Answer<typeof pendingWrites>;
@@ -150,6 +161,11 @@ export interface Answers {
   reindex_fts: Answer<typeof reindexFts>;
   rename_dep_layer: Answer<typeof renameDepLayer>;
   rename_smart_list: Answer<typeof renameSmartList>;
+  renderer_defaults: Answer<typeof rendererDefaults>;
+  diff_pipelines: Answer<typeof diffPipelines>;
+  set_diff_pipelines: Answer<typeof setDiffPipelines>;
+  command_steps: Answer<typeof commandSteps>;
+  named_pipelines: Answer<typeof namedPipelines>;
   resolve_url: Answer<typeof resolveUrl>;
   restore_backup: Answer<typeof restoreBackup>;
   retry_database: Answer<typeof retryDatabase>;
@@ -158,6 +174,7 @@ export interface Answers {
   run_artifacts: Answer<typeof runArtifacts>;
   run_chain: Answer<typeof runChain>;
   run_log: Answer<typeof runLog>;
+  run_renderer: Answer<typeof runRenderer>;
   run_presets: Answer<typeof runPresets>;
   run_tests: Answer<typeof runTests>;
   save_dep_view: Answer<typeof saveDepView>;
@@ -175,12 +192,17 @@ export interface Answers {
   set_monitoring_settings: Answer<typeof setMonitoringSettings>;
   set_notes_shown: Answer<typeof setNotesShown>;
   set_notification_kinds: Answer<typeof setNotificationKinds>;
+  set_pages_kept_open: Answer<typeof setPagesKeptOpen>;
   set_parent_links: Answer<typeof setParentLinks>;
   set_passive_attribution: Answer<typeof setPassiveAttribution>;
   set_pipeline_pinned: Answer<typeof setPipelinePinned>;
+  set_renderer_defaults: Answer<typeof setRendererDefaults>;
+  set_command_steps: Answer<typeof setCommandSteps>;
+  set_named_pipelines: Answer<typeof setNamedPipelines>;
   set_pr_file_viewed: Answer<typeof setPrFileViewed>;
   set_source_secret: Answer<typeof setSourceSecret>;
   set_standup_publish_target: Answer<typeof setStandupPublishTarget>;
+  set_user_renderers: Answer<typeof setUserRenderers>;
   share_export: Answer<typeof shareExport>;
   smart_lists: Answer<typeof smartLists>;
   snooze_inbox_item: Answer<typeof snoozeInboxItem>;
@@ -211,6 +233,7 @@ export interface Answers {
   update_adapter: Answer<typeof updateAdapter>;
   update_block: Answer<typeof updateBlock>;
   update_source: Answer<typeof updateSource>;
+  user_renderers: Answer<typeof userRenderers>;
   visit_entity: Answer<typeof visitEntity>;
   watch_sync: Answer<typeof watchSync>;
   week_timesheet: Answer<typeof weekTimesheet>;

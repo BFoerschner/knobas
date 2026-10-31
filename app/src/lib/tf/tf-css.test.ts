@@ -377,7 +377,7 @@ test("below 900px the Docs tree is a drawer over the page, on the component's ow
 });
 
 /** The one-row bars that stick: never taller than the window, so they need no bound of their own (#2091). */
-const STICKY_BARS = [".tf-fbar", ".tf-findbar", ".tf-ln-h", ".tf-wtabs", ".tf-logbar"];
+const STICKY_BARS = [".tf-fbar", ".tf-findbar", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar"];
 
 test("every sticky side column is bounded by the window and scrolls on its own, so its last entry is reachable (#2091)", () => {
   const sticky = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
@@ -386,10 +386,16 @@ test("every sticky side column is bounded by the window and scrolls on its own, 
   const columns = sticky.filter(([selector]) => !STICKY_BARS.includes(selector));
   // The columns this test was written against: it keeps finding them.
   expect(columns.map(([selector]) => selector)).toEqual(
-    expect.arrayContaining([".tf-ftree", ".tf-flist", ".tf-rd-outline", ".tf-dp-rail", ".tf-dp-panel"]),
+    expect.arrayContaining([".tf-ftreebox", ".tf-flist", ".tf-rd-outline", ".tf-dp-rail", ".tf-dp-panel"]),
   );
+  // A column whose head stays put scrolls in an inner box instead (#2257: the file tree's rows under its head).
+  const INNER: Record<string, string> = { ".tf-ftreebox": ".tf-ftree" };
+  const scrolls = (selector: string, body: string) =>
+    INNER[selector] === undefined
+      ? /overflow(-y)?:\s*auto/.test(body)
+      : /overflow:\s*hidden/.test(body) && /display:\s*flex/.test(body) && /overflow(-y)?:\s*auto/.test(block(code, INNER[selector]!));
   const unbounded = columns
-    .filter(([, body]) => !/max-height:\s*calc\(100vh - \d+px\)/.test(body) || !/overflow(-y)?:\s*auto/.test(body))
+    .filter(([selector, body]) => !/max-height:\s*calc\(100vh - \d+px\)/.test(body) || !scrolls(selector, body))
     .map(([selector]) => selector);
   expect(unbounded).toEqual([]);
   // Below the open find bar the outline sticks lower, and is shorter by as much.
@@ -402,7 +408,7 @@ test("every sticky side column is bounded by the window and scrolls on its own, 
 
 test("the changed files list sticks: its box is as tall as the diffs beside it (#2091)", () => {
   // A sticky element moves only inside its parent, and a grid item kept to its content's height leaves it no room.
-  expect(block(code, ".tf-prfiles-nav")).toMatch(/align-self:\s*stretch/);
+  expect(block(code, ".tf-dnav")).toMatch(/align-self:\s*stretch/);
 });
 
 test("an Inbox row has no content-visibility: the windowed list measures drawn rows, and a skipped row measures as its placeholder (#2209)", () => {
@@ -413,6 +419,26 @@ test("the Tickets page's row is bounded by the page, so a preview change does no
   expect(block(code, ".tf-tickets")).toMatch(/grid-template-rows:\s*minmax\(0, 1fr\);/);
   const narrow = code.slice(code.indexOf("@media (max-width: 900px) {\n  .tf-tickets"));
   expect(block(narrow, "  .tf-tickets")).toMatch(/grid-template-rows:\s*none;[^}]*height:\s*auto;/);
+});
+
+test("the highlighting themes are the Code area mockup's --hl-* tokens, light on :root and dark in both dark blocks (#2254)", () => {
+  const mockup = readFileSync(join(APP, "../mockups/code-area/base.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  /** Each `--hl-*` token a theme sets: light on `:root`, dark by the OS and when forced. */
+  const themes = (source: string) => {
+    const media = source.slice(source.indexOf("@media (prefers-color-scheme: dark)"));
+    const hl = (body: string) => Object.fromEntries([...body.matchAll(/(--hl-[a-z]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
+    return {
+      light: hl(block(source, ":root")),
+      os: hl(block(media, ':root:not([data-theme="light"])')),
+      forced: hl(block(source, ':root[data-theme="dark"]')),
+    };
+  };
+  const ours = themes(code);
+  expect(Object.keys(ours.light).sort()).toEqual(["--hl-com", "--hl-fn", "--hl-kw", "--hl-num", "--hl-str", "--hl-ty"]);
+  expect(ours).toEqual(themes(mockup));
+  // The two literal colours differ by theme; the rest follow --ok, --warn, --muted and --info.
+  expect(ours.os["--hl-kw"]).not.toBe(ours.light["--hl-kw"]);
+  expect(ours.os["--hl-ty"]).not.toBe(ours.light["--hl-ty"]);
 });
 
 /** `--control-*` → px, from the Controls section's token table (#2238). */

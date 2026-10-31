@@ -295,6 +295,7 @@ pub async fn reachable_transitions<R: tauri::Runtime>(
         &state.pool,
         &state.secrets,
         &state.registry,
+        &state.live,
         &entity_id,
     )
     .await
@@ -302,7 +303,9 @@ pub async fn reachable_transitions<R: tauri::Runtime>(
 }
 
 /// The **source view** of one entity (#661, ADR-0020): what its adapter draws
-/// for its kind, read live when the detail opens and never stored.
+/// for its kind, read live when the detail opens and never stored in the
+/// database. A view the adapter says stands at a fixed commit is kept in
+/// memory for the session and answered from there (ADR-0032, #2239).
 ///
 /// `section: None` reads the whole view, deferred sections as stubs;
 /// `Some(id)` reads that one deferred section when the reader opens its tab.
@@ -333,11 +336,241 @@ pub async fn entity_view<R: tauri::Runtime>(
         &state.pool,
         &state.secrets,
         &state.registry,
+        &state.live,
         &entity_id,
         section.as_deref(),
     )
     .await
     .map_err(|error| crate::sources::to_ipc(&error, None))
+}
+
+/// The diff from `base` to `head` of the repository `entity_id` (#2272,
+/// ADR-0036): read by local read-only git when its checkout holds both
+/// commits, with whitespace ignored when `ignore_whitespace` asks; otherwise
+/// the source's compare read, kept by sha pair. `read_at` says which, and so
+/// whether whitespace could be ignored.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what the source's read refuses with when the source answers.
+#[tauri::command]
+pub async fn entity_range_diff<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+    ignore_whitespace: bool,
+) -> Result<crate::checkout::RangeDiff, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::checkout::range_diff(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &base,
+        &head,
+        ignore_whitespace,
+    )
+    .await
+}
+
+/// The change commit `commit_id` (whole or short `sha`) made, for the
+/// commit tab (#2319, story 78): read by local read-only git when the
+/// checkout of repository `entity_id` holds it, with whitespace ignored when
+/// asked; otherwise the commit's own `diff` section, kept by sha.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what the source's read refuses with when the source answers.
+#[tauri::command]
+pub async fn entity_commit_diff<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    commit_id: String,
+    sha: String,
+    ignore_whitespace: bool,
+) -> Result<crate::checkout::RangeDiff, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::checkout::commit_diff(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &commit_id,
+        &sha,
+        ignore_whitespace,
+    )
+    .await
+}
+
+/// The bytes of the file at `path` in `entity_id`'s tree (#2256, spec #2234
+/// step 5): a README's relative image, a PDF. `commit` is the `commit` of the
+/// file block the reader has open, handed back, so a README's image is read
+/// at the README's commit; `None` reads at the entity's own reference.
+///
+/// Answered raw ([`tauri::ipc::Response`]: an `ArrayBuffer` in the shell,
+/// not a JSON array four times the size), whole and never cut. A file over
+/// [`BYTES_CAP`](knobas_source::view::BYTES_CAP) is refused with its size.
+/// Kept for the session where the adapter says the read is fixed (a whole
+/// sha), so a second look costs no request (ADR-0032).
+///
+/// # Errors
+///
+/// See [`entity_file_bytes_inner`].
+#[tauri::command]
+pub async fn entity_file_bytes<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    path: String,
+    commit: Option<String>,
+) -> Result<tauri::ipc::Response, IpcError> {
+    let state = crate::sources::state(&app)?;
+    entity_file_bytes_inner(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &path,
+        commit.as_deref(),
+    )
+    .await
+    .map(tauri::ipc::Response::new)
+}
+
+/// [`entity_file_bytes`]'s body, reachable from a test.
+///
+/// # Errors
+///
+/// `invalid` for a file over the cap, its size and the cap in the message,
+/// and for a source that reads no bytes; `not_found` where the source
+/// answers 404 for the path (no file there); otherwise as [`entity_view`].
+pub async fn entity_file_bytes_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    path: &str,
+    commit: Option<&str>,
+) -> Result<Vec<u8>, IpcError> {
+    use knobas_source::view::{BYTES_CAP, FileBytes};
+    let read =
+        crate::sources::crud::file_bytes(pool, secrets, registry, live, entity_id, path, commit)
+            .await
+            .map_err(|error| match error {
+                // The source has no file at `path` there (#2279 merger, witnessed on
+                // Gitea 1.27.3: a raw read of a path absent at a sha is a 404). A
+                // rendered diff of a binary file reads that as "no file on that side".
+                crate::sources::SourcesError::Source(knobas_source::SourceError::Protocol {
+                    status: Some(404),
+                    ..
+                }) => IpcError::not_found(format!("{entity_id} holds no file {path}")),
+                other => crate::sources::to_ipc(&other, None),
+            })?;
+    match read.as_deref() {
+        Some(FileBytes::Read(bytes)) => Ok(bytes.clone()),
+        Some(FileBytes::TooLarge { size }) => Err(IpcError::invalid(format!(
+            "{path} is {}; knobas reads a file's bytes up to {}",
+            mebibytes(*size),
+            mebibytes(BYTES_CAP)
+        ))),
+        None => Err(IpcError::invalid(format!(
+            "{entity_id}'s source reads no file bytes"
+        ))),
+    }
+}
+
+/// A pipeline over the bytes of the file at `path` in `entity_id`'s tree
+/// (#2264, spec #2234 step 5): `steps` in order, each on the last one's
+/// output, the last one's drawn by the renderer its name picks. Read as
+/// [`entity_file_bytes`] reads; a run over a file at a whole sha is kept, so
+/// the same pipeline again costs nothing (ADR-0032). Every step is capped at
+/// [`SIZE_CAP`](crate::file_pipeline::SIZE_CAP) of output and
+/// [`STEP_TIMEOUT`](crate::file_pipeline::STEP_TIMEOUT).
+///
+/// # Errors
+///
+/// See [`entity_file_piped_inner`].
+#[tauri::command]
+pub async fn entity_file_piped<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    path: String,
+    commit: Option<String>,
+    steps: Vec<crate::file_pipeline::PipeStep>,
+) -> Result<crate::file_pipeline::PipeRun, IpcError> {
+    let state = crate::sources::state(&app)?;
+    entity_file_piped_inner(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &path,
+        commit.as_deref(),
+        &steps,
+    )
+    .await
+}
+
+/// [`entity_file_piped`]'s body, reachable from a test.
+///
+/// # Errors
+///
+/// As [`entity_file_bytes_inner`]: the read's refusals. A step that fails is
+/// an answer ([`PipeRun::Failed`](crate::file_pipeline::PipeRun::Failed)).
+#[allow(clippy::too_many_arguments)]
+pub async fn entity_file_piped_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    path: &str,
+    commit: Option<&str>,
+    steps: &[crate::file_pipeline::PipeStep],
+) -> Result<crate::file_pipeline::PipeRun, IpcError> {
+    use crate::file_pipeline::{Limits, Piped, run_on_file};
+    let piped = run_on_file(
+        pool,
+        secrets,
+        registry,
+        live,
+        entity_id,
+        path,
+        commit,
+        steps,
+        Limits::default(),
+    )
+    .await
+    .map_err(|error| crate::sources::to_ipc(&error, None))?;
+    match piped {
+        Piped::Ran(run) => Ok(run.as_ref().clone()),
+        Piped::TooLarge { size } => Err(IpcError::invalid(format!(
+            "{path} is {}; knobas reads a file's bytes up to {}",
+            mebibytes(size),
+            mebibytes(knobas_source::view::BYTES_CAP)
+        ))),
+        Piped::NoBytes => Err(IpcError::invalid(format!(
+            "{entity_id}'s source reads no file bytes"
+        ))),
+    }
+}
+
+/// `size` bytes in MiB, to one place where it is not whole.
+fn mebibytes(size: u64) -> String {
+    #[allow(clippy::cast_precision_loss)]
+    let mib = size as f64 / (1024.0 * 1024.0);
+    if mib.fract() == 0.0 {
+        format!("{mib:.0} MiB")
+    } else {
+        format!("{mib:.1} MiB")
+    }
 }
 
 /// The writes among `asks` their sources' credentials cannot make, each with
@@ -361,10 +594,14 @@ pub async fn refused_writes<R: tauri::Runtime>(
     asks: Vec<knobas_source::grants::WriteAsk>,
 ) -> Result<Vec<knobas_source::grants::RefusedWrite>, IpcError> {
     let state = crate::sources::state(&app)?;
-    Ok(
-        crate::sources::crud::refused_writes(&state.pool, &state.secrets, &state.registry, &asks)
-            .await,
+    Ok(crate::sources::crud::refused_writes(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &asks,
     )
+    .await)
 }
 
 /// Everything the note view draws for one note (#46).

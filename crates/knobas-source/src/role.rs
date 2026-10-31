@@ -262,6 +262,11 @@ pub const MINIMUMS: &[Minimum] = &[
             "update_pull_request_branch",
             "delete_branch",
             "commit_file",
+            // A diff's threads and the Reviewers panel (spec #2234 step 6d,
+            // #2277, #2303): typed, since the shell draws them itself.
+            "reply_to_thread",
+            "resolve_thread",
+            "request_reviewers",
         ],
     },
     Minimum {
@@ -605,6 +610,7 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: vec![crate::clone_urls::CloneFrom::BaseUrl],
             url_forms: Vec::new(),
+            code_pages: None,
             write_ops: vec![],
             entity_kinds: ["repo", "branch", "pr", "commit"].map(kind).to_vec(),
             config_schema: serde_json::json!({}),

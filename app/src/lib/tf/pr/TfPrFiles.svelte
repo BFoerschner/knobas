@@ -5,8 +5,12 @@
   source's hunks, `⋯` between them.
 
   - *Viewed* per file collapses it. It is knobas-local, kept by pull request
-    and head commit (`pr_viewed_files`, `set_pr_file_viewed`): a push to the
-    head brings every file back.
+    and the blob the file holds (`pr_viewed_files`, `set_pr_file_viewed`,
+    #2276): a push that changes a file brings that file back, and the others
+    stay viewed.
+  - A thread takes a reply and, where the source can, a resolve (#2277),
+    each queued as a write and drawn *queued* under the thread until the
+    read after it shows it; a resolved thread is drawn collapsed.
   - Each thread the source holds sits under its line; an outdated one, or one
     whose line is not drawn, is kept apart at the end of its file, closed
     (`files.ts`). A thread on a file the diff no longer holds is listed at the
@@ -17,15 +21,42 @@
     edge and a *pending* chip, until *Submit review* sends it.
 
   The diff is the *Files* section, read once per pull request when the tab
-  opens (the whole view defers it, ADR-0020 rule 3).
+  opens (the whole view defers it, ADR-0020 rule 3). The one diff component
+  draws it (`diff/TfDiffView`, #2266), with *Viewed* and, where the source
+  takes comments, the review passed in.
+
+  Where the diff names its range (#2273, #2310):
+  - **The commit picker** (`TfPrPicker`): all commits, one, a range, or *since
+    my last review*. Any choice but all is a compare in the range's repository
+    (`diff/pick.ts`), drawn in place. Line comments are offered on the whole
+    diff only: the review goes to Gitea at the head, so a line of an older
+    commit's diff would land on the head's line of the same number. Gitea
+    itself takes a review at an older `commit_id` (measured on 1.27.3), but
+    one review carries one commit and knobas sends none, which Gitea reads as
+    the head (`write.rs` `submit_review`). Pending drafts, replies, resolve
+    and *Viewed* (kept by the head's blob) are the full diff's too: a pick
+    draws none of them.
+  - **Expanded context** (`diff/context.ts` `rangeContext`): each side read
+    whole at its sha, bytes too for a rendered image diff (#2279). A new pick
+    draws a new diff component, so no side read at one range is kept for another.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import { ipcErrorMessage } from "../../ipc";
-  import type { DiffFile, DiffLine, SourceView } from "../../ipc/entity";
-  import { lineName, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
-  import { ago } from "../../shell/time";
+  import { entityFileBytes, entityFilePiped, entityRangeDiff, type LineThread, type PipeRun, type PipeStep, type RangeDiff, type SourceView } from "../../ipc/entity";
+  import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+  import type { PendingCommentStore } from "../../detail/view/pending-comments.svelte";
+  import type { RenderPort } from "../../render/port";
+  import type { WriteFollower } from "../../shell/follow-write";
   import { push } from "../../shell/toasts.svelte";
-  import { diffOf, matchesPath, placeThreads, sameTarget, targetOf } from "./files";
+  import { echoOn, echoesOn, echoWrite, sameWords, settleEchoes, watchEchoes, type Echo, type EchoListen } from "../queued.svelte";
+  import TfDiffView from "../diff/TfDiffView.svelte";
+  import { compareSection } from "../diff/address";
+  import { rangeContext } from "../diff/context";
+  import { pickedEnds, type PrPick } from "../diff/pick";
+  import { diffOf } from "./files";
+  import TfPrPicker from "./TfPrPicker.svelte";
 
   let {
     prId,
@@ -33,20 +64,78 @@
     viewedFiles,
     setViewed,
     pending,
+    submitWrite = null,
+    source = null,
+    listen,
+    follower,
+    render,
+    openAt = null,
+    rangeDiff = (entityId, base, head, ignoreWhitespace) => entityRangeDiff(entityId, base, head, ignoreWhitespace),
+    fileBytes = (entityId, path, commit) => entityFileBytes(entityId, path, commit),
+    piped = (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
   }: {
     prId: string;
     entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
-    viewedFiles: (prId: string) => Promise<string[]>;
-    setViewed: (prId: string, path: string, viewed: boolean) => Promise<string[]>;
+    /** The files viewed, by the blob each holds in the diff drawn (#2276). */
+    viewedFiles: (prId: string, blobs: Record<string, string>) => Promise<string[]>;
+    setViewed: (prId: string, path: string, viewed: boolean, blobs: Record<string, string>) => Promise<string[]>;
     /** The reader's pending line comments. */
     pending: PendingCommentStore;
+    /** Queues a reply or a resolve (#2277); none offers neither. */
+    submitWrite?: ((payload: WriteOpPayload) => Promise<QueuedWrite>) | null;
+    /** The pull request's source, whose run's end reads the files again for a queued reply. */
+    source?: string | null;
+    /** Hears the refresh that follows a reply or a resolve landing; the bridge's when left out. */
+    listen?: EchoListen | undefined;
+    follower?: WriteFollower | undefined;
+    /** The renderer port, for tests; the app's by default. */
+    render?: RenderPort;
+    /** *Open in…* per file (#2274): the repository and the head the files are read at. */
+    openAt?: { entityId: string; at: string | null } | null;
+    /** A pick's diff, read at a checkout holding both commits, else the source's compare (ADR-0036); the IPC by default. */
+    rangeDiff?: (entityId: string, base: string, head: string, ignoreWhitespace: boolean) => Promise<RangeDiff>;
+    /** A file's bytes at a commit, for a rendered image diff (#2279); the IPC by default. */
+    fileBytes?: (entityId: string, path: string, commit: string | null) => Promise<Uint8Array>;
+    /** A file pipeline over a file at a commit, for pipelines on diffs (#2270); the IPC by default. */
+    piped?: (entityId: string, path: string, commit: string | null, steps: PipeStep[]) => Promise<PipeRun>;
   } = $props();
+
+  /** The surface the replies and resolves queued here are tagged with (#2277). */
+  const SURFACE = "pr-files";
 
   /** `undefined` while the *Files* read has not answered. */
   let view = $state<SourceView | null | undefined>(undefined);
   let failed = $state<string | null>(null);
   let viewed = $state<string[]>([]);
-  let filter = $state("");
+
+  /** The blob each file holds in `answer`'s diff, by path (#2276): what *Viewed* is kept by. */
+  const blobsOf = (answer: SourceView | null): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const file of diffOf(answer)?.files ?? []) if (file.blob) out[file.path] = file.blob;
+    return out;
+  };
+
+  /** The diff read (again, `again`): its head stamps new drafts (#2276), its blobs read *Viewed*. */
+  function read(id: string, live: () => boolean, again = false) {
+    entityView(id, "files").then(
+      (answer) => {
+        if (!live()) return;
+        view = answer;
+        const head = diffOf(answer)?.commentable?.head ?? null;
+        if (head !== null) pending.seen(id, head);
+        untrack(() => settleEchoes(id, (echo) => landed(answer, echo)));
+        viewedFiles(id, blobsOf(answer)).then(
+          (files) => {
+            if (live()) viewed = files;
+          },
+          () => {},
+        );
+      },
+      (error) => {
+        if (live() && !again) failed = ipcErrorMessage(error);
+      },
+    );
+  }
 
   $effect(() => {
     const id = prId;
@@ -54,186 +143,177 @@
     view = undefined;
     failed = null;
     viewed = [];
-    entityView(id, "files").then(
+    read(id, () => live);
+    return () => {
+      live = false;
+    };
+  });
+
+  // A reply or resolve that landed is read back here (#2277): the refresh after it reads the files again.
+  $effect(() => {
+    return untrack(() =>
+      watchEchoes(
+        SURFACE,
+        () => {
+          const id = prId;
+          if (view != null) read(id, () => prId === id, true);
+        },
+        { listen },
+      ),
+    );
+  });
+
+  const diff = $derived(view ? diffOf(view) : null);
+  const range = $derived(diff?.range ?? null);
+
+  /** The commit picker's choice (#2273), and the compare it reads; all commits is the diff above. */
+  let choice = $state<PrPick>({ kind: "all" });
+  const ends = $derived(range === null ? null : pickedEnds(range, choice));
+  const section = $derived(ends === null ? null : compareSection(ends.base, ends.head));
+  /** `undefined` while the pick's diff has not answered; local-first, as every diff between two shas (ADR-0036). */
+  let picked = $state<RangeDiff | undefined>(undefined);
+  let pickFailed = $state<string | null>(null);
+
+  $effect(() => {
+    // A new pull request starts at all commits.
+    void prId;
+    choice = { kind: "all" };
+  });
+
+  $effect(() => {
+    const repo = range?.repository;
+    const asked = ends;
+    picked = undefined;
+    pickFailed = null;
+    if (!repo || asked === null) return;
+    let live = true;
+    rangeDiff(repo, asked.base, asked.head, false).then(
       (answer) => {
-        if (live) view = answer;
+        if (live) picked = answer;
       },
       (error) => {
-        if (live) failed = ipcErrorMessage(error);
+        if (live) pickFailed = ipcErrorMessage(error);
       },
-    );
-    viewedFiles(id).then(
-      (files) => {
-        if (live) viewed = files;
-      },
-      () => {},
     );
     return () => {
       live = false;
     };
   });
 
-  const diff = $derived(view ? diffOf(view) : null);
-  const files = $derived(diff?.files ?? []);
-  const shown = $derived(files.filter((file) => matchesPath(file.path, filter)));
-  const drafts = $derived(pending.of(prId));
+  /** What is drawn: the pull request's diff, or the pick's compare once it answered. */
+  const shown = $derived.by(() => {
+    if (section === null) return diff;
+    return picked === undefined ? null : { files: picked.files, truncated: picked.truncated, commentable: null, gone: [], range: picked.range };
+  });
+  const context = $derived(shown?.range ? rangeContext(entityView, shown.range, fileBytes, piped) : null);
 
-  /** Each file's card, to scroll to from the list. */
-  const cards: Record<string, HTMLElement | null> = $state({});
+  /** The thread of `answer` an echo is about, by the thread's id. */
+  function threadOf(answer: SourceView | null, id: string): LineThread | null {
+    const found = diffOf(answer);
+    for (const file of found?.files ?? []) for (const thread of file.threads) if (thread.id === id) return thread;
+    for (const g of found?.gone ?? []) if (g.thread.id === id) return g.thread;
+    return null;
+  }
 
-  function jump(path: string) {
-    cards[path]?.scrollIntoView({ block: "start" });
+  /** Whether `answer` shows `echo` landed: the reply's words in its thread, the thread resolved or open as asked. */
+  function landed(answer: SourceView | null, echo: Echo): boolean {
+    const [kind, id] = echo.kind.split("\n");
+    if (id === undefined) return false;
+    const thread = threadOf(answer, id);
+    if (kind === "reply") return thread?.comments.some((c) => sameWords(c.body, echo.text)) ?? false;
+    if (kind === "resolve") return thread !== null && (thread.resolved_by !== null) === (echo.text === "resolved");
+    return false;
   }
 
   async function toggle(path: string, on: boolean) {
     try {
-      viewed = await setViewed(prId, path, on);
+      viewed = await setViewed(prId, path, on, blobsOf(view ?? null));
     } catch (cause) {
       push({ text: `Could not mark ${path}: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
   }
 
-  /** The line whose comment box is open: its file and its place. */
-  let open = $state<{ path: string; side: "old" | "new"; line: number } | null>(null);
-  let draft = $state("");
-
-  function startComment(path: string, line: DiffLine) {
-    open = { path, ...targetOf(line) };
-    draft = "";
+  /** Queue `payload` and echo it as `kind`; whether it was queued. */
+  async function queue(payload: WriteOpPayload, kind: string, text: string, what: string, many: boolean): Promise<boolean> {
+    if (submitWrite === null) return false;
+    try {
+      const write = await submitWrite(payload);
+      echoWrite(prId, kind, text, { write, many, surface: SURFACE, source, following: { name: what.charAt(0).toUpperCase() + what.slice(1) }, ...(follower ? { follower } : {}) });
+      return true;
+    } catch (cause) {
+      push({ text: `Could not queue the ${what}: ${ipcErrorMessage(cause)}`, tone: "err" });
+      return false;
+    }
   }
 
-  function addToReview() {
-    if (open === null) return;
-    if (pending.add(prId, { ...open, body: draft }) === null) return;
-    open = null;
-    draft = "";
-    push({ text: "Added to your review. Nothing is sent until you submit it." });
-  }
-
-  const SIGN = { context: " ", add: "+", del: "−" } as const;
-  const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
-  const isOpen = (path: string, line: DiffLine) => open !== null && sameTarget(open, { path, ...targetOf(line) });
-  const draftsAt = (path: string, line: DiffLine) => drafts.filter((d) => sameTarget(d, { path, ...targetOf(line) }));
-  /** A line's name as a comment on it says it: `line 12`, `old line 9`. */
-  const nameOf = (line: DiffLine) => {
-    const at = targetOf(line);
-    return lineName(at.side, at.line);
-  };
-  /** Pending comments on files the diff no longer holds. */
-  const homeless = $derived(drafts.filter((d) => !files.some((file) => file.path === d.path)));
-  const flat = (file: DiffFile) => file.hunks.flatMap((hunk, h) => hunk.lines.map((line, n) => ({ line, gap: h > 0 && n === 0 })));
+  const commentable = $derived(diff?.commentable ?? null);
+  const review = $derived(
+    commentable
+      ? {
+          entity: prId,
+          pending,
+          reply:
+            commentable.reply && submitWrite
+              ? (path: string, thread: LineThread, body: string) =>
+                  thread.id === null
+                    ? Promise.resolve(false)
+                    : queue(
+                        { ReplyToThread: { entity: prId, thread: thread.id, comment: { path, line: thread.line, side: thread.side, body } } },
+                        `reply\n${thread.id}`,
+                        body,
+                        "reply",
+                        true,
+                      )
+              : null,
+          resolve:
+            commentable.resolve && submitWrite
+              ? (thread: LineThread, on: boolean) =>
+                  thread.id === null
+                    ? Promise.resolve(false)
+                    : queue({ ResolveThread: { entity: prId, thread: thread.id, resolved: on } }, `resolve\n${thread.id}`, on ? "resolved" : "open", on ? "resolve" : "unresolve", false)
+              : null,
+          queued: (thread: LineThread) => (thread.id === null ? [] : echoesOn(prId, `reply\n${thread.id}`).map((echo) => echo.text)),
+          resolved: (thread: LineThread) => {
+            const asked = thread.id === null ? null : echoOn(prId, `resolve\n${thread.id}`);
+            return asked === null ? thread.resolved_by !== null : asked.text === "resolved";
+          },
+        }
+      : null,
+  );
 </script>
-
-{#snippet said(comments: { author: string; body: string; at: string | null }[])}
-  {#each comments as comment, n (n)}
-    <p><b>{comment.author}</b>{comment.at ? ` ${ago(comment.at)}` : ""}: {comment.body}</p>
-  {/each}
-{/snippet}
-
-{#snippet mine(body: string)}
-  <div class="tf-thread tf-pending"><p><b>You</b> <span class="tf-chip tf-warn">pending</span> {body}</p></div>
-{/snippet}
 
 {#if failed !== null}
   <p class="tf-cfail">Could not read the changed files: {failed}</p>
 {:else if view === null}
   <div class="tf-empty">This source draws no changed files for a pull request.</div>
 {:else if view !== undefined}
-  <div class="tf-prfiles">
-    <div class="tf-prfiles-nav">
-      <label class="tf-minif">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
-        <input bind:value={filter} placeholder="Filter changed files" aria-label="Filter changed files" />
-      </label>
-      <nav class="tf-flist" aria-label="Changed files">
-        {#each shown as file (file.path)}
-          {@const done = viewed.includes(file.path)}
-          <button type="button" class:tf-viewed={done} title={file.path} onclick={() => jump(file.path)}
-            >{baseName(file.path)}<span class="tf-n"
-              ><span class="tf-add-n">+{file.additions}</span> <span class="tf-del-n">−{file.deletions}</span>{done ? " ✓" : ""}</span
-            ></button
-          >
-        {:else}
-          <span class="tf-dim tf-flist-none">No file matches.</span>
-        {/each}
-      </nav>
+  {#if range !== null}
+    <div class="tf-pickbar">
+      <TfPrPicker {range} {choice} onchoose={(next) => (choice = next)} />
     </div>
-    <div>
-      {#if files.length === 0}
-        <div class="tf-empty">This pull request changes no files.</div>
-      {/if}
-      {#each shown as file (file.path)}
-        {@const done = viewed.includes(file.path)}
-        {@const placed = placeThreads(file)}
-        {@const lines = flat(file)}
-        {@const strays = drafts.filter((d) => d.path === file.path && !lines.some(({ line }) => draftsAt(file.path, line).includes(d)))}
-        <div class="tf-diff tf-prdiff" class:tf-viewed={done} bind:this={cards[file.path]}>
-          <div class="tf-fh">
-            <span class="tf-mono">{file.old_path && file.old_path !== file.path ? `${file.old_path} → ${file.path}` : file.path}</span>
-            <span class="tf-add-n">+{file.additions}</span>
-            <span class="tf-del-n">−{file.deletions}</span>
-            {#if file.change === "added"}<span class="tf-chip">new file</span>{/if}
-            <label class="tf-fh-viewed"
-              ><input type="checkbox" checked={done} onchange={(event) => void toggle(file.path, event.currentTarget.checked)} /> Viewed</label
-            >
-          </div>
-          {#if !done}
-            {#each lines as { line, gap }, n (n)}
-              {@const number = line.kind === "del" ? line.old : line.new}
-              {#if gap}<div class="tf-ln tf-hunk"><span></span><span>⋯</span><span></span></div>{/if}
-              <div class="tf-ln" class:tf-add={line.kind === "add"} class:tf-del={line.kind === "del"}>
-                <span>{number}</span><span>{SIGN[line.kind]} {line.text}</span>
-                {#if diff?.commentable}
-                  {@const name = nameOf(line)}
-                  <button type="button" class="tf-addc" title="Comment on {name}" aria-label="Comment on {name} of {file.path}" onclick={() => startComment(file.path, line)}
-                    >+</button
-                  >
-                {:else}<span></span>{/if}
-              </div>
-              {#each placed.under[n] ?? [] as thread, t (t)}
-                <div class="tf-thread">{@render said(thread.comments)}</div>
-              {/each}
-              {#each draftsAt(file.path, line) as d (d.id)}{@render mine(d.body)}{/each}
-              {#if isOpen(file.path, line)}
-                {@const name = nameOf(line)}
-                <div class="tf-newc">
-                  <textarea bind:value={draft} placeholder="Comment on {name}" aria-label="Comment on {name} of {file.path}"></textarea>
-                  <div class="tf-acts">
-                    <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (open = null)}>Cancel</button>
-                    <button type="button" class="tf-btn tf-sm tf-primary" disabled={draft.trim() === ""} onclick={addToReview}>Add to review</button>
-                  </div>
-                </div>
-              {/if}
-            {/each}
-            {#if file.truncated}
-              <div class="tf-ln tf-hunk"><span></span><span>Cut here: the rest of this file's change is at the source.</span><span></span></div>
-            {/if}
-            {#if placed.apart.length > 0 || strays.length > 0}
-              <details class="tf-outdated">
-                <summary>{placed.apart.length + strays.length} outdated</summary>
-                {#each placed.apart as thread, t (t)}
-                  <div class="tf-thread"><span class="tf-dim">{lineName(thread.side, thread.line)}</span>{@render said(thread.comments)}</div>
-                {/each}
-                {#each strays as d (d.id)}{@render mine(`${lineName(d.side, d.line)}: ${d.body}`)}{/each}
-              </details>
-            {/if}
-          {/if}
-        </div>
-      {/each}
-      {#if (diff?.gone.length ?? 0) > 0 || homeless.length > 0}
-        <details class="tf-outdated tf-gone">
-          <summary>On files this change no longer holds</summary>
-          {#each diff?.gone ?? [] as gone, g (g)}
-            <div class="tf-thread"><span class="tf-mono tf-dim">{gone.path}, {lineName(gone.thread.side, gone.thread.line)}</span>{@render said(gone.thread.comments)}</div>
-          {/each}
-          {#each homeless as d (d.id)}
-            {@render mine(`${d.path}, ${lineName(d.side, d.line)}: ${d.body}`)}
-          {/each}
-        </details>
-      {/if}
-      {#if diff?.truncated}
-        <p class="tf-dim tf-prfiles-cut">The source cut this diff; the rest is on its own page.</p>
-      {/if}
-    </div>
-  </div>
+  {/if}
+  {#if pickFailed !== null}
+    <p class="tf-cfail">Could not read the picked commits: {pickFailed}</p>
+  {:else if section !== null && picked === null}
+    <div class="tf-empty">This source draws no diff for the picked commits.</div>
+  {:else if shown === null}
+    <!-- The pick's compare has not answered yet. -->
+  {:else if shown.files.length === 0 && shown.gone.length === 0}
+    <div class="tf-empty">{section === null ? "This pull request changes no files." : "Nothing changes in the picked commits."}</div>
+  {:else}
+    {#key `${section}\n${shown.range?.base}\n${shown.range?.head}`}
+      <!-- Viewed, line comments, replies and drafts are the full diff's: each is kept at the head. -->
+      <TfDiffView
+        files={shown.files}
+        gone={shown.gone}
+        viewed={section === null ? { paths: viewed, set: (path, on) => void toggle(path, on) } : null}
+        review={section === null ? review : null}
+        {context}
+        openAt={openAt && ends ? { entityId: openAt.entityId, at: ends.head } : openAt}
+        cut={shown.truncated}
+        repository={range?.repository ?? null}
+        {...render ? { render } : {}}
+      />
+    {/key}
+  {/if}
 {/if}

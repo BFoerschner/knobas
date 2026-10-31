@@ -438,6 +438,7 @@ async fn drop_unused_artifact(pool: &PgPool, store: &Path, sha256: &str) {
 pub async fn uninstall(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
+    live: &super::live::LiveSources,
     registry: &Registry,
     store: &Path,
     kind: &str,
@@ -461,7 +462,7 @@ pub async fn uninstall(
     }
     for (done, removal) in answered.iter().enumerate() {
         if let Err(error) =
-            super::crud::delete(pool, secrets, &removal.source_id, removal.purge_items).await
+            super::crud::delete(pool, secrets, live, &removal.source_id, removal.purge_items).await
         {
             return Err(InstallError::Remove {
                 id: removal.source_id.clone(),

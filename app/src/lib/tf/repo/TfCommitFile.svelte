@@ -18,8 +18,8 @@
   import { ipcErrorMessage } from "../../ipc";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
-  import { lineDiff } from "../code/line-diff";
-  import TfDiff from "../code/TfDiff.svelte";
+  import { lineDiff } from "../diff/line-diff";
+  import TfDiffView from "../diff/TfDiffView.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { echoWrite } from "../queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
@@ -107,7 +107,7 @@
 
 <TfDialog title="Commit {path}" {onclose} className="tf-cf-dialog">
   {#snippet body()}
-    <TfDiff files={[diff]} />
+    <TfDiffView files={[diff]} list={false} />
     <div class="tf-formgrid">
       <label for="tf-cf-msg">Message</label>
       <input id="tf-cf-msg" type="text" autocomplete="off" bind:value={message} />

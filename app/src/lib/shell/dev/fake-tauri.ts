@@ -190,8 +190,28 @@ export function installIfRequested(): void {
   const params = new URLSearchParams(location.search);
   if (!params.has("fake-ipc")) return;
   for (const [, feature] of FEATURES) feature.seed?.(params);
-  const bridge = installFakeTauri(demoHandlers(params));
+  const bridge = installFakeTauri(holdBack(demoHandlers(params), params));
   for (const [, feature] of FEATURES) feature.attach?.(bridge);
+}
+
+/** A read that never answers. */
+const never = () => new Promise<never>(() => {});
+
+/**
+ * Reads held back for a screenshot of a page waiting on them:
+ * `?fake-hold-pages` (#2245) answers `list_entities`' first page and never a
+ * later one, so a list shows what it draws from its first page;
+ * `?fake-hold-view=<prefix>` (#2246) never answers an `entity_view` whose
+ * section starts with `<prefix>` (`commits`, `file:src/`).
+ */
+export function holdBack(handlers: Record<string, Handler>, params: URLSearchParams): Record<string, Handler> {
+  const out = { ...handlers };
+  const list = handlers["list_entities"];
+  if (params.has("fake-hold-pages") && list) out["list_entities"] = (args) => (Number(args["offset"] ?? 0) > 0 ? never() : list(args));
+  const view = handlers["entity_view"];
+  const prefix = params.get("fake-hold-view");
+  if (prefix && view) out["entity_view"] = (args) => (String(args["section"] ?? "").startsWith(prefix) ? never() : view(args));
+  return out;
 }
 
 /**

@@ -24,10 +24,10 @@
  * Answers no command of its own: `entity_view` is `entity.ts`'s, which asks
  * {@link pullView} after the repository page's views.
  */
-import type { DiffFile, Fact, SourceView, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../../../ipc/entity";
+import type { DiffFile, Fact, FileThread, SourceView, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../../../ipc/entity";
 import { CORPUS } from "../corpus";
 import { JOB_ROWS } from "../job-reach";
-import { PAYOUT_COMMITS, payoutCommitId, payoutPrFiles } from "./repos";
+import { PAYOUT_COMMITS, PAYOUT_MAIN_SHA, payoutCommitId, payoutPrFiles } from "./repos";
 
 const fact = (label: string, value: string, tone: Fact["tone"] = null): Fact => ({ label, value, tone });
 const section = (id: string, title: string, blocks: ViewBlock[], count: number | null = null, deferred = false): ViewSection => ({
@@ -123,6 +123,22 @@ function actions(title: string, body: string, own: boolean, open: boolean, behin
       }),
     );
   }
+  // *Request…* in the Reviewers panel (#2303): the people the source says a review can be asked of.
+  if (open)
+    list.push(
+      action("request_reviewers", "Request…", {
+        fields: [
+          {
+            name: "reviewers",
+            label: "Reviewer",
+            kind: { type: "choice", options: ["sven", "kai", "olu"].map((who) => ({ value: who, label: who })) },
+            value: null,
+            required: true,
+            placeholder: null,
+          },
+        ],
+      }),
+    );
   // The source's own action (#1194): a write no role's vocabulary has, its id fixed.
   list.push(
     action("source_action", "Add label…", {
@@ -198,6 +214,10 @@ function view142(): SourceView {
             fact("Mergeable", `no: ${blocked}`, "warn"),
             fact("Approvals", "1 of 2", "warn"),
             fact("Conflicts", "none with main", "ok"),
+            // The side rail (#2278): main requires the integration tests and the build.
+            fact("Required checks", "0 of 2 pass", "err"),
+            fact("Required check", "Payout_IntegrationTests #1187", "err"),
+            fact("Required check", "Payout_Build #1188", "info"),
             fact("Created", "2026-08-21 15:30"),
             fact("Updated", "2026-08-22 10:20"),
             fact("Review", "approved by priya", "ok"),
@@ -224,7 +244,12 @@ function view142(): SourceView {
           { type: "facts", facts: [fact("jonas", "2026-08-22 09:30"), fact("Review", "commented")] },
           { type: "text", text: "Should the jitter be bounded? ±20 % feels wide.", markdown: true },
           { type: "facts", facts: [fact("mara", "2026-08-22 10:20")] },
-          { type: "text", text: "Bounded to ±10 % in c90d11.", markdown: true },
+          {
+            type: "text",
+            // A mermaid fence in a comment (#2261): drawn as a diagram by the Markdown component.
+            text: "Bounded to ±10 % in c90d11. The delay is now:\n\n```mermaid\nflowchart LR\n  fail[5xx] --> wait[\"2ⁿ s ± 10 %\"] --> retry[retry]\n```",
+            markdown: true,
+          },
         ],
         2,
       ),
@@ -315,6 +340,40 @@ function plainView(entityId: string): SourceView | undefined {
 /** The jitter line of PR #142's retry, on the new side, where Jonas asked about it. */
 const JITTER_LINE = 14;
 
+/** The commit PR #142's outdated threads were written on (#2318): `a41f2c`, the second of its three. */
+const WRITTEN_ON = PAYOUT_COMMITS[1]![0];
+
+/**
+ * A thread on a file PR #142 no longer holds (#709): `src/sepa/backoff.rs`, which a41f2c added and c90d11
+ * folded back into `retry.rs`. Drawn in the diff's own outdated list, at the commit it was written on (#2318).
+ */
+function gone142(): FileThread[] {
+  return [
+    {
+      path: "src/sepa/backoff.rs",
+      thread: {
+        side: "new",
+        line: 4,
+        outdated: true,
+        comments: [{ author: "jonas", body: "A module of its own for three lines?", at: "2026-08-22T08:30:00Z" }],
+        id: "4075",
+        resolved_by: null,
+        replies: false,
+        commit: WRITTEN_ON,
+        hunk: {
+          header: "@@ -0,0 +1,4 @@",
+          lines: [
+            { kind: "add", old: null, new: 1, text: "use std::time::Duration;" },
+            { kind: "add", old: null, new: 2, text: "" },
+            { kind: "add", old: null, new: 3, text: "/// The delay before attempt `n`." },
+            { kind: "add", old: null, new: 4, text: "pub fn backoff(n: u32) -> Duration { Duration::from_secs(30 << n) }" },
+          ],
+        },
+      },
+    },
+  ];
+}
+
 /** PR #142's *Files* once asked for (#842): its three files, Jonas's thread and an outdated one of Priya's. */
 function files142(): DiffFile[] {
   const [retry, ...rest] = payoutPrFiles();
@@ -327,12 +386,42 @@ function files142(): DiffFile[] {
         { author: "jonas", body: "Should the jitter be bounded? ±20 % feels wide.", at: "2026-08-22T09:30:00Z" },
         { author: "mara", body: "Bounded to ±10 % in c90d11.", at: "2026-08-22T10:20:00Z" },
       ],
+      // A thread the source takes a reply and a resolve on (#2277).
+      id: "4088",
+      resolved_by: null,
+      replies: true,
+    },
+    {
+      side: "new",
+      line: 3,
+      outdated: false,
+      comments: [{ author: "priya", body: "Name the backoff module after what it does.", at: "2026-08-21T17:50:00Z" }],
+      // Resolved, so drawn collapsed (#2277).
+      id: "4071",
+      resolved_by: "mara",
+      replies: true,
     },
     {
       side: "new",
       line: 8,
       outdated: true,
       comments: [{ author: "priya", body: "Ten attempts is a lot for a payout.", at: "2026-08-21T18:02:00Z" }],
+      id: "4060",
+      resolved_by: null,
+      replies: false,
+      // Written on a41f2c, where line 8 read `MAX_ATTEMPTS: u32 = 10` (#2318).
+      commit: WRITTEN_ON,
+      hunk: {
+        header: "@@ -3,3 +4,5 @@",
+        lines: [
+          { kind: "context", old: 3, new: 4, text: "use crate::psp::errors::PspError;" },
+          { kind: "context", old: 4, new: 5, text: "" },
+          { kind: "del", old: 5, new: null, text: "pub const RETRY_DELAY: Duration = Duration::from_secs(60);" },
+          { kind: "add", old: null, new: 6, text: "pub const BASE: Duration = Duration::from_secs(30);" },
+          { kind: "add", old: null, new: 7, text: "pub const FACTOR: u32 = 2;" },
+          { kind: "add", old: null, new: 8, text: "pub const MAX_ATTEMPTS: u32 = 10;" },
+        ],
+      },
     },
   ];
   return [{ ...retry!, threads }, ...rest];
@@ -392,8 +481,19 @@ function filesSection(entityId: string, title: string): ViewSection {
             threads: [],
           },
         ];
-  const commentable = { write_op: "submit_review" };
-  return section("files", "Files", [{ type: "diff", files, truncated: false, commentable, gone: [] }], files.length);
+  const commentable = { write_op: "submit_review", reply: "reply_to_thread", resolve: "resolve_thread", head: "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192" };
+  // #142's range (#2273, #2310): its commits to pick from, and the viewer last reviewed at the oldest.
+  const range =
+    entityId === PR_142 && bulk === 0
+      ? {
+          repository: "mock:tidewater/payout-service",
+          base: PAYOUT_MAIN_SHA,
+          head: PAYOUT_COMMITS[0]![0],
+          commits: PAYOUT_COMMITS.map(([sha, subject, author]) => ({ sha, title: subject, meta: author })),
+          reviewed: PAYOUT_COMMITS.at(-1)![0],
+        }
+      : undefined;
+  return section("files", "Files", [{ type: "diff", files, truncated: false, commentable, gone: entityId === PR_142 && bulk === 0 ? gone142() : [], ...(range ? { range } : {}) }], files.length);
 }
 
 /** A pull request's whole view, or one of its sections; `undefined` for anything else. */

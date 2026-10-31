@@ -262,6 +262,7 @@ pub(super) fn left_out(
         chip: None,
         url,
         commit: None,
+        author: None,
     })
 }
 
@@ -358,6 +359,7 @@ pub(super) fn commit_row<'a>(
         chip: Some(short),
         url: line.url.map(str::to_owned),
         commit: None,
+        author: line.author.map(str::to_owned),
     }
 }
 
@@ -392,6 +394,7 @@ pub(super) fn pull_row(source_id: &str, owner: &str, repo: &str, pull: &OpenPull
         chip: Some("open".to_owned()),
         url: pull.html_url.clone(),
         commit: None,
+        author: None,
     }
 }
 
@@ -442,6 +445,7 @@ pub(super) fn muted_line(title: String) -> Block {
             chip: None,
             url: None,
             commit: None,
+            author: None,
         }],
     }
 }

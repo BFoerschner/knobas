@@ -260,7 +260,8 @@ const button = (name: string) =>
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name) ??
   [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name);
 const cells = (tr: Element) => [...tr.querySelectorAll("td")].map((td) => td.textContent?.replace(/\s+/g, " ").trim()).join(" | ");
-const buttons = () => [...target.querySelectorAll(".tf-fhead .tf-acts button:not(.tf-refresh)")].map((b) => b.textContent?.trim());
+const buttons = () =>
+  [...target.querySelectorAll(".tf-fhead .tf-acts button:not(.tf-refresh):not([aria-haspopup=menu])")].map((b) => b.textContent?.trim());
 
 test("the header names the pull request, its state, head into base and the reader as its author", async () => {
   await draw([PR]);
@@ -282,6 +283,10 @@ test("somebody else's pull request names its author and offers Review…", async
   await draw([PR], ports({ author: "jonas", pr: theirs }));
   expect(text(".tf-fhead .tf-sub")).toBe("open feature/PAY-231-sepa-retry into main, by jonas");
   expect(buttons()).toEqual(["Review…", "Edit", "Merge…"]);
+  // *Open in…* on the pull request (#2274): a ghost after the actions, before Refresh (#2238).
+  const all = [...target.querySelectorAll(".tf-fhead .tf-acts > *")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
+  expect(all.slice(-2, -1)).toEqual(["Open in… ▾"]);
+  expect(target.querySelector(".tf-fhead .tf-acts [aria-haspopup=menu]")!.className).toContain("tf-ghost");
 });
 
 test("the toolbar draws what the source offers, in prototype-6's order: Review…, Update branch, Edit, Close, Merge…", async () => {
@@ -326,17 +331,96 @@ test("Overview: each check with its state, the one the mirror holds opening its 
   expect(text(".tf-prdesc")).toBe("Retries SEPA payouts.");
 });
 
-test("Ready to merge? reads prototype-6's three lines, approvals, checks and conflicts, each with its dot; the clone beside it", async () => {
+test("Ready to merge? reads prototype-6's three lines, approvals, checks and conflicts, each with its mark; the clone beside it", async () => {
   await draw([PR]);
-  const lines = [...target.querySelectorAll(".tf-prready > span")];
-  expect(lines.map((line) => line.textContent?.trim())).toEqual([
-    "Approvals: 1 of 2",
-    "Checks: Payout_IntegrationTests #1187 failure",
-    "No conflicts with main",
+  const lines = [...target.querySelectorAll(".tf-prck")];
+  expect(lines.map((line) => line.textContent?.replace(/\s+/g, " ").trim())).toEqual([
+    "● Approvals: 1 of 2",
+    "✕ Checks: Payout_IntegrationTests #1187 failure",
+    "✓ No conflicts with main",
   ]);
-  expect(lines.map((line) => line.querySelector(".tf-dot")!.className)).toEqual(["tf-dot tf-warn", "tf-dot tf-err", "tf-dot tf-ok"]);
+  expect(lines.map((line) => line.className)).toEqual(["tf-prck tf-warn", "tf-prck tf-err", "tf-prck tf-ok"]);
   expect(text(".tf-prlocal")).toBe("/Users/mara/code/payout-service On this branch, 1 changed file Open in… ▾ Local changes");
   expect(target.querySelector(".tf-prlocal a")!.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/local`);
+});
+
+/** PR #142 as a base that requires ci/test and ci/build sees it (#2278): ci/test failing, a lint that is not required failing too. */
+function railView(conflict = false): SourceView {
+  const base = prView([COMMENT, action("merge_pull_request", "Merge…", { primary: true, disabled: "required check ci/test failed" })]);
+  const overview = base.sections[0]!;
+  return {
+    ...base,
+    sections: [
+      {
+        ...overview,
+        blocks: [
+          {
+            type: "facts",
+            facts: [
+              fact("State", "open", "info"),
+              fact("Branches", "feature/PAY-231-sepa-retry → main"),
+              fact("Approvals", "2 of 2", "ok"),
+              conflict ? fact("Conflicts", "conflicts with main", "warn") : fact("Conflicts", "none with main", "ok"),
+              fact("Required checks", "1 of 2 pass", "err"),
+              fact("Required check", "ci/build", "ok"),
+              fact("Required check", "ci/test", "err"),
+              fact("Review", "approved by priya", "ok"),
+              fact("Review", "changes requested by jonas", "warn"),
+            ],
+          },
+          {
+            type: "entities",
+            title: "Checks",
+            rows: [vrow(null, "lint", "failure", "err"), vrow(null, "ci/test", "failure", "err", null, RUN_URL), vrow(null, "ci/build", "success", "ok")],
+          },
+        ],
+      },
+      ...base.sections.slice(1),
+    ],
+  };
+}
+
+const lines = (selector: string) => [...target.querySelectorAll(selector)].map((node) => node.textContent?.replace(/\s+/g, " ").trim());
+
+test("the side rail: a failing required check is the first check, and readiness says not ready (#2278)", async () => {
+  await draw([PR], ports({ pr: railView() }));
+  expect(lines(".tf-prrail-checks .tf-prit")).toEqual(["ci/test Required failure", "lint failure", "ci/build Required success"]);
+  // The mirror holds ci/test's run: the check opens it.
+  expect(target.querySelector(".tf-prrail-checks .tf-prit a")!.getAttribute("href")).toBe(`#/build/${encodeURIComponent(RUN)}`);
+  expect(target.querySelector(".tf-prverdict")!.firstChild!.textContent!.trim()).toBe("Not yet: 2 of 3 met");
+  expect(text(".tf-prverdict .tf-prwhy")).toBe("required check ci/test failed");
+  expect(target.querySelector(".tf-prverdict")!.classList.contains("tf-err")).toBe(true);
+  const required = [...target.querySelectorAll(".tf-prck")].find((line) => line.textContent?.includes("Required checks"))!;
+  expect(required.className).toBe("tf-prck tf-err");
+  expect(required.querySelector(".tf-prwhy")!.textContent).toBe("ci/test failure");
+  expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "JO jonas Changes requested"]);
+  expect(text(".tf-prconflicts")).toBe("Conflicts No conflicts with main.");
+});
+
+test("the side rail says when the pull request conflicts with its base (#2278)", async () => {
+  await draw([PR, "conversation"], ports({ pr: railView(true) }));
+  expect(text(".tf-prconflicts p")).toBe("Conflicts with main. Resolve them in a checkout and push; they cannot be resolved here.");
+  expect(target.querySelector(".tf-prconflicts p")!.classList.contains("tf-prconflict")).toBe(true);
+  expect(lines(".tf-prck")).toContain("● Conflicts with main");
+});
+
+test("the builds of the head the mirror holds link to their runs (#2278)", async () => {
+  const builds = [
+    row(RUN, "build", "Payout_IntegrationTests #1187", { source_id: "teamcity", state: { text: "failed", tone: "err" } }),
+    row("teamcity:Payout_Lint#904", "build", "Payout_Lint #904", { source_id: "teamcity", state: { text: "success", tone: "ok" } }),
+  ];
+  await draw([PR], ports({ getEntity: async () => ({ ...detail("mara"), builds }) as EntityDetail }));
+  const items = [...target.querySelectorAll(".tf-prbuilds .tf-prit")];
+  expect(items.map((item) => item.textContent?.replace(/\s+/g, " ").trim())).toEqual(["Payout_IntegrationTests #1187 failed", "Payout_Lint #904 success"]);
+  expect(items.map((item) => item.querySelector("a")!.getAttribute("href"))).toEqual([
+    `#/build/${encodeURIComponent(RUN)}`,
+    `#/build/${encodeURIComponent("teamcity:Payout_Lint#904")}`,
+  ]);
+  if (view) unmount(view);
+  view = null;
+  // Nothing mirrored ran on the head: no panel.
+  await draw([PR]);
+  expect(target.querySelector(".tf-prbuilds")).toBeNull();
 });
 
 test("a repository not on this machine draws no Local checkout", async () => {
@@ -479,7 +563,7 @@ test("a muted line in Overview is drawn as a line where the source put it, never
   const body = [...target.querySelectorAll(".tf-prline, .tf-cgroup-h, .tf-prdesc")].map((node) => node.textContent?.trim());
   expect(body).toEqual([unread, "Description", "Retries SEPA payouts."]);
   // Where the checks could not be read, *Ready to merge?* says so in their place.
-  expect([...target.querySelectorAll(".tf-prready > span")].map((line) => line.textContent?.trim())).toEqual([
+  expect([...target.querySelectorAll(".tf-prck > span:last-child")].map((line) => line.textContent?.trim())).toEqual([
     "Approvals: 1 of 2",
     unread,
     "No conflicts with main",
@@ -490,7 +574,7 @@ test("a muted line in Overview is drawn as a line where the source put it, never
   await draw([PR], ports({ pr: withBlocks("overview", [facts!, checks!, mutedLine("Two checks are on Gitea only."), description!]) }));
   expect([...target.querySelectorAll(".tf-prchecks tr")].length).toBe(2);
   expect(text(".tf-prchecks + .tf-prline")).toBe("Two checks are on Gitea only.");
-  expect([...target.querySelectorAll(".tf-prready > span")][1]!.textContent?.trim()).toBe("Checks: Payout_IntegrationTests #1187 failure");
+  expect([...target.querySelectorAll(".tf-prck > span:last-child")][1]!.textContent?.trim()).toBe("Checks: Payout_IntegrationTests #1187 failure");
 });
 
 test("a muted line in Commits is drawn as a line, never as a commit; the list after it is the commits (#2065)", async () => {
@@ -608,6 +692,38 @@ test("line comments waiting turn Review… into Submit review (N pending), which
   expect(pending.of(PR)).toEqual([]);
   expect(buttons()[0]).toBe("Review…");
   expect(text(".tf-fhead .tf-sub")).toContain("review queued");
+});
+
+test("#2276: Submit review from Overview reads the diff's head first and sends no comment written on an earlier head", async () => {
+  pending.seen(PR, "aaa111");
+  pending.add(PR, { path: "src/sepa/retry.rs", side: "new", line: 14, body: "Written on the old head." });
+  const pr = prView([SUBMIT, COMMENT, APPROVE_SENDS, CHANGES, EDIT, MERGE]);
+  // The head moved since the Files tab last drew it.
+  const files: SourceView = {
+    sections: [
+      {
+        id: "files",
+        title: "Files",
+        count: 0,
+        deferred: false,
+        blocks: [
+          { type: "diff", files: [], truncated: false, commentable: { write_op: "submit_review", reply: null, resolve: null, head: "bbb222" }, gone: [] },
+        ],
+      },
+    ],
+    actions: [],
+  };
+  await draw([PR], ports({ author: "jonas", pr, entityView: async (_id, section) => (section === "files" ? files : pr) }));
+  button("Submit review (1 pending)")!.click();
+  flushSync();
+  const dialog = document.querySelector(".tf-dialog")!;
+  dialog.querySelector<HTMLInputElement>("input[value=approve]")!.click();
+  flushSync();
+  dialogButton("Submit review").click();
+  await settle();
+  expect(writes).toEqual([{ SubmitReview: { entity: PR, verdict: "approve", body: "", comments: [] } }]);
+  // Kept apart, never dropped.
+  expect(pending.stale(PR).map((d) => d.body)).toEqual(["Written on the old head."]);
 });
 
 test("Request changes waits for its words; Comment waits for a line comment", async () => {
@@ -1148,4 +1264,116 @@ test("⌘R on a pull request runs its Refresh, as a click does (#2156)", async (
   expect(pressRefreshKey().defaultPrevented).toBe(true);
   await settle();
   expect(probe.refreshed).toEqual([PR]);
+});
+
+// -- Markdown (#2261) --------------------------------------------------------------
+
+const FENCED = "Retries **SEPA** payouts.\n\n```mermaid\nflowchart LR\n  a --> b\n```";
+
+test("a description and a comment the source writes in Markdown are drawn by the Markdown component, a mermaid fence as a diagram fence", async () => {
+  const overview = prView().sections.find((section) => section.id === "overview")!.blocks.filter((block) => block.type !== "text");
+  let pr = withBlocks("overview", [...overview, { type: "text", text: FENCED, markdown: true }]);
+  pr = withBlocks(
+    "conversation",
+    [
+      { type: "facts", facts: [fact("jonas", "2026-08-22 09:30")] },
+      { type: "text", text: "As drawn:\n\n```mermaid\nsequenceDiagram\n  A->>B: hi\n```", markdown: true },
+    ],
+    pr,
+  );
+  await draw([PR], ports({ pr }));
+  expect(text(".tf-prdesc .tf-md strong")).toBe("SEPA");
+  expect(target.querySelector(".tf-prdesc .tf-md .tf-fence[data-lang='mermaid'] pre code")?.textContent).toBe("flowchart LR\n  a --> b");
+  unmount(view!);
+  view = null;
+  await draw([PR, "conversation"], ports({ pr }));
+  expect(target.querySelector(".tf-msg-body .tf-md .tf-fence[data-lang='mermaid'] pre code")?.textContent).toBe("sequenceDiagram\n  A->>B: hi");
+});
+
+test("text the source does not mark Markdown stays as written", async () => {
+  const overview = prView().sections.find((section) => section.id === "overview")!.blocks.filter((block) => block.type !== "text");
+  await draw([PR], ports({ pr: withBlocks("overview", [...overview, { type: "text", text: "Plain **not bold**", markdown: false }]) }));
+  expect(target.querySelector(".tf-prdesc .tf-md")).toBeNull();
+  expect(text(".tf-prdesc p")).toBe("Plain **not bold**");
+});
+
+// -- Request… in the Reviewers panel (#2303) ---------------------------------
+
+const REQUEST = action("request_reviewers", "Request…", {
+  fields: [
+    {
+      name: "reviewers",
+      label: "Reviewer",
+      kind: { type: "choice", options: ["olu", "kai"].map((who) => ({ value: who, label: who })) },
+      value: null,
+      required: true,
+      placeholder: null,
+    },
+  ],
+});
+
+/** `view` with the overview naming `who` as asked for a review, as Gitea's verdicts say it. */
+function withRequested(view: SourceView, who: string): SourceView {
+  const copy = structuredClone(view);
+  const facts = copy.sections[0]!.blocks[0]!;
+  if (facts.type === "facts") facts.facts.push(fact("Review", `requested from ${who}`, "muted"));
+  return copy;
+}
+
+test("#2303: Request… asks the picked reviewer, under `reviewers`, and the read after the write draws them requested", async () => {
+  let read = prView([COMMENT, EDIT, REQUEST]);
+  const { sync, follower, io } = lifecycle(() => read);
+  await draw([PR], io, follower);
+  // Drawn in the panel, never in the toolbar.
+  expect(buttons()).toEqual(["Edit"]);
+  target.querySelector<HTMLButtonElement>(".tf-prreviewers header button")!.click();
+  flushSync();
+  expect(lines(".tf-prpick button")).toEqual(["OL olu", "KA kai"]);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-prpick button")].find((b) => b.textContent?.includes("olu"))!.click();
+  await settle();
+  expect(writes).toEqual([{ RequestReviewers: { entity: PR, reviewers: ["olu"] } }]);
+  // At once: requested, while the write is out.
+  expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "OL olu · queued Review requested"]);
+  // The write landed; its refresh reads the view again, which names olu.
+  read = withRequested(prView([COMMENT, EDIT, REQUEST]), "olu");
+  await sync.refreshed(PR, 80);
+  expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "OL olu Review requested"]);
+});
+
+test("#2303: a reader the source offers no Request… sees no button", async () => {
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT]) }));
+  expect(target.querySelector(".tf-prreviewers header button")).toBeNull();
+});
+
+test("#2303: a refused request says the source's words and leaves the rail as it was", async () => {
+  let hear: Hear = () => {};
+  const follower: WriteFollower = {
+    follow: (_id, h) => {
+      hear = h;
+      return () => {};
+    },
+  };
+  const numbered = ports({
+    pr: prView([COMMENT, EDIT, REQUEST]),
+    submitWrite: async (payload) => {
+      writes.push(payload);
+      return { id: 32 } as never;
+    },
+  });
+  await draw([PR], numbered, follower);
+  target.querySelector<HTMLButtonElement>(".tf-prreviewers header button")!.click();
+  flushSync();
+  target.querySelector<HTMLButtonElement>(".tf-prpick button")!.click();
+  await settle();
+  hear({ id: 32, state: "refused", detail: "422 reviewer olu does not exist" } as never);
+  flushSync();
+  expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved"]);
+  expect(toasts.items.at(-1)!.text).toBe("Review request was refused: 422 reviewer olu does not exist");
+});
+
+test("#2276: the reader's unsent review is a Draft in the Reviewers panel", async () => {
+  pending.add(PR, { path: "src/retry.rs", side: "new", line: 27, body: "Sub-second?" });
+  pending.add(PR, { path: "src/retry.rs", side: "new", line: 28, body: "Why 3?" });
+  await draw([PR]);
+  expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "MA you · 2 pending comments Draft"]);
 });

@@ -60,6 +60,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: url_forms(),
+        code_pages: None,
         write_ops: vec![
             "comment".to_owned(),
             "update_page".to_owned(),

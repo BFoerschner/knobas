@@ -8,7 +8,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
-import { appStatus, type AppStatus } from "../../ipc/app";
+import { appStatus, pagesKeptOpen, setPagesKeptOpen, type AppStatus } from "../../ipc/app";
 import { monitoringSettings, setMonitoringSettings, type MonitoringSettings } from "../../ipc/assets";
 import {
   backupNow,
@@ -178,6 +178,9 @@ export const realSettingsPorts: SettingsPorts = {
  * one store `inbox/notify.svelte.ts` keeps, not through here.
  */
 export interface SectionPorts {
+  /** *Pages kept open* (#2247), Settings › Performance. */
+  pagesKeptOpen: () => Promise<number>;
+  setPagesKeptOpen: (count: number) => Promise<number>;
   passiveAttribution: () => Promise<boolean>;
   setPassiveAttribution: (enabled: boolean) => Promise<boolean>;
   notify: (draft: { title: string; body: string; address: string }) => Promise<void>;
@@ -211,10 +214,14 @@ export interface SectionPorts {
    * `~/Library`. No path: the command opens the running profile's (#1704).
    */
   openBackupFolder: () => Promise<void>;
+  /** Settings › Renderers (#2262); the IPC when omitted. */
+  renderers?: import("./TfRenderersSection.svelte").RendererPorts;
 }
 
 /** The real commands, each looked up when it is called (see above). */
 export const realSectionPorts: SectionPorts = {
+  pagesKeptOpen: () => pagesKeptOpen(),
+  setPagesKeptOpen: (count) => setPagesKeptOpen(count),
   passiveAttribution: () => passiveAttribution(),
   setPassiveAttribution: (enabled) => setPassiveAttribution(enabled),
   notify: (draft) => notify(draft),

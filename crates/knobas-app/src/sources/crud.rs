@@ -13,6 +13,7 @@ use knobas_sync::config::{self, AuthKind, CredentialHealth, InsertConfig, PatchC
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
 
+use super::live::LiveSources;
 use super::{
     ConnectionReport, NewSource, SecretInput, SourceDraft, SourcePatch, SourceSummary, SourcesError,
 };
@@ -73,7 +74,7 @@ fn template_for(
 /// seventh and eighth positional `Option` on that function is exactly how a
 /// caller comes to pass the account where the secret goes.
 #[derive(Default)]
-struct Credential {
+pub(super) struct Credential {
     secret: Option<String>,
     account: Option<knobas_source::instance::Account>,
 }
@@ -104,7 +105,7 @@ impl Credential {
     /// The secret may still come back `None` -- a source that needs none, or a
     /// draft for one not yet saved. What a caller may not do is read that as
     /// "clear it"; `set_secret` refuses by name instead.
-    fn keeping(typed: &SecretInput, stored: Option<knobas_secrets::Secret>) -> Self {
+    pub(super) fn keeping(typed: &SecretInput, stored: Option<knobas_secrets::Secret>) -> Self {
         let (kept_value, kept_account) = match stored {
             Some(kept) => (Some(kept.value), kept.account),
             None => (None, None),
@@ -121,7 +122,7 @@ impl Credential {
 /// One place, so `crud` and the scheduler route and shape instances
 /// identically -- an adapter that behaves differently depending on which of the
 /// two built it is a bug nobody would look for.
-fn instance_from(
+pub(super) fn instance_from(
     id: &str,
     kind: &str,
     display_name: &str,
@@ -494,12 +495,15 @@ pub async fn update(
 pub async fn delete(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
+    live: &LiveSources,
     id: &str,
     purge_items: bool,
 ) -> Result<(), SourcesError> {
     if !config::delete(pool, id, purge_items).await? {
         return Err(SourcesError::NotFound(id.to_owned()));
     }
+    // Dropped once the row is gone, so no read builds it again in between.
+    live.forget(id);
     knobas_secrets::spawn::delete(secrets, &knobas_secrets::KeychainAccount::source(id)).await?;
     Ok(())
 }
@@ -519,6 +523,7 @@ pub async fn set_secret(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
     id: &str,
     secret: SecretInput,
 ) -> Result<CredentialHealth, SourcesError> {
@@ -560,6 +565,9 @@ pub async fn set_secret(
         },
     )
     .await?;
+    // The live reads' instance holds the credential it was built with
+    // (#2240): the next read builds it again over this one.
+    live.forget(id);
     release_credential_waits(pool, id).await;
 
     let source = knobas_sync::scheduler::build_off_runtime(
@@ -823,9 +831,10 @@ pub async fn reachable_transitions(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
     entity_id: &str,
 ) -> Result<Vec<String>, SourcesError> {
-    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
     Ok(source.reachable_transitions(entity_id).await?)
 }
 
@@ -838,15 +847,18 @@ pub async fn reachable_transitions(
 /// side. The answers come back in the order asked.
 ///
 /// **Infallible on purpose**, for [`instance_write_ops`]' reason: a surface
-/// deciding how to draw a button must not be an error path. Everything that
-/// is no verdict refuses nothing, and the write is drawn as before: an
-/// entity no configured source owns, a keychain that would not answer, an
-/// adapter that would not build, a read the source failed, and an answer
-/// about a write nobody asked about.
+/// deciding how to draw a button must not be an error path. A read the
+/// source failed refuses its asks with a reason saying knobas could not ask
+/// (#2306, [`LiveSources::refused`]): a write is never drawn as allowed on a
+/// failed read. What asks nothing refuses nothing, and the write is drawn as
+/// before: an entity no configured source owns, a keychain that would not
+/// answer, an adapter that would not build, and an answer about a write
+/// nobody asked about.
 pub async fn refused_writes(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
     asks: &[knobas_source::grants::WriteAsk],
 ) -> Vec<knobas_source::grants::RefusedWrite> {
     let mut by_source: Vec<(String, Vec<knobas_source::grants::WriteAsk>)> = Vec::new();
@@ -861,17 +873,27 @@ pub async fn refused_writes(
     }
     let mut asked = tokio::task::JoinSet::new();
     for (id, of) in by_source {
-        let (pool, secrets, registry) = (pool.clone(), secrets.clone(), registry.clone());
-        asked.spawn(async move {
-            let answer = match adapter_for(&pool, &secrets, &registry, &of[0].entity).await {
-                Ok(source) => source.refused_writes(&of).await.map_err(SourcesError::from),
-                Err(error) => Err(error),
-            };
-            answer.unwrap_or_else(|error| {
-                tracing::debug!(source = %id, %error, "refused_writes: no verdict");
-                Vec::new()
-            })
-        });
+        let (pool, secrets, registry, live) = (
+            pool.clone(),
+            secrets.clone(),
+            registry.clone(),
+            live.clone(),
+        );
+        let work = async move {
+            // Kept where the adapter says the answer moves (#2241): Gitea's
+            // probe is asked once per repository, then behind the answer.
+            match live.source(&pool, &secrets, &registry, &of[0].entity).await {
+                Ok(lent) => live.refused(&lent, &of).await,
+                Err(error) => {
+                    tracing::debug!(source = %id, %error, "refused_writes: no source, no verdict");
+                    Vec::new()
+                }
+            }
+        };
+        // A test's request counter counts each source's asks as the call's.
+        #[cfg(feature = "test-util")]
+        let work = knobas_http::counted::inherit(work);
+        asked.spawn(work);
     }
     let answered: Vec<_> = asked.join_all().await.into_iter().flatten().collect();
     asks.iter()
@@ -880,7 +902,10 @@ pub async fn refused_writes(
 }
 
 /// The source view of `entity_id` (#661, ADR-0020): the entity's own adapter
-/// asked live, the way [`reachable_transitions`] asks it, and nothing stored.
+/// asked live, the way [`reachable_transitions`] asks it, and nothing stored
+/// in the database. A view the adapter says stands at a fixed commit is kept
+/// in memory and answered from there the next time (ADR-0032, #2239: see
+/// [`LiveSources`]); the app's work below is done on every read.
 ///
 /// **One thing is the app's to do to the answer**, and it is rule 7: an
 /// entity-list row keeps its `entity_id` only where the mirror holds that
@@ -909,11 +934,12 @@ pub async fn view(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
     entity_id: &str,
     section: Option<&str>,
 ) -> Result<Option<knobas_source::view::SourceView>, SourcesError> {
-    let source = adapter_for(pool, secrets, registry, entity_id).await?;
-    let Some(mut view) = source.view(entity_id, section).await? else {
+    let source = live.source(pool, secrets, registry, entity_id).await?;
+    let Some(mut view) = live.view(&source, entity_id, section).await? else {
         return Ok(None);
     };
     resolve_commit_hints(pool, registry.as_ref(), &mut view).await?;
@@ -950,6 +976,29 @@ pub async fn view(
     Ok(Some(view))
 }
 
+/// The bytes of the file at `path` in `entity_id`'s tree, at `commit` (a
+/// file block's, handed back), read whole up to
+/// [`BYTES_CAP`](knobas_source::view::BYTES_CAP) (#2256): routed like
+/// [`view`], and kept like it where the adapter says the read is fixed. Not
+/// touched by the app: no rule applies to bytes.
+///
+/// # Errors
+///
+/// As [`view`]. `Ok(None)` is an adapter that reads no bytes.
+pub async fn file_bytes(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
+    entity_id: &str,
+    path: &str,
+    commit: Option<&str>,
+) -> Result<Option<Arc<knobas_source::view::FileBytes>>, SourcesError> {
+    let source = live.source(pool, secrets, registry, entity_id).await?;
+    let cap = knobas_source::view::BYTES_CAP;
+    Ok(live.bytes(&source, entity_id, path, commit, cap).await?)
+}
+
 /// A pipeline's settings, read live from its own source (ADR-0022, #851),
 /// routed like [`view`].
 ///
@@ -968,9 +1017,10 @@ pub async fn pipeline_settings(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
     entity_id: &str,
 ) -> Result<Option<knobas_source::pipeline::PipelineSettings>, SourcesError> {
-    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
     let Some(mut settings) = source.pipeline_settings(entity_id).await? else {
         return Ok(None);
     };
@@ -1006,10 +1056,11 @@ pub async fn translate_query(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
     entity_id: &str,
     payload: &serde_json::Value,
 ) -> Result<Option<knobas_source::query::Translation>, SourcesError> {
-    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
     Ok(source.translate_query(payload).await?)
 }
 
@@ -1031,11 +1082,12 @@ pub async fn pipeline_commits(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
     entity_id: &str,
     shas: &[String],
 ) -> Result<std::collections::HashMap<String, String>, SourcesError> {
     let mut found = std::collections::HashMap::new();
-    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
     let Some(settings) = source.pipeline_settings(entity_id).await? else {
         return Ok(found);
     };
@@ -1088,12 +1140,13 @@ pub async fn shared_commits<'a>(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
     shared: std::collections::BTreeMap<&'a str, Vec<String>>,
 ) -> knobas_core::builds::ResolvedCommits<'a> {
     let mut resolved = knobas_core::builds::ResolvedCommits::new();
     let deadline = tokio::time::Instant::now() + COMMIT_READ_BUDGET;
     for (pipeline, wanted) in shared {
-        let read = pipeline_commits(pool, secrets, registry, pipeline, &wanted);
+        let read = pipeline_commits(pool, secrets, registry, live, pipeline, &wanted);
         match tokio::time::timeout_at(deadline, read).await {
             Err(_) => {
                 tracing::warn!(pipeline, "a run's repository took too long to read");
@@ -1121,11 +1174,12 @@ pub async fn older_runs(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
     entity_id: &str,
     before: &str,
     count: u32,
 ) -> Result<Vec<knobas_source::SyncItem>, SourcesError> {
-    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
     Ok(source
         .older_runs(entity_id, before, count)
         .await?
@@ -1142,9 +1196,10 @@ pub async fn run_chain(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
     entity_id: &str,
 ) -> Result<Vec<knobas_source::pipeline::RunChainStep>, SourcesError> {
-    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
     Ok(source.run_chain(entity_id).await?.unwrap_or_default())
 }
 
@@ -1161,9 +1216,10 @@ pub async fn run_source(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
     entity_id: &str,
-) -> Result<Box<dyn knobas_source::Source>, SourcesError> {
-    adapter_for(pool, secrets, registry, entity_id).await
+) -> Result<Arc<dyn knobas_source::Source>, SourcesError> {
+    adapter_for(pool, secrets, registry, live, entity_id).await
 }
 
 /// A repository's web page from a clone URL: its `.git` and trailing slash
@@ -1277,53 +1333,19 @@ fn commit_page(repo_url: &str, sha: &str) -> Option<String> {
     .then(|| format!("{repo}/commit/{sha}"))
 }
 
-/// The adapter that owns `entity_id`, built the way a scheduled run builds it.
-///
-/// The **source is the entity's namespace** (interfaces §4.1), so nothing
-/// else is asked for. The keychain is asked only where the configuration says
-/// a credential is needed at all, which is `build_source`'s rule: a source
-/// that authenticates nothing -- the mock, `--demo` against an empty keychain
-/// -- must not be turned into a keychain prompt by a detail opening.
+/// The adapter that owns `entity_id`, as [`LiveSources::source`] lends it:
+/// built once per source and reused (#2240).
 async fn adapter_for(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
     registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
     entity_id: &str,
-) -> Result<Box<dyn knobas_source::Source>, SourcesError> {
-    let parsed = knobas_core::entity::EntityRef::parse(entity_id)
-        .map_err(|error| SourcesError::Invalid(error.to_string()))?;
-    let cfg = config::get(pool, &parsed.namespace)
+) -> Result<Arc<dyn knobas_source::Source>, SourcesError> {
+    Ok(live
+        .source(pool, secrets, registry, entity_id)
         .await?
-        .ok_or_else(|| SourcesError::NotFound(parsed.namespace.clone()))?;
-    let method = cfg.auth_kind.method();
-    // The keychain is asked only where the configuration says a credential is
-    // needed at all, which is `build_source`'s rule: a source that
-    // authenticates nothing -- the mock, `--demo` against an empty keychain --
-    // must not be turned into a keychain prompt by a select opening.
-    let stored = match method {
-        None => None,
-        Some(_) => {
-            knobas_secrets::spawn::get(
-                secrets,
-                &knobas_secrets::KeychainAccount::source(&parsed.namespace),
-            )
-            .await?
-        }
-    };
-    let source = knobas_sync::scheduler::build_off_runtime(
-        registry,
-        instance_from(
-            &parsed.namespace,
-            &cfg.adapter_kind,
-            &cfg.display_name,
-            &cfg.base_url,
-            method,
-            Credential::keeping(&SecretInput::default(), stored),
-            cfg.config.clone(),
-        ),
-    )
-    .await?;
-    Ok(source)
+        .source)
 }
 
 /// The credential health of every source -- the cheap poll the top strip's

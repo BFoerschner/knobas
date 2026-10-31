@@ -471,6 +471,7 @@ fn descriptor() -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        code_pages: None,
         write_ops: Vec::new(),
         entity_kinds: Vec::new(),
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
@@ -573,6 +574,7 @@ async fn shutdown_stops_the_scheduler_before_the_database_and_a_second_does_noth
     lifecycle.install(AppState::over_pool(app_pool.clone()));
     app.manage(lifecycle);
     app.manage(SourcesState {
+        live: Default::default(),
         pool: app_pool.clone(),
         scheduler,
         secrets,
@@ -1086,6 +1088,7 @@ async fn a_trigger_that_reaches_the_spawn_after_the_quit_ends_its_row() {
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("a mock app");
     app.manage(SourcesState {
+        live: Default::default(),
         pool: app_pool,
         scheduler: scheduler.clone(),
         secrets,

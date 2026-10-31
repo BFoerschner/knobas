@@ -6,17 +6,17 @@
 //! [`Block::Diff`](crate::view::Block::Diff) carries, so a Gitea and a later
 //! GitLab adapter draw the same diff from the same parser.
 //!
-//! **Capped here, so the window never hangs on a lockfile** (ADR-0020 rule 6):
-//! at most [`MAX_LINES_PER_FILE`] lines of one file and [`MAX_LINES_PER_VIEW`]
-//! lines in all. A file over either cap keeps the lines before the cut, its
-//! **full** `additions` and `deletions`, and `truncated: true`; the panel
-//! offers the source's own page for the rest.
+//! **A ceiling here, as a safety stop** (ADR-0020 rule 6; #2269, spec #2234
+//! step 6a): at most [`MAX_LINES_PER_VIEW`] lines in all. The window draws a
+//! long diff by windowing its lines and holds a file over 1,500 changed lines
+//! behind *Load diff*, so nothing under the ceiling is cut. A file the
+//! ceiling cuts keeps the lines before the cut, its **full** `additions` and
+//! `deletions`, and `truncated: true`; the diff says it hit the ceiling and
+//! names it, and the source's own page has the rest.
 
-/// The most lines one file's hunks carry.
-pub const MAX_LINES_PER_FILE: usize = 1_500;
-
-/// The most lines one diff carries over all its files.
-pub const MAX_LINES_PER_VIEW: usize = 6_000;
+/// The ceiling: the most lines one diff carries over all its files. The
+/// shell names it when a diff hits it (`tf/diff/diff.ts` `DIFF_CEILING`).
+pub const MAX_LINES_PER_VIEW: usize = 50_000;
 
 /// What happened to one file.
 ///
@@ -48,8 +48,21 @@ pub struct DiffFile {
     /// Removed lines, counted the same way.
     pub deletions: u32,
     pub hunks: Vec<Hunk>,
-    /// Some of this file's lines were cut by a cap.
+    /// Some of this file's lines were cut by the ceiling.
     pub truncated: bool,
+    /// How alike the two sides of a rename or copy are, in percent, where
+    /// git says (`similarity index 92%`; #2268).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub similarity: Option<u8>,
+    /// The file's mode before and after, where it changed (`old mode
+    /// 100644` / `new mode 100755`; #2268): an executable bit set or cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub old_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub new_mode: Option<String>,
     /// The review conversations on this file's lines (issue #709): what a
     /// source that keeps line comments read for it, in the order the file
     /// reads -- empty from the parser, which knows only the text. Absent on
@@ -58,6 +71,14 @@ pub struct DiffFile {
     /// The outdated ones last.
     #[serde(default)]
     pub threads: Vec<LineThread>,
+    /// The blob the file holds after the change, as the diff's `index` line
+    /// names it (abbreviated as the server printed it; the blob before, for a
+    /// deletion): what *Viewed* is kept by (#2276), so a file whose content
+    /// did not change stays viewed through a new commit. `None` where the
+    /// diff names none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub blob: Option<String>,
 }
 
 /// One conversation on one line of a file's diff (issue #709, `CONTEXT.md`
@@ -78,6 +99,37 @@ pub struct LineThread {
     pub line: u32,
     pub outdated: bool,
     pub comments: Vec<LineComment>,
+    /// The source's id for the thread, which a reply or a resolve names
+    /// ([`WriteOp::ReplyToThread`](crate::WriteOp::ReplyToThread),
+    /// [`WriteOp::ResolveThread`](crate::WriteOp::ResolveThread); #2277);
+    /// `None` where the source offers neither on it. Absent on the wire
+    /// reads as `None`.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Who resolved the thread, as the source names them; `None` while it is
+    /// open (#2277). The shell draws a resolved thread collapsed. Absent on
+    /// the wire reads as `None`.
+    #[serde(default)]
+    pub resolved_by: Option<String>,
+    /// Whether the source takes a reply on this thread (#2277): Gitea places
+    /// a reply by line on the current head, so an outdated thread takes none.
+    /// Absent on the wire reads as `false`.
+    #[serde(default)]
+    pub replies: bool,
+    /// The commit an outdated thread was written on, its whole sha as the
+    /// source names it (#2318, spec #2234 story 84): where its words still
+    /// read in context. `None` on a thread that is not outdated, and where
+    /// the source names none. Absent on the wire reads as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub commit: Option<String>,
+    /// An outdated thread's line as it read at [`commit`](Self::commit):
+    /// the hunk the source kept with the comment, ending on that line
+    /// (#2318). `None` on a thread that is not outdated, and where the
+    /// source kept none. Absent on the wire reads as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hunk: Option<Hunk>,
 }
 
 /// A [`LineThread`] on a file the diff no longer holds (issue #709): written
@@ -92,8 +144,8 @@ pub struct FileThread {
 }
 
 /// One comment of a [`LineThread`]. Source text, like every string of a view:
-/// `body` is the source's Markdown, drawn legibly and never as markup
-/// (ADR-0020 rule 5).
+/// `body` is the source's Markdown, drawn by the shell's one Markdown
+/// component, sanitized (ADR-0020 rule 5, #2261).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct LineComment {
@@ -137,18 +189,17 @@ pub struct DiffLine {
     pub text: String,
 }
 
-/// Parse `git diff` text into files, under the default caps.
+/// Parse `git diff` text into files, under the ceiling.
 #[must_use]
 pub fn parse(text: &str) -> Vec<DiffFile> {
-    parse_capped(text, MAX_LINES_PER_FILE, MAX_LINES_PER_VIEW).0
+    parse_capped(text, usize::MAX, MAX_LINES_PER_VIEW).0
 }
 
-/// Parse `git diff` text under the default caps, and say whether the
-/// per-view cap cut anything: the two halves of a
-/// [`Block::Diff`](crate::view::Block::Diff).
+/// Parse `git diff` text under the ceiling, and say whether it cut
+/// anything: the two halves of a [`Block::Diff`](crate::view::Block::Diff).
 #[must_use]
 pub fn parse_view(text: &str) -> (Vec<DiffFile>, bool) {
-    parse_capped(text, MAX_LINES_PER_FILE, MAX_LINES_PER_VIEW)
+    parse_capped(text, usize::MAX, MAX_LINES_PER_VIEW)
 }
 
 /// Parse under explicit caps. Answers the files and whether `per_view` cut
@@ -254,6 +305,21 @@ fn file_line(
         .or_else(|| raw.strip_prefix("copy to "))
     {
         f.to = Some(unquote(to));
+    } else if let Some(rest) = raw
+        .strip_prefix("similarity index ")
+        .and_then(|r| r.strip_suffix('%'))
+    {
+        f.similarity = rest.parse().ok();
+    } else if let Some((before, after)) = raw
+        .strip_prefix("index ")
+        .and_then(|r| r.split(' ').next())
+        .and_then(|r| r.split_once(".."))
+    {
+        f.blobs = Some((before.to_owned(), after.to_owned()));
+    } else if let Some(mode) = raw.strip_prefix("old mode ") {
+        f.old_mode = Some(mode.to_owned());
+    } else if let Some(mode) = raw.strip_prefix("new mode ") {
+        f.new_mode = Some(mode.to_owned());
     } else if raw.starts_with("Binary files ") || raw == "GIT binary patch" {
         f.binary = true;
     } else if let Some(minus) = raw.strip_prefix("--- ") {
@@ -277,6 +343,11 @@ struct FileBuilder {
     renamed: bool,
     copied: bool,
     binary: bool,
+    similarity: Option<u8>,
+    old_mode: Option<String>,
+    new_mode: Option<String>,
+    /// The `index <before>..<after>` line's two blobs.
+    blobs: Option<(String, String)>,
     additions: u32,
     deletions: u32,
     hunks: Vec<Hunk>,
@@ -297,6 +368,10 @@ impl FileBuilder {
             renamed: false,
             copied: false,
             binary: false,
+            similarity: None,
+            old_mode: None,
+            new_mode: None,
+            blobs: None,
             additions: 0,
             deletions: 0,
             hunks: Vec::new(),
@@ -341,6 +416,18 @@ impl FileBuilder {
         } else {
             None
         };
+        // The blob after the change, or before it for a deletion, whose
+        // after side is all zeros.
+        let blob = self.blobs.and_then(|(before, after)| {
+            let gone = |b: &str| b.is_empty() || b.bytes().all(|c| c == b'0');
+            if !gone(&after) {
+                Some(after)
+            } else if !gone(&before) {
+                Some(before)
+            } else {
+                None
+            }
+        });
         DiffFile {
             path,
             old_path,
@@ -349,7 +436,11 @@ impl FileBuilder {
             deletions: self.deletions,
             hunks: self.hunks,
             truncated: self.truncated,
+            similarity: self.similarity,
+            old_mode: self.old_mode,
+            new_mode: self.new_mode,
             threads: Vec::new(),
+            blob,
         }
     }
 }
@@ -749,28 +840,80 @@ mod tests {
         text
     }
 
-    /// The per-file cap from both sides: at the cap nothing is cut, one over
-    /// is cut to the cap with the counts still whole.
+    /// The ceiling from both sides, on one file: at it nothing is cut, one
+    /// over is cut to it with the counts still whole. No cap below it.
     #[test]
-    fn the_per_file_cap_cuts_one_line_over_and_not_at() {
-        let at = one(&added_file("at.txt", MAX_LINES_PER_FILE));
+    fn the_ceiling_cuts_one_line_over_and_not_at() {
+        let at = one(&added_file("at.txt", MAX_LINES_PER_VIEW));
         assert!(!at.truncated);
-        assert_eq!(at.hunks[0].lines.len(), MAX_LINES_PER_FILE);
-        assert_eq!(at.additions as usize, MAX_LINES_PER_FILE);
+        assert_eq!(at.hunks[0].lines.len(), MAX_LINES_PER_VIEW);
 
-        let over = one(&added_file("over.txt", MAX_LINES_PER_FILE + 1));
-        assert!(over.truncated);
-        let kept: usize = over.hunks.iter().map(|h| h.lines.len()).sum();
-        assert_eq!(kept, MAX_LINES_PER_FILE);
+        let (files, cut) = parse_view(&added_file("over.txt", MAX_LINES_PER_VIEW + 1));
+        assert!(cut, "the diff says the ceiling cut it");
+        assert!(files[0].truncated);
+        let kept: usize = files[0].hunks.iter().map(|h| h.lines.len()).sum();
+        assert_eq!(kept, MAX_LINES_PER_VIEW);
         assert_eq!(
-            over.additions as usize,
-            MAX_LINES_PER_FILE + 1,
+            files[0].additions as usize,
+            MAX_LINES_PER_VIEW + 1,
             "counts stay full"
         );
     }
 
-    /// The per-view cap from both sides, over files each under the per-file
-    /// cap: exactly the cap draws everything, one more cuts the last file,
+    /// #2269: a 20,000-line diff over 40 files, each 500 lines (a 1,500-line
+    /// cap and a 6,000-line one each cut it before), comes through whole.
+    #[test]
+    fn a_twenty_thousand_line_diff_over_forty_files_is_not_cut() {
+        let text: String = (0..40)
+            .map(|n| added_file(&format!("f{n}.txt"), 500))
+            .collect();
+        let (files, cut) = parse_view(&text);
+        assert!(!cut);
+        assert_eq!(files.len(), 40);
+        assert!(
+            files
+                .iter()
+                .all(|f| !f.truncated && f.hunks[0].lines.len() == 500)
+        );
+        let big = one(&added_file("big.txt", 3_000));
+        assert!(!big.truncated, "a 3,000-line file is not cut either");
+        assert_eq!(big.hunks[0].lines.len(), 3_000);
+    }
+
+    /// #2268: a rename's similarity and a mode change are read from the
+    /// extended header.
+    #[test]
+    fn a_rename_says_its_similarity_and_a_mode_change_its_modes() {
+        let renamed = one("diff --git a/src/old_queue.rs b/src/queue/legacy.rs\n\
+             similarity index 92%\n\
+             rename from src/old_queue.rs\n\
+             rename to src/queue/legacy.rs\n");
+        assert_eq!(renamed.change, DiffChange::Renamed);
+        assert_eq!(renamed.similarity, Some(92));
+        let mode = one("diff --git a/deploy.sh b/deploy.sh\nold mode 100644\nnew mode 100755\n");
+        assert_eq!(
+            (mode.old_mode.as_deref(), mode.new_mode.as_deref()),
+            (Some("100644"), Some("100755"))
+        );
+        assert_eq!(mode.similarity, None);
+    }
+
+    /// #2276: a file's blob is the `index` line's after side, the before
+    /// side for a deletion, and none where the diff has no `index` line.
+    #[test]
+    fn a_file_names_the_blob_it_holds_after_the_change() {
+        let modified = one(
+            "diff --git a/a.rs b/a.rs\nindex 3c9d2b4..7aa01f9 100644\n--- a/a.rs\n+++ b/a.rs\n",
+        );
+        assert_eq!(modified.blob.as_deref(), Some("7aa01f9"));
+        let deleted =
+            one("diff --git a/a.rs b/a.rs\ndeleted file mode 100644\nindex 3c9d2b4..0000000\n");
+        assert_eq!(deleted.blob.as_deref(), Some("3c9d2b4"));
+        let bare = one("diff --git a/a.rs b/a.rs\nold mode 100644\nnew mode 100755\n");
+        assert_eq!(bare.blob, None);
+    }
+
+    /// A per-view cap from both sides, over files each under it: exactly the cap draws everything, one more cuts the last file,
     /// and a file wholly past the cut keeps its counts and no lines.
     #[test]
     fn the_per_view_cap_cuts_one_line_over_and_not_at() {
@@ -780,7 +923,7 @@ mod tests {
             added_file("a.txt", per_file),
             added_file("b.txt", per_file)
         );
-        let (files, cut) = parse_capped(&at, MAX_LINES_PER_FILE, 2 * per_file);
+        let (files, cut) = parse_capped(&at, MAX_LINES_PER_VIEW, 2 * per_file);
         assert!(!cut);
         assert!(files.iter().all(|f| !f.truncated));
 
@@ -790,7 +933,7 @@ mod tests {
             added_file("b.txt", per_file + 1),
             added_file("c.txt", 3)
         );
-        let (files, cut) = parse_capped(&over, MAX_LINES_PER_FILE, 2 * per_file);
+        let (files, cut) = parse_capped(&over, MAX_LINES_PER_VIEW, 2 * per_file);
         assert!(cut);
         assert!(!files[0].truncated);
         assert!(files[1].truncated);

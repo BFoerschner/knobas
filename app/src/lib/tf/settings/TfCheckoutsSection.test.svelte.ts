@@ -2,7 +2,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { CheckoutApplicationDraft, CheckoutSettings } from "../../ipc/entity";
+import type { CheckoutApplicationDraft, CheckoutSettings, PullRequestWorktree } from "../../ipc/entity";
 import { reset, toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import { createApps } from "../openin/apps.svelte";
@@ -13,10 +13,14 @@ let view: ReturnType<typeof mount> | null = null;
 let stored: CheckoutSettings;
 let saved: [CheckoutApplicationDraft[], string | null][];
 let roots: (string | null)[];
+let worktrees: PullRequestWorktree[];
+let refuseRemove: boolean;
 
 beforeEach(() => {
   saved = [];
   roots = [];
+  worktrees = [];
+  refuseRemove = false;
   stored = {
     clones_root: "/Users/mara/code",
     git: { status: "found", path: "/usr/bin/git" },
@@ -60,6 +64,16 @@ async function draw(refuse?: (path: string | null) => Promise<void>) {
     props: {
       apps,
       layers: createLayers(),
+      worktreePorts: {
+        list: () => Promise.resolve(worktrees),
+        remove: (path: string) => {
+          if (refuseRemove) {
+            return Promise.reject({ code: "conflict", message: `git would not remove ${path}: it contains modified or untracked files` });
+          }
+          worktrees = worktrees.filter((tree) => tree.path !== path);
+          return Promise.resolve(worktrees);
+        },
+      },
       saveRoot: (path) => {
         if (refuse) return refuse(path);
         roots.push(path);
@@ -149,4 +163,28 @@ test("a clones root the setter refuses is said on the page, and the field stays 
   expect(toasts.items.map((t) => t.text)).toEqual([expect.stringContaining("must be an absolute path")]);
   expect(target.querySelector<HTMLInputElement>("input[aria-label='Clones root']")?.value).toBe("Code");
   expect(roots).toEqual([]);
+});
+
+test("the pull request worktrees are listed, a closed one marked, and Remove removes one", async () => {
+  const at = (n: number) => `/Users/mara/code/pull-requests/tidewater/payout-service-${n}`;
+  worktrees = [
+    { repo_entity_id: "gitea:tidewater/payout-service", number: 7, path: at(7), closed: true },
+    { repo_entity_id: "gitea:tidewater/payout-service", number: 8, path: at(8), closed: false },
+  ];
+  await draw();
+  const section = [...target.querySelectorAll(".tf-stg-sec")].find((sec) => text(sec.querySelector("h2")) === "Pull request worktrees")!;
+  const rows = () => [...section.querySelectorAll("tbody tr")].map((row) => [...row.querySelectorAll("td")].map(text).join(" | "));
+  expect(rows()).toEqual([`#7 closed | ${at(7)} | Remove`, `#8 | ${at(8)} | Remove`]);
+
+  section.querySelector<HTMLButtonElement>(`button[title="Remove ${at(7)}"]`)!.click();
+  await settle();
+  expect(rows()).toEqual([`#8 | ${at(8)} | Remove`]);
+
+  refuseRemove = true;
+  section.querySelector<HTMLButtonElement>(`button[title="Remove ${at(8)}"]`)!.click();
+  await settle();
+  expect(rows()).toEqual([`#8 | ${at(8)} | Remove`]);
+  expect(toasts.items.map((toast) => toast.text)).toContain(
+    `Could not remove the worktree: git would not remove ${at(8)}: it contains modified or untracked files`,
+  );
 });

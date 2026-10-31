@@ -6,7 +6,8 @@
 //! * *Pull requests* (count = open) -- the open ones, with the rooms' chip.
 //! * *Branches* (count) -- the default branch first, then by last commit,
 //!   newest first.
-//! * *Commits* -- the default branch's latest twenty.
+//! * *Commits* (count = every commit the default branch has, #2311) -- its
+//!   latest twenty.
 //! * *Files* (deferred) -- the tree at the default branch ([`files`], #711);
 //!   none for an empty repository, which has no tree.
 //!
@@ -33,7 +34,7 @@ use crate::source::GiteaSource;
 
 const OVERVIEW: &str = "overview";
 const PULLS: &str = "pulls";
-const BRANCHES: &str = "branches";
+pub(super) const BRANCHES: &str = "branches";
 const COMMITS: &str = "commits";
 
 /// How many branches a *New pull request…* asks whether they are ahead, the
@@ -62,6 +63,12 @@ pub(super) async fn draw(
     repo: &str,
     section: Option<&str>,
 ) -> Result<SourceView, SourceError> {
+    // The tree reads the repository only for a tip it does not name (#2241).
+    if let Some(id) = section.filter(|id| files::owns(id)) {
+        return Ok(SourceView::new(vec![
+            files::read(source, owner, repo, files::Of::Repository, id).await?,
+        ]));
+    }
     let record: RepoRecord = source.client.repo_as(owner, repo).await?;
     let sections = match section {
         // Side by side over the one record (#703): each section is its own
@@ -102,9 +109,6 @@ pub(super) async fn draw(
             vec![branches(source, &record, owner, repo, &listing)]
         }
         Some(COMMITS) => vec![commits(source, &record, owner, repo).await?],
-        Some(id) if files::owns(id) => {
-            vec![files::read(source, &record, owner, repo, record.default_branch(), id).await?]
-        }
         Some(other) => {
             return Err(SourceError::protocol(format!(
                 "gitea: a repository's view has no section {other:?} (asked for {entity:?})"
@@ -351,6 +355,7 @@ fn branches(
                 chip: is_default.then(|| "default".to_owned()),
                 url: None,
                 commit: None,
+                author: None,
             }
         })
         .collect();
@@ -381,10 +386,7 @@ async fn toolbar(
 ) -> Result<Vec<ViewAction>, SourceError> {
     let default = record.default_branch();
     let names = || listing.items.iter().map(|b| b.name.as_str());
-    let empty = record
-        .repo
-        .empty
-        .then(|| "The repository is empty".to_owned());
+    let empty = record.repo.empty.then(|| super::EMPTY.to_owned());
     let mut actions = vec![act::new_branch(
         None,
         act::default_first(default, names(), None),
@@ -460,12 +462,12 @@ async fn commits(
     owner: &str,
     repo: &str,
 ) -> Result<ViewSection, SourceError> {
-    let latest: Vec<ListedCommit> = if record.repo.empty {
-        Vec::new()
+    let (latest, count): (Vec<ListedCommit>, _) = if record.repo.empty {
+        (Vec::new(), Some(0))
     } else {
         source
             .client
-            .latest_commits_as(owner, repo, record.default_branch(), rows::LATEST_COMMITS)
+            .latest_commits_counted(owner, repo, record.default_branch(), rows::LATEST_COMMITS)
             .await?
     };
     let rows = latest
@@ -475,8 +477,9 @@ async fn commits(
     Ok(ViewSection {
         id: COMMITS.to_owned(),
         title: "Commits".to_owned(),
-        // The latest twenty by design, not a list that stopped paging.
-        count: None,
+        // Every commit the default branch has (#2311, the last-commit
+        // strip's *N commits*); the rows are the latest twenty by design.
+        count,
         deferred: false,
         blocks: vec![Block::Entities { title: None, rows }],
     })

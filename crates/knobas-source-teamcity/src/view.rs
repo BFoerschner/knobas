@@ -408,6 +408,7 @@ fn build_row(viewer: &Viewer<'_>, config: &str, build: &Build, now: DateTime<Utc
         chip: Some(number(build)),
         url: map::build_web_url(viewer.base_url, Some(config), build.id),
         commit: None,
+        author: None,
     }
 }
 
@@ -1117,6 +1118,7 @@ fn build_overview(viewer: &Viewer<'_>, record: &BuildRecord, now: DateTime<Utc>)
                 chip: None,
                 url: Some(map::build_config_web_url(viewer.base_url, config)),
                 commit: None,
+                author: None,
             }],
         });
     }
@@ -1158,6 +1160,7 @@ fn revision_row(revision: &Revision) -> ViewRow {
         chip: short,
         url: None,
         commit: commit_hint(root, sha),
+        author: None,
     }
 }
 
@@ -1212,6 +1215,7 @@ fn change_row(viewer: &Viewer<'_>, change: &Change) -> ViewRow {
             change.id
         )),
         commit: commit_hint(change.vcs_root_instance.as_ref(), sha),
+        author: None,
     }
 }
 
@@ -1264,6 +1268,7 @@ fn failed_test_blocks(failed: &[TestOccurrence]) -> Vec<Block> {
                 chip: Some(chip.to_owned()),
                 url: None,
                 commit: None,
+                author: None,
             }],
         });
         if let Some(details) = nonblank(test.details.as_deref()) {
@@ -1297,6 +1302,7 @@ fn left_out_tests(
             url: map::build_web_url(viewer.base_url, config, id)
                 .map(|u| format!("{u}?buildTab=tests")),
             commit: None,
+            author: None,
         }],
     }
 }
@@ -1330,6 +1336,7 @@ fn artifact_row(viewer: &Viewer<'_>, config: Option<&str>, id: i64, file: &FileE
         chip: None,
         url,
         commit: None,
+        author: None,
     }
 }
 

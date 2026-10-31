@@ -13,7 +13,10 @@ license.workspace = true
 # the limiter and the retry budget. Tests need it to assert what a request
 # carries; adapters must never have it, so it is off in every build they
 # compile against (`cargo build`, and the `clippy --lib` half of the gate).
-test-util = []
+#
+# It also carries the request counter (`counted`, #2239), whose task-local
+# needs tokio's `rt`.
+test-util = ["tokio/rt"]
 
 [dependencies]
 # For `Bytes`, the chunk type of a streamed body; already in the tree through

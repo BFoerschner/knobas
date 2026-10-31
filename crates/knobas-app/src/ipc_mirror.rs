@@ -40,7 +40,23 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     // app.ts
     crate::commands::app::AppStatus::export_all(cfg)?;
     crate::commands::app::DbState::export_all(cfg)?;
+    crate::renderers::UserRenderer::export_all(cfg)?;
+    crate::renderers::UserRendererDraft::export_all(cfg)?;
+    crate::renderers::RenderContent::export_all(cfg)?;
+    crate::renderers::RenderRun::export_all(cfg)?;
+    crate::renderers::RendererDefault::export_all(cfg)?;
+    crate::file_pipeline::saved::CommandStep::export_all(cfg)?;
+    crate::file_pipeline::saved::CommandStepDraft::export_all(cfg)?;
+    crate::file_pipeline::saved::NamedPipeline::export_all(cfg)?;
+    crate::file_pipeline::saved::NamedPipelineDraft::export_all(cfg)?;
     // entity.ts
+    crate::file_pipeline::PipeFormat::export_all(cfg)?;
+    crate::file_pipeline::PipeStep::export_all(cfg)?;
+    crate::file_pipeline::PipeOutput::export_all(cfg)?;
+    crate::file_pipeline::PipeWhy::export_all(cfg)?;
+    crate::file_pipeline::PipeInput::export_all(cfg)?;
+    crate::file_pipeline::PipeFailure::export_all(cfg)?;
+    crate::file_pipeline::PipeRun::export_all(cfg)?;
     knobas_core::entity_list::EntityRow::export_all(cfg)?;
     knobas_core::tone::Tone::export_all(cfg)?;
     knobas_core::payload::StateChip::export_all(cfg)?;
@@ -145,13 +161,17 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::commands::entity::ActionItemTicket::export_all(cfg)?;
     crate::notify::NotificationDraft::export_all(cfg)?;
     crate::notify::NotificationClicked::export_all(cfg)?;
+    crate::sources::live::ViewFresh::export_all(cfg)?;
     crate::checkout::FoundBy::export_all(cfg)?;
     crate::checkout::CheckoutView::export_all(cfg)?;
     crate::checkout::working_tree::WorkingTreeState::export_all(cfg)?;
     crate::checkout::working_tree::TreeRead::export_all(cfg)?;
     knobas_core::checkout::open::Application::export_all(cfg)?;
     knobas_core::checkout::open::Draft::export_all(cfg)?;
+    knobas_core::checkout::open::Object::export_all(cfg)?;
+    knobas_core::checkout::open::ObjectKind::export_all(cfg)?;
     crate::checkout::open::GitFound::export_all(cfg)?;
+    crate::checkout::worktree::PullRequestWorktree::export_all(cfg)?;
     crate::checkout::open::CheckoutSettings::export_all(cfg)?;
     crate::checkout::clone::FailureCause::export_all(cfg)?;
     crate::checkout::clone::CloneState::export_all(cfg)?;
@@ -160,6 +180,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::checkout::uncommitted::CappedDiff::export_all(cfg)?;
     crate::checkout::uncommitted::UncommittedDiff::export_all(cfg)?;
     crate::checkout::uncommitted::DiffRead::export_all(cfg)?;
+    crate::checkout::DiffReadAt::export_all(cfg)?;
+    crate::checkout::RangeDiff::export_all(cfg)?;
     crate::capture::ShortcutView::export_all(cfg)?;
     crate::capture::Recorded::export_all(cfg)?;
     crate::conversation::ThreadComment::export_all(cfg)?;

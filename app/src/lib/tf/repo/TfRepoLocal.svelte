@@ -6,20 +6,25 @@
     *Open in…*); the line that knobas only reads here; then the uncommitted
     diff (`entity_checkout_diff`, ADR-0026), each file marked "modified, not
     staged" or "modified, staged", drawn by the pull request's diff block
-    (`TfDiff`); untracked files listed by name. Read when the tab opens and
+    (`TfDiffView`); untracked files listed by name. Read when the tab opens and
     when the window gets focus.
   - **Not on this machine**: *Clone*, and *It is already cloned somewhere
     else…*, which sets the path by hand (`set_checkout_override`).
 -->
 <script lang="ts">
+  import { pageVisible } from "../kept-pages.svelte";
+  import { onFocusWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutView, DiffRead } from "../../ipc/entity";
-  import TfDiff from "../code/TfDiff.svelte";
+  import { DIFF_CEILING } from "../diff/diff";
+  import TfDiffView from "../diff/TfDiffView.svelte";
   import { treeStanding } from "../code/code";
   import { repoName } from "../openin/openin";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { localFiles } from "./repo";
+  import TfWaiting from "../TfWaiting.svelte";
+  import { waitPhase } from "../waiting";
 
   let {
     repoId,
@@ -66,10 +71,10 @@
   $effect(() => {
     if (path === null) return;
     void load();
-    const again = () => void load();
-    window.addEventListener("focus", again);
-    return () => window.removeEventListener("focus", again);
   });
+  // Read again on focus, and once when the tab or its page is shown again;
+  // nothing while either is hidden (#2248, #2249).
+  onFocusWhileShown(pageVisible(), () => void load());
 
   async function save() {
     const value = typed.trim();
@@ -96,10 +101,14 @@
     Read with read-only git, when you open this tab and when the window gets focus. knobas never commits, stashes or pushes
     here: do that in your editor or terminal.
   </p>
-  {#if failed !== null}
-    <p class="tf-cfail">Could not read the local changes: {failed}</p>
-  {:else if read === null}
-    <!-- Reading. -->
+  <!-- The focus re-read answers in a blink from local git: it swaps the diff in place, undimmed; only the first read waits here (#2246). -->
+  <TfWaiting
+    phase={waitPhase({ drawn: read !== null, reading: false, failed: failed !== null })}
+    error={failed === null ? null : `Could not read the local changes: ${failed}`}
+    shape="lines"
+  >
+  {#if read === null}
+    <!-- Not drawn: the skeleton stands in. -->
   {:else if read.status === "no_git"}
     <div class="tf-empty"><p>git was not found on this machine, so knobas cannot read the checkout.</p></div>
   {:else if read.status === "not_a_repo"}
@@ -109,9 +118,11 @@
   {:else if files.length === 0 && untracked.length === 0}
     <div class="tf-empty">Working tree clean.</div>
   {:else}
-    <TfDiff {files} />
+    <TfDiffView {files} />
     {#if read.unstaged.truncated || read.staged.truncated}
-      <p class="tf-dim tf-local-note">The diff is cut here: it is longer than knobas draws. Your editor has all of it.</p>
+      <p class="tf-dim tf-local-note">
+        The diff is cut here: it is over knobas's ceiling of {DIFF_CEILING.toLocaleString("en-US")} lines. Your editor has all of it.
+      </p>
     {/if}
     {#if untracked.length > 0}
       <div class="tf-panel tf-untracked">
@@ -123,6 +134,7 @@
       </div>
     {/if}
   {/if}
+  </TfWaiting>
 {:else}
   <div class="tf-empty">
     Not on this machine yet.

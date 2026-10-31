@@ -11,8 +11,12 @@
     (ADR-0020 rule 4).
   - **Overview**: the head commit's checks (a check whose link the mirror
     holds opens its run) and the description; beside it *Ready to merge?*
-    (the source's *Approvals*, the checks and *Conflicts*, #994) and, when
-    the repository is cloned, the local checkout.
+    (the source's *Approvals*, its required checks and *Conflicts*, #994,
+    with a verdict that holds back wherever *Merge…* is refused) atop the
+    side rail (#2278): the reviewers and their state, the checks with the
+    required ones marked and a failing one first, the builds of the head
+    the mirror holds, the conflicts and, when the repository is cloned,
+    the local checkout. The rail sits beside every tab but *Files changed*.
   - **Conversation**: each comment and review in time order, and a comment
     box that queues `Comment`; *Comment* is drawn disabled with the source's
     reason where the token may not comment (#2030), and a press queues nothing.
@@ -54,8 +58,8 @@
     listSources: () => Promise<SourceFacts[]>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     /** *Viewed* on the pull request's files (#842). */
-    prViewedFiles: (prId: string) => Promise<string[]>;
-    setPrFileViewed: (prId: string, path: string, viewed: boolean) => Promise<string[]>;
+    prViewedFiles: (prId: string, blobs: Record<string, string>) => Promise<string[]>;
+    setPrFileViewed: (prId: string, path: string, viewed: boolean, blobs: Record<string, string>) => Promise<string[]>;
     /** Hears `item:refreshed` and `sync:state`, which read the live view again for the page's echoes (#2103); the bridge's when left out. */
     listen?: EchoListen;
     /** The header's *Refresh* (#2107); the bridge's when left out. */
@@ -97,12 +101,16 @@
     PR_TABS,
     commitParts,
     conversationOf,
+    conflictsOf,
     conversationParts,
     headerOf,
     overviewParts,
     prHash,
+    railChecks,
+    readiness,
     readPrRoute,
     readyLines,
+    reviewersOf,
     tabCounts,
     type PrTab,
   } from "./pr";
@@ -112,9 +120,12 @@
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
+  import TfOpenObject from "../openin/TfOpenObject.svelte";
+  import { diffOf, rangeOf } from "./files";
   import TfPrFiles from "./TfPrFiles.svelte";
   import TfPrMerge from "./TfPrMerge.svelte";
   import TfPrReview from "./TfPrReview.svelte";
+  import TfMarkdown from "../markdown/TfMarkdown.svelte";
 
   let {
     ready,
@@ -130,8 +141,8 @@
       resolveUrl: (url) => resolveUrl(url),
       listSources: () => listSources(),
       submitWrite: (payload) => submitWrite(payload),
-      prViewedFiles: (id) => prViewedFiles(id),
-      setPrFileViewed: (id, path, viewed) => setPrFileViewed(id, path, viewed),
+      prViewedFiles: (id, blobs) => prViewedFiles(id, blobs),
+      setPrFileViewed: (id, path, viewed, blobs) => setPrFileViewed(id, path, viewed, blobs),
     },
     pending = sharedPending,
     follower = writeFollower(),
@@ -335,6 +346,11 @@
   const header = $derived(headerOf(view ?? null));
   const counts = $derived(tabCounts(view ?? null));
   const readyRows = $derived(readyLines(view ?? null));
+  const standing = $derived(readiness(view ?? null));
+  const reviewers = $derived(reviewersOf(view ?? null));
+  const rail = $derived(railChecks(view ?? null));
+  const conflicts = $derived(conflictsOf(view ?? null));
+  const builds = $derived(detail?.builds ?? []);
   const number = $derived(prId === null ? null : prNumber(prId));
   const title = $derived(detail?.row.title ?? "");
   const conversation = $derived(conversationParts(view ?? null));
@@ -399,6 +415,41 @@
   let reviewing = $state(false);
   let merging = $state(false);
 
+  /** The echo kind of a review request queued here (#2303), one per reviewer. */
+  const REQUESTED = "reviewer";
+  /** *Request…* in the Reviewers panel, where the source offers it to this reader (ADR-0020 rule 4). */
+  const request = $derived(offered((a) => a.write_op === "request_reviewers"));
+  /** Who *Request…* may ask: the source's choices, less those asked this session. */
+  const askable = $derived.by(() => {
+    const field = request?.fields.find((f) => f.name === "reviewers");
+    if (field?.kind.type !== "choice" || prId === null) return [];
+    const asked = new Set(echoesOn(prId, REQUESTED).map((echo) => echo.text));
+    return field.kind.options.filter((option) => !asked.has(option.value));
+  });
+  let picking = $state(false);
+  /** The rail's reviewers: the read's, then those asked here that it does not name yet. */
+  const railReviewers = $derived.by(() => {
+    const read = reviewers.map((reviewer) => ({ ...reviewer, note: null as string | null }));
+    if (prId === null) return read;
+    for (const echo of echoesOn(prId, REQUESTED))
+      if (!read.some((reviewer) => reviewer.who === echo.text)) read.push({ who: echo.text, state: "Review requested", tone: "muted", note: echo.state });
+    return read;
+  });
+
+  /** Ask `who` for a review (#2303): queued, drawn requested at once, and read back by the refresh after it. */
+  async function requestReview(who: string) {
+    const id = prId;
+    if (id === null || request === null || request.disabled !== null) return;
+    picking = false;
+    try {
+      const write = await ports.submitWrite({ RequestReviewers: { entity: id, reviewers: [who] } });
+      echoWrite(id, REQUESTED, who, { write, many: true, following: { name: "Review request" }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null });
+      toastQueued(`review request to ${who} on ${name}`, detail?.source ?? null);
+    } catch (cause) {
+      push({ text: `Could not ask ${who} for a review: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
   /** The comments this session queued that the conversation did not hold when it was read. */
   const queuedComments = $derived(prId === null ? [] : echoesOn(prId, "comment"));
   /** The chips of what this session queued here, beside the state: `close queued`, then `close sent`. */
@@ -416,6 +467,8 @@
   /** Whether the read in `answer` shows `echo` landed; `sentBefore` holds the writes sent when it was asked. */
   function landedIn(answer: SourceView | null, echo: Echo, sentBefore: ReadonlySet<number>): boolean {
     if (echo.kind === "comment") return conversationOf(answer).some((message) => sameWords(message.body, echo.text));
+    // A review request (#2303) lands once the read names the reviewer.
+    if (echo.kind === REQUESTED) return reviewersOf(answer).some((reviewer) => reviewer.who === echo.text);
     if (!STATE_READ.includes(echo.kind)) return echo.write !== null && sentBefore.has(echo.write);
     const state = headerOf(answer).state?.text ?? null;
     return state !== null && echo.base !== null && state !== echo.base;
@@ -595,6 +648,14 @@
             }}>Merge…</button
           >
         {/if}
+        {#if repo !== null && number !== null && header.base !== null && header.head !== null}
+          <TfOpenObject
+            entityId={repo.entity_id}
+            size="md"
+            object={{ kind: "pull_request", number: Number(number.slice(1)), base: header.base, head: header.head, branch: header.head, item: prId }}
+            ends={() => (prId === null ? Promise.resolve(null) : ports.entityView(prId, "files").then(rangeOf))}
+          />
+        {/if}
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
       </div>
     </header>
@@ -615,6 +676,11 @@
           viewedFiles={ports.prViewedFiles}
           setViewed={ports.setPrFileViewed}
           {pending}
+          submitWrite={ports.submitWrite}
+          source={detail?.source?.id ?? null}
+          listen={ports.listen}
+          {follower}
+          openAt={repo === null ? null : { entityId: repo.entity_id, at: header.head }}
         />
       {:else}
         <div>
@@ -646,7 +712,9 @@
                 </table>
               {:else}
                 <h2 class="tf-cgroup-h">Description</h2>
-                <div class="tf-panel tf-prdesc"><p>{part.description}</p></div>
+                <div class="tf-panel tf-prdesc">
+                  {#if part.markdown}<TfMarkdown text={part.description} />{:else}<p>{part.description}</p>{/if}
+                </div>
               {/if}
             {/each}
           {:else if tab === "conversation"}
@@ -664,7 +732,7 @@
                       <b>{own ? "You" : message.who}</b>{message.at}
                       {#if message.verdict !== null}<span class="tf-chip tf-{message.verdict.tone ?? 'muted'}">{message.verdict.text}</span>{/if}
                     </div>
-                    {#if message.body !== ""}<p>{message.body}</p>{/if}
+                    {#if message.body !== "" && message.markdown}<TfMarkdown text={message.body} />{:else if message.body !== ""}<p>{message.body}</p>{/if}
                   </div>
                 </article>
                 {/if}
@@ -726,15 +794,113 @@
             {/each}
           {/if}
         </div>
-        <aside class="tf-side" aria-label="Ready to merge">
-          <div class="tf-panel" hidden={readyRows.length === 0}>
+        <aside class="tf-side" aria-label="Pull request status">
+          <div class="tf-panel" hidden={standing.lines.length === 0}>
             <header><h3>Ready to merge?</h3></header>
             <div class="tf-prready">
-              {#each readyRows as line, n (n)}
-                <span><span class="tf-dot tf-{line.tone}"></span> {line.text}</span>
+              {#if standing.verdict !== null}
+                <div class="tf-prverdict tf-{standing.verdict.tone}">
+                  {standing.verdict.text}{#if standing.verdict.why !== null}<span class="tf-prwhy">{standing.verdict.why}</span>{/if}
+                </div>
+              {/if}
+              {#each standing.lines as line, n (n)}
+                <div class="tf-prck tf-{line.tone}">
+                  <span class="tf-prmk" aria-hidden="true">{line.tone === "ok" ? "✓" : line.tone === "err" ? "✕" : "●"}</span>
+                  <span>{line.text}{#if line.why !== undefined}<span class="tf-prwhy">{line.why}</span>{/if}</span>
+                </div>
               {/each}
             </div>
           </div>
+          {#if view}
+            <div class="tf-panel tf-prreviewers">
+              <header
+                ><h3>Reviewers</h3>
+                {#if request !== null && askable.length > 0}
+                  <div class="tf-acts">
+                    <button
+                      type="button"
+                      class="tf-btn tf-sm tf-ghost"
+                      aria-expanded={picking}
+                      aria-disabled={request.disabled !== null ? "true" : undefined}
+                      title={request.disabled ?? undefined}
+                      onclick={() => {
+                        if (request.disabled === null) picking = !picking;
+                      }}>Request…</button
+                    >
+                  </div>
+                {/if}</header
+              >
+              {#if picking && request !== null}
+                <div class="tf-prpick" role="group" aria-label="Ask for a review">
+                  {#each askable as option (option.value)}
+                    <button type="button" onclick={() => void requestReview(option.value)}
+                      ><span class="tf-av" aria-hidden="true">{initials(option.label)}</span> {option.label}</button
+                    >
+                  {/each}
+                </div>
+              {/if}
+              {#if railReviewers.length === 0 && waiting === 0}
+                <p class="tf-prnote">No reviews yet.</p>
+              {:else}
+                <div class="tf-prlist">
+                  {#each railReviewers as reviewer (reviewer.who)}
+                    {@const own = me !== null && reviewer.who === me}
+                    <div class="tf-prit">
+                      <span class="tf-av" class:tf-me={own} aria-hidden="true">{initials(reviewer.who)}</span>
+                      <span class="tf-prgrow">{own ? "you" : reviewer.who}{#if reviewer.note !== null}<span class="tf-dim">{` · ${reviewer.note}`}</span>{/if}</span>
+                      <span class="tf-chip tf-{reviewer.tone ?? 'muted'}">{reviewer.state}</span>
+                    </div>
+                  {/each}
+                  {#if waiting > 0}
+                    <!-- The reader's own unsent review (#2276): its pending comments, kept across restarts. -->
+                    <div class="tf-prit">
+                      <span class="tf-av tf-me" aria-hidden="true">{initials(me ?? "you")}</span>
+                      <span class="tf-prgrow">you <span class="tf-dim">· {waiting} pending {waiting === 1 ? "comment" : "comments"}</span></span>
+                      <span class="tf-chip tf-warn">Draft</span>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+            {#if rail.length > 0}
+              <div class="tf-panel tf-prrail-checks">
+                <header><h3>Checks</h3></header>
+                <div class="tf-prlist">
+                  {#each rail as check, n (n)}
+                    {@const run = runOf(check.row)}
+                    <div class="tf-prit">
+                      <span class="tf-dot tf-{check.row.tone ?? 'muted'}"></span>
+                      <span class="tf-prgrow">{#if run !== null}<a href={run}>{check.row.title}</a>{:else}{check.row.title}{/if}</span>
+                      {#if check.required}<span class="tf-prreq">Required</span>{/if}
+                      <span class="tf-dim">{check.row.chip ?? ""}</span>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+            {#if builds.length > 0}
+              <div class="tf-panel tf-prbuilds">
+                <header><h3>Builds of the head</h3><span class="tf-dim">from the mirror</span></header>
+                <div class="tf-prlist">
+                  {#each builds as build (build.entity_id)}
+                    <div class="tf-prit">
+                      <span class="tf-dot tf-{build.state?.tone ?? 'muted'}"></span>
+                      <span class="tf-prgrow"><a href={itemHash(build)}>{build.title}</a></span>
+                      {#if build.state !== null}<span class="tf-dim">{build.state.text}</span>{/if}
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+            {#if conflicts !== null}
+              <div class="tf-panel tf-prconflicts">
+                <header><h3>Conflicts</h3></header>
+                <p class="tf-prnote" class:tf-prconflict={conflicts.conflicts}>
+                  {conflicts.text}.{#if conflicts.conflicts}{" "}Resolve them in a checkout and push; they cannot be resolved here.{/if}
+                </p>
+              </div>
+            {/if}
+          {/if}
           {#if local !== null && repo !== null}
             <div class="tf-panel">
               <header><h3>Local checkout</h3></header>
@@ -765,6 +931,7 @@
     submitWrite={ports.submitWrite}
     onqueued={(write) => echoChip(prId, "review", "Review", write)}
     onclose={() => (reviewing = false)}
+    headOf={() => ports.entityView(prId, "files").then((answer) => diffOf(answer)?.commentable?.head ?? null)}
   />
 {/if}
 

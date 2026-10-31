@@ -9,6 +9,7 @@ pub mod crud;
 pub mod demo;
 pub mod install;
 pub mod installed;
+pub mod live;
 pub mod paths;
 pub mod progress;
 pub mod refresh;
@@ -122,6 +123,9 @@ pub struct SourcesState {
     /// existed and `Registry` already implemented it; taking it here is what
     /// lets a test inject an adapter that refuses.
     pub registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    /// The built sources the live reads are asked of, and the read cache in
+    /// front of the source view (#2239, #2240, ADR-0032).
+    pub live: live::LiveSources,
 }
 
 impl SourcesState {
@@ -624,11 +628,17 @@ pub async fn bring_up<R: tauri::Runtime>(
         background,
     )
     .await?;
+    let live = live::LiveSources::default();
+    let fresh_to = app.clone();
+    live.on_fresh(move |fresh| {
+        crate::events::emit(&fresh_to, None, crate::events::VIEW_FRESH, fresh);
+    });
     Ok(SourcesState {
         pool: deps.pool,
         scheduler,
         secrets: deps.secrets,
         registry,
+        live,
     })
 }
 

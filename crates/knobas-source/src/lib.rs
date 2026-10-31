@@ -25,6 +25,7 @@
 //! against themselves in their own test suite.
 
 pub mod clone_urls;
+pub mod code_pages;
 pub mod contract;
 pub mod diff;
 pub mod docs;
@@ -227,6 +228,18 @@ pub struct SourceDescriptor {
     /// whose items open by their stored address alone.
     #[serde(default)]
     pub url_forms: Vec<url_forms::UrlForm>,
+    /// Where a code host serves the page of a repository, a file, a commit,
+    /// a range and a pull request, after the instance's typed base URL
+    /// (#2274, [`code_pages`]): what *Open in › Browser* and the `{url}`
+    /// placeholder open. [`code_pages::check`] holds it to its rules
+    /// (contract battery clause 14). Read on the Rust side; the shell never
+    /// does.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// decodes as a source with no code pages: *Browser* is then not offered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub code_pages: Option<code_pages::CodePages>,
 }
 
 impl SourceDescriptor {
@@ -668,6 +681,9 @@ impl SourceError {
 /// | [`UpdatePullRequestBranch`](Self::UpdatePullRequestBranch) | `"update_pull_request_branch"` | git workflows, spec #701 (Gitea, #708) |
 /// | [`CommitFile`](Self::CommitFile) | `"commit_file"` | ticket-first, spec #808 (Gitea, #822) |
 /// | [`SourceAction`](Self::SourceAction) | `"source_action"` | roles, spec #1192 (Gitea, #1194) |
+/// | [`ReplyToThread`](Self::ReplyToThread) | `"reply_to_thread"` | code area, spec #2234 (Gitea, #2277) |
+/// | [`ResolveThread`](Self::ResolveThread) | `"resolve_thread"` | code area, spec #2234 (Gitea, #2277) |
+/// | [`RequestReviewers`](Self::RequestReviewers) | `"request_reviewers"` | code area, spec #2234 (Gitea, #2303) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -1267,6 +1283,58 @@ pub enum WriteOp {
         #[serde(default)]
         fields: std::collections::BTreeMap<String, String>,
     },
+    /// Identifier `"reply_to_thread"`. Answer one review thread on a pull
+    /// request's diff (spec #2234 step 6d, issue #2277). `entity` is the
+    /// **pull request**.
+    ///
+    /// `thread` is the source's own id for the thread, as the diff's
+    /// [`LineThread::id`](crate::view::LineThread::id) hands it out, and
+    /// `comment` is the reply placed where the thread is: a source that
+    /// threads by id (GitHub's `in_reply_to`) reads `thread`, one that threads
+    /// by place (Gitea groups a conversation by path and line) reads
+    /// `comment`'s place. The shell copies both from the thread it answers.
+    ///
+    /// Hold detection is a comment's: the declared state only. A second
+    /// arrival is a second reply.
+    ReplyToThread {
+        /// The **pull request** (#2277).
+        entity: String,
+        /// The thread's id, as the diff handed it out.
+        thread: String,
+        /// The reply, at the thread's path, side and line.
+        comment: ReviewComment,
+    },
+    /// Identifier `"resolve_thread"`. Mark one review thread resolved, or
+    /// open again (`resolved: false`), on a pull request (spec #2234 step 6d,
+    /// issue #2277). `entity` is the **pull request**, `thread` the id the
+    /// diff handed out.
+    ///
+    /// A source that cannot resolve threads does not declare the op, or does
+    /// not offer it on the diff ([`Commenting::resolve`](crate::view::Commenting::resolve)):
+    /// Forgejo 17 has no such endpoint (the 2026-10-30 Gitea fact note). The
+    /// same state twice is one, so a resend is harmless.
+    ResolveThread {
+        /// The **pull request** (#2277).
+        entity: String,
+        /// The thread's id, as the diff handed it out.
+        thread: String,
+        /// `true` resolves, `false` opens it again.
+        resolved: bool,
+    },
+    /// Identifier `"request_reviewers"`. Ask one or more people to review a
+    /// pull request (spec #2234 step 6d, issue #2303). `entity` is the **pull
+    /// request**; `reviewers` are logins as the source names them, picked
+    /// from the ones the view's action offers.
+    ///
+    /// Asking somebody already asked asks them again and adds nobody, so a
+    /// resend is harmless. Hold detection is the declared state only: a push
+    /// to the pull request is no reason to hold a request for a review of it.
+    RequestReviewers {
+        /// The **pull request** (#2303).
+        entity: String,
+        /// Who is asked, by login.
+        reviewers: Vec<String>,
+    },
 }
 
 /// The identifier of [`WriteOp::SourceAction`], which a descriptor lists in
@@ -1540,6 +1608,9 @@ impl WriteOp {
             WriteOp::UpdatePullRequestBranch { .. } => "update_pull_request_branch",
             WriteOp::CommitFile { .. } => "commit_file",
             WriteOp::SourceAction { .. } => SOURCE_ACTION,
+            WriteOp::ReplyToThread { .. } => "reply_to_thread",
+            WriteOp::ResolveThread { .. } => "resolve_thread",
+            WriteOp::RequestReviewers { .. } => "request_reviewers",
         }
     }
 
@@ -1572,13 +1643,23 @@ impl WriteOp {
             WriteOp::SourceAction { .. } => conservative,
             // They add to a discussion and hold only on its declared state
             // (#752); a second arrival is a second comment or review.
-            WriteOp::Comment { .. } | WriteOp::Approve { .. } | WriteOp::SubmitReview { .. } => {
-                Delivery {
-                    projection: Projection::DeclaredState,
-                    can_leave_unclaimed: false,
-                    ..conservative
-                }
-            }
+            WriteOp::Comment { .. }
+            | WriteOp::Approve { .. }
+            | WriteOp::SubmitReview { .. }
+            | WriteOp::ReplyToThread { .. } => Delivery {
+                projection: Projection::DeclaredState,
+                can_leave_unclaimed: false,
+                ..conservative
+            },
+            // They set a state on the discussion, and the same state twice is
+            // one (#2277, #2303): Gitea answers a repeated resolve 204 and a
+            // repeated request adds nobody.
+            WriteOp::ResolveThread { .. } | WriteOp::RequestReviewers { .. } => Delivery {
+                projection: Projection::DeclaredState,
+                resend_harmless: true,
+                can_leave_unclaimed: false,
+                ..conservative
+            },
             // A judgement on the target's current state; a second arrival is
             // a second move.
             WriteOp::Transition { .. } => Delivery {
@@ -1706,7 +1787,10 @@ impl WriteOp {
                 | WriteOp::DeleteBranch { entity }
                 | WriteOp::EditPullRequest { entity, .. }
                 | WriteOp::UpdatePullRequestBranch { entity, .. }
-                | WriteOp::SourceAction { entity, .. } => Some(entity),
+                | WriteOp::SourceAction { entity, .. }
+                | WriteOp::ReplyToThread { entity, .. }
+                | WriteOp::ResolveThread { entity, .. }
+                | WriteOp::RequestReviewers { entity, .. } => Some(entity),
                 WriteOp::CreatePage { .. } | WriteOp::CommitFile { .. } => None,
             },
         };
@@ -1827,7 +1911,10 @@ impl WriteOp {
             | WriteOp::DeleteBranch { .. }
             | WriteOp::EditPullRequest { .. }
             | WriteOp::UpdatePullRequestBranch { .. }
-            | WriteOp::SourceAction { .. } => false,
+            | WriteOp::SourceAction { .. }
+            | WriteOp::ReplyToThread { .. }
+            | WriteOp::ResolveThread { .. }
+            | WriteOp::RequestReviewers { .. } => false,
         }
     }
 }
@@ -1948,14 +2035,31 @@ pub trait Source: Send + Sync {
     /// whose account holds every right), and what every WASM guest answers.
     /// An adapter whose credential can be narrower overrides it, finding out
     /// as the paragraph above allows; an adapter that does not override it
-    /// answers nothing. A failed read or probe is an error, and the caller
-    /// reads it as no verdict, as it reads nothing.
+    /// answers nothing. Where the app keeps the answer
+    /// ([`refusal_standing`](Source::refusal_standing) not `Live`), a failed
+    /// read or probe is an error, never an answer that refuses nothing
+    /// (#2306): the app asks a kept answer again behind, so a failure
+    /// answered as taken would stand. An adapter asked every time may leave
+    /// a failed read's asks unanswered instead. The app draws the writes of
+    /// an ask that failed disabled, saying it could not ask, and keeps
+    /// nothing of it.
     async fn refused_writes(
         &self,
         asks: &[grants::WriteAsk],
     ) -> Result<Vec<grants::RefusedWrite>, SourceError> {
         let _ = asks;
         Ok(Vec::new())
+    }
+    /// What the answer [`refused_writes`](Source::refused_writes) gives
+    /// for `ask` stands at, said before it is asked, as
+    /// [`view_standing`](Source::view_standing) says it of a view (ADR-0032,
+    /// #2241): [`Standing::Live`](view::Standing::Live), the default, is
+    /// asked every time; [`Standing::Moving`](view::Standing::Moving) is
+    /// answered from memory where the app holds it and asked again behind.
+    /// Pure: it reads nothing from the source.
+    fn refusal_standing(&self, ask: &grants::WriteAsk) -> view::Standing {
+        let _ = ask;
+        view::Standing::Live
     }
     /// The statuses this entity's workflow offers **from where it stands right
     /// now**, in the source's own spelling (`CONTEXT.md`: *reachable
@@ -1994,7 +2098,9 @@ pub trait Source: Send + Sync {
     /// The **source view** this adapter draws for one of its own entities
     /// (ADR-0020, `CONTEXT.md` *Source view*): sections of typed blocks from
     /// the fixed vocabulary in [`view`], read live when a detail opens and
-    /// never stored.
+    /// never stored in the database. What
+    /// [`view_standing`](Source::view_standing) says is fixed the app keeps in
+    /// memory (ADR-0032).
     ///
     /// `entity` is an [`EntityRef`] in string form, the address
     /// [`reachable_transitions`](Source::reachable_transitions) takes.
@@ -2022,6 +2128,55 @@ pub trait Source: Send + Sync {
         entity: &str,
         section: Option<&str>,
     ) -> Result<Option<view::SourceView>, SourceError>;
+    /// What the answer [`view`](Source::view) gives for `entity` and
+    /// `section` stands at (ADR-0032, #2239), said before it is read: whether
+    /// the app may keep it in memory and answer the next ask for the same
+    /// pair from there.
+    ///
+    /// [`Standing::Live`](view::Standing::Live) is the default and is never
+    /// kept. An adapter answers [`Standing::Fixed`](view::Standing::Fixed)
+    /// only where the pair names something that cannot change -- a file at a
+    /// full commit sha -- and the answer carries nothing that can: no
+    /// toolbar a credential narrows, no status that moves. Pure: it reads
+    /// nothing from the source.
+    fn view_standing(&self, entity: &str, section: Option<&str>) -> view::Standing {
+        let _ = (entity, section);
+        view::Standing::Live
+    }
+    /// The bytes of the file at `path` in `entity`'s tree (#2256, spec #2234
+    /// step 5), read whole up to `cap` bytes: a README's image, a PDF.
+    ///
+    /// `commit` is a [`Block::File`](view::Block::File)'s `commit`, handed
+    /// back: the read is at that commit, where the file the reader has open
+    /// was read. `None` reads at the entity's own reference (its branch, its
+    /// repository's default branch).
+    ///
+    /// A file longer than `cap` is [`FileBytes::TooLarge`](view::FileBytes::TooLarge)
+    /// with its size; the adapter stops reading past the cap and never
+    /// answers a cut file. A path that is no file is
+    /// [`SourceError::Protocol`].
+    ///
+    /// `Ok(None)` is **this adapter reads no file bytes**, and is the
+    /// default.
+    async fn file_bytes(
+        &self,
+        entity: &str,
+        path: &str,
+        commit: Option<&str>,
+        cap: u64,
+    ) -> Result<Option<view::FileBytes>, SourceError> {
+        let _ = (entity, path, commit, cap);
+        Ok(None)
+    }
+    /// What [`file_bytes`](Source::file_bytes)' answer for the same
+    /// arguments stands at, as [`view_standing`](Source::view_standing) says
+    /// it of a view (ADR-0032, #2256): [`Standing::Fixed`](view::Standing::Fixed)
+    /// only where `commit` names a commit no push can change. The default is
+    /// [`Standing::Live`](view::Standing::Live). Pure: it reads nothing.
+    fn bytes_standing(&self, entity: &str, path: &str, commit: Option<&str>) -> view::Standing {
+        let _ = (entity, path, commit);
+        view::Standing::Live
+    }
     /// A pipeline's settings, read live (ADR-0022, issue #851): the
     /// repositories it builds, its triggers and its parameters, scrubbed of
     /// every credential. `entity` is a pipeline's [`EntityRef`] in string
@@ -2231,6 +2386,7 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            code_pages: None,
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -2287,6 +2443,7 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            code_pages: None,
             ..a_descriptor()
         };
         let mut wire = serde_json::to_value(&declared).unwrap();
@@ -2630,6 +2787,25 @@ mod tests {
                 id: "add_label".into(),
                 fields: [("label".to_owned(), "7".to_owned())].into(),
             },
+            WriteOp::ReplyToThread {
+                entity: "gitea:tidewater/payout-service#142".into(),
+                thread: "4088".into(),
+                comment: ReviewComment {
+                    path: "src/retry.rs".into(),
+                    line: 27,
+                    side: ReviewSide::New,
+                    body: "Done in 7aa01f9.".into(),
+                },
+            },
+            WriteOp::ResolveThread {
+                entity: "gitea:tidewater/payout-service#142".into(),
+                thread: "4088".into(),
+                resolved: true,
+            },
+            WriteOp::RequestReviewers {
+                entity: "gitea:tidewater/payout-service#142".into(),
+                reviewers: vec!["olu".into(), "kai".into()],
+            },
         ];
         for op in &probes {
             match op {
@@ -2655,7 +2831,10 @@ mod tests {
                 | WriteOp::EditPullRequest { .. }
                 | WriteOp::UpdatePullRequestBranch { .. }
                 | WriteOp::CommitFile { .. }
-                | WriteOp::SourceAction { .. } => {}
+                | WriteOp::SourceAction { .. }
+                | WriteOp::ReplyToThread { .. }
+                | WriteOp::ResolveThread { .. }
+                | WriteOp::RequestReviewers { .. } => {}
             }
         }
         probes
@@ -3130,7 +3309,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 23, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 26, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also

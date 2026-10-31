@@ -76,6 +76,17 @@ vi.mock("./lib/ipc/app", () => ({
   retryDatabase: () => Promise.resolve(undefined),
   completeFirstRun: () => Promise.resolve(undefined),
   ping: () => Promise.resolve("pong"),
+  pagesKeptOpen: () => Promise.resolve(5),
+  setPagesKeptOpen: (count: number) => Promise.resolve(count),
+  diffPipelines: () => Promise.resolve(true),
+  setDiffPipelines: (on: boolean) => Promise.resolve(on),
+  userRenderers: () => Promise.resolve([]),
+  rendererDefaults: () => Promise.resolve([]),
+  setRendererDefaults: (list: unknown[]) => Promise.resolve(list),
+  namedPipelines: () => Promise.resolve([]),
+  setNamedPipelines: (list: unknown[]) => Promise.resolve(list),
+  commandSteps: () => Promise.resolve([]),
+  setCommandSteps: (list: unknown[]) => Promise.resolve(list),
 }));
 
 vi.mock("./lib/ipc/sources", () => ({
@@ -135,6 +146,9 @@ vi.mock("./lib/ipc/entity", () => ({
   // Settings › Checkouts and Open in… on a fresh install: no root, no applications (#1968).
   checkoutSettings: () =>
     Promise.resolve({ clones_root: null, git: { status: "no_git" }, default_application: null, applications: [] }),
+  // Its pull request worktrees (#2285): none.
+  pullRequestWorktrees: () => Promise.resolve([]),
+  removePullRequestWorktree: () => Promise.reject(new Error("no worktree is removed in this test")),
   captureShortcut: () =>
     Promise.resolve({ accelerator: null, refusal: null, shown: noteShownHere, note_count: 0, last_note_at: null }),
   setCaptureShortcut: () => Promise.reject(new Error("no shortcut is set in this test")),
@@ -244,6 +258,8 @@ vi.mock("./lib/ipc/time", () => ({
   deleteBlock: () => Promise.reject(new Error("no edit in this test")),
   dismissBlock: () => Promise.reject(new Error("no edit in this test")),
   createBlock: () => Promise.reject(new Error("no edit in this test")),
+  pagesKeptOpen: () => Promise.resolve(5),
+  setPagesKeptOpen: () => Promise.reject(new Error("no settings write in this test")),
   passiveAttribution: () => Promise.resolve(false),
   setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
   worklogDraft: (entityId: string, when: { day: string; offsetMinutes: number }) => {

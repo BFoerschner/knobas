@@ -1058,6 +1058,7 @@ async fn app_over(
     .expect("a scheduler over the scratch database");
 
     SourcesState {
+        live: Default::default(),
         pool,
         scheduler,
         secrets,
@@ -2040,6 +2041,7 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
             &state.pool,
             &state.secrets,
             &state.registry,
+            &state.live,
             &format!("{JIRA}:{key}"),
         )
         .await
@@ -2078,6 +2080,7 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
         &refused_state.pool,
         &refused_state.secrets,
         &refused_state.registry,
+        &refused_state.live,
         &format!("{JIRA}:{COMMENTED}"),
     )
     .await
@@ -2330,9 +2333,15 @@ async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workfl
     let read = |entity: String| {
         let state = &state;
         async move {
-            crud::reachable_transitions(&state.pool, &state.secrets, &state.registry, &entity)
-                .await
-                .unwrap_or_else(|error| panic!("the read must answer for {entity}: {error}"))
+            crud::reachable_transitions(
+                &state.pool,
+                &state.secrets,
+                &state.registry,
+                &state.live,
+                &entity,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("the read must answer for {entity}: {error}"))
         }
     };
     let reachable = read(entity.clone()).await;
@@ -3827,6 +3836,7 @@ async fn wiki_app(
 
     (
         SourcesState {
+            live: Default::default(),
             pool,
             scheduler,
             secrets,

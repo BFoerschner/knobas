@@ -266,8 +266,9 @@ export type ChainStepRow = { pipeline_id: string, name: string, run: RunRow | nu
 /**
  * One application on the *Open in…* menu.
  *
- * Issue #844, R-8.21. Its commands take `{path}`, `{file}`, `{line}` and
- * `{name}`, all filled from this disk.
+ * Issue #844, R-8.21, #2274. It accepts the objects it has a command for:
+ * every application a repository and a file, and a commit, a range or a
+ * pull request when it has that command.
  */
 export type CheckoutApplication = { 
 /**
@@ -285,7 +286,20 @@ command: string,
 /**
  * The command that opens a file, if the application has one.
  */
-file_command: string | null, };
+file_command: string | null, 
+/**
+ * The command that opens a commit; without one the application is not
+ * offered for a commit.
+ */
+commit_command?: string | null, 
+/**
+ * The command that opens a range of commits.
+ */
+range_command?: string | null, 
+/**
+ * The command that opens a pull request.
+ */
+pull_request_command?: string | null, };
 
 /**
  * An application as a person typed it in the dialog: a new one has no id
@@ -299,7 +313,19 @@ id: string | null, name: string, command: string,
 /**
  * Blank is no file command.
  */
-file_command: string | null, };
+file_command: string | null, 
+/**
+ * Blank is none: not offered for a commit.
+ */
+commit_command?: string | null, 
+/**
+ * Blank is none: not offered for a range.
+ */
+range_command?: string | null, 
+/**
+ * Blank is none: not offered for a pull request.
+ */
+pull_request_command?: string | null, };
 
 /**
  * How a checkout was arrived at, or that it was not.
@@ -489,7 +515,28 @@ export type Commenting = {
  * source's descriptor declares it and the shell can queue it, as for an
  * action.
  */
-write_op: string, };
+write_op: string, 
+/**
+ * The identifier a reply to one of the diff's threads goes through
+ * (`reply_to_thread`, #2277), on the threads that say they take one
+ * ([`LineThread::replies`](crate::diff::LineThread::replies)); `None`
+ * offers no reply. Absent on the wire reads as `None`.
+ */
+reply: string | null, 
+/**
+ * The identifier resolving or reopening a thread goes through
+ * (`resolve_thread`, #2277), on every thread with an id; `None` where
+ * the source cannot resolve threads (Forgejo 17 has no endpoint for it).
+ * Absent on the wire reads as `None`.
+ */
+resolve: string | null, 
+/**
+ * The head commit the diff's line comments are written against, in the
+ * source's spelling (#2276): the shell keeps the reader's unsent
+ * comments by pull request and this commit. `None` where the source did
+ * not say. Absent on the wire reads as `None`.
+ */
+head: string | null, };
 
 /**
  * What kind of working set this is.
@@ -568,9 +615,19 @@ additions: number,
  */
 deletions: number, hunks: Array<Hunk>, 
 /**
- * Some of this file's lines were cut by a cap.
+ * Some of this file's lines were cut by the ceiling.
  */
 truncated: boolean, 
+/**
+ * How alike the two sides of a rename or copy are, in percent, where
+ * git says (`similarity index 92%`; #2268).
+ */
+similarity?: number, 
+/**
+ * The file's mode before and after, where it changed (`old mode
+ * 100644` / `new mode 100755`; #2268): an executable bit set or cleared.
+ */
+old_mode?: string, new_mode?: string, 
 /**
  * The review conversations on this file's lines (issue #709): what a
  * source that keeps line comments read for it, in the order the file
@@ -579,7 +636,15 @@ truncated: boolean,
  *
  * The outdated ones last.
  */
-threads: Array<LineThread>, };
+threads: Array<LineThread>, 
+/**
+ * The blob the file holds after the change, as the diff's `index` line
+ * names it (abbreviated as the server printed it; the blob before, for a
+ * deletion): what *Viewed* is kept by (#2276), so a file whose content
+ * did not change stays viewed through a new commit. `None` where the
+ * diff names none.
+ */
+blob?: string, };
 
 /**
  * One line of a hunk, with its number on each side it exists on.
@@ -599,6 +664,44 @@ new: number | null,
 text: string, };
 
 /**
+ * The two commits a [`Block::Diff`] is between (#2273, #2310, spec #2234
+ * step 6): the diff is `base`'s tree to `head`'s.
+ *
+ * `repository` is the entity both commits belong to, the one whose sections
+ * read the diff between any two of its commits (`compare:<base>...<head>`)
+ * and a file at one of them (`file@<sha>:<path>`), and whose byte read takes
+ * a commit; at a whole sha each read stands at a fixed commit, so the app
+ * keeps it (ADR-0032). A pull request's diff also lists its `commits`, newest
+ * first, and the head the viewer last reviewed at (`reviewed`), which is
+ * how a reader picks one commit, a range or *since my last review*.
+ */
+export type DiffRange = { 
+/**
+ * The repository's entity id.
+ */
+repository: string, 
+/**
+ * The old side's commit, its whole sha: the merge base of a pull
+ * request, the commit before a range.
+ */
+base: string, 
+/**
+ * The new side's commit, its whole sha.
+ */
+head: string, 
+/**
+ * The commits from `base` (not included) to `head`, newest first, where
+ * the source lists them (a pull request's); empty otherwise.
+ */
+commits: Array<RangeCommit>, 
+/**
+ * The head's whole sha at the viewer's latest submitted review of a
+ * pull request; `None` for one the viewer never reviewed, and for any
+ * other diff.
+ */
+reviewed?: string, };
+
+/**
  * The answer the *Local changes* tab draws: the diff, or why there is none.
  * The same four arms as the working tree's
  * [`TreeRead`](super::working_tree::TreeRead).
@@ -612,6 +715,18 @@ text: string, };
  * Issue #824. None of the arms is an error.
  */
 export type DiffRead = { "status": "read" } & UncommittedDiff | { "status": "no_git" } | { "status": "not_a_repo" } | { "status": "failed", reason: string, };
+
+/**
+ * Where a [`RangeDiff`] was read.
+ *
+ * - `checkout`: local read-only git at the repository's checkout, which
+ *   holds both commits (ADR-0036).
+ * - `source`: the source's compare read, kept by sha pair (ADR-0032), or
+ *   for one commit its own diff section, kept by sha (#2319).
+ *
+ * Issue #2272.
+ */
+export type DiffReadAt = "checkout" | "source";
 
 /**
  * One line of one list: what it is about, and why it is here.
@@ -1776,8 +1891,8 @@ export type LaneField = "epic" | "assignee" | "priority" | "issuetype" | "label"
 
 /**
  * One comment of a [`LineThread`]. Source text, like every string of a view:
- * `body` is the source's Markdown, drawn legibly and never as markup
- * (ADR-0020 rule 5).
+ * `body` is the source's Markdown, drawn by the shell's one Markdown
+ * component, sanitized (ADR-0020 rule 5, #2261).
  */
 export type LineComment = { 
 /**
@@ -1816,7 +1931,41 @@ export type LineComments = "none" | "sends" | "requires";
  * its place since a later push. An outdated thread is drawn muted at the end
  * of its file, never on a line it was not written about.
  */
-export type LineThread = { side: ReviewSide, line: number, outdated: boolean, comments: Array<LineComment>, };
+export type LineThread = { side: ReviewSide, line: number, outdated: boolean, comments: Array<LineComment>, 
+/**
+ * The source's id for the thread, which a reply or a resolve names
+ * ([`WriteOp::ReplyToThread`](crate::WriteOp::ReplyToThread),
+ * [`WriteOp::ResolveThread`](crate::WriteOp::ResolveThread); #2277);
+ * `None` where the source offers neither on it. Absent on the wire
+ * reads as `None`.
+ */
+id: string | null, 
+/**
+ * Who resolved the thread, as the source names them; `None` while it is
+ * open (#2277). The shell draws a resolved thread collapsed. Absent on
+ * the wire reads as `None`.
+ */
+resolved_by: string | null, 
+/**
+ * Whether the source takes a reply on this thread (#2277): Gitea places
+ * a reply by line on the current head, so an outdated thread takes none.
+ * Absent on the wire reads as `false`.
+ */
+replies: boolean, 
+/**
+ * The commit an outdated thread was written on, its whole sha as the
+ * source names it (#2318, spec #2234 story 84): where its words still
+ * read in context. `None` on a thread that is not outdated, and where
+ * the source names none. Absent on the wire reads as `None`.
+ */
+commit?: string, 
+/**
+ * An outdated thread's line as it read at [`commit`](Self::commit):
+ * the hunk the source kept with the comment, ending on that line
+ * (#2318). `None` on a thread that is not outdated, and where the
+ * source kept none. Absent on the wire reads as `None`.
+ */
+hunk?: Hunk, };
 
 /**
  * The end of a link that the reader is **not** looking at.
@@ -2556,6 +2705,33 @@ export type NotificationDraft = { title: string, body: string,
 address: string, };
 
 /**
+ * What an application is opened on (#2274).
+ *
+ * - `repository`: the checkout.
+ * - `file`: a file in the repository, relative to it, at a line, read `at` a
+ *   commit or branch (the page's; the checkout is the working tree as left).
+ * - `commit`: one commit, by its sha.
+ * - `range`: the diff between two commits or branches, as the diff address
+ *   names them (`base` may be `<sha>^`).
+ * - `pull_request`: by its number, with its base and head as the page knows
+ *   them, and the head's branch. An application opens it in its worktree
+ *   under the clones root (#2285, ADR-0035), never in the person's checkout.
+ */
+export type OpenObject = { "kind": "repository" } | { "kind": "file", path: string, line: number | null, at: string | null, } | { "kind": "commit", sha: string, } | { "kind": "range", base: string, head: string, } | { "kind": "pull_request", number: number, base: string, head: string, branch: string, 
+/**
+ * The pull request's own entity id, when the page has one: knobas's
+ * bookkeeping of its worktree (#2285), read against the mirror to
+ * tell a closed one. Never an argument and never a placeholder.
+ */
+item?: string | null, };
+
+/**
+ * Which kind of [`Object`]: what an application declares it accepts by
+ * having a command for it.
+ */
+export type OpenObjectKind = "repository" | "file" | "commit" | "range" | "pull_request";
+
+/**
  * Which panel a [`DocBlock::Panel`] is.
  */
 export type PanelKind = "info" | "note" | "warning" | "tip";
@@ -2600,6 +2776,62 @@ label: string | null,
  * What the source says about the value, such as what empty means.
  */
 hint: string | null, kind: ParameterKind, };
+
+/**
+ * A step that gave no output.
+ */
+export type PipeFailure = { 
+/**
+ * Its place in the pipeline, from 0.
+ */
+index: number, name: string, why: PipeWhy, 
+/**
+ * What it said, in one line.
+ */
+error: string, input: PipeInput, };
+
+/**
+ * A data format the pretty-print and convert steps read and write.
+ */
+export type PipeFormat = "json" | "yaml" | "toml";
+
+/**
+ * The head of the input a failed step was given.
+ */
+export type PipeInput = { 
+/**
+ * Its whole size in bytes.
+ */
+size: number, 
+/**
+ * Its first 4 KiB as text, or, when it is not text, its first 256
+ * bytes as a hex dump.
+ */
+head: string, 
+/**
+ * The head is a hex dump.
+ */
+binary: boolean, };
+
+/**
+ * A pipeline's output: text where it is UTF-8, else bytes in base64.
+ */
+export type PipeOutput = { "kind": "text", text: string, } | { "kind": "bytes", base64: string, size: number, };
+
+/**
+ * What a pipeline answered.
+ */
+export type PipeRun = { "outcome": "done", name: string, output: PipeOutput, } | { "outcome": "failed", failure: PipeFailure, };
+
+/**
+ * One step of a pipeline.
+ */
+export type PipeStep = { "step": "base64_decode" } | { "step": "base64_encode" } | { "step": "gunzip" } | { "step": "unzstd" } | { "step": "bunzip2" } | { "step": "unxz" } | { "step": "jq", filter: string, } | { "step": "pretty", format: PipeFormat, } | { "step": "convert", from: PipeFormat, to: PipeFormat, } | { "step": "hex_dump" } | { "step": "command", id: string, };
+
+/**
+ * Why a step stopped.
+ */
+export type PipeWhy = "error" | "too_large" | "timed_out";
 
 /**
  * Why a pipeline is on a job (#850, R-9.1, R-9.2). Tagged on `kind`, so a
@@ -2882,6 +3114,43 @@ source_id: string,
  * The parent page, as an entity id.
  */
 parent: string, };
+
+/**
+ * A worktree, as Settings › Checkouts lists it.
+ *
+ * - `closed`: The mirror holds the pull request closed or merged.
+ *
+ * Issue #2285.
+ */
+export type PullRequestWorktree = { repo_entity_id: string, number: number, path: string, closed: boolean, };
+
+/**
+ * One commit of a [`DiffRange`]: its whole sha, its subject and a quiet
+ * second reading (author, age) as a commit row has.
+ */
+export type RangeCommit = { sha: string, title: string, meta: string | null, };
+
+/**
+ * The diff between two commits of a repository, from wherever it was read.
+ *
+ * Issue #2272.
+ */
+export type RangeDiff = { files: Array<DiffFile>, 
+/**
+ * A cap cut it (ADR-0020 rule 6).
+ */
+truncated: boolean, 
+/**
+ * The two whole shas it is between, where they are settled; `None` for
+ * a range from before the repository's first commit, and where the
+ * source did not name them.
+ */
+range: DiffRange | null, 
+/**
+ * Local git or the source. Whitespace is ignored only at `checkout`:
+ * the source's API cannot return a diff with whitespace ignored.
+ */
+read_at: DiffReadAt, };
 
 /**
  * Where a reached entity's path came from.
@@ -3672,8 +3941,9 @@ line_comments: LineComments, };
  * - `facts`: Label and value pairs: a commit's sha and author, a build's
  *   outcome.
  * - `text`: Prose: a commit message, a pull request's description. `markdown`
- *   says the source writes Markdown there; the shell still draws it as text,
- *   never as markup (ADR-0020 rule 5).
+ *   says the source writes Markdown there, and the shell draws it with its
+ *   one Markdown component, sanitized (ADR-0020 rule 5, #2261); without it
+ *   the text is drawn as text.
  * - `entities`: A list of things, each of which may be an address (ADR-0020
  *   rule 7): a commit's parents, a pull request's commits, a build's changes.
  * - `diff`: A diff, parsed by [`crate::diff`] and capped there. `truncated`
@@ -3723,8 +3993,9 @@ line_comments: LineComments, };
  *   (the source's own: Gitea's adapter keeps 1 MB and 10,000 lines), and `url`
  *   is the file's page at the source, where the rest is. `language` is a hint
  *   from the file's name (`"rust"`, `"markdown"`), `None` where the source has
- *   none; the shell may draw a `"markdown"` file rendered, with the raw text a
- *   toggle away, and never highlights.
+ *   none. The shell picks how to draw a file from its name, not from this
+ *   hint: it highlights every file's text (#2254), and may draw a Markdown
+ *   file rendered, with the raw text a toggle away.
  *
  * Named `ViewBlock` in the generated TypeScript (#1326), because the shell's
  * barrel already exports a time-tracking `Block`.
@@ -3735,7 +4006,13 @@ export type ViewBlock = { "type": "facts", facts: Array<Fact>, } | { "type": "te
  * outdated, drawn in a list at the end of the diff. Absent on the
  * wire reads as empty.
  */
-gone: Array<FileThread>, } | { "type": "log", text: string, truncated: boolean, } | { "type": "settings", title: string | null, entity: string, write_op: string, values: Array<Setting>, } | { "type": "actions", actions: Array<ViewAction>, } | { "type": "tree", trail: Array<Crumb>, entries: Array<TreeEntry>, 
+gone: Array<FileThread>, 
+/**
+ * The two commits the diff is between, where the source names them
+ * (#2273, #2310): what a reader reads a file whole at, and a pull
+ * request's commits to pick from. Absent on the wire when `None`.
+ */
+range?: DiffRange, } | { "type": "log", text: string, truncated: boolean, } | { "type": "settings", title: string | null, entity: string, write_op: string, values: Array<Setting>, } | { "type": "actions", actions: Array<ViewAction>, } | { "type": "tree", trail: Array<Crumb>, entries: Array<TreeEntry>, 
 /**
  * The source's cap cut the listing; the rest is at `url`.
  */
@@ -3743,7 +4020,18 @@ truncated: boolean,
 /**
  * The directory's page at its source.
  */
-url: string | null, } | { "type": "file", trail: Array<Crumb>, path: string, 
+url: string | null, 
+/**
+ * The section that lists every file of the tree at the commit this
+ * listing was read at (#2311): what *Go to file* filters, named by
+ * the source so the shell builds no id. Its answer is one `Tree`
+ * whose entries are the files below the top, each `name` the whole
+ * path from the top (`src/lib.rs`), in the source's order, and
+ * `truncated` where the source or its cap stopped short. `None`
+ * where the source has no such read, and on that answer itself.
+ * Absent on the wire when `None`.
+ */
+paths?: string, } | { "type": "file", trail: Array<Crumb>, path: string, 
 /**
  * Empty for a binary file.
  */
@@ -3770,7 +4058,24 @@ url: string | null,
  * of it is made against, `WriteOp::CommitFile`'s `base_sha`. `None`
  * where the source has none; absent on the wire reads as `None`.
  */
-sha: string | null, };
+sha: string | null, 
+/**
+ * The commit the file was read at (#2256): what
+ * [`Source::file_bytes`](crate::Source::file_bytes) takes back to
+ * read this file's bytes, or a file beside it (a README's relative
+ * image), at the same commit. The source's own id, never parsed by
+ * the shell; `None` where the source has none, and the byte read
+ * then reads at the entity's moving reference. Absent on the wire
+ * reads as `None`.
+ */
+commit: string | null, };
+
+/**
+ * The payload of the shell's `view:fresh` event (#2242): a view the shell
+ * was answered from memory was read again behind, and its answer moved, so
+ * a page showing it reads it again (from memory, now the fresh answer).
+ */
+export type ViewFresh = { entity_id: string, section: string | null, };
 
 /**
  * One row of an [`Block::Entities`] list.
@@ -3789,7 +4094,13 @@ meta: string | null, tone: Tone | null,
  * A short state word drawn as a chip (`merged`, `failed`), coloured by
  * `tone`.
  */
-chip: string | null, url: string | null, };
+chip: string | null, url: string | null, 
+/**
+ * Who the row is by, as the source names the account (#2311): a
+ * commit's author, for the avatar and name a last-commit strip draws.
+ * `meta` still reads in full without it. Absent on the wire when `None`.
+ */
+author?: string, };
 
 /**
  * One tab of a view.

@@ -2212,6 +2212,12 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
 | `./desktop-witness-test.sh` | The witness's own unit tests, over `desktop-witness-lib.sh` -- the Launch Services path comparison, the accessibility probe's reading, and the pure halves of the `open-in-editor` and `capture` drivers, and that every driver's landing has its DOM replay in `App.test.svelte.ts` (#1968). No screen, no bundle, no macOS. `just witness-unit`, and part of `just check`. |
 | `./reset` | `down -v` every profile, and delete the seed's outputs. |
 
+One script outside this folder belongs to the same family, since it measures the app rather than a product:
+
+| Script | Does |
+|---|---|
+| `scripts/keep-alive-budget.sh <slot>` | Keep-alive's budget and memory witness (#2250): `just keep-alive-budget <slot>`. Headless Chrome against the `?fake-ipc` dev server on `5300 + slot` (reused when one is up), debug port `9400 + slot`. Times the return to the repository page's Files tab, a 10,000-line file open (`?fake-file-lines=10000`), after Commits: 7 runs, exit 1 when the median is over 50 ms (`KEEP_ALIVE_RETURNS`, `KEEP_ALIVE_BUDGET_MS`). Then the JS heap after a forced garbage collection and the DOM node count with five pages held (that page, Inbox, Builds, Docs, Time), at *Pages kept open* 0 and 5 (`?fake-pages-kept-open=<n>`), twice each. It prints `scripts/machine-load.sh`'s line first: a timing on a machine that line calls over is quoted beside it. Starts no product; not part of `just check`. |
+
 ## mockd's documented deviations
 
 mockd is deliberately **stricter** than the real products in several places, so

@@ -11,8 +11,9 @@ use std::time::Duration;
 
 use knobas_source::ReviewSide;
 use knobas_source::view::{
-    ActionField, Block, ChoiceOption, Commenting, DiffChange, Fact, FieldKind, FileThread,
-    LineComment, LineComments, LineThread, SourceView, Tone, ViewAction, ViewRow, ViewSection,
+    ActionField, Block, ChoiceOption, Commenting, DiffChange, DiffLine, DiffLineKind, Fact,
+    FieldKind, FileThread, Hunk, LineComment, LineComments, LineThread, SourceView, Tone,
+    ViewAction, ViewRow, ViewSection,
 };
 use knobas_source::{Source, SourceError};
 use serde_json::{Value, json};
@@ -452,6 +453,7 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
                     "https://gitea.example/tidewater/payout-service/commit/{FIRST_SHA}"
                 )),
                 commit: None,
+                author: Some("Mara Lindqvist".into()),
             },
             ViewRow {
                 entity_id: Some(format!("gitea:tidewater/payout-service@{HEAD_SHA}")),
@@ -461,6 +463,7 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
                 chip: Some("c90d11a3f5".into()),
                 url: None,
                 commit: None,
+                author: Some("Mara Lindqvist".into()),
             },
         ]
     );
@@ -569,10 +572,16 @@ async fn the_files_tab_is_read_on_its_own_from_the_pull_requests_diff() {
     };
     assert!(!truncated);
     // An open pull request's diff takes line comments, sent as a review (#709).
+    // A reply goes beside them (#2277); this Gitea did not say its version,
+    // so nothing is offered that a Forgejo could not take: no resolve.
     assert_eq!(
         commentable,
         &Some(Commenting {
-            write_op: "submit_review".into()
+            write_op: "submit_review".into(),
+            reply: Some("reply_to_thread".into()),
+            resolve: None,
+            // What the reader's unsent comments are kept by (#2276).
+            head: Some(HEAD_SHA.into()),
         })
     );
     let summary: Vec<_> = files
@@ -589,7 +598,8 @@ async fn the_files_tab_is_read_on_its_own_from_the_pull_requests_diff() {
     // The diff, and beside it what places the line comments (#709): the pull
     // request's state and its reviews. No review here has line comments, so
     // none is asked for them. And whether the token may send a review at
-    // all (#2030): the branch probe, an empty write in the same scope.
+    // all (#2030): the branch probe, an empty write in the same scope. Its
+    // commits and who the token is go with the range (#2273).
     let mut asked = paths(&server).await;
     asked.sort();
     assert_eq!(
@@ -598,9 +608,79 @@ async fn the_files_tab_is_read_on_its_own_from_the_pull_requests_diff() {
             format!("{REPO}/branches"),
             format!("{REPO}/pulls/142"),
             format!("{REPO}/pulls/142.diff"),
+            format!("{REPO}/pulls/142/commits"),
             format!("{REPO}/pulls/142/reviews"),
+            "/api/v1/user".to_owned(),
+            // Whether the server resolves threads (#2277).
+            "/api/v1/version".to_owned(),
         ]
     );
+}
+
+/// The *Files* tab names what its diff is between (#2273, #2310): the merge
+/// base and the head the record names, the repository both are read in, the
+/// commits to pick from, and the head at the viewer's latest submitted review.
+#[tokio::test]
+async fn the_files_tab_names_its_range_commits_and_the_viewers_last_review() {
+    const BASE: &str = "907900b245f2941018dfd3ee155b876ef701c10a";
+    let mut pull = open_pull();
+    pull["merge_base"] = json!(BASE);
+    let mut given = reviews();
+    let list = given.as_array_mut().unwrap();
+    list.push(
+        json!({ "id": 20, "user": { "login": VIEWER }, "state": "COMMENT",
+                      "commit_id": FIRST_SHA, "submitted_at": "2026-08-22T09:00:00Z" }),
+    );
+    list.push(
+        json!({ "id": 21, "user": { "login": VIEWER }, "state": "APPROVED",
+                      "commit_id": HEAD_SHA, "submitted_at": "2026-08-22T12:00:00Z" }),
+    );
+    // A draft is not given yet, so the approval above stays the latest.
+    list.push(
+        json!({ "id": 22, "user": { "login": VIEWER }, "state": "PENDING",
+                      "commit_id": FIRST_SHA }),
+    );
+    let server = gitea(pull, given).await;
+    let view = source(&server)
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .unwrap();
+    let Block::Diff { range, .. } = &view.sections[0].blocks[0] else {
+        panic!("the files tab is a diff: {view:#?}");
+    };
+    let range = range
+        .as_ref()
+        .expect("a record naming both ends names a range");
+    assert_eq!(range.repository, "gitea:tidewater/payout-service");
+    assert_eq!((range.base.as_str(), range.head.as_str()), (BASE, HEAD_SHA));
+    assert_eq!(range.reviewed.as_deref(), Some(HEAD_SHA));
+    let picked: Vec<_> = range
+        .commits
+        .iter()
+        .map(|c| (c.sha.as_str(), c.title.as_str()))
+        .collect();
+    assert_eq!(
+        picked,
+        [
+            (
+                FIRST_SHA,
+                "PAY-231: retry SEPA payouts on transient PSP errors"
+            ),
+            (HEAD_SHA, "PAY-231: jitter in backoff"),
+        ]
+    );
+    // A record without its merge base names no range: nothing to read whole at.
+    let server = gitea(open_pull(), reviews()).await;
+    let view = source(&server)
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .unwrap();
+    let Block::Diff { range, .. } = &view.sections[0].blocks[0] else {
+        panic!("the files tab is a diff");
+    };
+    assert_eq!(range, &None);
 }
 
 // -- line comments on the diff (issue #709) ----------------------------------
@@ -622,7 +702,7 @@ index 1111111..2222222 100644
 /// (shape taken from the real 1.27.3 server, #709): `position` is the new
 /// side's line and `original_position` the old side's, the other `0`;
 /// `diff_hunk` is the diff up to and including the commented line, as it was
-/// when the comment was made.
+/// when the comment was made, and `commit_id` the head it was made on (#2318).
 fn line_comment(who: &str, at: &str, new: u32, old: u32, hunk_tail: &str, body: &str) -> Value {
     json!({
         "user": { "login": who },
@@ -631,6 +711,7 @@ fn line_comment(who: &str, at: &str, new: u32, old: u32, hunk_tail: &str, body: 
         "position": new,
         "original_position": old,
         "diff_hunk": format!("@@ -1,3 +1,3 @@\n pub fn backoff() -> u64 {{\n{hunk_tail}"),
+        "commit_id": FIRST_SHA,
         "body": body,
     })
 }
@@ -665,25 +746,40 @@ async fn gitea_with_line_comments(pull: Value) -> MockServer {
         "A second retry loop?",
     );
     on_dropped_file["path"] = json!("src/sepa/legacy.rs");
+    on_dropped_file["id"] = json!(204);
+    // Gitea's comment ids (#2277), and Olu's resolve of Priya's thread on
+    // new line 2, which Gitea keeps on the comment that opened it.
+    let with_id = |mut c: Value, id: u64| {
+        c["id"] = json!(id);
+        c
+    };
+    let mut opened = with_id(
+        line_comment(
+            "priya.nair",
+            "2026-08-22T09:00:00Z",
+            2,
+            0,
+            "-    30\n+    30 + jitter()",
+            "Bound the jitter.",
+        ),
+        101,
+    );
+    opened["resolver"] = json!({ "login": "olu" });
     let by_review = [
         (
             21,
             json!([
-                line_comment(
-                    "priya.nair",
-                    "2026-08-22T09:00:00Z",
-                    2,
-                    0,
-                    "-    30\n+    30 + jitter()",
-                    "Bound the jitter."
-                ),
-                line_comment(
-                    "priya.nair",
-                    "2026-08-22T09:00:00Z",
-                    0,
-                    2,
-                    "-    30",
-                    "Why drop the <b>constant</b>?"
+                opened,
+                with_id(
+                    line_comment(
+                        "priya.nair",
+                        "2026-08-22T09:00:00Z",
+                        0,
+                        2,
+                        "-    30",
+                        "Why drop the <b>constant</b>?"
+                    ),
+                    102
                 ),
             ]),
         ),
@@ -691,31 +787,40 @@ async fn gitea_with_line_comments(pull: Value) -> MockServer {
             23,
             json!([
                 // A reply on Priya's line, later.
-                line_comment(
-                    "olu",
-                    "2026-08-22T11:00:00Z",
-                    2,
-                    0,
-                    "-    30\n+    30 + jitter()",
-                    "Agreed: `±10 %`."
+                with_id(
+                    line_comment(
+                        "olu",
+                        "2026-08-22T11:00:00Z",
+                        2,
+                        0,
+                        "-    30\n+    30 + jitter()",
+                        "Agreed: `±10 %`."
+                    ),
+                    201
                 ),
                 // Written on a new line 3 that read `    35`; it reads `}` now.
-                line_comment(
-                    "olu",
-                    "2026-08-22T11:00:00Z",
-                    3,
-                    0,
-                    "-    30\n+    35",
-                    "Why 35?"
+                with_id(
+                    line_comment(
+                        "olu",
+                        "2026-08-22T11:00:00Z",
+                        3,
+                        0,
+                        "-    30\n+    35",
+                        "Why 35?"
+                    ),
+                    202
                 ),
                 // A line the diff no longer has at all.
-                line_comment(
-                    "olu",
-                    "2026-08-22T11:00:00Z",
-                    40,
-                    0,
-                    "+    gone",
-                    "And this?"
+                with_id(
+                    line_comment(
+                        "olu",
+                        "2026-08-22T11:00:00Z",
+                        40,
+                        0,
+                        "+    gone",
+                        "And this?"
+                    ),
+                    203
                 ),
                 // A file a later push dropped from the pull request.
                 on_dropped_file,
@@ -752,6 +857,32 @@ async fn gitea_with_line_comments(pull: Value) -> MockServer {
             .await;
     }
     server
+}
+
+/// The hunk [`line_comment`] sends, as the adapter answers it: numbered from
+/// the commented line, its last (#2318), so its first line is `first` on both
+/// sides, then `tail` as (kind, old number, new number, text).
+fn at_first(
+    header: &str,
+    first: u32,
+    tail: &[(DiffLineKind, Option<u32>, Option<u32>, &str)],
+) -> Hunk {
+    let mut lines = vec![DiffLine {
+        kind: DiffLineKind::Context,
+        old: Some(first),
+        new: Some(first),
+        text: "pub fn backoff() -> u64 {".into(),
+    }];
+    lines.extend(tail.iter().map(|&(kind, old, new, text)| DiffLine {
+        kind,
+        old,
+        new,
+        text: text.into(),
+    }));
+    Hunk {
+        header: header.into(),
+        lines,
+    }
 }
 
 fn said(author: &str, at: &str, body: &str) -> LineComment {
@@ -791,6 +922,15 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                 line: 7,
                 outdated: true,
                 comments: vec![said("olu", "2026-08-22T11:00:00Z", "A second retry loop?")],
+                id: Some("204".into()),
+                resolved_by: None,
+                replies: false,
+                commit: Some(FIRST_SHA.into()),
+                hunk: Some(at_first(
+                    "@@ -6,1 +6,2 @@",
+                    6,
+                    &[(DiffLineKind::Add, None, Some(7), "    loop {}")]
+                )),
             },
         }],
         "{view:#?}"
@@ -807,6 +947,11 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                     "2026-08-22T09:00:00Z",
                     "Why drop the <b>constant</b>?"
                 )],
+                id: Some("102".into()),
+                resolved_by: None,
+                replies: true,
+                commit: None,
+                hunk: None,
             },
             LineThread {
                 side: ReviewSide::New,
@@ -816,18 +961,46 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
                     said("priya.nair", "2026-08-22T09:00:00Z", "Bound the jitter."),
                     said("olu", "2026-08-22T11:00:00Z", "Agreed: `±10 %`."),
                 ],
+                // The opening comment's id and its resolver (#2277).
+                id: Some("101".into()),
+                resolved_by: Some("olu".into()),
+                replies: true,
+                commit: None,
+                hunk: None,
             },
             LineThread {
                 side: ReviewSide::New,
                 line: 3,
                 outdated: true,
                 comments: vec![said("olu", "2026-08-22T11:00:00Z", "Why 35?")],
+                // Outdated: Gitea would place a reply on today's line 3.
+                id: Some("202".into()),
+                resolved_by: None,
+                replies: false,
+                commit: Some(FIRST_SHA.into()),
+                hunk: Some(at_first(
+                    "@@ -2,2 +2,2 @@",
+                    2,
+                    &[
+                        (DiffLineKind::Del, Some(3), None, "    30"),
+                        (DiffLineKind::Add, None, Some(3), "    35"),
+                    ]
+                )),
             },
             LineThread {
                 side: ReviewSide::New,
                 line: 40,
                 outdated: true,
                 comments: vec![said("olu", "2026-08-22T11:00:00Z", "And this?")],
+                id: Some("203".into()),
+                resolved_by: None,
+                replies: false,
+                commit: Some(FIRST_SHA.into()),
+                hunk: Some(at_first(
+                    "@@ -39,1 +39,2 @@",
+                    39,
+                    &[(DiffLineKind::Add, None, Some(40), "    gone")]
+                )),
             },
         ],
         "{view:#?}"
@@ -837,6 +1010,37 @@ async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
         assert!(
             !asked.contains(&format!("{REPO}/pulls/142/reviews/{unasked}/comments")),
             "review {unasked} was asked for line comments: {asked:?}"
+        );
+    }
+}
+
+/// Resolve is offered where the server resolves threads (#2277): Gitea
+/// 1.27.3 does, Forgejo 17 has no endpoint for it (405, the fact note of
+/// 2026-10-30), and says what it is in its version.
+#[tokio::test]
+async fn resolve_is_offered_on_gitea_and_not_on_forgejo() {
+    for (version, resolve) in [
+        ("1.27.3", Some("resolve_thread".to_owned())),
+        ("17.0.0+gitea-1.22.0", None),
+    ] {
+        let server = gitea_with_line_comments(open_pull()).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/version"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "version": version })))
+            .mount(&server)
+            .await;
+        let view = source(&server)
+            .view(PR, Some("files"))
+            .await
+            .unwrap()
+            .unwrap();
+        let Block::Diff { commentable, .. } = &view.sections[0].blocks[0] else {
+            panic!("a diff: {view:#?}");
+        };
+        assert_eq!(
+            commentable.as_ref().and_then(|c| c.resolve.clone()),
+            resolve,
+            "{version}"
         );
     }
 }
@@ -1017,6 +1221,7 @@ async fn a_pull_request_past_the_commit_budget_says_what_it_left_out() {
                     "https://gitea.example/tidewater/payout-service/pulls/142/commits".into()
                 ),
                 commit: None,
+                author: None,
             }),
             "{header:?}"
         );
@@ -1646,6 +1851,120 @@ async fn required_status_checks_block_until_they_pass() {
     }
 }
 
+/// The overview declares the required checks for the pull request's side
+/// rail (#2278), so the shell reads them without taking *Merge…*'s sentence
+/// apart: *Required checks* counts the passed against all required, toned
+/// err where one failed, info where one is pending or never reported, ok
+/// where all passed; one *Required check* fact names each required context
+/// (a pattern that matched nothing is named itself), toned by its own
+/// standing, so the shell can mark those rows of *Checks* and name the ones
+/// in the way. Where the status check is off nothing is declared.
+#[tokio::test]
+async fn the_overview_declares_its_required_checks() {
+    let cases = [
+        (
+            "required and passed",
+            json!(["ci/build"]),
+            json!([status("ci/build", "success"), status("ci/lint", "failure")]),
+            Some(("1 of 1 pass", Tone::Ok)),
+            vec![("ci/build", Tone::Ok)],
+        ),
+        (
+            "an error and a warning fail",
+            json!(["ci/*"]),
+            json!([status("ci/build", "error"), status("ci/lint", "warning")]),
+            Some(("0 of 2 pass", Tone::Err)),
+            vec![("ci/build", Tone::Err), ("ci/lint", Tone::Err)],
+        ),
+        (
+            "never reported",
+            json!(["ci/build"]),
+            json!([]),
+            Some(("0 of 1 pass", Tone::Info)),
+            vec![("ci/build", Tone::Info)],
+        ),
+        (
+            "one pending",
+            json!(["ci/*"]),
+            json!([status("ci/build", "success"), status("ci/lint", "pending")]),
+            Some(("1 of 2 pass", Tone::Info)),
+            vec![("ci/build", Tone::Ok), ("ci/lint", Tone::Info)],
+        ),
+        (
+            "a failure is louder than a pending one",
+            json!(["ci/*", "deploy"]),
+            json!([status("ci/build", "failure"), status("ci/lint", "pending")]),
+            Some(("0 of 3 pass", Tone::Err)),
+            vec![
+                ("ci/build", Tone::Err),
+                ("ci/lint", Tone::Info),
+                ("deploy", Tone::Info),
+            ],
+        ),
+        (
+            "no contexts named: every status reported is required",
+            json!([]),
+            json!([status("deploy", "success"), status("ci/lint", "error")]),
+            Some(("1 of 2 pass", Tone::Err)),
+            vec![("deploy", Tone::Ok), ("ci/lint", Tone::Err)],
+        ),
+        (
+            "a skipped check passes, and a context is named trimmed as its row is",
+            json!(["ci/*"]),
+            json!([status("ci/build ", "success"), status("ci/docs", "skipped")]),
+            Some(("2 of 2 pass", Tone::Ok)),
+            vec![("ci/build", Tone::Ok), ("ci/docs", Tone::Ok)],
+        ),
+        (
+            "every pattern unjudged: nothing declared, as Merge… judges nothing",
+            json!(["ci/[ab]uild"]),
+            json!([status("ci/build", "failure")]),
+            None,
+            vec![],
+        ),
+        (
+            "no contexts named and nothing reported",
+            json!([]),
+            json!([]),
+            Some(("none have reported", Tone::Info)),
+            vec![],
+        ),
+    ];
+    for (what, contexts, statuses, summary, named) in cases {
+        let server = gitea(mergeable_pull(), json!([])).await;
+        protect_main_with(
+            &server,
+            json!({ "enable_status_check": true, "status_check_contexts": contexts }),
+        )
+        .await;
+        head_statuses(&server, statuses).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        let facts = facts_of(section(&view, "overview"));
+        let drawn = fact(facts, "Required checks").map(|f| (f.value.as_str(), f.tone));
+        let expected = summary.map(|(value, tone)| (value, Some(tone)));
+        assert_eq!(drawn, expected, "{what}");
+        let required: Vec<(&str, Tone)> = facts
+            .iter()
+            .filter(|f| f.label == "Required check")
+            .map(|f| (f.value.as_str(), f.tone.expect("a required check is toned")))
+            .collect();
+        assert_eq!(required, named, "{what}");
+    }
+
+    // The status check off: nothing declared.
+    let server = gitea(mergeable_pull(), json!([])).await;
+    protect_main_with(
+        &server,
+        json!({ "enable_status_check": false, "status_check_contexts": ["ci/build"] }),
+    )
+    .await;
+    head_statuses(&server, json!([status("ci/build", "failure")])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    let facts = facts_of(section(&view, "overview"));
+    assert!(fact(facts, "Required checks").is_none());
+    assert!(fact(facts, "Required check").is_none());
+}
+
 /// Where the status check is off, or its statuses cannot be read, the checks
 /// decide nothing: a failing status on a check that is off is no blocker
 /// (#710's *Checks* still draws it), and a read Gitea refuses leaves
@@ -1842,8 +2161,9 @@ async fn a_section_read_carries_no_toolbar() {
 /// once the record is in, the reviews, the commits, the comments, who the
 /// token is (#705), landing's three -- the base branch, the head branch,
 /// whether the head is behind (#708) -- the head commit's statuses (#710) and
-/// the repository's labels (#1194) and its organisation's (#1235) are in
-/// flight together. Read in turn, one is.
+/// the repository's labels (#1194) and its organisation's (#1235), and who a
+/// review can be requested from (#2303) are in flight together. Read in
+/// turn, one is.
 #[tokio::test]
 async fn a_pull_requests_tabs_are_read_at_the_same_time() {
     // A token of its own, so who it is has not been read before (see
@@ -1857,7 +2177,7 @@ async fn a_pull_requests_tabs_are_read_at_the_same_time() {
         .expect("reads")
         .expect("a pull request draws a view");
     assert_eq!(view.sections.len(), 4);
-    assert_eq!(flight.most(), 10, "the tabs' reads in flight at once");
+    assert_eq!(flight.most(), 11, "the tabs' reads in flight at once");
 }
 
 // -- Comment… and the review actions (issue #705) ----------------------------
@@ -2241,15 +2561,15 @@ async fn the_edit_is_prefilled_with_the_description_as_gitea_holds_it() {
 /// The reviews' line comments are read side by side (#709, as #703 reads the
 /// tabs): Gitea answers them one review at a time, and four reviewed rounds
 /// read in turn would cost four round trips on top of the diff's. The diff,
-/// the record and the reviews are three reads at once; four reviews' comments
-/// at once are the fourth.
+/// the record, the reviews, the commits and the viewer are five reads at once
+/// (#2273); six reviews' comments at once are more than that first wave.
 #[tokio::test]
 async fn the_reviews_line_comments_are_read_at_the_same_time() {
     let flight = InFlight::new(Duration::from_millis(300));
     let server = MockServer::builder().start().await;
     flight.watch(&server).await;
     let held = |body: ResponseTemplate| body.set_delay(flight.delay());
-    let reviews: Vec<Value> = (31..=34)
+    let reviews: Vec<Value> = (31..=36)
         .map(|id| {
             json!({ "id": id, "user": { "login": "olu" }, "state": "COMMENT",
                     "submitted_at": "2026-08-22T11:00:00Z", "comments_count": 1 })
@@ -2275,7 +2595,7 @@ async fn the_reviews_line_comments_are_read_at_the_same_time() {
             .mount(&server)
             .await;
     }
-    for id in 31..=34 {
+    for id in 31..=36 {
         Mock::given(method("GET"))
             .and(path(format!("{REPO}/pulls/142/reviews/{id}/comments")))
             .respond_with(held(ResponseTemplate::new(200).set_body_json(json!([
@@ -2299,20 +2619,20 @@ async fn the_reviews_line_comments_are_read_at_the_same_time() {
     let Block::Diff { files, .. } = &view.sections[0].blocks[0] else {
         panic!("a diff: {view:#?}");
     };
-    assert_eq!(files[0].threads[0].comments.len(), 4, "{view:#?}");
+    assert_eq!(files[0].threads[0].comments.len(), 6, "{view:#?}");
     assert_eq!(
         flight.most(),
-        4,
-        "the four reviews' comments in flight at once"
+        6,
+        "the six reviews' comments in flight at once"
     );
 }
 
-/// A file the cap cut (#709): a comment on a line past the cut is not called
+/// A file the ceiling cut (#709, #2269): a comment on a line past the cut is not called
 /// outdated -- the line may be there, unshown -- while one on a shown line
 /// still sits on it.
 #[tokio::test]
 async fn a_comment_past_a_files_cut_is_not_called_outdated() {
-    let lines = knobas_source::diff::MAX_LINES_PER_FILE + 100;
+    let lines = knobas_source::diff::MAX_LINES_PER_VIEW + 100;
     let mut diff = format!(
         "diff --git a/big.txt b/big.txt\nnew file mode 100644\nindex 0000000..1111111\n\
          --- /dev/null\n+++ b/big.txt\n@@ -0,0 +1,{lines} @@\n"
@@ -2367,6 +2687,74 @@ async fn a_comment_past_a_files_cut_is_not_called_outdated() {
         .map(|t| (t.line, t.outdated))
         .collect();
     assert_eq!(threads, [(3, false), (lines as u32, false)]);
+}
+
+/// An outdated comment as Gitea 1.27.3 answered it live (#2318): its hunk with
+/// a `\ No newline` note, whose `@@` line starts one short on both sides.
+/// The thread carries the commit it was written on, and the hunk numbered
+/// from the commented line, which Gitea's `position` gives exactly.
+#[tokio::test]
+async fn an_outdated_threads_hunk_is_numbered_from_its_line() {
+    let written_on = "5e2eaee59d13a2ebfeb91a50a5ff3cbc8479b07a";
+    let server = MockServer::builder().start().await;
+    let reviews = json!([{ "id": 41, "user": { "login": "olu" }, "state": "COMMENT",
+                           "submitted_at": "2026-08-22T11:00:00Z", "comments_count": 1 }]);
+    let comment = json!({ "id": 7, "user": { "login": "olu" }, "created_at": "2026-08-22T11:00:00Z",
+        "path": "README.md", "position": 2, "original_position": 0,
+        "commit_id": written_on, "original_commit_id": "",
+        "diff_hunk": "@@ -1,3 +1,2 @@\n-\n-Rust\n\\ No newline at end of file\n+reviewed from knobas",
+        "body": "say what reviewed it" });
+    for (p, answer) in [
+        (
+            format!("{REPO}/pulls/142"),
+            ResponseTemplate::new(200).set_body_json(open_pull()),
+        ),
+        (
+            format!("{REPO}/pulls/142/reviews"),
+            ResponseTemplate::new(200).set_body_json(reviews),
+        ),
+        (
+            format!("{REPO}/pulls/142.diff"),
+            ResponseTemplate::new(200).set_body_string(CHANGED_DIFF),
+        ),
+        (
+            format!("{REPO}/pulls/142/reviews/41/comments"),
+            ResponseTemplate::new(200).set_body_json(json!([comment])),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(answer)
+            .mount(&server)
+            .await;
+    }
+    let view = source(&server)
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .unwrap();
+    let Block::Diff { gone, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff: {view:#?}");
+    };
+    let line = |kind, old, new, text: &str| DiffLine {
+        kind,
+        old,
+        new,
+        text: text.into(),
+    };
+    assert_eq!(gone[0].thread.commit.as_deref(), Some(written_on));
+    assert_eq!(
+        gone[0].thread.hunk,
+        Some(Hunk {
+            header: "@@ -2,2 +2,1 @@".into(),
+            lines: vec![
+                line(DiffLineKind::Del, Some(2), None, ""),
+                line(DiffLineKind::Del, Some(3), None, "Rust"),
+                line(DiffLineKind::Add, None, Some(2), "reviewed from knobas"),
+            ],
+        }),
+        "{view:#?}"
+    );
 }
 
 // -- Checks (issue #710) -----------------------------------------------------
@@ -2912,4 +3300,297 @@ async fn a_token_without_the_organisation_scope_is_told_on_add_label() {
              it lacks the read:organization scope"
         )
     );
+}
+
+// -- Request… (issue #2303) ---------------------------------------------------
+
+/// [`gitea`] over `pull`, answering who a review can be requested from.
+async fn gitea_with_candidates(pull: Value, candidates: Value) -> MockServer {
+    let server = gitea(pull, reviews()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/reviewers")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(candidates))
+        .mount(&server)
+        .await;
+    server
+}
+
+fn request_of(view: &SourceView) -> Option<&ViewAction> {
+    view.actions
+        .iter()
+        .find(|a| a.write_op == "request_reviewers")
+}
+
+/// *Request…* offers the people Gitea says a review can be requested from,
+/// less the author and those already asked, to a reader who may push to the
+/// base; a reader who may not, or is not the author, is offered nothing, as
+/// Gitea would refuse them (ADR-0020 rule 4).
+#[tokio::test]
+async fn request_is_offered_to_a_pusher_with_the_people_gitea_names() {
+    // Forgejo lists the token's own account too (#2303); it is not offered.
+    let candidates = json!([
+        { "login": "mara.lindqvist" }, { "login": "olu" }, { "login": "kai" }, { "login": "sven" },
+        { "login": VIEWER }
+    ]);
+    let mut pusher = open_pull();
+    pusher["base"]["repo"]["permissions"] = json!({ "push": true });
+    pusher["requested_reviewers"] = json!([{ "login": "kai" }]);
+    let server = gitea_with_candidates(pusher, candidates.clone()).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    let request = request_of(&view).expect("offered to a pusher");
+    assert_eq!(request.label, "Request…");
+    let FieldKind::Choice { options } = &request.fields[0].kind else {
+        panic!("a choice: {request:#?}");
+    };
+    let offered: Vec<&str> = options.iter().map(|o| o.value.as_str()).collect();
+    assert_eq!(offered, ["olu", "sven"]);
+
+    let mut reader = open_pull();
+    reader["base"]["repo"]["permissions"] = json!({ "push": false });
+    let server = gitea_with_candidates(reader, candidates).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert!(request_of(&view).is_none(), "{:#?}", view.actions);
+}
+
+/// The author may ask for reviews without push access; on a closed pull
+/// request nobody is offered *Request…*, and who could be asked is not read.
+#[tokio::test]
+async fn the_author_may_request_and_a_closed_pull_request_offers_none() {
+    let candidates = json!([{ "login": "olu" }]);
+    let mut own = open_pull();
+    own["user"]["login"] = json!(VIEWER);
+    let server = gitea_with_candidates(own, candidates.clone()).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert!(request_of(&view).is_some(), "{:#?}", view.actions);
+
+    let mut closed = open_pull();
+    closed["state"] = json!("closed");
+    closed["base"]["repo"]["permissions"] = json!({ "push": true });
+    let server = gitea_with_candidates(closed, candidates).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert!(request_of(&view).is_none(), "{:#?}", view.actions);
+    assert!(!paths(&server).await.contains(&format!("{REPO}/reviewers")));
+}
+
+/// #2277: a reply to a thread is a review of one line comment, so
+/// *Conversation* says each review's line comments under it, quoted beneath
+/// where they were written, as Gitea's own page does; a draft's are nobody's.
+#[tokio::test]
+async fn conversation_quotes_each_reviews_line_comments_under_it() {
+    let server = gitea_with_line_comments(open_pull()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/issues/142/comments")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    let view = source(&server)
+        .view(PR, Some("conversation"))
+        .await
+        .unwrap()
+        .unwrap();
+    let texts: Vec<&str> = view.sections[0]
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        texts.contains(&"On `src/sepa/retry.rs`, line 2:\n\n> Bound the jitter.\n\nOn `src/sepa/retry.rs`, old line 2:\n\n> Why drop the <b>constant</b>?"),
+        "{texts:#?}"
+    );
+    assert!(
+        texts.iter().any(|t| t.contains("> Agreed: `±10 %`.")),
+        "{texts:#?}"
+    );
+    assert!(!texts.iter().any(|t| t.contains("draft")), "{texts:#?}");
+}
+
+/// #2277: a review's line comments that cannot be read cost *Conversation*
+/// its quotes, never the tab: the reviews are still said.
+#[tokio::test]
+async fn conversation_without_its_line_comments_still_says_the_reviews() {
+    let server = gitea_with_line_comments(open_pull()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/issues/142/comments")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls/142/reviews/21/comments")))
+        .respond_with(ResponseTemplate::new(500))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let view = source(&server)
+        .view(PR, Some("conversation"))
+        .await
+        .expect("the tab is drawn")
+        .unwrap();
+    let said = format!("{:?}", view.sections[0].blocks);
+    assert!(said.contains("priya.nair"), "{said}");
+    assert!(!said.contains("> Bound the jitter."), "{said}");
+}
+
+// -- a pull request's diff, kept at what its .diff stands at (#2321) ---------
+
+/// The merge base the kept-diff tests' records name.
+const MERGE_BASE: &str = "907900b245f2941018dfd3ee155b876ef701c10a";
+/// A head pushed after [`HEAD_SHA`].
+const PUSHED_SHA: &str = "d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f70819203";
+/// What `git diff` prints once [`PUSHED_SHA`] is in: one file added.
+const PUSHED_DIFF: &str = "diff --git a/src/sepa/pushed.rs b/src/sepa/pushed.rs
+new file mode 100644
+index 0000000..6112a3c
+--- /dev/null
++++ b/src/sepa/pushed.rs
+@@ -0,0 +1 @@
++pub fn pushed() {}
+";
+
+/// Over `server`'s answers, at `priority`: the record names `head` and
+/// [`MERGE_BASE`], the commits listing has `tip` newest (as Gitea and Forgejo
+/// list them, measured #2321), and the `.diff` is `diff`.
+async fn standing(server: &MockServer, head: &str, tip: &str, diff: &str, priority: u8) {
+    let mut pull = open_pull();
+    pull["head"]["sha"] = json!(head);
+    pull["merge_base"] = json!(MERGE_BASE);
+    record_says(server, pull, priority, None).await;
+    let mut listed = pr_commits();
+    listed[1]["sha"] = json!(tip);
+    let listed = json!([listed[1], listed[0]]);
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls/142/commits")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("X-Total-Count", "2")
+                .set_body_json(listed),
+        )
+        .with_priority(priority)
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls/142.diff")))
+        .respond_with(ResponseTemplate::new(200).set_body_string(diff))
+        .with_priority(priority)
+        .mount(server)
+        .await;
+}
+
+/// The record answers `pull` at `priority`, `times` times or for good.
+async fn record_says(server: &MockServer, pull: Value, priority: u8, times: Option<u64>) {
+    let mock = Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls/142")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(pull))
+        .with_priority(priority);
+    let mock = match times {
+        Some(n) => mock.up_to_n_times(n),
+        None => mock,
+    };
+    mock.mount(server).await;
+}
+
+async fn diffs_read(server: &MockServer) -> usize {
+    paths(server)
+        .await
+        .iter()
+        .filter(|p| p.ends_with("142.diff"))
+        .count()
+}
+
+async fn files_tab(source: &dyn Source) -> String {
+    let view = source
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    format!("{:?}", view.sections[0].blocks)
+}
+
+/// A pull request's diff is kept for the session at what its `.diff` stands
+/// at (spec #2234 step 1, ADR-0032): the *Files* tab read again at the same
+/// merge base and listed head reads the record, the reviews and the rest, but
+/// not the `.diff`; a pushed head is read again. A record that does not name
+/// its merge base keeps nothing.
+#[tokio::test]
+async fn a_pull_requests_diff_is_read_once_per_head_and_merge_base() {
+    let server = gitea(open_pull(), reviews()).await;
+    standing(&server, HEAD_SHA, HEAD_SHA, DIFF, 3).await;
+    let source = source(&server);
+
+    let first = files_tab(&*source).await;
+    let again = files_tab(&*source).await;
+    assert_eq!(first, again, "the kept diff draws the same tab");
+    assert_eq!(
+        diffs_read(&server).await,
+        1,
+        "the second read sent no .diff"
+    );
+
+    standing(&server, PUSHED_SHA, PUSHED_SHA, PUSHED_DIFF, 2).await;
+    let pushed = files_tab(&*source).await;
+    assert!(pushed.contains("pushed.rs"), "{pushed}");
+    assert_eq!(diffs_read(&server).await, 2, "a pushed head is read again");
+    files_tab(&*source).await;
+    assert_eq!(diffs_read(&server).await, 2, "and then kept");
+
+    // No merge base: nothing names what the diff stands at, so nothing is kept.
+    let unnamed = gitea(open_pull(), reviews()).await;
+    standing(&unnamed, HEAD_SHA, HEAD_SHA, DIFF, 3).await;
+    record_says(&unnamed, open_pull(), 2, None).await;
+    let source = source_of(&unnamed);
+    files_tab(&*source).await;
+    files_tab(&*source).await;
+    assert_eq!(diffs_read(&unnamed).await, 2);
+}
+
+/// Forgejo's record names a pushed head at once, while its `.diff` and its
+/// commits listing follow `refs/pull/N/head`, which a queue moves seconds
+/// later (#1195, measured again in #2321). A read in that window draws the
+/// `.diff` as it stands and keeps nothing, so the read once the queue has
+/// caught up draws the pushed diff, not the one from before the push.
+#[tokio::test]
+async fn a_diff_read_while_the_record_runs_ahead_of_it_is_not_kept() {
+    let server = gitea(open_pull(), reviews()).await;
+    standing(&server, PUSHED_SHA, HEAD_SHA, DIFF, 3).await;
+    let source = source(&server);
+
+    let lagging = files_tab(&*source).await;
+    assert!(!lagging.contains("pushed.rs"), "{lagging}");
+    files_tab(&*source).await;
+    assert_eq!(diffs_read(&server).await, 2, "nothing kept while it lags");
+
+    standing(&server, PUSHED_SHA, PUSHED_SHA, PUSHED_DIFF, 2).await;
+    let caught_up = files_tab(&*source).await;
+    assert!(caught_up.contains("pushed.rs"), "{caught_up}");
+    assert_eq!(diffs_read(&server).await, 3);
+}
+
+/// The `.diff` is read after the listing named its head, and kept only when
+/// the record read after it still names that head: a push that lands between
+/// the listing and the `.diff` cannot be kept under the head before it. Here
+/// the record names the head, then the pushed head (read after the `.diff`),
+/// then the head again: the first read keeps nothing, so the second reads the
+/// `.diff` again.
+#[tokio::test]
+async fn a_diff_is_kept_only_when_the_record_read_after_it_names_the_same_head() {
+    let server = gitea(open_pull(), reviews()).await;
+    standing(&server, HEAD_SHA, HEAD_SHA, DIFF, 3).await;
+    let mut pull = open_pull();
+    pull["merge_base"] = json!(MERGE_BASE);
+    record_says(&server, pull.clone(), 1, Some(1)).await;
+    pull["head"]["sha"] = json!(PUSHED_SHA);
+    record_says(&server, pull, 1, Some(1)).await;
+    let source = source(&server);
+
+    files_tab(&*source).await;
+    files_tab(&*source).await;
+    assert_eq!(diffs_read(&server).await, 2, "the first .diff was not kept");
+    files_tab(&*source).await;
+    assert_eq!(diffs_read(&server).await, 2, "the second was");
+}
+
+fn source_of(server: &MockServer) -> Box<dyn Source> {
+    knobas_source_gitea::build(instance(server.uri(), TOKEN, json!({}))).expect("builds")
 }

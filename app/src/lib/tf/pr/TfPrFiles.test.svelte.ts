@@ -7,8 +7,10 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { DiffFile, SourceView } from "../../ipc/entity";
+import type { DiffFile, DiffRange, SourceView } from "../../ipc/entity";
 import { createPendingComments, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
+import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+import { forgetEchoes } from "../queued.svelte";
 import TfPrFiles from "./TfPrFiles.svelte";
 
 const PR = "gitea:tidewater/payout-service#142";
@@ -33,8 +35,16 @@ const RETRY: DiffFile = {
   ],
   truncated: false,
   threads: [
-    { side: "new", line: 21, outdated: false, comments: [{ author: "jonas", body: "Should the jitter be bounded?", at: null }] },
-    { side: "new", line: 8, outdated: true, comments: [{ author: "priya", body: "Ten attempts is a lot.", at: null }] },
+    {
+      side: "new",
+      line: 21,
+      outdated: false,
+      comments: [{ author: "jonas", body: "Should the jitter be bounded?", at: null }],
+      id: "4088",
+      resolved_by: null,
+      replies: true,
+    },
+    { side: "new", line: 8, outdated: true, comments: [{ author: "priya", body: "Ten attempts is **a lot**.", at: null }], id: "4060", resolved_by: null, replies: false },
   ],
 };
 const NOTE: DiffFile = {
@@ -56,7 +66,7 @@ function filesView(commentable = true): SourceView {
         title: "Files",
         count: 2,
         deferred: false,
-        blocks: [{ type: "diff", files: [RETRY, NOTE], truncated: false, commentable: commentable ? { write_op: "submit_review" } : null, gone: [] }],
+        blocks: [{ type: "diff", files: [RETRY, NOTE], truncated: false, commentable: commentable ? { write_op: "submit_review", reply: null, resolve: null, head: null } : null, gone: [] }],
       },
     ],
     actions: [],
@@ -75,6 +85,13 @@ beforeEach(() => {
   pending = createPendingComments(() => null);
   viewed = [];
   asked = [];
+  sent = [];
+  refreshed = [];
+  stored = new Map();
+});
+
+afterEach(() => {
+  forgetEchoes();
 });
 
 afterEach(() => {
@@ -83,21 +100,56 @@ afterEach(() => {
   target.remove();
 });
 
-async function draw(answer: SourceView = filesView()) {
+/**
+ * The ticks as the app keeps them (`knobas_core::viewed`, #2276): by the
+ * blob a file held when ticked, or by the head where its diff named none.
+ */
+let stored: Map<string, string | null>;
+const viewedNow = (blobs: Record<string, string>) =>
+  [...stored].filter(([path, blob]) => (blob === null ? !(path in blobs) : blobs[path] === blob)).map(([path]) => path).sort();
+
+/** What `submit_write` was handed, and the `item:refreshed` handler the page listens with. */
+let sent: WriteOpPayload[];
+let refreshed: ((event: { payload: unknown }) => void)[];
+
+async function draw(answer: SourceView | (() => SourceView) = filesView(), writes: boolean | Record<string, SourceView> = false) {
+  /** Other sections' answers by section id (#2273): a pick's compare, a file at a sha. */
+  const others = typeof writes === "object" ? writes : {};
+  for (const path of viewed) if (!stored.has(path)) stored.set(path, null);
   view = mount(TfPrFiles, {
     target,
     props: {
       prId: PR,
-      entityView: async (_id: string, section: string | null) => {
-        asked.push(section);
-        return answer;
+      entityView: async (id: string, section: string | null) => {
+        asked.push(id === PR ? section : `${id} ${section}`);
+        return (section !== null && others[section]) || (typeof answer === "function" ? answer() : answer);
       },
-      viewedFiles: async () => [...viewed],
-      setViewed: async (_id: string, path: string, on: boolean) => {
-        viewed = on ? [...viewed, path].sort() : viewed.filter((p) => p !== path);
+      // A pick reads its diff local-first (Spec 6 of the review of spec #2234): here the source's compare answers it.
+      rangeDiff: async (id: string, base: string, head: string, ignoreWhitespace: boolean) => {
+        asked.push(`${id} range:${base}...${head}${ignoreWhitespace ? " -w" : ""}`);
+        const block = others[`compare:${base}...${head}`]?.sections[0]?.blocks.find((b) => b.type === "diff");
+        if (block?.type !== "diff") throw { code: "not_found", message: "no such compare" };
+        return { files: block.files, truncated: block.truncated, range: block.range ?? null, read_at: "source" as const };
+      },
+      viewedFiles: async (_id: string, blobs: Record<string, string>) => viewedNow(blobs),
+      setViewed: async (_id: string, path: string, on: boolean, blobs: Record<string, string>) => {
+        if (on) stored.set(path, blobs[path] ?? null);
+        else stored.delete(path);
+        viewed = viewedNow(blobs);
         return [...viewed];
       },
       pending,
+      submitWrite: writes === true
+        ? async (payload: WriteOpPayload) => {
+            sent.push(payload);
+            return { id: sent.length, state: "pending" } as QueuedWrite;
+          }
+        : null,
+      listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
+        if (event === "item:refreshed") refreshed.push(handler);
+        return () => {};
+      },
+      follower: { follow: () => () => {} },
     },
   });
   await settle();
@@ -113,15 +165,17 @@ async function settle() {
 
 const squash = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 const list = () => [...target.querySelectorAll(".tf-flist button")].map(squash);
-const cards = () => [...target.querySelectorAll<HTMLElement>(".tf-prdiff")];
+const cards = () => [...target.querySelectorAll<HTMLElement>(".tf-diff")];
 
 test("the Files section is read when the tab opens; the list names each file with its counts", async () => {
   await draw();
   expect(asked).toEqual(["files"]);
-  expect(list()).toEqual(["retry.rs+2 −1", "backoff.md+1 −0"]);
+  // The tree (#2268): directories by name, each file with its badge.
+  expect(list()).toEqual(["Abackoff.md+1 −0", "Mretry.rs+2 −1"]);
   expect(cards().map((card) => squash(card.querySelector(".tf-fh")))).toEqual([
-    "src/sepa/retry.rs +2 −1 Viewed",
-    "docs/backoff.md +1 −0 new file Viewed",
+    "M src/sepa/retry.rs +2 −1 Viewed",
+    // An added Markdown file draws rendered from its hunk (#2279): the mode switch sits before Viewed.
+    "A docs/backoff.md +1 −0 RenderedLines Viewed",
   ]);
   // One hunk after another: a ⋯ row between them.
   expect(cards()[0]!.querySelectorAll(".tf-hunk")).toHaveLength(1);
@@ -133,7 +187,7 @@ test("the filter narrows the list and the diffs; nothing matching says so", asyn
   filter.value = "BACKOFF";
   filter.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  expect(list()).toEqual(["backoff.md+1 −0"]);
+  expect(list()).toEqual(["Abackoff.md+1 −0"]);
   expect(cards()).toHaveLength(1);
   filter.value = "nothing";
   filter.dispatchEvent(new Event("input", { bubbles: true }));
@@ -144,7 +198,7 @@ test("the filter narrows the list and the diffs; nothing matching says so", asyn
 test("Viewed collapses a file and ticks it in the list, through the command; unticked, it opens again", async () => {
   viewed = ["docs/backoff.md"];
   await draw();
-  expect(list()).toEqual(["retry.rs+2 −1", "backoff.md+1 −0 ✓"]);
+  expect(list()).toEqual(["Abackoff.md+1 −0 ✓", "Mretry.rs+2 −1"]);
   expect(cards()[1]!.classList.contains("tf-viewed")).toBe(true);
   expect(cards()[1]!.querySelectorAll(".tf-ln")).toHaveLength(0);
   const box = cards()[0]!.querySelector<HTMLInputElement>(".tf-fh input[type=checkbox]")!;
@@ -163,10 +217,41 @@ test("a thread sits under its line; an outdated one is kept apart at the end of 
   const retry = cards()[0]!;
   const thread = retry.querySelector(".tf-thread")!;
   expect(squash(thread.previousElementSibling)).toBe("21+ let jitter = rng.gen_range(-JITTER..JITTER); +");
-  expect(squash(thread)).toBe("jonas: Should the jitter be bounded?");
+  // The author line and the Markdown body are two blocks since #2261, so no colon joins them.
+  expect(squash(thread)).toBe("jonas Should the jitter be bounded?");
   const apart = retry.querySelector("details.tf-outdated")!;
   expect(apart.hasAttribute("open")).toBe(false);
-  expect(squash(apart)).toBe("1 outdated line 8priya: Ten attempts is a lot.");
+  expect(squash(apart)).toBe("1 outdated line 8priya Ten attempts is a lot.");
+  // A line comment's body is the source's Markdown (#2261).
+  expect(apart.querySelector(".tf-thread .tf-md strong")?.textContent).toBe("a lot");
+});
+
+test("an outdated thread is drawn at the commit it was written on, its hunk as it read there (#2318)", async () => {
+  const at = "7be0e4c1d2e3f405162738495a6b7c8d9e0f1a2b";
+  const hunk = {
+    header: "@@ -7,2 +7,2 @@",
+    lines: [
+      { kind: "del" as const, old: 7, new: null, text: "const TRIES: u32 = 3;" },
+      { kind: "add" as const, old: null, new: 8, text: "const TRIES: u32 = 10;" },
+    ],
+  };
+  const outdated = { ...RETRY.threads[1]!, commit: at, hunk };
+  const range: DiffRange = { repository: "gitea:tidewater/payout-service", base: "a".repeat(40), head: "c".repeat(40), commits: [] };
+  const answer = filesView();
+  const block = answer.sections[0]!.blocks[0]!;
+  if (block.type !== "diff") throw new Error("a diff");
+  block.files = [{ ...RETRY, threads: [RETRY.threads[0]!, outdated] }, NOTE];
+  block.range = range;
+  block.gone = [{ path: "src/sepa/legacy.rs", thread: { ...outdated, line: 3, hunk: { header: "@@ -0,0 +1,3 @@", lines: [{ kind: "add", old: null, new: 3, text: "loop {}" }] } } }];
+  await draw(answer);
+  const apart = cards()[0]!.querySelector("details.tf-outdated")!;
+  expect(squash(apart)).toBe("1 outdated line 8at 7be0e4c 7− const TRIES: u32 = 3;8+ const TRIES: u32 = 10;priya Ten attempts is a lot.");
+  const link = apart.querySelector<HTMLAnchorElement>(".tf-was-at a")!;
+  expect(link.getAttribute("href")).toBe(`#/diff/gitea%3Atidewater%2Fpayout-service/${at}%5E/${at}`);
+  expect([...apart.querySelectorAll(".tf-was-hunk .tf-ln")].map((ln) => ln.className)).toEqual(["tf-ln tf-del", "tf-ln tf-add"]);
+  const gone = target.querySelector("details.tf-gone")!;
+  expect(squash(gone)).toBe("On files this change no longer holds src/sepa/legacy.rs, line 3at 7be0e4c 3+ loop {}priya Ten attempts is a lot.");
+  expect(gone.querySelector<HTMLAnchorElement>(".tf-was-at a")!.getAttribute("href")).toBe(link.getAttribute("href"));
 });
 
 test("+ on a removed line opens a box on its old side; Add to review keeps it pending under the line", async () => {
@@ -195,5 +280,217 @@ test("+ on a removed line opens a box on its old side; Add to review keeps it pe
 test("a diff the source takes no comments on draws no +", async () => {
   await draw(filesView(false));
   expect(target.querySelector(".tf-addc")).toBeNull();
-  expect(target.querySelectorAll(".tf-prdiff .tf-ln").length).toBeGreaterThan(0);
+  expect(target.querySelectorAll(".tf-diff .tf-ln").length).toBeGreaterThan(0);
+});
+
+// #2273, #2310: the commit picker, since my last review, and expanded context at the range's shas.
+
+const REPO = "gitea:tidewater/payout-service";
+const HEAD = "1262a5b610480702cfed4a1f3f76c87bf68fae55";
+const MID = "08232cb289a2d05c5813b08948b2063901c33ba7";
+const FIRST = "97cb5a8667f8aac8e6cdaeff83ffec9574f56a4b";
+const MERGE_BASE = "907900b245f2941018dfd3ee155b876ef701c102";
+const RANGE: DiffRange = {
+  repository: REPO,
+  base: MERGE_BASE,
+  head: HEAD,
+  commits: [
+    { sha: HEAD, title: "Jitter in backoff", meta: "mara · 5 h ago" },
+    { sha: MID, title: "Backoff jitter", meta: "mara · 1 d ago" },
+    { sha: FIRST, title: "Retry SEPA payouts", meta: "mara · 2 d ago" },
+  ],
+  reviewed: FIRST,
+};
+
+function rangedView(range: DiffRange | undefined = RANGE): SourceView {
+  const answer = filesView();
+  const block = answer.sections[0]!.blocks[0]!;
+  if (block.type === "diff" && range) block.range = range;
+  return answer;
+}
+
+/** A compare's answer: one file, its own range. */
+function compareView(base: string, head: string): SourceView {
+  return {
+    sections: [{ id: `compare:${base}...${head}`, title: "Diff", count: 1, deferred: false, blocks: [{ type: "diff", files: [NOTE], truncated: false, commentable: null, gone: [] }] }],
+    actions: [],
+  };
+}
+
+const face = () => target.querySelector<HTMLButtonElement>(".tf-pick-face");
+const options = () => [...target.querySelectorAll<HTMLElement>(".tf-pick .tf-menu [role^=menuitem]")];
+const option = (label: RegExp) => options().find((b) => label.test(squash(b)));
+const plus = () => target.querySelectorAll(".tf-addc").length;
+
+test("the picker names all commits; one commit shows only that commit's changes, and offers no line comments", async () => {
+  await draw(rangedView(), { [`compare:${MID}^...${MID}`]: compareView(`${MID}^`, MID) });
+  expect(squash(face())).toMatch(/Commits All 3/);
+  expect(plus()).toBeGreaterThan(0);
+  face()!.click();
+  flushSync();
+  option(/08232cb/)!.click();
+  await settle();
+  expect(asked).toContain(`${REPO} range:${MID}^...${MID}`);
+  expect(list()).toEqual([expect.stringMatching(/backoff\.md/)]);
+  // Gitea takes a review at one commit; knobas sends one at the head, so a line is commented on the whole diff only.
+  expect(plus()).toBe(0);
+  expect(squash(face())).toMatch(/08232cb/);
+  // Back to all commits: the pull request's own diff, comments and all.
+  option(/All commits/)!.click();
+  await settle();
+  expect(list()).toHaveLength(2);
+  expect(plus()).toBeGreaterThan(0);
+});
+
+test("a pick draws none of the full diff's pending drafts or Viewed boxes; all commits draws them again", async () => {
+  // A draft's line is the head's (the review goes to Gitea at the head), so it belongs to the full diff only.
+  pending.add(PR, { path: NOTE.path, side: "new", line: 1, body: "On the head's line 1" });
+  pending.add(PR, { path: "src/sepa/retry.rs", side: "old", line: 2, body: "Kept apart on a pick?" });
+  await draw(rangedView(), { [`compare:${MID}^...${MID}`]: compareView(`${MID}^`, MID) });
+  expect(target.querySelectorAll(".tf-pending").length).toBe(2);
+  face()!.click();
+  flushSync();
+  option(/08232cb/)!.click();
+  await settle();
+  expect(list()).toEqual([expect.stringMatching(/backoff\.md/)]);
+  expect(target.querySelectorAll(".tf-pending").length).toBe(0);
+  // Viewed is kept by the head's blob, so a commit's version of a file is not ticked as seen.
+  expect(target.querySelectorAll(".tf-fh input[type=checkbox]").length).toBe(0);
+  option(/All commits/)!.click();
+  await settle();
+  expect(target.querySelectorAll(".tf-pending").length).toBe(2);
+  expect(target.querySelectorAll(".tf-fh input[type=checkbox]").length).toBe(2);
+});
+
+test("since my last review shows the changes between the reviewed head and the head now", async () => {
+  await draw(rangedView(), { [`compare:${FIRST}...${HEAD}`]: compareView(FIRST, HEAD) });
+  face()!.click();
+  flushSync();
+  expect(squash(option(/Since your last review/))).toMatch(/You reviewed 97cb5a8 · 2 commits since/);
+  option(/Since your last review/)!.click();
+  await settle();
+  expect(asked).toContain(`${REPO} range:${FIRST}...${HEAD}`);
+  expect(list()).toEqual([expect.stringMatching(/backoff\.md/)]);
+  expect(plus()).toBe(0);
+});
+
+test("a viewer who never reviewed the pull request is not offered since my last review", async () => {
+  const { reviewed: _never, ...unreviewed } = RANGE;
+  await draw(rangedView(unreviewed));
+  face()!.click();
+  flushSync();
+  expect(option(/All commits/)).toBeDefined();
+  expect(option(/Since your last review/)).toBeUndefined();
+});
+
+test("a diff that names no range draws no picker", async () => {
+  await draw();
+  expect(face()).toBeNull();
+});
+
+test("context expands between hunks, read whole at the head in the range's repository (#2310)", async () => {
+  const whole = Array.from({ length: 30 }, (_, n) => `line ${n + 1}`).join("\n");
+  const fileAt: SourceView = {
+    sections: [{ id: "f", title: "f", count: null, deferred: false, blocks: [{ type: "file", trail: [], path: RETRY.path, text: whole, language: null, size: whole.length, truncated: false, binary: false, url: null, sha: null } as never] }],
+    actions: [],
+  };
+  await draw(rangedView(), { [`file@${HEAD}:${RETRY.path}`]: fileAt, [`file@${MERGE_BASE}:${RETRY.path}`]: fileAt });
+  const expand = target.querySelector<HTMLButtonElement>(".tf-exp");
+  expect(expand).not.toBeNull();
+  expand!.click();
+  await settle();
+  expect(asked).toContain(`${REPO} file@${HEAD}:${RETRY.path}`);
+  // The hidden lines, old and new numbers beside each: old 4 is new 5, old 19 new 20.
+  expect(squash(target.querySelector(".tf-diff"))).toMatch(/45 line 5 .*1920 line 20 21\+/);
+});
+
+/** The files at a head: each file's blob, and the commentable diff's head, as Gitea's *Files* section answers. */
+function at(head: string, blobs: { retry: string; note: string }, threads: DiffFile["threads"] = RETRY.threads, resolve = true): SourceView {
+  const base = filesView();
+  const block = base.sections[0]!.blocks[0]!;
+  if (block.type !== "diff") throw new Error("a diff");
+  block.files = [
+    { ...RETRY, blob: blobs.retry, threads },
+    { ...NOTE, blob: blobs.note },
+  ];
+  block.commentable = { write_op: "submit_review", reply: "reply_to_thread", resolve: resolve ? "resolve_thread" : null, head };
+  return base;
+}
+
+const viewedBox = (n: number) => cards()[n]!.querySelector<HTMLInputElement>(".tf-fh input[type=checkbox]")!;
+
+test("#2276: after a new commit that changes one file, only that file loses Viewed", async () => {
+  await draw(at("c90d11", { retry: "1111111", note: "2222222" }));
+  viewedBox(0).click();
+  await settle();
+  viewedBox(1).click();
+  await settle();
+  expect(list()).toEqual(["Abackoff.md+1 −0 ✓", "Mretry.rs+2 −1 ✓"]);
+  unmount(view!);
+  view = null;
+
+  // A push changes retry.rs and leaves the note as it was.
+  await draw(at("e41a07", { retry: "3333333", note: "2222222" }));
+  expect(list()).toEqual(["Abackoff.md+1 −0 ✓", "Mretry.rs+2 −1"]);
+});
+
+test("#2277: Reply… queues a reply on the thread's line, drawn queued until the read after it holds it", async () => {
+  let reply: string | null = null;
+  const thread = () => [
+    {
+      ...RETRY.threads[0]!,
+      comments: [...RETRY.threads[0]!.comments, ...(reply === null ? [] : [{ author: "knobas", body: reply, at: null }])],
+    },
+    RETRY.threads[1]!,
+  ];
+  await draw(() => at("c90d11", { retry: "1111111", note: "2222222" }, thread()), true);
+  const card = cards()[0]!;
+  [...card.querySelectorAll<HTMLButtonElement>(".tf-thread button")].find((b) => b.textContent === "Reply…")!.click();
+  flushSync();
+  const box = card.querySelector<HTMLTextAreaElement>(".tf-thread textarea")!;
+  box.value = "Bounded to ±10 % now.";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...card.querySelectorAll<HTMLButtonElement>(".tf-thread button")].find((b) => b.textContent === "Reply")!.click();
+  await settle();
+  expect(sent).toEqual([
+    {
+      ReplyToThread: {
+        entity: PR,
+        thread: "4088",
+        comment: { path: "src/sepa/retry.rs", line: 21, side: "new", body: "Bounded to ±10 % now." },
+      },
+    },
+  ]);
+  expect(squash(card.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? You queued Bounded to ±10 % now. Reply… Resolve");
+
+  // The write landed: its refresh reads the files again, and the reply is the source's now.
+  reply = "Bounded to ±10 % now.";
+  for (const hear of refreshed) hear({ payload: { entity_id: PR, write_id: 1 } });
+  await settle();
+  expect(asked).toEqual(["files", "files"]);
+  expect(squash(cards()[0]!.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? knobas Bounded to ±10 % now. Reply… Resolve");
+});
+
+test("#2277: Resolve queues the resolve and collapses the thread; a resolved thread reads collapsed, and Forgejo's offers none", async () => {
+  await draw(at("c90d11", { retry: "1111111", note: "2222222" }), true);
+  const card = cards()[0]!;
+  [...card.querySelectorAll<HTMLButtonElement>(".tf-thread button")].find((b) => b.textContent === "Resolve")!.click();
+  await settle();
+  expect(sent).toEqual([{ ResolveThread: { entity: PR, thread: "4088", resolved: true } }]);
+  expect(squash(card.querySelector(".tf-thread"))).toBe("Resolved 1 comment Show Unresolve");
+  unmount(view!);
+  view = null;
+  forgetEchoes();
+
+  // Read again with the source's state: resolved by mara, collapsed with no write of ours.
+  const resolved = [{ ...RETRY.threads[0]!, resolved_by: "mara" }, RETRY.threads[1]!];
+  await draw(at("c90d11", { retry: "1111111", note: "2222222" }, resolved), true);
+  expect(squash(cards()[0]!.querySelector(".tf-thread"))).toBe("Resolved by mara · 1 comment Show Unresolve");
+  unmount(view!);
+  view = null;
+
+  // A source that cannot resolve (Forgejo) offers a reply and no resolve.
+  await draw(at("c90d11", { retry: "1111111", note: "2222222" }, RETRY.threads, false), true);
+  expect(squash(cards()[0]!.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? Reply…");
 });
