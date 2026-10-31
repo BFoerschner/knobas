@@ -1,6 +1,6 @@
 # Ticket-first design system
 
-The design section of the ticket-first spec. The spec includes this file by reference. It writes down what `mockups/ticket-first/prototype-6.html` already draws, so every UI ticket builds against one system instead of reading CSS out of a 600 KB mockup. It adds no new look.
+The design section of the ticket-first spec. The spec includes this file by reference. It writes down what `mockups/ticket-first/prototype-6.html` already draws, so every UI ticket builds against one system instead of reading CSS out of a 600 KB mockup. It adds no new look, except where [Controls](#controls) settles what the prototype drew inconsistently.
 
 Acceptance for UI work is this file, the `#/controls` specimen (see [Controls](#controls)) and before/after screenshots of the real app at the same route, same theme, 1440 × 900. Prototype-6 is historical since 2026-10-31 (#2238): it decides nothing, and where the app and the prototype differ, this file decides. Its "acceptance is the match" rule in `requirements.md` is superseded.
 
