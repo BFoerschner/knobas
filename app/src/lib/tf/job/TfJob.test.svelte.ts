@@ -1694,4 +1694,11 @@ test("the card draws a description its source writes in Jira's wiki markup as Ma
   const text = target.querySelector(".tf-jobcard .tf-asks")!;
   expect(text.querySelector("h2")).toBeNull();
   expect(text.textContent).toBe("h2. Why\n# first");
+
+  unmount(job!);
+  const blank = ticket({ description: "  \n", markup: "markdown" });
+  open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(blank) : Promise.reject({ code: "not_found" })) }) });
+  await settle();
+  expect(target.querySelector(".tf-jobcard .tf-asks")).toBeNull();
+  expect(target.querySelector(".tf-jobcard")!.textContent).toContain("The ticket has no description.");
 });

@@ -154,7 +154,7 @@
   </div>
   <section>
     <h2>What it asks for</h2>
-    {#if detail.description !== null}
+    {#if detail.description !== null && detail.description.trim() !== ""}
       {@const markdown = proseMarkdown(detail.description, detail.markup)}
       {#if markdown !== null}<div class="tf-asks"><TfMarkdown text={markdown} /></div>{:else}<p class="tf-asks">{detail.description}</p>{/if}
     {:else}
