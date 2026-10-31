@@ -115,7 +115,7 @@
   .acts {
     margin-top: 16px;
     display: flex;
-    gap: 6px;
+    gap: var(--control-gap);
   }
 
   .acts :focus-visible {

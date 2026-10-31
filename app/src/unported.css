@@ -50,7 +50,7 @@
 .room-bar{display:flex;align-items:center;gap:10px;height:40px;padding:0 14px;border-bottom:1px solid var(--hair);overflow:hidden}
 .room-bar h1{font:600 22px/1.2 var(--disp);display:flex;align-items:baseline;gap:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .room-bar h1 .k{font:500 14px var(--mono);color:var(--muted)}
-.room-bar .acts{margin-left:auto;display:flex;gap:4px;flex:none}
+.room-bar .acts{margin-left:auto;display:flex;gap:var(--control-gap);flex:none}
 .kind{font:600 10px/1 var(--disp);text-transform:uppercase;letter-spacing:.1em;color:var(--faint);border:1px solid var(--hair);padding:4px 5px 3px;border-radius:2px}
 .empty{padding:14px 12px;color:var(--muted);font-size:12px;line-height:1.5}
 .view{height:100%;display:grid;grid-template-rows:auto 1fr;min-height:0;min-width:0}
@@ -71,14 +71,14 @@
 .row.hd:hover{background:var(--bg)}
 .row svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;vertical-align:-2px}
 .row.sug{grid-template-columns:34px 1fr 1.05fr 172px}
-.row.sug .acts{display:flex;gap:4px;justify-content:flex-end}
+.row.sug .acts{display:flex;gap:var(--control-gap);justify-content:flex-end}
 .row.sug .why{color:var(--muted);font-size:11px}
 .col{background:var(--bg);min-width:0;display:flex;flex-direction:column}
 .col-h{display:flex;justify-content:space-between;align-items:center;height:22px;padding:0 8px;font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint);border-bottom:1px solid var(--hair)}
 .col .more{margin:0;padding:6px 8px;font:10px var(--mono);color:var(--faint)}
 .sec{padding:10px 14px;border-bottom:1px solid var(--hair)}
 .sec-h{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.sec-h .acts{margin-left:auto;display:flex;gap:4px}
+.sec-h .acts{margin-left:auto;display:flex;gap:var(--control-gap)}
 .sec p{font-size:12.5px;line-height:1.55;color:var(--text)}
 .sec p .k{font-size:11.5px;color:var(--link)}
 .sec .row{margin:0 -14px;padding-left:10px;padding-right:14px}
