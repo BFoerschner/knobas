@@ -447,9 +447,10 @@ const SEVERITY: Record<FixtureAsset["status"], number> = { down: 0, warn: 1, up:
  * A row's rollup walks its subtree, and a column answers many rows, so a walk
  * that filtered the whole fixture per node cost the square of the estate: 1.5 s
  * of fake time for 5,000 VMs under one host. Every command here starts without
- * one ({@link fresh}) and every write drops it, so a read never sees an estate
- * older than its own command; other modules change `FIXTURE_ESTATE` only in
- * their own commands.
+ * one ({@link fresh}), so a read never sees an estate older than its own
+ * command: the writes, here and in `estate-import.ts`, are commands of their
+ * own. A command that reads the index and then writes would have to call
+ * {@link estateChanged} before reading again; none does.
  */
 let index: { byId: Map<string, FixtureAsset>; held: Map<string | null, FixtureAsset[]> } | null = null;
 /** How many times {@link estateIndex} has scanned the whole fixture: what a test witnesses the reuse by. */
@@ -468,7 +469,7 @@ function estateIndex() {
   index = { byId, held };
   return index;
 }
-/** Drop the index: a write changed the estate. */
+/** Drop the index: the estate may have changed since it was built. */
 function estateChanged() {
   index = null;
 }
@@ -554,7 +555,6 @@ function createAsset(args: Record<string, unknown>) {
     monitors: [],
   };
   FIXTURE_ESTATE.push(created);
-  estateChanged();
   ASSET_HISTORY.push({ entity_id: created.id, verb: "created", detail: {} });
   return assetRow(created);
 }
@@ -641,7 +641,6 @@ function moveAsset(args: Record<string, unknown>) {
     }
   }
   asset.parent_id = parentId;
-  estateChanged();
   ASSET_HISTORY.push({
     entity_id: asset.id,
     verb: "moved",
@@ -677,7 +676,6 @@ function deleteAsset(args: Record<string, unknown>) {
     if (route.target_id === asset.id) route.target_id = null;
   }
   FIXTURE_ESTATE.splice(FIXTURE_ESTATE.indexOf(asset), 1);
-  estateChanged();
   return null;
 }
 
