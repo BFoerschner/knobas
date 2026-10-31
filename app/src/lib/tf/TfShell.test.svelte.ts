@@ -551,7 +551,7 @@ test("an address the new shell has no place for names itself", async () => {
   start();
   // Link sets was the last section still drawn as "not built yet" (#866).
   await at("#/sets");
-  expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Link sets");
+  expect(seen(".tf-fhead h1")[0]?.textContent).toBe("Link sets");
   expect(target.textContent).not.toContain("is not built in the new shell yet");
   await at("#/nowhere");
   expect(seen(".tf-empty")[0]?.textContent).toContain("Nothing lives at #/nowhere in the new shell.");
@@ -1387,7 +1387,7 @@ test("an item's page draws the kind's label as its breadcrumb; with no parent an
   expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
   expect(crumbs.querySelector("strong")?.textContent).toBe("Survey");
   expect(escHint()).toBeNull();
-  expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Quay crane 4 inspection");
+  expect(seen(".tf-fhead h1")[0]?.textContent).toBe("Quay crane 4 inspection");
 
   const event = press("Escape");
   await settle();

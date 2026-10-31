@@ -135,6 +135,22 @@
   color: var(--ink); border-bottom-color: var(--ink); font-weight: 600;
 }
 
+/* The segmented control and the pill toggles are page-body controls: small (Controls). The segment's
+   buttons sit inside its 1px border, so the whole switch is `--control-h-sm` tall, as a small button is. */
+.tf-seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; flex: none; }
+.tf-seg button {
+  height: calc(var(--control-h-sm) - 2px); padding: 0 10px; font-size: var(--t-sm);
+  border: 0; background: var(--sheet); cursor: pointer; color: var(--ink-2);
+}
+.tf-seg button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
+.tf-fchips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.tf-fchips button {
+  height: var(--control-h-sm); padding: 0 10px; font-size: var(--t-sm); border-radius: 12px;
+  border: 1px solid var(--rule); background: var(--sheet); cursor: pointer; color: var(--ink-2);
+}
+.tf-fchips button:hover { border-color: var(--ink-2); }
+.tf-fchips button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+
 /* ---------- chips, signals, small text ---------- */
 .tf-chip {
   display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-xs); font-weight: 600; padding: 1px 7px;
