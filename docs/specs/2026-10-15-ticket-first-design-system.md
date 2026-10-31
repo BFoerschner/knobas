@@ -175,7 +175,7 @@ A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end
 
 - **(a)** a rule outside `chrome.css` sets `height`, `min-height`, `padding`, `font-size` (or the `font` shorthand) or `border-radius` on a control: a selector whose subject names `.tf-btn`, `.tf-sm`, `.tf-lg`, `.tf-iconbtn` or `.tf-refresh`, or is a `button` inside `.tf-seg` or `.tf-fchips`;
 - **(b)** the unported button classes `btn`, `tb-btn` or `x` appear in a stylesheet or in a component's `class`;
-- **(c)** an actions container (`.tf-acts` or any local `…-acts` row, `.tf-trail`, a dialog's `footer`) has a `gap` other than `var(--control-gap)`;
+- **(c)** an actions container (`.tf-acts`, any local `…acts` row with or without the hyphen, the bare `.acts`, `.tf-trail`, a dialog's `footer`; a `…facts` name is not one) has a `gap` other than `var(--control-gap)`;
 - **(d)** an allowlist entry has no reason;
 - **(e)** an allowlist entry matches nothing.
 

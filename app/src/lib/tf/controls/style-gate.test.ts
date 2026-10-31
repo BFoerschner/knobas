@@ -9,7 +9,7 @@
  *   `border-radius` (a `font` shorthand counts, it sets the size);
  * - (b) the unported button classes (`btn`, `tb-btn`, the old `x`) appear in a
  *   stylesheet or a component;
- * - (c) an actions container (`.tf-acts` or a local `…acts` row, `.tf-trail`, a dialog footer) has a
+ * - (c) an actions container (`.tf-acts`, a local `…acts` row or the bare `.acts`, `.tf-trail`, a dialog footer) has a
  *   `gap` other than `var(--control-gap)`;
  * - (d) an allowlist entry has no reason;
  * - (e) an allowlist entry matches nothing.
@@ -56,9 +56,9 @@ const UNPORTED = ["btn", "tb-btn", "x"];
  * `.tf-wq-acts`, and `.tf-appacts`, `.tf-logacts` without the hyphen, #2343), a strip's
  * `.tf-trail`, the unported `.dlg-f`, and a dialog's `footer`. A name ending in `facts`
  * (`.tf-facts`, `.artifacts`) is not one. The bare `.acts` of the unported styles and the
- * boot screen is not seen.
+ * boot screen is one too (#2292).
  */
-const ACTIONS_CLASS = /\.(?:[\w-]+(?<![fF])acts|tf-trail|dlg-f)(?![\w-])/;
+const ACTIONS_CLASS = /\.(?:(?:[\w-]+(?<![fF]))?acts|tf-trail|dlg-f)(?![\w-])/;
 const DIALOG = /\.(?:[\w-]*dialog[\w-]*|tf-steps)(?![\w-])/;
 
 /** Every `.css` and `.svelte` file under `root`, relative, sorted. */
@@ -398,6 +398,9 @@ test("(c) an actions container's gap other than the control gap fails", () => {
     // A row named `…acts` without the hyphen is one too (#2343).
     ".tf-approw .tf-appacts { margin-left: auto; display: flex; gap: 4px; }",
     ".tf-logacts { gap: 8px; }",
+    // The bare `.acts` of the unported styles and the boot screen too (#2292).
+    ".sec-h .acts{margin-left:auto;display:flex;gap:4px}",
+    ".acts { margin-top: 16px; display: flex; gap: 6px; }",
   ]) {
     const failures = planted({ "lib/tf/css/view.css": css });
     expect(failures, css).toHaveLength(1);
@@ -415,6 +418,9 @@ test("(c) an actions container's gap other than the control gap fails", () => {
         ".tf-fchips { gap: 4px; }",
         ".tf-acts .tf-btn { gap: 6px; }",
         ".tf-actsx { gap: 8px; }",
+        ".acts .tf-btn { gap: 6px; }",
+        ".actsx { gap: 8px; }",
+        ".facts { gap: 8px; }",
         // Facts are not actions (#2343).
         ".tf-facts { gap: 8px; }",
         ".tf-item-facts { gap: 8px; }",
