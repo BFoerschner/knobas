@@ -50,7 +50,7 @@ Lock script from your dispatch. Start once the PR is ready and your fixes are pu
 4. Release the lock.
 5. `git ls-remote --heads origin <branch>`; if present, `git push origin --delete <branch>`. Only the PR's own branch: a `pr-assets/*` branch stays until Björn deletes it himself (implementer brief, *Screenshots*).
 6. `gh issue view <N> --json state`; if open, close with a comment naming PR and commit.
-7. `git -C /Users/dev/Projects/knobas worktree remove .worktrees/<name>`, the one git command allowed outside your worktree, post-merge only. Dirty: report, never force. Already gone is fine.
+7. `git -C /Users/dev/knobas worktree remove .worktrees/<name>`, the one git command allowed outside your worktree, post-merge only. Dirty: report, never force. Already gone is fine.
 8. Leave nothing running (implementer brief, *Live suites*), also when you stop early.
 
 Scratch files in the scratchpad from your dispatch, PR number in every filename.
