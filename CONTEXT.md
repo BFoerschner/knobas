@@ -171,7 +171,7 @@ The working set behind a [job](#job), and nothing else. Membership is explicit a
 _Avoid_: workspace, project (a source's grouping, ADR-0010), room (retired; a [job](#job) is the working view)
 
 **Job**:
-The working view of one ticket, at `#/job/<key>`: the ticket's card, sections over what the ticket reaches (Code, Builds, Assets, Monitors, Pages), a Conversation, a Map drawing Dependencies, and a Connections drawer for the [links](#link) and [link sets](#link-set) that reach it. Opening one promotes the ticket's [context](#context). A job is a ticket's; ad-hoc work has no job.
+The working view of one ticket, at `#/job/<key>`: the ticket's card, sections over what the ticket reaches (Code, Builds, Assets, Monitors, Pages), a Conversation, a Map drawing Dependencies, and a Connections drawer for the [links](#link) and [link sets](#link-set) that reach it. Opening one promotes the ticket's [context](#context). A job is a ticket's; ad-hoc work has no job. Home is `#/job`, which shows the **chosen job**: the ticket last made the job on purpose, by opening a `#/job/<id>` address (a bookmark, history, a link, the Tickets preview's button), starting the timer on it, or running *Start work* on it. The choice survives a restart; with none made, `#/job` says how to make one.
 _Avoid_: task, workspace
 
 **Link set**:
