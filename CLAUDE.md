@@ -10,7 +10,7 @@ Single context: `CONTEXT.md` + `docs/adr/` (`docs/agents/domain.md`). Spec `docs
 
 ## Flow
 
-mattpocock-skills only: grilling → to-spec → to-tickets → `/loop /ticket-loop` (`.claude/commands/ticket-loop.md`; agent briefs `docs/agents/implementer-brief.md`, `docs/agents/merge-manager-brief.md`). `triage`, `to-spec`, `to-tickets` and `handoff` refuse the Skill tool: Björn types them. A handoff lands in `$TMPDIR/handoff-*.md`, not the repo.
+mattpocock-skills only: grilling → to-spec → to-tickets → `/loop /ticket-loop` (`.claude/commands/ticket-loop.md`; agent briefs `docs/agents/implementer-brief.md`, `docs/agents/merge-manager-brief.md`). A whole spec on one integration branch runs under `/implement-spec` and `docs/agents/integration-branch.md`. `triage`, `to-spec`, `to-tickets` and `handoff` refuse the Skill tool: Björn types them. A handoff lands in `$TMPDIR/handoff-*.md`, not the repo.
 
 **Standing rules live in the skill, the briefs and `docs/`, never in memory** (Björn, 2026-10-19: memories get skipped). A new rule is a docs-only PR to the file whose reader needs it.
 
