@@ -58,6 +58,7 @@
 </script>
 
 <script lang="ts">
+  import TfBareHeader from "../TfBareHeader.svelte";
   import { flushSync, onMount, tick, untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
 
@@ -325,10 +326,7 @@
 
 <!-- The header while no pipeline or run is drawn: the view's name and its *Sync now* (#2287). -->
 {#snippet bare()}
-  <header class="tf-fhead">
-    <div><h1>Builds</h1></div>
-    {#if sync}<div class="tf-acts">{@render sync()}</div>{/if}
-  </header>
+  <TfBareHeader title="Builds" {sync} />
 {/snippet}
 
 {#snippet crumbs(parts: Crumb[])}

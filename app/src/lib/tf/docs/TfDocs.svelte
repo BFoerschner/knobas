@@ -93,6 +93,7 @@
   import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes, type Echo } from "../queued.svelte";
   import { createDetailRefresh, DETAIL_REFRESH_BRIDGE, type DetailRefreshPorts } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfBareHeader from "../TfBareHeader.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
@@ -1045,10 +1046,7 @@
     {/if}
     {#if page === null && (pageError !== null || treeError !== null || (tree !== null && target === null))}
       <!-- No page to head (#2286): the view's own header, so *Sync now* is still where every view puts it. -->
-      <header class="tf-fhead">
-        <div><h1>Docs</h1></div>
-        {#if sync}<div class="tf-acts">{@render sync()}</div>{/if}
-      </header>
+      <TfBareHeader title="Docs" {sync} />
     {/if}
     {#if pageError !== null}
       <div class="tf-empty"><p>Could not open this page: {pageError}</p></div>
