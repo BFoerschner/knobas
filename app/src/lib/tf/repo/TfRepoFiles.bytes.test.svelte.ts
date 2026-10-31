@@ -53,6 +53,7 @@ function pdfRender(pages: { width: number; height: number; links?: PdfLink[] }[]
             draw: (_canvas, scale) => (draws.push(`${n}@${scale}`), { done: Promise.resolve(), cancel() {} }),
             text: async (into) => void into.append(Object.assign(document.createElement("span"), { textContent: `text of page ${n}` })),
             links: async () => links,
+            lines: async () => [`text of page ${n}`],
             print: async () => ({ key: `page ${n}`, unsure: false }),
             pixels: async () => null,
           };

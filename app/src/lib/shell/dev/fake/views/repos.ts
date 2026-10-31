@@ -318,7 +318,9 @@ function renderedDiffFiles(): DiffFile[] {
 /**
  * `?fake-pdf-diff` (#2282): the newest commit also changes three PDFs, read as bytes at it (after) and its parent
  * (before). `docs/spec.pdf` changes the text of page 2 of 4; `docs/handbook.pdf` gains a page between pages 1
- * and 2 of 3; `docs/brand.pdf` changes only the colour of the image on page 2 of 3 (page 3 keeps its image).
+ * and 2 of 3; `docs/brand.pdf` changes only the colour of the image on page 2 of 3 (page 3 keeps its image);
+ * `docs/notice.pdf` changes a Japanese line set in a predefined CMap, whose text pdf.js reads only with the CMaps
+ * served (#2315).
  */
 const pdfPage = (title: string, line: string, image?: string): FakePage => ({ lines: [title, line], ...(image ? { image } : {}) });
 const SPEC_PAGES = [
@@ -339,6 +341,10 @@ const PDF_DIFF: Record<string, [before: () => Uint8Array, after: () => Uint8Arra
     () => fakePdf({ pages: [HANDBOOK_PAGES[0]!, pdfPage("Runbooks", "Each alert links its runbook."), ...HANDBOOK_PAGES.slice(1)] }),
   ],
   "docs/brand.pdf": [() => fakePdf({ pages: BRAND_PAGES("1f7444") }), () => fakePdf({ pages: BRAND_PAGES("2f55d4") })],
+  "docs/notice.pdf": [
+    () => fakePdf({ pages: [{ lines: ["Notice", "Payouts in Japan."], cjk: ["支払いは毎日行われます。", "問い合わせ先: 経理部"] }] }),
+    () => fakePdf({ pages: [{ lines: ["Notice", "Payouts in Japan."], cjk: ["支払いは毎週月曜日に行われます。", "問い合わせ先: 経理部"] }] }),
+  ],
 };
 const pdfDiffOn = () => new URLSearchParams(globalThis.location?.search).has("fake-pdf-diff");
 const pdfDiffFiles = (): DiffFile[] =>

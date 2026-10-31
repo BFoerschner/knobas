@@ -8,9 +8,16 @@
 
   Pages draw as their row comes within 800 px of the view, as the file
   viewer's do (`TfPdf.svelte`), as pictures only: no text layer, no links.
+
+  Under a changed row, the page's text diff (#2315, `pageTextDiff`): the
+  lines of its text that changed, with the lines around them, or a line
+  saying its text is the same when only what it draws changed. Read once
+  the rows are shown, one changed page after another. An added or removed
+  page has none: the whole page is the change, and its picture shows it.
 -->
 <script lang="ts">
-  import { comparePdfs, type PageRow } from "../../render/pdf-diff";
+  import type { DiffFile } from "../../ipc/entity";
+  import { comparePdfs, pageTextDiff, type PageRow } from "../../render/pdf-diff";
   import { zoomStep } from "../../render/pdf-view";
   import { renderPort, type PdfDocument, type RenderPort } from "../../render/port";
 
@@ -37,6 +44,8 @@
   // Raw: the documents are pdf.js's, not something to proxy.
   let shown = $state.raw<Shown>({ kind: "comparing" });
   let scale = $state(0.5);
+  /** Each changed row's text diff, by row index, as it is read, or why its text could not be read; a row not yet read is absent. */
+  let texts = $state.raw<Record<number, DiffFile["hunks"] | { error: string }>>({});
 
   const sizesOf = async (pdf: PdfDocument | null): Promise<Size[]> =>
     pdf === null ? [] : (await Promise.all(Array.from({ length: pdf.pages }, (_, i) => pdf.page(i + 1)))).map(({ width, height }) => ({ width, height }));
@@ -51,6 +60,7 @@
       return;
     }
     shown = { kind: "comparing" };
+    texts = {};
     void (async () => {
       const docs: (PdfDocument | null)[] = [];
       for (const [i, bytes] of sides.entries()) {
@@ -70,7 +80,17 @@
       const [a, b] = docs as [PdfDocument | null, PdfDocument | null];
       try {
         const [rows, sizesA, sizesB] = await Promise.all([comparePdfs(a, b), sizesOf(a), sizesOf(b)]);
-        if (live) shown = { kind: "open", docs: [a, b], sizes: [sizesA, sizesB], rows };
+        if (!live) return;
+        shown = { kind: "open", docs: [a, b], sizes: [sizesA, sizesB], rows };
+        for (const [i, row] of rows.entries()) {
+          if (row.mark !== "changed" || a === null || b === null) continue;
+          // A page whose text pdf.js cannot read keeps its row: only its text diff says so.
+          const text = await pageTextDiff(await a.page(row.old!), await b.page(row.new!)).catch((error: unknown) => ({
+            error: error instanceof Error ? error.message : String(error),
+          }));
+          if (!live) return;
+          texts = { ...texts, [i]: text };
+        }
       } catch (error) {
         if (live) shown = { kind: "failed", why: error instanceof Error ? error.message : String(error) };
       }
@@ -129,6 +149,7 @@
   }
 
   const MARK = { same: "", changed: "changed", added: "added", removed: "removed" } as const;
+  const SIGN = { context: " ", add: "+", del: "−" } as const;
 </script>
 
 {#snippet cell(pdf: PdfDocument | null, n: number | null, sizes: Size[], side: string)}
@@ -166,6 +187,28 @@
         </div>
         {@render cell(a, row.old, sizesA, "before")}
         {@render cell(b, row.new, sizesB, "after")}
+        {#if row.mark === "changed"}
+          {@const hunks = texts[i]}
+          <div class="tf-pdfd-text" role="group" aria-label="Text of page {row.old} → {row.new}">
+            {#if hunks === undefined}
+              <p class="tf-dim tf-pdfd-reading">Reading its text…</p>
+            {:else if "error" in hunks}
+              <p class="tf-dim">Its text could not be read: {hunks.error}</p>
+            {:else if hunks.length === 0}
+              <p class="tf-dim">Its text is the same: what changed is in the drawing.</p>
+            {:else}
+              {#each hunks as hunk, h (h)}
+                <div class="tf-pdfd-hunk">
+                  {#each hunk.lines as line, k (k)}
+                    <div class="tf-ln" class:tf-add={line.kind === "add"} class:tf-del={line.kind === "del"}>
+                      <span class="tf-no">{line.old ?? ""}</span><span class="tf-no">{line.new ?? ""}</span><span>{SIGN[line.kind]} {line.text}</span>
+                    </div>
+                  {/each}
+                </div>
+              {/each}
+            {/if}
+          </div>
+        {/if}
       </div>
     {/each}
   </div>

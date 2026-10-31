@@ -271,6 +271,10 @@
 .tf-pdfd-removed .tf-pdfd-mark { background: var(--err); color: var(--sheet); }
 .tf-pdfd-cell { min-width: 0; overflow-x: auto; padding: 4px 14px 14px; display: flex; justify-content: center; }
 .tf-pdfd-cell + .tf-pdfd-cell { border-left: 1px solid var(--rule); }
+/* A changed page's text diff (#2315): under its two pages, across both, each hunk drawn as an outdated thread's is. */
+.tf-pdfd-text { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; padding: 0 14px 14px; }
+.tf-pdfd-text > p { margin: 0; font-size: var(--t-sm); }
+.tf-pdfd-hunk { background: var(--sheet); }
 .tf-pdfd-none { align-self: center; padding: 24px; font-size: var(--t-sm); color: var(--ink-2); font-style: italic; }
 .tf-ba-img > img, .tf-swipe-box img { max-width: 100%; background: repeating-conic-gradient(var(--sheet-2) 0 25%, var(--sheet) 0 50%) 0 0 / 16px 16px; }
 .tf-ba-old .tf-ba-img > img { outline: 2px solid var(--err); }
@@ -305,11 +309,11 @@
 /* An outdated thread at the commit it was written on (#2318): the sha, then the hunk as it read there. */
 .tf-was { margin: 2px 0 6px; }
 .tf-was-at { color: var(--ink-2); font-size: var(--t-xs); }
-.tf-was-hunk { border: 1px solid var(--rule-2); border-radius: 4px; overflow-x: auto; font: var(--t-xs)/1.6 var(--mono); font-variant-ligatures: none; }
-.tf-was-hunk .tf-ln, .tf-diff.tf-split .tf-was-hunk .tf-ln { display: grid; grid-template-columns: 40px 40px 1fr; white-space: pre; overflow: visible; }
-.tf-was-hunk .tf-no { color: var(--ink-2); text-align: right; padding-right: 8px; user-select: none; }
-.tf-was-hunk .tf-add { background: var(--ok-bg); }
-.tf-was-hunk .tf-del { background: var(--err-bg); }
+.tf-was-hunk, .tf-pdfd-hunk { border: 1px solid var(--rule-2); border-radius: 4px; overflow-x: auto; font: var(--t-xs)/1.6 var(--mono); font-variant-ligatures: none; }
+.tf-was-hunk .tf-ln, .tf-diff.tf-split .tf-was-hunk .tf-ln, .tf-pdfd-hunk .tf-ln { display: grid; grid-template-columns: 40px 40px 1fr; white-space: pre; overflow: visible; }
+.tf-was-hunk .tf-no, .tf-pdfd-hunk .tf-no { color: var(--ink-2); text-align: right; padding-right: 8px; user-select: none; }
+.tf-was-hunk .tf-add, .tf-pdfd-hunk .tf-add { background: var(--ok-bg); }
+.tf-was-hunk .tf-del, .tf-pdfd-hunk .tf-del { background: var(--err-bg); }
 .tf-diff.tf-split .tf-thread.tf-on-new, .tf-diff.tf-split .tf-newc.tf-on-new { margin-left: calc(50% + 56px); }
 /* A thread's footer, its reply and resolve (#2277; mockups/code-area .thr footer), and a resolved thread as one line. */
 .tf-thr-f, .tf-thr-h { display: flex; align-items: center; gap: var(--control-gap); margin: 6px -10px -6px; padding: 6px 8px; border-top: 1px solid var(--rule-2); background: var(--sheet-2); }

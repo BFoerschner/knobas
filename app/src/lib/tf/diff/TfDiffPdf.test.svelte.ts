@@ -35,6 +35,7 @@ function pdfPort() {
           draw: (_canvas, scale) => (drawn.push(`${pages[n - 1]}@${scale}`), { done: Promise.resolve(), cancel() {} }),
           text: async () => {},
           links: async () => [],
+          lines: async () => [pages[n - 1]!],
           print: async () => ({ key: pages[n - 1]!, unsure: false }),
           pixels: async () => null,
         }),
