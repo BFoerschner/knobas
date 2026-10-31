@@ -353,13 +353,6 @@ func values(pid: pid_t) -> Int32 {
     return 0
 }
 
-/// The frontmost application: its pid and its bundle identifier, tab-separated.
-///
-/// What makes a *global* shortcut's witness a witness. Every other assertion in
-/// these drivers is about knobas' own window, and this is the one that says the
-/// keystroke was sent while somebody else had the screen -- without it a driver
-/// would prove only that a key works in the application that is already
-/// listening for keys.
 /// The bundle identifier of the application macOS opens an https URL with:
 /// the default browser, which *Browser* in an "Open in" menu hands its page
 /// to (#2316). Asked of Launch Services, so no Apple Event and no prompt.
@@ -375,6 +368,13 @@ func defaultBrowser() -> Int32 {
     return 0
 }
 
+/// The frontmost application: its pid and its bundle identifier, tab-separated.
+///
+/// What makes a *global* shortcut's witness a witness. Every other assertion in
+/// these drivers is about knobas' own window, and this is the one that says the
+/// keystroke was sent while somebody else had the screen -- without it a driver
+/// would prove only that a key works in the application that is already
+/// listening for keys.
 func frontmost() -> Int32 {
     guard let app = NSWorkspace.shared.frontmostApplication else {
         FileHandle.standardError.write(Data("ax: no application is frontmost\n".utf8))
