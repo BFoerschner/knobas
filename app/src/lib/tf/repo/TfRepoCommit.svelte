@@ -152,7 +152,7 @@
       >{[detail.author, detail.row.updated_at ? clockLabel(detail.row.updated_at, now) : null].filter(Boolean).join(", ")}</span
     >
   {/if}
-  <span class="tf-acts">
+  <span class="tf-trail">
     {#if start !== null}
       <button
         type="button"

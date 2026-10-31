@@ -43,7 +43,6 @@
 .tf-approw { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-approw:last-child { border-bottom: 0; }
 .tf-approw .tf-appname .tf-mono { display: block; font-size: var(--t-xs); }
-.tf-approw .tf-appacts { margin-left: auto; display: flex; gap: var(--control-gap); }
 .tf-dnote { font-size: var(--t-sm); }
 .tf-clonefail { font-size: var(--t-sm); color: var(--err); max-width: 60ch; }
 .tf-banner.tf-err { background: var(--err-bg); color: var(--err); }

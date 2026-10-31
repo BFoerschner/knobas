@@ -75,7 +75,7 @@
   <div class="sec-h">
     <span class="lab">Linked items</span>
     <span class="k muted">{links.length}</span>
-    <span class="acts">
+    <span class="tf-trail">
       <button class="tf-btn tf-sm" onclick={onlink}>Link to…</button>
     </span>
   </div>

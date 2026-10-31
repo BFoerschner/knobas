@@ -16,6 +16,9 @@
  * - (f) a field in a row of buttons (the filter bar's `.tf-fsearch`, or a `select` or `input` in a
  *   row of buttons or a `.tf-fsel`) is sized by vertical padding or a literal height: it takes the
  *   row's height from `var(--control-h…)`;
+ * - (g) an actions container other than the page header's (`.tf-fhead`, `.tf-stg-h`) is pushed to the
+ *   end and laid out as a flex row by hand (`margin-left: auto` with `display: flex`): a strip's or a
+ *   row's trailing group is `.tf-trail`;
  * - (d) an allowlist entry has no reason;
  * - (e) an allowlist entry matches nothing.
  *
@@ -41,7 +44,7 @@ const ALLOWLIST = join(ROOT, "lib/tf/controls/style-gate-exceptions");
 const CONTROLS_SHEET = "lib/tf/css/chrome.css";
 const SECTION = "docs/specs/2026-10-15-ticket-first-design-system.md, section Controls";
 
-type Rule = "a" | "b" | "c" | "f";
+type Rule = "a" | "b" | "c" | "f" | "g";
 /** One breach: the rule, the file under `app/src/`, and the selector (a, c) or class (b) it is keyed on. */
 type Violation = { rule: Rule; file: string; key: string; detail: string };
 type Entry = { list: string; line: number; rule: string; file: string; key: string; reason: string };
@@ -181,6 +184,18 @@ function fieldSizing(decls: [string, string][]): string[] {
   });
 }
 
+/** The page headers, whose `.tf-acts` is the canonical header's and not a trailing group. */
+const PAGE_HEADER = /\.(?:tf-fhead|tf-stg-h)(?![\w-])/;
+
+/** Does the rule rebuild `.tf-trail`: an actions container outside a page header, pushed to the end as a flex row? */
+function rebuildsTrail(selector: string, decls: [string, string][]): boolean {
+  const parts = compounds(selector);
+  if (!isActions(selector) || /\.tf-trail(?![\w-])/.test(parts.at(-1) ?? "")) return false;
+  if (parts.slice(0, -1).some((part) => PAGE_HEADER.test(part))) return false;
+  const has = (prop: string, value: RegExp) => decls.some(([p, v]) => p === prop && value.test(v));
+  return has("margin-left", /^auto$/) && has("display", /^(?:inline-)?flex$/);
+}
+
 /** Is the rule's subject a row of buttons: an actions container, or a row of controls under another name? */
 function isButtonRow(selector: string): boolean {
   return isActions(selector) || BUTTON_ROW.test(compounds(selector).at(-1) ?? "");
@@ -248,6 +263,9 @@ function scan(root: string): Violation[] {
             add({ rule: "b", file, key: name, detail: `styles the unported button class .${name}` });
           }
         }
+        if (rebuildsTrail(selector, decls)) {
+          add({ rule: "g", file, key: selector, detail: "rebuilds the trailing group of actions; use `.tf-trail`" });
+        }
         const fieldSize = fieldSizing(decls);
         if (fieldSize.length > 0 && isRowField(selector)) {
           add({
@@ -301,8 +319,8 @@ function gate(violations: Violation[], entries: Entry[]): string[] {
     const id = `${entry.rule} ${entry.file} ${entry.key}`;
     if (!/^\d+\.txt$/.test(entry.list)) {
       failures.push(`${at}: ${id} sits in a file that names no ticket; entries go in the cleanup ticket's \`<ticket>.txt\``);
-    } else if (!/^[abcf]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
-      failures.push(`${at}: "${id}" is not \`<rule a|b|c|f> <file> <selector or class>  <reason>\``);
+    } else if (!/^[abcfg]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
+      failures.push(`${at}: "${id}" is not \`<rule a|b|c|f|g> <file> <selector or class>  <reason>\``);
     } else if (entry.reason === "") {
       failures.push(`(d) ${at}: ${id} has no reason; every exception says why it is one (${SECTION})`);
     } else if (listed.has(id)) {
@@ -445,10 +463,10 @@ test("(c) a row of buttons with a gap other than the control gap fails", () => {
     ".dlg-f { gap: 6px; }",
     ".tf-stg-acts { display: flex; gap: 8px; }",
     // A row named `…acts` without the hyphen is one too (#2343).
-    ".tf-approw .tf-appacts { margin-left: auto; display: flex; gap: 4px; }",
+    ".tf-approw .tf-appacts { display: flex; gap: 4px; }",
     ".tf-logacts { gap: 8px; }",
     // The bare `.acts` of the unported styles and the boot screen too (#2292).
-    ".sec-h .acts{margin-left:auto;display:flex;gap:4px}",
+    ".sec-h .acts{display:flex;gap:4px}",
     ".acts { margin-top: 16px; display: flex; gap: 6px; }",
     // A row of buttons that is not called actions: the filter bar, the pill toggles, the large decision, a `…-btns` row.
     ".tf-fbar { display: flex; gap: 8px 10px; }",
@@ -526,6 +544,32 @@ test("the filter bar's search and select, and the file tree's Go to file, take t
   expect(height("filter.css", ".tf-fsearch")).toBe("var(--control-h-sm)");
   expect(height("filter.css", ".tf-fsel select")).toBe("var(--control-h-sm)");
   expect(height("code.css", ".tf-ftreebox > header .tf-gotofile")).toBe("var(--control-h-sm)");
+});
+
+test("(g) a trailing group of actions rebuilt by hand fails; it is .tf-trail", () => {
+  for (const css of [
+    ".tf-banner .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }",
+    ".tf-logacts { margin-left: auto; display: flex; gap: var(--control-gap); }",
+    ".sec-h .acts{margin-left:auto;display:flex;gap:var(--control-gap)}",
+    ".tf-diff .tf-fh-acts { margin-left: auto; display: flex; align-items: center; }",
+  ]) {
+    const failures = planted({ "lib/tf/css/view.css": css });
+    expect(failures, css).toHaveLength(1);
+    expect(failures[0], css).toMatch(/^\(g\) lib\/tf\/css\/view\.css `[^`]+` rebuilds the trailing group of actions; use `\.tf-trail`\. See /);
+  }
+  // The clean twins: the page header's own rule, a placement-only margin, the trail itself and a tweak of it.
+  expect(
+    planted({
+      "lib/tf/css/view.css": [
+        ".tf-fhead .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }",
+        ".tf-stg-h .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }",
+        ".tf-suggest .tf-acts { margin-left: auto; }",
+        ".tf-mon-acts .tf-trail { justify-content: flex-end; flex-wrap: nowrap; }",
+        ".tf-ext-h .tf-btn { margin-left: auto; }",
+      ].join("\n"),
+      [CONTROLS_SHEET]: ".tf-btn { height: var(--control-h); padding: 0 11px; }\n.tf-trail { margin-left: auto; display: flex; gap: var(--control-gap); }",
+    }),
+  ).toEqual([]);
 });
 
 const BREACH = { "lib/tf/css/pr.css": ".tf-pr-head .tf-btn { padding: 2px 8px; }" };

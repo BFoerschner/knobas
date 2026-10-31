@@ -178,6 +178,7 @@ A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end
 - **(b)** the unported button classes `btn`, `tb-btn` or `x` appear in a stylesheet or in a component's `class`;
 - **(c)** a row of buttons has a `gap` other than `var(--control-gap)`: an actions container (`.tf-acts`, any local `…acts` row with or without the hyphen, the bare `.acts`, `.tf-trail`, a dialog's `footer`; a `…facts` name is not one), or a row of controls under another name (the filter bar `.tf-fbar`, the pill toggles `.tf-fchips`, the large decision `.tf-decide`, any `…-btns` row);
 - **(f)** a field in a row of buttons (`.tf-fsearch`, or a `select` or `input` inside a row of buttons or a `.tf-fsel`) sets a literal `height` or `min-height`, or vertical padding: it takes `height: var(--control-h…)`;
+- **(g)** an actions container outside a page header (`.tf-fhead`, `.tf-stg-h`) is pushed to the end and laid out by hand (`margin-left: auto` with `display: flex`): a strip's or a row's trailing group is `.tf-trail`;
 - **(d)** an allowlist entry has no reason;
 - **(e)** an allowlist entry matches nothing.
 

@@ -50,7 +50,6 @@
 .room-bar{display:flex;align-items:center;gap:10px;height:40px;padding:0 14px;border-bottom:1px solid var(--hair);overflow:hidden}
 .room-bar h1{font:600 22px/1.2 var(--disp);display:flex;align-items:baseline;gap:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .room-bar h1 .k{font:500 14px var(--mono);color:var(--muted)}
-.room-bar .acts{margin-left:auto;display:flex;gap:var(--control-gap);flex:none}
 .kind{font:600 10px/1 var(--disp);text-transform:uppercase;letter-spacing:.1em;color:var(--faint);border:1px solid var(--hair);padding:4px 5px 3px;border-radius:2px}
 .empty{padding:14px 12px;color:var(--muted);font-size:12px;line-height:1.5}
 .view{height:100%;display:grid;grid-template-rows:auto 1fr;min-height:0;min-width:0}
@@ -78,7 +77,6 @@
 .col .more{margin:0;padding:6px 8px;font:10px var(--mono);color:var(--faint)}
 .sec{padding:10px 14px;border-bottom:1px solid var(--hair)}
 .sec-h{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.sec-h .acts{margin-left:auto;display:flex;gap:var(--control-gap)}
 .sec p{font-size:12.5px;line-height:1.55;color:var(--text)}
 .sec p .k{font-size:11.5px;color:var(--link)}
 .sec .row{margin:0 -14px;padding-left:10px;padding-right:14px}

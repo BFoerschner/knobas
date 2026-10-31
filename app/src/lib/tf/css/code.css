@@ -92,7 +92,6 @@
   background: var(--sheet-2); flex-wrap: wrap;
 }
 .tf-fileview > header .tf-p, .tf-fileview > .tf-waiting > header .tf-p { font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none; }
-.tf-fileview > header .tf-acts, .tf-fileview > .tf-waiting > header .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }
 /* The file's directory dim before its name (mockups/code-area `.fileview > header .p .dim`). */
 .tf-fileview .tf-p .tf-pdir { color: var(--ink-2); font-weight: 400; }
 .tf-fileview .tf-fpad { padding: 12px; }
@@ -100,7 +99,6 @@
 .tf-banner.tf-warn { background: var(--warn-bg); color: var(--warn); }
 .tf-banner.tf-info { background: var(--info-bg); color: var(--info); }
 .tf-banner.tf-err { background: var(--err-bg); color: var(--err); }
-.tf-banner .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }
 .tf-code { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; overflow: auto; margin: 0; }
 .tf-code .tf-l { display: grid; grid-template-columns: 48px 1fr; white-space: pre; }
 .tf-code .tf-l > span:first-child { color: var(--ink-2); text-align: right; padding-right: 12px; user-select: none; }
@@ -123,7 +121,6 @@
    over it for selection (transparent, positioned by pdf.js's TextLayer through the CSSOM), and its links. */
 .tf-fpdf { background: var(--sheet); }
 .tf-pdf-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 6px 18px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); }
-.tf-pdf-bar .tf-acts { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); }
 .tf-pdf-zoom { min-width: 44px; text-align: center; font: var(--t-sm) var(--mono); font-variant-ligatures: none; font-variant-numeric: tabular-nums; }
 .tf-pdf-pages { padding: 18px; display: flex; flex-direction: column; align-items: center; gap: 14px; overflow-x: auto; }
 .tf-pdf-page { position: relative; flex: none; background: #fff; box-shadow: 0 0 0 1px var(--rule), 0 2px 6px rgb(0 0 0 / 0.12); --scale-round-x: 1px; --scale-round-y: 1px; }
@@ -139,7 +136,6 @@
    (its own <style> is refused by the bundled app's CSP, so the font is set here; render/mermaid.ts DIAGRAM_FONT). */
 .tf-dframe { display: block; border: 0; max-width: 100%; background: transparent; }
 .tf-diagram-scratch { position: fixed; left: -100000px; top: 0; font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
-.tf-cgroup-h .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }
 .tf-cgroup-h .tf-rc-who { font-weight: 400; }
 .tf-rcommits td.tf-rpick { width: 28px; padding-right: 0; }
 .tf-rcommits td:nth-child(2) { width: 110px; }
@@ -234,7 +230,7 @@
 .tf-dkeys span { display: inline-flex; gap: 3px; align-items: center; }
 .tf-diff .tf-fh-viewed { margin-left: auto; font: 400 var(--t-sm) var(--sans); display: flex; gap: 6px; align-items: center; }
 /* Header controls (#2279 the mode switch; later ones join it): right-aligned, Viewed after them. */
-.tf-diff .tf-fh-acts { margin-left: auto; display: flex; gap: var(--control-gap); align-items: center; font-weight: 400; }
+.tf-diff .tf-fh-acts { font-weight: 400; }
 .tf-diff .tf-fh-acts + .tf-fh-viewed { margin-left: 0; }
 /* Open in (#2274) follows the mode switch where there is no Viewed: one group at the right. */
 .tf-diff .tf-fh-acts + .tf-fh-open { margin-left: 0; }
@@ -404,7 +400,6 @@
 .tf-psave label { display: inline-flex; align-items: center; gap: 6px; }
 .tf-psave input { height: var(--control-h-sm); padding: 0 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--ink); }
 .tf-suggest { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--rule); background: var(--info-bg); color: var(--info); font-size: var(--t-sm); }
-.tf-suggest .tf-acts { margin-left: auto; }
 .tf-stepfail .tf-sfcols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .tf-stepfail .tf-sfcols b { display: block; font-size: var(--t-xs); margin-bottom: 4px; }
 

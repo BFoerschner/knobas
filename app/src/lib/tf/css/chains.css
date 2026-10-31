@@ -22,7 +22,6 @@
 .tf-logbar .tf-lqn { font-size: var(--t-xs); white-space: nowrap; }
 .tf-nav2 { display: flex; gap: 2px; }
 .tf-nav2 button { border: 1px solid var(--rule); background: var(--sheet); color: var(--ink); border-radius: 3px; cursor: pointer; width: 26px; height: 26px; }
-.tf-logacts { margin-left: auto; display: flex; gap: var(--control-gap); }
 .tf-logv { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; font: var(--t-xs)/1.55 var(--mono); font-variant-ligatures: none; overflow: auto; }
 .tf-logv details { border-top: 1px solid var(--rule-2); }
 /* The log's rows are flat (#2211): a loose run's rule and padding are rows of their own, and the first row is marked, since a windowed list's first child is any row. */

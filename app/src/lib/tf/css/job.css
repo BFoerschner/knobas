@@ -70,7 +70,6 @@
   margin: 0 12px 8px; padding: 8px 10px; border-radius: 6px; background: var(--sheet-2);
   display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: var(--t-sm);
 }
-.tf-checkout .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }
 .tf-openin { position: relative; }
 .tf-menu {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; display: flex; flex-direction: column;

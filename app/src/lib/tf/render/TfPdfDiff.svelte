@@ -151,7 +151,7 @@
   <div class="tf-pdfd">
     <div class="tf-pdf-bar">
       <span class="tf-dim tf-small tf-pdfd-sum">{sizesA.length} → {sizesB.length} pages · {counts}</span>
-      <span class="tf-acts">
+      <span class="tf-trail">
         <button type="button" class="tf-btn tf-sm" aria-label="Zoom out" onclick={() => (scale = zoomStep(scale, -1))}>−</button>
         <span class="tf-pdf-zoom" aria-live="polite">{Math.round(scale * 100)}%</span>
         <button type="button" class="tf-btn tf-sm" aria-label="Zoom in" onclick={() => (scale = zoomStep(scale, 1))}>+</button>

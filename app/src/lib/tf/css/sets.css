@@ -10,7 +10,6 @@
 /* R-7.10's hint card (#870): prototype-6's `.hint-card`. */
 .tf-hint-card { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 14px; border: 1px dashed var(--info); border-radius: 6px; background: var(--info-bg); font-size: var(--t-sm); }
 .tf-hint-card b { font-weight: 600; }
-.tf-hint-card .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }
 .tf-set-desc:empty::before { content: attr(data-placeholder); color: var(--ink-2); }
 .tf-cbody.tf-set { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
 .tf-set-panels, .tf-set .tf-side { display: flex; flex-direction: column; gap: 14px; }

@@ -178,7 +178,7 @@
     <div class="tf-fileview">
       <header>
         <span class="tf-p">{preview.path}</span>
-        <span class="tf-acts">
+        <span class="tf-trail">
           <button type="button" class="tf-btn tf-sm" onclick={() => preview && download({ kind: "file", path: preview.path }, name)}>Download</button>
           <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (preview = null)}>Close</button>
         </span>
