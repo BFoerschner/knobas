@@ -19,6 +19,7 @@
     refresh,
     reread,
     page = false,
+    small = false,
   }: {
     detail: RefreshSubject;
     refresh: DetailRefresh;
@@ -30,7 +31,10 @@
      * roster row does not; that page's is the header's *Sync now*.
      */
     page?: boolean;
+    /** Drawn at the small size: in a page body, as the job's tab strip draws it (#2294). */
+    small?: boolean;
   } = $props();
+  const size = $derived(small ? "tf-btn tf-sm tf-refresh" : "tf-btn tf-refresh");
 
   const offer = $derived(refresh.offer(detail));
   const sync = $derived(offer === "sync" ? refresh.syncOf(detail) : null);
@@ -71,7 +75,7 @@
 {#if offer === "refresh"}
   <button
     type="button"
-    class="tf-btn tf-refresh"
+    class={size}
     disabled={busy}
     title="Read this item from {detail.source.display_name} again"
     onclick={press}>{refresh.reading ? "Refreshing…" : "Refresh"}</button
@@ -79,7 +83,7 @@
 {:else if sync !== null}
   <button
     type="button"
-    class="tf-btn tf-refresh"
+    class={size}
     disabled={busy}
     title="Sync {detail.source.display_name}, which this item is from"
     onclick={press}>{sync.running ? "Syncing…" : "Sync now"}</button

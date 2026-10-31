@@ -13,7 +13,8 @@
   records this visit and answers the last one, `entity_thread` the thread. The
   card's summary and the Conversation tab both draw that one read.
 
-  **The Connections button (#820)** sits at the right of the tab bar, with the
+  **The Connections button (#820)** sits at the right of the tab bar (its
+  trailing small actions, #2294, with *Refresh*), with the
   ticket's link count and its proposals, and opens the drawer (also `L`).
   **Link sets (#867)**: `job_link_sets` is read once per job opened, for the
   *Also on this job* chips above the tab's body (not on Conversation, R-4.4)
@@ -570,14 +571,16 @@
                   >{/if}{#if conversation.fresh > 0}{" "}<span class="tf-count tf-info">{conversation.fresh} new</span>{/if}{/if}</a
           >
         {/each}
-        <button type="button" class="tf-conn" data-testid="job-connections" title="Connections (L)" onclick={() => (drawer = true)}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"
-            ><path d="M6.5 9.5l3-3M7 4.5l1-1a2.8 2.8 0 0 1 4 4l-1 1M9 11.5l-1 1a2.8 2.8 0 0 1-4-4l1-1" /></svg
-          ><b>{connectedCount(connected, groups)}</b> connected{#if proposals !== null && proposals.length > 0},
-            <span class="tf-p">{proposals.length} proposed</span>{/if}
-          <kbd>L</kbd>
-        </button>
-        <TfDetailRefresh {detail} {refresh} reread={rereadJob} page />
+        <div class="tf-trail">
+          <button type="button" class="tf-btn tf-sm tf-conn" data-testid="job-connections" title="Connections (L)" onclick={() => (drawer = true)}>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"
+              ><path d="M6.5 9.5l3-3M7 4.5l1-1a2.8 2.8 0 0 1 4 4l-1 1M9 11.5l-1 1a2.8 2.8 0 0 1-4-4l1-1" /></svg
+            ><b>{connectedCount(connected, groups)}</b> connected{#if proposals !== null && proposals.length > 0},
+              <span class="tf-p">{proposals.length} proposed</span>{/if}
+            <kbd>L</kbd>
+          </button>
+          <TfDetailRefresh {detail} {refresh} reread={rereadJob} page small />
+        </div>
       </div>
       <TfDetailBanners {detail} failed={refresh.failed} />
       <div class="tf-wbody">
