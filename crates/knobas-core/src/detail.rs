@@ -283,6 +283,22 @@ pub async fn read(
     }))
 }
 
+#[cfg(test)]
+mod markup_tests {
+    use super::markup_of;
+    use crate::payload::Markup;
+
+    /// The declared word, or text: an unknown word and none are never
+    /// parsed as markup (#2308).
+    #[test]
+    fn a_declared_markup_word_reads_as_itself_and_anything_else_as_text() {
+        assert_eq!(markup_of(Some("jira_wiki".to_owned())), Markup::JiraWiki);
+        assert_eq!(markup_of(Some("markdown".to_owned())), Markup::Markdown);
+        assert_eq!(markup_of(Some("asciidoc".to_owned())), Markup::Text);
+        assert_eq!(markup_of(None), Markup::Text);
+    }
+}
+
 /// The declared [`Markup`](crate::payload::Markup) word (#2308), or `text`
 /// for none and for a word this build does not know: text is never parsed as
 /// markup the source did not say it wrote.

@@ -587,6 +587,24 @@ mod tests {
         );
     }
 
+    /// An issue's description is its `body`, in Markdown (#2308): what the
+    /// ticket's reader draws, where the mapped record keeps it.
+    #[test]
+    fn an_issue_declares_its_body_as_a_markdown_description() {
+        let ticket = ticket_paths();
+        assert_eq!(ticket.description, vec![PayloadPath::of(["body"])]);
+        assert_eq!(ticket.markup, knobas_source::Markup::Markdown);
+        let record = serde_json::json!({ "body": "## Steps\n\n- one" });
+        assert_eq!(
+            ticket.description[0]
+                .segments()
+                .iter()
+                .try_fold(&record, |at, key| at.get(key.as_str()))
+                .and_then(serde_json::Value::as_str),
+            Some("## Steps\n\n- one")
+        );
+    }
+
     /// A closed issue is done-like (#1593): its job context is archived while
     /// its `state` reads `closed`. The set is the ticket's alone, and `open`
     /// is not in it.
