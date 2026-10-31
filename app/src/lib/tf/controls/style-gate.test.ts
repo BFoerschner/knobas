@@ -149,7 +149,31 @@ function stylesheet(file: string, text: string): string {
   return [...text.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join("\n");
 }
 
-/** Class names a component's markup sets: `class="…"`, `class={…}` string literals, `class:name`. */
+/** `expr` with every template literal's `${…}` holes blanked, so the literal's fixed text reads as words. */
+function holesBlanked(expr: string): string {
+  let prev: string;
+  do {
+    prev = expr;
+    expr = expr.replace(/\$\{[^{}]*\}/g, " ");
+  } while (expr !== prev);
+  return expr;
+}
+
+/** The expression in each `class={…}`, up to its balancing brace (a template literal's `${…}` nests). */
+function classExpressions(markup: string): string[] {
+  return [...markup.matchAll(/\bclass=\{/g)].map((m) => {
+    const start = m.index + m[0].length;
+    let depth = 1;
+    let i = start;
+    for (; i < markup.length && depth > 0; i++) {
+      if (markup[i] === "{") depth++;
+      else if (markup[i] === "}") depth--;
+    }
+    return markup.slice(start, i - 1);
+  });
+}
+
+/** Class names a component's markup sets: `class="…"`, `class={…}` string and template literals, `class:name`. */
 function markupClasses(text: string): Set<string> {
   const markup = text.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/g, "");
   const names = new Set<string>();
@@ -157,8 +181,8 @@ function markupClasses(text: string): Set<string> {
   for (const [, value] of markup.matchAll(/\bclass="([^"]*)"/g)) {
     add(value!.replace(/\{[^}]*\}/g, (expr) => [...expr.matchAll(/(["'`])([^"'`]*)\1/g)].map((m) => m[2]).join(" ")));
   }
-  for (const [, expr] of markup.matchAll(/\bclass=\{([^}]*)\}/g)) {
-    for (const [, , literal] of expr!.matchAll(/(["'`])([^"'`]*)\1/g)) add(literal!);
+  for (const expr of classExpressions(markup)) {
+    for (const [, , literal] of holesBlanked(expr).matchAll(/(["'`])([^"'`]*)\1/g)) add(literal!);
   }
   for (const [, name] of markup.matchAll(/\bclass:([\w-]+)/g)) names.add(name!);
   return names;
@@ -223,7 +247,9 @@ function gate(violations: Violation[], entries: Entry[]): string[] {
   for (const entry of entries) {
     const at = `style-gate-exceptions/${entry.list}:${entry.line}`;
     const id = `${entry.rule} ${entry.file} ${entry.key}`;
-    if (!/^[abc]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
+    if (!/^\d+\.txt$/.test(entry.list)) {
+      failures.push(`${at}: ${id} sits in a file that names no ticket; entries go in the cleanup ticket's \`<ticket>.txt\``);
+    } else if (!/^[abc]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
       failures.push(`${at}: "${id}" is not \`<rule a|b|c> <file> <selector or class>  <reason>\``);
     } else if (entry.reason === "") {
       failures.push(`(d) ${at}: ${id} has no reason; every exception says why it is one (${SECTION})`);
@@ -334,6 +360,8 @@ test("(b) the unported button classes fail in a stylesheet and in a component's 
     "<button class=\"row {open ? 'btn' : ''}\">Go</button>",
     "<button class={['btn', wide && 'wide']}>Go</button>",
     "<button class:btn={true}>Go</button>",
+    "<button class={`btn ${kind}`}>Go</button>",
+    "<button class={`row ${open ? 'on' : ''} btn`}>Go</button>",
   ]) {
     const failures = planted({ "lib/assets/Dialog.svelte": markup });
     expect(failures, markup).toHaveLength(1);
@@ -347,6 +375,7 @@ test("(b) the unported button classes fail in a stylesheet and in a component's 
         '<button class="tf-btn tf-sm">Go</button>',
         '<line class="tf-tm-hr" x1={x} x2={x} />',
         "<span class=\"row {x ? 'on' : ''}\">{x}</span>",
+        "<rect class={`tf-bar tf-run-${tone(x)}`} x={x} />",
         "<style>.tf-btns { gap: 4px; } .tf-x { width: 1.5x; }</style>",
       ].join("\n"),
       "lib/tf/css/view.css": ".tf-btn.tf-sm { color: red; } .tf-tbx { color: red; }",
@@ -415,4 +444,11 @@ test("an entry listed in two tickets' files, or not in the entry format, fails",
     "style-gate-exceptions/2296.txt:1: a lib/tf/css/pr.css .tf-pr-head .tf-btn is already listed in style-gate-exceptions/2295.txt:1; a violation goes in one file",
   ]);
   expect(planted({}, { "2295.txt": "lib/tf/css/pr.css .tf-pr-head .tf-btn  no rule letter\n" })).toHaveLength(1);
+});
+
+test("an entry in a file that names no ticket fails, and lets nothing through", () => {
+  expect(planted(BREACH, { "misc.txt": "a lib/tf/css/pr.css .tf-pr-head .tf-btn  the PR header\n" })).toEqual([
+    "style-gate-exceptions/misc.txt:1: a lib/tf/css/pr.css .tf-pr-head .tf-btn sits in a file that names no ticket; entries go in the cleanup ticket's `<ticket>.txt`",
+    "(a) lib/tf/css/pr.css `.tf-pr-head .tf-btn` sets padding on a control outside lib/tf/css/chrome.css. See docs/specs/2026-10-15-ticket-first-design-system.md, section Controls.",
+  ]);
 });
