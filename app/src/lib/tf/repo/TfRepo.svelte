@@ -585,7 +585,7 @@
           onclick={() => {
             if (branchRefused === null) newBranch = { from: null };
           }}>New branch…</button>
-        <TfOpenIn entityId={repoId} title={repo?.title ?? ""} {checkout} size="md" />
+        <TfOpenIn entityId={repoId} title={repo?.title ?? ""} {checkout} size="md" variant="ghost" />
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
       </div>
     </header>
