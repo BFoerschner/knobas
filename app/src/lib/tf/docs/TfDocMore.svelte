@@ -1,5 +1,5 @@
 <!--
-  The reader's *More ▾* (#2082, R-10.10): the last button of the actions row,
+  The reader's *More ▾* (#2082, R-10.10): in the header's actions before "Open in" (#2286),
   holding *Export as Markdown*; later actions go here too.
 
   The ticket view menu's pattern (`tickets/ViewMenu.svelte`), copied, not
@@ -53,7 +53,7 @@
 </script>
 
 <span class="tf-rd-more">
-  <button type="button" class="tf-btn tf-sm" aria-haspopup="menu" aria-expanded={open} bind:this={button} onclick={toggle}
+  <button type="button" class="tf-btn" aria-haspopup="menu" aria-expanded={open} bind:this={button} onclick={toggle}
     >More</button
   >
   {#if open}

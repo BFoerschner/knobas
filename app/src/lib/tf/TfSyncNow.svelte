@@ -1,6 +1,7 @@
 <!--
   A role view's *Sync now* (#2106), drawn by the role frame (`TfPage.svelte`)
-  into the header of every view whose page names a role. It runs each enabled
+  into the header of every view whose page names a role, at the header's
+  default size and last in its actions (#2238). It runs each enabled
   source that fills the role, as the mirror answers it (`sync_role`), says
   *Syncing…* until those runs end, and is not drawn for a role no enabled
   source fills.
