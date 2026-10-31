@@ -31,6 +31,7 @@
 -->
 <script lang="ts" module>
   import { SvelteMap } from "svelte/reactivity";
+  import { replaceAddress } from "../opener";
 
   import type { JobPipeline, PipelineRow, RunRow, SourceView } from "../../ipc/entity";
 
@@ -217,14 +218,14 @@
     const id = rest[0]!;
     const owner = all.find((p) => p.recent.some((r) => r.entity_id === id));
     if (owner !== undefined) {
-      location.replace(runHash(owner.entity_id, id));
+      replaceAddress(runHash(owner.entity_id, id));
       return;
     }
     const ids = all.map((p) => p.entity_id);
     void (ports.view ?? RUN_BRIDGE.view)(id).then(
       (view) => {
         const found = pipelineOfRun(view, ids);
-        if (found !== null && rest[0] === id) location.replace(runHash(found, id));
+        if (found !== null && rest[0] === id) replaceAddress(runHash(found, id));
         else lost = id;
       },
       () => (lost = id),

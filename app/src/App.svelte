@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { goWithoutOpener } from "./lib/tf/opener";
   import { listen } from "@tauri-apps/api/event";
 
   import { alerts } from "./lib/assets/alerts.svelte";
@@ -44,9 +45,9 @@
    */
   homeIfBlank(location);
 
-  /** Go to an address the launcher or the capture window names. */
+  /** Go to an address the launcher or the capture window names: nothing in the app opened it, so `Esc` goes up from it (#2229). */
   function navigate(hash: string) {
-    location.hash = hash;
+    goWithoutOpener(hash);
   }
 
   /** Whether the ⌘K overlay is up; the launcher binds ⌘K itself. */

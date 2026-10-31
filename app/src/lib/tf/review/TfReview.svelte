@@ -18,6 +18,7 @@
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { replaceAddress } from "../opener";
 
   import { ipcErrorMessage } from "../../ipc";
   import { proposalEvidence, roomSuggestions, type ProposalEvidence, type SuggestionEntry } from "../../ipc/entity";
@@ -64,7 +65,7 @@
       proposalEvidence: (linkId) => proposalEvidence(linkId),
     },
     decisions = sessionDecisions,
-    ongo = (hash: string) => location.replace(hash),
+    ongo = replaceAddress,
   }: {
     /** Whether the database answers yet. */
     ready: boolean;
