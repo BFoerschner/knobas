@@ -7,7 +7,7 @@
 import ESTATE_FILE from "../../../../../../testenv/estate.json";
 import type { AssetProperty, AssetRow, DependsOnRow, PropertyValue } from "../../../ipc/assets";
 import type { Handlers } from "../fake-tauri";
-import { keepSeed } from "../fake-seed";
+import { keepSeed, onFakeReset } from "../fake-seed";
 import { SYNCED_AT } from "./corpus";
 
 // -- the estate -------------------------------------------------------------
@@ -441,10 +441,49 @@ const PROBLEM: FixtureAsset["status"][] = ["warn", "down"];
 /** `AssetStatus::severity` -- down over warn over up over none, worst first. */
 const SEVERITY: Record<FixtureAsset["status"], number> = { down: 0, warn: 1, up: 2, none: 3 };
 
+/**
+ * The estate by id and by parent, built at most once per command (#2221).
+ *
+ * A row's rollup walks its subtree, and a column answers many rows, so a walk
+ * that filtered the whole fixture per node cost the square of the estate: 1.5 s
+ * of fake time for 5,000 VMs under one host. Every command here starts without
+ * one ({@link fresh}) and every write drops it, so a read never sees an estate
+ * older than its own command; other modules change `FIXTURE_ESTATE` only in
+ * their own commands.
+ */
+let index: { byId: Map<string, FixtureAsset>; held: Map<string | null, FixtureAsset[]> } | null = null;
+/** How many times {@link estateIndex} has scanned the whole fixture: what a test witnesses the reuse by. */
+export let estateScans = 0;
+function estateIndex() {
+  if (index !== null) return index;
+  estateScans += 1;
+  const byId = new Map<string, FixtureAsset>();
+  const held = new Map<string | null, FixtureAsset[]>();
+  for (const asset of FIXTURE_ESTATE) {
+    byId.set(asset.id, asset);
+    const siblings = held.get(asset.parent_id);
+    if (siblings) siblings.push(asset);
+    else held.set(asset.parent_id, [asset]);
+  }
+  index = { byId, held };
+  return index;
+}
+/** Drop the index: a write changed the estate. */
+function estateChanged() {
+  index = null;
+}
+onFakeReset(() => {
+  index = null;
+});
+
+/** What `id` holds directly, in the fixture's order. */
+function heldBy(id: string): FixtureAsset[] {
+  return estateIndex().held.get(id) ?? [];
+}
+
 /** Everything under `asset`, over the parent field. */
 function descendants(asset: FixtureAsset): FixtureAsset[] {
-  const held = FIXTURE_ESTATE.filter((other) => other.parent_id === asset.id);
-  return held.flatMap((child) => [child, ...descendants(child)]);
+  return heldBy(asset.id).flatMap((child) => [child, ...descendants(child)]);
 }
 
 /** The worst of a set of statuses, `"none"` for an empty one. */
@@ -515,6 +554,7 @@ function createAsset(args: Record<string, unknown>) {
     monitors: [],
   };
   FIXTURE_ESTATE.push(created);
+  estateChanged();
   ASSET_HISTORY.push({ entity_id: created.id, verb: "created", detail: {} });
   return assetRow(created);
 }
@@ -601,6 +641,7 @@ function moveAsset(args: Record<string, unknown>) {
     }
   }
   asset.parent_id = parentId;
+  estateChanged();
   ASSET_HISTORY.push({
     entity_id: asset.id,
     verb: "moved",
@@ -636,6 +677,7 @@ function deleteAsset(args: Record<string, unknown>) {
     if (route.target_id === asset.id) route.target_id = null;
   }
   FIXTURE_ESTATE.splice(FIXTURE_ESTATE.indexOf(asset), 1);
+  estateChanged();
   return null;
 }
 
@@ -649,7 +691,7 @@ function assetRow(asset: FixtureAsset): AssetRow {
   const inside = worst(under.map((held) => held.status));
   return {
     ...row,
-    has_children: FIXTURE_ESTATE.some((other) => other.parent_id === asset.id),
+    has_children: heldBy(asset.id).length > 0,
     health: worst([asset.status, inside]),
     inside,
     problems_inside: under.filter((held) => PROBLEM.includes(held.status)).length,
@@ -865,7 +907,7 @@ function dependsOnThis(args: Record<string, unknown>) {
       if (relation < held) reached.set(dst, relation);
     };
     for (const from of frontier) {
-      for (const held of FIXTURE_ESTATE.filter((row) => row.parent_id === from)) claim(held.id, null);
+      for (const held of heldBy(from)) claim(held.id, null);
       for (const edge of FIXTURE_DEPENDENCIES.filter((link) => link.to === from)) {
         claim(edge.from, edge.relation);
       }
@@ -875,7 +917,7 @@ function dependsOnThis(args: Record<string, unknown>) {
       .map(([reachedId, relation]) => ({
         // Non-null because every id in `reached` came out of `FIXTURE_ESTATE`
         // or out of a link this file wrote between two of its assets.
-        asset: FIXTURE_ESTATE.find((row) => row.id === reachedId)!,
+        asset: estateIndex().byId.get(reachedId)!,
         relation,
       }))
       .sort((left, right) => left.asset.name.localeCompare(right.asset.name));
@@ -1007,6 +1049,14 @@ export function assetPathText(asset: (typeof FIXTURE_ESTATE)[number]): string | 
 }
 
 /** This feature's commands. */
+/** `handle` with no index left from an earlier command: another module's write may have come between. */
+function fresh<A extends unknown[], R>(handle: (...args: A) => R): (...args: A) => R {
+  return (...args) => {
+    estateChanged();
+    return handle(...args);
+  };
+}
+
 export function handlers(): Handlers {
   return {
     // The estate (#428, writable since #429). Stateful within the session,
@@ -1014,21 +1064,21 @@ export function handlers(): Handlers {
     // here stays that way for as long as the page lives, so the whole create /
     // edit / move walk can be driven in a browser. Nothing is persisted --
     // reload and the estate is the fixture again.
-    asset_tree: (args) => assetColumn(args),
-    get_asset: (args) => assetDetail(args),
+    asset_tree: fresh((args) => assetColumn(args)),
+    get_asset: fresh((args) => assetDetail(args)),
     asset_types: () => ASSET_TYPES,
-    create_asset: (args) => createAsset(args),
-    edit_asset: (args) => editAsset(args),
-    move_asset: (args) => moveAsset(args),
-    delete_asset: (args) => deleteAsset(args),
+    create_asset: fresh((args) => createAsset(args)),
+    edit_asset: fresh((args) => editAsset(args)),
+    move_asset: fresh((args) => moveAsset(args)),
+    delete_asset: fresh((args) => deleteAsset(args)),
     // A route's own read, for the `#/route/<id>` address a click on a route's
     // name opens (#432), and its three writes (#876): in memory like the
     // assets', with no history line, since `routeDetail` has none to draw.
-    depends_on_this: (args) => dependsOnThis(args),
-    get_route: (args) => routeDetail(args),
-    create_route: (args) => createRoute(args),
-    edit_route: (args) => editRoute(args),
-    delete_route: (args) => deleteRoute(args),
+    depends_on_this: fresh((args) => dependsOnThis(args)),
+    get_route: fresh((args) => routeDetail(args)),
+    create_route: fresh((args) => createRoute(args)),
+    edit_route: fresh((args) => editRoute(args)),
+    delete_route: fresh((args) => deleteRoute(args)),
   };
 }
 

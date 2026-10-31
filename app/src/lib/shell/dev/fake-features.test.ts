@@ -10,7 +10,8 @@ import { repoOfRow, underRepoHash } from "../../tf/repo/repo";
 import { dayRows, offerRuns } from "../../tf/time/day-view";
 import { demoHandlers, holdBack } from "./fake-tauri";
 import { historyBuilds } from "./fake/builds";
-import { fakeRoleScope } from "./fake/corpus";
+import { CORPUS, corpusListBuilds, fakeRoleScope } from "./fake/corpus";
+import { estateScans } from "./fake/estate";
 import { FIXTURE_SOURCES } from "./fake/sources";
 
 const MODULES = import.meta.glob<{ handlers?: unknown }>("./fake/*.ts", { eager: true });
@@ -815,4 +816,72 @@ test("?fake-hold-view=<prefix> holds back the sections it names and answers the 
   const answered = await Promise.race([held.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 20))]);
   expect(answered).toBe(false);
   expect(h["entity_view"]!({ entityId: "gitea:tidewater/payout-service", section: "files" })).not.toBeInstanceOf(Promise);
+});
+
+// -- the estate and corpus reads, one pass over the fixture per read (#2221) --
+
+type Row = { id: string; has_children: boolean; problems_inside: number; health: string };
+
+test("an estate read scans the fixture once, however many rows it answers (#2221)", () => {
+  const h = demoHandlers() as Calls;
+  const top = h["asset_tree"]!({}) as Row[];
+  const rack = top[0]!.id;
+  for (let i = 0; i < 40; i += 1) {
+    h["create_asset"]!({ typeId: "vm", name: `scan-${i}`, parentId: rack });
+  }
+  // Each row walked its subtree with one whole-fixture filter per node:
+  // 5,000 VMs under one host cost 1.5 s of fake time.
+  const before = estateScans;
+  h["asset_tree"]!({});
+  h["get_asset"]!({ assetId: rack });
+  h["depends_on_this"]!({ assetId: rack });
+  expect(estateScans - before).toBe(3);
+});
+
+test("an estate read after a write answers from the written estate (#2221)", () => {
+  const h = demoHandlers() as Calls;
+  const top = h["asset_tree"]!({}) as Row[];
+  const leafOf = (parent: string): string => {
+    const held = h["asset_tree"]!({ parentId: parent }) as Row[];
+    const next = held.find((row) => row.has_children);
+    return next ? leafOf(next.id) : held[0]!.id;
+  };
+  const leaf = leafOf(top[0]!.id);
+  const row = () => (h["get_asset"]!({ assetId: leaf }) as { asset: Row }).asset;
+  expect(row().has_children).toBe(false);
+  const made = h["create_asset"]!({ typeId: "vm", name: "under the leaf", parentId: leaf }) as Row;
+  expect(row().has_children).toBe(true);
+  expect((h["depends_on_this"]!({ assetId: leaf }) as { assets: { asset: Row }[] }).assets.map((line) => line.asset.id)).toContain(made.id);
+  h["move_asset"]!({ assetId: made.id, newParentId: null });
+  expect(row().has_children).toBe(false);
+  expect((h["asset_tree"]!({}) as Row[]).map((top) => top.id)).toContain(made.id);
+  h["move_asset"]!({ assetId: made.id, newParentId: leaf });
+  expect(row().has_children).toBe(true);
+  h["delete_asset"]!({ assetId: made.id });
+  expect(row().has_children).toBe(false);
+});
+
+test("list_entities works a walk's filter out once and its pages from it (#2221)", () => {
+  const h = demoHandlers() as Calls;
+  const filter = { sources: [], kinds: ["repo"], order: "updated_desc" };
+  const page = (offset: number) => h["list_entities"]!({ filter, limit: 2, offset }) as EntityPage;
+  const first = page(0);
+  expect(first.total).toBeGreaterThan(4);
+  // `readAllRows` asks for every 1,000-row page; each filtered and sorted the whole corpus.
+  const before = corpusListBuilds;
+  const walked = [...page(0).rows];
+  for (let offset = 2; offset < first.total; offset += 2) walked.push(...page(offset).rows);
+  expect(corpusListBuilds - before).toBe(1);
+  const whole = (h["list_entities"]!({ filter, limit: 1000, offset: 0 }) as EntityPage).rows;
+  expect(walked.map((row) => row.entity_id)).toEqual(whole.map((row) => row.entity_id));
+});
+
+test("list_entities' first page reads the corpus as it is now (#2221)", () => {
+  const h = demoHandlers() as Calls;
+  const filter = { sources: [], kinds: ["repo"], order: "updated_desc" };
+  const total = () => (h["list_entities"]!({ filter, limit: 2, offset: 0 }) as EntityPage).total;
+  const was = total();
+  h["list_entities"]!({ filter, limit: 2, offset: 2 });
+  CORPUS.push({ ...CORPUS.find((entry) => entry.kind === "repo")!, entity_id: "mock:tidewater/new-repo" });
+  expect(total()).toBe(was + 1);
 });
