@@ -107,8 +107,19 @@ fn reviews() -> Value {
     ])
 }
 
+/// The pull request's commits, newest first: Gitea 1.27 and Forgejo 17 both
+/// list `/pulls/{n}/commits` that way (measured #2321, certified by
+/// `live_gitea`'s seeded pull request test).
 fn pr_commits() -> Value {
     json!([
+        {
+            "sha": HEAD_SHA,
+            "created": "2026-08-22T11:42:00Z",
+            "commit": {
+                "message": "PAY-231: jitter in backoff",
+                "author": { "name": "Mara Lindqvist", "date": "2026-08-22T11:42:00Z" }
+            }
+        },
         {
             "sha": FIRST_SHA,
             "created": "2026-08-21T17:30:00Z",
@@ -117,14 +128,6 @@ fn pr_commits() -> Value {
             "commit": {
                 "message": "PAY-231: retry SEPA payouts on transient PSP errors\n\nlong body",
                 "author": { "name": "Mara Lindqvist", "date": "2026-08-21T17:30:00Z" }
-            }
-        },
-        {
-            "sha": HEAD_SHA,
-            "created": "2026-08-22T11:42:00Z",
-            "commit": {
-                "message": "PAY-231: jitter in backoff",
-                "author": { "name": "Mara Lindqvist", "date": "2026-08-22T11:42:00Z" }
             }
         }
     ])
@@ -444,6 +447,16 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
         rows,
         &[
             ViewRow {
+                entity_id: Some(format!("gitea:tidewater/payout-service@{HEAD_SHA}")),
+                title: "PAY-231: jitter in backoff".into(),
+                meta: Some("Mara Lindqvist · 2026-08-22".into()),
+                tone: None,
+                chip: Some("c90d11a3f5".into()),
+                url: None,
+                commit: None,
+                author: Some("Mara Lindqvist".into()),
+            },
+            ViewRow {
                 entity_id: Some(format!("gitea:tidewater/payout-service@{FIRST_SHA}")),
                 title: "PAY-231: retry SEPA payouts on transient PSP errors".into(),
                 meta: Some("Mara Lindqvist · 2026-08-21".into()),
@@ -452,16 +465,6 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
                 url: Some(format!(
                     "https://gitea.example/tidewater/payout-service/commit/{FIRST_SHA}"
                 )),
-                commit: None,
-                author: Some("Mara Lindqvist".into()),
-            },
-            ViewRow {
-                entity_id: Some(format!("gitea:tidewater/payout-service@{HEAD_SHA}")),
-                title: "PAY-231: jitter in backoff".into(),
-                meta: Some("Mara Lindqvist · 2026-08-22".into()),
-                tone: None,
-                chip: Some("c90d11a3f5".into()),
-                url: None,
                 commit: None,
                 author: Some("Mara Lindqvist".into()),
             },
@@ -663,11 +666,11 @@ async fn the_files_tab_names_its_range_commits_and_the_viewers_last_review() {
     assert_eq!(
         picked,
         [
+            (HEAD_SHA, "PAY-231: jitter in backoff"),
             (
                 FIRST_SHA,
                 "PAY-231: retry SEPA payouts on transient PSP errors"
             ),
-            (HEAD_SHA, "PAY-231: jitter in backoff"),
         ]
     );
     // A record without its merge base names no range: nothing to read whole at.
@@ -3458,8 +3461,7 @@ async fn standing(server: &MockServer, head: &str, tip: &str, diff: &str, priori
     pull["merge_base"] = json!(MERGE_BASE);
     record_says(server, pull, priority, None).await;
     let mut listed = pr_commits();
-    listed[1]["sha"] = json!(tip);
-    let listed = json!([listed[1], listed[0]]);
+    listed[0]["sha"] = json!(tip);
     Mock::given(method("GET"))
         .and(path(format!("{REPO}/pulls/142/commits")))
         .respond_with(

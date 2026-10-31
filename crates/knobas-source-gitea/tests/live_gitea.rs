@@ -696,15 +696,38 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
     for row in rows {
         println!("  commit: {:?} {} ({:?})", row.chip, row.title, row.meta);
     }
-    let server: Vec<String> = get(format!(
+    let listing = get(format!(
         "pulls/{number}/commits?files=false&verification=false"
     ))
-    .await
-    .as_array()
-    .expect("a commit listing")
-    .iter()
-    .filter_map(|c| c["sha"].as_str().map(str::to_owned))
-    .collect();
+    .await;
+    let listing = listing.as_array().expect("a commit listing");
+    let server: Vec<String> = listing
+        .iter()
+        .filter_map(|c| c["sha"].as_str().map(str::to_owned))
+        .collect();
+    // The server lists them newest first (#2322): the seed pushes the
+    // branch's commits in `when` order, so the seeded ones come back reversed.
+    // The adapter (`listed`, `range::of`, the kept diff's head) and the
+    // wiremock fake's `pr_commits` both rest on this order.
+    let listed_seeded: Vec<&str> = listing
+        .iter()
+        .filter_map(|c| c["commit"]["message"].as_str())
+        .map(|m| m.lines().next().unwrap_or_default())
+        .filter(|m| seeded.iter().any(|c| c["msg"] == *m))
+        .collect();
+    let newest_first: Vec<&str> = seeded
+        .iter()
+        .rev()
+        .map(|c| c["msg"].as_str().unwrap())
+        .collect();
+    assert!(
+        newest_first.len() >= 2,
+        "{id}: the seed puts several commits on it"
+    );
+    assert_eq!(
+        listed_seeded, newest_first,
+        "{id}: `/pulls/{{n}}/commits` lists newest first"
+    );
     let addressed: Vec<String> = rows
         .iter()
         .map(|r| {
