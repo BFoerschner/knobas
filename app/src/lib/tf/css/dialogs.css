@@ -11,7 +11,7 @@
 .tf-dialog header h2 { font-size: var(--t-xl); }
 .tf-dialog .tf-body { padding: 14px 18px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
 .tf-dialog footer {
-  padding: 12px 18px; border-top: 1px solid var(--rule); display: flex; gap: 8px; justify-content: flex-end;
+  padding: 12px 18px; border-top: 1px solid var(--rule); display: flex; gap: var(--control-gap); justify-content: flex-end;
   background: var(--sheet-2);
 }
 .tf-dialog footer .tf-first { margin-right: auto; }

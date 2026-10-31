@@ -163,13 +163,24 @@
   });
 </script>
 
-<header class="tf-stg-h">
-  <h1>Notes and capture</h1>
-  <p>Pages are the place for documents in this version. Your notes are kept, and can come back.</p>
+<header class="tf-stg-h tf-stg-srch">
+  <div>
+    <h1>Notes and capture</h1>
+    <p>Pages are the place for documents in this version. Your notes are kept, and can come back.</p>
+  </div>
+  {#if error !== null}
+    <div class="tf-acts"><button class="tf-btn" onclick={load}>Try again</button></div>
+  {:else if view !== null}
+    <div class="tf-acts">
+      <button class="tf-btn" disabled={busy} onclick={() => void exportNotes()}>Export notes as Markdown</button>
+      <button class="tf-btn tf-ghost" disabled={view.note_count === 0} onclick={() => void openMove()}
+        >Move to Confluence…</button
+      >
+    </div>
+  {/if}
 </header>
 {#if error !== null}
   <p class="tf-stg-p tf-stg-errt">Could not read the notes setting: {error}</p>
-  <div class="tf-stg-acts"><button class="tf-btn" onclick={load}>Try again</button></div>
 {:else if view !== null}
   <div class="tf-stg-row">
     <div class="tf-stg-l">
@@ -205,12 +216,6 @@
     <div class="tf-stg-l">Your notes</div>
     <div class="tf-stg-c"><span>{notesLine(view.note_count, view.last_note_at, now())}</span></div>
   </div>
-  <div class="tf-stg-acts">
-    <button class="tf-btn" disabled={busy} onclick={() => void exportNotes()}>Export notes as Markdown</button>
-    <button class="tf-btn tf-ghost" disabled={view.note_count === 0} onclick={() => void openMove()}
-      >Move to Confluence…</button
-    >
-  </div>
 {/if}
 
 {#if editing}
@@ -235,10 +240,10 @@
       {#if saveError !== null}<p class="tf-fail">{saveFailed ? `Could not save the shortcut: ${saveError}` : `Not registered: ${saveError}`}</p>{/if}
     {/snippet}
     {#snippet footer()}
-      <button class="tf-btn" onclick={() => (editing = false)}>Cancel</button>
       {#if view?.accelerator != null}
-        <button class="tf-btn tf-ghost" disabled={saving} onclick={() => void saveShortcut(null)}>Clear</button>
+        <button class="tf-btn tf-ghost tf-first" disabled={saving} onclick={() => void saveShortcut(null)}>Clear</button>
       {/if}
+      <button class="tf-btn tf-ghost" onclick={() => (editing = false)}>Cancel</button>
       <button
         class="tf-btn tf-primary"
         disabled={saving || typed === "" || typed === (view?.accelerator ?? "")}
@@ -257,7 +262,7 @@
       </div>
     {/snippet}
     {#snippet footer()}
-      <button class="tf-btn" onclick={() => (moving = false)}>Cancel</button>
+      <button class="tf-btn tf-ghost" onclick={() => (moving = false)}>Cancel</button>
       <button class="tf-btn tf-primary" disabled={sending || chosen === null} onclick={() => void move()}>{moveLabel}</button>
     {/snippet}
   </TfDialog>

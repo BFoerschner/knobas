@@ -79,7 +79,7 @@
       <span class="tf-dim tf-dnote">Pick the default with the round button.</span>
     {/snippet}
     {#snippet footer()}
-      <button type="button" class="tf-btn" onclick={() => (editing = "add")}>Add an application…</button>
+      <button type="button" class="tf-btn tf-first" onclick={() => (editing = "add")}>Add an application…</button>
       <button type="button" class="tf-btn tf-primary" onclick={onclose}>Done</button>
     {/snippet}
   </TfDialog>

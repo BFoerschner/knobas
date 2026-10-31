@@ -38,7 +38,7 @@
 .tf-wq-gone {
   padding: 8px 10px; border: 1px dashed var(--rule); border-radius: 4px; color: var(--ink-2); font-size: var(--t-xs);
 }
-.tf-wq-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.tf-wq-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
 /* The footer's line and ADR-0012's sentence stack beside the buttons. */
 .tf-wq-foot { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-wq-guarantee { font-size: var(--t-xs); color: var(--ink-2); }

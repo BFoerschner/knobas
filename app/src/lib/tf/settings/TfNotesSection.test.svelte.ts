@@ -355,3 +355,30 @@ test("a page the source refuses nothing under, or cannot tell, is picked as befo
   await pickAndMove();
   expect(fake.moved).toEqual(["wiki:98500"]);
 });
+
+/** #2284: the page's actions on its title line; the dialogs' Cancel a ghost, an extra action far left. */
+test("Notes puts Export and Move on the title line, and its dialogs follow the footer rule", async () => {
+  const s = stub();
+  await render(s.ports);
+  expect([...target.querySelectorAll<HTMLElement>(".tf-stg-h .tf-acts .tf-btn")].map((b) => b.textContent!.trim())).toEqual([
+    "Export notes as Markdown",
+    "Move to Confluence…",
+  ]);
+  expect(target.querySelectorAll(":scope > .tf-stg-acts")).toHaveLength(0);
+  const footer = () => [...document.querySelectorAll<HTMLElement>('[role="dialog"] footer .tf-btn')].map((b) => [b.textContent!.trim(), b.className]);
+  button("Change capture shortcut").click();
+  flushSync();
+  expect(footer()).toEqual([
+    ["Clear", "tf-btn tf-ghost tf-first"],
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Save", "tf-btn tf-primary"],
+  ]);
+  [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] footer button')].find((b) => b.textContent!.trim() === "Cancel")!.click();
+  flushSync();
+  button("Move to Confluence…").click();
+  await settle();
+  expect(footer()).toEqual([
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Move 37 notes", "tf-btn tf-primary"],
+  ]);
+});

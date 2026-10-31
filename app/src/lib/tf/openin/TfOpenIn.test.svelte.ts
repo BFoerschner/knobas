@@ -482,6 +482,11 @@ test("Try it on an application being edited saves the edit over it and opens it 
 test("Manage applications: the radio picks the default, ↑ moves one up, Edit… opens it with Remove", async () => {
   const dialog = await openDialog("Manage applications…");
   expect(text(dialog.querySelector("h2"))).toBe("Applications for Open in…");
+  // #2289: the extra action on the far left, then the primary.
+  expect([...dialog.querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [text(b), b.className])).toEqual([
+    ["Add an application…", "tf-btn tf-first"],
+    ["Done", "tf-btn tf-primary"],
+  ]);
   const radios = [...dialog.querySelectorAll<HTMLInputElement>("input[type='radio']")];
   expect(radios.map((radio) => radio.checked)).toEqual([false, true]);
   radios[0]!.click();
@@ -499,6 +504,13 @@ test("Manage applications: the radio picks the default, ↑ moves one up, Edit�
   const edit = document.querySelector<HTMLElement>("[role='dialog']")!;
   expect(text(edit.querySelector("h2"))).toBe("Edit an application");
   expect(edit.querySelector<HTMLInputElement>("#tf-app-name")!.value).toBe("VS Code");
+  // #2289: the extra actions on the far left, *Remove* drawn as a destructive start; then ghost Cancel, then the primary.
+  expect([...edit.querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [text(b).replace(/ on .*/, " on …"), b.className])).toEqual([
+    ["Remove", "tf-btn tf-ghost tf-danger"],
+    ["Try it on …", "tf-btn tf-first"],
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Save", "tf-btn tf-primary"],
+  ]);
   button("Remove", edit).click();
   await settle();
   expect(calls.saved.at(-1)![0].map((draft) => draft.id)).toEqual(["terminal"]);
