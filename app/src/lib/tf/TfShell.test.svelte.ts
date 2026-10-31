@@ -1513,6 +1513,13 @@ test("every role view's header draws Sync now, once, and a view of no role draws
   expect(syncButton()).toBeNull();
 });
 
+test("Docs draws its Sync now last in its header (#2286)", async () => {
+  start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
+  await at("#/docs");
+  expect(syncButton()?.parentElement?.matches(".tf-fhead .tf-acts")).toBe(true);
+  expect(syncButton()?.parentElement?.lastElementChild).toBe(syncButton());
+});
+
 test("Code's Sync now is a default-size header button, last after New pull request (#2238, #2295)", async () => {
   start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
   await at("#/code");
