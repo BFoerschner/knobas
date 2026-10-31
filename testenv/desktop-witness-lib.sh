@@ -856,3 +856,34 @@ witness_window_size() {
     done
     printf 'window: %sx%s points (the drivers need %s wide)\n' "$width" "$height" "$WITNESS_MIN_WIDTH"
 }
+
+# --- a pull request's worktree (#2316, ADR-0035) -----------------------------
+
+# pr_worktree <clones root> <owner> <repo> <number>
+#
+# Where knobas puts a pull request's worktree: `<root>/pull-requests/<owner>/
+# <repo>-<n>`, three levels down so the clones-root scan never takes it for
+# the repository's checkout (ADR-0035, *Where*).
+pr_worktree() {
+    printf '%s/pull-requests/%s/%s-%s\n' "$1" "$2" "$3" "$4"
+}
+
+# fetched_ref <FETCH_HEAD text> <ref> <url>
+#
+# Whether git's FETCH_HEAD records <ref> fetched from <url>: a line
+# `<sha>\t\t'<ref>' of <url>`, git having dropped the URL's `.git`. The
+# driver's proof that knobas fetched the head into the worktree over the
+# source's address, and did not find it in the clone the driver made.
+fetched_ref() {
+    local want_url=${3%.git} line sha rest
+    while IFS= read -r line; do
+        sha=${line%%$'\t'*}
+        rest=${line#*$'\t'}
+        case $sha in
+        '' | *[!0-9a-f]*) continue ;;
+        esac
+        [ "${#sha}" -ge 40 ] || continue
+        [ "$rest" = $'\t'"'$2' of $want_url" ] && return 0
+    done <<<"$1"
+    return 1
+}

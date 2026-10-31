@@ -1277,6 +1277,39 @@ check_contains "a window the window server cannot find is refused" "no window on
 check_contains "and fails the step" "status 1" "$said"
 rm -rf "$size_tmp"
 
+# --- the pull-request-open-in driver's pure parts (#2316) -------------------
+#
+# Where ADR-0035 puts a pull request's worktree, and the line git leaves in the
+# worktree's own FETCH_HEAD: the driver's proof that knobas fetched the head
+# over https, rather than finding it in the clone the driver made.
+
+check "a pull request's worktree is three levels under the clones root" \
+    "/tmp/w/clones/pull-requests/tidewater/payout-service-142" \
+    "$(pr_worktree /tmp/w/clones tidewater payout-service 142)"
+
+# check_fetched <what> <yes|no> <FETCH_HEAD> <ref> <url>
+check_fetched() {
+    local outcome=no
+    fetched_ref "$3" "$4" "$5" && outcome=yes
+    check "$1" "$2" "$outcome"
+}
+# Recorded from git 2.50 on the dev Mac, 2026-10-31: git drops `.git` from the
+# URL it names, and the ref is quoted.
+fetch_head=$(printf "1262a5b610480702cfed4a1f3f76c87bf68fae55\t\t'refs/pull/142/head' of https://knobas-gitea.orb.local/tidewater/payout-service\n")
+check_fetched "the pull request's ref, from the URL knobas clones from" yes "$fetch_head" \
+    refs/pull/142/head https://knobas-gitea.orb.local/tidewater/payout-service.git
+check_fetched "the URL may be given without .git" yes "$fetch_head" \
+    refs/pull/142/head https://knobas-gitea.orb.local/tidewater/payout-service
+check_fetched "another pull request's ref is not this one" no "$fetch_head" \
+    refs/pull/14/head https://knobas-gitea.orb.local/tidewater/payout-service.git
+check_fetched "the same ref from another host is not this fetch" no "$fetch_head" \
+    refs/pull/142/head http://127.0.0.1:3000/tidewater/payout-service.git
+check_fetched "a line without a sha is not a fetch" no \
+    "$(printf "\t\t'refs/pull/142/head' of https://knobas-gitea.orb.local/tidewater/payout-service\n")" \
+    refs/pull/142/head https://knobas-gitea.orb.local/tidewater/payout-service
+check_fetched "no FETCH_HEAD is no fetch" no "" \
+    refs/pull/142/head https://knobas-gitea.orb.local/tidewater/payout-service
+
 # --- verdict ----------------------------------------------------------------
 
 if [ "$failures" -ne 0 ]; then
