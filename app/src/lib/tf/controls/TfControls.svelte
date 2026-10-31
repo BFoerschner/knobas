@@ -37,6 +37,9 @@
   </div>
 
   <div class="tf-fbar">
+    <label class="tf-fsearch">
+      <input type="text" placeholder="Filter" aria-label="Filter" />
+    </label>
     <label class="tf-fsel">
       Branch
       <select aria-label="Branch">

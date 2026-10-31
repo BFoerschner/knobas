@@ -132,7 +132,8 @@
 .tf-doc h2 .tf-queued-mark { font-family: var(--sans); vertical-align: middle; }
 .tf-doc .tf-sec-queued { color: var(--muted); white-space: pre-wrap; border-left: 2px dashed var(--rule); padding-left: 10px; }
 /* The Docs search, the outline, the find bar and the writes (#860 to #862) */
-.tf-dl-head .tf-fsearch { max-width: none; flex: none; padding: 6px 9px; }
+/* The column's own search, under the space picker and beside no button: the default control height. */
+.tf-dl-head .tf-fsearch { max-width: none; flex: none; height: var(--control-h); padding: 0 9px; }
 .tf-dl-head .tf-dl-scope { display: flex; }
 .tf-dl-scope button { flex: 1; }
 .tf-dl-hint { font-size: var(--t-2xs); color: var(--ink-2); }

@@ -43,8 +43,8 @@
 }
 .tf-ftreebox > header { display: flex; gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid var(--rule-2); }
 /* Go to file (#2311, mockups/code-area `.tree > header .tf-minif`): the head's field, `T` beside it. */
-/* An input in a row of buttons takes the row's height, here the small 26px (#2238). */
-.tf-ftreebox > header .tf-gotofile { flex: 1; max-width: none; min-width: 0; height: 26px; box-sizing: border-box; }
+/* An input in a row of buttons takes the row's height, here the small one (#2238). */
+.tf-ftreebox > header .tf-gotofile { flex: 1; max-width: none; min-width: 0; height: var(--control-h-sm); }
 .tf-gotofile kbd { flex: none; }
 .tf-ftreebox > header .tf-iconbtn[disabled] { opacity: .45; cursor: default; background: none; }
 .tf-ftreebox > header .tf-iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }

@@ -1,4 +1,6 @@
-/* ---------- the filter bar (#810): one for every list view ---------- */
+/* ---------- the filter bar (#810): one for every list view ----------
+   A panel toolbar in a page body: its search and its selects are at the small control height, beside the
+   segmented control and the pill toggles (Controls, *Form controls*). */
 .tf mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
 .tf-fbar {
   display: flex; flex-wrap: wrap; gap: var(--control-gap); align-items: center; padding: 10px 22px;
@@ -6,7 +8,7 @@
 }
 .tf-fsearch {
   display: flex; align-items: center; gap: 6px; border: 1px solid var(--rule); background: var(--paper);
-  border-radius: 4px; padding: 4px 8px; flex: 1 1 280px; max-width: 360px; color: var(--ink-2);
+  border-radius: 4px; height: var(--control-h-sm); padding: 0 8px; flex: 1 1 280px; max-width: 360px; color: var(--ink-2);
 }
 .tf-fsearch:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
 .tf-fsearch input { border: 0; background: none; outline: none; color: var(--ink); flex: 1; min-width: 0; padding: 1px 0; }
@@ -14,7 +16,8 @@
 .tf-fclear { border: 0; background: none; cursor: pointer; color: var(--ink-2); padding: 0 2px; }
 .tf-fsel { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-fsel select {
-  border: 1px solid var(--rule); background: var(--sheet); border-radius: 4px; padding: 2px 6px; color: var(--ink); max-width: 180px;
+  border: 1px solid var(--rule); background: var(--sheet); border-radius: 4px; height: var(--control-h-sm); padding: 0 6px; color: var(--ink);
+  max-width: 180px;
 }
 .tf-fsel select.tf-set { border-color: var(--ink); font-weight: 600; }
 .tf-fcount { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }

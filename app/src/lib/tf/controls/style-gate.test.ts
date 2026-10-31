@@ -13,6 +13,9 @@
  *   `.tf-trail`, a dialog footer; or a row that holds controls under another name: the filter bar
  *   `.tf-fbar`, the pill toggles `.tf-fchips`, the large decision `.tf-decide`, a `…-btns` row) has a
  *   `gap` other than `var(--control-gap)`;
+ * - (f) a field in a row of buttons (the filter bar's `.tf-fsearch`, or a `select` or `input` in a
+ *   row of buttons or a `.tf-fsel`) is sized by vertical padding or a literal height: it takes the
+ *   row's height from `var(--control-h…)`;
  * - (d) an allowlist entry has no reason;
  * - (e) an allowlist entry matches nothing.
  *
@@ -38,7 +41,7 @@ const ALLOWLIST = join(ROOT, "lib/tf/controls/style-gate-exceptions");
 const CONTROLS_SHEET = "lib/tf/css/chrome.css";
 const SECTION = "docs/specs/2026-10-15-ticket-first-design-system.md, section Controls";
 
-type Rule = "a" | "b" | "c";
+type Rule = "a" | "b" | "c" | "f";
 /** One breach: the rule, the file under `app/src/`, and the selector (a, c) or class (b) it is keyed on. */
 type Violation = { rule: Rule; file: string; key: string; detail: string };
 type Entry = { list: string; line: number; rule: string; file: string; key: string; reason: string };
@@ -153,6 +156,31 @@ function isActions(selector: string): boolean {
   return /^footer(?![\w-])/.test(subject) && parts.slice(0, -1).some((part) => DIALOG.test(part));
 }
 
+/** Is the rule's subject a field in a row of buttons: the filter bar's search, or a `select`/`input` inside such a row or a `.tf-fsel`? */
+function isRowField(selector: string): boolean {
+  const parts = compounds(selector);
+  const subject = parts.at(-1) ?? "";
+  if (/\.tf-fsearch(?![\w-])/.test(subject)) return true;
+  return (
+    /^(?:select|input)(?![\w-])/.test(subject) &&
+    parts.slice(0, -1).some((part) => ACTIONS_CLASS.test(part) || BUTTON_ROW.test(part) || /\.tf-fsel(?![\w-])/.test(part))
+  );
+}
+
+/** What sizes a field other than its token: a literal height, or vertical padding. */
+function fieldSizing(decls: [string, string][]): string[] {
+  const zero = (v: string | undefined) => v === undefined || /^0(px)?$/.test(v);
+  return decls.flatMap(([prop, value]) => {
+    if (/^(?:min-)?height$/.test(prop)) return value.startsWith("var(--control-h") ? [] : [`${prop}: ${value}`];
+    if (/^padding-(?:top|bottom|block(?:-start|-end)?)$/.test(prop)) return zero(value.split(/\s+/)[0]) ? [] : [`${prop}: ${value}`];
+    if (prop === "padding") {
+      const parts = value.split(/\s+/);
+      return zero(parts[0]) && zero(parts[2] ?? parts[0]) ? [] : [`${prop}: ${value}`];
+    }
+    return [];
+  });
+}
+
 /** Is the rule's subject a row of buttons: an actions container, or a row of controls under another name? */
 function isButtonRow(selector: string): boolean {
   return isActions(selector) || BUTTON_ROW.test(compounds(selector).at(-1) ?? "");
@@ -220,6 +248,15 @@ function scan(root: string): Violation[] {
             add({ rule: "b", file, key: name, detail: `styles the unported button class .${name}` });
           }
         }
+        const fieldSize = fieldSizing(decls);
+        if (fieldSize.length > 0 && isRowField(selector)) {
+          add({
+            rule: "f",
+            file,
+            key: selector,
+            detail: `sizes a field in a row of buttons by ${fieldSize.join(", ")}; it takes the row's height, \`height: var(--control-h…)\``,
+          });
+        }
         const gaps = decls.filter(([prop, value]) => /^(?:gap|column-gap)$/.test(prop) && value !== "var(--control-gap)");
         if (gaps.length > 0 && isButtonRow(selector)) {
           add({ rule: "c", file, key: selector, detail: `sets ${gaps.map(([p, v]) => `${p}: ${v}`).join(", ")} on a row of buttons` });
@@ -264,8 +301,8 @@ function gate(violations: Violation[], entries: Entry[]): string[] {
     const id = `${entry.rule} ${entry.file} ${entry.key}`;
     if (!/^\d+\.txt$/.test(entry.list)) {
       failures.push(`${at}: ${id} sits in a file that names no ticket; entries go in the cleanup ticket's \`<ticket>.txt\``);
-    } else if (!/^[abc]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
-      failures.push(`${at}: "${id}" is not \`<rule a|b|c> <file> <selector or class>  <reason>\``);
+    } else if (!/^[abcf]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
+      failures.push(`${at}: "${id}" is not \`<rule a|b|c|f> <file> <selector or class>  <reason>\``);
     } else if (entry.reason === "") {
       failures.push(`(d) ${at}: ${id} has no reason; every exception says why it is one (${SECTION})`);
     } else if (listed.has(id)) {
@@ -451,6 +488,44 @@ test("(c) a row of buttons with a gap other than the control gap fails", () => {
       ].join("\n"),
     }),
   ).toEqual([]);
+});
+
+test("(f) a field in a row of buttons sized by padding or a literal height fails", () => {
+  for (const css of [
+    ".tf-fsearch { display: flex; padding: 4px 8px; }",
+    ".tf-fsel select { border: 1px solid; padding: 2px 6px; }",
+    ".tf-fbar select { height: 24px; }",
+    ".tf-acts input { min-height: 30px; }",
+    ".tf-dl-head .tf-fsearch { padding: 6px 9px; }",
+    ".tf-trail select { padding-top: 3px; }",
+  ]) {
+    const failures = planted({ "lib/tf/css/view.css": css });
+    expect(failures, css).toHaveLength(1);
+    expect(failures[0], css).toMatch(/^\(f\) lib\/tf\/css\/view\.css `[^`]+` sizes a field in a row of buttons by .+; it takes the row's height, `height: var\(--control-h…\)`\. See /);
+  }
+  // The clean twins: the token and horizontal padding, the text box inside the field, a field in a form.
+  expect(
+    planted({
+      "lib/tf/css/view.css": [
+        ".tf-fsearch { height: var(--control-h-sm); padding: 0 8px; }",
+        ".tf-fsel select { height: var(--control-h-sm); padding: 0 6px; }",
+        ".tf-fsearch input { padding: 1px 0; }",
+        ".tf-formgrid input { padding: 5px 8px; }",
+        ".tf-fsearch.tf-wide { padding-left: 4px; max-width: none; }",
+        ".tf-acts select { height: var(--control-h); }",
+      ].join("\n"),
+    }),
+  ).toEqual([]);
+});
+
+test("the filter bar's search and select, and the file tree's Go to file, take the small control height", () => {
+  const height = (sheet: string, selector: string) =>
+    rules(readFileSync(join(ROOT, "lib/tf/css", sheet), "utf8"))
+      .find((rule) => rule.selectors.includes(selector))
+      ?.decls.find(([prop]) => prop === "height")?.[1];
+  expect(height("filter.css", ".tf-fsearch")).toBe("var(--control-h-sm)");
+  expect(height("filter.css", ".tf-fsel select")).toBe("var(--control-h-sm)");
+  expect(height("code.css", ".tf-ftreebox > header .tf-gotofile")).toBe("var(--control-h-sm)");
 });
 
 const BREACH = { "lib/tf/css/pr.css": ".tf-pr-head .tf-btn { padding: 2px 8px; }" };
