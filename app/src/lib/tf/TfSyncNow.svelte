@@ -3,7 +3,7 @@
   into the header of every view whose page names a role. It runs each enabled
   source that fills the role, as the mirror answers it (`sync_role`), says
   *Syncing…* until those runs end, and is not drawn for a role no enabled
-  source fills. A header button, so at the default size (#2238).
+  source fills.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
