@@ -27,7 +27,7 @@ How a whole spec is built on one integration branch with one PR to `main` at the
 
 - **Base.** The worktree is on `issue-<T>`, made from `origin/spec-<N>` at the SHA in the dispatch. First, confirm it with `git merge-base --is-ancestor <SHA> HEAD`. If the worktree isn't on that base, `git reset --hard <SHA>` before any work.
 - **No PR.** Push `issue-<T>`, and write the PR body's content to `<scratchpad>/pr-<T>.md`: what and why, the criteria checked, the head SHA and what ran, the mutation proof, **Rulings**, **Frozen surface**, **Fixed in passing** and **Evidence**. Rulings still go on the issue as a comment, and screenshots still go on `pr-assets/issue-<T>`.
-- **Base for comparisons.** Before shots and diffs are taken against the dispatch SHA on `spec-<N>`, not against `main`. `scripts/gate-scope.sh origin/spec-<N>` says whether a change is front or full.
+- **Base for comparisons.** Before shots and diffs are taken against the dispatch SHA on `spec-<N>`, not against `main`. `scripts/gate-scope.sh origin/spec-<N>` says whether a change is front, scripts or full.
 - **Before reporting**, run `git fetch origin && git merge --no-edit origin/spec-<N>` (a merge, not a rebase). Resolve, re-run the tests beside the change, push, and report the merged head.
 - **Hands off.** Never close an issue, and never push to `spec-<N>` or `main`.
 
