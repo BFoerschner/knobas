@@ -111,9 +111,12 @@ while IFS= read -r f; do
         if grep -qF '@tauri-apps/plugin-' <<< "$lines"; then
           echo "gate-scope: full: $f changes a @tauri-apps/plugin- line, which crates/knobas-app/tests/it/wiring.rs reads" >&2; echo full; exit 0
         fi
-      elif grep -rhF --include='*.rs' --include='*.toml' --include='*.json' "app/$rel" "$root/crates" 2>/dev/null \
-           | grep -qvE '^[[:space:]]*//'; then
-        echo "gate-scope: full: crates/ reads $f" >&2; echo full; exit 0
+      else
+        # Captured first, as above: the hits can outgrow a pipe buffer (#2305).
+        reads=$(grep -rhF --include='*.rs' --include='*.toml' --include='*.json' "app/$rel" "$root/crates" 2>/dev/null || true)
+        if [ -n "$reads" ] && grep -qvE '^[[:space:]]*//' <<< "$reads"; then
+          echo "gate-scope: full: crates/ reads $f" >&2; echo full; exit 0
+        fi
       fi
       while IFS= read -r pin; do
         [ -n "$pin" ] || continue

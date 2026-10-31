@@ -28,7 +28,9 @@ if [ -n "$hits" ] && [ -f "$allow" ]; then
     kept=
     while IFS= read -r line; do
         file=${line%%:*}
-        if printf '%s\n' "$allowed" | grep -qxF -- "$file"; then continue; fi
+        # A here-string, not a pipe: `grep -q` exiting early would SIGPIPE
+        # printf on a list past a pipe buffer, and pipefail fails the `if` (#2305).
+        if grep -qxF -- "$file" <<< "$allowed"; then continue; fi
         kept+="$line"$'\n'
     done <<< "$hits"
     hits=${kept%$'\n'}
