@@ -416,7 +416,7 @@
               oninput={(event) => (property.value = event.currentTarget.value)}
             />
             <button
-              class="btn sm"
+              class="tf-btn tf-sm"
               title="Remove {property.key || 'this property'}"
               onclick={() => properties.splice(index, 1)}
             >
@@ -425,7 +425,7 @@
           </div>
         {/each}
         <button
-          class="btn sm"
+          class="tf-btn tf-sm"
           onclick={() => properties.push({ key: "", kind: "text", value: "" })}
         >
           Add a property
@@ -440,11 +440,11 @@
 
   {#snippet footer()}
     {#if editing}
-      <button class="btn danger" disabled={writing} onclick={() => void drop()}>Delete</button>
+      <button class="tf-btn tf-ghost tf-danger tf-first" disabled={writing} onclick={() => void drop()}>Delete</button>
     {/if}
-    <button class="btn" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
-      class="btn pri"
+      class="tf-btn tf-primary"
       disabled={writing || name.trim() === "" || url.trim() === ""}
       onclick={() => void submit()}
     >
@@ -454,6 +454,13 @@
 </Modal>
 
 <style>
+  /* An edit's *Delete* sits apart on the far left of the footer (design system,
+     Controls, *Dialog footer*). `dialogs.css` does this for `.tf-dialog`; Modal's
+     `.dlg-f` is not one yet (#2292). Placement only, no size. */
+  .tf-first {
+    margin-right: auto;
+  }
+
   .fields {
     display: grid;
     gap: 12px;
