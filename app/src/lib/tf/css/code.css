@@ -20,7 +20,7 @@
 .tf-tabs .tf-tabgrp { flex: none; align-self: center; width: 1px; height: 18px; background: var(--rule); margin: 0 8px; }
 /* The branch picker in the header, at the header's height (#2238 story 6; mockups/code-area `.tf-select`). */
 .tf-bsel {
-  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 4px 0 10px; border: 1px solid var(--rule);
+  display: inline-flex; align-items: center; gap: 6px; height: var(--control-h); padding: 0 4px 0 10px; border: 1px solid var(--rule);
   background: var(--sheet); border-radius: 4px; color: var(--ink); white-space: nowrap;
 }
 .tf-bsel:hover { border-color: var(--ink-2); }

@@ -262,7 +262,7 @@
                   >Open PR</a
                 >{" "}{/if}{#if standing.deletable}<button
                   type="button"
-                  class="tf-btn tf-sm tf-ghost"
+                  class="tf-btn tf-sm tf-danger"
                   aria-disabled={standing.deleteBlocked !== null ? "true" : undefined}
                   title={standing.deleteBlocked ?? undefined}
                   onclick={() => {
@@ -301,7 +301,7 @@
       <button type="button" class="tf-btn tf-ghost" onclick={() => (deleting = null)}>Cancel</button>
       <button
         type="button"
-        class="tf-btn {standing.merged ? 'tf-primary' : 'tf-danger'}"
+        class="tf-btn tf-primary tf-danger"
         disabled={busy}
         onclick={confirmDelete}>Delete branch</button>
     {/snippet}

@@ -2,7 +2,6 @@
 .tf-rbranches td:first-child { width: 34%; }
 .tf-rbranches .tf-racts { text-align: right; }
 .tf-rbranches-note { margin: 8px 0 0; }
-.tf-rdel footer .tf-danger { border-color: var(--err); }
 /* A banner inside a dialog's body: a rounded block, not a strip across a panel. */
 .tf-dialog .tf-dbanner { border: 0; border-radius: 4px; }
 .tf-compare { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
