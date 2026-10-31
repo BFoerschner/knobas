@@ -360,6 +360,21 @@ func values(pid: pid_t) -> Int32 {
 /// keystroke was sent while somebody else had the screen -- without it a driver
 /// would prove only that a key works in the application that is already
 /// listening for keys.
+/// The bundle identifier of the application macOS opens an https URL with:
+/// the default browser, which *Browser* in an "Open in" menu hands its page
+/// to (#2316). Asked of Launch Services, so no Apple Event and no prompt.
+func defaultBrowser() -> Int32 {
+    guard let url = URL(string: "https://example.com/"),
+        let app = NSWorkspace.shared.urlForApplication(toOpen: url),
+        let bundle = Bundle(url: app)?.bundleIdentifier
+    else {
+        FileHandle.standardError.write(Data("ax: Launch Services names no application for https\n".utf8))
+        return 1
+    }
+    print("bundle\t\(bundle)")
+    return 0
+}
+
 func frontmost() -> Int32 {
     guard let app = NSWorkspace.shared.frontmostApplication else {
         FileHandle.standardError.write(Data("ax: no application is frontmost\n".utf8))
@@ -686,6 +701,8 @@ case "close-window" where arguments.count == 2 && integer(1) != nil:
     status = closeWindow(pid: pid_t(integer(1)!))
 case "frontmost" where arguments.count == 1:
     status = frontmost()
+case "default-browser" where arguments.count == 1:
+    status = defaultBrowser()
 case "dump" where arguments.count == 3 && integer(1) != nil && integer(2) != nil:
     status = dump(pid: pid_t(integer(1)!), depth: integer(2)!)
 case "focus" where arguments.count == 3 && integer(1) != nil:
@@ -729,6 +746,7 @@ default:
                    ax windows <pid>
                    ax close-window <pid>
                    ax frontmost
+                   ax default-browser
                    ax dump <pid> <depth>
                    ax focus <pid> <label>
                    ax press <pid> <label>

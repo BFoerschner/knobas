@@ -693,6 +693,44 @@ pin_label $tf/repo/TfRepo.svelte '<TfOpenIn entityId={repoId}' \
 pin_label ../crates/knobas-source-mock/src/lib.rs 'https://tidewater.example' \
     "the demo corpus still lives under the host the driver's clone points at"
 
+# The pull-request-open-in driver's own names (#2316): Settings › Sources'
+# *Add a source* and *Remove…*, the application's pull-request command, and
+# the pull request header's *Open in…* menu.
+pin_label $tf/settings/settings.ts '["sources", "Sources"]' \
+    "Settings still lists the Sources section pull-request-open-in opens"
+pin_label $tf/settings/TfSources.svelte 'onclick={onadd}>+ Add a source</button>' \
+    "Sources still offers + Add a source"
+pin_label ../crates/knobas-source-gitea/src/lib.rs 'name: "Gitea".to_owned()' \
+    "the Gitea adapter is still called Gitea, the radio the driver clicks"
+pin_label $tf/settings/TfAddSource.svelte '<label for="tf-add-address">Address</label>' \
+    "Add a source's address field is still labelled Address"
+pin_label $tf/settings/TfAddSource.svelte '"Password" : "Token"' \
+    "Add a source still labels a token field Token"
+pin_label $tf/settings/TfAddSource.svelte '<label for="tf-add-name">Name</label>' \
+    "Add a source's name field is still labelled Name"
+pin_label $tf/settings/TfAddSource.svelte '<label for="tf-add-id">Id</label>' \
+    "Add a source's id field is still labelled Id"
+pin_label $tf/settings/TfAddSource.svelte 'onclick={() => void test()}>Test connection</button>' \
+    "Add a source still tests with Test connection"
+pin_label $tf/settings/TfAddSource.svelte 'onclick={() => void add()}>Add source</button>' \
+    "Add a source still adds with Add source"
+pin_label $tf/settings/TfSourcePage.svelte '}}>Remove…</button>' \
+    "a source's page still offers Remove…"
+pin_label $tf/settings/TfSourcePage.svelte '<span>Delete what it synced<small>' \
+    "removing a source still offers Delete what it synced"
+pin_label $tf/settings/TfSourcePage.svelte 'onclick={() => void remove()}>Remove</button>' \
+    "removing a source is still confirmed with Remove"
+pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-pr">For a pull request</label>' \
+    "the application dialog's pull-request command is still labelled For a pull request"
+pin_label $tf/openin/TfOpenObject.svelte '}}>Open in… <span class="tf-dim" aria-hidden="true">▾</span></button' \
+    "the pull request's menu button is still named Open in…, its arrow hidden"
+pin_label $tf/openin/TfOpenObject.svelte '<b>Diff tool</b>' \
+    "the menu's Diff tool item still starts Diff tool"
+pin_label $tf/openin/TfOpenObject.svelte '<b>Browser</b><span class="tf-mono">{page}</span>' \
+    "the menu's Browser item still starts Browser and names the page"
+pin_label $tf/pr/TfPr.svelte 'header.base !== null && header.head !== null' \
+    "the pull request header draws Open in… once the source view names both branches"
+
 # --- names are rendered text, and the new shell transforms none ------------
 #
 # Measured on the dev Mac on 2026-09-08: WebKit names an element by its

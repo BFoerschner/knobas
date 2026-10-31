@@ -1248,3 +1248,18 @@ test("open-in-editor: Settings › Checkouts and Open in… lands on the section
   await openSettingsSection("Checkouts and Open in…");
   await landsOn(landing("open-in-editor", "settings-checkouts"));
 });
+
+test("pull-request-open-in: Settings › Sources lands on the section the driver adds its source in", async () => {
+  await openSettingsSection("Sources");
+  await landsOn(landing("pull-request-open-in", "settings-sources"));
+});
+
+test("pull-request-open-in: Settings › Checkouts and Open in… lands on the section the driver sets the root in", async () => {
+  await openSettingsSection("Checkouts and Open in…");
+  await landsOn(landing("pull-request-open-in", "settings-checkouts"));
+});
+
+test("pull-request-open-in: ⌘K lands on the launcher's query box", async () => {
+  await pressLauncherKey();
+  await landsOn(landing("pull-request-open-in", "cmd-k"));
+});
