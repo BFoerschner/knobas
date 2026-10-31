@@ -201,7 +201,7 @@
     ready: boolean;
     /** What follows `repo` in the address. */
     rest: string[];
-    /** The job the reader was last in, as a ticket key. */
+    /** The chosen job (spec #2227), as a ticket key. */
     job: string | null;
     /** Where `Esc` goes, which the breadcrumb's hint names; `null` where it does nothing (#2228). */
     back?: EscTarget | null;

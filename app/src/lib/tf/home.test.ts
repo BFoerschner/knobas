@@ -13,13 +13,13 @@ function at(hash: string) {
   };
 }
 
-test("a window opened on no address lands on Tickets, at #/tickets (#881)", () => {
+test("a window opened on no address lands on the Job page, at #/job (#881, spec #2227)", () => {
   for (const blank of ["", "#", "#/"]) {
     const place = at(blank);
     homeIfBlank(place);
     expect(place.replaced).toEqual([HOME]);
   }
-  expect(HOME).toBe("#/tickets");
+  expect(HOME).toBe("#/job");
 });
 
 test("an address the window was opened on is kept", () => {

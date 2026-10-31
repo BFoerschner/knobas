@@ -153,7 +153,7 @@
     ready: boolean;
     /** What follows `monitors` in the address: `unmonitored`, or nothing. */
     rest: string[];
-    /** The job the reader was last in, as a ticket key. */
+    /** The chosen job (spec #2227), as a ticket key. */
     job: string | null;
     ports?: MonitorPorts;
     /** Injectable clock, for the bars and the header's *synced*. */

@@ -45,7 +45,7 @@
 
 <script lang="ts">
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { onMount, untrack, type Snippet } from "svelte";
+  import { onMount, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
   import { commandSteps, diffPipelines, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
@@ -82,9 +82,10 @@
   import { sourceReadings } from "./status";
   import { sourceRoles } from "./roles.svelte";
   import { entityAddress, legacyAddress } from "./address";
-  import { isEntityId, keyOf, resolveTicket } from "./job/job";
+  import { keyOf } from "./job/job";
   import { bridgePorts, type JobPorts } from "./job/ports";
-  import { breadcrumbJob, linkRequest } from "./job/current.svelte";
+  import { breadcrumbJob, currentJob, linkRequest } from "./job/current.svelte";
+  import { chosenJob } from "./job/chosen.svelte";
   import TfPage from "./TfPage.svelte";
   import { roleSyncs as sharedRoleSyncs, type RoleSyncs } from "./role-sync.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
@@ -256,23 +257,15 @@
   });
 
   /**
-   * The job the reader was last in: the Job tab's and the launcher's job
-   * (R-1.2). Only a job actually opened, as prototype-6's `S.job`. Neither
-   * the breadcrumb nor `Esc` reads it (#2228). `key` is what the tab names;
-   * `segment` is the address
-   * it was opened at, a bare key or an entity id (#1476), which every way
-   * back to it uses, so a key two sources hold returns to the one the
-   * reader was on (#1525). Kept, not replaced, while the segment stays: a tab
-   * switch is a new route, and a new object would re-run every read keyed on
-   * it, the nav job's among them (#1987).
+   * The chosen job (spec #2227, `job/chosen.svelte.ts`), read from the
+   * browser storage when the shell mounts, as a restart does. It replaces the
+   * "job you were last in" (#2230): the Job tab, the pages' *This job* and
+   * the launcher's job elsewhere than on a job page read it. `key` is what
+   * the tab names; `entityId` is where every way back to it goes, so a key
+   * two sources hold returns to the one that was chosen (#1525).
    */
-  let lastJob = $state<{ key: string; segment: string } | null>(null);
-  $effect(() => {
-    if (route.view !== "job" || route.key === null) return;
-    const segment = route.key;
-    if (untrack(() => lastJob?.segment) === segment) return;
-    lastJob = { key: isEntityId(segment) ? keyOf(segment) : segment, segment };
-  });
+  chosenJob.load();
+  const chosen = $derived(chosenJob.id === null ? null : { key: keyOf(chosenJob.id), entityId: chosenJob.id });
 
   /**
    * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228):
@@ -286,77 +279,34 @@
     if (target === null || target.kind !== "entity" || assetTargetId(target) !== null) return null;
     return targetReading(target);
   });
-  /** The Job tab's job: the last one opened, else the timer's ticket (R-1.2). */
-  const navJob = $derived(lastJob?.key ?? timedTicket);
-  /** Where the Job tab goes: the address the last job was opened at, else the timer's ticket by its id. */
-  const navJobAt = $derived.by(() => {
-    if (lastJob !== null) return lastJob.segment;
+  /**
+   * The Job tab's job (R-1.2, spec #2227): the chosen job, else the ticket a
+   * timer runs on that was not started here (a start chooses its ticket),
+   * with its entity id, which `create_block` needs (#1027). Both are ids
+   * already, so nothing is read for it.
+   */
+  const navJobId = $derived.by(() => {
+    if (chosen !== null) return chosen;
     const target = timer.current?.target ?? null;
-    return timedTicket === null || target === null || target.kind !== "entity" ? null : target.entity_id;
+    return timedTicket === null || target === null || target.kind !== "entity" ? null : { key: timedTicket, entityId: target.entity_id };
   });
 
   /**
-   * The current job as an entity id, which `create_block` needs (#1027). The
-   * timer's ticket is already one; the last job opened is read at the address
-   * it was opened at, as the job page reads it (#1525): an id as itself, a
-   * bare key under every source. `null` while it is not known.
+   * The job the launcher's *Link to <key>* targets, and ⌘T falls back to
+   * (`breadcrumbJob`, spec #2227): the job on screen on the Job page (`null`
+   * while it is still being read), otherwise the chosen job. Never a guessed
+   * job: with none chosen there is none.
    */
-  let navJobId = $state<{ key: string; entityId: string } | null>(null);
-  /** The address `navJobId` was read for; plain, so the effect does not re-run on it. */
-  let navJobRead: string | null = null;
   $effect(() => {
-    const key = navJob;
-    const segment = lastJob?.segment ?? null;
-    // The timer is read only with no job opened: a start or stop must not re-run a read for a segment already held (#1687).
-    const timed = segment === null ? (timer.current?.target ?? null) : null;
-    if (key === null || !lifecycle.ready) {
-      navJobId = null;
-      navJobRead = null;
-      return;
-    }
-    if (segment === null && timed !== null && timed.kind === "entity") {
-      navJobId = { key, entityId: timed.entity_id };
-      navJobRead = null;
-      return;
-    }
-    // Another source's ticket under the same key is another job: never answer with the last one's id.
-    if (segment !== navJobRead) navJobId = null;
-    navJobRead = segment;
-    let stale = false;
-    void jobPorts
-      .listSources()
-      .then((sources) => resolveTicket(segment ?? key, sources, jobPorts.getEntity))
-      .then((found) => {
-        if (!stale) navJobId = found === null ? null : { key, entityId: found.row.entity_id };
-      })
-      .catch(() => {
-        if (!stale) navJobId = null;
-      });
-    return () => {
-      stale = true;
-    };
-  });
-
-  /**
-   * The job a page stands for (#1500), for the launcher's *Link to <key>*:
-   * the job page's, or the last job on a view opened from it. Tickets, Inbox
-   * and Settings are no job's.
-   */
-  const crumbKey = $derived.by(() => {
-    if (route.view === "job") return route.key === null ? null : (lastJob?.key ?? null);
-    if (route.view === "item") return lastJob?.key ?? null;
-    if (route.view === "full" && route.section !== "inbox" && route.section !== "settings") return lastJob?.key ?? null;
-    return null;
-  });
-  $effect(() => {
-    const id = navJobId;
-    breadcrumbJob.set(crumbKey !== null && id !== null && id.key === crumbKey ? id : null);
+    const onScreen = currentJob.entityId;
+    const job = route.view === "job" ? (onScreen === null ? null : { key: keyOf(onScreen), entityId: onScreen }) : chosen;
+    breadcrumbJob.set(job);
     return () => breadcrumbJob.set(null);
   });
   // A link asked for a job is the job page's to take; leaving for any other
   // page before it did drops it, so a later visit does not open the dialog.
   $effect(() => {
-    if (route.view !== "job" || route.key === null) linkRequest.drop();
+    if (route.view !== "job") linkRequest.drop();
   });
 
   // ---- the status bar's reads, once the database can answer ----
@@ -574,8 +524,8 @@
 <div class="tf">
   <TfTopBar
     current={sectionOf(route)}
-    job={navJob}
-    jobAt={navJobAt}
+    job={navJobId?.key ?? null}
+    jobAt={navJobId?.entityId ?? null}
     {inbox}
     {badges}
     {timer}
@@ -589,8 +539,8 @@
       ctx={{
         route,
         ready: lifecycle.ready,
-        job: lastJob?.key ?? null,
-        jobAt: lastJob?.segment ?? null,
+        job: chosen?.key ?? null,
+        jobAt: chosen?.entityId ?? null,
         back,
         timedTicket,
         navJob: navJobId,

@@ -177,7 +177,7 @@
     ready: boolean;
     /** What follows the address's first segment. */
     rest: string[];
-    /** The job the reader was last in, for *This job* and *Link to <job>*. */
+    /** The chosen job (spec #2227), for *This job* and *Link to <job>*. */
     job: string | null;
     /** The address the job was opened at (#1525), which its ticket is read by; its key when omitted. */
     jobAt?: string | null;

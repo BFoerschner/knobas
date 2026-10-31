@@ -27,9 +27,9 @@
   }: {
     /** The section the address lights, or `null`. */
     current: Section | null;
-    /** The job the Job tab opens: the last one visited, else the timer's. */
+    /** The job the Job tab opens: the chosen job (spec #2227), else the timer's ticket. */
     job: string | null;
-    /** That job's address (#1525): where it was opened, else the timer's ticket id; its key when omitted. */
+    /** That job's entity id (#1525), which the tab's address names; its key when omitted. */
     jobAt?: string | null;
     inbox: Pick<Inbox, "count">;
     badges: Pick<Badges, "builds" | "monitors" | "proposals">;

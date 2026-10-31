@@ -47,8 +47,8 @@ export const SECTION_NAME: Record<Section, string> = {
 
 /** The main navigation, left to right (R-1.1). Settings is the cog, not a tab. */
 export const NAV: readonly Section[] = [
-  "tickets",
   "job",
+  "tickets",
   "inbox",
   "code",
   "builds",
@@ -95,8 +95,10 @@ const SECTION_OF: Record<string, Section> = {
 /**
  * Where the reader is.
  *
- * - `tickets` is home: the empty address lands here, as in the prototype.
- * - `job` carries the ticket key and the job's tab (`#/job/PAY-231/conv`),
+ * - `tickets` is the list of tickets, and its saved views.
+ * - `job` is home (`home.ts`, spec #2227): the empty address lands on a
+ *   bare `#/job`, which draws the chosen job (`job/chosen.svelte.ts`). It
+ *   carries the ticket key and the job's tab (`#/job/PAY-231/conv`),
  *   either of which may be absent.
  * - `full` is every other section: a full view, its first segment kept as
  *   `head` and whatever follows it as `rest` for the ticket that builds it.

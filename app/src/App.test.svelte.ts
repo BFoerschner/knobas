@@ -572,18 +572,21 @@ test("a rejection landing while the boot seed is in flight is not written back t
 });
 
 /**
- * **The app boots straight into Tickets** (#881, spec #808 *Rooms UI
- * removal*): the ticket-first shell, at `#/tickets`, with no setting to read
- * and nothing of the rooms UI drawn.
+ * **The app boots straight into the Job page** (#881, spec #2227 *Home*):
+ * the ticket-first shell, at `#/job`, with nothing of the rooms UI drawn and,
+ * with no job chosen yet, the empty state that points at Tickets.
  */
-test("the window opens on Tickets at #/tickets, in the ticket-first shell", async () => {
+test("the window opens on the Job page at #/job, in the ticket-first shell", async () => {
   dbReady = true;
   expect(location.hash, "the test must start on no address").toBe("");
+  const historyAtStart = history.length;
   app = mount(App, { target, props: {} });
   await until(() => target.querySelector(".tf") !== null, "the new shell never drew");
-  expect(location.hash).toBe("#/tickets");
+  expect(location.hash).toBe("#/job");
+  expect(history.length, "the blank address is replaced, not pushed").toBe(historyAtStart);
   expect(target.querySelector(".tf-top .tf-brand")?.textContent).toBe("knobas");
-  expect(target.querySelector('.tf-nav [aria-current="page"]')?.textContent?.trim()).toBe("Tickets");
+  expect(target.querySelector('.tf-nav [aria-current="page"]')?.textContent?.trim()).toBe("Job");
+  expect(target.textContent).toContain("No job is chosen yet");
 });
 
 /**
@@ -611,7 +614,7 @@ test("finishing the wizard lands on Tickets with the launcher open, and the new 
   press("Finish");
 
   await until(() => target.querySelector(".tf-top") !== null, "the shell never drew after the wizard");
-  expect(location.hash).toBe("#/tickets");
+  expect(location.hash, "§14a lands on Tickets, not home: no job is chosen yet").toBe("#/tickets");
   await until(
     () => target.querySelector('.tf [role="dialog"].tf-launch') !== null,
     "the launcher never opened over the landing",
@@ -1082,11 +1085,11 @@ test("⌘T on a page with no job opens the picker", async () => {
 });
 
 /**
- * **⌘T on a view opened from a job starts on that job** (#1435, R-1.4, the
- * #1416 reading of "the job"): 'PAY-231 › Time' has nothing in front of the
- * reader, and the breadcrumb's job is what the timer starts on.
+ * **⌘T off the Job page starts on the chosen job** (#1435, R-1.4, spec
+ * #2227): Time has nothing in front of the reader, and the chosen job, which
+ * opening `#/job/mock:PAY-231` made it, is what the timer starts on.
  */
-test("⌘T on a view opened from a job starts the timer on the breadcrumb's job", async () => {
+test("⌘T on a view with nothing in front starts the timer on the chosen job", async () => {
   dbReady = true;
   entityAnswer = jobTicket();
   location.hash = "#/job/mock:PAY-231";
@@ -1096,14 +1099,17 @@ test("⌘T on a view opened from a job starts the timer on the breadcrumb's job"
   await until(() => target.querySelector(".tf-crumbs") !== null, "Time never drew its breadcrumb");
   await turns();
   pressTimerKey();
-  await until(() => timerStarts.length > 0, "⌘T never started a timer on the breadcrumb's job");
+  await until(() => timerStarts.length > 0, "⌘T never started a timer on the chosen job");
   expect(timerStarts).toEqual([{ kind: "entity", entity_id: "mock:PAY-231" }]);
   expect(pickerTitle(), "the picker opened over 'PAY-231 › Time'").toBeNull();
   await until(() => target.querySelector(".tf-timer:not(.tf-off)")?.textContent?.includes("PAY-231") ?? false, "the chip never read PAY-231");
 });
 
-/** #1416: Inbox and Settings offer no job, though a job was opened before them. */
-test.each(["#/inbox", "#/settings"])("⌘T on %s after a job asks with the picker", async (hash) => {
+/**
+ * Spec #2227 retires #1416's "Inbox and Settings are no job's": with nothing
+ * in front, ⌘T falls back to the chosen job on every page off the Job page.
+ */
+test.each(["#/inbox", "#/settings"])("⌘T on %s starts the timer on the chosen job", async (hash) => {
   dbReady = true;
   entityAnswer = jobTicket();
   location.hash = "#/job/mock:PAY-231";
@@ -1113,8 +1119,9 @@ test.each(["#/inbox", "#/settings"])("⌘T on %s after a job asks with the picke
   await until(() => target.querySelector(".tf-crumbs") !== null, `${hash} never drew its breadcrumb`);
   await turns();
   pressTimerKey();
-  await until(() => pickerTitle() !== null, `⌘T on ${hash} never asked`);
-  expect(timerStarts).toEqual([]);
+  await until(() => timerStarts.length > 0, `⌘T on ${hash} never started a timer on the chosen job`);
+  expect(timerStarts).toEqual([{ kind: "entity", entity_id: "mock:PAY-231" }]);
+  expect(pickerTitle(), `the picker opened on ${hash}`).toBeNull();
 });
 
 // --- where the desktop-witness drivers land (#1968) ------------------------

@@ -22,13 +22,13 @@ export const currentJob = {
 };
 
 /**
- * The job a page stands for (#1500): the job page's, or the job the reader
- * was last in on a view opened from it (Time, Builds), with the ticket's
- * entity id. The breadcrumb no longer draws it (#2228); the name stays until
- * spec #2227 re-sources it. It is `null` on Tickets, Inbox and Settings, and while the
- * key is still being resolved. The shell reports it; the launcher's *Link to
- * <key>* row is offered against it. Never the newest open job: a guessed job
- * would take links to the wrong ticket in silence.
+ * The job a page stands for (#1500, re-sourced by spec #2227): on the Job page
+ * the job on screen (`null` while its address is still being resolved),
+ * everywhere else the chosen job (`chosen.svelte.ts`), with the ticket's
+ * entity id; `null` when no job is chosen. The breadcrumb no longer draws it
+ * (#2228); the name is kept. The shell reports it; the launcher's *Link to
+ * <key>* row is offered against it, and ⌘T falls back to it. Never the newest
+ * open job: a guessed job would take links to the wrong ticket in silence.
  */
 let crumb = $state<{ key: string; entityId: string } | null>(null);
 

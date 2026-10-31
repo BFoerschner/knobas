@@ -73,7 +73,7 @@
   }: {
     /** Whether the database answers yet. */
     ready: boolean;
-    /** The job the reader was last in, as a ticket key: what *This job* keeps. */
+    /** The chosen job (spec #2227), as a ticket key: what *This job* keeps. */
     job: string | null;
     /** The live store. A prop so a test needs no Tauri bridge. */
     inbox?: Inbox;

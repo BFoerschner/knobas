@@ -110,32 +110,77 @@ test("on the job's own ticket only the timer row is offered", async () => {
 });
 
 /**
- * Tickets, Inbox and Settings are no job's (#1416's ruling), though the last
- * two start their breadcrumb at the job last opened, so each is reached after
- * opening one: the row is missing because of the page, not for want of a job.
+ * Off the Job page, *Link to <key>* targets the chosen job (spec #2227),
+ * on every page: opening `#/job/PAY-231` chose it.
  */
 test.each([
+  ["#/builds", "Builds"],
+  ["#/time", "Time"],
   ["#/tickets", "All tickets"],
   ["#/inbox", "Inbox"],
   ["#/settings", "Settings"],
-])("on %s only the timer row is offered, with a job opened before", async (hash, drawn) => {
+])("on %s, Link to names the chosen job", async (hash, drawn) => {
   await openOn("#/job/PAY-231", "Retry failed SEPA payouts");
   location.hash = hash;
   await until(() => currentJob.entityId === null, `${hash} never replaced the job`);
   await until(() => target.textContent?.includes(drawn) ?? false, `${hash} never drew ${drawn}`);
   await search("list:not-monitored");
   press("Tab");
+  expect(chain()).toEqual(["Link to PAY-231", `Start timer on ${FIRST_UNMONITORED}`]);
+});
+
+test("with no chosen job, Link to is not offered on Builds: never a guessed job", async () => {
+  await openOn("#/builds", "Builds");
+  await search("list:not-monitored");
+  press("Tab");
   expect(chain()).toEqual([`Start timer on ${FIRST_UNMONITORED}`]);
 });
 
-test("over a view opened from a job, Link to names that job", async () => {
-  await openOn("#/job/PAY-231", "Retry failed SEPA payouts");
-  location.hash = "#/time";
-  await until(() => target.querySelector(".tf-kept:not([hidden]) .tf-crumbs") !== null, "Time never drew its breadcrumb");
+/** The job's key the shown page draws, or `null` where no job is drawn. */
+function jobOnScreen(): string | null {
+  return target.querySelector(".tf-kept:not([hidden]) .tf-jobcard .tf-jobkey")?.textContent ?? null;
+}
+
+test("starting the timer on a ticket makes it the chosen job: #/job draws it, and Link to names it", async () => {
+  await openOn("#/time", "Time");
+  location.hash = "#/job";
+  await until(() => target.textContent?.includes("No job is chosen yet") ?? false, "#/job never drew its empty state");
+  await search("PAY-231");
+  press("Tab");
+  expect(chain()).toEqual(["Start timer on Retry failed SEPA payouts"]);
+  press("Enter");
+  await until(() => jobOnScreen() === "PAY-231", "#/job never drew the ticket the timer started on");
+  expect(location.hash, "#/job stays the home address").toBe("#/job");
+  press("Escape");
+  location.hash = "#/builds";
+  await until(() => target.querySelector(".tf-nav a[aria-current='page']")?.textContent?.trim() === "Builds", "Builds never drew");
   await search("list:not-monitored");
   press("Tab");
   expect(chain()).toEqual(["Link to PAY-231", `Start timer on ${FIRST_UNMONITORED}`]);
 });
+
+test("running Start work on a ticket makes it the chosen job", async () => {
+  await openOn("#/job/PAY-240", "Payout dashboard latency");
+  const run = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-kept:not([hidden]) button")].find((b) => b.textContent === "Run all steps");
+  await until(() => run() !== undefined && !run()!.disabled, "Start work never offered Run all steps");
+  // Another ticket chosen meanwhile, by a timer started on it from the launcher.
+  await search("PAY-231");
+  press("Tab");
+  expect(chain()).toEqual(["Link to PAY-240", "Start timer on Retry failed SEPA payouts"]);
+  press("ArrowDown");
+  press("Enter");
+  await until(() => jobTab() === "Job PAY-231", "the timer's ticket never became the chosen job");
+  // The timer step is skipped, so the choice is Start work's own.
+  const timerRow = [...target.querySelectorAll<HTMLElement>(".tf-kept:not([hidden]) .tf-steps > *")].find((row) => row.textContent?.includes("Start timer"));
+  [...(timerRow?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find((b) => b.textContent === "Skip")?.click();
+  run()!.click();
+  await until(() => jobTab() === "Job PAY-240", "Start work never made its ticket the chosen job");
+});
+
+/** The nav's Job entry as read: it names the chosen job. */
+function jobTab(): string | null {
+  return target.querySelector(".tf-nav a:first-child")?.textContent?.replace(/\s+/g, " ").trim() ?? null;
+}
 
 /** The job's link dialog, once it is up. */
 function linkDialog(): HTMLElement | null {

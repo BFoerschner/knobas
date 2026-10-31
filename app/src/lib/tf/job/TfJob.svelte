@@ -93,6 +93,7 @@
   import { createJobReader } from "./job-reader.svelte";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { currentJob, linkRequest, type LinkTarget } from "./current.svelte";
+  import { chosenJob } from "./chosen.svelte";
   import { askAgain, echoWrite, echoOn, echoesOn, sameWords, settleEchoes, watchEchoes } from "../queued.svelte";
   import { jobHash } from "../route";
   import TfCodeSection from "./TfCodeSection.svelte";
@@ -216,6 +217,14 @@
   // The job on screen is what the timer chip and ⌘T start on (R-1.4); a job
   // keep-alive holds hidden (#2247) is not on screen.
   $effect(() => (pageShown() ? currentJob.set(detail?.row.entity_id ?? null) : undefined));
+  // A job address resolved on screen makes its ticket the chosen job (spec
+  // #2227): a bookmark, history, a link or the Tickets preview's button. By
+  // its id, so a re-read of the same ticket (a timer start, a refresh) does
+  // not take the choice back from a ticket chosen since.
+  const resolvedId = $derived(detail?.row.entity_id ?? null);
+  $effect(() => {
+    if (pageShown() && resolvedId !== null) chosenJob.choose(resolvedId);
+  });
 
   // *Link to <key>* from the launcher (#1500): this job's own dialog, over its
   // Connections drawer, with the result preset, once the job has drawn.

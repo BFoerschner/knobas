@@ -69,7 +69,7 @@
   }: {
     /** Whether the database answers yet. */
     ready: boolean;
-    /** The job the reader was last in, as a ticket key: what *This job* keeps. */
+    /** The chosen job (spec #2227), as a ticket key: what *This job* keeps. */
     job: string | null;
     /** The addressed proposal's link id, `null` for `#/review`. */
     sid: string | null;

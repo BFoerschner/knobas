@@ -118,9 +118,9 @@
     head: string;
     /** What follows the head in the address. */
     rest: string[];
-    /** The job the reader was last in, for *This job*. */
+    /** The chosen job (spec #2227), for *This job*. */
     job: string | null;
-    /** The address the job was opened at (#1525), which its ticket is read by; its key when omitted. */
+    /** The chosen job's entity id (#1525), which its ticket is read by; its key when omitted. */
     jobAt?: string | null;
     /** Where `Esc` goes, which the breadcrumb's hint names; `null` where it does nothing (#2228). */
     back?: EscTarget | null;
