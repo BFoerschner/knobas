@@ -160,7 +160,7 @@
             <span class="t">{target.title}</span>
             <span class="k muted">{labelOf(target.kind)}</span>
             <button
-              class="btn sm"
+              class="tf-btn tf-sm"
               id="{listId}-target"
               onclick={() => {
                 target = null;
@@ -261,8 +261,8 @@
   {/snippet}
 
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>Cancel</button>
-    <button class="btn pri" disabled={!target || writing} onclick={() => void submit()}>
+    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-primary" disabled={!target || writing} onclick={() => void submit()}>
       {writing ? "Linking…" : "Link"}
     </button>
   {/snippet}

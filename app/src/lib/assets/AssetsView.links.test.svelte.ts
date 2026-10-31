@@ -355,7 +355,7 @@ test("unlinking withdraws the link and re-reads the asset", async () => {
   await settle();
   const before = reads.length;
 
-  target.querySelectorAll<HTMLButtonElement>(".sec .row.lrow .btn")[0]?.click();
+  target.querySelectorAll<HTMLButtonElement>(".sec .row.lrow .tf-btn")[0]?.click();
   await settle();
 
   expect(unlinked).toEqual(["link-deploy"]);
