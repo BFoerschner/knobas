@@ -8,7 +8,7 @@
 .tf-ib time { white-space: nowrap; font-size: var(--t-xs); color: var(--ink-2); grid-row: 1 / span 2; font-variant-numeric: tabular-nums; }
 .tf-ib .tf-what { font-weight: 600; }
 .tf-ib .tf-ctx { grid-column: 2; font-size: var(--t-sm); color: var(--ink-2); }
-.tf-ib .tf-acts { grid-row: 1 / span 2; grid-column: 3; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.tf-ib .tf-acts { grid-row: 1 / span 2; grid-column: 3; display: flex; gap: var(--control-gap); flex-wrap: wrap; justify-content: flex-end; }
 .tf-isnooze { grid-column: 2 / span 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding-top: 6px; }
 .tf-isnooze input { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 6px; background: var(--sheet); color: var(--ink); font: inherit; font-size: var(--t-sm); }
 .tf-ishelf { font-size: var(--t-sm); }

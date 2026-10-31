@@ -49,7 +49,7 @@
 .tf-arow:first-child { border-top: 0; }
 .tf-arow .tf-nm { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-arow .tf-sz { text-align: right; color: var(--ink-2); font-size: var(--t-xs); }
-.tf-arow .tf-acts { display: flex; gap: 6px; justify-content: flex-end; }
+.tf-arow .tf-acts { display: flex; gap: var(--control-gap); justify-content: flex-end; }
 .tf-arow.tf-dir { font-weight: 600; background: var(--sheet-2); }
 .tf-arow.tf-dir > button.tf-fold { all: unset; cursor: pointer; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-arow.tf-dir > button.tf-fold:focus-visible { outline: 2px solid var(--focus); }

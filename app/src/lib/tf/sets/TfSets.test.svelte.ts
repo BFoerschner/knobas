@@ -360,6 +360,12 @@ test("a query the backend refuses says why, and Add pattern waits", async () => 
   expect(button("Add pattern").disabled).toBe(true);
 });
 
+test("the set editor's Delete starts a destructive action: red text, as Note's (#2288)", async () => {
+  await draw(["payout-stack"]);
+  expect(button("Delete").className).toBe("tf-btn tf-danger");
+  expect(button("Delete").closest(".tf-fhead .tf-acts")).not.toBeNull();
+});
+
 test("Delete removes the set and goes back to the list", async () => {
   await draw(["payout-stack"]);
   button("Delete").click();

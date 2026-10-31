@@ -604,6 +604,15 @@ test("a row whose source reads one monitor draws Refresh, one whose source does 
   expect(probe.refreshed).toEqual([]);
 });
 
+test("a row's Refresh is a small button in the row's trailing group, last after Pause (#2288)", async () => {
+  await draw([], null, ports({ monitorRoster: async () => [monitor("kuma:1", "payouts /health")] }));
+  const trail = rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-trail")!;
+  expect([...trail.querySelectorAll("button")].map((b) => [text(b), b.className])).toEqual([
+    ["Pause", "tf-btn tf-sm tf-ghost"],
+    ["Refresh", "tf-btn tf-sm tf-refresh"],
+  ]);
+});
+
 test("Refresh reads the monitor from its source, then the roster again over what it drew, and settles a pause on that read (#2138)", async () => {
   let roster = ROSTER;
   let reads = 0;

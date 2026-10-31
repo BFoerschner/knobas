@@ -90,7 +90,6 @@
 .tf-rvq { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-rvq .tf-fbar { position: static; padding: 10px 12px; }
 .tf-rvq .tf-fsearch { max-width: none; flex-basis: 200px; }
-.tf-rvq .tf-fchips button { padding: 1px 9px; }
 .tf-ql { overflow: auto; flex: 1; }
 .tf-ql a {
   display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 2px 8px; padding: 8px 12px;
