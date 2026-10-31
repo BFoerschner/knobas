@@ -23,7 +23,7 @@
     /** Read the detail again, over what it drew. */
     reread: () => Promise<void> | void;
     /** The view's *Sync now*. */
-    sync?: Snippet;
+    sync?: Snippet | undefined;
   } = $props();
 </script>
 

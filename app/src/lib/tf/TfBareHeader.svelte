@@ -7,7 +7,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
-  let { title, sync }: { title: string; sync?: Snippet } = $props();
+  let { title, sync }: { title: string; sync?: Snippet | undefined } = $props();
 </script>
 
 <header class="tf-fhead">
