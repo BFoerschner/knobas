@@ -283,6 +283,15 @@ pub async fn read(
     }))
 }
 
+/// The declared [`Markup`](crate::payload::Markup) word (#2308), or `text`
+/// for none and for a word this build does not know: text is never parsed as
+/// markup the source did not say it wrote.
+#[must_use]
+pub fn markup_of(word: Option<String>) -> crate::payload::Markup {
+    word.and_then(|w| serde_json::from_value(serde_json::Value::String(w)).ok())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod markup_tests {
     use super::markup_of;
@@ -297,13 +306,4 @@ mod markup_tests {
         assert_eq!(markup_of(Some("asciidoc".to_owned())), Markup::Text);
         assert_eq!(markup_of(None), Markup::Text);
     }
-}
-
-/// The declared [`Markup`](crate::payload::Markup) word (#2308), or `text`
-/// for none and for a word this build does not know: text is never parsed as
-/// markup the source did not say it wrote.
-#[must_use]
-pub fn markup_of(word: Option<String>) -> crate::payload::Markup {
-    word.and_then(|w| serde_json::from_value(serde_json::Value::String(w)).ok())
-        .unwrap_or_default()
 }

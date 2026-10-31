@@ -1858,6 +1858,8 @@ const CASES: Case[] = [
                 status: "To Do",
                 priority: null,
                 body_text: "",
+                description: "h2. Why",
+                markup: "jira_wiki",
               } as never),
             listSources: () => deferred([] as never),
             listEntities: () => deferred({ rows: [], total: 0, tally: null, groups: null } as never),

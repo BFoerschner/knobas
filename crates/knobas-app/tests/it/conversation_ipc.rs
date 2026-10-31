@@ -10,8 +10,8 @@
 use knobas_app::commands::entity::get_entity_inner;
 use knobas_app::conversation::{thread, visit};
 use knobas_app::sources::Registry;
-use knobas_source::Markup;
 use knobas_core::entity::EntityRef;
+use knobas_source::Markup;
 
 async fn pool() -> sqlx::PgPool {
     let pool = knobas_db::test_util::test_pool().await;
@@ -228,13 +228,20 @@ async fn a_payload_of_another_shape_reads_as_no_comments() {
     ] {
         let id = issue(&pool, payload.clone()).await;
         assert!(
-            thread(&pool, &Registry::for_process(), &id).await.unwrap().comments.is_empty(),
+            thread(&pool, &Registry::for_process(), &id)
+                .await
+                .unwrap()
+                .comments
+                .is_empty(),
             "{payload}"
         );
     }
     let missing = format!("jira:{}", key());
     assert_eq!(
-        thread(&pool, &Registry::for_process(), &missing).await.unwrap_err().code,
+        thread(&pool, &Registry::for_process(), &missing)
+            .await
+            .unwrap_err()
+            .code,
         knobas_app::IpcErrorCode::NotFound
     );
 }
@@ -334,7 +341,9 @@ async fn the_thread_is_the_comments_and_nothing_else() {
     .await;
     confirmed(&pool, &ticket, &merged).await;
 
-    let read = thread(&pool, &Registry::for_process(), &ticket).await.unwrap();
+    let read = thread(&pool, &Registry::for_process(), &ticket)
+        .await
+        .unwrap();
     let wire = serde_json::to_value(&read).unwrap();
     let mut keys: Vec<_> = wire.as_object().unwrap().keys().cloned().collect();
     keys.sort();

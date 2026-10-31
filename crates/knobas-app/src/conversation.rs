@@ -305,10 +305,21 @@ mod tests {
     #[test]
     fn a_comment_with_no_text_is_not_a_comment_and_a_bad_stamp_is_no_time() {
         assert_eq!(
-            comment_of(&serde_json::json!({ "body": "  " }), &me(), knobas_source::Markup::Text),
+            comment_of(
+                &serde_json::json!({ "body": "  " }),
+                &me(),
+                knobas_source::Markup::Text
+            ),
             None
         );
-        assert_eq!(comment_of(&serde_json::json!({ "body": 4 }), &me(), knobas_source::Markup::Text), None);
+        assert_eq!(
+            comment_of(
+                &serde_json::json!({ "body": 4 }),
+                &me(),
+                knobas_source::Markup::Text
+            ),
+            None
+        );
         let undated = comment_of(
             &serde_json::json!({ "body": "x", "created": "yesterday" }),
             &me(),
