@@ -14,5 +14,5 @@ export const page = definePage({
   matches: (route): route is BuildsRoute => route.view === "full" && route.section === "builds",
   role: CI,
   component: TfBuilds,
-  props: ({ route, ready, job, jobAt }) => ({ ready, head: route.head, rest: route.rest, job, jobAt }),
+  props: ({ route, ready, job, jobAt, back }) => ({ ready, head: route.head, rest: route.rest, job, jobAt, back }),
 });

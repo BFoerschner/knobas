@@ -102,7 +102,7 @@
     ready: boolean;
     /** What follows `code` in the address: `repos`, `prs`, or nothing. */
     rest: string[];
-    /** The job the reader was last in, as a ticket key. */
+    /** The chosen job (spec #2227), as a ticket key. */
     job: string | null;
     ports?: CodePorts;
     /** Injectable clock, for the time column and *Idle > 5 days*. */

@@ -13,5 +13,5 @@ export const page = definePage({
   matches: (route): route is DocsRoute => route.view === "full" && route.section === "docs",
   role: WIKI,
   component: TfDocs,
-  props: ({ route, ready, job, jobAt, jobPorts, layers }) => ({ ready, rest: route.rest, job, jobAt, linkPorts: jobPorts, layers }),
+  props: ({ route, ready, job, jobAt, jobPorts, layers, back }) => ({ ready, rest: route.rest, job, jobAt, linkPorts: jobPorts, layers, back }),
 });

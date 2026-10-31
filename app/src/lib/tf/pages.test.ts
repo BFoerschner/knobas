@@ -20,12 +20,14 @@ import { page as repoPage } from "./repo/page";
 import { page as reviewPage } from "./review/page";
 import { page as settingsPage } from "./settings/page";
 import { page as setsPage } from "./sets/page";
+import { page as ticketPage } from "./ticket/page";
 import { page as ticketsPage } from "./tickets/page";
 import { page as timePage } from "./time/page";
 
 test("the glob finds every feature's page", () => {
   expect(PAGES).toContain(ticketsPage);
   expect(PAGES).toContain(jobPage);
+  expect(PAGES).toContain(ticketPage);
   expect(PAGES).toContain(timePage);
   expect(PAGES).toContain(settingsPage);
   expect(PAGES).toContain(reviewPage);
@@ -45,6 +47,8 @@ const ADDRESSES = [
   ["#/tickets", "tickets"],
   ["", "tickets"],
   ["#/tickets/PAY-231", "tickets"],
+  ["#/ticket/jira%3APAY-231", "ticket"],
+  ["#/ticket", "tickets"],
   ["#/job/PAY-231", "job"],
   ["#/job/PAY-231/code", "job"],
   ["#/job", "shell"],
@@ -88,6 +92,7 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
   const names = new Map([
     [ticketsPage, "tickets"],
     [jobPage, "job"],
+    [ticketPage, "ticket"],
     [timePage, "time"],
     [settingsPage, "settings"],
     [reviewPage, "review"],

@@ -13,6 +13,7 @@
  * to. `#/map` and `#/assets` are the retired global map and asset page (D13);
  * they still belong to Dependencies, which took their places.
  */
+import { repoHash } from "./repo/repo";
 
 /** A place in the main navigation, or Settings, which has its cog instead. */
 export type Section =
@@ -45,10 +46,30 @@ export const SECTION_NAME: Record<Section, string> = {
   settings: "Settings",
 };
 
+/**
+ * What a deeper address under a section is called (spec #2227): the one map
+ * the breadcrumb (`TfCrumbs.svelte`) and `Esc`'s *Back to <name>*
+ * (`escape.ts`) both read, so the two cannot name a place differently. A
+ * run's and a pull request's word goes before a bare number (*Run #4811*); a
+ * repository's page is *Repository* until it has read its title.
+ */
+export const HEAD_NAME: Readonly<Record<string, string>> = {
+  build: "Run",
+  pr: "Pull request",
+  repo: "Repository",
+  assets: "Asset tree",
+  asset: "Asset",
+  route: "Route",
+  map: "Map",
+  branch: "Branch",
+  commit: "Commit",
+  diff: "Diff",
+};
+
 /** The main navigation, left to right (R-1.1). Settings is the cog, not a tab. */
 export const NAV: readonly Section[] = [
-  "tickets",
   "job",
+  "tickets",
   "inbox",
   "code",
   "builds",
@@ -95,9 +116,15 @@ const SECTION_OF: Record<string, Section> = {
 /**
  * Where the reader is.
  *
- * - `tickets` is home: the empty address lands here, as in the prototype.
- * - `job` carries the ticket key and the job's tab (`#/job/PAY-231/conv`),
+ * - `tickets` is the list of tickets, and its saved views.
+ * - `job` is home (`home.ts`, spec #2227): the empty address lands on a
+ *   bare `#/job`, which draws the chosen job (`job/chosen.svelte.ts`). It
+ *   carries the ticket key and the job's tab (`#/job/PAY-231/conv`),
  *   either of which may be absent.
+ * - `ticket` is one ticket's own page, `#/ticket/<entity id>` (spec #2227):
+ *   the ticket to read, under Tickets in the nav, the way a run opens under
+ *   Builds. It is not the job: opening it chooses no job and promotes no
+ *   context. A bare `#/ticket` with no id is Tickets.
  * - `full` is every other section: a full view, its first segment kept as
  *   `head` and whatever follows it as `rest` for the ticket that builds it.
  * - `item` is one item's page, `#/item/<entity id>` (#1201): the source's
@@ -107,13 +134,14 @@ const SECTION_OF: Record<string, Section> = {
  *   sends the reader to Settings › Notes and capture while notes hide (D10).
  *   It lights no nav entry either: notes have none.
  * - `unknown` is an address this shell has no place for. The shell first asks
- *   `address.ts` whether it is a rooms-UI address (`#/ticket/jira:PAY-231`,
- *   #1085) and replaces it; otherwise saying so beats drawing Tickets under
+ *   `address.ts` whether it is a rooms-UI address (`#/ctx/all`, #1085) and
+ *   replaces it; otherwise saying so beats drawing Tickets under
  *   an address that names something else.
  */
 export type TfRoute =
   | { view: "tickets"; rest: string[] }
   | { view: "job"; key: string | null; tab: string | null }
+  | { view: "ticket"; id: string }
   | {
       view: "full";
       section: Exclude<Section, "tickets" | "job">;
@@ -136,6 +164,8 @@ export function parseTfHash(hash: string): TfRoute {
   if (head === "") return { view: "tickets", rest: [] };
   if (head === "item" && segments[1]) return { view: "item", id: segments[1] };
   if (head === "note" && segments[1]) return { view: "note", id: segments[1] };
+  // A ticket's own page (spec #2227); with no id it is Tickets, so a cut-off address still lands.
+  if (head === "ticket") return segments[1] ? { view: "ticket", id: segments[1] } : { view: "tickets", rest: [] };
   // The rooms UI's *Monitors* tab beside *Tree* (#448), whose roster went with
   // #1087: Monitors lives at `#/monitors` now (R-11.3), so this is an old
   // address, which `address.ts`' `legacyAddress` sends there (#1459).
@@ -151,7 +181,7 @@ export function parseTfHash(hash: string): TfRoute {
 
 /** The section a route lights in the nav, or `null` for an unknown address. */
 export function sectionOf(route: TfRoute): Section | null {
-  if (route.view === "tickets") return "tickets";
+  if (route.view === "tickets" || route.view === "ticket") return "tickets";
   if (route.view === "job") return "job";
   if (route.view === "full") return route.section;
   return null;
@@ -172,6 +202,48 @@ export function sectionHash(section: Exclude<Section, "job">): string {
  */
 export function jobHash(segment: string | null): string {
   return segment === null ? "#/job" : `#/job/${encodeURIComponent(segment)}`;
+}
+
+/**
+ * Whether `route` is a section's top page (spec #2227): the address its nav
+ * entry or the Settings cog links to. Tickets with a saved view open
+ * (`#/tickets/<view>`) and a job on its first tab (`#/job/<key>`, and the
+ * bare `#/job`) count, so `Esc` there does nothing.
+ */
+export function isTopPage(route: TfRoute): boolean {
+  if (route.view === "tickets") return true;
+  if (route.view === "job") return route.tab === null;
+  if (route.view === "full") return route.head === route.section && route.rest.length === 0;
+  return false;
+}
+
+/**
+ * Where a detail page sits under (spec #2227, story 29), as an address, or
+ * `null` for a top page, an item's page, a note's page and an unknown
+ * address, which have none. Listed first, the pages whose parent is not their
+ * section's top page; everything else inside a section goes to that top page.
+ *
+ * - a run (`#/build/…`) → Builds;
+ * - a pull request or a repository, any tab of it → Code;
+ * - a commit, which opens under its repository's Commits tab
+ *   (`#/repo/<id>/commits/<commit>`) → that repository's page;
+ * - a doc page → Docs; an asset or a route → Dependencies;
+ * - a ticket page → Tickets.
+ *
+ * A branch opens on its repository's Branches tab, so its parent is the
+ * repository's (Code). `#/branch/<id>` and `#/commit/<id>` themselves name no
+ * repository until their page has read the item and replaced the address
+ * (`code-row/`), so until then their parent is Code too.
+ *
+ * A job's sub-tab is not here: it is the `Esc` ladder's own rung.
+ */
+export function parentOf(route: TfRoute): string | null {
+  if (route.view === "ticket") return sectionHash("tickets");
+  if (route.view !== "full" || isTopPage(route)) return null;
+  if (route.head === "repo" && route.rest[0] && route.rest[1] === "commits" && route.rest[2]) {
+    return repoHash(route.rest[0]);
+  }
+  return sectionHash(route.section);
 }
 
 function decode(segment: string): string {

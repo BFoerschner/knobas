@@ -276,8 +276,8 @@ test("a key two sources hold is shared, and every ticket opens at its source's a
   columns[0]!.cards = [jira, card(8, "To Do")];
   const shared = sharedKeys(columns);
   expect([...shared]).toEqual(["PAY-231"]);
-  expect(ticketAddress(jira)).toBe("#/job/jira%3APAY-231");
-  expect(ticketAddress(mock)).toBe("#/job/mock%3APAY-231");
+  expect(ticketAddress(jira)).toBe("#/ticket/jira%3APAY-231");
+  expect(ticketAddress(mock)).toBe("#/ticket/mock%3APAY-231");
   // A key one source holds names its source too.
-  expect(ticketAddress(card(7))).toBe("#/job/jira%3APAY-7");
+  expect(ticketAddress(card(7))).toBe("#/ticket/jira%3APAY-7");
 });

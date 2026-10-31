@@ -38,6 +38,7 @@ import type { JobPorts } from "./job/ports";
 import type { Layers } from "./layers.svelte";
 import type { RoleSyncs } from "./role-sync.svelte";
 import type { Theme } from "./theme.svelte";
+import type { EscTarget } from "./escape";
 import type { TfRoute } from "./route";
 
 /** What the shell hands every page. */
@@ -50,13 +51,19 @@ export interface TfPageContext {
   visible: boolean;
   /** Whether the database answers yet: a page's reads wait for it. */
   ready: boolean;
-  /** The job the reader was last in, as its key. */
+  /** The chosen job (spec #2227), as its key. */
   job: string | null;
-  /** The address that job was opened at (#1525): its key, or its entity id when two sources hold the key. */
+  /** The chosen job's entity id, which its ticket is read by (#1525: a key two sources hold reads the one chosen). */
   jobAt: string | null;
+  /**
+   * Where `Esc` goes once nothing is open, and what the breadcrumb's *Back to
+   * <name>* calls it (`escTarget` in `escape.ts`, #2228); `null` where `Esc`
+   * does nothing, which draws no hint.
+   */
+  back: EscTarget | null;
   /** The ticket key the timer runs on, or `null`. */
   timedTicket: string | null;
-  /** The Job tab's job (the last opened, else the timer's) with its entity id, or `null`. */
+  /** The Job tab's job (the chosen job, else the timer's ticket) with its entity id, or `null`. */
   navJob: { key: string; entityId: string } | null;
   timer: Pick<Timer, "current" | "elapsed">;
   layers: Layers;

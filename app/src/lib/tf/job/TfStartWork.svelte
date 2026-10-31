@@ -33,6 +33,7 @@
   import { refusedAttrs } from "../../shell/refused-writes";
   import { createStartWork, demandOf, editable, edited, type StartWorkApi } from "../../start-work/start-work.svelte";
   import { keyOf } from "./job";
+  import { chosenJob } from "./chosen.svelte";
   import { pageVisible } from "../kept-pages.svelte";
 
   let {
@@ -147,6 +148,8 @@
     else await flow.run();
     if (flow.error === null) {
       toastStarted(key, flow.steps.filter((each) => each.outcome === "queued").length, detail.source);
+      // The ticket work just started on is the one home shows (spec #2227).
+      chosenJob.choose(detail.row.entity_id);
     }
     if (flow.error === null && !timerDone && !timerSkipped) {
       onstarttimer(detail.row.entity_id, detail.row.title);

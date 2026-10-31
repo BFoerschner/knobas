@@ -55,3 +55,10 @@ test("a set's branch or commit opens its own address, which the repository page'
   expect(hrefs).toEqual(["#/branch/gitea%3Ax%2Fpay%40refs%2Fheads%2Fmain", "#/commit/gitea%3Ax%2Fpay%409f2c1ab"]);
   for (const href of hrefs) expect(pageFor(parseTfHash(href)), href).toBe(codeRowPage);
 });
+
+test("the parent's group heading opens the parent's ticket page, not its job (spec #2227)", () => {
+  const parent = { ticket: "gitea:acme/payouts#144", title: null, links: [] };
+  const group = groupsOf({ sets: [], parent })[0]!;
+  expect(group.href).toBe("#/ticket/gitea%3Aacme%2Fpayouts%23144");
+  expect(parseTfHash(group.href!)).toEqual({ view: "ticket", id: "gitea:acme/payouts#144" });
+});

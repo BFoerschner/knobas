@@ -93,7 +93,9 @@
   import { createJobReader } from "./job-reader.svelte";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { currentJob, linkRequest, type LinkTarget } from "./current.svelte";
+  import { chosenJob } from "./chosen.svelte";
   import { askAgain, echoWrite, echoOn, echoesOn, sameWords, settleEchoes, watchEchoes } from "../queued.svelte";
+  import { entityAddress } from "../address";
   import { jobHash } from "../route";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfDeps from "../deps/TfDeps.svelte";
@@ -216,6 +218,14 @@
   // The job on screen is what the timer chip and ⌘T start on (R-1.4); a job
   // keep-alive holds hidden (#2247) is not on screen.
   $effect(() => (pageShown() ? currentJob.set(detail?.row.entity_id ?? null) : undefined));
+  // A job address resolved on screen makes its ticket the chosen job (spec
+  // #2227): a bookmark, history, a link or the Tickets preview's button. By
+  // its id, so a re-read of the same ticket (a timer start, a refresh) does
+  // not take the choice back from a ticket chosen since.
+  const resolvedId = $derived(detail?.row.entity_id ?? null);
+  $effect(() => {
+    if (pageShown() && resolvedId !== null) chosenJob.choose(resolvedId);
+  });
 
   // *Link to <key>* from the launcher (#1500): this job's own dialog, over its
   // Connections drawer, with the result preset, once the job has drawn.
@@ -527,7 +537,7 @@
       {:else}
         <p>No ticket {segment} in the mirror. It may not have synced yet.</p>
       {/if}
-      <a class="tf-btn" href="#/tickets">All tickets <kbd>Esc</kbd></a>
+      <a class="tf-btn" href="#/tickets">All tickets</a>
     </div>
   </div>
 {:else if detail}
@@ -591,7 +601,7 @@
             <div class="tf-blocked">
               <strong>Blocked by {blocker.key} {blocker.title}</strong>
               {#if blocker.note}<span>{blocker.note}</span>{/if}
-              <a class="tf-btn tf-sm" href={jobHash(blocker.entityId)}>Open {blocker.key}</a>
+              <a class="tf-btn tf-sm" href={entityAddress("ticket", blocker.entityId)}>Open {blocker.key}</a>
             </div>
           {/each}
           {#if starting}

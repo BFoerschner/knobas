@@ -116,8 +116,26 @@ type Rung = Pick<EntityRow, "entity_id" | "source_id" | "path">;
  * `epicAbove` walks on from here. `null` with no parent.
  */
 export function epicOf(row: Rung): string | null {
-  const top = row.path?.split(" › ")[0]?.trim();
-  return top ? `${row.source_id}:${top}` : null;
+  return rungId(row, pathNames(row)[0]);
+}
+
+/**
+ * The bottom of a ticket's own path line (`PAY-200 › PAY-231` is `PAY-231`), in
+ * its own source: its nearest parent, whose title the Tickets board's
+ * `parent_title` is (#894). `null` with no parent.
+ */
+export function parentOf(row: Rung): string | null {
+  return rungId(row, pathNames(row).at(-1));
+}
+
+/** A path line's names, top first, each trimmed. */
+function pathNames(row: Rung): string[] {
+  return row.path?.split(" › ").map((name) => name.trim()) ?? [];
+}
+
+/** A path name as an id in the ticket's own source, or `null` for none. */
+function rungId(row: Rung, name: string | undefined): string | null {
+  return name ? `${row.source_id}:${name}` : null;
 }
 
 /**

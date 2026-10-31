@@ -171,7 +171,7 @@ The working set behind a [job](#job), and nothing else. Membership is explicit a
 _Avoid_: workspace, project (a source's grouping, ADR-0010), room (retired; a [job](#job) is the working view)
 
 **Job**:
-The working view of one ticket, at `#/job/<key>`: the ticket's card, sections over what the ticket reaches (Code, Builds, Assets, Monitors, Pages), a Conversation, a Map drawing Dependencies, and a Connections drawer for the [links](#link) and [link sets](#link-set) that reach it. Opening one promotes the ticket's [context](#context). A job is a ticket's; ad-hoc work has no job.
+The working view of one ticket, at `#/job/<key>`: the ticket's card, sections over what the ticket reaches (Code, Builds, Assets, Monitors, Pages), a Conversation, a Map drawing Dependencies, and a Connections drawer for the [links](#link) and [link sets](#link-set) that reach it. Opening one promotes the ticket's [context](#context). A job is a ticket's; ad-hoc work has no job. Home is `#/job`, which shows the **chosen job**: the ticket last made the job on purpose, by opening a `#/job/<id>` address (a bookmark, history, a link, the primary button on the Tickets preview or a [ticket page](#ticket-page)), starting the timer on it, or running *Start work* on it. The choice survives a restart; with none made, `#/job` says how to make one.
 _Avoid_: task, workspace
 
 **Link set**:
@@ -184,7 +184,11 @@ _Avoid_: item (the mirror's word)
 
 **Ticket view**:
 A saved way of looking at tickets in the Tickets view: a name, a group, which tickets (conditions stored as search text, tickets only) and how they show (a [ticket board](#ticket-board) or a list, columns, lanes, card fields). A **Jira view** is one the Jira source keeps for a board or a favourite filter; Jira decides which tickets it holds, and only how it shows is set in knobas. Not a [smart list](#smart-list), which spans every kind and has no layout.
-_Avoid_: saved search, filter, board (alone)
+_Avoid_: saved search, filter, board (alone), ticket view for one ticket's page (that is the [ticket page](#ticket-page))
+
+**Ticket page**:
+One ticket to read, at `#/ticket/<entity id>`, under Tickets in the nav the way a run opens under Builds: its key, title, facts, epic, description and *Around this ticket* (counts, not links) on the ticket-yellow card, and one primary button (*Start work*, *Resume work* or *Open job*, by the ticket's state) that opens its [job](#job) and so makes it the chosen job. Every ticket link opens it. Not the job and not a [ticket view](#ticket-view): opening it chooses no job and never promotes the ticket's [context](#context). It is the open detail for [passive attribution](#passive-attribution).
+_Avoid_: ticket view, ticket detail, job (for reading a ticket)
 
 **Smart list**:
 A saved local query with a live count and change badge. A **built-in** is hand-written SQL in `knobas_search::lists`' registry; a **saved** one is a row in `knobas.smart_list` holding the raw box text and its name. One `list:<id>` namespace, one rail, one shape on the wire. Only a saved list can be renamed, deleted or come to **need attention**, which is what the rail says when today's grammar refuses the stored query: nothing was counted, the count reads 0 and the row does not open. A saved list stores text and never a parse; no migration ever rewrites a stored query, and there is no editor for one. At most eight saved lists, held in `saved::MAX_SAVED_LISTS`, a measured bound read off the perf gate, lowered by measurement and never raised by hand; `create` refuses the ninth and nothing else enforces it. The [share export](#share-export) carries saved lists verbatim.

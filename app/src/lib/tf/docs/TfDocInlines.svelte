@@ -10,7 +10,7 @@
 -->
 <script lang="ts">
   import type { DocInline } from "../../ipc/entity";
-  import { jobHash } from "../route";
+  import { entityAddress } from "../address";
   import TfMarked from "./TfMarked.svelte";
   import { mentionText, pageHash, statusTone } from "./docs";
 
@@ -33,7 +33,7 @@
         >{@render words(run.text)}</a
       >{:else}{@render words(run.text)}{/if}{:else if run.type === "issue"}{#if run.entity_id}{@const tone = statusTone(
         run.status,
-      )}<a class="tf-tchip" href={jobHash(run.entity_id)} title={run.title ?? undefined}
+      )}<a class="tf-tchip" href={entityAddress("ticket", run.entity_id)} title={run.title ?? undefined}
         ><span class="tf-k">{run.key}</span>{#if run.title}{run.title}{/if}{#if run.status}
           <span class="tf-chip" class:tf-ok={tone === "ok"}>{run.status}</span
           >{/if}</a

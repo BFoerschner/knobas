@@ -312,6 +312,8 @@ test("a key opens its ticket and promotes it once, and the card shows key, summa
   expect(card.textContent).toContain("Story, High, est. 3h");
   expect(card.textContent).toContain("Payouts to two SEPA banks fail with a 409 on retry.");
   expect(target.querySelector<HTMLAnchorElement>(".tf-back")?.getAttribute("href")).toBe("#/tickets");
+  // Esc does nothing on the job's first tab (rung 6), so the way back names no key (spec #2227, story 36).
+  expect(target.querySelector(".tf-back kbd")).toBeNull();
 
   // A move re-reads the ticket (the reader's tests hold what else it reads) and promotes nothing again.
   calls.read.length = 0;
@@ -399,6 +401,7 @@ test("a key nothing answers to says so and offers the way back", async () => {
   expect(calls.promote).toEqual([]);
   expect(text()).toContain("No ticket NOPE-1 in the mirror.");
   expect(target.querySelector(".tf-btn")?.getAttribute("href")).toBe("#/tickets");
+  expect(target.querySelector(".tf-btn kbd")).toBeNull();
 });
 
 test("a read that fails for another reason than a miss says it failed, not that the ticket is missing", async () => {
@@ -863,7 +866,7 @@ test("a blocked ticket shows the red banner naming the blocker, with a button to
   expect(banner.textContent).toContain("Staging needs the updated runbook.");
   const button = banner.querySelector("a")!;
   expect(button.textContent).toBe("Open OPS-77");
-  expect(button.getAttribute("href")).toBe("#/job/jira%3AOPS-77");
+  expect(button.getAttribute("href")).toBe("#/ticket/jira%3AOPS-77");
 });
 
 test("the banner opens the blocker of its own source when two sources hold the key (#1676)", async () => {
@@ -877,7 +880,7 @@ test("the banner opens the blocker of its own source when two sources hold the k
   });
   open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(blocked) : Promise.reject({ code: "not_found" })) }) });
   await settle();
-  expect(target.querySelector(".tf-blocked a")?.getAttribute("href")).toBe("#/job/gitea%3AOPS-77");
+  expect(target.querySelector(".tf-blocked a")?.getAttribute("href")).toBe("#/ticket/gitea%3AOPS-77");
 });
 
 test("an unblocked ticket draws no banner", async () => {

@@ -87,14 +87,23 @@ export interface Timer {
   /** `"0:07"` / `"3:20:07"`, or `null` when nothing is running. */
   readonly elapsed: string | null;
   /**
+   * The row this window's last start wrote, or `null` before one: a new
+   * object on every start, so a reader can tell a start from a read that
+   * found a clock already running. A start on a ticket makes it the chosen
+   * job (spec #2227, `App.svelte`); another surface's start, and a timer
+   * running when the app opened, are not this window's starts.
+   */
+  readonly started: RunningTimer | null;
+  /**
    * What the next heartbeat will carry. The shell writes it; the store only
    * hands it on. `null` is *nothing in front of the reader*, which is a legal
    * observation and not a missing one.
    */
   foreground: TimerTarget | null;
   /**
-   * **The job in the breadcrumb** (#1435, R-1.4): the ticket of a job page or
-   * of a view opened from one ('PAY-231 › Time'), or `null`. ⌘T starts on it
+   * **The page's job** (#1435, R-1.4; `breadcrumbJob` in
+   * `tf/job/current.svelte.ts`): the job on screen on the Job page, else the
+   * chosen job (spec #2227), or `null`. ⌘T starts on it
    * when nothing is in front of the reader. The shell writes it; the heartbeat
    * never carries it, so passive attribution still records nothing on a list.
    */
@@ -188,12 +197,14 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
    */
   const state = $state<{
     current: RunningTimer | null;
+    started: RunningTimer | null;
     now: Date;
     foreground: TimerTarget | null;
     breadcrumbJob: TimerTarget | null;
     roomContext: string | null;
   }>({
     current: null,
+    started: null,
     now: io.now(),
     foreground: null,
     breadcrumbJob: null,
@@ -216,6 +227,9 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
   return {
     get current() {
       return state.current;
+    },
+    get started() {
+      return state.started;
     },
     get elapsed() {
       const running = state.current;
@@ -244,7 +258,9 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
       // The answer is used directly rather than followed by a read: `start_timer`
       // returns the row it wrote, and a re-read would be a second round trip
       // that can only agree or race.
-      state.current = await io.startTimer(target, state.roomContext);
+      const row = await io.startTimer(target, state.roomContext);
+      state.current = row;
+      state.started = row;
     },
     async stop() {
       const closed = await io.stopTimer();
@@ -334,6 +350,7 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
       stopLive?.();
       stopLive = null;
       state.current = null;
+      state.started = null;
       state.now = io.now();
       state.foreground = null;
       state.breadcrumbJob = null;

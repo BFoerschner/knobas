@@ -9,7 +9,7 @@
  */
 import type { LinkEnd, LinkRow, ProposalEvidence, SuggestionEntry, SuggestionPage } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
-import { keyOf } from "../job/job";
+import { keyOf, ticketRef, type TicketRef } from "../job/job";
 
 /** The tray's read and the open proposal's evidence, injectable so a test needs no bridge. */
 export interface ReviewPorts {
@@ -79,9 +79,9 @@ function targetLabel(end: LinkEnd): string {
  * entity id to link by, the id naming the source (#1977). `null` when neither
  * end is a ticket.
  */
-export function aboutTicket(entry: SuggestionEntry): { key: string; entityId: string } | null {
+export function aboutTicket(entry: SuggestionEntry): TicketRef | null {
   const { target } = targetOf(entry);
-  return target.kind === "ticket" ? { key: keyOf(target.entity_id), entityId: target.entity_id } : null;
+  return target.kind === "ticket" ? ticketRef(target.entity_id) : null;
 }
 
 const VERDICT_WORD: Record<Verdict, string> = { yes: "linked", no: "not related", skip: "later" };

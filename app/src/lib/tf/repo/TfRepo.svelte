@@ -133,7 +133,7 @@
   } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { jobHash } from "../route";
+  import type { EscTarget } from "../escape";
   import {
     branchOptions,
     changedPaths,
@@ -168,6 +168,7 @@
   import { provideTabRereads } from "./refreshed.svelte";
   import { NO_TABS, readShown, SLOTS, slotOf, tabHref, visit, type TabSlot } from "./repo-tabs";
   import TfRepoTab from "./TfRepoTab.svelte";
+  import { namePage } from "../page-name.svelte";
   import { providePageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
 
@@ -175,7 +176,7 @@
     ready,
     rest,
     job,
-    jobAt = null,
+    back = null,
     visible = true,
     ports = {
       getEntity: (entityId) => getEntity(entityId),
@@ -201,10 +202,10 @@
     ready: boolean;
     /** What follows `repo` in the address. */
     rest: string[];
-    /** The job the reader was last in, as a ticket key. */
+    /** The chosen job (spec #2227), as a ticket key. */
     job: string | null;
-    /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
-    jobAt?: string | null;
+    /** Where `Esc` goes, which the breadcrumb's hint names; `null` where it does nothing (#2228). */
+    back?: EscTarget | null;
     /** Whether keep-alive shows the page (#2247); hidden, it reads nothing on focus (#2249). */
     visible?: boolean;
     ports?: RepoPorts;
@@ -517,19 +518,29 @@
 
   const NOT_BUILT: Partial<Record<RepoTab, string>> = {};
 
+  // What *Back to <name>* calls this page once it is left: its breadcrumb's own name (spec #2227).
+  namePage(() => (route.commit !== null && repoId !== null ? "Commit" : (repo?.title ?? null)));
+
   /** *New branch…*'s dialog, open from the header or from a commit. */
   let newBranch = $state<{ from: ChoiceOption | null } | null>(null);
 </script>
 
 <div class="tf-full">
   <nav class="tf-crumbs" aria-label="Breadcrumb">
-    {#if job !== null}
-      <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a><span class="tf-sep">›</span>
-    {/if}
     <a class="tf-crumb" href="#/code">Code</a><span class="tf-sep">›</span>
     <a class="tf-crumb" href="#/code/repos">Repositories</a><span class="tf-sep">›</span>
-    <strong>{repo?.title ?? ""}</strong>
-    <span class="tf-esc">{job !== null ? `Back to ${job}` : "Back"} <kbd>Esc</kbd></span>
+    {#if route.commit !== null && repoId !== null}
+      <a class="tf-crumb" href={repoHash(repoId)}>{repo?.title ?? ""}</a><span class="tf-sep">›</span>
+      <strong>Commit</strong>
+    {:else}
+      <strong>{repo?.title ?? ""}</strong>
+    {/if}
+    {#if back !== null}
+      <!-- The shell names a repository's page *Repository*; this page knows its title. -->
+      <span class="tf-esc"
+        >Back to {repoId !== null && back.hash === repoHash(repoId) && repo !== null ? repo.title : back.name} <kbd>Esc</kbd></span
+      >
+    {/if}
   </nav>
 
   {#if repoId === null || failed !== null}

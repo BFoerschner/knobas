@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { goWithoutOpener } from "./lib/tf/opener";
   import { listen } from "@tauri-apps/api/event";
 
   import { alerts } from "./lib/assets/alerts.svelte";
@@ -12,7 +13,7 @@
   import { kindRegistry } from "./lib/shell/kind-registry.svelte";
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
   import { timer } from "./lib/shell/timer.svelte";
-  import { targetReading } from "./lib/shell/timer";
+  import { assetTargetId, targetReading } from "./lib/shell/timer";
   import { toastQueued } from "./lib/shell/queued-toast";
   import TimerPicker from "./lib/shell/TimerPicker.svelte";
   import { push } from "./lib/shell/toasts.svelte";
@@ -22,12 +23,13 @@
   import FirstRun, { type FirstRunLanding } from "./lib/sources/FirstRun.svelte";
   import { EVENTS, ipcErrorMessage } from "./lib/ipc";
   import { adHocBlock, worklogDraft, type AdHocBlock, type Block, type Worklog } from "./lib/ipc/time";
-  import { recordCaptureContext } from "./lib/ipc/entity";
+  import { getEntity, recordCaptureContext } from "./lib/ipc/entity";
+  import { chosenJob } from "./lib/tf/job/chosen.svelte";
   import { entityAddress } from "./lib/tf/address";
-  import { HOME, homeIfBlank } from "./lib/tf/home";
+  import { homeIfBlank } from "./lib/tf/home";
   import { breadcrumbJob, currentJob, linkRequest, type LinkTarget } from "./lib/tf/job/current.svelte";
   import { foregroundOf } from "./lib/tf/foreground";
-  import { jobHash, parseTfHash } from "./lib/tf/route";
+  import { jobHash, parseTfHash, sectionHash } from "./lib/tf/route";
   import TfShell from "./lib/tf/TfShell.svelte";
   import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
   import { createDraftFlow } from "./lib/tf/drafting.svelte";
@@ -44,9 +46,9 @@
    */
   homeIfBlank(location);
 
-  /** Go to an address the launcher or the capture window names. */
+  /** Go to an address the launcher or the capture window names: nothing in the app opened it, so `Esc` goes up from it (#2229). */
   function navigate(hash: string) {
-    location.hash = hash;
+    goWithoutOpener(hash);
   }
 
   /** Whether the ⌘K overlay is up; the launcher binds ⌘K itself. */
@@ -82,7 +84,7 @@
    * What is in front of the reader (#1102): the entity page on screen, else
    * the asset the Tree selects, else the job on screen (R-1.4), else nothing,
    * by `foregroundOf`'s reading of `CONTEXT.md`'s rule. On a page with none
-   * of them ⌘T starts on the breadcrumb's job, else asks (#1435). The store
+   * of them ⌘T starts on the page's job (`breadcrumbJob`), else asks (#1435). The store
    * holds the answer because the heartbeat reads it from an interval,
    * outside any reactive scope.
    */
@@ -166,7 +168,7 @@
   /**
    * ⌘T and the timer chip. One draft at a time (#826); a running clock opens
    * its draft and stops on the answer (#896); otherwise `timer.press()`
-   * starts on the foreground, else on the breadcrumb's job (#1435), or asks
+   * starts on the foreground, else on the page's job (#1435, spec #2227), or asks
    * with the picker.
    */
   function toggleTimer() {
@@ -198,11 +200,26 @@
     if (currentJob.entityId !== job.entityId) location.hash = jobHash(job.entityId);
   }
 
-  // ⌘T with nothing in front starts on the job the breadcrumb names (#1435);
+  // ⌘T with nothing in front starts on the page's job (#1435): on the Job page the job on screen, else the chosen job (spec #2227);
   // the shell keeps that job in `breadcrumbJob` (#1500), one answer for both.
   $effect(() => {
     const job = breadcrumbJob.job;
     timer.breadcrumbJob = job === null ? null : { kind: "entity", entity_id: job.entityId };
+  });
+
+  // A timer this window starts on a ticket makes it the chosen job (spec
+  // #2227), whichever way it started: ⌘T, the chip, the picker, the
+  // launcher's *Start timer*, a job's or *Start work*'s button. A label, an
+  // asset or another kind's item is no job; the read says which it is.
+  $effect(() => {
+    const started = timer.started;
+    if (started === null || started.target.kind !== "entity" || assetTargetId(started.target) !== null) return;
+    const id = started.target.entity_id;
+    void getEntity(id)
+      .then((detail) => {
+        if (detail.row.kind === "ticket" && timer.started === started) chosenJob.choose(id);
+      })
+      .catch(() => {});
   });
 
   /** Start on what the picker chose, and close it only if that worked. */
@@ -310,7 +327,8 @@
   const firstRun = $derived(!completedFirstRun && (lifecycle.status?.first_run ?? false));
 
   /**
-   * §14a's landing: Tickets, with the launcher open over it. A reader who set
+   * §14a's landing: Tickets, with the launcher open over it; not home (`#/job`,
+   * spec #2227), which with no job chosen yet would only point at Tickets. A reader who set
    * up later (#1399) lands on Settings › Sources instead, where adding a
    * source lives, and one who restores first (#1469) on Settings › Backup and
    * export; neither with anything over it.
@@ -324,7 +342,7 @@
       location.hash = landing === "sources" ? "#/settings/sources" : "#/settings/backup";
       return;
     }
-    location.hash = HOME;
+    location.hash = sectionHash("tickets");
     launcherOpen = true;
   }
 
@@ -383,7 +401,7 @@
         The ⌘K launcher is a ticket-first dialog (#1422), drawn inside `.tf`,
         last so it sits over the others. `sources` is supplied so the launcher's rows and chips read the live
         `source:health` store; an empty list means *watching, nothing to complain
-        about* (#36). `openEntity` is the job the breadcrumb names, which *Link to
+        about* (#36). `openEntity` is the page's job (`breadcrumbJob`), which *Link to
         <key>* needs as its other end (#1500).
       -->
       <Launcher

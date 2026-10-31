@@ -243,7 +243,7 @@ function ports(over: Partial<PrPorts> & { pr?: SourceView; author?: string; chec
 }
 
 async function draw(rest: string[], with_: PrPorts = ports(), follower?: WriteFollower) {
-  view = mount(TfPr, { target, props: { ready: true, rest, job: "PAY-231", ports: with_, pending, ...(follower ? { follower } : {}) } });
+  view = mount(TfPr, { target, props: { ready: true, rest, back: { hash: "#/code", name: "Code" }, ports: with_, pending, ...(follower ? { follower } : {}) } });
   await settle();
 }
 
@@ -268,12 +268,12 @@ test("the header names the pull request, its state, head into base and the reade
   expect(text("h1")).toBe("PR #142 SEPA retry with exponential backoff");
   expect(text(".tf-fhead .tf-sub")).toBe("open feature/PAY-231-sepa-retry into main, by you");
   const crumbs = [...target.querySelectorAll(".tf-crumbs a")].map((a) => [a.textContent, a.getAttribute("href")]);
-  expect(crumbs).toEqual([
-    ["PAY-231", "#/job/PAY-231"],
+  expect(crumbs, "the path, with no job's chip (#2228)").toEqual([
     ["Code", "#/code"],
     ["tidewater/payout-service", `#/repo/${encodeURIComponent(REPO)}`],
   ]);
   expect(text(".tf-crumbs strong")).toBe("PR #142");
+  expect(text(".tf-crumbs .tf-esc")).toBe("Back to Code Esc");
 });
 
 test("somebody else's pull request names its author and offers Review…", async () => {

@@ -12,7 +12,7 @@ knobas is a work tool for one developer who has a dozen tools open behind it. Th
 
 Rules that follow from that:
 
-- **Yellow means "the ticket you are on".** It goes on the job card, the selected ticket on the board and list, the running timer and the job chip in breadcrumbs. Nothing else gets yellow. Highlights use `--mark`, which is a paler yellow and only appears behind matched search text.
+- **Yellow means "the ticket you are on".** It goes on the job card, the ticket page's card (`#/ticket/<id>`, spec #2227), the selected ticket on the board and list, and the running timer. Nothing else gets yellow. Highlights use `--mark`, which is a paler yellow and only appears behind matched search text.
 - **The width axis does the shouting, not colour or size.** Big figures (the job key, counts, durations) use Archivo at width 62 and weight 800. Page titles use width 85. Body text stays at the normal width.
 - **Tones carry state, and only state.** `ok`, `warn`, `err`, `info` and `muted` belong to the shell. Adapters never choose a colour. A source says "failed" and the shell draws it.
 - **Structure means something.** A border separates things that are different. A shadow means the thing floats above the page. Labels are sentence case and never all caps. The prototype has no `text-transform: uppercase` anywhere, and the app keeps it that way.

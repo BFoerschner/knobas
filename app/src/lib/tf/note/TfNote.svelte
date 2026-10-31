@@ -18,6 +18,7 @@
 -->
 <script module lang="ts">
   import { captureShortcut, deleteNote, getNote, type NoteDetail } from "../../ipc/entity";
+  import { replaceAddress } from "../opener";
 
   /** The page's reads, its one write, and where it sends the reader. */
   export interface NotePorts {
@@ -40,7 +41,7 @@
     getNote: (noteId) => getNote(noteId),
     deleteNote: (noteId) => deleteNote(noteId),
     notesShown: async () => (await captureShortcut()).shown,
-    replace: (hash) => location.replace(hash),
+    replace: replaceAddress,
     canGoBack: () => history.length > 1,
     back: () => history.back(),
   };
@@ -54,20 +55,21 @@
   import { entityAddress } from "../address";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
+  import type { EscTarget } from "../escape";
   import TfCrumbs from "../TfCrumbs.svelte";
   import { tokenise } from "./note-body";
 
   let {
     id,
     ready,
-    job,
+    back = null,
     ports = BRIDGE,
     layers = sharedLayers,
   }: {
     id: string;
     ready: boolean;
-    /** The job the reader was last in, which the breadcrumb starts at (R-1.6). */
-    job: string | null;
+    /** Where `Esc` goes, which the breadcrumb's hint names; `null` where it does nothing (#2228). */
+    back?: EscTarget | null;
     ports?: NotePorts;
     layers?: Layers;
   } = $props();
@@ -138,11 +140,11 @@
       <a class="tf-btn" href="#/tickets">Go to Tickets</a>
     </div>
   {:else if "failed" in read}
-    <TfCrumbs {job} name="Note" />
+    <TfCrumbs parts={[{ name: "Note" }]} {back} />
     <div class="tf-empty"><p class="tf-cfail">Could not read {id}: {read.failed}</p></div>
   {:else}
     {@const detail = read.note}
-    <TfCrumbs {job} name="Note" />
+    <TfCrumbs parts={[{ name: "Note" }]} {back} />
     <header class="tf-fhead">
       <div>
         <h1>{detail.note.title}</h1>

@@ -641,14 +641,32 @@ function giteaCard(entry: (typeof CORPUS)[number]) {
 /**
  * The epics' names (#894), prototype-6's `EPICS`. The real board reads the
  * mirrored epic item's title; this corpus holds no epic items (they would
- * stand on the board as cards of their own), so it keeps their names here.
- * An epic not named here draws its key alone, the miss direction.
+ * stand on the board as cards of their own), so it keeps their names here,
+ * and `get_entity` answers for an epic with {@link fakeEpicEntry}'s row. An
+ * epic not named here draws its key alone, the miss direction.
  */
 const FAKE_EPIC_TITLES: Record<string, string> = {
   "PAY-200": "Payout reliability",
   "PAY-300": "PSP migration",
   "PAY-150": "Finance reporting",
 };
+
+/**
+ * An epic the corpus names but does not hold, as the mirror would hold it: a
+ * Jira epic is a ticket of type *Epic*, so the ticket page reads its title as
+ * the board's `parent_title` (spec #2227). Kept out of `CORPUS`, so no list
+ * or board draws it; `undefined` for any other id.
+ */
+export function fakeEpicEntry(id: string): (typeof CORPUS)[number] | undefined {
+  const key = id.startsWith("mock:") ? id.slice("mock:".length) : "";
+  const title = FAKE_EPIC_TITLES[key];
+  if (title === undefined) return undefined;
+  return row(id, "ticket", title, null, null, {
+    key,
+    fields: { project: { key: "PAY", name: "Payments Platform" } },
+    type: "Epic",
+  });
+}
 
 /**
  * The fixture's confirmed links for the signals (#815): PAY-231's pull

@@ -17,6 +17,7 @@ import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
 import { entityAddress } from "./address";
 import { sourceRoles } from "./roles.svelte";
+import { goWithoutOpener, replaceAddress } from "./opener";
 import { jobHash, NAV, SECTION_NAME } from "./route";
 import TfShell, { type TfShellPorts } from "./TfShell.svelte";
 import { installCommands } from "../render/command";
@@ -125,6 +126,12 @@ async function settle() {
 
 async function at(hash: string) {
   location.hash = hash;
+  await settle();
+}
+
+/** Go to `hash` with no opener, as the ⌘K launcher, a deep link and an `Esc` step do (#2229). */
+async function reached(hash: string) {
+  goWithoutOpener(hash);
   await settle();
 }
 
@@ -292,7 +299,7 @@ function filterField(text: string): HTMLInputElement {
   return field;
 }
 
-test("Esc unwinds dialog, drawer, filter text, filter focus, sub-tab, job, one layer per press", async () => {
+test("Esc unwinds dialog, drawer, filter text, filter focus, then the job's sub-tab, one layer per press; the first tab is the top", async () => {
   const layers = createLayers();
   const closed: string[] = [];
   const offDrawer = layers.add({ kind: "drawer", close: () => (closed.push("drawer"), offDrawer()) });
@@ -319,38 +326,225 @@ test("Esc unwinds dialog, drawer, filter text, filter focus, sub-tab, job, one l
 
   press("Escape");
   await settle();
+  expect(location.hash, "a sub-tab goes to the job's first tab").toBe("#/job/PAY-231");
+
+  const last = press("Escape");
+  await settle();
+  expect(last.defaultPrevented, "the job's first tab is a top page: Esc does nothing").toBe(false);
   expect(location.hash).toBe("#/job/PAY-231");
-
-  press("Escape");
-  await settle();
-  expect(location.hash).toBe("#/tickets");
-
-  press("Escape");
-  await settle();
-  expect(location.hash, "Tickets is where the ladder ends").toBe("#/tickets");
 });
 
-test("Esc on a full view returns to the job last visited, and names it in the breadcrumb", async () => {
+/** The breadcrumb's `Esc` hint as read, or `null` where none is drawn. */
+function escHint(): string | null {
+  return seen(".tf-esc")[0]?.textContent?.replace(/\s+/g, " ").trim() ?? null;
+}
+
+test("Esc on every nav entry's top page and on Settings does nothing, and no breadcrumb names it", async () => {
+  start();
+  const tops = [
+    ...NAV.map((section) => (section === "job" ? jobHash(null) : `#/${section}`)),
+    "#/settings",
+    "#/tickets/view-1",
+    "#/job/PAY-231",
+  ];
+  for (const top of tops) {
+    await at(top);
+    const event = press("Escape");
+    await settle();
+    expect(event.defaultPrevented, `${top} takes no Esc`).toBe(false);
+    expect(location.hash, `${top} stays`).toBe(top);
+    expect(escHint(), `${top} names no Esc`).toBeNull();
+  }
+});
+
+test("Esc on a detail page reached with no opener goes to its structural parent; deeper inside a section, to the section's top page", async () => {
+  start();
+  const parents: [string, string][] = [
+    ["#/build/pipe-1/run-4812", "#/builds"],
+    ["#/builds/pipe-1", "#/builds"],
+    ["#/pr/gh:pr-12", "#/code"],
+    ["#/pr/gh:pr-12/files", "#/code"],
+    ["#/repo/gh:repo-1", "#/code"],
+    ["#/repo/gh:repo-1/branches", "#/code"],
+    // A commit opens under its repository's Commits tab: its parent is the repository's page.
+    ["#/repo/gh:repo-1/commits/gh:c-9", "#/repo/gh%3Arepo-1"],
+    // A branch or commit address the shell has not placed under a repository yet.
+    ["#/branch/gh:b-1", "#/code"],
+    ["#/commit/gh:c-9", "#/code"],
+    ["#/page/confluence:2", "#/docs"],
+    ["#/docs/space/ENG", "#/docs"],
+    ["#/asset/assets:svc-1", "#/deps"],
+    ["#/route/assets:route-1", "#/deps"],
+    ["#/assets", "#/deps"],
+    ["#/code/repos", "#/code"],
+    ["#/monitors/unmonitored", "#/monitors"],
+    ["#/settings/appearance", "#/settings"],
+    // A ticket page (spec #2227), here one the mirror cannot read: its parent is Tickets either way.
+    ["#/ticket/jira:PAY-999", "#/tickets"],
+  ];
+  for (const [from, parent] of parents) {
+    await reached(from);
+    press("Escape");
+    await settle();
+    expect(location.hash, `Esc on ${from}`).toBe(parent);
+  }
+});
+
+/** The window's own history, so `Esc` stepping back and `⌘]` going forward move the address for real. */
+const windowNav = { back: () => history.back(), forward: () => history.forward() };
+
+test("a run opened from the Job page: Esc returns to the Job page, and the hint said Back to Job", async () => {
+  start({ nav: windowNav });
+  await at("#/job/PAY-231/builds");
+  await at("#/build/pipe-1/run-4812");
+  expect(escHint()).toBe("Back to Job Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231/builds");
+});
+
+test("a job's row opens a run by its bare id; the address the run page puts in its place keeps the Job page as opener", async () => {
+  start({ nav: windowNav });
+  await at("#/job/PAY-231");
+  await at("#/build/run-4812");
+  // What Builds does once it knows the run's pipeline.
+  replaceAddress("#/build/pipe-1/run-4812");
+  await settle();
+  expect(escHint()).toBe("Back to Job Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231");
+});
+
+test("a run opened from the Builds list: Esc returns to the Builds list", async () => {
+  start({ nav: windowNav });
+  await at("#/builds/pipe-1");
+  await at("#/build/pipe-1/run-4812");
+  expect(escHint()).toBe("Back to Builds Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/builds/pipe-1");
+});
+
+test("a run opened from another run's link: Esc returns to that run, and a second Esc to that run's own opener", async () => {
+  start({ nav: windowNav });
+  await at("#/job/PAY-231");
+  await at("#/build/pipe-1/run-4811");
+  await at("#/build/pipe-1/run-4812");
+  expect(escHint()).toMatch(/^Back to Run\b/);
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/build/pipe-1/run-4811");
+  expect(escHint()).toBe("Back to Job Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231");
+});
+
+test("a run reached by ⌘K or by a deep link: Esc goes to Builds, its structural parent", async () => {
+  start({ nav: windowNav });
+  await at("#/job/PAY-231");
+  // The launcher's pick, as `App.svelte` makes it.
+  goWithoutOpener("#/build/pipe-1/run-4812");
+  await settle();
+  expect(escHint()).toBe("Back to Builds Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/builds");
+
+  unmount(shell!);
+  shell = null;
+  await openedOn("#/build/pipe-1/run-4812");
+  start({ nav: windowNav });
+  await settle();
+  expect(escHint()).toBe("Back to Builds Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/builds");
+});
+
+test("a pull request opened from Code, switched to its Files tab: Esc returns to Code, not to the previous tab", async () => {
+  start({ nav: windowNav });
+  await at("#/code/repos");
+  await at("#/pr/gh:pr-12");
+  await at("#/pr/gh:pr-12/files");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/code/repos");
+});
+
+test("after an Esc that stepped back, ⌘] goes forward to the detail again", async () => {
+  start({ nav: windowNav });
+  await at("#/job/PAY-231");
+  await at("#/build/pipe-1/run-4812");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231");
+  press("]", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/build/pipe-1/run-4812");
+  expect(escHint(), "the entry kept its own opener").toBe("Back to Job Esc");
+});
+
+test("after ⌘[ and ⌘] through history, Esc on an entry still uses that entry's own opener", async () => {
+  start({ nav: windowNav });
+  await at("#/builds");
+  await at("#/build/pipe-1/run-4811");
+  await at("#/job/PAY-231");
+  await at("#/build/pipe-1/run-4812");
+  press("[", { metaKey: true });
+  await settle();
+  press("[", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/build/pipe-1/run-4811");
+  expect(escHint()).toBe("Back to Builds Esc");
+  press("]", { metaKey: true });
+  await settle();
+  press("]", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/build/pipe-1/run-4812");
+  expect(escHint()).toBe("Back to Job Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231");
+});
+
+test("a top page never navigates on Esc, even when it has an opener", async () => {
+  start({ nav: windowNav });
+  await at("#/build/pipe-1/run-4812");
+  await at("#/inbox");
+  const event = press("Escape");
+  await settle();
+  expect(event.defaultPrevented).toBe(false);
+  expect(location.hash).toBe("#/inbox");
+  expect(escHint()).toBeNull();
+});
+
+test("the breadcrumb on a full view shows the path with no job chip, and its hint names where Esc goes", async () => {
   start();
   await at("#/job/PAY-231");
-  await at("#/builds");
-  const crumbs = target.querySelector(".tf-crumbs");
-  expect(crumbs?.querySelector(".tf-jobchip")?.textContent).toBe("PAY-231");
-  expect(crumbs?.querySelector(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back to PAY-231 Esc");
+  await reached("#/asset/assets:svc-1");
+  let crumbs = seen(".tf-crumbs")[0]!;
+  expect(crumbs.querySelector(".tf-jobchip"), "no last job's chip").toBeNull();
+  const parent = crumbs.querySelector<HTMLAnchorElement>("a.tf-crumb")!;
+  expect(parent.textContent).toBe("Dependencies");
+  expect(parent.getAttribute("href")).toBe("#/deps");
+  expect(escHint()).toBe("Back to Dependencies Esc");
 
+  await reached("#/settings/appearance");
+  crumbs = seen(".tf-crumbs")[0]!;
+  expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
+  expect(crumbs.querySelector("strong")?.textContent).toBe("Appearance");
+  expect(escHint()).toBe("Back to Settings Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/job/PAY-231");
+  expect(location.hash).toBe("#/settings");
 });
 
-test("with no job, the breadcrumb starts at the view's own name and Esc goes to Tickets", async () => {
+test("a commit's page with no opener names its repository's page as the breadcrumb's map calls it, until the page has its title", async () => {
   start();
-  await at("#/inbox");
-  expect(target.querySelector(".tf-crumbs .tf-jobchip")).toBeNull();
-  expect(target.querySelector(".tf-crumbs strong")?.textContent).toBe("Inbox");
-  press("Escape");
-  await settle();
-  expect(location.hash).toBe("#/tickets");
+  await reached("#/repo/r1/commits/c1");
+  expect(escHint()).toBe("Back to Repository Esc");
 });
 
 test("an address the new shell has no place for names itself", async () => {
@@ -371,7 +565,7 @@ test("a rooms-UI address is replaced by the ticket-first one", async () => {
   const depth = history.length;
   await at("#/ctx/all");
   expect(location.hash).toBe("#/tickets");
-  await at("#/ticket/jira:PAY-231");
+  await at("#/start-work/jira:PAY-231");
   expect(location.hash).toBe("#/job/jira%3APAY-231");
   await at("#/sources");
   expect(location.hash).toBe("#/settings/sources");
@@ -468,6 +662,107 @@ test("badges: inbox, failing builds in err tone, proposals; nothing drawn at zer
   });
 });
 
+// ---- home and the chosen job (spec #2227, #2230) ---------------------------
+
+test("the nav reads Job first, then Tickets and the rest in order; Settings stays the cog", async () => {
+  start();
+  await at("#/job");
+  const names = seen<HTMLAnchorElement>(".tf-nav a").map((a) => a.firstChild?.textContent?.trim());
+  expect(names).toEqual(["Job", "Tickets", "Inbox", "Code", "Builds", "Docs", "Dependencies", "Monitors", "Link sets", "Proposed links", "Time"]);
+  expect(target.querySelector(".tf-top [aria-label='Settings']"), "Settings is the cog, not a nav entry").not.toBeNull();
+});
+
+/** The bare `#/job`'s empty state, or `null` where it is not drawn. */
+function emptyHome(): HTMLElement | null {
+  return seen(".tf-full").find((page) => page.querySelector("h1")?.textContent === "Job" && page.querySelector(".tf-empty") !== null) ?? null;
+}
+
+test("with no chosen job, #/job says how a ticket becomes the job, and its button goes to Tickets", async () => {
+  start();
+  await at("#/job");
+  const home = emptyHome();
+  expect(home, "the empty state").not.toBeNull();
+  expect(home!.textContent).toMatch(/start the timer on it/i);
+  expect(home!.textContent).toMatch(/Start work/);
+  const button = [...home!.querySelectorAll<HTMLAnchorElement>("a.tf-btn")].find((a) => a.textContent?.trim() === "All tickets")!;
+  expect(button.getAttribute("href")).toBe("#/tickets");
+  expect(location.hash).toBe("#/job");
+});
+
+/** A browser storage that keeps what the shell wrote, across remounts. */
+function installStorage(): Map<string, string> {
+  const kept = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => kept.get(key) ?? null,
+    setItem: (key: string, value: string) => void kept.set(key, String(value)),
+    removeItem: (key: string) => void kept.delete(key),
+  };
+  Object.defineProperty(window, "localStorage", { value: storage, configurable: true, writable: true });
+  return kept;
+}
+
+function removeStorage(): void {
+  Object.defineProperty(window, "localStorage", { value: undefined, configurable: true, writable: true });
+}
+
+/** Unmount the shell and mount it again on `hash`, as a restart does. */
+async function restartOn(hash: string): Promise<void> {
+  if (shell) unmount(shell);
+  shell = null;
+  location.hash = hash;
+  start();
+  await settle();
+}
+
+test("opening #/job/<id> makes it the chosen job: after a restart with the storage kept, #/job draws it and keeps its address", async () => {
+  installStorage();
+  try {
+    start();
+    await at("#/job/PAY-231");
+    expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent).toBe("PAY-231");
+    await restartOn("#/job");
+    expect(seen(".tf-jobcard .tf-jobkey").map((key) => key.textContent)).toEqual(["PAY-231"]);
+    expect(emptyHome(), "the chosen job, not the empty state").toBeNull();
+    expect(location.hash, "#/job stays the home address").toBe("#/job");
+  } finally {
+    removeStorage();
+  }
+});
+
+test("a browser storage that throws, or is empty, leaves the shell working with no chosen job", async () => {
+  Object.defineProperty(window, "localStorage", {
+    value: {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+      removeItem: () => {
+        throw new Error("blocked");
+      },
+    },
+    configurable: true,
+    writable: true,
+  });
+  try {
+    start();
+    await at("#/job");
+    expect(emptyHome(), "a failed read: no chosen job").not.toBeNull();
+    await at("#/job/PAY-231");
+    expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent, "a failed write still opens the job").toBe("PAY-231");
+  } finally {
+    removeStorage();
+  }
+  installStorage();
+  try {
+    await restartOn("#/job");
+    expect(emptyHome(), "an empty storage: no chosen job").not.toBeNull();
+  } finally {
+    removeStorage();
+  }
+});
+
 test("the timer chip ticks the store's reading and stops through the shell's verb, as ⌘T does", async () => {
   const ontimer = vi.fn();
   const timer = $state<{ current: RunningTimer | null; elapsed: string | null }>({
@@ -485,7 +780,7 @@ test("the timer chip ticks the store's reading and stops through the shell's ver
   chip.click();
   press("t", { metaKey: true });
   expect(ontimer).toHaveBeenCalledTimes(2);
-  expect(target.querySelector(".tf-nav a:nth-child(2)")?.textContent?.replace(/\s+/g, " ").trim(), "the Job tab names the timer's ticket").toBe("Job PAY-231");
+  expect(target.querySelector(".tf-nav a:nth-child(1)")?.textContent?.replace(/\s+/g, " ").trim(), "with no chosen job, the Job tab names the timer's ticket").toBe("Job PAY-231");
 });
 
 test("the chip's target carries its full text in a title: a label reads in the sans face, a ticket key stays mono (#1430)", async () => {
@@ -819,11 +1114,11 @@ test("a running timer names the Job tab but is not a job the breadcrumb or Esc r
     elapsed: "1:00",
   };
   start({ timer });
-  await at("#/builds");
+  await reached("#/build/pipe-1/run-4812");
   expect(target.querySelector(".tf-crumbs .tf-jobchip")).toBeNull();
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/tickets");
+  expect(location.hash).toBe("#/builds");
 });
 
 test("a toast from anywhere lands in the shell's stack, as text, and its action runs and dismisses it (R-1.8)", async () => {
@@ -879,25 +1174,19 @@ const TWO_SOURCE_PORTS: JobPorts = {
       : JOB_PORTS.getEntity(id),
 };
 
-test("a job opened at its source's address is the one the chip, the Job tab and Esc return to (#1525)", async () => {
+/** The Job tab's link: it names the job once one is opened. */
+function jobTab(): HTMLAnchorElement | undefined {
+  return [...target.querySelectorAll<HTMLAnchorElement>(".tf-nav a")].find((a) => a.textContent?.includes("PAY-231"));
+}
+
+test("a job opened at its source's address is the one the Job tab returns to (#1525)", async () => {
   start({ jobPorts: TWO_SOURCE_PORTS });
   await at("#/job/tide:PAY-231");
-  await at("#/builds");
-  const chip = target.querySelector<HTMLAnchorElement>(".tf-crumbs .tf-jobchip");
-  expect(chip?.textContent, "the chip still names the key").toBe("PAY-231");
-  expect(chip?.getAttribute("href")).toBe(jobHash("tide:PAY-231"));
-  const tab = [...target.querySelectorAll<HTMLAnchorElement>(".tf-nav a")].find((a) => a.textContent?.includes("PAY-231"));
-  expect(tab?.getAttribute("href"), "the Job tab").toBe(jobHash("tide:PAY-231"));
-
-  // The shell's own breadcrumb (Time) and a page's own (Settings) link it too.
-  for (const view of ["#/time/2026-08-22", "#/settings"]) {
+  for (const view of ["#/builds", "#/time/2026-08-22", "#/settings"]) {
     await at(view);
-    expect(target.querySelector(".tf-crumbs .tf-jobchip")?.getAttribute("href"), view).toBe(jobHash("tide:PAY-231"));
+    expect(jobTab()?.getAttribute("href"), view).toBe(jobHash("tide:PAY-231"));
+    expect(seen(".tf-crumbs .tf-jobchip"), `${view}: the breadcrumb names no job (#2228)`).toEqual([]);
   }
-
-  press("Escape");
-  await settle();
-  expect(location.hash).toBe(jobHash("tide:PAY-231"));
 });
 
 test("the Day tab's Add to writes to the ticket of the address the job was opened at (#1525)", async () => {
@@ -911,19 +1200,12 @@ test("the Day tab's Add to writes to the ticket of the address the job was opene
   expect(created).toEqual([{ kind: "entity", entity_id: "tide:PAY-231" }]);
 });
 
-test("a job opened by its bare key keeps the bare key's address (#1525)", async () => {
-  start({ jobPorts: TWO_SOURCE_PORTS });
-  await at("#/job/PAY-231");
-  await at("#/settings");
-  expect(target.querySelector(".tf-jobchip")?.getAttribute("href")).toBe("#/job/PAY-231");
-});
-
-test("a job left at its source's address for its bare key is held at the bare key (#1987)", async () => {
+test("a job opened by its bare key is chosen as the ticket it resolved to, the first listed source's (#1525, spec #2227)", async () => {
   start({ jobPorts: TWO_SOURCE_PORTS });
   await at("#/job/tide:PAY-231");
   await at("#/job/PAY-231");
   await at("#/settings");
-  expect(target.querySelector(".tf-jobchip")?.getAttribute("href"), "same key, another address: a new last job").toBe("#/job/PAY-231");
+  expect(jobTab()?.getAttribute("href"), "same key, another source: the one resolved last is chosen").toBe(jobHash("jira:PAY-231"));
 });
 
 function addToButton(): HTMLButtonElement | undefined {
@@ -983,10 +1265,10 @@ test("a tab switch on a job page re-reads no ticket for the nav job; another job
 
   await at("#/job/PAY-232");
   await at("#/job/PAY-232/conversation");
-  expect(reads.listSources - opened.listSources, "another job is resolved once by the shell, once by its page").toBe(2);
+  expect(reads.listSources - opened.listSources, "another job is resolved once, by its page: the chosen job is an id, read by nobody").toBe(1);
 });
 
-test("a last job moved to another source's ticket under the same key is never answered with the old id (#1782)", async () => {
+test("a job left before its page resolved is not chosen: the job chosen before stays, and the one resolved on screen replaces it (#1782, spec #2227)", async () => {
   let release: () => void = () => {};
   let hold: Promise<void> | null = null;
   const jobPorts: JobPorts = {
@@ -1005,15 +1287,19 @@ test("a last job moved to another source's ticket under the same key is never an
   hold = new Promise<void>((resolve) => (release = resolve));
   await at("#/job/tide:PAY-231");
   await at("#/time/2026-08-22");
-  expect(addToButton(), "the new read is late: no id is offered, least of all the old one").toBeUndefined();
-
   release();
   hold = null;
   await settle();
-  expect(addToButton()?.textContent?.trim()).toBe("Add to PAY-231");
   addToButton()!.click();
   await settle();
-  expect(created).toEqual([{ kind: "entity", entity_id: "tide:PAY-231" }]);
+  expect(created, "Tidewater's never drew, so Jira's is still the chosen job").toEqual([{ kind: "entity", entity_id: "jira:PAY-231" }]);
+
+  created.length = 0;
+  await at("#/job/tide:PAY-231");
+  await at("#/time/2026-08-22");
+  addToButton()!.click();
+  await settle();
+  expect(created, "Tidewater's drew: it is the chosen job").toEqual([{ kind: "entity", entity_id: "tide:PAY-231" }]);
 });
 
 test("with no job opened, the Day tab's open rows offer Add to the timer's ticket (#1027)", async () => {
@@ -1091,17 +1377,37 @@ test("an item of a custom-role source opens its block view, and the role gets no
   expect(entries.filter((a) => a.getAttribute("aria-current") === "page")).toEqual([]);
 });
 
-test("an item opened from a job draws the breadcrumb: the job's key, the kind's label, Back Esc; Esc returns to the job (#1408)", async () => {
+test("an item's page draws the kind's label as its breadcrumb; with no parent and no opener, Esc does nothing and no hint names it (#1408)", async () => {
   start({ sources: [{ id: "surveys", display_name: "Harbour surveys", roles: [{ role: "wasm-fixture:survey-desk", reads: [] }] }] });
   await at("#/job/PAY-231");
-  await at(entityAddress("survey", "surveys:survey-1"));
+  const item = entityAddress("survey", "surveys:survey-1");
+  await reached(item);
 
-  const crumbs = target.querySelector(".tf-crumbs")!;
-  expect(crumbs.querySelector(".tf-jobchip")?.textContent).toBe("PAY-231");
+  const crumbs = seen(".tf-crumbs")[0]!;
+  expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
   expect(crumbs.querySelector("strong")?.textContent).toBe("Survey");
-  expect(crumbs.querySelector(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back to PAY-231 Esc");
+  expect(escHint()).toBeNull();
   expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Quay crane 4 inspection");
 
+  const event = press("Escape");
+  await settle();
+  expect(event.defaultPrevented).toBe(false);
+  expect(location.hash).toBe(item);
+});
+
+test("a note's page has no parent: with no opener Esc does nothing and no hint names it; opened from the Job page, it returns there", async () => {
+  start({ nav: windowNav });
+  await at("#/job/PAY-231");
+  await reached("#/note/note-1");
+  expect(escHint()).toBeNull();
+  const event = press("Escape");
+  await settle();
+  expect(event.defaultPrevented).toBe(false);
+  expect(location.hash).toBe("#/note/note-1");
+
+  await at("#/job/PAY-231");
+  await at("#/note/note-1");
+  expect(escHint()).toBe("Back to Job Esc");
   press("Escape");
   await settle();
   expect(location.hash).toBe("#/job/PAY-231");

@@ -155,6 +155,18 @@ test("#/docs opens the page read last and records the visit", async () => {
   expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
 });
 
+test("a doc page's breadcrumb names where Esc goes, and draws no hint where Esc does nothing (spec #2227, story 35)", async () => {
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: ports(), back: { name: "Run #4811" } } });
+  await settle();
+  expect(target.querySelector(".tf-rd-crumbrow .tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back to Run #4811 Esc");
+  unmount(view);
+  view = null;
+  target.replaceChildren();
+
+  await draw(["confluence:2"]);
+  expect(target.querySelector(".tf-esc")).toBeNull();
+});
+
 test("a space's address opens the page at the top of its tree", async () => {
   const io = await draw(["space", "ENG"]);
   expect(io.docsPage).toHaveBeenCalledWith("confluence:9");
@@ -299,7 +311,7 @@ test("the body: a live ticket chip, my mention in yellow, a page link, code with
   await draw(["confluence:2"]);
   const doc = target.querySelector(".tf-doc")!;
   const chip = doc.querySelector<HTMLAnchorElement>("a.tf-tchip")!;
-  expect(chip.getAttribute("href")).toBe("#/job/jira%3AOPS-77");
+  expect(chip.getAttribute("href")).toBe("#/ticket/jira%3AOPS-77");
   expect(chip.textContent).toContain("On-call runbook outdated");
   expect(chip.textContent).toContain("To Do");
   const mentions = [...doc.querySelectorAll(".tf-ment")];
@@ -868,7 +880,7 @@ test("the page foot: Work it belongs to, then Linked from by space, after the bo
   // After the page body: its last block comes before the foot.
   expect(page.querySelector(".tf-macro")!.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const job = work.parentElement!.querySelector<HTMLAnchorElement>("li a")!;
-  expect(job.getAttribute("href")).toBe("#/job/jira%3AOPS-77");
+  expect(job.getAttribute("href")).toBe("#/ticket/jira%3AOPS-77");
   expect(job.closest("li")!.textContent).toBe("OPS-77 On-call runbook outdatedTo Do");
 
   expect(groups()).toEqual([

@@ -6,7 +6,7 @@
  * be tested as a string. Folding, grouping, filters and search are `draw.ts`'s.
  */
 import type { Dependencies, DepItem, DepKind } from "../../ipc/assets";
-import { jobHash } from "../route";
+import { entityAddress } from "../address";
 
 /**
  * How a tile is drawn: solid red, amber, outlined blue, fine, hatched when
@@ -107,7 +107,7 @@ export function hrefOf(item: DepItem): string {
   const id = encodeURIComponent(item.id);
   switch (item.kind) {
     case "ticket":
-      return jobHash(item.id);
+      return entityAddress("ticket", item.id);
     case "pr":
       return `#/pr/${id}`;
     case "repo":

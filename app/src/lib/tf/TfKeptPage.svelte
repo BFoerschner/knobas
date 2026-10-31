@@ -13,10 +13,11 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { providePageVisible } from "./kept-pages.svelte";
+  import { providePageName } from "./page-name.svelte";
   import { keepScroll } from "./while-shown.svelte";
   import type { RoleFrameProps, TfPageContext, TfPageEntry } from "./page-entry";
-  import { SECTION_NAME, type TfRoute } from "./route";
-  import TfCrumbs from "./TfCrumbs.svelte";
+  import type { TfRoute } from "./route";
+  import TfCrumbs, { shellCrumbs } from "./TfCrumbs.svelte";
   import TfSyncNow from "./TfSyncNow.svelte";
 
   let {
@@ -37,6 +38,8 @@
   } = $props();
 
   providePageVisible(() => visible);
+  // The name the page gives itself, which the shell stamps on the entry opened from it (spec #2227).
+  providePageName(() => visible);
   // The shell's one scroller is every page's: each page shows again where it was left (#2248).
   let wrapper = $state<HTMLElement>();
   keepScroll(() => wrapper, () => visible);
@@ -78,7 +81,7 @@
 <div class="tf-kept" hidden={!visible} bind:this={wrapper}>
   {#if page.crumbs && route.view === "full"}
     <div class="tf-full">
-      <TfCrumbs job={ctx.job} jobAt={ctx.jobAt} name={SECTION_NAME[route.section]} />
+      <TfCrumbs parts={shellCrumbs(route)} back={ctx.back} />
       <Page {...pageProps} {...frameProps} />
     </div>
   {:else}

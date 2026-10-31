@@ -9,7 +9,7 @@
 import type { EntityDetail, JobLinkSets, LinkEntry, LinkSetRuleRow, SuggestionEntry } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
 import { kindRegistry } from "../../shell/kind-registry.svelte";
-import { jobHash } from "../route";
+import { entityAddress } from "../address";
 import { itemHash, keyOf, runKindsOf } from "./job";
 
 /**
@@ -143,7 +143,7 @@ export function groupsOf(read: JobLinkSets | null): JobGroup[] {
       key: `parent:${read.parent.ticket}`,
       label: `Parent ${key}`,
       via: PARENT_VIA,
-      href: jobHash(read.parent.ticket),
+      href: entityAddress("ticket", read.parent.ticket),
       setId: null,
       rows: read.parent.links.map((link) => ({
         id: link.entity_id,

@@ -18,6 +18,7 @@
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { replaceAddress } from "../opener";
 
   import { ipcErrorMessage } from "../../ipc";
   import { proposalEvidence, roomSuggestions, type ProposalEvidence, type SuggestionEntry } from "../../ipc/entity";
@@ -29,7 +30,7 @@
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import type { Layers } from "../layers.svelte";
-  import { jobHash } from "../route";
+  import { entityAddress } from "../address";
   import { decisions as sessionDecisions, UNDO_MS, type Decisions } from "./decisions.svelte";
   import {
     aboutTicket,
@@ -64,11 +65,11 @@
       proposalEvidence: (linkId) => proposalEvidence(linkId),
     },
     decisions = sessionDecisions,
-    ongo = (hash: string) => location.replace(hash),
+    ongo = replaceAddress,
   }: {
     /** Whether the database answers yet. */
     ready: boolean;
-    /** The job the reader was last in, as a ticket key: what *This job* keeps. */
+    /** The chosen job (spec #2227), as a ticket key: what *This job* keeps. */
     job: string | null;
     /** The addressed proposal's link id, `null` for `#/review`. */
     sid: string | null;
@@ -269,7 +270,7 @@
           <h1>Is this a real connection?</h1>
           <span class="tf-dim"
             >{list.indexOf(current) + 1} of {list.length}{#if about !== null}, about <a
-                href={jobHash(about.entityId)}
+                href={entityAddress("ticket", about.entityId)}
                 class="tf-mono">{about.key}</a
               >{/if}</span
           >

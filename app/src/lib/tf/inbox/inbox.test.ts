@@ -110,10 +110,10 @@ describe("where a row opens", () => {
       href: "#/monitors",
     });
   });
-  test("an assignment opens the job", () => {
+  test("an assignment opens the ticket page, to read before taking it on (spec #2227)", () => {
     expect(opener(item({ category: "new_assignment", entity_id: "jira:PAY-240", kind: "ticket" }))).toEqual({
-      label: "Open job",
-      href: "#/job/jira%3APAY-240",
+      label: "Open ticket",
+      href: "#/ticket/jira%3APAY-240",
     });
   });
   test("a mention opens where it was said", () => {

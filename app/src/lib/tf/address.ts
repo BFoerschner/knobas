@@ -12,17 +12,21 @@
  *
  * {@link legacyAddress} reads an address the new shell has no place for. A
  * notification delivered before #1085 still carries `#/entity/<id>`, and a
- * bookmark may hold `#/ticket/<id>` or a room; the shell asks this module
- * before it answers *Nothing lives at …*.
+ * bookmark may hold `#/start-work/<id>` or a room; the shell asks this module
+ * before it answers *Nothing lives at …*. `#/ticket/<id>` is no longer one of
+ * them: it is the ticket page's own address (spec #2227), which `route.ts`
+ * reads, so it never reaches here.
  */
 import { itemHash } from "./job/job";
 import { jobHash } from "./route";
 
 /**
  * The address of an entity of `kind`: `itemHash`, which owns every kind's
- * rule (#1101). A ticket opens its job by its entity id, the address that
- * names the source, so a key two sources hold opens the one it was drawn
- * from (#1476, #1977). `title`, where the producer holds one, lets a standup
+ * rule (#1101). A ticket opens its ticket page by its entity id (spec #2227),
+ * never its job: the address names the source, so a key two sources hold
+ * opens the one it was drawn from (#1476, #1977). A caller that means to take
+ * the ticket on (a primary button, the timer chip, *Start work*) builds the
+ * job's address itself. `title`, where the producer holds one, lets a standup
  * protocol note open Time › Standup at its date rather than the note page
  * (#1504).
  */
@@ -39,7 +43,7 @@ export type Legacy = { go: string } | { resolve: string } | null;
 
 /**
  * The kinds the rooms UI addressed as `#/<kind>/<id>`. Several are first
- * segments of the new shell too (`#/pr/…`, `#/build/…`), which never reach
+ * segments of the new shell too (`#/pr/…`, `#/build/…`, `#/ticket/…`), which never reach
  * here; they are listed so the rule reads whole. `route` is not a kind the
  * rooms UI had (`#/route/<id>` was a view), and the new shell reads it itself.
  */
@@ -73,7 +77,8 @@ export function legacyAddress(hash: string): Legacy {
   if (id === "") return null;
   if (head === "entity") return { resolve: id };
   // The id the rooms UI held is the entity id, which names the source (#1676).
-  if (head === "start-work" || head === "ticket") return { go: jobHash(id) };
+  // *Start work* means to take the ticket on, so it still opens the job.
+  if (head === "start-work") return { go: jobHash(id) };
   if (ROOM_KINDS.has(head)) return { go: entityAddress(head, id) };
   return null;
 }

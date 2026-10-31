@@ -7,16 +7,17 @@ import { pageFor } from "./pages";
 import { parseTfHash } from "./route";
 
 test("an entity of a known kind goes where its own page is", () => {
-  expect(entityAddress("ticket", "jira:PAY-231")).toBe("#/job/jira%3APAY-231");
+  expect(entityAddress("ticket", "jira:PAY-231")).toBe("#/ticket/jira%3APAY-231");
   expect(entityAddress("pr", "gitea:acme/svc#142")).toBe("#/pr/gitea%3Aacme%2Fsvc%23142");
   expect(entityAddress("page", "confluence:42")).toBe("#/page/confluence%3A42");
   expect(entityAddress("asset", "asset:9f1c")).toBe("#/asset/asset%3A9f1c");
   expect(entityAddress("route", "route:9a1b")).toBe("#/route/route%3A9a1b");
 });
 
-test("a ticket opens at its source's address, so a key two sources hold opens the one it names (#1476, #1977)", () => {
-  expect(entityAddress("ticket", "gitea:PAY-231")).toBe("#/job/gitea%3APAY-231");
-  expect(entityAddress("ticket", "gitea:acme/payouts#144")).toBe("#/job/gitea%3Aacme%2Fpayouts%23144");
+test("a ticket opens its ticket page by its entity id, so a key two sources hold opens the one it names (#1476, #1977, spec #2227)", () => {
+  expect(entityAddress("ticket", "gitea:PAY-231")).toBe("#/ticket/gitea%3APAY-231");
+  expect(entityAddress("ticket", "gitea:acme/payouts#144")).toBe("#/ticket/gitea%3Aacme%2Fpayouts%23144");
+  expect(parseTfHash(entityAddress("ticket", "gitea:acme/payouts#144"))).toEqual({ view: "ticket", id: "gitea:acme/payouts#144" });
 });
 
 test("a note opens its own page, which sends the reader to Settings › Notes while notes hide (#1504, D10)", () => {
@@ -28,7 +29,7 @@ test("a note titled by the protocol rule opens Time › Standup at its date (#15
   expect(entityAddress("note", "note:7a1", "Standup 2026-09-03")).toBe("#/time/standup/2026-09-03");
   expect(entityAddress("note", "note:7a1", "Standup notes")).toBe("#/note/note%3A7a1");
   // The rule is a note's: a ticket that happens to be so titled is still a ticket.
-  expect(entityAddress("ticket", "jira:PAY-1", "Standup 2026-09-03")).toBe("#/job/jira%3APAY-1");
+  expect(entityAddress("ticket", "jira:PAY-1", "Standup 2026-09-03")).toBe("#/ticket/jira%3APAY-1");
 });
 
 test("a Jira view opens its ticket view, by the projection's slug (#1094)", () => {
@@ -58,13 +59,12 @@ test("a branch or commit opens its own address, which the repository page's redi
 });
 
 test("a rooms-UI detail address is read as the entity it names", () => {
-  expect(legacyAddress("#/ticket/jira:PAY-231")).toEqual({ go: "#/job/jira%3APAY-231" });
   expect(legacyAddress("#/build/teamcity%3A77")).toEqual({ go: "#/build/teamcity%3A77" });
 });
 
-test("a bookmark to a ticket names its source when two sources hold the key (#1676)", () => {
-  expect(legacyAddress("#/ticket/gitea:PAY-231")).toEqual({ go: "#/job/gitea%3APAY-231" });
-  expect(legacyAddress("#/ticket/gitea:acme%2Fpayouts%23144")).toEqual({ go: "#/job/gitea%3Aacme%2Fpayouts%23144" });
+test("#/ticket/<id> is the ticket page now, not a rooms address; #/start-work/<id> still opens the job by its source (#1676, spec #2227)", () => {
+  expect(parseTfHash("#/ticket/gitea:PAY-231")).toEqual({ view: "ticket", id: "gitea:PAY-231" });
+  expect(parseTfHash("#/ticket/gitea:acme%2Fpayouts%23144")).toEqual({ view: "ticket", id: "gitea:acme/payouts#144" });
   expect(legacyAddress("#/start-work/gitea:PAY-231")).toEqual({ go: "#/job/gitea%3APAY-231" });
 });
 

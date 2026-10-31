@@ -31,6 +31,7 @@
 -->
 <script lang="ts" module>
   import { SvelteMap } from "svelte/reactivity";
+  import { replaceAddress } from "../opener";
 
   import type { JobPipeline, PipelineRow, RunRow, SourceView } from "../../ipc/entity";
 
@@ -73,7 +74,8 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
-  import { jobHash } from "../route";
+  import type { EscTarget } from "../escape";
+  import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
   import TfPipeline from "./TfPipeline.svelte";
   import TfRun from "./TfRun.svelte";
   import { pipelineOfRun } from "./run";
@@ -106,6 +108,7 @@
     rest,
     job,
     jobAt = null,
+    back = null,
     ports = { pipelines: readPipelines, runs: (id) => pipelineRuns(id) },
     sync,
     syncRevision = 0,
@@ -116,10 +119,12 @@
     head: string;
     /** What follows the head in the address. */
     rest: string[];
-    /** The job the reader was last in, for the breadcrumb. */
+    /** The chosen job (spec #2227), for *This job*. */
     job: string | null;
-    /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
+    /** The chosen job's entity id (#1525), which its ticket is read by; its key when omitted. */
     jobAt?: string | null;
+    /** Where `Esc` goes, which the breadcrumb's hint names; `null` where it does nothing (#2228). */
+    back?: EscTarget | null;
     ports?: BuildsPorts;
   } & RoleFrameProps = $props();
 
@@ -214,14 +219,14 @@
     const id = rest[0]!;
     const owner = all.find((p) => p.recent.some((r) => r.entity_id === id));
     if (owner !== undefined) {
-      location.replace(runHash(owner.entity_id, id));
+      replaceAddress(runHash(owner.entity_id, id));
       return;
     }
     const ids = all.map((p) => p.entity_id);
     void (ports.view ?? RUN_BRIDGE.view)(id).then(
       (view) => {
         const found = pipelineOfRun(view, ids);
-        if (found !== null && rest[0] === id) location.replace(runHash(found, id));
+        if (found !== null && rest[0] === id) replaceAddress(runHash(found, id));
         else lost = id;
       },
       () => (lost = id),
@@ -317,20 +322,8 @@
   }
 </script>
 
-{#snippet crumbs(parts: { name: string; href?: string }[])}
-  <nav class="tf-crumbs" aria-label="Breadcrumb">
-    {#if job !== null}
-      <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a><span class="tf-sep">›</span>
-    {/if}
-    {#each parts as part, at (at)}
-      {#if part.href !== undefined}
-        <a class="tf-crumb" href={part.href}>{part.name}</a><span class="tf-sep">›</span>
-      {:else}
-        <strong>{part.name}</strong>
-      {/if}
-    {/each}
-    <span class="tf-esc">{job !== null ? `Back to ${job}` : "Back"} <kbd>Esc</kbd></span>
-  </nav>
+{#snippet crumbs(parts: Crumb[])}
+  <TfCrumbs {parts} {back} />
 {/snippet}
 
 {#snippet item(pipeline: PipelineRow, depth: number, key: string)}

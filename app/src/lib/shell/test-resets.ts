@@ -57,6 +57,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/job/current.svelte.ts#entityId": async () => void (await import("../tf/job/current.svelte")).currentJob.set(null),
   "tf/job/current.svelte.ts#crumb": async () => (await import("../tf/job/current.svelte")).breadcrumbJob.set(null),
   "tf/job/current.svelte.ts#asked": async () => (await import("../tf/job/current.svelte")).linkRequest.drop(),
+  // The chosen job (spec #2227), kept in `localStorage`: each test starts with none.
+  "tf/job/chosen.svelte.ts#chosenJob": async () => (await import("../tf/job/chosen.svelte")).chosenJob.reset(),
   "tf/layers.svelte.ts#layers": async () => (await import("../tf/layers.svelte")).layers.reset(),
   "tf/page-refresh.svelte.ts#pageRefresh": async () => (await import("../tf/page-refresh.svelte")).pageRefresh.reset(),
   "tf/openin/apps.svelte.ts#apps": async () => (await import("../tf/openin/apps.svelte")).apps.reset(),

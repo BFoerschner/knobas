@@ -79,6 +79,7 @@
  * so at `warn`.
  */
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { goWithoutOpener } from "../tf/opener";
 import {
   isPermissionGranted as realIsPermissionGranted,
   requestPermission as realRequestPermission,
@@ -227,9 +228,8 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
     send: sendThrough(),
     onAction: clickChannel(),
     focused: () => document.hasFocus(),
-    navigate: (hash) => {
-      location.hash = hash;
-    },
+    // A notification's click is a deep link: no page in the app opened it (#2229).
+    navigate: (hash) => goWithoutOpener(hash),
     ...ports,
   };
 

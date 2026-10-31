@@ -168,7 +168,7 @@ test("a cell links to its day and says what is left; weekend columns are shaded"
   expect(cells[6]!.classList.contains("tf-tm-we")).toBe(true);
   expect(cells[1]!.classList.contains("tf-tm-we")).toBe(false);
   expect(text(cells[8])).toBe("7h 45m");
-  expect(row.querySelector('a[href="#/job/jira%3APAY-228"]')).not.toBeNull();
+  expect(row.querySelector('a[href="#/ticket/jira%3APAY-228"]')).not.toBeNull();
 });
 
 test("a Gitea ticket's slash does not split its address, and a page or repo opens at its kind's address (#1676)", async () => {
@@ -176,7 +176,7 @@ test("a Gitea ticket's slash does not split its address, and a page or repo open
   await render();
   const hrefOf = (words: string) =>
     [...target.querySelectorAll("tbody tr")].find((tr) => text(tr).includes(words))?.querySelector(".tf-tm-t a")?.getAttribute("href");
-  expect(hrefOf("acme/payouts#144")).toBe("#/job/gitea%3Aacme%2Fpayouts%23144");
+  expect(hrefOf("acme/payouts#144")).toBe("#/ticket/gitea%3Aacme%2Fpayouts%23144");
   expect(hrefOf("page-1")).toBe("#/page/knobas%3Apage-1");
   expect(
     [...target.querySelectorAll("tbody tr")].filter((tr) => text(tr).includes("acme/payouts") && !text(tr).includes("#144"))[0]?.querySelector(".tf-tm-t a")?.getAttribute("href"),
