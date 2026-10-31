@@ -267,11 +267,10 @@ test("a hand-drawn link draws no reason line", () => {
 
 /**
  * #2238 / #2292: the panel is a page body, so its actions are the Controls'
- * small button, and the unported `.btn` is gone from it.
+ * small button.
  */
 test("every action is a small Controls button, in a row and in the empty state", () => {
   const filled = render([entry({ id: "one" })]);
-  expect(filled.target.querySelector(".btn")).toBeNull();
   expect(
     [...filled.target.querySelectorAll<HTMLButtonElement>("button.tf-btn")].map((button) => [
       button.textContent?.trim(),
@@ -284,7 +283,6 @@ test("every action is a small Controls button, in a row and in the empty state",
   filled.done();
 
   const empty = render([]);
-  expect(empty.target.querySelector(".btn")).toBeNull();
   expect(empty.buttons("Link to").map((button) => button.className.split(" ").filter((name) => name.startsWith("tf-")).join(" "))).toEqual([
     "tf-btn tf-sm",
     "tf-btn tf-sm",

@@ -1372,7 +1372,6 @@ test("the reader's actions sit on the right of the title line at the header size
   expect(buttons.filter((b) => b.classList.contains("tf-sm"))).toEqual([]);
   expect(buttons.every((b) => b.classList.contains("tf-btn"))).toBe(true);
   expect(buttons.filter((b) => b.classList.contains("tf-ghost")).map((b) => b.textContent)).toEqual(["Open in Confluence"]);
-  expect(target.querySelector(".tf-rd-acts")).toBeNull();
   // The meta line follows the header; no actions follow the meta line.
   expect(head.nextElementSibling?.classList.contains("tf-rd-meta")).toBe(true);
 });

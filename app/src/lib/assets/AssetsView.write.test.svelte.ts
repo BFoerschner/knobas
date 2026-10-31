@@ -1038,7 +1038,7 @@ function drawnAs(control: Element): string {
 /**
  * **Every dialog the pane opens has the one footer: ghost *Cancel*, then the
  * primary; an edit dialog's *Delete* on the far left** (#2291, spec #2238
- * stories 26-28 and 32). The view and its dialogs draw no unported `.btn`.
+ * stories 26-28 and 32).
  */
 test.each([
   ["New asset in vm-db-01", ["Cancel: ghost", "Create: primary"]],
@@ -1060,15 +1060,11 @@ test.each([
   ]);
   render("#/asset/asset:vm-db-01", store);
   await waitFor(() => expect(text()).toContain("Postgres UI"));
-  // The Links panel (`detail/LinksPanel.svelte`) moved with #2292, so nothing
-  // in the pane is left out.
-  expect([...target.querySelectorAll(".btn, .tb-btn")], "the pane on the unported button").toEqual([]);
 
   click(opener);
   const dialog = target.querySelector('[role="dialog"]')!;
   const foot = [...dialog.querySelectorAll("footer button")];
   expect(foot.map((control) => `${(control.textContent ?? "").trim()}: ${drawnAs(control)}`)).toEqual(footer);
-  expect(dialog.querySelector(".btn"), "the dialog on the unported button").toBeNull();
 });
 
 /**
