@@ -514,6 +514,8 @@ test("Conversation: each entry's who, when and verdict, then a comment queued an
   expect(messages()).toEqual(["JO jonas2026-08-22 09:30 commented Should the jitter be bounded?", "MA You2026-08-22 10:20 Bounded to ±10 %."]);
   const box = target.querySelector<HTMLTextAreaElement>(".tf-compose textarea")!;
   expect(box.placeholder).toBe("Comment on PR #142");
+  // In the page body, so small (#2238 Controls).
+  expect(button("Comment")!.classList.contains("tf-sm")).toBe(true);
   box.value = "Thanks, looks good.";
   box.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
