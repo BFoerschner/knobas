@@ -6979,7 +6979,11 @@ async fn an_archived_or_missing_repository_is_refused_its_writes_saying_why() {
     }
 
     assert_eq!(made, [201, 201], "create both repositories");
-    assert_eq!(patched, [200, 200], "archive one, switch the other's issues off");
+    assert_eq!(
+        patched,
+        [200, 200],
+        "archive one, switch the other's issues off"
+    );
     let answer = answer.expect("each probe answered a verdict");
     let gone = "Gitea does not show this repository's issues to this token: \
                 they are switched off, or the repository is gone";

@@ -255,7 +255,13 @@ async fn an_archived_or_missing_repository_refuses_saying_why() {
     write_probe(&server, format!("{REPO}/issues"), 423, "repo is archived").await;
     write_probe(&server, format!("{REPO}/branches"), 423, "repo is archived").await;
     write_probe(&server, format!("{OTHER}/issues"), 404, "not found").await;
-    write_probe(&server, format!("{OTHER}/branches"), 422, "[BranchName]: Required").await;
+    write_probe(
+        &server,
+        format!("{OTHER}/branches"),
+        422,
+        "[BranchName]: Required",
+    )
+    .await;
     let elsewhere = id(keys::issue_key("tidewater", "ledger", 3));
     let elsewhere_pull = id(keys::pr_key("tidewater", "ledger", 4));
     let refused = source(&server)
