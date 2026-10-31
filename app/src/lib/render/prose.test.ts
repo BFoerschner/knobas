@@ -41,6 +41,22 @@ describe("jiraWikiToMarkdown (#2308)", () => {
   });
 });
 
+describe("jiraWikiToMarkdown: what Jira draws as text stays text (#2308)", () => {
+  it("keeps the words after a block's closing tag", () => {
+    expect(jiraWikiToMarkdown("{code}x{code} and *more*")).toBe("```\nx\n```\nand **more**");
+  });
+
+  it("escapes a line start Markdown would read as a list or a quote", () => {
+    expect(jiraWikiToMarkdown("1. not a list\n> not a quote\n+ nor this")).toBe(
+      "1\\. not a list  \n\\> not a quote  \n\\+ nor this",
+    );
+  });
+
+  it("quotes a bq. line inside a {quote} once more", () => {
+    expect(jiraWikiToMarkdown("{quote}\nbq. inner\n{quote}")).toBe("> > inner");
+  });
+});
+
 describe("proseMarkdown (#2308)", () => {
   it("answers the Markdown to draw, or null for text", () => {
     expect(proseMarkdown("# Title", "markdown")).toBe("# Title");

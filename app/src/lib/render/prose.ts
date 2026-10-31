@@ -65,11 +65,13 @@ export function jiraWikiToMarkdown(wiki: string): string {
       const close = `{${tag}}`;
       const body: string[] = [];
       let rest = block[3] ?? "";
+      let after = "";
       // `{code}x{code}` on one line, or the body starting on the opening line.
       while (true) {
         const end = rest.indexOf(close);
         if (end >= 0) {
           if (end > 0) body.push(rest.slice(0, end));
+          after = rest.slice(end + close.length);
           break;
         }
         if (rest !== "") body.push(rest);
@@ -79,6 +81,7 @@ export function jiraWikiToMarkdown(wiki: string): string {
       push("```" + lang);
       for (const line of body) push(line);
       push("```");
+      if (after.trim() !== "") push(inline(literal(after.trim())), true);
       tableRows = 0;
       continue;
     }
@@ -126,7 +129,7 @@ export function jiraWikiToMarkdown(wiki: string): string {
     }
     const bq = QUOTE_LINE.exec(line);
     if (bq) {
-      out.push({ text: `> ${inline(bq[1]!)}`, prose: false });
+      push(`> ${inline(bq[1]!)}`);
       continue;
     }
     const list = LIST.exec(line);
@@ -136,13 +139,21 @@ export function jiraWikiToMarkdown(wiki: string): string {
       push(`${indent}${marks.endsWith("#") ? "1." : "-"} ${inline(list[2]!)}`);
       continue;
     }
-    line = line.replace(/\\\\\s*/g, "  \n");
+    line = literal(line).replace(/\\\\\s*/g, "  \n");
     push(inline(line), true);
   }
 
   return out
     .map((line, at) => (line.prose && out[at + 1]?.prose ? `${line.text}  ` : line.text))
     .join("\n");
+}
+
+/**
+ * A paragraph line's start that Markdown reads as a block and Jira as text
+ * (`1. `, `> `, `+ `), escaped so it stays text.
+ */
+function literal(line: string): string {
+  return line.replace(/^(\s*)(\d+)([.)]\s)/, "$1$2\\$3").replace(/^(\s*)([>+]\s)/, "$1\\$2");
 }
 
 /** A `{code:…}` parameter list's language: its first parameter when that is not a `key=value`. */
