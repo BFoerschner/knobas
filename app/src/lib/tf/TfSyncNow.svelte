@@ -3,7 +3,7 @@
   into the header of every view whose page names a role. It runs each enabled
   source that fills the role, as the mirror answers it (`sync_role`), says
   *Syncing…* until those runs end, and is not drawn for a role no enabled
-  source fills.
+  source fills. A header button, so at the default size (#2238).
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -39,7 +39,7 @@
 </script>
 
 {#if drawn}
-  <button type="button" class="tf-btn tf-sm tf-syncnow" disabled={sync.running} {title} onclick={press}
+  <button type="button" class="tf-btn tf-syncnow" disabled={sync.running} {title} onclick={press}
     >{sync.running ? "Syncing…" : "Sync now"}</button
   >
 {/if}
