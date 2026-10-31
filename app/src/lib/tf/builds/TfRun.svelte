@@ -119,7 +119,7 @@
     /** The breadcrumb, drawn by the Builds page. */
     crumbs: Snippet<[{ name: string; href?: string }[]]>;
     /** The Builds view's *Sync now* (#2106), last in the header (#2287). */
-    sync?: Snippet;
+    sync?: Snippet | undefined;
     ports?: RunPorts;
   } = $props();
 

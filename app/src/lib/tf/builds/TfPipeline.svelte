@@ -122,7 +122,7 @@
     /** Read the pipeline's row again, the list's (#2137): a *Refresh* asks it before the page's own reads. */
     rereadRow?: () => Promise<void> | void;
     /** The Builds view's *Sync now* (#2106), last in the header (#2287). */
-    sync?: Snippet;
+    sync?: Snippet | undefined;
     ports?: PipelinePorts;
   } = $props();
 
