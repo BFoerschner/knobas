@@ -37,12 +37,14 @@
 //   finish loading and any one DevTools command to be answered; SHOT_STEP_WAIT_S
 //   (default 60) for the element a step names. A probe that hangs is cut off at its
 //   guard too. A Chrome that exits before it offers a page fails at once. SHOT_CHROME
-//   replaces the Chrome binary (scripts/shot-test.sh starts a late, a dead and a mute one).
+//   replaces the Chrome binary (scripts/shot-test.sh starts a late, a dead and a mute one);
+//   unset, scripts/chrome-path.mjs finds it (the macOS app, else Chrome or Chromium on PATH).
 //   Every uncaught exception and console.error in the page is printed as `shot: uncaught …`
 //   or `shot: console.error …`. An uncaught exception fails the shot (exit 1) after its image
 //   is written, so a screen that throws never passes as a picture; SHOT_ALLOW_ERRORS=1 lets
 //   it through.
 import { spawn } from "node:child_process";
+import { chromePath as findChrome } from "./chrome-path.mjs";
 import { writeFileSync } from "node:fs";
 
 const [port, debug, profile, size, theme, file, spec, extra = ""] = process.argv.slice(2);
@@ -136,7 +138,11 @@ const keyPress = (combo) => {
 const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, `--window-size=${size}`];
 if (theme === "dark") flags.push("--blink-settings=preferredColorScheme=0");
 if (theme === "light") flags.push("--blink-settings=preferredColorScheme=1");
-const chromePath = process.env.SHOT_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const chromePath = findChrome();
+if (!chromePath) {
+  console.error("shot: no Chrome found (the macOS app, or google-chrome or chromium on PATH); set SHOT_CHROME");
+  process.exit(1);
+}
 const chrome = spawn(chromePath, [...flags, "about:blank"], { stdio: "ignore", detached: true });
 // Why Chrome is gone, once it is: an exit before it offered a page is a fault, not a slow start.
 let chromeGone = null;
