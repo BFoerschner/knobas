@@ -3,7 +3,7 @@
  * filter and chips, the selected pipeline's runs on the right, and the
  * source's word in one header line only.
  */
-import { flushSync, mount, unmount } from "svelte";
+import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
@@ -94,7 +94,10 @@ const LIST: PipelineRow[] = [
   pipeline("Payout_Lint", "Payout_Lint", [run("teamcity:build:904", "ok")]),
 ];
 
-function draw(rest: string[], head = "builds", asked: string[] = [], extra: Partial<BuildsPorts> = {}) {
+/** The role frame's *Sync now* (#2106), as `TfKeptPage` hands it. */
+const syncNow = createRawSnippet(() => ({ render: () => '<button type="button" class="tf-btn tf-syncnow">Sync now</button>' }));
+
+function draw(rest: string[], head = "builds", asked: string[] = [], extra: Partial<BuildsPorts> = {}, sync = false) {
   const ports: BuildsPorts = {
     ...extra,
     pipelines: () => Promise.resolve(LIST),
@@ -103,7 +106,7 @@ function draw(rest: string[], head = "builds", asked: string[] = [], extra: Part
       return Promise.resolve(LIST.find((p) => p.entity_id === id)?.recent ?? []);
     },
   };
-  page = mount(TfBuilds, { target, props: { ready: true, head, rest, job: null, ports } });
+  page = mount(TfBuilds, { target, props: { ready: true, head, rest, job: null, ports, ...(sync ? { sync: syncNow } : {}) } });
 }
 
 const rows = () => [...target.querySelectorAll<HTMLAnchorElement>(".tf-pi")];
@@ -209,6 +212,42 @@ test("no pipelines says what would fill the list", async () => {
   });
   await settle();
   expect(target.querySelector(".tf-pl-note")?.textContent).toContain("No pipelines yet");
+});
+
+// -- *Sync now* in the header (#2287) ------------------------------------------
+
+/** The header's actions on the right of the Builds page, in their order. */
+const headerActs = () => [...target.querySelectorAll<HTMLElement>(".tf-bmain .tf-fhead .tf-acts > *")];
+
+test.each([
+  ["a pipeline", "builds", ["teamcity:buildType:Payout_Lint"]],
+  ["a run", "build", ["teamcity:buildType:Payout_Lint", "teamcity:build:904"]],
+  ["no pipeline at the address", "builds", ["teamcity:buildType:Gone"]],
+  ["no run at the address", "build", ["teamcity:build:1"]],
+])("Sync now is last in the Builds header on %s, and not in the rail", async (_, head, rest) => {
+  draw(rest, head, [], { view: () => Promise.resolve(null) }, true);
+  await settle();
+  expect(target.querySelectorAll(".tf-syncnow")).toHaveLength(1);
+  expect(target.querySelector(".tf-pl .tf-syncnow")).toBeNull();
+  expect(headerActs().at(-1)?.textContent).toBe("Sync now");
+});
+
+test("Sync now is in the Builds header while no pipeline has synced yet", async () => {
+  page = mount(TfBuilds, {
+    target,
+    props: {
+      ready: true,
+      head: "builds",
+      rest: [],
+      job: null,
+      ports: { pipelines: () => Promise.resolve([]), runs: () => Promise.resolve([]) },
+      sync: syncNow,
+    },
+  });
+  await settle();
+  expect(target.querySelector(".tf-pl .tf-syncnow")).toBeNull();
+  expect(target.querySelector(".tf-bmain .tf-fhead h1")?.textContent).toBe("Builds");
+  expect(headerActs().at(-1)?.textContent).toBe("Sync now");
 });
 
 // -- the project tree and pins (#849), *This job* (#850) ----------------------

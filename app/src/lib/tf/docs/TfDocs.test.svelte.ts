@@ -2144,6 +2144,27 @@ test("a page whose adapter does not read one page offers Sync now, and the run's
   expect(getEntity).toHaveBeenCalledTimes(2);
 });
 
+test("the view's Sync now ends the header after Refresh, and gives way to the page's own Sync now: one per header (#2287, #2286)", async () => {
+  const mountWith = async (refreshes: boolean) => {
+    const getEntity = vi.fn(async () => pageDetail({ refreshes }));
+    const io = ports({ docsPage: vi.fn(async () => RICH), getEntity, refresh: refreshProbe().ports });
+    view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: io, sync: syncSnippet } });
+    await settle();
+  };
+  await mountWith(true);
+  expect(actions().slice(-2)).toEqual(["Refresh", "Sync now"]);
+  expect(syncNow()).toHaveLength(1);
+
+  unmount(view!);
+  view = null;
+  target.innerHTML = "";
+  await mountWith(false);
+  expect(actions().filter((name) => name === "Sync now")).toHaveLength(1);
+  expect(syncNow()).toEqual([]);
+  expect(actions().at(-1)).toBe("Sync now");
+  expect(refreshButton()?.textContent).toBe("Sync now");
+});
+
 test("a turned-off source's page draws neither button and its banner; a withdrawn one keeps Refresh and says so (#2136)", async () => {
   const off = refreshProbe();
   await draw(["confluence:2"], ports({ getEntity: vi.fn(async () => pageDetail({ source: { ...pageDetail().source, enabled: false } })), refresh: off.ports }));

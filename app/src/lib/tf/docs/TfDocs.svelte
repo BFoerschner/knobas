@@ -19,8 +19,9 @@
   title line is the canonical header (#2286): on its right the actions with
   *More ▾* (#2082), "Open in <source>" as a ghost, the page's *Refresh* or
   *Sync now* (#2136: `TfDetailRefresh` over `get_entity` of the page), and last
-  the view's *Sync now* (the role frame's `sync`, #2106), which a reader pane
-  with no page draws in a plain *Docs* header. The withdrawn, turned-off and
+  the view's *Sync now* (the role frame's `sync`, #2106), left out while the
+  page's own button is a *Sync now* (one per header, #2287). A reader pane
+  with no page draws the view's *Sync now* in a plain *Docs* header. The withdrawn, turned-off and
   failed-refresh banners sit under the meta line, then the blocks by section (*Edit section*),
   the page foot (*Work it belongs to*, *Linked from*, `TfDocFoot`) and the
   comments with the composer (R-10.9 to R-10.15). A page opened from a hit
@@ -1115,7 +1116,8 @@
                 <button type="button" class="tf-btn tf-ghost" onclick={() => open(url)}>Open in {p.source_name}</button>
               {/if}
               {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
-              {@render sync?.()}
+              <!-- The view's *Sync now*, unless the page's button already is one (#2287): one *Sync now* per header. -->
+              {#if detail === null || refresh.offer(detail) !== "sync"}{@render sync?.()}{/if}
             </div>
           </div>
           <div class="tf-rd-meta">
