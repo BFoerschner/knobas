@@ -432,9 +432,10 @@ head_repo: Array<PayloadPath>,
  * The name of the default branch of the repo a branch sits in (#718):
  * for Gitea, `repository.default_branch` as `map` writes it into a
  * branch's payload. A branch titled so is its repo's default, which
- * the Code tile never draws as one wanting a pull request. Empty for
- * every kind that is not a branch, and a miss draws the branch as any
- * other.
+ * the Code tile never draws as one wanting a pull request. On a
+ * repository, its own default branch (#2307, Gitea's `default_branch`):
+ * what its detail carries to the repository page. Empty for every other
+ * kind, and a miss draws the branch as any other.
  */
 default_branch: Array<PayloadPath>, 
 /**
