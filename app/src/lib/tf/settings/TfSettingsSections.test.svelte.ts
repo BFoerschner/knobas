@@ -394,8 +394,9 @@ test("a link set draws its tick after Links, on by default, and switching it off
   expect(p.shareExport).toHaveBeenLastCalledWith(expect.objectContaining({ link_sets: false }));
 });
 
-/** The file names the open dialog lists. */
-const listedFiles = () => [...target.querySelectorAll('[role="dialog"] tbody tr td:first-child')].map((el) => el.textContent);
+/** The file names the open dialog lists, one pick each. */
+const listedFiles = () =>
+  [...target.querySelectorAll<HTMLInputElement>('[role="dialog"] [role="radiogroup"] input[type="radio"]')].map((el) => el.value);
 
 test("Restore from a file… lists the backups and Import… the share exports, each restoring that file", async () => {
   const p = await open("backup");
@@ -704,7 +705,46 @@ test("Standup's Change… and Backup's Restore from a file… draw Cancel as a g
   await open("backup");
   button("Restore from a file…").click();
   await settle();
-  expect(footerOf()).toEqual([["Cancel", "tf-btn tf-ghost"]]);
+  expect(footerOf()).toEqual([
+    ["Open the backup folder", "tf-btn tf-first"],
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Restore", "tf-btn tf-primary"],
+  ]);
+});
+
+/** The radio for one listed file in the open dialog. */
+const pickFor = (file: string) =>
+  target.querySelector<HTMLInputElement>(`[role="dialog"] [role="radiogroup"] input[type="radio"][value="${file}"]`)!;
+
+test("Restore from a file… is a pick and a footer primary: the first file is picked, another can be (#2343)", async () => {
+  const p = await open("backup", sectionPorts({ backupStatus: vi.fn(() => Promise.resolve(statusWith("knobas-20261014-020000.knobas", false))) }));
+  button("Restore from a file…").click();
+  await settle();
+  expect(target.querySelector('[role="dialog"] [role="radiogroup"]')?.getAttribute("aria-label")).toBe("Backups");
+  expect(listedFiles()).toEqual(["knobas-20261015-020000.knobas", "knobas-20261014-020000.knobas"]);
+  expect(pickFor("knobas-20261015-020000.knobas").checked).toBe(true);
+  expect(target.querySelectorAll('[role="dialog"] tbody button'), "no per-row Restore").toHaveLength(0);
+  pickFor("knobas-20261014-020000.knobas").click();
+  flushSync();
+  button("Restore").click();
+  await settle();
+  expect(p.restoreBackup).toHaveBeenCalledExactlyOnceWith("knobas-20261014-020000.knobas");
+});
+
+test("Import… names its picks Share exports and its primary Import (#2343)", async () => {
+  await open("backup");
+  button("Import…").click();
+  await settle();
+  expect(target.querySelector('[role="dialog"] [role="radiogroup"]')?.getAttribute("aria-label")).toBe("Share exports");
+  expect(footerOf().at(-1)).toEqual(["Import", "tf-btn tf-primary"]);
+});
+
+test("with nothing in the folder the primary is there and disabled (#2343)", async () => {
+  await open("backup", sectionPorts({ backupStatus: vi.fn(() => Promise.resolve({ ...status(), archives: [] })) }));
+  button("Restore from a file…").click();
+  await settle();
+  expect(body().textContent).toContain("No backups there yet.");
+  expect(button("Restore").disabled).toBe(true);
 });
 
 test("Standup puts a failed read's Try again on the title line (#2284)", async () => {
