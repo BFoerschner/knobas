@@ -436,6 +436,19 @@ test("Delete… on a merged branch says nothing is lost", async () => {
   expect(writes).toEqual([]);
 });
 
+test("a branch's Delete… starts in small red text and its dialog confirms in filled red, merged or not (#2238 danger pair)", async () => {
+  await draw([REPO, "branches"]);
+  for (const name of ["feature/", "chore/"]) {
+    const start = button("Delete…", rowOf(name))!;
+    expect([...start.classList].sort()).toEqual(["tf-btn", "tf-danger", "tf-sm"]);
+    start.click();
+    flushSync();
+    expect([...button("Delete branch", dialog()!)!.classList].sort()).toEqual(["tf-btn", "tf-danger", "tf-primary"]);
+    button("Cancel", dialog()!)!.click();
+    flushSync();
+  }
+});
+
 test("New branch… is prefilled from the job, offers every branch to start from, and queues CreateBranch in the repository", async () => {
   await draw([REPO, "branches"], "PAY-231");
   button("New branch…", target)!.click();

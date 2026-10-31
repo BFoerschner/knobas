@@ -1,8 +1,0 @@
-# Style gate allowlist for #2296: Repository header and delete-branch.
-# Read by app/src/lib/tf/controls/style-gate.test.ts (#2281).
-# Each line: `<rule a|b|c> <file under app/src/> <selector or class>  <reason>`,
-# two spaces before the reason. #2296 deletes its lines as it fixes them, and the
-# file once none is left. Never add a line here for new work: follow
-# the design-system spec's Controls section instead.
-
-c lib/tf/css/pr.css .tf-local-acts  the repository's local-checkout actions, a literal 6px
