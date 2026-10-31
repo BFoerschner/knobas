@@ -100,6 +100,10 @@ const SECTION_OF: Record<string, Section> = {
  *   bare `#/job`, which draws the chosen job (`job/chosen.svelte.ts`). It
  *   carries the ticket key and the job's tab (`#/job/PAY-231/conv`),
  *   either of which may be absent.
+ * - `ticket` is one ticket's own page, `#/ticket/<entity id>` (spec #2227):
+ *   the ticket to read, under Tickets in the nav, the way a run opens under
+ *   Builds. It is not the job: opening it chooses no job and promotes no
+ *   context. A bare `#/ticket` with no id is Tickets.
  * - `full` is every other section: a full view, its first segment kept as
  *   `head` and whatever follows it as `rest` for the ticket that builds it.
  * - `item` is one item's page, `#/item/<entity id>` (#1201): the source's
@@ -109,13 +113,14 @@ const SECTION_OF: Record<string, Section> = {
  *   sends the reader to Settings › Notes and capture while notes hide (D10).
  *   It lights no nav entry either: notes have none.
  * - `unknown` is an address this shell has no place for. The shell first asks
- *   `address.ts` whether it is a rooms-UI address (`#/ticket/jira:PAY-231`,
- *   #1085) and replaces it; otherwise saying so beats drawing Tickets under
+ *   `address.ts` whether it is a rooms-UI address (`#/ctx/all`, #1085) and
+ *   replaces it; otherwise saying so beats drawing Tickets under
  *   an address that names something else.
  */
 export type TfRoute =
   | { view: "tickets"; rest: string[] }
   | { view: "job"; key: string | null; tab: string | null }
+  | { view: "ticket"; id: string }
   | {
       view: "full";
       section: Exclude<Section, "tickets" | "job">;
@@ -138,6 +143,8 @@ export function parseTfHash(hash: string): TfRoute {
   if (head === "") return { view: "tickets", rest: [] };
   if (head === "item" && segments[1]) return { view: "item", id: segments[1] };
   if (head === "note" && segments[1]) return { view: "note", id: segments[1] };
+  // A ticket's own page (spec #2227); with no id it is Tickets, so a cut-off address still lands.
+  if (head === "ticket") return segments[1] ? { view: "ticket", id: segments[1] } : { view: "tickets", rest: [] };
   // The rooms UI's *Monitors* tab beside *Tree* (#448), whose roster went with
   // #1087: Monitors lives at `#/monitors` now (R-11.3), so this is an old
   // address, which `address.ts`' `legacyAddress` sends there (#1459).
@@ -153,7 +160,7 @@ export function parseTfHash(hash: string): TfRoute {
 
 /** The section a route lights in the nav, or `null` for an unknown address. */
 export function sectionOf(route: TfRoute): Section | null {
-  if (route.view === "tickets") return "tickets";
+  if (route.view === "tickets" || route.view === "ticket") return "tickets";
   if (route.view === "job") return "job";
   if (route.view === "full") return route.section;
   return null;
@@ -199,7 +206,8 @@ export function isTopPage(route: TfRoute): boolean {
  * - a pull request or a repository, any tab of it → Code;
  * - a commit, which opens under its repository's Commits tab
  *   (`#/repo/<id>/commits/<commit>`) → that repository's page;
- * - a doc page → Docs; an asset or a route → Dependencies.
+ * - a doc page → Docs; an asset or a route → Dependencies;
+ * - a ticket page → Tickets.
  *
  * A branch opens on its repository's Branches tab, so its parent is the
  * repository's (Code). `#/branch/<id>` and `#/commit/<id>` themselves name no
@@ -209,6 +217,7 @@ export function isTopPage(route: TfRoute): boolean {
  * A job's sub-tab is not here: it is the `Esc` ladder's own rung.
  */
 export function parentOf(route: TfRoute): string | null {
+  if (route.view === "ticket") return sectionHash("tickets");
   if (route.view !== "full" || isTopPage(route)) return null;
   if (route.head === "repo" && route.rest[0] && route.rest[1] === "commits" && route.rest[2]) {
     return `#/repo/${encodeURIComponent(route.rest[0])}`;

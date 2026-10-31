@@ -838,11 +838,12 @@ test("a rooms-UI address arriving here is replaced by the ticket-first one", asy
   app = mount(App, { target, props: {} });
   await until(() => location.hash === "#/tickets", `#/ctx/all stayed ${location.hash}`);
 
-  location.hash = "#/ticket/mock:PAY-231";
-  await until(() => location.hash === "#/job/mock%3APAY-231", `#/ticket/… stayed ${location.hash}`);
+  location.hash = "#/start-work/mock:PAY-231";
+  await until(() => location.hash === "#/job/mock%3APAY-231", `#/start-work/… stayed ${location.hash}`);
 
+  // A ticket opens its ticket page (spec #2227), not its job.
   location.hash = "#/entity/mock:PAY-231";
-  await until(() => location.hash === "#/job/mock%3APAY-231", `#/entity/… stayed ${location.hash}`);
+  await until(() => location.hash === "#/ticket/mock%3APAY-231", `#/entity/… stayed ${location.hash}`);
   expect(target.textContent).not.toContain("Nothing lives at");
 
   // An id the mirror does not know keeps its address and says so.

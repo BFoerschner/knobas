@@ -25,7 +25,7 @@
  * With no opener, the structural parent is `parentOf`'s: a run's is
  * Builds, a pull request's or a repository's Code, a commit's its
  * repository's page, a doc page's Docs, an asset's or a route's
- * Dependencies, and anything else inside a section that section's top page.
+ * Dependencies, a ticket page's Tickets, and anything else inside a section that section's top page.
  * An item's page and a note's page have no parent, so rung 9 leaves them
  * where they are. `Esc` never reads "the job you were last in" (#2228); a
  * key that sometimes does nothing is what makes the others safe to press.
@@ -113,6 +113,8 @@ export function openerName(route: TfRoute, own: string | null): string {
     return kind !== undefined && own.startsWith("#") ? `${kind} ${own}` : own;
   }
   if (route.view === "item" || route.view === "note") return own || (route.view === "item" ? "Item" : "Note");
+  // A ticket page (spec #2227) is named by its ticket's key, as its breadcrumb names it.
+  if (route.view === "ticket") return own || (isEntityId(route.id) ? keyOf(route.id) : route.id);
   return placeName(route) || "the last page";
 }
 

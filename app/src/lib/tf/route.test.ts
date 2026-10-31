@@ -31,7 +31,15 @@ test("a space's address keeps its segment whole, with or without a source (#1455
 
 test("a rooms-UI address is unknown here, not Tickets", () => {
   expect(parseTfHash("#/ctx/all")).toEqual({ view: "unknown", hash: "#/ctx/all" });
-  expect(sectionOf(parseTfHash("#/ticket/jira:PAY-231"))).toBeNull();
+  expect(sectionOf(parseTfHash("#/ctx/all"))).toBeNull();
+});
+
+test("a ticket page is its entity id under Tickets, and a bare #/ticket is Tickets (spec #2227)", () => {
+  expect(parseTfHash("#/ticket/jira%3APAY-231")).toEqual({ view: "ticket", id: "jira:PAY-231" });
+  expect(parseTfHash("#/ticket/jira:PAY-231")).toEqual({ view: "ticket", id: "jira:PAY-231" });
+  expect(sectionOf(parseTfHash("#/ticket/jira:PAY-231"))).toBe("tickets");
+  expect(parseTfHash("#/ticket")).toEqual({ view: "tickets", rest: [] });
+  expect(parseTfHash("#/ticket/")).toEqual({ view: "tickets", rest: [] });
 });
 
 test("a job addressed by its source round-trips, its tab too, and a bare key is still a key (#1476)", () => {

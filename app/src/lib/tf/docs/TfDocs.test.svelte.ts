@@ -299,7 +299,7 @@ test("the body: a live ticket chip, my mention in yellow, a page link, code with
   await draw(["confluence:2"]);
   const doc = target.querySelector(".tf-doc")!;
   const chip = doc.querySelector<HTMLAnchorElement>("a.tf-tchip")!;
-  expect(chip.getAttribute("href")).toBe("#/job/jira%3AOPS-77");
+  expect(chip.getAttribute("href")).toBe("#/ticket/jira%3AOPS-77");
   expect(chip.textContent).toContain("On-call runbook outdated");
   expect(chip.textContent).toContain("To Do");
   const mentions = [...doc.querySelectorAll(".tf-ment")];
@@ -868,7 +868,7 @@ test("the page foot: Work it belongs to, then Linked from by space, after the bo
   // After the page body: its last block comes before the foot.
   expect(page.querySelector(".tf-macro")!.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const job = work.parentElement!.querySelector<HTMLAnchorElement>("li a")!;
-  expect(job.getAttribute("href")).toBe("#/job/jira%3AOPS-77");
+  expect(job.getAttribute("href")).toBe("#/ticket/jira%3AOPS-77");
   expect(job.closest("li")!.textContent).toBe("OPS-77 On-call runbook outdatedTo Do");
 
   expect(groups()).toEqual([

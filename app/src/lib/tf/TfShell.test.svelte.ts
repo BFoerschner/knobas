@@ -379,6 +379,8 @@ test("Esc on a detail page reached with no opener goes to its structural parent;
     ["#/code/repos", "#/code"],
     ["#/monitors/unmonitored", "#/monitors"],
     ["#/settings/appearance", "#/settings"],
+    // A ticket page (spec #2227), here one the mirror cannot read: its parent is Tickets either way.
+    ["#/ticket/jira:PAY-999", "#/tickets"],
   ];
   for (const [from, parent] of parents) {
     await reached(from);
@@ -557,7 +559,7 @@ test("a rooms-UI address is replaced by the ticket-first one", async () => {
   const depth = history.length;
   await at("#/ctx/all");
   expect(location.hash).toBe("#/tickets");
-  await at("#/ticket/jira:PAY-231");
+  await at("#/start-work/jira:PAY-231");
   expect(location.hash).toBe("#/job/jira%3APAY-231");
   await at("#/sources");
   expect(location.hash).toBe("#/settings/sources");

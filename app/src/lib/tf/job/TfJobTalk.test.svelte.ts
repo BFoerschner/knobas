@@ -630,7 +630,7 @@ test("Also on this job names each set that applies with its reason, then the par
   await settle();
   const bar = target.querySelector(".tf-setsbar")!;
   expect(squash(bar)).toBe("Also on this job Payout stack via epic PAY-200 Parent PAY-230 sub-tasks show their parent’s connections Apply a link set…");
-  expect([...bar.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#/sets/payout-stack", "#/job/jira%3APAY-230"]);
+  expect([...bar.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#/sets/payout-stack", "#/ticket/jira%3APAY-230"]);
   // Two own links and three more from the set and the parent, the page once.
   expect(squash(target.querySelector(".tf-conn"))).toBe("5 connected, 1 proposed L");
   if (job) unmount(job);

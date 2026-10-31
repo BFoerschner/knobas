@@ -23,8 +23,8 @@ export const currentJob = {
 
 /**
  * The job a page stands for (#1500, re-sourced by spec #2227): on the Job page
- * the job on screen (`null` while its address is still being resolved),
- * everywhere else the chosen job (`chosen.svelte.ts`), with the ticket's
+ * the job on screen (`null` while its address is still being resolved), on a
+ * ticket page the ticket its address names, everywhere else the chosen job (`chosen.svelte.ts`), with the ticket's
  * entity id; `null` when no job is chosen. The breadcrumb no longer draws it
  * (#2228); the name is kept. The shell reports it; the launcher's *Link to
  * <key>* row is offered against it, and ⌘T falls back to it. Never the newest

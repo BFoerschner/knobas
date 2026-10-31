@@ -24,7 +24,8 @@
   **Keys** (R-3.10): `j`/`k` and the arrows move the selection through the
   cards on screen in reading order (lane by lane, column by column, top to
   bottom; the list's rows as sorted), and focus the card. `Enter` and a
-  double click open the job. A long list draws only the rows near the
+  double click open the ticket page (`#/ticket/<id>`, spec #2227); only the
+  preview's primary button opens the job. A long list draws only the rows near the
   viewport (`shell/windowed.svelte.ts`, #2209); `j`/`k` draws the next first.
 
   **The *Board / List* and *Lanes* switches hold for the session** (R-3.3):
@@ -40,6 +41,10 @@
   copy of your own, from the parts of its query knobas can test, as its
   source reads them (#880, #1208), and only where the source translates it;
   *Delete*, in the ⋯ menus and the editor, a toast's *Undo* takes back.
+
+  **Back from a ticket page** (spec #2227): `Esc` on a ticket page Tickets
+  opened returns to the ticket view it was opened from, with that ticket
+  selected again ({@link selectTicket}, which the shell calls on that step).
 -->
 <script lang="ts" module>
   import type {
@@ -74,6 +79,15 @@
     views: {},
     selected: null,
   });
+
+  /**
+   * Select `entityId` on Tickets (spec #2227): the shell's `Esc` from a ticket
+   * page that Tickets opened, so the reader lands where they left, even when
+   * the selection moved meanwhile (`⌘[`, another pick, `⌘]`).
+   */
+  export function selectTicket(entityId: string): void {
+    session.selected = entityId;
+  }
 
   /** A new session: what each test is. */
   export function forgetTicketsSession(): void {
@@ -512,7 +526,8 @@
     session.selected = card.entity_id;
   }
 
-  function openJob(card: MiniBoardCard) {
+  /** A double click or `Enter`: the ticket page (spec #2227), the card selected for the way back. */
+  function openTicket(card: MiniBoardCard) {
     session.selected = card.entity_id;
     location.hash = ticketAddress(card);
   }
@@ -532,8 +547,9 @@
     element?.scrollIntoView?.({ block: "nearest" });
   }
 
-  // `Enter` presses the preview's button (R-3.9), from anywhere but a field
-  // that types or a control of its own; a card is not one.
+  // `Enter` opens the selected or focused card's ticket page (spec #2227),
+  // from anywhere but a field that types or a control of its own; a card is
+  // not one.
   const pageShown = pageVisible();
   onMount(() => {
     const onkey = (event: KeyboardEvent) => {
@@ -756,7 +772,7 @@
                       {needles}
                       selected={current?.card.entity_id === card.entity_id}
                       onselect={() => select(card)}
-                      onopen={() => openJob(card)}
+                      onopen={() => openTicket(card)}
                     />
                   {:else}
                     <span class="tf-dim tf-nothing">Nothing here</span>
@@ -803,7 +819,7 @@
                 data-entity={card.entity_id}
                 tabindex="0"
                 onclick={() => select(card)}
-                ondblclick={() => openJob(card)}
+                ondblclick={() => openTicket(card)}
               >
                 {#each listColumns as [column] (column)}
                   {#if column === "key"}
@@ -873,7 +889,6 @@
   {#if current !== null && base !== null}
     <TicketPreview
       card={current.card}
-      address={ticketAddress(current.card)}
       description={reader.description}
       around={reader.around}
       timerOnIt={timedTicket === current.card.key}

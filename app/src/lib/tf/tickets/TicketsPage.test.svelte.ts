@@ -560,12 +560,12 @@ test("selecting a card never creates a context", async () => {
   expect(h.lists.every((filter) => filter.context === null)).toBe(true);
 });
 
-test("Enter presses the preview's button from a card", async () => {
+test("Enter on a card opens its ticket page, not the job (spec #2227)", async () => {
   await open(harness());
   const first = target.querySelector<HTMLButtonElement>(".tf-tcard")!;
   first.focus();
   first.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-  expect(location.hash).toBe("#/job/jira%3APAY-1");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-1");
 });
 
 test("Enter on a focused card that is not selected opens that card's ticket", async () => {
@@ -575,7 +575,7 @@ test("Enter on a focused card that is not selected opens that card's ticket", as
   expect(second.classList.contains("tf-card")).toBe(false);
   second.focus();
   second.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-  expect(location.hash).toBe(`#/job/jira%3A${key}`);
+  expect(location.hash).toBe(`#/ticket/jira%3A${key}`);
 });
 
 const layoutButton = (name: string) =>
@@ -702,7 +702,7 @@ test("j/k and the arrows move the selection through the visible cards in reading
   expect(preview().textContent).toContain("PAY-52");
 });
 
-test("j/k walk the list's rows in their sorted order, and a double click opens the job", async () => {
+test("j/k walk the list's rows in their sorted order, and a double click opens the ticket page", async () => {
   await open(harness());
   layoutButton("List").click();
   await settle();
@@ -717,12 +717,12 @@ test("j/k walk the list's rows in their sorted order, and a double click opens t
   press("j");
   expect(selectedKey()).toBe("PAY-3");
   target.querySelectorAll<HTMLElement>(".tf-tbl tbody tr")[4]!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-  expect(location.hash).toBe("#/job/jira%3APAY-5");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-5");
   location.hash = "#/tickets";
   layoutButton("Board").click();
   await settle();
   target.querySelectorAll<HTMLElement>(".tf-tcard")[1]!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-  expect(location.hash).toBe("#/job/jira%3APAY-2");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-2");
 });
 
 test("list headers sort on click and show the direction; Key and Status never wrap", async () => {
@@ -1382,7 +1382,7 @@ test("two sources holding PAY-1: each card and row names its source and opens by
       ]),
     );
     target.querySelector<HTMLElement>('.tf-tcard[data-entity="gitea:PAY-1"]')!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-    expect(location.hash).toBe("#/job/gitea%3APAY-1");
+    expect(location.hash).toBe("#/ticket/gitea%3APAY-1");
 
     [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
     await settle();

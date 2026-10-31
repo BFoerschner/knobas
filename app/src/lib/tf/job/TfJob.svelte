@@ -95,6 +95,7 @@
   import { currentJob, linkRequest, type LinkTarget } from "./current.svelte";
   import { chosenJob } from "./chosen.svelte";
   import { askAgain, echoWrite, echoOn, echoesOn, sameWords, settleEchoes, watchEchoes } from "../queued.svelte";
+  import { entityAddress } from "../address";
   import { jobHash } from "../route";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfDeps from "../deps/TfDeps.svelte";
@@ -600,7 +601,7 @@
             <div class="tf-blocked">
               <strong>Blocked by {blocker.key} {blocker.title}</strong>
               {#if blocker.note}<span>{blocker.note}</span>{/if}
-              <a class="tf-btn tf-sm" href={jobHash(blocker.entityId)}>Open {blocker.key}</a>
+              <a class="tf-btn tf-sm" href={entityAddress("ticket", blocker.entityId)}>Open {blocker.key}</a>
             </div>
           {/each}
           {#if starting}

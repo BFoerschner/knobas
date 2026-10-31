@@ -1588,7 +1588,7 @@ test("a pasted link that resolves opens the entity it names", async () => {
   await search(PASTED);
 
   // The ticket-first shell's job, never the rooms UI's `#/ticket/…` (#1085).
-  expect(navigated).toEqual(["#/job/jira%3APAY-231"]);
+  expect(navigated).toEqual(["#/ticket/jira%3APAY-231"]);
   expect(closed, "the overlay gets out of the way first").toHaveBeenCalled();
 });
 
@@ -2993,7 +2993,7 @@ test("two sources' PAY-231: each row names its source before its age, a unique k
   press("ArrowDown");
   press("Enter");
   await settle();
-  expect(onnavigate).toHaveBeenCalledWith("#/job/jira%3APAY-231");
+  expect(onnavigate).toHaveBeenCalledWith("#/ticket/jira%3APAY-231");
 });
 
 // ── Reopening selects the kept query (#1480) ───────────────────────────────

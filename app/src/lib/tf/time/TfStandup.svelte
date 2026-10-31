@@ -71,7 +71,7 @@
   import { projectSource } from "../create-ticket";
   import { echoWrite, echoesOn, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
   import { keyOf } from "../job/job";
-  import { jobHash } from "../route";
+  import { entityAddress } from "../address";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import TfCreateTicket from "../TfCreateTicket.svelte";
@@ -701,7 +701,7 @@
           {:else if made.ticket === null}
             <span class="tf-chip tf-info">{made.state}</span>
           {:else}
-            <a class="tf-mono" href={jobHash(made.ticket)}>{keyOf(made.ticket)}</a>
+            <a class="tf-mono" href={entityAddress("ticket", made.ticket)}>{keyOf(made.ticket)}</a>
             {#if made.status}<span class="tf-chip">{made.status}</span>{/if}
           {/if}
         </div>

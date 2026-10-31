@@ -114,7 +114,7 @@ test("a body that lost a heading gets it back at the end", () => {
 });
 
 test("a digest line opens its item in the new shell, and a timer label opens nothing", () => {
-  expect(lineHash(line({}))).toBe("#/job/jira%3APAY-231");
+  expect(lineHash(line({}))).toBe("#/ticket/jira%3APAY-231");
   expect(lineHash(line({ entity_id: "gitea:payout-service#142", kind: "pr" }))).toBe("#/pr/gitea%3Apayout-service%23142");
   expect(lineHash(line({ entity_id: "confluence:98401", kind: "page" }))).toBe("#/page/confluence%3A98401");
   expect(lineHash(line({ entity_id: "note:0f2c1a", kind: "note" }))).toBe("#/note/note%3A0f2c1a");
