@@ -537,7 +537,7 @@
       {:else}
         <p>No ticket {segment} in the mirror. It may not have synced yet.</p>
       {/if}
-      <a class="tf-btn" href="#/tickets">All tickets <kbd>Esc</kbd></a>
+      <a class="tf-btn" href="#/tickets">All tickets</a>
     </div>
   </div>
 {:else if detail}

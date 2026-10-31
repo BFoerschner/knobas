@@ -2,7 +2,7 @@
   The job card (#816, R-4.2): the ticket you are on, on the yellow, in a
   fixed 320px column left of the work.
 
-  Top to bottom: *All tickets* (`Esc`), the key at 64px in Archivo width 62,
+  Top to bottom: *All tickets* (a link: `Esc` does nothing on the first tab, #2228), the key at 64px in Archivo width 62,
   the source when another source holds the same key (#1476), with a link to
   each other one, the summary, the status select, the facts line and the blocked chip, the
   clock, *What it asks for* and *Time this week*. The conversation summary is
@@ -101,7 +101,7 @@
 </script>
 
 <aside class="tf-jobcard tf-card" aria-label="Job card">
-  <a class="tf-back" href="#/tickets">All tickets <kbd>Esc</kbd></a>
+  <a class="tf-back" href="#/tickets">All tickets</a>
   <div>
     <div class="tf-jobkey">{key}</div>
     {#if others.length > 0}
