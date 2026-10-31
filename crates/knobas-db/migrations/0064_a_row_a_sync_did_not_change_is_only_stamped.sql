@@ -5,7 +5,7 @@
 -- Single-writer, like every migration: a stream that needs more schema
 -- requests 0065 and never edits this file or its predecessors -- sqlx
 -- checksums applied migrations. Recorded in
--- `docs/archive/contract-10.8/2189-migration-0064-item-stamp.md`.
+-- `docs/contract/10.8/2189-migration-0064-item-stamp.md`.
 --
 -- ## Why
 --

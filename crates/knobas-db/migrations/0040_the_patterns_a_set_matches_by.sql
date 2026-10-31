@@ -5,7 +5,7 @@
 -- Single-writer, like every migration: a later ticket that needs more schema
 -- takes the next number and never edits this file. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/archive/contract-10.8/868-1008-migration-0040-link-set-patterns-and-member-rows.md`).
+-- (`docs/contract/10.8/868-1008-migration-0040-link-set-patterns-and-member-rows.md`).
 --
 -- ## Why a second column beside `query`
 --

@@ -5,7 +5,7 @@
 -- Single-writer, like every migration: a change that needs more schema
 -- requests 0066 and never edits this file or its predecessors -- sqlx
 -- checksums applied migrations. Recorded in
--- `docs/archive/contract-10.8/2192-migration-0065-the-branch-a-run-was-built-on.md`.
+-- `docs/contract/10.8/2192-migration-0065-the-branch-a-run-was-built-on.md`.
 --
 -- ## Why
 --

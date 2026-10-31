@@ -7,7 +7,7 @@
 -- schema requests 0033 and never edits this file or its predecessors -- sqlx
 -- checksums applied migrations. Ruled by the deputy for Björn on #759 and #761
 -- on 2026-10-14 (one migration for both) and recorded in
--- `docs/archive/contract-10.8/759-migration-0032-item-project-and-parent-prefix.md`.
+-- `docs/contract/10.8/759-migration-0032-item-project-and-parent-prefix.md`.
 --
 -- ## Why
 --
