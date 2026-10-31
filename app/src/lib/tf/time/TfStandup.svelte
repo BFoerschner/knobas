@@ -589,7 +589,7 @@
   <section class="tf-panel tf-su-dig" aria-label="Your digest">
     <header>
       <h3>Your digest</h3>
-      <button class="tf-btn tf-sm tf-ghost tf-open" disabled={digest === null} onclick={() => void copyDigest()}>
+      <button class="tf-btn tf-sm tf-ghost" disabled={digest === null} onclick={() => void copyDigest()}>
         Copy as text
       </button>
     </header>
@@ -638,7 +638,7 @@
       <span class="tf-dim tf-su-day">{protocolDay(day)}</span>
       {#if publication === null}
         <button
-          class="tf-btn tf-sm tf-primary tf-open"
+          class="tf-btn tf-sm tf-primary"
           disabled={!loaded || publishing || protocol === null}
           {...refusedAttrs(publishRefusal)}
           onclick={() => void publish()}
@@ -646,7 +646,7 @@
           Publish to Confluence
         </button>
       {:else if publication.page_entity_id !== null && publication.linked}
-        <a class="tf-btn tf-sm tf-ghost tf-open" href="#/page/{encodeURIComponent(publication.page_entity_id)}">Published</a>
+        <a class="tf-btn tf-sm tf-ghost" href="#/page/{encodeURIComponent(publication.page_entity_id)}">Published</a>
       {:else}
         <span class="tf-chip tf-open">{publication.state === "held" ? "held in the queue" : "publishing"}</span>
       {/if}

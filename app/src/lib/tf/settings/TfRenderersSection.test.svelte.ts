@@ -259,3 +259,27 @@ test("a refused save of Run pipelines on diffs puts the box back (Standards 6)",
   expect(piping.on).toBe(true);
   expect(box.checked).toBe(true);
 });
+
+/** #2343: "Small: everything inside a page body" (Controls); a dialog has its own footer rule. */
+const buttonsAtDefault = () =>
+  [...target.querySelectorAll<HTMLElement>(".tf-btn")]
+    .filter((b) => !b.closest('[role="dialog"]') && !b.classList.contains("tf-sm"))
+    .map((b) => b.textContent!.trim());
+
+test.each([null, "Add a renderer…", "Add a command step…", "Add a pipeline…"])(
+  "the section's buttons are small, and so are the form %s opens (#2343)",
+  async (press) => {
+    const { ports } = backend([
+      { id: "cat", name: "Cat", command: "cat", patterns: ["*.page"], fences: [], input: "text", output: "html", timeout_secs: 3, diff: false },
+    ]);
+    app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+    await settle();
+    expect(button("Run"), "the test pane is drawn").toBeDefined();
+    if (press !== null) {
+      button(press).click();
+      flushSync();
+      expect(button("Cancel"), `${press} opened its form`).toBeDefined();
+    }
+    expect(buttonsAtDefault()).toEqual([]);
+  },
+);

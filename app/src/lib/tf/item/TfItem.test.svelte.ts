@@ -182,6 +182,7 @@ test("a deferred section is read when the reader opens it", async () => {
   expect(target.textContent).not.toContain("Booked twice");
 
   const show = [...target.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Show History (2)");
+  expect(show!.className).toBe("tf-btn tf-sm");
   show!.click();
   await settle();
 
@@ -202,6 +203,29 @@ test("a view's source action is drawn as the page's toolbar, named as the source
   await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(surveyView([BOOK_REPAIR])) });
 
   expect(toolbar()).toEqual(["Book repair"]);
+});
+
+test("the header runs the source's actions, then a ghost Open in, then Refresh last (#2288)", async () => {
+  await open({
+    getEntity: () => Promise.resolve(detail({ web_url: "https://surveys.example/1" })),
+    entityView: () => Promise.resolve(surveyView([BOOK_REPAIR])),
+  });
+
+  const acts = [...target.querySelectorAll(".tf-fhead .tf-acts > *")].map((el) => [el.textContent?.trim(), el.className]);
+  expect(acts).toEqual([
+    ["Book repair", expect.stringContaining("tf-btn")],
+    ["Open in Harbour surveys", "tf-btn tf-ghost"],
+    ["Refresh", "tf-btn tf-refresh"],
+  ]);
+});
+
+test("the header puts the source's primary action first, then the others in its order (#2288)", async () => {
+  const close: ViewAction = { ...BOOK_REPAIR, label: "Close survey…", values: { id: "close" }, primary: true };
+  const later: ViewAction = { ...BOOK_REPAIR, label: "Flag…", values: { id: "flag" } };
+  await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(surveyView([BOOK_REPAIR, close, later])) });
+
+  const acts = [...target.querySelectorAll(".tf-fhead .tf-acts > button")].map((el) => el.textContent?.trim());
+  expect(acts.slice(0, 3)).toEqual(["Close survey", "Book repair", "Flag"]);
 });
 
 test("a view with no actions draws no toolbar", async () => {
@@ -242,6 +266,8 @@ test("an actions block is drawn in place as the same buttons, not named as anoth
   const section = target.querySelector("section")!;
   const inPlace = [...section.querySelectorAll("button")].map((button) => button.textContent?.trim());
   expect(inPlace).toEqual(["Book repair"]);
+  // In the page body, so small (Controls: three sizes, chosen by place; #2288).
+  expect(section.querySelector("button")!.className).toBe("tf-btn tf-sm");
   expect(target.textContent).not.toContain("drawn on its role's page");
 
   section.querySelector("button")!.click();

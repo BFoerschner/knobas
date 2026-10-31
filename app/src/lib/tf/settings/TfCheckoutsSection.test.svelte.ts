@@ -188,3 +188,12 @@ test("the pull request worktrees are listed, a closed one marked, and Remove rem
     `Could not remove the worktree: git would not remove ${at(8)}: it contains modified or untracked files`,
   );
 });
+
+test("the section's buttons are small, Edit applications… among them (#2343)", async () => {
+  await draw();
+  const atDefault = [...target.querySelectorAll<HTMLElement>(".tf-btn")]
+    .filter((b) => !b.closest('[role="dialog"]') && !b.classList.contains("tf-sm"))
+    .map((b) => b.textContent!.trim());
+  expect([...target.querySelectorAll(".tf-btn")].map((b) => b.textContent!.trim())).toContain("Edit applications…");
+  expect(atDefault).toEqual([]);
+});

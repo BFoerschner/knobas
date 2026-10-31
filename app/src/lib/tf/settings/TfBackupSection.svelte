@@ -6,7 +6,8 @@
   knobas has no file picker and `restore_backup` takes an archive in the
   backup folder, so *Restore from a file…* and *Import…* open a dialog that
   lists the archives in that folder: backups for the one, share exports for
-  the other. Both restore only into a knobas that holds no data yet, which the
+  the other. The list is a pick, the first file picked, and the footer's
+  primary restores it (#2343), as Apply-set's does (#2289). Both restore only into a knobas that holds no data yet, which the
   dialog says, since a merge with a preview is not built.
 
   Every write re-reads, because an export also prunes past `keep`;
@@ -92,6 +93,7 @@
   /** Open a dialog over the folder as it is now, not as the section found it (#1470). */
   function choose(kind: "backup" | "share") {
     choosing = kind;
+    pickedFile = null;
     reading = true;
     void load();
   }
@@ -193,6 +195,11 @@
   const ticks = $derived(shareTicks(savedLists, savedViews, savedSets));
   const nothingTicked = $derived(!ticks.some((tick) => parts[tick.part]));
   const listed = $derived(status?.archives.filter((archive) => archive.share === (choosing === "share")) ?? []);
+
+  const uid = $props.id();
+  let pickedFile = $state<string | null>(null);
+  /** The archive the primary restores: the one picked while the folder still lists it, else the first listed (#2343). */
+  const chosen = $derived(reading ? null : (listed.find((archive) => archive.file === pickedFile) ?? listed[0] ?? null));
 </script>
 
 <header class="tf-stg-h tf-stg-srch">
@@ -259,9 +266,9 @@
       {/each}
     </div>
     <div class="tf-stg-acts">
-      <button class="tf-btn tf-primary" disabled={busy || nothingTicked} onclick={() => void exportShare()}>Export…</button>
-      <button class="tf-btn tf-ghost" onclick={() => choose("share")}>Import…</button>
-      <button class="tf-btn tf-ghost" onclick={() => void openFolder()}>Open the backup folder</button>
+      <button class="tf-btn tf-sm tf-primary" disabled={busy || nothingTicked} onclick={() => void exportShare()}>Export…</button>
+      <button class="tf-btn tf-sm tf-ghost" onclick={() => choose("share")}>Import…</button>
+      <button class="tf-btn tf-sm tf-ghost" onclick={() => void openFolder()}>Open the backup folder</button>
     </div>
   </div>
 
@@ -276,9 +283,6 @@
           {choosing === "share" ? "Share exports" : "Backups"} in <span class="tf-mono">{current.directory}</span>. Put a
           file there to see it here.
         </p>
-        <div class="tf-stg-acts">
-          <button class="tf-btn tf-sm" onclick={() => void openFolder()}>Open the backup folder</button>
-        </div>
         <p class="tf-dsub">
           This works only into a knobas that holds no data yet; one that has data refuses it. Passwords are not in the
           file, so each source asks for its own again.
@@ -288,25 +292,29 @@
         {:else if listed.length === 0}
           <p class="tf-stg-note">{choosing === "share" ? "No share exports there yet." : "No backups there yet."}</p>
         {:else}
-          <table class="tf-tbl tf-stg-gap">
-            <tbody>
-              {#each listed as archive (archive.file)}
-                <tr>
-                  <td class="tf-mono">{archive.file}</td>
-                  <td class="tf-num tf-stg-r">{formatBytes(archive.bytes)}</td>
-                  <td class="tf-num tf-stg-r">
-                    <button class="tf-btn tf-sm" disabled={busy} onclick={() => void restore(archive)}>
-                      {choosing === "share" ? "Import" : "Restore"}
-                    </button>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
+          <div class="tf-picks tf-stg-gap" role="radiogroup" aria-label={choosing === "share" ? "Share exports" : "Backups"}>
+            {#each listed as archive (archive.file)}
+              <label class="tf-pickrow">
+                <input
+                  type="radio"
+                  name="tf-bak-{uid}"
+                  value={archive.file}
+                  checked={chosen?.file === archive.file}
+                  onchange={() => (pickedFile = archive.file)}
+                />
+                <span class="tf-mono">{archive.file}</span>
+                <span class="tf-dim tf-num">{formatBytes(archive.bytes)}</span>
+              </label>
+            {/each}
+          </div>
         {/if}
       {/snippet}
       {#snippet footer()}
+        <button class="tf-btn tf-first" onclick={() => void openFolder()}>Open the backup folder</button>
         <button class="tf-btn tf-ghost" onclick={() => (choosing = null)}>Cancel</button>
+        <button class="tf-btn tf-primary" disabled={busy || chosen === null} onclick={() => chosen && void restore(chosen)}
+          >{choosing === "share" ? "Import" : "Restore"}</button
+        >
       {/snippet}
     </TfDialog>
   {/if}

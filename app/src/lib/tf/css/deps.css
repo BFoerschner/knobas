@@ -170,7 +170,6 @@
 }
 .tf-dp-lrow input[type="text"] { min-width: 0; font-weight: 600; }
 .tf-dp-arrows { display: flex; }
-.tf-dp-arrows .tf-btn { padding: 0 5px; }
 .tf-dp-lkinds { grid-column: 1 / -1; font-size: var(--t-xs); padding-left: 4px; }
 .tf-dp-lerr { grid-column: 1 / -1; font-size: var(--t-xs); color: var(--err); }
 .tf-dp-vrow { display: flex; gap: 4px 12px; flex-wrap: wrap; align-items: center; padding: 5px 0; border-bottom: 1px dashed var(--rule-2); }
