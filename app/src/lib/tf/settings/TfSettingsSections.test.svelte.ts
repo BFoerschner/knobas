@@ -723,7 +723,10 @@ test("Restore from a file… is a pick and a footer primary: the first file is p
   expect(target.querySelector('[role="dialog"] [role="radiogroup"]')?.getAttribute("aria-label")).toBe("Backups");
   expect(listedFiles()).toEqual(["knobas-20261015-020000.knobas", "knobas-20261014-020000.knobas"]);
   expect(pickFor("knobas-20261015-020000.knobas").checked).toBe(true);
-  expect(target.querySelectorAll('[role="dialog"] tbody button'), "no per-row Restore").toHaveLength(0);
+  expect(
+    [...target.querySelectorAll('[role="dialog"] button')].filter((b) => b.textContent!.trim() === "Restore"),
+    "one Restore, the footer's, none per row",
+  ).toHaveLength(1);
   pickFor("knobas-20261014-020000.knobas").click();
   flushSync();
   button("Restore").click();
