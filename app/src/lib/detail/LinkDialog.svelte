@@ -16,9 +16,9 @@
   ## The Esc ladder
 
   One rung per press, the launcher's own rule: a non-empty search clears first,
-  and only an already-empty box lets the key through to `Modal`, which closes
+  and only an already-empty box lets the key through to `TfDialog`, which closes
   the dialog and hands focus back to the control that opened it. The shell's
-  global handler never sees it either way — `Modal` stops it — so one keystroke
+  global handler never sees it either way — `TfDialog` stops it — so one keystroke
   never unwinds two ladders.
 -->
 <script lang="ts">
@@ -28,7 +28,7 @@
   import { launcherHome, search } from "../ipc/search";
   import { createLink } from "../ipc/entity";
   import { Session } from "../launcher/session.svelte";
-  import Modal from "../shell/Modal.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
@@ -88,7 +88,7 @@
   /**
    * The picker's keyboard, which is the launcher's.
    *
-   * `Escape` is handled here rather than left to `Modal` so the ladder has its
+   * `Escape` is handled here rather than left to `TfDialog` so the ladder has its
    * first rung: a search somebody typed is a step, and one keypress must undo
    * one step.
    */
@@ -110,7 +110,7 @@
       }
       case "Escape":
         if (session.raw === "") return;
-        // Rung 1: clear what was typed. `Modal`'s handler, the rung above,
+        // Rung 1: clear what was typed. `TfDialog`'s handler, the rung above,
         // must not also close the dialog on this press.
         event.preventDefault();
         event.stopPropagation();
@@ -149,7 +149,7 @@
   }
 </script>
 
-<Modal title="Link to…" subtitle={fromTitle} {onclose}>
+<TfDialog closeButton title="Link to…" subtitle={fromTitle} {onclose}>
   {#snippet body()}
     <div class="fields">
       <div class="fld">
@@ -266,7 +266,7 @@
       {writing ? "Linking…" : "Link"}
     </button>
   {/snippet}
-</Modal>
+</TfDialog>
 
 <style>
   .fields {

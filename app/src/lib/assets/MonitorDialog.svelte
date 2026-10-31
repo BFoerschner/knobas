@@ -51,7 +51,7 @@
   import type { AssetDetail, editAsset, MonitorTarget } from "../ipc/assets";
   import type { submitWrite } from "../ipc/entity";
   import { followWrite } from "../shell/follow-write";
-  import Modal from "../shell/Modal.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
   import { prefillFor } from "./create-monitor";
 
   let {
@@ -131,12 +131,12 @@
   }
 </script>
 
-<Modal title="Create monitor" subtitle={`For ${detail.asset.name}`} {onclose}>
+<TfDialog closeButton title="Create monitor" subtitle={`For ${detail.asset.name}`} {onclose}>
   {#snippet body()}
     <div class="fields">
       <div class="fld">
         <label class="l" for="{fieldId}-name">Name</label>
-        <!-- `Modal` focuses the first focusable control, which is this one. -->
+        <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
           id="{fieldId}-name"
@@ -200,7 +200,7 @@
       {writing ? "Queueing…" : "Create"}
     </button>
   {/snippet}
-</Modal>
+</TfDialog>
 
 <style>
   .fields {

@@ -119,7 +119,7 @@
     PropertyValue,
   } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
-  import Modal from "../shell/Modal.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
   import { readSecretsInMemory, tokenKeptHint } from "../shell/secret-store";
 
   let {
@@ -376,10 +376,11 @@
   );
 </script>
 
-<Modal
+<TfDialog
+  closeButton
   title="Import an estate file"
   subtitle={chosen ?? "Nothing is written until you press Import"}
-  wide
+  className="tf-dwide"
   {onclose}
 >
   {#snippet body()}
@@ -651,7 +652,7 @@
       {busy ? "Working…" : "Import"}
     </button>
   {/snippet}
-</Modal>
+</TfDialog>
 
 <style>
   .fields {

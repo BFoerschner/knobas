@@ -1,27 +1,35 @@
 <!--
-  Test fixture for `Modal.test.svelte.ts` — nothing else imports it, so it is
+  Test fixture for `TfDialog.test.svelte.ts` — nothing else imports it, so it is
   tree-shaken out of the app bundle.
 
-  It exists because a `Modal`'s interesting behaviour is about the focusable
+  It exists because a dialog's interesting behaviour is about the focusable
   controls *inside* it, and a snippet cannot be handed to `mount()` from a
-  plain TypeScript test. Two body buttons plus the header's close button give
-  the Tab trap three stops to cycle between.
+  plain TypeScript test. Two body buttons plus the header's Close give the Tab
+  trap three stops to cycle between.
 
   `content` picks what the body holds, for the open-time focus (#1431): a button
   (the default), a text field, or nothing focusable at all.
 -->
 <script lang="ts">
-  import { layers as sharedLayers, type Layers } from "../tf/layers.svelte";
-  import Modal from "./Modal.svelte";
+  import { layers as sharedLayers, type Layers } from "../layers.svelte";
+  import TfDialog from "./TfDialog.svelte";
 
   let {
     onclose,
     content = "button",
     layers = sharedLayers,
-  }: { onclose: () => void; content?: "button" | "input" | "none"; layers?: Layers } = $props();
+    closeButton = true,
+    className = "",
+  }: {
+    onclose: () => void;
+    content?: "button" | "input" | "none";
+    layers?: Layers;
+    closeButton?: boolean;
+    className?: string;
+  } = $props();
 </script>
 
-<Modal title="Add source" subtitle="Step 1 of 5" {onclose} {layers}>
+<TfDialog title="Add source" subtitle="Step 1 of 5" {onclose} {layers} {closeButton} {className}>
   {#snippet body()}
     {#if content === "button"}
       <button class="tf-btn tf-sm">Test connection</button>
@@ -36,4 +44,4 @@
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button class="tf-btn tf-primary">Add</button>
   {/snippet}
-</Modal>
+</TfDialog>

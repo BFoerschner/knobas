@@ -995,7 +995,7 @@ test("a type table that will not load is said out loud, not left as a dead plus"
 });
 
 /**
- * The tree's dialogs are rooms-UI `Modal`s under the ticket-first shell, and
+ * The tree's dialogs are `TfDialog`s with a header Close, and
  * each sits on the shell's layer stack while open (#1527): the stack's close,
  * which the window's `Esc` calls when focus is outside the dialog, shuts it,
  * and nothing is left on the stack for history to wait on (#1086).
@@ -1126,7 +1126,7 @@ test("renaming writes the old-to-new line and redraws the column", async () => {
  * `Escape` from anywhere in the view (a reader in the pane means the same
  * thing by it as one in a column), and #429's editors close on it. One press
  * must not do both -- cancelling the edit *and* walking the selection out of
- * the asset being edited is the rung-skipping `Modal` stops for a dialog.
+ * the asset being edited is the rung-skipping `TfDialog` stops for a dialog.
  *
  * The witness is the **address**, which is what a walk changes and what a
  * cancelled edit leaves alone, plus the draft that was never written.

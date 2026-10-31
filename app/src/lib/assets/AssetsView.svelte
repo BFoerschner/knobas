@@ -127,7 +127,7 @@
   import { DEBOUNCE_MS } from "../launcher";
   import { alerts as sharedAlerts, type Alerts } from "./alerts.svelte";
   import { latestRead } from "../shell/latest-read";
-  import Modal from "../shell/Modal.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
   import { ago } from "../shell/time";
   // The queued-write line, and the same one the Monitors tab draws for a pause:
   // what a create can honestly say now is that knobas asked, and a toast is
@@ -1281,7 +1281,7 @@
   /**
    * `Esc` in an inline editor: put it away, and **consume the press**.
    *
-   * Rung 1 of the `Esc` ladder, the rung `Modal`'s own handler occupies for a
+   * Rung 1 of the `Esc` ladder, the rung `TfDialog`'s own handler occupies for a
    * dialog. The view answers `Escape` from anywhere inside itself -- that is
    * #430's walk, and it is deliberate, because a reader in the pane means the
    * same thing by the key as one standing in a column. So an editor that
@@ -2590,7 +2590,7 @@
        not reach into it. -->
   {@const doomed = detail.asset}
   {@const ask = deleteConfirm(detail)}
-  <Modal title="Delete asset" subtitle={doomed.name} onclose={() => (deleting = false)}>
+  <TfDialog closeButton title="Delete asset" subtitle={doomed.name} onclose={() => (deleting = false)}>
     {#snippet body()}
       <!--
         The Dependencies editor's own sentence (#1463, R-11.19a), not a copy:
@@ -2614,7 +2614,7 @@
         {writing ? "Deleting…" : "Delete"}
       </button>
     {/snippet}
-  </Modal>
+  </TfDialog>
 {/if}
 
 <style>

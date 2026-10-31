@@ -11,7 +11,7 @@ import type { RunningTimer } from "../ipc/time";
 import { writeQueuePanel, type WriteQueue } from "../shell/write-queue.svelte";
 import { createHealth, type Health } from "../shell/health.svelte";
 import { push, toasts } from "../shell/toasts.svelte";
-import Modal from "../shell/Modal.fixture.svelte";
+import Modal from "./settings/TfDialog.fixture.svelte";
 import { createBadges } from "./badges.svelte";
 import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
@@ -993,11 +993,11 @@ test("a dialog opened over the write queue panel closes first on Esc, then the p
 });
 
 /**
- * A rooms-UI `Modal` under this shell (the asset tree's dialogs, #1527) is a
- * layer like a `TfDialog`: with focus outside it, the window's `Esc` closes it
+ * A `TfDialog` with a header Close (the asset tree's dialogs, #1527) is a
+ * layer like any dialog: with focus outside it, the window's `Esc` closes it
  * and the page stays, and history does not move while it is up (#1086).
  */
-test("Esc on the window closes a Modal and leaves the page; history waits for it (#1527)", async () => {
+test("Esc on the window closes an asset dialog and leaves the page; history waits for it (#1527)", async () => {
   const nav = { back: vi.fn(), forward: vi.fn() };
   const layers = createLayers();
   start({ nav, layers });

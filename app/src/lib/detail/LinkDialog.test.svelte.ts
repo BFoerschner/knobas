@@ -307,7 +307,7 @@ test("a refusal that is not a conflict keeps the backend's sentence", async () =
 /**
  * Story 23's ladder: one rung per press. A search somebody typed is a step, so
  * the first Esc undoes it and the dialog stays; only an empty box lets the key
- * through to `Modal`.
+ * through to `TfDialog`.
  */
 test("Esc clears the search first and only then closes the dialog", async () => {
   answer = () => Promise.resolve(response([hit({ id: "mock:PAY-228", title: "Payout retries" })]));

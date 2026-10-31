@@ -9,6 +9,14 @@
 }
 .tf-dialog header { padding: 14px 18px; border-bottom: 1px solid var(--rule); }
 .tf-dialog header h2 { font-size: var(--t-xl); }
+/* TfDialog's title line: the title block on the left, an optional Close on the right. The negative margin
+   keeps the 32px icon button from growing the header: placement only, no size. */
+.tf-dhead { display: flex; align-items: flex-start; gap: 10px; }
+.tf-dtitle { flex: 1; min-width: 0; }
+.tf-dhead .tf-dclose { margin: -5px -8px -5px 0; }
+.tf-dclose svg { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; }
+/* The import dialog's width (a dialog of its own width passes `className` to TfDialog). */
+.tf-dialog.tf-dwide { width: min(820px, calc(100vw - 32px)); }
 .tf-dialog .tf-body { padding: 14px 18px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
 .tf-dialog footer {
   padding: 12px 18px; border-top: 1px solid var(--rule); display: flex; gap: var(--control-gap); justify-content: flex-end;

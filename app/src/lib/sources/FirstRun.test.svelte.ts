@@ -792,7 +792,7 @@ test("Connect a real system opens the add-source dialog Settings uses (#1399, #1
 /**
  * The wizard is not under the shell, so nothing else hears `Esc`: the dialog
  * it opens registers with the layer stack like any other and the wizard
- * closes the topmost layer itself, as the rooms `Modal` did.
+ * closes the topmost layer itself.
  */
 test("Esc closes the add-source dialog over the wizard, and the wizard stays (#1400)", async () => {
   render({ source: null });

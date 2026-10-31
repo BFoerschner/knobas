@@ -57,7 +57,7 @@
     Visibility,
   } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
-  import Modal from "../shell/Modal.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
   import { inputTypeFor, parseProperty, propertyEdit, PROPERTY_KINDS } from "./editing";
 
   let {
@@ -283,12 +283,12 @@
   }
 </script>
 
-<Modal title={editing ? "Edit route" : "New route"} subtitle={`On ${asset.name}`} {onclose}>
+<TfDialog closeButton title={editing ? "Edit route" : "New route"} subtitle={`On ${asset.name}`} {onclose}>
   {#snippet body()}
     <div class="fields">
       <div class="fld">
         <label class="l" for="{fieldId}-name">Name</label>
-        <!-- `Modal` focuses the first focusable control, which is this one. -->
+        <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
           id="{fieldId}-name"
@@ -451,7 +451,7 @@
       {writing ? "Saving…" : editing ? "Save" : "Expose"}
     </button>
   {/snippet}
-</Modal>
+</TfDialog>
 
 <style>
   .fields {

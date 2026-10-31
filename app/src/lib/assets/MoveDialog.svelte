@@ -28,7 +28,7 @@
   import { ipcErrorMessage } from "../ipc";
   import type { assetTree, AssetRow, moveAsset } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
-  import Modal from "../shell/Modal.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
 
   let {
     asset,
@@ -120,7 +120,7 @@
   }
 </script>
 
-<Modal title="Move to…" subtitle={asset.name} {onclose}>
+<TfDialog closeButton title="Move to…" subtitle={asset.name} {onclose}>
   {#snippet body()}
     <div class="picker">
       <p class="crumb mono">
@@ -176,7 +176,7 @@
       {writing ? "Moving…" : `Move into ${here}`}
     </button>
   {/snippet}
-</Modal>
+</TfDialog>
 
 <style>
   .picker {

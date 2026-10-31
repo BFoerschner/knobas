@@ -12,7 +12,7 @@
   Spec §4's rung, unwound one step at a time: a non-empty query is cleared
   first, and only an already-empty box closes the overlay. Both rungs
   `stopPropagation`, so the shell's own ladder (detail slide-over → room) never
-  sees the key while the launcher is up — the same rule `shell/Modal.svelte`
+  sees the key while the launcher is up — the same rule `tf/settings/TfDialog.svelte`
   follows, and the reason it is a rule is that two handlers unwinding two
   ladders on one keystroke is indistinguishable from a bug.
 
