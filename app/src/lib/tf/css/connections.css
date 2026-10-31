@@ -34,12 +34,9 @@
 .tf-compose .tf-acts { display: flex; justify-content: flex-end; }
 
 /* ---------- the Connections button and drawer (#820, R-4.3, R-6.1) ---------- */
-.tf-conn {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--rule);
-  background: var(--sheet); padding: 4px 10px; border-radius: 4px; cursor: pointer; color: var(--ink-2);
-  font-size: var(--t-sm); margin-bottom: 6px;
-}
-.tf-conn:hover { color: var(--ink); border-color: var(--ink-2); }
+/* A small button in the job's tab strip's trailing group (#2294): its count and proposals only. */
+.tf-conn { color: var(--ink-2); }
+.tf-conn:hover { color: var(--ink); }
 .tf-conn b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .tf-conn .tf-p { color: var(--info); font-weight: 600; }
 .tf-scrim { position: fixed; inset: 0; background: rgba(10,15,20,.35); z-index: 20; animation: tf-fade .15s ease-out; }

@@ -42,11 +42,6 @@
 
 /* ---------- tabs ---------- */
 .tf-tabs { display: flex; gap: 2px; padding: 0 22px; border-bottom: 1px solid var(--rule); overflow-x: auto; }
-.tf-tabs a {
-  border: 0; background: none; padding: 8px 12px; color: var(--ink-2); border-bottom: 2px solid transparent;
-  margin-bottom: -1px; white-space: nowrap; text-decoration: none;
-}
-.tf-tabs [aria-current="page"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
 
 /* ---------- forms in a dialog ---------- */
 .tf-dform { display: contents; }

@@ -1,9 +1,0 @@
-# Style gate allowlist for #2294: Job tab strip, the tab rules, Start work.
-# Read by app/src/lib/tf/controls/style-gate.test.ts (#2281).
-# Each line: `<rule a|b|c> <file under app/src/> <selector or class>  <reason>`,
-# two spaces before the reason. #2294 deletes its lines as it fixes them, and the
-# file once none is left. Never add a line here for new work: follow
-# the design-system spec's Controls section instead.
-
-c lib/tf/css/job.css .tf-checkout .tf-acts  the checkout row's actions on the job and repo, a literal 6px
-c lib/tf/css/job.css .tf-steps footer  Start work's footer, 8px apart

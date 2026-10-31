@@ -125,6 +125,32 @@
 /* A strip's or a row's trailing group of actions: at the end, centred on the strip, the control gap apart. */
 .tf-trail { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
 
+/* An underline tab strip (#2294): a page's `.tf-tabs` (the current tab `aria-current`) and the job's
+   `.tf-wtabs` (`role="tab"`, `aria-selected`) draw their tabs with this one rule. */
+:is(.tf-tabs, .tf-wtabs) a {
+  border: 0; background: none; padding: 8px 12px; color: var(--ink-2); border-bottom: 2px solid transparent;
+  margin-bottom: -1px; white-space: nowrap; text-decoration: none;
+}
+:is(.tf-tabs, .tf-wtabs) a:is([aria-current="page"], [aria-selected="true"]) {
+  color: var(--ink); border-bottom-color: var(--ink); font-weight: 600;
+}
+
+/* The segmented control and the pill toggles are page-body controls: small (Controls). The segment's
+   buttons sit inside its 1px border, so the whole switch is `--control-h-sm` tall, as a small button is. */
+.tf-seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; flex: none; }
+.tf-seg button {
+  height: calc(var(--control-h-sm) - 2px); padding: 0 10px; font-size: var(--t-sm);
+  border: 0; background: var(--sheet); cursor: pointer; color: var(--ink-2);
+}
+.tf-seg button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
+.tf-fchips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.tf-fchips button {
+  height: var(--control-h-sm); padding: 0 10px; font-size: var(--t-sm); border-radius: 12px;
+  border: 1px solid var(--rule); background: var(--sheet); cursor: pointer; color: var(--ink-2);
+}
+.tf-fchips button:hover { border-color: var(--ink-2); }
+.tf-fchips button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+
 /* ---------- chips, signals, small text ---------- */
 .tf-chip {
   display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-xs); font-weight: 600; padding: 1px 7px;

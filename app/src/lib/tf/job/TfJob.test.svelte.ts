@@ -1203,6 +1203,15 @@ test("the stepper draws no Step by step and promises no per-step run (#1426)", a
   expect(items.map((toast) => toast.text).join(" ")).not.toContain("Each step can also run on its own");
 });
 
+test("Start work's footer is the canonical one: its note first, the primary last, on the right (#2294)", async () => {
+  await runWith(["pending", "pending", "pending", "pending"]);
+  const footer = target.querySelector(".tf-steps > footer")!;
+  expect([...footer.children].map((each) => [squash(each), each.className])).toEqual([
+    ["A failed step can be retried, skipped or amended.", "tf-dim tf-small tf-swhint"],
+    ["Run all steps", "tf-btn tf-primary"],
+  ]);
+});
+
 test("a To Do ticket of somebody else's, or mine in progress, shows no Start work", async () => {
   open("PAY-231", {
     ports: ports({ listSources: MARA, getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status: "To Do", author: "jonas" })) : Promise.reject({ code: "not_found" })) }),
@@ -1514,6 +1523,18 @@ test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… me
   expect(codeRows().length).toBeGreaterThan(0);
   expect(refreshButton()?.textContent).toBe("Refresh");
   expect(target.querySelector(".tf-refresh-failed")).toBeNull();
+});
+
+test("Connections and Refresh end the tab strip in its trailing group, at the small size (#2294)", async () => {
+  open("PAY-231", { ports: ports({ refresh: refreshProbe({ answer: () => Promise.resolve({ outcome: "refreshed" }) }).ports }) });
+  await settle();
+  const strip = target.querySelector(".tf-wtabs")!;
+  const trail = strip.lastElementChild!;
+  expect(trail.classList.contains("tf-trail")).toBe(true);
+  expect([...trail.children].map((each) => [squash(each).replace(/\d+/, "N"), each.className])).toEqual([
+    ["N connected L", "tf-btn tf-sm tf-conn"],
+    ["Refresh", "tf-btn tf-sm tf-refresh"],
+  ]);
 });
 
 test("a move the app could not ask about is asked again on a refresh (#2306)", async () => {
