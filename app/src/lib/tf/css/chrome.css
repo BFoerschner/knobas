@@ -46,6 +46,8 @@
 .tf-iconbtn:hover { background: var(--sheet-2); color: var(--ink); }
 .tf-iconbtn[aria-current="page"] { color: var(--ink); background: var(--sheet-2); }
 .tf-iconbtn svg { width: 16px; height: 16px; }
+/* Square at a page body's small height (#2238): the repo file tree's and file view's icon buttons. */
+.tf-iconbtn.tf-sm { width: var(--control-h-sm); height: var(--control-h-sm); padding: 0; align-items: center; justify-content: center; }
 
 /* ---------- status bar ---------- */
 .tf-status {

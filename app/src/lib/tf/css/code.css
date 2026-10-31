@@ -46,7 +46,6 @@
 /* An input in a row of buttons takes the row's height, here the small 26px (#2238). */
 .tf-ftreebox > header .tf-gotofile { flex: 1; max-width: none; min-width: 0; height: 26px; box-sizing: border-box; }
 .tf-gotofile kbd { flex: none; }
-.tf-ftreebox > header .tf-iconbtn { width: 26px; height: 26px; padding: 0; display: inline-grid; place-items: center; }
 .tf-ftreebox > header .tf-iconbtn[disabled] { opacity: .45; cursor: default; background: none; }
 .tf-ftreebox > header .tf-iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .tf-ftree { overflow: auto; padding: 4px 0; font-size: var(--t-sm); }
@@ -93,7 +92,7 @@
   background: var(--sheet-2); flex-wrap: wrap;
 }
 .tf-fileview > header .tf-p, .tf-fileview > .tf-waiting > header .tf-p { font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none; }
-.tf-fileview > header .tf-acts, .tf-fileview > .tf-waiting > header .tf-acts { margin-left: auto; display: flex; gap: 6px; }
+.tf-fileview > header .tf-acts, .tf-fileview > .tf-waiting > header .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }
 /* The file's directory dim before its name (mockups/code-area `.fileview > header .p .dim`). */
 .tf-fileview .tf-p .tf-pdir { color: var(--ink-2); font-weight: 400; }
 .tf-fileview .tf-fpad { padding: 12px; }
@@ -101,7 +100,7 @@
 .tf-banner.tf-warn { background: var(--warn-bg); color: var(--warn); }
 .tf-banner.tf-info { background: var(--info-bg); color: var(--info); }
 .tf-banner.tf-err { background: var(--err-bg); color: var(--err); }
-.tf-banner .tf-acts { margin-left: auto; display: flex; gap: 6px; }
+.tf-banner .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }
 .tf-code { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; overflow: auto; margin: 0; }
 .tf-code .tf-l { display: grid; grid-template-columns: 48px 1fr; white-space: pre; }
 .tf-code .tf-l > span:first-child { color: var(--ink-2); text-align: right; padding-right: 12px; user-select: none; }
@@ -124,7 +123,7 @@
    over it for selection (transparent, positioned by pdf.js's TextLayer through the CSSOM), and its links. */
 .tf-fpdf { background: var(--sheet); }
 .tf-pdf-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 6px 18px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); }
-.tf-pdf-bar .tf-acts { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.tf-pdf-bar .tf-acts { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); }
 .tf-pdf-zoom { min-width: 44px; text-align: center; font: var(--t-sm) var(--mono); font-variant-ligatures: none; font-variant-numeric: tabular-nums; }
 .tf-pdf-pages { padding: 18px; display: flex; flex-direction: column; align-items: center; gap: 14px; overflow-x: auto; }
 .tf-pdf-page { position: relative; flex: none; background: #fff; box-shadow: 0 0 0 1px var(--rule), 0 2px 6px rgb(0 0 0 / 0.12); --scale-round-x: 1px; --scale-round-y: 1px; }
@@ -140,7 +139,7 @@
    (its own <style> is refused by the bundled app's CSP, so the font is set here; render/mermaid.ts DIAGRAM_FONT). */
 .tf-dframe { display: block; border: 0; max-width: 100%; background: transparent; }
 .tf-diagram-scratch { position: fixed; left: -100000px; top: 0; font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
-.tf-cgroup-h .tf-acts { margin-left: auto; display: flex; gap: 6px; }
+.tf-cgroup-h .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }
 .tf-cgroup-h .tf-rc-who { font-weight: 400; }
 .tf-rcommits td.tf-rpick { width: 28px; padding-right: 0; }
 .tf-rcommits td:nth-child(2) { width: 110px; }
@@ -239,7 +238,6 @@
 .tf-diff .tf-fh-acts + .tf-fh-viewed { margin-left: 0; }
 /* Open in (#2274) follows the mode switch where there is no Viewed: one group at the right. */
 .tf-diff .tf-fh-acts + .tf-fh-open { margin-left: 0; }
-.tf-fh-acts .tf-seg button { padding: 1px 9px; font-size: var(--t-xs); }
 /* Pipelines on diffs (#2270, `mockups/code-area/diff.html`): the pipeline the header names, and the toolbar's toggle. */
 .tf-diff .tf-ran { display: inline-flex; align-items: center; gap: 5px; font: 600 var(--t-xs) var(--sans); color: var(--info); background: var(--info-bg); border-radius: 3px; padding: 1px 7px; white-space: nowrap; }
 .tf-diff .tf-ran::before { content: "✓"; }
@@ -305,7 +303,7 @@
 .tf-newc textarea {
   border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); color: var(--ink); min-height: 54px; font: inherit;
 }
-.tf-newc .tf-acts { display: flex; gap: 6px; justify-content: flex-end; }
+.tf-newc .tf-acts { display: flex; gap: var(--control-gap); justify-content: flex-end; }
 .tf-outdated { margin: 6px 12px 10px; font: var(--t-sm) var(--sans); }
 .tf-outdated summary { cursor: pointer; color: var(--ink-2); }
 .tf-outdated .tf-thread { margin-left: 0; }
@@ -412,8 +410,7 @@
 
 /* The file header's *More* (⋯) (#2311, mockups/code-area/file.html): Edit, History, the source's page. */
 .tf-fmore { position: relative; display: inline-flex; }
-/* Icon-only, square at its row's small height (#2238: 26px, a literal until #2280's tokens). */
-.tf-fmore > .tf-iconbtn { width: 26px; height: 26px; padding: 0; display: inline-grid; place-items: center; }
+/* Icon-only, square at its row's small height: `.tf-iconbtn.tf-sm` in chrome.css (#2238). */
 .tf-fmore > .tf-iconbtn svg { width: 14px; height: 14px; }
 .tf-fmore svg { fill: currentColor; }
 .tf-fmore .tf-menu { font-size: var(--t-sm); }
