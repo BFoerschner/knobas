@@ -3,7 +3,7 @@
  * its writes, the Overview leading with the first failed test, the Run and
  * Artifacts panels, and the Changes and Parameters tabs.
  */
-import { createRawSnippet, flushSync, mount, unmount } from "svelte";
+import { createRawSnippet, flushSync, mount, unmount, type Snippet } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { DownloadTarget, LinkEntry, PipelineRow, Project, RunLog, PipelineSettings, RunRow, SourceView } from "../../ipc/entity";
@@ -207,7 +207,13 @@ interface Drawn {
   listening: () => number;
 }
 
-function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<RunPorts> = {}, runs: RunRow[] = RUNS): Drawn {
+function draw(
+  runId = "teamcity:build:1187",
+  tab?: string,
+  overrides: Partial<RunPorts> = {},
+  runs: RunRow[] = RUNS,
+  sync?: Snippet,
+): Drawn {
   const props = $state({ rest: [PIPE, runId, ...(tab ? [tab] : [])] });
   const handlers = new Set<(event: { payload: unknown }) => void>();
   const drawn: Drawn = {
@@ -296,6 +302,7 @@ function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<Ru
       },
       crumbs,
       ports,
+      sync,
     },
   });
   return drawn;
@@ -555,6 +562,8 @@ test("Parameters pairs each value in this run with its default, then the branch,
     ["test.filter", "(empty)", "(empty)"],
     ["branch", FEATURE, "main"],
   ]);
+  // A page body's button is small (the Controls section, #2287).
+  expect(button("Run again with these…")!.classList.contains("tf-sm")).toBe(true);
   button("Run again with these…")!.click();
   await settle();
   expect(target.querySelector(".tf-run-dialog")).not.toBeNull();
@@ -1244,6 +1253,23 @@ test("a run whose adapter reads no one item offers Sync now, which runs its sour
   await settle();
   expect(probe.synced).toEqual(["teamcity"]);
   expect(probe.refreshed).toEqual([]);
+});
+
+/** The Builds view's *Sync now* (#2106), as the role frame hands it. */
+const viewSync = createRawSnippet(() => ({ render: () => '<button type="button" class="tf-btn tf-syncnow">Sync now</button>' }));
+const headerActs = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-bhead .tf-acts button")].map((b) => b.textContent);
+
+test("the view's Sync now ends the run's header after Refresh, and gives way to the run's own Sync now: one per header (#2287)", async () => {
+  draw("teamcity:build:1187", undefined, { refresh: refreshProbe().ports }, RUNS, viewSync);
+  await settle();
+  expect(headerActs().slice(-2)).toEqual(["Refresh", "Sync now"]);
+  unmount(page!);
+  page = null;
+  draw("teamcity:build:1187", undefined, { refresh: refreshProbe().ports, getEntity: (id) => Promise.resolve(detailOf(id, { refreshes: false })) }, RUNS, viewSync);
+  await settle();
+  expect(headerActs().filter((name) => name === "Sync now")).toHaveLength(1);
+  expect(target.querySelector(".tf-syncnow")).toBeNull();
+  expect(headerActs().at(-1)).toBe("Sync now");
 });
 
 test("a run of a turned-off source draws neither button, and says its source is off; a withdrawn one says so", async () => {
