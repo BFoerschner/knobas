@@ -151,11 +151,13 @@
   }
 </script>
 
-{#snippet buttonsOf(list: ViewAction[])}
+<!-- The header's at the default size; an actions block in the page body small (Controls). -->
+{#snippet buttonsOf(list: ViewAction[], small: boolean)}
   {#each list as action, n (n)}
     <button
       type="button"
       class="tf-btn"
+      class:tf-sm={small}
       class:tf-primary={action.primary}
       aria-disabled={action.disabled !== null ? "true" : undefined}
       title={action.disabled ?? undefined}
@@ -200,7 +202,7 @@
     {:else if block.type === "log"}
       <pre class="tf-item-log">{block.text}</pre>
     {:else if block.type === "actions"}
-      <div class="tf-item-acts">{@render buttonsOf(block.actions)}</div>
+      <div class="tf-item-acts">{@render buttonsOf(block.actions, true)}</div>
     {:else}
       <p class="tf-item-meta">A {block.type} block is drawn on its role's page, not here.</p>
     {/if}
@@ -221,11 +223,11 @@
       </div>
       {#if detail.web_url !== null || actions.length > 0 || refresh.offer(detail) !== null}
         <div class="tf-acts">
-          {@render buttonsOf(actions)}
-          <TfDetailRefresh {detail} {refresh} {reread} page />
+          {@render buttonsOf(actions, false)}
           {#if detail.web_url !== null}
-            <a class="tf-btn" href={detail.web_url} target="_blank" rel="noreferrer">Open in {detail.source.display_name}</a>
+            <a class="tf-btn tf-ghost" href={detail.web_url} target="_blank" rel="noreferrer">Open in {detail.source.display_name}</a>
           {/if}
+          <TfDetailRefresh {detail} {refresh} {reread} page />
         </div>
       {/if}
     </header>
@@ -255,7 +257,7 @@
                 <p class="tf-cfail">Could not read {section.title}: {read.failed}</p>
               {/if}
             {:else}
-              <button type="button" class="tf-btn" onclick={() => readDeferred(section)}
+              <button type="button" class="tf-btn tf-sm" onclick={() => readDeferred(section)}
                 >Show {section.title}{section.count !== null ? ` (${section.count})` : ""}</button
               >
             {/if}
