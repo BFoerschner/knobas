@@ -24,7 +24,7 @@
 <Modal title="Add source" subtitle="Step 1 of 5" {onclose} {layers}>
   {#snippet body()}
     {#if content === "button"}
-      <button class="btn">Test connection</button>
+      <button class="tf-btn tf-sm">Test connection</button>
     {:else if content === "input"}
       <label for="fixture-name">Name</label>
       <input id="fixture-name" type="text" />
@@ -33,6 +33,7 @@
     {/if}
   {/snippet}
   {#snippet footer()}
-    <button class="btn pri">Add</button>
+    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-primary">Add</button>
   {/snippet}
 </Modal>

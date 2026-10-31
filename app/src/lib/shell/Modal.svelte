@@ -1,12 +1,14 @@
 <!--
-  A focus-trapped dialog over a scrim.
+  A focus-trapped dialog over a scrim, drawn as the ticket-first dialog
+  (`.tf-modal` / `.tf-dialog` in `dialogs.css`, the same sheet, header and
+  canonical footer `TfDialog` draws; #2292). Its header adds a Close icon button.
 
   Deliberately not a native `<dialog>`: `showModal()` puts the element in the
-  top layer, where `::backdrop` — not `.scrim` — draws the dim, and the
-  mockup's `.scrim > .dlg` geometry (the 80 px drop from the top) would have to be rebuilt against a pseudo-element
-  this stylesheet does not style. What a native dialog *gives* is focus
-  trapping, Escape and focus restore, so those three are written out below and
-  tested; nothing else about `showModal` was wanted.
+  top layer, where `::backdrop` — not `.tf-modal` — draws the dim, and the
+  sheet's geometry (the drop from the top) would have to be rebuilt against a
+  pseudo-element this stylesheet does not style. What a native dialog *gives* is
+  focus trapping, Escape and focus restore, so those three are written out below
+  and tested; nothing else about `showModal` was wanted.
 
   It sits on the ticket-first shell's layer stack while open, as `TfDialog`
   does (#1527): the window's `Esc` closes it when focus is outside it, rather
@@ -28,7 +30,7 @@
   }: {
     title: string;
     subtitle?: string;
-    /** `.dlg.wide` — the 820 px variant the add-source flow uses. */
+    /** The 820 px variant the import dialog uses. */
     wide?: boolean;
     onclose: () => void;
     /** The stack the shell's `Esc` and history read; tests hand in their own. */
@@ -61,7 +63,7 @@
     // The body's first control, not the dialog's: the header's Close comes
     // first in document order, and a reader who opened a dialog to type would
     // type into nothing (#1431). Close only when the body offers nothing.
-    (dialog?.querySelector<HTMLElement>(`.dlg-b :is(${FOCUSABLE})`) ?? focusable()[0])?.focus();
+    (dialog?.querySelector<HTMLElement>(`.tf-body :is(${FOCUSABLE})`) ?? focusable()[0])?.focus();
     return () => {
       untrack(off);
       if (restoreTo instanceof HTMLElement && document.contains(restoreTo)) {
@@ -107,13 +109,14 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="scrim"
+  class="tf-modal"
   onclick={(event) => {
     if (event.target === event.currentTarget) onclose();
   }}
 >
   <div
-    class="dlg {wide ? 'wide' : ''}"
+    class="tf-dialog"
+    class:wide
     bind:this={dialog}
     role="dialog"
     aria-modal="true"
@@ -121,14 +124,42 @@
     tabindex="-1"
     {onkeydown}
   >
-    <div class="dlg-h">
-      <h2 id={titleId}>{title}</h2>
-      {#if subtitle}<span class="lab">{subtitle}</span>{/if}
-      <button class="x" aria-label="Close" onclick={onclose}>
+    <header>
+      <div>
+        <h2 id={titleId}>{title}</h2>
+        {#if subtitle}<p class="tf-dsub">{subtitle}</p>{/if}
+      </div>
+      <button class="tf-iconbtn" aria-label="Close" onclick={onclose}>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
       </button>
-    </div>
-    {#if body}<div class="dlg-b">{@render body()}</div>{/if}
-    {#if footer}<div class="dlg-f">{@render footer()}</div>{/if}
+    </header>
+    {#if body}<div class="tf-body">{@render body()}</div>{/if}
+    {#if footer}<footer>{@render footer()}</footer>{/if}
   </div>
 </div>
+
+<style>
+  .wide {
+    width: min(820px, calc(100vw - 32px));
+  }
+
+  /* The title block on the left, Close on the right of the title line. The
+     negative margin keeps the 32 px icon button from growing the header:
+     placement only, no size. */
+  header {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  header .tf-iconbtn {
+    margin: -5px -8px -5px auto;
+  }
+
+  header svg {
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+  }
+</style>

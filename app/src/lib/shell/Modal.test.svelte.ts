@@ -39,7 +39,7 @@ test("moves focus inside on mount and restores it on unmount", () => {
   flushSync();
 
   expect(document.activeElement).not.toBe(button);
-  expect(target.querySelector(".dlg")?.contains(document.activeElement)).toBe(true);
+  expect(target.querySelector(".tf-dialog")?.contains(document.activeElement)).toBe(true);
 
   unmount(app);
   expect(document.activeElement).toBe(button);
@@ -73,10 +73,10 @@ test("a click on the scrim closes it; a click inside the dialog does not", () =>
   const app = mount(Modal, { target, props: { onclose } });
   flushSync();
 
-  target.querySelector<HTMLElement>(".dlg")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  target.querySelector<HTMLElement>(".tf-dialog")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   expect(onclose).not.toHaveBeenCalled();
 
-  target.querySelector<HTMLElement>(".scrim")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  target.querySelector<HTMLElement>(".tf-modal")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   expect(onclose).toHaveBeenCalledTimes(1);
 
   unmount(app);
@@ -112,7 +112,7 @@ test("announces itself as a dialog labelled by its title", () => {
   const app = mount(Modal, { target, props: { onclose: () => {} } });
   flushSync();
 
-  const dialog = target.querySelector(".dlg");
+  const dialog = target.querySelector(".tf-dialog");
   expect(dialog?.getAttribute("role")).toBe("dialog");
   expect(dialog?.getAttribute("aria-modal")).toBe("true");
   const labelledBy = dialog?.getAttribute("aria-labelledby");
@@ -134,7 +134,7 @@ test("opens with focus on the first field in its body, not the header's Close", 
   const app = mount(Modal, { target, props: { onclose: () => {}, content: "input" } });
   flushSync();
 
-  expect(document.activeElement).toBe(target.querySelector(".dlg-b input"));
+  expect(document.activeElement).toBe(target.querySelector(".tf-body input"));
 
   unmount(app);
   behind.remove();
@@ -174,5 +174,34 @@ test("sits on the layer stack while open, and the stack's close is its own", () 
 
   unmount(app);
   expect(layers.open).toEqual([]);
+  target.remove();
+});
+
+/**
+ * **Modal is the ticket-first dialog** (#2292). It was the last dialog drawn
+ * with `unported.css`'s `.scrim` / `.dlg` and its old `×`; it now takes the
+ * same sheet, header and canonical footer as `TfDialog` (design-system spec,
+ * Controls, *Dialog footer*), and its Close is a Controls icon button.
+ */
+test("draws as the ticket-first dialog, with the canonical footer and no unported class", () => {
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {} } });
+  flushSync();
+
+  const dialog = target.querySelector(".tf-modal > .tf-dialog[role=dialog]");
+  expect(dialog, "the ticket-first sheet").not.toBeNull();
+  expect(target.querySelector(".scrim, .dlg, .dlg-h, .dlg-b, .dlg-f, .x, .btn")).toBeNull();
+  expect(dialog!.querySelector("header h2")?.textContent).toBe("Add source");
+  expect(dialog!.querySelector("header .tf-dsub")?.textContent).toBe("Step 1 of 5");
+  expect(dialog!.querySelector('header button[aria-label="Close"]')?.classList.contains("tf-iconbtn")).toBe(true);
+  expect(dialog!.querySelector(".tf-body button")).not.toBeNull();
+  expect(
+    [...dialog!.querySelectorAll("footer .tf-btn")].map((button) => [button.textContent, button.className]),
+  ).toEqual([
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Add", "tf-btn tf-primary"],
+  ]);
+
+  unmount(app);
   target.remove();
 });
