@@ -507,6 +507,18 @@ test("Assign… on an offered block lists the recent tickets, and only tickets, 
   expect(sent.updates).toEqual([[2, at(9, 25), at(9, 40), { kind: "entity", entity_id: "jira:PAY-228" }]]);
 });
 
+/** The dialog opens on what it is for, the target, not on *From* (#2346 kept this through the move to TfDialog). */
+test("+ Add a block opens with the ticket search focused, and Esc closes it", async () => {
+  render();
+  await settle();
+  button(target, "+ Add a block").click();
+  await settle();
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Search for a ticket");
+  document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(target.querySelector("[role=dialog]")).toBeNull();
+});
+
 test("+ Add a block on A label makes an ad-hoc block on that label", async () => {
   const sent = render();
   await settle();

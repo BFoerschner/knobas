@@ -264,9 +264,7 @@ test("TfDialog is the only component that draws the dialog's scrim", () => {
     .filter((file) => /class="tf-modal"/.test(readFileSync(file, "utf8")))
     .map((file) => relative(root, file));
   expect(shells).toEqual([
-    // Still hand-drawn, each waiting on something TfDialog doesn't take yet (#2346).
     "lib/tf/settings/TfDialog.svelte",
-    "lib/tf/time/TfBlockDialog.svelte",
   ]);
 });
 
