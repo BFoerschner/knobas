@@ -94,10 +94,14 @@
   }
 </script>
 
-<header class="tf-stg-h"><h1>Standup</h1><p>Where the standup protocol is published.</p></header>
+<header class="tf-stg-h tf-stg-srch">
+  <div><h1>Standup</h1><p>Where the standup protocol is published.</p></div>
+  {#if failure !== null}
+    <div class="tf-acts"><button class="tf-btn" onclick={() => void load()}>Try again</button></div>
+  {/if}
+</header>
 {#if failure !== null}
   <p class="tf-stg-p tf-stg-errt">Could not read where standups are published: {failure}</p>
-  <div class="tf-stg-acts"><button class="tf-btn" onclick={() => void load()}>Try again</button></div>
 {:else if stored !== undefined}
   <div class="tf-stg-row">
     <div class="tf-stg-l">Publish under<small>Each day becomes a child page, named by its date.</small></div>
@@ -123,7 +127,7 @@
       </div>
     {/snippet}
     {#snippet footer()}
-      <button class="tf-btn" onclick={() => (picking = false)}>Cancel</button>
+      <button class="tf-btn tf-ghost" onclick={() => (picking = false)}>Cancel</button>
       <button class="tf-btn tf-primary" disabled={saving || chosen === null} onclick={() => void save()}>Save</button>
     {/snippet}
   </TfDialog>

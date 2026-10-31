@@ -306,7 +306,7 @@
         {/if}
       {/snippet}
       {#snippet footer()}
-        <button class="tf-btn" onclick={() => (choosing = null)}>Cancel</button>
+        <button class="tf-btn tf-ghost" onclick={() => (choosing = null)}>Cancel</button>
       {/snippet}
     </TfDialog>
   {/if}

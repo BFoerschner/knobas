@@ -687,3 +687,28 @@ test("a section that could not read puts Try again on the title line", async () 
   expect(headerActions()).toEqual(["Try again"]);
   expect(loneRows()).toBe(0);
 });
+
+const footerOf = () =>
+  [...target.querySelectorAll<HTMLElement>('[role="dialog"] footer .tf-btn')].map((b) => [b.textContent!.trim(), b.className]);
+
+test("Standup's Change… and Backup's Restore from a file… draw Cancel as a ghost (#2284)", async () => {
+  await open("standup");
+  button("Change…").click();
+  await settle();
+  expect(footerOf()).toEqual([
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Save", "tf-btn tf-primary"],
+  ]);
+  unmount(view!);
+  view = null;
+  await open("backup");
+  button("Restore from a file…").click();
+  await settle();
+  expect(footerOf()).toEqual([["Cancel", "tf-btn tf-ghost"]]);
+});
+
+test("Standup puts a failed read's Try again on the title line (#2284)", async () => {
+  await open("standup", sectionPorts({ standupPublishTarget: vi.fn(() => Promise.reject(new Error("locked"))) }));
+  expect(headerActions()).toEqual(["Try again"]);
+  expect(loneRows()).toBe(0);
+});
