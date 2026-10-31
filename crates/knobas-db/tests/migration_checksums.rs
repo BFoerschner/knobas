@@ -39,7 +39,10 @@ fn pinned() -> BTreeMap<i64, Pinned<'static>> {
         }
         let fields: Vec<&str> = line.split_whitespace().collect();
         let [version, checksum, file] = fields[..] else {
-            panic!("{LIST_PATH}:{}: expected `<version> <sha384> <file>`, got {line:?}", n + 1);
+            panic!(
+                "{LIST_PATH}:{}: expected `<version> <sha384> <file>`, got {line:?}",
+                n + 1
+            );
         };
         let version: i64 = version
             .parse()
