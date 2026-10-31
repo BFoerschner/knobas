@@ -15,8 +15,8 @@
   import { providePageVisible } from "./kept-pages.svelte";
   import { keepScroll } from "./while-shown.svelte";
   import type { RoleFrameProps, TfPageContext, TfPageEntry } from "./page-entry";
-  import { SECTION_NAME, type TfRoute } from "./route";
-  import TfCrumbs from "./TfCrumbs.svelte";
+  import type { TfRoute } from "./route";
+  import TfCrumbs, { shellCrumbs } from "./TfCrumbs.svelte";
   import TfSyncNow from "./TfSyncNow.svelte";
 
   let {
@@ -78,7 +78,7 @@
 <div class="tf-kept" hidden={!visible} bind:this={wrapper}>
   {#if page.crumbs && route.view === "full"}
     <div class="tf-full">
-      <TfCrumbs job={ctx.job} jobAt={ctx.jobAt} name={SECTION_NAME[route.section]} />
+      <TfCrumbs parts={shellCrumbs(route)} back={ctx.back} />
       <Page {...pageProps} {...frameProps} />
     </div>
   {:else}

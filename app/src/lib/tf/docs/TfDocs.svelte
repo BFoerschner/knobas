@@ -88,7 +88,6 @@
   import type { JobPorts } from "../job/ports";
   import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes, type Echo } from "../queued.svelte";
   import { createDetailRefresh, DETAIL_REFRESH_BRIDGE, type DetailRefreshPorts } from "../refresh.svelte";
-  import { jobHash } from "../route";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { initials } from "../tickets/tickets";
@@ -178,9 +177,9 @@
     ready: boolean;
     /** What follows the address's first segment. */
     rest: string[];
-    /** The job the reader was last in, for the breadcrumb's chip and *Link to <job>*. */
+    /** The job the reader was last in, for *This job* and *Link to <job>*. */
     job: string | null;
-    /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
+    /** The address the job was opened at (#1525), which its ticket is read by; its key when omitted. */
     jobAt?: string | null;
     ports?: DocsPorts;
     linkPorts?: LinkPorts;
@@ -1055,9 +1054,6 @@
               >
             {/if}
             <div class="tf-rd-crumb">
-              {#if job !== null}
-                <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a> ›
-              {/if}
               <a href="#/docs">Docs</a>
               {#if p.space}
                 › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>

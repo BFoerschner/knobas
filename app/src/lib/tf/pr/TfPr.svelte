@@ -95,7 +95,7 @@
   import { prNumber } from "../code/code";
   import { isMine, itemHash, keyOf, username } from "../job/job";
   import { commitHash, readAllRows, repoHash, repoOfRow } from "../repo/repo";
-  import { jobHash } from "../route";
+  import type { EscTarget } from "../escape";
   import { initials } from "../tickets/tickets";
   import {
     PR_TABS,
@@ -130,8 +130,7 @@
   let {
     ready,
     rest,
-    job,
-    jobAt = null,
+    back = null,
     ports = {
       getEntity: (entityId) => getEntity(entityId),
       entityView: (entityId, section) => entityView(entityId, section),
@@ -151,10 +150,8 @@
     ready: boolean;
     /** What follows `pr` in the address. */
     rest: string[];
-    /** The job the reader was last in, as a ticket key. */
-    job: string | null;
-    /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
-    jobAt?: string | null;
+    /** Where `Esc` goes, which the breadcrumb's hint names; `null` where it does nothing (#2228). */
+    back?: EscTarget | null;
     ports?: PrPorts;
     /** The reader's pending line comments (#842): this viewer's, kept across restarts. */
     pending?: PendingCommentStore;
@@ -588,9 +585,6 @@
 
 <div class="tf-full">
   <nav class="tf-crumbs" aria-label="Breadcrumb">
-    {#if job !== null}
-      <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a><span class="tf-sep">›</span>
-    {/if}
     <a class="tf-crumb" href="#/code">Code</a><span class="tf-sep">›</span>
     {#if repo !== null}
       <a class="tf-crumb" href={repoHash(repo.entity_id)}>{repo.title}</a><span class="tf-sep">›</span>
@@ -598,7 +592,7 @@
       <span class="tf-crumb">{detail.row.path}</span><span class="tf-sep">›</span>
     {/if}
     <strong>{name}</strong>
-    <span class="tf-esc">{job !== null ? `Back to ${job}` : "Back"} <kbd>Esc</kbd></span>
+    {#if back !== null}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
   </nav>
 
   {#if prId === null || failed !== null}

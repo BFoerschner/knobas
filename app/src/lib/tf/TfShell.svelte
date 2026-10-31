@@ -71,7 +71,7 @@
     type WriteQueue as Queue,
   } from "../shell/write-queue.svelte";
   import { badges as sharedBadges, type Badges } from "./badges.svelte";
-  import { escStep } from "./escape";
+  import { escStep, escTarget } from "./escape";
   import { keptPages as sharedKeptPages, type KeptPagesSetting } from "./kept-pages.svelte";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
@@ -212,9 +212,10 @@
   });
 
   /**
-   * The job the reader was last in: the breadcrumb's chip and where `Esc`
-   * returns (R-1.6). Only a job actually opened, as prototype-6's `S.job`.
-   * `key` is what the chip and the tab name (R-1.2); `segment` is the address
+   * The job the reader was last in: the Job tab's and the launcher's job
+   * (R-1.2). Only a job actually opened, as prototype-6's `S.job`. Neither
+   * the breadcrumb nor `Esc` reads it (#2228). `key` is what the tab names;
+   * `segment` is the address
    * it was opened at, a bare key or an entity id (#1476), which every way
    * back to it uses, so a key two sources hold returns to the one the
    * reader was on (#1525). Kept, not replaced, while the segment stays: a tab
@@ -228,6 +229,12 @@
     if (untrack(() => lastJob?.segment) === segment) return;
     lastJob = { key: isEntityId(segment) ? keyOf(segment) : segment, segment };
   });
+
+  /**
+   * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228):
+   * the ladder's own rungs, so the hint names what the key does.
+   */
+  const back = $derived(escTarget(route));
 
   /** What the timer runs on, as a ticket key; an asset or a label is no job. */
   const timedTicket = $derived.by(() => {
@@ -287,9 +294,9 @@
   });
 
   /**
-   * The job the breadcrumb names (#1500), for the launcher's *Link to <key>*:
+   * The job a page stands for (#1500), for the launcher's *Link to <key>*:
    * the job page's, or the last job on a view opened from it. Tickets, Inbox
-   * and Settings are no job's, though the last two draw it in their crumbs.
+   * and Settings are no job's.
    */
   const crumbKey = $derived.by(() => {
     if (route.view === "job") return route.key === null ? null : (lastJob?.key ?? null);
@@ -470,7 +477,6 @@
               text: field instanceof HTMLInputElement ? field.value : "",
             },
       route,
-      jobAt: lastJob?.segment ?? null,
     });
     if (step.do === "nothing") return;
     event.preventDefault();
@@ -538,6 +544,7 @@
         ready: lifecycle.ready,
         job: lastJob?.key ?? null,
         jobAt: lastJob?.segment ?? null,
+        back,
         timedTicket,
         navJob: navJobId,
         timer,

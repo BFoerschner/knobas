@@ -15,5 +15,5 @@ export const page = definePage({
   matches: (route): route is ItemRoute => route.view === "item",
   component: TfItem,
   address: (route) => route.id,
-  props: ({ route, ready, job, jobAt }) => ({ id: route.id, ready, job, jobAt }),
+  props: ({ route, ready, back }) => ({ id: route.id, ready, back }),
 });

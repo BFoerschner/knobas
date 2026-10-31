@@ -49,6 +49,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import { actionName } from "../../detail/view/actions";
+  import type { EscTarget } from "../escape";
   import TfCrumbs from "../TfCrumbs.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
@@ -60,16 +61,13 @@
   let {
     id,
     ready,
-    job,
-    jobAt = null,
+    back = null,
     ports = BRIDGE,
   }: {
     id: string;
     ready: boolean;
-    /** The job the reader was last in, which the breadcrumb starts at (R-1.6). */
-    job: string | null;
-    /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
-    jobAt?: string | null;
+    /** Where `Esc` goes, which the breadcrumb's hint names; `null` where it does nothing (#2228). */
+    back?: EscTarget | null;
     ports?: ItemPorts;
   } = $props();
 
@@ -212,10 +210,10 @@
 <div class="tf-full">
   <!-- The breadcrumb names the kind (#1408): the title is the header's. -->
   {#if failed !== null}
-    <TfCrumbs {job} {jobAt} name="Item" />
+    <TfCrumbs parts={[{ name: "Item" }]} {back} />
     <div class="tf-empty"><p class="tf-cfail">Could not read {id}: {failed}</p></div>
   {:else if detail !== null}
-    <TfCrumbs {job} {jobAt} name={kindLabel} />
+    <TfCrumbs parts={[{ name: kindLabel }]} {back} />
     <header class="tf-fhead">
       <div>
         <h1>{detail.row.title}</h1>

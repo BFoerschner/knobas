@@ -22,9 +22,10 @@ export const currentJob = {
 };
 
 /**
- * The job the breadcrumb names (#1500): the job page's, or the job a view
- * opened from it starts its breadcrumb at ('PAY-231 › Time'), with the
- * ticket's entity id; `null` on Tickets, Inbox and Settings, and while the
+ * The job a page stands for (#1500): the job page's, or the job the reader
+ * was last in on a view opened from it (Time, Builds), with the ticket's
+ * entity id. The breadcrumb no longer draws it (#2228); the name stays until
+ * spec #2227 re-sources it. It is `null` on Tickets, Inbox and Settings, and while the
  * key is still being resolved. The shell reports it; the launcher's *Link to
  * <key>* row is offered against it. Never the newest open job: a guessed job
  * would take links to the wrong ticket in silence.
