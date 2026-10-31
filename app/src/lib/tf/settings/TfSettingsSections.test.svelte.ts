@@ -761,3 +761,23 @@ test.each(["time", "notifications", "standup", "monitoring", "backup", "appearan
     expect(loneRows()).toBe(0);
   },
 );
+
+/**
+ * #2343: "Small: everything inside a page body" (Controls). Every button in a
+ * Settings page body is small, except the title line's actions, which are the
+ * header's, and a dialog's, which have their own footer rule.
+ */
+const bodyButtonsAtDefault = () =>
+  [...body().querySelectorAll<HTMLElement>(".tf-btn")]
+    .filter((b) => !b.closest(".tf-stg-h") && !b.closest('[role="dialog"]') && !b.classList.contains("tf-sm"))
+    .map((b) => b.textContent!.trim());
+
+// Renderers and Checkouts draw their bodies in their own files' fixtures, and are checked there.
+test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "performance", "keyboard", "logs", "notes"])(
+  "Settings › %s draws its body buttons small (#2343)",
+  async (section) => {
+    await open(section, sectionPorts(), section === "notifications" ? { notifications: notificationsStub([]) } : {});
+    expect(body().querySelector("h1")).not.toBeNull();
+    expect(bodyButtonsAtDefault()).toEqual([]);
+  },
+);

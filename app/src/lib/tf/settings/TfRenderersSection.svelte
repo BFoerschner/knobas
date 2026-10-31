@@ -259,7 +259,7 @@
       </table>
     {/if}
     {#if editing === null}
-      <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn" onclick={() => edit("new")}>Add a renderer…</button></div>
+      <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn tf-sm" onclick={() => edit("new")}>Add a renderer…</button></div>
     {:else}
       <div class="tf-stg-sec">
         <h2>{editing === "new" ? "New renderer" : `Edit ${saved[editing]?.name ?? ""}`}</h2>
@@ -303,8 +303,8 @@
         </div>
         {#if refusal !== null}<p class="tf-stg-errt" role="alert">{refusal}</p>{/if}
         <div class="tf-stg-acts">
-          <button class="tf-btn tf-primary" onclick={() => void saveForm()}>Save</button>
-          <button class="tf-btn tf-ghost" onclick={() => (editing = null)}>Cancel</button>
+          <button class="tf-btn tf-sm tf-primary" onclick={() => void saveForm()}>Save</button>
+          <button class="tf-btn tf-sm tf-ghost" onclick={() => (editing = null)}>Cancel</button>
         </div>
       </div>
     {/if}
@@ -372,7 +372,7 @@
         <select class="tf-select" aria-label="Open with" bind:value={adding.renderer}>
           {#each choices as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
         </select>
-        <button class="tf-btn" disabled={adding.pattern.trim() === ""} onclick={() => void addDefault()}>Add</button>
+        <button class="tf-btn tf-sm" disabled={adding.pattern.trim() === ""} onclick={() => void addDefault()}>Add</button>
       </div>
     </div>
     {#if defaultsRefusal !== null}<p class="tf-stg-errt" role="alert">{defaultsRefusal}</p>{/if}
@@ -396,7 +396,7 @@
         <label class="tf-stg-l" for="tf-rnd-sample">Sample</label>
         <div class="tf-stg-c"><textarea id="tf-rnd-sample" class="tf-stg-in tf-mono" rows="6" bind:value={sample}></textarea></div>
       </div>
-      <div class="tf-stg-acts"><button class="tf-btn" onclick={runTest}>Run</button></div>
+      <div class="tf-stg-acts"><button class="tf-btn tf-sm" onclick={runTest}>Run</button></div>
       {#if trying !== null}
         {#key trying.at}
           <div class="tf-stg-test"><TfCommandOutput renderer={trying.renderer} text={trying.text} commands={ports.commands} /></div>

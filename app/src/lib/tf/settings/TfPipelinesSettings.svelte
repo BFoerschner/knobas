@@ -142,7 +142,7 @@
     </table>
   {/if}
   {#if editingStep === null}
-    <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn" onclick={() => editStep("new")}>Add a command step…</button></div>
+    <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn tf-sm" onclick={() => editStep("new")}>Add a command step…</button></div>
     {#if stepRefusal !== null}<p class="tf-stg-errt" role="alert">{stepRefusal}</p>{/if}
   {:else}
     <div class="tf-stg-sec">
@@ -161,8 +161,8 @@
       </div>
       {#if stepRefusal !== null}<p class="tf-stg-errt" role="alert">{stepRefusal}</p>{/if}
       <div class="tf-stg-acts">
-        <button class="tf-btn tf-primary" onclick={() => void saveStep()}>Save step</button>
-        <button class="tf-btn tf-ghost" onclick={() => (editingStep = null)}>Cancel</button>
+        <button class="tf-btn tf-sm tf-primary" onclick={() => void saveStep()}>Save step</button>
+        <button class="tf-btn tf-sm tf-ghost" onclick={() => (editingStep = null)}>Cancel</button>
       </div>
     </div>
   {/if}
@@ -197,7 +197,7 @@
     </table>
   {/if}
   {#if editingPipe === null}
-    <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn" onclick={() => editPipe("new")}>Add a pipeline…</button></div>
+    <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn tf-sm" onclick={() => editPipe("new")}>Add a pipeline…</button></div>
     {#if pipeRefusal !== null}<p class="tf-stg-errt" role="alert">{pipeRefusal}</p>{/if}
   {:else}
     <div class="tf-stg-sec">
@@ -216,8 +216,8 @@
       />
       {#if pipeRefusal !== null}<p class="tf-stg-errt" role="alert">{pipeRefusal}</p>{/if}
       <div class="tf-stg-acts">
-        <button class="tf-btn tf-primary" onclick={() => void savePipe()}>Save pipeline</button>
-        <button class="tf-btn tf-ghost" onclick={() => (editingPipe = null)}>Cancel</button>
+        <button class="tf-btn tf-sm tf-primary" onclick={() => void savePipe()}>Save pipeline</button>
+        <button class="tf-btn tf-sm tf-ghost" onclick={() => (editingPipe = null)}>Cancel</button>
       </div>
     </div>
   {/if}

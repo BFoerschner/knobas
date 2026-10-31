@@ -134,7 +134,7 @@
         {/each}
       </tbody>
     </table>
-    <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn" onclick={() => (managing = true)}>Edit applications…</button></div>
+    <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn tf-sm" onclick={() => (managing = true)}>Edit applications…</button></div>
   </div>
   <div class="tf-stg-sec">
     <h2>Pull request worktrees</h2>

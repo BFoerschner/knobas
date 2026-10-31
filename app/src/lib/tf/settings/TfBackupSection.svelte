@@ -266,9 +266,9 @@
       {/each}
     </div>
     <div class="tf-stg-acts">
-      <button class="tf-btn tf-primary" disabled={busy || nothingTicked} onclick={() => void exportShare()}>Export…</button>
-      <button class="tf-btn tf-ghost" onclick={() => choose("share")}>Import…</button>
-      <button class="tf-btn tf-ghost" onclick={() => void openFolder()}>Open the backup folder</button>
+      <button class="tf-btn tf-sm tf-primary" disabled={busy || nothingTicked} onclick={() => void exportShare()}>Export…</button>
+      <button class="tf-btn tf-sm tf-ghost" onclick={() => choose("share")}>Import…</button>
+      <button class="tf-btn tf-sm tf-ghost" onclick={() => void openFolder()}>Open the backup folder</button>
     </div>
   </div>
 
