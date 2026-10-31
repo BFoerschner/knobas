@@ -76,13 +76,14 @@
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
   import { goWithoutOpener, samePage, stamped, stampOf, takeTold, type Opened } from "./opener";
+  import { provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { parseTfHash, sectionOf } from "./route";
   import { theme as sharedTheme, type Theme } from "./theme.svelte";
   import { sourceReadings } from "./status";
   import { sourceRoles } from "./roles.svelte";
   import { entityAddress, legacyAddress } from "./address";
-  import { keyOf } from "./job/job";
+  import { ticketRef } from "./job/job";
   import { bridgePorts, type JobPorts } from "./job/ports";
   import { breadcrumbJob, currentJob, linkRequest } from "./job/current.svelte";
   import { chosenJob } from "./job/chosen.svelte";
@@ -185,17 +186,8 @@
     hash = next;
   }
 
-  let main: HTMLElement | undefined = $state();
-
-  /** The name the shown page's breadcrumb gives the page itself, read as it is left, or `null`. */
-  function ownName(): string | null {
-    for (const crumbs of main?.querySelectorAll(".tf-crumbs") ?? []) {
-      if (crumbs.closest("[hidden]") !== null) continue;
-      const own = [...crumbs.querySelectorAll("strong")].at(-1);
-      return own?.textContent?.trim() || null;
-    }
-    return null;
-  }
+  /** The name the shown page gives itself (`page-name.svelte.ts`), read as it is left. */
+  const shownPage = provideShownPageName();
 
   /**
    * The address moved (#2229). An entry already stamped is one history
@@ -213,7 +205,7 @@
     } else {
       if (how === "unopened") here = { opener: null, prev: hash };
       else if (how === null && samePage(hash, now)) here = { opener: here.opener, prev: hash };
-      else if (how === null) here = { opener: { hash, name: openerName(route, ownName()) }, prev: hash };
+      else if (how === null) here = { opener: { hash, name: openerName(route, shownPage.name) }, prev: hash };
       history.replaceState(stamped(history.state, $state.snapshot(here)), "");
     }
     hash = now;
@@ -266,7 +258,7 @@
    * two sources hold returns to the one that was chosen (#1525).
    */
   chosenJob.load();
-  const chosen = $derived(chosenJob.id === null ? null : { key: keyOf(chosenJob.id), entityId: chosenJob.id });
+  const chosen = $derived(chosenJob.id === null ? null : ticketRef(chosenJob.id));
 
   /**
    * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228):
@@ -301,12 +293,7 @@
    */
   $effect(() => {
     const onScreen = route.view === "ticket" ? route.id : currentJob.entityId;
-    const job =
-      route.view === "job" || route.view === "ticket"
-        ? onScreen === null
-          ? null
-          : { key: keyOf(onScreen), entityId: onScreen }
-        : chosen;
+    const job = route.view === "job" || route.view === "ticket" ? (onScreen === null ? null : ticketRef(onScreen)) : chosen;
     breadcrumbJob.set(job);
     return () => breadcrumbJob.set(null);
   });
@@ -547,7 +534,7 @@
     {ontimer}
     ontheme={() => theme.toggle(prefersDark())}
   />
-  <main class="tf-main" tabindex="-1" bind:this={main}>
+  <main class="tf-main" tabindex="-1">
     <TfPage
       {kept}
       ctx={{

@@ -126,6 +126,7 @@
   import TfPrMerge from "./TfPrMerge.svelte";
   import TfPrReview from "./TfPrReview.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
+  import { namePage } from "../page-name.svelte";
 
   let {
     ready,
@@ -355,6 +356,8 @@
   const commitList = $derived(commitParts(view ?? null));
   const actions = $derived(view?.actions ?? []);
   const name = $derived(number === null ? "PR" : `PR ${number}`);
+  // What *Back to <name>* calls this page once it is left: its breadcrumb's own name (spec #2227).
+  namePage(() => name);
 
   /** The write each toolbar button stands for, where the source offers it. */
   const offered = (test: (action: ViewAction) => boolean) => actions.find(test) ?? null;

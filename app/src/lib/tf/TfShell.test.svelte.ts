@@ -541,6 +541,12 @@ test("the breadcrumb on a full view shows the path with no job chip, and its hin
   expect(location.hash).toBe("#/settings");
 });
 
+test("a commit's page with no opener names its repository's page as the breadcrumb's map calls it, until the page has its title", async () => {
+  start();
+  await reached("#/repo/r1/commits/c1");
+  expect(escHint()).toBe("Back to Repository Esc");
+});
+
 test("an address the new shell has no place for names itself", async () => {
   start();
   // Link sets was the last section still drawn as "not built yet" (#866).

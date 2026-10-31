@@ -168,6 +168,7 @@
   import { provideTabRereads } from "./refreshed.svelte";
   import { NO_TABS, readShown, SLOTS, slotOf, tabHref, visit, type TabSlot } from "./repo-tabs";
   import TfRepoTab from "./TfRepoTab.svelte";
+  import { namePage } from "../page-name.svelte";
   import { providePageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
 
@@ -516,6 +517,9 @@
   }
 
   const NOT_BUILT: Partial<Record<RepoTab, string>> = {};
+
+  // What *Back to <name>* calls this page once it is left: its breadcrumb's own name (spec #2227).
+  namePage(() => (route.commit !== null && repoId !== null ? "Commit" : (repo?.title ?? null)));
 
   /** *New branch…*'s dialog, open from the header or from a commit. */
   let newBranch = $state<{ from: ChoiceOption | null } | null>(null);
