@@ -221,6 +221,21 @@ test("draws no Close unless asked", () => {
   target.remove();
 });
 
+/** A title with markup in it (the worklog draft's ticket key in mono, #2346) is a snippet, still the dialog's name. */
+test("a snippet title draws its markup inside the heading that names the dialog", () => {
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, markupTitle: true } });
+  flushSync();
+
+  const dialog = target.querySelector("[role=dialog]")!;
+  const heading = target.querySelector(`#${dialog.getAttribute("aria-labelledby")}`);
+  expect(heading?.textContent).toBe("Log time to PROJ-7");
+  expect(heading?.querySelector(".tf-mono")?.textContent).toBe("PROJ-7");
+
+  unmount(app);
+  target.remove();
+});
+
 /** A dialog of its own width passes a class beside `tf-dialog` (Shell conventions); the import dialog's is `tf-dwide`. */
 test("a dialog of its own width carries its class beside tf-dialog", () => {
   const target = host();

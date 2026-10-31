@@ -8,7 +8,8 @@
   trap three stops to cycle between.
 
   `content` picks what the body holds, for the open-time focus (#1431): a button
-  (the default), a text field, or nothing focusable at all.
+  (the default), a text field, or nothing focusable at all. `markupTitle` hands
+  the title as a snippet with markup in it, as the worklog draft's is (#2346).
 -->
 <script lang="ts">
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
@@ -20,16 +21,20 @@
     layers = sharedLayers,
     closeButton = true,
     className = "",
+    markupTitle = false,
   }: {
     onclose: () => void;
     content?: "button" | "input" | "none";
     layers?: Layers;
     closeButton?: boolean;
     className?: string;
+    markupTitle?: boolean;
   } = $props();
 </script>
 
-<TfDialog title="Add source" subtitle="Step 1 of 5" {onclose} {layers} {closeButton} {className}>
+{#snippet keyed()}Log time to <span class="tf-mono">PROJ-7</span>{/snippet}
+
+<TfDialog title={markupTitle ? keyed : "Add source"} subtitle="Step 1 of 5" {onclose} {layers} {closeButton} {className}>
   {#snippet body()}
     {#if content === "button"}
       <button class="tf-btn tf-sm">Test connection</button>

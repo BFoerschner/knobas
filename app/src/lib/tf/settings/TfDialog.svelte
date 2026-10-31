@@ -2,6 +2,9 @@
   The app's one dialog shell (#830, review of #2238): prototype-6's `.dialog`,
   a header, a body and a footer of buttons over a scrim. A dialog of its own
   width passes `className`; the asset tree's dialogs ask for a header Close.
+  A title with markup in it (the worklog draft's ticket key in mono) is a
+  snippet. A dialog whose body is a form keeps the `<form>` in the body and
+  points its footer's submit at it with `form=` (`TfApplySet`, `TfBlockDialog`).
 
   It registers itself with the shell's layer stack while it is open, so the
   window's `Esc` closes it as rung 1 of the ladder (`escape.ts`) even when focus
@@ -31,7 +34,8 @@
     className = "",
     closeButton = false,
   }: {
-    title: string;
+    /** Text, or a snippet when the title holds markup (#2346); either way it names the dialog. */
+    title: string | Snippet;
     /** A line under the title, in the dialog's sub tone (the write queue's counts, #1425). */
     subtitle?: string | null;
     onclose: () => void;
@@ -114,7 +118,7 @@
   <div class="tf-dialog {className}" role="dialog" aria-modal="true" aria-labelledby={titleId} tabindex="-1" bind:this={dialog} {onkeydown}>
     <header class="tf-dhead">
       <div class="tf-dtitle">
-        <h2 id={titleId}>{title}</h2>
+        <h2 id={titleId}>{#if typeof title === "string"}{title}{:else}{@render title()}{/if}</h2>
         {#if subtitle}<p class="tf-dsub">{subtitle}</p>{/if}
       </div>
       {#if closeButton}
