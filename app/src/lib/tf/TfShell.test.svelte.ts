@@ -517,6 +517,107 @@ test("badges: inbox, failing builds in err tone, proposals; nothing drawn at zer
   });
 });
 
+// ---- home and the chosen job (spec #2227, #2230) ---------------------------
+
+test("the nav reads Job first, then Tickets and the rest in order; Settings stays the cog", async () => {
+  start();
+  await at("#/job");
+  const names = seen<HTMLAnchorElement>(".tf-nav a").map((a) => a.firstChild?.textContent?.trim());
+  expect(names).toEqual(["Job", "Tickets", "Inbox", "Code", "Builds", "Docs", "Dependencies", "Monitors", "Link sets", "Proposed links", "Time"]);
+  expect(target.querySelector(".tf-top [aria-label='Settings']"), "Settings is the cog, not a nav entry").not.toBeNull();
+});
+
+/** The bare `#/job`'s empty state, or `null` where it is not drawn. */
+function emptyHome(): HTMLElement | null {
+  return seen(".tf-full").find((page) => page.querySelector("h1")?.textContent === "Job" && page.querySelector(".tf-empty") !== null) ?? null;
+}
+
+test("with no chosen job, #/job says how a ticket becomes the job, and its button goes to Tickets", async () => {
+  start();
+  await at("#/job");
+  const home = emptyHome();
+  expect(home, "the empty state").not.toBeNull();
+  expect(home!.textContent).toMatch(/start the timer on it/i);
+  expect(home!.textContent).toMatch(/Start work/);
+  const button = [...home!.querySelectorAll<HTMLAnchorElement>("a.tf-btn")].find((a) => a.textContent?.trim() === "All tickets")!;
+  expect(button.getAttribute("href")).toBe("#/tickets");
+  expect(location.hash).toBe("#/job");
+});
+
+/** A browser storage that keeps what the shell wrote, across remounts. */
+function installStorage(): Map<string, string> {
+  const kept = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => kept.get(key) ?? null,
+    setItem: (key: string, value: string) => void kept.set(key, String(value)),
+    removeItem: (key: string) => void kept.delete(key),
+  };
+  Object.defineProperty(window, "localStorage", { value: storage, configurable: true, writable: true });
+  return kept;
+}
+
+function removeStorage(): void {
+  Object.defineProperty(window, "localStorage", { value: undefined, configurable: true, writable: true });
+}
+
+/** Unmount the shell and mount it again on `hash`, as a restart does. */
+async function restartOn(hash: string): Promise<void> {
+  if (shell) unmount(shell);
+  shell = null;
+  location.hash = hash;
+  start();
+  await settle();
+}
+
+test("opening #/job/<id> makes it the chosen job: after a restart with the storage kept, #/job draws it and keeps its address", async () => {
+  installStorage();
+  try {
+    start();
+    await at("#/job/PAY-231");
+    expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent).toBe("PAY-231");
+    await restartOn("#/job");
+    expect(seen(".tf-jobcard .tf-jobkey").map((key) => key.textContent)).toEqual(["PAY-231"]);
+    expect(emptyHome(), "the chosen job, not the empty state").toBeNull();
+    expect(location.hash, "#/job stays the home address").toBe("#/job");
+  } finally {
+    removeStorage();
+  }
+});
+
+test("a browser storage that throws, or is empty, leaves the shell working with no chosen job", async () => {
+  Object.defineProperty(window, "localStorage", {
+    value: {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+      removeItem: () => {
+        throw new Error("blocked");
+      },
+    },
+    configurable: true,
+    writable: true,
+  });
+  try {
+    start();
+    await at("#/job");
+    expect(emptyHome(), "a failed read: no chosen job").not.toBeNull();
+    await at("#/job/PAY-231");
+    expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent, "a failed write still opens the job").toBe("PAY-231");
+  } finally {
+    removeStorage();
+  }
+  installStorage();
+  try {
+    await restartOn("#/job");
+    expect(emptyHome(), "an empty storage: no chosen job").not.toBeNull();
+  } finally {
+    removeStorage();
+  }
+});
+
 test("the timer chip ticks the store's reading and stops through the shell's verb, as ⌘T does", async () => {
   const ontimer = vi.fn();
   const timer = $state<{ current: RunningTimer | null; elapsed: string | null }>({
@@ -534,7 +635,7 @@ test("the timer chip ticks the store's reading and stops through the shell's ver
   chip.click();
   press("t", { metaKey: true });
   expect(ontimer).toHaveBeenCalledTimes(2);
-  expect(target.querySelector(".tf-nav a:nth-child(2)")?.textContent?.replace(/\s+/g, " ").trim(), "the Job tab names the timer's ticket").toBe("Job PAY-231");
+  expect(target.querySelector(".tf-nav a:nth-child(1)")?.textContent?.replace(/\s+/g, " ").trim(), "with no chosen job, the Job tab names the timer's ticket").toBe("Job PAY-231");
 });
 
 test("the chip's target carries its full text in a title: a label reads in the sans face, a ticket key stays mono (#1430)", async () => {
@@ -954,19 +1055,12 @@ test("the Day tab's Add to writes to the ticket of the address the job was opene
   expect(created).toEqual([{ kind: "entity", entity_id: "tide:PAY-231" }]);
 });
 
-test("a job opened by its bare key keeps the bare key's address (#1525)", async () => {
-  start({ jobPorts: TWO_SOURCE_PORTS });
-  await at("#/job/PAY-231");
-  await at("#/settings");
-  expect(jobTab()?.getAttribute("href")).toBe("#/job/PAY-231");
-});
-
-test("a job left at its source's address for its bare key is held at the bare key (#1987)", async () => {
+test("a job opened by its bare key is chosen as the ticket it resolved to, the first listed source's (#1525, spec #2227)", async () => {
   start({ jobPorts: TWO_SOURCE_PORTS });
   await at("#/job/tide:PAY-231");
   await at("#/job/PAY-231");
   await at("#/settings");
-  expect(jobTab()?.getAttribute("href"), "same key, another address: a new last job").toBe("#/job/PAY-231");
+  expect(jobTab()?.getAttribute("href"), "same key, another source: the one resolved last is chosen").toBe(jobHash("jira:PAY-231"));
 });
 
 function addToButton(): HTMLButtonElement | undefined {
@@ -1026,10 +1120,10 @@ test("a tab switch on a job page re-reads no ticket for the nav job; another job
 
   await at("#/job/PAY-232");
   await at("#/job/PAY-232/conversation");
-  expect(reads.listSources - opened.listSources, "another job is resolved once by the shell, once by its page").toBe(2);
+  expect(reads.listSources - opened.listSources, "another job is resolved once, by its page: the chosen job is an id, read by nobody").toBe(1);
 });
 
-test("a last job moved to another source's ticket under the same key is never answered with the old id (#1782)", async () => {
+test("a job left before its page resolved is not chosen: the job chosen before stays, and the one resolved on screen replaces it (#1782, spec #2227)", async () => {
   let release: () => void = () => {};
   let hold: Promise<void> | null = null;
   const jobPorts: JobPorts = {
@@ -1048,15 +1142,19 @@ test("a last job moved to another source's ticket under the same key is never an
   hold = new Promise<void>((resolve) => (release = resolve));
   await at("#/job/tide:PAY-231");
   await at("#/time/2026-08-22");
-  expect(addToButton(), "the new read is late: no id is offered, least of all the old one").toBeUndefined();
-
   release();
   hold = null;
   await settle();
-  expect(addToButton()?.textContent?.trim()).toBe("Add to PAY-231");
   addToButton()!.click();
   await settle();
-  expect(created).toEqual([{ kind: "entity", entity_id: "tide:PAY-231" }]);
+  expect(created, "Tidewater's never drew, so Jira's is still the chosen job").toEqual([{ kind: "entity", entity_id: "jira:PAY-231" }]);
+
+  created.length = 0;
+  await at("#/job/tide:PAY-231");
+  await at("#/time/2026-08-22");
+  addToButton()!.click();
+  await settle();
+  expect(created, "Tidewater's drew: it is the chosen job").toEqual([{ kind: "entity", entity_id: "tide:PAY-231" }]);
 });
 
 test("with no job opened, the Day tab's open rows offer Add to the timer's ticket (#1027)", async () => {

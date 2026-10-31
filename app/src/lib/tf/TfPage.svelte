@@ -19,8 +19,11 @@
     `syncRevision`, which moves when those runs have ended and when the page
     is shown again. The button and its runs are this frame's, so every role
     view draws the same one, and its runs outlive a view drawn again.
-  - **A bare `#/job`** with no job opened yet says how to open one. Job has no
-    breadcrumb, and it is the Job top page: `Esc` does nothing there (#2228).
+  - **A bare `#/job`** is home (`home.ts`, spec #2227). While a job is chosen
+    (`job/chosen.svelte.ts`) the job page draws it there, under the bare
+    address; with none chosen this file says how a ticket becomes the job,
+    with a button to Tickets. Job has no breadcrumb, and it is the Job top
+    page: `Esc` does nothing there (#2228).
   - **A full view not built yet** starts with the breadcrumb (R-1.6,
     `TfCrumbs.svelte`): its path, and *Back to <name>* beside `Esc` where `Esc`
     goes somewhere, none on a section's top page. It is an empty page that
@@ -85,7 +88,10 @@
       </div>
     </header>
     <div class="tf-empty">
-      <p>No job is open. Open a ticket from Tickets, or start the timer on one.</p>
+      <p>
+        No job is chosen yet. A ticket becomes the job when you open its job from Tickets, start the timer on it, or run
+        Start work on it.
+      </p>
       <a class="tf-btn" href="#/tickets">All tickets</a>
     </div>
   </div>

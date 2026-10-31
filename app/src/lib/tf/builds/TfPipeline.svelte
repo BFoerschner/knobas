@@ -111,7 +111,7 @@
     pipeline: PipelineRow;
     /** What follows `builds` in the address: the pipeline, then the tab. */
     rest: string[];
-    /** The job the reader was last in. */
+    /** The chosen job (spec #2227). */
     job: string | null;
     /** The mirrored runs, newest first (`pipeline_runs`). */
     runs: (pipelineId: string) => Promise<RunRow[]>;
