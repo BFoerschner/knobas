@@ -22,7 +22,8 @@
   import { health as sharedHealth, type Health } from "../../shell/health.svelte";
   import { latestRead } from "../../shell/latest-read";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
-  import { jobHash } from "../route";
+  import type { EscTarget } from "../escape";
+  import TfCrumbs from "../TfCrumbs.svelte";
   import { push } from "../../shell/toasts.svelte";
   import TfAddSource from "./TfAddSource.svelte";
   import { notifications as sharedNotifications, type Notifications } from "../../inbox/notify.svelte";
@@ -47,8 +48,7 @@
 
   let {
     rest,
-    job,
-    jobAt = null,
+    back = null,
     ready,
     ports = realSettingsPorts,
     sectionPorts = realSectionPorts,
@@ -60,10 +60,8 @@
   }: {
     /** What follows `#/settings` in the address. */
     rest: string[];
-    /** The job the reader was last in, for the breadcrumb. */
-    job: string | null;
-    /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
-    jobAt?: string | null;
+    /** Where `Esc` goes, which the breadcrumb's hint names; `null` where it does nothing (#2228). */
+    back?: EscTarget | null;
     /** Whether the database answers yet. */
     ready: boolean;
     ports?: SettingsPorts;
@@ -199,14 +197,7 @@
 </script>
 
 <div class="tf-full">
-  <nav class="tf-crumbs" aria-label="Breadcrumb">
-    {#if job !== null}
-      <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a><span class="tf-sep">›</span>
-    {/if}
-    <a class="tf-crumb" href="#/settings">Settings</a><span class="tf-sep">›</span>
-    <strong>{crumbName}</strong>
-    <span class="tf-esc">{job !== null ? `Back to ${job}` : "Back"} <kbd>Esc</kbd></span>
-  </nav>
+  <TfCrumbs parts={[{ name: "Settings", href: "#/settings" }, { name: crumbName }]} {back} />
   <div class="tf-stg">
     <nav class="tf-stg-nav" aria-label="Settings">
       {#each SETTINGS_SECTIONS as [key, label] (key)}

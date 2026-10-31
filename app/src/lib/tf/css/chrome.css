@@ -82,10 +82,6 @@
 }
 .tf-crumbs a { text-decoration: none; }
 .tf-crumbs a.tf-crumb { text-decoration: underline; text-underline-offset: 2px; }
-.tf-jobchip {
-  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 3px;
-  font-weight: 600; text-decoration: none; font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-xs);
-}
 .tf-crumbs .tf-sep { color: var(--ink-2); }
 .tf-crumbs .tf-esc { margin-left: auto; color: var(--ink-2); }
 .tf-fhead { padding: 16px 22px 12px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }

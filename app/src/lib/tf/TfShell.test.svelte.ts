@@ -292,7 +292,7 @@ function filterField(text: string): HTMLInputElement {
   return field;
 }
 
-test("Esc unwinds dialog, drawer, filter text, filter focus, sub-tab, job, one layer per press", async () => {
+test("Esc unwinds dialog, drawer, filter text, filter focus, then the job's sub-tab, one layer per press; the first tab is the top", async () => {
   const layers = createLayers();
   const closed: string[] = [];
   const offDrawer = layers.add({ kind: "drawer", close: () => (closed.push("drawer"), offDrawer()) });
@@ -319,38 +319,87 @@ test("Esc unwinds dialog, drawer, filter text, filter focus, sub-tab, job, one l
 
   press("Escape");
   await settle();
+  expect(location.hash, "a sub-tab goes to the job's first tab").toBe("#/job/PAY-231");
+
+  const last = press("Escape");
+  await settle();
+  expect(last.defaultPrevented, "the job's first tab is a top page: Esc does nothing").toBe(false);
   expect(location.hash).toBe("#/job/PAY-231");
-
-  press("Escape");
-  await settle();
-  expect(location.hash).toBe("#/tickets");
-
-  press("Escape");
-  await settle();
-  expect(location.hash, "Tickets is where the ladder ends").toBe("#/tickets");
 });
 
-test("Esc on a full view returns to the job last visited, and names it in the breadcrumb", async () => {
+/** The breadcrumb's `Esc` hint as read, or `null` where none is drawn. */
+function escHint(): string | null {
+  return seen(".tf-esc")[0]?.textContent?.replace(/\s+/g, " ").trim() ?? null;
+}
+
+test("Esc on every nav entry's top page and on Settings does nothing, and no breadcrumb names it", async () => {
+  start();
+  const tops = [
+    ...NAV.map((section) => (section === "job" ? jobHash(null) : `#/${section}`)),
+    "#/settings",
+    "#/tickets/view-1",
+    "#/job/PAY-231",
+  ];
+  for (const top of tops) {
+    await at(top);
+    const event = press("Escape");
+    await settle();
+    expect(event.defaultPrevented, `${top} takes no Esc`).toBe(false);
+    expect(location.hash, `${top} stays`).toBe(top);
+    expect(escHint(), `${top} names no Esc`).toBeNull();
+  }
+});
+
+test("Esc on a detail page goes to its structural parent; deeper inside a section, to the section's top page", async () => {
+  start();
+  const parents: [string, string][] = [
+    ["#/build/pipe-1/run-4812", "#/builds"],
+    ["#/builds/pipe-1", "#/builds"],
+    ["#/pr/gh:pr-12", "#/code"],
+    ["#/pr/gh:pr-12/files", "#/code"],
+    ["#/repo/gh:repo-1", "#/code"],
+    ["#/repo/gh:repo-1/branches", "#/code"],
+    // A commit opens under its repository's Commits tab: its parent is the repository's page.
+    ["#/repo/gh:repo-1/commits/gh:c-9", "#/repo/gh%3Arepo-1"],
+    // A branch or commit address the shell has not placed under a repository yet.
+    ["#/branch/gh:b-1", "#/code"],
+    ["#/commit/gh:c-9", "#/code"],
+    ["#/page/confluence:2", "#/docs"],
+    ["#/docs/space/ENG", "#/docs"],
+    ["#/asset/assets:svc-1", "#/deps"],
+    ["#/route/assets:route-1", "#/deps"],
+    ["#/assets", "#/deps"],
+    ["#/code/repos", "#/code"],
+    ["#/monitors/unmonitored", "#/monitors"],
+    ["#/settings/appearance", "#/settings"],
+  ];
+  for (const [from, parent] of parents) {
+    await at(from);
+    press("Escape");
+    await settle();
+    expect(location.hash, `Esc on ${from}`).toBe(parent);
+  }
+});
+
+test("the breadcrumb on a full view shows the path with no job chip, and its hint names where Esc goes", async () => {
   start();
   await at("#/job/PAY-231");
-  await at("#/builds");
-  const crumbs = target.querySelector(".tf-crumbs");
-  expect(crumbs?.querySelector(".tf-jobchip")?.textContent).toBe("PAY-231");
-  expect(crumbs?.querySelector(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back to PAY-231 Esc");
+  await at("#/asset/assets:svc-1");
+  let crumbs = seen(".tf-crumbs")[0]!;
+  expect(crumbs.querySelector(".tf-jobchip"), "no last job's chip").toBeNull();
+  const parent = crumbs.querySelector<HTMLAnchorElement>("a.tf-crumb")!;
+  expect(parent.textContent).toBe("Dependencies");
+  expect(parent.getAttribute("href")).toBe("#/deps");
+  expect(escHint()).toBe("Back to Dependencies Esc");
 
+  await at("#/settings/appearance");
+  crumbs = seen(".tf-crumbs")[0]!;
+  expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
+  expect(crumbs.querySelector("strong")?.textContent).toBe("Appearance");
+  expect(escHint()).toBe("Back to Settings Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/job/PAY-231");
-});
-
-test("with no job, the breadcrumb starts at the view's own name and Esc goes to Tickets", async () => {
-  start();
-  await at("#/inbox");
-  expect(target.querySelector(".tf-crumbs .tf-jobchip")).toBeNull();
-  expect(target.querySelector(".tf-crumbs strong")?.textContent).toBe("Inbox");
-  press("Escape");
-  await settle();
-  expect(location.hash).toBe("#/tickets");
+  expect(location.hash).toBe("#/settings");
 });
 
 test("an address the new shell has no place for names itself", async () => {
@@ -819,11 +868,11 @@ test("a running timer names the Job tab but is not a job the breadcrumb or Esc r
     elapsed: "1:00",
   };
   start({ timer });
-  await at("#/builds");
+  await at("#/build/pipe-1/run-4812");
   expect(target.querySelector(".tf-crumbs .tf-jobchip")).toBeNull();
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/tickets");
+  expect(location.hash).toBe("#/builds");
 });
 
 test("a toast from anywhere lands in the shell's stack, as text, and its action runs and dismisses it (R-1.8)", async () => {
@@ -879,25 +928,19 @@ const TWO_SOURCE_PORTS: JobPorts = {
       : JOB_PORTS.getEntity(id),
 };
 
-test("a job opened at its source's address is the one the chip, the Job tab and Esc return to (#1525)", async () => {
+/** The Job tab's link: it names the job once one is opened. */
+function jobTab(): HTMLAnchorElement | undefined {
+  return [...target.querySelectorAll<HTMLAnchorElement>(".tf-nav a")].find((a) => a.textContent?.includes("PAY-231"));
+}
+
+test("a job opened at its source's address is the one the Job tab returns to (#1525)", async () => {
   start({ jobPorts: TWO_SOURCE_PORTS });
   await at("#/job/tide:PAY-231");
-  await at("#/builds");
-  const chip = target.querySelector<HTMLAnchorElement>(".tf-crumbs .tf-jobchip");
-  expect(chip?.textContent, "the chip still names the key").toBe("PAY-231");
-  expect(chip?.getAttribute("href")).toBe(jobHash("tide:PAY-231"));
-  const tab = [...target.querySelectorAll<HTMLAnchorElement>(".tf-nav a")].find((a) => a.textContent?.includes("PAY-231"));
-  expect(tab?.getAttribute("href"), "the Job tab").toBe(jobHash("tide:PAY-231"));
-
-  // The shell's own breadcrumb (Time) and a page's own (Settings) link it too.
-  for (const view of ["#/time/2026-08-22", "#/settings"]) {
+  for (const view of ["#/builds", "#/time/2026-08-22", "#/settings"]) {
     await at(view);
-    expect(target.querySelector(".tf-crumbs .tf-jobchip")?.getAttribute("href"), view).toBe(jobHash("tide:PAY-231"));
+    expect(jobTab()?.getAttribute("href"), view).toBe(jobHash("tide:PAY-231"));
+    expect(seen(".tf-crumbs .tf-jobchip"), `${view}: the breadcrumb names no job (#2228)`).toEqual([]);
   }
-
-  press("Escape");
-  await settle();
-  expect(location.hash).toBe(jobHash("tide:PAY-231"));
 });
 
 test("the Day tab's Add to writes to the ticket of the address the job was opened at (#1525)", async () => {
@@ -915,7 +958,7 @@ test("a job opened by its bare key keeps the bare key's address (#1525)", async 
   start({ jobPorts: TWO_SOURCE_PORTS });
   await at("#/job/PAY-231");
   await at("#/settings");
-  expect(target.querySelector(".tf-jobchip")?.getAttribute("href")).toBe("#/job/PAY-231");
+  expect(jobTab()?.getAttribute("href")).toBe("#/job/PAY-231");
 });
 
 test("a job left at its source's address for its bare key is held at the bare key (#1987)", async () => {
@@ -923,7 +966,7 @@ test("a job left at its source's address for its bare key is held at the bare ke
   await at("#/job/tide:PAY-231");
   await at("#/job/PAY-231");
   await at("#/settings");
-  expect(target.querySelector(".tf-jobchip")?.getAttribute("href"), "same key, another address: a new last job").toBe("#/job/PAY-231");
+  expect(jobTab()?.getAttribute("href"), "same key, another address: a new last job").toBe("#/job/PAY-231");
 });
 
 function addToButton(): HTMLButtonElement | undefined {
@@ -1091,20 +1134,33 @@ test("an item of a custom-role source opens its block view, and the role gets no
   expect(entries.filter((a) => a.getAttribute("aria-current") === "page")).toEqual([]);
 });
 
-test("an item opened from a job draws the breadcrumb: the job's key, the kind's label, Back Esc; Esc returns to the job (#1408)", async () => {
+test("an item's page draws the kind's label as its breadcrumb; with no parent, Esc does nothing and no hint names it (#1408)", async () => {
   start({ sources: [{ id: "surveys", display_name: "Harbour surveys", roles: [{ role: "wasm-fixture:survey-desk", reads: [] }] }] });
   await at("#/job/PAY-231");
-  await at(entityAddress("survey", "surveys:survey-1"));
+  const item = entityAddress("survey", "surveys:survey-1");
+  await at(item);
 
-  const crumbs = target.querySelector(".tf-crumbs")!;
-  expect(crumbs.querySelector(".tf-jobchip")?.textContent).toBe("PAY-231");
+  const crumbs = seen(".tf-crumbs")[0]!;
+  expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
   expect(crumbs.querySelector("strong")?.textContent).toBe("Survey");
-  expect(crumbs.querySelector(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back to PAY-231 Esc");
+  expect(escHint()).toBeNull();
   expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Quay crane 4 inspection");
 
-  press("Escape");
+  const event = press("Escape");
   await settle();
-  expect(location.hash).toBe("#/job/PAY-231");
+  expect(event.defaultPrevented).toBe(false);
+  expect(location.hash).toBe(item);
+});
+
+test("a note's page has no parent: Esc does nothing and no hint names it", async () => {
+  start();
+  await at("#/job/PAY-231");
+  await at("#/note/note-1");
+  expect(escHint()).toBeNull();
+  const event = press("Escape");
+  await settle();
+  expect(event.defaultPrevented).toBe(false);
+  expect(location.hash).toBe("#/note/note-1");
 });
 
 // #1415: a window opened on an old address (a bookmark, a notification) lands

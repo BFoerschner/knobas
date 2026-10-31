@@ -154,6 +154,7 @@ test("Back and Forward return to the diff address: the same page, drawn as it wa
       return state.route;
     },
     ready: true,
+    back: null,
   } as unknown as Omit<TfPageContext, "visible">;
   view = mount(TfPage, { target, props: { ctx, pages: [diffPage, inbox], kept: createKeptPagesSetting() } });
   const range = diffHash(REPO, `${BASE}^`, HEAD);

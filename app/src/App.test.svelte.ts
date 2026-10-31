@@ -1093,7 +1093,7 @@ test("⌘T on a view opened from a job starts the timer on the breadcrumb's job"
   app = mount(App, { target, props: {} });
   await until(() => target.textContent?.includes("Retry failed SEPA payouts") ?? false, "the job never drew");
   location.hash = "#/time/2026-09-03";
-  await until(() => target.querySelector(".tf-crumbs .tf-jobchip")?.textContent === "PAY-231", "Time never drew PAY-231's crumb");
+  await until(() => target.querySelector(".tf-crumbs") !== null, "Time never drew its breadcrumb");
   await turns();
   pressTimerKey();
   await until(() => timerStarts.length > 0, "⌘T never started a timer on the breadcrumb's job");
@@ -1110,7 +1110,7 @@ test.each(["#/inbox", "#/settings"])("⌘T on %s after a job asks with the picke
   app = mount(App, { target, props: {} });
   await until(() => target.textContent?.includes("Retry failed SEPA payouts") ?? false, "the job never drew");
   location.hash = hash;
-  await until(() => target.querySelector(".tf-crumbs .tf-jobchip")?.textContent === "PAY-231", `${hash} never drew PAY-231's crumb`);
+  await until(() => target.querySelector(".tf-crumbs") !== null, `${hash} never drew its breadcrumb`);
   await turns();
   pressTimerKey();
   await until(() => pickerTitle() !== null, `⌘T on ${hash} never asked`);

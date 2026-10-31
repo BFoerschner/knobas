@@ -101,7 +101,7 @@ async function settle() {
 let probe: RefreshProbe;
 
 /** The page's reads as given; its writes land in {@link writes}. */
-async function open(reads: Omit<ItemPorts, "submitWrite">, id = ID, job: string | null = null) {
+async function open(reads: Omit<ItemPorts, "submitWrite">, id = ID, back: { hash: string; name: string } | null = null) {
   const ports: ItemPorts = {
     refresh: probe.ports,
     ...reads,
@@ -110,7 +110,7 @@ async function open(reads: Omit<ItemPorts, "submitWrite">, id = ID, job: string 
       return Promise.resolve({ id: 1 } as Awaited<ReturnType<ItemPorts["submitWrite"]>>);
     },
   };
-  page = mount(TfItem, { target, props: { id, ready: true, job, ports } });
+  page = mount(TfItem, { target, props: { id, ready: true, back, ports } });
   await settle();
 }
 
@@ -270,23 +270,22 @@ test("a source action the source draws disabled says why and opens nothing", asy
   expect(document.querySelector(".tf-dialog")).toBeNull();
 });
 
-test("opened from a job, the breadcrumb starts at the job's key, then the kind's label, with Back Esc (#1408)", async () => {
-  await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(SURVEY_VIEW) }, ID, "PAY-231");
+test("the breadcrumb is the kind's label, and the hint names where Esc goes when the shell says it goes somewhere (#1408, #2228)", async () => {
+  await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(SURVEY_VIEW) }, ID, { hash: "#/builds", name: "Builds" });
 
   const crumbs = target.querySelector('nav[aria-label="Breadcrumb"]')!;
-  expect(crumbs.querySelector(".tf-jobchip")?.textContent).toBe("PAY-231");
-  expect(crumbs.querySelector(".tf-jobchip")?.getAttribute("href")).toBe("#/job/PAY-231");
+  expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
   expect(crumbs.querySelector("strong")?.textContent).toBe("Survey");
-  expect(crumbs.querySelector(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back to PAY-231 Esc");
+  expect(crumbs.querySelector(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back to Builds Esc");
 });
 
-test("with no job, the breadcrumb starts at the kind's label; the item's title stays in the header (#1408)", async () => {
+test("where Esc does nothing, the breadcrumb is the kind's label alone; the item's title stays in the header (#1408, #2228)", async () => {
   await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(SURVEY_VIEW) });
 
   const crumbs = target.querySelector('nav[aria-label="Breadcrumb"]')!;
   expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
   expect(crumbs.querySelector("strong")?.textContent).toBe("Survey");
-  expect(crumbs.querySelector(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back Esc");
+  expect(crumbs.querySelector(".tf-esc")).toBeNull();
   expect(crumbs.textContent).not.toContain("Quay crane 4 inspection");
   expect(target.querySelector("h1")?.textContent).toBe("Quay crane 4 inspection");
 });

@@ -14,5 +14,5 @@ export const page = definePage({
   component: TfPr,
   // One page per pull request; its tabs are that page drawn again (#2247).
   address: (route) => route.rest[0] ?? "",
-  props: ({ route, ready, job, jobAt }) => ({ ready, rest: route.rest, job, jobAt }),
+  props: ({ route, ready, back }) => ({ ready, rest: route.rest, back }),
 });

@@ -38,6 +38,7 @@ import type { JobPorts } from "./job/ports";
 import type { Layers } from "./layers.svelte";
 import type { RoleSyncs } from "./role-sync.svelte";
 import type { Theme } from "./theme.svelte";
+import type { EscTarget } from "./escape";
 import type { TfRoute } from "./route";
 
 /** What the shell hands every page. */
@@ -54,6 +55,12 @@ export interface TfPageContext {
   job: string | null;
   /** The address that job was opened at (#1525): its key, or its entity id when two sources hold the key. */
   jobAt: string | null;
+  /**
+   * Where `Esc` goes once nothing is open, and what the breadcrumb's *Back to
+   * <name>* calls it (`escTarget` in `escape.ts`, #2228); `null` where `Esc`
+   * does nothing, which draws no hint.
+   */
+  back: EscTarget | null;
   /** The ticket key the timer runs on, or `null`. */
   timedTicket: string | null;
   /** The Job tab's job (the last opened, else the timer's) with its entity id, or `null`. */

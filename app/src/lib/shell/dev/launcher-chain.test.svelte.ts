@@ -131,7 +131,7 @@ test.each([
 test("over a view opened from a job, Link to names that job", async () => {
   await openOn("#/job/PAY-231", "Retry failed SEPA payouts");
   location.hash = "#/time";
-  await until(() => target.querySelector(".tf-crumbs")?.textContent?.includes("PAY-231") ?? false, "Time's breadcrumb never named PAY-231");
+  await until(() => target.querySelector(".tf-kept:not([hidden]) .tf-crumbs") !== null, "Time never drew its breadcrumb");
   await search("list:not-monitored");
   press("Tab");
   expect(chain()).toEqual(["Link to PAY-231", `Start timer on ${FIRST_UNMONITORED}`]);
@@ -173,7 +173,7 @@ test("Link to closes the launcher and opens the job's link dialog, whose write t
 test("from a view opened from the job, Link to opens the job with its link dialog", async () => {
   await openOn("#/job/PAY-231", "Retry failed SEPA payouts");
   location.hash = "#/time";
-  await until(() => target.querySelector(".tf-crumbs")?.textContent?.includes("PAY-231") ?? false, "Time's breadcrumb never named PAY-231");
+  await until(() => target.querySelector(".tf-kept:not([hidden]) .tf-crumbs") !== null, "Time never drew its breadcrumb");
   await search("list:not-monitored");
   press("Tab");
   press("Enter");

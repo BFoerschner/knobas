@@ -174,6 +174,46 @@ export function jobHash(segment: string | null): string {
   return segment === null ? "#/job" : `#/job/${encodeURIComponent(segment)}`;
 }
 
+/**
+ * Whether `route` is a section's top page (spec #2227): the address its nav
+ * entry or the Settings cog links to. Tickets with a saved view open
+ * (`#/tickets/<view>`) and a job on its first tab (`#/job/<key>`, and the
+ * bare `#/job`) count, so `Esc` there does nothing.
+ */
+export function isTopPage(route: TfRoute): boolean {
+  if (route.view === "tickets") return true;
+  if (route.view === "job") return route.tab === null;
+  if (route.view === "full") return route.head === route.section && route.rest.length === 0;
+  return false;
+}
+
+/**
+ * Where a detail page sits under (spec #2227, story 29), as an address, or
+ * `null` for a top page, an item's page, a note's page and an unknown
+ * address, which have none. Listed first, the pages whose parent is not their
+ * section's top page; everything else inside a section goes to that top page.
+ *
+ * - a run (`#/build/…`) → Builds;
+ * - a pull request or a repository, any tab of it → Code;
+ * - a commit, which opens under its repository's Commits tab
+ *   (`#/repo/<id>/commits/<commit>`) → that repository's page;
+ * - a doc page → Docs; an asset or a route → Dependencies.
+ *
+ * A branch opens on its repository's Branches tab, so its parent is the
+ * repository's (Code). `#/branch/<id>` and `#/commit/<id>` themselves name no
+ * repository until their page has read the item and replaced the address
+ * (`code-row/`), so until then their parent is Code too.
+ *
+ * A job's sub-tab is not here: it is the `Esc` ladder's own rung.
+ */
+export function parentOf(route: TfRoute): string | null {
+  if (route.view !== "full" || isTopPage(route)) return null;
+  if (route.head === "repo" && route.rest[0] && route.rest[1] === "commits" && route.rest[2]) {
+    return `#/repo/${encodeURIComponent(route.rest[0])}`;
+  }
+  return sectionHash(route.section);
+}
+
 function decode(segment: string): string {
   try {
     return decodeURIComponent(segment);
