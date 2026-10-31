@@ -40,9 +40,13 @@
 .tf-timer-stop { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 3px; background: rgba(0,0,0,.12); }
 .tf-timer.tf-off .tf-timer-stop { background: none; }
 .tf-timer-stop i { width: 9px; height: 9px; background: currentColor; border-radius: 1px; }
+/* An icon-only button is square at its row's height: the top bar's at the header height, a body row's `.tf-sm` (Controls). */
 .tf-iconbtn {
-  display: inline-flex; border: 0; background: none; cursor: pointer; color: var(--ink-2); padding: 6px; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: var(--control-h); height: var(--control-h); padding: 0;
+  border: 0; background: none; cursor: pointer; color: var(--ink-2); border-radius: 4px;
 }
+.tf-iconbtn.tf-sm { width: var(--control-h-sm); height: var(--control-h-sm); }
 .tf-iconbtn:hover { background: var(--sheet-2); color: var(--ink); }
 .tf-iconbtn[aria-current="page"] { color: var(--ink); background: var(--sheet-2); }
 .tf-iconbtn svg { width: 16px; height: 16px; }

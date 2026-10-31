@@ -114,7 +114,7 @@ They are on `:root` in `tokens.css`. A button takes a fixed `height` from its si
 
 Three sizes is the complete set. A rule outside `chrome.css` doesn't set a button's height, padding, font size or radius.
 
-- **Icon-only buttons** are square at their row's height. The top bar's icon buttons are at the header height.
+- **Icon-only buttons** (`.tf-iconbtn`) are square at their row's height: `--control-h` by default, `--control-h-sm` with `.tf-sm` in a page body's row. The top bar's icon buttons are at the header height.
 - **Form controls:** a `select` or `input` sitting in a row of buttons takes the row's control height.
 - **Exempt:** the × removers inside chips and links (the view editor's ×, a link's ×) are part of the chip, not controls.
 
