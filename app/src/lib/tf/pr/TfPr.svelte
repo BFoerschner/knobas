@@ -752,7 +752,7 @@
                   <div class="tf-acts">
                     <button
                       type="button"
-                      class="tf-btn"
+                      class="tf-btn tf-sm"
                       disabled={comment.disabled === null && (draft.trim() === "" || sending)}
                       {...refusedAttrs(comment.disabled)}
                       onclick={() => void send()}>Comment</button
