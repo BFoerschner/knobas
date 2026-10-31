@@ -40,7 +40,7 @@
  * event, so that press never reaches the shell.
  */
 import { segmentKey } from "./job/job";
-import { isTopPage, jobHash, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
+import { HEAD_NAME, isTopPage, jobHash, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
 
 /** What `Esc` can see when it is pressed. */
 export interface EscState {
@@ -98,18 +98,16 @@ export function escTarget(route: TfRoute, opener: EscTarget | null): EscTargetOf
   return parent === null ? null : { hash: parent, name: placeName(parseTfHash(parent)), opened: false };
 }
 
-/** What a run's or a pull request's own breadcrumb name is prefixed with when it is a bare number (`#4811`). */
-const NUMBERED: Record<string, string> = { build: "Run", pr: "Pull request" };
-
 /**
  * What the breadcrumb calls an opener (#2229): a section's name for a
  * section's own page, the Job page and Tickets (*Back to Job*); otherwise the
- * name the page's own breadcrumb gave itself when it was left (`own`), a bare
- * number under its kind (*Back to Run #4811*), else the section's name.
+ * name the page gave itself (`own`, `page-name.svelte.ts`) when it was left,
+ * a bare number under its kind's {@link HEAD_NAME} (*Back to Run #4811*),
+ * else what {@link HEAD_NAME} calls the address, else the section's name.
  */
 export function openerName(route: TfRoute, own: string | null): string {
   if (route.view === "full" && route.head !== route.section && own !== null && own !== "") {
-    const kind = NUMBERED[route.head];
+    const kind = HEAD_NAME[route.head];
     return kind !== undefined && own.startsWith("#") ? `${kind} ${own}` : own;
   }
   if (route.view === "item" || route.view === "note") return own || (route.view === "item" ? "Item" : "Note");
@@ -119,13 +117,14 @@ export function openerName(route: TfRoute, own: string | null): string {
 }
 
 /**
- * What the breadcrumb calls a place `Esc` goes to: a section's name, or
- * *Repository* for a repository's page, whose title only its own read knows
- * (`TfRepo` names it once it has).
+ * What the breadcrumb calls a place `Esc` goes to: a section's name for its
+ * own pages, else what {@link HEAD_NAME} calls a deeper address (a
+ * repository's page is *Repository*: its title only its own read knows, and
+ * `TfRepo` names it once it has), else its section's name.
  */
 function placeName(route: TfRoute): string {
-  if (route.view === "full" && route.head === "repo") return "Repository";
   if (route.view === "tickets") return SECTION_NAME.tickets;
   if (route.view === "job") return SECTION_NAME.job;
-  return route.view === "full" ? SECTION_NAME[route.section] : "";
+  if (route.view !== "full") return "";
+  return (route.head !== route.section ? HEAD_NAME[route.head] : undefined) ?? SECTION_NAME[route.section];
 }

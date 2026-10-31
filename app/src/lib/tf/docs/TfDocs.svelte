@@ -130,6 +130,8 @@
     stemsOf,
   } from "./docs";
   import { pageVisible } from "../kept-pages.svelte";
+  import { namePage } from "../page-name.svelte";
+  import type { EscTarget } from "../escape";
 
   /** The page's own reads and writes; *Link to…* uses the job's ports. */
   export interface DocsPorts {
@@ -172,6 +174,7 @@
     linkPorts,
     layers = sharedLayers,
     follower = writeFollower(),
+    back = null,
     sync,
   }: {
     ready: boolean;
@@ -186,6 +189,8 @@
     layers?: Layers;
     /** Follows each queued edit, comment and page, so one held or refused drops its echo (#1424). */
     follower?: WriteFollower;
+    /** Where `Esc` goes (`escTarget`), which the doc page's breadcrumb names; `null` where it does nothing. */
+    back?: Pick<EscTarget, "name"> | null;
     // The frame's `syncRevision` (#2106) is left unread: this view reads
     // again on the end of every run of its role's sources already.
   } & RoleFrameProps = $props();
@@ -214,6 +219,8 @@
   let tree = $state.raw<DocsTree | null>(null);
   let treeError = $state<string | null>(null);
   let page = $state<DocPage | null>(null);
+  // What *Back to <name>* calls a doc page once it is left: its title (spec #2227).
+  namePage(() => page?.title ?? null);
   let pageError = $state<string | null>(null);
   /** The picked space (`spaceId`), `*` for all, or `null` to follow the page. */
   let picked = $state<string | null>(null);
@@ -1062,6 +1069,8 @@
                 › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}
               {/if}
             </div>
+            <!-- Where `Esc` goes, as every breadcrumb names it (spec #2227, story 35). -->
+            {#if back !== null}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
           </div>
           <h1 class="tf-rd-title">
             <TfMarked text={p.title} {stems} />

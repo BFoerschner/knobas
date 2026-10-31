@@ -155,6 +155,18 @@ test("#/docs opens the page read last and records the visit", async () => {
   expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
 });
 
+test("a doc page's breadcrumb names where Esc goes, and draws no hint where Esc does nothing (spec #2227, story 35)", async () => {
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: ports(), back: { name: "Run #4811" } } });
+  await settle();
+  expect(target.querySelector(".tf-rd-crumbrow .tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back to Run #4811 Esc");
+  unmount(view);
+  view = null;
+  target.replaceChildren();
+
+  await draw(["confluence:2"]);
+  expect(target.querySelector(".tf-esc")).toBeNull();
+});
+
 test("a space's address opens the page at the top of its tree", async () => {
   const io = await draw(["space", "ENG"]);
   expect(io.docsPage).toHaveBeenCalledWith("confluence:9");

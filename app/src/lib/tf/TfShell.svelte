@@ -76,6 +76,7 @@
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
   import { goWithoutOpener, samePage, stamped, stampOf, takeTold, type Opened } from "./opener";
+  import { provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { parseTfHash, sectionOf } from "./route";
   import { theme as sharedTheme, type Theme } from "./theme.svelte";
@@ -185,17 +186,8 @@
     hash = next;
   }
 
-  let main: HTMLElement | undefined = $state();
-
-  /** The name the shown page's breadcrumb gives the page itself, read as it is left, or `null`. */
-  function ownName(): string | null {
-    for (const crumbs of main?.querySelectorAll(".tf-crumbs") ?? []) {
-      if (crumbs.closest("[hidden]") !== null) continue;
-      const own = [...crumbs.querySelectorAll("strong")].at(-1);
-      return own?.textContent?.trim() || null;
-    }
-    return null;
-  }
+  /** The name the shown page gives itself (`page-name.svelte.ts`), read as it is left. */
+  const shownPage = provideShownPageName();
 
   /**
    * The address moved (#2229). An entry already stamped is one history
@@ -213,7 +205,7 @@
     } else {
       if (how === "unopened") here = { opener: null, prev: hash };
       else if (how === null && samePage(hash, now)) here = { opener: here.opener, prev: hash };
-      else if (how === null) here = { opener: { hash, name: openerName(route, ownName()) }, prev: hash };
+      else if (how === null) here = { opener: { hash, name: openerName(route, shownPage.name) }, prev: hash };
       history.replaceState(stamped(history.state, $state.snapshot(here)), "");
     }
     hash = now;
@@ -542,7 +534,7 @@
     {ontimer}
     ontheme={() => theme.toggle(prefersDark())}
   />
-  <main class="tf-main" tabindex="-1" bind:this={main}>
+  <main class="tf-main" tabindex="-1">
     <TfPage
       {kept}
       ctx={{

@@ -43,6 +43,8 @@
 .tf-rd-pages svg { width: 15px; height: 15px; }
 .tf-rd-crumb { font-size: var(--t-sm); color: var(--ink-2); }
 .tf-rd-crumb a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+/* *Back to <name>* beside `Esc`, at the row's end as on every breadcrumb (spec #2227). */
+.tf-rd-crumbrow .tf-esc { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); }
 .tf .tf-rd-title {
   font-family: var(--serif); font-size: 40px; line-height: 1.1; font-weight: 600; margin: 8px 0 10px; letter-spacing: -.01em;
 }

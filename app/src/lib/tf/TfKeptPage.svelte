@@ -13,6 +13,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { providePageVisible } from "./kept-pages.svelte";
+  import { providePageName } from "./page-name.svelte";
   import { keepScroll } from "./while-shown.svelte";
   import type { RoleFrameProps, TfPageContext, TfPageEntry } from "./page-entry";
   import type { TfRoute } from "./route";
@@ -37,6 +38,8 @@
   } = $props();
 
   providePageVisible(() => visible);
+  // The name the page gives itself, which the shell stamps on the entry opened from it (spec #2227).
+  providePageName(() => visible);
   // The shell's one scroller is every page's: each page shows again where it was left (#2248).
   let wrapper = $state<HTMLElement>();
   keepScroll(() => wrapper, () => visible);

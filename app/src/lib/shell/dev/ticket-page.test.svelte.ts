@@ -266,3 +266,65 @@ test("Esc on a ticket page Tickets opened returns to that ticket view with that 
   await until(() => location.hash === "#/tickets/payout-reliability", `Esc went to ${location.hash}`);
   await until(() => selected() === "mock:PAY-231", `the board selected ${selected()}`);
 });
+
+/** A failed run of the fixture, and its address (`runHash`). */
+const RUN = "teamcity:build:Payout_IntegrationTests-1187";
+const RUN_HASH = `#/build/${encodeURIComponent("teamcity:buildType:Payout_IntegrationTests")}/${encodeURIComponent(RUN)}`;
+
+/** The run is linked to PAY-231, as a ticket filed from it is once its source syncs (#1451). */
+function withRunTicket(handlers: Record<string, Handler>): Record<string, Handler> {
+  const read = handlers["get_entity"]!;
+  return {
+    ...handlers,
+    get_entity: (args) => {
+      const detail = read(args) as { links: unknown[] };
+      if (args["entityId"] !== RUN) return detail;
+      const link = {
+        id: "run-ticket",
+        from_id: "mock:PAY-231",
+        to_id: RUN,
+        relation: "related",
+        origin: "manual",
+        note: null,
+        created_by: "mara",
+        created_at: "2026-08-22T10:30:00Z",
+        confirmed_at: "2026-08-22T10:30:00Z",
+        rule: null,
+        rule_class: null,
+        reason: null,
+      };
+      const other = { entity_id: "mock:PAY-231", kind: "ticket", title: "Retry failed SEPA payouts", deleted_at: null };
+      return { ...detail, links: [{ link, other }, ...detail.links] };
+    },
+  };
+}
+
+function hint(): string | null {
+  return shown(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim() ?? null;
+}
+
+test("a run's ticket link on Builds opens the ticket page, and Esc there returns to the run", async () => {
+  installFakeTauri(recorded(withRunTicket(withTicketSearch(demoHandlers()))));
+  await openOn(RUN_HASH, "#1187");
+  const link = `a[href="#/ticket/${encodeURIComponent("mock:PAY-231")}"]`;
+  await until(() => shown(link) !== null, "the run never drew its ticket");
+  shown(link)!.click();
+  await until(() => location.hash === "#/ticket/mock%3APAY-231", `the run's ticket opened ${location.hash}`);
+  await ticketPageOf("PAY-231");
+  expect(lit()).toBe("Tickets");
+  expect(hint()).toBe("Back to Run #1187 Esc");
+
+  key("Escape");
+  await until(() => location.hash === RUN_HASH, `Esc went to ${location.hash}`);
+});
+
+test("a run opened from a doc page names the doc page in its hint, as Esc goes there (spec #2227, story 35)", async () => {
+  await openOn("#/page/confluence%3Asepa", "SEPA payout retry design");
+  await until(() => shown(".tf-rd-title")?.textContent?.includes("SEPA payout retry design") ?? false, "the doc page never drew");
+  location.hash = RUN_HASH;
+  await until(() => shown(".tf-crumbs strong")?.textContent === "#1187", "the run never drew");
+  expect(hint()).toBe("Back to SEPA payout retry design Esc");
+
+  key("Escape");
+  await until(() => location.hash === "#/page/confluence%3Asepa", `Esc went to ${location.hash}`);
+});

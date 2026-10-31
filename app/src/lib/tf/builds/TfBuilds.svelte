@@ -75,6 +75,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { EscTarget } from "../escape";
+  import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
   import TfPipeline from "./TfPipeline.svelte";
   import TfRun from "./TfRun.svelte";
   import { pipelineOfRun } from "./run";
@@ -321,17 +322,8 @@
   }
 </script>
 
-{#snippet crumbs(parts: { name: string; href?: string }[])}
-  <nav class="tf-crumbs" aria-label="Breadcrumb">
-    {#each parts as part, at (at)}
-      {#if part.href !== undefined}
-        <a class="tf-crumb" href={part.href}>{part.name}</a><span class="tf-sep">›</span>
-      {:else}
-        <strong>{part.name}</strong>
-      {/if}
-    {/each}
-    {#if back !== null}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
-  </nav>
+{#snippet crumbs(parts: Crumb[])}
+  <TfCrumbs {parts} {back} />
 {/snippet}
 
 {#snippet item(pipeline: PipelineRow, depth: number, key: string)}

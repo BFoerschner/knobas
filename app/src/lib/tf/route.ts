@@ -46,6 +46,26 @@ export const SECTION_NAME: Record<Section, string> = {
   settings: "Settings",
 };
 
+/**
+ * What a deeper address under a section is called (spec #2227): the one map
+ * the breadcrumb (`TfCrumbs.svelte`) and `Esc`'s *Back to <name>*
+ * (`escape.ts`) both read, so the two cannot name a place differently. A
+ * run's and a pull request's word goes before a bare number (*Run #4811*); a
+ * repository's page is *Repository* until it has read its title.
+ */
+export const HEAD_NAME: Readonly<Record<string, string>> = {
+  build: "Run",
+  pr: "Pull request",
+  repo: "Repository",
+  assets: "Asset tree",
+  asset: "Asset",
+  route: "Route",
+  map: "Map",
+  branch: "Branch",
+  commit: "Commit",
+  diff: "Diff",
+};
+
 /** The main navigation, left to right (R-1.1). Settings is the cog, not a tab. */
 export const NAV: readonly Section[] = [
   "job",

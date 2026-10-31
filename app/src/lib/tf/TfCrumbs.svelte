@@ -9,29 +9,20 @@
 
   `TfPage.svelte` draws it above a page that sets `crumbs` and above a full
   view not built yet, with {@link shellCrumbs}' path; a page that knows more
-  of its own path (Builds, a pull request, a repository, Settings, the item
-  and note pages) draws it itself with its own `parts`.
+  of its own path (Builds, Settings, the item, note and ticket pages) draws it
+  itself with its own `parts`. Its last part, when it links nowhere, is the
+  name the page gives itself (`page-name.svelte.ts`): what *Back to <name>*
+  calls this page once the reader has left it.
 -->
 <script module lang="ts">
   import type { EscTarget } from "./escape";
-  import { parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
+  import { HEAD_NAME, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
 
   /** One place on the path: linked when it has an address, the page's own name when it has none. */
   export interface Crumb {
     name: string;
     href?: string;
   }
-
-  /** What a deeper address under a section is called where the shell draws its breadcrumb. */
-  const HEAD_NAME: Record<string, string> = {
-    assets: "Asset tree",
-    asset: "Asset",
-    route: "Route",
-    map: "Map",
-    branch: "Branch",
-    commit: "Commit",
-    diff: "Diff",
-  };
 
   /**
    * The path the shell's own breadcrumb draws for `route`: the section's
@@ -49,6 +40,8 @@
 </script>
 
 <script lang="ts">
+  import { namePage } from "./page-name.svelte";
+
   let {
     parts,
     back,
@@ -58,6 +51,12 @@
     /** Where `Esc` goes, or `null` where it does nothing. */
     back: Pick<EscTarget, "name"> | null;
   } = $props();
+
+  // The page's own name is the last part when it links nowhere: what *Back to <name>* calls this page once it is left.
+  namePage(() => {
+    const own = parts.at(-1);
+    return own === undefined || own.href !== undefined || own.name === "" ? null : own.name;
+  });
 </script>
 
 <nav class="tf-crumbs" aria-label="Breadcrumb">
