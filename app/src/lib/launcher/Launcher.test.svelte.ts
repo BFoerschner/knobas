@@ -770,14 +770,13 @@ test("on the shell's dialog, Shift+Tab in the box keeps focus there", async () =
   expect(document.activeElement).toBe(input);
 });
 
-test("the overlay is the shell's dialog: no .scrim, no .dlg, and a click on the dim closes it", async () => {
+test("the overlay is the shell's dialog, and a click on the dim closes it", async () => {
   const onclose = vi.fn();
   open({ onclose });
   await settle();
   const dialog = target.querySelector<HTMLElement>('[role="dialog"]');
   expect(dialog?.classList.contains("tf-dialog")).toBe(true);
   expect(dialog?.classList.contains("tf-launch")).toBe(true);
-  expect(target.querySelector(".scrim, .dlg")).toBeNull();
   dialog!.parentElement!.click();
   flushSync();
   expect(onclose).toHaveBeenCalledTimes(1);

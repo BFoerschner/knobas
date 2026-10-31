@@ -251,7 +251,14 @@ test("it draws in the ticket-first dialog and names no room and no day review", 
   ] as AdHocOffer[]) {
     const { layers } = render(offer);
     expect(target.querySelector(".tf-modal > .tf-dialog[role=dialog]"), "not the tf dialog shell").not.toBeNull();
-    expect(target.querySelector(".dlg, .scrim, .btn"), "still shell/Modal").toBeNull();
+    // The canonical footer: *Keep local* is the primary only when there is nowhere to log to.
+    const footer = [...target.querySelectorAll(".tf-dialog footer button")].map((b) => [
+      b.textContent!.trim(),
+      ["tf-btn", "tf-ghost", "tf-primary"].filter((c) => b.classList.contains(c)).join(" "),
+    ]);
+    expect(footer[0], "Keep local").toEqual(["Keep local", offer.suggestion ? "tf-btn tf-ghost" : "tf-btn tf-primary"]);
+    expect(footer.length, "one primary, last").toBe(offer.suggestion ? 2 : 1);
+    if (offer.suggestion) expect(footer[1]![1]).toBe("tf-btn tf-primary");
     expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
     expect(target.textContent!.toLowerCase()).not.toMatch(/\broom\b|day review/);
     if (app) unmount(app);
