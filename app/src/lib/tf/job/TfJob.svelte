@@ -110,6 +110,7 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import { ago } from "../../shell/time";
   import { pageVisible } from "../kept-pages.svelte";
+  import { onShownAgain } from "../while-shown.svelte";
 
   let {
     segment,
@@ -190,12 +191,27 @@
     const entity = detail?.row.entity_id;
     return JSON.stringify(entity === undefined ? [] : ["comment", "transition"].map((op) => ({ entity, op })));
   });
-  $effect(() => askInto(JSON.parse(asks) as WriteAsk[], ports.refusedWrites, (answer) => (refused = answer)));
+  /**
+   * Bumped by a refresh and by the page being shown again, so the ticket's
+   * writes are asked about again: an ask the app could not read is answered
+   * disabled and kept nowhere (#2306), and only a new ask clears it.
+   */
+  let writesAsked = $state(0);
+  $effect(() => {
+    void writesAsked;
+    return askInto(JSON.parse(asks) as WriteAsk[], ports.refusedWrites, (answer) => (refused = answer));
+  });
   const commentRefused = $derived(refusalOf(refused, detail?.row.entity_id ?? null, "comment"));
   const moveRefused = $derived(refusalOf(refused, detail?.row.entity_id ?? null, "transition"));
 
   /** Whether keep-alive shows this job or holds it hidden (#2247). */
   const pageShown = pageVisible();
+  onShownAgain(pageShown, () => (writesAsked += 1));
+  /** A refresh's re-read (#2134): the ticket through the reader, and its writes asked about again. */
+  function rereadJob() {
+    writesAsked += 1;
+    return reader.reread();
+  }
 
   // The job on screen is what the timer chip and ⌘T start on (R-1.4); a job
   // keep-alive holds hidden (#2247) is not on screen.
@@ -551,7 +567,7 @@
             <span class="tf-p">{proposals.length} proposed</span>{/if}
           <kbd>L</kbd>
         </button>
-        <TfDetailRefresh {detail} {refresh} reread={() => reader.reread()} page />
+        <TfDetailRefresh {detail} {refresh} reread={rereadJob} page />
       </div>
       <TfDetailBanners {detail} failed={refresh.failed} />
       <div class="tf-wbody">

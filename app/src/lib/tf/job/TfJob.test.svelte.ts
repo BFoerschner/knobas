@@ -1513,6 +1513,30 @@ test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… me
   expect(target.querySelector(".tf-refresh-failed")).toBeNull();
 });
 
+test("a move the app could not ask about is asked again on a refresh (#2306)", async () => {
+  const reason = "knobas could not ask whether this credential may make this write (HTTP 502); it asks again when the write is drawn again";
+  let down = true;
+  let asked = 0;
+  open("PAY-231", {
+    ports: ports({
+      refresh: refreshProbe({ answer: () => Promise.resolve({ outcome: "refreshed" }) }).ports,
+      refusedWrites: (asks) => {
+        asked += 1;
+        return Promise.resolve(down ? asks.map((ask) => ({ ...ask, reason })) : []);
+      },
+    }),
+  });
+  await settle();
+  const select = () => target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
+  expect(select().title).toBe(reason);
+
+  down = false;
+  refreshButton()!.click();
+  await settle();
+  expect(asked).toBe(2);
+  expect(select().hasAttribute("aria-disabled")).toBe(false);
+});
+
 test("a failed refresh on the job says why under the tab bar and keeps the job as it was", async () => {
   const probe = refreshProbe({ answer: () => Promise.resolve({ outcome: "failed", reason: "connection refused" }) });
   open("PAY-231", { ports: ports({ refresh: probe.ports }) });

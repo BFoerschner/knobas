@@ -235,6 +235,12 @@
   let branchRefused = $state<string | null>(null);
   /** Why a commit straight onto the branch the tabs read at is refused (#985, #2241); `null` where it is taken. */
   let commitRefused = $state<string | null>(null);
+  /**
+   * Bumped by a refresh and by the page being shown again, so the toolbar's
+   * writes are asked about again: an ask the app could not read is answered
+   * disabled and kept nowhere (#2306), and only a new ask clears it.
+   */
+  let writesAsked = $state(0);
   let checkout = $state<CheckoutView | undefined>(undefined);
   let local = $state<DiffRead | null>(null);
   let prs = $state<EntityRow[] | null>(null);
@@ -274,7 +280,13 @@
   }
   onFocusWhileShown(() => visible, checkoutAgain);
   // The open tab reads again too, over what it drew, as it does on a refresh.
-  onShownAgain(() => visible, () => (tabs = readShown(tabs)));
+  onShownAgain(
+    () => visible,
+    () => {
+      tabs = readShown(tabs);
+      writesAsked += 1;
+    },
+  );
 
   /**
    * The repository's own reads: its row, its team and language, its pull
@@ -334,9 +346,11 @@
 
   // Whether the source offers *New branch…* and a commit onto the branch is
   // its answer to `refused_writes` (ADR-0020 rule 4, #2241), asked together;
-  // one that does not answer refuses nothing.
+  // one that does not answer refuses nothing. Asked again on a refresh and
+  // on being shown again (`writesAsked`).
   $effect(() => {
     if (!ready || repoId === null || at === null) return;
+    void writesAsked;
     const [id, where] = [repoId, at];
     let live = true;
     const ask = untrack(() => ports.refusedWrites) ?? (async () => []);
@@ -390,6 +404,7 @@
     const id = repoId;
     if (id === null) return;
     tabs = readShown(tabs);
+    writesAsked += 1;
     await Promise.all([readRepo(id, () => repoId === id, true), tabRereads.settled()]);
   }
 

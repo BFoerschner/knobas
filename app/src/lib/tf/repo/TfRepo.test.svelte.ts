@@ -1018,6 +1018,40 @@ test("New branch… is the source's refused_writes answer, asked with the commit
   expect(viewReads.filter(([, sectionId]) => sectionId === null)).toEqual([]);
 });
 
+test("a toolbar the app could not ask about is asked again on a refresh and when the page is shown again (#2306)", async () => {
+  const COULD_NOT = "knobas could not ask whether this credential may make this write (HTTP 502); it asks again when the write is drawn again";
+  let down = true;
+  let asked = 0;
+  await drawLive(
+    [REPO],
+    ports({
+      getEntity: repoDetail(),
+      refresh: refreshProbe().ports,
+      refusedWrites: async (asks) => {
+        asked += 1;
+        return down ? asks.map((ask) => ({ ...ask, reason: COULD_NOT })) : [];
+      },
+    }),
+  );
+  const newBranch = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-fhead button")].find((b) => text(b) === "New branch…")!;
+  expect(newBranch().getAttribute("aria-disabled")).toBe("true");
+  expect(newBranch().title).toBe(COULD_NOT);
+
+  down = false;
+  refreshButton()!.click();
+  await settle();
+  expect(asked).toBe(2);
+  expect(newBranch().getAttribute("aria-disabled")).toBeNull();
+
+  down = true;
+  live.visible = false;
+  await settle();
+  live.visible = true;
+  await settle();
+  expect(asked).toBe(3);
+  expect(newBranch().title).toBe(COULD_NOT);
+});
+
 test("a branch list the app read again behind its answer is read again when it moved (#2242)", async () => {
   let pushed = false;
   const base = ports();
