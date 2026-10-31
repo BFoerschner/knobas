@@ -47,8 +47,19 @@
 //! push need that permission (a reader may still comment and review), so
 //! only those are disabled for it.
 //!
-//! Anything else the probe meets -- a 401, a 5xx, a timeout, an archived
-//! repository's 423 -- is no verdict. A view draws its writes as before then
+//! Two more answers are verdicts, since no write can land behind them
+//! (measured on Gitea 1.27 and Forgejo, 2026-10-31, and witnessed by
+//! `tests/live_gitea.rs`; merger of #2306):
+//!
+//! | answer, either probe | what it says |
+//! |---|---|
+//! | 423 `repo is archived` | the repository is archived; every write is refused |
+//! | 404 | the repository is gone or hidden from the token; on the issue probe also a repository with issues and pull requests both switched off |
+//!
+//! A repository with issues off and pull requests on answers the issue probe
+//! 422, as a comment on a pull request still goes through its issue.
+//!
+//! Anything else the probe meets -- a 401, a 5xx, a timeout -- is no verdict. A view draws its writes as before then
 //! (the probe narrows what a view offers and never fails it). Asked by
 //! [`Source::refused_writes`], no verdict is an error and never "nothing
 //! refused" (#2306): the app keeps that answer and asks it again behind, so
@@ -133,6 +144,12 @@ enum Refusal {
     Scope,
     /// The account may not push here (the branch probe only).
     Account,
+    /// The repository is archived: Gitea answers every write 423.
+    Archived,
+    /// The route is not there for this token: the repository is gone or
+    /// hidden from it, or (the issue probe) its issues and pull requests are
+    /// both switched off. Gitea answers 404.
+    Absent,
 }
 
 /// What the probes learned about one repository: a refusal per category, or
@@ -165,18 +182,35 @@ impl Grants {
             Refusal::Account => {
                 pushes(op).then(|| "This account cannot push to this repository".to_owned())
             }
+            Refusal::Archived => Some("This repository is archived, so it takes no writes".to_owned()),
+            Refusal::Absent => Some(match category {
+                Category::Repository => {
+                    "Gitea does not show this repository to this token".to_owned()
+                }
+                Category::Issue => {
+                    "Gitea does not show this repository's issues to this token: they are switched off, or the repository is gone".to_owned()
+                }
+            }),
         }
     }
 }
 
 /// Ask Gitea what the token may write in `owner/repo`, probing only the
-/// categories `ops` fall in, side by side. A view's narrowing: a probe
-/// without a verdict refuses nothing ([`verdicts`] says it instead).
+/// categories `ops` fall in, side by side. A view's narrowing, unchanged by
+/// #2306: a probe without a verdict refuses nothing ([`verdicts`] says it
+/// instead), and so do the 423 and the 404, as they did before #2306 read
+/// them (a view's repository was just read, so it is there).
 pub(crate) async fn probe(source: &GiteaSource, owner: &str, repo: &str, ops: &[&str]) -> Grants {
     let (repository, issue) = verdicts(source, owner, repo, ops).await;
+    let narrowed = |verdict: Verdict| {
+        verdict
+            .ok()
+            .flatten()
+            .filter(|refusal| matches!(refusal, Refusal::Scope | Refusal::Account))
+    };
     Grants {
-        repository: repository.ok().flatten(),
-        issue: issue.ok().flatten(),
+        repository: narrowed(repository),
+        issue: narrowed(issue),
     }
 }
 
@@ -349,8 +383,9 @@ async fn probe_one(source: &GiteaSource, owner: &str, repo: &str, category: Cate
 
 /// What a probe's failure says: the scope refusal ([`is_scope_refusal`]),
 /// any other 403 on the branch probe, which `knobas-http` reads as a refusal
-/// carrying Gitea's sentence, or the body's 422, which is taken. Anything
-/// else is no verdict, and comes back as the error.
+/// carrying Gitea's sentence, the body's 422, which is taken, an archived
+/// repository's 423 or a missing route's 404 (the module docs' second
+/// table). Anything else is no verdict, and comes back as the error.
 fn refusal_of(category: Category, failure: SourceError) -> Verdict {
     match failure {
         scope if is_scope_refusal(&scope) => Ok(Some(Refusal::Scope)),
@@ -358,6 +393,8 @@ fn refusal_of(category: Category, failure: SourceError) -> Verdict {
             Ok(Some(Refusal::Account))
         }
         invalid if invalid.status() == Some(422) => Ok(None),
+        archived if archived.status() == Some(423) => Ok(Some(Refusal::Archived)),
+        absent if absent.status() == Some(404) => Ok(Some(Refusal::Absent)),
         other => Err(other),
     }
 }
@@ -385,9 +422,19 @@ mod tests {
             status: Some(502),
             message: "HTTP 502 Bad Gateway".into(),
         };
+        let archived = || SourceError::Protocol {
+            status: Some(423),
+            message: "HTTP 423 Locked: repo is archived".into(),
+        };
+        let absent = || SourceError::Protocol {
+            status: Some(404),
+            message: "HTTP 404 Not Found: not found".into(),
+        };
         for category in [Category::Repository, Category::Issue] {
             assert_eq!(verdict(category, scope()), Some(Some(Refusal::Scope)));
             assert_eq!(verdict(category, invalid()), Some(None), "taken");
+            assert_eq!(verdict(category, archived()), Some(Some(Refusal::Archived)));
+            assert_eq!(verdict(category, absent()), Some(Some(Refusal::Absent)));
             // No verdict (#2306): the failure, never taken.
             assert_eq!(verdict(category, SourceError::unauthorized()), None);
             assert_eq!(verdict(category, down()), None);

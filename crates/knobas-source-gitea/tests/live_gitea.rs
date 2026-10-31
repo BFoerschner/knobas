@@ -6884,6 +6884,117 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
     );
 }
 
+/// Merger of #2306, against the real server: an archived repository answers
+/// both probes 423, a repository with issues and pull requests switched off
+/// answers the issue probe 404, and so does a repository that is not there.
+/// No write lands behind any of them, so `Source::refused_writes` reads each
+/// as a refusal saying why, never as the error that draws every write of the
+/// call "could not ask". Both repositories are made under the account and
+/// removed again; an earlier killed run's are removed first.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn an_archived_or_missing_repository_is_refused_its_writes_saying_why() {
+    use knobas_source::grants::{RefusedWrite, WriteAsk};
+
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1", env.url);
+    let me: serde_json::Value = http
+        .get(format!("{api}/user"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET /user")
+        .json()
+        .await
+        .expect("a user record");
+    let me = me["login"].as_str().expect("a login").to_owned();
+    let archived = "knobas-live-2306-archived";
+    let no_issues = "knobas-live-2306-no-issues";
+    let nowhere = "knobas-live-2306-nowhere";
+    let remove = async |name: &str| {
+        let _ = http
+            .delete(format!("{api}/repos/{me}/{name}"))
+            .header("Authorization", &auth)
+            .send()
+            .await;
+    };
+    for name in [archived, no_issues, nowhere] {
+        remove(name).await;
+    }
+    let mut made = Vec::new();
+    for name in [archived, no_issues] {
+        let status = http
+            .post(format!("{api}/user/repos"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "name": name, "auto_init": true }))
+            .send()
+            .await
+            .expect("POST /user/repos")
+            .status()
+            .as_u16();
+        made.push(status);
+    }
+    let mut patched = Vec::new();
+    for (name, patch) in [
+        (archived, serde_json::json!({ "archived": true })),
+        (
+            no_issues,
+            serde_json::json!({ "has_issues": false, "has_pull_requests": false }),
+        ),
+    ] {
+        let status = http
+            .patch(format!("{api}/repos/{me}/{name}"))
+            .header("Authorization", &auth)
+            .json(&patch)
+            .send()
+            .await
+            .expect("PATCH the repository")
+            .status()
+            .as_u16();
+        patched.push(status);
+    }
+
+    let repo = |name: &str| format!("gitea:{me}/{name}");
+    let ask = |entity: String, op: &str| WriteAsk {
+        entity,
+        op: op.to_owned(),
+        field: None,
+    };
+    let asks = [
+        ask(repo(archived), "create_branch"),
+        ask(repo(archived), "create_ticket"),
+        ask(repo(no_issues), "create_ticket"),
+        ask(repo(nowhere), "create_ticket"),
+    ];
+    let source = env.source(serde_json::json!({}));
+    let answer = source.refused_writes(&asks).await;
+
+    for name in [archived, no_issues] {
+        remove(name).await;
+    }
+
+    assert_eq!(made, [201, 201], "create both repositories");
+    assert_eq!(patched, [200, 200], "archive one, switch the other's issues off");
+    let answer = answer.expect("each probe answered a verdict");
+    let gone = "Gitea does not show this repository's issues to this token: \
+                they are switched off, or the repository is gone";
+    let archived_why = "This repository is archived, so it takes no writes";
+    assert_eq!(
+        answer,
+        [
+            RefusedWrite::of(&asks[0], archived_why.to_owned()),
+            RefusedWrite::of(&asks[1], archived_why.to_owned()),
+            RefusedWrite::of(&asks[2], gone.to_owned()),
+            RefusedWrite::of(&asks[3], gone.to_owned()),
+        ]
+    );
+}
+
 /// Issue #2054, spec #1192 story 10, against the real server: the writes a
 /// shell surface draws outside a view -- a ticket's comment and move, *Create
 /// ticket* in the repository, a pull request's comment, approval and merge

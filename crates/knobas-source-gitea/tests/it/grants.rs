@@ -210,16 +210,16 @@ async fn what_this_source_cannot_answer_is_not_asked() {
     );
 }
 
-/// **A probe that meets anything but the two measured answers is no
-/// verdict, and no verdict is an error, never "taken"** (#2306): the app
-/// keeps a grants answer and asks it again behind, so a failure answered as
-/// taken would be kept, or replace a kept refusal. A 5xx, a 404 (wiremock's
-/// unmounted route) and a 401 each fail the call.
+/// **A probe that meets anything but the measured answers is no verdict,
+/// and no verdict is an error, never "taken"** (#2306): the app keeps a
+/// grants answer and asks it again behind, so a failure answered as taken
+/// would be kept, or replace a kept refusal. A 5xx, a 502 and a 401 each
+/// fail the call.
 #[tokio::test]
 async fn a_probe_without_a_verdict_fails_the_ask() {
     for (status, message) in [
         (500, "internal error"),
-        (404, "not found"),
+        (502, "bad gateway"),
         (401, "token is required"),
     ] {
         let server = MockServer::builder().start().await;
@@ -241,4 +241,42 @@ async fn one_probe_without_a_verdict_fails_the_asks_beside_it() {
     write_probe(&server, format!("{REPO}/branches"), 503, "maintenance").await;
     let answer = source(&server).refused_writes(&asks()).await;
     assert!(answer.is_err(), "{answer:?}");
+}
+
+/// **An archived repository's 423 and a missing route's 404 are verdicts**
+/// (merger of #2306, measured on Gitea 1.27 and Forgejo): no write lands
+/// behind either, so each refuses its category's writes saying why rather
+/// than failing the call. Left as errors, one archived or deleted
+/// repository among a surface's asks would draw every other repository's
+/// writes "could not ask", on every ask.
+#[tokio::test]
+async fn an_archived_or_missing_repository_refuses_saying_why() {
+    let server = MockServer::builder().start().await;
+    write_probe(&server, format!("{REPO}/issues"), 423, "repo is archived").await;
+    write_probe(&server, format!("{REPO}/branches"), 423, "repo is archived").await;
+    write_probe(&server, format!("{OTHER}/issues"), 404, "not found").await;
+    write_probe(&server, format!("{OTHER}/branches"), 422, "[BranchName]: Required").await;
+    let elsewhere = id(keys::issue_key("tidewater", "ledger", 3));
+    let elsewhere_pull = id(keys::pr_key("tidewater", "ledger", 4));
+    let refused = source(&server)
+        .refused_writes(&[
+            ask(issue(), "comment"),
+            ask(pull(), "merge_pull_request"),
+            ask(elsewhere.clone(), "comment"),
+            ask(elsewhere_pull.clone(), "merge_pull_request"),
+        ])
+        .await
+        .expect("both are verdicts");
+    let archived = "This repository is archived, so it takes no writes";
+    assert_eq!(
+        refused,
+        [
+            RefusedWrite::of(&ask(issue(), "comment"), archived.to_owned()),
+            RefusedWrite::of(&ask(pull(), "merge_pull_request"), archived.to_owned()),
+            RefusedWrite::of(
+                &ask(elsewhere, "comment"),
+                "Gitea does not show this repository's issues to this token: they are switched off, or the repository is gone".to_owned()
+            ),
+        ]
+    );
 }
