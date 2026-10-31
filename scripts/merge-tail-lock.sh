@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Machine-wide merge-tail lock: reviews and pre-gates run in parallel; only the
-# freshness check, a re-gate when main moved, and the merges run one at a
-# time, oldest PR first.
+# Merge-tail lock, shared by every machine that merges (#2335): reviews and
+# pre-gates run in parallel; only the freshness check, a re-gate when main
+# moved, and the merges run one at a time, oldest PR first on each machine.
 #
 # Usage: scripts/merge-tail-lock.sh ready <PR> <head SHA> [<main SHA>]   (review done, and with a main: gated green on that head over that main)
 #        scripts/merge-tail-lock.sh take <PR>      (exit 0 = held; 4 = still queued, call again)
@@ -10,11 +10,35 @@
 #        scripts/merge-tail-lock.sh release <PR>
 #        scripts/merge-tail-lock.sh assert <PR>    (exit 1 unless <PR> holds the lock; run right before gh pr merge)
 #
+# The holder slot is a ref on origin (#2335): `refs/locks/merge-tail`. Before
+# #2335 it was a directory in `$TMPDIR`, so the Mac and the Linux host each had
+# their own lock and could both merge at once; a merge from one machine could
+# land between the other's `gated` and its `gh pr merge`, onto a main no gate
+# saw (`--match-head-commit` pins the head, not the base). Now the slot holds a
+# token commit (empty tree, no parent) whose message says
+#     holder: <PR>
+#     machine: <host>
+#     expires: <epoch seconds>
+# and every change to it is a compare-and-swap: `git push --force-with-lease
+# =<ref>:<the token just read>` (empty = must not exist), which origin applies
+# only if nobody moved the ref since. Never with a `+` on the refspec: that
+# overrides the lease (checked against GitHub, 2026-10-31). So of two machines
+# racing for a free slot, or for a dead holder's, exactly one push lands; the
+# other re-reads and waits. Since every merge on every machine happens under
+# the one slot, nobody can merge between a holder's `gated` and its merge:
+# the shared slot is what closes that window, not `--match-head-commit`.
+#
+# What stays per machine: the waiter queue and the pre-gate records, under
+# `$TMPDIR`. Only each machine's lowest-numbered live waiter competes for the
+# slot; across machines it goes to whoever's push lands first.
+#
+# The lock talks to origin through the repo the script sits in (the root
+# checkout's copy: the root checkout), or KNOBAS_MERGE_TAIL_REPO. An origin it
+# cannot read never holds: `take` stays queued and `assert` exits 1.
+#
 # No batching (Björn, 2026-10-29): a holder merges its own PR alone. It gates
 # before the lock, `gated` says whether that pre-gate is still fresh, and if
-# not it rebases and gates once more under `hold`, still alone. The `partner`
-# and `merged` subcommands that stacked waiters onto a holder's head went with
-# batching.
+# not it rebases and gates once more under `hold`, still alone.
 #
 # Pre-gate (#1862): a merge-manager gates its rebased head before `take` and
 # records it with `ready <PR> <head> <main>`, in `$READY/<PR>.main`. Under the
@@ -24,21 +48,21 @@
 # the squash merge produces exactly the tree the pre-gate saw. Anything else,
 # including no record and an unreadable origin, exits 1: gate under the lock.
 #
-# A waiter registers in the queue dir and touches its entry every poll. The lock
-# goes to the lowest-numbered live waiter, since every merge makes the others
-# rebase and an older branch has the most to rebase. An entry not touched for
-# 120 s is a dead waiter and is ignored. `take` returns after WAIT seconds with
-# exit 4 while still queued, so a waiter can wait in the foreground and call it
-# again; its entry stays.
+# A waiter registers in the queue dir and touches its entry every poll. The
+# slot goes to the lowest-numbered live waiter, since every merge makes the
+# others rebase and an older branch has the most to rebase. An entry not
+# touched for 120 s is a dead waiter and is ignored. `take` returns after WAIT
+# seconds with exit 4 while still queued, so a waiter can wait in the
+# foreground and call it again; its entry stays.
 #
-# The holder's claim (#1836): `$LOCK/alive` is touched by every lock call the
-# holder makes and, under `hold`, every POLL seconds while the command runs. A
-# claim older than LEASE is a dead holder, whatever its PR's state, and the
-# next waiter takes the lock over; a live holder in a long gate keeps it by
-# running the gate under `hold`. Before #1836 only a MERGED or CLOSED PR
-# counted, so a holder that died with its PR open held the lock until a human
-# noticed (2026-10-23, 20 min). A lock taken by that older script has no
-# `alive` file: its claim is as old as its `holder` file.
+# The holder's claim (#1836) is a lease: every lock call the holder makes
+# (`assert`, `gated`, a re-entrant `take`) and, under `hold`, every POLL
+# seconds while the command runs, swaps in a token with a new expiry, LEASE
+# seconds on. A token past its expiry is a dead holder, whatever its PR's
+# state, and the next waiter takes it over with the same compare-and-swap; the
+# old holder's next `assert` then exits 1. Expiry is wall-clock time written
+# by one machine and read by another: clock skew between them shortens or
+# lengthens a lease by the skew, seconds against 600.
 #
 # The holder's gate first (#1866): `hold` runs its command with
 # KNOBAS_MERGE_TAIL_HOLDER=<PR>, and `scripts/gate-slot.sh` gives a gate that
@@ -48,9 +72,12 @@ set -u
 POLL="${KNOBAS_MERGE_TAIL_POLL:-30}"     # seconds between polls, and between `hold`'s refreshes
 LEASE="${KNOBAS_MERGE_TAIL_LEASE:-600}"  # seconds a holder may go without refreshing its claim
 WAIT="${KNOBAS_MERGE_TAIL_WAIT:-100}"    # seconds a `take` waits before returning 4 (under the Bash tool's default timeout)
-LOCK="${TMPDIR:-/tmp}/knobas-merge-tail.lock"
 QUEUE="${TMPDIR:-/tmp}/knobas-merge-tail.queue"
 READY="${TMPDIR:-/tmp}/knobas-merge-tail.ready"
+REPO="${KNOBAS_MERGE_TAIL_REPO:-$(cd "$(dirname "$0")" && pwd)}"
+REMOTE="${KNOBAS_MERGE_TAIL_REMOTE:-origin}"
+REF="${KNOBAS_MERGE_TAIL_REF:-refs/locks/merge-tail}"
+MACHINE="${KNOBAS_MERGE_TAIL_MACHINE:-$(hostname -s 2>/dev/null || hostname)}"
 cmd="${1:-}"; pr="${2:-}"; arg="${3:-}"
 usage() { echo "usage: $0 ready|take|gated|hold|assert|release <PR> [SHA [SHA] | command...]"; exit 2; }
 if [ -z "$cmd" ] || [ -z "$pr" ]; then usage; fi
@@ -67,11 +94,54 @@ oldest_live_waiter() {
 # GNU stat first: on Linux `stat -f` is file-system status and exits 0. A file
 # another waiter removed since the glob reads as epoch 0, i.e. long dead.
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
-holder() { cat "$LOCK/holder" 2>/dev/null || true; }
-# Seconds since the holder last refreshed its claim; `holder` stands in for a
-# lock the pre-#1836 script took.
-claim_age() { local f="$LOCK/alive"; [ -e "$f" ] || f="$LOCK/holder"; echo $(( $(date +%s) - $(mtime "$f") )); }
-refresh() { [ "$(holder)" = "$pr" ] && touch "$LOCK/alive"; }
+lg() { GIT_TERMINAL_PROMPT=0 git -C "$REPO" "$@"; }
+# read_slot: reads the slot into SLOT (the token's SHA, empty when free) and
+# S_HOLDER, S_MACHINE, S_EXPIRES. Returns 1 when origin cannot be read. A
+# token without an expiry reads as long expired.
+read_slot() {
+  local out msg
+  SLOT='' S_HOLDER='' S_MACHINE='' S_EXPIRES=0
+  for _ in 1 2 3; do
+    out=$(lg ls-remote "$REMOTE" "$REF" 2>/dev/null) || return 1
+    SLOT=$(printf '%s\n' "$out" | awk -v r="$REF" '$2 == r { print $1 }')
+    [ -n "$SLOT" ] || return 0
+    lg cat-file -e "$SLOT^{commit}" 2>/dev/null || lg fetch -q --no-write-fetch-head "$REMOTE" "$REF" 2>/dev/null || return 1
+    # Moved again between the read and the fetch: read once more.
+    msg=$(lg cat-file commit "$SLOT" 2>/dev/null) || continue
+    S_HOLDER=$(printf '%s\n' "$msg" | sed -n 's/^holder: //p')
+    S_MACHINE=$(printf '%s\n' "$msg" | sed -n 's/^machine: //p')
+    S_EXPIRES=$(printf '%s\n' "$msg" | sed -n 's/^expires: \([0-9][0-9]*\)$/\1/p')
+    S_EXPIRES=${S_EXPIRES:-0}
+    return 0
+  done
+  return 1
+}
+# token: a new token commit naming this PR, expiring LEASE seconds from now.
+token() {
+  local tree
+  tree=$(lg hash-object -t tree -w /dev/null) || return 1
+  printf 'merge-tail lock\n\nholder: %s\nmachine: %s\nexpires: %s\nnonce: %s\n' \
+    "$pr" "$MACHINE" "$(( $(date +%s) + LEASE ))" "$$-$RANDOM" |
+    lg -c user.name=merge-tail -c user.email=merge-tail@knobas.invalid commit-tree --no-gpg-sign "$tree"
+}
+# cas <expected SHA, empty = free> <new SHA, empty = free it>: one leased push.
+cas() {
+  if [ -n "$2" ]; then lg push -q --no-verify "$REMOTE" "$2:$REF" "--force-with-lease=$REF:$1" 2>/dev/null
+  else lg push -q --no-verify "$REMOTE" ":$REF" "--force-with-lease=$REF:$1" 2>/dev/null; fi
+}
+# refresh: 0 = this PR holds the slot and its lease starts over; 1 = it does
+# not hold it; 2 = undecided (origin unreadable, or pushes keep failing).
+refresh() {
+  local new
+  for _ in 1 2 3; do
+    read_slot || return 2
+    { [ -n "$SLOT" ] && [ "$S_HOLDER" = "$pr" ]; } || return 1
+    new=$(token) || return 2
+    cas "$SLOT" "$new" && return 0
+  done
+  return 2
+}
+holder_said() { if [ -n "${SLOT:-}" ]; then echo "#${S_HOLDER:-?} on ${S_MACHINE:-?}"; else echo none; fi; }
 case "$cmd" in
 ready)
   [ -n "$arg" ] || { echo "usage: $0 ready <PR> <head SHA> [<main SHA the gate ran over>]"; exit 2; }
@@ -87,8 +157,11 @@ ready)
   fi
   ;;
 gated)
-  if ! refresh; then
-    echo "merge-tail: PR #$pr does NOT hold the lock (holder: $(holder)); gate under the lock once you hold it"; exit 1
+  refresh; held=$?
+  if [ "$held" -ne 0 ]; then
+    if [ "$held" -eq 2 ]; then echo "merge-tail: cannot read the lock on $REMOTE; PR #$pr does NOT hold the lock as far as anyone can tell"
+    else echo "merge-tail: PR #$pr does NOT hold the lock (holder: $(holder_said)); gate under the lock once you hold it"; fi
+    exit 1
   fi
   gated_head=$(cat "$READY/$pr" 2>/dev/null); gated_main=$(cat "$READY/$pr.main" 2>/dev/null)
   if [ -z "$gated_head" ] || [ -z "$gated_main" ]; then
@@ -115,62 +188,68 @@ take)
   while :; do
     touch "$QUEUE/$pr"
     first=$(oldest_live_waiter)
-    if [ "$first" = "$pr" ] && mkdir "$LOCK" 2>/dev/null; then break; fi
-    holder=$(holder)
-    if [ "$holder" = "$pr" ]; then
-      rm -f "$QUEUE/$pr"; refresh; echo "merge-tail: already held by PR #$pr"; exit 0
-    fi
-    if [ -n "$holder" ] && [ "$(claim_age)" -gt "$LEASE" ]; then
-      # One waiter at a time decides a takeover, on a read made under the
-      # guard: another waiter may have taken over and acquired, or the holder
-      # may have refreshed, since the read above. A guard older than 60 s was
-      # left by a waiter killed mid-takeover and would block every takeover
-      # for good.
-      if [ -d "$LOCK.takeover" ] && [ $(( $(date +%s) - $(mtime "$LOCK.takeover") )) -gt 60 ]; then
-        rmdir "$LOCK.takeover" 2>/dev/null
-      fi
-      if mkdir "$LOCK.takeover" 2>/dev/null; then
-        age=$(claim_age)
-        if [ "$(holder)" = "$holder" ] && [ "$age" -gt "$LEASE" ]; then
-          echo "merge-tail: PR #$holder has not refreshed its claim for $age s (lease $LEASE s) and is dead; taking it over"
-          rm -rf "$LOCK"
+    if read_slot; then
+      holder=$(holder_said)
+      if [ -n "$SLOT" ] && [ "$S_HOLDER" = "$pr" ]; then
+        if refresh; then rm -f "$QUEUE/$pr"; echo "merge-tail: already held by PR #$pr"; exit 0; fi
+      elif [ "$first" = "$pr" ]; then
+        # Only this machine's first waiter competes; the leased push decides
+        # between machines, and a lost push just means another poll.
+        if [ -z "$SLOT" ]; then
+          new=$(token) && cas "" "$new" && break
+        elif [ "$(date +%s)" -gt "$S_EXPIRES" ]; then
+          dead=$holder; late=$(( $(date +%s) - S_EXPIRES ))
+          if new=$(token) && cas "$SLOT" "$new"; then
+            echo "merge-tail: PR $dead let its lease run out $late s ago (lease $LEASE s) and is dead; taking it over"
+            break
+          fi
         fi
-        rmdir "$LOCK.takeover"
-        continue
       fi
+    else
+      holder="unknown: cannot read $REF on $REMOTE"
     fi
-    [ -z "$said" ] && { echo "merge-tail: waiting (holder #${holder:-none}, first in queue #${first:-?})"; said=1; }
+    [ -z "$said" ] && { echo "merge-tail: waiting (holder $holder, first in this machine's queue #${first:-?})"; said=1; }
     if [ $((SECONDS - started)) -ge "$WAIT" ]; then
-      echo "merge-tail: PR #$pr still waiting after $((SECONDS - started)) s (holder #${holder:-none}, first in queue #${first:-?}); call take again"
+      echo "merge-tail: PR #$pr still waiting after $((SECONDS - started)) s (holder $holder, first in this machine's queue #${first:-?}); call take again"
       exit 4
     fi
     sleep "$POLL"
   done
   rm -f "$QUEUE/$pr"
-  echo "$pr" > "$LOCK/holder"; touch "$LOCK/alive"
-  echo "merge-tail: held by PR #$pr"
+  echo "merge-tail: held by PR #$pr (on $MACHINE)"
   ;;
 hold)
   [ $# -ge 3 ] || { echo "usage: $0 hold <PR> <command...>"; exit 2; }
   shift 2
   if ! refresh; then
-    echo "merge-tail: PR #$pr does NOT hold the lock (holder: $(holder)); not running: $*"; exit 1
+    echo "merge-tail: PR #$pr does NOT hold the lock (holder: $(holder_said)); not running: $*"; exit 1
   fi
-  ( while [ "$(holder)" = "$pr" ]; do touch "$LOCK/alive"; sleep "$POLL"; done ) &
+  # Refresh until the slot is definitely someone else's; an origin that cannot
+  # be read for a poll or two is not a lost lock.
+  ( while :; do sleep "$POLL"; refresh; [ $? -eq 1 ] && break; done ) &
   keeper=$!
   KNOBAS_MERGE_TAIL_HOLDER=$pr "$@"; status=$?
   kill "$keeper" 2>/dev/null; wait "$keeper" 2>/dev/null
   exit "$status"
   ;;
 assert)
-  if refresh; then echo "merge-tail: PR #$pr holds the lock"
-  else echo "merge-tail: PR #$pr does NOT hold the lock (holder: $(holder)); not merging"; exit 1; fi
+  refresh; held=$?
+  if [ "$held" -eq 0 ]; then echo "merge-tail: PR #$pr holds the lock"
+  elif [ "$held" -eq 2 ]; then echo "merge-tail: cannot read the lock on $REMOTE; not merging"; exit 1
+  else echo "merge-tail: PR #$pr does NOT hold the lock (holder: $(holder_said)); not merging"; exit 1; fi
   ;;
 release)
   rm -f "$QUEUE/$pr" "$READY/$pr" "$READY/$pr.main"
-  holder=$(holder)
-  if [ "$holder" = "$pr" ]; then rm -rf "$LOCK"; echo "merge-tail: released by PR #$pr"
-  else echo "merge-tail: PR #$pr does not hold the lock (holder: ${holder:-none})"; fi
+  for _ in 1 2 3; do
+    if ! read_slot; then
+      echo "merge-tail: cannot read the lock on $REMOTE; a slot PR #$pr still holds frees itself when its lease runs out"; exit 0
+    fi
+    if [ -z "$SLOT" ] || [ "$S_HOLDER" != "$pr" ]; then
+      echo "merge-tail: PR #$pr does not hold the lock (holder: $(holder_said))"; exit 0
+    fi
+    if cas "$SLOT" ""; then echo "merge-tail: released by PR #$pr"; exit 0; fi
+  done
+  echo "merge-tail: PR #$pr could not free the slot; it frees itself when its lease runs out"
   ;;
 *) usage ;;
 esac

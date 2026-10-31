@@ -16,8 +16,9 @@
 // Prints one `keep-alive:` line per figure and the machine's load before and after
 // (scripts/machine-load.sh is the settled-or-not judgement; this prints uptime's figure).
 // Env: KEEP_ALIVE_RETURNS (default 7), KEEP_ALIVE_BUDGET_MS (default 50),
-//      SHOT_CHROME (the Chrome binary, as scripts/shot-steps.mjs takes it).
+//      SHOT_CHROME (the Chrome binary; unset, scripts/chrome-path.mjs finds it).
 import { spawn } from "node:child_process";
+import { chromePath as findChrome } from "./chrome-path.mjs";
 import { loadavg } from "node:os";
 
 const [port, debug, profile] = process.argv.slice(2);
@@ -34,7 +35,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const say = (line) => console.log(`keep-alive: ${line}`);
 const load = () => loadavg().map((n) => n.toFixed(2)).join(" ");
 
-const chromePath = process.env.SHOT_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const chromePath = findChrome();
+if (!chromePath) {
+  console.error("keep-alive: no Chrome found (the macOS app, or google-chrome or chromium on PATH); set SHOT_CHROME");
+  process.exit(1);
+}
 const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, "--window-size=1440,900", "--js-flags=--expose-gc"];
 const chrome = spawn(chromePath, [...flags, "about:blank"], { stdio: "ignore", detached: true });
 const closeChrome = () => {
