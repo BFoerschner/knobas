@@ -41,6 +41,7 @@
   import { DraftForm } from "../time/draft-form.svelte";
   import type { DraftOutcome } from "./drafting.svelte";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
+  import TfDialog from "./settings/TfDialog.svelte";
 
   export interface TfWorklogDraftPorts {
     logWork: typeof realLogWork;
@@ -76,8 +77,6 @@
     layers?: Layers;
     ports?: TfWorklogDraftPorts;
   } = $props();
-
-  const uid = `tf-worklog-${Math.random().toString(36).slice(2, 9)}`;
 
   // svelte-ignore state_referenced_locally
   // Read once: a draft swapped mid-life would drop the reader's ticks.
@@ -152,10 +151,7 @@
       );
   }
 
-  let first: HTMLInputElement | undefined = $state();
-
   onMount(() => {
-    first?.focus();
     const { from, to } = dayBounds(draft.day);
     void ports
       .dayBlocks(from.toISOString(), to.toISOString())
@@ -175,26 +171,16 @@
     void askRefused([{ entity: draft.entity_id, op: "log_work" }], ports.refusedWrites).then(
       (answer) => (refused = refusalOf(answer, draft.entity_id, "log_work")),
     );
-    return layers.add({ kind: "dialog", close: leave });
   });
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<!-- The backdrop's click is the mouse twin of `Esc`, which the shell's ladder handles. -->
-<div
-  class="tf-modal"
-  onclick={(event) => {
-    if (event.target === event.currentTarget) leave();
-  }}
->
-  <div class="tf-dialog" role="dialog" aria-modal="true" aria-labelledby="{uid}-h">
-    <header>
-      <h2 id="{uid}-h">Log time to <span class="tf-mono">{form.key}</span></h2>
-      {#if title}<p class="tf-dsub">{title}</p>{/if}
-    </header>
-    <div class="tf-body">
+{#snippet heading()}Log time to <span class="tf-mono">{form.key}</span>{/snippet}
+
+<!-- `Esc` and the backdrop leave quietly, through `TfDialog`'s `onclose`. -->
+<TfDialog title={heading} subtitle={title} onclose={leave} {layers}>
+  {#snippet body()}
       <div class="tf-dur">
-        <label><span>From</span><input bind:this={first} type="time" aria-label="From" bind:value={form.began} /></label>
+        <label><span>From</span><input type="time" aria-label="From" bind:value={form.began} /></label>
         <label><span>Minutes</span><input type="number" min="1" step="1" aria-label="Minutes" bind:value={form.minutes} /></label>
         <b>{form.reading}</b>
         <span class="tf-dim">{intervals}</span>
@@ -231,8 +217,8 @@
       <p class="tf-dim tf-fine">A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than guess; it never merges or drops what you wrote.</p>
       {#if refused !== null}<p class="tf-fail">{refused}</p>{/if}
       {#if failed}<p class="tf-fail" role="alert">{failed}</p>{/if}
-    </div>
-    <footer>
+  {/snippet}
+  {#snippet footer()}
       {#if stopped}
         <button class="tf-btn tf-ghost tf-first" type="button" disabled={sending} onclick={() => onoutcome("later")}>
           Stop, log later
@@ -245,6 +231,5 @@
       <button class="tf-btn tf-primary" type="button" {...refusedAttrs(refused)} disabled={sending || form.seconds <= 0} onclick={send}>
         Log {form.reading} to {form.key}
       </button>
-    </footer>
-  </div>
-</div>
+  {/snippet}
+</TfDialog>

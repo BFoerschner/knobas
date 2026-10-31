@@ -221,6 +221,21 @@ test("draws no Close unless asked", () => {
   target.remove();
 });
 
+/** A title with markup in it (the worklog draft's ticket key in mono, #2346) is a snippet, still the dialog's name. */
+test("a snippet title draws its markup inside the heading that names the dialog", () => {
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, markupTitle: true } });
+  flushSync();
+
+  const dialog = target.querySelector("[role=dialog]")!;
+  const heading = target.querySelector(`#${dialog.getAttribute("aria-labelledby")}`);
+  expect(heading?.textContent).toBe("Log time to PROJ-7");
+  expect(heading?.querySelector(".tf-mono")?.textContent).toBe("PROJ-7");
+
+  unmount(app);
+  target.remove();
+});
+
 /** A dialog of its own width passes a class beside `tf-dialog` (Shell conventions); the import dialog's is `tf-dwide`. */
 test("a dialog of its own width carries its class beside tf-dialog", () => {
   const target = host();
@@ -249,11 +264,7 @@ test("TfDialog is the only component that draws the dialog's scrim", () => {
     .filter((file) => /class="tf-modal"/.test(readFileSync(file, "utf8")))
     .map((file) => relative(root, file));
   expect(shells).toEqual([
-    // Still hand-drawn, each waiting on something TfDialog doesn't take yet (#2346).
-    "lib/tf/TfWorklogDraft.svelte",
     "lib/tf/settings/TfDialog.svelte",
-    "lib/tf/time/TfBlockDialog.svelte",
-    "lib/tf/time/TfLogAll.svelte",
   ]);
 });
 

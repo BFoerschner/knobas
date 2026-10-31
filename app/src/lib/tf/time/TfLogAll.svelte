@@ -44,6 +44,7 @@
   import { readerDay } from "../../time/day";
   import { columnHeading, minutesOf } from "../../time/week";
   import type { Layers } from "../layers.svelte";
+  import TfDialog from "../settings/TfDialog.svelte";
   
   interface LogAllPorts {
     logAllPreview: typeof realLogAllPreview;
@@ -94,7 +95,6 @@
   let refused = $state<RefusedWrite[]>([]);
   const cannot = (plan: PlannedWorklog) => refusalOf(refused, plan.entity_id, "log_work");
 
-  const uid = `tf-logall-${Math.random().toString(36).slice(2, 9)}`;
   const id = (plan: Pick<PlannedWorklog, "day" | "entity_id">) => `${plan.day} ${plan.entity_id}`;
 
 
@@ -124,7 +124,6 @@
       (sources) => (names = Object.fromEntries(sources.map((source) => [source.id, source.display_name]))),
       () => {},
     );
-    return layers.add({ kind: "dialog", close: onclose });
   });
 
   const ticked = $derived(rows?.filter((row) => row.ticked && cannot(row.plan) === null) ?? []);
@@ -181,13 +180,14 @@
   }
 </script>
 
-<div class="tf-modal" role="presentation" onclick={(event) => event.target === event.currentTarget && onclose()}>
-  <div class="tf-dialog tf-tm-logall" role="dialog" aria-modal="true" aria-labelledby="{uid}-title">
-    <header>
-      <h2 id="{uid}-title">Log all</h2>
-      <p class="tf-dsub">One worklog per day and ticket, from the blocks you tracked and have not logged.</p>
-    </header>
-    <div class="tf-body">
+<TfDialog
+  title="Log all"
+  subtitle="One worklog per day and ticket, from the blocks you tracked and have not logged."
+  className="tf-tm-logall"
+  {onclose}
+  {layers}
+>
+  {#snippet body()}
       {#if failure !== null}
         <p class="tf-fail" role="alert">{failure}</p>
       {/if}
@@ -243,14 +243,13 @@
         </p>
       {/if}
       <p class="tf-dim tf-note">Time on "No target, app open" is not offered. Assign it to a ticket in the day first.</p>
-    </div>
-    <footer>
+  {/snippet}
+  {#snippet footer()}
       <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
       {#if rows !== null && rows.length > 0}
         <button type="button" class="tf-btn tf-primary" disabled={sending || ticked.length === 0} onclick={() => void send()}>
           Log {ticked.length} worklog{ticked.length === 1 ? "" : "s"}
         </button>
       {/if}
-    </footer>
-  </div>
-</div>
+  {/snippet}
+</TfDialog>

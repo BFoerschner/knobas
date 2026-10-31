@@ -20,7 +20,7 @@
   field beside it takes the rest of the row (`time.css`).
 
   A refusal stays in the dialog beside the fields it is about, and the dialog
-  stays open. It registers on the shell's layers, so `Esc` closes it first.
+  stays open. It is a `TfDialog` (#2346), so `Esc` closes it first.
 -->
 <script lang="ts" module>
   import type { TimerTarget } from "../../ipc/time";
@@ -39,6 +39,7 @@
   import { Session, type SessionPorts } from "../../launcher/session.svelte";
   import { targetReading } from "../../shell/timer";
   import type { Layers } from "../layers.svelte";
+  import TfDialog from "../settings/TfDialog.svelte";
 
   let {
     mode,
@@ -116,15 +117,12 @@
   const keyOf = (entityId: string) => targetReading({ kind: "entity", entity_id: entityId });
   const ready = $derived(form.kind === "entity" ? form.picked !== null : form.label.trim() !== "");
 
+  const uid = $props.id();
   let field = $state<HTMLInputElement | null>(null);
   onMount(() => {
     field?.focus();
     void session.loadHome();
-    const off = layers.add({ kind: "dialog", close: onclose });
-    return () => {
-      off();
-      session.dispose();
-    };
+    return () => session.dispose();
   });
 
   function pick(ticket: Ticket) {
@@ -170,14 +168,10 @@
   }
 </script>
 
-<div class="tf-modal" role="presentation" onclick={(event) => event.target === event.currentTarget && onclose()}>
-  <div class="tf-dialog" role="dialog" aria-modal="true" aria-labelledby="tf-tm-dialog-title">
-  <form class="tf-dform" onsubmit={submit}>
-    <header>
-      <h2 id="tf-tm-dialog-title">{TITLE[mode]}</h2>
-      {#if mode === "assign" && span !== null}<p class="tf-dsub">{span}</p>{/if}
-    </header>
-    <div class="tf-body">
+<!-- The form is the body; the footer's submit reaches it through `form=`, as `TfApplySet`'s does. -->
+<TfDialog title={TITLE[mode]} subtitle={mode === "assign" ? span : null} {onclose} {layers}>
+  {#snippet body()}
+  <form id="tf-tm-form-{uid}" class="tf-dform" onsubmit={submit}>
       <div class="tf-formgrid">
         {#if mode !== "assign"}
           <label for="tf-tm-from">From</label>
@@ -241,14 +235,13 @@
       {#if refusal !== null}
         <p class="tf-tm-refusal" role="alert">{refusal}</p>
       {/if}
-    </div>
-    <footer>
+  </form>
+  {/snippet}
+  {#snippet footer()}
       {#if mode === "edit"}
         <button type="button" class="tf-btn tf-ghost tf-danger tf-first" onclick={ondelete}>Delete block</button>
       {/if}
       <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-      <button type="submit" class="tf-btn tf-primary" disabled={!ready}>{SAVE[mode]}</button>
-    </footer>
-  </form>
-  </div>
-</div>
+      <button type="submit" class="tf-btn tf-primary" form="tf-tm-form-{uid}" disabled={!ready}>{SAVE[mode]}</button>
+  {/snippet}
+</TfDialog>
