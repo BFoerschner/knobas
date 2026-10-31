@@ -1225,6 +1225,8 @@ test("Delete view in the editor deletes it, with Undo in the toast", async () =>
   await open(h, null, "backlog");
   [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view")!.click();
   await previewed(h);
+  // #2289: an extra action that starts a destructive one, drawn by the Controls classes alone.
+  expect(inDialog("Delete view").className).toBe("tf-btn tf-ghost tf-danger");
   inDialog("Delete view").click();
   await settle();
   expect(dialog()).toBeNull();
@@ -1594,7 +1596,7 @@ test("View settings on a Jira view says Jira decides, locks its columns, and sav
     ["In flight", true],
     ["Shipped", true],
   ]);
-  expect(box.querySelector(".tf-vw-del")).toBeNull();
+  expect([...box.querySelectorAll("button")].some((b) => b.textContent!.trim() === "Delete view")).toBe(false);
   expect(box.textContent).toContain("Only how it looks here. Jira still decides which tickets.");
 
   const lanes = box.querySelector<HTMLSelectElement>('select[aria-label="Lanes"]')!;
