@@ -104,7 +104,7 @@ Buttons and the controls that sit beside them follow one set of rules (#2238). T
 | `--control-h-lg` | 40 px | large button height |
 | `--control-gap` | 6 px | the gap between neighbouring buttons |
 
-They are on `:root` in `tokens.css`. A button takes a fixed `height` from its size token and horizontal padding only, so its height never depends on line-height or on its content: a `<kbd>` hint inside a button doesn't change its height. Every control's radius is 4 px.
+They are on `:root` in `tokens.css`. A button takes a fixed `height` from its size token and horizontal padding only, so its height never depends on line-height or on its content: a `<kbd>` hint inside a button doesn't change its height. Every control's radius is 4 px, except the pill toggles, which are round.
 
 ### Three sizes, chosen by place
 
