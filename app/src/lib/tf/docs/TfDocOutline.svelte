@@ -4,7 +4,7 @@
 
   On a wide window it is the page's right column, sticking while the page
   scrolls (the margin). Below 1240px (`folded`) it is a fold between the
-  actions row and the first section, closed, its summary counting the
+  meta line and the first section, closed, its summary counting the
   sections and, while the find bar is open, the matches in them, a badge
   drawn only above zero (#2081).
 -->
