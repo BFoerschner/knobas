@@ -244,7 +244,7 @@ test("Apply a link set… has a primary that applies the picked set, the first o
   await settle();
   button(target.querySelector(".tf-setsbar")!, "Apply a link set…").click();
   await settle();
-  const radios = [...dialog().querySelectorAll<HTMLInputElement>(".tf-pickrow input[type=radio]")];
+  const radios = [...dialog().querySelectorAll<HTMLInputElement>("[role=radiogroup][aria-label='Link sets'] input[type=radio]")];
   expect(radios.map((r) => [r.checked, r.disabled])).toEqual([
     [false, true],
     [true, false],

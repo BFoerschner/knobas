@@ -81,10 +81,10 @@
     {:else if sets !== null && sets.length === 0}
       <p class="tf-dim">No link sets yet.</p>
     {/if}
-    <div class="tf-picks" role="list" aria-label="Link sets">
+    <div class="tf-picks" role="radiogroup" aria-label="Link sets">
       {#each shown as set (set.id)}
         {@const on = applied.has(set.id)}
-        <label class="tf-pickrow" class:tf-in={on} role="listitem">
+        <label class="tf-pickrow" class:tf-in={on}>
           <input
             type="radio"
             name="tf-aps-{uid}"
