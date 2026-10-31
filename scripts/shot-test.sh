@@ -33,14 +33,37 @@ b=$(SHOT_DRY_RUN=1 "$shot" 9 "$out" "${long}2" | sed 's/.* file=//')
 elsewhere=$(SHOT_DRY_RUN=1 env -C / "$checkout/scripts/shot.sh" 9 "$out" '#/time')
 case $elsewhere in *"root=$checkout "*) ;; *) fail "run from /, the root is not the script's checkout: $elsewhere" ;; esac
 
+# scripts/chrome-path.mjs, the Chrome the steps start: SHOT_CHROME wins; unset, a
+# Chromium on PATH is found by name, google-chrome before it (the macOS app, where
+# it is installed, before both); a PATH with none and no macOS app finds nothing.
+mac_chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+bins=$(mktemp -d "${TMPDIR:-/tmp}/knobas-chrome-path.XXXXXX")
+mkdir "$bins/one" "$bins/two" "$bins/none"
+printf '#!/bin/sh\n' >"$bins/one/chromium"
+printf '#!/bin/sh\n' >"$bins/two/google-chrome"
+chmod +x "$bins/one/chromium" "$bins/two/google-chrome"
+found=$(SHOT_CHROME=/some/chrome node "$here/chrome-path.mjs") || true
+[ "$found" = /some/chrome ] || fail "chrome-path: SHOT_CHROME not taken: $found"
+if [ -x "$mac_chrome" ]; then on_path=$mac_chrome; else on_path=$bins/two/google-chrome; fi
+found=$(env -u SHOT_CHROME PATH="$bins/one:$bins/two" "$(command -v node)" "$here/chrome-path.mjs") || true
+[ "$found" = "$on_path" ] || fail "chrome-path: found '$found', not $on_path"
+if [ ! -x "$mac_chrome" ]; then
+    if found=$(env -u SHOT_CHROME PATH="$bins/none" "$(command -v node)" "$here/chrome-path.mjs"); then
+        fail "chrome-path: found '$found' on a PATH with no Chrome"
+    fi
+fi
+rm -rf "$bins"
+
 # The pointer steps (#1483), through scripts/shot-steps.mjs in headless Chrome
 # against a fixture page: each step reveals a button only the real pointer
 # event can, and the `click:` after it misses (exit 1) unless the step worked.
 # `Hovered` stands only while the row is under the pointer, so the hover holds
 # through later steps to the capture. A miss on each new step exits 1 naming it.
 # A step never targets an element of a page keep-alive holds hidden (#2247).
-if [ ! -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
-    echo "shot-test: no Chrome at the path shot-steps.mjs starts; the pointer-step and start-up cases skipped"
+# The Chrome shot-steps.mjs starts, found as it finds it (scripts/chrome-path.mjs:
+# the macOS app, else Chrome or Chromium on PATH), not the macOS path alone.
+if ! chrome=$(node "$here/chrome-path.mjs"); then
+    echo "shot-test: no Chrome where scripts/chrome-path.mjs looks; the pointer-step and start-up cases skipped"
     if [ "$failures" -gt 0 ]; then echo "shot-test: $failures failure(s)" >&2; exit 1; fi
     echo "shot-test: ok"
     exit 0
@@ -97,7 +120,6 @@ steps() { # <name> <spec>: run the steps script on the fixture; its stderr lands
 # first page's wait once allowed, as a loaded machine's gate saw it, on a page
 # whose button is drawn late. It runs beside the cases below and is waited for
 # after them.
-chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 printf '#!/bin/sh\nsleep 20\nexec "%s" "$@"\n' "$chrome" >"$fixture/stalled-chrome"
 chmod +x "$fixture/stalled-chrome"
 SHOT_CHROME=$fixture/stalled-chrome steps stalled '#/ + click:Late' & stalled=$!
