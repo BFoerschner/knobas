@@ -19,6 +19,7 @@ import type {
   EntityRow,
   SourceView,
   TreeEntry,
+  TreeSections,
   ViewAction,
   ViewRow,
   ViewSection,
@@ -338,16 +339,21 @@ export function ancestors(path: string): string[] {
 /**
  * The sections a link to `path` is likely read through, asked before the
  * listings above it have named them (#2244, spec #2234 step 2): each
- * directory above it (`""` the top) and the file. The ids are Gitea's
- * adapter's (`files`, `files:<dir>`, `file:<path>`), the one tree a source
- * draws today, and only a guess: the section a listing names is the one the
- * tab keeps, and a guess it names too is answered by the read already asked.
- * The shell never takes an id apart (ADR-0020 rule 3).
+ * directory below the top (whose section is the tab's own, read anyway) and
+ * the file, built from the scheme the source declares for its tree (#2298,
+ * `EntityDetail.tree`). `null` where it declares none, and the link waits for
+ * its listings. Only a guess: the section a listing names is the one the tab
+ * keeps, and a guess it names too is answered by the read already asked. The
+ * shell never takes an id apart (ADR-0020 rule 3).
  */
-export function likelySections(path: string): { dirs: Record<string, string>; file: string } {
-  const dirs: Record<string, string> = { "": "files" };
-  for (const dir of ancestors(path)) dirs[dir] = `files:${dir}`;
-  return { dirs, file: `file:${path}` };
+export function likelySections(
+  path: string,
+  declared: TreeSections | null,
+): { dirs: Record<string, string>; file: string } | null {
+  if (declared === null) return null;
+  const dirs: Record<string, string> = {};
+  for (const dir of ancestors(path)) dirs[dir] = `${declared.dir}${dir}`;
+  return { dirs, file: `${declared.file}${path}` };
 }
 
 /**
@@ -448,24 +454,17 @@ export function repoRefusals(
 }
 
 /**
- * The repository's default branch as the mirror holds it (#2243): the
- * repository row's declared `default_branch`, so the page draws its tabs
- * before the live branch list answers. `null` where the row names none, and
- * the page waits for the list.
- *
- * A payload read outside the adapter (ADR-0007), in this one statement: the
- * code host's declared `default_branch` path covers a branch's row, not a
- * repository's, and no DTO field carries it yet. It misses, never guesses:
- * an absent or non-text key is `null`, the page waiting for the list as
- * before #2243 (pinned in `repo.test.ts` and `TfRepo.test`). A stale name only
- * labels the selector until the list answers: on the default branch the tabs
- * read through the repository entity, whose source names its own default.
+ * The repository's default branch as the mirror holds it (#2243): the one its
+ * detail declares (#2307, `EntityDetail.default_branch`, the kind's declared
+ * path read by the app), so the page draws its tabs before the live branch
+ * list answers. `null` where it declares none, and the page waits for the
+ * list. A stale name only labels the selector until the list answers: on the
+ * default branch the tabs read through the repository entity, whose source
+ * names its own default.
  */
 export function mirrorDefault(detail: EntityDetail | null): string | null {
-  const payload = detail?.payload;
-  if (payload === null || typeof payload !== "object") return null;
-  const named = (payload as Record<string, unknown>)["default_branch"];
-  return typeof named === "string" && named !== "" ? named : null;
+  const named = detail?.default_branch;
+  return named !== undefined && named !== "" ? named : null;
 }
 
 /** The view's toolbar action for `writeOp`, where it offers one. */

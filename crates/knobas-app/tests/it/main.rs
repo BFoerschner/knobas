@@ -71,6 +71,7 @@ mod refresh;
 mod refused_writes;
 mod registry_reads_ipc;
 mod renderer_commands;
+mod repo_detail_ipc;
 mod responsiveness_probe;
 mod run_pipeline;
 mod run_presets_ipc;

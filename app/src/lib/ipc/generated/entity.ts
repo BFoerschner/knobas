@@ -1277,7 +1277,22 @@ priority: string | null,
  * `estimate` path: a whole JSON number or nothing, never zero for a
  * miss. The job card writes it as *est. 3h*.
  */
-estimate_seconds: number | null, };
+estimate_seconds: number | null, 
+/**
+ * A repository's default branch as its source declares it (#2307),
+ * through the kind's `default_branch` path: what the repository page
+ * draws its tabs on before the branch list answers. Absent on the wire
+ * where nothing is declared or the record misses it (ADR-0007).
+ */
+default_branch?: string, 
+/**
+ * How the tree of this kind's view names its sections by path (#2298),
+ * resolved from the adapter registry by the row's `adapter_kind` as
+ * [`kind_info`](Self::kind_info) is: what a deep file link reads before
+ * any listing names its sections (#2244). Absent on the wire for a kind
+ * that draws no tree or an adapter that declares none.
+ */
+tree?: TreeSections, };
 
 /**
  * Which slice of the corpus a room wants.
@@ -3800,6 +3815,29 @@ section: string | null, };
  * Issue #704.
  */
 export type TreeRead = { "status": "read" } & WorkingTreeState | { "status": "no_git" } | { "status": "not_a_repo" } | { "status": "failed", reason: string, };
+
+/**
+ * How a source names the sections of a tree by their path (#2298): what a
+ * link to a file several directories deep reads before any listing has
+ * named its sections (#2244). The id of a directory below the top is `dir`
+ * followed by its path from the top (`src/lib`), a file's `file` followed
+ * by its path (`src/lib.rs`); the top is the tab's own section.
+ *
+ * Declared by the adapter for each kind whose view draws a tree, and carried
+ * to the shell on the entity's detail, so the shell builds an id only from
+ * the source's own words and never takes one apart (ADR-0020 rule 3). Only a
+ * prefetch: the section a listing names is the one the shell keeps, and an
+ * id the source refuses goes unheard.
+ */
+export type TreeSections = { 
+/**
+ * What a directory's path follows in its section id (Gitea: `files:`).
+ */
+dir: string, 
+/**
+ * What a file's path follows in its section id (Gitea: `file:`).
+ */
+file: string, };
 
 /**
  * What is uncommitted at a checkout.

@@ -125,6 +125,17 @@ pub const KIND_TICKET: &str = "ticket";
 /// declaration is per kind at all -- see
 /// `tests::exactly_the_unbudgeted_code_host_kinds_are_exhaustive_and_the_ticket_is_not`, and `sync`'s module
 /// docs for what makes the `true` half honest.
+/// How the tree of a kind's view names its sections by path (#2298): the
+/// repository's, a branch's and a commit's *Files* tab, `None` for a kind
+/// that draws no tree. What the app carries on the entity's detail, so a deep
+/// link's reads start before any listing has named them (#2244).
+#[must_use]
+pub fn tree_sections(kind: &str) -> Option<knobas_source::view::TreeSections> {
+    [KIND_REPO, KIND_BRANCH, KIND_COMMIT]
+        .contains(&kind)
+        .then(view::tree_sections)
+}
+
 #[must_use]
 pub fn entity_kinds() -> Vec<KindInfo> {
     vec![
@@ -429,6 +440,10 @@ fn payload_paths() -> Vec<KindPaths> {
                 entry: PayloadPath::of(["name"]),
             }],
             owner: vec![PayloadPath::of(["owner", "login"])],
+            // The repository record's own field (#2307), as a branch's row
+            // carries it under `repository`: what the repository page draws
+            // its tabs on before the branch list answers.
+            default_branch: vec![PayloadPath::of(["default_branch"])],
             ..KindPaths::default()
         },
         KindPaths {
@@ -538,6 +553,34 @@ fn pr_state() -> Vec<StatePath> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2298: the kinds whose view draws *Files* declare its scheme, and the
+    /// rest none.
+    #[test]
+    fn the_kinds_with_a_tree_declare_its_sections_and_the_rest_none() {
+        for kind in [KIND_REPO, KIND_BRANCH, KIND_COMMIT] {
+            assert!(tree_sections(kind).is_some(), "{kind}");
+        }
+        for kind in [KIND_PR, KIND_TICKET, "build"] {
+            assert_eq!(tree_sections(kind), None, "{kind}");
+        }
+    }
+
+    /// #2307: a repository's row declares its default branch, as a branch's
+    /// does, so the repository page reads it as a field.
+    #[test]
+    fn a_repository_declares_its_default_branch() {
+        let template = descriptor_template();
+        let repo = template
+            .payload_paths
+            .iter()
+            .find(|paths| paths.kind == KIND_REPO)
+            .expect("the repository declares paths");
+        assert_eq!(
+            repo.default_branch,
+            vec![PayloadPath::of(["default_branch"])]
+        );
+    }
 
     /// A closed issue is done-like (#1593): its job context is archived while
     /// its `state` reads `closed`. The set is the ticket's alone, and `open`

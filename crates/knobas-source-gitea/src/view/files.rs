@@ -34,7 +34,9 @@
 //! and its page.
 
 use knobas_source::SourceError;
-use knobas_source::view::{Block, Crumb, EntryKind, FileBytes, TreeEntry, ViewSection};
+use knobas_source::view::{
+    Block, Crumb, EntryKind, FileBytes, TreeEntry, TreeSections, ViewSection,
+};
 
 use super::rows::RepoRecord;
 use crate::map;
@@ -128,6 +130,16 @@ impl<'a> Named<'a> {
             _ => return None,
         };
         Some(Self { place, sha })
+    }
+}
+
+/// How this tab names a directory and a file by their path, at the tip
+/// (#2298): what a deep link reads before any listing names its sections,
+/// the plain spellings of [`Place::id`] that [`Named::parse`] reads.
+pub(crate) fn tree_sections() -> TreeSections {
+    TreeSections {
+        dir: format!("{FILES}:"),
+        file: "file:".to_owned(),
     }
 }
 
@@ -683,6 +695,31 @@ mod tests {
         let mut long = b"one\n".to_vec();
         long.extend(std::iter::repeat_n(b'x', BYTE_CAP + 5));
         assert_eq!(capped(&long, true), ("one\n".to_owned(), true));
+    }
+
+    /// #2298: the scheme the shell builds a deep link's ids by is the one
+    /// this tab parses, at the tip.
+    #[test]
+    fn the_declared_tree_sections_name_the_places_this_tab_reads() {
+        let tree = tree_sections();
+        for dir in ["src", "src/psp/gateway"] {
+            assert_eq!(
+                Named::parse(&format!("{}{dir}", tree.dir)),
+                Some(Named {
+                    place: Place::Dir(dir),
+                    sha: None
+                })
+            );
+        }
+        for path in ["README.md", "src/psp/gateway/sepa/codes.rs"] {
+            assert_eq!(
+                Named::parse(&format!("{}{path}", tree.file)),
+                Some(Named {
+                    place: Place::File(path),
+                    sha: None
+                })
+            );
+        }
     }
 
     #[test]

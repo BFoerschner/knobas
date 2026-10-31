@@ -2,7 +2,7 @@
  * `?fake-ipc`: One entity: the detail and the job page's reads, the reachable
  * transitions, the conversation, and the URL resolver.
  */
-import type { LinkEntry, LinkRow, PipeStep, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
+import type { EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
@@ -285,7 +285,17 @@ function getEntity(args: Record<string, unknown>) {
     priority: fakeText(entry.payload["priority"]),
     estimate_seconds:
       typeof entry.payload["estimate_h"] === "number" ? Math.round(entry.payload["estimate_h"] * 3600) : null,
+    // A repository's declared default branch and its tree's sections, as
+    // Gitea declares both (#2307, #2298): the repository page's demo rows are
+    // Gitea-shaped (`repoView`).
+    ...(entry.kind === "repo" ? repoDeclared(entry.payload) : {}),
   };
+}
+
+/** What Gitea's adapter declares on a repository's detail (#2298, #2307). */
+function repoDeclared(payload: Record<string, unknown>): Partial<Pick<EntityDetail, "default_branch" | "tree">> {
+  const named = fakeText(payload["default_branch"]);
+  return { ...(named === null ? {} : { default_branch: named }), tree: { dir: "files:", file: "file:" } };
 }
 
 /** A payload value that is non-blank text, trimmed, or `null` (ADR-0007's miss). */

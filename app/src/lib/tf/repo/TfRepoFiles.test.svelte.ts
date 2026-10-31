@@ -9,7 +9,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { SourceView, TreeEntry } from "../../ipc/entity";
+import type { SourceView, TreeEntry, TreeSections } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import TfRepoFilesRefreshed from "./TfRepoFiles.refresh.fixture.svelte";
 import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
@@ -84,8 +84,12 @@ function openSource(files: Files) {
 
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
+/** The scheme the repository's detail declares for its tree (#2298): the stand-in's, Gitea's. */
+const GITEA_TREE: TreeSections = { dir: "files:", file: "file:" };
+let declared: TreeSections | null = GITEA_TREE;
 
 beforeEach(() => {
+  declared = GITEA_TREE;
   target = document.createElement("div");
   document.body.appendChild(target);
 });
@@ -122,6 +126,7 @@ function draw(
       path,
       line,
       changed: new Set<string>(),
+      treeSections: declared,
       defaults,
       ...(render ? { render } : {}),
       ...(commands ? { commands } : {}),
@@ -278,6 +283,27 @@ test("a link to a file that does not exist says so once its directory is read", 
   for (const read of [...source.asked]) if (!source.answered.includes(read.section)) read.release();
   await settle();
   expect(text(target.querySelector(".tf-fileview .tf-cfail"))).toBe(`There is no file ${missing} on main.`);
+});
+
+test("a source that declares no tree sections asks for no section its listings have not named (#2298)", async () => {
+  declared = null;
+  const source = heldSource(DEEP_FILES);
+  draw(source.entityView, DEEP);
+  await settle();
+
+  expect(source.asked.map((read) => read.section)).toEqual(["files"]);
+});
+
+test("a deep link asks for the sections its source declares, in the source's own spelling (#2298)", async () => {
+  declared = { dir: "dir:", file: "blob:" };
+  const source = heldSource(DEEP_FILES);
+  draw(source.entityView, DEEP);
+  await settle();
+
+  expect(source.answered).toEqual([]);
+  expect(source.asked.map((read) => read.section).sort()).toEqual(
+    ["files", "dir:src", "dir:src/psp", "dir:src/psp/gateway", "dir:src/psp/gateway/sepa", `blob:${DEEP}`].sort(),
+  );
 });
 
 test("a source that names its sections otherwise still opens the deep file, through the sections its listings name", async () => {

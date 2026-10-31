@@ -88,6 +88,21 @@ pub struct EntityDetail {
     /// `estimate` path: a whole JSON number or nothing, never zero for a
     /// miss. The job card writes it as *est. 3h*.
     pub estimate_seconds: Option<i64>,
+    /// A repository's default branch as its source declares it (#2307),
+    /// through the kind's `default_branch` path: what the repository page
+    /// draws its tabs on before the branch list answers. Absent on the wire
+    /// where nothing is declared or the record misses it (ADR-0007).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub default_branch: Option<String>,
+    /// How the tree of this kind's view names its sections by path (#2298),
+    /// resolved from the adapter registry by the row's `adapter_kind` as
+    /// [`kind_info`](Self::kind_info) is: what a deep file link reads before
+    /// any listing names its sections (#2244). Absent on the wire for a kind
+    /// that draws no tree or an adapter that declares none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tree: Option<knobas_source::view::TreeSections>,
 }
 
 /// Everything the slide-over needs for `entity_id`: the source listing the
@@ -118,6 +133,10 @@ pub async fn get_entity_inner(
             detail.configured_adapter_kind.as_deref(),
             &detail.row.kind,
         ),
+        tree: detail
+            .configured_adapter_kind
+            .as_deref()
+            .and_then(|adapter| registry.tree_sections(adapter, &detail.row.kind)),
         refreshes: refreshes(
             registry,
             detail.configured_adapter_kind.as_deref(),
@@ -137,6 +156,7 @@ pub async fn get_entity_inner(
         issue_type: detail.issue_type,
         priority: detail.priority,
         estimate_seconds: detail.estimate_seconds,
+        default_branch: detail.default_branch,
     })
 }
 

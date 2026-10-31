@@ -70,7 +70,7 @@
 
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { EVENTS, ipcErrorMessage } from "../../ipc";
-  import type { CheckoutView, TreeEntry, ViewBlock, ViewFresh, ViewSection } from "../../ipc/entity";
+  import type { CheckoutView, TreeEntry, TreeSections, ViewBlock, ViewFresh, ViewSection } from "../../ipc/entity";
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
@@ -148,6 +148,7 @@
     defaults = appDefaults,
     pipelines = appPipelines,
     stepCommands = appCommandSteps,
+    treeSections = null,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "piped">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -187,6 +188,8 @@
     pipelines?: NamedPipelines;
     /** The person's command steps (#2265): the app's copy, a fresh one in tests. */
     stepCommands?: CommandSteps;
+    /** How the source names the tree's sections by path (#2298, the repository's `EntityDetail.tree`); `null` asks a deep link's sections only once its listings name them. */
+    treeSections?: TreeSections | null;
   } = $props();
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
@@ -290,15 +293,17 @@
   });
 
   // A link to a file below directories not read yet asks for each of them
-  // and the file at once (#2244); the file draws as soon as it answers, and
+  // and the file at once (#2244), by the scheme its source declares (#2298); the file draws as soon as it answers, and
   // the tree fills in as its listings arrive.
   $effect(() => {
     const where = at;
     const target = path;
+    const declared = treeSections;
     if (target === null) return;
     return untrack(() => {
       if (listings[parentOf(target)] !== undefined) return;
-      const likely = likelySections(target);
+      const likely = likelySections(target, declared);
+      if (likely === null) return;
       for (const [dir, section] of Object.entries(likely.dirs))
         if (!asked.has(dir) && listings[dir] === undefined && !early.has(dirKey(dir))) askEarly(section, dirKey(dir));
       let live = true;

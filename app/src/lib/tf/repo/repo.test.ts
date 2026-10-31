@@ -13,6 +13,7 @@ import {
   branchStanding,
   type BranchRow,
   commitPrefill,
+  likelySections,
   mirrorDefault,
   repoAsks,
   repoRefusals,
@@ -463,13 +464,22 @@ test("the repository page asks New branch and Commit change together, and reads 
   expect(repoRefusals([], repo, repo)).toEqual({ branch: null, commit: null });
 });
 
-test("the default branch is the mirror row's declared one, and none where it names none (#2243)", () => {
-  const detail = (payload: unknown) => ({ payload }) as unknown as EntityDetail;
+test("the default branch is the one the repository's detail declares, and none where it declares none (#2243, #2307)", () => {
+  const detail = (fields: Partial<EntityDetail>) => ({ payload: { default_branch: "payload-main" }, ...fields }) as EntityDetail;
   expect(mirrorDefault(detail({ default_branch: "trunk" }))).toBe("trunk");
-  expect(mirrorDefault(detail({ default_branch: "" }))).toBeNull();
+  // The payload's own key is the source's spelling: never read in the shell.
   expect(mirrorDefault(detail({}))).toBeNull();
-  expect(mirrorDefault(detail(null))).toBeNull();
+  expect(mirrorDefault(detail({ default_branch: "" }))).toBeNull();
   expect(mirrorDefault(null)).toBeNull();
+});
+
+test("a deep link's sections are built from the scheme the source declares, and none where it declares none (#2298)", () => {
+  expect(likelySections("src/psp/codes.rs", { dir: "dir:", file: "blob:" })).toEqual({
+    dirs: { src: "dir:src", "src/psp": "dir:src/psp" },
+    file: "blob:src/psp/codes.rs",
+  });
+  expect(likelySections("README.md", { dir: "files:", file: "file:" })).toEqual({ dirs: {}, file: "file:README.md" });
+  expect(likelySections("src/lib.rs", null)).toBeNull();
 });
 
 // ---- readAllRows (#1825) ----

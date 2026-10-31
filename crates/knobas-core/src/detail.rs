@@ -69,6 +69,9 @@ pub struct Detail {
     pub issue_type: Option<String>,
     pub priority: Option<String>,
     pub estimate_seconds: Option<i64>,
+    /// A repository's default branch through its declared `default_branch`
+    /// path (#2307); `None` where nothing is declared or the record misses it.
+    pub default_branch: Option<String>,
 }
 
 /// How many history lines the detail view is given up front.
@@ -166,6 +169,9 @@ select i.entity_id, i.source_id, i.kind, i.title, "#,
        "#,
     crate::declared_integer!("$2", "estimate"),
     r#" as estimate_seconds,
+       "#,
+    crate::declared_string!("$2", "default_branch"),
+    r#" as default_branch,
        e.deleted_at,
        c.display_name, c.kind as adapter_kind,
        coalesce(c.enabled, true) as source_enabled
@@ -265,5 +271,6 @@ pub async fn read(
         issue_type: row.get("issue_type"),
         priority: row.get("priority"),
         estimate_seconds: row.get("estimate_seconds"),
+        default_branch: row.get("default_branch"),
     }))
 }

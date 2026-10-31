@@ -949,13 +949,13 @@ function heldBack<T>() {
   return { promise, answer };
 }
 
-/** `ports()` with the branch list held back, and the repository row's mirror payload `payload`. */
-function holdingBranches(payload: unknown) {
+/** `ports()` with the branch list held back, and the repository's detail declaring `fields` (#2307) over a payload naming a default the shell never reads. */
+function holdingBranches(fields: Partial<EntityDetail>) {
   const base = ports();
   const branches = heldBack<SourceView | null>();
   const stand: RepoPorts = {
     ...base,
-    getEntity: async (id) => ({ ...(await base.getEntity(id)), payload }) as EntityDetail,
+    getEntity: async (id) => ({ ...(await base.getEntity(id)), payload: { default_branch: "payload-main" }, ...fields }) as EntityDetail,
     entityView: (id, sectionId) => {
       if (id === REPO && sectionId === "branches") {
         viewReads.push([id, sectionId]);
@@ -989,7 +989,23 @@ test("with the branch list held back, Files draws on the mirror's default branch
   expect(tree()).toContain("README.md");
 });
 
-test("a repository whose mirror row names no default branch draws its tab once the branch list answers", async () => {
+test("a deep file link reads by the tree sections the repository's detail declares, before any listing names them (#2298)", async () => {
+  const early = (declared: Partial<EntityDetail>) => {
+    const base = ports();
+    return { ...base, getEntity: async (id: string) => ({ ...(await base.getEntity(id)), ...declared }) as EntityDetail };
+  };
+  const fileReads = () => viewReads.filter(([, sectionId]) => sectionId === "blob:src/psp/codes.rs").length;
+  await draw([REPO, "files", "src", "psp", "codes.rs"], early({ default_branch: "main", tree: { dir: "dir:", file: "blob:" } }));
+  expect(fileReads()).toBe(1);
+  unmount(view!);
+  view = null;
+  viewReads.length = 0;
+
+  await draw([REPO, "files", "src", "psp", "codes.rs"], early({ default_branch: "main" }));
+  expect(fileReads()).toBe(0);
+});
+
+test("a repository whose detail declares no default branch draws its tab once the branch list answers, whatever its payload says", async () => {
   const { stand, release } = holdingBranches({});
   await draw([REPO], stand);
   expect(target.querySelector(".tf-ftree")).toBeNull();
