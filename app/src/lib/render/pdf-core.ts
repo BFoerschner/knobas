@@ -20,9 +20,11 @@
  *   opener, a link to a page scrolls to it, and every other link (a
  *   `javascript:` or `file:` URI, a launch, a named or script action) is
  *   not drawn at all.
- * - **Fetches**: no `standardFontDataUrl`, `cMapUrl`, `iccUrl` or `wasmUrl`,
- *   so the worker fetches nothing; a font a PDF does not embed falls back to
- *   a system font, and a JPEG 2000 or JBIG2 image is not drawn.
+ * - **Fetches**: the app hands in `pdf-assets.ts`'s options (#2313), and the
+ *   worker fetches pdf.js's own decoders, fonts and CMaps from the app's
+ *   origin, nothing a PDF names. Without them (as in this module's tests) a
+ *   font a PDF does not embed falls back to a system font, and a JPEG 2000
+ *   or JBIG2 image is not drawn.
  */
 import type { PageViewport, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 
