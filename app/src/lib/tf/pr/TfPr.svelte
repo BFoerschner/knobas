@@ -616,6 +616,20 @@
         </div>
       </div>
       <div class="tf-acts">
+        {#if merge !== null}
+          {@const hold = heldBy("merge")}
+          <!-- The primary comes first (#2238 header order). Blocked by the source, it still opens its dialog, which names each reason (#843); held by a queued write, it opens nothing. -->
+          <button
+            type="button"
+            class="tf-btn"
+            class:tf-primary={hold === null}
+            aria-disabled={hold !== null || merge.disabled !== null ? "true" : undefined}
+            title={hold ?? merge.disabled ?? undefined}
+            onclick={() => {
+              if (hold === null) merging = true;
+            }}>Merge…</button
+          >
+        {/if}
         {#if waiting > 0 && takesReview}
           <button type="button" class="tf-btn tf-warnbtn" onclick={() => (reviewing = true)}>Submit review ({waiting} pending)</button>
         {:else if reviewable}
@@ -631,20 +645,6 @@
             onclick={() => open(write)}>{write.label}</button
           >
         {/each}
-        {#if merge !== null}
-          {@const hold = heldBy("merge")}
-          <!-- Blocked by the source, it still opens its dialog, which names each reason (#843); held by a queued write, it opens nothing. -->
-          <button
-            type="button"
-            class="tf-btn"
-            class:tf-primary={hold === null}
-            aria-disabled={hold !== null || merge.disabled !== null ? "true" : undefined}
-            title={hold ?? merge.disabled ?? undefined}
-            onclick={() => {
-              if (hold === null) merging = true;
-            }}>Merge…</button
-          >
-        {/if}
         {#if repo !== null && number !== null && header.base !== null && header.head !== null}
           <TfOpenObject
             entityId={repo.entity_id}
