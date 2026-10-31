@@ -62,6 +62,18 @@ rm "$scratch/docs/prose.md"
 
 expect green "the tree after it is removed"
 
+# #2305: an allow-listed fixture is skipped though the list outgrows a pipe
+# buffer, so a `grep -q` that matches its first line cannot SIGPIPE the rest.
+cp "$scratch/scripts/conflict-markers-allow.txt" "$scratch/allow.orig"
+printf 'docs/fixture.md\n' > "$scratch/scripts/conflict-markers-allow.txt"
+for i in $(seq 4000); do echo "docs/padding-$i-of-an-allow-list-longer-than-a-pipe-buffer.md"; done \
+    >> "$scratch/scripts/conflict-markers-allow.txt"
+printf 'prose\n<<<<<<< HEAD\n' > "$scratch/docs/fixture.md"
+expect green "an allowed fixture under an allow list longer than a pipe buffer (#2305)"
+rm "$scratch/docs/fixture.md"
+cp "$scratch/allow.orig" "$scratch/scripts/conflict-markers-allow.txt"
+rm "$scratch/allow.orig"
+
 # #1919: the doc-list check, each table in both directions. A red case must
 # also name what it refuses, so a check that failed for another reason (a
 # table it could not find) does not pass it.

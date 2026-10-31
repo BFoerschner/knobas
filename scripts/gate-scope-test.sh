@@ -7,7 +7,8 @@
 # script that answers `full` for everything would pass. `app/package.json`
 # (#2301): a new dependency line answers `front` though `crates/` reads the
 # file; a changed `@tauri-apps/plugin-*` line answers `full`, and so does any
-# other app file `crates/` names. The `scripts` scope (#2334): a head that
+# other app file `crates/` names. Also one it names on more lines than a pipe buffer
+# holds (#2305): `grep -q` must not SIGPIPE its producer into a `front`. The `scripts` scope (#2334): a head that
 # changes only `scripts/`, `testenv/` and prose answers `scripts`, unless one of
 # its paths is named by `crates/` or `app/src` (a directory named pins its
 # contents; a comment or a bare `testenv/` pins nothing), is one the full gate
@@ -33,6 +34,10 @@ echo a > "$scratch/app/src/lib/tf/Top.svelte"
 echo a > "$scratch/app/src/lib/other/Plain.svelte"
 echo a > "$scratch/app/src/lib/slash/S.svelte"
 echo a > "$scratch/app/src/lib/read.ts"
+echo a > "$scratch/app/src/lib/big.ts"
+# #2305: more `crates/` lines naming one app file than a pipe buffer holds, so a
+# `grep -q` reading them exits while the producer still writes.
+for i in $(seq 4000); do echo "const BIG_$i: &str = include_str!(\"../app/src/lib/big.ts\");"; done > "$scratch/crates/big.rs"
 echo a > "$scratch/docs/x.md"
 cat > "$scratch/app/package.json" <<'EOS'
 {
@@ -111,6 +116,7 @@ expect front "a prose file" docs/x.md
 expect full "the hook wiring, which bash-guard-test.sh tests (#1982)" .claude/settings.json
 expect front "a Markdown command under .claude/" .claude/commands/loop.md
 expect full "an app file crates/ reads" app/src/lib/read.ts
+expect full "an app file crates/ names on more lines than a pipe buffer holds (#2305)" app/src/lib/big.ts
 expect scripts "a script nothing reads (#2334)" scripts/shot-test.sh
 expect scripts "a testenv script and a prose file (#2334)" testenv/w-test.sh docs/x.md
 expect scripts "a script only a crates/ comment names (#2334)" scripts/commented.sh
