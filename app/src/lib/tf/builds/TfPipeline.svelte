@@ -30,7 +30,8 @@
   withdrawn and turned-off banners under the header (`TfDetailBanners`). A
   refresh reads the pipeline's row (the list's), its runs, its settings and
   its item again, over what the page drew. The Builds view's *Sync now*
-  (`sync`, #2287) comes after it, last.
+  (`sync`, #2287) comes after it, last, unless the detail's
+  button is itself a *Sync now* (its source reads no one item).
 -->
 <script lang="ts">
   import { secondsLabel } from "../../time/format";
@@ -564,7 +565,8 @@
       <button type="button" class="tf-btn tf-ghost" onclick={openInSource}>Open in {pipeline.source_name}</button>
     {/if}
     {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={refreshRead} page />{/if}
-    {@render syncNow?.()}
+    <!-- The view's *Sync now*, unless the detail's button already is one (#2287): one *Sync now* per header. -->
+    {#if detail === null || refresh.offer(detail) !== "sync"}{@render syncNow?.()}{/if}
   </div>
 </header>
 {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}

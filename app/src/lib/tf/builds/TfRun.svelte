@@ -37,7 +37,8 @@
     (`TfDetailRefresh`), and the withdrawn and turned-off banners under the
     header (`TfDetailBanners`). A refresh reads the run again as a finished
     sync does, over what the page drew. The Builds view's *Sync now*
-    (`sync`, #2287) comes after it, last.
+    (`sync`, #2287) comes after it, last, unless the detail's
+    button is itself a *Sync now* (its source reads no one item).
 -->
 <script lang="ts">
   import { clockLabel, secondsLabel } from "../../time/format";
@@ -484,7 +485,8 @@
         <button type="button" class="tf-btn tf-ghost" onclick={() => openExternal(run.web_url)}>Open in {pipeline.source_name}</button>
       {/if}
       {#if detail !== null}<TfDetailRefresh {detail} {refresh} reread={rereadRun} page />{/if}
-      {@render syncNow?.()}
+      <!-- The view's *Sync now*, unless the detail's button already is one (#2287): one *Sync now* per header. -->
+      {#if detail === null || refresh.offer(detail) !== "sync"}{@render syncNow?.()}{/if}
     </div>
   </header>
   {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}

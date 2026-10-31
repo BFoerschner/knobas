@@ -5,7 +5,7 @@
  * a run started here drawn queued at once; and the Parameters and Triggers
  * tabs over the live settings read.
  */
-import { flushSync, mount, unmount } from "svelte";
+import { createRawSnippet, flushSync, mount, unmount, type Snippet } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { PipelineRow, PipelineSettings, RunRow } from "../../ipc/entity";
@@ -170,6 +170,7 @@ function draw(
   job: string | null = "PAY-231",
   overrides: Partial<PipelinePorts> = {},
   older: RunRow[][] = [[run(1150, "ok", daysAgo(9, 9))], []],
+  sync?: Snippet,
 ): Drawn {
   const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [], reads: 0, rowReads: 0, sync: null, next: RUNS, go: () => {}, goPipeline: () => {} };
   const ports: PipelinePorts = {
@@ -211,7 +212,7 @@ function draw(
     return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
   };
   const rereadRow = () => void (drawn.rowReads += 1);
-  const props = $state({ pipeline: PIPELINE, rest, job, runs, onpin: () => (drawn.pinned += 1), rereadRow, ports });
+  const props = $state({ pipeline: PIPELINE, rest, job, runs, onpin: () => (drawn.pinned += 1), rereadRow, ports, sync });
   drawn.go = (next) => {
     props.rest = next;
     flushSync();
@@ -1254,6 +1255,23 @@ test("a pipeline whose adapter reads no one item offers Sync now; a turned-off s
   await settle();
   expect(refreshButton()).toBeNull();
   expect(target.querySelector(".tf-turnedoff")?.textContent).toContain("Tidewater CI is disabled");
+});
+
+/** The Builds view's *Sync now* (#2106), as the role frame hands it. */
+const viewSync = createRawSnippet(() => ({ render: () => '<button type="button" class="tf-btn tf-syncnow">Sync now</button>' }));
+const headerActs = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-bhead .tf-acts button")].map((b) => b.textContent);
+
+test("the view's Sync now ends the header after Refresh, and gives way to a detail's own Sync now: one per header (#2287)", async () => {
+  draw([PIPELINE.entity_id], "PAY-231", { refresh: refreshProbe().ports }, undefined, viewSync);
+  await settle();
+  expect(headerActs().slice(-2)).toEqual(["Refresh", "Sync now"]);
+  unmount(page!);
+  page = null;
+  draw([PIPELINE.entity_id], "PAY-231", { refresh: refreshProbe().ports, getEntity: (id) => Promise.resolve(detailOf(id, { refreshes: false })) }, undefined, viewSync);
+  await settle();
+  expect(headerActs().filter((name) => name === "Sync now")).toHaveLength(1);
+  expect(target.querySelector(".tf-syncnow")).toBeNull();
+  expect(headerActs().at(-1)).toBe("Sync now");
 });
 
 test("a parameter change's echo goes on a refresh's read of the settings that shows the new value (#2128)", async () => {
