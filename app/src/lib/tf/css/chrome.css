@@ -143,7 +143,7 @@
   border: 0; background: var(--sheet); cursor: pointer; color: var(--ink-2);
 }
 .tf-seg button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
-.tf-fchips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.tf-fchips { display: inline-flex; gap: var(--control-gap); flex-wrap: wrap; }
 .tf-fchips button {
   height: var(--control-h-sm); padding: 0 10px; font-size: var(--t-sm); border-radius: 12px;
   border: 1px solid var(--rule); background: var(--sheet); cursor: pointer; color: var(--ink-2);

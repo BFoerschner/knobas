@@ -9,7 +9,9 @@
  *   `border-radius` (a `font` shorthand counts, it sets the size);
  * - (b) the unported button classes (`btn`, `tb-btn`, the old `x`) appear in a
  *   stylesheet or a component;
- * - (c) an actions container (`.tf-acts`, a local `…acts` row or the bare `.acts`, `.tf-trail`, a dialog footer) has a
+ * - (c) a row of buttons (an actions container: `.tf-acts`, a local `…acts` row or the bare `.acts`,
+ *   `.tf-trail`, a dialog footer; or a row that holds controls under another name: the filter bar
+ *   `.tf-fbar`, the pill toggles `.tf-fchips`, the large decision `.tf-decide`, a `…-btns` row) has a
  *   `gap` other than `var(--control-gap)`;
  * - (d) an allowlist entry has no reason;
  * - (e) an allowlist entry matches nothing.
@@ -60,6 +62,11 @@ const UNPORTED = ["btn", "tb-btn", "x"];
  */
 const ACTIONS_CLASS = /\.(?:(?:[\w-]+(?<![fF]))?acts|tf-trail|dlg-f)(?![\w-])/;
 const DIALOG = /\.(?:[\w-]*dialog[\w-]*|tf-steps)(?![\w-])/;
+/**
+ * Rows of controls not named for actions (rule c, review of #2238): the filter bar, the pill
+ * toggles, the link review's large decision and a `…-btns` row (the view editor's `.tf-vw-btns`).
+ */
+const BUTTON_ROW = /\.(?:tf-fbar|tf-fchips|tf-decide|[\w-]+-btns)(?![\w-])/;
 
 /** Every `.css` and `.svelte` file under `root`, relative, sorted. */
 function files(root: string): string[] {
@@ -146,6 +153,11 @@ function isActions(selector: string): boolean {
   return /^footer(?![\w-])/.test(subject) && parts.slice(0, -1).some((part) => DIALOG.test(part));
 }
 
+/** Is the rule's subject a row of buttons: an actions container, or a row of controls under another name? */
+function isButtonRow(selector: string): boolean {
+  return isActions(selector) || BUTTON_ROW.test(compounds(selector).at(-1) ?? "");
+}
+
 /** The stylesheet text of `file`: the file itself, or a component's `<style>` blocks. */
 function stylesheet(file: string, text: string): string {
   if (file.endsWith(".css")) return text;
@@ -209,8 +221,8 @@ function scan(root: string): Violation[] {
           }
         }
         const gaps = decls.filter(([prop, value]) => /^(?:gap|column-gap)$/.test(prop) && value !== "var(--control-gap)");
-        if (gaps.length > 0 && isActions(selector)) {
-          add({ rule: "c", file, key: selector, detail: `sets ${gaps.map(([p, v]) => `${p}: ${v}`).join(", ")} on an actions container` });
+        if (gaps.length > 0 && isButtonRow(selector)) {
+          add({ rule: "c", file, key: selector, detail: `sets ${gaps.map(([p, v]) => `${p}: ${v}`).join(", ")} on a row of buttons` });
         }
       }
     }
@@ -379,14 +391,14 @@ test("(b) the unported button classes fail in a stylesheet and in a component's 
         '<line class="tf-tm-hr" x1={x} x2={x} />',
         "<span class=\"row {x ? 'on' : ''}\">{x}</span>",
         "<rect class={`tf-bar tf-run-${tone(x)}`} x={x} />",
-        "<style>.tf-btns { gap: 4px; } .tf-x { width: 1.5x; }</style>",
+        "<style>.tf-btns { color: red; } .tf-x { width: 1.5x; }</style>",
       ].join("\n"),
       "lib/tf/css/view.css": ".tf-btn.tf-sm { color: red; } .tf-tbx { color: red; }",
     }),
   ).toEqual([]);
 });
 
-test("(c) an actions container's gap other than the control gap fails", () => {
+test("(c) a row of buttons with a gap other than the control gap fails", () => {
   for (const css of [
     ".tf-fhead .tf-acts { margin-left: auto; display: flex; gap: 6px; }",
     ".tf-strip .tf-trail { gap: 8px; }",
@@ -401,10 +413,15 @@ test("(c) an actions container's gap other than the control gap fails", () => {
     // The bare `.acts` of the unported styles and the boot screen too (#2292).
     ".sec-h .acts{margin-left:auto;display:flex;gap:4px}",
     ".acts { margin-top: 16px; display: flex; gap: 6px; }",
+    // A row of buttons that is not called actions: the filter bar, the pill toggles, the large decision, a `…-btns` row.
+    ".tf-fbar { display: flex; gap: 8px 10px; }",
+    ".tf-fchips { display: inline-flex; gap: 4px; }",
+    ".tf-decide { display: flex; gap: 10px; }",
+    ".tf-vw-btns { display: flex; gap: 8px; }",
   ]) {
     const failures = planted({ "lib/tf/css/view.css": css });
     expect(failures, css).toHaveLength(1);
-    expect(failures[0], css).toMatch(/^\(c\) lib\/tf\/css\/view\.css `[^`]+` sets (column-)?gap: \d+px on an actions container\. See /);
+    expect(failures[0], css).toMatch(/^\(c\) lib\/tf\/css\/view\.css `[^`]+` sets (column-)?gap: \d+px( \d+px)? on a row of buttons\. See /);
   }
   // In the controls stylesheet too: the gap rule has no home where it may be broken.
   expect(planted({ [CONTROLS_SHEET]: ".tf-trail { gap: 4px; }" })).toHaveLength(1);
@@ -415,8 +432,11 @@ test("(c) an actions container's gap other than the control gap fails", () => {
         ".tf-fhead .tf-acts { gap: var(--control-gap); }",
         ".tf-dialog footer { gap: var(--control-gap); }",
         ".tf-launch > footer { gap: 14px; }",
-        ".tf-fchips { gap: 4px; }",
+        ".tf-fchips { gap: var(--control-gap); }",
+        // The select's label and the select are not two buttons.
+        ".tf-fsel { gap: 5px; }",
         ".tf-acts .tf-btn { gap: 6px; }",
+        ".tf-fbar .tf-fcount { gap: 4px; }",
         ".tf-actsx { gap: 8px; }",
         ".acts .tf-btn { gap: 6px; }",
         ".actsx { gap: 8px; }",

@@ -1,7 +1,7 @@
 /* ---------- the filter bar (#810): one for every list view ---------- */
 .tf mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
 .tf-fbar {
-  display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; padding: 10px 22px;
+  display: flex; flex-wrap: wrap; gap: var(--control-gap); align-items: center; padding: 10px 22px;
   background: var(--sheet); border-bottom: 1px solid var(--rule); position: sticky; top: 0; z-index: 5;
 }
 .tf-fsearch {
