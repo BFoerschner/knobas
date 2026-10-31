@@ -200,6 +200,29 @@ async function printOf(lib: PdfLib, page: PDFPageProxy): Promise<PdfPrint> {
   return { key, unsure };
 }
 
+/**
+ * The page's text, one entry per line: pdf.js's text items joined until one
+ * ends a line (`hasEOL`), each line's trailing space trimmed and blank lines
+ * dropped. The items come in the content stream's order, which is reading
+ * order for nearly every PDF a tool writes.
+ */
+async function linesOf(page: PDFPageProxy): Promise<string[]> {
+  const content = await page.getTextContent();
+  const lines: string[] = [];
+  let line = "";
+  const end = () => {
+    if (line.trim() !== "") lines.push(line.trimEnd());
+    line = "";
+  };
+  for (const item of content.items) {
+    if (!("str" in item)) continue;
+    line += item.str;
+    if (item.hasEOL) end();
+  }
+  end();
+  return lines;
+}
+
 function pageOf(lib: PdfLib, doc: PDFDocumentProxy, page: PDFPageProxy): PdfPage {
   const base = page.getViewport({ scale: CSS_PER_POINT });
   return {
@@ -228,6 +251,7 @@ function pageOf(lib: PdfLib, doc: PDFDocumentProxy, page: PDFPageProxy): PdfPage
       await new lib.TextLayer({ textContentSource: page.streamTextContent(), container: into, viewport }).render();
     },
     links: () => linksOf(doc, page, base),
+    lines: () => linesOf(page),
     print: () => printOf(lib, page),
     async pixels(scale) {
       if (typeof document === "undefined") return null;
