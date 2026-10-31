@@ -300,6 +300,9 @@ checks layout and interaction. `just dev` or `just demo` checks the bridge.
 `mockups/ticket-first/` holds the clickable HTML mockups, `prototype-1.html`
 to `prototype-6.html`, with the brief in `requirements.md`; `mockups/shared/`
 holds the shared notes (`assets.md`, `capabilities.md`, `dataset.md`).
-`prototype-6.html` is the behaviour and layout reference. Its CSS became the
-global stylesheet. Its rendering approach (string templates and one
-`innerHTML` swap per frame) did not carry over.
+They are historical since 2026-10-31 (#2238) and decide nothing: UI work is
+held to `docs/specs/2026-10-15-ticket-first-design-system.md` (its Controls
+section for buttons and their placement), the dev-only `#/controls` specimen,
+and before/after screenshots. Prototype-6's CSS became the global stylesheet.
+Its rendering approach (string templates and one `innerHTML` swap per frame)
+did not carry over.

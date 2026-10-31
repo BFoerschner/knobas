@@ -17,6 +17,8 @@
      as the Code area mockup (mockups/code-area/base.css) draws them. */
   --hl-kw: #7A3EB1; --hl-str: var(--ok); --hl-num: var(--warn); --hl-com: var(--muted); --hl-fn: var(--info); --hl-ty: #A2461B;
   --add-word: #B4DEC3; --del-word: #EFB9B6;
+  /* The control tokens (design system, Controls; #2280): a button's three heights and the gap between buttons. */
+  --control-h: 32px; --control-h-sm: 26px; --control-h-lg: 40px; --control-gap: 6px;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {

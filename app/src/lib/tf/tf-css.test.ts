@@ -440,3 +440,43 @@ test("the highlighting themes are the Code area mockup's --hl-* tokens, light on
   expect(ours.os["--hl-kw"]).not.toBe(ours.light["--hl-kw"]);
   expect(ours.os["--hl-ty"]).not.toBe(ours.light["--hl-ty"]);
 });
+
+/** `--control-*` → px, from the Controls section's token table (#2238). */
+const CONTROL_TOKENS = [...spec.matchAll(/^\| `(--control-[a-z-]+)` \| (\d+) px \|/gm)].map((row) => [row[1]!, row[2]!] as const);
+
+test("the control tokens are the Controls section's, on :root (#2280)", () => {
+  expect(CONTROL_TOKENS.map(([token]) => token)).toEqual(["--control-h", "--control-h-sm", "--control-h-lg", "--control-gap"]);
+  const root = block(code, ":root");
+  expect(CONTROL_TOKENS.filter(([token, px]) => !root.includes(`${token}: ${px}px;`))).toEqual([]);
+});
+
+/**
+ * Three sizes, each a fixed height from its token and horizontal padding only
+ * (#2280), so neither line-height nor a `<kbd>` inside can make one button of
+ * a row taller than its neighbour. Radius is the design system's 4px for every size.
+ */
+test.each([
+  [".tf-btn", "--control-h"],
+  [".tf-btn.tf-sm", "--control-h-sm"],
+  [".tf-btn.tf-lg", "--control-h-lg"],
+])("%s is var(%s) high with horizontal padding only (#2280)", (selector, token) => {
+  const rule = block(code, selector);
+  expect(rule).toMatch(new RegExp(`(^|[;{\\s])height:\\s*var\\(${token}\\);`));
+  expect(rule).toMatch(/padding:\s*0 \d+px;/);
+  expect(rule).not.toMatch(/min-height|line-height|padding-(top|bottom)/);
+});
+
+test("a button's radius is 4px, and no size rule sets its own (#2280)", () => {
+  expect(block(code, ".tf-btn")).toMatch(/border-radius:\s*4px;/);
+  // No size rule outside the three may set a radius of its own on a button.
+  expect(code.match(/\.tf-btn\.tf-(sm|lg) \{[^}]*border-radius/g)).toBeNull();
+});
+
+test("one danger class: tf-danger-t is merged into tf-danger (#2280)", () => {
+  expect(code).not.toMatch(/tf-danger-t\b/);
+  expect(block(code, ".tf-btn.tf-danger")).toMatch(/color:\s*var\(--err\);/);
+});
+
+test("the link review's decide buttons take their size from .tf-lg, not a padding of their own (#2280)", () => {
+  expect(code).not.toMatch(/\.tf-decide \.tf-btn \{/);
+});

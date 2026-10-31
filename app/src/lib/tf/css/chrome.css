@@ -101,16 +101,29 @@
 /* The job key: Archivo at width 62, weight 800, 64px. The identity of the app. */
 .tf-jobkey { font-weight: 800; font-variation-settings: "wdth" 62; font-size: var(--t-d3); line-height: 1; letter-spacing: -.01em; }
 
-/* ---------- buttons ---------- */
+/* ---------- buttons: the design system's Controls section (#2238, #2280), drawn on `#/controls` ----------
+   Three sizes, each a fixed height from its token and horizontal padding only, so a row of buttons is one
+   height whatever their line-height or a `<kbd>` inside. Default in headers, dialog footers and the top bar;
+   small everywhere in a page body; large only for the one decision a screen exists for. */
 .tf-btn {
-  display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--rule); background: var(--sheet);
-  padding: 5px 11px; border-radius: 4px; cursor: pointer; font-weight: 500; white-space: nowrap; text-decoration: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: var(--control-h); padding: 0 11px; border: 1px solid var(--rule); border-radius: 4px;
+  background: var(--sheet); font-weight: 500; cursor: pointer; white-space: nowrap; text-decoration: none;
 }
 .tf-btn:hover { border-color: var(--ink-2); }
 .tf-btn.tf-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .tf-btn.tf-ghost { border-color: transparent; background: none; }
 .tf-btn.tf-ghost:hover { background: var(--sheet-2); }
 .tf-btn[disabled], .tf-btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: var(--t-sm); }
+.tf-btn.tf-lg { height: var(--control-h-lg); padding: 0 16px; font-size: var(--t-md); }
+
+/* Danger, one pair: red text starts a destructive action, filled red confirms it. */
+.tf-btn.tf-danger { color: var(--err); }
+.tf-btn.tf-primary.tf-danger { background: var(--err); border-color: var(--err); color: var(--sheet); }
+
+/* A strip's or a row's trailing group of actions: at the end, centred on the strip, the control gap apart. */
+.tf-trail { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
 
 /* ---------- chips, signals, small text ---------- */
 .tf-chip {
@@ -121,7 +134,6 @@
 .tf-chip.tf-err { background: var(--err-bg); color: var(--err); } .tf-chip.tf-info { background: var(--info-bg); color: var(--info); }
 .tf-signal { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); }
 .tf .tf-small { font-size: var(--t-xs); }
-.tf-btn.tf-sm { padding: 3px 8px; font-size: var(--t-sm); }
 .tf-linkish {
   border: 0; background: none; padding: 0; cursor: pointer; color: var(--ink-2);
   text-decoration: underline; text-underline-offset: 2px; font-size: var(--t-sm);

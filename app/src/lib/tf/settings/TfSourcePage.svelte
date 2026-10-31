@@ -670,7 +670,7 @@
     <div class="tf-stg-l">Remove this source<small>Asks whether to keep what it synced.</small></div>
     <div class="tf-stg-c">
       <button
-        class="tf-btn tf-sm tf-danger-t"
+        class="tf-btn tf-sm tf-danger"
         onclick={() => {
           purge = false;
           removing = true;
