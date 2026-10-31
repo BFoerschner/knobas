@@ -13,6 +13,7 @@
  * to. `#/map` and `#/assets` are the retired global map and asset page (D13);
  * they still belong to Dependencies, which took their places.
  */
+import { repoHash } from "./repo/repo";
 
 /** A place in the main navigation, or Settings, which has its cog instead. */
 export type Section =
@@ -220,7 +221,7 @@ export function parentOf(route: TfRoute): string | null {
   if (route.view === "ticket") return sectionHash("tickets");
   if (route.view !== "full" || isTopPage(route)) return null;
   if (route.head === "repo" && route.rest[0] && route.rest[1] === "commits" && route.rest[2]) {
-    return `#/repo/${encodeURIComponent(route.rest[0])}`;
+    return repoHash(route.rest[0]);
   }
   return sectionHash(route.section);
 }

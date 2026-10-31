@@ -29,7 +29,7 @@
   import { homeIfBlank } from "./lib/tf/home";
   import { breadcrumbJob, currentJob, linkRequest, type LinkTarget } from "./lib/tf/job/current.svelte";
   import { foregroundOf } from "./lib/tf/foreground";
-  import { jobHash, parseTfHash } from "./lib/tf/route";
+  import { jobHash, parseTfHash, sectionHash } from "./lib/tf/route";
   import TfShell from "./lib/tf/TfShell.svelte";
   import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
   import { createDraftFlow } from "./lib/tf/drafting.svelte";
@@ -342,7 +342,7 @@
       location.hash = landing === "sources" ? "#/settings/sources" : "#/settings/backup";
       return;
     }
-    location.hash = "#/tickets";
+    location.hash = sectionHash("tickets");
     launcherOpen = true;
   }
 

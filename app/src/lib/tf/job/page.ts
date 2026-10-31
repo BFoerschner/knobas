@@ -20,9 +20,10 @@ export const page = definePage({
   matches: (route): route is JobRoute => route.view === "job" && segmentOf(route) !== null,
   component: TfJob,
   // One job per ticket address; its tabs are that page drawn again (#2247).
-  address: (route) => segmentOf(route)!,
+  // `matches` held a job; only a kept page whose chosen job was dropped since names none.
+  address: (route) => segmentOf(route) ?? "",
   props: ({ route, timer, layers, ontimer, onstarttimer, jobPorts }) => ({
-    segment: segmentOf(route)!,
+    segment: segmentOf(route) ?? "",
     tab: route.tab,
     timer,
     layers,

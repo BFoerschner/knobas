@@ -82,7 +82,7 @@
   import { sourceReadings } from "./status";
   import { sourceRoles } from "./roles.svelte";
   import { entityAddress, legacyAddress } from "./address";
-  import { keyOf } from "./job/job";
+  import { ticketRef } from "./job/job";
   import { bridgePorts, type JobPorts } from "./job/ports";
   import { breadcrumbJob, currentJob, linkRequest } from "./job/current.svelte";
   import { chosenJob } from "./job/chosen.svelte";
@@ -266,7 +266,7 @@
    * two sources hold returns to the one that was chosen (#1525).
    */
   chosenJob.load();
-  const chosen = $derived(chosenJob.id === null ? null : { key: keyOf(chosenJob.id), entityId: chosenJob.id });
+  const chosen = $derived(chosenJob.id === null ? null : ticketRef(chosenJob.id));
 
   /**
    * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228):
@@ -301,12 +301,7 @@
    */
   $effect(() => {
     const onScreen = route.view === "ticket" ? route.id : currentJob.entityId;
-    const job =
-      route.view === "job" || route.view === "ticket"
-        ? onScreen === null
-          ? null
-          : { key: keyOf(onScreen), entityId: onScreen }
-        : chosen;
+    const job = route.view === "job" || route.view === "ticket" ? (onScreen === null ? null : ticketRef(onScreen)) : chosen;
     breadcrumbJob.set(job);
     return () => breadcrumbJob.set(null);
   });

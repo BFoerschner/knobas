@@ -39,7 +39,7 @@
  * outside it. `Modal` also answers an `Esc` pressed inside it and stops the
  * event, so that press never reaches the shell.
  */
-import { isEntityId, keyOf } from "./job/job";
+import { segmentKey } from "./job/job";
 import { isTopPage, jobHash, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
 
 /** What `Esc` can see when it is pressed. */
@@ -90,7 +90,7 @@ export function escStep(state: EscState): EscStep {
  */
 export function escTarget(route: TfRoute, opener: EscTarget | null): EscTargetOf | null {
   if (route.view === "job" && route.key !== null && route.tab !== null) {
-    return { hash: jobHash(route.key), name: isEntityId(route.key) ? keyOf(route.key) : route.key, opened: false };
+    return { hash: jobHash(route.key), name: segmentKey(route.key), opened: false };
   }
   if (isTopPage(route)) return null;
   if (opener !== null) return { ...opener, opened: true };
@@ -114,7 +114,7 @@ export function openerName(route: TfRoute, own: string | null): string {
   }
   if (route.view === "item" || route.view === "note") return own || (route.view === "item" ? "Item" : "Note");
   // A ticket page (spec #2227) is named by its ticket's key, as its breadcrumb names it.
-  if (route.view === "ticket") return own || (isEntityId(route.id) ? keyOf(route.id) : route.id);
+  if (route.view === "ticket") return own || segmentKey(route.id);
   return placeName(route) || "the last page";
 }
 

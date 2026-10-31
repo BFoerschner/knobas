@@ -31,6 +31,22 @@ export function isEntityId(segment: string): boolean {
 
 export { keyOf };
 
+/** The key an address segment names, whether it holds a key (`PAY-231`) or an entity id (`jira:PAY-231`). */
+export function segmentKey(segment: string): string {
+  return isEntityId(segment) ? keyOf(segment) : segment;
+}
+
+/** A ticket as the shell hands it around: its key to read, and its entity id to go by (#1525). */
+export interface TicketRef {
+  key: string;
+  entityId: string;
+}
+
+/** The {@link TicketRef} of an entity id. */
+export function ticketRef(entityId: string): TicketRef {
+  return { key: keyOf(entityId), entityId };
+}
+
 /**
  * The ticket a job address names, given how to read one entity.
  *
@@ -71,7 +87,7 @@ export async function resolveJob(
   read: (entityId: string) => Promise<EntityDetail>,
 ): Promise<ResolvedJob | null> {
   const named = isEntityId(segment);
-  const key = named ? keyOf(segment) : segment;
+  const key = segmentKey(segment);
   const candidates = sources.map((source) => `${source.id}:${key}`);
   if (named && !candidates.includes(segment)) candidates.unshift(segment);
   const tickets = await ticketsOf(candidates, read);
