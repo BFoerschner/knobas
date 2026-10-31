@@ -274,6 +274,14 @@ front-changed base="origin/main": deps
 shot slot out +routes:
     scripts/shot.sh "$@"
 
+# Reads live from GitHub through `gh`, no checkout needed. Serves on
+# 127.0.0.1:8765 and opens the browser; `just pr-assets 8800 --no-open`.
+# `python3 scripts/pr-assets-viewer/build.py out.html` writes a static snapshot.
+# Browse every `pr-assets/*` screenshot branch with its tickets and PRs
+[positional-arguments]
+pr-assets *args:
+    python3 -I scripts/pr-assets-viewer/build.py serve "$@"
+
 # Keep-alive's budget and memory witness (#2250, testenv/README.md *Scripts*):
 # headless Chrome against the `?fake-ipc` dev server on 5300 + slot. Times the
 # return to a visited repository tab (Files with a 10,000-line file, after
