@@ -94,6 +94,8 @@ export interface PdfPage {
   /** Fills `into` with the page's text as transparent spans over the drawing, so it can be selected. */
   text(into: HTMLElement, scale: number): Promise<void>;
   links(): Promise<PdfLink[]>;
+  /** The page's text as pdf.js reads it (`getTextContent`), one entry per line, blank lines left out: what its text diff compares (#2315). */
+  lines(): Promise<string[]>;
   /** What the page is made of, to tell it from another page without drawing it (#2282, `render/pdf-diff.ts`). */
   print(): Promise<PdfPrint>;
   /** The page drawn at `scale` on a canvas off screen, its RGBA pixels; `null` where nothing draws (jsdom). */

@@ -3,17 +3,20 @@
  * (its legacy build, as `pdf-core.test.ts`): two PDFs compared page by page,
  * each page row marked same, changed, added or removed.
  */
+import { resolve } from "node:path";
+
 import { expect, test } from "vitest";
 
 import { openPdf, type PdfLib } from "./pdf-core";
-import { alignPages, comparePdfs, type PageRow } from "./pdf-diff";
+import { alignPages, comparePdfs, pageTextDiff, type PageRow } from "./pdf-diff";
 import { fakePdf, type FakePage } from "./pdf-fixture";
 import type { PdfDocument } from "./port";
+import { pdfAssetOptions } from "./pdf-assets";
 
 const lib = async () => (await import("pdfjs-dist/legacy/build/pdf.mjs")) as unknown as PdfLib;
 
-async function open(bytes: Uint8Array): Promise<PdfDocument> {
-  const answer = await openPdf(await lib(), bytes);
+async function open(bytes: Uint8Array, extra: Record<string, unknown> = {}): Promise<PdfDocument> {
+  const answer = await openPdf(await lib(), bytes, extra);
   if (!("pdf" in answer)) throw new Error(`not opened: ${answer.error}`);
   return answer.pdf;
 }
@@ -119,4 +122,42 @@ test("a page inserted into a scan, whose prints are all alike, is aligned by the
     { old: 3, new: 4, mark: "same" },
   ]);
   expect((await comparePdfs(scan(1, 2, 3), scan(1, 5, 3))).map((row) => row.mark)).toEqual(["same", "changed", "same"]);
+});
+
+/** The text diff of page `n` before and page `m` after (#2315), as `±text` lines, context lines as ` text`. */
+async function textDiff(before: FakePage[], n: number | null, after: FakePage[], m: number | null, extra: Record<string, unknown> = {}): Promise<string[]> {
+  const [a, b] = await Promise.all([open(fakePdf({ pages: before }), extra), open(fakePdf({ pages: after }), extra)]);
+  try {
+    const hunks = await pageTextDiff(n === null ? null : await a.page(n), m === null ? null : await b.page(m));
+    return hunks.flatMap((hunk) => hunk.lines.map((line) => `${{ add: "+", del: "-", context: " " }[line.kind]}${line.text}`));
+  } finally {
+    a.close();
+    b.close();
+  }
+}
+
+test("a changed page's text diff says which line changed, beside the lines around it", async () => {
+  const after = FOUR.map((p, i) => (i === 1 ? page("Two", "retries: 5") : p));
+  expect(await textDiff(FOUR, 2, after, 2)).toEqual([" Two", "-retries: 3", "+retries: 5"]);
+});
+
+test("an added page's text diff is every line of it added; a removed page's, every line removed", async () => {
+  expect(await textDiff([], null, FOUR, 3)).toEqual(["+Three", "+backoff"]);
+  expect(await textDiff(FOUR, 4, [], null)).toEqual(["-Four", "-end"]);
+});
+
+test("a page whose only change is an image has no text diff", async () => {
+  const before = [{ ...page("Logo", "the mark"), image: "ff0000" }];
+  const after = [{ ...page("Logo", "the mark"), image: "0000ff" }];
+  expect(await textDiff(before, 1, after, 1)).toEqual([]);
+});
+
+/** `node_modules/pdfjs-dist/`, laid out as the app serves it under `/pdfjs/` (#2313); in Node pdf.js reads the files itself. */
+const SERVED = { ...pdfAssetOptions(`${resolve(process.cwd(), "node_modules/pdfjs-dist")}/`), useWorkerFetch: false };
+
+test("a Japanese page set in a predefined CMap shows its text in the diff once the CMaps are served, and none without", async () => {
+  const before = [{ ...page("Notice"), cjk: ["支払いは毎日です。"] }];
+  const after = [{ ...page("Notice"), cjk: ["支払いは毎週です。"] }];
+  expect(await textDiff(before, 1, after, 1, SERVED)).toEqual([" Notice", "-支払いは毎日です。", "+支払いは毎週です。"]);
+  expect(await textDiff(before, 1, after, 1)).toEqual([]);
 });

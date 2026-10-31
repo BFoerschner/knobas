@@ -17,7 +17,9 @@
  * pair with their old selves. Pages left between two matched pages pair up
  * in order as changed; the ones over are added or removed.
  */
-import type { PdfDocument } from "./port";
+import type { DiffFile } from "../ipc/entity";
+import { lineDiff } from "../tf/diff/line-diff";
+import type { PdfDocument, PdfPage } from "./port";
 
 export type PageMark = "same" | "changed" | "added" | "removed";
 
@@ -109,4 +111,16 @@ async function keysOf(pdf: PdfDocument): Promise<string[]> {
 export async function comparePdfs(before: PdfDocument | null, after: PdfDocument | null): Promise<PageRow[]> {
   const [a, b] = await Promise.all([before ? keysOf(before) : [], after ? keysOf(after) : []]);
   return alignPages(a, b);
+}
+
+/**
+ * What changed in a page's words (#2315): the text of `before` and `after`
+ * (`PdfPage.lines`) diffed line by line, as a source's diff is, with three
+ * lines of context around each change. Either page may be `null` (an added
+ * or removed page): every line is then added or removed. No hunk where the
+ * text is the same, as on a page whose only change is an image.
+ */
+export async function pageTextDiff(before: PdfPage | null, after: PdfPage | null): Promise<DiffFile["hunks"]> {
+  const [a, b] = await Promise.all([before ? before.lines() : [], after ? after.lines() : []]);
+  return lineDiff("", a.join("\n"), b.join("\n")).hunks;
 }

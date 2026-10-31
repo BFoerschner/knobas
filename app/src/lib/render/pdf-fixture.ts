@@ -29,6 +29,11 @@ export interface FakePage {
   gradient?: string;
   /** A JPEG 2000 image on the page (`JPX_SQUARES`, a JPX codestream as hex), drawn 120 pt wide: pdf.js decodes it only with `openjpeg.wasm` (#2313). */
   jpx?: string;
+  /**
+   * Lines set below `lines` in a Japanese font the PDF does not embed, through the predefined CMap `UniJIS-UCS2-H`
+   * (written as UTF-16BE hex, so the file stays ASCII). pdf.js reads their text only with the CMaps served (#2313, #2315).
+   */
+  cjk?: string[];
 }
 
 export interface FakePdfSpec {
@@ -45,6 +50,14 @@ function action(to: FakeTarget, pageRef: (n: number) => string): string {
   if ("js" in to) return `/A << /S /JavaScript /JS (${escape(to.js)}) >>`;
   return `/A << /S /Launch /F (${escape(to.launch)}) >>`;
 }
+
+/** A CID font of Adobe-Japan1, not embedded: its text reaches Unicode only through pdf.js's CMap files. */
+const CJK_DESCRIPTOR =
+  "<< /Type /FontDescriptor /FontName /KozMinPr6N-Regular /Flags 4 /FontBBox [0 -120 1000 880] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>";
+const CJK_DESCENDANT = (descriptor: number) =>
+  `<< /Type /Font /Subtype /CIDFontType0 /BaseFont /KozMinPr6N-Regular /CIDSystemInfo << /Registry (Adobe) /Ordering (Japan1) /Supplement 6 >> /FontDescriptor ${descriptor} 0 R /DW 1000 >>`;
+const CJK_FONT = (descendant: number) =>
+  `<< /Type /Font /Subtype /Type0 /BaseFont /KozMinPr6N-Regular /Encoding /UniJIS-UCS2-H /DescendantFonts [${descendant} 0 R] >>`;
 
 /** A PDF of `spec`'s pages, each 612×792 points (US Letter), its text at 72 pt from the left. */
 export function fakePdf(spec: FakePdfSpec): Uint8Array {
@@ -83,8 +96,12 @@ export function fakePdf(spec: FakePdfSpec): Uint8Array {
       page.jpx === undefined
         ? null
         : add(`<< /Type /XObject /Subtype /Image /Width 16 /Height 16 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/ASCIIHexDecode /JPXDecode] /Length ${page.jpx.length + 1} >>\nstream\n${page.jpx}>\nendstream`);
+    const cjkFont = page.cjk === undefined ? null : add(CJK_FONT(add(CJK_DESCENDANT(add(CJK_DESCRIPTOR)))));
+    const utf16 = (line: string) => Array.from(line, (c) => c.charCodeAt(0).toString(16).padStart(4, "0")).join("");
+    const cjkText = (page.cjk ?? []).map((line, i) => `\nBT /F2 12 Tf 72 ${720 - (page.lines.length + i) * 28} Td <${utf16(line)}> Tj ET`).join("");
     const text =
       page.lines.map((line, i) => `BT /F1 ${i === 0 ? 20 : 12} Tf 72 ${720 - i * 28} Td (${escape(line)}) Tj ET`).join("\n") +
+      cjkText +
       (image === null ? "" : "\nq 120 0 0 120 72 300 cm /Im1 Do Q") +
       (jpx === null ? "" : "\nq 120 0 0 120 72 300 cm /Jpx1 Do Q");
     const rgb = (hex: string) => [0, 2, 4].map((at) => (parseInt(hex.slice(at, at + 2), 16) / 255).toFixed(3)).join(" ");
@@ -96,7 +113,7 @@ export function fakePdf(spec: FakePdfSpec): Uint8Array {
     const images = [image === null ? "" : ` /Im1 ${image} 0 R`, jpx === null ? "" : ` /Jpx1 ${jpx} 0 R`].join("");
     const xobject = (images === "" ? "" : ` /XObject <<${images} >>`) + (shading === null ? "" : ` /Shading << /Sh1 ${shading} 0 R >>`);
     objects[pageId(k)] =
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >>${xobject} >> /Contents ${pageId(k) + 1} 0 R` +
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R${cjkFont === null ? "" : ` /F2 ${cjkFont} 0 R`} >>${xobject} >> /Contents ${pageId(k) + 1} 0 R` +
       (annots.length > 0 ? ` /Annots [${annots.map((a) => `${a} 0 R`).join(" ")}]` : "") +
       " >>";
     objects[pageId(k) + 1] = `<< /Length ${painted.length} >>\nstream\n${painted}\nendstream`;
