@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
-# The merge-tail lock's own test (#1274, #1836), run by `just witness-unit`.
+# The merge-tail lock's own test (#1274, #1836, #2335), run by `just witness-unit`.
 #
+# The holder slot lives on origin as a ref (#2335). Here origin is a local bare
+# repo and each "machine" is its own clone with its own TMPDIR (its own local
+# queue): machine A is the default, `lock_b` runs as machine B.
+#
+# 0. Two machines (#2335): two `take`s racing from two clones on a free slot,
+#    and on a dead holder's slot: exactly one gets the lock. A holder whose
+#    lease ran out is taken over from the other machine, and the old holder's
+#    `assert` then exits 1 and its `release` leaves the new holder alone. An
+#    unreadable origin never holds: `take` stays queued, `assert` exits 1.
 # 1. A holder keeps the lock while it refreshes its claim: a long command
 #    under `hold` refreshes it for as long as the command runs, and every
 #    lock call by the holder (`assert`, a re-entrant `take`) refreshes it too.
 #    A waiter polling through all of that never takes over.
 # 2. A holder whose claim is older than the lease is dead: a waiter takes it
 #    over and gets the lock, however the holder's PR stands (before #1836 only
-#    a MERGED or CLOSED PR counted, so a holder that died with its PR open
-#    held the lock until a human noticed). Two waiters find it, exactly one
-#    takes it over, and the lowest-numbered gets the lock. A takeover guard
-#    left by a killed waiter goes stale and does not block takeovers for good.
-#    A lock taken by the pre-#1836 script has no `alive` file: its claim is as
-#    old as its `holder` file.
+#    a MERGED or CLOSED PR counted). Two waiters on one machine find it,
+#    exactly one takes it over, and the lowest-numbered gets the lock.
 # 3. `take` returns within the wait bound with exit 4 when it is still queued,
 #    so a waiter can wait in the foreground and call it again; its queue entry
 #    stays. `take` is re-entrant for the holder; `assert` exits 0 for the
@@ -27,18 +32,20 @@
 #    end with that script, the holder's gate under `hold` takes the freed gate
 #    slot ahead of a pre-gate that has waited longer.
 #
-# Everything runs under a private TMPDIR, so the real lock under the machine's
-# $TMPDIR is never touched. The lock no longer asks GitHub anything: a `gh` on
-# PATH that records being called proves it.
+# Everything runs under a private TMPDIR against a private origin
+# (KNOBAS_MERGE_TAIL_REPO points the lock at a scratch clone), so neither the
+# machine's real queue nor GitHub's lock ref is ever touched. The lock never
+# asks `gh`: a `gh` on PATH that records being called proves it.
 #
 # MERGE_TAIL_LOCK=<path> runs it against another copy of the script, such as
-# the one on `main` before #1836, to watch the dead-holder cases fail;
-# GATE_SLOT=<path> does the same for `scripts/gate-slot.sh` in case 5.
+# the per-machine one on `main` before #2335, to watch the two-machine cases
+# fail; GATE_SLOT=<path> does the same for `scripts/gate-slot.sh` in case 5.
 set -uo pipefail # no -e: a failed check is counted, and the run goes on
 here=$(cd "$(dirname "$0")" && pwd)
 # Under a holder's re-gate (`hold <PR> just gate` runs `witness-unit`) the
-# environment already carries the mark case 5 looks for.
-unset KNOBAS_MERGE_TAIL_HOLDER
+# environment already carries the mark case 5 looks for, and maybe overrides.
+unset KNOBAS_MERGE_TAIL_HOLDER KNOBAS_MERGE_TAIL_REMOTE KNOBAS_MERGE_TAIL_REF
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/knobas-merge-tail-check.XXXXXX")
 # A private copy, so the cleanup and the watchdog can kill exactly this test's
@@ -47,22 +54,33 @@ lock_script=$scratch/merge-tail-lock.sh
 cp "${MERGE_TAIL_LOCK:-$here/merge-tail-lock.sh}" "$lock_script"
 trap 'pkill -f "$lock_script" 2>/dev/null; rm -rf "$scratch"' EXIT
 export TMPDIR=$scratch/tmp
-mkdir -p "$TMPDIR" "$scratch/bin"
-# A broken lock can make a `take` wait forever: after 100 s, kill this test's
+mkdir -p "$TMPDIR" "$scratch/tmp-b" "$scratch/bin"
+# A broken lock can make a `take` wait forever: after 150 s, kill this test's
 # `take`s so the failures surface and the run ends.
 (
-    while [ -d "$scratch" ] && [ "$SECONDS" -lt 100 ]; do sleep 1; done
-    [ -d "$scratch" ] && { echo "FAIL: timed out after 100 s" >&2; pkill -f "$lock_script"; }
+    while [ -d "$scratch" ] && [ "$SECONDS" -lt 150 ]; do sleep 1; done
+    [ -d "$scratch" ] && { echo "FAIL: timed out after 150 s" >&2; pkill -f "$lock_script"; }
 ) &
 export PATH=$scratch/bin:$PATH KNOBAS_MERGE_TAIL_POLL=1 KNOBAS_MERGE_TAIL_LEASE=600 KNOBAS_MERGE_TAIL_WAIT=600
 
 printf '#!/usr/bin/env bash\ntouch "%s/gh-called"; echo "stub: the lock asked gh: $*" >&2; exit 1\n' "$scratch" > "$scratch/bin/gh"
 chmod +x "$scratch/bin/gh"
 
-LOCK=$TMPDIR/knobas-merge-tail.lock
+g() { git -c user.name=test -c user.email=test@example.invalid -c commit.gpgsign=false "$@"; }
+# origin, and one clone per machine. `-b main` on the bare one: its HEAD is
+# what a clone checks out, and git's own default is `master` on ubuntu-latest
+# (#2035, Linux only).
+origin=$scratch/origin.git
+git init -q --bare -b main "$origin"
+for m in a b; do git init -q -b main "$scratch/$m"; git -C "$scratch/$m" remote add origin "$origin"; done
+export KNOBAS_MERGE_TAIL_REPO=$scratch/a KNOBAS_MERGE_TAIL_MACHINE=machine-a
+REF=refs/locks/merge-tail
+
 QUEUE=$TMPDIR/knobas-merge-tail.queue
 lock() { bash "$lock_script" "$@"; }
+lock_b() { TMPDIR=$scratch/tmp-b KNOBAS_MERGE_TAIL_REPO=$scratch/b KNOBAS_MERGE_TAIL_MACHINE=machine-b bash "$lock_script" "$@"; }
 assert_status() { lock assert "$1" > /dev/null && echo 0 || echo 1; }
+assert_b_status() { lock_b assert "$1" > /dev/null && echo 0 || echo 1; }
 # take_within <seconds> <PR> <out file>: prints take's exit status, or
 # "timeout" when it is still waiting after <seconds> (and is then killed).
 take_within() {
@@ -73,8 +91,21 @@ take_within() {
     if kill -0 "$job" 2>/dev/null; then kill "$job"; wait "$job" 2>/dev/null; echo timeout
     else wait "$job"; echo $?; fi
 }
-age() { perl -e 'my $s = shift; utime time - $s, time - $s, @ARGV' "$@"; } # age <seconds> <file>...
-fresh() { rm -rf "$TMPDIR"/knobas-merge-tail.*; } # each case starts unlocked, with no queue
+# The slot as origin sees it, and the PR its token names.
+slot() { git -C "$origin" rev-parse -q --verify "$REF"; }
+slot_holder() { local s; s=$(slot) && git -C "$origin" cat-file commit "$s" | sed -n 's/^holder: //p'; }
+# expire: the holder stops refreshing and its lease runs out, as origin sees
+# it: the token is rewritten with an expiry 100 s in the past, its holder kept.
+expire() {
+    local s msg tree new
+    s=$(slot) || return 1
+    msg=$(git -C "$origin" cat-file commit "$s" | sed '1,/^$/d' | sed "s/^expires: .*/expires: $(($(date +%s) - 100))/")
+    tree=$(git -C "$origin" hash-object -t tree -w /dev/null)
+    new=$(g -C "$origin" commit-tree "$tree" -m "$msg")
+    git -C "$origin" update-ref "$REF" "$new" "$s"
+}
+# Each case starts with a free slot and no queue on either machine.
+fresh() { git -C "$origin" update-ref -d "$REF" 2>/dev/null; rm -rf "$TMPDIR"/knobas-merge-tail.* "$scratch"/tmp-b/knobas-merge-tail.*; }
 
 failures=0
 check() { # check <label> <command...>
@@ -84,8 +115,77 @@ check() { # check <label> <command...>
 has() { grep -q -- "$2" "$1"; }
 lacks() { ! grep -q -- "$2" "$1"; }
 
+# --- 0. Two machines share one holder slot on origin (#2335) ---
+# Two takes race from two clones on a free slot, five rounds: exactly one
+# exits 0 each time, and the slot names it; the other is still queued.
+# `racing <s>` puts a git on PATH that waits <s> seconds before every push.
+# One machine waits 1 s, the other 2 s, so both read the same free slot before
+# either pushes, and the second push carries a lease that is already stale:
+# the race happens every round, not only when two calls happen to interleave.
+# (Equal waits would make both pushes meet origin's own ref lock at once, and
+# one would fail on that instead of on the lease.)
+export KNOBAS_MERGE_TAIL_WAIT=3
+real_git=$(command -v git)
+mkdir -p "$scratch/slow-push"
+# shellcheck disable=SC2016 # the wrapper's own shell expands it
+printf '#!/usr/bin/env bash\nfor a in "$@"; do [ "$a" = push ] && { sleep "$SLOW_PUSH"; break; }; done\nexec "%s" "$@"\n' "$real_git" > "$scratch/slow-push/git"
+chmod +x "$scratch/slow-push/git"
+racing() { local s=$1; shift; SLOW_PUSH=$s PATH=$scratch/slow-push:$PATH "$@"; }
+for round in 1 2 3 4 5; do
+    fresh
+    da=$((1 + round % 2)); db=$((2 - round % 2)) # who pushes first alternates
+    racing "$da" lock take "14${round}1" > "$scratch/race$round.a" 2>&1 & ja=$!
+    racing "$db" lock_b take "14${round}2" > "$scratch/race$round.b" 2>&1 & jb=$!
+    wait "$ja"; sa=$?; wait "$jb"; sb=$?
+    winners=$(( (sa == 0) + (sb == 0) ))
+    check "race $round: two machines on a free slot, exactly one gets the lock (A $sa, B $sb)" [ "$winners" -eq 1 ]
+    if [ "$sa" = 0 ]; then want="14${round}1"; else want="14${round}2"; fi
+    check "race $round: the slot on origin names the winner" [ "$(slot_holder)" = "$want" ]
+    check "race $round: the loser is still queued (exit 4)" [ $((sa + sb)) -eq 4 ]
+done
+
+# Two machines find a dead holder: exactly one takes it over.
+fresh
+lock take 1400 > /dev/null
+expire
+racing 1 lock take 1401 > "$scratch/dead.a" 2>&1 & ja=$!
+racing 2 lock_b take 1402 > "$scratch/dead.b" 2>&1 & jb=$!
+wait "$ja"; sa=$?; wait "$jb"; sb=$?
+check "dead holder, two machines: exactly one gets the lock (A $sa, B $sb)" [ $(( (sa == 0) + (sb == 0) )) -eq 1 ]
+takeovers=$(cat "$scratch/dead.a" "$scratch/dead.b" | grep -c "taking it over")
+check "dead holder, two machines: exactly one says it takes over (got $takeovers)" [ "$takeovers" -eq 1 ]
+
+# A holder whose lease ran out is taken over from the other machine; its own
+# assert then exits 1, and its release leaves the new holder in place.
+fresh
+KNOBAS_MERGE_TAIL_LEASE=2 lock take 1420 > /dev/null
+sleep 3
+lock_b take 1421 > "$scratch/over.b" 2>&1; sb=$?
+check "expired lease: machine B takes it over (exit $sb)" [ "$sb" = 0 ]
+check "expired lease: B says whose lease it took over" has "$scratch/over.b" "PR #1420 .*lease.*taking it over"
+check "expired lease: the old holder's assert exits 1" [ "$(assert_status 1420)" = 1 ]
+lock release 1420 > /dev/null
+check "expired lease: the old holder's release leaves B holding" [ "$(assert_b_status 1421)" = 0 ]
+check "expired lease: B's assert refreshed the slot, B still named" [ "$(slot_holder)" = 1421 ]
+lock_b release 1421 > /dev/null
+check "release: the slot on origin is gone" [ -z "$(slot)" ]
+
+# A live holder on the other machine keeps the lock: A waits.
+fresh
+lock_b take 1431 > /dev/null
+status=$(KNOBAS_MERGE_TAIL_WAIT=2 take_within 10 1430 "$scratch/live.a")
+check "live holder on B: A is still queued (status $status)" [ "$status" = 4 ]
+check "live holder on B: A names the holder" has "$scratch/live.a" "#1431"
+# An origin nobody can reach never holds.
+status=$(KNOBAS_MERGE_TAIL_REMOTE=$scratch/nowhere.git KNOBAS_MERGE_TAIL_WAIT=2 take_within 10 1432 "$scratch/gone.out")
+check "origin unreachable: take stays queued (status $status)" [ "$status" = 4 ]
+check "origin unreachable: assert exits 1 even for the holder" [ "$(KNOBAS_MERGE_TAIL_REMOTE=$scratch/nowhere.git assert_b_status 1431)" = 1 ]
+lock_b release 1431 > /dev/null
+export KNOBAS_MERGE_TAIL_WAIT=600
+
 # --- 1. A holder that refreshes its claim keeps the lock ---
 # Lease 3 s, poll 1 s: `hold` runs a 6 s command, a waiter polls throughout.
+fresh
 export KNOBAS_MERGE_TAIL_LEASE=3
 lock take 1270 > /dev/null
 ( lock hold 1270 sleep 6 > "$scratch/h1.hold" 2>&1; echo "hold exit $?" >> "$scratch/h1.hold" ) &
@@ -104,14 +204,14 @@ lock release 1268 > /dev/null
 export KNOBAS_MERGE_TAIL_LEASE=600
 
 # Every lock call by the holder is proof of life: `assert` and a re-entrant
-# `take` on a claim 700 s old keep a polling waiter out.
+# `take` on a lapsed claim keep a polling waiter out.
 fresh
 lock take 1271 > /dev/null
-age 700 "$LOCK/alive" "$LOCK/holder"
+expire
 lock assert 1271 > /dev/null
 status=$(take_within 3 1272 "$scratch/w1c.out")
 check "assert refreshes the claim: the waiter does not take over (status $status)" lacks "$scratch/w1c.out" "taking it over"
-age 700 "$LOCK/alive" "$LOCK/holder"
+expire
 lock take 1271 > "$scratch/r1.out"
 check "re-entrant take: already held" has "$scratch/r1.out" "already held by PR #1271"
 status=$(take_within 3 1272 "$scratch/w1d.out")
@@ -121,18 +221,19 @@ lock release 1271 > /dev/null
 # --- 2. A holder whose claim outlived the lease is taken over ---
 fresh
 lock take 1260 > /dev/null
-age 700 "$LOCK/alive" "$LOCK/holder"
+expire
 status=$(take_within 10 1261 "$scratch/w2.out")
 check "dead holder, PR still open: the waiter takes the lock over (status $status)" has "$scratch/w2.out" "held by PR #1261"
 check "dead holder: the takeover is said" has "$scratch/w2.out" "taking it over"
 lock release 1261 > /dev/null
 
-# Two waiters find the dead holder; exactly one takes it over, the lowest-numbered gets the lock.
+# Two waiters on one machine find the dead holder; exactly one takes it over,
+# the lowest-numbered gets the lock.
 fresh
 lock take 1260 > /dev/null
-age 700 "$LOCK/alive" "$LOCK/holder"
+expire
 # 1261 is already in the queue, so 1262 can never be the lowest live waiter,
-# however the two start; both race to take the dead holder over.
+# however the two start.
 mkdir -p "$QUEUE"; touch "$QUEUE/1261"
 (
     lock take 1261 > "$scratch/w2a.out"
@@ -152,27 +253,6 @@ check "two waiters: exactly one takes the dead holder over (got $takeovers)" [ "
 check "two waiters: the lower-numbered gets the lock" has "$scratch/w2a.out" "held by PR #1261"
 check "two waiters: the lower-numbered keeps it while the other waits" has "$scratch/w2a.assert" "^0$"
 check "two waiters: the other gets it after the release" has "$scratch/w2b.out" "held by PR #1262"
-
-# A takeover guard left by a waiter killed mid-takeover goes stale after 60 s
-# and no longer blocks taking over a dead holder.
-fresh
-lock take 1263 > /dev/null
-age 700 "$LOCK/alive" "$LOCK/holder"
-mkdir "$LOCK.takeover"; age 120 "$LOCK.takeover"
-status=$(take_within 10 1264 "$scratch/w3.out")
-check "stale takeover guard: the dead holder is still taken over (status $status)" has "$scratch/w3.out" "held by PR #1264"
-lock release 1264 > /dev/null
-
-# A lock the pre-#1836 script took has no `alive` file: its claim is as old as `holder`.
-fresh
-lock take 1265 > /dev/null
-rm "$LOCK/alive"
-status=$(take_within 3 1266 "$scratch/w5a.out")
-check "legacy holder, fresh: not taken over (status $status)" [ "$status" = timeout ]
-age 700 "$LOCK/holder"
-status=$(take_within 10 1266 "$scratch/w5b.out")
-check "legacy holder, 700 s old: taken over (status $status)" has "$scratch/w5b.out" "held by PR #1266"
-lock release 1266 > /dev/null
 
 # --- 3. take's wait bound, re-entry, assert, hold's guards ---
 fresh
@@ -205,16 +285,9 @@ check "hold: the holder still holds afterwards" [ "$(assert_status 1280)" = 0 ]
 lock release 1280 > /dev/null
 
 # --- 4. The pre-gate record: merge without gating again only when nothing moved ---
-# A real origin and two clones: `wt` is the merge-manager's worktree, `other`
-# moves main the way another merge does.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
-g() { git -c user.name=test -c user.email=test@example.invalid -c commit.gpgsign=false "$@"; }
+# The shared origin and two more clones: `wt` is the merge-manager's worktree,
+# `other` moves main the way another merge does.
 wt=$scratch/wt
-# `-b main` on the bare one too: its HEAD is what `other` clones onto, and
-# git's own default is `master` (the Mac's Command Line Tools ship `main` in
-# their system gitconfig, ubuntu-latest does not), so without it `other`
-# started an unrelated history and its push was refused (#2035, Linux only).
-git init -q --bare -b main "$scratch/origin.git"
 git init -q -b main "$wt"
 g -C "$wt" commit -q --allow-empty -m base
 git -C "$wt" remote add origin "$scratch/origin.git"
