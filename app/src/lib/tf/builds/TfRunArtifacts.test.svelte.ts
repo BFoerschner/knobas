@@ -110,7 +110,10 @@ test("every download goes through knobas: a file, a folder as a zip, and all as 
   await settle();
   button(1, "Download")!.click();
   button(0, "Download folder")!.click();
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-aall button")].find((b) => b.textContent === "Download all as zip")!.click();
+  const all = [...target.querySelectorAll<HTMLButtonElement>(".tf-aall button")].find((b) => b.textContent === "Download all as zip")!;
+  // A page body's button is small (the Controls section, #2287).
+  expect(all.classList.contains("tf-sm")).toBe(true);
+  all.click();
   await settle();
   expect(drawn.downloads).toEqual([{ kind: "file", path: "test-report/junit.xml" }, { kind: "folder", path: "test-report" }, { kind: "all" }]);
   expect(toasts.items.map((t) => t.text)).toEqual([
