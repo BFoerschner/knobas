@@ -5,6 +5,11 @@
   section tally the Tickets preview reads (`reachTally`), and draws them with
   the preview's own component on the ticket-yellow card.
 
+  Its epic line is the preview's: the path line and the title of the nearest
+  parent's own row, read from the mirror through the same `get_entity`
+  (`parentOf`). A parent that cannot be read, or whose title is its key,
+  leaves the path line alone.
+
   It never promotes the ticket's context and never chooses the job: the one
   primary button goes to the job's address, and the job page does both.
 
@@ -22,6 +27,7 @@
   import { isMine, type SourceFacts } from "../job/job";
   import type { JobPorts } from "../job/ports";
   import { reachTally } from "../job/sections";
+  import { parentOf } from "../sets/apply";
   import { sectionHash } from "../route";
   import TfCrumbs from "../TfCrumbs.svelte";
   import TicketPreview from "../tickets/TicketPreview.svelte";
@@ -49,6 +55,8 @@
   let failure = $state<string | null>(null);
   let sources = $state<SourceFacts[]>([]);
   let around = $state<AroundLine[] | null>(null);
+  /** The nearest parent's title, `null` while it is read or when it cannot be. */
+  let parentTitle = $state<string | null>(null);
 
   // Once per ticket, once the database answers. A read the next id overtakes lands nothing.
   $effect(() => {
@@ -59,10 +67,20 @@
       detail = undefined;
       failure = null;
       around = null;
+      parentTitle = null;
       ports
         .getEntity(asked)
         .then((found) => {
-          if (!dead) detail = found.row.kind === "ticket" ? found : null;
+          if (dead) return;
+          detail = found.row.kind === "ticket" ? found : null;
+          const parent = detail ? parentOf(detail.row) : null;
+          if (parent === null) return;
+          ports
+            .getEntity(parent)
+            .then((above) => {
+              if (!dead && above.row.title !== keyOf(parent)) parentTitle = above.row.title;
+            })
+            .catch(() => {});
         })
         .catch((error: unknown) => {
           if (dead) return;
@@ -105,7 +123,7 @@
   {:else}
     <TicketPreview
       page
-      card={ticketFacts(detail, isMine(detail, sources))}
+      card={ticketFacts(detail, isMine(detail, sources), parentTitle)}
       description={detail.body_text}
       {around}
       timerOnIt={timedTicket === key}

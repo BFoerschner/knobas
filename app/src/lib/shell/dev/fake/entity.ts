@@ -6,7 +6,7 @@ import type { LinkEntry, LinkRow, PipeStep, SourceView, Thread, ViewAction, View
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
-import { CORPUS, mirrorRow } from "./corpus";
+import { CORPUS, fakeEpicEntry, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
 import { fixtureBuildEntity, runView } from "./builds";
@@ -248,7 +248,7 @@ function getEntity(args: Record<string, unknown>) {
   if (!id.includes(":") || id.startsWith(":") || id.endsWith(":")) {
     throw { code: "invalid", message: `entity id ${id} has no ':' separating namespace from key`, source_id: null };
   }
-  const entry = CORPUS.find((candidate) => candidate.entity_id === id) ?? buildEntry(id);
+  const entry = CORPUS.find((candidate) => candidate.entity_id === id) ?? buildEntry(id) ?? fakeEpicEntry(id);
   if (!entry) {
     throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
   }

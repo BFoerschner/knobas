@@ -5,7 +5,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { LinkEnd, LinkSetRow } from "../../ipc/entity";
-import { applyToast, epicAbove, epicOf, offered, projectOf, savedDraft, savedName, savedToast, withHandRule, withoutHandRule } from "./apply";
+import { applyToast, epicAbove, epicOf, offered, parentOf, projectOf, savedDraft, savedName, savedToast, withHandRule, withoutHandRule } from "./apply";
 
 const SET: LinkSetRow = {
   id: "payout-stack",
@@ -97,6 +97,12 @@ describe("where a saved set applies", () => {
     expect(epicOf({ entity_id: "jira:PAY-232", source_id: "jira", path: "PAY-200 › PAY-231" })).toBe("jira:PAY-200");
     expect(epicOf({ entity_id: "jira:PAY-231", source_id: "jira", path: "PAY-200" })).toBe("jira:PAY-200");
     expect(epicOf({ entity_id: "jira:PAY-200", source_id: "jira", path: null })).toBeNull();
+  });
+
+  test("a ticket's nearest parent is the bottom of its own path line, in its own source", () => {
+    expect(parentOf({ entity_id: "jira:PAY-232", source_id: "jira", path: "PAY-200 › PAY-231" })).toBe("jira:PAY-231");
+    expect(parentOf({ entity_id: "jira:PAY-231", source_id: "jira", path: "PAY-200" })).toBe("jira:PAY-200");
+    expect(parentOf({ entity_id: "jira:PAY-200", source_id: "jira", path: null })).toBeNull();
   });
 
   /** A stand-in `get_entity` over `key → path line`, recording what it read. */

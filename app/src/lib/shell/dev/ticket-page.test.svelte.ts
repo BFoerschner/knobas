@@ -128,7 +128,7 @@ test("a card on Tickets opens its ticket page: key, title, facts, epic, descript
   expect(lit(), "the ticket page lights Tickets").toBe("Tickets");
   expect(page.classList.contains("tf-card"), "the card is the ticket-yellow").toBe(true);
   expect(page.querySelector("h1")?.textContent).toBe("Retry failed SEPA payouts");
-  expect(facts(page)).toMatchObject({ Status: "In Progress", Assignee: "mara", Priority: "High", Epic: "PAY-200" });
+  expect(facts(page)).toMatchObject({ Status: "In Progress", Assignee: "mara", Priority: "High", Epic: "PAY-200 Payout reliability" });
   expect(page.querySelector(".tf-desc")?.textContent).toBeTruthy();
   await until(() => (page.querySelectorAll(".tf-rollup > div").length ?? 0) > 0, "Around this ticket never counted");
   const lines = [...page.querySelectorAll(".tf-rollup > div")].map((line) => line.textContent ?? "");
@@ -138,6 +138,39 @@ test("a card on Tickets opens its ticket page: key, title, facts, epic, descript
   expect(crumbs).toEqual(["Tickets", "PAY-231"]);
   // Reading a ticket chose no job.
   expect(target.querySelector(".tf-nav a:first-child")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Job");
+});
+
+/** The fixture's handlers with the epic `mock:PAY-200`'s `get_entity` answered by `read` instead. */
+function withEpicRead(handlers: Record<string, Handler>, read: (args: Record<string, unknown>) => unknown): Record<string, Handler> {
+  const getEntity = handlers["get_entity"]!;
+  return { ...handlers, get_entity: (args) => (args["entityId"] === "mock:PAY-200" ? read(args) : getEntity(args)) };
+}
+
+/** The fixture's `get_entity` answer for the epic, with the title a source gave none of: its key. */
+function untitledEpic(handlers: Record<string, Handler>): (args: Record<string, unknown>) => unknown {
+  const getEntity = handlers["get_entity"]!;
+  return (args) => {
+    const detail = getEntity(args) as { row: Record<string, unknown> };
+    return { ...detail, row: { ...detail.row, title: "PAY-200" } };
+  };
+}
+
+test.each([
+  [
+    "cannot read",
+    () => () => {
+      throw { code: "not_found", message: "mock:PAY-200 is not in the mirror", source_id: null };
+    },
+  ],
+  ["reads with its key for a title", untitledEpic],
+])("a ticket page whose epic the mirror %s names the epic by its key alone", async (_, read) => {
+  const handlers = withTicketSearch(demoHandlers());
+  installFakeTauri(recorded(withEpicRead(handlers, read(handlers))));
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  const page = await ticketPageOf("PAY-231");
+  await until(() => sent.some((call) => call.cmd === "get_entity" && call.args["entityId"] === "mock:PAY-200"), "the epic was never read");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(facts(page)).toMatchObject({ Epic: "PAY-200" });
 });
 
 test.each([

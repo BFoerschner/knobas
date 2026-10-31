@@ -120,11 +120,15 @@ export type TicketFacts = Pick<
  * A ticket's {@link TicketFacts} off its detail, for the ticket page: the
  * assignee is the detail's `author`, as the Jira adapter maps it, and `mine`
  * is `isMine`'s answer, the rule `mini_board`'s `mine` reads. The detail holds
- * no epic name, so the epic is its path line alone.
+ * no epic name: `parentTitle` is the title of the nearest parent's own row,
+ * which the page reads from the mirror as the board's `parent_title` is, so
+ * the epic line is the preview's (`PAY-200 Payout reliability`). `null` while
+ * it is read, or when it cannot be, draws the path line alone.
  */
 export function ticketFacts(
   detail: Pick<EntityDetail, "row" | "author" | "status" | "priority">,
   mine: boolean,
+  parentTitle: string | null,
 ): TicketFacts {
   return {
     entity_id: detail.row.entity_id,
@@ -134,7 +138,7 @@ export function ticketFacts(
     assignee: detail.author,
     priority: detail.priority,
     path: detail.row.path,
-    parent_title: null,
+    parent_title: parentTitle,
     updated_at: detail.row.updated_at,
     mine,
   };
