@@ -20,6 +20,7 @@
     reread,
     page = false,
     small = false,
+    ghost = false,
   }: {
     detail: RefreshSubject;
     refresh: DetailRefresh;
@@ -33,8 +34,11 @@
     page?: boolean;
     /** Drawn at the small size: in a page body, as the job's tab strip draws it (#2294). */
     small?: boolean;
+    /** Drawn as a ghost, beside the other ghost actions of a monitor's row (#2138). */
+    ghost?: boolean;
   } = $props();
-  const size = $derived(small ? "tf-btn tf-sm tf-refresh" : "tf-btn tf-refresh");
+  /** The button's classes: the Controls button at its size and look, and `tf-refresh`, which tests find it by. */
+  const classes = $derived(["tf-btn", small && "tf-sm", ghost && "tf-ghost", "tf-refresh"].filter(Boolean).join(" "));
 
   const offer = $derived(refresh.offer(detail));
   const sync = $derived(offer === "sync" ? refresh.syncOf(detail) : null);
@@ -75,7 +79,7 @@
 {#if offer === "refresh"}
   <button
     type="button"
-    class={size}
+    class={classes}
     disabled={busy}
     title="Read this item from {detail.source.display_name} again"
     onclick={press}>{refresh.reading ? "Refreshing…" : "Refresh"}</button
@@ -83,7 +87,7 @@
 {:else if sync !== null}
   <button
     type="button"
-    class={size}
+    class={classes}
     disabled={busy}
     title="Sync {detail.source.display_name}, which this item is from"
     onclick={press}>{sync.running ? "Syncing…" : "Sync now"}</button

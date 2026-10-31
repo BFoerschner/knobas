@@ -630,7 +630,7 @@
                       <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
                     {/each}
                   {/if}
-                  {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} small />{/if}
+                  {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} small ghost />{/if}
                 </div></td>
               </tr>
             {/if}

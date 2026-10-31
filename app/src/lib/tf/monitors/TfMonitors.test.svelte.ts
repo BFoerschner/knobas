@@ -609,7 +609,7 @@ test("a row's Refresh is a small button in the row's trailing group, last after 
   const trail = rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-trail")!;
   expect([...trail.querySelectorAll("button")].map((b) => [text(b), b.className])).toEqual([
     ["Pause", "tf-btn tf-sm tf-ghost"],
-    ["Refresh", "tf-btn tf-sm tf-refresh"],
+    ["Refresh", "tf-btn tf-sm tf-ghost tf-refresh"],
   ]);
 });
 
