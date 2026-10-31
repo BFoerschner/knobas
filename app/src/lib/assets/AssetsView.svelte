@@ -1552,7 +1552,7 @@
       whole estate, and the address that most needs it — a tree with nothing
       in it yet — has neither a column nor a selection to hang it off.
     -->
-    <button class="tb-btn imp" onclick={() => (importing = true)}>Import</button>
+    <button class="tf-btn imp" onclick={() => (importing = true)}>Import</button>
   </div>
 
   {#if typesFailure}
@@ -1694,7 +1694,7 @@
         -->
         <div class="none">
           <p class="empty">Nothing in the estate yet.</p>
-          <button class="btn" disabled={types.length === 0} onclick={() => openCreate(0)}>
+          <button class="tf-btn tf-sm" disabled={types.length === 0} onclick={() => openCreate(0)}>
             New asset
           </button>
         </div>
@@ -1847,7 +1847,7 @@
                 if (event.key === "Escape") cancelEditor(event, () => (renaming = false));
               }}
             />
-            <button class="btn sm pri" disabled={writing} onclick={() => void saveName()}>
+            <button class="tf-btn tf-sm tf-primary" disabled={writing} onclick={() => void saveName()}>
               Save
             </button>
           {:else}
@@ -1921,8 +1921,8 @@
           from, and setting the stored half beside that is a design of its own.
         -->
         <div class="acts">
-          <button class="btn sm" onclick={beginRename}>Rename</button>
-          <button class="btn sm" onclick={() => (moving = true)}>Move…</button>
+          <button class="tf-btn tf-sm" onclick={beginRename}>Rename</button>
+          <button class="tf-btn tf-sm" onclick={() => (moving = true)}>Move…</button>
           <!--
             Story 36: the same gesture a ticket's slide-over offers, opening
             the same dialog. It is beside the other three rather than only
@@ -1931,7 +1931,7 @@
             likely to want it.
           -->
           <button
-            class="btn sm"
+            class="tf-btn tf-sm"
             onclick={() => {
               linking = true;
               writeFailure = null;
@@ -1939,7 +1939,7 @@
           >
             Link to…
           </button>
-          <button class="btn sm danger" onclick={() => (deleting = true)}>Delete</button>
+          <button class="tf-btn tf-sm tf-danger" onclick={() => (deleting = true)}>Delete</button>
         </div>
 
         {#if writeFailure}
@@ -1974,7 +1974,7 @@
                       }}
                     />
                     <button
-                      class="btn sm pri"
+                      class="tf-btn tf-sm tf-primary"
                       disabled={writing}
                       onclick={() => void saveProperty(property)}
                     >
@@ -2052,9 +2052,9 @@
                 }}
               />
               <div class="add-f">
-                <button class="btn sm" onclick={() => (adding = false)}>Cancel</button>
+                <button class="tf-btn tf-sm" onclick={() => (adding = false)}>Cancel</button>
                 <button
-                  class="btn sm pri"
+                  class="tf-btn tf-sm tf-primary"
                   disabled={writing || newKey.trim() === "" || newValue.trim() === ""}
                   onclick={() => void addProperty()}
                 >
@@ -2064,7 +2064,7 @@
             </div>
           {:else}
             <button
-              class="btn sm"
+              class="tf-btn tf-sm"
               onclick={() => {
                 adding = true;
                 writeFailure = null;
@@ -2170,7 +2170,7 @@
                     <span class="faint">lands on nothing knobas knows</span>
                   {/if}
                   <button
-                    class="btn sm"
+                    class="tf-btn tf-sm"
                     onclick={() => {
                       editingRoute = route;
                       // The same clean slate `Add a route` opens on: a failure
@@ -2187,7 +2187,7 @@
             </ul>
           {/if}
           <button
-            class="btn sm"
+            class="tf-btn tf-sm"
             onclick={() => {
               exposing = true;
               writeFailure = null;
@@ -2381,7 +2381,7 @@
         -->
         {#if detail.monitor_targets.length > 0}
           <section class="grp mkmon">
-            <button class="btn sm" onclick={() => (creatingMonitor = true)}>
+            <button class="tf-btn tf-sm" onclick={() => (creatingMonitor = true)}>
               Create monitor for this asset
             </button>
           </section>
@@ -2609,8 +2609,8 @@
       {/if}
     {/snippet}
     {#snippet footer()}
-      <button class="btn" onclick={() => (deleting = false)}>Cancel</button>
-      <button class="btn danger" disabled={writing} onclick={() => void confirmDelete()}>
+      <button class="tf-btn tf-ghost" onclick={() => (deleting = false)}>Cancel</button>
+      <button class="tf-btn tf-primary tf-danger" disabled={writing} onclick={() => void confirmDelete()}>
         {writing ? "Deleting…" : "Delete"}
       </button>
     {/snippet}
@@ -2620,8 +2620,9 @@
 <style>
   /*
     Pushed to the far end of the room bar, away from the heading: this is an
-    action on the whole estate. `.tb-btn` itself is the shell's, shared with the top strip's own
-    buttons, and only the placement is this view's.
+    action on the whole estate. The room bar is the page's header, so the
+    button is `.tf-btn` at the default size (design system, Controls; #2291),
+    and only the placement is this view's.
   */
   .imp {
     margin-left: auto;
@@ -3295,7 +3296,7 @@
   .acts {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--control-gap);
     margin: 0 0 12px;
   }
 
@@ -3322,7 +3323,7 @@
     grid-column: 1 / -1;
     display: flex;
     justify-content: flex-end;
-    gap: 6px;
+    gap: var(--control-gap);
   }
 
   .ask {
