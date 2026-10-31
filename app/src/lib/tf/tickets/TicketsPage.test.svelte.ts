@@ -4,7 +4,7 @@
  * yellow selected card and the preview.
  */
 import { needles } from "./needles";
-import { flushSync, mount, unmount } from "svelte";
+import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type {
@@ -916,6 +916,35 @@ test("Find a view narrows the pane by name and by query, and marks the name", as
   await settle();
   expect(pane()).toEqual(["# Mine", "My work 2"]);
   expect(target.querySelector(".tf-vlist")!.textContent).not.toContain("All tickets");
+});
+
+test("the board head is the canonical header: title left, one group right with the switch, the actions at default size, Sync now last (#2293)", async () => {
+  const h = harness([], [view("mine", "My open bugs", "Mine", 0, { query: "assignee:@me issuetype:Bug" })]);
+  const sync = createRawSnippet(() => ({ render: () => '<button type="button" class="tf-btn tf-syncnow">Sync now</button>' }));
+  page = mount(TicketsPage, { target, props: { ready: true, timedTicket: null, ports: h.ports, viewId: "mine", typingPause: 0, sync } });
+  await settle();
+  const head = target.querySelector<HTMLElement>(".tf-board-head")!;
+  expect(head.matches("header.tf-fhead")).toBe(true);
+  const [title, acts, ...rest] = [...head.children];
+  expect(rest).toEqual([]);
+  expect(title!.querySelector("h1")!.textContent).toBe("My open bugs");
+  expect(title!.querySelector(".tf-q")!.textContent).toBe("assignee:@me issuetype:Bug");
+  expect(acts!.matches(".tf-acts")).toBe(true);
+  expect(acts!.firstElementChild!.matches('.tf-seg[aria-label="Layout"]')).toBe(true);
+  const buttons = [...acts!.querySelectorAll<HTMLButtonElement>(":scope > button, :scope > * > button")].filter((b) => !b.closest(".tf-seg"));
+  expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Edit view", "⋯", "Sync now"]);
+  for (const b of buttons) {
+    expect(b.classList.contains("tf-btn")).toBe(true);
+    expect(b.classList.contains("tf-sm")).toBe(false);
+  }
+  expect(acts!.lastElementChild!.textContent).toBe("Sync now");
+});
+
+test("the preview's go button is the large decision (#2293)", async () => {
+  await open(harness());
+  const go = preview().querySelector(".tf-go .tf-primary")!;
+  expect(go.classList.contains("tf-btn")).toBe(true);
+  expect(go.classList.contains("tf-lg")).toBe(true);
 });
 
 test("a view opens with its text as the filter bar's base, its name and text in the header, and its own layout", async () => {
