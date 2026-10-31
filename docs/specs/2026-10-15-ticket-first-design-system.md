@@ -144,6 +144,31 @@ Right-aligned, `var(--control-gap)` apart, at the default size. A ghost *Cancel*
 
 There is no third way to draw danger.
 
+### The specimen
+
+`#/controls` draws one example of every control and arrangement below, each found by its selector. `controls/TfControls.test.svelte.ts` reads this table, so a row added here without its example on the page fails.
+
+| Control | Selector |
+|---|---|
+| Canonical header and its actions | `.tf-fhead .tf-acts` |
+| Default button | `.tf-fhead .tf-acts .tf-btn:not(.tf-sm):not(.tf-lg)` |
+| Primary | `.tf-fhead .tf-acts .tf-btn.tf-primary` |
+| Ghost "Open in <source>" | `.tf-fhead .tf-acts .tf-btn.tf-ghost` |
+| Section heading with a small action | `.tf-ext-h .tf-btn.tf-sm` |
+| Tab strip with trailing small actions | `.tf-wtabs .tf-trail .tf-btn.tf-sm` |
+| Panel toolbar with a select | `.tf-fbar select` |
+| Segmented control | `.tf-fbar .tf-seg button` |
+| Pill toggles | `.tf-fbar .tf-fchips button` |
+| Row with small actions | `.tf-ext-row .tf-trail .tf-btn.tf-sm` |
+| Icon-only button | `.tf-ext-row .tf-trail .tf-iconbtn` |
+| Dialog footer with an extra action | `.tf-dialog footer .tf-btn.tf-first` |
+| Dialog footer's ghost *Cancel* | `.tf-dialog footer .tf-btn.tf-ghost` |
+| Danger, starting | `.tf-btn.tf-danger:not(.tf-primary)` |
+| Danger, confirming | `.tf-btn.tf-primary.tf-danger` |
+| Large decision with a `<kbd>` hint | `.tf-btn.tf-lg kbd` |
+
+A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end, centred on the strip, `var(--control-gap)` apart.
+
 ### Adding a control
 
 A control this section doesn't name is added by amending this section, the `#/controls` specimen and the style gate in the same PR. It is never a rule local to one view.

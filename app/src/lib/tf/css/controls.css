@@ -18,3 +18,6 @@
 /* Danger, one pair: red text starts a destructive action, filled red confirms it. */
 .tf-btn.tf-danger { color: var(--err); }
 .tf-btn.tf-primary.tf-danger { background: var(--err); border-color: var(--err); color: var(--sheet); }
+
+/* A strip's or a row's trailing group of actions: at the end, centred on the strip, the control gap apart. */
+.tf-trail { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
