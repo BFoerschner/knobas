@@ -30,6 +30,8 @@ function detail(entity_id: string, title: string, path: string | null): EntityDe
     status: "To Do",
     priority: null,
     body_text: "",
+    description: null,
+    markup: "text",
   } as unknown as EntityDetail;
 }
 
