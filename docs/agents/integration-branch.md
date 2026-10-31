@@ -8,7 +8,7 @@ How a whole spec is built on one integration branch with one PR to `main` at the
 - **Ceiling.** The *Ceiling* in `.claude/commands/ticket-loop.md` applies to this run as it does to the loop: seats, Rust builders, the load line, disk, the ledger and its orphan recovery. The caps are per machine.
 - **Tickets.** Only `#<N>`'s sub-issues are claimed (`in-progress`), and never by `/ticket-loop`. A gap that a run finds in its own spec's scope joins the spec as a sub-issue (`gh api -X POST repos/{owner}/{repo}/issues/<N>/sub_issues -F sub_issue_id=<id>`), so the PR closes it.
 - **ADR numbers.** Reserve a block for the spec at the start, and hand each ticket that writes an ADR its number in the dispatch. Two runs on different machines take disjoint blocks.
-- **Landing counts.** Count the landings. Every fifth landing's merger gets *full gate* in its dispatch.
+- **Landing counts.** Count the landings. Every fifth landing's merger gets *full gate* in its dispatch, which also runs the whole live suites. On spec #2234, the first whole live run came at the end and found a break (#2317) that had sat for about 20 landings.
 - **Before the PR goes ready**, in this order:
   1. Merge `origin/main` into `spec-<N>`.
   2. Run a whole-branch `code-review` (both axes) against the merge base, and give the fixes to one implementer.
@@ -33,7 +33,7 @@ How a whole spec is built on one integration branch with one PR to `main` at the
   2. Run `just pre-gate` and commit whatever it changed.
   3. Run `just check-front origin/spec-<N>`.
   4. For every crate the change touches: run `just clippy -p <crate> …`, then `cargo test -p <crate> …` (after `just wasm-fixture` when `knobas-app` is among them). A change to `knobas-source` or `knobas-http` also tests every crate that depends on it directly.
-  5. When the dispatch says *full gate*, replace all of the above with `just gate origin/spec-<N>`.
+  5. When the dispatch says *full gate*, replace all of the above with `just gate origin/spec-<N>`, then run the **whole** `just gitea-live` and `just gitea-live forgejo`, plus any other live suite the spec's tickets have run so far, on their locks. Quote the counts. A failure the spec caused is fixed in this landing; a failure it didn't cause is filed as `Live fixture:`.
 - **Land.** Push with a plain `git push origin HEAD:spec-<N>`, never force. It is fast-forward only, so a rejection means `spec-<N>` moved: merge, run the landing gate again, push again. No tree lands that no landing gate saw. Then push `issue-<T>` to the same SHA.
 - **After landing.** Comment "Landed on `spec-<N>` at `<sha>`; closes with the spec's PR." on each issue. Leave the issue open, and leave the worktree and branch for the orchestrator.
 - **Report** in the merge-manager brief's shape, with `Landed: issue-<T> → spec-<N> <sha>` in place of `Merged:`, and name which gate ran.
