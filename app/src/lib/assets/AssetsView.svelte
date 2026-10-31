@@ -3296,7 +3296,7 @@
   .acts {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--control-gap);
     margin: 0 0 12px;
   }
 
@@ -3323,7 +3323,7 @@
     grid-column: 1 / -1;
     display: flex;
     justify-content: flex-end;
-    gap: 6px;
+    gap: var(--control-gap);
   }
 
   .ask {
