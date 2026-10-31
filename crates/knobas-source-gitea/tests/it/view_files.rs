@@ -878,7 +878,10 @@ async fn an_empty_repository_reads_no_branch_for_a_commit() {
         field: None,
     });
     let answer = source(&server).refused_writes(&asks).await.unwrap();
-    let reasons: Vec<_> = answer.iter().map(|r| (r.op.as_str(), r.reason.as_str())).collect();
+    let reasons: Vec<_> = answer
+        .iter()
+        .map(|r| (r.op.as_str(), r.reason.as_str()))
+        .collect();
     assert_eq!(reasons, [("create_branch", "The repository is empty")]);
 }
 

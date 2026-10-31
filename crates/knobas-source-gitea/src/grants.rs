@@ -334,12 +334,7 @@ async fn standing(
 }
 
 /// One probe: the category's write with an empty body (the module docs).
-async fn probe_one(
-    source: &GiteaSource,
-    owner: &str,
-    repo: &str,
-    category: Category,
-) -> Verdict {
+async fn probe_one(source: &GiteaSource, owner: &str, repo: &str, category: Category) -> Verdict {
     let owner = crate::client::GiteaClient::path_segment(owner)?;
     let repo = crate::client::GiteaClient::path_segment(repo)?;
     let answer = source

@@ -862,7 +862,11 @@ async fn a_failed_grants_read_behind_keeps_the_refusal() {
     f.push();
     assert_eq!(f.refused("moving/repo").await, ["v0"], "kept");
     f.live.settled().await;
-    assert_eq!(f.seen.grants.load(Ordering::SeqCst), 2, "read behind, failed");
+    assert_eq!(
+        f.seen.grants.load(Ordering::SeqCst),
+        2,
+        "read behind, failed"
+    );
     assert_eq!(f.refused("moving/repo").await, ["v0"], "still kept");
     f.live.settled().await;
 }
@@ -878,7 +882,8 @@ async fn a_failed_first_grants_read_refuses_saying_so_and_keeps_nothing() {
         let reasons = f.refused(key).await;
         assert_eq!(reasons.len(), 1, "{key}: {reasons:?}");
         assert!(
-            reasons[0].starts_with("knobas could not ask whether this credential may make this write"),
+            reasons[0]
+                .starts_with("knobas could not ask whether this credential may make this write"),
             "{key}: {reasons:?}"
         );
     }

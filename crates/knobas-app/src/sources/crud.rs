@@ -882,14 +882,13 @@ pub async fn refused_writes(
         let work = async move {
             // Kept where the adapter says the answer moves (#2241): Gitea's
             // probe is asked once per repository, then behind the answer.
-            let answer = match live.source(&pool, &secrets, &registry, &of[0].entity).await {
+            match live.source(&pool, &secrets, &registry, &of[0].entity).await {
                 Ok(lent) => live.refused(&lent, &of).await,
                 Err(error) => {
                     tracing::debug!(source = %id, %error, "refused_writes: no source, no verdict");
                     Vec::new()
                 }
-            };
-            answer
+            }
         };
         // A test's request counter counts each source's asks as the call's.
         #[cfg(feature = "test-util")]
