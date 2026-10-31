@@ -210,12 +210,12 @@ async fn each_ask_goes_to_its_entitys_source_once_and_the_answers_come_back_toge
     );
 }
 
-/// No verdict refuses nothing: a source whose read fails, an entity no
-/// configured source owns, and something that is not an entity id at all
-/// each leave their writes as they were drawn, and the others are still
-/// answered.
+/// An entity no configured source owns and something that is not an entity
+/// id at all leave their writes as they were drawn. A source whose read
+/// fails refuses its asks saying knobas could not ask (#2306): a write is
+/// never drawn as allowed on a failed read. The others are still answered.
 #[tokio::test]
-async fn what_is_no_verdict_refuses_nothing_and_the_rest_are_still_answered() {
+async fn a_failed_read_refuses_saying_so_and_the_rest_are_still_answered() {
     let (up, down) = (unique("narrow-up"), unique("narrow-down"));
     let f = fixture(&[&up, &down]).await;
     let asks = [
@@ -226,9 +226,15 @@ async fn what_is_no_verdict_refuses_nothing_and_the_rest_are_still_answered() {
         ask(&format!("{up}:build:4"), "rerun_build"),
     ];
     let answer = refused(&f, &asks).await;
+    let unasked = "knobas could not ask whether this credential may make this write \
+                   (unreachable: connection refused); it asks again when the write is drawn again";
     assert_eq!(
         answer,
-        [RefusedWrite::of(&asks[4], format!("{up} may not re-run"))]
+        [
+            RefusedWrite::of(&asks[0], unasked),
+            RefusedWrite::of(&asks[1], unasked),
+            RefusedWrite::of(&asks[4], format!("{up} may not re-run")),
+        ]
     );
 }
 

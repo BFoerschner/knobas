@@ -16,9 +16,11 @@
  * A surface draws its writes as before, then asks `refused_writes` about
  * them and draws each refused one disabled with the reason (`aria-disabled`
  * and the reason as its title, as the repository page draws a refused
- * *New branch…*). A press on it queues nothing. Anything that is not an
- * answer (a rejection, an ask left out) is no verdict, and the write stays
- * as it was drawn.
+ * *New branch…*). A press on it queues nothing. A source whose read failed
+ * answers its asks refused, saying knobas could not ask (#2306), so a failed
+ * read never draws a write as allowed. Anything that is not an answer (a
+ * rejection, an ask left out) is no verdict, and the write stays as it was
+ * drawn.
  */
 import { refusedWrites, type RefusedWrite, type WriteAsk } from "../ipc/entity";
 

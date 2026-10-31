@@ -851,6 +851,44 @@ async fn grants_are_kept_and_read_again_behind() {
     assert_eq!(f.seen.grants.load(Ordering::SeqCst) - before, 2, "live");
 }
 
+/// A grants read behind that fails keeps the kept refusal (#2306), as a
+/// failed view read behind keeps the view: the next ask is still answered
+/// with it, and nothing is said.
+#[tokio::test]
+async fn a_failed_grants_read_behind_keeps_the_refusal() {
+    let f = fixture().await;
+    assert_eq!(f.refused("moving/repo").await, ["v0"]);
+    f.seen.failing.store(true, Ordering::SeqCst);
+    f.push();
+    assert_eq!(f.refused("moving/repo").await, ["v0"], "kept");
+    f.live.settled().await;
+    assert_eq!(f.seen.grants.load(Ordering::SeqCst), 2, "read behind, failed");
+    assert_eq!(f.refused("moving/repo").await, ["v0"], "still kept");
+    f.live.settled().await;
+}
+
+/// **A first grants read that fails does not draw the write as allowed**
+/// (#2306): the write is refused with a reason that says knobas could not
+/// ask, and nothing is kept, so the next ask asks again and is answered.
+#[tokio::test]
+async fn a_failed_first_grants_read_refuses_saying_so_and_keeps_nothing() {
+    let f = fixture().await;
+    f.seen.failing.store(true, Ordering::SeqCst);
+    for key in ["moving/repo", "ticket/1"] {
+        let reasons = f.refused(key).await;
+        assert_eq!(reasons.len(), 1, "{key}: {reasons:?}");
+        assert!(
+            reasons[0].starts_with("knobas could not ask whether this credential may make this write"),
+            "{key}: {reasons:?}"
+        );
+    }
+    f.live.settled().await;
+    f.seen.failing.store(false, Ordering::SeqCst);
+    let before = f.seen.grants.load(Ordering::SeqCst);
+    assert_eq!(f.refused("moving/repo").await, ["v0"], "asked again");
+    assert_eq!(f.seen.grants.load(Ordering::SeqCst) - before, 1, "not kept");
+}
+
 // -- the byte read (#2256) ----------------------------------------------------
 
 impl Fixture {

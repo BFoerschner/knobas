@@ -412,16 +412,11 @@ impl LiveSources {
     /// answered from the cache where it holds it, and asked again behind;
     /// the rest are asked now, together.
     ///
-    /// # Errors
-    ///
-    /// The adapter's; an ask it answers with an error is never kept. An
-    /// adapter that answers a failed read as taken (Gitea's probe) has that
-    /// answer kept, until the next ask's read behind.
-    pub(crate) async fn refused(
-        &self,
-        lent: &Lent,
-        asks: &[WriteAsk],
-    ) -> Result<Vec<RefusedWrite>, SourceError> {
+    /// **A read that fails is never drawn as allowed** (#2306). Asked now,
+    /// each of its asks is refused with [`unasked`]'s reason and nothing is
+    /// kept, so the next ask asks again; read behind, the kept answer stands
+    /// and nothing is said, as for a view.
+    pub(crate) async fn refused(&self, lent: &Lent, asks: &[WriteAsk]) -> Vec<RefusedWrite> {
         let mut answered: Vec<RefusedWrite> = Vec::new();
         let mut kept_keys = Vec::new();
         let mut ask_now: Vec<WriteAsk> = Vec::new();
@@ -447,7 +442,16 @@ impl LiveSources {
             self.read_behind(&lent.source, kept_keys);
         }
         if !ask_now.is_empty() {
-            let fresh = lent.source.refused_writes(&ask_now).await?;
+            let fresh = match lent.source.refused_writes(&ask_now).await {
+                Ok(fresh) => fresh,
+                Err(error) => {
+                    tracing::debug!(%error, "grants asked now failed; refused, kept nowhere");
+                    let why = unasked(&error);
+                    answered.extend(ask_now.iter().map(|ask| RefusedWrite::of(ask, why.clone())));
+                    ask_now.clear();
+                    Vec::new()
+                }
+            };
             let mut reads = self.reads();
             for ask in &ask_now {
                 let refusal = fresh.iter().find(|r| r.refuses(ask)).cloned();
@@ -460,10 +464,9 @@ impl LiveSources {
                 answered.extend(refusal);
             }
         }
-        Ok(asks
-            .iter()
+        asks.iter()
             .filter_map(|ask| answered.iter().find(|r| r.refuses(ask)).cloned())
-            .collect())
+            .collect()
     }
 
     /// Read `keys` again behind the answer just given from the cache: a
@@ -584,6 +587,16 @@ impl LiveSources {
             .expect("the read cache")
             .drop_generation(generation);
     }
+}
+
+/// Why a write is drawn disabled when its grants could not be read (#2306):
+/// a write is never drawn as allowed on a failed read, and the reader is told
+/// it is knobas that does not know, not the source that refused.
+fn unasked(error: &SourceError) -> String {
+    format!(
+        "knobas could not ask whether this credential may make this write ({error}); \
+         it asks again when the write is drawn again"
+    )
 }
 
 /// What is kept, by the build it was read through and the entity.

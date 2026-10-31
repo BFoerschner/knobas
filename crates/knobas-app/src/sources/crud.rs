@@ -847,11 +847,13 @@ pub async fn reachable_transitions(
 /// side. The answers come back in the order asked.
 ///
 /// **Infallible on purpose**, for [`instance_write_ops`]' reason: a surface
-/// deciding how to draw a button must not be an error path. Everything that
-/// is no verdict refuses nothing, and the write is drawn as before: an
-/// entity no configured source owns, a keychain that would not answer, an
-/// adapter that would not build, a read the source failed, and an answer
-/// about a write nobody asked about.
+/// deciding how to draw a button must not be an error path. A read the
+/// source failed refuses its asks with a reason saying knobas could not ask
+/// (#2306, [`LiveSources::refused`]): a write is never drawn as allowed on a
+/// failed read. What asks nothing refuses nothing, and the write is drawn as
+/// before: an entity no configured source owns, a keychain that would not
+/// answer, an adapter that would not build, and an answer about a write
+/// nobody asked about.
 pub async fn refused_writes(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
@@ -881,13 +883,13 @@ pub async fn refused_writes(
             // Kept where the adapter says the answer moves (#2241): Gitea's
             // probe is asked once per repository, then behind the answer.
             let answer = match live.source(&pool, &secrets, &registry, &of[0].entity).await {
-                Ok(lent) => live.refused(&lent, &of).await.map_err(SourcesError::from),
-                Err(error) => Err(error),
+                Ok(lent) => live.refused(&lent, &of).await,
+                Err(error) => {
+                    tracing::debug!(source = %id, %error, "refused_writes: no source, no verdict");
+                    Vec::new()
+                }
             };
-            answer.unwrap_or_else(|error| {
-                tracing::debug!(source = %id, %error, "refused_writes: no verdict");
-                Vec::new()
-            })
+            answer
         };
         // A test's request counter counts each source's asks as the call's.
         #[cfg(feature = "test-util")]

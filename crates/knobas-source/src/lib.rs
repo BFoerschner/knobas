@@ -2035,8 +2035,11 @@ pub trait Source: Send + Sync {
     /// whose account holds every right), and what every WASM guest answers.
     /// An adapter whose credential can be narrower overrides it, finding out
     /// as the paragraph above allows; an adapter that does not override it
-    /// answers nothing. A failed read or probe is an error, and the caller
-    /// reads it as no verdict, as it reads nothing.
+    /// answers nothing. A failed read or probe is an error, never an answer
+    /// that refuses nothing (#2306): the app keeps an answer that moves and
+    /// asks it again behind, so a failure answered as taken would stand. The
+    /// app draws the writes of a failed ask disabled, saying it could not
+    /// ask, and keeps nothing of it.
     async fn refused_writes(
         &self,
         asks: &[grants::WriteAsk],
