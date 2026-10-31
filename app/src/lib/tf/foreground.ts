@@ -7,7 +7,9 @@
  * Pure, and read from the address alone, so it answers at once on every
  * address change and never passes through a gap while a page reads.
  *
- * - **The open detail** is an entity page: `#/pr/<id>`, `#/repo/<id>`,
+ * - **The open detail** is an entity page: a ticket page (`#/ticket/<id>`,
+ *   spec #2227, so reading a ticket is recorded against it, not the chosen
+ *   job), `#/pr/<id>`, `#/repo/<id>`,
  *   `#/build/…<run>`, `#/page/<id>`, and `#/branch/<id>` and `#/commit/<id>`,
  *   which send the reader on to the repository page that draws them (#1440)
  *   and name the entity where its repository is unknown. A tab
@@ -33,6 +35,8 @@ const ENTITY_HEADS = new Set(["pr", "repo", "page", "asset", "branch", "commit"]
 
 /** The entity id an address's page is the detail of, or `null`. */
 function detailOf(route: TfRoute): string | null {
+  // The ticket page (spec #2227) is its ticket's detail, whatever job is chosen.
+  if (route.view === "ticket") return route.id;
   if (route.view !== "full") return null;
   const { head, rest } = route;
   // `#/build/<run>` is replaced by `#/build/<pipeline>/<run>[/<tab>]`; the run is the detail either way.

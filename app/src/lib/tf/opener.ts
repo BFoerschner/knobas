@@ -82,6 +82,7 @@ export function pageOf(route: TfRoute): string {
       return `job/${route.key ?? ""}`;
     case "item":
     case "note":
+    case "ticket":
       return `${route.view}/${route.id}`;
     case "unknown":
       return route.hash;

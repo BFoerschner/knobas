@@ -3,9 +3,10 @@
  * draws, what a card's corner says, what the preview's button reads, and
  * what *Around this ticket* counts.
  */
-import type { KindTally, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
+import type { EntityDetail, KindTally, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type { ListSort as StoredSort, ViewLanes, ViewSortColumn } from "../../ipc/search";
 import { kindLabel, kindSingular, sectionOf } from "../../shell/kinds";
+import { keyOf } from "../../time/format";
 import { entityAddress } from "../address";
 import type { SectionTally } from "../job/sections";
 
@@ -106,12 +107,47 @@ export function initials(assignee: string | null): string {
 }
 
 /**
- * The preview's one primary button and the line under it (R-3.9), by the
- * ticket's state as prototype-6 decides it: *Start work* on a To Do ticket of
- * mine, *Open job* on a done one or somebody else's, *Resume work* on the
- * rest of mine. The state is the card's own status, whatever column it
- * stands in (#1423). Where it goes is the job's address; #816 and #818 wire
- * what happens there.
+ * What the Tickets preview and the ticket page draw of a ticket (spec #2227):
+ * a board card's fields, or the same fields read off the ticket's detail
+ * ({@link ticketFacts}), so both draw from one component.
+ */
+export type TicketFacts = Pick<
+  MiniBoardCard,
+  "entity_id" | "key" | "title" | "status" | "assignee" | "priority" | "path" | "parent_title" | "updated_at" | "mine"
+>;
+
+/**
+ * A ticket's {@link TicketFacts} off its detail, for the ticket page: the
+ * assignee is the detail's `author`, as the Jira adapter maps it, and `mine`
+ * is `isMine`'s answer, the rule `mini_board`'s `mine` reads. The detail holds
+ * no epic name, so the epic is its path line alone.
+ */
+export function ticketFacts(
+  detail: Pick<EntityDetail, "row" | "author" | "status" | "priority">,
+  mine: boolean,
+): TicketFacts {
+  return {
+    entity_id: detail.row.entity_id,
+    key: keyOf(detail.row.entity_id),
+    title: detail.row.title,
+    status: detail.status,
+    assignee: detail.author,
+    priority: detail.priority,
+    path: detail.row.path,
+    parent_title: null,
+    updated_at: detail.row.updated_at,
+    mine,
+  };
+}
+
+/**
+ * The one primary button of the Tickets preview and the ticket page, and the
+ * line under it (R-3.9, spec #2227), by the ticket's state as prototype-6
+ * decides it: *Start work* on a To Do ticket of mine, *Open job* on a done one
+ * or somebody else's, *Resume work* on the rest of mine. The state is the
+ * ticket's own status, whatever column it stands in (#1423). Both buttons go
+ * to the job's address (`jobHash`), which opens the job and makes it the
+ * chosen job; #816 and #818 wire what happens there.
  */
 export function previewAction(
   card: Pick<MiniBoardCard, "assignee" | "mine" | "status">,
@@ -430,8 +466,10 @@ export function sharedKeys(columns: readonly MiniBoardColumn[]): Set<string> {
 }
 
 /**
- * Where a card opens: its job by its entity id (`#/job/jira:PAY-231`), the
- * address that names the source ({@link entityAddress}'s rule, #1476, #1977).
+ * Where a card opens (Enter, a double click): its ticket page by its entity
+ * id (`#/ticket/jira:PAY-231`, spec #2227), the address that names the source
+ * ({@link entityAddress}'s rule, #1476, #1977). Never the job: only the
+ * primary button takes the ticket on, at the job's address (`jobHash`).
  */
 export function ticketAddress(card: Pick<MiniBoardCard, "entity_id">): string {
   return entityAddress("ticket", card.entity_id);

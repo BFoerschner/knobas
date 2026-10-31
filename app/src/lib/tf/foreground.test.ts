@@ -16,6 +16,11 @@ test("an entity page puts its entity in front, before the job", () => {
   expect(at("#/asset/asset%3Apayouts-api", JOB)).toBe("asset:payouts-api");
 });
 
+test("a ticket page puts its ticket in front, before the chosen job (spec #2227)", () => {
+  expect(at("#/ticket/jira%3APAY-240", JOB)).toBe("jira:PAY-240");
+  expect(at("#/ticket/jira%3APAY-240")).toBe("jira:PAY-240");
+});
+
 test("a branch or a commit is in front while its page sends the reader to its repository (#1440)", () => {
   expect(at("#/branch/gitea%3Aacme%2Fpayouts%40main", JOB)).toBe("gitea:acme/payouts@main");
   expect(at("#/commit/gitea%3Aabc123", JOB)).toBe("gitea:abc123");

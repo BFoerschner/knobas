@@ -86,6 +86,7 @@
   import { bridgePorts, type JobPorts } from "./job/ports";
   import { breadcrumbJob, currentJob, linkRequest } from "./job/current.svelte";
   import { chosenJob } from "./job/chosen.svelte";
+  import { selectTicket } from "./tickets/TicketsPage.svelte";
   import TfPage from "./TfPage.svelte";
   import { roleSyncs as sharedRoleSyncs, type RoleSyncs } from "./role-sync.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
@@ -293,13 +294,19 @@
 
   /**
    * The job the launcher's *Link to <key>* targets, and ⌘T falls back to
-   * (`breadcrumbJob`, spec #2227): the job on screen on the Job page (`null`
-   * while it is still being read), otherwise the chosen job. Never a guessed
-   * job: with none chosen there is none.
+   * (`breadcrumbJob`, spec #2227): the ticket on screen on the Job page
+   * (`null` while it is still being read) or on a ticket page (its address
+   * names it), otherwise the chosen job. Never a guessed job: with none
+   * chosen there is none.
    */
   $effect(() => {
-    const onScreen = currentJob.entityId;
-    const job = route.view === "job" ? (onScreen === null ? null : { key: keyOf(onScreen), entityId: onScreen }) : chosen;
+    const onScreen = route.view === "ticket" ? route.id : currentJob.entityId;
+    const job =
+      route.view === "job" || route.view === "ticket"
+        ? onScreen === null
+          ? null
+          : { key: keyOf(onScreen), entityId: onScreen }
+        : chosen;
     breadcrumbJob.set(job);
     return () => breadcrumbJob.set(null);
   });
@@ -480,9 +487,16 @@
       field.value = "";
       field.dispatchEvent(new Event("input", { bubbles: true }));
     } else if (step.do === "blur") field?.blur();
+    else if (step.do === "go") leave(step.hash, step.opened);
+  }
+
+  /** `Esc`'s step to `hash` (rungs 5 to 8), `opened` when it is the entry's opener. */
+  function leave(hash: string, opened: boolean) {
+    // Back on the Tickets that opened this ticket page, that ticket is selected again (spec #2227).
+    if (opened && route.view === "ticket" && parseTfHash(hash).view === "tickets") selectTicket(route.id);
     // The opener is the entry before: step back to it, so `⌘]` comes forward to this page again.
-    else if (step.do === "go" && step.opened && step.hash === here.prev) nav.back();
-    else if (step.do === "go") goWithoutOpener(step.hash);
+    if (opened && hash === here.prev) nav.back();
+    else goWithoutOpener(hash);
   }
 
   // A forced theme is on `<html>`, where the tokens are, so everything in the

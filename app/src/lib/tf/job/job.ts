@@ -19,7 +19,6 @@ import { protocolDayOf } from "../../standup/protocol";
 import { ageLabel, keyOf, minutesLabel } from "../../time/format";
 import { minutesOf } from "../../time/week";
 import { CI, claims } from "../roles.svelte";
-import { jobHash } from "../route";
 import { reenterWords, secretNoun } from "../settings/settings";
 
 /** What the job reads of a `list_sources` row: the fields of the wire row it uses, all always sent. */
@@ -265,7 +264,9 @@ export function runKindsOf(registry: Pick<KindRegistry, "frameKinds">): readonly
  * The full view a row opens (R-4.10): the item's own address in the new
  * shell, never a panel. The address carries the entity id, because a pull
  * request's number is unique only inside its repository and a ticket's key
- * only inside its source (#1977). A branch and a
+ * only inside its source (#1977). A ticket opens its ticket page
+ * (`#/ticket/<id>`, spec #2227), not its job: only the buttons that mean to
+ * take a ticket on build the job's address (`jobHash`). A branch and a
  * commit keep addresses of their own, which send the reader on to the
  * repository page that draws them (#1440). A kind with no view
  * of its own opens the section that lists it: a Jira view its ticket view, a
@@ -291,8 +292,9 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind"> & { title?: 
       return `#/branch/${id}`;
     case "commit":
       return `#/commit/${id}`;
+    // The ticket page (spec #2227), never the job: reading a ticket chooses no job.
     case "ticket":
-      return jobHash(row.entity_id);
+      return `#/ticket/${id}`;
     case "build":
       return `#/build/${id}`;
     case "page":

@@ -261,7 +261,7 @@ test("the digest draws each list, every line with an item a link into the new sh
   await settle();
   expect(text()).toContain("Yesterday, Thursday 20");
   const links = [...target.querySelectorAll(".tf-su-dig a")].map((link) => link.getAttribute("href"));
-  expect(links).toEqual(["#/job/jira%3APAY-231", "#/page/confluence%3A98401", "#/monitors"]);
+  expect(links).toEqual(["#/ticket/jira%3APAY-231", "#/page/confluence%3A98401", "#/monitors"]);
   expect(text()).toContain("DB config (timer running)");
   expect(text()).toContain("Nothing of yours is blocked.");
 });
