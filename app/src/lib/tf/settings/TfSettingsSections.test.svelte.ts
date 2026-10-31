@@ -712,3 +712,12 @@ test("Standup puts a failed read's Try again on the title line (#2284)", async (
   expect(headerActions()).toEqual(["Try again"]);
   expect(loneRows()).toBe(0);
 });
+
+test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "performance", "renderers", "keyboard", "logs", "checkouts"])(
+  "Settings › %s draws no action row of its own under the title (#2284)",
+  async (section) => {
+    await open(section, sectionPorts(), section === "notifications" ? { notifications: notificationsStub([]) } : {});
+    expect(body().querySelector("h1")).not.toBeNull();
+    expect(loneRows()).toBe(0);
+  },
+);
