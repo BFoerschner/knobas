@@ -3,6 +3,11 @@
 //! `sqlx::migrate!` bakes `migrations/` into the executable at compile time,
 //! so a shipped build carries its own schema; `build.rs` reruns the build when
 //! the directory changes.
+//!
+//! A migration's file, comments included, is frozen once released: sqlx
+//! checksums the whole file, and an edited one fails startup on every database
+//! that applied it (#2327). Change the schema with a new migration and append
+//! its line to `migrations.sha384`; `tests/migration_checksums.rs` enforces both.
 
 /// Bring `pool`'s database up to the current schema.
 ///
