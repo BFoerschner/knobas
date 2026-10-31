@@ -91,8 +91,12 @@ pub struct ThreadComment {
     ///
     /// RFC 3339 on the wire.
     pub at: Option<DateTime<Utc>>,
-    /// The text as the source wrote it (Jira's wiki markup), never markup here.
+    /// The text as the source wrote it, untrusted. Drawn by
+    /// [`markup`](Self::markup), never as HTML.
     pub body: String,
+    /// How the source writes it (#2308), as the ticket's kind declares:
+    /// `jira_wiki` for Jira, `text` where nothing is declared.
+    pub markup: knobas_source::Markup,
     /// The reader wrote it: its author's account is one of the identity's.
     pub mine: bool,
     /// The body names the reader (R-5.3), by [`mentions`]'s rule.
@@ -129,7 +133,7 @@ const COMMENTS: &str = "select coalesce(
             then payload #> '{fields,comment,comments}' end,
        case when jsonb_typeof(payload -> 'comments') = 'array'
             then payload -> 'comments' end,
-       '[]'::jsonb) as comments
+       '[]'::jsonb) as comments, source_id, kind
   from sync.item
  where entity_id = $1";
 
@@ -153,7 +157,11 @@ fn stamp(text: &str) -> Option<DateTime<Utc>> {
 }
 
 /// One entry of [`COMMENTS`], read for both spellings.
-fn comment_of(entry: &serde_json::Value, me: &[String]) -> Option<ThreadComment> {
+fn comment_of(
+    entry: &serde_json::Value,
+    me: &[String],
+    markup: knobas_source::Markup,
+) -> Option<ThreadComment> {
     let body = text_at(entry, &["body"]).or_else(|| text_at(entry, &["text"]))?;
     let account = text_at(entry, &["author", "name"])
         .or_else(|| text_at(entry, &["author", "key"]))
@@ -166,6 +174,7 @@ fn comment_of(entry: &serde_json::Value, me: &[String]) -> Option<ThreadComment>
         author: author.map(str::to_owned),
         at,
         body: body.to_owned(),
+        markup,
         mine: account.is_some_and(|account| me.iter().any(|name| name == account)),
         mentions_me: mentions(body, me),
     })
@@ -205,13 +214,18 @@ async fn identity(pool: &PgPool) -> Result<Vec<String>, IpcError> {
 
 /// The thread of `entity_id`: its comments in the source's order, which both
 /// spellings write oldest first (Jira's comment list is ordered by `created`,
-/// and the Jira adapter reads it so).
+/// and the Jira adapter reads it so). Each comment carries the markup its
+/// source declares for the ticket's kind (#2308), read off `registry`.
 ///
 /// # Errors
 ///
 /// `invalid` for something that is not an entity id, `not_found` for one the
 /// mirror does not hold, `internal` for a query failure.
-pub async fn thread(pool: &PgPool, entity_id: &str) -> Result<Thread, IpcError> {
+pub async fn thread(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+) -> Result<Thread, IpcError> {
     let entity = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
     let id = entity.to_string();
     let row = sqlx::query(COMMENTS)
@@ -220,13 +234,20 @@ pub async fn thread(pool: &PgPool, entity_id: &str) -> Result<Thread, IpcError> 
         .await?
         .ok_or_else(|| IpcError::not_found(format!("{id} is not in the mirror")))?;
     let list: serde_json::Value = row.get("comments");
+    let source_id: String = row.get("source_id");
+    let kind: String = row.get("kind");
+    let markup = crate::sources::paths::declared_paths(pool, registry)
+        .await?
+        .get(&source_id, &kind)
+        .map(|paths| paths.markup)
+        .unwrap_or_default();
     let me = identity(pool).await?;
     let comments: Vec<ThreadComment> = list
         .as_array()
         .map(|entries| {
             entries
                 .iter()
-                .filter_map(|entry| comment_of(entry, &me))
+                .filter_map(|entry| comment_of(entry, &me, markup))
                 .collect()
         })
         .unwrap_or_default();
@@ -267,7 +288,7 @@ mod tests {
             "created": "2026-08-12T09:40:00.000+0200",
             "body": "Yes. [~mara] can you pick this up?",
         });
-        let read = comment_of(&jira, &me()).unwrap();
+        let read = comment_of(&jira, &me(), knobas_source::Markup::JiraWiki).unwrap();
         assert_eq!(read.author.as_deref(), Some("Priya Nair"));
         assert_eq!(read.at, Some("2026-08-12T07:40:00Z".parse().unwrap()));
         assert!(read.mentions_me);
@@ -275,7 +296,7 @@ mod tests {
 
         let mock =
             serde_json::json!({ "who": "mara", "when": "2026-08-12T10:02:00Z", "text": "Sure." });
-        let read = comment_of(&mock, &me()).unwrap();
+        let read = comment_of(&mock, &me(), knobas_source::Markup::Text).unwrap();
         assert_eq!(read.author.as_deref(), Some("mara"));
         assert!(read.mine);
         assert!(!read.mentions_me);
@@ -284,13 +305,14 @@ mod tests {
     #[test]
     fn a_comment_with_no_text_is_not_a_comment_and_a_bad_stamp_is_no_time() {
         assert_eq!(
-            comment_of(&serde_json::json!({ "body": "  " }), &me()),
+            comment_of(&serde_json::json!({ "body": "  " }), &me(), knobas_source::Markup::Text),
             None
         );
-        assert_eq!(comment_of(&serde_json::json!({ "body": 4 }), &me()), None);
+        assert_eq!(comment_of(&serde_json::json!({ "body": 4 }), &me(), knobas_source::Markup::Text), None);
         let undated = comment_of(
             &serde_json::json!({ "body": "x", "created": "yesterday" }),
             &me(),
+            knobas_source::Markup::Text,
         )
         .unwrap();
         assert_eq!(undated.at, None);

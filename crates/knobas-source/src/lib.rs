@@ -316,7 +316,7 @@ impl SourceDescriptor {
 pub use knobas_spi_types::delivery::Delivery;
 pub use knobas_spi_types::entity::EntityRef;
 pub use knobas_spi_types::payload::{
-    Frame, KindPaths, ListPath, ParentPath, PayloadPath, ProjectPath, StateChip, StatePath,
+    Frame, KindPaths, ListPath, Markup, ParentPath, PayloadPath, ProjectPath, StateChip, StatePath,
     StateValue, Trigger, TriggerPath, TriggerValue,
 };
 pub use knobas_spi_types::tone::Tone;

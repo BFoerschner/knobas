@@ -176,6 +176,10 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             issue_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
             estimate: vec![PayloadPath::of(["fields", "timeoriginalestimate"])],
             comment_count: vec![PayloadPath::of(["fields", "comment", "total"])],
+            // The description and the comments as Jira Data Center stores
+            // them (#2308): wiki markup, which the shell converts to draw.
+            description: vec![PayloadPath::of(["fields", "description"])],
+            markup: knobas_source::Markup::JiraWiki,
             labels: vec![ListPath {
                 at: PayloadPath::of(["fields", "labels"]),
                 entry: PayloadPath::default(),

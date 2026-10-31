@@ -528,6 +528,9 @@ fn ticket_paths() -> KindPaths {
         project_key: vec![PayloadPath::of(["repository", "full_name"])],
         project_name: vec![PayloadPath::of(["repository", "name"])],
         comment_count: vec![PayloadPath::of(["comments"])],
+        // The issue's body as written (#2308): Markdown, as Gitea renders it.
+        description: vec![PayloadPath::of(["body"])],
+        markup: knobas_source::Markup::Markdown,
         done_statuses: vec!["closed".to_owned()],
         ..KindPaths::default()
     }

@@ -103,6 +103,15 @@ pub struct EntityDetail {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub tree: Option<knobas_source::view::TreeSections>,
+    /// A ticket's description as its source wrote it (#2308), through the
+    /// declared `description` path; untrusted text. `None` where nothing is
+    /// declared or the record misses it: the reader then draws no
+    /// description. Not [`body_text`](Self::body_text), the search text.
+    pub description: Option<String>,
+    /// How the source writes this kind's prose (#2308), as its kind declares:
+    /// the shell draws `markdown` and `jira_wiki` with its Markdown component
+    /// and `text` as text. `text` where nothing is declared.
+    pub markup: knobas_source::Markup,
 }
 
 /// Everything the slide-over needs for `entity_id`: the source listing the
@@ -157,6 +166,8 @@ pub async fn get_entity_inner(
         priority: detail.priority,
         estimate_seconds: detail.estimate_seconds,
         default_branch: detail.default_branch,
+        description: detail.description,
+        markup: detail.markup,
     })
 }
 

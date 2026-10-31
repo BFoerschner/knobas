@@ -7,7 +7,10 @@
 //! takes a database of its own ([`scratch`], #1907). The identity `@me` resolves to is `mara`, the one username any source
 //! here is configured with.
 
+use knobas_app::commands::entity::get_entity_inner;
 use knobas_app::conversation::{thread, visit};
+use knobas_app::sources::Registry;
+use knobas_source::Markup;
 use knobas_core::entity::EntityRef;
 
 async fn pool() -> sqlx::PgPool {
@@ -190,7 +193,7 @@ async fn a_jira_thread_reads_its_comments_with_mine_and_mentions() {
     )
     .await;
 
-    let read = thread(&pool, &id).await.unwrap();
+    let read = thread(&pool, &Registry::for_process(), &id).await.unwrap();
     assert_eq!(read.me, ["mara"]);
     let lines: Vec<_> = read
         .comments
@@ -225,13 +228,13 @@ async fn a_payload_of_another_shape_reads_as_no_comments() {
     ] {
         let id = issue(&pool, payload.clone()).await;
         assert!(
-            thread(&pool, &id).await.unwrap().comments.is_empty(),
+            thread(&pool, &Registry::for_process(), &id).await.unwrap().comments.is_empty(),
             "{payload}"
         );
     }
     let missing = format!("jira:{}", key());
     assert_eq!(
-        thread(&pool, &missing).await.unwrap_err().code,
+        thread(&pool, &Registry::for_process(), &missing).await.unwrap_err().code,
         knobas_app::IpcErrorCode::NotFound
     );
 }
@@ -331,7 +334,7 @@ async fn the_thread_is_the_comments_and_nothing_else() {
     .await;
     confirmed(&pool, &ticket, &merged).await;
 
-    let read = thread(&pool, &ticket).await.unwrap();
+    let read = thread(&pool, &Registry::for_process(), &ticket).await.unwrap();
     let wire = serde_json::to_value(&read).unwrap();
     let mut keys: Vec<_> = wire.as_object().unwrap().keys().cloned().collect();
     keys.sort();
@@ -343,4 +346,74 @@ async fn the_thread_is_the_comments_and_nothing_else() {
             .collect::<Vec<_>>(),
         [(Some("Lena Hoffmann"), "Finance asks.")]
     );
+}
+
+/// **A ticket's text carries its markup** (#2308): a Jira ticket answers its
+/// description as Jira wrote it, not the search text, and says both it and
+/// each comment are Jira's wiki markup, as the Jira adapter declares.
+#[tokio::test]
+async fn a_jira_ticket_says_its_description_and_comments_are_wiki_markup() {
+    let pool = pool().await;
+    let id = issue(
+        &pool,
+        serde_json::json!({ "fields": {
+            "description": "h2. Why\n\n# first\n# second",
+            "comment": { "comments": [
+                comment("lena", "Lena Hoffmann", "2026-08-12T09:14:00.000+0200", "*Bold* ask"),
+            ] },
+        } }),
+    )
+    .await;
+
+    let detail = get_entity_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
+    assert_eq!(
+        detail.description.as_deref(),
+        Some("h2. Why\n\n# first\n# second")
+    );
+    assert_eq!(detail.markup, Markup::JiraWiki);
+
+    let read = thread(&pool, &Registry::for_process(), &id).await.unwrap();
+    assert_eq!(
+        read.comments
+            .iter()
+            .map(|c| (c.body.as_str(), c.markup))
+            .collect::<Vec<_>>(),
+        [("*Bold* ask", Markup::JiraWiki)]
+    );
+}
+
+/// **A source that declares nothing is text** (#2308): a ticket of a source
+/// no adapter describes has no description and its comments are text, never
+/// parsed as markup nobody said it was.
+#[tokio::test]
+async fn a_ticket_of_an_undeclared_source_is_text() {
+    let pool = pool().await;
+    let id = format!("nowhere:{}", key());
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'ticket',$1)")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+         values ($1,'nowhere','ticket',$1,'',$2, now())",
+    )
+    .bind(&id)
+    .bind(serde_json::json!({
+        "fields": { "description": "h2. Why" },
+        "comments": [{ "who": "mara", "when": "2026-08-12T10:02:00Z", "text": "*Sure*" }],
+    }))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let detail = get_entity_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
+    assert_eq!(detail.description, None);
+    assert_eq!(detail.markup, Markup::Text);
+    let read = thread(&pool, &Registry::for_process(), &id).await.unwrap();
+    assert_eq!(read.comments[0].markup, Markup::Text);
 }
