@@ -12,6 +12,7 @@ import { afterAll, afterEach, beforeEach, expect, vi } from "vitest";
 // First: it must run before any module that looks for a storage is evaluated.
 import "./test-no-storage";
 
+import { wholeTreeBudget } from "./test-budget";
 import { resetStores } from "./test-resets";
 import { settleRejections, takeUnhandled, watchRejections } from "./unhandled";
 
@@ -20,8 +21,17 @@ import { settleRejections, takeUnhandled, watchRejections } from "./unhandled";
  * (`test-resets.ts` lists them; `test-resets.test.ts` fails on one missing).
  * Each is a singleton like the session it remembers, so without this a test
  * would inherit what the previous one left (FE-14, #1674).
+ *
+ * The whole tree's budget, not the hook's 10 s (#2359). Each reset imports its
+ * store, so the first one in a file loads every store and, through the page
+ * components among them, most of the app: 1.7 s for `a11y.test.ts` run alone
+ * on an idle Mac, nearly all of it transform, then 0 ms for every later test.
+ * Under load that one import measured the neighbours: `a11y.test.ts` alone
+ * beside load 70-130 spent 12.6-13.8 s in it and failed a test whose own scan
+ * takes milliseconds. A cold import costs in proportion to the tree it pulls,
+ * as a whole-tree scan does, so it takes that budget.
  */
-afterEach(resetStores);
+afterEach(resetStores, wholeTreeBudget());
 
 /**
  * The zone is pinned in `vite.config.ts`; this is what makes the pin a fact

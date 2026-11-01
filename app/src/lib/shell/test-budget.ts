@@ -2,7 +2,7 @@
  * **How long a test may take on this machine** (#2035, #2044).
  *
  * `vite.config.ts` takes `testTimeout` and `hookTimeout` from here, and the
- * whole-tree guards take `wholeTreeBudget()`.
+ * whole-tree guards and `test-setup.ts`'s store reset take `wholeTreeBudget()`.
  *
  * `just check` runs eight threads at once: vitest's four workers
  * (`maxWorkers`) beside cargo's four rustc jobs (`CARGO_BUILD_JOBS`). The
