@@ -16,7 +16,8 @@ import { PDFJS_ASSET_DIRS, PDFJS_ASSET_PREFIX } from "./src/lib/render/pdf-asset
 // Not `new URL(…, import.meta.url)`: Vite rewrites that form into an asset URL when vitest loads this file.
 const DIST = `${join(dirname(fileURLToPath(import.meta.url)), "node_modules/pdfjs-dist")}/`;
 
-const TYPES: Record<string, string> = { wasm: "application/wasm", ttf: "font/ttf", pfb: "application/octet-stream" };
+// `text/javascript`: pdf.js imports a `*_nowasm_fallback.js` decoder as a module script.
+const TYPES: Record<string, string> = { js: "text/javascript", wasm: "application/wasm", ttf: "font/ttf", pfb: "application/octet-stream" };
 
 /** Each served file: its URL path below the base (`pdfjs/wasm/openjpeg.wasm`) and where it is on disk. */
 export function pdfjsAssetFiles(dist = DIST): { url: string; path: string }[] {

@@ -62,7 +62,7 @@ test("Helvetica, which the PDF does not embed, is drawn from pdf.js's own font f
   }
 });
 
-test("the app serves every file the options point pdf.js at, and not the scripting sandbox or the JavaScript decoders", async () => {
+test("the app serves every file the options point pdf.js at, the JavaScript decoders WebKit falls back to, and not the scripting sandbox", async () => {
   const { pdfjsAssetFiles } = await import("../../../vite-pdfjs-assets");
   const urls = pdfjsAssetFiles().map((file) => `/${file.url}`);
   const options = pdfAssetOptions(`/${PDFJS_ASSET_PREFIX}`) as Record<string, string>;
@@ -72,6 +72,8 @@ test("the app serves every file the options point pdf.js at, and not the scripti
       `${options.wasmUrl}openjpeg.wasm`,
       `${options.wasmUrl}jbig2.wasm`,
       `${options.wasmUrl}qcms_bg.wasm`,
+      `${options.wasmUrl}openjpeg_nowasm_fallback.js`,
+      `${options.wasmUrl}jbig2_nowasm_fallback.js`,
       `${options.iccUrl}CGATS001Compat-v2-micro.icc`,
       `${options.standardFontDataUrl}LiberationSans-Regular.ttf`,
       `${options.standardFontDataUrl}FoxitSymbol.pfb`,
@@ -80,5 +82,5 @@ test("the app serves every file the options point pdf.js at, and not the scripti
     ]),
   );
   expect(urls.filter((url) => url.endsWith(".bcmap"))).toHaveLength(168);
-  expect(urls.filter((url) => /quickjs|nowasm|\.js$/.test(url))).toEqual([]);
+  expect(urls.filter((url) => /quickjs/.test(url))).toEqual([]);
 });

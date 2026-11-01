@@ -9,9 +9,10 @@
 
 /** What `vite-pdfjs-assets.ts` serves: each `pdfjs-dist` directory and the files of it the worker may ask for. */
 export const PDFJS_ASSET_DIRS = {
-  // The scripting sandbox (`quickjs-eval`) is never started (`pdf-core.ts`), and the
-  // `*_nowasm_fallback.js` decoders run only when WebAssembly cannot: not served.
-  wasm: /^(openjpeg|jbig2|qcms_bg)\.wasm$|^LICENSE_/,
+  // The scripting sandbox (`quickjs-eval`) is never started (`pdf-core.ts`): not served.
+  // The `*_nowasm_fallback.js` decoders are: WebKit cannot compile `openjpeg.wasm`
+  // (relaxed SIMD), so in the bundle pdf.js imports the fallback as a module (#2388).
+  wasm: /^(openjpeg|jbig2|qcms_bg)\.wasm$|^(openjpeg|jbig2)_nowasm_fallback\.js$|^LICENSE_/,
   standard_fonts: /\.(pfb|ttf)$|^LICENSE_/,
   cmaps: /\.bcmap$|^LICENSE$/,
   iccs: /\.icc$|^LICENSE$/,
