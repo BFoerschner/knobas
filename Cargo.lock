@@ -3197,6 +3197,7 @@ dependencies = [
  "base64 0.22.1",
  "bzip2",
  "chrono",
+ "dirs",
  "flate2",
  "jaq-core",
  "jaq-json",

@@ -42,6 +42,7 @@ pub mod inbox;
 #[cfg(test)]
 mod ipc_mirror;
 pub mod link_sets;
+pub mod live_sources;
 pub mod logging;
 pub mod notes_export;
 pub mod notify;

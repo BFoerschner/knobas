@@ -68,7 +68,10 @@ impl SecretStoreKind {
     }
 }
 
-fn secret_store(profile: &crate::Profile, kind: SecretStoreKind) -> Arc<dyn SecretStore> {
+pub(crate) fn secret_store(
+    profile: &crate::Profile,
+    kind: SecretStoreKind,
+) -> Arc<dyn SecretStore> {
     if kind == SecretStoreKind::Memory {
         tracing::warn!("{SECRET_STORE_ENV}=memory: credentials will not survive this process");
         return Arc::new(knobas_secrets::MemoryStore::new());

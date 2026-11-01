@@ -7,5 +7,9 @@ fn main() {
     if let Some(code) = knobas_app::file_pipeline::main_if_asked() {
         std::process::exit(code);
     }
+    // `live-sources` (#2371): the demo profile's live sources, headless.
+    if let Some(code) = knobas_app::live_sources::main_if_asked() {
+        std::process::exit(code);
+    }
     knobas_app::run();
 }

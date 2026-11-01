@@ -1359,6 +1359,30 @@ dev: deps
 demo: deps
     cd crates/knobas-app && PATH="$PWD/../../app/node_modules/.bin:$PATH" tauri dev -- -- --demo
 
+# Gitea, Forgejo, Jira, Confluence, TeamCity and Uptime Kuma at the live
+# target's addresses with `testenv/seed --env`'s credentials, through
+# `knobas-app live-sources` (the app's own add/update + set_secret; #2371).
+# Again: updates in place, so a re-minted token is picked up. A product not up
+# is skipped with one line. Quit any demo knobas first. `app` is a bundle whose
+# own binary to run (a keychain item is the writing binary's); empty means
+# target/debug, `just demo`'s. testenv/README.md *Live products as sources*.
+# Every live product as a source on the demo profile.
+live-sources app="":
+    testenv/live-sources.sh add {{ quote(app) }}
+
+# The six live sources off the demo profile again, with what they synced.
+live-sources-remove app="":
+    testenv/live-sources.sh remove {{ quote(app) }}
+
+# `just demo` with every live product as a source already in place.
+live-demo: (live-sources "")
+    just demo
+
+# For the milestone review's bundle, or the desktop witness's.
+# A built bundle on the demo profile with every live product as a source.
+live-demo-bundle app: (live-sources app)
+    open -a {{ quote(app) }} --args --demo
+
 # The desktop witness (issue #500, ADR-0016): the signed bundle, launched from
 # the path Launch Services registered, driven by desktop automation.
 #
