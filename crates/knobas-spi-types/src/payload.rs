@@ -2083,7 +2083,10 @@ mod tests {
         ] } });
         assert_eq!(
             resolve_worklog(&payload, std::slice::from_ref(&jira)),
-            Some(BTreeMap::from([("lena".to_owned(), 1800), ("mara".to_owned(), 6000)]))
+            Some(BTreeMap::from([
+                ("lena".to_owned(), 1800),
+                ("mara".to_owned(), 6000)
+            ]))
         );
 
         let elsewhere = WorklogPath {
@@ -2097,7 +2100,10 @@ mod tests {
             Some(BTreeMap::from([("mara".to_owned(), 60)]))
         );
         let empty = serde_json::json!({ "worklogs": [] });
-        assert_eq!(resolve_worklog(&empty, &[elsewhere.clone()]), Some(BTreeMap::new()));
+        assert_eq!(
+            resolve_worklog(&empty, std::slice::from_ref(&elsewhere)),
+            Some(BTreeMap::new())
+        );
         let none = serde_json::json!({ "worklogs": null });
         assert_eq!(resolve_worklog(&none, &[elsewhere]), None);
         assert_eq!(resolve_worklog(&payload, &[]), None);
