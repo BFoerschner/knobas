@@ -538,7 +538,7 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
             imported.monitors_kept,
             imported.monitors_linked,
         ),
-        (17, 6, 5, 5),
+        (18, 6, 5, 5),
         "the real estate, with every one of its five monitor names resolved against \
          the monitors the real Kuma published"
     );
