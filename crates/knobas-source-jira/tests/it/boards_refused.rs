@@ -95,6 +95,7 @@ fn source(base_url: &str) -> Box<dyn Source> {
 #[derive(Default)]
 struct Recorded {
     items: Vec<SyncItem>,
+    left_out: Vec<String>,
 }
 
 #[async_trait::async_trait]
@@ -102,6 +103,10 @@ impl knobas_source::Sink for Recorded {
     async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
         self.items.push(item);
         Ok(())
+    }
+
+    async fn left_out(&mut self, why: &str) {
+        self.left_out.push(why.to_owned());
     }
 }
 
@@ -118,4 +123,21 @@ async fn a_refused_board_listing_keeps_the_issues_and_is_not_a_sign_in_failure()
     );
     let keys: Vec<&str> = sink.items.iter().map(|i| i.entity.key.as_str()).collect();
     assert_eq!(keys, ["OPS-1"], "the issue lands and no board does");
+    assert_eq!(
+        sink.left_out,
+        ["boards unavailable: Jira Software is unlicensed or refuses this account (403)"],
+        "the run says why the boards are missing"
+    );
+}
+
+/// A Jira whose boards answer is the run's: nothing is left out.
+#[tokio::test]
+async fn a_listed_board_scope_leaves_nothing_out() {
+    let empty = serde_json::json!({ "values": [], "isLast": true });
+    let jira = jira(ResponseTemplate::new(200).set_body_json(empty)).await;
+    let mut sink = Recorded::default();
+
+    source(&jira.uri()).sync(None, &mut sink).await.unwrap();
+
+    assert!(sink.left_out.is_empty(), "{:?}", sink.left_out);
 }

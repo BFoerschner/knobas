@@ -685,6 +685,8 @@ mod tests {
         after_first_page: Option<Vec<FakeBoard>>,
         /// Board pages answered so far.
         board_pages: std::sync::atomic::AtomicU32,
+        /// Jira Software refuses the account: an expired licence (#2374).
+        software_refused: bool,
     }
 
     impl Agile {
@@ -779,6 +781,15 @@ mod tests {
         ) -> Result<BoardPage, SourceError> {
             if self.no_software || project.is_some_and(|p| self.unlisted.contains(&p)) {
                 return Err(not_found());
+            }
+            if self.software_refused {
+                // What the seeded Jira 10.3 answered with its Jira Software
+                // licence expired (#2374).
+                return Err(knobas_http::status_error(
+                    knobas_http::StatusCode::FORBIDDEN,
+                    r#"{"errorMessages":["You currently don't have access to perform this operation."]}"#,
+                    None,
+                ));
             }
             let mut listed: Vec<&FakeBoard> = match project {
                 Some(_) => self.held().iter().collect(),
@@ -1070,6 +1081,24 @@ mod tests {
         let (items, second) = sync(&api, Some(first.clone())).await;
         assert!(items.is_empty(), "{items:?}");
         assert_eq!(second, first);
+    }
+
+    /// A Jira Software that stops serving the account (its licence expired,
+    /// #2374) takes no board away: the boards delivered before are neither
+    /// gone nor re-sent, and the position stays put. When the listing
+    /// answers again, the unchanged boards are not delivered twice.
+    #[tokio::test]
+    async fn a_refused_board_listing_takes_no_board_away() {
+        let mut api = seeded();
+        let (_, first) = sync(&api, None).await;
+        api.software_refused = true;
+        api.clock_minutes = 120; // an hour on: the boards are due again
+        let (items, second) = sync(&api, Some(first.clone())).await;
+        assert!(items.is_empty(), "{items:?}");
+        assert_eq!(second, first);
+        api.software_refused = false;
+        let (again, _) = sync(&api, Some(second)).await;
+        assert!(again.is_empty(), "{again:?}");
     }
 
     /// The upgrade: a cursor written before the views (no `views` field, the

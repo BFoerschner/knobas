@@ -355,6 +355,7 @@ impl SyncRun<'_> {
             // deleted in Jira: the ones delivered before stay as they were,
             // neither re-sent nor gone, until a listing answers again.
             if boards_refused {
+                sink.left_out(crate::views::BOARDS_REFUSED).await;
                 now.extend(
                     delivered
                         .iter()
