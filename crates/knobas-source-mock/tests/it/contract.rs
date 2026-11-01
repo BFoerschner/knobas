@@ -264,7 +264,7 @@ async fn full_sync_emits_every_work_item() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s.sync(None, &mut sink).await.expect("full sync");
-    assert_eq!(cursor, "tidewater-v4");
+    assert_eq!(cursor, "tidewater-v5");
     assert_eq!(sink.0.len(), corpus_size(f));
 
     let ticket = sink
@@ -305,6 +305,55 @@ async fn full_sync_emits_every_work_item() {
     assert!(build.body_text.contains("gives_up_after_max_attempts"));
 }
 
+/// **The three typed facts and the worklog** (#2403) on the mock's tickets,
+/// through the paths the mock declares, as the Jira mock serves the same
+/// dataset: the reporter is whoever assigned the ticket, else its assignee
+/// (a person id, as the assignee is), created is two weeks before its last
+/// update, and the time spent and the worklog are the dataset's worklogs in
+/// seconds. A ticket with no worklog reads no time spent.
+#[tokio::test]
+async fn a_ticket_carries_its_reporter_created_spent_and_worklog() {
+    use knobas_core::payload::{parse_instant, resolve_number, resolve_string, resolve_worklog};
+
+    let s = MockSource::new();
+    let mut sink = VecSink(Vec::new());
+    s.sync(None, &mut sink).await.expect("full sync");
+    let descriptor = s.descriptor();
+    let paths = descriptor
+        .payload_paths
+        .iter()
+        .find(|p| p.kind == "ticket")
+        .expect("the mock declares its tickets");
+    let payload = |key: &str| {
+        sink.0
+            .iter()
+            .find(|i| i.entity.key == key)
+            .unwrap_or_else(|| panic!("{key} emitted"))
+            .payload
+            .clone()
+    };
+
+    let logged = payload("PAY-231");
+    assert_eq!(resolve_string(&logged, &paths.reporter).as_deref(), Some("mara"));
+    assert_eq!(
+        resolve_string(&logged, &paths.created)
+            .as_deref()
+            .and_then(parse_instant)
+            .map(|at| at.to_rfc3339()),
+        Some("2026-08-08T11:48:00+00:00".to_owned())
+    );
+    assert_eq!(resolve_number(&logged, &paths.time_spent), Some(16_200.0));
+    assert_eq!(
+        resolve_worklog(&logged, &paths.worklog),
+        Some([("mara".to_owned(), 16_200)].into())
+    );
+
+    // PAY-240: assigned by priya, nothing logged.
+    let bare = payload("PAY-240");
+    assert_eq!(resolve_string(&bare, &paths.reporter).as_deref(), Some("priya"));
+    assert_eq!(resolve_number(&bare, &paths.time_spent), None);
+}
+
 /// A caller already at the current version has nothing to fetch -- and must say
 /// so without re-emitting the whole corpus on every 5-minute tick.
 ///
@@ -322,11 +371,11 @@ async fn incremental_sync_is_empty_and_keeps_the_cursor() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s
-        .sync(Some("tidewater-v4".into()), &mut sink)
+        .sync(Some("tidewater-v5".into()), &mut sink)
         .await
         .expect("incremental sync");
     assert!(sink.0.is_empty());
-    assert_eq!(cursor, "tidewater-v4");
+    assert_eq!(cursor, "tidewater-v5");
 }
 
 /// The upgrade path the cursor's versioning exists to provide (#234): a
