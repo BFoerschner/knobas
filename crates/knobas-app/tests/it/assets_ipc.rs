@@ -2185,6 +2185,9 @@ async fn monitor_reading(
     state: Option<&str>,
     web_url: Option<&str>,
 ) -> String {
+    // Where Uptime Kuma declares a monitor's status, stored as bring-up
+    // stores it: what the pane reads the state through (#2364).
+    declare_monitor(pool, source, serde_json::json!([["state"]])).await;
     let id = format!("{source}:{key}");
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'monitor',$2)")
         .bind(&id)
@@ -2205,6 +2208,31 @@ async fn monitor_reading(
     .await
     .expect("the mirror row");
     id
+}
+
+/// The source `source`, configured with an adapter of the same name, and
+/// that adapter's stored monitor declaration naming `status_name` at
+/// `paths` (#2364): what the pane reads a monitor's state through. Writing it
+/// twice is harmless, so every fixture monitor can ask for it.
+async fn declare_monitor(pool: &PgPool, source: &str, paths: serde_json::Value) {
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ($1, $1, $1, 'http://127.0.0.1:1', 'pat')
+         on conflict (id) do nothing",
+    )
+    .bind(source)
+    .execute(pool)
+    .await
+    .expect("the source");
+    sqlx::query(
+        "insert into sync.parent_declaration (adapter_kind, payload_paths) values ($1, $2)
+         on conflict (adapter_kind) do nothing",
+    )
+    .bind(source)
+    .bind(serde_json::json!([{ "kind": "monitor", "status_name": paths }]))
+    .execute(pool)
+    .await
+    .expect("the stored declaration");
 }
 
 /// How one asset's pane reads its links: `(relation, the other end, its kind)`.
@@ -2508,6 +2536,43 @@ async fn the_pane_lists_the_monitors_watching_an_asset_with_their_state_and_a_li
             .len(),
         1,
         "a monitor watches the asset it was attached to and no other"
+    );
+}
+
+/// The state the pane shows is the monitor's **declared** status (#2364), the
+/// `status_name` `knobas_sync::samples::sample_of` reads, from the stored
+/// declaration of the adapter its source is configured with -- not Kuma's
+/// `state` key. A source that keeps the word at `health` shows that word,
+/// though its record's `state` says the opposite.
+#[tokio::test]
+async fn the_pane_reads_a_monitors_state_where_its_kind_declares_it() {
+    let pool = pool("assets-pane-declared-state").await;
+    let vm = make(&pool, None, "vm", "vm-db-01", &[]).await;
+    declare_monitor(&pool, "uptime", serde_json::json!([["health"]])).await;
+    let id = "uptime:gitea";
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'monitor','gitea')")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .expect("the entity row");
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1,'uptime','monitor','gitea','',
+                 '{\"health\": \"down\", \"state\": \"up\"}'::jsonb)",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .expect("the mirror row");
+    link_as(&pool, &vm.id, id, "monitored-by").await;
+
+    let pane = assets::get(&pool, &vm.id).await.expect("the pane");
+    assert_eq!(
+        pane.monitoring
+            .iter()
+            .map(|watch| watch.state.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("down")]
     );
 }
 
@@ -5340,6 +5405,58 @@ impl knobas_sync::scheduler::AdapterRegistry for KumaThatOnlySyncs {
     ) -> Result<Box<dyn knobas_source::Source>, knobas_source::SourceError> {
         knobas_sync::scheduler::AdapterRegistry::build(&self.0, instance)
     }
+}
+
+/// The process registry with Uptime Kuma's monitor declared at other keys:
+/// its status at `health` and its check type at `check` (#2364).
+struct KumaSpelledElsewhere(Registry);
+
+impl knobas_sync::scheduler::AdapterRegistry for KumaSpelledElsewhere {
+    fn descriptors(&self) -> Vec<knobas_source::SourceDescriptor> {
+        let mut templates = knobas_sync::scheduler::AdapterRegistry::descriptors(&self.0);
+        for template in &mut templates {
+            if template.adapter_kind == "kuma" {
+                for paths in &mut template.payload_paths {
+                    paths.status_name = vec![knobas_source::PayloadPath::of(["health"])];
+                    paths.monitor_type = vec![knobas_source::PayloadPath::of(["check"])];
+                }
+            }
+        }
+        templates
+    }
+
+    fn build(
+        &self,
+        instance: knobas_source::instance::SourceInstance,
+    ) -> Result<Box<dyn knobas_source::Source>, knobas_source::SourceError> {
+        knobas_sync::scheduler::AdapterRegistry::build(&self.0, instance)
+    }
+}
+
+/// **A roster row's state and type are read where the monitor kind declares
+/// them** (#2364): with no sample to take the state from, the row shows the
+/// declared status, and its type is the declared `monitor_type`, not Kuma's
+/// `state` and `type` keys, which say the opposite here.
+#[tokio::test]
+async fn a_roster_row_reads_its_state_and_type_where_its_kind_declares_them() {
+    let pool = pool("monitors-roster-declared").await;
+    kuma_monitor(
+        &pool,
+        "kuma",
+        "gitea",
+        serde_json::json!({ "health": "down", "state": "up", "check": "ping", "type": "http" }),
+        None,
+    )
+    .await;
+
+    let roster = assets::monitor_roster(&pool, &KumaSpelledElsewhere(Registry::for_process()))
+        .await
+        .expect("the roster");
+    let gitea = row(&roster, "gitea");
+    assert_eq!(
+        (gitea.state.as_deref(), gitea.monitor_type.as_deref()),
+        (Some("down"), Some("ping"))
+    );
 }
 
 /// **A roster row says whether its monitor can be refreshed** (#2138): the

@@ -4,6 +4,43 @@
 //! would walk every ticket's payload for one of them probes that table by
 //! the item's id instead.
 
+/// The stored declaration of the row `$row`'s source and kind, as a lateral
+/// relation `(decl)` shaped like a bound [`Declarations`](crate::payload::Declarations)
+/// jsonb, `{<source_id>: {<kind>: <its KindPaths>}}`: so a statement that
+/// binds no declarations reads a role with the `declared_*!` macros all the
+/// same, `$decl` being `"<alias>.decl"` (#2364).
+///
+/// The declaration is the database's stored copy (`sync.parent_declaration`,
+/// ADR-0019) of the adapter the source is configured with, which bring-up and
+/// every search command write, as `crate::project::list` reads it. No row
+/// where the source is not configured, its adapter stored nothing, or its
+/// kind is not declared: joined `cross join lateral`, the row drops out; a
+/// `left join lateral … on true` keeps it with a null `decl`, which every
+/// `declared_*!` macro reads as a miss.
+#[macro_export]
+macro_rules! stored_declaration {
+    ($row:literal) => {
+        concat!(
+            "(select jsonb_build_object(",
+            $row,
+            ".source_id, jsonb_build_object(",
+            $row,
+            ".kind, kp.p)) as decl
+               from knobas.source_config sc
+               join sync.parent_declaration pd on pd.adapter_kind = sc.kind
+              cross join lateral jsonb_array_elements(
+                case when jsonb_typeof(pd.payload_paths) = 'array'
+                     then pd.payload_paths else '[]'::jsonb end) as kp(p)
+              where sc.id = ",
+            $row,
+            ".source_id and kp.p->>'kind' = ",
+            $row,
+            ".kind
+              limit 1)"
+        )
+    };
+}
+
 /// A row's declared string for `$field`, stored where it can be and walked
 /// where it cannot: the stored value of `i`'s `$field` whose `paths` are the
 /// candidates `$decl` gives `i`'s source and kind, and `$walk` -- the read

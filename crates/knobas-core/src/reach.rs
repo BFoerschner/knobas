@@ -53,9 +53,8 @@
 //! links reach its tickets through link sets (TF5), not through this switch.
 //!
 //! The issue type goes through the declaration (#2364). The walk binds none,
-//! so it reads the database's stored copy: the parent's source's adapter's
-//! `sync.parent_declaration` row (ADR-0019), which bring-up and every search
-//! command write, as `knobas_core::project::list` reads it.
+//! so it reads the database's stored copy, [`crate::stored_declaration!`]:
+//! the parent's source's adapter's `sync.parent_declaration` row (ADR-0019).
 //! `a_parents_type_is_read_where_its_kind_declares_it` pins the path.
 //!
 //! The parent **key** stays a payload read outside an adapter (ADR-0007),
@@ -235,15 +234,9 @@ macro_rules! reach_walk {
           join knobas.entity pe
             on pe.id = ci.source_id || ':' || (ci.payload->'fields'->'parent'->>'key')
           join sync.live_item i on i.entity_id = pe.id
-         cross join lateral (
-           select jsonb_build_object(i.source_id, jsonb_build_object(i.kind, kp.p)) as decl
-             from knobas.source_config sc
-             join sync.parent_declaration pd on pd.adapter_kind = sc.kind
-            cross join lateral jsonb_array_elements(
-              case when jsonb_typeof(pd.payload_paths) = 'array'
-                   then pd.payload_paths else '[]'::jsonb end) as kp(p)
-            where sc.id = i.source_id and kp.p->>'kind' = i.kind
-            limit 1) dd
+         cross join lateral ",
+            $crate::stored_declaration!("i"),
+            " dd
          where not exists (select 1 from knobas.setting st
                             where st.key = 'job.parent_links' and st.value = to_jsonb('off'::text))
            and coalesce(",
