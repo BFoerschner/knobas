@@ -1375,12 +1375,12 @@ live-sources-remove app="":
     testenv/live-sources.sh remove {{ quote(app) }}
 
 # `just demo` with every live product as a source already in place.
-demo-live: (live-sources "")
+live-demo: (live-sources "")
     just demo
 
 # For the milestone review's bundle, or the desktop witness's.
 # A built bundle on the demo profile with every live product as a source.
-demo-live-bundle app: (live-sources app)
+live-demo-bundle app: (live-sources app)
     open -a {{ quote(app) }} --args --demo
 
 # The desktop witness (issue #500, ADR-0016): the signed bundle, launched from
