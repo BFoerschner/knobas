@@ -48,16 +48,26 @@
 //! further. The parent is the declared `fields.parent.key`, in the ticket's own
 //! source -- the first arm of `recorded_parent_key!`; the classic `epic.key`
 //! arm names an epic, which is not "the parent" here. The parent counts only
-//! when it is mirrored and its issue type reads as something other than an
-//! epic, by the path the promote path's anchor check reads: an epic's links
-//! reach its tickets through link sets (TF5), not through this switch. Both are
-//! payload reads outside an adapter (ADR-0007), confined to [`reach_walk!`],
-//! and both miss toward absence: a parent key or an issue type the path does
-//! not find contributes no parent, so the failure is an absent row, never a
-//! wrong one. `a_parent_whose_type_cannot_be_read_brings_nothing` pins the
-//! second. The two paths are spelled here rather than through
-//! `recorded_parent_key!` because that macro's second arm (`epic.key`) names
-//! an epic, which this read must not take.
+//! when it is mirrored and its declared `issue_type` reads as something other
+//! than an epic, the test the promote path's anchor check makes: an epic's
+//! links reach its tickets through link sets (TF5), not through this switch.
+//!
+//! The issue type goes through the declaration (#2364). The walk binds none,
+//! so it reads the database's stored copy, [`crate::stored_declaration!`]:
+//! the parent's source's adapter's `sync.parent_declaration` row (ADR-0019).
+//! `a_parents_type_is_read_where_its_kind_declares_it` pins the path.
+//!
+//! The parent **key** stays a payload read outside an adapter (ADR-0007),
+//! confined to [`reach_walk!`]: a kind's declared parent names are what a
+//! parent *answers to* (a title, a configuration's name), not the entity id
+//! this join needs, and the declaration cannot say which candidate is the
+//! parent and which the epic. Both reads miss toward absence: a parent key or
+//! an issue type the walk does not find contributes no parent, so the failure
+//! is an absent row, never a wrong one.
+//! `a_parent_whose_type_cannot_be_read_brings_nothing` pins the second. The
+//! key's path is spelled here rather than through `recorded_parent_key!`
+//! because that macro's second arm (`epic.key`) names an epic, which this read
+//! must not take.
 //!
 //! ## The link sets
 //!
@@ -223,10 +233,15 @@ macro_rules! reach_walk {
           join sync.live_item ci on ci.entity_id = s.t
           join knobas.entity pe
             on pe.id = ci.source_id || ':' || (ci.payload->'fields'->'parent'->>'key')
-          join sync.live_item pi on pi.entity_id = pe.id
+          join sync.live_item i on i.entity_id = pe.id
+         cross join lateral ",
+            $crate::stored_declaration!("i"),
+            " dd
          where not exists (select 1 from knobas.setting st
                             where st.key = 'job.parent_links' and st.value = to_jsonb('off'::text))
-           and coalesce(pi.payload->'fields'->'issuetype'->>'name' not ilike 'epic', false)
+           and coalesce(",
+            $crate::declared_string!("dd.decl", "issue_type"),
+            " not ilike 'epic', false)
            and pe.id <> s.t
     ),
     ",

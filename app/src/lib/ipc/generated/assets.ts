@@ -944,8 +944,9 @@ name: string,
  * in no payload. A chip counting warns off the mirror would count none,
  * for ever. The mirror is the fallback for the one case a sample cannot
  * cover -- a monitor mirrored by a run that wrote no sample, or one whose
- * samples retention has swept -- and it is the same
- * `payload->>'state'` read the pane's monitoring section makes (#445).
+ * samples retention has swept -- and it is the monitor's declared
+ * `status_name`, the read the pane's monitoring section makes (#445,
+ * #2364).
  *
  * `null` is a genuine miss: a tombstone with no reading left, or a state
  * code the adapter had no word for.
@@ -953,7 +954,8 @@ name: string,
 state: string | null, 
 /**
  * `http`, `ping`, `docker`, `port` -- Kuma's own word for what kind of
- * check this is. `null` where the payload does not say.
+ * check this is, at the kind's declared `monitor_type`. `null` where the
+ * payload does not say.
  */
 monitor_type: string | null, 
 /**

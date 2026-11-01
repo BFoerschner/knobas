@@ -28,7 +28,8 @@ use crate::responsiveness_probe::Synthetic;
 /// declared state; `status_paths`, one row per source and status candidate;
 /// `lane_paths`, `label_paths` and `state_paths` the same for a lane's field,
 /// the labels and a build's or pull request's state (#939); `assignee_paths`
-/// the inbox's assignee candidates (#1164).
+/// the inbox's assignee candidates (#1164), and `pipeline_paths` its failed
+/// build's pipeline candidates (#2364).
 const SMALL: &[&str] = &[
     "source_config",
     "grouped",
@@ -37,6 +38,7 @@ const SMALL: &[&str] = &[
     "label_paths",
     "state_paths",
     "assignee_paths",
+    "pipeline_paths",
     // `ticket_views`' saved views by project and liveness (#2193): one row
     // per view, project its members name and live or not, so bounded by the
     // user's views times the projects one view spans, never the members,

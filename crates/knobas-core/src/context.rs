@@ -172,14 +172,12 @@ macro_rules! done_like {
 
 /// What the promote path needs to know about its anchor, in one read.
 ///
-/// `epic` is a **payload read outside an adapter**, governed by ADR-0007: the
-/// issue type lives only in the source's own shape
-/// (`fields.issuetype.name`), this statement is the one place that shape is
-/// spelled, and its failure direction is pinned by
-/// `an_unrecognized_issue_type_shape_misses_toward_ticket` -- an absent or
-/// unrecognized shape reads `false`, so a miss promotes the *narrower*
-/// ticket-kind context, never a wrong epic. A second source's spelling of
-/// "this is an epic" is one more `or` here and nothing anywhere else.
+/// `epic` is the anchor's declared `issue_type` (#811, #2364; Jira's
+/// `fields.issuetype.name`) read as `epic`, ignoring case. Its failure
+/// direction is pinned by `an_unrecognized_issue_type_shape_misses_toward_ticket`:
+/// an undeclared type, or one the declared path does not find, reads `false`,
+/// so a miss promotes the *narrower* ticket-kind context, never a wrong epic.
+/// `an_epic_is_read_where_the_ticket_kind_declares_its_type` pins the path.
 ///
 /// `done` is [`done_like!`] on the anchor, which is what makes a context first
 /// made for a done ticket born archived.
@@ -189,7 +187,9 @@ macro_rules! done_like {
 /// everything else, and is never done.
 const ANCHOR_SHAPE: &str = concat!(
     "select e.title,
-            coalesce(i.payload->'fields'->'issuetype'->>'name' ilike 'epic', false) as epic,
+            coalesce(",
+    crate::declared_string!("$2", "issue_type"),
+    " ilike 'epic', false) as epic,
             ",
     done_like!("$2"),
     " as done
@@ -479,6 +479,14 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ContextRow>, CoreError> {
 /// `a_foreign_or_misshapen_parent_contributes_nothing` for `member_ids`, and
 /// `a_misshapen_parent_seeds_no_context_in_the_merged_walk` for the merged
 /// one, both in `tests/it/contexts.rs`.
+///
+/// **Why not the declared `parent`** (#2364, ruled on that issue): a kind's
+/// declared parent names are what a parent *answers to*, for `under:` and
+/// the path line -- a Confluence page's title, a TeamCity configuration's
+/// name before its id -- and this read needs the parent's **entity id**,
+/// `<source>:<key>`. Read through the declaration, a name that happened to
+/// equal some key would seed a wrong member, and no `KindPaths` role says
+/// "this name is the parent's key". It stays here until one does.
 ///
 /// Exported for [`held_by_any_context!`]'s sake — a macro's body resolves at
 /// its call site — which is [`context_expansion!`]'s reason too.

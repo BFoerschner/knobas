@@ -111,14 +111,29 @@ async fn search(pool: &sqlx::PgPool, raw: &str) -> Vec<String> {
 async fn reach_returns_the_same_ids_as_the_read() {
     let pool = pool().await;
     let tag = unique();
-    let parent = item(&pool, "jira", "ticket", &format!("P{tag}-1")).await;
+    // The tickets' source of its own, configured with the Jira adapter whose
+    // stored declaration the walk reads a parent's issue type through
+    // (#2364); stored before the read, as bring-up stores it.
+    let jira = format!("jira-{}", tag.to_lowercase());
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ($1, 'jira', $1, 'http://127.0.0.1:1', 'pat')",
+    )
+    .bind(&jira)
+    .execute(&pool)
+    .await
+    .unwrap();
+    Searcher::declaring(pool.clone(), [knobas_source_jira::descriptor_template()])
+        .await
+        .unwrap();
+    let parent = item(&pool, &jira, "ticket", &format!("P{tag}-1")).await;
     sqlx::query("update sync.item set payload = payload || '{\"fields\":{\"issuetype\":{\"name\":\"Story\"}}}' where entity_id = $1")
         .bind(&parent)
         .execute(&pool)
         .await
         .unwrap();
     let key = format!("P{tag}-2");
-    let sub = EntityRef::new("jira", &key).to_string();
+    let sub = EntityRef::new(&jira, &key).to_string();
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'ticket',$2)")
         .bind(&sub)
         .bind(&key)
@@ -127,11 +142,12 @@ async fn reach_returns_the_same_ids_as_the_read() {
         .unwrap();
     sqlx::query(
         "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
-         values ($1,'jira','ticket',$2,$2,$3)",
+         values ($1,$4,'ticket',$2,$2,$3)",
     )
     .bind(&sub)
     .bind(&key)
     .bind(serde_json::json!({ "key": key, "fields": { "parent": { "key": format!("P{tag}-1") } } }))
+    .bind(&jira)
     .execute(&pool)
     .await
     .unwrap();

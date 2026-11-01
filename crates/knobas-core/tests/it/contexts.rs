@@ -174,7 +174,7 @@ async fn promoting_a_ticket_yields_one_ticket_context_however_often() {
         .unwrap();
 
     let anchor = EntityRef::parse(&ticket).unwrap();
-    let promoted = context::promote(&pool, &anchor, &knobas_core::payload::Declarations::empty())
+    let promoted = context::promote(&pool, &anchor, &jira())
         .await
         .unwrap()
         .unwrap();
@@ -186,7 +186,7 @@ async fn promoting_a_ticket_yields_one_ticket_context_however_often() {
 
     // Promoting again is the same context, not a second one -- and the store
     // says so, which is what lets the command log and announce exactly once.
-    let again = context::promote(&pool, &anchor, &knobas_core::payload::Declarations::empty())
+    let again = context::promote(&pool, &anchor, &jira())
         .await
         .unwrap()
         .unwrap();
@@ -200,7 +200,7 @@ async fn promoting_something_that_never_synced_is_a_miss_not_a_context() {
     let pool = scratch().await;
     let ghost = EntityRef::new(SOURCE, "PAY-404");
     assert!(
-        context::promote(&pool, &ghost, &knobas_core::payload::Declarations::empty())
+        context::promote(&pool, &ghost, &jira())
             .await
             .unwrap()
             .is_none()
@@ -218,16 +218,49 @@ async fn promoting_an_epic_is_read_off_the_issue_type() {
         serde_json::json!({"fields": {"issuetype": {"name": "Epic"}}}),
     )
     .await;
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&epic).unwrap(),
-        &knobas_core::payload::Declarations::empty(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
     assert_eq!(ctx.kind, ContextKind::Epic);
+}
+
+/// The issue type is read where the ticket kind **declares** it (#2364), not
+/// at Jira's `fields.issuetype.name`: a source that keeps it at `type` makes
+/// an epic of the ticket whose `type` says so, and not of the one only Jira's
+/// path calls an epic.
+#[tokio::test]
+async fn an_epic_is_read_where_the_ticket_kind_declares_its_type() {
+    let pool = scratch().await;
+    let declared = knobas_core::payload::Declarations::empty().with(
+        SOURCE,
+        vec![knobas_core::payload::KindPaths {
+            kind: "ticket".to_owned(),
+            issue_type: vec![knobas_core::payload::PayloadPath::of(["type"])],
+            ..knobas_core::payload::KindPaths::default()
+        }],
+    );
+    for (key, payload, want) in [
+        (
+            "EPIC-7",
+            serde_json::json!({"type": "epic", "fields": {"issuetype": {"name": "Story"}}}),
+            ContextKind::Epic,
+        ),
+        (
+            "PAY-7",
+            serde_json::json!({"type": "Story", "fields": {"issuetype": {"name": "Epic"}}}),
+            ContextKind::Ticket,
+        ),
+    ] {
+        let id = with_payload(&pool, "ticket", key, payload).await;
+        let ctx = context::promote(&pool, &EntityRef::parse(&id).unwrap(), &declared)
+            .await
+            .unwrap()
+            .unwrap()
+            .context;
+        assert_eq!(ctx.kind, want, "{key}");
+    }
 }
 
 /// ADR-0007's pinned failure direction for the issue-type read: a payload the
@@ -248,15 +281,11 @@ async fn an_unrecognized_issue_type_shape_misses_toward_ticket() {
         ),
     ] {
         let id = with_payload(&pool, "ticket", key, payload).await;
-        let ctx = context::promote(
-            &pool,
-            &EntityRef::parse(&id).unwrap(),
-            &knobas_core::payload::Declarations::empty(),
-        )
-        .await
-        .unwrap()
-        .unwrap()
-        .context;
+        let ctx = context::promote(&pool, &EntityRef::parse(&id).unwrap(), &jira())
+            .await
+            .unwrap()
+            .unwrap()
+            .context;
         assert_eq!(ctx.kind, ContextKind::Ticket, "payload of {key}");
     }
 }
@@ -294,15 +323,11 @@ async fn a_promoted_anchor_is_a_member_and_seeds_the_walk() {
     draw(&pool, &pr, &build).await;
     draw(&pool, &build, &page).await;
 
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&ticket).unwrap(),
-        &knobas_core::payload::Declarations::empty(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&ticket).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
 
     assert_eq!(members(&pool, &ctx.id).await, set(&[&ticket, &pr, &build]));
 }
@@ -379,15 +404,11 @@ async fn epic_children_seed_the_walk_through_the_recorded_parent() {
     draw(&pool, &pr, &build).await;
     draw(&pool, &build, &page).await;
 
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&epic).unwrap(),
-        &knobas_core::payload::Declarations::empty(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
 
     assert_eq!(
         members(&pool, &ctx.id).await,
@@ -426,15 +447,11 @@ async fn a_classic_epics_children_are_members_through_the_stored_epic() {
     )
     .await;
 
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&epic).unwrap(),
-        &knobas_core::payload::Declarations::empty(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
 
     assert_eq!(members(&pool, &ctx.id).await, set(&[&epic, &story, &bug]));
     let merged: BTreeSet<String> = context::held_by_any_context(&pool)
@@ -516,15 +533,11 @@ async fn a_foreign_or_misshapen_parent_contributes_nothing() {
     )
     .await;
 
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&epic).unwrap(),
-        &knobas_core::payload::Declarations::empty(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
 
     let got = members(&pool, &ctx.id).await;
     assert!(
@@ -577,15 +590,11 @@ async fn an_unknown_context_has_no_members_rather_than_an_error() {
 async fn the_anchor_index_refuses_a_second_context_as_a_duplicate() {
     let pool = scratch().await;
     let ticket = with_payload(&pool, "ticket", "PAY-1", serde_json::json!({})).await;
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&ticket).unwrap(),
-        &knobas_core::payload::Declarations::empty(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&ticket).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
 
     let refused = sqlx::query(
         "insert into knobas.context (id, kind, title, anchor_id)
@@ -618,15 +627,11 @@ async fn a_ticket_context_does_not_seed_its_subtasks() {
     )
     .await;
 
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&story).unwrap(),
-        &knobas_core::payload::Declarations::empty(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&story).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
     assert_eq!(ctx.kind, ContextKind::Ticket);
     assert_eq!(
         members(&pool, &ctx.id).await,
@@ -647,12 +652,7 @@ async fn promoting_a_context_is_refused() {
     let ctx = context::create_adhoc(&pool, "payout retries")
         .await
         .unwrap();
-    let refused = context::promote(
-        &pool,
-        &EntityRef::parse(&ctx.id).unwrap(),
-        &knobas_core::payload::Declarations::empty(),
-    )
-    .await;
+    let refused = context::promote(&pool, &EntityRef::parse(&ctx.id).unwrap(), &jira()).await;
     assert!(
         matches!(refused, Err(CoreError::AnchorIsAContext)),
         "got {refused:?}"
@@ -922,15 +922,11 @@ async fn the_merged_walk_is_the_union_of_every_contexts_members() {
     )
     .await;
     draw(&pool, &child, &build).await;
-    let promoted = context::promote(
-        &pool,
-        &EntityRef::parse(&epic).unwrap(),
-        &knobas_core::payload::Declarations::empty(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let promoted = context::promote(&pool, &EntityRef::parse(&epic).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
 
     // Three: archived, and everything it alone reaches is out.
     let old = context::create_adhoc(&pool, "last spring").await.unwrap();
@@ -1049,14 +1045,10 @@ async fn a_misshapen_parent_seeds_no_context_in_the_merged_walk() {
         serde_json::json!({"fields": {}, "epic": "EPIC-1"}),
     )
     .await;
-    context::promote(
-        &pool,
-        &EntityRef::parse(&epic).unwrap(),
-        &knobas_core::payload::Declarations::empty(),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    context::promote(&pool, &EntityRef::parse(&epic).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap();
 
     let got: BTreeSet<String> = context::held_by_any_context(&pool)
         .await
@@ -1086,6 +1078,23 @@ async fn a_misshapen_parent_seeds_no_context_in_the_merged_walk() {
 
 /// What the Jira adapter declares for a ticket's status and its done-like
 /// set, under this file's source id. The lifecycle reads nothing else.
+/// What Jira Data Center declares of a ticket's type (#811): the promote
+/// path reads an epic through it (#2364).
+fn jira() -> knobas_core::payload::Declarations {
+    knobas_core::payload::Declarations::empty().with(
+        SOURCE,
+        vec![knobas_core::payload::KindPaths {
+            kind: "ticket".to_owned(),
+            issue_type: vec![knobas_core::payload::PayloadPath::of([
+                "fields",
+                "issuetype",
+                "name",
+            ])],
+            ..knobas_core::payload::KindPaths::default()
+        }],
+    )
+}
+
 fn done_like_declared() -> knobas_core::payload::Declarations {
     knobas_core::payload::Declarations::empty().with(
         SOURCE,
@@ -1243,16 +1252,12 @@ async fn following_the_status_archives_on_done_and_revives_when_it_leaves() {
     .context
     .id;
     let elsewhere = mirrored(&pool, "jira-eu", "ticket", "LIFE-7", in_status("Done")).await;
-    let other = context::promote(
-        &pool,
-        &EntityRef::parse(&elsewhere).unwrap(),
-        &knobas_core::payload::Declarations::empty(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context
-    .id;
+    let other = context::promote(&pool, &EntityRef::parse(&elsewhere).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context
+        .id;
 
     set_status(&pool, &ticket, "DONE").await;
     let moved = context::follow_status(&pool, SOURCE, &done_like_declared())

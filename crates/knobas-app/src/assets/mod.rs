@@ -855,14 +855,16 @@ pub struct MonitorRow {
     /// in no payload. A chip counting warns off the mirror would count none,
     /// for ever. The mirror is the fallback for the one case a sample cannot
     /// cover -- a monitor mirrored by a run that wrote no sample, or one whose
-    /// samples retention has swept -- and it is the same
-    /// `payload->>'state'` read the pane's monitoring section makes (#445).
+    /// samples retention has swept -- and it is the monitor's declared
+    /// `status_name`, the read the pane's monitoring section makes (#445,
+    /// #2364).
     ///
     /// `null` is a genuine miss: a tombstone with no reading left, or a state
     /// code the adapter had no word for.
     pub state: Option<String>,
     /// `http`, `ping`, `docker`, `port` -- Kuma's own word for what kind of
-    /// check this is. `null` where the payload does not say.
+    /// check this is, at the kind's declared `monitor_type`. `null` where the
+    /// payload does not say.
     pub monitor_type: Option<String>,
     /// **What it watches**: the URL where there is one, else the hostname with
     /// its port where there is one. One field and not three, because it is one
@@ -1570,7 +1572,7 @@ const ROUTE_ONE: &str = "select r.id, r.asset_id, r.target_id, r.name, r.url,
 /// * **The sample, not the mirror row.** *Warn* is knobas' own state and
 ///   exists only in the timeseries (#443): Uptime Kuma publishes `up` for a
 ///   monitor answering slowly, and it is `samples::sample_of` that turns the
-///   response-time threshold into a word. A rollup reading `payload->>'state'`
+///   response-time threshold into a word. A rollup reading the mirror's state
 ///   could therefore never produce the `warn` spec #427 puts in the middle of
 ///   its own ordering. The pane's [`AttachedMonitor::state`] still reads the
 ///   mirror, and deliberately: that section says what *Kuma* last published,
@@ -1923,9 +1925,23 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<AssetDetail, IpcError> {
 /// filter every reader in this app inherits (`0012`). The *attachment* is not
 /// read here: that is the link, and a link survives both the tombstone and the
 /// disabled source.
-const MONITOR_READINGS: &str = "select entity_id, payload->>'state' as state, web_url
-  from sync.live_item
- where kind = $2 and entity_id = any($1::text[])";
+///
+/// The state is the monitor's declared `status_name` (#2364), the word
+/// `knobas_sync::samples::sample_of` reads, so the pane says what the source
+/// last published in its own words (Kuma's `state`). The pane binds no
+/// declarations, so it reads the stored copy
+/// ([`knobas_core::stored_declaration!`]); a source with none stored, or a
+/// monitor kind that declares no status, shows no state, the ADR-0007 miss.
+const MONITOR_READINGS: &str = concat!(
+    "select i.entity_id, ",
+    knobas_core::declared_string!("dd.decl", "status_name"),
+    " as state, i.web_url
+  from sync.live_item i
+  left join lateral ",
+    knobas_core::stored_declaration!("i"),
+    " dd on true
+ where i.kind = $2 and i.entity_id = any($1::text[])"
+);
 
 /// The monitors watching an asset, out of the links it already takes part in.
 ///
@@ -2164,14 +2180,14 @@ pub async fn monitor_roster(
             let entity_id: String = row.try_get("entity_id")?;
             let source_id: String = row.try_get("source_id")?;
             let payload: serde_json::Value = row.try_get("payload")?;
-            let response_time = declarations
-                .get(&source_id, MONITOR_KIND)
-                .map_or(&[][..], |paths| paths.response_time.as_slice());
-            let reading = reading_of(&payload, response_time);
+            let declared = declarations.get(&source_id, MONITOR_KIND);
+            let reading = reading_of(&payload, declared);
             let samples = samples.remove(&entity_id).unwrap_or_default();
             let state = match samples.last() {
                 Some(newest) => newest.state.clone(),
-                None => text_at(&payload, "state"),
+                None => declared.and_then(|paths| {
+                    knobas_core::payload::resolve_string(&payload, &paths.status_name)
+                }),
             };
             Ok(MonitorRow {
                 source_id,
@@ -2655,11 +2671,13 @@ struct Reading {
 ///
 /// # This is a payload read outside an adapter (ADR-0007, #277)
 ///
-/// The response time is the one column read through a declaration: the
-/// source's `response_time` (#1224), the paths passed in, which the monitoring
-/// role requires, as `knobas_sync::samples::sample_of` reads it. A source
-/// that declares none draws no reading. For the rest `KindPaths` has no slot
-/// shaped like them -- no "what it watches", no "a ratio per window" -- so
+/// Two columns are read through the declaration passed in (the source's
+/// paths for its monitor kind): the response time, its `response_time`
+/// (#1224), which the monitoring role requires, as
+/// `knobas_sync::samples::sample_of` reads it; and the type, its
+/// `monitor_type` (#1020, read so since #2364; Kuma's `type`). A source that
+/// declares no path for one draws nothing in that column. For the rest
+/// `KindPaths` has no slot shaped like them -- no "what it watches", no "a ratio per window" -- so
 /// the interim discipline applies in full, and this function meets all three
 /// requirements the way `knobas_sync::samples::sample_of` does:
 ///
@@ -2671,10 +2689,10 @@ struct Reading {
 ///    coerced. A blank string is a miss too, for `estate_file.rs`' reason:
 ///    *nothing here* and *somebody meant to fill this in* must not read alike.
 /// 2. **One named place**, this function, reached from [`monitor_roster`] and
-///    from nowhere else. The one read outside it is `state`, which
-///    [`monitor_roster`] takes with [`text_at`] because it is the *fallback*
-///    for a value the samples normally supply, and the pane's own monitoring
-///    section already reads it that way (#445, [`MONITOR_READINGS`]).
+///    from nowhere else. The state is not read here: [`monitor_roster`] takes
+///    the declared `status_name` as the *fallback* for a value the samples
+///    normally supply, as the pane's own monitoring section does (#445,
+///    #2364, [`MONITOR_READINGS`]).
 /// 3. **The failure direction is absence.** A drifted key, and a source that
 ///    declares no `response_time`, draws an empty cell
 ///    in the roster -- never a target that is somebody else's host, never a
@@ -2705,15 +2723,17 @@ struct Reading {
 /// asset whose hostname is `gitea`. Same key, different question.
 fn reading_of(
     payload: &serde_json::Value,
-    response_time: &[knobas_core::payload::PayloadPath],
+    declared: Option<&knobas_core::payload::KindPaths>,
 ) -> Reading {
+    let response_time = declared.map_or(&[][..], |paths| paths.response_time.as_slice());
     let hostname = text_at(payload, "hostname");
     let target = text_at(payload, "url").or_else(|| match (hostname, text_at(payload, "port")) {
         (Some(host), Some(port)) => Some(format!("{host}:{port}")),
         (host, _) => host,
     });
     Reading {
-        monitor_type: text_at(payload, "type"),
+        monitor_type: declared
+            .and_then(|paths| knobas_core::payload::resolve_string(payload, &paths.monitor_type)),
         target,
         response_time_ms: knobas_core::payload::resolve_number(payload, response_time),
         uptime: payload
