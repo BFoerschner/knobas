@@ -15,7 +15,10 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 common=$(git -C "$here" rev-parse --path-format=absolute --git-common-dir)
-main=${common%/.git}
+# KNOBAS_LIVE_REFRESH_TREE runs another checkout's: a branch that brings the
+# refresher before main has it. Re-install from main once it does.
+main=${KNOBAS_LIVE_REFRESH_TREE:-${common%/.git}}
+[ -x "$main/testenv/live" ] || { echo "refresh-agent: no $main/testenv/live" >&2; exit 1; }
 label=com.knobas.live-refresh
 plist=$HOME/Library/LaunchAgents/$label.plist
 log=$HOME/Library/Logs/knobas-live-refresh.log
