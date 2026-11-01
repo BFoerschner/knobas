@@ -30,8 +30,9 @@
 # WHAT `down` MEANS DIFFERS, ON PURPOSE. TeamCity and Gitea are *stopped*:
 # their volumes hold the seeded builds and the seeded corpus, and the next `up`
 # finds them seeded in seconds. Jira and Confluence are removed with their
-# volumes: they run on 3-hour timebomb licences that a restart does not renew,
-# so a kept volume is a product whose licence has already run out. Their seed-state.json block goes
+# volumes, so `down` means from empty for them: a restart renews their 3-hour
+# timebomb licence (#2373, below), but a stopped instance kept for later
+# would come back to whatever a run left in it. Their seed-state.json block goes
 # with them, so `./seed --env` stops printing a URL nothing answers.
 #
 # NEVER A STRAY REMOTE ENGINE. Until #634 the docker contexts `knobas-teamcity`,
@@ -766,18 +767,23 @@ _live_start() {
   echo "live: $product: up"
 }
 
-# THE 3-HOUR LICENCE, RENEWED WHEN IT IS DUE. A timebomb key runs out three
-# hours after the wizard applies it, and nothing renews it but a new instance.
-# A product only ever up for one run never met that; one kept up -- `live-up`
-# for a session, or a remote target that keeps it around the clock, or a
-# stopped container a reboot left behind -- does. So before Jira or
-# Confluence is started or re-seeded, the age of its data volume is read
-# (created before the wizard ran, so the estimate errs early): with less than
-# KNOBAS_LIVE_LICENCE_MARGIN_S left (3600 by default), it is removed with its
-# volumes and set up from empty. The caller holds the JVM lock, so no other
-# run is in it. An age that cannot be read -- no container, or no answer --
-# removes nothing.
-LIVE_LICENCE_S=10800
+# THE 3-HOUR LICENCE, RENEWED WHEN IT IS DUE. A timebomb key's expiry is a
+# duration, `LicenseExpiryDate=P3H`, which the product resolves when its JVM
+# decodes the key: at the wizard, and again at every START. Measured on the
+# WSL box, 2026-11-01 (#2373): a `docker restart` of a Confluence due at
+# 16:44 moved its expiry to 19:03, three hours after the restart, data kept;
+# applying the same key again in place through Jira's licence API answers 200
+# and leaves the expiry where it was, and Jira refuses to remove its only
+# licence. So a restart is the renewal, and a product that is down renews when
+# it starts. Before Jira or Confluence is re-seeded, its expiry is read from
+# the product itself (`_live_licence_left`): with less than
+# KNOBAS_LIVE_LICENCE_MARGIN_S left (3600 by default) it is restarted; a
+# restart that does not move the expiry falls back to removing it with its
+# volumes and setting it up from empty. The caller holds the product's lock,
+# so no other run is in it. A product that does not answer is left alone.
+# Between runs, on a remote target, `testenv/live refresh` does the same
+# under the product's lock (`live_refresh`, below), every 15 minutes from
+# launchd on the Mac (testenv/wsl/refresh-agent.sh).
 
 # _live_epoch <RFC 3339 time> -- seconds since the epoch, for docker's
 # spellings: fractional seconds, and `Z` or a `+01:00` offset.
@@ -799,22 +805,48 @@ _live_engine_now() {
   date +%s
 }
 
-# _live_licence_left <product> -- seconds of licence left, by the age of the
-# product's data VOLUME: the licence lives in it, and only a reset removes
-# it. Not the container's age: compose recreates a container whenever its
-# configuration changes (a moved image pin, a raised memory cap), which
-# would make an old licence look new. The container's age is the fallback
-# for a volume docker cannot date. Fails when neither is there.
+# _live_licence_left <product> -- seconds of licence left, by the expiry the
+# product itself reports (milliseconds, on the engine's clock, which is the
+# product's): Jira Software's from the plugin manager's application licence,
+# Confluence's from its licence details. Negative once it has run out; both
+# still answer then. Fails when the product does not answer -- down, or
+# still starting. The right password only (README, "Never send this Jira a
+# wrong password").
 _live_licence_left() {
-  local created epoch
-  created=$(docker volume inspect -f '{{.CreatedAt}}' "knobas-testenv_$1-data" 2>/dev/null) || created=""
-  epoch=$(_live_epoch "$created") || epoch=""
-  if [ -z "$epoch" ]; then
-    created=$(docker inspect -f '{{.Created}}' "$(_live_main "$1")" 2>/dev/null) || return 1
-    epoch=$(_live_epoch "$created") || return 1
+  local url ms
+  case $1 in
+    jira) url=http://127.0.0.1:8080/rest/plugins/applications/1.0/installed/jira-software/license ;;
+    confluence) url=http://127.0.0.1:8090/rest/license/1.0/license/details ;;
+    *) return 1 ;;
+  esac
+  ms=$(curl -fsS -m 10 -u knobas:knobas-dev "$url" 2>/dev/null | jq -r '.expiryDate // empty' 2>/dev/null) || return 1
+  case $ms in '' | *[!0-9]*) return 1 ;; esac
+  echo $((ms / 1000 - $(_live_engine_now)))
+}
+
+# _live_licence_margin -- KNOBAS_LIVE_LICENCE_MARGIN_S, whole seconds.
+_live_licence_margin() {
+  local margin=${KNOBAS_LIVE_LICENCE_MARGIN_S:-3600}
+  case $margin in '' | *[!0-9]*)
+    echo "live: KNOBAS_LIVE_LICENCE_MARGIN_S must be whole seconds, not '$margin'" >&2; return 1 ;;
+  esac
+  echo "$margin"
+}
+
+# _live_atlassian_renew <product> <seconds left> -- restart the product, which
+# renews its licence with its data kept, and confirm the expiry moved. Fails
+# when the restart fails or the expiry did not move.
+_live_atlassian_renew() {
+  local left
+  echo "live: $1: about $(($2 > 0 ? $2 / 60 : 0)) min left of its 3-hour licence; restarting it, which renews it with its data kept"
+  _live_compose --profile real-atlassian restart "$1" >/dev/null || return 1
+  KNOBAS_LIVE_API_WAIT_S=${KNOBAS_LIVE_API_WAIT_S:-600} _live_atlassian_api "$1" || return 1
+  if left=$(_live_licence_left "$1") && [ "$left" -gt $(($2 + 60)) ]; then
+    echo "live: $1: renewed, about $((left / 60)) min of licence left"
+    return 0
   fi
-  case $epoch in '' | *[!0-9]*) return 1 ;; esac
-  echo $((LIVE_LICENCE_S - ($(_live_engine_now) - epoch)))
+  echo "live: $1: the restart did not renew its licence (${left:-no answer}s left)" >&2
+  return 1
 }
 
 # _live_atlassian_remove <product> -- the product and its database removed
@@ -882,16 +914,15 @@ _live_atlassian_seed() {
 # fails from empty is a real failure and is reported as one.
 _live_atlassian_start() {
   local product=$1 left margin existed=""
-  margin=${KNOBAS_LIVE_LICENCE_MARGIN_S:-3600}
-  case $margin in '' | *[!0-9]*)
-    echo "live: KNOBAS_LIVE_LICENCE_MARGIN_S must be whole seconds, not '$margin'" >&2; return 1 ;;
-  esac
-  if [[ " $LIVE_RENEWED " == *" $product "* ]]; then
-    : # renewed in the memory section a moment ago: from empty
-  elif left=$(_live_licence_left "$product"); then
+  margin=$(_live_licence_margin) || return 1
+  if left=$(_live_licence_left "$product"); then
     if [ "$left" -lt "$margin" ]; then
-      echo "live: $product: its 3-hour licence has about $((left > 0 ? left / 60 : 0)) min left (under KNOBAS_LIVE_LICENCE_MARGIN_S=${margin}s); removing it and setting it up from empty"
-      _live_atlassian_remove "$product"
+      if _live_atlassian_renew "$product" "$left"; then
+        existed=1
+      else
+        echo "live: $product: removing it and setting it up from empty"
+        _live_atlassian_remove "$product"
+      fi
     else
       existed=1
       echo "live: $product: about $((left / 60)) min of its 3-hour licence left; re-seeding it"
@@ -1063,23 +1094,14 @@ _live_up_args() {
   esac
 }
 
-# _live_claim <product> -- on a remote target, the memory section: renew a
-# licence that is due, make room, and start the containers, so the next run
-# to count finds this product up. Seeding comes after, outside it.
-LIVE_RENEWED=""
+# _live_claim <product> -- on a remote target, the memory section: make room
+# and start the containers, so the next run to count finds this product up.
+# Seeding, and renewing a licence that is due (a restart, which changes no
+# memory), come after, outside it.
 _live_claim() {
-  local p=$1 left margin
+  local p=$1
   [ -n "$LIVE_REMOTE" ] || return 0
-  case $p in
-    jira | confluence)
-      margin=${KNOBAS_LIVE_LICENCE_MARGIN_S:-3600}
-      if left=$(_live_licence_left "$p") && [ "$left" -lt "$margin" ] 2>/dev/null; then
-        echo "live: $p: its 3-hour licence has about $((left > 0 ? left / 60 : 0)) min left (under KNOBAS_LIVE_LICENCE_MARGIN_S=${margin}s); removing it and setting it up from empty"
-        _live_atlassian_remove "$p"
-        LIVE_RENEWED="$LIVE_RENEWED $p"
-      fi
-      _live_licences || return 1 ;;
-  esac
+  case $p in jira | confluence) _live_licences || return 1 ;; esac
   live_is_up "$p" && return 0
   _live_make_room "$p" || return 1
   # shellcheck disable=SC2046  # the profile flags and services, split on purpose
