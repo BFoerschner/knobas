@@ -730,6 +730,10 @@ pin_label $tf/openin/TfOpenObject.svelte '<b>Browser</b><span class="tf-mono">{p
     "the menu's Browser item still starts Browser and names the page"
 pin_label $tf/pr/TfPr.svelte 'header.base !== null && header.head !== null' \
     "the pull request header draws Open in… once the source view names both branches"
+# #2377: *Clone* on the page of a repository with no clone yet, over the
+# https front (the repository page's TfOpenIn is pinned above).
+pin_label $tf/openin/TfOpenIn.svelte '"Try again" : "Clone"}</button' \
+    "the repository's button is still named Clone before a clone"
 
 # --- names are rendered text, and the new shell transforms none ------------
 #
