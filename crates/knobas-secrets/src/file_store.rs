@@ -63,8 +63,13 @@ impl FileStore {
 
     fn read(&self) -> Result<Items, SecretError> {
         match fs::read_to_string(&self.path) {
-            Ok(text) => serde_json::from_str(&text)
-                .map_err(|_| SecretError::Backend("unreadable secret file".into())),
+            // The path and the remedy, never the text: it holds the secrets.
+            Ok(text) => serde_json::from_str(&text).map_err(|_| {
+                SecretError::Backend(format!(
+                    "unreadable secret file {}: delete it and run `just live-sources`",
+                    self.path.display()
+                ))
+            }),
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(Items::new()),
             Err(e) => Err(io_error(e)),
         }
@@ -74,7 +79,15 @@ impl FileStore {
         let text =
             serde_json::to_string_pretty(items).map_err(|e| SecretError::Backend(e.to_string()))?;
         let tmp = self.path.with_extension("tmp");
-        let mut file = private(OpenOptions::new().create(true).truncate(true).write(true))
+        // A temp file a killed write left behind keeps its own mode under
+        // `truncate`, and the rename would carry it over: remove it and create
+        // a fresh 0600 one. The caller holds the lock, so no writer races this.
+        match fs::remove_file(&tmp) {
+            Ok(()) => {}
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(e) => return Err(io_error(e)),
+        }
+        let mut file = private(OpenOptions::new().create_new(true).write(true))
             .open(&tmp)
             .map_err(io_error)?;
         file.write_all(text.as_bytes()).map_err(io_error)?;
@@ -219,5 +232,44 @@ mod tests {
             .unwrap();
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "mode {mode:o}");
+    }
+
+    /// A temp file a killed write left world-readable must not hand its mode
+    /// to the next file renamed into place.
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_wide_temp_file_does_not_widen_the_file() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let path = scratch("stale-tmp");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let tmp = path.with_extension("tmp");
+        fs::write(&tmp, "{}").unwrap();
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o644)).unwrap();
+        FileStore::new(&path)
+            .put(
+                &KeychainAccount::source("a"),
+                &Secret::just(AuthMethod::Pat, "1"),
+            )
+            .unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "mode {mode:o}");
+    }
+
+    /// A corrupt file fails every call, naming the file and never its text.
+    #[test]
+    fn a_corrupt_file_is_an_error_naming_the_path_not_the_contents() {
+        let path = scratch("corrupt");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "{\"source:a\": \"hunter2").unwrap();
+        let store = FileStore::new(&path);
+        let id = KeychainAccount::source("a");
+        for err in [
+            store.get(&id).unwrap_err(),
+            store.put(&id, &Secret::just(AuthMethod::Pat, "1")).unwrap_err(),
+        ] {
+            let text = err.to_string();
+            assert!(text.contains("secrets.json"), "{text}");
+            assert!(!text.contains("hunter2"), "{text}");
+        }
     }
 }
