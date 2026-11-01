@@ -265,7 +265,9 @@ mod tests {
         let id = KeychainAccount::source("a");
         for err in [
             store.get(&id).unwrap_err(),
-            store.put(&id, &Secret::just(AuthMethod::Pat, "1")).unwrap_err(),
+            store
+                .put(&id, &Secret::just(AuthMethod::Pat, "1"))
+                .unwrap_err(),
         ] {
             let text = err.to_string();
             assert!(text.contains("secrets.json"), "{text}");
