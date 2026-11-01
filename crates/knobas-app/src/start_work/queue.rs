@@ -242,17 +242,23 @@ pub async fn branch_named(
 /// *without* merging carries `merged: false`, so a rule built on the
 /// declaration alone calls it open and commits the same bug one state over.
 ///
-/// `state` is read at a literal path because no [`KindPaths`] slot answers
-/// "is this open" and pointing `status_name` at it would change what every
-/// reader of a status renders for a pull request. The **`open` spelling is
-/// [`STATE_OPEN`]**, the coalesce point ADR-0007's requirement 2 promises;
-/// both adapters that mirror pull requests today spell it that way.
+/// `state`, `head` and `base` are read where the pull request's kind
+/// **declares** them (#2358, ADR-0029), not at Gitea's spelling: a second
+/// code host that keeps its branches at other paths is found by the same
+/// statement. `state` is the text of the chip [`declared_state!`] resolves --
+/// the first declared candidate whose value the source's map names. For
+/// Gitea that is `merged` on a merged pull request (its flag is declared
+/// before its state word) and its own `open` or `closed` otherwise. The
+/// **`open` spelling is [`STATE_OPEN`]**, the coalesce point ADR-0007's
+/// requirement 2 promises; both adapters that mirror pull requests today
+/// spell it that way.
 ///
-/// The `jsonb_typeof(...) = 'string'` guard is the same triple refusal
-/// `declared_string!` makes: a payload is a verbatim source record, and `->>`
-/// on an object would answer that object's JSON text, which is neither `open`
-/// nor a miss. It has to be a string, and trimming it has to leave something.
+/// A state no declared map names is a miss (`null`), as is one that is not
+/// a string or a boolean, or a blank one: the same refusals
+/// `declared_string!` makes, so a verbatim payload's odd value is neither
+/// `open` nor a wrong word.
 ///
+/// [`declared_state!`]: knobas_core::declared_state
 /// The merged flag is read at the path the source **declares** (#277, `$4`),
 /// which is the same declaration `super::merge` follows, so the two halves of
 /// the pull-request story cannot disagree about what merged means.
@@ -266,13 +272,17 @@ pub async fn branch_named(
 const PULL_REQUEST_BY_HEAD_AND_BASE: &str = concat!(
     "select i.entity_id, ",
     knobas_core::declared_flag!("$4", "merged"),
-    " as merged,
-        case when jsonb_typeof(i.payload->'state') = 'string'
-             then nullif(btrim(i.payload->>'state'), '') end as state
+    " as merged, ",
+    knobas_core::declared_state!("$4"),
+    "->>'text' as state
        from sync.live_item i
       where i.entity_id like $1 and i.kind = $2
-        and i.payload->'head'->>'ref' = $3
-        and i.payload->'base'->>'ref' = $5
+        and ",
+    knobas_core::declared_string!("$4", "head"),
+    " = $3
+        and ",
+    knobas_core::declared_string!("$4", "base"),
+    " = $5
       order by i.entity_id"
 );
 
@@ -282,15 +292,12 @@ const PULL_REQUEST_BY_HEAD_AND_BASE: &str = concat!(
 /// requirement 2 promises: a forge that says `OPENED` is a change to this
 /// item and to [`is_open`], and to nothing else anywhere.
 ///
-/// **Gitea is the only source this read reaches today**, and it mirrors its
-/// `state` verbatim: `open` or `closed`, exactly the two words, so both
-/// classifications below are literal for it. `knobas_source_mock` spells its
-/// own state `open | merged` but never gets here at all --
-/// [`PULL_REQUEST_BY_HEAD_AND_BASE`] finds a record by `payload->'head'->>'ref'` and
-/// the mock's pull request carries `from`/`to` and no `head` object. That is
-/// worth knowing in both directions: it is why the mock is an argument about
-/// *shape* below and not a corpus, and it is why the word
-/// [`is_finished`] picks is right for every record that actually arrives.
+/// Both adapters that declare a pull request's head, base and state today
+/// name `open` in their state map: Gitea's `open | closed` (behind its merged
+/// flag, which resolves to `merged`), and `knobas_source_mock`'s
+/// `open | merged`. Since #2358 the read follows those declarations, so the
+/// mock's `from`/`to` records are found too, and its `merged` is a state word
+/// that is not `open`, which [`is_finished`] classifies as finished.
 const STATE_OPEN: &str = "open";
 
 /// The repository's id as a `like` prefix, with `like`'s own metacharacters
@@ -636,8 +643,8 @@ mod tests {
     /// which is the concrete reason the deciding fact is the record's own: a
     /// source may decline that declaration -- `knobas-source-mock` does, its
     /// merge being a timestamp -- and its pull requests still have to be
-    /// linkable. The ids say `mock` for that shape and not because the mock
-    /// reaches this read; [`STATE_OPEN`] records that it does not.
+    /// linkable. Since #2358 the mock's records reach this read through its
+    /// declared `from`/`to` ([`STATE_OPEN`]).
     #[test]
     fn a_source_that_declares_no_merged_flag_still_reads_its_state() {
         assert_eq!(

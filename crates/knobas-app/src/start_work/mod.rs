@@ -155,9 +155,10 @@ pub enum Linked {
 /// pull request closed without merging carries `merged: false`, so a rule
 /// built on the declared flag alone calls it open and commits the whole bug
 /// one state over. So `state` decides, read at
-/// [`queue::PULL_REQUEST_BY_HEAD_AND_BASE`](crate::start_work::queue), inside the one
-/// named statement that already reads this record's head branch the same
-/// interim way.
+/// [`queue::PULL_REQUEST_BY_HEAD_AND_BASE`](crate::start_work::queue) where
+/// the pull request's kind declares it (#2358): the text of the chip
+/// `declared_state!` resolves, beside the head and base branches read where
+/// the kind declares those.
 ///
 /// The declared flag is not discarded: it is the one reading a **source** owns
 /// rather than knobas, so it can veto -- anything the declaration calls merged
@@ -167,18 +168,13 @@ pub enum Linked {
 /// why: it declares no merged flag at all, deliberately, because its merge is
 /// a timestamp rather than a boolean. A source may decline that declaration
 /// and still have pull requests knobas must be able to link, and `state` is
-/// what answers for one. (The mock is an argument about shape and not a
-/// corpus: its pull requests carry `from`/`to` and no `head` object, so
-/// `queue::PULL_REQUEST_BY_HEAD_AND_BASE` never reaches them either way. Gitea is the
-/// only source this read reaches today.)
+/// what answers for one.
 ///
-/// The **declared** route for open-ness would be `status_name` on the `pr`
-/// kind, and it was left alone on purpose: `status_name` is what the mini
-/// board, the room statements and the census render, so pointing it at a
-/// forge's `state` changes what every one of those shows for a pull request.
-/// That is a product decision, not this ticket's, and when it is made this
-/// read expires into it -- which is what ADR-0007 says every interim read
-/// does.
+/// `state` is read through the kind's `state` declaration and not through
+/// `status_name`: `status_name` is what the mini board, the room statements
+/// and the census render, so pointing it at a forge's `state` would change
+/// what every one of those shows for a pull request. The `state` declaration
+/// is the one the row's chip already draws.
 ///
 /// # The failure direction, pinned toward absence
 ///
