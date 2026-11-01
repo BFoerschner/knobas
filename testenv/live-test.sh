@@ -38,6 +38,10 @@ export PATH="$scratch/bin:$PATH" STUB_LOG="$scratch/docker.log"
 # gitea-live`, or take the lock out from under one.
 export KNOBAS_LIVE_LOCK="$scratch/jvm.lock" KNOBAS_LIVE_GITEA_LOCK="$scratch/gitea.lock"
 unset KNOBAS_LIVE_LOCK_HOLDER KNOBAS_LIVE_GITEA_LOCK_HOLDER
+# This machine's products, whatever testenv/live.env says: a developer whose
+# file names a remote target must not have these tests ssh anywhere.
+export KNOBAS_LIVE_TARGET=local KNOBAS_LIVE_TUNNEL_SOCK="$scratch/no-tunnel.sock"
+unset KNOBAS_LIVE_SSH KNOBAS_LIVE_ONE_JVM DOCKER_HOST
 
 # shellcheck source=testenv/live-lib.sh disable=SC1091
 . "$here/live-lib.sh"
@@ -411,6 +415,315 @@ if grep -E '(^| )(stop|down|rm|kill)( .*)? (knobas-)?gitea( |$)' "$shared/docker
   fail "a start outside the Gitea lock never stops Gitea" "$(cat "$shared/docker.log")"
 fi
 
+
+# --- a remote target (testenv/live.env) --------------------------------------
+
+# Each case sources live-lib.sh in its own subshell, with $1 as live.env in a
+# scratch testenv/ (the library reads the file next to itself), and prints
+# what it decided.
+remote_lib=$scratch/remote/testenv
+mkdir -p "$remote_lib"
+cp "$here/live-lib.sh" "$remote_lib/"
+# check_target <what> <live.env content> <script> <needle> [ok|refused]
+check_target() {
+  local what=$1 content=$2 script=$3 needle=$4 expected=${5:-ok} out rc=0
+  checks=$((checks + 1))
+  printf '%s\n' "$content" >"$remote_lib/live.env"
+  out=$( (
+    unset KNOBAS_LIVE_TARGET KNOBAS_LIVE_SSH KNOBAS_LIVE_ONE_JVM DOCKER_HOST
+    # shellcheck source=testenv/live-lib.sh disable=SC1091
+    . "$remote_lib/live-lib.sh" || exit 3
+    eval "$script"
+  ) 2>&1 ) || rc=$?
+  if [ "$expected" = ok ] && [ "$rc" != 0 ]; then
+    fail "$what" "exit $rc: $out"
+  elif [ "$expected" = refused ] && [ "$rc" = 0 ]; then
+    fail "$what: refused" "got: $out"
+  fi
+  case $out in *"$needle"*) ;; *) fail "$what: says '$needle'" "got: $out" ;; esac
+}
+remote_env=$'KNOBAS_LIVE_TARGET=remote\nKNOBAS_LIVE_SSH=knobas-wsl'
+# shellcheck disable=SC2016  # expanded by the case, after it sources live-lib.sh
+check_target "a remote target points docker at its engine" "$remote_env" \
+  'echo "host=$DOCKER_HOST"' "host=ssh://knobas-wsl"
+# shellcheck disable=SC2016  # expanded by the case, after it sources live-lib.sh
+check_target "quotes, CRLF and export are read" $'export KNOBAS_LIVE_TARGET="remote"\r\nKNOBAS_LIVE_SSH=\'wsl box\'' \
+  'echo "host=$DOCKER_HOST"' "host=ssh://wsl box"
+check_target "no file line runs as code" $'KNOBAS_LIVE_TARGET=remote\nKNOBAS_LIVE_SSH=x\ntouch /tmp/x' \
+  'echo sourced' "is not a KNOBAS_LIVE_*=value line" refused
+check_target "remote without a machine is refused" "KNOBAS_LIVE_TARGET=remote" \
+  'echo sourced' "names no machine" refused
+check_target "an unknown target is refused" "KNOBAS_LIVE_TARGET=hetzner" \
+  'echo sourced' "must be local or remote" refused
+checks=$((checks + 1))
+printf '%s\n' "$remote_env" >"$remote_lib/live.env"
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export KNOBAS_LIVE_TARGET=local
+  unset DOCKER_HOST
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$remote_lib/live-lib.sh"
+  echo "target=$LIVE_TARGET host=${DOCKER_HOST:-none}"
+) 2>&1 )
+[ "$out" = "target=local host=none" ] || fail "KNOBAS_LIVE_TARGET=local in the environment beats a remote live.env" "got: $out"
+check_target "a remote target lets all three JVM products up at once" "$remote_env" \
+  'STUB_RUNNING="knobas-teamcity knobas-jira" live_guard confluence && echo allowed' "allowed"
+check_target "KNOBAS_LIVE_ONE_JVM=1 keeps the refusal on a remote target" "$remote_env"$'\nKNOBAS_LIVE_ONE_JVM=1' \
+  'STUB_RUNNING="knobas-teamcity" live_guard confluence' "one JVM product at a time" refused
+# shellcheck disable=SC2016  # expanded by the case, after it sources live-lib.sh
+check_target "a remote target puts nothing back" "$remote_env" \
+  'STUB_RUNNING="" ; echo "put_back=[$(live_to_put_back jira)]"' "put_back=[]"
+check_target "a remote target is not refused as a stray context" "$remote_env" \
+  'STUB_CONTEXT=knobas-jira live_guard gitea && echo allowed' "allowed"
+# shellcheck disable=SC2016  # expanded by the case, after it sources live-lib.sh
+check_target "no live.env is this machine" "" \
+  'echo "target=$LIVE_TARGET put_back=[$(STUB_RUNNING="" live_to_put_back jira)]"' "target=local put_back=[jira]"
+rm -f "$remote_lib/live.env"
+
+# A local run beside a tunnel a remote run left open is refused before it
+# touches anything: the tunnel holds the product ports.
+checks=$((checks + 1))
+tun=$scratch/tunnel
+mkdir -p "$tun/bin"
+printf '#!/usr/bin/env bash\ncase "$*" in *"-O check"*) exit 0 ;; esac\nexit 1\n' >"$tun/bin/ssh"
+chmod +x "$tun/bin/ssh"
+python3 -I -c "import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])" "$tun/t.sock"
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export PATH="$tun/bin:$scratch/bin:$PATH" KNOBAS_LIVE_TUNNEL_SOCK="$tun/t.sock" STUB_RUNNING=""
+  : >"$STUB_LOG"
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  live_up gitea
+) 2>&1 ) && fail "a local run beside an open tunnel is refused" "$out"
+case $out in *"holds this machine's product ports"*) ;; *) fail "and says the tunnel holds the ports" "$out" ;; esac
+# shellcheck disable=SC2031  # the subshell only truncated it
+[ ! -s "$STUB_LOG" ] || fail "and touches nothing" "$(cat "$STUB_LOG")"
+
+# --- the 3-hour licence -----------------------------------------------------
+
+# A docker whose `inspect -f {{.Created}}` answers $STUB_CREATED, and which
+# logs every other call.
+lic=$scratch/licence
+mkdir -p "$lic/bin" "$lic/testenv"
+cat >"$lic/bin/docker" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+  "volume inspect") [ -n "${STUB_VOLUME_CREATED:-}" ] || exit 1; echo "$STUB_VOLUME_CREATED"; exit 0 ;;
+  "inspect "*) [ -n "${STUB_CREATED:-}" ] || exit 1; echo "$STUB_CREATED"; exit 0 ;;
+  "ps "*) exit 0 ;;
+esac
+echo "docker $*" >>"$STUB_LOG"
+STUB
+chmod +x "$lic/bin/docker"
+# The REST API answers at once: what is under test is the decision, not Jira.
+# shellcheck disable=SC2016  # expanded by the stub
+printf '#!/usr/bin/env bash\necho "curl $*" >>"$STUB_LOG"\nprintf 200\n' >"$lic/bin/curl"
+chmod +x "$lic/bin/curl"
+for s in seed-atlassian.sh seed-atlassian-content.sh; do
+  # shellcheck disable=SC2016  # expanded by the fake seed
+  printf '#!/usr/bin/env bash\necho "%s $*" >>"$STUB_LOG"\n[ ! -e "$STUB_SEED_FAILS" ] || { rm -f "$STUB_SEED_FAILS"; exit 1; }\n' "$s" >"$lic/testenv/$s"
+  chmod +x "$lic/testenv/$s"
+done
+# iso_ago <seconds> -- that long ago, as docker spells a container's Created.
+iso_ago() {
+  date -u -r $(($(date +%s) - $1)) '+%Y-%m-%dT%H:%M:%S.123456789Z' 2>/dev/null ||
+    date -u -d "@$(($(date +%s) - $1))" '+%Y-%m-%dT%H:%M:%S.123456789Z'
+}
+# check_licence <what> <age seconds|none> <seed fails once: 0|1> <needles...>
+# ($STUB_VOLUME_AGE, when set, is the data volume's age.)
+# and, after `--absent`, what the log must not hold.
+check_licence() {
+  local what=$1 age=$2 fails=$3 created="" out rc=0 n absent=""
+  shift 3
+  checks=$((checks + 1))
+  : >"$lic/docker.log"
+  rm -f "$lic/fails"
+  [ "$fails" = 0 ] || : >"$lic/fails"
+  [ "$age" = none ] || created=$(iso_ago "$age")
+  local vcreated=""
+  [ -z "${STUB_VOLUME_AGE:-}" ] || vcreated=$(iso_ago "$STUB_VOLUME_AGE" | sed 's/\.123456789Z$/+00:00/')
+    # shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+  out=$( (
+    export PATH="$lic/bin:$PATH" STUB_LOG="$lic/docker.log" STUB_CREATED="$created" STUB_SEED_FAILS="$lic/fails"
+    export STUB_VOLUME_CREATED="$vcreated"
+    export JIRA_LICENSE_KEY=k CONFLUENCE_LICENSE_KEY=k
+    # shellcheck source=testenv/live-lib.sh disable=SC1091
+    . "$here/live-lib.sh"
+    LIVE_TESTENV=$lic/testenv
+    _live_start jira
+  ) 2>&1 ) || rc=$?
+  out="$out"$'\n'"$(cat "$lic/docker.log")"
+  for n in "$@"; do
+    if [ "$n" = --absent ]; then absent=1; continue; fi
+    if [ -n "$absent" ]; then
+      case $out in *"$n"*) fail "$what: never '$n'" "$out" ;; esac
+    else
+      case $out in *"$n"*) ;; *) fail "$what: '$n'" "$out" ;; esac
+    fi
+  done
+  echo "$rc" >"$lic/rc"
+}
+check_licence "a Jira with hours of licence left is re-seeded, not removed" 1800 0 \
+  "min of its 3-hour licence left" "seed-atlassian.sh jira" "/rest/api/2/myself" --absent "rm --stop"
+check_licence "a Jira with under an hour left is removed and set up from empty" 9000 0 \
+  "removing it and setting it up from empty" "rm --stop --force jira jira-db" "seed-atlassian.sh jira"
+STUB_VOLUME_AGE=9000 check_licence "a recreated Jira container on an old volume is judged by the volume" 600 0 \
+  "removing it and setting it up from empty" "rm --stop --force jira jira-db"
+STUB_VOLUME_AGE=600 check_licence "a young volume keeps an old-looking container" 20000 0 \
+  "re-seeding it" --absent "rm --stop"
+check_licence "a Jira whose licence ran out is removed" 20000 0 \
+  "about 0 min left" "rm --stop --force jira jira-db"
+check_licence "no Jira container: nothing removed, seeded from empty" none 0 \
+  "seed-atlassian.sh jira" --absent "rm --stop" "re-seeding"
+check_licence "a seed failing on the instance that was there is retried once from empty" 1800 1 \
+  "the seed failed against the instance that was already there" "rm --stop --force jira jira-db"
+checks=$((checks + 1))
+[ "$(cat "$lic/rc")" = 0 ] || fail "and the retry from empty passes"
+check_licence "a seed failing from empty is not retried" none 1 \
+  "seed-atlassian.sh jira" --absent "rm --stop"
+checks=$((checks + 1))
+[ "$(cat "$lic/rc")" != 0 ] || fail "and fails the start"
+
+
+# --- the memory budget on a remote target ------------------------------------
+
+# A docker answering `ps` from $STUB_RUNNING, `info` with $STUB_MEM bytes,
+# `inspect` with a StartedAt from $STUB_STARTED ("<container>=<iso> ..."), and
+# logging the rest.
+mem=$scratch/mem
+mkdir -p "$mem/bin" "$mem/testenv"
+cat >"$mem/bin/docker" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  ps) for n in ${STUB_RUNNING:-}; do echo "$n"; done; exit 0 ;;
+  info) echo "${STUB_MEM:-0}"; exit 0 ;;
+  inspect)
+    for kv in ${STUB_STARTED:-}; do [ "${kv%%=*}" != "${!#}" ] || { echo "${kv#*=}"; exit 0; }; done
+    exit 1 ;;
+esac
+echo "docker $*" >>"$STUB_LOG"
+STUB
+chmod +x "$mem/bin/docker"
+# check_room <what> <product> <running> <expect ok|refused> <needles...>
+# (after --absent, what must not appear)
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+check_room() {
+  local what=$1 product=$2 running=$3 expected=$4 out rc=0 n absent=""
+  shift 4
+  checks=$((checks + 1))
+  : >"$mem/docker.log"
+  out=$( (
+    export PATH="$mem/bin:$PATH" STUB_LOG="$mem/docker.log" STUB_RUNNING="$running"
+    export STUB_MEM=$((10 * 1024 * 1024 * 1024))
+    export STUB_STARTED="knobas-teamcity=2026-11-01T08:00:00.1Z knobas-jira=2026-11-01T09:00:00.1Z knobas-confluence=2026-11-01T10:00:00.1Z"
+    export KNOBAS_LIVE_TARGET=remote KNOBAS_LIVE_SSH=wsl-test KNOBAS_LIVE_LOCK_DIR="$mem"
+    unset KNOBAS_LIVE_MEM_BUDGET_MB
+    # shellcheck source=testenv/live-lib.sh disable=SC1091
+    . "$here/live-lib.sh"
+    LIVE_TESTENV=$mem/testenv
+    _live_make_room "$product"
+  ) 2>&1 ) || rc=$?
+  out="$out"$'\n'"$(cat "$mem/docker.log")"
+  if [ "$expected" = ok ] && [ "$rc" != 0 ]; then fail "$what" "exit $rc: $out"; fi
+  if [ "$expected" = refused ] && [ "$rc" = 0 ]; then fail "$what: refused" "$out"; fi
+  for n in "$@"; do
+    if [ "$n" = --absent ]; then absent=1; continue; fi
+    if [ -n "$absent" ]; then
+      case $out in *"$n"*) fail "$what: never '$n'" "$out" ;; esac
+    else
+      case $out in *"$n"*) ;; *) fail "$what: '$n'" "$out" ;; esac
+    fi
+  done
+}
+# 10 GB less the 1536 MB reserve is an 8704 MB budget; measured use: Gitea
+# 512, TeamCity 2048, Jira 4096, Confluence 2560 -- two JVM products fit, three
+# (9216) do not.
+check_room "two JVM products fit beside Gitea" confluence "knobas-gitea knobas-jira" ok \
+  --absent "stop"
+check_room "a third stops the one started longest ago" jira "knobas-gitea knobas-teamcity knobas-confluence" ok \
+  "stopping teamcity" "stop teamcity teamcity-agent" --absent "stop confluence"
+check_room "one already up needs no room" jira "knobas-gitea knobas-teamcity knobas-jira knobas-confluence" ok \
+  --absent "stop"
+# Held by a live pid (this test's own): a run inside TeamCity, or its keeper.
+ln -s "$$ 1 live-up-teamcity-kept /elsewhere" "$mem/knobas-live-teamcity.lock"
+check_room "a product another run holds is never stopped" jira "knobas-gitea knobas-teamcity knobas-confluence" ok \
+  "teamcity would make room but another run holds it" "stopping confluence" --absent "stop teamcity"
+checks=$((checks + 1))
+[ "$(readlink "$mem/knobas-live-teamcity.lock")" = "$$ 1 live-up-teamcity-kept /elsewhere" ] ||
+  fail "and its holder's lock is left as it was" "$(readlink "$mem/knobas-live-teamcity.lock")"
+checks=$((checks + 1))
+[ ! -e "$mem/knobas-live-confluence.lock" ] || fail "the stopped product's lock is given back after the stop"
+rm -f "$mem/knobas-live-teamcity.lock"
+ln -s "999999 1 jira-live /elsewhere" "$mem/knobas-live-teamcity.lock"
+check_room "a product whose holder is dead may be stopped" jira "knobas-gitea knobas-teamcity knobas-confluence" ok \
+  "stopping teamcity"
+rm -f "$mem/knobas-live-teamcity.lock"
+checks=$((checks + 1))
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export PATH="$mem/bin:$PATH" STUB_LOG="$mem/docker.log" STUB_RUNNING="knobas-gitea"
+  export KNOBAS_LIVE_TARGET=remote KNOBAS_LIVE_SSH=wsl-test KNOBAS_LIVE_MEM_BUDGET_MB=3000
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  _live_make_room jira
+) 2>&1 ) && fail "a product that cannot fit even alone is refused" "$out"
+case $out in *"not starting it"*) ;; *) fail "and the refusal says why" "$out" ;; esac
+checks=$((checks + 1))
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export PATH="$mem/bin:$PATH" STUB_LOG="$mem/docker.log" STUB_RUNNING="knobas-gitea knobas-teamcity knobas-jira"
+  export KNOBAS_LIVE_TARGET=local
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  _live_make_room confluence && echo "no-op"
+) 2>&1 )
+[ "$out" = no-op ] || fail "the local target has no budget" "$out"
+
+
+# --- the canary and the stall follow a remote target ---------------------------
+
+# An ssh that records its arguments and what it was fed on stdin.
+disp=$scratch/dispatch
+mkdir -p "$disp/bin" "$disp/testenv"
+cp "$here/live-lib.sh" "$here/canary.sh" "$here/stall.sh" "$disp/testenv/"
+# shellcheck disable=SC2016  # expanded by the stub
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >"$DISP_ARGS"\ncat >"$DISP_STDIN"\necho remote-said-ok\n' >"$disp/bin/ssh"
+chmod +x "$disp/bin/ssh"
+# check_dispatch <what> <script> <word> <expect: sent|refused> [<needle>]
+check_dispatch() {
+  local what=$1 script=$2 word=$3 expected=$4 needle=${5:-} out rc=0
+  checks=$((checks + 1))
+  rm -f "$disp/args" "$disp/stdin"
+  # shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+  out=$( (
+    export PATH="$disp/bin:$PATH" DISP_ARGS="$disp/args" DISP_STDIN="$disp/stdin"
+    export KNOBAS_LIVE_TARGET=remote KNOBAS_LIVE_SSH=wsl-test
+    "$disp/testenv/$script" "$word"
+  ) 2>&1 ) || rc=$?
+  if [ "$expected" = sent ]; then
+    [ "$rc" = 0 ] || fail "$what" "exit $rc: $out"
+    grep -q "wsl-test" "$disp/args" 2>/dev/null || fail "$what: over ssh to the target" "$(cat "$disp/args" 2>/dev/null)"
+    grep -q "bash -s -- $word\$" "$disp/args" 2>/dev/null || fail "$what: with only '$word' after the script" "$(cat "$disp/args" 2>/dev/null)"
+    cmp -s "$disp/stdin" "$disp/testenv/$script" || fail "$what: the script itself fed on stdin"
+  else
+    [ "$rc" != 0 ] || fail "$what: refused" "$out"
+    [ ! -e "$disp/args" ] || fail "$what: refused before any ssh" "$(cat "$disp/args")"
+    case $out in *"$needle"*) ;; *) fail "$what: says '$needle'" "$out" ;; esac
+  fi
+}
+check_dispatch "a remote target's canary runs on that machine" canary.sh up sent
+check_dispatch "and its status too" canary.sh status sent
+check_dispatch "no other word reaches the remote shell" canary.sh 'up; touch /tmp/x' refused "usage"
+check_dispatch "the stall runs on the remote target's machine" stall.sh up sent
+# shellcheck disable=SC2016  # the literal text is the attempt
+check_dispatch "and nothing else reaches it" stall.sh '$(id)' refused "usage"
+checks=$((checks + 1))
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export PATH="$disp/bin:$PATH" KNOBAS_LIVE_TARGET=local
+  "$disp/testenv/stall.sh" up
+) 2>&1 ) && fail "the stall refuses the local target, where the suite holds its own socket" "$out"
 if [ "$failures" -gt 0 ]; then
   echo "live-test: $failures of $checks checks failed" >&2
   exit 1

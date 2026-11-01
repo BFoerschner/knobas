@@ -36,9 +36,37 @@
 # 8200, 8210, 8212) on purpose: it is a host port, not a published container
 # port, so check-ports.sh neither knows nor should know about it.
 set -euo pipefail
-cd "$(dirname "$0")"
+
+# ON A REMOTE TARGET (testenv/live.env; README, "Live products on a remote
+# machine (WSL)") Uptime Kuma runs on that machine, so the canary must too:
+# a host socket of THIS machine is nothing Kuma there can reach. So this
+# script runs itself there, over ssh, fed on stdin -- the remote machine has
+# no checkout. And there it binds the Docker bridge address instead of
+# 127.0.0.1: on a plain Linux engine `host.docker.internal` resolves to that
+# bridge (docker-compose.yml's comment on `extra_hosts`), and a container
+# cannot reach a loopback-only socket. The bridge is not a LAN interface, so
+# the canary is still off the network. Only the three words below cross.
+if [ -z "${KNOBAS_CANARY_REMOTE_SIDE:-}" ]; then
+  here=$(cd "$(dirname "$0")" && pwd)
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  if [ -n "$LIVE_REMOTE" ]; then
+    case "${1:-}" in up | down | status) ;; *) echo "canary: usage: ./canary.sh up|down|status" >&2; exit 1 ;; esac
+    case ${KNOBAS_CANARY_WAIT_S:-120} in '' | 0* | *[!0-9]*) echo "canary: KNOBAS_CANARY_WAIT_S must be a whole number of seconds, got '${KNOBAS_CANARY_WAIT_S:-}'" >&2; exit 2 ;; esac
+    exec ssh -o BatchMode=yes "$KNOBAS_LIVE_SSH" \
+      "KNOBAS_CANARY_REMOTE_SIDE=1 KNOBAS_CANARY_WAIT_S=${KNOBAS_CANARY_WAIT_S:-120} bash -s -- $1" <"$here/canary.sh"
+  fi
+  cd "$here"
+fi
 
 PORT=8299
+# Where the responder binds: 127.0.0.1 here, the Docker bridge on a remote
+# target's machine (above).
+BIND=127.0.0.1
+if [ -n "${KNOBAS_CANARY_REMOTE_SIDE:-}" ]; then
+  BIND=$(ip -4 -o addr show docker0 2>/dev/null | awk '{ print $4 }' | cut -d/ -f1 | head -1)
+  [ -n "$BIND" ] || { echo "canary: no docker0 address on $(hostname) -- is dockerd running?" >&2; exit 1; }
+fi
 PIDFILE="$HOME/.knobas-canary-$PORT.pid"
 # The guard on `up`'s wait for the responder to answer (#1961), whole seconds.
 WAIT_S=${KNOBAS_CANARY_WAIT_S:-120}
@@ -70,7 +98,7 @@ class C(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
     def log_message(self, *args):
         pass
-http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), C).serve_forever()
+http.server.HTTPServer((sys.argv[2], int(sys.argv[1])), C).serve_forever()
 PY
 }
 
@@ -91,16 +119,16 @@ listens() { # listens <pid>
 }
 # One request, printing curl's complaint when it fails: `up` names it when the
 # responder never answers.
-probe() { curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:$PORT/" 2>&1; }
+probe() { curl -fsS -o /dev/null --max-time 3 "http://$BIND:$PORT/" 2>&1; }
 # Quiet on failure: "not answering" is the normal, expected answer here (it is
 # how `down` confirms the release), not something to print a curl error about.
 answers() { probe >/dev/null; }
 
 up() {
-  if alive && answers; then say "up (pid $(cat "$PIDFILE"), 127.0.0.1:$PORT)"; return 0; fi
+  if alive && answers; then say "up (pid $(cat "$PIDFILE"), $BIND:$PORT)"; return 0; fi
   alive || rm -f "$PIDFILE"
   if answers; then
-    die "127.0.0.1:$PORT already answers and it is not ours. Find it with
+    die "$BIND:$PORT already answers and it is not ours. Find it with
     lsof -nP -iTCP:$PORT -sTCP:LISTEN -- and do not kill it blind."
   fi
   command -v python3 >/dev/null || die "python3 is required for the responder"
@@ -110,7 +138,7 @@ up() {
   # it reports is python3's.
   local src from last
   src=$(responder)
-  nohup python3 -c "$src" "$PORT" >/dev/null 2>&1 &
+  nohup python3 -c "$src" "$PORT" "$BIND" >/dev/null 2>&1 &
   echo $! > "$PIDFILE"
   # Polled until it answers, under a guard in seconds (#1961): a loaded
   # machine starts python3 slowly, and the old 40 tries of 0.5 s failed a run
@@ -126,10 +154,10 @@ up() {
   from=$SECONDS
   until last=$(probe); do
     kill -0 "$(cat "$PIDFILE")" 2>/dev/null || { rm -f "$PIDFILE"; die "responder exited before it answered (is $PORT taken?); last seen: ${last:-no answer}"; }
-    [ $((SECONDS - from)) -lt "$WAIT_S" ] || { kill "$(cat "$PIDFILE")" 2>/dev/null || true; rm -f "$PIDFILE"; die "did not answer on 127.0.0.1:$PORT within $WAIT_S s (KNOBAS_CANARY_WAIT_S); last seen: ${last:-no answer}"; }
+    [ $((SECONDS - from)) -lt "$WAIT_S" ] || { kill "$(cat "$PIDFILE")" 2>/dev/null || true; rm -f "$PIDFILE"; die "did not answer on $BIND:$PORT within $WAIT_S s (KNOBAS_CANARY_WAIT_S); last seen: ${last:-no answer}"; }
     sleep 0.5
   done
-  say "up (pid $(cat "$PIDFILE"), 127.0.0.1:$PORT)"
+  say "up (pid $(cat "$PIDFILE"), $BIND:$PORT)"
 }
 
 down() {
@@ -138,7 +166,7 @@ down() {
   pid=$(cat "$PIDFILE")
   if ! listens "$pid"; then
     rm -f "$PIDFILE"
-    say "pid $pid is alive but is not on 127.0.0.1:$PORT -- stale pidfile removed, nothing killed"
+    say "pid $pid is alive but is not on $BIND:$PORT -- stale pidfile removed, nothing killed"
     return 0
   fi
   kill "$pid" 2>/dev/null || true
@@ -149,16 +177,16 @@ down() {
   # `./canary.sh down` finishes the job.
   while answers; do
     i=$((i + 1))
-    [ "$i" -lt 20 ] || die "killed pid $pid but 127.0.0.1:$PORT still answers"
+    [ "$i" -lt 20 ] || die "killed pid $pid but $BIND:$PORT still answers"
     sleep 0.5
   done
   rm -f "$PIDFILE"
-  say "down (released 127.0.0.1:$PORT)"
+  say "down (released $BIND:$PORT)"
 }
 
 status() {
-  if alive && answers; then say "up (pid $(cat "$PIDFILE"), 127.0.0.1:$PORT)"; return 0; fi
-  if answers; then say "127.0.0.1:$PORT answers but is not ours"; return 1; fi
+  if alive && answers; then say "up (pid $(cat "$PIDFILE"), $BIND:$PORT)"; return 0; fi
+  if answers; then say "$BIND:$PORT answers but is not ours"; return 1; fi
   say "down"; return 1
 }
 

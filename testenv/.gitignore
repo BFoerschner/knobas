@@ -10,3 +10,6 @@ seed-state-forgejo.json.tmp
 # addresses, one person's account. Kept ignored after #634 so a checkout that
 # still holds the file cannot commit it; drop this once nobody has one.
 hetzner/hosts.env
+
+# Where the live products run (live.env.example): one person's machine.
+live.env

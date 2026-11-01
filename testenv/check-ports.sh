@@ -52,6 +52,8 @@ docker compose --env-file images.env --profile seed --profile real-teamcity --pr
   || { echo "check-ports: docker-compose.yml is not a valid compose file (with all profiles enabled); fix that first" >&2; exit 1; }
 docker compose --env-file images.env -f docker-compose.yml -f docker-compose.capped.yml config -q 2>&1 \
   || { echo "check-ports: docker-compose.capped.yml does not overlay docker-compose.yml cleanly; fix that first" >&2; exit 1; }
+docker compose --env-file images.env -f docker-compose.yml -f docker-compose.remote.yml --profile seed --profile real-teamcity --profile real-atlassian --profile forgejo config -q 2>&1 \
+  || { echo "check-ports: docker-compose.remote.yml does not overlay docker-compose.yml cleanly; fix that first" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # 1. The default `docker compose up` set. Anything opt-in that leaks into this
@@ -99,6 +101,16 @@ actual_capped=$(resolved -f docker-compose.yml -f docker-compose.capped.yml)
 if [ "$actual_capped" != "$expected_default" ]; then
   note "the capped overlay changes the port map, which it must not:"
   show_diff "$expected_default" "$actual_capped"
+fi
+
+# ---------------------------------------------------------------------------
+# 2c. The remote target's memory overlay (docker-compose.remote.yml) caps
+#     memory and must change no port, with every profile on.
+# ---------------------------------------------------------------------------
+actual_remote=$(resolved -f docker-compose.yml -f docker-compose.remote.yml --profile seed --profile real-teamcity --profile real-atlassian --profile forgejo)
+if [ "$actual_remote" != "$expected_all" ]; then
+  note "the remote memory overlay changes the port map, which it must not:"
+  show_diff "$expected_all" "$actual_remote"
 fi
 
 # ---------------------------------------------------------------------------

@@ -44,9 +44,10 @@ STUB
 chmod +x "$scratch/bin/docker"
 # A curl that answers: `live_up gitea` probes http://127.0.0.1:3000 for health,
 # and without a stub the cases passed only on a machine with a real Gitea up
-# there (a bare Linux runner has none, #1713).
+# there (a bare Linux runner has none, #1713). It prints 200 for the Atlassian
+# start, which waits until the REST API answers that before the content seed.
 printf '#!/bin/sh
-exit 0
+printf 200
 ' >"$scratch/bin/curl"
 chmod +x "$scratch/bin/curl"
 
@@ -60,6 +61,10 @@ export KNOBAS_LIVE_LOCK_POLL=0.1
 # set their own.
 export KNOBAS_LIVE_LOCK_WAIT=5
 unset KNOBAS_LIVE_LOCK_HOLDER KNOBAS_LIVE_GITEA_LOCK_HOLDER
+# This machine's products, whatever testenv/live.env says: a developer whose
+# file names a remote target must not have these tests ssh anywhere.
+export KNOBAS_LIVE_TARGET=local KNOBAS_LIVE_TUNNEL_SOCK="$scratch/no-tunnel.sock"
+unset KNOBAS_LIVE_SSH KNOBAS_LIVE_ONE_JVM DOCKER_HOST
 
 # A scratch testenv/ whose seeds do nothing, so `live_session` can run whole.
 fake=$scratch/tree/testenv
@@ -510,6 +515,126 @@ lock_gone "a dead keeper's lock goes"
 checks=$((checks + 1))
 : >"$STUB_RUNNING_FILE"
 
+
+# --- one lock per product on a remote target ----------------------------------
+
+# rholder <name> <product> -- like `holder`, on a remote target: takes that
+# product's lock as <name> and keeps it until $scratch/<name>.release.
+rdir=$scratch/remote-locks
+mkdir -p "$rdir"
+# shellcheck disable=SC2030,SC2031  # each case is its own subshell on purpose
+rholder() {
+  local name=$1 product=$2
+  mkdir -p "$scratch/$name/testenv"
+  (
+    export KNOBAS_LIVE_TARGET=remote KNOBAS_LIVE_SSH=wsl-test KNOBAS_LIVE_LOCK_DIR="$rdir"
+    # shellcheck source=testenv/live-lib.sh disable=SC1091
+    . "$here/live-lib.sh"
+    LIVE_TESTENV=$scratch/$name/testenv
+    trap 'live_lock_release' EXIT
+    live_lock_hold "$name" jvm "$product"
+    echo "holding" >>"$scratch/$name.out"
+    while [ ! -e "$scratch/$name.release" ]; do sleep 0.1; done
+  ) >>"$scratch/$name.out" 2>&1 &
+  pids+=($!)
+  wait_for "$scratch/$name.out" holding || fail "$name never took the $product lock" "$(cat "$scratch/$name.out")"
+}
+# rtake <product> [<recipe>] -- take a product's lock on a remote target once,
+# with a 1 s wait, and print what it said and its status.
+# shellcheck disable=SC2030,SC2031  # likewise
+rtake() {
+  (
+    export KNOBAS_LIVE_TARGET=remote KNOBAS_LIVE_SSH=wsl-test KNOBAS_LIVE_LOCK_DIR="$rdir" KNOBAS_LIVE_LOCK_WAIT=1
+    # shellcheck source=testenv/live-lib.sh disable=SC1091
+    . "$here/live-lib.sh"
+    LIVE_TESTENV=$fake
+    trap 'live_lock_release' EXIT
+    if live_lock_hold "${2:-rtake}" jvm "$1"; then echo "rc=0 lock=$LIVE_LOCK"; else echo "rc=1"; fi
+  ) 2>&1
+}
+
+rholder jira-run jira
+out=$(rtake teamcity)
+check "a TeamCity run goes on while a Jira run holds Jira" "$out" "rc=0"
+check_not "and never waits for it" "$out" "waiting"
+check "on TeamCity's own lock" "$out" "lock=$rdir/knobas-live-teamcity.lock"
+out=$(rtake jira)
+check "a second Jira run waits for the first and gives up after its wait" "$out" "rc=1"
+check "naming the holder" "$out" "the jira lock is still held by 'jira-run'"
+check_not "no JVM-wide lock is taken on a remote target" "$(ls "$rdir")" "knobas-live-jvm.lock"
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export KNOBAS_LIVE_TARGET=remote KNOBAS_LIVE_SSH=wsl-test KNOBAS_LIVE_LOCK_DIR="$rdir"
+  KNOBAS_LIVE_LOCK_HOLDER_JIRA=$(readlink "$rdir/knobas-live-jira.lock")
+  export KNOBAS_LIVE_LOCK_HOLDER_JIRA
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  live_lock_hold child jvm jira && echo rc=0
+) 2>&1 )
+check "a run started by the Jira lock's holder goes on under it" "$out" "runs under the jira lock its caller holds"
+touch "$scratch/jira-run.release"
+lock_gone "the Jira lock goes when its holder lets go" "$rdir/knobas-live-jira.lock"
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export KNOBAS_LIVE_TARGET=remote KNOBAS_LIVE_SSH=wsl-test KNOBAS_LIVE_LOCK_DIR="$rdir"
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  live_lock_hold atlassian-live && echo "rc=0 mine=[$LIVE_LOCK_MINE]"
+) 2>&1 )
+check "a JVM lock asked for with no product is no lock on a remote target" "$out" "rc=0 mine=[]"
+check "and says each run under it takes its own" "$out" "locks per product"
+checks=$((checks + 1))
+[ -z "$(ls "$rdir")" ] || fail "and leaves no lock behind" "$(ls "$rdir")"
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export KNOBAS_LIVE_LOCK_WAIT=1
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  _live_lock_select jvm jira
+  echo "lock=$LIVE_LOCK"
+) 2>&1 )
+check "the local target keeps the one JVM lock, product or not" "$out" "lock=$KNOBAS_LIVE_LOCK"
+
+# The memory section: a second taker waits for the first, a dead holder's is
+# taken over.
+mlock=$scratch/mem.lock
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+(
+  export KNOBAS_LIVE_MEM_LOCK="$mlock"
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  _live_mem_lock && echo "first in" >>"$scratch/mem.out"
+  while [ ! -e "$scratch/mem.release" ]; do sleep 0.1; done
+  _live_mem_unlock
+) >>"$scratch/mem.out" 2>&1 &
+pids+=($!)
+wait_for "$scratch/mem.out" "first in" || fail "the first never took the memory section" "$(cat "$scratch/mem.out")"
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+(
+  export KNOBAS_LIVE_MEM_LOCK="$mlock"
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  _live_mem_lock && echo "second in" >>"$scratch/mem.out"
+  _live_mem_unlock
+) >>"$scratch/mem.out" 2>&1 &
+pids+=($!)
+sleep 1.5
+check_not "a second taker waits while the first holds the memory section" "$(cat "$scratch/mem.out")" "second in"
+touch "$scratch/mem.release"
+wait_for "$scratch/mem.out" "second in" || fail "and goes in once it is let go" "$(cat "$scratch/mem.out")"
+rm -rf "$mlock"
+mkdir "$mlock"
+echo 999999 >"$mlock/pid"
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export KNOBAS_LIVE_MEM_LOCK="$mlock" KNOBAS_LIVE_MEM_LOCK_WAIT=3
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  _live_mem_lock && echo "took over" && _live_mem_unlock
+) 2>&1 )
+check "a dead holder's memory section is taken over" "$out" "took over"
+checks=$((checks + 1))
+[ ! -e "$mlock" ] || fail "and given back"
 if [ "$failures" -gt 0 ]; then
   echo "live-lock-test: $failures of $checks checks failed" >&2
   exit 1

@@ -1824,6 +1824,12 @@ kuma-live:
     # whatever directory the shell died in, and a relative path in it would
     # fail exactly when it is most needed.
     root=$PWD
+    # Where Kuma runs: this machine, or the remote target testenv/live.env
+    # names, whose engine every docker call below then reaches (and whose
+    # 127.0.0.1:3001 the tunnel brings here). The canary follows it
+    # (canary.sh). testenv/README.md, "Live products on a remote machine".
+    . testenv/live-lib.sh
+    live_remote_ready
     cd testenv
     docker compose --env-file images.env up -d --wait uptime-kuma
     ./seed-kuma.sh
@@ -1848,10 +1854,18 @@ kuma-live:
     # interrupt during `up` restores a port that is either bound or free, and
     # `up` is what restores it either way.
     restore_canary() { cd "$root/testenv" && ./canary.sh up || true; }
-    trap 'restore_canary' EXIT
-    trap 'restore_canary; trap - INT; kill -INT $$' INT
-    trap 'restore_canary; trap - TERM; kill -TERM $$' TERM
+    # On a remote target the suite's never-answering socket lives on that
+    # machine too (testenv/stall.sh), released however this ends.
+    release_stall() { [ -z "$LIVE_REMOTE" ] || { cd "$root/testenv" && ./stall.sh down >/dev/null || true; }; }
+    trap 'restore_canary; release_stall' EXIT
+    trap 'restore_canary; release_stall; trap - INT; kill -INT $$' INT
+    trap 'restore_canary; release_stall; trap - TERM; kill -TERM $$' TERM
     ./canary.sh up
+    if [ -n "$LIVE_REMOTE" ]; then
+      ./stall.sh up
+      KNOBAS_KUMA_STALLED_URL=$(./stall.sh url)
+      export KNOBAS_KUMA_STALLED_URL
+    fi
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-kuma --test live_kuma \
       -- --ignored --nocapture --test-threads=1
@@ -1917,7 +1931,7 @@ teamcity-live:
     # pointed at the seeded container makes this a TeamCity run like any other.
     . testenv/live-lib.sh
     live_lock_traps
-    live_lock_hold teamcity-live
+    live_lock_hold teamcity-live jvm teamcity
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity \
       -- --ignored --nocapture --test-threads=1
 

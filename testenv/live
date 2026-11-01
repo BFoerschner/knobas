@@ -6,6 +6,12 @@
 #   ./live down <product>   stop it (TeamCity, Gitea) or remove it with its
 #                           volumes (Jira, Confluence: 3-hour licences)
 #   ./live status           one line per product
+#   ./live tunnel up|down|status   the ssh port forward to a remote target
+#   ./live remote-check     a remote target's engine, memory and tunnel
+#
+# WHERE the products run is testenv/live.env (git-ignored; live.env.example):
+# this machine by default, or a remote one such as a WSL box that keeps them
+# up 24/7 (live-lib.sh, "A REMOTE TARGET, DECLARED").
 #
 # <product> is gitea, forgejo (#1195), teamcity, jira or confluence. `up` of a JVM product
 # waits for the machine-wide JVM lock a live run holds (issue #690), then
@@ -16,7 +22,11 @@ set -euo pipefail
 # shellcheck source=testenv/live-lib.sh disable=SC1091
 . "$(cd "$(dirname "$0")" && pwd)/live-lib.sh"
 
-usage() { echo "usage: testenv/live up|down <gitea|forgejo|teamcity|jira|confluence> | status" >&2; exit 2; }
+usage() { echo "usage: testenv/live up|down <gitea|forgejo|teamcity|jira|confluence> | status | tunnel up|down|status | remote-check" >&2; exit 2; }
+
+need_remote() {
+  [ -n "$LIVE_REMOTE" ] || { echo "live: the target is this machine (KNOBAS_LIVE_TARGET=local); '$1' is for a remote one -- testenv/live.env" >&2; exit 1; }
+}
 
 case "${1:-}" in
   up)
@@ -28,8 +38,45 @@ case "${1:-}" in
   down) [ $# -eq 2 ] || usage; live_down "$2" ;;
   status)
     [ $# -eq 1 ] || usage
+    if [ -n "$LIVE_REMOTE" ]; then
+      if live_tunnel_is_up; then t="tunnel up"; else t="tunnel down"; fi
+      echo "target: remote, $KNOBAS_LIVE_SSH ($t)"
+    fi
     for p in gitea forgejo teamcity jira confluence; do
       if live_is_up "$p"; then echo "$p: up"; else echo "$p: down"; fi
     done ;;
+  tunnel)
+    [ $# -eq 2 ] || usage
+    case $2 in
+      up) need_remote "tunnel up"; live_tunnel_up ;;
+      down) live_tunnel_down ;;
+      status) if live_tunnel_is_up; then echo "tunnel: up"; else echo "tunnel: down"; exit 1; fi ;;
+      *) usage ;;
+    esac ;;
+  remote-check)
+    [ $# -eq 1 ] || usage
+    need_remote remote-check
+    echo "remote-check: ssh $KNOBAS_LIVE_SSH ..."
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$KNOBAS_LIVE_SSH" true ||
+      { echo "remote-check: ssh $KNOBAS_LIVE_SSH fails (keys, host, port?)" >&2; exit 1; }
+    engine=$(docker version --format '{{.Server.Version}} ({{.Server.Os}}/{{.Server.Arch}})') ||
+      { echo "remote-check: no docker engine answers over $DOCKER_HOST" >&2; exit 1; }
+    echo "remote-check: engine $engine"
+    budget=$(_live_mem_budget_mb) || { echo "remote-check: could not read the engine's memory" >&2; exit 1; }
+    echo "remote-check: memory budget ${budget} MB (live-lib.sh, THE MEMORY BUDGET); measured use: gitea $(_live_footprint_mb gitea), jira $(_live_footprint_mb jira), confluence $(_live_footprint_mb confluence), teamcity $(_live_footprint_mb teamcity) MB"
+    fits=""
+    all3=$(($(_live_footprint_mb gitea) + $(_live_footprint_mb jira) + $(_live_footprint_mb confluence) + $(_live_footprint_mb teamcity)))
+    if [ "$all3" -le "$budget" ]; then
+      echo "remote-check: all three JVM products fit beside Gitea (${all3} of ${budget} MB)"
+    fi
+    for pair in jira:confluence jira:teamcity confluence:teamcity; do
+      a=${pair%:*} b=${pair#*:}
+      [ $(($(_live_footprint_mb gitea) + $(_live_footprint_mb "$a") + $(_live_footprint_mb "$b"))) -gt "$budget" ] || fits="$fits $a+$b"
+    done
+    echo "remote-check: up together beside Gitea:${fits:- one JVM product at a time}; a run stops the oldest other one to make room"
+    [ "$budget" -ge "$(($(_live_footprint_mb gitea) + $(_live_footprint_mb jira)))" ] ||
+      echo "remote-check: WARNING Jira alone does not fit the budget -- raise memory= in .wslconfig" >&2
+    live_tunnel_up
+    echo "remote-check: ok" ;;
   *) usage ;;
 esac

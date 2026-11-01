@@ -1,0 +1,47 @@
+# Memory caps for a REMOTE target (testenv/live.env, KNOBAS_LIVE_TARGET=remote),
+# where the products stay up together on a box with 16 GB of physical memory
+# and WSL gets about 10 of it. live-lib.sh layers this over docker-compose.yml
+# through COMPOSE_FILE, for every compose call a remote run makes. Never on
+# the local target: that VM runs one JVM product at a time, uncapped.
+#
+# A hard cap per container (`mem_limit`): a ceiling against a runaway, so a
+# JVM that grows takes out its own container, not the whole VM. The JVM heaps
+# are pinned under each cap. The caps sit about a third above what each
+# container was MEASURED to use with all three products up and a Jira suite
+# running (2026-11-01, the real box; testenv/README.md): Jira 3.48 GB, so 4.5
+# GB (an earlier 3.5 GB cap held it at its ceiling and pushed it into swap);
+# Confluence 2.27, so 3; TeamCity 1.22 and its agent 0.40, so 2 and 1; each
+# PostgreSQL under 0.2, so 0.5. live-lib.sh's memory budget plans with the
+# measured use, not with these ceilings (KNOBAS_LIVE_*_MB move the ceilings).
+#
+# It changes memory and nothing else -- check-ports.sh asserts the port map
+# through this overlay is the default one.
+services:
+  uptime-kuma:
+    mem_limit: ${KNOBAS_LIVE_KUMA_MB:-768}m
+  docker-proxy:
+    mem_limit: 128m
+  gitea:
+    mem_limit: ${KNOBAS_LIVE_GITEA_MB:-512}m
+  forgejo:
+    mem_limit: ${KNOBAS_LIVE_GITEA_MB:-512}m
+  teamcity:
+    mem_limit: ${KNOBAS_LIVE_TEAMCITY_MB:-2048}m
+    environment:
+      TEAMCITY_SERVER_MEM_OPTS: "-Xmx1536m -XX:ReservedCodeCacheSize=256m"
+  teamcity-agent:
+    mem_limit: ${KNOBAS_LIVE_TEAMCITY_AGENT_MB:-1024}m
+  jira:
+    mem_limit: ${KNOBAS_LIVE_JIRA_MB:-4608}m
+    environment:
+      JVM_MINIMUM_MEMORY: 1024m
+      JVM_MAXIMUM_MEMORY: 2048m
+  jira-db:
+    mem_limit: ${KNOBAS_LIVE_DB_MB:-512}m
+  confluence:
+    mem_limit: ${KNOBAS_LIVE_CONFLUENCE_MB:-3072}m
+    environment:
+      JVM_MINIMUM_MEMORY: 512m
+      JVM_MAXIMUM_MEMORY: 1024m
+  confluence-db:
+    mem_limit: ${KNOBAS_LIVE_DB_MB:-512}m

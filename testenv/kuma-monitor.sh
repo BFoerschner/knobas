@@ -29,8 +29,10 @@ esac
 
 # KUMA_WAIT_S is the guard on each socket wait (kuma-monitor.mjs, #1961);
 # unset here, it goes in empty and the helper takes its own default.
-docker compose --env-file images.env --profile seed run --rm -T -e KUMA_WAIT_S="${KUMA_WAIT_S:-}" kuma-seed sh -c '
+# The helper goes in as a tar on stdin: kuma-seed mounts nothing, so the
+# engine may be another machine's (docker-compose.yml).
+COPYFILE_DISABLE=1 tar --format ustar -c kuma-monitor.mjs | docker compose --env-file images.env --profile seed run --rm -T -e KUMA_WAIT_S="${KUMA_WAIT_S:-}" kuma-seed sh -c '
   mkdir -p /tmp/k &&
-  cp /seed/kuma-monitor.mjs /tmp/k/ &&
+  tar -x -C /tmp/k &&
   npm --prefix /tmp/k i --no-save --silent socket.io-client@4 &&
   node /tmp/k/kuma-monitor.mjs "$@"' sh "$@"

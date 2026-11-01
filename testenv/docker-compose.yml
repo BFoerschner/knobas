@@ -264,24 +264,25 @@ services:
       KUMA_URL: http://uptime-kuma:3001
       KUMA_USER: knobas
       KUMA_PASS: knobas-dev
-    volumes:
-      # READ-ONLY on purpose. The API key comes back on the container's stdout
-      # and seed-kuma.sh writes it host-side, so nothing in this repo is ever
-      # written by a container (which on Linux would leave root-owned files).
-      - ./:/seed:ro
+    # NO MOUNT: the scripts arrive as a tar on stdin (seed-kuma.sh,
+    # kuma-monitor.sh pipe it in). A bind mount names a path on the engine's
+    # machine, and on a remote target (testenv/live.env) that machine has no
+    # checkout. The API key still comes back on the container's stdout and
+    # seed-kuma.sh writes it host-side, so nothing in this repo is ever
+    # written by a container.
+    stdin_open: true
     # The only step in the whole environment that needs network access at seed
     # time; noted in README.md.
     #
-    # The script is COPIED to /tmp/k next to its node_modules rather than run
-    # from the read-only /seed mount. ESM ignores NODE_PATH -- an `import` from
-    # /seed/kuma-seed.mjs resolves against /seed/node_modules and /node_modules
-    # and nowhere else, so the obvious `NODE_PATH=... node /seed/kuma-seed.mjs`
-    # fails with ERR_MODULE_NOT_FOUND. Copying puts the script in the directory
-    # whose node_modules npm just populated. monitors.json travels with it
-    # because the script resolves it relative to import.meta.url.
+    # The scripts land in /tmp/k next to their node_modules. ESM ignores
+    # NODE_PATH -- an `import` resolves against the script's own directory's
+    # node_modules and /node_modules and nowhere else -- so the script must sit
+    # in the directory whose node_modules npm just populated. monitors.json
+    # travels with it because the script resolves it relative to
+    # import.meta.url.
     command: >
       sh -c "mkdir -p /tmp/k &&
-             cp /seed/kuma-seed.mjs /seed/monitors.json /tmp/k/ &&
+             tar -x -C /tmp/k &&
              npm --prefix /tmp/k i --no-save --silent socket.io-client@4 &&
              node /tmp/k/kuma-seed.mjs"
 
