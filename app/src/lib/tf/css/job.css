@@ -15,8 +15,19 @@
 /* ---------- one page for a ticket and the job (spec #2396) ---------- */
 /* The page is the job's two columns under its own breadcrumb; each column scrolls on its own, so the card's foot is in reach. */
 .tf-ticketpage { height: 100%; }
-.tf-ticketpage .tf-ws { flex: 1; min-height: 0; height: auto; }
-@media (max-width: 900px) { .tf-ticketpage { height: auto; } }
+.tf-ticketpage .tf-ws { flex: 1; min-height: 0; height: auto; grid-template-columns: var(--tk-side, 320px) minmax(0, 1fr); }
+/* The card's width is the reader's (#2402): a 6px separator on its right edge drags it between 240px and 720px
+   (`knobas.ticket.side`), a double click fits it so nothing on the card wraps. The handle shows as the card's edge
+   darkening under the pointer. Below 900px the columns stack and the handle is gone. */
+.tf-tkhandle { position: absolute; top: 0; bottom: 0; right: 0; width: 6px; cursor: col-resize; z-index: 2; }
+.tf-tkhandle:hover, .tf-tkhandle:focus-visible, .tf-tkdragging .tf-tkhandle { background: rgba(0,0,0,.14); outline: 0; }
+.tf-sheetcard .tf-tkhandle:hover, .tf-sheetcard .tf-tkhandle:focus-visible, .tf-sheetcard.tf-tkdragging .tf-tkhandle { background: var(--rule); }
+.tf-ticketcard.tf-tkdragging, .tf-ticketcard.tf-tkdragging * { cursor: col-resize; user-select: none; }
+@media (max-width: 900px) {
+  .tf-ticketpage { height: auto; }
+  .tf-ticketpage .tf-ws { grid-template-columns: minmax(0, 1fr); }
+  .tf-tkhandle { display: none; }
+}
 /* No 64px key in either mood. Beside it, the copy button: one press puts the key and the title on the clipboard (#2400). */
 .tf-ticketcard .tf-jobkey { font-size: var(--t-d2); }
 .tf-tkhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

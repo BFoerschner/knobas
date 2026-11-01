@@ -23,6 +23,11 @@
   reading, the timer once pinned. The running time is the top bar's chip
   alone. The title, the description and the conversation are the reading
   column's (#2399).
+
+  The card's width (#2402, `card-width.svelte.ts`): a six-pixel separator on
+  its right edge drags the column between 240px and 720px, a double click (or
+  Enter) fits it so nothing on the card wraps, and the arrows step it. Below
+  900px the columns stack and the handle is not drawn.
 -->
 <script lang="ts">
   import type { EntityDetail } from "../../ipc/entity";
@@ -30,6 +35,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import { openExternal } from "../../shell/open-external";
   import { pressSection, type CardTable } from "./card-sections";
+  import { cardWidth, naturalWidth, SIDE_MAX, SIDE_MIN } from "./card-width.svelte";
   import { ticketHash } from "../route";
   import { parentOf } from "../sets/apply";
   import { epicLine, initials } from "../tickets/tickets";
@@ -92,6 +98,54 @@
   }
   $effect(() => () => clearTimeout(settle));
 
+  // ---- the card's width (#2402) ----
+  /** The window at which the columns stack and the handle goes (`narrow.css`). */
+  const NARROW = "(max-width: 900px)";
+  /** How far an arrow key moves the edge. */
+  const STEP = 16;
+  let article = $state<HTMLElement | null>(null);
+  let narrow = $state(false);
+  $effect(() => {
+    const query = typeof window.matchMedia === "function" ? window.matchMedia(NARROW) : null;
+    if (query === null) return;
+    narrow = query.matches;
+    const changed = (event: MediaQueryListEvent) => (narrow = event.matches);
+    query.addEventListener("change", changed);
+    return () => query.removeEventListener("change", changed);
+  });
+
+  /** A drag in progress: what lets go of the window's pointer listeners. */
+  let release: (() => void) | null = $state(null);
+  function startDrag(event: PointerEvent) {
+    if (event.button !== 0 || article === null) return;
+    event.preventDefault();
+    release?.();
+    const left = article.getBoundingClientRect().left;
+    const move = (at: PointerEvent) => cardWidth.set(at.clientX - left);
+    const up = () => release?.();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    release = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      release = null;
+    };
+  }
+  $effect(() => () => release?.());
+
+  /** The width at which nothing on the card wraps, up to the cap. */
+  function fit() {
+    if (article !== null) cardWidth.set(naturalWidth(article));
+  }
+
+  function edgeKey(event: KeyboardEvent) {
+    if (event.key === "ArrowLeft") cardWidth.set(cardWidth.px - STEP);
+    else if (event.key === "ArrowRight") cardWidth.set(cardWidth.px + STEP);
+    else if (event.key === "Enter") fit();
+    else return;
+    event.preventDefault();
+  }
+
   /** *Open in <source>*: the ticket's web address through the browser, never the webview. */
   function openWeb(event: MouseEvent, url: string) {
     event.preventDefault();
@@ -100,11 +154,30 @@
 </script>
 
 <article
+  bind:this={article}
   class="tf-jobcard tf-ticketcard"
   class:tf-card={pinned}
   class:tf-sheetcard={!pinned}
+  class:tf-tkdragging={release !== null}
   aria-label={pinned ? "Job card" : "Ticket"}
 >
+  {#if !narrow}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+    <div
+      class="tf-tkhandle"
+      role="separator"
+      tabindex="0"
+      aria-orientation="vertical"
+      aria-label="Card width. Drag to resize, double-click to fit."
+      aria-valuemin={SIDE_MIN}
+      aria-valuemax={SIDE_MAX}
+      aria-valuenow={cardWidth.px}
+      title="Drag to resize, double-click to fit"
+      onpointerdown={startDrag}
+      ondblclick={fit}
+      onkeydown={edgeKey}
+    ></div>
+  {/if}
   <div>
     <div class="tf-tkhead">
       <div class="tf-jobkey">{key}</div>

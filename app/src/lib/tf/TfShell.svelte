@@ -88,6 +88,7 @@
   import { breadcrumbJob, currentJob, linkRequest } from "./job/current.svelte";
   import { chosenJob } from "./job/chosen.svelte";
   import { scopedTicket } from "./job/scoped.svelte";
+  import { cardWidth } from "./job/card-width.svelte";
   import { selectTicket } from "./tickets/TicketsPage.svelte";
   import TfPage from "./TfPage.svelte";
   import { roleSyncs as sharedRoleSyncs, type RoleSyncs } from "./role-sync.svelte";
@@ -259,6 +260,8 @@
    * two sources hold returns to the one that was chosen (#1525).
    */
   chosenJob.load();
+  // The ticket page card's width (#2402), kept in the same storage.
+  cardWidth.load();
   const chosen = $derived(chosenJob.id === null ? null : ticketRef(chosenJob.id));
   /**
    * The job the shown page's *This job* names (#2401): a ticket a card's

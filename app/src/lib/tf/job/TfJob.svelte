@@ -83,6 +83,7 @@
   import TfConversation from "./TfConversation.svelte";
   import TfJobCard from "./TfJobCard.svelte";
   import { cardSections } from "./card-sections";
+  import { cardWidth } from "./card-width.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { proseMarkdown } from "../../render/prose";
   import TfLinkTo from "./TfLinkTo.svelte";
@@ -488,7 +489,7 @@
   {@const key = keyOf(detail.row.entity_id)}
   <div class="tf-full tf-ticketpage">
   <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: key }]} {back} />
-  <div class="tf-ws">
+  <div class="tf-ws" style:--tk-side="{cardWidth.px}px">
     <TfJobCard
       {detail}
       others={reader.others}
