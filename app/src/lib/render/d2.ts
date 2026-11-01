@@ -1,10 +1,15 @@
 /**
  * D2 behind the renderer port (#2259, spec #2234 step 5): D2's official WASM
- * build (`@terrastruct/d2`). Only the diagram worker (`diagram.worker.ts`)
- * reaches this module, through a dynamic `import()`, so it and D2 are a
- * chunk of their own that loads with the first D2 diagram. The package runs
- * its WASM in a `blob:` worker of its own, nested in the diagram worker, so
- * it is bound by the diagram worker's CSP and not the document's.
+ * build (`@terrastruct/d2`), a chunk of its own that loads with the first D2
+ * diagram.
+ *
+ * **Where it runs** (#2381). The package runs its WASM in a `blob:` worker of
+ * its own, and in WebKit (the bundled app) D2's Go WASM overflows a worker
+ * thread's stack while it starts. So the package's worker source runs on the
+ * thread that starts D2 instead ({@link ThreadWorker}): in the app that is
+ * D2's frame (`d2-frame.ts`), a sandboxed document of its own whose policy
+ * allows WASM and `new Function`, which the app's document does not; in dev
+ * and tests (no bridge, no CSP) it is the page itself (`port.ts`).
  *
  * - **Colours** are the knobas tokens of the theme drawn now, as D2 theme
  *   overrides on its default theme. A theme override the source sets itself
@@ -96,24 +101,132 @@ function messageOf(error: unknown): string {
   return text;
 }
 
+/** The call that ends the package's worker source: it answers on the worker's own `self`. */
+const WORKER_CALL = "setupMessageHandler(false, self, initWasmBrowser);";
+/** Where the rewritten source finds the port it answers on while it is evaluated. */
+const PORT = "__knobasD2Port";
+
+interface Port {
+  onmessage: ((event: { data: unknown }) => void) | null;
+  postMessage(message: unknown): void;
+}
+
 /**
- * The package's browser build, started in the diagram worker. It tells a
- * browser from Node by `typeof window` while it starts, and a worker has no
- * `window`: taken for Node, it would listen on its own worker with `.on` and
- * throw. So the worker lends it one until it is ready.
+ * The package's worker (`new Worker(blob:…)`), run on this thread (#2381).
+ * It reads the worker's source (`read`), has it answer a port of this
+ * object's in place of its `self`, and evaluates it as a module (`run`);
+ * messages go between the package and that port as they would between it
+ * and its worker.
+ *
+ * The package says `ready` even when its Go runtime threw while it started
+ * (it does not await `go.run`), and its first `compile` then fails on an
+ * engine that is not there. So a `ready` with no engine on `globalThis.d2`
+ * is answered as the error it is, with the reason the start was rejected
+ * with when there was one.
  */
-async function startInWorker(): Promise<D2Engine> {
-  const scope = globalThis as { window?: unknown };
-  const lent = !("window" in scope);
-  if (lent) scope.window = globalThis;
-  try {
-    const d2 = new D2();
-    await (d2 as unknown as { ready: Promise<void> }).ready;
-    return d2 as unknown as D2Engine;
-  } finally {
-    if (lent) delete scope.window;
+export class ThreadWorker {
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onerror: ((event: unknown) => void) | null = null;
+  readonly #port: Port;
+  readonly #started: Promise<void>;
+  #rejected: string | null = null;
+
+  constructor(url: string | URL, read: (url: string) => Promise<string>, run: (module: string) => Promise<unknown>) {
+    this.#port = { onmessage: null, postMessage: (message) => queueMicrotask(() => this.#answer(message)) };
+    this.#started = read(String(url)).then(async (source) => {
+      const scope = globalThis as Record<string, unknown>;
+      scope[PORT] = this.#port;
+      try {
+        await run(onThisThread(source));
+      } finally {
+        delete scope[PORT];
+      }
+    });
+  }
+
+  postMessage(message: unknown): void {
+    const init = (message as { type?: unknown } | null)?.type === "init";
+    if (init) globalThis.addEventListener?.("unhandledrejection", this.#heard);
+    this.#started.then(
+      () => this.#port.onmessage?.({ data: message }),
+      (error: unknown) => this.#deliver({ type: "error", error: `D2 could not start: ${messageOf(error)}` }),
+    );
+  }
+
+  terminate(): void {
+    globalThis.removeEventListener?.("unhandledrejection", this.#heard);
+  }
+
+  readonly #heard = (event: Event) => {
+    const reason = (event as PromiseRejectionEvent).reason as unknown;
+    this.#rejected ??= reason instanceof Error ? reason.message : String(reason);
+  };
+
+  #answer(message: unknown): void {
+    const type = (message as { type?: unknown } | null)?.type;
+    if (type !== "ready" && type !== "error") return this.#deliver(message);
+    // An unhandled rejection is reported after the task that made it: wait one, so its reason is heard.
+    setTimeout(() => {
+      this.terminate();
+      const engine = (globalThis as { d2?: { compile?: unknown } }).d2;
+      if (type === "ready" && typeof engine?.compile !== "function") {
+        this.#deliver({ type: "error", error: `D2 could not start: ${this.#rejected ?? "its engine did not come up."}` });
+      } else this.#deliver(message);
+    });
+  }
+
+  #deliver(message: unknown): void {
+    this.onmessage?.({ data: message });
   }
 }
 
+/** The package's worker source, answering `globalThis[PORT]` in place of its `self`. */
+function onThisThread(source: string): string {
+  const at = source.indexOf(WORKER_CALL);
+  if (at < 0 || source.indexOf(WORKER_CALL, at + 1) >= 0) {
+    throw new Error("its worker source has changed (a new @terrastruct/d2?), and it cannot run on this thread.");
+  }
+  return `${source.slice(0, at)}setupMessageHandler(false, globalThis.${PORT}, initWasmBrowser);${source.slice(at + WORKER_CALL.length)}`;
+}
+
+/** A `blob:` URL's text. */
+async function readBlob(url: string): Promise<string> {
+  return (await fetch(url)).text();
+}
+
+/** `source` evaluated as a module on this thread. */
+async function runModule(source: string): Promise<unknown> {
+  const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+  try {
+    return await import(/* @vite-ignore */ url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * The package's browser build, its worker on this thread. The package makes
+ * its worker inside `new D2()`, before its first `await`, so `Worker` is
+ * {@link ThreadWorker} for that call only, and every other worker of the
+ * page is a real one.
+ */
+async function startOnThisThread(): Promise<D2Engine> {
+  const scope = globalThis as { Worker: unknown };
+  const real = scope.Worker;
+  scope.Worker = class extends ThreadWorker {
+    constructor(url: string | URL) {
+      super(url, readBlob, runModule);
+    }
+  };
+  let d2: D2;
+  try {
+    d2 = new D2();
+  } finally {
+    scope.Worker = real;
+  }
+  await (d2 as unknown as { ready: Promise<void> }).ready;
+  return d2 as unknown as D2Engine;
+}
+
 /** The app's D2. */
-export const renderD2 = d2Renderer(startInWorker);
+export const renderD2 = d2Renderer(startOnThisThread);

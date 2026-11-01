@@ -79,9 +79,9 @@ export const MERMAID: Renderer = {
 };
 
 /**
- * D2 (#2259): a `d2` fence and a `.d2` file, drawn by D2's WASM build in the
- * diagram worker (`render/diagram.worker.ts`), sanitized, in the sandboxed
- * frame. D2 loads with the first D2 diagram.
+ * D2 (#2259): a `d2` fence and a `.d2` file, drawn by D2's WASM build in D2's
+ * own frame (`render/d2-frame.ts`, #2381), sanitized, in the sandboxed frame.
+ * D2 loads with the first D2 diagram.
  */
 export const D2: Renderer = {
   id: "d2",

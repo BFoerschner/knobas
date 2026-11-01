@@ -1173,10 +1173,11 @@ fn install_panic_hook() {
 #[cfg(test)]
 mod tests {
     /// The policy every module worker would need if Tauri sent it the CSP
-    /// (#2312). Shiki (`highlight.worker.ts`), D2 and Graphviz
-    /// (`diagram.worker.ts`) need `'unsafe-eval'` and `blob:` (D2 starts a
-    /// `blob:` worker of its own); pdf.js's worker compiles WASM and fetches
-    /// its decoders, fonts, CMaps and ICC profile from `/pdfjs/` (#2313).
+    /// (#2312). Shiki (`highlight.worker.ts`) and Graphviz
+    /// (`diagram.worker.ts`) need `'unsafe-eval'`; pdf.js's worker compiles
+    /// WASM and fetches its decoders, fonts, CMaps and ICC profile from
+    /// `/pdfjs/` (#2313). D2 left the workers for a frame of its own, under
+    /// a policy the backend sends itself (#2381, `renderers::ENGINE_CSP`).
     const WORKER_POLICY: &str =
         "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob:; connect-src 'self'";
 

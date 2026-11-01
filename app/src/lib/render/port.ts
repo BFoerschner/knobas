@@ -10,6 +10,9 @@
  * no language to highlight in. Nothing is ever answered synchronously: the
  * caller draws the plain text first.
  */
+import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
+
+import { FRAME_SCHEME } from "./frame";
 
 /** A run of a line's text and its kind (`kw`, `str`, `num`, `com`, `fn`, `ty`; `""` is plain ink). */
 export type Token = readonly [text: string, kind: string];
@@ -184,6 +187,60 @@ export function workerDiagram(
   };
 }
 
+/** What D2's frame says once it listens (`d2-frame.ts`). */
+export interface FrameHello {
+  hello: "d2";
+}
+
+/**
+ * D2's frame (#2381) as a worker {@link workerDiagram} can hold: a hidden
+ * `<iframe sandbox="allow-scripts">` at `src` (the backend's `knobas-render`
+ * scheme: an opaque origin under a policy of its own, no Tauri globals), on
+ * a main thread of its own, since D2's WASM overflows a WebKit worker's
+ * stack while it starts.
+ *
+ * What is sent before the frame says hello waits for it. Only a message whose
+ * source is the frame is an answer. A frame that has not said hello within
+ * `limit` ms (refused, not built) fails as a worker does: an `error`.
+ */
+export function frameWorker(src: string, doc: Document = document, limit = 30_000): Pick<Worker, "postMessage" | "addEventListener" | "terminate"> {
+  const frame = doc.createElement("iframe");
+  frame.setAttribute("sandbox", "allow-scripts");
+  frame.hidden = true;
+  frame.title = "D2";
+  frame.src = src;
+  const events = new EventTarget();
+  const view = doc.defaultView!;
+  let held: unknown[] | null = [];
+  const timer = setTimeout(() => {
+    events.dispatchEvent(Object.assign(new Event("error"), { message: `D2's frame did not load within ${limit / 1000} s.` }));
+  }, limit);
+  const heard = (event: MessageEvent) => {
+    if (event.source === null || event.source !== frame.contentWindow) return;
+    if (held === null) events.dispatchEvent(new MessageEvent("message", { data: event.data as unknown }));
+    else if ((event.data as Partial<FrameHello> | null)?.hello === "d2") {
+      clearTimeout(timer);
+      const waiting = held;
+      held = null;
+      for (const message of waiting) frame.contentWindow.postMessage(message, "*");
+    }
+  };
+  view.addEventListener("message", heard);
+  doc.body.append(frame);
+  return {
+    postMessage(message: unknown) {
+      if (held === null) frame.contentWindow?.postMessage(message, "*");
+      else held.push(message);
+    },
+    addEventListener: events.addEventListener.bind(events) as Worker["addEventListener"],
+    terminate() {
+      clearTimeout(timer);
+      view.removeEventListener("message", heard);
+      frame.remove();
+    },
+  };
+}
+
 /** What the port sends the worker. */
 export type HighlightMessage =
   | ({ type: "open"; id: number } & HighlightRequest)
@@ -243,19 +300,34 @@ export const plainPort: RenderPort = {
 let shared: RenderPort | null = null;
 
 let wasm: ((request: DiagramRequest) => Promise<DiagramAnswer>) | null = null;
+let d2: ((request: DiagramRequest) => Promise<DiagramAnswer>) | null = null;
+
+/** D2's frame page on the backend's scheme (`knobas_app::renderers::D2_FRAME_PAGE`). */
+const D2_FRAME = "d2-frame.html";
 
 /**
  * Mermaid, loaded on the first diagram: `mermaid.ts` and Mermaid itself are
  * a chunk of their own. It runs on the main thread, since it lays text out
  * in the document.
  *
- * D2 and Graphviz are WASM, and run in the diagram worker
- * (`diagram.worker.ts`), started on the first of them; each engine is a
- * chunk of its own inside it. Their WASM never runs in the document, so the
- * document's CSP needs no `'wasm-unsafe-eval'` (#2259).
+ * Graphviz is WASM, and runs in the diagram worker (`diagram.worker.ts`),
+ * started on the first Graphviz diagram. Its WASM never runs in the
+ * document, so the document's CSP needs no `'wasm-unsafe-eval'` (#2259).
+ *
+ * D2 is WASM too, but its Go runtime overflows a WebKit worker's stack while
+ * it starts (#2381), so it needs a main thread: under the app's bridge D2's
+ * frame ({@link frameWorker}), under a policy of its own, so the document's
+ * stays as it is; in dev and tests, where there is no bridge and no CSP, the
+ * page itself.
  */
 export function engineDiagram(request: DiagramRequest): Promise<DiagramAnswer> {
   if (request.engine === "mermaid") return import("./mermaid").then(({ renderMermaid }) => renderMermaid(request.code, request.palette));
+  if (request.engine === "d2") {
+    d2 ??= isTauri()
+      ? workerDiagram(() => frameWorker(convertFileSrc(D2_FRAME, FRAME_SCHEME)))
+      : ({ code, palette }) => import("./d2").then(({ renderD2 }) => renderD2(code, palette));
+    return d2(request);
+  }
   wasm ??= workerDiagram(() => new Worker(new URL("./diagram.worker.ts", import.meta.url), { type: "module", name: "diagram" }));
   return wasm(request);
 }

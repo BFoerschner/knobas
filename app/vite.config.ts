@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => ({
     strictPort: true,
   },
   build: {
-    // **Two documents, not one** (#503). `index.html` is the shell; the second
+    // **Three documents, not one** (#503, #2381). `index.html` is the shell; the second
     // is the capture window, which `knobas_app::capture` opens as its own
     // Tauri window and which mounts one component with none of the shell's
     // subscriptions behind it. Named here because a Vite build with no
@@ -29,6 +29,8 @@ export default defineConfig(({ mode }) => ({
       input: {
         index: "index.html",
         capture: "capture.html",
+        // D2's frame (#2381): D2 on a main thread of its own, served on the backend's `knobas-render` scheme.
+        "d2-frame": "d2-frame.html",
       },
     },
     // The only consumer is the WebView bundled with the app, so there is no
