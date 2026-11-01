@@ -545,6 +545,42 @@ on another. They finished in 179, 259 and 332 s, all green (49 + 36 + 39
 tests), about 5.5 minutes for what took about 23 in turn. `setup-windows.ps1` has not run: this box's WSL already had
 12 GB and systemd.
 
+## Live products as sources (`just live-sources`, #2371)
+
+`just live-sources` adds one source per live product to the demo profile:
+`live-gitea`, `live-forgejo`, `live-jira`, `live-confluence`, `live-teamcity`
+and `live-kuma`. Addresses and credentials come from `./seed --env`,
+`--env-forgejo` and `--env-kuma`, so the target (`live.env`: local, or the WSL
+box through the tunnel) is whatever seeded them. Gitea and Forgejo sync the
+seeded owner's repositories (`tidewater`), Jira the seeded projects, Confluence
+the seeded space. A product with no seed, or with nothing answering at its
+address, is skipped with one line; the rest are still added. Each line says
+whether the source was added or updated and what its credential test said.
+
+```sh
+just live-sources                       # target/debug/knobas-app, then the demo profile
+just demo-live                          # the same, then `just demo`
+just demo-live-bundle path/to/knobas.app    # the bundle's own binary, then opens it --demo
+just live-sources-remove [knobas.app]   # the six sources off again, with what they synced
+```
+
+It runs `knobas-app live-sources apply --demo` (a debug build only), which goes
+through the app's own `crud::add` or `crud::update`, then `crud::set_secret`:
+the credential is stored under the demo profile's keychain service and tested,
+as the Settings form does. Running it again updates every source in place, so
+a token `just live-up gitea` minted again is picked up by running it again.
+The sources go in on stdin, never in argv.
+
+- **Quit any demo knobas first.** The subcommand starts the demo profile's own
+  database, which one process holds at a time.
+- **Run it with the binary that will read the credentials.** macOS lets the
+  binary that wrote a keychain item read it without asking, and asks for any
+  other. `just demo` and a bundle share the demo profile's keychain service, so
+  pass the bundle when that is what you will open. A `just demo` that rebuilds
+  the binary asks once, as it does for any source.
+- `--data-dir <dir>` on `testenv/live-sources.sh` puts the profile in a scratch
+  directory; the keychain service stays the demo profile's.
+
 ## The live recipes
 
 Every live suite has a `just` recipe, and the recipe is how it is run — a suite
