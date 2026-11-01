@@ -207,7 +207,9 @@ export type CredentialHealth = { source_id: string, state: AuthState,
 checked_at: string | null, 
 /**
  * One line of detail for the sources view -- the server's own message
- * where there is one. Never a secret.
+ * where there is one. Never a secret. On `ok`, what the last sync on
+ * the good credential left out and why (#2374): *boards unavailable:
+ * Jira Software is unlicensed or refuses this account (403)*.
  */
 detail: string | null, 
 /**

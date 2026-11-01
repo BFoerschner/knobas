@@ -333,8 +333,11 @@ impl SyncRun<'_> {
             .unwrap_or_default();
         let mut views_emitted = 0_usize;
         let (now, board_read): (Vec<crate::cursor::SeenView>, _) = if read_views {
-            let views = crate::views::read(self.api, self.cfg, self.base_url).await?;
-            let now: Vec<crate::cursor::SeenView> = views
+            let crate::views::Read {
+                views,
+                boards_refused,
+            } = crate::views::read(self.api, self.cfg, self.base_url).await?;
+            let mut now: Vec<crate::cursor::SeenView> = views
                 .iter()
                 .map(|view| crate::cursor::SeenView {
                     k: view.key.clone(),
@@ -348,6 +351,18 @@ impl SyncRun<'_> {
                 sink.item(crate::views::item(self.source_id, view)).await?;
                 views_emitted += 1;
             }
+            // Boards Jira Software would not list (#2374) are not boards
+            // deleted in Jira: the ones delivered before stay as they were,
+            // neither re-sent nor gone, until a listing answers again.
+            if boards_refused {
+                sink.left_out(crate::views::BOARDS_REFUSED).await;
+                now.extend(
+                    delivered
+                        .iter()
+                        .filter(|old| crate::views::is_board(&old.k))
+                        .cloned(),
+                );
+            }
             for old in delivered {
                 if !now.iter().any(|seen| seen.k == old.k) {
                     sink.item(crate::views::gone(self.source_id, &old.k))
@@ -355,15 +370,19 @@ impl SyncRun<'_> {
                     views_emitted += 1;
                 }
             }
-            (
-                now,
+            // A refused listing read no board, so the hour does not restart
+            // on it: the next run asks again.
+            let board_read = if boards_refused {
+                previous.as_ref().and_then(|c| c.board_read.clone())
+            } else {
                 server_now
                     .filter(|_| crate::views::reads_any(self.cfg))
                     .map(|at| crate::cursor::BoardRead {
                         at,
                         scope: crate::views::scope(self.cfg),
-                    }),
-            )
+                    })
+            };
+            (now, board_read)
         } else {
             (
                 delivered.to_vec(),

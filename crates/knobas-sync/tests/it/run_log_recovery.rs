@@ -85,6 +85,7 @@ async fn a_run_abandoned_by_a_quit_is_closed_at_the_next_start() {
             outcome: SyncOutcome::Ok,
             counts: run_log::RunCounts::default(),
             error: None,
+            left_out: None,
         },
     )
     .await

@@ -247,6 +247,10 @@ pub struct RunResult {
     pub counts: RunCounts,
     /// The failure's message, or `None` for a run that succeeded.
     pub error: Option<String>,
+    /// What a run that succeeded said it left out, and why
+    /// (`Sink::left_out`, #2374). Not logged: it is the source's `ok` health
+    /// detail.
+    pub left_out: Option<String>,
 }
 
 /// The message a run the quit interrupted is logged with, and the one thing
@@ -280,6 +284,7 @@ impl RunResult {
             outcome: SyncOutcome::Error,
             counts: RunCounts::default(),
             error: Some(CANCELLED_MESSAGE.to_owned()),
+            left_out: None,
         }
     }
 
@@ -848,6 +853,7 @@ mod tests {
             deleted: 4,
             swept: 7,
             cursor: r#"{"v":1,"n":9}"#.to_owned(),
+            left_out: None,
         });
         assert_eq!(counts.upserted, 21);
         assert_eq!(counts.deleted, 4);
@@ -870,6 +876,7 @@ mod tests {
             deleted: 0,
             swept: 0,
             cursor: String::new(),
+            left_out: None,
         });
         assert_eq!(counts.upserted, i64::MAX);
         assert!(counts.touched() >= 0, "a count never reads as negative");
@@ -909,6 +916,7 @@ mod tests {
                     cursor_after: Some("c-9".to_owned()),
                 },
                 error: Some("401".to_owned()),
+                left_out: None,
             },
         )
         .await

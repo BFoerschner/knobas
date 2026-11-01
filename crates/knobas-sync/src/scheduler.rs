@@ -629,6 +629,7 @@ pub async fn execute_run(
             outcome: SyncOutcome::Ok,
             counts: run_log::RunCounts::of(&report),
             error: None,
+            left_out: report.left_out,
         },
         Err(failure) => {
             tracing::warn!(source_id, run_id, failure = %failure.message(), "sync run failed");
@@ -636,6 +637,7 @@ pub async fn execute_run(
                 outcome: failure.outcome(),
                 counts: run_log::RunCounts::default(),
                 error: Some(failure.message()),
+                left_out: None,
             }
         }
     };
@@ -1165,7 +1167,10 @@ async fn apply_health_and_backoff(deps: &SchedulerDeps, source_id: &str, result:
     // count it either.
     let held_by_knobas = result.stopped_on_local_quota();
     let (state, detail) = match result.outcome {
-        SyncOutcome::Ok => (Some(AuthState::Ok), None),
+        // What the adapter left out (#2374) is the one detail an `ok`
+        // carries: the credential worked, and the row says what it did not
+        // bring in. A run that left nothing out clears it.
+        SyncOutcome::Ok => (Some(AuthState::Ok), result.left_out.as_deref()),
         SyncOutcome::Unauthorized if result.error.as_deref() == Some(MISSING_SECRET_MESSAGE) => {
             (Some(AuthState::MissingSecret), result.error.as_deref())
         }
@@ -2571,6 +2576,7 @@ fn stopped() -> RunResult {
         outcome: SyncOutcome::Error,
         counts: run_log::RunCounts::default(),
         error: Some(RUN_STOPPED_MESSAGE.to_owned()),
+        left_out: None,
     }
 }
 

@@ -80,6 +80,16 @@ test("a row says Synced, Sign-in failed or what else holds it, with a dot in the
   });
 });
 
+test("a sync that left part of the source out says what on a warn row, not Sign-in failed (#2374)", () => {
+  const source = { enabled: true, last_run: null, auth_kind: null, role_misses: [] };
+  const why = "boards unavailable: Jira Software is unlicensed or refuses this account (403)";
+  expect(sourceState(source, { ...health("ok"), detail: why }, status(), NOW)).toEqual({
+    tone: "warn",
+    text: `Synced 4 min ago, ${why}`,
+    failed: false,
+  });
+});
+
 test("a run stopped at a deadline or memory cap names the limit on the health line; other failures do not", () => {
   const run = (error: string | null) =>
     ({ enabled: true, last_run: { outcome: "error", error, finished_at: MIN_AGO(4) } }) as never;

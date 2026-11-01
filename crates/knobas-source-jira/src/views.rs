@@ -19,7 +19,11 @@
 //! on by default) come in too, each searched by its JQL as Jira holds it.
 //!
 //! **A Jira without Jira Software** answers the board listing with a 404, and
-//! that is no boards, not a failed sync. A board whose configuration or
+//! that is no boards, not a failed sync. **A Jira Software that will not serve
+//! this account** -- its licence expired, or the account has no Jira Software
+//! access -- answers it with a 403 while core REST serves the same credential
+//! (#2374): the boards are left as the last read delivered them, and the run
+//! says why ([`BOARDS_REFUSED`]) rather than failing as a sign-in failure. A board whose configuration or
 //! filter this account may not read (403, 404) is left out, as a board the
 //! account cannot see. Any other failure fails the run, for the reason the
 //! issue walk's does: a partial answer would read as boards deleted in Jira.
@@ -276,6 +280,26 @@ fn not_readable(error: &SourceError) -> bool {
     matches!(error.status(), Some(403 | 404))
 }
 
+/// What a run hands its sink, and the row of the source shows, when Jira
+/// Software refused the board listing (#2374): the boards are left out, and
+/// the sign-in is not in question.
+pub(crate) const BOARDS_REFUSED: &str =
+    "boards unavailable: Jira Software is unlicensed or refuses this account (403)";
+
+/// What one read of the views found.
+#[derive(Debug, Default)]
+pub(crate) struct Read {
+    /// The views read, boards first in board id order, then the favourite
+    /// filters in filter id order (#878).
+    pub views: Vec<JiraView>,
+    /// Jira Software answered the board listing with 403 (#2374): an expired
+    /// Jira Software licence, or an account without Jira Software access,
+    /// while core REST serves the same credential. `views` holds no board,
+    /// and none was read: the boards this source delivered before are not
+    /// known gone.
+    pub boards_refused: bool,
+}
+
 /// Every Jira view this source brings in: the boards the *Boards and
 /// filters* setting names, in board id order, then the favourite filters, in
 /// filter id order (#878).
@@ -283,7 +307,7 @@ pub(crate) async fn read(
     api: &(dyn JiraApi + '_),
     cfg: &crate::JiraConfig,
     base_url: &str,
-) -> Result<Vec<JiraView>, SourceError> {
+) -> Result<Read, SourceError> {
     let favourites = if cfg.favourite_filters || cfg.boards == BoardScope::Favourites {
         // A 404 is a Jira that answers no favourites here: none, not a
         // failed sync, for the board listing's reason.
@@ -295,7 +319,11 @@ pub(crate) async fn read(
     } else {
         Vec::new()
     };
-    let mut views = boards(api, cfg, base_url, &favourites).await?;
+    let (mut views, boards_refused) = match boards(api, cfg, base_url, &favourites).await {
+        Ok(views) => (views, false),
+        Err(Listing::Refused) => (Vec::new(), true),
+        Err(Listing::Failed(error)) => return Err(error),
+    };
     if cfg.favourite_filters {
         let mut filters = favourites;
         filters.sort_by_key(|filter| (filter.id().parse::<u64>().ok(), filter.id()));
@@ -312,7 +340,30 @@ pub(crate) async fn read(
             }
         }
     }
-    Ok(views)
+    Ok(Read {
+        views,
+        boards_refused,
+    })
+}
+
+/// Whether a view key names a board rather than a favourite filter.
+pub(crate) fn is_board(key: &str) -> bool {
+    key.starts_with("board-")
+}
+
+/// Why the boards were not read.
+enum Listing {
+    /// The board listing answered 403: Jira Software will not serve this
+    /// account (#2374). Core REST already accepted the credential this run --
+    /// the issue walk ran on it -- so it is not a sign-in failure.
+    Refused,
+    Failed(SourceError),
+}
+
+impl From<SourceError> for Listing {
+    fn from(error: SourceError) -> Self {
+        Listing::Failed(error)
+    }
 }
 
 /// The boards the setting names (#878, D17). *Only boards built on my
@@ -323,7 +374,7 @@ async fn boards(
     cfg: &crate::JiraConfig,
     base_url: &str,
     favourites: &[FavouriteFilter],
-) -> Result<Vec<JiraView>, SourceError> {
+) -> Result<Vec<JiraView>, Listing> {
     let listings: Vec<Option<&str>> = match cfg.boards {
         BoardScope::None => return Ok(Vec::new()),
         BoardScope::Synced => cfg.projects.iter().map(|p| Some(p.as_str())).collect(),
@@ -331,7 +382,11 @@ async fn boards(
     };
     let mut boards: Vec<Board> = Vec::new();
     for project in listings {
-        boards.extend(listing(api, project).await?);
+        match listing(api, project).await {
+            Ok(listed) => boards.extend(listed),
+            Err(error) if error.status() == Some(403) => return Err(Listing::Refused),
+            Err(error) => return Err(error.into()),
+        }
     }
     boards.sort_by_key(|board| board.id);
     boards.dedup_by_key(|board| board.id);
@@ -353,7 +408,7 @@ async fn boards(
             Ok(None) => {}
             // A board's filter Jira can no longer run (400), like a favourite's.
             Err(error) if not_readable(&error) || error.status() == Some(400) => {}
-            Err(error) => return Err(error),
+            Err(error) => return Err(error.into()),
         }
     }
     Ok(views)
@@ -630,6 +685,8 @@ mod tests {
         after_first_page: Option<Vec<FakeBoard>>,
         /// Board pages answered so far.
         board_pages: std::sync::atomic::AtomicU32,
+        /// Jira Software refuses the account: an expired licence (#2374).
+        software_refused: bool,
     }
 
     impl Agile {
@@ -724,6 +781,15 @@ mod tests {
         ) -> Result<BoardPage, SourceError> {
             if self.no_software || project.is_some_and(|p| self.unlisted.contains(&p)) {
                 return Err(not_found());
+            }
+            if self.software_refused {
+                // What the seeded Jira 10.3 answered with its Jira Software
+                // licence expired (#2374).
+                return Err(knobas_http::status_error(
+                    knobas_http::StatusCode::FORBIDDEN,
+                    r#"{"errorMessages":["You currently don't have access to perform this operation."]}"#,
+                    None,
+                ));
             }
             let mut listed: Vec<&FakeBoard> = match project {
                 Some(_) => self.held().iter().collect(),
@@ -1015,6 +1081,24 @@ mod tests {
         let (items, second) = sync(&api, Some(first.clone())).await;
         assert!(items.is_empty(), "{items:?}");
         assert_eq!(second, first);
+    }
+
+    /// A Jira Software that stops serving the account (its licence expired,
+    /// #2374) takes no board away: the boards delivered before are neither
+    /// gone nor re-sent, and the position stays put. When the listing
+    /// answers again, the unchanged boards are not delivered twice.
+    #[tokio::test]
+    async fn a_refused_board_listing_takes_no_board_away() {
+        let mut api = seeded();
+        let (_, first) = sync(&api, None).await;
+        api.software_refused = true;
+        api.clock_minutes = 120; // an hour on: the boards are due again
+        let (items, second) = sync(&api, Some(first.clone())).await;
+        assert!(items.is_empty(), "{items:?}");
+        assert_eq!(second, first);
+        api.software_refused = false;
+        let (again, _) = sync(&api, Some(second)).await;
+        assert!(again.is_empty(), "{again:?}");
     }
 
     /// The upgrade: a cursor written before the views (no `views` field, the

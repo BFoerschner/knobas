@@ -57,6 +57,9 @@ struct MockRegistry {
     /// How many times an adapter this registry built was asked for its
     /// descriptor. A run asks once (#1701).
     descriptor_calls: Arc<std::sync::atomic::AtomicUsize>,
+    /// What the built adapter's sync says it left out (`Sink::left_out`,
+    /// #2374), on a run that otherwise succeeds.
+    left_out: Mutex<Option<&'static str>>,
 }
 
 impl AdapterRegistry for MockRegistry {
@@ -77,6 +80,7 @@ impl AdapterRegistry for MockRegistry {
             protocol: *self.protocol.lock().unwrap(),
             quota: *self.quota.lock().unwrap(),
             descriptor_calls: Arc::clone(&self.descriptor_calls),
+            left_out: *self.left_out.lock().unwrap(),
         }))
     }
 }
@@ -90,6 +94,7 @@ struct Renamed {
     protocol: bool,
     quota: bool,
     descriptor_calls: Arc<std::sync::atomic::AtomicUsize>,
+    left_out: Option<&'static str>,
 }
 
 #[async_trait::async_trait]
@@ -134,7 +139,11 @@ impl Source for Renamed {
             id: &self.id,
             inner: sink,
         };
-        self.inner.sync(cursor, &mut renaming).await
+        let next = self.inner.sync(cursor, &mut renaming).await?;
+        if let Some(why) = self.left_out {
+            sink.left_out(why).await;
+        }
+        Ok(next)
     }
     async fn write(
         &self,
@@ -306,6 +315,7 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
         protocol: Mutex::new(false),
         quota: Mutex::new(false),
         descriptor_calls: Arc::default(),
+        left_out: Mutex::new(None),
     });
 
     Harness {
@@ -658,6 +668,42 @@ async fn an_error_run_leaves_any_other_health_alone() {
         assert_eq!(cfg.health.detail.as_deref(), Some("before"));
     }
     assert!(h.events.healths.lock().unwrap().is_empty());
+}
+
+/// A run that left part of the source out (Jira Software refusing the board
+/// listing, #2374) is still a run on a good credential: `ok`, with what it
+/// left out as the detail the source's row shows, and no backoff. The next
+/// run that leaves nothing out clears the line.
+#[tokio::test]
+async fn a_run_that_left_something_out_is_ok_and_says_what() {
+    let h = harness(AuthKind::Method(AuthMethod::Pat), true).await;
+    let why = "boards unavailable: Jira Software is unlicensed or refuses this account (403)";
+    *h.registry.left_out.lock().unwrap() = Some(why);
+
+    let (row, _) = one_run(&h, SyncTrigger::Manual).await;
+    assert_eq!(row.outcome, Some(SyncOutcome::Ok));
+    let cfg = config::get(&h.deps.pool, &h.id).await.unwrap().unwrap();
+    assert_eq!(cfg.health.state, AuthState::Ok);
+    assert_eq!(cfg.health.detail.as_deref(), Some(why));
+    assert!(cfg.backoff_until.is_none());
+
+    *h.registry.left_out.lock().unwrap() = None;
+    one_run(&h, SyncTrigger::Manual).await;
+    let cfg = config::get(&h.deps.pool, &h.id).await.unwrap().unwrap();
+    assert_eq!(cfg.health.state, AuthState::Ok);
+    assert_eq!(
+        cfg.health.detail, None,
+        "a run that left nothing out clears it"
+    );
+    let healths = h.events.healths.lock().unwrap();
+    assert_eq!(
+        healths
+            .iter()
+            .map(|x| x.detail.as_deref())
+            .collect::<Vec<_>>(),
+        [Some(why), None],
+        "each change is announced"
+    );
 }
 
 /// P7: `unauthorized` gets **no** automatic retry -- only a human can fix it.

@@ -2366,6 +2366,25 @@ pub trait Sink {
     async fn walked_whole(&mut self, kind: &str) {
         let _ = kind;
     }
+
+    /// Say that this run left part of the source out because the source
+    /// would not serve it, and why, in one line the source's row shows
+    /// beside its last sync: *boards unavailable: Jira Software is unlicensed
+    /// or refuses this account (403)*. Issue #2374.
+    ///
+    /// For a refusal that is not about the credential: an optional API the
+    /// source's licence or the account's access does not cover, while the
+    /// reads the run stands on answered. A credential the source refused is
+    /// still [`SourceError::Unauthorized`], and fails the run. Call it at
+    /// most once per thing left out, and only on a run that returns `Ok`;
+    /// the engine keeps the last line it was told, and a run that says
+    /// nothing clears the line a previous run left.
+    ///
+    /// The default does nothing, so a sink that predates it shows no line.
+    /// A sink that wraps another forwards it.
+    async fn left_out(&mut self, why: &str) {
+        let _ = why;
+    }
 }
 
 #[cfg(test)]

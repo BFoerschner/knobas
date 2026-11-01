@@ -105,6 +105,12 @@ pub struct SyncReport {
     /// Where the source says the next run should resume. Opaque to the
     /// frontend: it is handed back, unread, to resume an incremental sync.
     pub cursor: Cursor,
+    /// What the adapter said this run left out, and why
+    /// ([`Sink::left_out`], #2374): the scheduler writes it as the detail of
+    /// the source's `ok` credential health. Not on the wire: the health is.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub left_out: Option<String>,
 }
 
 /// Why a run failed.
@@ -520,6 +526,7 @@ async fn run_inner(
         deleted,
         swept,
         previous,
+        left_out,
     } = locked;
     let report = SyncReport {
         source_id,
@@ -527,6 +534,7 @@ async fn run_inner(
         deleted,
         swept,
         cursor,
+        left_out,
     };
     let changed_nothing = report.upserted == 0
         && report.deleted == 0
@@ -624,6 +632,7 @@ struct Locked {
     swept: u64,
     /// The position the run started from, for the "changed nothing" test.
     previous: Option<Cursor>,
+    left_out: Option<String>,
 }
 
 /// Everything that happens under the source's advisory lock.
@@ -702,7 +711,7 @@ async fn run_locked(
     let role_check = (!role_check.is_empty() && role_check::wanted(&role_check, &kept_roles))
         .then_some(role_check);
 
-    let (cursor, upserted, deleted, emitted, whole, role_check) = {
+    let (cursor, upserted, deleted, emitted, whole, role_check, left_out) = {
         let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check);
         let cursor = source.sync(cursor, &mut sink).await?;
         // The adapter is done, so whatever is still buffered belongs to this
@@ -715,6 +724,7 @@ async fn run_locked(
             sink.emitted,
             sink.whole,
             sink.roles,
+            sink.left_out,
         )
     };
 
@@ -804,6 +814,7 @@ async fn run_locked(
         deleted,
         swept,
         previous,
+        left_out,
     })
 }
 
@@ -978,6 +989,8 @@ struct PgSink<'t, 'c> {
     roles: Option<knobas_source::role::data::DataCheck>,
     upserted: u64,
     deleted: u64,
+    /// The last line the adapter said it left out (`Sink::left_out`, #2374).
+    left_out: Option<String>,
 }
 
 impl<'t, 'c> PgSink<'t, 'c> {
@@ -998,6 +1011,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
             roles,
             upserted: 0,
             deleted: 0,
+            left_out: None,
         }
     }
 
@@ -1290,6 +1304,11 @@ impl Sink for PgSink<'_, '_> {
     /// emitted nothing, is not swept whatever the adapter says.
     async fn walked_whole(&mut self, kind: &str) {
         self.whole.insert(kind.to_owned());
+    }
+
+    /// Kept for the source's credential health (#2374): the last line wins.
+    async fn left_out(&mut self, why: &str) {
+        self.left_out = Some(why.to_owned());
     }
 }
 

@@ -38,3 +38,6 @@ serde_json.workspace = true
 # Named rather than inherited: reqwest happens to turn them on, and a test
 # resting on another crate's feature breaks when that crate changes.
 tokio = { workspace = true, features = ["net", "io-util"] }
+# `tests/it/boards_refused.rs`: a Jira whose board listing answers 403 while
+# core REST answers (#2374). mockd serves no Agile REST and is frozen.
+wiremock = "0.6"
