@@ -635,6 +635,100 @@ out=$( (
 check "a dead holder's memory section is taken over" "$out" "took over"
 checks=$((checks + 1))
 [ ! -e "$mlock" ] || fail "and given back"
+
+# --- the licence refresher (#2373): only under the product's own lock ---------
+
+# A docker that says Jira and Confluence are up and logs, with whether Jira's
+# lock existed at that moment, every other call; a curl that answers the
+# licence endpoints with $REF_LEFT_JIRA / $REF_LEFT_CONFLUENCE seconds left
+# (three hours once that product's restart is in the log) and 200 otherwise.
+ref=$scratch/refresh
+mkdir -p "$ref/bin"
+cat >"$ref/bin/docker" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+  "ps "*) printf '%s\n' knobas-jira knobas-jira-db knobas-confluence knobas-confluence-db; exit 0 ;;
+  "version "*) echo 27.0; exit 0 ;;
+esac
+if [ -L "$REF_DIR/knobas-live-jira.lock" ]; then l=held; else l=free; fi
+echo "docker $* [jira lock $l]" >>"$REF_LOG"
+STUB
+cat >"$ref/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  *jira-software/license*) p=jira left=$REF_LEFT_JIRA ;;
+  *license/details*) p=confluence left=$REF_LEFT_CONFLUENCE ;;
+  *) printf 200; exit 0 ;;
+esac
+grep -q " restart $p " "$REF_LOG" 2>/dev/null && left=10800
+# A run that renewed it while the refresher waited for nothing but the lock.
+[ -z "${REF_RENEWED_UNDER_LOCK:-}" ] || [ ! -L "$REF_DIR/knobas-live-$p.lock" ] || left=10800
+printf '{"expiryDate":%s}' $((($(date +%s) + left) * 1000))
+STUB
+chmod +x "$ref/bin/docker" "$ref/bin/curl"
+# refresh [<target>] -- `live_refresh` once, with Jira $REF_LEFT_JIRA and
+# Confluence $REF_LEFT_CONFLUENCE seconds from expiry; prints what it said and
+# its status, then the docker log.
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+refresh() {
+  : >"$ref/docker.log"
+  (
+    export PATH="$ref/bin:$PATH" REF_LOG="$ref/docker.log" REF_DIR="$rdir"
+    export KNOBAS_LIVE_TARGET=${1:-remote} KNOBAS_LIVE_SSH=wsl-test KNOBAS_LIVE_LOCK_DIR="$rdir"
+    # shellcheck source=testenv/live-lib.sh disable=SC1091
+    . "$here/live-lib.sh"
+    live_tunnel_up() { :; }
+    LIVE_TESTENV=${REF_TREE:-$scratch/refresher}/testenv
+    if live_refresh; then echo rc=0; else echo rc=1; fi
+  ) 2>&1
+  cat "$ref/docker.log"
+}
+mkdir -p "$scratch/refresher/testenv"
+export REF_LEFT_JIRA=1800 REF_LEFT_CONFLUENCE=9000
+out=$(refresh)
+check "a Jira due with its lock free is restarted" "$out" "restart jira [jira lock held]"
+check "and says it was renewed" "$out" "jira: renewed"
+check_not "a Confluence with hours left is not" "$out" "restart confluence"
+check "and says how long it has" "$out" "confluence: about 150 min"
+check "and the tick passes" "$out" "rc=0"
+checks=$((checks + 1))
+[ ! -e "$rdir/knobas-live-jira.lock" ] || fail "and gives Jira's lock back" "$(readlink "$rdir/knobas-live-jira.lock")"
+rholder jira-suite jira
+out=$(refresh)
+check_not "a Jira due while a suite holds its lock is not restarted" "$out" "restart jira"
+check "and the refresher names the holder" "$out" "'jira-suite'"
+check "and leaves it to the next tick" "$out" "rc=0"
+check "and the suite's lock stays" "$(readlink "$rdir/knobas-live-jira.lock")" "jira-suite"
+touch "$scratch/jira-suite.release"
+lock_gone "the suite lets go" "$rdir/knobas-live-jira.lock"
+# A live-up keeper of the very checkout the refresher runs from: the keeper's
+# pass for its own worktree's runs is no pass for the refresher.
+rholder live-up-jira-kept jira
+out=$(REF_TREE=$scratch/live-up-jira-kept refresh)
+check_not "nor while a live-up keeper of its own checkout holds it" "$out" "restart jira"
+touch "$scratch/live-up-jira-kept.release"
+lock_gone "the keeper lets go" "$rdir/knobas-live-jira.lock"
+out=$(REF_LEFT_JIRA=-600 refresh)
+check "a Jira whose licence ran out is restarted" "$out" "restart jira [jira lock held]"
+out=$(REF_RENEWED_UNDER_LOCK=1 refresh)
+check "a Jira renewed by the time the lock is taken is read again and left alone" "$out" "jira: renewed meanwhile"
+check_not "and not restarted" "$out" "restart jira"
+checks=$((checks + 1))
+[ ! -e "$rdir/knobas-live-jira.lock" ] || fail "and its lock given back" "$(readlink "$rdir/knobas-live-jira.lock")"
+# A dead holder's lock is taken over -- but not while another run reclaims it.
+ln -s "99999999 0 dead-suite $scratch/gone" "$rdir/knobas-live-jira.lock"
+mkdir "$rdir/knobas-live-jira.lock.reclaim"
+out=$(refresh)
+check_not "a dead holder's lock that another run is reclaiming is left to it" "$out" "restart jira"
+rmdir "$rdir/knobas-live-jira.lock.reclaim"
+out=$(refresh)
+check "a dead holder's lock is taken over and Jira restarted" "$out" "restart jira [jira lock held]"
+checks=$((checks + 1))
+[ ! -e "$rdir/knobas-live-jira.lock" ] || fail "and the lock given back" "$(readlink "$rdir/knobas-live-jira.lock")"
+out=$(refresh local)
+check "the local target has no refresher" "$out" "rc=1"
+check_not "and touches nothing" "$out" "restart"
+unset REF_LEFT_JIRA REF_LEFT_CONFLUENCE
 if [ "$failures" -gt 0 ]; then
   echo "live-lock-test: $failures of $checks checks failed" >&2
   exit 1

@@ -502,51 +502,53 @@ case $out in *"holds this machine's product ports"*) ;; *) fail "and says the tu
 
 # --- the 3-hour licence -----------------------------------------------------
 
-# A docker whose `inspect -f {{.Created}}` answers $STUB_CREATED, and which
-# logs every other call.
+# A docker that logs every call, and a curl that answers the product's licence
+# endpoint with an expiry $STUB_LEFT seconds from now (nothing when unset) --
+# or, once a `restart` is in the log and $STUB_RENEWS is set, three hours from
+# now, as the real products do (2026-11-01, #2373) -- and 200 to the rest.
+# Its data volume is there unless $STUB_NO_VOLUME is set.
 lic=$scratch/licence
 mkdir -p "$lic/bin" "$lic/testenv"
 cat >"$lic/bin/docker" <<'STUB'
 #!/usr/bin/env bash
 case "${1:-} ${2:-}" in
-  "volume inspect") [ -n "${STUB_VOLUME_CREATED:-}" ] || exit 1; echo "$STUB_VOLUME_CREATED"; exit 0 ;;
-  "inspect "*) [ -n "${STUB_CREATED:-}" ] || exit 1; echo "$STUB_CREATED"; exit 0 ;;
   "ps "*) exit 0 ;;
+  "volume inspect") [ -z "${STUB_NO_VOLUME:-}" ]; exit ;;
 esac
 echo "docker $*" >>"$STUB_LOG"
 STUB
-chmod +x "$lic/bin/docker"
-# The REST API answers at once: what is under test is the decision, not Jira.
-# shellcheck disable=SC2016  # expanded by the stub
-printf '#!/usr/bin/env bash\necho "curl $*" >>"$STUB_LOG"\nprintf 200\n' >"$lic/bin/curl"
-chmod +x "$lic/bin/curl"
+cat >"$lic/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+echo "curl $*" >>"$STUB_LOG"
+case "$*" in
+  */license*)
+    left=${STUB_LEFT:-}
+    if [ -n "${STUB_RENEWS:-}" ] && grep -q ' restart ' "$STUB_LOG"; then left=10800; fi
+    [ -n "$left" ] || exit 7
+    printf '{"expiryDate":%s}' $((($(date +%s) + left) * 1000)) ;;
+  *) printf 200 ;;
+esac
+STUB
+chmod +x "$lic/bin/docker" "$lic/bin/curl"
 for s in seed-atlassian.sh seed-atlassian-content.sh; do
   # shellcheck disable=SC2016  # expanded by the fake seed
   printf '#!/usr/bin/env bash\necho "%s $*" >>"$STUB_LOG"\n[ ! -e "$STUB_SEED_FAILS" ] || { rm -f "$STUB_SEED_FAILS"; exit 1; }\n' "$s" >"$lic/testenv/$s"
   chmod +x "$lic/testenv/$s"
 done
-# iso_ago <seconds> -- that long ago, as docker spells a container's Created.
-iso_ago() {
-  date -u -r $(($(date +%s) - $1)) '+%Y-%m-%dT%H:%M:%S.123456789Z' 2>/dev/null ||
-    date -u -d "@$(($(date +%s) - $1))" '+%Y-%m-%dT%H:%M:%S.123456789Z'
-}
-# check_licence <what> <age seconds|none> <seed fails once: 0|1> <needles...>
-# ($STUB_VOLUME_AGE, when set, is the data volume's age.)
-# and, after `--absent`, what the log must not hold.
+# check_licence <what> <seconds left|none> <seed fails once: 0|1> <needles...>
+# and, after `--absent`, what the log must not hold. $STUB_RENEWS, when set,
+# makes a restart renew the licence.
 check_licence() {
-  local what=$1 age=$2 fails=$3 created="" out rc=0 n absent=""
+  local what=$1 left=$2 fails=$3 out rc=0 n absent=""
   shift 3
   checks=$((checks + 1))
   : >"$lic/docker.log"
   rm -f "$lic/fails"
   [ "$fails" = 0 ] || : >"$lic/fails"
-  [ "$age" = none ] || created=$(iso_ago "$age")
-  local vcreated=""
-  [ -z "${STUB_VOLUME_AGE:-}" ] || vcreated=$(iso_ago "$STUB_VOLUME_AGE" | sed 's/\.123456789Z$/+00:00/')
-    # shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+  [ "$left" != none ] || left=""
+  # shellcheck disable=SC2030,SC2031  # its own subshell on purpose
   out=$( (
-    export PATH="$lic/bin:$PATH" STUB_LOG="$lic/docker.log" STUB_CREATED="$created" STUB_SEED_FAILS="$lic/fails"
-    export STUB_VOLUME_CREATED="$vcreated"
+    export PATH="$lic/bin:$PATH" STUB_LOG="$lic/docker.log" STUB_LEFT="$left" STUB_SEED_FAILS="$lic/fails"
     export JIRA_LICENSE_KEY=k CONFLUENCE_LICENSE_KEY=k
     # shellcheck source=testenv/live-lib.sh disable=SC1091
     . "$here/live-lib.sh"
@@ -564,23 +566,24 @@ check_licence() {
   done
   echo "$rc" >"$lic/rc"
 }
-check_licence "a Jira with hours of licence left is re-seeded, not removed" 1800 0 \
-  "min of its 3-hour licence left" "seed-atlassian.sh jira" "/rest/api/2/myself" --absent "rm --stop"
-check_licence "a Jira with under an hour left is removed and set up from empty" 9000 0 \
-  "removing it and setting it up from empty" "rm --stop --force jira jira-db" "seed-atlassian.sh jira"
-STUB_VOLUME_AGE=9000 check_licence "a recreated Jira container on an old volume is judged by the volume" 600 0 \
-  "removing it and setting it up from empty" "rm --stop --force jira jira-db"
-STUB_VOLUME_AGE=600 check_licence "a young volume keeps an old-looking container" 20000 0 \
-  "re-seeding it" --absent "rm --stop"
-check_licence "a Jira whose licence ran out is removed" 20000 0 \
-  "about 0 min left" "rm --stop --force jira jira-db"
-check_licence "no Jira container: nothing removed, seeded from empty" none 0 \
-  "seed-atlassian.sh jira" --absent "rm --stop" "re-seeding"
-check_licence "a seed failing on the instance that was there is retried once from empty" 1800 1 \
+check_licence "a Jira with hours of licence left is re-seeded, not restarted" 7200 0 \
+  "min of its 3-hour licence left" "jira-software/license" "seed-atlassian.sh jira" "/rest/api/2/myself" \
+  --absent "restart" "rm --stop"
+STUB_RENEWS=1 check_licence "a Jira with under an hour left is restarted, which renews it, data kept" 1800 0 \
+  "restarting it" "--profile real-atlassian restart jira" "seed-atlassian.sh jira" --absent "rm --stop"
+STUB_RENEWS=1 check_licence "a Jira whose licence ran out is restarted" -600 0 \
+  "about 0 min left" "restart jira" --absent "rm --stop"
+check_licence "a restart that does not renew it falls back to setting it up from empty" 1800 0 \
+  "restart jira" "did not renew" "rm --stop --force jira jira-db" "seed-atlassian.sh jira"
+check_licence "a Jira that does not tell its licence: nothing restarted or removed, seeded" none 0 \
+  "seed-atlassian.sh jira" --absent "restart" "rm --stop" "re-seeding"
+check_licence "a seed failing on the instance that was there is retried once from empty" 7200 1 \
   "the seed failed against the instance that was already there" "rm --stop --force jira jira-db"
 checks=$((checks + 1))
 [ "$(cat "$lic/rc")" = 0 ] || fail "and the retry from empty passes"
-check_licence "a seed failing from empty is not retried" none 1 \
+check_licence "a kept Jira that does not tell its licence yet is retried from empty when its seed fails" none 1 \
+  "the seed failed against the instance that was already there" "rm --stop --force jira jira-db"
+STUB_NO_VOLUME=1 check_licence "a seed failing from empty is not retried" none 1 \
   "seed-atlassian.sh jira" --absent "rm --stop"
 checks=$((checks + 1))
 [ "$(cat "$lic/rc")" != 0 ] || fail "and fails the start"

@@ -14,6 +14,8 @@
 # 4. A docker context `wsl` (ssh://knobas-wsl), made if missing: the context
 #    testenv/estate.json's engine names, which `just estate-live` reads.
 # 5. testenv/live remote-check: ssh, the engine, its memory, the tunnel.
+# 6. The launchd agent that renews Jira's and Confluence's 3-hour licences
+#    between runs (refresh-agent.sh, #2373); --local removes it.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 common=$(git -C "$here" rev-parse --path-format=absolute --git-common-dir)
@@ -22,6 +24,7 @@ envfile="${common%/.git}/testenv/live.env"
 if [ "${1:-}" = --local ]; then
   if [ -f "$envfile" ]; then rm -f "$envfile"; echo "connect: removed $envfile; the live products run on this machine again"; fi
   "$here/../live" tunnel down 2>/dev/null || true
+  "$here/refresh-agent.sh" uninstall
   exit 0
 fi
 [ $# -ge 1 ] && [ $# -le 3 ] || { echo "usage: connect.sh <address> [port] [user] | --local" >&2; exit 2; }
@@ -76,3 +79,4 @@ echo "connect: wrote $envfile"
 # Docker importer and `just estate-live` read the box's containers through.
 docker context inspect wsl >/dev/null 2>&1 || docker context create wsl --description "knobas live products on the WSL box" --docker host=ssh://knobas-wsl
 "$here/../live" remote-check
+"$here/refresh-agent.sh" install

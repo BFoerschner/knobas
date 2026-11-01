@@ -283,9 +283,10 @@ a whole `live_session gitea` from an empty engine.
 
 **Why `down` differs by product.** TeamCity and Gitea are *stopped*: their
 volumes hold the seeded builds and corpus, and the next start finds them
-seeded in seconds. Jira and Confluence run on 3-hour timebomb licences that a
-restart does not renew, so a kept volume is an expired product; they are
-removed with their volumes, and their block in `seed-state.json` goes too, so
+seeded in seconds. Jira and Confluence are removed with their volumes, so
+`down` means from empty for them (a restart renews their 3-hour licence,
+#2373, but a kept instance would come back to whatever a run left in it), and
+their block in `seed-state.json` goes too, so
 `./seed --env` stops printing a URL nothing answers. The removal is `docker
 compose rm` plus the two named volumes, **not** `down -v`: a `down` with
 services named still removes the project network when no *running* container
@@ -457,21 +458,44 @@ answering ssh. There are three layers, each closing a different way to that:
    0.40, each PostgreSQL under 0.2. The VM peaked at 8.5 of 12 GB used, with
    3.2 GB available, and the 49 Jira tests passed.
 
-**The 3-hour licence is renewed when it is due.** A product kept up meets the
-timebomb licence's end, which a run that removed it afterwards never did. So
-before Jira or Confluence is started or re-seeded, by a run or by `live-up`,
-the age of its **data volume** is read. The volume is created before the
-wizard applies the key, so the estimate errs early, and only a reset removes
-it. The container's own age is wrong for this: compose recreates a container
-whenever its configuration changes (a moved pin, a raised cap), and a
-recreated Jira would look new on an old licence. With less than
-`KNOBAS_LIVE_LICENCE_MARGIN_S` left it is removed with its volumes and set up
-from empty, about five minutes for Jira and two for Confluence; otherwise it is
-re-seeded, which writes nothing to a seeded instance. A stopped container a
-reboot left behind is the same case. The caller holds the JVM lock, so no
-other run is inside the product while it is replaced. This holds on the local
-target too, where a `live-up` session past two hours used to end in an
-expired product.
+**The 3-hour licence is renewed in place, by a restart.** A timebomb key's
+expiry is a duration (`LicenseExpiryDate=P3H` in the decoded key), which the
+product resolves when its JVM reads the key: at the wizard, and again at
+every start. Measured on the box, 2026-11-01 (#2373): `docker restart
+knobas-confluence` moved a licence due at 16:44 to 19:03, three hours after
+the restart, with the data kept and the API back in under a minute. Posting a
+fresh copy of the key to Jira's licence API
+(`/rest/plugins/applications/1.0/installed/jira-software/license`) answers 200
+and leaves the expiry where it was, since the key is the same string and
+there is no other, and Jira refuses to delete its only licence. So the restart
+is the renewal. Before Jira or Confluence is re-seeded, by a run or by
+`live-up`, its expiry is read **from the product** (Jira Software's application
+licence, Confluence's `/rest/license/1.0/license/details`). With less than
+`KNOBAS_LIVE_LICENCE_MARGIN_S` (3600) left, it is restarted. A restart that
+does not move the expiry falls back to removal with its volumes and a setup
+from empty. Otherwise it is re-seeded, which writes nothing to a seeded
+instance. A product that is down renews when it starts. The caller holds the
+product's lock, so no other run is inside it during the restart. This holds
+on the local target too.
+
+**Between runs, `testenv/live refresh` keeps them licensed** (remote target
+only). For Jira and Confluence, each one that is up and has less than the
+margin left is restarted, **only under that product's lock** taken without
+waiting. A product whose lock a suite or a `live-up` keeper holds, from any
+worktree, is left alone, with a line naming the holder, and tried again on the
+next tick. A run in a product is never pulled out from under. It runs from
+**launchd on the Mac**, every 15 minutes, where the per-product locks are
+(`$TMPDIR`): the box cannot see them, so a timer there could not keep the lock
+rule. `testenv/wsl/refresh-agent.sh install` writes
+`~/Library/LaunchAgents/com.knobas.live-refresh.plist` for the main checkout's
+`testenv/live refresh`, with this shell's `PATH` and `TMPDIR`. `connect.sh`
+installs it and `connect.sh --local` removes it. The log is
+`~/Library/Logs/knobas-live-refresh.log`, and `refresh-agent.sh status` shows
+its tail. The Mac must not sleep (`pmset -g`: `sleep 0`). On a Mac asleep, no
+suite runs either, and the next run's own check renews what is due. Fifteen
+minutes and an hour's margin give four tries before expiry. A run that holds
+the lock past the expiry meets an expired product, as before this. A forced
+tick: `KNOBAS_LIVE_LICENCE_MARGIN_S=10500 testenv/live refresh`.
 
 **Before the content seed, the REST API must answer.** `/status` says RUNNING
 while the plugins behind the API are still warming. A Jira restarted from a
