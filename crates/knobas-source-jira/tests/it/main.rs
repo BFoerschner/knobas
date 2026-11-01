@@ -6,6 +6,7 @@
 //! `live_jira_seeded.rs` stays a binary of its own, because
 //! `just atlassian-live` runs it by name (`test-layout-exceptions.txt`).
 
+mod boards_refused;
 mod field_discovery;
 mod grants;
 mod mockd;
