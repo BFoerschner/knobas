@@ -1192,20 +1192,30 @@ async fn a_refresh_waits_for_a_created_monitors_first_heartbeat() {
     kuma_monitor(&["delete", STALLED]);
 
     // Accepts every connection and holds it unanswered for the test's life.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a local port");
-    let port = listener.local_addr().expect("its address").port();
-    std::thread::spawn(move || {
-        let mut held = Vec::new();
-        for stream in listener.incoming().flatten() {
-            held.push(stream);
+    // Kuma reaches it at `host.docker.internal`, which is this machine only
+    // when Kuma runs here: a remote target's Kuma resolves that name to its
+    // own machine, so `just kuma-live` binds such a socket there
+    // (`testenv/stall.sh`) and names it in `KNOBAS_KUMA_STALLED_URL`.
+    let stalled_url = match std::env::var("KNOBAS_KUMA_STALLED_URL") {
+        Ok(url) if !url.is_empty() => url,
+        _ => {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a local port");
+            let port = listener.local_addr().expect("its address").port();
+            std::thread::spawn(move || {
+                let mut held = Vec::new();
+                for stream in listener.incoming().flatten() {
+                    held.push(stream);
+                }
+            });
+            format!("http://host.docker.internal:{port}/")
         }
-    });
+    };
 
     let receipt = source
         .write(WriteOp::CreateMonitor {
             entity: knobas_source::monitor_target("kuma"),
             name: STALLED.to_owned(),
-            url: format!("http://host.docker.internal:{port}/"),
+            url: stalled_url,
             kind: knobas_source::MonitorKind::Http,
         })
         .await

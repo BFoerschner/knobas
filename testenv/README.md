@@ -379,11 +379,41 @@ lives on the remote machine:
   the ports, from either target). A worktree whose code predates the remote
   target has no such guard. Until every worktree runs this code, a remote run
   can collide with a local one, as it did on the first day.
-- **Uptime Kuma and the canary stay here.** `just kuma-live` does not source
-  `live-lib.sh`, the canary is a host socket of this machine, and the Kuma
-  suites assert no product's monitor state. Kuma's `gitea` monitor reads
-  `gitea:3000` on the local compose network, so it is red while Gitea is
-  remote; its three JVM checks go through `host.docker.internal` to the tunnel.
+- **Uptime Kuma follows the target too** (Björn, 2026-11-01: *"move it to
+  wsl. i want to completely turn off docker … on this mac"*). `just kuma-live`
+  sources `live-lib.sh`, so Kuma, its Docker API proxy and the seed's node
+  container run on the remote engine, and the tunnel brings 3001 here. The
+  seed's scripts reach their container as a tar on stdin, not through a bind
+  mount, which would name a path on the engine's machine. Two host sockets go
+  there as well, because a remote Kuma resolves `host.docker.internal` to its
+  own machine's Docker bridge (172.17.0.1), and a container cannot reach a
+  socket bound to that machine's 127.0.0.1:
+  - **the canary** (`canary.sh`), which runs itself on that machine over ssh,
+    fed on stdin, and binds the bridge address, still off the network. Only
+    `up`, `down` and `status` cross to the remote shell.
+  - **the stall** (`stall.sh`, port 8298): a socket that accepts and never
+    answers. `live_kuma`'s refresh-waits witness needs one. Locally the suite
+    holds its own; on a remote target `kuma-live` binds this one and names it
+    in `KNOBAS_KUMA_STALLED_URL`.
+
+  With a remote target this machine runs **no container at all**. The gates
+  need none either: `check-ports.sh` only resolves the compose file, and the
+  shellcheck recipe uses the local binary when its version is the pin. Both
+  were run with OrbStack stopped.
+
+  What a remote Kuma shows red, and no suite asserts: `notebook` pings
+  `0.250.250.254`, OrbStack's address for the Mac; the three JVM checks reach
+  `host.docker.internal:<port>`, the bridge, where the products (bound to
+  127.0.0.1) do not answer. On a freshly seeded Kuma that ping takes long
+  enough to fail that a full sync in the first minute may not see `notebook`
+  yet. A second run does.
+
+  **`just estate-live` needs the notebook's engine.** Its Docker half reads
+  `docker --context orbstack` and requires at least one running container that
+  `testenv/estate.json` lists there. With no container on the Mac that half
+  fails. Witnessing the importer against the remote engine instead means
+  changing `estate.json`'s engine and container list, and the demo and the
+  Kuma suites read that file. That is not done here.
 
 **The box has 16 GB, so nothing may freeze it.** A VM pushed into swap stops
 answering ssh. There are three layers, each closing a different way to that:
@@ -2418,7 +2448,8 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
 | `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
 | `./seed-kuma.sh` | Kuma admin account, monitors, API key. Owns the monitor list: what `monitors.json` no longer names is deleted. |
 | `./kuma-monitor.sh` | `add <name> <url>` / `delete <name>` on one throwaway monitor, through the same socket.io channel the seed uses. Idempotent both ways. What `just kuma-live` witnesses a deletion with; not part of the baseline, so `./seed-kuma.sh` sweeps whatever it leaves. |
-| `./canary.sh` | `up` / `down` / `status` on the canary's host socket, `127.0.0.1:8299`. The one thing a live run may knock over. |
+| `./canary.sh` | `up` / `down` / `status` on the canary's host socket, `127.0.0.1:8299`. The one thing a live run may knock over. On a remote target it runs on that machine and binds its Docker bridge. |
+| `./stall.sh` | Remote target only: `up` / `down` / `url` on a socket that accepts and never answers (bridge address, port 8298), for `live_kuma`'s refresh-waits witness. `just kuma-live` binds and releases it. |
 | `./fetch-timebomb-keys.sh` | Pulls the two 10-user, 3-hour Data Center timebomb keys off Atlassian's public page, checks each decodes to the right product, prints `export` lines (`--write` also drops them in the git-ignored `.env.licences`). `seed-atlassian.sh` calls it when a key is unset. |
 | `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`); `./seed --atlassian` runs the script below after it. Takes `jira` or `confluence` to walk one wizard, which is the shape a loaded machine wants — see *Jira and Confluence, end to end*. |
 | `./seed-atlassian-content.sh` | The Tidewater people, projects, issues, comments, worklogs and links in the real Jira; the ENG space, pages and comments in the real Confluence. Takes `jira` or `confluence` to seed one. `--verify` reads PAY-231 and one page back, walks one throwaway ticket through `NARROW`'s workflow to prove it still narrows (the only write in that path; it deletes the ticket), and waits until a CQL search returns exactly the seeded pages and the home page; the Confluence seed deletes the `ENG` pages it did not create. `just jira-live` / `just confluence-live` run the whole window. |

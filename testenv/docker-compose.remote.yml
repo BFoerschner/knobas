@@ -17,6 +17,10 @@
 # It changes memory and nothing else -- check-ports.sh asserts the port map
 # through this overlay is the default one.
 services:
+  uptime-kuma:
+    mem_limit: ${KNOBAS_LIVE_KUMA_MB:-768}m
+  docker-proxy:
+    mem_limit: 128m
   gitea:
     mem_limit: ${KNOBAS_LIVE_GITEA_MB:-512}m
   forgejo:

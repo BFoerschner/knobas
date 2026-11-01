@@ -58,8 +58,9 @@
 # The locks stay on this machine: the worktrees that take turns are all here,
 # and on a remote target each JVM product has its own (ONE LOCK PER PRODUCT,
 # below).
-# Uptime Kuma and the canary stay here too -- `just kuma-live` does not source
-# this file, and the canary is a host socket of this machine. Unset, or
+# Uptime Kuma follows the target too (`just kuma-live` sources this file),
+# and so do the canary and the stall (canary.sh, stall.sh run themselves on
+# that machine). With a remote target this machine runs no container. Unset, or
 # `local`, everything below behaves as it did before the remote target
 # existed. testenv/README.md, "Live products on a remote machine (WSL)".
 
@@ -129,7 +130,7 @@ esac
 # The one-JVM refusal: on for this machine's 8 GB VM, off for a remote target
 # that keeps all three up. Either may be overridden.
 LIVE_ONE_JVM=${KNOBAS_LIVE_ONE_JVM:-$([ -n "$LIVE_REMOTE" ] && echo 0 || echo 1)}
-LIVE_TUNNEL_PORTS=${KNOBAS_LIVE_TUNNEL_PORTS:-3000 3002 8080 8090 8111}
+LIVE_TUNNEL_PORTS=${KNOBAS_LIVE_TUNNEL_PORTS:-3000 3001 3002 8080 8090 8111}
 
 # _live_tunnel_sock -- the ssh master's control socket. Short on purpose:
 # macOS caps a socket path at 104 bytes and $TMPDIR is already half of that.
@@ -1026,6 +1027,9 @@ _live_make_room() {
     [ "$p" != "$product" ] || continue
     live_is_up "$p" && used=$((used + $(_live_footprint_mb "$p")))
   done
+  # Uptime Kuma and its Docker API run there too (`just kuma-live`), and are
+  # never stopped to make room.
+  live_running knobas-uptime-kuma && used=$((used + ${KNOBAS_LIVE_USE_KUMA_MB:-512}))
   [ $((used + need)) -gt "$budget" ] || return 0
   candidates=$(for p in teamcity jira confluence; do
     [ "$p" != "$product" ] && live_is_up "$p" && echo "$(_live_started_at "$p") $p"

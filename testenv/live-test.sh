@@ -680,6 +680,50 @@ out=$( (
 ) 2>&1 )
 [ "$out" = no-op ] || fail "the local target has no budget" "$out"
 
+
+# --- the canary and the stall follow a remote target ---------------------------
+
+# An ssh that records its arguments and what it was fed on stdin.
+disp=$scratch/dispatch
+mkdir -p "$disp/bin" "$disp/testenv"
+cp "$here/live-lib.sh" "$here/canary.sh" "$here/stall.sh" "$disp/testenv/"
+# shellcheck disable=SC2016  # expanded by the stub
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >"$DISP_ARGS"\ncat >"$DISP_STDIN"\necho remote-said-ok\n' >"$disp/bin/ssh"
+chmod +x "$disp/bin/ssh"
+# check_dispatch <what> <script> <word> <expect: sent|refused> [<needle>]
+check_dispatch() {
+  local what=$1 script=$2 word=$3 expected=$4 needle=${5:-} out rc=0
+  checks=$((checks + 1))
+  rm -f "$disp/args" "$disp/stdin"
+  # shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+  out=$( (
+    export PATH="$disp/bin:$PATH" DISP_ARGS="$disp/args" DISP_STDIN="$disp/stdin"
+    export KNOBAS_LIVE_TARGET=remote KNOBAS_LIVE_SSH=wsl-test
+    "$disp/testenv/$script" "$word"
+  ) 2>&1 ) || rc=$?
+  if [ "$expected" = sent ]; then
+    [ "$rc" = 0 ] || fail "$what" "exit $rc: $out"
+    grep -q "wsl-test" "$disp/args" 2>/dev/null || fail "$what: over ssh to the target" "$(cat "$disp/args" 2>/dev/null)"
+    grep -q "bash -s -- $word\$" "$disp/args" 2>/dev/null || fail "$what: with only '$word' after the script" "$(cat "$disp/args" 2>/dev/null)"
+    cmp -s "$disp/stdin" "$disp/testenv/$script" || fail "$what: the script itself fed on stdin"
+  else
+    [ "$rc" != 0 ] || fail "$what: refused" "$out"
+    [ ! -e "$disp/args" ] || fail "$what: refused before any ssh" "$(cat "$disp/args")"
+    case $out in *"$needle"*) ;; *) fail "$what: says '$needle'" "$out" ;; esac
+  fi
+}
+check_dispatch "a remote target's canary runs on that machine" canary.sh up sent
+check_dispatch "and its status too" canary.sh status sent
+check_dispatch "no other word reaches the remote shell" canary.sh 'up; touch /tmp/x' refused "usage"
+check_dispatch "the stall runs on the remote target's machine" stall.sh up sent
+# shellcheck disable=SC2016  # the literal text is the attempt
+check_dispatch "and nothing else reaches it" stall.sh '$(id)' refused "usage"
+checks=$((checks + 1))
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export PATH="$disp/bin:$PATH" KNOBAS_LIVE_TARGET=local
+  "$disp/testenv/stall.sh" up
+) 2>&1 ) && fail "the stall refuses the local target, where the suite holds its own socket" "$out"
 if [ "$failures" -gt 0 ]; then
   echo "live-test: $failures of $checks checks failed" >&2
   exit 1
