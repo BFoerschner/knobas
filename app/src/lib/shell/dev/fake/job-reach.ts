@@ -9,7 +9,7 @@
  *   reads, since the mock adapter declares no state.
  * - `fakeReach`: `job_reach`, as a table rather than a walk. PAY-231 reaches
  *   its code, builds, pages, the testenv estate's Gitea container and what it
- *   runs on, and that container's monitors; PAY-232, a sub-task of PAY-231,
+ *   runs on, and that container's monitors; PAY-232 and PAY-233, sub-tasks of PAY-231,
  *   reaches its parent's own links labelled "Parent PAY-231" (R-7.3), unless
  *   the switch is off. A restatement, which certifies nothing: the walk is
  *   witnessed in `knobas-core`'s `tests/it/reach.rs`.
@@ -131,7 +131,7 @@ const PAY_231: [id: string, kind: string, step: string][] = [
 ];
 
 /** The parent each sub-task names (`fields.parent.key`). */
-export const PARENTS: Record<string, string> = { "mock:PAY-232": "mock:PAY-231" };
+export const PARENTS: Record<string, string> = { "mock:PAY-232": "mock:PAY-231", "mock:PAY-233": "mock:PAY-231" };
 
 /** R-7.3's switch, for the session. */
 let parentLinks = true;

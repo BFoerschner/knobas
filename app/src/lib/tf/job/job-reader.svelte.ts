@@ -28,13 +28,16 @@ import { PROPOSAL_LIMIT, proposalsFor } from "./connections";
 import {
   assetTone,
   isMine,
+  keyOf,
   offersStartWork,
   resolveJob,
   type AssetLine,
   type FrameKinds,
   type SourceFacts,
 } from "./job";
-import type { JobPorts } from "./ports";
+import { bridgeTicketBoard, type JobPorts } from "./ports";
+import { entityCheckout } from "../../ipc/entity";
+import { isDone } from "../tickets/tickets";
 import { parentOf } from "../sets/apply";
 import { ASSET_LIMIT, reachFilter, readSection, SECTION_LIMIT, SECTION_READS, type SectionRead } from "./sections";
 
@@ -51,7 +54,18 @@ export type JobReaderPorts = Pick<
   | "jobReach"
   | "jobLinkSets"
   | "getAsset"
+  | "ticketBoard"
+  | "entityCheckout"
 >;
+
+/** The ticket's sub-tasks as the card's row counts them (#2401). */
+export interface Subtasks {
+  total: number;
+  open: number;
+}
+
+/** How many of a ticket's branches have their checkout read for Code's *not pushed* (#2401). */
+export const UNPUSHED_LIMIT = 10;
 
 /** One repository *Start work*'s dropdown offers. */
 export interface RepoChoice {
@@ -86,6 +100,10 @@ export interface JobReader {
   readonly pages: EntityRow[] | null;
   readonly monitors: EntityRow[] | null;
   readonly assets: AssetLine[] | null;
+  /** The sub-tasks under the ticket, as the ticket system's board answers `under:<key>`; `null` until read. */
+  readonly subtasks: Subtasks | null;
+  /** The ids of the Code rows' branches whose checkout here has commits not pushed (#2401). */
+  readonly unpushed: ReadonlySet<string>;
   /** The job-reach read, by entity id: the rows' labels. */
   readonly reached: Map<string, Reached>;
   /** The link sets that apply and the parent (#867), `null` until read. */
@@ -141,6 +159,8 @@ function fresh() {
     monitors: null as EntityRow[] | null,
     assets: null as AssetLine[] | null,
     repos: null as RepoChoice[] | null,
+    subtasks: null as Subtasks | null,
+    unpushed: new Set<string>() as ReadonlySet<string>,
   };
 }
 
@@ -168,6 +188,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       const id = found.row.entity_id;
       void readConversation(id, mine);
       void readParent(found, mine);
+      void readSubtasks(id, mine);
       void readInherited(id, mine);
       // The reach starts from the ticket's context, so the context first.
       const context = await ports.promoteContext(id);
@@ -312,21 +333,66 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     }
   }
 
-  /** The link sets, the reach and every section again, the checkout line kept; settles once all have answered. */
+  /** The link sets, the reach, the sub-tasks and every section again; settles once all have answered. */
   async function readReachAgain(id: string, mine: number) {
     await Promise.allSettled([
       readInherited(id, mine),
+      readSubtasks(id, mine),
       readReach(id, mine),
       readSections(id, mine),
       readRows(id, SECTION_READS.code, mine).then((rows) => {
-        if (mine === token && rows) state.code = rows;
+        if (mine !== token || !rows) return;
+        state.code = rows;
+        return readUnpushed(rows, mine);
       }),
     ]);
   }
 
   async function readCode(id: string, mine: number) {
     const rows = await readSection(ports.listEntities, id, SECTION_READS.code);
-    if (mine === token) state.code = rows;
+    if (mine !== token) return;
+    state.code = rows;
+    void readUnpushed(rows, mine);
+  }
+
+  /**
+   * The sub-tasks (#2401): the ticket system's board under `under:<key>`,
+   * counted by its columns' totals, a column that is not *Done* open. A read
+   * that fails draws no Sub-tasks row.
+   */
+  async function readSubtasks(id: string, mine: number) {
+    try {
+      const board = await (ports.ticketBoard ?? bridgeTicketBoard)(`under:${keyOf(id)}`);
+      if (mine !== token) return;
+      const total = board.columns.reduce((sum, column) => sum + column.total, 0);
+      const open = board.columns.filter((column) => !isDone(column.status)).reduce((sum, column) => sum + column.total, 0);
+      state.subtasks = { total, open };
+    } catch {
+      if (mine === token) state.subtasks = { total: 0, open: 0 };
+    }
+  }
+
+  /**
+   * Code's *not pushed* (#2401): a branch counts when its checkout on this
+   * machine stands on that branch with commits ahead of its upstream. The
+   * mirror's branches are the forge's, so only the checkout knows. A branch
+   * with no checkout, or one standing elsewhere, counts nothing.
+   */
+  async function readUnpushed(rows: readonly EntityRow[], mine: number) {
+    const read = ports.entityCheckout ?? entityCheckout;
+    const branches = rows.filter((row) => row.kind === "branch").slice(0, UNPUSHED_LIMIT);
+    const answers = await Promise.allSettled(branches.map(async (row) => read(row.entity_id)));
+    if (mine !== token) return;
+    state.unpushed = new Set(
+      branches
+        .filter((row, at) => {
+          const answer = answers[at]!;
+          if (answer.status !== "fulfilled") return false;
+          const tree = answer.value.tree;
+          return tree !== null && tree.status === "read" && tree.branch === row.title && tree.ahead > 0;
+        })
+        .map((row) => row.entity_id),
+    );
   }
 
   return {
@@ -362,6 +428,12 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     },
     get assets() {
       return state.assets;
+    },
+    get subtasks() {
+      return state.subtasks;
+    },
+    get unpushed() {
+      return state.unpushed;
     },
     get reached() {
       return state.reached;

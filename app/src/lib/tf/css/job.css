@@ -15,8 +15,19 @@
 /* ---------- one page for a ticket and the job (spec #2396) ---------- */
 /* The page is the job's two columns under its own breadcrumb; each column scrolls on its own, so the card's foot is in reach. */
 .tf-ticketpage { height: 100%; }
-.tf-ticketpage .tf-ws { flex: 1; min-height: 0; height: auto; }
-@media (max-width: 900px) { .tf-ticketpage { height: auto; } }
+.tf-ticketpage .tf-ws { flex: 1; min-height: 0; height: auto; grid-template-columns: var(--tk-side, 320px) minmax(0, 1fr); }
+/* The card's width is the reader's (#2402): a 6px separator on its right edge drags it between 240px and 720px
+   (`knobas.ticket.side`), a double click fits it so nothing on the card wraps. The handle shows as the card's edge
+   darkening under the pointer. Below 900px the columns stack and the handle is gone. */
+.tf-tkhandle { position: absolute; top: 0; bottom: 0; right: 0; width: 6px; cursor: col-resize; z-index: 2; }
+.tf-tkhandle:hover, .tf-tkhandle:focus-visible, .tf-tkdragging .tf-tkhandle { background: rgba(0,0,0,.14); outline: 0; }
+.tf-sheetcard .tf-tkhandle:hover, .tf-sheetcard .tf-tkhandle:focus-visible, .tf-sheetcard.tf-tkdragging .tf-tkhandle { background: var(--rule); }
+.tf-ticketcard.tf-tkdragging, .tf-ticketcard.tf-tkdragging * { cursor: col-resize; user-select: none; }
+@media (max-width: 900px) {
+  .tf-ticketpage { height: auto; }
+  .tf-ticketpage .tf-ws { grid-template-columns: minmax(0, 1fr); }
+  .tf-tkhandle { display: none; }
+}
 /* No 64px key in either mood. Beside it, the copy button: one press puts the key and the title on the clipboard (#2400). */
 .tf-ticketcard .tf-jobkey { font-size: var(--t-d2); }
 .tf-tkhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -58,6 +69,30 @@
   --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
   --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
 }
+/* The sections table (#2401): a bordered list, one row a section: the name, the count in tabular figures, at most
+   one state with its dot (in full ink when it asks something of you), and a chevron that says the row opens. The
+   two action rows under it take the same shape with the name and the chevron alone. A list of places, not buttons. */
+.tf-tktable { display: flex; flex-direction: column; border: 1px solid rgba(0,0,0,.2); border-radius: 6px; background: rgba(255,255,255,.26); overflow: hidden; }
+.tf-tktable > a, .tf-tktable > button {
+  display: grid; grid-template-columns: 62px 2.2ch minmax(0, 1fr) 8px; gap: 10px; align-items: center;
+  padding: 7px 10px; border: 0; border-top: 1px solid rgba(0,0,0,.12); background: none; font: inherit; font-size: var(--t-sm);
+  color: inherit; text-align: left; text-decoration: none; white-space: nowrap; cursor: pointer;
+}
+.tf-tktable > :first-child { border-top: 0; }
+.tf-tktable > a:hover, .tf-tktable > button:hover { background: rgba(0,0,0,.07); }
+.tf-tktable.tf-tkacts > a, .tf-tktable.tf-tkacts > button { grid-template-columns: minmax(0, 1fr) 8px; }
+.tf-tktable .tf-n { font-variant-numeric: tabular-nums; text-align: right; color: var(--card-ink-2); }
+.tf-tktable .tf-st { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--card-ink-2); }
+.tf-tktable .tf-st.tf-asks { color: var(--card-ink); }
+.tf-tktable .tf-dot { width: 7px; height: 7px; flex: none; }
+.tf-tktable .tf-chev { color: var(--card-ink-2); font-size: var(--t-lg); line-height: 1; text-align: right; }
+.tf-tknone { font-size: var(--t-sm); color: var(--card-ink-2); }
+.tf-sheetcard .tf-tktable { border-color: var(--rule); background: var(--paper); }
+.tf-sheetcard .tf-tktable > a, .tf-sheetcard .tf-tktable > button { border-top-color: var(--rule-2); }
+.tf-sheetcard .tf-tktable > :first-child { border-top: 0; }
+.tf-sheetcard .tf-tktable > a:hover, .tf-sheetcard .tf-tktable > button:hover { background: var(--sheet-2); }
+.tf-sheetcard .tf-tktable .tf-n, .tf-sheetcard .tf-tktable .tf-st, .tf-sheetcard .tf-tktable .tf-chev, .tf-sheetcard .tf-tknone { color: var(--ink-2); }
+.tf-sheetcard .tf-tktable .tf-st.tf-asks { color: var(--ink); }
 /* The one decision at the card's foot: the card's own ink, large. */
 .tf-ticketcard .tf-go { margin-top: auto; padding-top: 6px; }
 .tf-ticketcard .tf-go .tf-btn { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }

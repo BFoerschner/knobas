@@ -2,8 +2,9 @@
   One page the page host (`TfPage.svelte`) draws, shown or kept hidden by
   keep-alive (#2247, `page-entry.ts`).
 
-  It hands the page the shell's context with the page's own address and its
-  `visible` flag, so a hidden page keeps the props of the address it was left
+  It hands the page the shell's context with the page's own address, its
+  `visible` flag and its *This job* (the chosen job, or the ticket a card's
+  sections row narrowed the page's section to, #2401), so a hidden page keeps the props of the address it was left
   at, and tells the components inside it through `pageVisible()`. It draws the
   role frame (#2106) for a page that names a `role`: *Sync now* into its header
   as `sync`, and `syncRevision`, which also moves each time the page is shown
@@ -16,7 +17,8 @@
   import { providePageName } from "./page-name.svelte";
   import { keepScroll } from "./while-shown.svelte";
   import type { RoleFrameProps, TfPageContext, TfPageEntry } from "./page-entry";
-  import type { TfRoute } from "./route";
+  import { sectionOf, type TfRoute } from "./route";
+  import { scopedTicket } from "./job/scoped.svelte";
   import TfCrumbs, { shellCrumbs } from "./TfCrumbs.svelte";
   import TfSyncNow from "./TfSyncNow.svelte";
 
@@ -44,7 +46,16 @@
   let wrapper = $state<HTMLElement>();
   keepScroll(() => wrapper, () => visible);
 
-  const pageCtx = $derived<TfPageContext>({ ...ctx, route, visible });
+  /**
+   * The page's *This job*: the ticket a card's sections row narrowed this
+   * page's section to (#2401, `job/scoped.svelte.ts`), else the chosen job
+   * the shell hands every page. Per page, so a hidden page of another
+   * section keeps the chosen job and reads nothing again.
+   */
+  const held = $derived(scopedTicket.viewJob(sectionOf(route), null));
+  const pageCtx = $derived<TfPageContext>(
+    held === null ? { ...ctx, route, visible } : { ...ctx, route, visible, job: held.key, jobAt: held.entityId },
+  );
 
   /**
    * The page's props, each its own signal (#1987). A spread of `entry.props(ctx)`

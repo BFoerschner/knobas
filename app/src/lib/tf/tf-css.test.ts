@@ -525,3 +525,11 @@ test("the yellow page card is a light surface in both themes: its dots and chips
 test("a description without markup keeps its line breaks in the reading column's panel (#2399)", () => {
   expect(block(code, ".tf-tkdesc p.tf-asks")).toMatch(/white-space:\s*pre-line;/);
 });
+
+test("the ticket page's columns take the card's width, and below 900px they stack with the handle gone (#2402)", () => {
+  expect(block(code, ".tf-ticketpage .tf-ws")).toContain("grid-template-columns: var(--tk-side, 320px) minmax(0, 1fr)");
+  const narrow = code.slice(code.indexOf("@media (max-width: 900px) {\n  .tf-ticketpage {"));
+  const body = narrow.slice(0, narrow.indexOf("\n}"));
+  expect(body).toContain(".tf-ticketpage .tf-ws { grid-template-columns: minmax(0, 1fr); }");
+  expect(body).toContain(".tf-tkhandle { display: none; }");
+});
