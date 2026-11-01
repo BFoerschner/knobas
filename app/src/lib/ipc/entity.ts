@@ -13,7 +13,6 @@ import type {
   ActionItemTicket,
   ArtifactEntry,
   ArtifactPreview,
-  Attachment,
   CaptureContext,
   CaptureShortcut,
   ChainStepRow,
