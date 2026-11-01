@@ -14,7 +14,9 @@
 /// ADR-0019) of the adapter the source is configured with, which bring-up and
 /// every search command write, as `crate::project::list` reads it. No row
 /// where the source is not configured, its adapter stored nothing, or its
-/// kind is not declared: joined `cross join lateral`, the row drops out; a
+/// kind is not declared: joined `cross join lateral`, the row drops out; an
+/// adapter that lists a kind twice (the contract battery refuses it) gives
+/// its first entry, the one every reader takes; a
 /// `left join lateral … on true` keeps it with a null `decl`, which every
 /// `declared_*!` macro reads as a miss.
 #[macro_export]
@@ -30,12 +32,13 @@ macro_rules! stored_declaration {
                join sync.parent_declaration pd on pd.adapter_kind = sc.kind
               cross join lateral jsonb_array_elements(
                 case when jsonb_typeof(pd.payload_paths) = 'array'
-                     then pd.payload_paths else '[]'::jsonb end) as kp(p)
+                     then pd.payload_paths else '[]'::jsonb end) with ordinality as kp(p, ord)
               where sc.id = ",
             $row,
             ".source_id and kp.p->>'kind' = ",
             $row,
             ".kind
+              order by kp.ord
               limit 1)"
         )
     };

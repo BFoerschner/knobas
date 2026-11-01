@@ -808,6 +808,54 @@ async fn a_failed_build_i_triggered_is_mine_and_a_green_one_is_nobodys() {
     );
 }
 
+/// `statusText` is the one literal read in the failed-build rule (#2364,
+/// ADR-0007): no role names it, so its miss direction is pinned here. A red
+/// build that carries none still raises the item and says only that it failed,
+/// never a borrowed or blank tail.
+#[tokio::test]
+async fn a_failed_build_with_no_status_text_says_only_that_it_failed() {
+    let pool = &scratch().await;
+    let told = build(
+        pool,
+        "build:1187",
+        "FAILURE",
+        "Payout_Tests",
+        Some(ME),
+        days_ago(1),
+    )
+    .await;
+    let silent = item(
+        pool,
+        Mirrored {
+            source: "teamcity",
+            kind: "build",
+            key: "build:1190",
+            author: Some(ME),
+            body: "",
+            payload: serde_json::json!({
+                "status": "FAILURE",
+                "state": "finished",
+                "buildTypeId": "Ledger_Tests",
+            }),
+            updated: days_ago(1),
+        },
+    )
+    .await;
+
+    let items = stream(pool).await;
+    let reason = |id: &str| {
+        items
+            .iter()
+            .find(|i| i.key == format!("failed_build:{id}"))
+            .map(|i| i.reason.clone())
+    };
+    assert_eq!(
+        reason(&told).as_deref(),
+        Some("this build failed: 3 tests failed")
+    );
+    assert_eq!(reason(&silent).as_deref(), Some("this build failed"));
+}
+
 /// Story 4, second arm: a build CI triggered on my pull request finds me
 /// through the link graph -- and **only** through a confirmed link.
 ///
