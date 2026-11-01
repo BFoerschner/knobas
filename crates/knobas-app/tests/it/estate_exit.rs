@@ -112,7 +112,7 @@ async fn estate() -> PgPool {
                     outcome.monitors_kept,
                     outcome.monitors_linked,
                 ),
-                (17, 6, 0, 0, 5, 0),
+                (18, 6, 0, 0, 5, 0),
                 "the first import of the real estate: every entry is an insert, so \
                  nothing is set on a row that was already there and nothing is kept \
                  from a hand edit; the five Uptime Kuma names are kept on the assets \
@@ -430,6 +430,7 @@ async fn the_machine_in_a_context_brings_the_container_into_its_members() {
             "asset:knobas-confluence",
             "asset:knobas-confluence-db",
             "asset:knobas-docker-proxy",
+            "asset:knobas-forgejo",
             "asset:knobas-gitea",
             "asset:knobas-jira",
             "asset:knobas-jira-db",

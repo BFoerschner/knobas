@@ -87,6 +87,21 @@
       ]
     },
     {
+      "id": "asset:knobas-forgejo",
+      "type": "container",
+      "name": "knobas-forgejo",
+      "parent": "asset:wsl-docker",
+      "description": "Forgejo, the hard fork of Gitea, run through the same adapter (#1195): `just gitea-live forgejo` starts it, on its own opt-in profile, volume and seed state. On the WSL box no run stops it once it is up, so it is part of what the engine runs.",
+      "properties": {
+        "docker_context": "wsl",
+        "container_name": "knobas-forgejo",
+        "image": "codeberg.org/forgejo/forgejo",
+        "compose_service": "forgejo",
+        "compose_profile": "forgejo",
+        "published_port": "127.0.0.1:3002"
+      }
+    },
+    {
       "id": "asset:knobas-uptime-kuma",
       "type": "container",
       "name": "knobas-uptime-kuma",

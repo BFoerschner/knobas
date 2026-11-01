@@ -155,7 +155,7 @@ async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) {
         .value;
     assert_eq!(
         (outcome.assets_created, outcome.routes_created),
-        (17, 6),
+        (18, 6),
         "the real estate, as `tests/it/estate_exit.rs` counts it"
     );
 
@@ -363,7 +363,16 @@ async fn the_estate_is_in_the_tree_on_the_clean_machine() {
         .fetch_one(pool)
         .await
         .expect("the routes");
-    assert_eq!(routes, 6, "the estate's routes are part of the assets part");
+    let in_file = serde_json::from_str::<serde_json::Value>(ESTATE_FILE)
+        .expect("the estate file is JSON")["routes"]
+        .as_array()
+        .expect("the estate file has routes")
+        .len();
+    assert_eq!(
+        usize::try_from(routes).expect("a count"),
+        in_file,
+        "the estate's routes are part of the assets part"
+    );
 }
 
 // ---------------------------------------------------------------------------

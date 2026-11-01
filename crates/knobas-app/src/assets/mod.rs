@@ -7743,7 +7743,7 @@ mod tests {
     fn the_checked_in_estate_parses_and_its_scalars_become_tagged_values() {
         const ESTATE: &str = include_str!("../../../../testenv/estate.json");
         let parsed: EstateFile = serde_json::from_str(ESTATE).expect("the real estate file");
-        assert_eq!(parsed.assets.len(), 17, "the estate file's assets");
+        assert_eq!(parsed.assets.len(), 18, "the estate file's assets");
         assert_eq!(parsed.routes.len(), 6, "the estate file's routes");
 
         let notebook = parsed

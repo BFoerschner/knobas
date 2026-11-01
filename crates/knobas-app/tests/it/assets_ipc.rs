@@ -3162,7 +3162,7 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
         .expect("the estate imports");
     let outcome = written.value;
 
-    assert_eq!(outcome.assets_created, 17, "the file's assets");
+    assert_eq!(outcome.assets_created, 18, "the file's assets");
     assert_eq!(outcome.routes_created, 6, "the file's routes");
     assert_eq!(outcome.properties_set, 0, "there was nothing to change");
     assert_eq!(outcome.properties_kept, 0);
@@ -3181,7 +3181,7 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
     );
     assert_eq!(
         written.activity[0].detail["outcome"]["assets_created"],
-        serde_json::json!(17)
+        serde_json::json!(18)
     );
 
     let top = assets::tree(&pool, None).await.expect("the top level");
@@ -3414,8 +3414,8 @@ async fn a_second_import_of_the_same_file_is_all_known_and_changes_nothing() {
         .expect("the second preview");
     assert_eq!(
         preview.known.len(),
-        23,
-        "seventeen assets and six routes are all already in the tree"
+        24,
+        "eighteen assets and six routes are all already in the tree"
     );
     assert!(preview.new.is_empty(), "{:?}", preview.new);
     assert!(preview.changes.is_empty(), "{:?}", preview.changes);
@@ -6283,6 +6283,7 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
             ("asset:knobas-confluence".to_owned(), None),
             ("asset:knobas-confluence-db".to_owned(), None),
             ("asset:knobas-docker-proxy".to_owned(), None),
+            ("asset:knobas-forgejo".to_owned(), None),
             ("asset:knobas-gitea".to_owned(), None),
             ("asset:knobas-jira".to_owned(), None),
             ("asset:knobas-jira-db".to_owned(), None),
@@ -6345,7 +6346,7 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
             .await
             .expect("the names in the database's order");
     assert_eq!(names, by_name);
-    assert_eq!(answer.assets.len(), 13);
+    assert_eq!(answer.assets.len(), 14);
 }
 
 /// A route landing on what **holds** the asset is not one that breaks with it.
@@ -6536,6 +6537,7 @@ async fn an_asset_held_and_linked_in_the_same_step_reads_as_inside() {
             ("asset:knobas-confluence".to_owned(), None),
             ("asset:knobas-confluence-db".to_owned(), None),
             ("asset:knobas-docker-proxy".to_owned(), None),
+            ("asset:knobas-forgejo".to_owned(), None),
             ("asset:knobas-gitea".to_owned(), None),
             ("asset:knobas-jira".to_owned(), None),
             ("asset:knobas-jira-db".to_owned(), None),

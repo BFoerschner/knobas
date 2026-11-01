@@ -72,17 +72,15 @@ const ENVIRONMENTS: &[&str] = &["dev", "stage", "prod", "shared"];
 /// *done to* the estate, not a thing the estate holds, so it has no asset and
 /// no monitor.
 ///
-/// `forgejo` (#1195) is the Gitea live suite's second target, behind its own
-/// profile: `just gitea-live forgejo` starts it and stops it again at the end
-/// of the run. Between runs it is not there, so the estate does not hold it;
-/// Gitea is the asset the notebook routes to and watches.
-///
-/// Every other service in that file runs somewhere and is recorded --
-/// `docker-proxy` (#978), Kuma's read-only Docker API, among them since
-/// 2026-11-01: it publishes no port and nothing routes to it, but it runs on
-/// the WSL box's engine around the clock, and `just estate-live` holds every
-/// running container there to this file.
-const NOT_ASSETS: &[&str] = &["kuma-seed", "forgejo"];
+/// Every other service in that file runs somewhere and is recorded. Since
+/// 2026-11-01 that includes two that used to be left out, because the WSL box
+/// keeps what it runs and `just estate-live` holds every running container
+/// there to this file:
+/// - `docker-proxy` (#978), Kuma's read-only Docker API. It publishes no port
+///   and nothing routes to it, but it runs around the clock.
+/// - `forgejo` (#1195), the Gitea live suite's second target. On the local
+///   target a run stopped it again; on the box no run stops it once it is up.
+const NOT_ASSETS: &[&str] = &["kuma-seed"];
 
 /// The repository root, from this crate's manifest directory.
 fn root() -> PathBuf {
