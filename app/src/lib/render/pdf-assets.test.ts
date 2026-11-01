@@ -62,7 +62,7 @@ test("Helvetica, which the PDF does not embed, is drawn from pdf.js's own font f
   }
 });
 
-test("the app serves every file the options point pdf.js at, and not the scripting sandbox or the JavaScript decoders", async () => {
+test("the app serves every file the options point pdf.js at, the JavaScript decoders WebKit falls back to, and not the scripting sandbox", async () => {
   const { pdfjsAssetFiles } = await import("../../../vite-pdfjs-assets");
   const urls = pdfjsAssetFiles().map((file) => `/${file.url}`);
   const options = pdfAssetOptions(`/${PDFJS_ASSET_PREFIX}`) as Record<string, string>;
@@ -72,6 +72,8 @@ test("the app serves every file the options point pdf.js at, and not the scripti
       `${options.wasmUrl}openjpeg.wasm`,
       `${options.wasmUrl}jbig2.wasm`,
       `${options.wasmUrl}qcms_bg.wasm`,
+      `${options.wasmUrl}openjpeg_nowasm_fallback.js`,
+      `${options.wasmUrl}jbig2_nowasm_fallback.js`,
       `${options.iccUrl}CGATS001Compat-v2-micro.icc`,
       `${options.standardFontDataUrl}LiberationSans-Regular.ttf`,
       `${options.standardFontDataUrl}FoxitSymbol.pfb`,
@@ -80,5 +82,25 @@ test("the app serves every file the options point pdf.js at, and not the scripti
     ]),
   );
   expect(urls.filter((url) => url.endsWith(".bcmap"))).toHaveLength(168);
-  expect(urls.filter((url) => /quickjs|nowasm|\.js$/.test(url))).toEqual([]);
+  // JavaScript only where WebAssembly may fail (#2388): no sandbox, no other script.
+  expect(urls.filter((url) => /quickjs|\.js$/.test(url))).toEqual([
+    `${options.wasmUrl}jbig2_nowasm_fallback.js`,
+    `${options.wasmUrl}openjpeg_nowasm_fallback.js`,
+  ]);
+});
+
+test("the dev server answers a JavaScript decoder as a module script may be: text/javascript", async () => {
+  const { pdfjsAssets } = await import("../../../vite-pdfjs-assets");
+  const plugin = pdfjsAssets() as unknown as {
+    configResolved: (config: { base: string }) => void;
+    configureServer: (server: { middlewares: { use: (fn: (...args: unknown[]) => void) => void } }) => void;
+  };
+  let middleware: ((...args: unknown[]) => void) | undefined;
+  plugin.configResolved({ base: "/" });
+  plugin.configureServer({ middlewares: { use: (fn) => (middleware = fn) } });
+  const headers: Record<string, string> = {};
+  let body: Buffer | undefined;
+  const res = { setHeader: (name: string, value: string) => (headers[name] = value), end: (data: Buffer) => (body = data) };
+  middleware!({ url: `/${PDFJS_ASSET_PREFIX}wasm/openjpeg_nowasm_fallback.js` }, res, () => {});
+  expect([headers["Content-Type"], body!.length > 0]).toEqual(["text/javascript", true]);
 });
