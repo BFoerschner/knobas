@@ -617,7 +617,7 @@ check_room() {
     export PATH="$mem/bin:$PATH" STUB_LOG="$mem/docker.log" STUB_RUNNING="$running"
     export STUB_MEM=$((10 * 1024 * 1024 * 1024))
     export STUB_STARTED="knobas-teamcity=2026-11-01T08:00:00.1Z knobas-jira=2026-11-01T09:00:00.1Z knobas-confluence=2026-11-01T10:00:00.1Z"
-    export KNOBAS_LIVE_TARGET=remote KNOBAS_LIVE_SSH=wsl-test KNOBAS_LIVE_LOCK="$mem/jvm.lock"
+    export KNOBAS_LIVE_TARGET=remote KNOBAS_LIVE_SSH=wsl-test KNOBAS_LIVE_LOCK_DIR="$mem"
     unset KNOBAS_LIVE_MEM_BUDGET_MB
     # shellcheck source=testenv/live-lib.sh disable=SC1091
     . "$here/live-lib.sh"
@@ -645,10 +645,20 @@ check_room "a third stops the one started longest ago" jira "knobas-gitea knobas
   "stopping teamcity" "stop teamcity teamcity-agent" --absent "stop confluence"
 check_room "one already up needs no room" jira "knobas-gitea knobas-teamcity knobas-jira knobas-confluence" ok \
   --absent "stop"
-ln -s "999999 1 live-up-teamcity-kept /elsewhere" "$mem/jvm.lock"
-check_room "a product a live-up keeps is never stopped" jira "knobas-gitea knobas-teamcity knobas-confluence" ok \
-  "stopping confluence" --absent "stop teamcity"
-rm -f "$mem/jvm.lock"
+# Held by a live pid (this test's own): a run inside TeamCity, or its keeper.
+ln -s "$$ 1 live-up-teamcity-kept /elsewhere" "$mem/knobas-live-teamcity.lock"
+check_room "a product another run holds is never stopped" jira "knobas-gitea knobas-teamcity knobas-confluence" ok \
+  "teamcity would make room but another run holds it" "stopping confluence" --absent "stop teamcity"
+checks=$((checks + 1))
+[ "$(readlink "$mem/knobas-live-teamcity.lock")" = "$$ 1 live-up-teamcity-kept /elsewhere" ] ||
+  fail "and its holder's lock is left as it was" "$(readlink "$mem/knobas-live-teamcity.lock")"
+checks=$((checks + 1))
+[ ! -e "$mem/knobas-live-confluence.lock" ] || fail "the stopped product's lock is given back after the stop"
+rm -f "$mem/knobas-live-teamcity.lock"
+ln -s "999999 1 jira-live /elsewhere" "$mem/knobas-live-teamcity.lock"
+check_room "a product whose holder is dead may be stopped" jira "knobas-gitea knobas-teamcity knobas-confluence" ok \
+  "stopping teamcity"
+rm -f "$mem/knobas-live-teamcity.lock"
 checks=$((checks + 1))
 # shellcheck disable=SC2030,SC2031  # its own subshell on purpose
 out=$( (

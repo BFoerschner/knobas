@@ -363,7 +363,16 @@ lives on the remote machine:
   memory budget (below) needs the room for another.
   `just live-down <product>` still works, through the same engine.
 - The locks stay on this machine (`$TMPDIR`): the worktrees that take turns
-  are all here. The JVM lock still serialises the JVM runs.
+  are all here. **On a remote target each JVM product has its own lock**
+  (`knobas-live-jira.lock`, `-confluence`, `-teamcity`; Björn, 2026-11-01).
+  A Jira run, a Confluence run and a TeamCity run from three worktrees go at
+  once, and two runs on one product take turns, with the same waiting line,
+  45-minute refusal and dead-holder takeover. The machine-wide JVM lock existed
+  for the 8 GB VM's memory, which the budget below now guards. Its other job,
+  two runs in one product's data, is per product. `atlassian-live` takes no
+  lock there, because each half takes its own. A `live-up` keeper keeps its
+  product's lock. The Gitea lock is unchanged. The local target keeps the
+  one JVM lock.
 - **The tunnel holds this machine's product ports.** A local run beside it
   would fail to publish them, or talk to the remote product through it. So a
   local run refuses while a tunnel is open (`testenv/live tunnel down` frees
@@ -395,13 +404,15 @@ answering ssh. There are three layers, each closing a different way to that:
    **measured** figures with headroom, not the caps: Jira with its database
    4096 MB, Confluence 2560, TeamCity with its agent 2048, Gitea 512. While
    the sum is over the budget (the engine's memory less 1536 MB), the other
-   JVM products are **stopped**,
+   JVM products are **stopped**, each only under its own lock taken for
+   the stop (one another run holds is in use and is skipped),
    the one started longest ago first, until it fits. They are stopped rather
    than removed: TeamCity keeps its builds, and Jira and Confluence their seed
-   until their licence is due. The run holds the JVM lock, so no other run is
-   inside what it stops. A product another worktree's `live-up` keeps is never
-   stopped, and a product that cannot fit is refused in a line naming the
-   numbers. On the real box's 12 GB WSL (budget 10425 MB) all three fit
+   until their licence is due. A product that cannot fit is refused in a line
+   naming the numbers. Deciding what fits and starting the containers (not
+   seeding them) happens in one short **memory section**
+   (`$TMPDIR/knobas-live-mem.lock`). Two runs starting two products at once
+   would otherwise each count the other as down and both find room. On the real box's 12 GB WSL (budget 10425 MB) all three fit
    (9216). With a 10 GB WSL any two fit and a third stops one. `testenv/live
    remote-check` prints the budget and what fits.
 
@@ -2412,7 +2423,7 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
 | `./live.env.example` | The template for `live.env`, which says where the live products run: here, or a remote machine. |
 | `./wsl/setup-windows.ps1`, `./wsl/setup-wsl.sh`, `./wsl/connect.sh` | Setting up a WSL box as the 24/7 host of the live products, one script per machine. See *Live products on a remote machine (WSL)*. |
 | `./live-test.sh` | Its unit tests against a stub `docker`: the one-JVM refusal, the remote-context refusal, what a run puts back, and that no run stops a Gitea it started, TeamCity's or Gitea's own (#698); `live.env`'s reading and a remote target's rules; the licence renewal and the one retry from empty. `just witness-unit`, and part of `just check`. |
-| `./live-lock-test.sh` | The JVM lock's unit tests (#690), against a stub `docker` and a scratch lock: a second run waits for the first, a stale lock is taken over, the wait times out naming the holder. `just witness-unit`, and part of `just check`. |
+| `./live-lock-test.sh` | The JVM lock's unit tests (#690), against a stub `docker` and a scratch lock: a second run waits for the first, a stale lock is taken over, the wait times out naming the holder. On a remote target: runs on two products go at once, two on one product take turns, a lock with no product is none, and the memory section serialises its takers. `just witness-unit`, and part of `just check`. |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
 | `./pin-images.sh` | Re-resolve image tags to digests into `images.env`; guarded pins are held, `--move VAR` takes a new one. |

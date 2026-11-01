@@ -55,7 +55,9 @@
 #     products stay up until THE MEMORY BUDGET (below) needs their room;
 #   - every container is capped (docker-compose.remote.yml, via COMPOSE_FILE).
 #
-# The locks stay on this machine: the worktrees that take turns are all here.
+# The locks stay on this machine: the worktrees that take turns are all here,
+# and on a remote target each JVM product has its own (ONE LOCK PER PRODUCT,
+# below).
 # Uptime Kuma and the canary stay here too -- `just kuma-live` does not source
 # this file, and the canary is a host socket of this machine. Unset, or
 # `local`, everything below behaves as it did before the remote target
@@ -350,11 +352,29 @@ _live_lock_pid_alive() {
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
-# _live_lock_select <jvm|gitea> -- point LIVE_LOCK and its label and holder
-# variable at one of the two locks.
+# ONE LOCK PER PRODUCT ON A REMOTE TARGET (Björn, 2026-11-01). The JVM lock
+# had two jobs: the 8 GB VM's memory, and two runs in one product's data. On
+# a remote target the products stay up together and the memory budget below
+# keeps them from freezing the box, so only the second job is left -- and it
+# is per product. There the "JVM lock" of a product is its own,
+# `$TMPDIR/knobas-live-<product>.lock` (`KNOBAS_LIVE_LOCK_DIR` moves them;
+# the holder is passed down in `KNOBAS_LIVE_LOCK_HOLDER_<PRODUCT>`): a Jira
+# run and a TeamCity run from two worktrees go at once, two Jira runs take
+# turns. A JVM lock asked for with no product -- `atlassian-live` around its
+# two halves -- is no lock there, since each half takes its own. The local
+# target keeps the one machine-wide lock.
+#
+# _live_lock_select <jvm|gitea> [<product>] -- point LIVE_LOCK and its label
+# and holder variable at a lock.
 _live_lock_select() {
   case $1 in
     jvm)
+      if [ -n "$LIVE_REMOTE" ] && [ -n "${2:-}" ]; then
+        LIVE_LOCK=${KNOBAS_LIVE_LOCK_DIR:-${TMPDIR:-/tmp}}/knobas-live-$2.lock
+        LIVE_LOCK_LABEL="$2 lock"
+        LIVE_LOCK_HOLDER_VAR=KNOBAS_LIVE_LOCK_HOLDER_$(printf '%s' "$2" | tr '[:lower:]' '[:upper:]')
+        return 0
+      fi
       LIVE_LOCK=${KNOBAS_LIVE_LOCK:-${TMPDIR:-/tmp}/knobas-live-jvm.lock}
       LIVE_LOCK_LABEL="JVM lock"
       LIVE_LOCK_HOLDER_VAR=KNOBAS_LIVE_LOCK_HOLDER ;;
@@ -367,17 +387,22 @@ _live_lock_select() {
 }
 _live_lock_select jvm
 
-# live_lock_hold <recipe> [<jvm|gitea>] -- return once this shell holds the
-# lock (the JVM one unless named; or runs under a parent that does); return 1,
-# naming the holder, after the wait. Arm `live_lock_release` in the EXIT, INT
-# and TERM traps before calling it.
+# live_lock_hold <recipe> [<jvm|gitea> [<product>]] -- return once this
+# shell holds the lock (the JVM one unless named -- on a remote target, the
+# product's; or runs under a parent that does); return 1, naming the holder,
+# after the wait. Arm `live_lock_release` in the EXIT, INT and TERM traps
+# before calling it.
 live_lock_hold() {
   local recipe=$1 me target waited announced='' last_report=0 wait_s poll from=$SECONDS
   if [ -n "$LIVE_LOCK_MINE" ]; then
     echo "live: $recipe: this shell already holds the $LIVE_LOCK_LABEL; one lock per shell" >&2
     return 1
   fi
-  _live_lock_select "${2:-jvm}" || return 1
+  if [ -n "$LIVE_REMOTE" ] && [ "${2:-jvm}" = jvm ] && [ -z "${3:-}" ]; then
+    echo "live: $recipe: a remote target locks per product; each run under this one takes its own"
+    return 0
+  fi
+  _live_lock_select "${2:-jvm}" "${3:-}" || return 1
   # This (sub)shell's own pid: `$$` is the script's in a subshell, and bash
   # 3.2 has no BASHPID. The exec'd sh's parent is the shell that runs this.
   me=$(exec sh -c 'echo $PPID')
@@ -450,6 +475,7 @@ live_lock_hold() {
 
 # live_lock_release -- give the lock back, if this shell holds it.
 live_lock_release() {
+  _live_mem_unlock
   [ -z "$LIVE_LOCK_RECLAIMING" ] || rmdir "$LIVE_LOCK.reclaim" 2>/dev/null || true
   LIVE_LOCK_RECLAIMING=""
   [ -n "$LIVE_LOCK_MINE" ] || return 0
@@ -558,7 +584,7 @@ _live_lock_is_keeper() {
 # _live_lock_unkeep <product> -- end the keeper of this product's live-up.
 _live_lock_unkeep() {
   local target pid since recipe tree i
-  _live_lock_select jvm
+  _live_lock_select jvm "$1"
   target=$(readlink "$LIVE_LOCK" 2>/dev/null || true)
   read -r pid since recipe tree <<<"$target"
   [ "$recipe" = "live-up-$1-kept" ] || return 0
@@ -592,7 +618,7 @@ _live_lock_unkeep() {
 live_up_held() {
   if ! live_is_jvm "$1"; then live_up "$1"; return; fi
   live_lock_traps
-  live_lock_hold "live-up-$1" || return 1
+  live_lock_hold "live-up-$1" jvm "$1" || return 1
   live_up "$1" || return 1
   _live_lock_keep "$1"
 }
@@ -859,7 +885,9 @@ _live_atlassian_start() {
   case $margin in '' | *[!0-9]*)
     echo "live: KNOBAS_LIVE_LICENCE_MARGIN_S must be whole seconds, not '$margin'" >&2; return 1 ;;
   esac
-  if left=$(_live_licence_left "$product"); then
+  if [[ " $LIVE_RENEWED " == *" $product "* ]]; then
+    : # renewed in the memory section a moment ago: from empty
+  elif left=$(_live_licence_left "$product"); then
     if [ "$left" -lt "$margin" ]; then
       echo "live: $product: its 3-hour licence has about $((left > 0 ? left / 60 : 0)) min left (under KNOBAS_LIVE_LICENCE_MARGIN_S=${margin}s); removing it and setting it up from empty"
       _live_atlassian_remove "$product"
@@ -927,10 +955,69 @@ _live_stop() {
   esac
 }
 
+# _live_lock_grab <product> -- take a product's lock without waiting, for the
+# few seconds a stop takes; fail when anyone holds it -- a run inside that
+# product, or the keeper of its live-up. A dead holder's lock is taken over.
+# Prints the link it made, for _live_lock_drop.
+_live_lock_grab() {
+  local lock=${KNOBAS_LIVE_LOCK_DIR:-${TMPDIR:-/tmp}}/knobas-live-$1.lock target
+  # $$, the run's own shell: this runs in a command substitution, whose pid
+  # is gone the moment it returns, and a dead holder is anyone's to take.
+  target="$$ $(date +%s) make-room-stops-$1 ${LIVE_TESTENV%/testenv}"
+  if ! ln -s "$target" "$lock" 2>/dev/null; then
+    _live_lock_pid_alive "$(readlink "$lock" 2>/dev/null || true)" && return 1
+    rm -f "$lock"
+    ln -s "$target" "$lock" 2>/dev/null || return 1
+  fi
+  echo "$target"
+}
+
+_live_lock_drop() {
+  local lock=${KNOBAS_LIVE_LOCK_DIR:-${TMPDIR:-/tmp}}/knobas-live-$1.lock
+  [ "$(readlink "$lock" 2>/dev/null || true)" != "$2" ] || rm -f "$lock"
+}
+
+# THE MEMORY SECTION. Runs on two products start them at once now, and each
+# would count the other as down and find room. So deciding what fits and
+# starting the containers -- not seeding them, which is long -- happens under
+# one short lock, `$TMPDIR/knobas-live-mem.lock` (`KNOBAS_LIVE_MEM_LOCK` moves
+# it): a directory, the holder's pid inside, a dead holder's taken over.
+LIVE_MEM_LOCK_MINE=""
+_live_mem_lock() {
+  local d=${KNOBAS_LIVE_MEM_LOCK:-${TMPDIR:-/tmp}/knobas-live-mem.lock} pid from=$SECONDS me
+  me=$(exec sh -c 'echo $PPID')
+  until mkdir "$d" 2>/dev/null; do
+    pid=$(cat "$d/pid" 2>/dev/null || true)
+    if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } ||
+      { [ -z "$pid" ] && [ -n "$(find "$d" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
+      if mkdir "$d.reclaim" 2>/dev/null; then
+        [ "$(cat "$d/pid" 2>/dev/null || true)" != "$pid" ] || rm -rf "$d"
+        rmdir "$d.reclaim"
+      fi
+      continue
+    fi
+    if [ $((SECONDS - from)) -ge "${KNOBAS_LIVE_MEM_LOCK_WAIT:-900}" ]; then
+      echo "live: the memory section ($d) is still held by pid ${pid:-?}; giving up" >&2
+      return 1
+    fi
+    sleep 1
+  done
+  echo "$me" >"$d/pid"
+  LIVE_MEM_LOCK_MINE=$d
+}
+
+_live_mem_unlock() {
+  [ -n "$LIVE_MEM_LOCK_MINE" ] || return 0
+  rm -rf "$LIVE_MEM_LOCK_MINE"
+  LIVE_MEM_LOCK_MINE=""
+}
+
 # _live_make_room <product> -- on a remote target, stop other JVM products
-# until this one fits the budget; refuse when it cannot.
+# until this one fits the budget; refuse when it cannot. Inside the memory
+# section. A product is stopped only under its own lock, taken for the stop:
+# one another run holds is in use, and is not a candidate.
 _live_make_room() {
-  local product=$1 budget used=0 need p kept="" victim lock_target
+  local product=$1 budget used=0 need p victim grabbed candidates
   [ -n "$LIVE_REMOTE" ] || return 0
   live_is_up "$product" && return 0
   budget=$(_live_mem_budget_mb) || { echo "live: could not read the memory of the engine on $KNOBAS_LIVE_SSH; set KNOBAS_LIVE_MEM_BUDGET_MB" >&2; return 1; }
@@ -939,28 +1026,69 @@ _live_make_room() {
     [ "$p" != "$product" ] || continue
     live_is_up "$p" && used=$((used + $(_live_footprint_mb "$p")))
   done
-  # A product another live-up keeps is in use by that session.
-  lock_target=$(readlink "${KNOBAS_LIVE_LOCK:-${TMPDIR:-/tmp}/knobas-live-jvm.lock}" 2>/dev/null || true)
-  case $lock_target in *" live-up-"*"-kept "*) kept=${lock_target#* * live-up-}; kept=${kept%%-kept *} ;; esac
-  while [ $((used + need)) -gt "$budget" ]; do
-    victim=$(for p in teamcity jira confluence; do
-      [ "$p" != "$product" ] && [ "$p" != "$kept" ] && live_is_up "$p" && echo "$(_live_started_at "$p") $p"
-    done | sort -n | awk 'NR == 1 { print $2 }')
-    if [ -z "$victim" ]; then
-      echo "live: $product needs ${need} MB and ${used} MB of the ${budget} MB budget on $KNOBAS_LIVE_SSH is held by what may not be stopped; not starting it (KNOBAS_LIVE_MEM_BUDGET_MB, the KNOBAS_LIVE_*_MB caps)" >&2
-      return 1
-    fi
+  [ $((used + need)) -gt "$budget" ] || return 0
+  candidates=$(for p in teamcity jira confluence; do
+    [ "$p" != "$product" ] && live_is_up "$p" && echo "$(_live_started_at "$p") $p"
+  done | sort -n | awk '{ print $2 }')
+  for victim in $candidates; do
+    [ $((used + need)) -gt "$budget" ] || break
+    grabbed=$(_live_lock_grab "$victim") || {
+      echo "live: $product: $victim would make room but another run holds it; not stopping it"
+      continue
+    }
     echo "live: $product needs ${need} MB; $((used + need)) MB is over the ${budget} MB budget on $KNOBAS_LIVE_SSH -- stopping $victim (started longest ago; its data stays)"
-    _live_stop "$victim" || return 1
+    _live_stop "$victim" || { _live_lock_drop "$victim" "$grabbed"; return 1; }
+    _live_lock_drop "$victim" "$grabbed"
     used=$((used - $(_live_footprint_mb "$victim")))
   done
+  if [ $((used + need)) -gt "$budget" ]; then
+    echo "live: $product needs ${need} MB and ${used} MB of the ${budget} MB budget on $KNOBAS_LIVE_SSH is held by what may not be stopped; not starting it (KNOBAS_LIVE_MEM_BUDGET_MB, KNOBAS_LIVE_USE_*_MB)" >&2
+    return 1
+  fi
+}
+
+# _live_containers <product> -- its services, for the memory section's start.
+_live_containers() {
+  case $1 in
+    gitea) echo "gitea" ;;
+    forgejo) echo "--profile forgejo forgejo" ;;
+    teamcity) echo "--profile real-teamcity teamcity teamcity-agent" ;;
+    jira | confluence) echo "--profile real-atlassian $1-db $1" ;;
+  esac
+}
+
+# _live_claim <product> -- on a remote target, the memory section: renew a
+# licence that is due, make room, and start the containers, so the next run
+# to count finds this product up. Seeding comes after, outside it.
+LIVE_RENEWED=""
+_live_claim() {
+  local p=$1 left margin
+  [ -n "$LIVE_REMOTE" ] || return 0
+  case $p in
+    jira | confluence)
+      margin=${KNOBAS_LIVE_LICENCE_MARGIN_S:-3600}
+      if left=$(_live_licence_left "$p") && [ "$left" -lt "$margin" ] 2>/dev/null; then
+        echo "live: $p: its 3-hour licence has about $((left > 0 ? left / 60 : 0)) min left (under KNOBAS_LIVE_LICENCE_MARGIN_S=${margin}s); removing it and setting it up from empty"
+        _live_atlassian_remove "$p"
+        LIVE_RENEWED="$LIVE_RENEWED $p"
+      fi
+      _live_licences || return 1 ;;
+  esac
+  live_is_up "$p" && return 0
+  _live_make_room "$p" || return 1
+  # shellcheck disable=SC2046  # the profile flags and services, split on purpose
+  _live_compose $(_live_containers "$p") up -d >/dev/null || return 1
 }
 
 # live_up <product> -- the product and what it needs, guarded.
 live_up() {
   local p
   live_remote_ready || return 1
-  for p in $(live_needs "$1"); do _live_make_room "$p" || return 1; done
+  if [ -n "$LIVE_REMOTE" ]; then
+    _live_mem_lock || return 1
+    for p in $(live_needs "$1"); do _live_claim "$p" || { _live_mem_unlock; return 1; }; done
+    _live_mem_unlock
+  fi
   live_guard "$1" || return 1
   for p in $(live_needs "$1"); do _live_start "$p" || return 1; done
 }
@@ -1022,7 +1150,7 @@ live_session() {
   # The lock BEFORE the guard: a run queued behind another JVM run must wait
   # for it, not meet the refusal that run's product causes.
   if live_is_jvm "$1"; then
-    live_lock_hold "${2:-live_session-$1}" || exit 1
+    live_lock_hold "${2:-live_session-$1}" jvm "$1" || exit 1
   elif [ "$1" = gitea ] || [ "$1" = forgejo ]; then
     # Forgejo shares the Gitea lock (#1195): the suite and its sweeps are the
     # same, and two Gitea-suite runs at once are what #724 ended.

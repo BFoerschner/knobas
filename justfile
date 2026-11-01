@@ -1917,7 +1917,7 @@ teamcity-live:
     # pointed at the seeded container makes this a TeamCity run like any other.
     . testenv/live-lib.sh
     live_lock_traps
-    live_lock_hold teamcity-live
+    live_lock_hold teamcity-live jvm teamcity
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity \
       -- --ignored --nocapture --test-threads=1
 
