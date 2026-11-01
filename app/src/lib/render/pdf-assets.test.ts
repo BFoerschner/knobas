@@ -82,7 +82,11 @@ test("the app serves every file the options point pdf.js at, the JavaScript deco
     ]),
   );
   expect(urls.filter((url) => url.endsWith(".bcmap"))).toHaveLength(168);
-  expect(urls.filter((url) => /quickjs/.test(url))).toEqual([]);
+  // JavaScript only where WebAssembly may fail (#2388): no sandbox, no other script.
+  expect(urls.filter((url) => /quickjs|\.js$/.test(url))).toEqual([
+    `${options.wasmUrl}jbig2_nowasm_fallback.js`,
+    `${options.wasmUrl}openjpeg_nowasm_fallback.js`,
+  ]);
 });
 
 test("the dev server answers a JavaScript decoder as a module script may be: text/javascript", async () => {

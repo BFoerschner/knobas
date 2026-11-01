@@ -7,7 +7,7 @@
  * A file of its own: pdf.js keeps its decoder in the worker's statics, and
  * `pdf-assets.test.ts` opens documents with WebAssembly on.
  */
-import { copyFileSync, mkdirSync, mkdtempSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -47,5 +47,6 @@ test("without WebAssembly, the served JavaScript decoder draws the JPEG 2000 ima
     expect([r, g, b].map((c, i) => Math.abs(c! - [0x1f, 0x74, 0x44][i]!) <= 4)).toEqual([true, true, true]);
   } finally {
     await task.destroy();
+    rmSync(root, { recursive: true, force: true });
   }
 });
