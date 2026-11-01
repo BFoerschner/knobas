@@ -76,6 +76,15 @@ pub(crate) fn secret_store(
         tracing::warn!("{SECRET_STORE_ENV}=memory: credentials will not survive this process");
         return Arc::new(knobas_secrets::MemoryStore::new());
     }
+    #[cfg(debug_assertions)]
+    if uses_dev_secret_file(kind, profile.demo, cfg!(debug_assertions)) {
+        let store = knobas_secrets::FileStore::new(dev_secret_file(profile));
+        tracing::info!(
+            path = %store.path().display(),
+            "debug build, demo profile: credentials in a file, not the keychain (#2384)"
+        );
+        return Arc::new(store);
+    }
     // **`Profile::keychain_service()`, never a rebuilt string** (interfaces §3).
     // A second copy of that rule is a copy that can lose the `.demo` suffix
     // while still looking right, and a demo run reading the real credentials is
@@ -83,6 +92,27 @@ pub(crate) fn secret_store(
     let store = knobas_secrets::KeyringStore::new(profile.keychain_service());
     tracing::info!(service = store.service(), "using the OS keychain");
     Arc::new(store)
+}
+
+/// Whether this process keeps credentials in the demo profile's file rather
+/// than the keychain (#2384): a **debug build** on the **demo profile** that
+/// asked for the keychain. A release build and the user's own profile always
+/// get the keychain; the file store is not even compiled into a release build.
+///
+/// Why: a dev build's keychain items are partitioned by the writer's cdhash
+/// (the knobas-dev certificate has no team ID), so every rebuild prompted for
+/// the login password once per item. The demo profile holds testenv
+/// credentials only.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+fn uses_dev_secret_file(kind: SecretStoreKind, demo: bool, debug_build: bool) -> bool {
+    debug_build && demo && kind == SecretStoreKind::Keychain
+}
+
+/// The demo profile's credential file, inside the profile so `--data-dir`
+/// moves it with the database.
+#[cfg(debug_assertions)]
+fn dev_secret_file(profile: &crate::Profile) -> std::path::PathBuf {
+    profile.dir.join("dev-secrets.json")
 }
 
 /// The connections a sync run holds -- one each, outside every pool.
@@ -762,6 +792,25 @@ pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 #[cfg(test)]
 mod tests {
     use super::SecretStoreKind;
+
+    /// #2384: the file store is the demo profile's in a debug build and
+    /// nobody else's. The release row is the pin the issue asks for.
+    #[test]
+    fn only_a_debug_demo_keychain_request_uses_the_dev_secret_file() {
+        use super::uses_dev_secret_file as uses;
+        use SecretStoreKind::{Keychain, Memory};
+        assert!(uses(Keychain, true, true), "debug demo: the file");
+        assert!(!uses(Keychain, true, false), "release demo: the keychain");
+        assert!(
+            !uses(Keychain, false, false),
+            "release user profile: the keychain"
+        );
+        assert!(
+            !uses(Keychain, false, true),
+            "debug user profile: the keychain"
+        );
+        assert!(!uses(Memory, true, true), "memory stays memory");
+    }
 
     #[test]
     fn memory_in_any_case_is_the_memory_store_and_anything_else_the_keychain() {

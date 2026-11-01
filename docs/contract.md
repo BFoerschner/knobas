@@ -73,6 +73,8 @@ value   = {"v":1,"kind":"pat","secret":"…"}   JSON envelope
 
 Rationale: one item per source (not per auth method) means changing PAT → password rewrites in place instead of orphaning an item; the envelope's `kind`/`v` leave room for OAuth (access + refresh + expiry) without a naming change (§3 "OAuth later"); a dev-suffixed service keeps `just dev` off the real credentials, and gotcha 10 (unsigned dev builds re-prompt every run) is then at least survivable.
 
+**One exception: a debug build on the demo profile** keeps its credentials in `<demo profile dir>/dev-secrets.json` (mode 0600, same envelope, one key per account) through `knobas_secrets::FileStore`, not the keychain (#2384). The `knobas-dev` certificate has no Apple team ID, so macOS partitions a dev build's keychain items by the writer's cdhash and every rebuild prompted once per item. `FileStore` is compiled only under `debug_assertions`, the demo profile holds testenv credentials only, and `sources::secret_store` is the one place that picks it (`uses_dev_secret_file`, pinned by test). Release builds and the user's own profile, debug or release, keep the keychain.
+
 **Test/CI seam — mandatory.** CI runs on Linux (`.github/workflows/check.yml`), where `keyring` needs a live secret-service over D-Bus. Stream F therefore ships
 
 ```rust

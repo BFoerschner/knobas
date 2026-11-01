@@ -590,18 +590,27 @@ just live-sources-remove [knobas.app]   # the six sources off again, with what t
 
 It runs `knobas-app live-sources apply --demo` (a debug build only), which goes
 through the app's own `crud::add` or `crud::update`, then `crud::set_secret`:
-the credential is stored under the demo profile's keychain service and tested,
+the credential is stored in the demo profile's secret store and tested,
 as the Settings form does. Running it again updates every source in place, so
 a token `just live-up gitea` minted again is picked up by running it again.
 The sources go in on stdin, never in argv.
 
 - **Quit any demo knobas first.** The subcommand starts the demo profile's own
   database, which one process holds at a time.
-- **Run it with the binary that will read the credentials.** macOS lets the
-  binary that wrote a keychain item read it without asking, and asks for any
-  other. `just demo` and a bundle share the demo profile's keychain service, so
-  pass the bundle when that is what you will open. A `just demo` that rebuilds
-  the binary asks once, as it does for any source.
+- **No keychain prompt (#2384).** A debug build (`just demo`, `just
+  live-sources`, `tauri build --debug` bundles, desktop-witness) keeps the demo
+  profile's credentials in `dev-secrets.json` (mode 0600) inside the demo
+  profile's directory, never in the login keychain. Every debug binary and
+  bundle reads the same file, so rebuilding asks for nothing. The reason: the
+  `knobas-dev` certificate has no Apple team ID, so macOS partitions a dev
+  build's keychain items by the binary's cdhash, and "Always Allow" only ever
+  covered one build and one item. Release builds and the user's own profile
+  still use the keychain; the file store is not compiled into a release build.
+  **Once, after upgrading:** run `just live-sources` to write the six
+  credentials into the file (no password asked). Sources you added by hand on
+  the demo profile need their credential entered again in Settings. The old
+  `dev.knobas.desktop.dev.demo` items in the login keychain are no longer read;
+  delete them in Keychain Access if you like.
 - **A stale credential ends the run non-zero, naming it.** A token the
   product refuses still saves the source (a re-run updates it), but the line
   says `credential unauthorized` and the run exits 1 listing the sources not
@@ -611,7 +620,7 @@ The sources go in on stdin, never in argv.
   rest, and exits 1. Either way: `just live-up <product>` in the same checkout
   mints fresh credentials (seed state is per worktree), then run it again.
 - `--data-dir <dir>` on `testenv/live-sources.sh` puts the profile in a scratch
-  directory; the keychain service stays the demo profile's.
+  directory, and the credential file with it.
 
 ## The live recipes
 
@@ -1792,7 +1801,10 @@ Desktop notifications (M3.3, #290) need a `.app` bundle with a stable signed
 identity, and an unsigned build re-prompts the keychain on every run (roadmap
 gotcha 10). `tauri dev` produces neither, so the check runs against a bundle.
 No Apple identity is required: a self-signed code-signing certificate is a
-stable identity as far as the keychain and TCC are concerned.
+stable identity as far as TCC is concerned. It is not one for the keychain:
+with no team ID, macOS partitions an item by the writer's cdhash, which changes
+with every build, so the demo profile keeps its credentials in a file instead
+(#2384, *Live products as sources*).
 
 The identity on the dev Mac is **`knobas-dev`**, a self-signed certificate
 created 2026-09-03 (#273). If `security find-identity -v -p codesigning` does

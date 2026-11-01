@@ -3,16 +3,15 @@
 //!
 //! **The app's own path, not a side door.** Each source goes through
 //! `sources::crud` -- `add` or `update`, then `set_secret`, which stores the
-//! credential under the profile's keychain service and tests it -- so the row
+//! credential in the profile's secret store and tests it -- so the row
 //! and the credential land exactly where the app reads them. `testenv/
 //! live-sources.sh` builds the list from `testenv/seed --env` and pipes it in.
 //!
 //! **Debug builds and the demo profile only.** A release binary refuses, so an
 //! installed knobas carries no way to write credentials from a pipe, and the
-//! real profile is never touched (P13). Run it with the binary that will read
-//! the credentials (`target/debug/knobas-app` for `just demo`, the bundle's
-//! own for a bundle): macOS trusts the binary that wrote a keychain item, and
-//! any other one asks.
+//! real profile is never touched (P13). In a debug build the demo profile's
+//! secret store is its `dev-secrets.json`, not the keychain (#2384), so any
+//! debug binary or bundle reads what this wrote without a prompt.
 
 use std::io::Read as _;
 use std::sync::Arc;
