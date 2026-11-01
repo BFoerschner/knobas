@@ -503,7 +503,10 @@ docker.io 29.1.3, reached over Tailscale; budget 10425 MB): `just gitea-live`
 teamcity-live-seeded` 39 passed (559 s). TeamCity, the third JVM product,
 printed `teamcity needs 3584 MB; 11264 MB is over the 10425 MB budget --
 stopping jira` and ran beside Confluence. `just kuma-live`, on the Mac as
-always, 21 passed. `setup-windows.ps1` has not run: this box's WSL already had
+always, 21 passed. With per-product locks, `jira-live`, `confluence-live` and
+`teamcity-live-seeded` started together from three worktrees and none waited
+on another. They finished in 179, 259 and 332 s, all green (49 + 36 + 39
+tests), about 5.5 minutes for what took about 23 in turn. `setup-windows.ps1` has not run: this box's WSL already had
 12 GB and systemd.
 
 ## The live recipes
