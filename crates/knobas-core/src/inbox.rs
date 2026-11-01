@@ -274,14 +274,18 @@ pub const WINDOW_DAYS: i64 = 14;
 /// forever. knobas' own clock is the honest fallback and is always known.
 ///
 /// A review request is open while the pull request's declared state chip
-/// reads `open` ([`crate::declared_state!`], #2364), the word #2358's
+/// reads `open` ([`crate::resolved_state!`] over `state_paths`, the
+/// declared state resolved once a statement, #2364), the word #2358's
 /// start-work reads compare to. A state no map names, or a kind that declares
 /// none, counts as open: the request stays rather than vanishing on a word
 /// knobas cannot read.
 macro_rules! review_request {
     () => {
         concat!(
-            "select 'review_request'                     as category,
+            "(with state_paths as materialized (",
+            $crate::state_paths!("$4"),
+            ")
+             select 'review_request'                     as category,
                     i.entity_id                          as subject,
                     i.source_id                          as source_id,
                     i.entity_id                          as entity_id,
@@ -301,8 +305,8 @@ macro_rules! review_request {
                 and i.kind = 'pr'
                 and r.value = any($1)
                 and coalesce(",
-            $crate::declared_state!("$4"),
-            "->>'text', 'open') = 'open'"
+            $crate::resolved_state!(),
+            "->>'text', 'open') = 'open')"
         )
     };
 }

@@ -1036,7 +1036,12 @@ async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
 
     // ...and out again through the pane the reader looks at, which is the far
     // end of story 33's *monitoring* row: the state Kuma published and the
-    // page in Kuma to open, on a monitor nobody attached by hand.
+    // page in Kuma to open, on a monitor nobody attached by hand. The pane
+    // reads the state where the stored declaration says (#2364), which
+    // bring-up writes; this does as bring-up does.
+    knobas_app::commands::search::declare(&pool, &Registry::for_process())
+        .await
+        .expect("the declarations stored");
     let pane = knobas_app::assets::get(&pool, "asset:knobas-gitea")
         .await
         .expect("the container's pane");
