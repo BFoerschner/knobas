@@ -30,6 +30,7 @@
 
 pub mod assets;
 pub mod backup;
+pub mod bundle;
 pub mod capture;
 pub mod checkout;
 pub mod commands;
@@ -238,6 +239,12 @@ pub fn run() {
     // A command renderer's HTML frame is served from its own origin under its
     // own policy (#2304, `renderers::frame_response`), and so is D2's frame,
     // from the app's assets (#2381).
+    // A path the bundle does not have answers 404, not the app's page
+    // (#2390): the same assets are behind Tauri's `tauri://` protocol and the
+    // handler every window's webview is built with.
+    let mut context = tauri::generate_context!();
+    let bundle = bundle::share(&mut context);
+
     let builder = tauri::Builder::default().register_uri_scheme_protocol(
         renderers::FRAME_SCHEME,
         |context, request| {
@@ -295,7 +302,23 @@ pub fn run() {
                 })
                 .build(),
         )
+        .manage(bundle.clone())
         .setup(move |app| {
+            // The main window, declared in tauri.conf.json with `create:
+            // false` and built here as Tauri would build it, plus the handler
+            // that refuses the `index.html` fallback (#2390), which the
+            // config cannot name. First, as Tauri's own would be.
+            let main = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|window| window.label == "main")
+                .expect("tauri.conf.json declares the main window")
+                .clone();
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?
+                .on_web_resource_request(bundle.answer_missing_with_404())
+                .build()?;
             // Both managed synchronously, before anything can call in, and
             // both for the same reason: they are what a command asks when the
             // database is *not* up yet. `Lifecycle` is the shared state's
@@ -681,7 +704,7 @@ pub fn run() {
             // #2319's commit diff, local-first, appended at the foot (§10.8).
             commands::entity::entity_commit_diff,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("build the tauri application")
         .run(|app, event| {
             // Both, because they are different exits. Closing the last window
