@@ -12,8 +12,8 @@
  * image are not.
  *
  * {@link svgFrame} also sizes the frame to the drawing: the SVG's root gets
- * its viewBox's size as `width`/`height`, the `<img>` that size, and the
- * frame's body no margin (`marginwidth`/`marginheight`, presentational
+ * its viewBox's size as `width`/`height`, the `<img>` that size and out of
+ * the line box (`align="left"`), and the frame's body no margin (`marginwidth`/`marginheight`, presentational
  * attributes, which no CSP refuses).
  */
 import DOMPurify from "dompurify";
@@ -73,7 +73,10 @@ function sizeOf(svg: SVGSVGElement): [number, number] {
 function imageOf(svg: SVGSVGElement | null, width: number | null, height: number | null): string {
   // XMLSerializer writes the SVG namespace an `<img>` needs.
   const markup = svg === null ? "" : new XMLSerializer().serializeToString(svg);
-  const size = width === null || height === null ? "" : ` width="${width}" height="${height}"`;
+  // A sized drawing floats (`align`, presentational, so no CSP refuses it): an inline image sits on a text baseline,
+  // its line box a few px taller than the frame sized to it, and the overflow puts scrollbars in the frame where the
+  // platform draws them (WKWebView with classic macOS scrollbars), clipping the drawing.
+  const size = width === null || height === null ? "" : ` align="left" width="${width}" height="${height}"`;
   return `<img alt=""${size} src="data:image/svg+xml;base64,${base64Of(new TextEncoder().encode(markup))}">`;
 }
 

@@ -27,6 +27,14 @@ test("an SVG is drawn as an image in the frame, sized to its viewBox", () => {
   expect(svg).toContain(">hi<");
 });
 
+test("the sized image floats (align=left), so it makes no line box taller than the frame", () => {
+  // An inline <img> sits on a text baseline: the line box is a few px taller than the image, the frame sized to the
+  // image overflows, and with classic macOS scrollbars WKWebView draws both bars and clips the drawing (#2380).
+  // A floated image (`align`, a presentational attribute no CSP refuses) makes no line box.
+  const img = new DOMParser().parseFromString(svgFrame(HOSTILE)!.srcdoc, "text/html").querySelector("img")!;
+  expect(img.getAttribute("align")).toBe("left");
+});
+
 test("the SVG is sanitized first: no script, no handler, no javascript: link", () => {
   const svg = imageIn(svgFrame(HOSTILE)!.srcdoc);
   expect(svg).not.toMatch(/<script/i);
