@@ -506,3 +506,18 @@ test("on the Tickets board and list, yellow is the chosen job's card and row, an
   expect(block(code, ".tf-row.tf-sel td:last-child")).toMatch(/box-shadow:\s*inset -2px 0 0 var\(--tf-sel-ink\), inset 0 2px 0 var\(--tf-sel-ink\), inset 0 -2px 0 var\(--tf-sel-ink\);/);
   expect(block(code, ".tf-row.tf-card.tf-sel td")).toMatch(/--tf-sel-ink:\s*var\(--card-ink\);/);
 });
+
+test("the yellow page card is a light surface in both themes: its dots and chips take the light tone values, the blocked chip too (spec #2396, #2400)", () => {
+  const TONES = ["--ok", "--ok-bg", "--warn", "--warn-bg", "--err", "--err-bg", "--info", "--info-bg", "--muted", "--muted-bg"];
+  // The light values are the spec's colour table's, not a copy of the stylesheet.
+  const light = new Map(COLOURS.map(([token, value]) => [token, value]));
+  expect(TONES.every((token) => light.has(token)), "the spec's table names every tone").toBe(true);
+  const card = block(code, ".tf-ticketcard.tf-card");
+  const wrong = TONES.filter((token) => !card.includes(`${token}: ${light.get(token)};`));
+  expect(wrong).toEqual([]);
+  // Every dot and chip draws from these tokens, so none needs a value of its own on the card.
+  expect(block(code, ".tf-dot.tf-err")).toContain("var(--err)");
+  expect(block(code, ".tf-jobcard .tf-chip.tf-err")).toContain("var(--err)");
+  // The rule is the design system's, in its words.
+  expect(spec).toContain("The yellow card is a light surface in both themes");
+});

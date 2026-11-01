@@ -21,8 +21,47 @@
 .tf-ticketpage { height: 100%; }
 .tf-ticketpage .tf-ws { flex: 1; min-height: 0; height: auto; }
 @media (max-width: 900px) { .tf-ticketpage { height: auto; } }
-/* No 64px key in either mood. */
+/* No 64px key in either mood. Beside it, the copy button: one press puts the key and the title on the clipboard (#2400). */
 .tf-ticketcard .tf-jobkey { font-size: var(--t-d2); }
+.tf-tkhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tf-ticketcard .tf-tkcopy { color: var(--card-ink-2); }
+.tf-ticketcard .tf-tkcopy:hover { background: rgba(0,0,0,.08); color: var(--card-ink); }
+.tf-sheetcard .tf-tkcopy { color: var(--ink-2); }
+.tf-sheetcard .tf-tkcopy:hover { background: var(--sheet-2); color: var(--ink); }
+.tf-ticketcard .tf-tkcopy.tf-tkcopied { color: var(--ok); }
+/* The status as the card's chip, close under the key: the one fact that is a state. */
+.tf-ticketcard .tf-jobrow { margin-top: -4px; }
+.tf-ticketcard .tf-jobrow .tf-chip { font-size: var(--t-xs); line-height: 18px; padding: 0 7px; }
+/* The facts list is the Tickets pane's (`dl.tf-facts`): a 68px label column, every row 20px tall whether it holds
+   text, a chip or an avatar, so the rhythm holds. */
+.tf-ticketcard .tf-facts { grid-template-columns: 68px minmax(0, 1fr); gap: 8px 10px; align-items: center; }
+.tf-ticketcard .tf-facts dt, .tf-ticketcard .tf-facts dd { line-height: 20px; min-height: 20px; }
+.tf-ticketcard .tf-facts dt { color: var(--card-ink-2); }
+.tf-sheetcard .tf-facts dt { color: var(--ink-2); }
+.tf-ticketcard .tf-facts dd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.tf-ticketcard .tf-facts dd .tf-av { width: 20px; height: 20px; font-size: 9px; line-height: 1; }
+.tf-ticketcard .tf-facts dd .tf-chip { font-size: var(--t-xs); line-height: 18px; padding: 0 7px; }
+.tf-ticketcard .tf-facts dd .tf-lab { line-height: 16px; }
+.tf-ticketcard .tf-facts .tf-av { background: rgba(0,0,0,.08); border-color: rgba(0,0,0,.2); color: var(--card-ink); }
+.tf-ticketcard .tf-facts .tf-av.tf-me { background: var(--card-ink); border-color: var(--card-ink); color: var(--card); }
+.tf-sheetcard .tf-facts .tf-av { background: var(--sheet-2); border-color: var(--rule); color: var(--ink-2); }
+.tf-sheetcard .tf-facts .tf-av.tf-me { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+.tf-ticketcard .tf-lab { border-color: rgba(0,0,0,.25); color: var(--card-ink); }
+.tf-sheetcard .tf-lab { border-color: var(--rule); color: var(--ink-2); }
+/* The epic as a chip that links: the status chip's shape, cut with an ellipsis (its whole name is its title),
+   underlined on hover so it reads as a place to go. */
+.tf-ticketcard .tf-facts a.tf-tkepicchip {
+  display: inline-block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  line-height: 18px; color: var(--card-ink); text-decoration: none;
+}
+.tf-sheetcard .tf-facts a.tf-tkepicchip { color: var(--ink); }
+.tf-ticketcard .tf-facts a.tf-tkepicchip:hover { text-decoration: underline; text-underline-offset: 2px; }
+/* The yellow card is a light surface in both themes (design system, Colour), so its dots and chips take the light
+   tone values: dark's --warn is the card's own yellow and its --err pink on it. The blocked chip follows. */
+.tf-ticketcard.tf-card {
+  --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
+  --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
+}
 /* The one decision at the card's foot: the card's own ink, large. */
 .tf-ticketcard .tf-go { margin-top: auto; padding-top: 6px; }
 .tf-ticketcard .tf-go .tf-btn { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }

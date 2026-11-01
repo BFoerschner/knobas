@@ -95,6 +95,36 @@ async fn a_tickets_detail_carries_its_type_priority_and_estimate() {
     assert_eq!(detail.estimate_seconds, Some(10800));
 }
 
+/// **The card's labels** (#2400) come with the detail, through the
+/// `labels` path the Jira adapter declares, in the record's order; a ticket
+/// with none, or with a blank one, carries none of those, and the wire leaves
+/// the field out when the list is empty.
+#[tokio::test]
+async fn a_tickets_detail_carries_its_labels_and_leaves_them_off_the_wire_when_there_are_none() {
+    let pool = pool().await;
+    let labelled = issue(
+        &pool,
+        &key(),
+        serde_json::json!({ "labels": ["sepa", " ", "psp"] }),
+    )
+    .await;
+    let bare = issue(&pool, &key(), serde_json::json!({ "labels": [] })).await;
+
+    let detail = get_entity_inner(&pool, &Registry::for_process(), &labelled)
+        .await
+        .unwrap();
+    assert_eq!(
+        detail.labels.as_deref(),
+        Some(&["sepa".to_owned(), "psp".to_owned()][..])
+    );
+    let none = get_entity_inner(&pool, &Registry::for_process(), &bare)
+        .await
+        .unwrap();
+    assert_eq!(none.labels, None);
+    let wire = serde_json::to_value(&none).unwrap();
+    assert!(wire.get("labels").is_none(), "{wire}");
+}
+
 /// A miss is a miss (ADR-0007): no estimate, an estimate Jira wrote as `null`
 /// and one that is not a number all read as none, never as zero.
 #[tokio::test]

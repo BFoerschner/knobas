@@ -69,6 +69,9 @@ pub struct Detail {
     pub issue_type: Option<String>,
     pub priority: Option<String>,
     pub estimate_seconds: Option<i64>,
+    /// A ticket's labels through the declared `labels` path (#2400), in the
+    /// record's order, as the mini board reads them; empty on a miss.
+    pub labels: Vec<String>,
     /// A repository's default branch through its declared `default_branch`
     /// path (#2307); `None` where nothing is declared or the record misses it.
     pub default_branch: Option<String>,
@@ -171,6 +174,9 @@ select i.entity_id, i.source_id, i.kind, i.title, "#,
        "#,
     crate::declared_integer!("$2", "estimate"),
     r#" as estimate_seconds,
+       array(select l.value from "#,
+    crate::declared_list!("$2", "labels"),
+    r#" l) as labels,
        "#,
     crate::declared_string!("$2", "default_branch"),
     r#" as default_branch,
@@ -277,6 +283,7 @@ pub async fn read(
         issue_type: row.get("issue_type"),
         priority: row.get("priority"),
         estimate_seconds: row.get("estimate_seconds"),
+        labels: row.get("labels"),
         default_branch: row.get("default_branch"),
         description: row.get("description"),
         markup: markup_of(row.get("markup")),

@@ -285,6 +285,9 @@ function getEntity(args: Record<string, unknown>) {
     priority: fakeText(entry.payload["priority"]),
     estimate_seconds:
       typeof entry.payload["estimate_h"] === "number" ? Math.round(entry.payload["estimate_h"] * 3600) : null,
+    // The mock adapter declares `labels` on the flat record (#811); none is
+    // left off, as the real command leaves an empty list off the wire (#2400).
+    ...fakeLabels(entry.payload["labels"]),
     // A repository's declared default branch and its tree's sections, as
     // Gitea declares both (#2307, #2298): the repository page's demo rows are
     // Gitea-shaped (`repoView`).
@@ -299,6 +302,12 @@ function getEntity(args: Record<string, unknown>) {
 function repoDeclared(payload: Record<string, unknown>): Partial<Pick<EntityDetail, "default_branch" | "tree">> {
   const named = fakeText(payload["default_branch"]);
   return { ...(named === null ? {} : { default_branch: named }), tree: { dir: "files:", file: "file:" } };
+}
+
+/** A ticket's labels as `get_entity` answers them: the non-blank ones, or no field for none (#2400). */
+function fakeLabels(value: unknown): Pick<EntityDetail, "labels"> {
+  const labels = Array.isArray(value) ? value.filter((label): label is string => typeof label === "string" && label.trim() !== "").map((label) => label.trim()) : [];
+  return labels.length === 0 ? {} : { labels };
 }
 
 /** A payload value that is non-blank text, trimmed, or `null` (ADR-0007's miss). */

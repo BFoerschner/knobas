@@ -519,3 +519,89 @@ test("Start work draws the stepper above the description", async () => {
   const description = reading()!.querySelector(".tf-tkdesc")!;
   expect(steps.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING, "the steps come first").toBeTruthy();
 });
+
+// ---- the card: key with copy, status chip, facts list (#2400) ----
+
+/** The card's facts list as label and value pairs, in order; a value of parts (an avatar and a name, chips) reads them space-separated. */
+function facts(card: HTMLElement): [string, string][] {
+  const terms = [...card.querySelectorAll("dl.tf-facts > dt")];
+  const value = (dd: Element | null) => {
+    if (dd === null) return "";
+    const parts = [...dd.children].map((part) => part.textContent?.trim() ?? "");
+    return (parts.length > 0 ? parts.join(" ") : (dd.textContent ?? "")).replace(/\s+/g, " ").trim();
+  };
+  return terms.map((term) => [term.textContent?.trim() ?? "", value(term.nextElementSibling)]);
+}
+
+test("PAY-231's card: the key with its copy button, the status chip, then Epic, Assignee, Type, Priority and Labels", async () => {
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  const page = await pageOf("PAY-231");
+  await until(() => facts(page).length === 5, `the facts read ${JSON.stringify(facts(page))}`);
+
+  expect(page.querySelector(".tf-tkhead .tf-jobkey")?.textContent).toBe("PAY-231");
+  expect(page.querySelector(".tf-tkhead button.tf-tkcopy")?.getAttribute("aria-label")).toBe("Copy the key and the title");
+  expect(page.querySelector(".tf-jobrow .tf-chip")?.textContent).toBe("In Progress");
+  expect(facts(page).map(([label]) => label)).toEqual(["Epic", "Assignee", "Type", "Priority", "Labels"]);
+  expect(facts(page)[1]![1]).toBe("MA mara (you)");
+  expect(page.querySelector("dl.tf-facts .tf-av")?.classList.contains("tf-me"), "my own ticket's avatar is in full ink").toBe(true);
+  expect(facts(page).slice(2)).toEqual([
+    ["Type", "Story"],
+    ["Priority", "High"],
+    ["Labels", "sepa psp"],
+  ]);
+});
+
+test("the epic is a chip that opens the epic's page, cut with its whole name as its title", async () => {
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  const page = await pageOf("PAY-231");
+  await until(() => page.querySelector("a.tf-tkepicchip")?.textContent?.includes("Payout reliability") ?? false, "the epic chip never named its epic");
+  const chip = page.querySelector<HTMLAnchorElement>("a.tf-tkepicchip")!;
+  expect(chip.getAttribute("href")).toBe("#/ticket/mock%3APAY-200");
+  expect(chip.classList.contains("tf-chip")).toBe(true);
+  expect(chip.textContent?.trim()).toBe("PAY-200 Payout reliability");
+  expect(chip.title).toBe("PAY-200 Payout reliability");
+});
+
+test("OPS-77's card draws no row its source leaves empty: no Epic and no Type; somebody else's assignee is not mine", async () => {
+  await openOn("#/ticket/mock%3AOPS-77", "Rotate the staging database credentials");
+  const page = await pageOf("OPS-77");
+  await until(() => facts(page).length > 0, "no facts drawn");
+  expect(facts(page)).toEqual([
+    ["Assignee", "PR priya"],
+    ["Priority", "Low"],
+    ["Labels", "on-call"],
+  ]);
+});
+
+test("the copy button puts the key and the title on the clipboard and toasts Copied", async () => {
+  const written: string[] = [];
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText: (text: string) => (written.push(text), Promise.resolve()) },
+    configurable: true,
+  });
+  try {
+    await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+    const page = await pageOf("PAY-231");
+    const button = page.querySelector<HTMLButtonElement>("button.tf-tkcopy")!;
+    button.click();
+    await until(() => written.length === 1, "nothing was copied");
+    expect(written).toEqual(["PAY-231 Retry failed SEPA payouts"]);
+    await until(() => target.querySelector(".tf-toasts")?.textContent?.includes("Copied") ?? false, "no Copied toast");
+    expect(button.classList.contains("tf-tkcopied"), "the button takes the ok tone for a moment").toBe(true);
+  } finally {
+    Reflect.deleteProperty(navigator, "clipboard");
+  }
+});
+
+test("both moods draw the same card markup", async () => {
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  const reading = await pageOf("PAY-231");
+  await until(() => facts(reading).length === 5, "the facts never drew");
+  const shape = (card: HTMLElement) => [...card.querySelectorAll("*")].map((node) => node.tagName).join(" ");
+  const before = shape(reading);
+  location.hash = "#/job/mock%3APAY-231";
+  await until(() => mood(pageCard()!) === "pinned", "the card never turned yellow");
+  const pinned = pageCard()!;
+  await until(() => facts(pinned).length === 5, "the pinned facts never drew");
+  expect(shape(pinned)).toBe(before);
+});

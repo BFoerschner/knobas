@@ -471,7 +471,7 @@
   <div class="tf-full tf-ticketpage">
   <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: key }]} {back} />
   <div class="tf-ws">
-    <TfJobCard {detail} others={reader.others} {pinned} {action} onaction={act} />
+    <TfJobCard {detail} others={reader.others} parentTitle={reader.parentTitle} {mine} {pinned} {action} onaction={act} />
     <section class="tf-work">
       <div class="tf-wbody">
         <div class="tf-tkread">

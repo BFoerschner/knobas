@@ -12,8 +12,7 @@ import type { EntityDetail, EntityRow, Reached, Tone } from "../../ipc/entity";
 import type { SourceSummary } from "../../ipc/sources";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { protocolDayOf } from "../../standup/protocol";
-import { keyOf, minutesLabel } from "../../time/format";
-import { minutesOf } from "../../time/week";
+import { keyOf } from "../../time/format";
 import { CI } from "../roles.svelte";
 
 /** What the job reads of a `list_sources` row: the fields of the wire row it uses, all always sent. */
@@ -151,17 +150,6 @@ export function blockerEntries(detail: Pick<EntityDetail, "row" | "links">): Blo
       title: entry.other.title,
       note: entry.link.note ?? null,
     }));
-}
-
-/** The card's facts line: `Story, High, est. 3h`, each part only where known. */
-export function factsLine(detail: Pick<EntityDetail, "issue_type" | "priority" | "estimate_seconds">): string {
-  const parts: string[] = [];
-  if (detail.issue_type) parts.push(detail.issue_type);
-  if (detail.priority) parts.push(detail.priority);
-  if (detail.estimate_seconds !== null && detail.estimate_seconds > 0) {
-    parts.push(`est. ${minutesLabel(minutesOf(detail.estimate_seconds))}`);
-  }
-  return parts.join(", ");
 }
 
 /** The kinds the Code section draws, in the words of R-4.7. */

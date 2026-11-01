@@ -35,6 +35,7 @@ import {
   type SourceFacts,
 } from "./job";
 import type { JobPorts } from "./ports";
+import { parentOf } from "../sets/apply";
 import { ASSET_LIMIT, reachFilter, readSection, SECTION_LIMIT, SECTION_READS, type SectionRead } from "./sections";
 
 /** The reads the reader makes: the job's own ports, without its writes. */
@@ -68,6 +69,12 @@ export interface JobReader {
   readonly detail: EntityDetail | null | undefined;
   /** The other sources' tickets under the same key (#1476), in list order; empty when the key is one source's. */
   readonly others: EntityDetail[];
+  /**
+   * The title of the ticket's direct parent, its path line's last key, read
+   * from the mirror for the card's epic chip (#2400); `null` with no parent,
+   * while it is read, or when it cannot be.
+   */
+  readonly parentTitle: string | null;
   /** Why the job could not be read, or `null`. */
   readonly failure: string | null;
   /** Every configured source, for which ticket is the person's own. */
@@ -120,6 +127,7 @@ function fresh() {
   return {
     detail: undefined as EntityDetail | null | undefined,
     others: [] as EntityDetail[],
+    parentTitle: null as string | null,
     code: null as EntityRow[] | null,
     failure: null as string | null,
     thread: null as Thread | null,
@@ -159,6 +167,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       if (found === null) return;
       const id = found.row.entity_id;
       void readConversation(id, mine);
+      void readParent(found, mine);
       void readInherited(id, mine);
       // The reach starts from the ticket's context, so the context first.
       const context = await ports.promoteContext(id);
@@ -251,6 +260,18 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     }
   }
 
+  /** The parent's title for the epic chip; a parent that cannot be read keeps the path line alone. */
+  async function readParent(ticket: EntityDetail, mine: number) {
+    const parent = parentOf(ticket.row);
+    if (parent === null) return;
+    try {
+      const read = await ports.getEntity(parent);
+      if (mine === token) state.parentTitle = read.row.title;
+    } catch {
+      // The chip says the key alone.
+    }
+  }
+
   async function readConversation(id: string, mine: number) {
     // The visit is written first and answers the one before it; a visit that
     // cannot be written reads as no earlier visit, so nothing is called new.
@@ -314,6 +335,9 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     },
     get others() {
       return state.others;
+    },
+    get parentTitle() {
+      return state.parentTitle;
     },
     get failure() {
       return state.failure;

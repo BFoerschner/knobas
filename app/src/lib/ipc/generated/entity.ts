@@ -1279,6 +1279,13 @@ priority: string | null,
  */
 estimate_seconds: number | null, 
 /**
+ * A ticket's labels through the declared `labels` path (#2400), the
+ * ticket page card's *Labels* row; the mini board reads them by the same
+ * rule. `None`, absent on the wire, where there are none, so the row is
+ * not drawn (ADR-0007); never an empty list.
+ */
+labels?: Array<string>, 
+/**
  * A repository's default branch as its source declares it (#2307),
  * through the kind's `default_branch` path: what the repository page
  * draws its tabs on before the branch list answers. Absent on the wire
