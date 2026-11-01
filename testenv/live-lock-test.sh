@@ -60,6 +60,10 @@ export KNOBAS_LIVE_LOCK_POLL=0.1
 # set their own.
 export KNOBAS_LIVE_LOCK_WAIT=5
 unset KNOBAS_LIVE_LOCK_HOLDER KNOBAS_LIVE_GITEA_LOCK_HOLDER
+# This machine's products, whatever testenv/live.env says: a developer whose
+# file names a remote target must not have these tests ssh anywhere.
+export KNOBAS_LIVE_TARGET=local
+unset KNOBAS_LIVE_SSH KNOBAS_LIVE_ONE_JVM DOCKER_HOST
 
 # A scratch testenv/ whose seeds do nothing, so `live_session` can run whole.
 fake=$scratch/tree/testenv

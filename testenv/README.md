@@ -290,9 +290,11 @@ on #633's first runs; the cure for a container in that state is `docker
 compose up -d --force-recreate <service>`, then `stop` and `up` once more for
 OrbStack's port forward).
 
-**Never a remote engine.** `live-up` refuses a docker context named
+**Never a stray remote engine.** `live-up` refuses a docker context named
 `knobas-*`: until #634 those reached the three Hetzner servers over ssh, and a
 context left behind on a machine would send these calls somewhere else. The
+one remote engine allowed is a declared one, in `testenv/live.env` (next
+section). The
 three product monitors check the products at their published ports, so they
 are red whenever their product is stopped. See "Monitors" below.
 
@@ -311,6 +313,155 @@ and lets it go after the put-back, a `live-up` product's keeper holds it
 against other worktrees until `live-down`, and a Gitea session queues on
 the Gitea lock and never on the JVM one — both in `just witness-unit` and so
 in `just check`.
+
+## Live products on a remote machine (WSL)
+
+**Björn, 2026-11-01:** the live products may run **24/7 on a WSL box** instead
+of on demand in the notebook's Docker, so the whole live suite is open around
+the clock and no JVM run waits for another product to be removed first. It is
+a switch, not a replacement: one file says where the products are, and with no
+file everything above holds unchanged.
+
+**The switch is `testenv/live.env`** (git-ignored; `live.env.example` is the
+template), in the **main checkout**: every worktree reads that one file
+(its own `testenv/live.env` first, if it has one). It holds `KNOBAS_LIVE_*`
+lines only and is read, never sourced. A variable set in the environment wins
+over the file, per variable, so `KNOBAS_LIVE_TARGET=local just jira-live` runs
+one suite here while the file names the WSL box, and the unit tests pin
+`local` whatever the file says.
+
+| Variable | Default | Means |
+|---|---|---|
+| `KNOBAS_LIVE_TARGET` | `local` | `local`: this machine's Docker, on demand, as above. `remote`: the machine below. |
+| `KNOBAS_LIVE_SSH` | — | The remote machine's ssh host. Required for `remote`. |
+| `KNOBAS_LIVE_TUNNEL_PORTS` | `3000 3002 8080 8090 8111` | Ports forwarded from 127.0.0.1 here to 127.0.0.1 there. |
+| `KNOBAS_LIVE_ONE_JVM` | `1` local, `0` remote | The one-JVM refusal. |
+| `KNOBAS_LIVE_LICENCE_MARGIN_S` | `3600` | Jira and Confluence are set up again when their licence has less left than this (both targets). |
+| `KNOBAS_LIVE_MEM_BUDGET_MB` | engine memory − `KNOBAS_LIVE_MEM_RESERVE_MB` (1536) | Remote only: what the products' caps may add up to (below). |
+| `KNOBAS_LIVE_{GITEA,TEAMCITY,TEAMCITY_AGENT,JIRA,CONFLUENCE,DB}_MB` | 512, 2560, 1024, 3584, 2560, 512 | Remote only: each container's memory cap, in `docker-compose.remote.yml` and in the budget alike. |
+
+**How a remote target works.** Nothing in the suites changes, and no checkout
+lives on the remote machine:
+
+- `live-lib.sh` exports `DOCKER_HOST=ssh://$KNOBAS_LIVE_SSH`, so every
+  `docker` and `docker compose` call (the recipes, the seeds, and the one
+  suite that runs `docker exec`, `live_jira_seeded`'s tied-`created` stamp)
+  goes to the remote engine. Compose still reads `docker-compose.yml` and
+  `images.env` from the worktree, so the remote runs the pins of the tree
+  under test.
+- One ssh master (`testenv/live tunnel up`, opened by any live run that
+  finds it down, left running) forwards the product ports from this
+  machine's loopback to the remote's. The products stay bound to the remote's
+  127.0.0.1, and every URL the seeds, `./seed --env` and the suites use is the
+  one they use locally. A local product still holding one of those ports
+  stops the tunnel from opening, and the refusal names the port.
+- The seeds run here, as always, so each worktree's `seed-state.json` is its
+  own and is written by the seed that just ran against the remote product.
+- **No run stops a product when it ends** (`live_to_put_back` answers
+  nothing), and the one-JVM refusal is off: products stay up until the
+  memory budget (below) needs the room for another.
+  `just live-down <product>` still works, through the same engine.
+- The locks stay on this machine (`$TMPDIR`): the worktrees that take turns
+  are all here. The JVM lock still serialises the JVM runs.
+- **Uptime Kuma and the canary stay here.** `just kuma-live` does not source
+  `live-lib.sh`, the canary is a host socket of this machine, and the Kuma
+  suites assert no product's monitor state. Kuma's `gitea` monitor reads
+  `gitea:3000` on the local compose network, so it is red while Gitea is
+  remote; its three JVM checks go through `host.docker.internal` to the tunnel.
+
+**The box has 16 GB, so nothing may freeze it.** All products up at once would
+claim about 11 GB, more than WSL can be given while Windows keeps enough to
+stay responsive, and a VM pushed into swap stops answering ssh. There are three
+layers, each closing a different way to that:
+
+1. **Windows keeps its share.** `setup-windows.ps1` gives WSL physical memory
+   less 6 GB (10 of 16), 4 GB of swap and `autoMemoryReclaim=gradual`. WSL
+   cannot take more than its cap, whatever runs inside.
+2. **Every container has a hard cap** (`docker-compose.remote.yml`, layered on
+   through `COMPOSE_FILE` for every compose call a remote run makes) and a heap
+   pinned under it: Jira 3.5 GB with `-Xmx2048m`, Confluence 2.5 GB with
+   `-Xmx1024m`, TeamCity 2.5 GB with `-Xmx1536m` plus 1 GB for its agent, each
+   PostgreSQL and Gitea 512 MB. A JVM that grows takes out its own container,
+   not the VM. `check-ports.sh` asserts the overlay changes no port.
+3. **A memory budget decides what runs at once.** Before a product starts, the
+   caps of what is up are added to its own. While the sum is over the budget
+   (the engine's memory less 1536 MB), the other JVM products are **stopped**,
+   the one started longest ago first, until it fits. They are stopped rather
+   than removed: TeamCity keeps its builds, and Jira and Confluence their seed
+   until their licence is due. The run holds the JVM lock, so no other run is
+   inside what it stops. A product another worktree's `live-up` keeps is never
+   stopped, and a product that cannot fit is refused in a line naming the
+   numbers. With a 10 GB WSL, any two JVM products fit beside Gitea and a third
+   stops one. `testenv/live remote-check` prints the budget and which pairs
+   fit.
+
+**The 3-hour licence is renewed when it is due.** A product kept up meets the
+timebomb licence's end, which a run that removed it afterwards never did. So
+before Jira or Confluence is started or re-seeded, by a run or by `live-up`,
+its container's age is read (`Created`, which is before the wizard applied
+the key, so the estimate errs early). With less than
+`KNOBAS_LIVE_LICENCE_MARGIN_S` left it is removed with its volumes and set up
+from empty, about five minutes for Jira and two for Confluence; otherwise it is
+re-seeded, which writes nothing to a seeded instance. A stopped container a
+reboot left behind is the same case. The caller holds the JVM lock, so no
+other run is inside the product while it is replaced. This holds on the local
+target too, where a `live-up` session past two hours used to end in an
+expired product.
+
+**A seed that fails on an instance that was already there is retried once,
+from empty.** That covers data a killed run left half-changed, an account Jira
+locked after wrong passwords (*Never send this Jira a wrong password*, above),
+and a licence that ran out earlier than its age said. A seed that fails from
+empty is reported as the failure it is. Jira and Confluence log in with the
+admin password, not a token, so a fresh instance needs no new credential. The
+Gitea token is checked by `./seed --env` and minted again by the seed (#1377).
+
+### Setting it up
+
+Three scripts in `testenv/wsl/`, one per machine:
+
+1. **Windows**, in an elevated PowerShell:
+   `powershell -ExecutionPolicy Bypass -File setup-windows.ps1 -Distro Ubuntu`.
+   It sets `memory` (physical less 6 GB), `swap=4GB`,
+   `networkingMode=mirrored` (so WSL's sshd answers on the Windows box's own
+   address), `vmIdleTimeout=-1` and `autoMemoryReclaim=gradual` in
+   `%UserProfile%\.wslconfig`. An existing file is backed up and keeps its
+   other keys. It refuses a `-MemoryGB` that leaves Windows under 4 GB. It adds a firewall rule for port 2222 and a scheduled task
+   that starts the distribution at boot and keeps it open. Then `wsl
+   --shutdown`. Set the box never to sleep.
+2. **WSL**: `bash setup-wsl.sh --key '<public key>' [--port 2222]`. It turns
+   systemd on (first run: `wsl --shutdown` and run it again), installs
+   `docker.io` and `openssh-server`, puts the user in `docker`, and runs sshd
+   on 2222 with keys only. Docker Desktop's engine is refused as a 24/7 host,
+   because it runs only while Docker Desktop does.
+3. **Mac**: `testenv/wsl/connect.sh <address> [port] [user]`. It makes
+   `~/.ssh/knobas-wsl` (no passphrase: the runs are unattended, and a security
+   key asks for a touch per login) and prints the public key for step 2. It
+   writes a `Host knobas-wsl` block with a ControlMaster to `~/.ssh/config`,
+   because every docker call is an ssh login. It writes `testenv/live.env` in
+   the main checkout only once the login works, then runs `testenv/live
+   remote-check`: ssh, the engine, the memory budget, the tunnel.
+   `connect.sh --local` removes `live.env` and the tunnel, and the products
+   run here again.
+
+If mirrored networking is not available, Tailscale inside WSL does the same
+job: use its address in step 3. Before switching, stop any product still up
+locally (`just live-down <product>`). Its port would keep the tunnel from
+opening.
+
+**Measured, 2026-11-01**, against an OrbStack Ubuntu machine (arm64, 7 GB)
+standing in for WSL and set up by `setup-wsl.sh`. `just gitea-live` (70
+tests) and `just gitea-live-capped` were green. `just confluence-live` was
+green: 36 tests, seeded and verified at 118 s, Confluence left up. A second
+run with `KNOBAS_LIVE_LICENCE_MARGIN_S=10800` removed the running instance as
+due, set it up from empty and was green again. On a second stand-in, the caps
+landed (Gitea and each PostgreSQL 512 MB, Confluence 2560 MB running
+`-Xmx1024m`). Under a forced 3600 MB budget, starting Forgejo was refused while
+Confluence's `live-up` kept it, and stopped Confluence once nothing did. A
+`just confluence-live` then brought it back from its stopped container,
+re-seeded rather than rebuilt, and was green. Jira and TeamCity have not run
+on a remote target. Neither the real WSL box nor `setup-windows.ps1` has run
+yet; the first run on the box is where they are witnessed.
 
 ## The live recipes
 
@@ -2225,8 +2376,10 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
 | `./fetch-timebomb-keys.sh` | Pulls the two 10-user, 3-hour Data Center timebomb keys off Atlassian's public page, checks each decodes to the right product, prints `export` lines (`--write` also drops them in the git-ignored `.env.licences`). `seed-atlassian.sh` calls it when a key is unset. |
 | `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`); `./seed --atlassian` runs the script below after it. Takes `jira` or `confluence` to walk one wizard, which is the shape a loaded machine wants — see *Jira and Confluence, end to end*. |
 | `./seed-atlassian-content.sh` | The Tidewater people, projects, issues, comments, worklogs and links in the real Jira; the ENG space, pages and comments in the real Confluence. Takes `jira` or `confluence` to seed one. `--verify` reads PAY-231 and one page back, walks one throwaway ticket through `NARROW`'s workflow to prove it still narrows (the only write in that path; it deletes the ticket), and waits until a CQL search returns exactly the seeded pages and the home page; the Confluence seed deletes the `ENG` pages it did not create. `just jira-live` / `just confluence-live` run the whole window. |
-| `./live` | `up` / `down <gitea\|teamcity\|jira\|confluence>` and `status`: the on-demand products (`live-lib.sh`), one JVM product at a time. `just live-up` / `live-down` / `live-status`. See *Live products, on demand*. |
-| `./live-test.sh` | Its unit tests against a stub `docker`: the one-JVM refusal, the remote-context refusal, what a run puts back, and that no run stops a Gitea it started, TeamCity's or Gitea's own (#698). `just witness-unit`, and part of `just check`. |
+| `./live` | `up` / `down <gitea\|teamcity\|jira\|confluence>` and `status`: the on-demand products (`live-lib.sh`), one JVM product at a time. `just live-up` / `live-down` / `live-status`. See *Live products, on demand*. With a remote target, also `tunnel up\|down\|status` and `remote-check` (*Live products on a remote machine (WSL)*). |
+| `./live.env.example` | The template for `live.env`, which says where the live products run: here, or a remote machine. |
+| `./wsl/setup-windows.ps1`, `./wsl/setup-wsl.sh`, `./wsl/connect.sh` | Setting up a WSL box as the 24/7 host of the live products, one script per machine. See *Live products on a remote machine (WSL)*. |
+| `./live-test.sh` | Its unit tests against a stub `docker`: the one-JVM refusal, the remote-context refusal, what a run puts back, and that no run stops a Gitea it started, TeamCity's or Gitea's own (#698); `live.env`'s reading and a remote target's rules; the licence renewal and the one retry from empty. `just witness-unit`, and part of `just check`. |
 | `./live-lock-test.sh` | The JVM lock's unit tests (#690), against a stub `docker` and a scratch lock: a second run waits for the first, a stale lock is taken over, the wait times out naming the holder. `just witness-unit`, and part of `just check`. |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
