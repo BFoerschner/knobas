@@ -711,19 +711,21 @@ done
 
 # --- the https front (#2377) ------------------------------------------------
 
+# "$scratch/docker.log" is the top-level stub log: the subshells above set
+# their own STUB_LOG, which shellcheck cannot tell apart.
 # It serves both forges, so it goes down with the last of them and not before.
 for want in "gitea||stop https-front" "forgejo||stop https-front" \
   "gitea|knobas-forgejo|" "forgejo|knobas-gitea|"; do
   product=${want%%|*} rest=${want#*|}
   up=${rest%%|*} needle=${rest#*|}
   checks=$((checks + 1))
-  : >"$STUB_LOG"
+  : >"$scratch/docker.log"
   out=$(STUB_RUNNING=$up live_down "$product" 2>&1) || fail "live_down $product (up: '$up')" "$out"
-  front=$(grep -c 'stop https-front' "$STUB_LOG" || true)
+  front=$(grep -c 'stop https-front' "$scratch/docker.log" || true)
   if [ -n "$needle" ] && [ "$front" -ne 1 ]; then
-    fail "live_down $product with no other forge up stops the https front" "$(cat "$STUB_LOG")"
+    fail "live_down $product with no other forge up stops the https front" "$(cat "$scratch/docker.log")"
   elif [ -z "$needle" ] && [ "$front" -ne 0 ]; then
-    fail "live_down $product leaves the https front to $up" "$(cat "$STUB_LOG")"
+    fail "live_down $product leaves the https front to $up" "$(cat "$scratch/docker.log")"
   fi
 done
 
@@ -745,14 +747,14 @@ echo "ssh $*" >>"$STUB_LOG"
 STUB
 chmod +x "$fwd/bin/lsof" "$fwd/bin/ssh"
 checks=$((checks + 1))
-: >"$STUB_LOG"
+: >"$scratch/docker.log"
 # shellcheck disable=SC2030,SC2031  # its own subshell on purpose
 out=$( (
-  export PATH="$fwd/bin:$PATH" STUB_FREE="3443 3445" KNOBAS_LIVE_SSH=wsl-test
+  export PATH="$fwd/bin:$PATH" STUB_FREE="3443 3445" KNOBAS_LIVE_SSH=wsl-test STUB_LOG="$scratch/docker.log"
   _live_tunnel_add_missing
 ) 2>&1 ) || fail "_live_tunnel_add_missing" "$out"
 check_eq "only the ports nothing here listens on are added to the open master" \
-  "2 1 0" "$(grep -c -- '-O forward' "$STUB_LOG") $(grep -c '127.0.0.1:3445:127.0.0.1:3445' "$STUB_LOG") $(grep -c ':3000:' "$STUB_LOG")"
+  "2 1 0" "$(grep -c -- '-O forward' "$scratch/docker.log") $(grep -c '127.0.0.1:3445:127.0.0.1:3445' "$scratch/docker.log") $(grep -c ':3000:' "$scratch/docker.log")"
 
 # --- the canary and the stall follow a remote target ---------------------------
 

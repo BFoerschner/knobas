@@ -355,7 +355,7 @@ rc=$(wait_rc giteawaiter)
 out=$(cat "$scratch/giteawaiter.out")
 check "the waiting Gitea session goes on once the first lets go" "$rc" "0"
 check "and says how long it waited" "$out" "took the Gitea lock after"
-check "it starts Gitea holding the Gitea lock" "$(cat "$STUB_LOG")" "up -d --wait gitea [lock free] [gitea lock held]"
+check "it starts Gitea holding the Gitea lock" "$(cat "$STUB_LOG")" "up -d --wait gitea https-front [lock free] [gitea lock held]"
 check_not "and, as every run, leaves Gitea up (#698)" "$(cat "$STUB_LOG")" "stop gitea"
 lock_gone "the Gitea session releases its lock at its end" "$KNOBAS_LIVE_GITEA_LOCK"
 
