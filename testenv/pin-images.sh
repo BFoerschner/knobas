@@ -188,6 +188,8 @@ trap 'rm -f "$tmp"' EXIT
   # Forgejo (#1195), opt-in behind the `forgejo` profile. Pinned by version
   # tag, not a moving major, so the run recorded against it stays reproducible.
   pin FORGEJO_IMAGE    codeberg.org/forgejo/forgejo:17.0.0
+  # The https front for Gitea and Forgejo (#2377): ~20 MB.
+  pin CADDY_IMAGE      caddy:2-alpine
   pin KUMA_IMAGE       louislam/uptime-kuma:2
   pin NODE_IMAGE       node:22-alpine
   # The read-only Docker API Kuma's Docker host points at (#978): ~15 MB.

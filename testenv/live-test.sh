@@ -686,7 +686,8 @@ out=$( (
 # before them, compose reads the first service as its subcommand ("unknown
 # docker command: \"compose confluence-db\"", #2368). No StartedAt for the
 # product, so no licence is read and nothing is renewed.
-for want in "gitea|compose --env-file images.env up -d gitea" \
+for want in "gitea|compose --env-file images.env up -d gitea https-front" \
+  "forgejo|compose --env-file images.env --profile forgejo up -d forgejo https-front" \
   "confluence|compose --env-file images.env --profile real-atlassian up -d confluence-db confluence" \
   "teamcity|compose --env-file images.env --profile real-teamcity up -d teamcity teamcity-agent"; do
   checks=$((checks + 1))
@@ -707,6 +708,51 @@ for want in "gitea|compose --env-file images.env up -d gitea" \
   esac
 done
 
+
+# --- the https front (#2377) ------------------------------------------------
+
+# It serves both forges, so it goes down with the last of them and not before.
+for want in "gitea||stop https-front" "forgejo||stop https-front" \
+  "gitea|knobas-forgejo|" "forgejo|knobas-gitea|"; do
+  product=${want%%|*} rest=${want#*|}
+  up=${rest%%|*} needle=${rest#*|}
+  checks=$((checks + 1))
+  : >"$STUB_LOG"
+  out=$(STUB_RUNNING=$up live_down "$product" 2>&1) || fail "live_down $product (up: '$up')" "$out"
+  front=$(grep -c 'stop https-front' "$STUB_LOG" || true)
+  if [ -n "$needle" ] && [ "$front" -ne 1 ]; then
+    fail "live_down $product with no other forge up stops the https front" "$(cat "$STUB_LOG")"
+  elif [ -z "$needle" ] && [ "$front" -ne 0 ]; then
+    fail "live_down $product leaves the https front to $up" "$(cat "$STUB_LOG")"
+  fi
+done
+
+# An open master that predates a port in the list forwards it from then on;
+# a port already bound here is left alone.
+fwd=$scratch/forward
+mkdir -p "$fwd/bin"
+cat >"$fwd/bin/lsof" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do
+  case $a in -iTCP:*) p=${a#-iTCP:} ;; esac
+done
+case " $STUB_FREE " in *" $p "*) exit 1 ;; esac
+exit 0
+STUB
+cat >"$fwd/bin/ssh" <<'STUB'
+#!/usr/bin/env bash
+echo "ssh $*" >>"$STUB_LOG"
+STUB
+chmod +x "$fwd/bin/lsof" "$fwd/bin/ssh"
+checks=$((checks + 1))
+: >"$STUB_LOG"
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export PATH="$fwd/bin:$PATH" STUB_FREE="3443 3445" KNOBAS_LIVE_SSH=wsl-test
+  _live_tunnel_add_missing
+) 2>&1 ) || fail "_live_tunnel_add_missing" "$out"
+check_eq "only the ports nothing here listens on are added to the open master" \
+  "2 1 0" "$(grep -c -- '-O forward' "$STUB_LOG") $(grep -c '127.0.0.1:3445:127.0.0.1:3445' "$STUB_LOG") $(grep -c ':3000:' "$STUB_LOG")"
 
 # --- the canary and the stall follow a remote target ---------------------------
 

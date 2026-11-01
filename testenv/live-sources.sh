@@ -14,6 +14,12 @@
 # updates each source in place: one source per product, the current token.
 # `remove` deletes the six with what they synced and their credentials.
 #
+# Gitea and Forgejo are registered at the https front (#2377: Gitea
+# https://127.0.0.1:3443, Forgejo :3445), not at the http address the seed
+# names: knobas clones and fetches over https or ssh only (ADR-0023,
+# ADR-0035). A front whose certificate this Mac does not trust yet is added
+# all the same, with the one line that says to run `just live-trust-ca`.
+#
 # A bundle given runs the bundle's own binary; without it target/debug/knobas-app is
 # built and run, which is the one `just demo` starts. A debug build keeps the
 # demo profile's credentials in the profile's dev-secrets.json, not the
@@ -81,7 +87,8 @@ refused=$(mktemp)
 rm -f "$refused"
 
 # Whether anything answers HTTP at the address: any status at all.
-answers() { [ "$(curl -s -o /dev/null -m 5 -w '%{http_code}' "$1" || true)" != 000 ]; }
+# -k: an https front this Mac does not trust yet still answers (forge() says so).
+answers() { [ "$(curl -s -k -o /dev/null -m 5 -w '%{http_code}' "$1" || true)" != 000 ]; }
 
 sources=()
 # add <product> <url> <json>: the source if its product answers, else a line.
@@ -102,11 +109,31 @@ source_json() { # id kind name url auth config secret
           config: $config, secret: $secret, sync_interval_secs: 300, enabled: true}'
 }
 
+# https_front <http address> -- the https front's address for a forge's http
+# one (docker-compose.yml, `https-front`), or nothing when it has none.
+https_front() {
+    case $1 in
+        http://127.0.0.1:3000 | http://127.0.0.1:3000/) echo https://127.0.0.1:3443 ;;
+        http://127.0.0.1:3002 | http://127.0.0.1:3002/) echo https://127.0.0.1:3445 ;;
+    esac
+}
+
 forge() { # product id name seed-flag
     # shellcheck disable=SC2034 # set by the seed's eval
     local KNOBAS_GITEA_URL='' KNOBAS_GITEA_TOKEN='' KNOBAS_GITEA_OWNER='' KNOBAS_GITEA_REPO='' KNOBAS_GITEA_SEED_STATE=''
+    local url
     eval "$(seed_env "$4")"
-    add "$1" "$KNOBAS_GITEA_URL" "$(source_json "$2" gitea "$3" "$KNOBAS_GITEA_URL" Pat \
+    url=$KNOBAS_GITEA_URL
+    if [ -n "$url" ]; then
+        url=$(https_front "$url")
+        [ -n "$url" ] || die "$1: no https front for $KNOBAS_GITEA_URL (testenv/README.md, The https front)"
+        # /usr/bin/curl reads the keychain's trust settings, as the app does.
+        if [ "$(curl -s -k -o /dev/null -m 5 -w '%{http_code}' "$url/api/healthz" || true)" = 200 ] &&
+            ! /usr/bin/curl -fsS -o /dev/null -m 5 "$url/api/healthz" 2>/dev/null; then
+            say "$1: this Mac does not trust $url's certificate yet: run 'just live-trust-ca' once"
+        fi
+    fi
+    add "$1" "$url" "$(source_json "$2" gitea "$3" "$url" Pat \
         "$(jq -cn --arg o "$KNOBAS_GITEA_OWNER" '{owners: [$o]}')" \
         "$(jq -cn --arg v "$KNOBAS_GITEA_TOKEN" '{value: $v}')")"
 }

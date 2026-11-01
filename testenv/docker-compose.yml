@@ -112,6 +112,49 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # The https front for Gitea and Forgejo (#2377). knobas clones and fetches
+  # over https or ssh only (ADR-0023, ADR-0035), and both forges serve http.
+  # Caddy terminates TLS with a certificate from its own local CA ("knobas
+  # testenv CA", in the https-front-data volume, so it outlives a recreate)
+  # and proxies over the compose network: https://127.0.0.1:3443 is Gitea,
+  # :3445 Forgejo (a 502 while Forgejo is down). The certificate names
+  # 127.0.0.1 and localhost; a client that sends no SNI (an IP address) gets
+  # the 127.0.0.1 one. `just live-trust-ca` trusts that CA on this Mac, once
+  # per volume (testenv/README.md, *The https front*). Started with either
+  # forge; the http ports stay what the seeds and the suites use.
+  https-front:
+    image: ${CADDY_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
+    container_name: knobas-https-front
+    environment:
+      CADDYFILE: |
+        {
+        	admin off
+        	default_sni 127.0.0.1
+        	skip_install_trust
+        	pki {
+        		ca local {
+        			name "knobas testenv CA"
+        		}
+        	}
+        }
+        https://127.0.0.1:3443, https://localhost:3443 {
+        	tls internal
+        	reverse_proxy gitea:3000
+        }
+        https://127.0.0.1:3445, https://localhost:3445 {
+        	tls internal
+        	reverse_proxy forgejo:3000
+        }
+    # The Caddyfile rides in the environment, not a bind mount: on the WSL
+    # target the engine is another machine and cannot see this checkout.
+    command: ["sh", "-c", "printf '%s' \"$$CADDYFILE\" > /etc/caddy/Caddyfile && exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"]
+    ports:
+      - "127.0.0.1:3443:3443"
+      - "127.0.0.1:3445:3445"
+    volumes:
+      - https-front-data:/data
+    restart: unless-stopped
+
   # The Docker daemon Uptime Kuma's seeded Docker host talks to (#978), so a
   # Docker monitor created in this Kuma has a host to name.
   #
@@ -412,6 +455,7 @@ networks:
 volumes:
   gitea-data:
   forgejo-data:
+  https-front-data:
   kuma-data:
   tc-data:
   tc-logs:

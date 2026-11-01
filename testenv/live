@@ -11,6 +11,7 @@
 #   ./live refresh          a remote target's Jira and Confluence restarted
 #                           when their 3-hour licence is due, each only under
 #                           its own lock (launchd runs it: wsl/refresh-agent.sh)
+#   ./live trust-ca         trust the https front's CA on this Mac (#2377)
 #
 # WHERE the products run is testenv/live.env (git-ignored; live.env.example):
 # this machine by default, or a remote one such as a WSL box that keeps them
@@ -25,7 +26,7 @@ set -euo pipefail
 # shellcheck source=testenv/live-lib.sh disable=SC1091
 . "$(cd "$(dirname "$0")" && pwd)/live-lib.sh"
 
-usage() { echo "usage: testenv/live up|down <gitea|forgejo|teamcity|jira|confluence> | status | tunnel up|down|status | remote-check | refresh" >&2; exit 2; }
+usage() { echo "usage: testenv/live up|down <gitea|forgejo|teamcity|jira|confluence> | status | tunnel up|down|status | remote-check | refresh | trust-ca" >&2; exit 2; }
 
 need_remote() {
   [ -n "$LIVE_REMOTE" ] || { echo "live: the target is this machine (KNOBAS_LIVE_TARGET=local); '$1' is for a remote one -- testenv/live.env" >&2; exit 1; }
@@ -82,5 +83,6 @@ case "${1:-}" in
     live_tunnel_up
     echo "remote-check: ok" ;;
   refresh) [ $# -eq 1 ] || usage; live_refresh ;;
+  trust-ca) [ $# -eq 1 ] || usage; live_trust_ca ;;
   *) usage ;;
 esac

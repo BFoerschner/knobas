@@ -102,6 +102,20 @@
       }
     },
     {
+      "id": "asset:knobas-https-front",
+      "type": "container",
+      "name": "knobas-https-front",
+      "parent": "asset:wsl-docker",
+      "description": "Caddy, the https front for Gitea (3443) and Forgejo (3445) (#2377): knobas clones over https or ssh only, and the forges serve http. Its certificate comes from its own local CA, which `just live-trust-ca` trusts on the Mac. Up with either forge.",
+      "properties": {
+        "docker_context": "wsl",
+        "container_name": "knobas-https-front",
+        "image": "caddy",
+        "compose_service": "https-front",
+        "published_port": "127.0.0.1:3443"
+      }
+    },
+    {
       "id": "asset:knobas-uptime-kuma",
       "type": "container",
       "name": "knobas-uptime-kuma",

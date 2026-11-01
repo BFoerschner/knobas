@@ -48,7 +48,7 @@
 #
 #   - every `docker` call in this file, the seeds and the suites goes to that
 #     machine's engine (`DOCKER_HOST=ssh://<host>`, exported here);
-#   - one ssh master forwards the product ports (3000 3002 8080 8090 8111) from
+#   - one ssh master forwards the product ports (3000-3002 3443 3445 8080 8090 8111) from
 #     this machine's 127.0.0.1 to that machine's 127.0.0.1, so every URL the
 #     seeds, `./seed --env` and the suites use is the one they use locally;
 #   - no run stops a product when it ends (`live_to_put_back`), and the
@@ -131,7 +131,8 @@ esac
 # The one-JVM refusal: on for this machine's 8 GB VM, off for a remote target
 # that keeps all three up. Either may be overridden.
 LIVE_ONE_JVM=${KNOBAS_LIVE_ONE_JVM:-$([ -n "$LIVE_REMOTE" ] && echo 0 || echo 1)}
-LIVE_TUNNEL_PORTS=${KNOBAS_LIVE_TUNNEL_PORTS:-3000 3001 3002 8080 8090 8111}
+# 3443 and 3445 are the https front's Gitea and Forgejo (#2377).
+LIVE_TUNNEL_PORTS=${KNOBAS_LIVE_TUNNEL_PORTS:-3000 3001 3002 3443 3445 8080 8090 8111}
 
 # _live_tunnel_sock -- the ssh master's control socket. Short on purpose:
 # macOS caps a socket path at 104 bytes and $TMPDIR is already half of that.
@@ -151,7 +152,10 @@ live_tunnel_is_up() {
 # to open it fails to bind and then finds the first one's master.
 live_tunnel_up() {
   local p args=() out
-  live_tunnel_is_up && return 0
+  if live_tunnel_is_up; then
+    _live_tunnel_add_missing
+    return 0
+  fi
   for p in $LIVE_TUNNEL_PORTS; do args+=(-L "127.0.0.1:$p:127.0.0.1:$p"); done
   if out=$(ssh -f -N -M -S "$(_live_tunnel_sock)" \
     -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
@@ -167,6 +171,58 @@ live_tunnel_up() {
     fi
   done
   return 1
+}
+
+# live_trust_ca -- trust the https front's CA (#2377) for SSL in this Mac's
+# login keychain, which knobas' client (rustls with the platform verifier),
+# Apple's git and /usr/bin/curl all read. The CA lives in the front's volume
+# on the target, so this is once per volume (and once per target: the local
+# front has a CA of its own). macOS asks for the login password once; nothing
+# is done when the front is trusted already.
+LIVE_HTTPS_GITEA=https://127.0.0.1:3443
+LIVE_HTTPS_FORGEJO=https://127.0.0.1:3445
+LIVE_FRONT_CA=/data/caddy/pki/authorities/local/root.crt
+live_trust_ca() {
+  local crt subject
+  live_remote_ready || return 1
+  live_running knobas-https-front || {
+    echo "live: the https front (knobas-https-front) is down; 'just live-up gitea' starts it" >&2
+    return 1
+  }
+  if /usr/bin/curl -fsS -m 5 -o /dev/null "$LIVE_HTTPS_GITEA/api/healthz" 2>/dev/null; then
+    echo "live: this Mac already trusts the https front ($LIVE_HTTPS_GITEA)"
+    return 0
+  fi
+  crt=${TMPDIR:-/tmp}/knobas-testenv-ca.crt
+  docker exec knobas-https-front cat "$LIVE_FRONT_CA" >"$crt" || {
+    echo "live: could not read the front's CA ($LIVE_FRONT_CA)" >&2
+    return 1
+  }
+  subject=$(openssl x509 -in "$crt" -noout -subject -fingerprint -sha256 | tr '\n' ' ')
+  echo "live: trusting $subject for SSL in the login keychain; macOS asks for your password"
+  security add-trusted-cert -r trustRoot -p ssl -k "$HOME/Library/Keychains/login.keychain-db" "$crt" || return 1
+  /usr/bin/curl -fsS -m 5 -o /dev/null "$LIVE_HTTPS_GITEA/api/healthz" || {
+    echo "live: the CA is trusted but $LIVE_HTTPS_GITEA still fails verification" >&2
+    return 1
+  }
+  echo "live: trusted; $LIVE_HTTPS_GITEA (Gitea) and $LIVE_HTTPS_FORGEJO (Forgejo) verify"
+}
+
+# _live_tunnel_add_missing -- a master opened before a port joined the list
+# (3443 and 3445 did, #2377) forwards it from now on, without the master
+# going down under a run that is using it. A port already bound here is left
+# alone: either this master forwards it or a local product holds it.
+_live_tunnel_add_missing() {
+  local p
+  for p in $LIVE_TUNNEL_PORTS; do
+    lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && continue
+    if ssh -S "$(_live_tunnel_sock)" -O forward -L "127.0.0.1:$p:127.0.0.1:$p" \
+      "$KNOBAS_LIVE_SSH" >/dev/null 2>&1; then
+      echo "live: tunnel to $KNOBAS_LIVE_SSH now also forwards 127.0.0.1:$p"
+    else
+      echo "live: the open tunnel could not add 127.0.0.1:$p; 'testenv/live tunnel down' and run again" >&2
+    fi
+  done
 }
 
 live_tunnel_down() {
@@ -723,7 +779,7 @@ _live_gitea_lock_held() {
 _live_gitea_up() {
   local wait_s
   wait_s=$(_live_gitea_wait_s) || return 1
-  _live_compose up -d --wait gitea
+  _live_compose up -d --wait gitea https-front
   _live_gitea_answers "$wait_s" && return 0
   if ! _live_gitea_lock_held; then
     echo "live: gitea: the container is up but $LIVE_GITEA_URL does not answer (the OrbStack port forward a recreate kills); not holding the Gitea lock, so not stopping it -- 'just gitea-live' heals it under the lock" >&2
@@ -731,7 +787,7 @@ _live_gitea_up() {
   fi
   echo "live: gitea: the container is up but $LIVE_GITEA_URL does not answer (the OrbStack port forward a recreate kills); stop + up" >&2
   _live_compose stop gitea
-  _live_compose up -d --wait gitea
+  _live_compose up -d --wait gitea https-front
   _live_gitea_answers "$wait_s" || {
     echo "live: gitea: $LIVE_GITEA_URL still does not answer after stop + up" >&2
     return 1
@@ -751,7 +807,7 @@ _live_start() {
     forgejo)
       # Forgejo (#1195): opt-in profile, port 3002, its own seed state. Not a
       # JVM, so never refused; stopped again at the end of a run that started it.
-      _live_compose --profile forgejo up -d --wait forgejo
+      _live_compose --profile forgejo up -d --wait forgejo https-front
       curl -fsS -m 5 -o /dev/null "${KNOBAS_FORGEJO_URL:-http://127.0.0.1:3002}/api/healthz" || {
         echo "live: forgejo: the container is up but the host does not reach it on port 3002 (stop + up heals the OrbStack port forward)" >&2
         return 1
@@ -1147,8 +1203,8 @@ _live_make_room() {
 # service before the subcommand is read AS the subcommand (#2368).
 _live_up_args() {
   case $1 in
-    gitea) echo "up -d gitea" ;;
-    forgejo) echo "--profile forgejo up -d forgejo" ;;
+    gitea) echo "up -d gitea https-front" ;;
+    forgejo) echo "--profile forgejo up -d forgejo https-front" ;;
     teamcity) echo "--profile real-teamcity up -d teamcity teamcity-agent" ;;
     jira | confluence) echo "--profile real-atlassian up -d $1-db $1" ;;
   esac
@@ -1193,6 +1249,10 @@ live_down() {
     forgejo) _live_compose --profile forgejo stop forgejo ;;
     teamcity) _live_compose --profile real-teamcity stop teamcity teamcity-agent ;;
     jira | confluence) _live_atlassian_remove "$1" ;;
+  esac
+  # The https front (#2377) serves both forges: it goes with the last of them.
+  case $1 in
+    gitea | forgejo) live_is_up gitea || live_is_up forgejo || _live_compose stop https-front ;;
   esac
   live_is_jvm "$1" && _live_lock_unkeep "$1"
   echo "live: $1: down"

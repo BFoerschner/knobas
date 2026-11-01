@@ -60,6 +60,8 @@ docker compose --env-file images.env -f docker-compose.yml -f docker-compose.rem
 #    list is a ~10 GB surprise for whoever runs it.
 # ---------------------------------------------------------------------------
 expected_default='gitea|127.0.0.1|3000|3000|tcp
+https-front|127.0.0.1|3443|3443|tcp
+https-front|127.0.0.1|3445|3445|tcp
 uptime-kuma|127.0.0.1|3001|3001|tcp'
 
 actual_default=$(resolved)
@@ -75,6 +77,8 @@ fi
 expected_all='confluence|127.0.0.1|8090|8090|tcp
 forgejo|127.0.0.1|3002|3000|tcp
 gitea|127.0.0.1|3000|3000|tcp
+https-front|127.0.0.1|3443|3443|tcp
+https-front|127.0.0.1|3445|3445|tcp
 jira|127.0.0.1|8080|8080|tcp
 teamcity|127.0.0.1|8111|8111|tcp
 uptime-kuma|127.0.0.1|3001|3001|tcp'

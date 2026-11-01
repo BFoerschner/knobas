@@ -19,10 +19,11 @@
 # draws no source view, its repositories carry no owner (`payout-service`, so
 # ADR-0023's `owner/repo` refuses to build a URL from it) and its shas are
 # short; the Gitea adapter has all three for real. The one thing the testenv
-# Gitea lacked is https, which the worktree's fetch requires (ADR-0035's
-# protocol flags): OrbStack serves every container at
-# `https://<container>.orb.local` with a certificate from its own root, which
-# OrbStack installs as trusted for SSL in the login keychain. knobas' client
+# Gitea lacks is https, which the worktree's fetch requires (ADR-0035's
+# protocol flags): the testenv's https front (#2377, docker-compose.yml
+# `https-front`) serves it at https://127.0.0.1:3443 on either target (the
+# WSL box's through the tunnel), with a certificate from its own CA, which
+# `just live-trust-ca` trusts for SSL in the login keychain. knobas' client
 # (rustls with the platform verifier) and git both accept it, so the driver
 # adds the testenv Gitea at that address -- through the real Settings, as a
 # person would -- and removes it at the end. KNOBAS_WITNESS_GITEA names
@@ -213,15 +214,15 @@ open_menu_at() {
 
 # --- 0. the fixture: the testenv Gitea over https, and a clone of it ---------
 
-readonly GITEA_HTTPS=${KNOBAS_WITNESS_GITEA:-https://knobas-gitea.orb.local}
+readonly GITEA_HTTPS=${KNOBAS_WITNESS_GITEA:-https://127.0.0.1:3443}
 case $GITEA_HTTPS in
 https://*) ;;
 *) die "KNOBAS_WITNESS_GITEA must be an https address, and it is '$GITEA_HTTPS'." ;;
 esac
 curl -fsS -o /dev/null "$GITEA_HTTPS/api/healthz" 2>/dev/null || die \
     "the testenv Gitea does not answer at $GITEA_HTTPS with a certificate this Mac trusts." \
-    "Bring it up with 'just live-up gitea'. The address is OrbStack's https front for the" \
-    "knobas-gitea container; under another Docker, set KNOBAS_WITNESS_GITEA to an https front."
+    "Bring it up with 'just live-up gitea' (which starts the https front), then trust" \
+    "the front's CA once with 'just live-trust-ca'; KNOBAS_WITNESS_GITEA names another https front."
 seed_env=$(./seed --env 2>/dev/null) || die "./seed --env failed: seed the testenv Gitea from this tree ('just live-up gitea')."
 eval "$seed_env"
 : "${KNOBAS_GITEA_TOKEN:?./seed --env named no Gitea token}"
