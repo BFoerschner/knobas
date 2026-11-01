@@ -236,10 +236,14 @@ pub fn run() {
     let demo = Profile::demo_in(std::env::args());
 
     // A command renderer's HTML frame is served from its own origin under its
-    // own policy (#2304, `renderers::frame_response`).
+    // own policy (#2304, `renderers::frame_response`), and so is D2's frame,
+    // from the app's assets (#2381).
     let builder = tauri::Builder::default()
-        .register_uri_scheme_protocol(renderers::FRAME_SCHEME, |_context, request| {
-            renderers::frame_response(request.uri().path())
+        .register_uri_scheme_protocol(renderers::FRAME_SCHEME, |context, request| {
+            renderers::frame_response(request.uri().path(), |path| {
+                let asset = context.app_handle().asset_resolver().get(path.to_owned())?;
+                Some((asset.bytes, asset.mime_type))
+            })
         });
     // The single-instance guard (#748), registered **first**: its setup runs
     // before the builder's `setup` closure, so a second launch exits before it
