@@ -39,6 +39,7 @@ async fn finish_ok(pool: &PgPool, run_id: i64, upserted: i64) {
             outcome: SyncOutcome::Ok,
             counts: ok_counts(upserted),
             error: None,
+            left_out: None,
         },
     )
     .await
@@ -53,6 +54,7 @@ async fn finish_failed(pool: &PgPool, run_id: i64, outcome: SyncOutcome, error: 
             outcome,
             counts: RunCounts::default(),
             error: Some(error.to_owned()),
+            left_out: None,
         },
     )
     .await
@@ -89,6 +91,7 @@ async fn a_run_is_open_while_it_runs_and_closed_with_its_counts() {
                 cursor_after: Some("c-9".to_owned()),
             },
             error: None,
+            left_out: None,
         },
     )
     .await

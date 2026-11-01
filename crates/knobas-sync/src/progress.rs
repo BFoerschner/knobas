@@ -510,4 +510,9 @@ impl Sink for Counting<'_> {
     async fn walked_whole(&mut self, kind: &str) {
         self.inner.walked_whole(kind).await;
     }
+
+    /// Handed on: the scheduler reads it from the engine's sink (#2374).
+    async fn left_out(&mut self, why: &str) {
+        self.inner.left_out(why).await;
+    }
 }
