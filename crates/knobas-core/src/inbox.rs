@@ -272,6 +272,12 @@ pub const WINDOW_DAYS: i64 = 14;
 /// source never dated the record, and an item with no date could not be
 /// ordered, could not be marked done and would sort to one end of the stream
 /// forever. knobas' own clock is the honest fallback and is always known.
+///
+/// A review request is open while the pull request's declared state chip
+/// reads `open` ([`crate::declared_state!`], #2364), the word #2358's
+/// start-work reads compare to. A state no map names, or a kind that declares
+/// none, counts as open: the request stays rather than vanishing on a word
+/// knobas cannot read.
 macro_rules! review_request {
     () => {
         concat!(
@@ -294,7 +300,9 @@ macro_rules! review_request {
             "
                 and i.kind = 'pr'
                 and r.value = any($1)
-                and coalesce(i.payload->>'state', 'open') = 'open'"
+                and coalesce(",
+            $crate::declared_state!("$4"),
+            "->>'text', 'open') = 'open'"
         )
     };
 }
@@ -391,10 +399,22 @@ macro_rules! mention_of {
 ///
 /// Three statements, each of which is the difference between a rule and noise.
 ///
-/// **What "failed" means**: the mirrored record says its status is `FAILURE`
-/// and it is finished. A running build has no verdict yet and a canceled one
-/// is not a failure (`0002`-era TeamCity work ratified `finished canceled` as
-/// its own reading, #105).
+/// **What "failed" means**: the build's declared state chip
+/// ([`crate::resolved_state!`] over `state_paths`, #2364) is in the `err`
+/// tone, and a green one is in the `ok` tone, the reading the room signals'
+/// `failing-build` makes (`err_builds!`). For TeamCity that is `FAILURE` and
+/// `SUCCESS` on a finished build: its declaration maps `running` and `queued`
+/// first, so a build in flight draws an `info` chip and has no verdict yet,
+/// and a canceled one is `UNKNOWN`, `muted`, not a failure (`0002`-era
+/// TeamCity work ratified `finished canceled` as its own reading, #105). A
+/// kind that declares no state raises nothing, the ADR-0007 miss.
+///
+/// **The configuration** is the build's declared `pipeline` (TeamCity's
+/// `buildTypeId`), resolved once a source as the CTE `pipeline_paths`. The
+/// one payload key read here at a literal path is `statusText`, the reason
+/// line's tail: no [`KindPaths`](crate::payload::KindPaths) role names it,
+/// and a record without it draws `this build failed` alone, a shorter line
+/// and never a wrong one.
 ///
 /// **What "on my work" means**, and it is two arms because a red build reaches
 /// you in two ways: either **you triggered it** -- `author` is the person who
@@ -410,9 +430,9 @@ macro_rules! mention_of {
 /// with a new id, so nothing at the source ever edits this record into a
 /// resolved one -- without this clause a red build would sit in the inbox for
 /// ever and story 17 would be false for the one category that most needs it.
-/// The newer build must itself be **finished**: the mirror holds queued and
-/// running builds too, and a running build's `status` is TeamCity's interim
-/// verdict -- a re-run that is green *so far* has not resolved anything, and
+/// The newer build must itself be **finished**, its chip `ok`: the mirror holds
+/// queued and running builds too, and a running build's `status` is TeamCity's
+/// interim verdict -- a re-run that is green *so far* has not resolved anything, and
 /// hiding the red build while it runs would un-hide it minutes later if the
 /// re-run fails, which is a stream that flickers rather than resolves.
 ///
@@ -441,28 +461,43 @@ macro_rules! mention_of {
 macro_rules! failed_build {
     () => {
         concat!(
-            "select 'failed_build', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
+            "(with state_paths as materialized (",
+            $crate::state_paths!("$4"),
+            "),
+             pipeline_paths as materialized (
+               select i.source_id, c.segs, c.ord
+                 from (select d.source_id, 'build'::text as kind
+                         from jsonb_object_keys(case when jsonb_typeof($4::jsonb) = 'object'
+                                                     then $4::jsonb else '{}'::jsonb end)
+                              as d(source_id)) i
+                cross join lateral ",
+            $crate::declared_candidates!("$4", "pipeline"),
+            " c)
+         select 'failed_build', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
                 format('this build failed%s', coalesce(': ' || nullif(i.status_text, ''), '')),
                 i.at, i.web_url
            from (select scored.*,
-                        max(scored.at) filter (where scored.status = 'SUCCESS' and scored.finished)
+                        max(scored.at) filter (where scored.tone = 'ok')
                           over (partition by scored.source_id collate \"C\", scored.config collate \"C\")
                           as latest_green
-                   from (select b.entity_id, b.source_id, b.kind, b.title, b.author, b.web_url,
-                                coalesce(b.item_updated_at, b.synced_at) as at,
-                                b.payload->>'status' as status,
-                                coalesce(b.payload->>'state', 'finished') = 'finished' as finished,
-                                b.payload->>'statusText' as status_text,
-                                coalesce(b.payload->>'buildTypeId',
-                                         b.payload->'buildType'->>'id') as config
-                           from sync.item b
+                   from (select i.entity_id, i.source_id, i.kind, i.title, i.author, i.web_url,
+                                coalesce(i.item_updated_at, i.synced_at) as at,
+                                ",
+            $crate::resolved_state!(),
+            "->>'tone' as tone,
+                                i.payload->>'statusText' as status_text,
+                                ",
+            $crate::first_string_of!(
+                "(select p.segs, p.ord from pipeline_paths p where p.source_id = i.source_id)"
+            ),
+            " as config
+                           from sync.item i
                           where ",
-            $crate::live_by_exclusion!("b"),
+            $crate::live_by_exclusion!("i"),
             "
-                            and b.kind = 'build'
-                            and b.payload->>'status' in ('FAILURE', 'SUCCESS')) scored) i
-          where i.status = 'FAILURE'
-            and i.finished
+                            and i.kind = 'build') scored
+                  where scored.tone in ('err', 'ok')) i
+          where i.tone = 'err'
             and (   i.author = any($1)
                  or exists (
                        select 1
@@ -482,7 +517,7 @@ macro_rules! failed_build {
                           and ",
             $crate::live_by_key!("mine"),
             "))
-            and (i.config is null or i.latest_green is null or i.latest_green <= i.at)"
+            and (i.config is null or i.latest_green is null or i.latest_green <= i.at))"
         )
     };
 }

@@ -79,8 +79,11 @@ struct Mirrored<'a> {
 ///
 /// Gitea's `requested_reviewers[].login` and Jira Data Center's
 /// `fields.assignee.name`, which are the shapes the fixtures below are written
-/// in. `teamcity` declares nothing: a build has neither, and the failed-build
-/// rule reads an outcome rather than a declared field.
+/// in. A pull request's state and a build's state and pipeline are read
+/// through the declaration too (#2364), so `gitea` declares its state as its
+/// adapter does, and `teamcity` and `teamcity2` TeamCity's build state and its
+/// pipeline: `buildTypeId`, and `buildType.id` second, the spelling
+/// [`every_build_mine_names_what_the_per_build_statement_named`] holds.
 fn declarations() -> knobas_core::payload::Declarations {
     use knobas_core::payload::{Declarations, KindPaths, ListPath, PayloadPath};
     Declarations::empty()
@@ -92,9 +95,13 @@ fn declarations() -> knobas_core::payload::Declarations {
                     at: PayloadPath::of(["requested_reviewers"]),
                     entry: PayloadPath::of(["login"]),
                 }],
+                state: gitea_pr_state(),
                 ..KindPaths::default()
             }],
         )
+        .with("teamcity", vec![teamcity_build()])
+        .with("teamcity2", vec![teamcity_build()])
+        .with("forge", forge_kinds())
         .with(
             "jira",
             vec![KindPaths {
@@ -106,6 +113,97 @@ fn declarations() -> knobas_core::payload::Declarations {
                 ..KindPaths::default()
             }],
         )
+}
+
+/// Gitea's pull request state, as its descriptor declares it: the merged
+/// flag first, then `state`.
+fn gitea_pr_state() -> Vec<knobas_core::payload::StatePath> {
+    use knobas_core::payload::{PayloadPath, StatePath, StateValue};
+    use knobas_core::tone::Tone;
+    vec![
+        StatePath {
+            at: PayloadPath::of(["merged"]),
+            values: vec![StateValue::of(true, Tone::Ok).shown_as("merged")],
+        },
+        StatePath {
+            at: PayloadPath::of(["state"]),
+            values: vec![
+                StateValue::of("open", Tone::Info),
+                StateValue::of("closed", Tone::Muted),
+            ],
+        },
+    ]
+}
+
+/// A TeamCity build's state and pipeline, as its descriptor declares them,
+/// with `buildType.id` as a second pipeline candidate.
+fn teamcity_build() -> knobas_core::payload::KindPaths {
+    use knobas_core::payload::{KindPaths, PayloadPath, StatePath, StateValue};
+    use knobas_core::tone::Tone;
+    KindPaths {
+        kind: "build".to_owned(),
+        state: vec![
+            StatePath {
+                at: PayloadPath::of(["state"]),
+                values: vec![
+                    StateValue::of("running", Tone::Info),
+                    StateValue::of("queued", Tone::Info),
+                ],
+            },
+            StatePath {
+                at: PayloadPath::of(["status"]),
+                values: vec![
+                    StateValue::of("SUCCESS", Tone::Ok),
+                    StateValue::of("FAILURE", Tone::Err),
+                    StateValue::of("UNKNOWN", Tone::Muted),
+                ],
+            },
+        ],
+        pipeline: vec![
+            PayloadPath::of(["buildTypeId"]),
+            PayloadPath::of(["buildType", "id"]),
+        ],
+        ..KindPaths::default()
+    }
+}
+
+/// A source that spells everything its own way (#2364): a pull request's
+/// reviewers at `asked`, its state at `phase` (`active` shown as `open`,
+/// `done`), and a build's outcome at `result` and its pipeline at `job`.
+/// Neither kind carries Gitea's or TeamCity's keys where it means them.
+fn forge_kinds() -> Vec<knobas_core::payload::KindPaths> {
+    use knobas_core::payload::{KindPaths, ListPath, PayloadPath, StatePath, StateValue};
+    use knobas_core::tone::Tone;
+    vec![
+        KindPaths {
+            kind: "pr".to_owned(),
+            reviewers: vec![ListPath {
+                at: PayloadPath::of(["asked"]),
+                entry: PayloadPath::default(),
+            }],
+            state: vec![StatePath {
+                at: PayloadPath::of(["phase"]),
+                values: vec![
+                    StateValue::of("active", Tone::Info).shown_as("open"),
+                    StateValue::of("done", Tone::Muted),
+                ],
+            }],
+            ..KindPaths::default()
+        },
+        KindPaths {
+            kind: "build".to_owned(),
+            state: vec![StatePath {
+                at: PayloadPath::of(["result"]),
+                values: vec![
+                    StateValue::of("running", Tone::Info),
+                    StateValue::of("broken", Tone::Err),
+                    StateValue::of("passed", Tone::Ok),
+                ],
+            }],
+            pipeline: vec![PayloadPath::of(["job"])],
+            ..KindPaths::default()
+        },
+    ]
 }
 
 /// `sync.live_item`, which is the join of the two.
@@ -842,6 +940,88 @@ async fn a_failed_build_leaves_when_the_same_configuration_goes_green_again() {
     assert!(
         keys.contains(&format!("failed_build:{inflight}")),
         "a re-run that is still running has not resolved its red build: {keys:?}"
+    );
+}
+
+/// A pull request's state and a build's outcome and pipeline are read where
+/// the kind **declares** them (#2364), not at Gitea's `state` or TeamCity's
+/// `status`, `state` and `buildTypeId`. Every `forge` record carries those
+/// keys too, saying the opposite of its declared ones, so a rule that still
+/// read them answers every case here the other way round.
+#[tokio::test]
+async fn a_review_request_and_a_failed_build_are_read_where_their_kind_declares_them() {
+    let pool = &scratch().await;
+    let forge = |key: &'static str, kind: &'static str, payload: serde_json::Value, days| {
+        (key, kind, payload, days)
+    };
+    let rows = [
+        forge(
+            "forge:pr-1",
+            "pr",
+            serde_json::json!({ "asked": [ME], "phase": "active", "state": "closed" }),
+            1,
+        ),
+        forge(
+            "forge:pr-2",
+            "pr",
+            serde_json::json!({ "asked": [ME], "phase": "done", "state": "open" }),
+            1,
+        ),
+        // Red, and nothing newer of its job is green: still asking.
+        forge(
+            "forge:b-1",
+            "build",
+            serde_json::json!({ "result": "broken", "job": "lint",
+                                "status": "SUCCESS", "buildTypeId": "tests" }),
+            3,
+        ),
+        // Red, and its own job went green a day later: resolved.
+        forge(
+            "forge:b-2",
+            "build",
+            serde_json::json!({ "result": "broken", "job": "tests",
+                                "status": "SUCCESS", "buildTypeId": "lint" }),
+            3,
+        ),
+        forge(
+            "forge:b-3",
+            "build",
+            serde_json::json!({ "result": "passed", "job": "tests",
+                                "status": "FAILURE", "state": "finished",
+                                "buildTypeId": "lint" }),
+            2,
+        ),
+    ];
+    let mut ids = Vec::new();
+    for (key, kind, payload, days) in rows {
+        ids.push(
+            item(
+                pool,
+                Mirrored {
+                    source: "forge",
+                    kind,
+                    key,
+                    author: Some(ME),
+                    body: "",
+                    payload,
+                    updated: days_ago(days),
+                },
+            )
+            .await,
+        );
+    }
+
+    let mut got = keys(&stream(pool).await);
+    got.sort();
+    let mut want = vec![
+        format!("review_request:{}", ids[0]),
+        format!("failed_build:{}", ids[2]),
+    ];
+    want.sort();
+    assert_eq!(
+        got, want,
+        "the open pull request and the red build of a job nothing has fixed, by the declared \
+         paths alone"
     );
 }
 
