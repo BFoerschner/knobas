@@ -2061,6 +2061,48 @@ mod tests {
         assert_eq!(resolve_trigger(&both, &two), Some(Trigger::Schedule));
     }
 
+    /// A worklog sums per author (#2403): an entry whose author or time
+    /// misses (blank, absent, a number spelled as text, negative) costs that
+    /// entry; the first candidate leading to an array wins, an empty array
+    /// is an empty worklog, and no array is none.
+    #[test]
+    fn a_worklog_sums_per_author_and_drops_the_entries_it_cannot_read() {
+        let jira = WorklogPath {
+            at: PayloadPath::of(["worklog", "worklogs"]),
+            author: vec![PayloadPath::of(["author", "name"])],
+            seconds: vec![PayloadPath::of(["timeSpentSeconds"])],
+        };
+        let payload = serde_json::json!({ "worklog": { "worklogs": [
+            { "author": { "name": "mara" }, "timeSpentSeconds": 3600 },
+            { "author": { "name": " lena " }, "timeSpentSeconds": 1800 },
+            { "author": { "name": "mara" }, "timeSpentSeconds": 2400 },
+            { "author": { "name": "" }, "timeSpentSeconds": 60 },
+            { "author": { "name": "jonas" }, "timeSpentSeconds": "60" },
+            { "author": { "name": "jonas" }, "timeSpentSeconds": -60 },
+            { "timeSpentSeconds": 60 },
+        ] } });
+        assert_eq!(
+            resolve_worklog(&payload, std::slice::from_ref(&jira)),
+            Some(BTreeMap::from([("lena".to_owned(), 1800), ("mara".to_owned(), 6000)]))
+        );
+
+        let elsewhere = WorklogPath {
+            at: PayloadPath::of(["worklogs"]),
+            author: vec![PayloadPath::of(["who"])],
+            seconds: vec![PayloadPath::of(["seconds"])],
+        };
+        let flat = serde_json::json!({ "worklogs": [{ "who": "mara", "seconds": 60 }] });
+        assert_eq!(
+            resolve_worklog(&flat, &[jira.clone(), elsewhere.clone()]),
+            Some(BTreeMap::from([("mara".to_owned(), 60)]))
+        );
+        let empty = serde_json::json!({ "worklogs": [] });
+        assert_eq!(resolve_worklog(&empty, &[elsewhere.clone()]), Some(BTreeMap::new()));
+        let none = serde_json::json!({ "worklogs": null });
+        assert_eq!(resolve_worklog(&none, &[elsewhere]), None);
+        assert_eq!(resolve_worklog(&payload, &[]), None);
+    }
+
     /// A declared time is ISO 8601 in either spelling (#848): TeamCity's
     /// basic form and RFC 3339 read as the same instant; a date alone, a
     /// word or a blank is a miss.
