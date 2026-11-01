@@ -334,7 +334,10 @@ async fn a_ticket_carries_its_reporter_created_spent_and_worklog() {
     };
 
     let logged = payload("PAY-231");
-    assert_eq!(resolve_string(&logged, &paths.reporter).as_deref(), Some("mara"));
+    assert_eq!(
+        resolve_string(&logged, &paths.reporter).as_deref(),
+        Some("mara")
+    );
     assert_eq!(
         resolve_string(&logged, &paths.created)
             .as_deref()
@@ -350,7 +353,10 @@ async fn a_ticket_carries_its_reporter_created_spent_and_worklog() {
 
     // PAY-240: assigned by priya, nothing logged.
     let bare = payload("PAY-240");
-    assert_eq!(resolve_string(&bare, &paths.reporter).as_deref(), Some("priya"));
+    assert_eq!(
+        resolve_string(&bare, &paths.reporter).as_deref(),
+        Some("priya")
+    );
     assert_eq!(resolve_number(&bare, &paths.time_spent), None);
 }
 

@@ -1194,9 +1194,9 @@ pub fn resolve_worklog(
     payload: &serde_json::Value,
     candidates: &[WorklogPath],
 ) -> Option<BTreeMap<String, i64>> {
-    let (candidate, entries) = candidates.iter().find_map(|candidate| {
-        Some((candidate, at(payload, &candidate.at)?.as_array()?))
-    })?;
+    let (candidate, entries) = candidates
+        .iter()
+        .find_map(|candidate| Some((candidate, at(payload, &candidate.at)?.as_array()?)))?;
     let mut by_author = BTreeMap::new();
     for entry in entries {
         let Some(author) = resolve_string(entry, &candidate.author) else {
@@ -2073,7 +2073,10 @@ mod tests {
         assert_eq!(parse_instant("2026-08-22T10:20:00Z"), Some(expected));
         assert_eq!(parse_instant(" 20260822T102000+0000 "), Some(expected));
         // Jira's `created` (#2403): extended, milliseconds, a basic offset.
-        assert_eq!(parse_instant("2026-08-22T12:20:00.000+0200"), Some(expected));
+        assert_eq!(
+            parse_instant("2026-08-22T12:20:00.000+0200"),
+            Some(expected)
+        );
         assert_eq!(parse_instant("2026-08-22"), None);
         assert_eq!(parse_instant("yesterday"), None);
         assert_eq!(parse_instant(""), None);
