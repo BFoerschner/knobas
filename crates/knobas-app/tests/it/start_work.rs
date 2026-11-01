@@ -449,9 +449,69 @@ fn repo() -> EntityRef {
 
 /// A flow, planned but not run.
 async fn planned(pool: &PgPool) -> Vec<FlowStep> {
-    start_work::begin(pool, &ticket(), &repo())
+    start_work::begin(pool, &declarations(), &ticket(), &repo())
         .await
         .expect("a flow is proposed")
+}
+
+/// The proposal's base branch is the repository's default branch read where
+/// the repository kind **declares** it (#2358), not at Gitea's
+/// `default_branch` key: a host that keeps it elsewhere proposes its own
+/// default, and one whose declaration misses falls back rather than guessing.
+#[tokio::test]
+async fn the_proposed_base_is_the_default_branch_the_repository_kind_declares() {
+    use knobas_core::payload::{Declarations, KindPaths, PayloadPath};
+    let pool = corpus("sw_declared_default").await;
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(REPO)
+        .bind(serde_json::json!({"default_branch": "release", "mainbranch": {"name": "develop"}}))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let declaring = |at: &[&str]| {
+        Declarations::empty().with(
+            "gitea",
+            vec![KindPaths {
+                kind: "repo".to_owned(),
+                default_branch: vec![PayloadPath::of(at.iter().copied())],
+                ..KindPaths::default()
+            }],
+        )
+    };
+    let base = |flow: &[FlowStep]| {
+        step_of(flow, Step::CreateBranch).payload["CreateBranch"]["from_ref"]
+            .as_str()
+            .expect("a base")
+            .to_owned()
+    };
+
+    let flow = start_work::begin(
+        &pool,
+        &declaring(&["mainbranch", "name"]),
+        &ticket(),
+        &repo(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(base(&flow), "develop");
+
+    let other = EntityRef::parse("jira:PAY-232").unwrap();
+    item(
+        &pool,
+        "jira:PAY-232",
+        "ticket",
+        "a second ticket",
+        serde_json::json!({}),
+    )
+    .await;
+    let flow = start_work::begin(&pool, &declaring(&["trunk"]), &other, &repo())
+        .await
+        .unwrap();
+    assert_eq!(
+        base(&flow),
+        "main",
+        "a declaration that misses falls back; it does not read Gitea's key"
+    );
 }
 
 /// One step of a flow, by kind.
@@ -1127,7 +1187,7 @@ async fn a_second_flow_on_one_ticket_is_refused() {
     let pool = corpus("sw_twice").await;
     planned(&pool).await;
 
-    let error = start_work::begin(&pool, &ticket(), &repo())
+    let error = start_work::begin(&pool, &declarations(), &ticket(), &repo())
         .await
         .expect_err("one flow per ticket");
 
@@ -1527,12 +1587,8 @@ async fn a_pull_request_whose_state_cannot_be_read_is_not_an_open_one() {
 /// A source that declares no merged flag still resolves through the record's
 /// own state, which is why the deciding fact is that one: a source may decline
 /// that declaration -- `knobas_source_mock` does, its merge being a timestamp
-/// -- and its pull requests still have to be linkable. The empty
-/// [`Declarations`] is that source's shape, not that source's corpus; the
-/// mock's own pull requests carry no `head` object and never reach this
-/// statement.
-///
-/// [`Declarations`]: knobas_core::payload::Declarations
+/// -- and its pull requests still have to be linkable. Gitea's spelling with
+/// the merged flag left out is that source's shape, not its corpus.
 #[tokio::test]
 async fn a_source_that_declares_no_merged_flag_still_reads_the_state() {
     let pool = corpus("sw_head_undeclared").await;
@@ -1546,17 +1602,73 @@ async fn a_source_that_declares_no_merged_flag_still_reads_the_state() {
     )
     .await;
 
-    let found = queue::pull_request_on_head(
-        &pool,
-        &knobas_core::payload::Declarations::empty(),
-        &repo(),
-        head,
-        BASE,
-    )
-    .await
-    .unwrap();
+    let found = queue::pull_request_on_head(&pool, &declared(false), &repo(), head, BASE)
+        .await
+        .unwrap();
 
     assert_eq!(found, PullRequestOnHead::Open(PR_REOPENED.to_owned()));
+}
+
+/// A source that spells a pull request's two branches and its state its own
+/// way is read where it **declares** them (#2358), not at Gitea's
+/// `head.ref` / `base.ref`. The declarations are `knobas_source_mock`'s
+/// spelling (`from`, `to`, `state` mapping `open | merged`); the corpus is a
+/// record in that shape, and nothing about it is Gitea's.
+#[tokio::test]
+async fn a_source_that_spells_head_and_base_its_own_way_is_read_where_it_declares_them() {
+    use knobas_core::payload::{Declarations, KindPaths, PayloadPath, StatePath, StateValue};
+    use knobas_core::tone::Tone;
+    let pool = corpus("sw_head_declared").await;
+    let head = "feature/PAY-231";
+    item(
+        &pool,
+        PR_REOPENED,
+        "pr",
+        "payout dashboard latency, part two",
+        serde_json::json!({"state": "open", "from": head, "to": BASE}),
+    )
+    .await;
+    item(
+        &pool,
+        PR_MERGED,
+        "pr",
+        "payout dashboard latency",
+        serde_json::json!({"state": "merged", "from": head, "to": "release/2026.08"}),
+    )
+    .await;
+    let declarations = Declarations::empty().with(
+        "gitea",
+        vec![KindPaths {
+            kind: "pr".to_owned(),
+            state: vec![StatePath {
+                at: PayloadPath::of(["state"]),
+                values: vec![
+                    StateValue::of("open", Tone::Info),
+                    StateValue::of("merged", Tone::Ok),
+                ],
+            }],
+            head: vec![PayloadPath::of(["from"])],
+            base: vec![PayloadPath::of(["to"])],
+            ..KindPaths::default()
+        }],
+    );
+
+    let found = queue::pull_request_on_head(&pool, &declarations, &repo(), head, BASE)
+        .await
+        .unwrap();
+    assert_eq!(found, PullRequestOnHead::Open(PR_REOPENED.to_owned()));
+
+    let found = queue::pull_request_on_head(&pool, &declarations, &repo(), head, "release/2026.08")
+        .await
+        .unwrap();
+    assert_eq!(
+        found,
+        PullRequestOnHead::Closed {
+            id: PR_MERGED.to_owned(),
+            merged: false
+        },
+        "a state the declaration names and that is not open is finished"
+    );
 }
 
 /// **The seam.** With both pull requests on the head, the flow settles the
@@ -1759,17 +1871,48 @@ async fn a_link_step_refuses_a_closed_pull_request_as_closed_and_not_as_merged()
 
 // -- the reverse direction -------------------------------------------------
 
-/// What the pull request's source declares about where it keeps its merged
-/// flag (#277). Gitea's boolean `merged`, which is `knobas_source_gitea`'s own
-/// declaration -- the pass reads through it now, so a fixture's source has to
-/// have said where its own spelling is.
+/// What the pull request's source declares (#277, #2358): Gitea's own
+/// spelling, as `knobas_source_gitea` declares it -- the boolean `merged`,
+/// the state that flag leads and the `open | closed` word behind it, and the
+/// two branches at `head.ref` and `base.ref`. The reads follow these
+/// declarations, so a fixture's source has to have said where its own
+/// spelling is.
 fn declarations() -> knobas_core::payload::Declarations {
-    use knobas_core::payload::{Declarations, KindPaths, PayloadPath};
+    declared(true)
+}
+
+/// [`declarations`], with or without the merged flag.
+fn declared(merged: bool) -> knobas_core::payload::Declarations {
+    use knobas_core::payload::{Declarations, KindPaths, PayloadPath, StatePath, StateValue};
+    use knobas_core::tone::Tone;
+    let mut state = vec![StatePath {
+        at: PayloadPath::of(["state"]),
+        values: vec![
+            StateValue::of("open", Tone::Info),
+            StateValue::of("closed", Tone::Muted),
+        ],
+    }];
+    if merged {
+        state.insert(
+            0,
+            StatePath {
+                at: PayloadPath::of(["merged"]),
+                values: vec![StateValue::of(true, Tone::Ok).shown_as("merged")],
+            },
+        );
+    }
     Declarations::empty().with(
         "gitea",
         vec![KindPaths {
             kind: "pr".to_owned(),
-            merged: vec![PayloadPath::of(["merged"])],
+            merged: if merged {
+                vec![PayloadPath::of(["merged"])]
+            } else {
+                Vec::new()
+            },
+            state,
+            head: vec![PayloadPath::of(["head", "ref"])],
+            base: vec![PayloadPath::of(["base", "ref"])],
             ..KindPaths::default()
         }],
     )

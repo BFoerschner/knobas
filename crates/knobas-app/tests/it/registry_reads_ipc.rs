@@ -85,6 +85,12 @@ impl AdapterRegistry for Probe {
                         entry: PayloadPath::of(["login"]),
                     }],
                     merged: vec![PayloadPath::of(["merged"])],
+                    state: vec![StatePath {
+                        at: PayloadPath::of(["state"]),
+                        values: vec![StateValue::of("open", Tone::Info)],
+                    }],
+                    head: vec![PayloadPath::of(["head", "ref"])],
+                    base: vec![PayloadPath::of(["base", "ref"])],
                     ..KindPaths::default()
                 },
             ],
@@ -102,6 +108,27 @@ impl AdapterRegistry for Probe {
         Err(knobas_source::SourceError::protocol(
             "the probe builds nothing",
         ))
+    }
+}
+
+/// The [`Probe`], declaring no merged flag for its pull requests: what a
+/// source whose merge is not a boolean looks like to the post-write read.
+struct Unmerged;
+
+impl AdapterRegistry for Unmerged {
+    fn descriptors(&self) -> Vec<SourceDescriptor> {
+        let mut descriptors = Probe.descriptors();
+        for paths in &mut descriptors[0].payload_paths {
+            paths.merged.clear();
+        }
+        descriptors
+    }
+
+    fn build(
+        &self,
+        instance: knobas_source::instance::SourceInstance,
+    ) -> Result<Box<dyn knobas_source::Source>, knobas_source::SourceError> {
+        Probe.build(instance)
     }
 }
 
@@ -407,8 +434,8 @@ async fn run_ends(pool: &PgPool, registry: Arc<dyn AdapterRegistry>, ticket: &st
 
 /// The write queue's post-write read takes the registry it is given: a pull
 /// request open from the write's head into its base, which the probe declares
-/// merged, is not the write's and is not linked; the process's registry, which
-/// declares no merged flag for the kind, links it.
+/// merged, is not the write's and is not linked; the same probe declaring no
+/// merged flag for the kind ([`Unmerged`]) links it.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_post_write_read_takes_the_registry_it_is_given() {
     let pool = database("registry_reads_write_queue").await;
@@ -460,13 +487,7 @@ async fn the_post_write_read_takes_the_registry_it_is_given() {
         "the probe declares the pull request merged"
     );
 
-    run_ends(
-        &pool,
-        Arc::new(knobas_app::sources::Registry::for_process()),
-        &ticket,
-        &pr,
-    )
-    .await;
+    run_ends(&pool, Arc::new(Unmerged), &ticket, &pr).await;
     let mut both = vec![branch, pr];
     both.sort();
     assert_eq!(reached(&pool, &ticket).await, both);

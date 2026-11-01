@@ -47,7 +47,8 @@ pub async fn start_work_flow(
         return Ok(Vec::new());
     };
     let repo = EntityRef::parse(&repo_id).map_err(IpcError::invalid)?;
-    crate::start_work::begin(&pool, &ticket, &repo).await
+    let declarations = crate::sources::paths::declared_paths(&pool, lifecycle.registry()).await?;
+    crate::start_work::begin(&pool, &declarations, &ticket, &repo).await
 }
 
 /// Run the flow as far as it will go, **behind the answer** (#779): answers

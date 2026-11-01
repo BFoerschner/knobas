@@ -21,6 +21,7 @@
 //! next door never names the enum at all; it moves payloads.
 
 use knobas_core::entity::EntityRef;
+use knobas_core::payload::Declarations;
 use knobas_core::start_work::{PlannedStep, Step};
 use knobas_source::WriteOp;
 use sqlx::PgPool;
@@ -100,7 +101,8 @@ pub struct Subject {
 /// repository need not be: `WriteOp`'s creating variants take a container, and
 /// a container knobas does not mirror is a legal target (#43). What is lost by
 /// not mirroring it is the default branch, and [`FALLBACK_BASE`] is what stands
-/// in.
+/// in. The default branch is read where the repository's kind declares it in
+/// `declarations` (#2358); a source that declares none falls back too.
 ///
 /// # Errors
 ///
@@ -108,6 +110,7 @@ pub struct Subject {
 /// mirror; [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
 pub async fn subject(
     pool: &PgPool,
+    declarations: &Declarations,
     ticket: &EntityRef,
     repo: &EntityRef,
 ) -> Result<Subject, IpcError> {
@@ -123,15 +126,17 @@ pub async fn subject(
         ))
     })?;
 
-    // `default_branch` is a Gitea repository record's own field. Read through
-    // `->>` and defaulted, never required: this is the one place the proposal
-    // benefits from knowing a source's payload shape, the cost of being wrong
-    // is a base branch the user corrects in the review step, and no other part
-    // of the flow depends on it.
-    let base: Option<String> = sqlx::query_scalar(
-        "select payload->>'default_branch' from sync.live_item where entity_id = $1",
-    )
+    // Read where the repository kind declares its default branch (#2307,
+    // #2358), and defaulted, never required: the cost of a miss is a base
+    // branch the user corrects in the review step, and no other part of the
+    // flow depends on it.
+    let base: Option<String> = sqlx::query_scalar(concat!(
+        "select ",
+        knobas_core::declared_string!("$2", "default_branch"),
+        " from sync.live_item i where i.entity_id = $1"
+    ))
     .bind(repo.to_string())
+    .bind(declarations.as_param())
     .fetch_optional(pool)
     .await
     .map_err(IpcError::internal)?

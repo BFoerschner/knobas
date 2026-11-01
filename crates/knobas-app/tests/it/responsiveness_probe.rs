@@ -1986,9 +1986,14 @@ async fn writes(
     let flow = || async {
         let n = tickets.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let ticket = knobas_core::entity::EntityRef::parse(&format!("jira0:JIRA0-{n}")).unwrap();
-        knobas_app::start_work::begin(pool, &ticket, &repo)
-            .await
-            .map_err(said)?;
+        knobas_app::start_work::begin(
+            pool,
+            &knobas_core::payload::Declarations::empty(),
+            &ticket,
+            &repo,
+        )
+        .await
+        .map_err(said)?;
         Ok::<_, String>(ticket)
     };
     time(

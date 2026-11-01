@@ -14,7 +14,8 @@ use knobas_app::sources::write_queue::{
     ArrivalLinks, arrival_linkable, hold_arrival_link, link_arrivals, link_on_arrival,
 };
 use knobas_core::entity::EntityRef;
-use knobas_core::payload::{Declarations, KindPaths, PayloadPath};
+use knobas_core::payload::{Declarations, KindPaths, PayloadPath, StatePath, StateValue};
+use knobas_core::tone::Tone;
 use sqlx::PgPool;
 
 const TICKET: &str = "jira:PAY-231";
@@ -110,13 +111,23 @@ async fn queued(pool: &PgPool, payload: serde_json::Value) -> i64 {
     .id
 }
 
-/// Gitea's declared merged flag, as `start_work`'s look-up reads it.
+/// Gitea's declared merged flag, state and branches (#2358), as
+/// `start_work`'s look-up reads them.
 fn declarations() -> Declarations {
     Declarations::empty().with(
         "gitea",
         vec![KindPaths {
             kind: "pr".to_owned(),
             merged: vec![PayloadPath::of(["merged"])],
+            state: vec![StatePath {
+                at: PayloadPath::of(["state"]),
+                values: vec![
+                    StateValue::of("open", Tone::Info),
+                    StateValue::of("closed", Tone::Muted),
+                ],
+            }],
+            head: vec![PayloadPath::of(["head", "ref"])],
+            base: vec![PayloadPath::of(["base", "ref"])],
             ..KindPaths::default()
         }],
     )
