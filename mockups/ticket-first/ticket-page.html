@@ -1,0 +1,722 @@
+<!doctype html>
+<!--
+  The ticket page, redrawn (#/ticket/<entity id>, spec #2227), and the merged page where the
+  same card is the job once pinned.
+
+  Drawn on the app's own stylesheets: every <link> below is a file under
+  app/src/lib/tf/css/, in tf.css's order, and every class in the page exists
+  there, except the few in the "Proposed additions" style block, which is the
+  whole CSS change. The markup is the DOM the Svelte component would produce,
+  so porting it is a component change and one block of tickets.css.
+
+  Open from the repository root (a static server or the file itself). The
+  yellow bar at the bottom left switches ticket, state and theme; it is not
+  part of the app. ?state=<name> and ?theme=light|dark do the same from the
+  address; &bar=0 hides the bar.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ticket page mockup</title>
+<!-- The vendored fonts, as the app bundles them (family "Archivo Variable"); Google Fonts behind them for a server rooted at mockups/. -->
+<link rel="stylesheet" href="../../app/node_modules/@fontsource-variable/archivo/wdth.css">
+<link rel="stylesheet" href="../../app/node_modules/@fontsource/jetbrains-mono/latin-400.css">
+<link rel="stylesheet" href="../../app/node_modules/@fontsource/jetbrains-mono/latin-600.css">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<!-- The app's stylesheets, in tf.css's import order. -->
+<link rel="stylesheet" href="../../app/src/lib/tf/css/tokens.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/chrome.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/job.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/settings.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/dialogs.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/time.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/toasts.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/filter.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/tickets.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/narrow.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/connections.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/views.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/builds.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/docs.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/deps.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/view-editor.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/inbox.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/code.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/markdown.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/monitors.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/branches.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/pr.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/sets.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/chains.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/also-on-this-job.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/first-run.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/write-queue.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/note.css">
+<link rel="stylesheet" href="../../app/src/lib/tf/css/launcher.css">
+<style>
+  /* Google Fonts' family name behind the vendored one, for a server that cannot reach node_modules. */
+  :root { --sans: "Archivo Variable", "Archivo", system-ui, sans-serif; }
+
+  /* ================================================================================
+     Proposed additions to tickets.css. These replace the two `.tf-ticketpage` /
+     `.tf-ticketcard` rules there today.
+     ================================================================================ */
+
+  /* The page is the job's two columns (`.tf-ws`, job.css): the ticket's card on the left, the reading on the
+     right, under its own breadcrumb. The page fills the main area, so each column scrolls on its own and the
+     card's foot is always in reach; below 900px the columns stack and the page scrolls as one (narrow.css). */
+  .tf-ticketpage { height: 100%; }
+  .tf-ticketpage .tf-ws { flex: 1; min-height: 0; height: auto; grid-template-columns: var(--tk-side, 320px) minmax(0, 1fr); }
+  /* The card's width is yours: a 6px handle on its right edge drags it (240px to 720px, kept in browser storage,
+     `knobas.ticket.side`), and a double click on the handle fits it so nothing on the card wraps. The handle shows
+     as the card's edge darkening under the pointer. Below 900px the columns stack and the handle is gone. */
+  .tf-tkhandle { position: absolute; top: 0; bottom: 0; right: 0; width: 6px; cursor: col-resize; z-index: 2; }
+  .tf-tkhandle:hover, .tf-tkhandle.tf-tkdragging { background: rgba(0,0,0,.14); }
+  .tf-sheetcard .tf-tkhandle:hover, .tf-sheetcard .tf-tkhandle.tf-tkdragging { background: var(--rule); }
+  .tf-ws.tf-tkdragging, .tf-ws.tf-tkdragging * { cursor: col-resize !important; user-select: none; }
+  @media (max-width: 900px) { .tf-ticketpage .tf-ws { grid-template-columns: minmax(0, 1fr); } .tf-tkhandle { display: none; } }
+  /* The title is at most two lines, cut with an ellipsis; a cut title shows itself whole in a small sheet that
+     floats over the card while the pointer rests on it (the menu's own surface, `.tf-menu`'s shadow and radius).
+     Beside the key, a copy button: one press puts the key and the title on the clipboard, for a commit, a branch
+     or a chat. */
+  .tf-tkhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .tf-ticketcard .tf-tkcopy { color: var(--card-ink-2); }
+  .tf-ticketcard .tf-tkcopy:hover { background: rgba(0,0,0,.08); color: var(--card-ink); }
+  .tf-sheetcard .tf-tkcopy { color: var(--ink-2); }
+  .tf-sheetcard .tf-tkcopy:hover { background: var(--sheet-2); color: var(--ink); }
+  .tf-ticketcard .tf-tkcopy.tf-tkcopied { color: var(--ok); }
+  .tf-ticketcard .tf-jobrow { margin-top: -6px; }
+  @media (max-width: 900px) { .tf-ticketpage { height: auto; } }
+
+  /* The card is the job card (`.tf-jobcard`, job.css): same column, padding, sections and chips.
+     (Mockup only: tickets.css still carries the old 640px card; the port deletes those two rules instead.) */
+  .tf-ticketpage .tf-ticketcard { width: auto; margin: 0; padding: 24px 22px 20px; gap: 16px; border: 0; border-right: 1px solid var(--card-2); border-radius: 0; overflow: auto; align-self: stretch; }
+  .tf-ticketcard .tf-jobtitle { margin-top: 6px; }
+  .tf-ticketcard .tf-jobrow b { font-weight: 600; }
+  /* Who, the epic, the labels, the source: one short line each, the card's secondary ink. */
+  .tf-tkwho { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); }
+  .tf-tkwho .tf-av, .tf-ticketcard .tf-facts .tf-av { background: rgba(0,0,0,.08); border-color: rgba(0,0,0,.2); color: var(--card-ink); }
+  .tf-tkwho .tf-av.tf-me, .tf-ticketcard .tf-facts .tf-av.tf-me { background: var(--card-ink); border-color: var(--card-ink); color: var(--card); }
+  .tf-tkline { font-size: var(--t-sm); color: var(--card-ink-2); }
+  .tf-tkline a { color: var(--card-ink); text-decoration: underline; text-underline-offset: 2px; }
+  .tf-tklabels { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tf-ticketcard .tf-lab { border-color: rgba(0,0,0,.25); color: var(--card-ink); }
+  /* Reported and logged as the preview's facts list (`dl.tf-facts`, tickets.css), so the labels line up; under the
+     logged line a meter in the week chart's language: what is logged, yours in full ink, the rest of the estimate. */
+  .tf-ticketcard .tf-facts { grid-template-columns: 68px minmax(0, 1fr); gap: 8px 10px; align-items: center; }
+  .tf-ticketcard .tf-facts dt, .tf-ticketcard .tf-facts dd { line-height: 20px; min-height: 20px; }
+  .tf-ticketcard .tf-facts dt { color: var(--card-ink-2); }
+  .tf-sheetcard .tf-facts dt { color: var(--ink-2); }
+  .tf-tkmeter { display: flex; height: 6px; margin-top: 5px; border-radius: 3px; overflow: hidden; background: rgba(0,0,0,.12); }
+  .tf-tkmeter i { display: block; height: 100%; }
+  .tf-tkmeter .tf-tkme { background: var(--card-ink); }
+  .tf-tkmeter .tf-tkothers { background: rgba(0,0,0,.3); }
+  .tf-sheetcard .tf-tkmeter { background: var(--rule-2); }
+  .tf-sheetcard .tf-tkmeter .tf-tkme { background: var(--ink); }
+  .tf-sheetcard .tf-tkmeter .tf-tkothers { background: var(--ink-2); }
+  .tf-tkmeter.tf-tkover { background: var(--err-bg); }
+  /* The title block: the epic as the board card's own epic line (`.tf-cep`, tickets.css), above the key or under the
+     title, and under it the dates line; both in the card's secondary ink. */
+  .tf-ticketcard .tf-tkepic { display: block; font-size: var(--t-xs); color: var(--card-ink-2); text-decoration: none; }
+  .tf-ticketcard .tf-tkepic:hover { text-decoration: underline; text-underline-offset: 2px; }
+  .tf-ticketcard .tf-tkepic.tf-tkabove { margin-bottom: 6px; }
+  .tf-ticketcard .tf-tkepic.tf-tkbelow { margin-top: 6px; }
+  .tf-sheetcard .tf-tkepic { color: var(--ink-2); }
+  /* The epic as a chip that links: the status chip's shape, underlined on hover so it reads as a place to go. */
+  .tf-ticketcard .tf-facts a.tf-tkepicchip { display: inline-block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 18px; text-decoration: none; }
+  .tf-ticketcard .tf-facts a.tf-tkepicchip:hover { text-decoration: underline; text-underline-offset: 2px; }
+  /* The status as the card's chip (job.css tints `.tf-jobcard .tf-chip`), the one fact that is a state. */
+  .tf-ticketcard .tf-facts .tf-chip { font-size: var(--t-xs); }
+  .tf-sheetcard .tf-chip { background: var(--muted-bg); color: var(--ink); }
+  .tf-ticketcard .tf-facts a { color: var(--card-ink); text-decoration: underline; text-underline-offset: 2px; }
+  .tf-sheetcard .tf-facts a { color: var(--ink); }
+  .tf-ticketcard .tf-facts dd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+  .tf-ticketcard .tf-facts dd .tf-tkmeter { flex: 1 0 100%; margin: -2px 0 4px; }
+  .tf-ticketcard .tf-facts dd .tf-av { width: 20px; height: 20px; font-size: 9px; line-height: 1; }
+  .tf-ticketcard .tf-facts dd .tf-chip { line-height: 18px; padding: 0 7px; }
+  .tf-ticketcard .tf-facts dd .tf-lab { line-height: 16px; }
+  .tf-ticketcard .tf-jobrow .tf-chip { font-size: var(--t-xs); line-height: 18px; padding: 0 7px; }
+  .tf-ticketcard .tf-jobrow { margin-top: -4px; }
+  /* The card's two actions under the sections, in the sections' own shape: a second bordered list of rows that open
+     something, *Open in <source>* and *Link something to it* (the drawer). Refresh is the keybind's and has no row. */
+  .tf-tktable.tf-tkacts a { grid-template-columns: minmax(0, 1fr) 8px; }
+  /* The one decision: the preview's `.tf-go`, pinned to the card's foot, the card's own ink-on-yellow button. */
+  .tf-ticketcard .tf-go { margin-top: auto; padding-top: 6px; }
+  .tf-ticketcard .tf-go .tf-btn { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
+
+  /* Two moods of one card, the same card. A ticket you are reading sits on a sheet; the yellow is for the one
+     ticket you are on, as the design system's first rule says, and the yellow is the only difference. */
+  .tf-ticketcard.tf-sheetcard { background: var(--sheet); color: var(--ink); border-right-color: var(--rule); }
+  .tf-ticketcard.tf-sheetcard::before { content: none; }
+  .tf-sheetcard .tf-jobdim, .tf-sheetcard p, .tf-sheetcard h2, .tf-sheetcard .tf-tkline, .tf-sheetcard .tf-go small { color: var(--ink-2); }
+  .tf-sheetcard section { border-top-color: var(--rule-2); }
+  .tf-sheetcard .tf-tkwho .tf-av, .tf-sheetcard .tf-facts .tf-av { background: var(--sheet-2); border-color: var(--rule); color: var(--ink-2); }
+  .tf-sheetcard .tf-tkwho .tf-av.tf-me, .tf-sheetcard .tf-facts .tf-av.tf-me { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+  .tf-sheetcard .tf-lab { border-color: var(--rule); color: var(--ink-2); }
+  .tf-sheetcard .tf-tkline a { color: var(--ink); }
+  .tf-sheetcard .tf-go .tf-btn { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+  .tf-ticketcard .tf-jobkey { font-size: var(--t-d2); }
+  /* The card has no hole: the punched job card is the one thing the page does not keep. */
+  .tf-ticketcard::before { content: none; }
+
+  /* The sections on the card: one line each, three columns that align down the list. The name, the count in
+     tabular figures, and at most one state with its dot, the worst one, only where something asks for you.
+     The rollup's full words are the row's title. The row opens the section's view with *This job* set. */
+  .tf-tksec { display: flex; flex-direction: column; margin: 0 -8px; }
+  .tf-tksec a {
+    display: grid; grid-template-columns: 66px 2.2ch minmax(0, 1fr); gap: 10px; align-items: center;
+    padding: 5px 8px; border-radius: 4px; text-decoration: none; color: inherit; font-size: var(--t-sm); white-space: nowrap;
+  }
+  .tf-tksec a:hover { background: rgba(0,0,0,.07); }
+  .tf-sheetcard .tf-tksec a:hover { background: var(--sheet-2); }
+  .tf-tksec .tf-n { font-variant-numeric: tabular-nums; text-align: right; color: var(--card-ink-2); }
+  .tf-tksec .tf-st { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--card-ink-2); }
+  .tf-sheetcard .tf-tksec .tf-n, .tf-sheetcard .tf-tksec .tf-st { color: var(--ink-2); }
+  .tf-tksec .tf-st.tf-asks { color: var(--card-ink); }
+  .tf-sheetcard .tf-tksec .tf-st.tf-asks { color: var(--ink); }
+  .tf-tksec .tf-dot { width: 7px; height: 7px; }
+  /* The yellow card is a light surface in both themes, so its dots take the light tones: dark's --warn is the
+     card's own yellow and its --err is pink on it. */
+  .tf-card .tf-tksec .tf-dot.tf-warn { background: #8A5600; }
+  .tf-card .tf-tksec .tf-dot.tf-err { background: #B0262A; }
+  .tf-card .tf-tksec .tf-dot.tf-info, .tf-card .tf-tksec .tf-dot.tf-run { background: #2F55D4; }
+  .tf-card .tf-tksec .tf-dot.tf-ok { background: #1F7444; }
+
+  /* ---- The sections as a table: the preview's bordered list (`.tf-rollup`'s shape), one row a link, a chevron at
+     its end as the breadcrumb writes it. The box says "a list of places", the chevron says "opens". ---- */
+  .tf-tktable { display: flex; flex-direction: column; border: 1px solid rgba(0,0,0,.2); border-radius: 6px; background: rgba(255,255,255,.26); overflow: hidden; }
+  .tf-sheetcard .tf-tktable { border-color: var(--rule); background: var(--paper); }
+  .tf-tktable a {
+    display: grid; grid-template-columns: 62px 2.2ch minmax(0, 1fr) 8px; gap: 10px; align-items: center;
+    padding: 7px 10px; border-top: 1px solid rgba(0,0,0,.12); text-decoration: none; color: inherit; font-size: var(--t-sm); white-space: nowrap;
+  }
+  .tf-sheetcard .tf-tktable a { border-top-color: var(--rule-2); }
+  .tf-tktable a:first-child { border-top: 0; }
+  .tf-tktable a:hover { background: rgba(0,0,0,.07); }
+  .tf-sheetcard .tf-tktable a:hover { background: var(--sheet-2); }
+  .tf-tktable .tf-n { font-variant-numeric: tabular-nums; text-align: right; color: var(--card-ink-2); }
+  .tf-tktable .tf-st { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--card-ink-2); }
+  .tf-tktable .tf-st.tf-asks { color: var(--card-ink); }
+  .tf-sheetcard .tf-tktable .tf-n, .tf-sheetcard .tf-tktable .tf-st { color: var(--ink-2); }
+  .tf-sheetcard .tf-tktable .tf-st.tf-asks { color: var(--ink); }
+  .tf-tktable .tf-chev { color: var(--card-ink-2); font-size: var(--t-lg); line-height: 1; text-align: right; }
+  .tf-sheetcard .tf-tktable .tf-chev { color: var(--ink-2); }
+  .tf-tktable .tf-dot { width: 7px; height: 7px; }
+  .tf-card .tf-tktable .tf-dot.tf-warn, .tf-card .tf-tktiles .tf-dot.tf-warn { background: #8A5600; }
+  .tf-card .tf-tktable .tf-dot.tf-err, .tf-card .tf-tktiles .tf-dot.tf-err { background: #B0262A; }
+  .tf-card .tf-tktable .tf-dot.tf-info, .tf-card .tf-tktiles .tf-dot.tf-info { background: #2F55D4; }
+
+  /* ---- The sections as tiles: two a row, each a small bordered card with the name, the count as a display
+     figure and the state. The fifth spans the row. A border and a hover border are the tile's "press me". ---- */
+  .tf-tktiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .tf-tktiles a {
+    display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 8px 10px 7px; border: 1px solid rgba(0,0,0,.2); border-radius: 6px;
+    background: rgba(255,255,255,.26); text-decoration: none; color: inherit;
+  }
+  .tf-tktiles a:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .tf-tktiles a:hover { border-color: var(--card-ink); }
+  .tf-sheetcard .tf-tktiles a { border-color: var(--rule); background: var(--paper); }
+  .tf-sheetcard .tf-tktiles a:hover { border-color: var(--ink-2); }
+  .tf-tktiles .tf-tkname { font-size: var(--t-xs); color: var(--card-ink-2); }
+  .tf-tktiles .tf-tkn { font-size: var(--t-2xl); font-weight: 800; font-variation-settings: "wdth" 62; font-variant-numeric: tabular-nums; line-height: 1.05; }
+  .tf-tktiles .tf-st { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-xs); color: var(--card-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 15px; }
+  .tf-tktiles .tf-st.tf-asks { color: var(--card-ink); }
+  .tf-sheetcard .tf-tktiles .tf-tkname, .tf-sheetcard .tf-tktiles .tf-st { color: var(--ink-2); }
+  .tf-sheetcard .tf-tktiles .tf-st.tf-asks { color: var(--ink); }
+  .tf-tktiles .tf-dot { width: 6px; height: 6px; }
+
+  /* The page's head in the reading column: the title at the page-title step (`.tf-fhead`'s type, chrome.css), whole,
+     and under it the page's actions as a header's buttons, default size (Controls), the ghost ones last. */
+  .tf-tkpagehead { display: flex; align-items: flex-start; gap: 16px; margin-bottom: -8px; }
+  .tf-tkpagehead h1 { flex: 1; min-width: 0; }
+  .tf-tkpagehead .tf-acts { flex: none; margin-top: -2px; }
+  .tf-tkpagehead h1 { font-size: var(--t-3xl); line-height: 1.15; font-weight: 700; font-variation-settings: "wdth" 85; overflow-wrap: anywhere; }
+  .tf-tkpagehead .tf-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
+  /* The reading column: the description and the thread, at a reading width. */
+  /* The reading column sits centred in the space beside the card (Björn's call; the design system's left
+     alignment stays everywhere else). */
+  .tf-ticketpage .tf-wbody { padding: 24px 22px 48px; }
+  .tf-tkread { max-width: 880px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+  .tf-tkread > section > header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; min-height: var(--control-h-sm); }
+  .tf-tkread > section > header h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
+  .tf-tkread > section > header .tf-dim { font-size: var(--t-sm); }
+  /* The description is the ticket's Markdown in a resting panel, at body size, wrapped at a reading measure. */
+  .tf-tkdesc { padding: 14px 16px; }
+  .tf-tkdesc .tf-md { padding: 0; font-size: var(--t-md); }
+  .tf-tkdesc p.tf-dim { font-size: var(--t-sm); }
+  /* The thread is the job's (`.tf-convo`, connections.css); the compose box is one line until it is used. */
+  .tf-tkread .tf-convo { max-width: none; }
+  .tf-tkread .tf-compose textarea { min-height: 36px; }
+  .tf-tkread .tf-compose:focus-within textarea { min-height: 80px; }
+  /* Attachments (the mirror holds the list, `fields.attachment`; the bytes come live through the source's credential):
+     a panel of rows, the job's `.tf-r`, each with a preview or the file's kind, the name, who and when and how big,
+     and *Open* and *Download*. A preview that cannot be fetched is a dashed placeholder, as `.tf-md-noimg` draws one. */
+  .tf-tkatt .tf-r { grid-template-columns: 56px minmax(0, 1fr) auto; display: grid; align-items: center; gap: 12px; padding: 8px 12px; }
+  .tf-tkatt .tf-r .tf-rend { margin-left: 0; }
+  .tf-tkthumb { width: 56px; height: 40px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet-2); object-fit: cover; display: block; }
+  .tf-tkkind, .tf-tkthumb.tf-tknone {
+    width: 56px; height: 40px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet-2);
+    display: grid; place-items: center; font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2);
+  }
+  .tf-tkthumb.tf-tknone { border-style: dashed; background: none; }
+  .tf-tkatt .tf-rsub { white-space: normal; }
+  .tf-tkatt .tf-rend .tf-btn { color: var(--ink-2); }
+  /* The panel folds: a <details> whose summary is the section heading, closed by default, with the names it holds
+     after the count so nobody opens it to learn what is there. The marker is the table's own sort glyph. */
+  .tf-tkread details.tf-tkfold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; min-height: var(--control-h-sm); margin-bottom: 10px; border-radius: 4px; }
+  .tf-tkread details.tf-tkfold > summary::-webkit-details-marker { display: none; }
+  .tf-tkread details.tf-tkfold > summary h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
+  .tf-tkread details.tf-tkfold > summary .tf-dim { font-size: var(--t-sm); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tf-tkread details.tf-tkfold > summary .tf-tkmark { width: 14px; height: 14px; color: var(--ink-2); transition: transform 120ms ease-out; }
+  .tf-tkread details.tf-tkfold[open] > summary .tf-tkmark { transform: rotate(90deg); }
+  .tf-tkread details.tf-tkfold > summary:hover h2 { text-decoration: underline; text-underline-offset: 3px; }
+  /* The warn strip the job uses for stale data (`.tf-stale`, job.css), here for a source that cannot be reached. */
+  .tf-tkatt .tf-stale { margin: 10px 12px 2px; }
+  /* An attachment drawn inline in the description, where the wiki put it: a figure at most the panel's width. */
+  .tf-tkfig { margin: 12px 0 0; }
+  .tf-tkfig img { display: block; max-width: 100%; max-height: 280px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet-2); }
+  .tf-tkfig figcaption { font-size: var(--t-xs); color: var(--ink-2); margin-top: 4px; }
+  .tf-tkfig .tf-md-noimg { display: inline-flex; align-items: center; gap: 8px; padding: 10px 12px; }
+  .tf-tkfig .tf-md-noimg a { color: var(--info); text-decoration: underline; text-underline-offset: 2px; }
+  /* Skeletons while the ticket is read (chrome.css draws the bars). */
+  .tf-ticketcard .tf-skel-lines { padding: 0; }
+  .tf-ticketcard .tf-skel-bar { background: rgba(0,0,0,.14); }
+  .tf-sheetcard .tf-skel-bar { background: var(--rule-2); }
+
+  /* ================================================================================
+     Mockup only: the bar that switches ticket, state and theme. Not part of the app.
+     ================================================================================ */
+  .mk { position: fixed; left: 12px; bottom: 40px; z-index: 50; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; max-width: 60vw;
+        background: var(--card); color: var(--card-ink); border: 1px solid var(--card-2); border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: var(--shadow); }
+  .mk b { font-weight: 700; margin-right: 4px; }
+  .mk button { border: 1px solid rgba(0,0,0,.25); border-radius: 4px; padding: 2px 8px; background: rgba(255,255,255,.3); color: inherit; font: inherit; cursor: pointer; }
+  .mk button[aria-pressed="true"] { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
+  .mk-hide .mk { display: none; }
+</style>
+</head>
+<body>
+<div class="tf">
+  <header class="tf-top">
+    <span class="tf-brand">knobas</span>
+    <nav class="tf-nav" aria-label="Main">
+      <a href="#/tickets" aria-current="page">Tickets</a>
+      <a href="#/inbox">Inbox <span class="tf-count">10</span></a>
+      <a href="#/code">Code</a>
+      <a href="#/builds">Builds</a>
+      <a href="#/docs">Docs</a>
+      <a href="#/deps">Dependencies</a>
+      <a href="#/monitors">Monitors <span class="tf-count tf-err">1</span></a>
+      <a href="#/sets">Link sets</a>
+      <a href="#/review">Proposed links <span class="tf-count">8</span></a>
+      <a href="#/time">Time</a>
+    </nav>
+    <span class="tf-spacer"></span>
+    <button class="tf-search" aria-label="Search everything">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>
+      <span class="tf-label">Search</span><kbd>⌘K</kbd>
+    </button>
+    <span id="timer" style="display: contents"></span>
+    <a class="tf-iconbtn" href="#/settings" aria-label="Settings"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="5.6" stroke-width="2.6" stroke-dasharray="2.2 2.2"/><circle cx="8" cy="8" r="3.9" stroke-width="1.6"/><circle cx="8" cy="8" r="1.3" stroke-width="1.4"/></svg></a>
+    <button class="tf-iconbtn" aria-label="Toggle colour theme" id="themebtn"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 12.5v-11a5.5 5.5 0 0 1 0 11z"/></svg></button>
+  </header>
+
+  <main class="tf-main" id="main"></main>
+
+  <footer class="tf-status">
+    <a class="tf-sources" href="#/settings">Sources</a>
+    <span class="tf-healthy"><span>Tidewater (mock) synced 2026-08-22</span><span>Tidewater Gitea 2026-08-22</span><span>Tidewater Jira 2026-08-22</span></span>
+    <span class="tf-bad">Tidewater TeamCity: sign-in failed 2026-08-22 (401) <a href="#/settings">Re-enter password</a></span>
+    <span class="tf-queue"><button class="tf-queued">2 queued writes · <span class="tf-need">4 need you</span></button></span>
+  </footer>
+</div>
+
+<div class="mk" role="group" aria-label="Mockup switches">
+  <b>Mockup</b>
+  <button data-state="read">Reading PAY-231</button>
+  <button data-state="job">PAY-231 is your job</button>
+  <button data-state="ops77">OPS-77, nobody's</button>
+  <button data-state="done">PAY-219, done</button>
+  <button data-state="long">Long title</button>
+  <button data-state="loading">Opening</button>
+  <button data-state="missing">Not in the mirror</button>
+  <span>·</span>
+  <button data-sec="table">Table</button>
+  <button data-sec="tiles">Tiles</button>
+  <button data-sec="lines">Lines</button>
+  <span>·</span>
+  <button data-mine="1">Logged by you</button>
+
+
+  <span>·</span>
+  <button data-att="down">Jira unreachable</button>
+  <span>·</span>
+  <button data-theme="light">Light</button>
+  <button data-theme="dark">Dark</button>
+</div>
+
+<script>
+/* ------------------------------------------------------------------ fixtures
+   The dev fake's tickets (app/src/lib/shell/dev/fake/), in its words. */
+const TICKETS = {
+  pay231: {
+    id: "mock:PAY-231", key: "PAY-231", title: "Retry failed SEPA payouts",
+    status: "In Progress", facts: "Story, High",
+    logged: { spent: 130, mine: 100, estimate: 360, text: "2h 10m of 6h", mineText: "1h 40m yours" }, reporter: "Lena Hoffmann", reporterInitials: "LH", reporterMe: false, created: "2026-08-12",
+    subtasks: [3, 1, "1 open"],
+    assignee: "mara", initials: "ML", mine: true,
+    epic: { id: "mock:PAY-200", line: "PAY-200 Payout reliability" },
+    labels: ["sepa", "psp"],
+    source: "Tidewater Jira", updated: "2026-08-22", webUrl: "https://jira.tidewater.example/browse/PAY-231",
+    links: [],
+    /* One line a section: tone and words of the worst signal, or none; the title carries the whole rollup. */
+    sections: [
+      ["Code", 6, "#/code", "warn", "3 not pushed", "6 items: 1 open PR, 3 commits not pushed, 1 proposed link"],
+      ["Builds", 7, "#/builds", "err", "1 failing", "7 configurations: 1 failing, 1 running, 5 passing"],
+      ["Docs", 1, "#/docs", "", "", "1 page"],
+      ["Monitors", 3, "#/monitors", "err", "1 down", "3 watched: 1 down, 2 fine"],
+      ["Assets", 5, "#/assets", "", "", "5 assets"],
+    ],
+    description: `<p>Payouts to two SEPA banks fail with a <strong>409</strong> on retry. The retry window has to be idempotent before we can turn the scheduler back on.</p>
+@@INLINE:psp-409-trace.png@@
+<ul><li>Retry only the transient codes (<code>AC04</code> is final)</li><li>Cap the retry budget</li></ul>`,
+    thread: { total: 20, mentions: 2, shown: [
+      ["LH", "Lena Hoffmann", "2026-08-12 09:14", false, false, "Finance keeps chasing failed SEPA payouts by hand, about 30 a week. Can we retry the transient ones automatically?"],
+      ["PN", "Priya Nair", "2026-08-12 09:40", false, true, "Yes. <span class=\"tf-at\">@mara</span> can you pick this up after PAY-219? Keep it to transient PSP errors only."],
+      ["ML", "You", "2026-08-12 10:02", true, false, "Sure. Which codes count as transient? I only know 503."],
+      ["PN", "Priya Nair", "2026-08-12 10:30", false, false, "503 and TEMP_UNAVAILABLE. The PSP docs list RATE_LIMITED too, but they say not to retry that one automatically."],
+      ["TW", "Tomasz Wójcik", "2026-08-12 11:05", false, false, "If you retry, please don’t hammer the PSP. Last outage we got rate limited for an hour."],
+      ["ML", "You", "2026-08-13 16:20", true, false, "Plan: exponential backoff, base 30 s, factor 2. Max attempts still open."],
+      ["LH", "Lena Hoffmann", "2026-08-14 09:00", false, false, "Finance asks for at most 5 attempts. After that it should land in the manual review queue."],
+      ["JB", "Jonas Becker", "2026-08-14 09:12", false, false, "5 attempts from base 30 s is about 15 min until the last one. Fine for the 13:00 batch?"],
+      ["LH", "Lena Hoffmann", "2026-08-14 09:30", false, false, "Yes, the cutoff is 15:00."],
+      ["ML", "You", "2026-08-18 09:06", true, false, "Starting. The design goes on the SEPA payout retry design page."],
+      ["PN", "Priya Nair", "2026-08-19 11:45", false, false, "Add jitter, otherwise all retries of a batch hit the PSP in the same second."],
+      ["ML", "You", "2026-08-19 12:10", true, false, "Will do. ±20 %?"],
+      ["TW", "Tomasz Wójcik", "2026-08-20 08:50", false, false, "Staging PSP sandbox is flaky this week, don’t trust red integration tests blindly."],
+      ["PN", "Priya Nair", "yesterday 14:20", false, false, "Please make sure the backoff policy matches the design page. Finance wants max 5 attempts."],
+      ["LH", "Lena Hoffmann", "yesterday 15:02", false, true, "<span class=\"tf-at\">@mara</span> will the manual review queue get an SLA? Finance asked twice."],
+      ["ML", "You", "yesterday 15:30", true, false, "Priya, can you decide the SLA? I’ll document it."],
+      ["ML", "You", "yesterday 17:30", true, false, "First version pushed on feature/PAY-231-sepa-retry."],
+      ["JB", "Jonas Becker", "today 09:35", false, false, "Left a comment on the PR about the jitter width."],
+      ["ML", "You", "today 10:15", true, false, "Backoff + jitter implemented in a41f2c, integration test still red (#1187), investigating."],
+      ["TW", "Tomasz Wójcik", "today 12:45", false, false, "flows-stage is down since 12:40, so sandbox calls from stage time out right now. Looking into it."],
+    ] },
+    action: ["Resume work", "Makes it your job and starts the timer on it."],
+  },
+  ops77: {
+    id: "mock:OPS-77", key: "OPS-77", title: "Rotate the staging database credentials",
+    status: "To Do", facts: "Task, Low",
+    logged: { spent: 0, mine: 0, estimate: 120, text: "0m of 2h", mineText: null }, reporter: "Priya Nair", reporterInitials: "PN", reporterMe: false, created: "2026-08-19", subtasks: null,
+    assignee: null, initials: "–", mine: false,
+    epic: null, labels: ["on-call"],
+    source: "Tidewater Jira", updated: "2026-08-19", webUrl: "https://jira.tidewater.example/browse/OPS-77",
+    links: [["blocks", "mock:PAY-228", "PAY-228", "Idempotency key on the payout endpoint"]],
+    sections: [],
+    description: null,
+    thread: { total: 0, mentions: 0, shown: [] },
+    action: ["Work on this", "Makes it your job: the timer, Start work and Link to point here."],
+  },
+  long: null,
+  done: {
+    id: "mock:PAY-219", key: "PAY-219", title: "Classify PSP error codes",
+    status: "Done", facts: "Task, Medium",
+    logged: { spent: 220, mine: 220, estimate: null, text: "3h 40m", mineText: "all yours" }, reporter: "mara", reporterInitials: "ML", reporterMe: true, created: "2026-08-15", subtasks: null,
+    assignee: "mara", initials: "ML", mine: true,
+    epic: { id: "mock:PAY-200", line: "PAY-200 Payout reliability" },
+    labels: [],
+    source: "Tidewater Jira", updated: "2026-08-18", webUrl: "https://jira.tidewater.example/browse/PAY-219",
+    links: [],
+    sections: [["Code", 2, "#/code", "", "", "2 items: 1 merged PR, 1 commit"], ["Builds", 1, "#/builds", "", "", "1 configuration, passing"]],
+    description: `<p>Group the PSP's error codes into transient and final, so the retry work in PAY-231 can tell them apart.</p>`,
+    thread: { total: 3, mentions: 0, shown: [
+      ["ML", "You", "2026-08-17 16:40", true, false, "PR #131 is up, three codes still unclassified, see the comment there."],
+      ["PN", "Priya Nair", "2026-08-18 11:02", false, false, "Merged. The table is on the PSP error codes page."],
+    ] },
+    action: null,
+  },
+};
+
+/* A stand-in for a screenshot: a grey window with a red trace line, so a preview reads as one. */
+const SHOT = (w, h, seed) => "data:image/svg+xml;utf8," + encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <rect width="${w}" height="${h}" fill="#EEF1F4"/><rect x="0" y="0" width="${w}" height="${h * 0.12}" fill="#DDE2E7"/>
+    ${Array.from({ length: 7 }, (_, i) => `<rect x="${w * 0.05}" y="${h * (0.2 + i * 0.1)}" width="${w * (0.3 + ((i * 7 + seed) % 5) * 0.12)}" height="${h * 0.045}" rx="2" fill="#CBD2D9"/>`).join("")}
+    <rect x="${w * 0.05}" y="${h * 0.5}" width="${w * 0.7}" height="${h * 0.045}" rx="2" fill="#B0262A" opacity=".8"/>
+  </svg>`);
+const ATTACHMENTS = {
+  "mock:PAY-231": [
+    { name: "psp-409-trace.png", kind: "image", size: "182 KB", by: "Lena Hoffmann", at: "2026-08-12", inline: true, seed: 1 },
+    { name: "retry-timeline.png", kind: "image", size: "96 KB", by: "You", at: "2026-08-19", seed: 4 },
+    { name: "sepa-error-codes.pdf", kind: "PDF", size: "1.2 MB", by: "Priya Nair", at: "2026-08-12" },
+    { name: "batch-13-failures.csv", kind: "CSV", size: "48 KB", by: "Lena Hoffmann", at: "2026-08-14" },
+  ],
+};
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const ticketHash = (id) => `#/ticket/${encodeURIComponent(id)}`;
+const jobHash = (id) => `#/job/${encodeURIComponent(id)}`;
+
+function crumbs(key, hint = true) {
+  return `<nav class="tf-crumbs" aria-label="Breadcrumb">
+    <a class="tf-crumb" href="#/tickets">Tickets</a><span class="tf-sep">›</span><strong>${esc(key)}</strong>
+    ${hint ? `<span class="tf-esc">Back to Tickets <kbd>Esc</kbd></span>` : ""}
+  </nav>`;
+}
+/* The top bar's timer chip: running on the pinned ticket, or off. */
+function timerChip(key) {
+  document.getElementById("timer").innerHTML = key
+    ? `<button class="tf-timer tf-card" title="Timer (⌘T)"><span class="tf-timer-key tf-mono">${esc(key)}</span><span class="tf-timer-t">1:12</span><span class="tf-timer-stop" title="Stop and log"><i></i></span></button>`
+    : `<button class="tf-timer tf-off" title="Timer (⌘T)"><span>No timer</span><span class="tf-timer-stop" aria-hidden="true">▶</span></button>`;
+}
+function setNav(t, chosen) {
+  timerChip(chosen ? t.key : null);
+}
+
+/* The sections on the card (`reachTally` and the section rollups in job.ts): one line each. */
+function sectionRows(t) {
+  if (t.sections.length === 0) return `<p class="tf-small">Nothing connected yet.</p>`;
+  const sub = t.subtasks ? [["Sub-tasks", t.subtasks[0], "#/tickets", t.subtasks[1] ? "info" : "", t.subtasks[2], `${t.subtasks[0]} sub-tasks, ${t.subtasks[2]}`]] : [];
+  if (shape === "table") return `<div class="tf-tktable">${[...sub, ...t.sections].map(([name, n, href, tone, state, words]) =>
+    `<a href="${href}" title="${esc(name)} view, this ticket only. ${esc(words)}">
+      <span>${esc(name)}</span><span class="tf-n">${n}</span>
+      ${state ? `<span class="tf-st${tone === "err" || tone === "warn" ? " tf-asks" : ""}"><span class="tf-dot tf-${tone}"></span>${esc(state)}</span>` : "<span></span>"}
+      <span class="tf-chev" aria-hidden="true">›</span>
+    </a>`).join("")}</div>`;
+  if (shape === "tiles") return `<div class="tf-tktiles">${t.sections.map(([name, n, href, tone, state, words]) =>
+    `<a href="${href}" title="${esc(name)} view, this ticket only. ${esc(words)}">
+      <span class="tf-tkname">${esc(name)}</span><span class="tf-tkn">${n}</span>
+      <span class="tf-st${tone === "err" || tone === "warn" ? " tf-asks" : ""}">${state ? `<span class="tf-dot tf-${tone}"></span>${esc(state)}` : ""}</span>
+    </a>`).join("")}</div>`;
+  return `<div class="tf-tksec">${t.sections.map(([name, n, href, tone, state, words]) =>
+    `<a href="${href}" title="${esc(name)} view, this ticket only. ${esc(words)}">
+      <span>${esc(name)}</span><span class="tf-n">${n}</span>
+      ${state ? `<span class="tf-st${tone === "err" || tone === "warn" ? " tf-asks" : ""}"><span class="tf-dot tf-${tone}"></span>${esc(state)}</span>` : "<span></span>"}
+    </a>`).join("")}</div>`;
+}
+
+/* The logged meter: yours, others', the rest of the estimate; over the estimate the track turns err. */
+function meter(l) {
+  const total = Math.max(l.estimate, l.spent);
+  const pct = (m) => `${((m / total) * 100).toFixed(1)}%`;
+  const mine = byMe ? l.mine : 0, others = l.spent - mine;
+  return `<span class="tf-tkmeter${l.spent > l.estimate ? " tf-tkover" : ""}" role="img" aria-label="${esc(l.text)} logged${byMe ? `, ${esc(l.mineText)}` : ""}">${
+    mine ? `<i class="tf-tkme" style="width:${pct(mine)}"></i>` : ""}${others ? `<i class="tf-tkothers" style="width:${pct(others)}"></i>` : ""}</span>`;
+}
+
+/* The card: identity and facts, the sections, then one action: the timer (pinned) or the decision. */
+function card(t, chosen) {
+  const who = t.assignee === null
+    ? `<span class="tf-av" aria-hidden="true">–</span><span>Unassigned</span>`
+    : `<span class="tf-av${t.mine ? " tf-me" : ""}" aria-hidden="true">${esc(t.initials)}</span><span>${esc(t.assignee)}${t.mine ? " (you)" : ""}</span>`;
+  const status = `<b>${esc(t.status)}</b>`;
+  const links = t.links.length ? `<section><h2>Linked</h2><div class="tf-tkline">${t.links.map(([rel, id, key, title]) =>
+    `<a href="${ticketHash(id)}">${esc(rel === "blocks" ? "Blocks" : "Blocked by")} ${esc(key)} ${esc(title)}</a>`).join("<br>")}</div></section>` : "";
+  const foot = chosen
+    ? `<div class="tf-go"><a class="tf-btn tf-primary tf-lg" href="#/time">Stop and log</a></div>`
+    : t.action
+      ? `<div class="tf-go"><a class="tf-btn tf-primary tf-lg" href="${jobHash(t.id)}" title="${esc(t.action[1])}">${esc(t.action[0])}</a></div>`
+      : "";
+  return `<article class="tf-jobcard tf-ticketcard ${chosen ? "tf-card" : "tf-sheetcard"}" aria-label="${chosen ? "Job card" : "Ticket"}">
+    <div class="tf-tkhandle" role="separator" aria-orientation="vertical" aria-label="Card width. Drag to resize, double-click to fit." title="Drag to resize, double-click to fit"></div>
+    <div>
+      <div class="tf-tkhead">
+        <div class="tf-jobkey">${esc(t.key)}</div>
+        <button type="button" class="tf-iconbtn tf-sm tf-tkcopy" title="Copy the key and the title" aria-label="Copy the key and the title" data-copy="${esc(t.key)} ${esc(t.title)}">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="tf-jobrow"><span class="tf-chip">${esc(t.status)}</span></div>
+    <dl class="tf-facts">
+      ${t.epic ? `<dt>Epic</dt><dd><a class="tf-chip tf-tkepicchip" href="${ticketHash(t.epic.id)}">${esc(t.epic.line)}</a></dd>` : ""}
+      <dt>Reporter</dt><dd><span class="tf-av${t.reporterMe ? " tf-me" : ""}" aria-hidden="true">${esc(t.reporterInitials)}</span><span>${esc(t.reporter)}${t.reporterMe ? " (you)" : ""}</span></dd>
+      <dt>Assignee</dt><dd>${who}</dd>
+      <dt>Type</dt><dd>${esc(t.facts.split(", ")[0])}</dd>
+      <dt>Priority</dt><dd>${esc(t.facts.split(", ")[1] ?? "")}</dd>
+      ${t.labels.length ? `<dt>Labels</dt><dd>${t.labels.map((l) => `<span class="tf-lab">${esc(l)}</span>`).join("")}</dd>` : ""}
+      ${t.logged ? `<dt>Logged</dt><dd>${esc(t.logged.text)}${byMe && t.logged.mineText ? `, ${esc(t.logged.mineText)}` : ""}${t.logged.estimate ? meter(t.logged) : ""}</dd>` : ""}
+    </dl>
+    ${links}
+    <section>${sectionRows(t)}</section>
+    <div class="tf-tktable tf-tkacts">
+      <a href="${esc(t.webUrl)}" target="_blank" rel="noreferrer"><span>Open in ${esc(t.source)}</span><span class="tf-chev" aria-hidden="true">›</span></a>
+      <a href="#/" role="button"><span>Link something to it</span><span class="tf-chev" aria-hidden="true">›</span></a>
+    </div>
+    ${foot}
+  </article>`;
+}
+
+/* An attachment the wiki drew inline (`!name.png|thumbnail!`): the preview when it can be fetched, else a placeholder. */
+function inlineFigure(t, name) {
+  const att = (ATTACHMENTS[t.id] || []).find((a) => a.name === name);
+  if (!att) return `<p><code>!${esc(name)}!</code></p>`;
+  if (attState === "down") return `<figure class="tf-tkfig"><span class="tf-md-noimg">${esc(name)}, not reachable in ${esc(t.source)} right now. <a href="${esc(t.webUrl)}" target="_blank" rel="noreferrer">Open in ${esc(t.source)}</a></span></figure>`;
+  return `<figure class="tf-tkfig"><img src="${SHOT(640, 240, att.seed)}" alt="${esc(name)}"></figure>`;
+}
+
+/* The Attachments panel. */
+function attachments(t) {
+  const list = ATTACHMENTS[t.id] || [];
+  if (list.length === 0) return "";
+  const down = attState === "down";
+  const rows = list.map((a) => {
+    const lead = a.kind === "image"
+      ? (down ? `<span class="tf-tkthumb tf-tknone" aria-hidden="true">–</span>` : `<img class="tf-tkthumb" src="${SHOT(112, 80, a.seed)}" alt="">`)
+      : `<span class="tf-tkkind" aria-hidden="true">${esc(a.kind)}</span>`;
+    return `<div class="tf-r">${lead}
+      <span class="tf-t">${esc(a.name)}<span class="tf-rsub">${esc(a.by)}, ${esc(a.at)}, ${esc(a.size)}</span></span>
+      <span class="tf-rend"><a class="tf-btn tf-sm tf-ghost" href="${esc(t.webUrl)}" target="_blank" rel="noreferrer">Open</a><button type="button" class="tf-btn tf-sm tf-ghost"${down ? " disabled" : ""}>Download</button></span>
+    </div>`;
+  }).join("");
+  const notice = down ? `<div class="tf-stale">${esc(t.source)} cannot be reached, so previews and downloads wait. The names and links are the mirror's. <a href="#/">Try again</a></div>` : "";
+  const names = list.length <= 2 ? list.map((a) => a.name).join(", ") : `${list.slice(0, 2).map((a) => a.name).join(", ")} and ${list.length - 2} more`;
+  return `<section aria-labelledby="tk-att"><details class="tf-tkfold"${attOpen ? " open" : ""}>
+    <summary><h2 id="tk-att">Attachments</h2><span class="tf-count">${list.length}</span><svg class="tf-tkmark" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg></summary>
+    <div class="tf-panel tf-tkatt">${notice}<div class="tf-rows">${rows}</div></div></details></section>`;
+}
+
+/* The reading column: the description (TfMarkdown) and the thread (entityThread) with its compose box. */
+function reading(t) {
+  const text = t.description === null ? null : t.description.replace(/@@INLINE:([^@]+)@@/g, (_, name) => inlineFigure(t, name));
+  const desc = text !== null
+    ? `<div class="tf-panel tf-tkdesc"><div class="tf-md">${text}</div></div>`
+    : `<div class="tf-panel tf-tkdesc"><p class="tf-dim">The ticket has no description.</p></div>`;
+  const trail = `<span class="tf-trail">
+      <button type="button" class="tf-btn tf-sm tf-ghost">Link…</button>
+      <a class="tf-btn tf-sm tf-ghost" href="${esc(t.webUrl)}" target="_blank" rel="noreferrer">Open in ${esc(t.source)}</a>
+      <button type="button" class="tf-btn tf-sm tf-ghost">Refresh</button>
+    </span>`;
+  const n = t.thread.total, shown = t.thread.shown;
+  const firstNew = shown.findIndex(([, , at]) => at.startsWith("today"));
+  const thread = n === 0 ? `<p class="tf-dim">No comments yet.</p>` : `
+      ${shown.map(([ini, name, at, mine, mention, body], i) => `${i === firstNew ? `<div class="tf-newline" id="tk-new">New since your last visit, 09:00</div>` : ""}<article class="tf-msg${mention ? " tf-mention" : ""}${i >= firstNew && firstNew >= 0 && !mine ? " tf-new" : ""}">
+        <span class="tf-av${mine ? " tf-me" : ""}" aria-hidden="true">${esc(ini)}</span>
+        <div class="tf-msg-body"><div class="tf-who"><b>${esc(name)}</b><span>${esc(at)}</span>${mention ? `<span class="tf-chip tf-chip-mention">mentions you</span>` : ""}</div><p>${body}</p></div>
+      </article>`).join("")}`;
+  const compose = `<div class="tf-compose"><textarea aria-label="Comment" placeholder="Write a comment" rows="1"></textarea><div class="tf-acts"><button type="button" class="tf-btn tf-primary" disabled>Comment</button></div></div>`;
+  const fresh = firstNew >= 0 ? shown.slice(firstNew).filter(([, , , mine]) => !mine).length : 0;
+  const summary = n === 0 ? "" : `<span class="tf-dim">${n === 1 ? "1 comment" : `${n} comments`}${fresh ? `, <a href="#tk-new">${fresh} new</a>` : ""}${t.thread.mentions ? `, ${t.thread.mentions === 1 ? "1 mentions you" : `${t.thread.mentions} mention you`}` : ""}</span>`;
+  return `<section class="tf-work"><div class="tf-wbody"><div class="tf-tkread">
+    <header class="tf-tkpagehead">
+      <h1>${esc(t.title)}</h1>
+    </header>
+    <section aria-label="Description">${desc}</section>
+    ${attachments(t)}
+    <section aria-labelledby="tk-talk"><header><h2 id="tk-talk">Conversation</h2></header><div class="tf-convo">${thread}${compose}</div></section>
+  </div></div></section>`;
+}
+
+function page(t, chosen) {
+  setNav(t, chosen);
+  return `<div class="tf-full tf-ticketpage">${crumbs(t.key, !chosen)}<div class="tf-ws">${card(t, chosen)}${reading(t)}</div></div>`;
+}
+
+function loading() {
+  setNav(TICKETS.pay231, false);
+  const bars = (n) => `<div class="tf-skel tf-skel-lines" aria-hidden="true">${"<span class=\"tf-skel-bar\"></span>".repeat(n)}</div>`;
+  return `<div class="tf-full tf-ticketpage">${crumbs("PAY-231")}<div class="tf-ws">
+    <article class="tf-jobcard tf-ticketcard tf-sheetcard" aria-label="Ticket" aria-busy="true"><div class="tf-jobkey">PAY-231</div>${bars(6)}</article>
+    <section class="tf-work"><div class="tf-wbody"><div class="tf-tkread"><div class="tf-panel">${bars(5)}</div></div></div></section>
+  </div></div>`;
+}
+
+function missing() {
+  setNav(TICKETS.pay231, false);
+  return `<div class="tf-full tf-ticketpage">${crumbs("PAY-999")}
+    <div class="tf-empty"><p>No ticket PAY-999 in the mirror. It may not have synced yet.</p><a class="tf-btn" href="#/tickets">All tickets</a></div></div>`;
+}
+
+/* ------------------------------------------------------------------ the card's width */
+const SIDE_MIN = 240, SIDE_MAX = 720, SIDE_KEY = "knobas.ticket.side";
+function setSide(px) {
+  const ws = document.querySelector(".tf-ws");
+  if (!ws) return;
+  const side = Math.round(Math.min(SIDE_MAX, Math.max(SIDE_MIN, px)));
+  ws.style.setProperty("--tk-side", `${side}px`);
+  try { localStorage.setItem(SIDE_KEY, String(side)); } catch {}
+}
+/* The width at which nothing on the card wraps: the card laid out at its content's width, every line kept whole. */
+function fitSide() {
+  const card = document.querySelector(".tf-ticketcard");
+  if (!card) return;
+  const clone = card.cloneNode(true);
+  clone.style.cssText = "position:absolute;left:-99999px;top:0;width:max-content;max-width:none;overflow:visible;visibility:hidden";
+  clone.querySelectorAll("*").forEach((el) => { el.style.whiteSpace = "nowrap"; });
+  clone.querySelectorAll(".tf-facts dd").forEach((el) => { el.style.flexWrap = "nowrap"; });
+  document.querySelector(".tf-ws").append(clone);
+  const width = clone.getBoundingClientRect().width;
+  clone.remove();
+  setSide(Math.ceil(width) + 1);
+}
+/* A cut title shows itself whole on hover; the copy button copies and says so for a moment. */
+function wireTitle() {
+  document.querySelectorAll(".tf-tkcopy").forEach((b) => b.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy); } catch {}
+    b.classList.add("tf-tkcopied"); b.title = "Copied";
+    setTimeout(() => { b.classList.remove("tf-tkcopied"); b.title = "Copy the key and the title"; }, 1500);
+  }));
+}
+function wireHandle() {
+  const handle = document.querySelector(".tf-tkhandle");
+  const ws = document.querySelector(".tf-ws");
+  if (!handle || !ws) return;
+  handle.addEventListener("pointerdown", (down) => {
+    if (down.button !== 0) return;
+    down.preventDefault();
+    handle.setPointerCapture(down.pointerId);
+    handle.classList.add("tf-tkdragging"); ws.classList.add("tf-tkdragging");
+    const left = ws.getBoundingClientRect().left;
+    const move = (e) => setSide(e.clientX - left);
+    const up = () => {
+      handle.classList.remove("tf-tkdragging"); ws.classList.remove("tf-tkdragging");
+      handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", up);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+  });
+  handle.addEventListener("dblclick", fitSide);
+}
+
+/* ------------------------------------------------------------------ the switches */
+const params = new URLSearchParams(location.search);
+let state = params.get("state") || "read";
+let theme = params.get("theme") || "";
+let shape = params.get("sec") || "table";
+let byMe = params.get("mine") !== "0";
+let attState = params.get("att") || "ok";
+let attOpen = params.get("attopen") === "1";
+if (params.get("bar") === "0") document.body.classList.add("mk-hide");
+
+function draw() {
+  const main = document.getElementById("main");
+  main.innerHTML =
+    state === "loading" ? loading()
+    : state === "missing" ? missing()
+    : state === "job" ? page(TICKETS.pay231, true)
+    : state === "ops77" ? page(TICKETS.ops77, false)
+    : state === "done" ? page(TICKETS.done, false)
+    : state === "long" ? page({ ...TICKETS.pay231, title: "Retry failed SEPA payouts for the two banks whose PSP answers 409 on the second attempt inside the same batch window", epic: { id: "mock:PAY-200", line: "PAY-200 Payout reliability and reconciliation across all PSP integrations" } }, true)
+    : page(TICKETS.pay231, false);
+  if (theme) document.documentElement.dataset.theme = theme; else delete document.documentElement.dataset.theme;
+  const side = params.get("side");
+  if (side === "fit") fitSide();
+  else if (side) setSide(Number(side));
+  else { const kept = (() => { try { return localStorage.getItem(SIDE_KEY); } catch { return null; } })(); if (kept) setSide(Number(kept)); }
+  wireHandle();
+  wireTitle();
+  document.querySelectorAll(".mk [data-state]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.state === state)));
+  document.querySelectorAll(".mk [data-theme]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.theme === theme)));
+  document.querySelectorAll(".mk [data-sec]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.sec === shape)));
+  document.querySelectorAll(".mk [data-mine]").forEach((b) => b.setAttribute("aria-pressed", String(byMe)));
+  document.querySelectorAll(".mk [data-att]").forEach((b) => b.setAttribute("aria-pressed", String(attState === "down")));
+}
+document.querySelectorAll(".mk [data-sec]").forEach((b) => (b.onclick = () => { shape = b.dataset.sec; draw(); }));
+document.querySelectorAll(".mk [data-mine]").forEach((b) => (b.onclick = () => { byMe = !byMe; draw(); }));
+document.querySelectorAll(".mk [data-att]").forEach((b) => (b.onclick = () => { attState = attState === "down" ? "ok" : "down"; draw(); }));
+document.querySelectorAll(".mk [data-state]").forEach((b) => (b.onclick = () => { state = b.dataset.state; draw(); }));
+document.querySelectorAll(".mk [data-theme]").forEach((b) => (b.onclick = () => { theme = theme === b.dataset.theme ? "" : b.dataset.theme; draw(); }));
+document.getElementById("themebtn").onclick = () => { theme = theme === "dark" ? "light" : "dark"; draw(); };
+draw();
+</script>
+</body>
+</html>
