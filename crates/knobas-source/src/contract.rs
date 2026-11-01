@@ -1183,7 +1183,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 37] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 40] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -1197,6 +1197,9 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::ISSUE_TYPE, &paths.issue_type, Wanted::Text),
             (field::ESTIMATE, &paths.estimate, Wanted::Integer),
             (field::COMMENT_COUNT, &paths.comment_count, Wanted::Integer),
+            (field::REPORTER, &paths.reporter, Wanted::Text),
+            (field::CREATED, &paths.created, Wanted::Instant),
+            (field::TIME_SPENT, &paths.time_spent, Wanted::Integer),
             (field::DESCRIPTION, &paths.description, Wanted::Text),
             (field::POSITION, &paths.position, Wanted::Integer),
             (field::NAME, &paths.name, Wanted::Text),
@@ -1402,6 +1405,45 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                         Wanted::Text,
                         "in a parent object of",
                     );
+                }
+            }
+        }
+        // The worklog (#2403): `at` leads to an array of objects or to
+        // nothing, and each entry's author (text) and seconds (a whole
+        // number) are weighed in slots of their own, so a resolving `at`
+        // excuses neither. A ticket nobody logged on carries an empty array,
+        // which is evidence for `at` and none for the entries.
+        for candidate in &paths.worklog {
+            let seen = evidence.entry((&item.kind, field::WORKLOG)).or_default();
+            let found = at(&item.payload, &candidate.at);
+            if let Some(value) = found {
+                assert!(
+                    value
+                        .as_array()
+                        .is_some_and(|entries| entries.iter().all(serde_json::Value::is_object)),
+                    "descriptor.payload_paths declares worklog of kind {:?} at {:?}, which does \
+                     not lead to an array of objects on this adapter's own item {} -- a worklog \
+                     must be one, or nothing at all. Payload: {}",
+                    item.kind,
+                    candidate.at.segments(),
+                    item.entity,
+                    item.payload
+                );
+                seen.resolved = true;
+            }
+            seen.names_a_missing_key |= names_a_missing_key(&item.payload, &candidate.at);
+            let entries = found
+                .and_then(serde_json::Value::as_array)
+                .map_or(&[][..], Vec::as_slice);
+            for (slot, paths_in, wanted) in [
+                ("worklog authors", &candidate.author, Wanted::Text),
+                ("worklog seconds", &candidate.seconds, Wanted::Integer),
+            ] {
+                let seen = evidence.entry((&item.kind, slot)).or_default();
+                for entry in entries {
+                    for path in paths_in {
+                        weigh(seen, slot, entry, path, wanted, "in a worklog entry of");
+                    }
                 }
             }
         }

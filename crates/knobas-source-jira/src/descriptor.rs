@@ -121,6 +121,14 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// **The estimate** (#816) is `timeoriginalestimate`, which Jira sends in
 /// seconds and `BASE_FIELDS` has asked for since M1: the job card's *est.*.
 ///
+/// **The reporter, the created date, the time spent and the worklog**
+/// (#2403) are the ticket page card's *Reporter* and *Logged*, all in
+/// `BASE_FIELDS` since M1. The reporter declares two paths for one identity,
+/// as the assignee does; `timespent` is seconds, as the estimate is. The
+/// worklog is `fields.worklog.worklogs`, which the sync's completion fills
+/// with every entry beyond the 20 `/search` inlines, so the card's share of
+/// the time is the reader's entries across the whole worklog.
+///
 /// **The comment count** (#894) is `fields.comment.total`: `BASE_FIELDS` asks
 /// for `comment` too, and the sync's completion rewrites `total` with the
 /// comments it fetched beyond what `/search` returned, so it is the count the
@@ -176,6 +184,20 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             issue_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
             estimate: vec![PayloadPath::of(["fields", "timeoriginalestimate"])],
             comment_count: vec![PayloadPath::of(["fields", "comment", "total"])],
+            reporter: vec![
+                PayloadPath::of(["fields", "reporter", "name"]),
+                PayloadPath::of(["fields", "reporter", "key"]),
+            ],
+            created: vec![PayloadPath::of(["fields", "created"])],
+            time_spent: vec![PayloadPath::of(["fields", "timespent"])],
+            worklog: vec![knobas_source::WorklogPath {
+                at: PayloadPath::of(["fields", "worklog", "worklogs"]),
+                author: vec![
+                    PayloadPath::of(["author", "name"]),
+                    PayloadPath::of(["author", "key"]),
+                ],
+                seconds: vec![PayloadPath::of(["timeSpentSeconds"])],
+            }],
             // The description and the comments as Jira Data Center stores
             // them (#2308): wiki markup, which the shell converts to draw.
             description: vec![PayloadPath::of(["fields", "description"])],
