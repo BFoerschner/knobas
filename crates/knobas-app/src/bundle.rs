@@ -114,6 +114,34 @@ impl<R: Runtime> BundleAssets<R> {
     }
 }
 
+/// Build the main window, declared in tauri.conf.json with `create: false`,
+/// as Tauri would build it, plus the handler the config cannot name.
+///
+/// # Errors
+///
+/// The window cannot be built.
+///
+/// # Panics
+///
+/// tauri.conf.json declares no window labelled `main`.
+pub fn open_main_window<R: Runtime>(
+    app: &tauri::App<R>,
+    bundle: &BundleAssets<R>,
+) -> tauri::Result<()> {
+    let main = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .expect("tauri.conf.json declares the main window")
+        .clone();
+    tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?
+        .on_web_resource_request(bundle.answer_missing_with_404())
+        .build()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

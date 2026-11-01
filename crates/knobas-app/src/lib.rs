@@ -304,21 +304,8 @@ pub fn run() {
         )
         .manage(bundle.clone())
         .setup(move |app| {
-            // The main window, declared in tauri.conf.json with `create:
-            // false` and built here as Tauri would build it, plus the handler
-            // that refuses the `index.html` fallback (#2390), which the
-            // config cannot name. First, as Tauri's own would be.
-            let main = app
-                .config()
-                .app
-                .windows
-                .iter()
-                .find(|window| window.label == "main")
-                .expect("tauri.conf.json declares the main window")
-                .clone();
-            tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?
-                .on_web_resource_request(bundle.answer_missing_with_404())
-                .build()?;
+            // First, as Tauri's own config window would be (#2390).
+            bundle::open_main_window(app, &bundle)?;
             // Both managed synchronously, before anything can call in, and
             // both for the same reason: they are what a command asks when the
             // database is *not* up yet. `Lifecycle` is the shared state's
