@@ -935,6 +935,45 @@ _live_atlassian_start() {
   _live_atlassian_seed "$product"
 }
 
+# live_refresh -- `testenv/live refresh`, on a remote target, between runs:
+# restart each of Jira and Confluence that is up and due, ONLY under its own
+# lock, taken without waiting (`_live_lock_grab`, below). A lock anyone holds
+# -- a suite, or the keeper of a live-up from any worktree, this checkout's
+# included -- leaves that product alone until the next tick. Fails when a
+# restart fails; a product left alone is not a failure.
+live_refresh() {
+  local p left margin grabbed holder rc=0
+  echo "live: refresh, $(date '+%Y-%m-%d %H:%M:%S')"
+  [ -n "$LIVE_REMOTE" ] || {
+    echo "live: refresh keeps a remote target's products licensed between runs; on this machine each run renews what is due" >&2
+    return 1
+  }
+  margin=$(_live_licence_margin) || return 1
+  live_remote_ready || return 1
+  for p in jira confluence; do
+    if ! live_is_up "$p"; then
+      echo "live: $p: down; its next start renews its licence"
+      continue
+    fi
+    if ! left=$(_live_licence_left "$p"); then
+      echo "live: $p: up but does not tell its licence (still starting?); next tick"
+      continue
+    fi
+    if [ "$left" -ge "$margin" ]; then
+      echo "live: $p: about $((left / 60)) min of licence left"
+      continue
+    fi
+    if ! grabbed=$(_live_lock_grab "$p"); then
+      holder=$(readlink "${KNOBAS_LIVE_LOCK_DIR:-${TMPDIR:-/tmp}}/knobas-live-$p.lock" 2>/dev/null || true)
+      echo "live: $p: about $((left > 0 ? left / 60 : 0)) min of licence left, but its lock is held by $(_live_lock_describe "$holder"); not restarting it under that run, next tick"
+      continue
+    fi
+    _live_atlassian_renew "$p" "$left" || rc=1
+    _live_lock_drop "$p" "$grabbed"
+  done
+  return $rc
+}
+
 # THE MEMORY BUDGET, ON A REMOTE TARGET. The WSL box has 16 GB of physical
 # memory and WSL 10 to 12 of it (setup-windows.ps1), and a VM pushed into
 # swap stops answering ssh -- a frozen box, not a failed run. So before a
