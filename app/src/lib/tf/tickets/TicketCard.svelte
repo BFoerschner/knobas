@@ -3,8 +3,9 @@
   summary, the epic under it, its signals (#815) and the assignee's
   initials. The chosen job's card is the yellow card, selected or not; the
   selected card carries a two-pixel ink outline and is lifted off the board
-  (spec #2396, #2398). A double click opens the ticket's page (#813). The epic is its key and name and the
-  comment count is drawn above zero only (#894).
+  (spec #2396, #2398). A double click opens the ticket's page (#813). The
+  epic is its key and name and the comment count is drawn above zero only
+  (#894).
 
   A key another source holds too (#1476) draws its source's name beside it,
   so two sources' PAY-231 are told apart.
@@ -35,7 +36,7 @@
     /** The card is the chosen job's (`job/chosen.svelte.ts`): the yellow card. */
     chosen?: boolean;
     onselect: () => void;
-    /** A double click: open the job. */
+    /** A double click: open the ticket's page. */
     onopen: () => void;
     /** What the card shows, from its view; `null` is everything it has. */
     fields?: CardField[] | null;
