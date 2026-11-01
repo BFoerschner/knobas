@@ -158,7 +158,23 @@ pub(crate) async fn jira_guard(
         });
     };
 
-    // 1. The contract's paths are all relative to `/rest/`.
+    // 1. The contract's paths are all relative to `/rest/` -- but for the
+    // attachment servlets (#2405), which are not REST and are not in the
+    // WADL: a `GET` with no query, and then the credential and the fault as
+    // for any REST path.
+    if crate::jira::is_attachment_path(&path) {
+        if method != "GET" || !query.is_empty() {
+            record(
+                ViolationKind::UnknownMethod,
+                "an attachment servlet answers a GET with no query".to_owned(),
+            );
+            return jira_error(StatusCode::METHOD_NOT_ALLOWED, format!("{method} {path}?{query}"));
+        }
+        return match credential_and_fault(&state, &authorization(&req), &record).await {
+            Some(refused) => refused,
+            None => next.run(req).await,
+        };
+    }
     let Some(rest) = path.strip_prefix("/rest/") else {
         record(
             ViolationKind::UnknownPath,
@@ -225,13 +241,32 @@ pub(crate) async fn jira_guard(
         );
     }
 
-    // 4. Credentials, on every endpoint (deviation 4).
-    let credential = req
-        .headers()
+    if let Some(refused) = credential_and_fault(&state, &authorization(&req), &record).await {
+        return refused;
+    }
+
+    // 6. Dispatch.
+    next.run(req).await
+}
+
+/// The request's `Authorization` header, empty where it has none.
+fn authorization(req: &Request) -> String {
+    req.headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default()
-        .trim();
+        .to_owned()
+}
+
+/// Steps 4 and 5 of [`jira_guard`]: the credential, then the injected fault.
+/// `Some` is the answer that refuses the request; `None` lets it through.
+async fn credential_and_fault(
+    state: &MockState,
+    credential: &str,
+    record: &(impl Fn(ViolationKind, String) + Sync),
+) -> Option<Response> {
+    // 4. Credentials, on every endpoint (deviation 4).
+    let credential = credential.trim();
     // RFC 7235 §2.1: the auth-scheme token is case-insensitive, so `bearer`
     // is as valid as `Bearer`. Rejecting it would invent a non-bug for an
     // adapter author to chase.
@@ -244,20 +279,20 @@ pub(crate) async fn jira_guard(
             ViolationKind::MissingHeader,
             "no Authorization: Bearer/Basic header".to_owned(),
         );
-        return seraph_401("You do not have the permission to see the specified issue.");
+        return Some(seraph_401("You do not have the permission to see the specified issue."));
     }
 
     // 5. The injected fault, if any.
     match state.fault() {
         MockFault::None => {}
         MockFault::Unauthorized => {
-            return seraph_401("You do not have the permission to see the specified issue.");
+            return Some(seraph_401("You do not have the permission to see the specified issue."));
         }
         MockFault::ServerError => {
-            return jira_error(
+            return Some(jira_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal server error (injected by mockd)",
-            );
+            ));
         }
         MockFault::RateLimited { retry_after_secs } => {
             let mut r = jira_error(
@@ -267,7 +302,7 @@ pub(crate) async fn jira_guard(
             if let Ok(v) = HeaderValue::from_str(&retry_after_secs.to_string()) {
                 r.headers_mut().insert(header::RETRY_AFTER, v);
             }
-            return r;
+            return Some(r);
         }
         // Hang, then answer normally: what a client with its own timeout has
         // to survive is the wait, not a special status code.
@@ -276,8 +311,7 @@ pub(crate) async fn jira_guard(
         }
     }
 
-    // 6. Dispatch.
-    next.run(req).await
+    None
 }
 
 /// The fallback for a path the contract declares and mockd does not serve.

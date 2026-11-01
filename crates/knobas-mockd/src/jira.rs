@@ -60,6 +60,10 @@ pub fn router(state: Arc<MockState>) -> Router {
             "/rest/api/2/issue/{issueIdOrKey}/transitions",
             get(issue_transitions).merge(post(do_transition)),
         )
+        // #2405: an attachment's bytes, from the servlets Jira serves them
+        // from (not REST, so not in the WADL; the guard admits these two).
+        .route("/secure/attachment/{id}/{name}", get(attachment_bytes))
+        .route("/secure/thumbnail/{id}/{name}", get(attachment_bytes))
         .fallback(unimplemented)
         // A verb the WADL declares on a path mockd *does* serve (`POST
         // /search`, `PUT /myself`, `PUT`/`DELETE /issue/{key}`, `POST
@@ -461,6 +465,45 @@ fn attachment_json(base: &str, a: &crate::state::JiraAttachment, off: FixedOffse
         out["thumbnail"] = json!(format!("{base}/secure/thumbnail/{}/{}", a.id, a.filename));
     }
     out
+}
+
+/// Whether `path` is under one of the attachment servlets (#2405), which the
+/// guard admits outside `/rest/`.
+pub(crate) fn is_attachment_path(path: &str) -> bool {
+    path.starts_with("/secure/attachment/") || path.starts_with("/secure/thumbnail/")
+}
+
+/// `GET /secure/attachment/{id}/{name}` (#2405): the file's bytes, made up
+/// deterministically at the size the list declares, behind the magic number
+/// of its type so a reader that sniffs one finds it. The name must be the
+/// listed one, as Jira's servlet checks it. The thumbnail answers the same
+/// bytes: mockd draws no thumbnails.
+async fn attachment_bytes(
+    State(state): State<Arc<MockState>>,
+    Path((id, name)): Path<(String, String)>,
+) -> Response {
+    let found = state.issues().into_iter().find_map(|issue| {
+        issue
+            .attachments
+            .into_iter()
+            .find(|a| a.id.to_string() == id && a.filename == name)
+    });
+    let Some(file) = found else {
+        return jira_error(StatusCode::NOT_FOUND, format!("No attachment {id}/{name}"));
+    };
+    let magic: &[u8] = match file.mime.as_str() {
+        "image/png" => b"\x89PNG\r\n\x1a\n",
+        "application/pdf" => b"%PDF-1.7\n",
+        _ => b"",
+    };
+    let size = usize::try_from(file.size).unwrap_or(usize::MAX);
+    let mut body: Vec<u8> = magic.iter().copied().take(size).collect();
+    body.extend((body.len()..size).map(|at| (at % 251) as u8));
+    (
+        [(axum::http::header::CONTENT_TYPE, file.mime.clone())],
+        body,
+    )
+        .into_response()
 }
 
 /// The worklog collection. The endpoint takes no pagination parameters (the
