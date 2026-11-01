@@ -1275,7 +1275,7 @@ priority: string | null,
 /**
  * A ticket's original estimate in seconds (#816), through the declared
  * `estimate` path: a whole JSON number or nothing, never zero for a
- * miss. The job card writes it as *est. 3h*.
+ * miss. The ticket page's card draws it again on the Logged row (#2403).
  */
 estimate_seconds: number | null, 
 /**
