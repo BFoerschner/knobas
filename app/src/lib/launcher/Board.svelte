@@ -165,7 +165,7 @@
     armed !== null && home.smart_lists[selected]?.id === armed ? armed : null,
   );
 
-  /** One line per source: what it is, whether knobas can still read it, and whether its last run failed. */
+  /** One line per source: what it is, whether knobas can still read it, and whether its last run failed or left part of the source out (#2374). */
   const strip = $derived(
     sources.map((source) => {
       const actionable = isActionable(source.state);
@@ -179,7 +179,7 @@
         runs.find((row) => row.source_id === source.source_id) ?? null,
         now,
       );
-      const lastRunFailed = !actionable && run.tone === "warn";
+      const runWarns = !actionable && run.tone === "warn";
       return {
         id: source.source_id,
         monogram: sourceMonogram(source.source_id),
@@ -187,10 +187,10 @@
         // strip and a result row's badge cannot come to different conclusions
         // about the same source.
         failing: actionable,
-        warning: lastRunFailed,
+        warning: runWarns,
         note: actionable
           ? (source.detail ?? source.state)
-          : lastRunFailed
+          : runWarns
             ? run.text
             : source.checked_at
               ? `checked ${ago(source.checked_at, now)}`
