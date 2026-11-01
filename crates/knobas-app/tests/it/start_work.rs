@@ -449,9 +449,57 @@ fn repo() -> EntityRef {
 
 /// A flow, planned but not run.
 async fn planned(pool: &PgPool) -> Vec<FlowStep> {
-    start_work::begin(pool, &ticket(), &repo())
+    start_work::begin(pool, &declarations(), &ticket(), &repo())
         .await
         .expect("a flow is proposed")
+}
+
+/// The proposal's base branch is the repository's default branch read where
+/// the repository kind **declares** it (#2358), not at Gitea's
+/// `default_branch` key: a host that keeps it elsewhere proposes its own
+/// default, and one whose declaration misses falls back rather than guessing.
+#[tokio::test]
+async fn the_proposed_base_is_the_default_branch_the_repository_kind_declares() {
+    use knobas_core::payload::{Declarations, KindPaths, PayloadPath};
+    let pool = corpus("sw_declared_default").await;
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(REPO)
+        .bind(serde_json::json!({"default_branch": "release", "mainbranch": {"name": "develop"}}))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let declaring = |at: &[&str]| {
+        Declarations::empty().with(
+            "gitea",
+            vec![KindPaths {
+                kind: "repo".to_owned(),
+                default_branch: vec![PayloadPath::of(at.iter().copied())],
+                ..KindPaths::default()
+            }],
+        )
+    };
+    let base = |flow: &[FlowStep]| {
+        step_of(flow, Step::CreateBranch).payload["CreateBranch"]["from_ref"]
+            .as_str()
+            .expect("a base")
+            .to_owned()
+    };
+
+    let flow = start_work::begin(&pool, &declaring(&["mainbranch", "name"]), &ticket(), &repo())
+        .await
+        .unwrap();
+    assert_eq!(base(&flow), "develop");
+
+    let other = EntityRef::parse("jira:PAY-232").unwrap();
+    item(&pool, "jira:PAY-232", "ticket", "a second ticket", serde_json::json!({})).await;
+    let flow = start_work::begin(&pool, &declaring(&["trunk"]), &other, &repo())
+        .await
+        .unwrap();
+    assert_eq!(
+        base(&flow),
+        "main",
+        "a declaration that misses falls back; it does not read Gitea's key"
+    );
 }
 
 /// One step of a flow, by kind.
@@ -1127,7 +1175,7 @@ async fn a_second_flow_on_one_ticket_is_refused() {
     let pool = corpus("sw_twice").await;
     planned(&pool).await;
 
-    let error = start_work::begin(&pool, &ticket(), &repo())
+    let error = start_work::begin(&pool, &declarations(), &ticket(), &repo())
         .await
         .expect_err("one flow per ticket");
 

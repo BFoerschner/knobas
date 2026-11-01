@@ -781,7 +781,7 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
     );
 
     // 1. The proposal, shown before anything happens.
-    let flow = start_work::begin(&state.pool, &ticket, &repo)
+    let flow = start_work::begin(&state.pool, &declared_paths(&state).await, &ticket, &repo)
         .await
         .expect("a flow is proposed");
     assert_eq!(flow.len(), Step::ALL.len());
@@ -836,8 +836,9 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
         litter.default_branch,
     );
     //    What the **proposal** said the base was, asserted before it is edited
-    //    away. `plan::subject` reads it from the mirrored repository payload's
-    //    `default_branch`, and until this file reproposed the base that value
+    //    away. `plan::subject` reads it from the mirrored repository payload,
+    //    where Gitea's repository kind declares `default_branch` (#2358), and
+    //    until this file reproposed the base that value
     //    went to Gitea on every run -- so the chain from Gitea's repository
     //    record through the adapter's stored payload to `subject`'s read was
     //    witnessed here, incidentally, by the branch creation succeeding.

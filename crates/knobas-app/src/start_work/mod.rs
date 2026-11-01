@@ -68,6 +68,7 @@ pub mod queue;
 
 use async_trait::async_trait;
 use knobas_core::entity::EntityRef;
+use knobas_core::payload::Declarations;
 use knobas_core::start_work::{self as store, Advance, FlowStep, Step, StepOutcome};
 use knobas_sync::background::Background;
 
@@ -345,6 +346,7 @@ pub fn outcome_of(landing: &Landing) -> (StepOutcome, Option<String>) {
 /// [`plan::subject`](plan::subject).
 pub async fn begin(
     pool: &PgPool,
+    declarations: &Declarations,
     ticket: &EntityRef,
     repo: &EntityRef,
 ) -> Result<Vec<FlowStep>, IpcError> {
@@ -354,7 +356,7 @@ pub async fn begin(
             "{ticket} already has a start-work flow -- open it rather than starting a second"
         )));
     }
-    let subject = plan::subject(pool, ticket, repo).await?;
+    let subject = plan::subject(pool, declarations, ticket, repo).await?;
     let steps = store::plan(pool, ticket, &plan::propose(&subject)).await?;
     Ok(steps)
 }
