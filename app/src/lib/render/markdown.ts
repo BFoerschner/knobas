@@ -10,7 +10,7 @@
  *   {@link SANITIZE}: no script, no handler, no `javascript:` URL, no form,
  *   frame, style or class of the author's. The classes the fragment carries
  *   are set after the sanitizer, from markers only this module writes and the
- *   sanitizer lets through (`data-md-fence`, `data-md-task`); an author who
+ *   sanitizer lets through (`data-md-fence`, `data-md-task`, `data-md-attachment`); an author who
  *   writes a marker by hand gets a fence or a task box, nothing more.
  * - **Links** are classified by {@link resolveLink}: repository-relative ones
  *   resolve against the file's directory and take the href the surface gives
@@ -20,7 +20,9 @@
  *   scheme loses its href.
  * - **Images** lose their `src` unless it is a `data:` URL (the CSP refuses
  *   remote ones); a relative one keeps its resolved path in `data-md-path`
- *   for the byte read (#2256). No element but `<a>` keeps an `href` and none
+ *   for the byte read (#2256), and an `attachment:<id>` one (the Jira wiki's
+ *   `!name!`, #2406) keeps its id in `data-md-attachment` for the surface's
+ *   attachment read. No element but `<a>` keeps an `href` and none
  *   but `<img>` a `src` (`<area>`, `<video>`, `<audio>`, `<source>`, `<track>`).
  * - **Fences** are `.tf-fence` blocks. {@link drawFences} hands each to the
  *   renderer the registry names for its language (`renderersForFence`) that
@@ -33,6 +35,16 @@ import MarkdownIt from "markdown-it";
 import { drawDiagram } from "./diagram";
 import type { LineTokens, RenderPort } from "./port";
 import { D2, GRAPHVIZ, MERMAID, renderersForFence } from "./registry";
+
+/**
+ * A surface's ticket attachments, for the text's `attachment:<id>` images
+ * (#2406): `load` answers the image as a `data:image/…` URL or refuses, and
+ * `missing` says what a refused one draws instead, by its name.
+ */
+export interface AttachmentImages {
+  load(id: string): Promise<string>;
+  missing(name: string, error: unknown): { text: string; link: { href: string; label: string } | null };
+}
 
 /** Where a link in the Markdown goes. */
 export type MarkdownLink =
@@ -109,6 +121,18 @@ engine.renderer.rules.code_block = (tokens, idx) => fence("", tokens[idx]!.conte
 engine.renderer.rules.s_open = () => "<del>";
 engine.renderer.rules.s_close = () => "</del>";
 
+// An `attachment:<id>` image (#2406) carries its id as a marker: the sanitizer drops a src of a scheme it does not know.
+const image = engine.renderer.rules.image!;
+engine.renderer.rules.image = (tokens, idx, options, env, self) => {
+  const token = tokens[idx]!;
+  const attachment = /^attachment:(.+)$/i.exec((token.attrGet("src") ?? "").trim());
+  if (attachment) {
+    token.attrSet("src", "");
+    token.attrSet("data-md-attachment", decode(attachment[1]!));
+  }
+  return image(tokens, idx, options, env, self);
+};
+
 // Task lists: a list item whose text starts `[ ] ` or `[x] ` is marked, and the box drawn after the sanitizer.
 engine.core.ruler.push("tf-tasks", (state) => {
   const tokens = state.tokens;
@@ -136,7 +160,7 @@ export const SANITIZE: Config = {
     "poster", "background", "usemap", "download",
   ],
   ALLOW_DATA_ATTR: false,
-  ADD_ATTR: ["data-md-fence", "data-md-task"],
+  ADD_ATTR: ["data-md-fence", "data-md-task", "data-md-attachment"],
 };
 
 /** `text` drawn as Markdown: sanitized, its links, fences and task boxes in place. */
@@ -181,6 +205,10 @@ function finish(root: DocumentFragment, links: MarkdownLinks) {
     const src = image.getAttribute("src") ?? "";
     if (/^data:image\//i.test(src)) continue;
     image.removeAttribute("src");
+    if (image.dataset["mdAttachment"] !== undefined) {
+      image.classList.add("tf-md-att");
+      continue;
+    }
     const to = resolveLink(src, links.base);
     if (to.kind === "file") image.dataset["mdPath"] = to.path;
   }
