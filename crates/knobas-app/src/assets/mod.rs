@@ -2732,9 +2732,8 @@ fn reading_of(
         (host, _) => host,
     });
     Reading {
-        monitor_type: declared.and_then(|paths| {
-            knobas_core::payload::resolve_string(payload, &paths.monitor_type)
-        }),
+        monitor_type: declared
+            .and_then(|paths| knobas_core::payload::resolve_string(payload, &paths.monitor_type)),
         target,
         response_time_ms: knobas_core::payload::resolve_number(payload, response_time),
         uptime: payload

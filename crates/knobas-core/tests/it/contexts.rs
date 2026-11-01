@@ -218,15 +218,11 @@ async fn promoting_an_epic_is_read_off_the_issue_type() {
         serde_json::json!({"fields": {"issuetype": {"name": "Epic"}}}),
     )
     .await;
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&epic).unwrap(),
-        &jira(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
     assert_eq!(ctx.kind, ContextKind::Epic);
 }
 
@@ -285,15 +281,11 @@ async fn an_unrecognized_issue_type_shape_misses_toward_ticket() {
         ),
     ] {
         let id = with_payload(&pool, "ticket", key, payload).await;
-        let ctx = context::promote(
-            &pool,
-            &EntityRef::parse(&id).unwrap(),
-            &jira(),
-        )
-        .await
-        .unwrap()
-        .unwrap()
-        .context;
+        let ctx = context::promote(&pool, &EntityRef::parse(&id).unwrap(), &jira())
+            .await
+            .unwrap()
+            .unwrap()
+            .context;
         assert_eq!(ctx.kind, ContextKind::Ticket, "payload of {key}");
     }
 }
@@ -331,15 +323,11 @@ async fn a_promoted_anchor_is_a_member_and_seeds_the_walk() {
     draw(&pool, &pr, &build).await;
     draw(&pool, &build, &page).await;
 
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&ticket).unwrap(),
-        &jira(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&ticket).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
 
     assert_eq!(members(&pool, &ctx.id).await, set(&[&ticket, &pr, &build]));
 }
@@ -416,15 +404,11 @@ async fn epic_children_seed_the_walk_through_the_recorded_parent() {
     draw(&pool, &pr, &build).await;
     draw(&pool, &build, &page).await;
 
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&epic).unwrap(),
-        &jira(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
 
     assert_eq!(
         members(&pool, &ctx.id).await,
@@ -463,15 +447,11 @@ async fn a_classic_epics_children_are_members_through_the_stored_epic() {
     )
     .await;
 
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&epic).unwrap(),
-        &jira(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
 
     assert_eq!(members(&pool, &ctx.id).await, set(&[&epic, &story, &bug]));
     let merged: BTreeSet<String> = context::held_by_any_context(&pool)
@@ -553,15 +533,11 @@ async fn a_foreign_or_misshapen_parent_contributes_nothing() {
     )
     .await;
 
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&epic).unwrap(),
-        &jira(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
 
     let got = members(&pool, &ctx.id).await;
     assert!(
@@ -614,15 +590,11 @@ async fn an_unknown_context_has_no_members_rather_than_an_error() {
 async fn the_anchor_index_refuses_a_second_context_as_a_duplicate() {
     let pool = scratch().await;
     let ticket = with_payload(&pool, "ticket", "PAY-1", serde_json::json!({})).await;
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&ticket).unwrap(),
-        &jira(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&ticket).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
 
     let refused = sqlx::query(
         "insert into knobas.context (id, kind, title, anchor_id)
@@ -655,15 +627,11 @@ async fn a_ticket_context_does_not_seed_its_subtasks() {
     )
     .await;
 
-    let ctx = context::promote(
-        &pool,
-        &EntityRef::parse(&story).unwrap(),
-        &jira(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let ctx = context::promote(&pool, &EntityRef::parse(&story).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
     assert_eq!(ctx.kind, ContextKind::Ticket);
     assert_eq!(
         members(&pool, &ctx.id).await,
@@ -684,12 +652,7 @@ async fn promoting_a_context_is_refused() {
     let ctx = context::create_adhoc(&pool, "payout retries")
         .await
         .unwrap();
-    let refused = context::promote(
-        &pool,
-        &EntityRef::parse(&ctx.id).unwrap(),
-        &jira(),
-    )
-    .await;
+    let refused = context::promote(&pool, &EntityRef::parse(&ctx.id).unwrap(), &jira()).await;
     assert!(
         matches!(refused, Err(CoreError::AnchorIsAContext)),
         "got {refused:?}"
@@ -959,15 +922,11 @@ async fn the_merged_walk_is_the_union_of_every_contexts_members() {
     )
     .await;
     draw(&pool, &child, &build).await;
-    let promoted = context::promote(
-        &pool,
-        &EntityRef::parse(&epic).unwrap(),
-        &jira(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context;
+    let promoted = context::promote(&pool, &EntityRef::parse(&epic).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
 
     // Three: archived, and everything it alone reaches is out.
     let old = context::create_adhoc(&pool, "last spring").await.unwrap();
@@ -1086,14 +1045,10 @@ async fn a_misshapen_parent_seeds_no_context_in_the_merged_walk() {
         serde_json::json!({"fields": {}, "epic": "EPIC-1"}),
     )
     .await;
-    context::promote(
-        &pool,
-        &EntityRef::parse(&epic).unwrap(),
-        &jira(),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    context::promote(&pool, &EntityRef::parse(&epic).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap();
 
     let got: BTreeSet<String> = context::held_by_any_context(&pool)
         .await
@@ -1297,16 +1252,12 @@ async fn following_the_status_archives_on_done_and_revives_when_it_leaves() {
     .context
     .id;
     let elsewhere = mirrored(&pool, "jira-eu", "ticket", "LIFE-7", in_status("Done")).await;
-    let other = context::promote(
-        &pool,
-        &EntityRef::parse(&elsewhere).unwrap(),
-        &jira(),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .context
-    .id;
+    let other = context::promote(&pool, &EntityRef::parse(&elsewhere).unwrap(), &jira())
+        .await
+        .unwrap()
+        .unwrap()
+        .context
+        .id;
 
     set_status(&pool, &ticket, "DONE").await;
     let moved = context::follow_status(&pool, SOURCE, &done_like_declared())

@@ -538,7 +538,10 @@ async fn a_parents_type_is_read_where_its_kind_declares_it() {
     draw(&pool, &epic, &page, "documents").await;
 
     assert_eq!(
-        reached(&pool, &under_story).await.keys().collect::<Vec<_>>(),
+        reached(&pool, &under_story)
+            .await
+            .keys()
+            .collect::<Vec<_>>(),
         [&repo],
         "a story's links come in"
     );
