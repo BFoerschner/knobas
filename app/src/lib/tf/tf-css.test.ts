@@ -521,3 +521,7 @@ test("the yellow page card is a light surface in both themes: its dots and chips
   // The rule is the design system's, in its words.
   expect(spec).toContain("The yellow card is a light surface in both themes");
 });
+
+test("a description without markup keeps its line breaks in the reading column's panel (#2399)", () => {
+  expect(block(code, ".tf-tkdesc p.tf-asks")).toMatch(/white-space:\s*pre-line;/);
+});

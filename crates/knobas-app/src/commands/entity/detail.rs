@@ -86,7 +86,7 @@ pub struct EntityDetail {
     pub priority: Option<String>,
     /// A ticket's original estimate in seconds (#816), through the declared
     /// `estimate` path: a whole JSON number or nothing, never zero for a
-    /// miss. The job card writes it as *est. 3h*.
+    /// miss. The ticket page's card draws it again on the Logged row (#2403).
     pub estimate_seconds: Option<i64>,
     /// A ticket's labels through the declared `labels` path (#2400), the
     /// ticket page card's *Labels* row; the mini board reads them by the same

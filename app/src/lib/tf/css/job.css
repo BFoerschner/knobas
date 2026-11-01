@@ -8,12 +8,8 @@
 /* Which source's ticket this is, when another source holds the same key (#1476). */
 .tf-jobcard .tf-jobsrc { font-size: var(--t-sm); margin: 6px 0 0; }
 .tf-jobcard .tf-jobsrc a { color: inherit; }
-.tf-jobtitle { font-size: var(--t-2xl); line-height: 1.2; font-weight: 600; }
 .tf-jobrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.tf-jobcard .tf-jobdim, .tf-jobcard p { color: var(--card-ink-2); }
-.tf-jobcard p.tf-asks { white-space: pre-line; }
-.tf-jobcard section { border-top: 1px solid rgba(0,0,0,.14); padding-top: 12px; }
-.tf-jobcard h2 { font-size: var(--t-xs); font-weight: 600; color: var(--card-ink-2); margin: 0 0 6px; }
+.tf-jobcard p { color: var(--card-ink-2); }
 .tf-jobcard .tf-chip { background: rgba(0,0,0,.1); color: var(--card-ink); }
 .tf-jobcard .tf-chip.tf-err { background: var(--err); color: #fff; }
 /* ---------- one page for a ticket and the job (spec #2396) ---------- */
@@ -67,8 +63,7 @@
 .tf-ticketcard .tf-go .tf-btn { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
 /* Two moods of one card: the yellow is for the ticket you are on (`tf-card`); a ticket you are reading sits on a sheet. */
 .tf-ticketcard.tf-sheetcard { background: var(--sheet); color: var(--ink); border-right-color: var(--rule); }
-.tf-sheetcard .tf-jobdim, .tf-sheetcard p, .tf-sheetcard h2 { color: var(--ink-2); }
-.tf-sheetcard section { border-top-color: var(--rule-2); }
+.tf-sheetcard p { color: var(--ink-2); }
 .tf-sheetcard .tf-chip { background: var(--muted-bg); color: var(--ink); }
 .tf-sheetcard .tf-go .tf-btn { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 /* The reading column (#2399): the title, the description and the whole thread, centred in the space beside the
@@ -85,6 +80,8 @@
 .tf-tkdesc { padding: 14px 16px; }
 .tf-tkdesc .tf-md { padding: 0; font-size: var(--t-md); }
 .tf-tkdesc p.tf-dim { font-size: var(--t-sm); }
+/* A description without markup keeps its line breaks. */
+.tf-tkdesc p.tf-asks { white-space: pre-line; overflow-wrap: anywhere; margin: 0; }
 /* The thread is the job's (`.tf-convo`, connections.css); the compose box is one line until it is used. */
 .tf-tkread .tf-convo { max-width: none; }
 .tf-tkread .tf-compose textarea { min-height: 36px; }
@@ -130,10 +127,7 @@
 a.tf-r:hover { background: var(--sheet-2); }
 .tf-r .tf-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-r .tf-rend { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: none; }
-.tf-r .tf-rsub { display: block; font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
 .tf-r .tf-repo { font: var(--t-xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
-.tf-secfoot { display: flex; gap: 8px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); flex-wrap: wrap; }
-.tf-secfoot .tf-push { margin-left: auto; }
 .tf-minif {
   display: flex; align-items: center; gap: 5px; border: 1px solid var(--rule); background: var(--paper); border-radius: 4px;
   padding: 2px 7px; flex: 1; min-width: 120px; max-width: 220px; color: var(--ink-2);
@@ -141,11 +135,6 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-minif svg { width: 12px; height: 12px; flex: none; }
 .tf-minif input { border: 0; background: none; outline: none; color: var(--ink); font-size: var(--t-sm); width: 100%; }
 .tf-minif:focus-within { outline: 2px solid var(--focus); }
-/* A row from the parent or a link set names it (R-4.6). */
-.tf-via {
-  display: inline-block; font-size: var(--t-2xs); font-weight: 600; padding: 0 5px; border-radius: 3px; margin-right: 4px;
-  background: var(--sheet-2); color: var(--ink-2); border: 1px solid var(--rule);
-}
 /* Builds' stale-data warning, with its fix (R-4.7). */
 .tf-stale {
   margin: 0 12px 8px; padding: 6px 10px; border-radius: 4px; background: var(--warn-bg); color: var(--warn);
