@@ -190,7 +190,8 @@ async fn over_profile(
         knobas_db::migrate::run(db.pool())
             .await
             .map_err(|e| format!("migrating: {e}"))?;
-        let secrets = crate::sources::secret_store(profile, crate::sources::SecretStoreKind::Keychain);
+        let secrets =
+            crate::sources::secret_store(profile, crate::sources::SecretStoreKind::Keychain);
         let registry: Arc<dyn AdapterRegistry> = Arc::new(crate::sources::Registry::default());
         let live = LiveSources::default();
         let mut failed = 0;
@@ -202,8 +203,15 @@ async fn over_profile(
                         Applied::Added => "added",
                         Applied::Updated => "updated",
                     };
-                    let detail = o.health.detail.map(|d| format!(" ({d})")).unwrap_or_default();
-                    println!("{id}: {verb}, credential {}{detail}", o.health.state.as_str());
+                    let detail = o
+                        .health
+                        .detail
+                        .map(|d| format!(" ({d})"))
+                        .unwrap_or_default();
+                    println!(
+                        "{id}: {verb}, credential {}{detail}",
+                        o.health.state.as_str()
+                    );
                 }
                 Err(error) => {
                     failed += 1;
@@ -221,7 +229,11 @@ async fn over_profile(
                 }
             }
         }
-        if failed == 0 { Ok(()) } else { Err(format!("{failed} source(s) failed")) }
+        if failed == 0 {
+            Ok(())
+        } else {
+            Err(format!("{failed} source(s) failed"))
+        }
     }
     .await;
     if let Err(error) = db.stop().await {

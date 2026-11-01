@@ -68,7 +68,11 @@ async fn a_second_run_updates_in_place_and_picks_up_a_rotated_token() {
     .await
     .unwrap();
     assert_eq!(first.applied, Applied::Added);
-    assert_eq!(first.health.state, AuthState::Ok, "the run tests what it saved");
+    assert_eq!(
+        first.health.state,
+        AuthState::Ok,
+        "the run tests what it saved"
+    );
 
     let second = live_sources::apply(
         &f.pool,
@@ -82,23 +86,39 @@ async fn a_second_run_updates_in_place_and_picks_up_a_rotated_token() {
     assert_eq!(second.applied, Applied::Updated);
     assert_eq!(ids_like(&f.pool, &f.id).await, 1, "one source per product");
 
-    let stored = f.secrets.get(&KeychainAccount::source(&f.id)).unwrap().unwrap();
-    assert_eq!(stored.value, "token-two", "the rotated token is the stored one");
+    let stored = f
+        .secrets
+        .get(&KeychainAccount::source(&f.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        stored.value, "token-two",
+        "the rotated token is the stored one"
+    );
     let base_url: String =
         sqlx::query_scalar("SELECT base_url FROM knobas.source_config WHERE id = $1")
             .bind(&f.id)
             .fetch_one(&f.pool)
             .await
             .unwrap();
-    assert_eq!(base_url, "http://127.0.0.1:3002", "a moved address is updated");
+    assert_eq!(
+        base_url, "http://127.0.0.1:3002",
+        "a moved address is updated"
+    );
 }
 
 #[tokio::test]
 async fn a_source_of_another_kind_under_the_id_is_refused_not_overwritten() {
     let f = fixture().await;
-    live_sources::apply(&f.pool, &f.secrets, &f.registry, &f.live, source(&f.id, "http://a", "t"))
-        .await
-        .unwrap();
+    live_sources::apply(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &f.live,
+        source(&f.id, "http://a", "t"),
+    )
+    .await
+    .unwrap();
     let mut other = source(&f.id, "http://a", "t");
     other.adapter_kind = "gitea".to_owned();
     let refused = live_sources::apply(&f.pool, &f.secrets, &f.registry, &f.live, other).await;
@@ -108,16 +128,33 @@ async fn a_source_of_another_kind_under_the_id_is_refused_not_overwritten() {
 #[tokio::test]
 async fn removing_takes_the_source_and_its_credential_and_tolerates_absence() {
     let f = fixture().await;
-    live_sources::apply(&f.pool, &f.secrets, &f.registry, &f.live, source(&f.id, "http://a", "t"))
-        .await
-        .unwrap();
-
-    assert!(live_sources::remove(&f.pool, &f.secrets, &f.live, &f.id).await.unwrap());
-    assert_eq!(ids_like(&f.pool, &f.id).await, 0);
-    assert!(f.secrets.get(&KeychainAccount::source(&f.id)).unwrap().is_none());
+    live_sources::apply(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &f.live,
+        source(&f.id, "http://a", "t"),
+    )
+    .await
+    .unwrap();
 
     assert!(
-        !live_sources::remove(&f.pool, &f.secrets, &f.live, &f.id).await.unwrap(),
+        live_sources::remove(&f.pool, &f.secrets, &f.live, &f.id)
+            .await
+            .unwrap()
+    );
+    assert_eq!(ids_like(&f.pool, &f.id).await, 0);
+    assert!(
+        f.secrets
+            .get(&KeychainAccount::source(&f.id))
+            .unwrap()
+            .is_none()
+    );
+
+    assert!(
+        !live_sources::remove(&f.pool, &f.secrets, &f.live, &f.id)
+            .await
+            .unwrap(),
         "a second remove finds nothing and says so"
     );
 }
