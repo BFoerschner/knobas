@@ -21,14 +21,17 @@ vi.mock("../../shell/open-external", () => ({
 const REPO = "gitea:tidewater/payout-service";
 const PDF_BYTES = new TextEncoder().encode("%PDF-1.7 fake");
 
-/** A source with one binary file at `path`, `size` bytes, read at commit `c0mmit`. */
-function binarySource(path: string, size = PDF_BYTES.length) {
+/**
+ * A source with one file at `path`, `size` bytes, read at commit `c0mmit`: binary unless `text` is given, the text
+ * the source answers for a file it read as text (no NUL in its head, like an ASCII-only PDF).
+ */
+function binarySource(path: string, size = PDF_BYTES.length, text: string | null = null) {
   const name = path.slice(path.lastIndexOf("/") + 1);
   return async (_at: string, section: string | null): Promise<SourceView> => {
     const blocks =
       section === "files"
         ? [{ type: "tree", trail: [], entries: [{ name, kind: "file", size, section: `file:${path}` }], truncated: false, url: null }]
-        : [{ type: "file", trail: [], path, text: "", language: null, size, truncated: false, binary: true, url: null, sha: "b10b", commit: "c0mmit" }];
+        : [{ type: "file", trail: [], path, text: text ?? "", language: null, size, truncated: false, binary: text === null, url: null, sha: "b10b", commit: "c0mmit" }];
     return { sections: [{ id: section, title: "Files", count: null, deferred: false, blocks }], actions: [] } as unknown as SourceView;
   };
 }
@@ -114,12 +117,18 @@ afterEach(() => {
   watching.clear();
 });
 
-function draw(path: string, render: RenderPort, fileBytes: ((entityId: string, path: string, commit: string | null) => Promise<Uint8Array>) | null, size?: number) {
+function draw(
+  path: string,
+  render: RenderPort,
+  fileBytes: ((entityId: string, path: string, commit: string | null) => Promise<Uint8Array>) | null,
+  size?: number,
+  asText: string | null = null,
+) {
   view = mount(TfRepoFiles, {
     target,
     props: {
       ports: {
-        entityView: binarySource(path, size),
+        entityView: binarySource(path, size, asText),
         ...(fileBytes ? { fileBytes } : {}),
         submitWrite: async () => {
           throw { code: "invalid", message: "no write in this suite" };
@@ -171,6 +180,21 @@ test("a binary .pdf is read at the file's commit and drawn by PDF, every page a 
   expect(render.draws).toEqual(["1@1", "2@1", "3@1"]);
   expect(pageBoxes().map((box) => text(box.querySelector(".tf-pdf-text")))).toEqual(["text of page 1", "text of page 2", "text of page 3"]);
   expect(target.querySelector(".tf-fileview")?.textContent).not.toContain("A binary file, not drawn.");
+});
+
+test("a .pdf the source read as text (ASCII only, no NUL) is still drawn by PDF from its bytes, not shown as source", async () => {
+  const render = pdfRender([LETTER]);
+  const reads: string[] = [];
+  const ascii = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n";
+  const bytes = new TextEncoder().encode(ascii);
+  draw("docs/scan.pdf", render.port, async (entityId, path, commit) => (reads.push(`${entityId} ${path} ${commit}`), bytes), bytes.length, ascii);
+  await settle();
+
+  expect(text(target.querySelector(".tf-fileview .tf-rsw-face"))).toBe("Render as PDF");
+  expect(reads).toEqual([`${REPO} docs/scan.pdf c0mmit`]);
+  expect(render.asked).toEqual([bytes]);
+  expect(text(target.querySelector(".tf-pdf-bar .tf-dim"))).toBe("1 page");
+  expect(target.querySelector(".tf-fileview .tf-code")).toBeNull();
 });
 
 test("only the pages near the view are drawn; a page is drawn once it scrolls near", async () => {

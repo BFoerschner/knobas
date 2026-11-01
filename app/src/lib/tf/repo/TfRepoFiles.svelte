@@ -874,11 +874,14 @@
     return read === undefined ? null : (path: string) => read(entityId, path, commit);
   });
   /**
-   * A binary file's bytes, at the commit it was read at (#2256), for the renderer that reads bytes (an image, a PDF,
-   * #2260). Keyed by what it reads, so a re-read of the same file hands the renderer the same function and it reads
-   * nothing again.
+   * A file's bytes, at the commit it was read at (#2256), for the renderer that reads bytes (an image, a PDF,
+   * #2260): every binary file, and a file the source read as text that such a renderer draws (an ASCII-only PDF has
+   * no NUL in its head, so the source calls it text). Keyed by what it reads, so a re-read of the same file hands the
+   * renderer the same function and it reads nothing again.
    */
-  const bytesAt = $derived(file === null || !file.binary ? null : JSON.stringify([at, file.path, file.commit ?? null]));
+  const bytesAt = $derived(
+    file === null || !(file.binary || renderer?.input === "bytes") ? null : JSON.stringify([at, file.path, file.commit ?? null]),
+  );
   const bytesRead = $derived.by(() => {
     const read = ports.fileBytes;
     if (bytesAt === null || read === undefined) return null;
@@ -1210,7 +1213,7 @@
           <div class="tf-banner tf-err" role="alert">The pipeline could not read the file: {pipeRefused}</div>
         {/if}
       {/if}
-      {#if drawn === file && file.binary && bytesRead !== null && drawAs === "pdf"}
+      {#if drawn === shownFile && bytesRead !== null && drawAs === "pdf"}
         <TfPdf read={bytesRead} size={file.size} {render} />
       {:else if drawn === file && file.binary && bytesRead !== null && drawAs === "image"}
         <TfBytesImage read={bytesRead} path={file.path} size={file.size} />
