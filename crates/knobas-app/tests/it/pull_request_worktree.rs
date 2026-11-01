@@ -225,10 +225,12 @@ impl World {
         .await
     }
 
-    async fn set_state(&self, item: &str, state: &str) {
-        sqlx::query("update sync.item set payload = jsonb_build_object('state', $2::text) where entity_id = $1")
+    /// Replace the pull request's mirror payload with `payload`, Gitea's
+    /// spelling of its state.
+    async fn set_state(&self, item: &str, payload: serde_json::Value) {
+        sqlx::query("update sync.item set payload = $2 where entity_id = $1")
             .bind(item)
-            .bind(state)
+            .bind(payload)
             .execute(&self.pool)
             .await
             .unwrap();
@@ -370,7 +372,7 @@ async fn a_pull_request_opens_in_a_worktree_at_its_head_and_the_checkout_is_unto
         "the fetch wrote the worktree's FETCH_HEAD, not the checkout's"
     );
     assert_eq!(
-        worktree::list(&w.pool).await.unwrap(),
+        worktree::list(&w.pool, &Registry::for_process()).await.unwrap(),
         [worktree::PullRequestWorktree {
             repo_entity_id: w.repo.clone(),
             number: 7,
@@ -424,8 +426,10 @@ async fn a_closed_pull_requests_worktree_is_removed_on_the_next_open() {
     w.open(7, Some(&seven)).await.unwrap();
     w.open(9, Some(&nine)).await.unwrap();
     fs::write(w.worktree(9).join("wip.txt"), "unsaved\n").unwrap();
-    w.set_state(&seven, "closed").await;
-    w.set_state(&nine, "merged").await;
+    w.set_state(&seven, serde_json::json!({"state": "closed", "merged": false}))
+        .await;
+    w.set_state(&nine, serde_json::json!({"state": "closed", "merged": true}))
+        .await;
     let before = standing(&w.checkout);
 
     w.open(8, None).await.unwrap();
@@ -435,13 +439,21 @@ async fn a_closed_pull_requests_worktree_is_removed_on_the_next_open() {
         w.worktree(9).join("wip.txt").exists(),
         "an untracked file keeps it"
     );
-    let listed: Vec<(u64, bool)> = worktree::list(&w.pool)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|t| (t.number, t.closed))
-        .collect();
-    assert_eq!(listed, [(9, true), (8, false)]);
+    let listed = || async {
+        worktree::list(&w.pool, &Registry::for_process())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|t| (t.number, t.closed))
+            .collect::<Vec<(u64, bool)>>()
+    };
+    assert_eq!(listed().await, [(9, true), (8, false)]);
+
+    // Closed is read where Gitea's pull request kind declares its state
+    // (#2358): a word that declaration does not name is not known to be
+    // closed, and a worktree is never swept on a guess.
+    w.set_state(&nine, serde_json::json!({"state": "draft"})).await;
+    assert_eq!(listed().await, [(9, false), (8, false)]);
     let registered = git(&w.checkout, &["worktree", "list", "--porcelain"]);
     assert!(
         !registered.contains(&format!("{}-7", w.name())),
@@ -462,19 +474,19 @@ async fn settings_removes_a_worktree_and_git_refuses_one_with_changes() {
     let (seven, eight) = (w.worktree(7), w.worktree(8));
     fs::write(eight.join("b.txt"), "changed\n").unwrap();
 
-    let left = worktree::remove(&w.pool, &seven.to_string_lossy())
+    let left = worktree::remove(&w.pool, &Registry::for_process(), &seven.to_string_lossy())
         .await
         .unwrap();
     assert!(!seven.exists());
     assert_eq!(left.len(), 1);
 
-    let error = worktree::remove(&w.pool, &eight.to_string_lossy())
+    let error = worktree::remove(&w.pool, &Registry::for_process(), &eight.to_string_lossy())
         .await
         .unwrap_err();
     assert_eq!(error.code, IpcErrorCode::Conflict, "{error:?}");
     assert!(eight.join("b.txt").exists());
 
-    let error = worktree::remove(&w.pool, &w.checkout.to_string_lossy())
+    let error = worktree::remove(&w.pool, &Registry::for_process(), &w.checkout.to_string_lossy())
         .await
         .unwrap_err();
     assert_eq!(
@@ -507,7 +519,7 @@ async fn a_folder_knobas_did_not_make_is_refused_and_a_failed_fetch_leaves_nothi
     assert_eq!(error.code, IpcErrorCode::Invalid, "{error:?}");
     assert!(error.message.contains("#41"), "{}", error.message);
     assert!(!w.worktree(41).exists());
-    assert!(worktree::list(&w.pool).await.unwrap().is_empty());
+    assert!(worktree::list(&w.pool, &Registry::for_process()).await.unwrap().is_empty());
     let registered = git(&w.checkout, &["worktree", "list", "--porcelain"]);
     assert!(!registered.contains("-41"), "{registered}");
     assert_eq!(standing(&w.checkout), before);
@@ -628,7 +640,7 @@ async fn a_worktree_whose_git_file_is_gone_is_left_alone_and_the_repository_abov
     let error = w.open(7, None).await.unwrap_err();
     assert_eq!(error.code, IpcErrorCode::Conflict, "{error:?}");
     assert!(error.message.contains(".git"), "{}", error.message);
-    let error = worktree::remove(&w.pool, &wt.to_string_lossy())
+    let error = worktree::remove(&w.pool, &Registry::for_process(), &wt.to_string_lossy())
         .await
         .unwrap_err();
     assert_eq!(error.code, IpcErrorCode::Conflict, "{error:?}");

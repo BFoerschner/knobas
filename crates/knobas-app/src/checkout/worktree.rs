@@ -53,10 +53,12 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
 use knobas_core::checkout::worktree::{self as rules, Step, difftool_args};
+use knobas_core::payload::Declarations;
 use knobas_sync::scheduler::AdapterRegistry;
 
 use super::working_tree::{self, PROTOCOL_VARIABLES, REPOSITORY_VARIABLES};
 use crate::IpcError;
+use crate::sources::paths::declared_paths;
 use crate::settings::{read_value, write_value};
 
 /// The `knobas.setting` key holding the worktrees knobas made.
@@ -112,17 +114,27 @@ async fn save(pool: &PgPool, records: &[Record]) -> Result<(), IpcError> {
     write_value(pool, WORKTREES_KEY, &value).await
 }
 
-/// Whether the mirror holds pull request `item` closed or merged: its
-/// payload's `state` is there and is not `open`, the reading the inbox makes.
-/// One the mirror no longer holds is not known to be closed.
-async fn closed(pool: &PgPool, item: Option<&str>) -> Result<bool, IpcError> {
+/// Whether the mirror holds pull request `item` closed or merged: the state
+/// its kind declares (#2358) resolves, and to something other than `open` --
+/// Gitea's `closed`, or `merged` where its merged flag leads. One the mirror
+/// no longer holds, or whose state no declaration names, is not known to be
+/// closed, so its worktree is never swept on a guess.
+async fn closed(
+    pool: &PgPool,
+    declarations: &Declarations,
+    item: Option<&str>,
+) -> Result<bool, IpcError> {
     let Some(item) = item else { return Ok(false) };
-    let state: Option<Option<String>> =
-        sqlx::query_scalar("select payload->>'state' from sync.item where entity_id = $1")
-            .bind(item)
-            .fetch_optional(pool)
-            .await
-            .map_err(IpcError::internal)?;
+    let state: Option<Option<String>> = sqlx::query_scalar(concat!(
+        "select ",
+        knobas_core::declared_state!("$2"),
+        "->>'text' from sync.item i where i.entity_id = $1"
+    ))
+    .bind(item)
+    .bind(declarations.as_param())
+    .fetch_optional(pool)
+    .await
+    .map_err(IpcError::internal)?;
     Ok(state.flatten().is_some_and(|state| state != "open"))
 }
 
@@ -354,7 +366,7 @@ pub async fn open(
     })?;
     drop(busy);
 
-    if let Err(error) = sweep_but(pool, Some(&worktree)).await {
+    if let Err(error) = sweep_but(pool, registry, Some(&worktree)).await {
         tracing::warn!(%error, "the closed pull requests' worktrees were not swept");
     }
     Ok(worktree)
@@ -383,12 +395,17 @@ async fn add(git: &Path, checkout: &Path, worktree: &Path, again: bool) -> Resul
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the row cannot be read or
 /// written; git's refusals are not errors.
-pub async fn sweep(pool: &PgPool) -> Result<Vec<String>, IpcError> {
-    sweep_but(pool, None).await
+pub async fn sweep(pool: &PgPool, registry: &dyn AdapterRegistry) -> Result<Vec<String>, IpcError> {
+    sweep_but(pool, registry, None).await
 }
 
-async fn sweep_but(pool: &PgPool, keep: Option<&Path>) -> Result<Vec<String>, IpcError> {
+async fn sweep_but(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    keep: Option<&Path>,
+) -> Result<Vec<String>, IpcError> {
     let _busy = BUSY.lock().await;
+    let declarations = declared_paths(pool, registry).await?;
     let records = load(pool).await?;
     let mut kept = Vec::new();
     let mut removed = Vec::new();
@@ -401,7 +418,9 @@ async fn sweep_but(pool: &PgPool, keep: Option<&Path>) -> Result<Vec<String>, Ip
         if !exists(&path).await {
             continue;
         }
-        if !closed(pool, record.item.as_deref()).await? || !is_worktree(&path).await {
+        if !closed(pool, &declarations, record.item.as_deref()).await?
+            || !is_worktree(&path).await
+        {
             kept.push(record);
             continue;
         }
@@ -423,11 +442,15 @@ async fn sweep_but(pool: &PgPool, keep: Option<&Path>) -> Result<Vec<String>, Ip
 /// # Errors
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) for a read that fails.
-pub async fn list(pool: &PgPool) -> Result<Vec<PullRequestWorktree>, IpcError> {
+pub async fn list(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+) -> Result<Vec<PullRequestWorktree>, IpcError> {
+    let declarations = declared_paths(pool, registry).await?;
     let mut out = Vec::new();
     for record in load(pool).await? {
         out.push(PullRequestWorktree {
-            closed: closed(pool, record.item.as_deref()).await?,
+            closed: closed(pool, &declarations, record.item.as_deref()).await?,
             repo_entity_id: record.repo,
             number: record.number,
             path: record.path,
@@ -444,7 +467,11 @@ pub async fn list(pool: &PgPool) -> Result<Vec<PullRequestWorktree>, IpcError> {
 /// [`NotFound`](crate::IpcErrorCode::NotFound) for a path that is not one of
 /// knobas's worktrees; [`Conflict`](crate::IpcErrorCode::Conflict) when git
 /// refuses (changes or untracked files in it), in git's words.
-pub async fn remove(pool: &PgPool, path: &str) -> Result<Vec<PullRequestWorktree>, IpcError> {
+pub async fn remove(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    path: &str,
+) -> Result<Vec<PullRequestWorktree>, IpcError> {
     {
         let _busy = BUSY.lock().await;
         let mut records = load(pool).await?;
@@ -475,7 +502,7 @@ pub async fn remove(pool: &PgPool, path: &str) -> Result<Vec<PullRequestWorktree
         records.remove(at);
         save(pool, &records).await?;
     }
-    list(pool).await
+    list(pool, registry).await
 }
 
 // -- the Diff tool ------------------------------------------------------------

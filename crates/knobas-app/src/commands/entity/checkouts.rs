@@ -308,7 +308,7 @@ pub async fn pull_request_worktrees(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<crate::checkout::worktree::PullRequestWorktree>, IpcError> {
     let pool = lifecycle.pool()?;
-    crate::checkout::worktree::list(&pool).await
+    crate::checkout::worktree::list(&pool, lifecycle.registry()).await
 }
 
 /// Remove one pull request worktree knobas made (#2285), and answer the list.
@@ -325,7 +325,7 @@ pub async fn remove_pull_request_worktree(
     path: String,
 ) -> Result<Vec<crate::checkout::worktree::PullRequestWorktree>, IpcError> {
     let pool = lifecycle.pool()?;
-    crate::checkout::worktree::remove(&pool, &path).await
+    crate::checkout::worktree::remove(&pool, lifecycle.registry(), &path).await
 }
 
 /// Settings › Checkouts (#844, R-13a.3): the clones root, the git found, the
