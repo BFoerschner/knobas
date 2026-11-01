@@ -300,7 +300,7 @@
   // A link asked for a job is the job page's to take; leaving for any other
   // page before it did drops it, so a later visit does not open the dialog.
   $effect(() => {
-    if (route.view !== "job") linkRequest.drop();
+    if (route.view !== "job" && route.view !== "ticket") linkRequest.drop();
   });
 
   // ---- the status bar's reads, once the database can answer ----
@@ -525,8 +525,6 @@
 <div class="tf">
   <TfTopBar
     current={sectionOf(route)}
-    job={navJobId?.key ?? null}
-    jobAt={navJobId?.entityId ?? null}
     {inbox}
     {badges}
     {timer}

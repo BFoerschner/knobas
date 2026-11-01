@@ -4,40 +4,40 @@
   padding: 26px 22px 18px; overflow: auto; position: relative; display: flex; flex-direction: column; gap: 14px;
   border-right: 1px solid var(--card-2);
 }
-/* The punched hole at the top of the card. */
-.tf-jobcard::before {
-  content: ""; position: absolute; top: 10px; left: 50%; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%;
-  background: var(--paper); box-shadow: inset 0 1px 2px rgba(0,0,0,.35);
-}
-.tf-jobcard .tf-back {
-  align-self: flex-start; background: rgba(0,0,0,.08); padding: 3px 9px; border-radius: 3px;
-  font-size: var(--t-sm); text-decoration: none; display: inline-flex; gap: 6px; align-items: center;
-}
 .tf-jobcard .tf-jobkey { line-height: .9; margin-top: 4px; }
 /* Which source's ticket this is, when another source holds the same key (#1476). */
 .tf-jobcard .tf-jobsrc { font-size: var(--t-sm); margin: 6px 0 0; }
 .tf-jobcard .tf-jobsrc a { color: inherit; }
 .tf-jobtitle { font-size: var(--t-2xl); line-height: 1.2; font-weight: 600; }
 .tf-jobrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.tf-jobcard select {
-  font-weight: 600; padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(0,0,0,.25);
-  background: rgba(255,255,255,.35); color: var(--card-ink);
-}
-/* A queued move (#1424): the picked status, muted and dashed, until the mirror moves. */
-.tf-jobcard select.tf-queued { color: var(--card-ink-2); font-style: italic; border-style: dashed; }
 .tf-jobcard .tf-jobdim, .tf-jobcard p { color: var(--card-ink-2); }
 .tf-jobcard p.tf-asks { white-space: pre-line; }
 .tf-jobcard section { border-top: 1px solid rgba(0,0,0,.14); padding-top: 12px; }
 .tf-jobcard h2 { font-size: var(--t-xs); font-weight: 600; color: var(--card-ink-2); margin: 0 0 6px; }
 .tf-jobcard .tf-chip { background: rgba(0,0,0,.1); color: var(--card-ink); }
 .tf-jobcard .tf-chip.tf-err { background: var(--err); color: #fff; }
-.tf-clock {
-  display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,.08); border-radius: 6px;
-  padding: 10px 12px; flex-wrap: wrap;
-}
-/* A duration is Archivo with tabular figures (design system, Type). */
-.tf-clock-t { font-weight: 600; font-size: var(--t-2xl); font-variant-numeric: tabular-nums; }
-.tf-clock .tf-btn { margin-left: auto; background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
+/* ---------- one page for a ticket and the job (spec #2396) ---------- */
+/* The page is the job's two columns under its own breadcrumb; each column scrolls on its own, so the card's foot is in reach. */
+.tf-ticketpage { height: 100%; }
+.tf-ticketpage .tf-ws { flex: 1; min-height: 0; height: auto; }
+@media (max-width: 900px) { .tf-ticketpage { height: auto; } }
+/* No 64px key in either mood. */
+.tf-ticketcard .tf-jobkey { font-size: var(--t-d2); }
+/* The one decision at the card's foot: the card's own ink, large. */
+.tf-ticketcard .tf-go { margin-top: auto; padding-top: 6px; }
+.tf-ticketcard .tf-go .tf-btn { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
+/* Two moods of one card: the yellow is for the ticket you are on (`tf-card`); a ticket you are reading sits on a sheet. */
+.tf-ticketcard.tf-sheetcard { background: var(--sheet); color: var(--ink); border-right-color: var(--rule); }
+.tf-sheetcard .tf-jobdim, .tf-sheetcard p, .tf-sheetcard h2 { color: var(--ink-2); }
+.tf-sheetcard section { border-top-color: var(--rule-2); }
+.tf-sheetcard .tf-chip { background: var(--muted-bg); color: var(--ink); }
+.tf-sheetcard .tf-cbtn { border-color: var(--rule); color: var(--ink); }
+.tf-sheetcard .tf-last { background: var(--sheet-2); }
+.tf-sheetcard .tf-go .tf-btn { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.tf-sheetcard .tf-week .tf-week-unlogged { fill: var(--rule-2); }
+.tf-sheetcard .tf-week .tf-week-logged { fill: var(--rule); }
+.tf-sheetcard .tf-week .tf-today .tf-week-unlogged { fill: var(--ink-2); }
+.tf-sheetcard .tf-week .tf-today .tf-week-logged { fill: var(--ink); }
 .tf-week { display: block; width: 100%; height: 34px; margin-top: 6px; }
 .tf-week .tf-week-unlogged { fill: rgba(0,0,0,.12); }
 .tf-week .tf-week-logged { fill: rgba(0,0,0,.24); }

@@ -1,5 +1,16 @@
 <!--
-  The job (#816, R-4.1): `#/job/<key>`, a ticket's working view.
+  One page for a ticket and the job (#816, R-4.1, spec #2396): `#/ticket/<id>`,
+  `#/job/<key or id>` and home's bare `#/job` (`page.ts` says which draws what).
+
+  **Two moods, one page.** The card is on the yellow when the ticket is the
+  chosen job (`chosen.svelte.ts`) and on a sheet while it is only read; the
+  card's class is the only difference (`TfJobCard.svelte`). Reading never
+  chooses: only a `#/job/<…>` address (`choose`), which then lands on the
+  ticket's own address, and the card's foot (`footAction`) choose. *Start
+  work* chooses and shows the stepper, *Resume work* chooses and starts the
+  timer, *Work on this* chooses; pinned, the foot is the timer. The page's
+  breadcrumb is *Tickets › KEY*; `Esc` takes the ticket page's rung (the
+  opener, else Tickets) and does nothing at home.
 
   Opening it reads the ticket, then **promotes its context** (`promote_context`,
   idempotent, so a ticket with a context keeps it and one without gets one) and
@@ -74,6 +85,8 @@
     assetsRollup,
     blockerEntries,
     buildsRollup,
+    footAction,
+    segmentKey,
     byAttention,
     isMine,
     itemHash,
@@ -95,9 +108,12 @@
   import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { currentJob, linkRequest, type LinkTarget } from "./current.svelte";
   import { chosenJob } from "./chosen.svelte";
-  import { askAgain, echoWrite, echoOn, echoesOn, sameWords, settleEchoes, watchEchoes } from "../queued.svelte";
+  import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, watchEchoes } from "../queued.svelte";
   import { entityAddress } from "../address";
-  import { jobHash } from "../route";
+  import { replaceAddress } from "../opener";
+  import { sectionHash, ticketHash } from "../route";
+  import TfCrumbs from "../TfCrumbs.svelte";
+  import type { EscTarget } from "../escape";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfDeps from "../deps/TfDeps.svelte";
   import { clones } from "../openin/clones.svelte";
@@ -118,6 +134,8 @@
   let {
     segment,
     tab,
+    choose = false,
+    back = null,
     timer,
     layers,
     ontimer,
@@ -133,6 +151,10 @@
     segment: string;
     /** The job's tab from the address, `null` for Work. */
     tab: string | null;
+    /** A `#/job/<…>` address: choose the ticket as the job once read, and land on its own address. */
+    choose?: boolean;
+    /** Where `Esc` goes, which the breadcrumb's hint names (#2228); `null` where it does nothing. */
+    back?: EscTarget | null;
     timer: Pick<Timer, "current" | "elapsed">;
     layers: Layers;
     /** The timer verb: with a timer running, stop it into the worklog draft. */
@@ -164,7 +186,6 @@
   // Built once per mount over the ports this page was given: the reader owns the token.
   const reader = createJobReader(ports, { today: () => today(), registry: { load: () => registry.load() } });
   const detail = $derived(reader.detail);
-  const offered = $derived(reader.transitions);
   const week = $derived(reader.week);
   const code = $derived(reader.code);
   const checkout = $derived(reader.checkout);
@@ -219,14 +240,23 @@
   // The job on screen is what the timer chip and ⌘T start on (R-1.4); a job
   // keep-alive holds hidden (#2247) is not on screen.
   $effect(() => (pageShown() ? currentJob.set(detail?.row.entity_id ?? null) : undefined));
-  // A job address resolved on screen makes its ticket the chosen job (spec
-  // #2227): a bookmark, history, a link or the Tickets preview's button. By
-  // its id, so a re-read of the same ticket (a timer start, a refresh) does
-  // not take the choice back from a ticket chosen since.
+  // A job address resolved on screen makes its ticket the chosen job and
+  // lands on the ticket's own address (spec #2396): a bookmark, history, a
+  // link, the timer chip or the Tickets preview's button. A ticket address
+  // and home choose nothing. By its id, so a re-read of the same ticket (a
+  // timer start, a refresh) does not take the choice back from a ticket
+  // chosen since.
   const resolvedId = $derived(detail?.row.entity_id ?? null);
   $effect(() => {
-    if (pageShown() && resolvedId !== null) chosenJob.choose(resolvedId);
+    if (!choose || !pageShown() || resolvedId === null) return;
+    const id = resolvedId;
+    untrack(() => {
+      chosenJob.choose(id);
+      replaceAddress(ticketHash(id, tab));
+    });
   });
+  /** Whether the ticket is the chosen job: the card's yellow, else its sheet. */
+  const pinned = $derived(resolvedId !== null && chosenJob.id === resolvedId);
 
   // *Link to <key>* from the launcher (#1500): this job's own dialog, over its
   // Connections drawer, with the result preset, once the job has drawn.
@@ -345,8 +375,6 @@
   // ---- what this job queued, drawn at once (#1424) ----
   /** The surface the job's echoes are tagged with, for `watchEchoes` (#2103). */
   const JOB = "job";
-  /** The status a queued move picked, drawn in the select until the ticket's status moves. */
-  const statusEcho = $derived(detail ? echoOn(detail.row.entity_id, "status") : null);
   /** The comments queued here, drawn at the end of the thread until the thread holds them. */
   const queuedComments = $derived(detail ? echoesOn(detail.row.entity_id, "comment") : []);
 
@@ -398,7 +426,7 @@
           name: `Comment on ${key}`,
           resend: () => {
             askAgain(id, "comment", body);
-            location.hash = `${jobHash(id)}/conversation`;
+            location.hash = ticketHash(id, "conversation");
           },
         },
         follower,
@@ -419,39 +447,6 @@
     seenClones = clones.finished;
     untrack(() => reader.rereadCheckout());
   });
-
-  /**
-   * A move queued and drawn in the select, then the ticket and its transitions
-   * read again: nothing else it reaches changed.
-   */
-  async function move(status: string) {
-    if (!detail || moveRefused !== null) return;
-    const id = detail.row.entity_id;
-    const key = keyOf(id);
-    const source = detail.source;
-    const from = detail.status;
-    try {
-      const write = await ports.submitWrite({ Transition: { entity: id, status } });
-      echoWrite(id, "status", status, {
-        write,
-        base: from,
-        surface: JOB,
-        source: source.id,
-        following: {
-          name: `Move of ${key} to ${status}`,
-          resend: () => {
-            askAgain(id, "status", status);
-            location.hash = jobHash(id);
-          },
-        },
-        follower,
-      });
-      reader.rereadDetail(id);
-      toastQueued(`${key} to ${status}`, source);
-    } catch (cause) {
-      push({ text: `Could not queue the move: ${ipcErrorMessage(cause)}`, tone: "err" });
-    }
-  }
 
   /** The job's tabs, in prototype-6's order and words; an unknown tab is Work. */
   const TABS = [
@@ -519,7 +514,34 @@
   );
 
   const mine = $derived(detail ? isMine(detail, sources) : false);
-  const starting = $derived(detail ? offersStartWork(detail.status, mine) : false);
+  /** The stepper runs on the chosen job alone: *Start work* is what chooses a ticket read. */
+  const starting = $derived(detail ? pinned && offersStartWork(detail.status, mine) : false);
+  const timerOnIt = $derived(
+    detail !== null && detail !== undefined && timer.current?.target.kind === "entity" && timer.current.target.entity_id === detail.row.entity_id,
+  );
+  const action = $derived(detail ? footAction({ pinned, status: detail.status, mine, timerOnIt }) : null);
+
+  /** The foot's button: choose the ticket, and what its label says beside. */
+  function act() {
+    if (!detail || action === null) return;
+    const id = detail.row.entity_id;
+    const title = detail.row.title;
+    switch (action.does) {
+      case "stop":
+        ontimer?.();
+        return;
+      case "start-timer":
+        onstarttimer(id, title);
+        return;
+      case "resume":
+        chosenJob.choose(id);
+        onstarttimer(id, title);
+        return;
+      case "start-work":
+      case "choose":
+        chosenJob.choose(id);
+    }
+  }
   const blocked = $derived(detail ? blockerEntries(detail) : []);
   const stale = $derived(staleBuilds(sources, health, sync, builds ?? [], today()));
   /** What *Start work* suggests: a repository the ticket already reaches. */
@@ -529,43 +551,43 @@
 </script>
 
 {#if detail === undefined && failure === null}
-  <div class="tf-empty"><p>Opening {segment}…</p></div>
+  <div class="tf-full tf-ticketpage">
+    <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: segmentKey(segment) }]} {back} />
+    <div class="tf-empty"><p>Opening {segmentKey(segment)}…</p></div>
+  </div>
 {:else if detail === null || (detail === undefined && failure !== null)}
-  <div class="tf-full">
+  <div class="tf-full tf-ticketpage">
+    <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: segmentKey(segment) }]} {back} />
     <div class="tf-empty">
       {#if failure !== null}
-        <p>Could not open {segment}: {failure}</p>
+        <p>Could not open {segmentKey(segment)}: {failure}</p>
       {:else}
-        <p>No ticket {segment} in the mirror. It may not have synced yet.</p>
+        <p>No ticket {segmentKey(segment)} in the mirror. It may not have synced yet.</p>
       {/if}
       <a class="tf-btn" href="#/tickets">All tickets</a>
     </div>
   </div>
 {:else if detail}
   {@const key = keyOf(detail.row.entity_id)}
-  {@const address = jobHash(detail.row.entity_id)}
+  <div class="tf-full tf-ticketpage">
+  <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: key }]} {back} />
   <div class="tf-ws" class:tf-mapmode={current.id === "map"}>
     <TfJobCard
       {detail}
       others={reader.others}
-      {offered}
+      {pinned}
+      {action}
+      onaction={act}
       {week}
       {conversation}
       conversationFailure={threadFailure}
       {lastVisit}
       now={today()}
-      {timer}
-      queued={statusEcho?.text ?? null}
-      queuedState={statusEcho?.state ?? "queued"}
-      refused={moveRefused}
-      onmove={move}
-      onstop={() => ontimer?.()}
-      onstart={() => onstarttimer(detail!.row.entity_id, detail!.row.title)}
     />
     <section class="tf-work">
       <div class="tf-wtabs" role="tablist">
         {#each TABS as each (each.id)}
-          <a href="{address}{each.path}" role="tab" aria-selected={current.id === each.id}
+          <a href={ticketHash(detail.row.entity_id, each.path === "" ? null : each.path.slice(1))} role="tab" aria-selected={current.id === each.id}
             >{each.name}{#if each.id === "conversation" && conversation !== null}{#if conversation.comments > 0}{" "}<span
                     class="tf-count">{conversation.comments}</span
                   >{/if}{#if conversation.fresh > 0}{" "}<span class="tf-count tf-info">{conversation.fresh} new</span>{/if}{/if}</a
@@ -624,7 +646,7 @@
                 {/snippet}
               </TfSection>
             {/if}
-            <TfSection id="assets" title="Assets" openLabel="Open in Dependencies" openHref="{address}/map" footHref="#/assets" rows={assetLines} rollup={assets ? assetsRollup(assets) : null} />
+            <TfSection id="assets" title="Assets" openLabel="Open in Dependencies" openHref={ticketHash(detail.row.entity_id, "map")} footHref="#/assets" rows={assetLines} rollup={assets ? assetsRollup(assets) : null} />
             <TfSection id="monitors" title="Monitors" openLabel="Open Monitors" openHref="#/monitors" footHref="#/monitors" onopen={() => (sessionFilter("monitors").scope = "job")} rows={lines(monitors)} rollup={monitors ? monitorsRollup(monitors) : null} />
             <TfSection id="pages" title="Pages" openLabel="Open Docs view" openHref="#/docs" footHref="#/docs" onopen={() => (sessionFilter("docs").scope = "job")} rows={lines(pages)} rollup={pages ? pagesRollup(pages) : null} />
           </div>
@@ -646,6 +668,7 @@
         {/if}
       </div>
     </section>
+  </div>
   </div>
   {#if drawer}
     <TfConnections

@@ -12,12 +12,10 @@
   import type { Timer } from "../shell/timer.svelte";
   import { targetReading } from "../shell/timer";
   import type { Badges } from "./badges.svelte";
-  import { jobHash, NAV, SECTION_NAME, sectionHash, type Section } from "./route";
+  import { NAV, SECTION_NAME, sectionHash, type Section } from "./route";
 
   let {
     current,
-    job,
-    jobAt = null,
     inbox,
     badges,
     timer,
@@ -27,10 +25,6 @@
   }: {
     /** The section the address lights, or `null`. */
     current: Section | null;
-    /** The job the Job tab opens: the chosen job (spec #2227), else the timer's ticket. */
-    job: string | null;
-    /** That job's entity id (#1525), which the tab's address names; its key when omitted. */
-    jobAt?: string | null;
     inbox: Pick<Inbox, "count">;
     badges: Pick<Badges, "builds" | "monitors" | "proposals">;
     timer: Pick<Timer, "current" | "elapsed">;
@@ -56,10 +50,6 @@
     return { n, err: section === "builds" || section === "monitors" };
   }
 
-  function hrefOf(section: Section): string {
-    return section === "job" ? jobHash(jobAt ?? job) : sectionHash(section);
-  }
-
   /** Prototype-6 draws the clock as `H:MM:SS` from the first second. */
   const clock = $derived.by(() => {
     const parts = (timer.elapsed ?? "0:00").split(":");
@@ -74,11 +64,8 @@
   <nav class="tf-nav" aria-label="Main">
     {#each NAV as section (section)}
       {@const count = badge(section)}
-      <a href={hrefOf(section)} aria-current={section === current ? "page" : undefined}>
+      <a href={sectionHash(section)} aria-current={section === current ? "page" : undefined}>
         {SECTION_NAME[section]}
-        {#if section === "job" && job !== null}
-          <span class="tf-navkey">{job}</span>
-        {/if}
         {#if count}
           <span class="tf-count {count.err ? 'tf-err' : ''}">{count.n}</span>
         {/if}

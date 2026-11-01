@@ -66,9 +66,11 @@ export const HEAD_NAME: Readonly<Record<string, string>> = {
   diff: "Diff",
 };
 
-/** The main navigation, left to right (R-1.1). Settings is the cog, not a tab. */
-export const NAV: readonly Section[] = [
-  "job",
+/**
+ * The main navigation, left to right (R-1.1). Settings is the cog, not a tab.
+ * Job has no entry (spec #2396): the job is a ticket's page, under Tickets.
+ */
+export const NAV: readonly Exclude<Section, "job">[] = [
   "tickets",
   "inbox",
   "code",
@@ -118,13 +120,14 @@ const SECTION_OF: Record<string, Section> = {
  *
  * - `tickets` is the list of tickets, and its saved views.
  * - `job` is home (`home.ts`, spec #2227): the empty address lands on a
- *   bare `#/job`, which draws the chosen job (`job/chosen.svelte.ts`). It
- *   carries the ticket key and the job's tab (`#/job/PAY-231/conv`),
- *   either of which may be absent.
- * - `ticket` is one ticket's own page, `#/ticket/<entity id>` (spec #2227):
- *   the ticket to read, under Tickets in the nav, the way a run opens under
- *   Builds. It is not the job: opening it chooses no job and promotes no
- *   context. A bare `#/ticket` with no id is Tickets.
+ *   bare `#/job`, which draws the chosen job's page (`job/chosen.svelte.ts`)
+ *   under that address. `#/job/<key or id>[/<tab>]` is the old way in, kept
+ *   for links, bookmarks, the timer chip and *Start work* (spec #2396): it
+ *   chooses the ticket as the job and lands on its `ticket` address.
+ * - `ticket` is one ticket's page, `#/ticket/<entity id>[/<tab>]` (spec
+ *   #2396), under Tickets in the nav, the way a run opens under Builds. It
+ *   draws the job page, in its reading mood unless the ticket is the chosen
+ *   job; opening it chooses no job. A bare `#/ticket` with no id is Tickets.
  * - `full` is every other section: a full view, its first segment kept as
  *   `head` and whatever follows it as `rest` for the ticket that builds it.
  * - `item` is one item's page, `#/item/<entity id>` (#1201): the source's
@@ -141,7 +144,7 @@ const SECTION_OF: Record<string, Section> = {
 export type TfRoute =
   | { view: "tickets"; rest: string[] }
   | { view: "job"; key: string | null; tab: string | null }
-  | { view: "ticket"; id: string }
+  | { view: "ticket"; id: string; tab: string | null }
   | {
       view: "full";
       section: Exclude<Section, "tickets" | "job">;
@@ -165,7 +168,9 @@ export function parseTfHash(hash: string): TfRoute {
   if (head === "item" && segments[1]) return { view: "item", id: segments[1] };
   if (head === "note" && segments[1]) return { view: "note", id: segments[1] };
   // A ticket's own page (spec #2227); with no id it is Tickets, so a cut-off address still lands.
-  if (head === "ticket") return segments[1] ? { view: "ticket", id: segments[1] } : { view: "tickets", rest: [] };
+  if (head === "ticket") {
+    return segments[1] ? { view: "ticket", id: segments[1], tab: segments[2] || null } : { view: "tickets", rest: [] };
+  }
   // The rooms UI's *Monitors* tab beside *Tree* (#448), whose roster went with
   // #1087: Monitors lives at `#/monitors` now (R-11.3), so this is an old
   // address, which `address.ts`' `legacyAddress` sends there (#1459).
@@ -181,8 +186,8 @@ export function parseTfHash(hash: string): TfRoute {
 
 /** The section a route lights in the nav, or `null` for an unknown address. */
 export function sectionOf(route: TfRoute): Section | null {
-  if (route.view === "tickets" || route.view === "ticket") return "tickets";
-  if (route.view === "job") return "job";
+  // Every ticket page lights Tickets, the job's too (spec #2396): Job has no entry.
+  if (route.view === "tickets" || route.view === "ticket" || route.view === "job") return "tickets";
   if (route.view === "full") return route.section;
   return null;
 }
@@ -202,6 +207,14 @@ export function sectionHash(section: Exclude<Section, "job">): string {
  */
 export function jobHash(segment: string | null): string {
   return segment === null ? "#/job" : `#/job/${encodeURIComponent(segment)}`;
+}
+
+/**
+ * A ticket's page (spec #2396) by its entity id, on `tab` when one is named.
+ * Going there chooses nothing; {@link jobHash} is the address that chooses.
+ */
+export function ticketHash(entityId: string, tab: string | null = null): string {
+  return `#/ticket/${encodeURIComponent(entityId)}${tab === null ? "" : `/${tab}`}`;
 }
 
 /**
@@ -228,14 +241,14 @@ export function isTopPage(route: TfRoute): boolean {
  * - a commit, which opens under its repository's Commits tab
  *   (`#/repo/<id>/commits/<commit>`) → that repository's page;
  * - a doc page → Docs; an asset or a route → Dependencies;
- * - a ticket page → Tickets.
+ * - a ticket page, any tab of it → Tickets.
  *
  * A branch opens on its repository's Branches tab, so its parent is the
  * repository's (Code). `#/branch/<id>` and `#/commit/<id>` themselves name no
  * repository until their page has read the item and replaced the address
  * (`code-row/`), so until then their parent is Code too.
  *
- * A job's sub-tab is not here: it is the `Esc` ladder's own rung.
+ * A ticket page's tab is not here: it is the `Esc` ladder's own rung.
  */
 export function parentOf(route: TfRoute): string | null {
   if (route.view === "ticket") return sectionHash("tickets");

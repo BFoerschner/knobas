@@ -1,30 +1,42 @@
 /**
- * The job (#816): `#/job/<key>`, and the bare `#/job` (home, spec #2227)
- * while a job is chosen (`chosen.svelte.ts`), drawn at that job's entity id
- * with the address left as it is. A bare `#/job` with no chosen job is the
- * shell's own empty page in `TfPage.svelte`.
+ * One page for a ticket and the job (spec #2396): `TfJob` draws
+ *
+ * - `#/ticket/<entity id>[/<tab>]`, the ticket's page, in its reading mood
+ *   unless the ticket is the chosen job; opening it chooses nothing;
+ * - `#/job/<key or id>[/<tab>]`, the old way in (links, bookmarks, the timer
+ *   chip, *Start work*): the page resolves the ticket, chooses it as the job
+ *   (`chosen.svelte.ts`) and replaces the address with the ticket's;
+ * - the bare `#/job` (home, `home.ts`) while a job is chosen: that job's
+ *   page, under the bare address, where `Esc` does nothing. With none chosen
+ *   it is the shell's own empty page in `TfPage.svelte`.
+ *
+ * One page per ticket: every address of a ticket's entity id is one page
+ * instance (#2247), so landing from `#/job/<id>` on `#/ticket/<id>` draws
+ * the page that already read it.
  */
 import { definePage } from "../page-entry";
 import type { TfRoute } from "../route";
 import { chosenJob } from "./chosen.svelte";
 import TfJob from "./TfJob.svelte";
 
-type JobRoute = Extract<TfRoute, { view: "job" }>;
+type TicketPageRoute = Extract<TfRoute, { view: "job" | "ticket" }>;
 
-/** The job a job address draws: the one it names, else the chosen job. */
-function segmentOf(route: JobRoute): string | null {
-  return route.key ?? chosenJob.id;
+/** What the address names: the ticket's id, a job address's key or id, else the chosen job. */
+function segmentOf(route: TicketPageRoute): string | null {
+  return route.view === "ticket" ? route.id : (route.key ?? chosenJob.id);
 }
 
 export const page = definePage({
-  matches: (route): route is JobRoute => route.view === "job" && segmentOf(route) !== null,
+  matches: (route): route is TicketPageRoute =>
+    route.view === "ticket" || (route.view === "job" && segmentOf(route) !== null),
   component: TfJob,
-  // One job per ticket address; its tabs are that page drawn again (#2247).
-  // `matches` held a job; only a kept page whose chosen job was dropped since names none.
+  // `matches` held a ticket; only a kept page whose chosen job was dropped since names none.
   address: (route) => segmentOf(route) ?? "",
-  props: ({ route, timer, layers, ontimer, onstarttimer, jobPorts }) => ({
+  props: ({ route, back, timer, layers, ontimer, onstarttimer, jobPorts }) => ({
     segment: segmentOf(route) ?? "",
     tab: route.tab,
+    choose: route.view === "job" && route.key !== null,
+    back,
     timer,
     layers,
     ontimer,

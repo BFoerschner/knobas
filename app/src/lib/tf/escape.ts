@@ -6,7 +6,7 @@
  * 2. a drawer is open           → close it;
  * 3. a filter field has text    → clear it, focus stays;
  * 4. a text field has focus     → blur it;
- * 5. a job's sub-tab is open    → the job's first tab;
+ * 5. a ticket page's tab is open → the page's first tab;
  * 6. a top page                 → nothing;
  * 7. an opener is known         → go to the opener;
  * 8. a structural parent exists → go to it;
@@ -40,7 +40,7 @@
  * shell.
  */
 import { segmentKey } from "./job/job";
-import { HEAD_NAME, isTopPage, jobHash, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
+import { HEAD_NAME, isTopPage, parentOf, parseTfHash, SECTION_NAME, ticketHash, type TfRoute } from "./route";
 
 /** What `Esc` can see when it is pressed. */
 export interface EscState {
@@ -89,8 +89,8 @@ export function escStep(state: EscState): EscStep {
  * where it does nothing. `opener` is the current entry's (`opener.ts`).
  */
 export function escTarget(route: TfRoute, opener: EscTarget | null): EscTargetOf | null {
-  if (route.view === "job" && route.key !== null && route.tab !== null) {
-    return { hash: jobHash(route.key), name: segmentKey(route.key), opened: false };
+  if (route.view === "ticket" && route.tab !== null) {
+    return { hash: ticketHash(route.id), name: segmentKey(route.id), opened: false };
   }
   if (isTopPage(route)) return null;
   if (opener !== null) return { ...opener, opened: true };
@@ -100,7 +100,8 @@ export function escTarget(route: TfRoute, opener: EscTarget | null): EscTargetOf
 
 /**
  * What the breadcrumb calls an opener (#2229): a section's name for a
- * section's own page, the Job page and Tickets (*Back to Job*); otherwise the
+ * section's own page and Tickets; the key a ticket page or home's job page
+ * named itself (*Back to PAY-231*), else *Job* for home; otherwise the
  * name the page gave itself (`own`, `page-name.svelte.ts`) when it was left,
  * a bare number under its kind's {@link HEAD_NAME} (*Back to Run #4811*),
  * else what {@link HEAD_NAME} calls the address, else the section's name.
@@ -113,6 +114,8 @@ export function openerName(route: TfRoute, own: string | null): string {
   if (route.view === "item" || route.view === "note") return own || (route.view === "item" ? "Item" : "Note");
   // A ticket page (spec #2227) is named by its ticket's key, as its breadcrumb names it.
   if (route.view === "ticket") return own || segmentKey(route.id);
+  // Home draws the chosen job's page (spec #2396), which names itself by its key.
+  if (route.view === "job") return own || SECTION_NAME.job;
   return placeName(route) || "the last page";
 }
 

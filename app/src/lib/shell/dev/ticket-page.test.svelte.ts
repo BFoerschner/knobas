@@ -1,17 +1,18 @@
 /**
- * The ticket page (spec #2227, #2231) through the app's own mount over the
- * whole fake IPC (`?fake-ipc`'s handlers): a card on Tickets opens
- * `#/ticket/<entity id>`, which reads the ticket without choosing it or
- * promoting its context; its one button opens the job; `⌘K` opens it too;
- * it is the foreground a capture names; *Link to* targets it; and `Esc` takes
- * the reader back to the Tickets that opened it, that ticket selected. It
- * lives under `dev/` because only the harness may import the harness
+ * One page for a ticket and the job (spec #2396, #2397) through the app's own
+ * mount over the whole fake IPC (`?fake-ipc`'s handlers): `#/ticket/<entity
+ * id>` draws the page in its reading mood, on a sheet, and chooses nothing;
+ * `#/job/<entity id>` chooses the ticket and lands on its page, on the
+ * yellow; a bare `#/job` draws the chosen job's page, or the empty state. The
+ * card's foot holds the one decision, and the nav has no Job entry. It lives
+ * under `dev/` because only the harness may import the harness
  * (`house-rules.test.ts`).
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import App from "../../../App.svelte";
+import { chosenJob } from "../../tf/job/chosen.svelte";
 import { demoHandlers, installFakeTauri, type Handler } from "./fake-tauri";
 import { until } from "../test-wait";
 
@@ -60,7 +61,23 @@ function withTicketSearch(handlers: Record<string, Handler>): Record<string, Han
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
+/** A storage for the chosen job, which this runner's jsdom lacks (`test-no-storage.ts`), as a restart reads it. */
+function memoryStorage(): Storage {
+  const held = new Map<string, string>();
+  return {
+    get length() {
+      return held.size;
+    },
+    clear: () => held.clear(),
+    getItem: (key) => held.get(key) ?? null,
+    key: (at) => [...held.keys()][at] ?? null,
+    removeItem: (key) => void held.delete(key),
+    setItem: (key, value) => void held.set(key, value),
+  };
+}
+
 beforeEach(() => {
+  Object.defineProperty(window, "localStorage", { value: memoryStorage(), configurable: true, writable: true });
   sent = [];
   installFakeTauri(recorded(withTicketSearch(demoHandlers())));
   target = document.createElement("div");
@@ -72,6 +89,8 @@ afterEach(() => {
   app = undefined;
   target.remove();
   history.replaceState(null, "", location.pathname + location.search);
+  chosenJob.reset();
+  Object.defineProperty(window, "localStorage", { value: undefined, configurable: true, writable: true });
 });
 
 async function openOn(hash: string, drawn: string): Promise<void> {
@@ -85,14 +104,30 @@ function shown(selector: string): HTMLElement | null {
   return target.querySelector<HTMLElement>(`.tf-kept:not([hidden]) ${selector}`);
 }
 
-/** The ticket page's card, once it has read its ticket. */
-function ticketCard(): HTMLElement | null {
-  return shown('article[aria-label="Ticket"]');
+/** The page's card, once it has read its ticket. */
+function pageCard(): HTMLElement | null {
+  return shown("article.tf-ticketcard");
 }
 
-async function ticketPageOf(key: string): Promise<HTMLElement> {
-  await until(() => ticketCard()?.querySelector(".tf-k")?.textContent === key, `the ticket page never drew ${key}`);
-  return ticketCard()!;
+async function pageOf(key: string): Promise<HTMLElement> {
+  await until(() => pageCard()?.querySelector(".tf-jobkey")?.textContent === key, `the page never drew ${key}`);
+  return pageCard()!;
+}
+
+/** The card's mood: the yellow once the ticket is the chosen job, the sheet while it is read. */
+function mood(card: HTMLElement): "pinned" | "reading" | "both" | "neither" {
+  const yellow = card.classList.contains("tf-card");
+  const sheet = card.classList.contains("tf-sheetcard");
+  return yellow && sheet ? "both" : yellow ? "pinned" : sheet ? "reading" : "neither";
+}
+
+/** The foot's one button, or `null` where the card offers none. */
+function foot(card: HTMLElement): HTMLButtonElement | null {
+  return card.querySelector<HTMLButtonElement>(".tf-go .tf-btn");
+}
+
+function navNames(): string[] {
+  return [...target.querySelectorAll(".tf-nav a")].map((link) => link.firstChild?.textContent?.trim() ?? "");
 }
 
 function lit(): string | null {
@@ -112,125 +147,171 @@ function key(name: string, options: KeyboardEventInit = {}): void {
   flushSync();
 }
 
-function facts(page: HTMLElement): Record<string, string> {
-  const terms = [...page.querySelectorAll(".tf-facts dt")].map((dt) => dt.textContent?.trim() ?? "");
-  const values = [...page.querySelectorAll(".tf-facts dd")].map((dd) => dd.textContent?.trim() ?? "");
-  return Object.fromEntries(terms.map((term, at) => [term, values[at]!]));
+function crumbs(): (string | undefined)[] {
+  return [...(shown(".tf-crumbs")?.querySelectorAll("a, strong") ?? [])].map((part) => part.textContent?.trim());
 }
 
-test("a card on Tickets opens its ticket page: key, title, facts, epic, description and Around this ticket as counts, under Tickets", async () => {
+function hint(): string | null {
+  return shown(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim() ?? null;
+}
+
+test("#/ticket/<id> draws the page on a sheet and leaves the chosen job as it was", async () => {
+  chosenJob.choose("mock:PAY-240");
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  const page = await pageOf("PAY-231");
+
+  expect(mood(page)).toBe("reading");
+  expect(page.getAttribute("aria-label")).toBe("Ticket");
+  expect(location.hash, "no redirect").toBe("#/ticket/mock%3APAY-231");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(chosenJob.id, "reading chose nothing").toBe("mock:PAY-240");
+});
+
+test("#/job/<id> chooses the ticket and lands on #/ticket/<id>, on the yellow", async () => {
+  await openOn("#/job/mock%3APAY-231", "Retry failed SEPA payouts");
+  await until(() => location.hash === "#/ticket/mock%3APAY-231", `the job address stayed at ${location.hash}`);
+  const page = await pageOf("PAY-231");
+
+  expect(chosenJob.id).toBe("mock:PAY-231");
+  expect(mood(page)).toBe("pinned");
+  expect(page.getAttribute("aria-label")).toBe("Job card");
+});
+
+test("#/job/<tab> keeps the tab on the ticket's address", async () => {
+  await openOn("#/job/mock%3APAY-231/conversation", "Retry failed SEPA payouts");
+  await until(() => location.hash === "#/ticket/mock%3APAY-231/conversation", `the job address went to ${location.hash}`);
+  expect(chosenJob.id).toBe("mock:PAY-231");
+});
+
+test("a bare #/job draws the chosen job's page, and says how to choose one when none is", async () => {
+  await openOn("#/job", "No job is chosen yet");
+  expect(pageCard()).toBeNull();
+  unmount(app!);
+  app = undefined;
+
+  chosenJob.choose("mock:PAY-231");
+  await openOn("#/job", "Retry failed SEPA payouts");
+  const page = await pageOf("PAY-231");
+  expect(mood(page)).toBe("pinned");
+  expect(location.hash, "home keeps its address").toBe("#/job");
+});
+
+test("the nav has no Job entry, and Tickets is current on a ticket page in both moods", async () => {
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  await pageOf("PAY-231");
+  expect(navNames()).not.toContain("Job");
+  expect(navNames()).toContain("Tickets");
+  expect(lit()).toBe("Tickets");
+
+  location.hash = "#/job/mock%3APAY-240";
+  await until(() => location.hash === "#/ticket/mock%3APAY-240", `the job address stayed at ${location.hash}`);
+  const pinned = await pageOf("PAY-240");
+  expect(mood(pinned)).toBe("pinned");
+  expect(lit()).toBe("Tickets");
+
+  location.hash = "#/job";
+  await until(() => pageCard()?.querySelector(".tf-jobkey")?.textContent === "PAY-240", "home never drew the chosen job");
+  expect(lit()).toBe("Tickets");
+});
+
+test("the breadcrumb is Tickets › KEY; Esc on #/job does nothing and shows no hint", async () => {
+  chosenJob.choose("mock:PAY-231");
+  await openOn("#/job", "Retry failed SEPA payouts");
+  await pageOf("PAY-231");
+  expect(crumbs()).toEqual(["Tickets", "PAY-231"]);
+  expect(hint()).toBeNull();
+
+  key("Escape");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(location.hash).toBe("#/job");
+});
+
+test("Esc on a ticket page Tickets opened returns there with that ticket selected", async () => {
   await openOn("#/tickets/payout-reliability", "Payout reliability");
   await until(() => card("mock:PAY-231") !== null, "the board never drew PAY-231");
   card("mock:PAY-231")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
   await until(() => location.hash === "#/ticket/mock%3APAY-231", `the card opened ${location.hash}`);
-  const page = await ticketPageOf("PAY-231");
+  await pageOf("PAY-231");
+  expect(crumbs()).toEqual(["Tickets", "PAY-231"]);
+  expect(hint()).toBe("Back to Tickets Esc");
 
-  expect(lit(), "the ticket page lights Tickets").toBe("Tickets");
-  expect(page.classList.contains("tf-card"), "the card is the ticket-yellow").toBe(true);
-  expect(page.querySelector("h1")?.textContent).toBe("Retry failed SEPA payouts");
-  expect(facts(page)).toMatchObject({ Status: "In Progress", Assignee: "mara", Priority: "High", Epic: "PAY-200 Payout reliability" });
-  expect(page.querySelector(".tf-desc")?.textContent).toBeTruthy();
-  await until(() => (page.querySelectorAll(".tf-rollup > div").length ?? 0) > 0, "Around this ticket never counted");
-  const lines = [...page.querySelectorAll(".tf-rollup > div")].map((line) => line.textContent ?? "");
-  expect(lines.some((line) => /Builds\d+ builds?/.test(line)), lines.join(" | ")).toBe(true);
-  expect(page.querySelector(".tf-rollup a"), "the counts are not links").toBeNull();
-  const crumbs = [...(shown(".tf-crumbs")?.querySelectorAll("a, strong") ?? [])].map((part) => part.textContent?.trim());
-  expect(crumbs).toEqual(["Tickets", "PAY-231"]);
-  // Reading a ticket chose no job.
-  expect(target.querySelector(".tf-nav a:first-child")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Job");
-});
-
-/** The fixture's handlers with the epic `mock:PAY-200`'s `get_entity` answered by `read` instead. */
-function withEpicRead(handlers: Record<string, Handler>, read: (args: Record<string, unknown>) => unknown): Record<string, Handler> {
-  const getEntity = handlers["get_entity"]!;
-  return { ...handlers, get_entity: (args) => (args["entityId"] === "mock:PAY-200" ? read(args) : getEntity(args)) };
-}
-
-/** The fixture's `get_entity` answer for the epic, with the title a source gave none of: its key. */
-function untitledEpic(handlers: Record<string, Handler>): (args: Record<string, unknown>) => unknown {
-  const getEntity = handlers["get_entity"]!;
-  return (args) => {
-    const detail = getEntity(args) as { row: Record<string, unknown> };
-    return { ...detail, row: { ...detail.row, title: "PAY-200" } };
-  };
-}
-
-test.each([
-  [
-    "cannot read",
-    () => () => {
-      throw { code: "not_found", message: "mock:PAY-200 is not in the mirror", source_id: null };
-    },
-  ],
-  ["reads with its key for a title", untitledEpic],
-])("a ticket page whose epic the mirror %s names the epic by its key alone", async (_, read) => {
-  const handlers = withTicketSearch(demoHandlers());
-  installFakeTauri(recorded(withEpicRead(handlers, read(handlers))));
-  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
-  const page = await ticketPageOf("PAY-231");
-  await until(() => sent.some((call) => call.cmd === "get_entity" && call.args["entityId"] === "mock:PAY-200"), "the epic was never read");
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(facts(page)).toMatchObject({ Epic: "PAY-200" });
+  key("Escape");
+  await until(() => location.hash === "#/tickets/payout-reliability", `Esc went to ${location.hash}`);
+  await until(() => selected() === "mock:PAY-231", `the board selected ${selected()}`);
 });
 
 test.each([
   ["mock:PAY-240", "PAY-240", "Start work"],
   ["mock:PAY-231", "PAY-231", "Resume work"],
-  ["mock:PAY-219", "PAY-219", "Open job"],
-  ["mock:PAY-236", "PAY-236", "Open job"],
-])("the ticket page of %s offers %s's button the preview offers: %s", async (id, ticket, label) => {
+  ["mock:PAY-236", "PAY-236", "Work on this"],
+])("reading %s, the foot offers %s's decision: %s, with no line under it", async (id, ticket, label) => {
   await openOn("#/tickets", "All tickets");
   location.hash = `#/ticket/${encodeURIComponent(id)}`;
-  const page = await ticketPageOf(ticket);
-  await until(() => page.querySelector(".tf-go .tf-primary")?.textContent === label, `the button read ${page.querySelector(".tf-go .tf-primary")?.textContent}`);
-  expect(page.querySelector(".tf-go .tf-primary")?.getAttribute("href")).toBe(`#/job/${encodeURIComponent(id)}`);
+  const page = await pageOf(ticket);
+  await until(() => foot(page)?.textContent?.trim() === label, `the foot read ${foot(page)?.textContent}`);
+  expect(page.querySelectorAll(".tf-go .tf-btn")).toHaveLength(1);
+  expect(page.querySelector(".tf-go small")).toBeNull();
 });
 
-test("the ticket page's button opens the job and makes it the chosen job", async () => {
+test("a done ticket's card has no button", async () => {
+  await openOn("#/ticket/mock%3APAY-219", "Rotate PSP credentials");
+  const page = await pageOf("PAY-219");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(foot(page)).toBeNull();
+});
+
+test("Work on this chooses the ticket and starts nothing", async () => {
+  await openOn("#/ticket/mock%3APAY-236", "Payout CSV export for finance");
+  const page = await pageOf("PAY-236");
+  await until(() => foot(page)?.textContent?.trim() === "Work on this", "Work on this never offered");
+  foot(page)!.click();
+  await until(() => chosenJob.id === "mock:PAY-236", `the chosen job is ${chosenJob.id}`);
+  await until(() => mood(pageCard()!) === "pinned", "the card never turned yellow");
+  expect(location.hash).toBe("#/ticket/mock%3APAY-236");
+  expect(sent.map((call) => call.cmd)).not.toContain("start_timer");
+  expect(shown(".tf-steps")).toBeNull();
+  await until(() => foot(pageCard()!)?.textContent?.trim() === "Start timer", `the pinned foot read ${foot(pageCard()!)?.textContent}`);
+});
+
+test("Resume work chooses the ticket and starts the timer on it; the foot then stops and logs", async () => {
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  const page = await pageOf("PAY-231");
+  await until(() => foot(page)?.textContent?.trim() === "Resume work", "Resume work never offered");
+  foot(page)!.click();
+  await until(() => chosenJob.id === "mock:PAY-231", `the chosen job is ${chosenJob.id}`);
+  await until(() => sent.some((call) => call.cmd === "start_timer"), "the timer never started");
+  const started = sent.find((call) => call.cmd === "start_timer")!.args["target"] as { entity_id?: string };
+  expect(started.entity_id).toBe("mock:PAY-231");
+  await until(() => foot(pageCard()!)?.textContent?.trim() === "Stop and log", `the pinned foot read ${foot(pageCard()!)?.textContent}`);
+  expect(pageCard()!.querySelector(".tf-clock"), "the running time is the chip's alone").toBeNull();
+});
+
+test("Start work chooses the ticket and runs the stepper", async () => {
   await openOn("#/ticket/mock%3APAY-240", "Payout dashboard latency");
-  const page = await ticketPageOf("PAY-240");
-  await until(() => page.querySelector(".tf-go .tf-primary")?.textContent === "Start work", "Start work never offered");
-  page.querySelector<HTMLAnchorElement>(".tf-go .tf-primary")!.click();
-  await until(() => shown(".tf-jobcard .tf-jobkey")?.textContent === "PAY-240", "the job never drew");
-  expect(location.hash).toBe("#/job/mock%3APAY-240");
-  await until(() => target.querySelector(".tf-nav a:first-child")?.textContent?.replace(/\s+/g, " ").trim() === "Job PAY-240", "the job was never chosen");
+  const page = await pageOf("PAY-240");
+  expect(shown(".tf-steps"), "reading runs no stepper").toBeNull();
+  await until(() => foot(page)?.textContent?.trim() === "Start work", "Start work never offered");
+  foot(page)!.click();
+  await until(() => chosenJob.id === "mock:PAY-240", `the chosen job is ${chosenJob.id}`);
+  await until(() => shown(".tf-steps") !== null, "the stepper never ran");
+  expect(mood(pageCard()!)).toBe("pinned");
 });
 
-test("the Tickets preview's button opens the job too", async () => {
-  await openOn("#/tickets/payout-reliability", "Payout reliability");
-  await until(() => card("mock:PAY-231") !== null, "the board never drew PAY-231");
-  card("mock:PAY-231")!.click();
-  flushSync();
-  const button = shown('aside[aria-label="Selected ticket"] .tf-go .tf-primary');
-  expect(button?.getAttribute("href")).toBe("#/job/mock%3APAY-231");
-});
-
-test("#/ticket/<id> draws the ticket page in place, a bare #/ticket lands on Tickets, and an unreadable id says it was not found", async () => {
+test("the card keeps no status select, no clock and no hole in either mood", async () => {
   await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
-  await ticketPageOf("PAY-231");
-  expect(location.hash, "no redirect to the job").toBe("#/ticket/mock%3APAY-231");
-
-  location.hash = "#/ticket";
-  await until(() => shown(".tf-tickets") !== null, "a bare #/ticket never drew Tickets");
-  expect(lit()).toBe("Tickets");
-
-  location.hash = "#/ticket/mock%3ANOPE-1";
-  await until(() => shown(".tf-ticketpage")?.textContent?.includes("No ticket NOPE-1 in the mirror") ?? false, "an unreadable ticket never said so");
-});
-
-test("opening the ticket page promotes no context; opening the job does", async () => {
-  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
-  const page = await ticketPageOf("PAY-231");
-  await until(() => (page.querySelectorAll(".tf-rollup > div").length ?? 0) > 0, "Around this ticket never counted");
-  expect(sent.map((call) => call.cmd)).not.toContain("promote_context");
+  const reading = await pageOf("PAY-231");
+  expect(reading.querySelector("select")).toBeNull();
+  expect(reading.querySelector(".tf-clock")).toBeNull();
   location.hash = "#/job/mock%3APAY-231";
-  await until(() => sent.some((call) => call.cmd === "promote_context"), "the job never promoted its context");
+  await until(() => mood(pageCard()!) === "pinned", "the card never turned yellow");
+  expect(pageCard()!.querySelector("select")).toBeNull();
+  expect(pageCard()!.querySelector(".tf-clock")).toBeNull();
 });
 
 test("the ticket page is the foreground a capture names, not the chosen job", async () => {
   await openOn("#/job/mock%3APAY-231", "Retry failed SEPA payouts");
   location.hash = "#/ticket/mock%3APAY-240";
-  await ticketPageOf("PAY-240");
+  await pageOf("PAY-240");
   await until(
     () => sent.filter((call) => call.cmd === "record_capture_context").at(-1)?.args["foreground"] === "mock:PAY-240",
     "the ticket page was never the foreground",
@@ -261,7 +342,7 @@ function inLauncher(name: string): void {
 test("on a ticket page, Link to targets that ticket, not the chosen job", async () => {
   await openOn("#/job/mock%3APAY-231", "Retry failed SEPA payouts");
   location.hash = "#/ticket/mock%3APAY-240";
-  await ticketPageOf("PAY-240");
+  await pageOf("PAY-240");
   await search("list:not-monitored");
   inLauncher("Tab");
   const rows = [...target.querySelectorAll('[aria-label="Actions on the selected result"] .tf-ln-chain-a')].map((row) => row.textContent?.trim());
@@ -273,31 +354,19 @@ test("a ticket result in ⌘K opens the ticket page, and Esc there goes to Ticke
   await search("PAY-240");
   inLauncher("Enter");
   await until(() => location.hash === "#/ticket/mock%3APAY-240", `the result opened ${location.hash}`);
-  await ticketPageOf("PAY-240");
+  await pageOf("PAY-240");
   await until(() => launcher() === null, "the launcher stayed open");
   key("Escape");
   await until(() => location.hash === "#/tickets", `Esc went to ${location.hash}`);
 });
 
-test("Esc on a ticket page Tickets opened returns to that ticket view with that ticket selected, even after the selection moved", async () => {
-  await openOn("#/tickets/payout-reliability", "Payout reliability");
-  await until(() => card("mock:PAY-231") !== null && card("mock:PAY-240") !== null, "the board never drew its cards");
-  card("mock:PAY-231")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-  await ticketPageOf("PAY-231");
-  expect(shown(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back to Tickets Esc");
+test("a bare #/ticket lands on Tickets, and an unreadable id says it was not found", async () => {
+  await openOn("#/ticket", "All tickets");
+  await until(() => shown(".tf-tickets") !== null, "a bare #/ticket never drew Tickets");
+  expect(lit()).toBe("Tickets");
 
-  // Back on the board, another card is picked, and the reader comes forward to the ticket page again.
-  key("[", { metaKey: true });
-  await until(() => card("mock:PAY-240") !== null, "⌘[ never showed the board");
-  card("mock:PAY-240")!.click();
-  flushSync();
-  expect(selected()).toBe("mock:PAY-240");
-  key("]", { metaKey: true });
-  await ticketPageOf("PAY-231");
-
-  key("Escape");
-  await until(() => location.hash === "#/tickets/payout-reliability", `Esc went to ${location.hash}`);
-  await until(() => selected() === "mock:PAY-231", `the board selected ${selected()}`);
+  location.hash = "#/ticket/mock%3ANOPE-1";
+  await until(() => shown(".tf-empty")?.textContent?.includes("No ticket NOPE-1 in the mirror") ?? false, "an unreadable ticket never said so");
 });
 
 /** A failed run of the fixture, and its address (`runHash`). */
@@ -332,10 +401,6 @@ function withRunTicket(handlers: Record<string, Handler>): Record<string, Handle
   };
 }
 
-function hint(): string | null {
-  return shown(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim() ?? null;
-}
-
 test("a run's ticket link on Builds opens the ticket page, and Esc there returns to the run", async () => {
   installFakeTauri(recorded(withRunTicket(withTicketSearch(demoHandlers()))));
   await openOn(RUN_HASH, "#1187");
@@ -343,7 +408,7 @@ test("a run's ticket link on Builds opens the ticket page, and Esc there returns
   await until(() => shown(link) !== null, "the run never drew its ticket");
   shown(link)!.click();
   await until(() => location.hash === "#/ticket/mock%3APAY-231", `the run's ticket opened ${location.hash}`);
-  await ticketPageOf("PAY-231");
+  await pageOf("PAY-231");
   expect(lit()).toBe("Tickets");
   expect(hint()).toBe("Back to Run #1187 Esc");
 

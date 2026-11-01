@@ -528,6 +528,30 @@ export function offersStartWork(status: string | null, mine: boolean): boolean {
   return mine && (status?.toLowerCase() ?? "") === "to do";
 }
 
+/** What the card's one button does (spec #2396). */
+export type FootDoes = "start-work" | "resume" | "choose" | "stop" | "start-timer";
+
+/**
+ * The ticket page card's one button (spec #2396): while reading, the decision
+ * that pins the ticket, *Start work* on a To Do ticket of mine, *Resume work*
+ * on the rest of mine, *Work on this* on anyone else's, and none on a done
+ * ticket; once pinned, the timer, *Stop and log* while it runs on the ticket,
+ * else *Start timer*. Its label is all it says: no line goes under it.
+ */
+export function footAction(ticket: {
+  pinned: boolean;
+  status: string | null;
+  mine: boolean;
+  timerOnIt: boolean;
+}): { label: string; does: FootDoes } | null {
+  if (ticket.pinned) {
+    return ticket.timerOnIt ? { label: "Stop and log", does: "stop" } : { label: "Start timer", does: "start-timer" };
+  }
+  if ((ticket.status?.toLowerCase() ?? "") === "done") return null;
+  if (offersStartWork(ticket.status, ticket.mine)) return { label: "Start work", does: "start-work" };
+  return ticket.mine ? { label: "Resume work", does: "resume" } : { label: "Work on this", does: "choose" };
+}
+
 /** One row of a job section, whatever its kind. */
 export interface SectionRow {
   id: string;

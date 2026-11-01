@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import type { EntityDetail } from "../../ipc/entity";
-import { resolveJob, resolveTicket, weekLine } from "./job";
+import { footAction, resolveJob, resolveTicket, weekLine } from "./job";
 
 const SOURCES = [{ id: "mock" }, { id: "gitea" }, { id: "jira" }];
 /** The mirror: PAY-231 in the mock source and in Jira, PAY-9 in Jira alone. */
@@ -44,4 +44,19 @@ test("a read that fails for another reason than a miss is said, not taken for on
 test("durations are whole minutes, floored: 163 s logged as 120 s leaves 43 s that are not a minute to log", () => {
   expect(weekLine({ days: [], logged: 120, unlogged: 43 })).toBe("2m logged");
   expect(weekLine({ days: [], logged: 0, unlogged: 43 })).toBe("Nothing yet");
+});
+
+test("the card's foot: the decision while reading, the timer once pinned, nothing on a done ticket read (spec #2396)", () => {
+  const reading = { pinned: false, timerOnIt: false };
+  expect(footAction({ ...reading, status: "To Do", mine: true })).toEqual({ label: "Start work", does: "start-work" });
+  expect(footAction({ ...reading, status: "In Progress", mine: true })).toEqual({ label: "Resume work", does: "resume" });
+  expect(footAction({ ...reading, status: "In Review", mine: true })?.label).toBe("Resume work");
+  expect(footAction({ ...reading, status: "To Do", mine: false })).toEqual({ label: "Work on this", does: "choose" });
+  expect(footAction({ ...reading, status: null, mine: false })?.label).toBe("Work on this");
+  expect(footAction({ ...reading, status: "Done", mine: true })).toBeNull();
+  expect(footAction({ ...reading, status: "done", mine: false })).toBeNull();
+
+  const pinned = { pinned: true, status: "Done", mine: false };
+  expect(footAction({ ...pinned, timerOnIt: true })).toEqual({ label: "Stop and log", does: "stop" });
+  expect(footAction({ ...pinned, timerOnIt: false })).toEqual({ label: "Start timer", does: "start-timer" });
 });
