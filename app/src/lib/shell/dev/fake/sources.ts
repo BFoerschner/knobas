@@ -55,7 +55,9 @@ export const FIXTURE_SOURCES: SourceSummary[] = [
       source_id: "jira",
       state: "ok",
       checked_at: SYNCED_AT,
-      detail: null,
+      // Its last sync left the boards out (#2374): Jira Software's licence
+      // lapsed while core REST kept serving the credential.
+      detail: "boards unavailable: Jira Software is unlicensed or refuses this account (403)",
       // Eight days from today, not from the fixture's clock (#1499): the page
       // counts down from the reader's now, so a fixed date would read
       // "expired" and never the amber countdown a screenshot needs.
