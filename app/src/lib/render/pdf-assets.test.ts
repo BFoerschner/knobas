@@ -84,3 +84,19 @@ test("the app serves every file the options point pdf.js at, the JavaScript deco
   expect(urls.filter((url) => url.endsWith(".bcmap"))).toHaveLength(168);
   expect(urls.filter((url) => /quickjs/.test(url))).toEqual([]);
 });
+
+test("the dev server answers a JavaScript decoder as a module script may be: text/javascript", async () => {
+  const { pdfjsAssets } = await import("../../../vite-pdfjs-assets");
+  const plugin = pdfjsAssets() as unknown as {
+    configResolved: (config: { base: string }) => void;
+    configureServer: (server: { middlewares: { use: (fn: (...args: unknown[]) => void) => void } }) => void;
+  };
+  let middleware: ((...args: unknown[]) => void) | undefined;
+  plugin.configResolved({ base: "/" });
+  plugin.configureServer({ middlewares: { use: (fn) => (middleware = fn) } });
+  const headers: Record<string, string> = {};
+  let body: Buffer | undefined;
+  const res = { setHeader: (name: string, value: string) => (headers[name] = value), end: (data: Buffer) => (body = data) };
+  middleware!({ url: `/${PDFJS_ASSET_PREFIX}wasm/openjpeg_nowasm_fallback.js` }, res, () => {});
+  expect([headers["Content-Type"], body!.length > 0]).toEqual(["text/javascript", true]);
+});
