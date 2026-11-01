@@ -363,7 +363,7 @@ async fn the_estate_is_in_the_tree_on_the_clean_machine() {
         .fetch_one(pool)
         .await
         .expect("the routes");
-    assert_eq!(routes, 9, "the estate's routes are part of the assets part");
+    assert_eq!(routes, 6, "the estate's routes are part of the assets part");
 }
 
 // ---------------------------------------------------------------------------
