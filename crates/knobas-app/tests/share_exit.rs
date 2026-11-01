@@ -75,9 +75,9 @@ const ESTATE_FILE: &str = include_str!("../../../testenv/estate.json");
 /// asset, and the pair is what says a share export moved the estate rather
 /// than something shaped like it.
 const CONTAINER: &str = "asset:knobas-teamcity";
-const SERVER: &str = "asset:orbstack";
+const SERVER: &str = "asset:wsl";
 const CONTAINER_PATH: &str =
-    "knobas test estate / devs-MacBook-Pro / OrbStack Linux VM / Docker engine (OrbStack)";
+    "knobas test estate / DESKTOP-QUUAHUB / Ubuntu 26.04 (WSL 2) / Docker engine (WSL)";
 
 /// The ticket the sharer's link names.
 ///
@@ -155,7 +155,7 @@ async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) {
         .value;
     assert_eq!(
         (outcome.assets_created, outcome.routes_created),
-        (16, 9),
+        (17, 6),
         "the real estate, as `tests/it/estate_exit.rs` counts it"
     );
 
@@ -314,7 +314,7 @@ async fn shared() -> PgPool {
 /// **The estate is in the Tree on the clean machine** (#455, criterion 2).
 ///
 /// Through `assets::tree` and `assets::get`, which are what the Tree's columns
-/// and its held-by line call -- not a row count, because "16 rows are in the
+/// and its held-by line call -- not a row count, because "17 rows are in the
 /// table" and "the Tree draws the estate" are different claims and only the
 /// second one is the criterion. The path is the whole five-deep chain, in
 /// names, which is the reading that would break if the archive had carried the
@@ -379,7 +379,7 @@ async fn the_estate_is_in_the_tree_on_the_clean_machine() {
 /// of a copied table: a machine that had the `knobas.link` row and had lost
 /// `knobas.asset.parent_id` would list exactly one member.
 ///
-/// The negative is the other half: the notebook above the VM is not in the
+/// The negative is the other half: the desktop above the VM is not in the
 /// room, so the members are the subtree and not the estate. The room's Assets
 /// tile that drew them went with the rooms UI (#1087) and its read with
 /// #1578; the membership is `knobas_core::context::member_ids`'.
@@ -408,8 +408,12 @@ async fn the_contexts_room_lists_its_members_on_the_clean_machine() {
          is a member too: {listed:?}"
     );
     assert!(
+        !listed.contains(&"asset:desktop"),
+        "the desktop *above* the VM is not a member: {listed:?}"
+    );
+    assert!(
         !listed.contains(&"asset:notebook"),
-        "the notebook *above* the VM is not a member: {listed:?}"
+        "nor is the notebook beside it: {listed:?}"
     );
 }
 

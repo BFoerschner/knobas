@@ -122,11 +122,12 @@ const ESTATE_FILE: &str = include_str!("../../../testenv/estate.json");
 
 /// Where the canary's asset hangs, and what it is called.
 ///
-/// `asset:notebook` is the development notebook, which is the machine the
-/// responder's socket is bound on (`testenv/canary.sh`: `127.0.0.1:8299`,
-/// reached from the Kuma container through `host.docker.internal`). A `service`
-/// under a `hypervisor` is not a pair `AssetType::suggests` records, and that is
-/// not a rule: *"a type convention is an **ordering, never a filter** … and
+/// `asset:notebook` is the development notebook, where `testenv/canary.sh` is
+/// run from: on the local target it binds `127.0.0.1:8299` there, and on the
+/// WSL target (testenv/README.md) it runs itself on the box over ssh and binds
+/// the Docker bridge, reached from the Kuma container through
+/// `host.docker.internal` either way. A `service` under a `custom` is not a
+/// pair `AssetType::suggests` records, and that is not a rule: *"a type convention is an **ordering, never a filter** … and
 /// `assets::create` accepts any type under any parent"* (`CONTEXT.md`, **Type
 /// convention**).
 ///
@@ -537,7 +538,7 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
             imported.monitors_kept,
             imported.monitors_linked,
         ),
-        (16, 9, 5, 5),
+        (17, 6, 5, 5),
         "the real estate, with every one of its five monitor names resolved against \
          the monitors the real Kuma published"
     );

@@ -3162,8 +3162,8 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
         .expect("the estate imports");
     let outcome = written.value;
 
-    assert_eq!(outcome.assets_created, 16, "the file's assets");
-    assert_eq!(outcome.routes_created, 9, "the file's routes");
+    assert_eq!(outcome.assets_created, 17, "the file's assets");
+    assert_eq!(outcome.routes_created, 6, "the file's routes");
     assert_eq!(outcome.properties_set, 0, "there was nothing to change");
     assert_eq!(outcome.properties_kept, 0);
     assert_eq!(outcome.monitors_kept, 5, "the file's monitor names");
@@ -3181,7 +3181,7 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
     );
     assert_eq!(
         written.activity[0].detail["outcome"]["assets_created"],
-        serde_json::json!(16)
+        serde_json::json!(17)
     );
 
     let top = assets::tree(&pool, None).await.expect("the top level");
@@ -3202,9 +3202,9 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
             .collect::<Vec<_>>(),
         [
             "knobas test estate",
-            "devs-MacBook-Pro",
-            "OrbStack Linux VM",
-            "Docker engine (OrbStack)",
+            "DESKTOP-QUUAHUB",
+            "Ubuntu 26.04 (WSL 2)",
+            "Docker engine (WSL)",
             "knobas-jira-db",
         ],
         "the containment path is the file's, outermost first"
@@ -3225,19 +3225,19 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
     // column; and a key the *type* declares takes the type's kind, which is
     // the negative control for the pair above.
     assert_eq!(
-        property(&pool, "asset:orbstack", "memory_gb").await,
-        Some(PropertyValue::Number { value: 8.0 })
+        property(&pool, "asset:wsl", "memory_gb").await,
+        Some(PropertyValue::Number { value: 12.0 })
     );
     assert!(
         matches!(
-            property(&pool, "asset:orbstack", "description").await,
-            Some(PropertyValue::Text { value }) if value.contains("JVM")
+            property(&pool, "asset:wsl", "description").await,
+            Some(PropertyValue::Text { value }) if value.contains("memory budget")
         ),
         "the file's description is a property of the asset"
     );
     assert_eq!(
-        property(&pool, "asset:notebook", "os").await,
-        Some(text("macOS 26.5.2"))
+        property(&pool, "asset:wsl", "os").await,
+        Some(text("Ubuntu 26.04.1 LTS"))
     );
 
     // Every created asset carries its origin line, and it names the estate.
@@ -3272,15 +3272,15 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
         .expect("the notebook");
     assert_eq!(
         notebook.exposes.len(),
-        8,
-        "the notebook exposes every published port; the compose network's \
-         route is the engine's"
+        5,
+        "the notebook exposes every product port the ssh tunnel forwards; the \
+         compose network's route is the engine's"
     );
     let published = notebook
         .exposes
         .iter()
         .find(|route| route.id == "route:notebook-jira")
-        .expect("Jira's published port");
+        .expect("Jira's tunnelled port");
     assert_eq!(published.url, "http://127.0.0.1:8080/");
     assert_eq!(published.target_name.as_deref(), Some("knobas-jira"));
     assert!(
@@ -3414,8 +3414,8 @@ async fn a_second_import_of_the_same_file_is_all_known_and_changes_nothing() {
         .expect("the second preview");
     assert_eq!(
         preview.known.len(),
-        25,
-        "sixteen assets and nine routes are all already in the tree"
+        23,
+        "seventeen assets and six routes are all already in the tree"
     );
     assert!(preview.new.is_empty(), "{:?}", preview.new);
     assert!(preview.changes.is_empty(), "{:?}", preview.changes);
@@ -4355,10 +4355,11 @@ async fn a_producer_this_build_does_not_know_is_refused_by_name() {
 /// `ping` carries `hostname` and a null `url`, an `http` check the other way
 /// round. So the two files are compared against each other rather than against
 /// a copy of either, and a seventh monitor added to the seed list is a monitor
-/// this test then has to account for. `canary` and the three product checks
-/// watch `host.docker.internal`, which no asset states -- four of the six
-/// monitors watch a host the estate does not name, and they must still
-/// propose nothing.
+/// this test then has to account for. `canary` watches `host.docker.internal`
+/// and the three product checks their compose service names (`teamcity`,
+/// `jira`, `confluence`), none of which an asset or a route states -- four of
+/// the six monitors watch a host the estate does not name, and they must
+/// still propose nothing.
 ///
 /// Until #634 the pings were three, one per Hetzner server, and their
 /// addresses came from a gitignored `hosts.env`; the servers are gone and the
@@ -6231,7 +6232,7 @@ async fn an_asset_read_without_a_keychain_offers_no_create() {
 /// file is a tree and its routes and carries no `knobas.link` row at all, so
 /// every relation these tests read is drawn here by hand. What comes from the
 /// file is the shape the panel walks -- six levels from the estate root down
-/// to a database inside a container, and nine routes landing on containers --
+/// to a database inside a container, and six routes landing on containers --
 /// and that is the half a made-up fixture could not supply (ADR-0013).
 async fn imported(label: &str) -> PgPool {
     let pool = pool(label).await;
@@ -6262,11 +6263,12 @@ async fn breaks_with(pool: &PgPool, id: &str) -> Vec<(String, Option<String>)> {
 /// with no relation at all.
 ///
 /// `CONTEXT.md`, **Depends on this**: *"its descendants, since they run inside
-/// it"*. The subject is OrbStack's VM, which holds the deepest branch the real
+/// it"*. The subject is the WSL VM, which holds the deepest branch the real
 /// file has -- Docker engine, nine containers, and a database inside three of
 /// them -- so "nearest first" is a claim with three levels under it rather than
 /// one, and "by name within a step" is a claim over nine siblings. (Until #634
-/// the subject was the Hetzner TeamCity machine, decommissioned since.)
+/// the subject was the Hetzner TeamCity machine, decommissioned since; until
+/// 2026-11-01, OrbStack's VM on the notebook.)
 ///
 /// The relation is `null` on every line because the tree is a `parent_id`
 /// field and not a link (ADR-0014); the panel reads that null as *inside*.
@@ -6275,15 +6277,15 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
     let pool = imported("depends-on-descendants").await;
 
     assert_eq!(
-        breaks_with(&pool, "asset:orbstack").await,
+        breaks_with(&pool, "asset:wsl").await,
         vec![
-            ("asset:orbstack-docker".to_owned(), None),
+            ("asset:wsl-docker".to_owned(), None),
             ("asset:knobas-confluence".to_owned(), None),
             ("asset:knobas-confluence-db".to_owned(), None),
+            ("asset:knobas-docker-proxy".to_owned(), None),
             ("asset:knobas-gitea".to_owned(), None),
             ("asset:knobas-jira".to_owned(), None),
             ("asset:knobas-jira-db".to_owned(), None),
-            ("asset:knobas-mockd".to_owned(), None),
             ("asset:knobas-teamcity".to_owned(), None),
             ("asset:knobas-teamcity-agent".to_owned(), None),
             ("asset:knobas-uptime-kuma".to_owned(), None),
@@ -6293,7 +6295,7 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
         ]
     );
 
-    let answer = assets::depends_on_this(&pool, "asset:orbstack")
+    let answer = assets::depends_on_this(&pool, "asset:wsl")
         .await
         .expect("the panel");
     // Story 54's other half: where each one sits, so a reader can tell two
@@ -6308,14 +6310,14 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
             .path
             .as_deref(),
         Some(
-            "knobas test estate / devs-MacBook-Pro / OrbStack Linux VM / \
-             Docker engine (OrbStack) / knobas-teamcity"
+            "knobas test estate / DESKTOP-QUUAHUB / Ubuntu 26.04 (WSL 2) / \
+             Docker engine (WSL) / knobas-teamcity"
         )
     );
     // Nothing in the file lands on the VM itself -- every route in it lands on
     // a container -- and every one of those containers is on the list above,
     // so every route breaks with the VM (#1553). Listed beneath and not
-    // counted: thirteen assets, nine routes.
+    // counted: thirteen assets, six routes.
     let mut routes: Vec<&str> = answer.routes.iter().map(|r| r.id.as_str()).collect();
     routes.sort_unstable();
     assert_eq!(
@@ -6326,9 +6328,6 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
             "route:notebook-gitea",
             "route:notebook-jira",
             "route:notebook-kuma",
-            "route:notebook-mockd-admin",
-            "route:notebook-mockd-jira",
-            "route:notebook-mockd-teamcity",
             "route:notebook-teamcity",
         ]
     );
@@ -6477,7 +6476,7 @@ async fn a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart() 
 /// this container -- the case ADR-0014 names when it says the tree and the
 /// relations are different facts.
 ///
-/// The negative is the rest of the file: sixteen assets are in this estate and
+/// The negative is the rest of the file: seventeen assets are in this estate and
 /// two are on this list.
 #[tokio::test]
 async fn a_runs_on_link_counts_with_its_own_word_beside_what_is_held() {
@@ -6505,7 +6504,7 @@ async fn a_runs_on_link_counts_with_its_own_word_beside_what_is_held() {
         "asset:knobas-jira",
         "asset:knobas-confluence-db",
         "asset:db-confluence",
-        "asset:orbstack-docker",
+        "asset:wsl-docker",
     ] {
         assert!(
             !lines.iter().any(|(id, _)| id == absent),
@@ -6517,7 +6516,7 @@ async fn a_runs_on_link_counts_with_its_own_word_beside_what_is_held() {
 /// An asset reached in one step both by the tree and by a link reads as
 /// *inside*.
 ///
-/// The Docker engine is held by OrbStack's VM and, here, also drawn at it with
+/// The Docker engine is held by the WSL VM and, here, also drawn at it with
 /// `runs-on` -- which is a true sentence somebody may well write down. Two
 /// edges, one asset: the panel counts assets, so it is one line, and the
 /// tie-break is containment, because *held by the thing that went down* needs
@@ -6528,18 +6527,18 @@ async fn a_runs_on_link_counts_with_its_own_word_beside_what_is_held() {
 #[tokio::test]
 async fn an_asset_held_and_linked_in_the_same_step_reads_as_inside() {
     let pool = imported("depends-on-tie-break").await;
-    link_as(&pool, "asset:orbstack-docker", "asset:orbstack", "runs-on").await;
+    link_as(&pool, "asset:wsl-docker", "asset:wsl", "runs-on").await;
 
     assert_eq!(
-        breaks_with(&pool, "asset:orbstack").await,
+        breaks_with(&pool, "asset:wsl").await,
         vec![
-            ("asset:orbstack-docker".to_owned(), None),
+            ("asset:wsl-docker".to_owned(), None),
             ("asset:knobas-confluence".to_owned(), None),
             ("asset:knobas-confluence-db".to_owned(), None),
+            ("asset:knobas-docker-proxy".to_owned(), None),
             ("asset:knobas-gitea".to_owned(), None),
             ("asset:knobas-jira".to_owned(), None),
             ("asset:knobas-jira-db".to_owned(), None),
-            ("asset:knobas-mockd".to_owned(), None),
             ("asset:knobas-teamcity".to_owned(), None),
             ("asset:knobas-teamcity-agent".to_owned(), None),
             ("asset:knobas-uptime-kuma".to_owned(), None),
@@ -6592,8 +6591,8 @@ async fn a_cycle_is_walked_once_and_never_lists_the_asset_it_started_from() {
 /// Each is a different way to be adjacent without breaking, and each would be
 /// counted by a walk missing one clause of [`assets::depends_on_this`]:
 ///
-/// * **the other direction** -- Gitea depends on mockd, so mockd going down
-///   breaks Gitea and not the other way about;
+/// * **the other direction** -- Gitea depends on the Docker proxy, so the
+///   proxy going down breaks Gitea and not the other way about;
 /// * **another relation** -- `blocks` is work's word and says nothing about
 ///   what runs where;
 /// * **a proposal** -- nobody has confirmed it, and a blast radius drawn from
@@ -6610,11 +6609,11 @@ async fn a_link_the_panel_does_not_walk_leaves_the_list_empty() {
     link_as(
         &pool,
         "asset:knobas-gitea",
-        "asset:knobas-mockd",
+        "asset:knobas-docker-proxy",
         "depends-on",
     )
     .await;
-    link_as(&pool, "asset:orbstack", "asset:knobas-gitea", "blocks").await;
+    link_as(&pool, "asset:wsl", "asset:knobas-gitea", "blocks").await;
     propose(
         &pool,
         "asset:knobas-uptime-kuma",
@@ -6642,8 +6641,10 @@ async fn a_link_the_panel_does_not_walk_leaves_the_list_empty() {
             .map(|row| (&row.asset.id, &row.relation))
             .collect::<Vec<_>>()
     );
-    // Exactly Gitea's two: mockd's three would be here if the walk went the
-    // other way down the `depends-on` link.
+    // Exactly Gitea's two: the walk going the other way down the
+    // `depends-on` link would bring the proxy, and with it anything landing
+    // on the proxy, which is nothing -- so the asset list above is the half
+    // of this that tells the directions apart.
     assert_eq!(answer.routes.len(), 2, "the two routes still land on Gitea");
 }
 
@@ -7140,8 +7141,8 @@ const DOCKER_PS_ORBSTACK: &str = concat!(
 
 /// The same for the TeamCity server's context as it was recorded on 2026-09-08,
 /// on the Hetzner server's ssh context: an image **id** where the local engine
-/// had a reference. Since #634 those two containers run on the notebook's
-/// engine and the stub serves these lines under `orbstack`; the producer reads
+/// had a reference. Since 2026-11-01 those two containers run on the WSL box's
+/// engine and the stub serves these lines under `wsl`; the producer reads
 /// the name and nothing else, so where a line was recorded changes nothing
 /// it writes.
 const DOCKER_PS_TEAMCITY: &str = concat!(
@@ -7243,12 +7244,12 @@ fn produced_entries(file: &str) -> Vec<(String, Option<String>, serde_json::Valu
 /// `image` would land containers in *would change* with an image id, which is
 /// the measurement `assets::docker`'s header records.
 ///
-/// **The type filter is under test here too, and silently.** The estate's
-/// OrbStack VM carries `docker_context` as well as its engine; a producer
-/// reading every asset with the property would spawn `orbstack` twice and emit
-/// two entries with one origin key, which the Import refuses as a file
-/// describing one asset twice -- and the argument-vector assertion below would
-/// list two runs. (Until #634 the three Hetzner servers carried it too.)
+/// **The type filter is not under test here any more.** Until 2026-11-01 the
+/// estate's OrbStack VM carried `docker_context` as well as its engine (and
+/// until #634 the three Hetzner servers did); the WSL VM does not, so the
+/// filter's witness is
+/// [`a_new_container_lands_under_its_engine_and_an_engine_with_no_context_is_named`],
+/// whose hand-built VM carries the engine's context.
 #[cfg(unix)]
 #[tokio::test]
 async fn every_recorded_container_is_already_in_the_tree_and_nothing_would_change() {
@@ -7256,9 +7257,10 @@ async fn every_recorded_container_is_already_in_the_tree_and_nothing_would_chang
     let stub = stub_docker(
         dir.path(),
         &[(
-            "orbstack",
+            "wsl",
             [
                 DOCKER_PS_ORBSTACK,
+                "{\"Names\":\"knobas-docker-proxy\"}\n",
                 DOCKER_PS_TEAMCITY,
                 "{\"Names\":\"knobas-jira\"}\n{\"Names\":\"knobas-jira-db\"}\n",
                 "{\"Names\":\"knobas-confluence\"}\n{\"Names\":\"knobas-confluence-db\"}\n",
@@ -7297,7 +7299,7 @@ async fn every_recorded_container_is_already_in_the_tree_and_nothing_would_chang
     // One spawn per engine, and the whole argument vector each time.
     assert_eq!(
         recorded_argv(dir.path()),
-        [vec!["--context", "orbstack", "ps", "--format", "json"]],
+        [vec!["--context", "wsl", "ps", "--format", "json"]],
         "one read per engine, each under the context that engine's property \
          names and nothing else substituted (ADR-0016)"
     );
@@ -7342,6 +7344,7 @@ async fn every_recorded_container_is_already_in_the_tree_and_nothing_would_chang
         [
             "asset:knobas-confluence",
             "asset:knobas-confluence-db",
+            "asset:knobas-docker-proxy",
             "asset:knobas-gitea",
             "asset:knobas-jira",
             "asset:knobas-jira-db",
@@ -7379,7 +7382,7 @@ async fn a_recreated_container_keeps_its_asset() {
         // The one context the checked-in estate names answers, because a
         // missing one is a refusal for the whole run and this test is about
         // something else.
-        let stub = stub_docker(dir.path(), &[("orbstack", answer)]);
+        let stub = stub_docker(dir.path(), &[("wsl", answer)]);
         let assets::Produced::Ready { file, .. } =
             assets::docker::produce(&pool, &assets::docker::cli(&stub))
                 .await
@@ -7415,12 +7418,17 @@ async fn a_recreated_container_keeps_its_asset() {
 async fn a_new_container_lands_under_its_engine_and_an_engine_with_no_context_is_named() {
     let pool = pool("docker-landing").await;
     // Two engines, one with a context and one without -- the shape
-    // `testenv/estate.json` had before this ticket, where
-    // `asset:orbstack-docker` carried the property on the VM above it.
+    // `testenv/estate.json` had before this ticket, where the engine's
+    // property was on the VM above it. The VM carries the engine's context
+    // as well, as OrbStack's did until 2026-11-01: that is the witness of the
+    // engine-type filter, since a producer that read every asset carrying the
+    // property would read `box` twice and refuse two assets naming one
+    // context, or spawn it twice, and the argument vector below says once.
     assets::apply_import(
         &pool,
         r#"{"version":1,"name":"two engines","assets":[
-             {"id":"asset:box","type":"vm","name":"a box"},
+             {"id":"asset:box","type":"vm","name":"a box",
+              "properties":{"docker_context":"box"}},
              {"id":"asset:engine","type":"container_engine","name":"Docker engine (box)",
               "parent":"asset:box","properties":{"docker_context":"box"}},
              {"id":"asset:silent","type":"container_engine","name":"Docker engine (nameless)",
@@ -7523,7 +7531,7 @@ async fn a_column_this_build_has_never_read_does_not_refuse_the_run() {
     let stub = stub_docker(
         dir.path(),
         &[(
-            "orbstack",
+            "wsl",
             concat!(
                 r#"{"Names":"knobas-gitea","ID":"3cb4f18ace38","Image":"gitea/gitea","#,
                 r#""Platform":null,"Size":"0B","Mounts":"knobas-testenv…","#,
@@ -7544,14 +7552,14 @@ async fn a_column_this_build_has_never_read_does_not_refuse_the_run() {
             .into_iter()
             .map(|(id, _, _)| id)
             .collect::<Vec<_>>(),
-        ["asset:docker-orbstack/knobas-gitea"]
+        ["asset:docker-wsl/knobas-gitea"]
     );
 
     // The other direction: a line that is not a container object.
     let dir = tempfile::tempdir().expect("a directory for the stub");
     let stub = stub_docker(
         dir.path(),
-        &[("orbstack", "docker: 'ps' is not a docker command.\n")],
+        &[("wsl", "docker: 'ps' is not a docker command.\n")],
     );
     let refused = assets::docker::produce(&pool, &assets::docker::cli(&stub))
         .await
@@ -7575,7 +7583,7 @@ async fn a_column_this_build_has_never_read_does_not_refuse_the_run() {
 #[tokio::test]
 async fn a_context_this_machine_cannot_read_refuses_the_whole_run() {
     let pool = imported("docker-unreachable").await;
-    // A second engine beside the notebook's, under a context this machine does
+    // A second engine beside the WSL box's, under a context this machine does
     // not have -- the shape the estate had until #634, when three Hetzner
     // engines sat beside OrbStack's.
     assets::apply_import(
@@ -7591,7 +7599,7 @@ async fn a_context_this_machine_cannot_read_refuses_the_whole_run() {
     .expect("a second engine");
     let dir = tempfile::tempdir().expect("a directory for the stub");
     // Only one of the two contexts answers.
-    let stub = stub_docker(dir.path(), &[("orbstack", DOCKER_PS_ORBSTACK)]);
+    let stub = stub_docker(dir.path(), &[("wsl", DOCKER_PS_ORBSTACK)]);
 
     let refused = assets::docker::produce(&pool, &assets::docker::cli(&stub))
         .await

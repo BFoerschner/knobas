@@ -55,7 +55,7 @@ const ASSET_TYPES: {
       { key: "location", label: "Location", kind: "text" },
       { key: "provider", label: "Provider", kind: "text" },
     ],
-    suggests: ["site", "hypervisor", "vm", "network"],
+    suggests: ["site", "hypervisor", "vm", "network", "custom"],
   },
   {
     id: "hypervisor",
@@ -145,8 +145,8 @@ const ASSET_TYPES: {
  *
  * `testenv/estate.json` is the estate as it runs (#438, #634), and since
  * #440 it is the file `--demo` imports -- so a browser pointed at `?fake-ipc`
- * and a person looking at `just demo` are looking at the same sixteen
- * assets and the same nine routes. This module's own docs have said since #428
+ * and a person looking at `just demo` are looking at the same seventeen
+ * assets and the same six routes. This module's own docs have said since #428
  * that *"when that file lands, this can read it instead"*, and this is that.
  *
  * The hand-copied corner it replaces is why: five levels of the estate written
@@ -338,7 +338,7 @@ export function assetFromFile(entry: EstateFileAsset): FixtureAsset {
 }
 
 /**
- * The estate the Tree draws: sixteen assets, five levels at the deepest.
+ * The estate the Tree draws: seventeen assets, five levels at the deepest.
  *
  * Stateful within the session, like the contexts: an asset created, renamed,
  * moved or deleted here stays that way for as long as the page lives, so the
@@ -362,7 +362,7 @@ const FILE_ASSET_IDS = new Set(ESTATE.assets.map((entry) => entry.id));
  * A route declares no schema, so every property is a custom row --
  * `assets::route_row_of` calls `custom_properties` and not `properties_of`.
  *
- * **The URL is the file's, verbatim, and one of the nine does not name a
+ * **The URL is the file's, verbatim, and one of the six does not name a
  * loopback address.** `route:compose-gitea` is Gitea on the compose network,
  * and the host in its URL is `gitea` -- the docker network name the TeamCity
  * containers resolve, which is why the estate spells it that way and why it
@@ -394,11 +394,12 @@ export function routeFromFile(route: EstateFileRoute): FixtureRoute {
 }
 
 /**
- * The nine routes the estate exposes (#432, drawn as wires by #433): the eight
- * ports the notebook publishes -- three of them the on-demand products' -- and
- * Gitea's name on the compose network, exposed by the Docker engine. (Until
- * #634 three of them were SSH tunnel forwards to Hetzner servers, and one ran
- * back from a server to Gitea.)
+ * The six routes the estate exposes (#432, drawn as wires by #433): the five
+ * product ports the notebook reaches through the ssh tunnel to the WSL box,
+ * and Gitea's name on the compose network, exposed by the Docker engine.
+ * (Until #634 three of them were SSH tunnel forwards to Hetzner servers, and
+ * one ran back from a server to Gitea; until 2026-11-01 three more were
+ * mockd's ports.)
  *
  * They are what makes the Tree's wires visible in a browser at all: a wire
  * runs from a route's row to the row (or the spine) of the asset at its far
@@ -862,8 +863,9 @@ const FIXTURE_DEPENDENCIES: { from: string; to: string; relation: string }[] = [
   { from: "asset:knobas-teamcity", to: "asset:knobas-gitea", relation: "depends-on" },
   // An agent is no use without the server it registers with.
   { from: "asset:knobas-teamcity-agent", to: "asset:knobas-teamcity", relation: "depends-on" },
-  // The mockd container answers the loopback ports the laptop's suites use.
-  { from: "asset:notebook", to: "asset:knobas-mockd", relation: "runs-on" },
+  // The notebook's live suites run their products on the WSL box, through the
+  // ssh tunnel to the loopback ports the suites use.
+  { from: "asset:notebook", to: "asset:wsl", relation: "runs-on" },
 ];
 
 /**

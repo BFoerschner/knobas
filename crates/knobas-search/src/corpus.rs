@@ -654,7 +654,7 @@ pub const ASSET: Corpus = Corpus {
 ///
 /// So it is the **path** that fuses things together, not the port: a URL that
 /// ends at `/` gives the port as a lexeme of its own, which is why every one
-/// of the nine routes in `testenv/estate.json` is findable by the port
+/// of the six routes in `testenv/estate.json` is findable by the port
 /// that tells it apart (ADR-0013 -- the real container is the witness, and it
 /// was asked). A URL with a path folds the port into `33001/dashboard`, and a
 /// *named* host with a port is one lexeme whole. Those two are reachable only

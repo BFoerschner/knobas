@@ -184,13 +184,6 @@ trap 'rm -f "$tmp"' EXIT
   echo '# teamcity-agent ~1 GB compressed (its own JDK and toolchain), behind the'
   echo '# same profile; jira-software ~700 MB; confluence ~800 MB.'
   echo '#'
-  echo '# The two build stages of mockd.Dockerfile are pinned for the same reason'
-  echo '# the services are: an unpinned `rust:1-slim` makes the mockd container'
-  echo '# unreproducible. rust-toolchain.toml still decides the compiler --'
-  echo '# rustup inside the image obeys it -- so this pins the base OS, not rustc.'
-  pin RUST_IMAGE       rust:1-slim
-  pin RUNTIME_IMAGE    debian:trixie-slim
-  echo '#'
   pin GITEA_IMAGE      gitea/gitea:1
   # Forgejo (#1195), opt-in behind the `forgejo` profile. Pinned by version
   # tag, not a moving major, so the run recorded against it stays reproducible.

@@ -19,7 +19,7 @@ import { prefillFor, urlFor } from "./create-monitor";
 
 const ASSET: AssetRow = {
   id: "asset:knobas-gitea",
-  parent_id: "asset:orbstack-docker",
+  parent_id: "asset:wsl-docker",
   type_id: "container",
   type_label: "Container",
   monogram: "CT",

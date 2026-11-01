@@ -116,7 +116,7 @@ let PRODUCED_FILE: string | null = null;
  * **skipped** engine, so that the branch of the dialog that state exists for is
  * reachable by hand -- a branch nothing here could reach is a branch nobody
  * would see before it shipped. The name it skips is
- * `asset:orbstack-docker`'s, because a reader recognises it from the Tree; it
+ * `asset:wsl-docker`'s, because a reader recognises it from the Tree; it
  * is **not** a claim about that engine, which since #510 carries a
  * `docker_context` like every other engine in `testenv/estate.json`.
  * No engine in this fixture's estate can honestly be skipped, which is the
@@ -133,10 +133,10 @@ function dockerProduce(): Produced {
       name: "Docker hosts",
       assets: [
         {
-          id: "asset:docker-orbstack/knobas-gitea",
+          id: "asset:docker-wsl/knobas-gitea",
           type: "container",
           name: "knobas-gitea",
-          properties: { docker_context: "orbstack", container_name: "knobas-gitea" },
+          properties: { docker_context: "wsl", container_name: "knobas-gitea" },
         },
       ],
       routes: [],
@@ -148,7 +148,7 @@ function dockerProduce(): Produced {
     state: "ready",
     file: PRODUCED_FILE,
     new_servers: [],
-    skipped: ["Docker engine (OrbStack)"],
+    skipped: ["Docker engine (WSL)"],
   };
 }
 

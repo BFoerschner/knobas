@@ -216,7 +216,7 @@ function bulkItems(n: number): { items: DepItem[]; relations: DepRelation[] } {
       environment: i % 2 === 0 ? "prod" : "staging",
       owner: null,
     });
-    const holder = service ? "asset:orbstack-docker" : `asset:bulk-${((i % 50) * 10) % n + 1}`;
+    const holder = service ? "asset:wsl-docker" : `asset:bulk-${((i % 50) * 10) % n + 1}`;
     relations.push({ from: id, to: holder, relation: "inside" });
   }
   return { items, relations };

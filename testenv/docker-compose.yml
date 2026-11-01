@@ -1,15 +1,11 @@
 # The knobas test environment: a small fake company that a developer can bring
 # up on a laptop.
 #
-# Two kinds of service live here, and the difference is the point:
-#
-#   * REAL products we can self-host -- Gitea and Uptime Kuma v2. The adapters
-#     for these are certified against the actual software, not against a mock.
-#   * mockd, our own mock of Jira Data Center and TeamCity, serving the same
-#     Tidewater Freight fixture. DEPRECATED since 2026-09-03 (ADR-0013): a mock
-#     certifies nothing, the real containers behind the profiles below are the
-#     witness, and mockd gets nothing new. It stays only until the live suites
-#     assert what its Jira and TeamCity tests assert, then goes with them.
+# Every service here is a REAL product we can self-host -- Gitea and Uptime
+# Kuma v2 by default. The adapters are certified against the actual software,
+# not against a mock. (mockd, our deprecated mock of Jira Data Center and
+# TeamCity, ran here as a container until 2026-11-01; the `knobas-mockd` crate
+# is still spawned in process by the tests that use it, ADR-0013.)
 #
 # The opt-in profiles bring up the real Jira, Confluence and TeamCity servers.
 # Since ADR-0013 they are the witness for every adapter and every write path,
@@ -159,31 +155,23 @@ services:
       # answer, `Database.writeDBConfig` persists it, and the real server
       # starts unattended. (Verified on the pinned image, 2.5.3.)
       UPTIME_KUMA_DB_TYPE: sqlite
-    # Five of the six seeded monitors check something on the HOST rather than
-    # on this network: the three products at their published ports
-    # 127.0.0.1:8111/8080/8090, the canary on 8299, and the `notebook` ping on
-    # the address `host.docker.internal` resolves to. (`gitea` is local too,
-    # but reaches its container by compose service name.) Docker Desktop and
-    # OrbStack define `host.docker.internal` themselves; a plain Linux engine
+    # Of the six seeded monitors, only the canary checks a socket on the
+    # engine's HOST, at http://host.docker.internal:8299/. The three products
+    # and `gitea` are reached by compose service name on this network
+    # (http://teamcity:8111/, http://jira:8080/, http://confluence:8090/,
+    # http://gitea:3000/), which needs no host alias and works on any engine;
+    # the `notebook` ping is ICMP to the Mac's Tailscale address. Docker
+    # Desktop and OrbStack define `host.docker.internal` themselves; a plain
+    # Linux engine -- the WSL box's, where this runs since 2026-11-01 --
     # defines nothing at all, and this line is what makes the name RESOLVE
-    # there.
+    # there: to the bridge gateway, 172.17.0.1.
     #
-    # It does not make those monitors WORK on Linux, and this comment does not
-    # claim it does. `host-gateway` is the bridge gateway (172.17.0.1 or so),
-    # and the products' published ports and the canary bind 127.0.0.1 only --
-    # deliberately, so this environment's developer credentials are never
-    # off-host. A bridge-gateway client cannot reach a loopback-only socket, so
-    # running this on a Linux engine would also mean binding those targets on
-    # the bridge address. Nobody has needed that; the environment is a
-    # laptop's (README.md, "One environment, one owner at a time"). What the
-    # line buys is a resolvable name and an explicit record of what the
-    # container reaches out to.
-    #
-    # Measured on OrbStack 2026-09-06: with and without the line the alias
-    # resolves to 0.250.250.254 and reaches a host socket bound to 127.0.0.1
-    # (`curl http://host.docker.internal:8111/` -> 401 from TeamCity, then
-    # behind the since-retired SSH tunnel), so it changes nothing here. The
-    # `notebook` ping names that address literally (#634).
+    # A bridge-gateway client cannot reach a socket bound to the machine's
+    # 127.0.0.1, so on a remote target canary.sh binds the canary on that
+    # bridge address (README.md, "Live products on a remote machine (WSL)").
+    # The products' published ports stay on 127.0.0.1, deliberately, so this
+    # environment's developer credentials are never off-host; Kuma does not
+    # need them, since it reaches each product on the compose network.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -210,42 +198,6 @@ services:
       timeout: 5s
       retries: 30
       start_period: 20s
-    restart: unless-stopped
-
-  # ---------------------------------------------------------------- mock ----
-  # DEPRECATED (ADR-0013, 2026-09-03): frozen, nothing new goes in, and the
-  # service is deleted once the live suites assert what its tests assert.
-  mockd:
-    build:
-      # The repo root: build.rs needs testenv/specs/, knobas-source-mock needs
-      # fixtures/. See the header of mockd.Dockerfile.
-      context: ..
-      dockerfile: testenv/mockd.Dockerfile
-      args:
-        RUST_IMAGE: ${RUST_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
-        RUNTIME_IMAGE: ${RUNTIME_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
-    container_name: knobas-mockd
-    environment:
-      # Scheme and host ONLY -- mockd appends each API's own port, so this
-      # yields http://127.0.0.1:8210 for Jira and http://127.0.0.1:8212 for
-      # TeamCity. Writing the port here would produce `...:8210:8210`.
-      #
-      # 127.0.0.1 rather than the container name because the consumer of these
-      # `self`/`webUrl` links is an adapter running on the HOST.
-      MOCKD_PUBLIC_BASE_URL: http://127.0.0.1
-    ports:
-      - "127.0.0.1:8200:8200"   # health + /__mock/* admin API
-      - "127.0.0.1:8210:8210"   # Jira Data Center REST v2
-      - "127.0.0.1:8212:8212"   # TeamCity REST
-      # 8211 (a Confluence DC mock, until ADR-0013 on 2026-09-03) and 8213 (a
-      # low-code-runtime stub, until that feature left the plan on 2026-09-06)
-      # were once reserved here; both are ordinary free ports now.
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8200/__mock/health"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 5s
     restart: unless-stopped
 
   # ---------------------------------------------------------------- seed ----

@@ -771,7 +771,7 @@ test("the Docker importer asks for no token and no landing, and names what it sk
       state: "ready",
       file: FILE,
       new_servers: [],
-      skipped: ["Docker engine (OrbStack)"],
+      skipped: ["Docker engine (WSL)"],
     },
   ];
   const calls = render();
@@ -794,7 +794,7 @@ test("the Docker importer asks for no token and no landing, and names what it sk
   expect(calls.producers).toEqual(["docker"]);
 
   expect(target.textContent).toContain("1 container engine was");
-  expect(target.textContent).toContain("Docker engine (OrbStack)");
+  expect(target.textContent).toContain("Docker engine (WSL)");
   expect(target.querySelector<HTMLAnchorElement>(".tf-dialog a.dl")?.getAttribute("download")).toBe(
     "docker-estate.json",
   );

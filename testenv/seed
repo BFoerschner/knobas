@@ -56,12 +56,7 @@ print_env() {
   [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_API_KEY=$(cat "$KEY_FILE")"
   [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_USER=$KUMA_USER"
   [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_PASSWORD=$KUMA_PASSWORD"
-  echo "export KNOBAS_MOCKD_JIRA_URL=http://127.0.0.1:8210"
-  echo "export KNOBAS_MOCKD_TEAMCITY_URL=http://127.0.0.1:8212"
-  echo "export KNOBAS_MOCKD_ADMIN_URL=http://127.0.0.1:8200"
-  # Only if ./seed --atlassian has run: these are the *real* products, and a
-  # suite pointed at them is answering a different question from one pointed
-  # at mockd.
+  # Only if ./seed --atlassian has run: these are the real products.
   if [ "$(jq -r 'has("jira")' "$STATE")" = "true" ]; then
     echo "export KNOBAS_JIRA_URL=$(jq -r '.jira.url' "$STATE")"
     echo "export KNOBAS_JIRA_USER=$(jq -r '.jira.user' "$STATE")"
@@ -144,7 +139,6 @@ wait_for() {  # wait_for <name> <url>
 
 wait_for gitea       http://127.0.0.1:3000/api/healthz
 wait_for uptime-kuma http://127.0.0.1:3001/
-wait_for mockd       http://127.0.0.1:8200/__mock/health
 
 ./seed-gitea.sh
 ./seed-kuma.sh

@@ -538,7 +538,7 @@ macro_rules! host_of {
 /// rather than which end of one gets the suggestion, and the estate the
 /// milestone is developed against is why. `testenv/estate.json`'s only route
 /// whose host a seeded monitor watches is `route:compose-gitea`,
-/// `http://gitea:3000/`, exposed by `asset:orbstack-docker` and targeting
+/// `http://gitea:3000/`, exposed by `asset:wsl-docker` and targeting
 /// `asset:knobas-gitea` (until #634, `route:tunnel-gitea-reverse` from a
 /// Hetzner server, in the same shape); the monitor is `gitea`,
 /// `http://gitea:3000/api/healthz`. The thing that answers at that host is
@@ -562,12 +562,12 @@ macro_rules! host_of {
 /// asset's side to compare it against.
 ///
 /// The cost is **a host several assets share**, and it is the known weakness
-/// of this rule rather than an oversight: eight routes in
-/// `testenv/estate.json` carry `127.0.0.1` and land on six different
+/// of this rule rather than an oversight: five routes in
+/// `testenv/estate.json` carry `127.0.0.1` and land on five different
 /// assets, so a Kuma running on the notebook rather than in a container would
-/// watch `http://127.0.0.1:8111/` and be proposed to all six. Nothing fires
-/// on it today -- the seeded Kuma is in a container and reaches the notebook as
-/// `host.docker.internal` -- and narrowing it was **rejected in triage**
+/// watch `http://127.0.0.1:8111/` and be proposed to all five. Nothing fires
+/// on it today -- the seeded Kuma is in a container on the WSL box and reaches
+/// the products by their compose service names -- and narrowing it was **rejected in triage**
 /// (#479): the hostname and ip arms have no port to compare, so comparing
 /// ports on the route arm alone would make one rule fail two ways. A proposal
 /// is dismissible and a dismissal is remembered, which is what makes the weak

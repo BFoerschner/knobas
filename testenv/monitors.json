@@ -2,25 +2,25 @@
   {
     "name": "notebook",
     "type": "ping",
-    "hostname": "0.250.250.254",
+    "hostname": "100.92.199.117",
     "interval": 60
   },
   {
     "name": "teamcity",
     "type": "http",
-    "url": "http://host.docker.internal:8111/login.html",
+    "url": "http://teamcity:8111/login.html",
     "interval": 60
   },
   {
     "name": "jira",
     "type": "http",
-    "url": "http://host.docker.internal:8080/status",
+    "url": "http://jira:8080/status",
     "interval": 60
   },
   {
     "name": "confluence",
     "type": "http",
-    "url": "http://host.docker.internal:8090/status",
+    "url": "http://confluence:8090/status",
     "interval": 60
   },
   {

@@ -4,7 +4,7 @@
 # there, and `docker compose config -q` is happy with any port at all.
 #
 # This reads the RESOLVED compose model (`config --format json`), not the YAML
-# text. Grepping the file for "8210" would pass on a port that a profile, an
+# text. Grepping the file for "8111" would pass on a port that a profile, an
 # override file or a ${VAR} turned into something else -- the resolved model is
 # the thing that actually gets bound.
 #
@@ -60,9 +60,6 @@ docker compose --env-file images.env -f docker-compose.yml -f docker-compose.rem
 #    list is a ~10 GB surprise for whoever runs it.
 # ---------------------------------------------------------------------------
 expected_default='gitea|127.0.0.1|3000|3000|tcp
-mockd|127.0.0.1|8200|8200|tcp
-mockd|127.0.0.1|8210|8210|tcp
-mockd|127.0.0.1|8212|8212|tcp
 uptime-kuma|127.0.0.1|3001|3001|tcp'
 
 actual_default=$(resolved)
@@ -79,9 +76,6 @@ expected_all='confluence|127.0.0.1|8090|8090|tcp
 forgejo|127.0.0.1|3002|3000|tcp
 gitea|127.0.0.1|3000|3000|tcp
 jira|127.0.0.1|8080|8080|tcp
-mockd|127.0.0.1|8200|8200|tcp
-mockd|127.0.0.1|8210|8210|tcp
-mockd|127.0.0.1|8212|8212|tcp
 teamcity|127.0.0.1|8111|8111|tcp
 uptime-kuma|127.0.0.1|3001|3001|tcp'
 
@@ -117,7 +111,8 @@ fi
 # 3. No port is reserved any more. 8211 (a Confluence DC mock) was unreserved
 #    2026-09-03 by ADR-0013 -- the real container on 8090 is the witness --
 #    and 8213 (a low-code-runtime stub) 2026-09-06, when that feature left
-#    the plan (roadmap §2 M4). Both are ordinary free ports.
+#    the plan (roadmap §2 M4). 8200, 8210 and 8212 were mockd's until the
+#    container went on 2026-11-01. All are ordinary free ports.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------

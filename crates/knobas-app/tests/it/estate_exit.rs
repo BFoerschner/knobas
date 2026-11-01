@@ -22,7 +22,7 @@
 //! tests over six databases would be six profiles, and the claim would be
 //! about none of them. So [`estate`] imports the file **once** into one
 //! scratch database, every test here reads that one estate, and what the file
-//! asserts as a whole is that those six things are true of the same sixteen
+//! asserts as a whole is that those six things are true of the same seventeen
 //! assets at the same time.
 //!
 //! They still do not collide: the timer is a singleton and exactly one test
@@ -54,19 +54,19 @@ const ESTATE_FILE: &str = include_str!("../../../../testenv/estate.json");
 
 /// The container the checklist follows, and the machine that holds it.
 ///
-/// The TeamCity server, on OrbStack's VM. Until #634 it ran on a Hetzner
+/// The TeamCity server, on the WSL VM. Until #634 it ran on a Hetzner
 /// server that shared its name, `knobas-teamcity`, so a launcher hit for the
 /// name was ambiguous by construction; the server is gone, and what criterion
 /// 2's *"with its path"* asks for is now the path saying where the container
 /// runs.
 const CONTAINER: &str = "asset:knobas-teamcity";
-const MACHINE: &str = "asset:orbstack";
+const MACHINE: &str = "asset:wsl";
 
 /// Where the container sits, by the names a reader sees.
 const CONTAINER_PATH: &str =
-    "knobas test estate / devs-MacBook-Pro / OrbStack Linux VM / Docker engine (OrbStack)";
+    "knobas test estate / DESKTOP-QUUAHUB / Ubuntu 26.04 (WSL 2) / Docker engine (WSL)";
 
-/// The published port that reaches it, and the notebook that exposes it.
+/// The tunnelled port that reaches it, and the notebook that exposes it.
 const FORWARD: &str = "route:notebook-teamcity";
 const NOTEBOOK: &str = "asset:notebook";
 
@@ -112,7 +112,7 @@ async fn estate() -> PgPool {
                     outcome.monitors_kept,
                     outcome.monitors_linked,
                 ),
-                (16, 9, 0, 0, 5, 0),
+                (17, 6, 0, 0, 5, 0),
                 "the first import of the real estate: every entry is an insert, so \
                  nothing is set on a row that was already there and nothing is kept \
                  from a hand edit; the five Uptime Kuma names are kept on the assets \
@@ -168,7 +168,7 @@ fn query(raw: &str) -> SearchQuery {
 /// them on the root and on nothing else (`estate_file.rs` holds it to that),
 /// so a container five levels down reporting `dev` from `asset:knobas-estate`
 /// is `assets::inherited` walking the real path rather than a value copied
-/// sixteen times.
+/// seventeen times.
 #[tokio::test]
 async fn the_estate_file_imports_into_a_fresh_profile_with_its_own_ids() {
     let pool = &estate().await;
@@ -387,11 +387,12 @@ async fn cmd_t_on_the_container_times_it_and_the_day_review_names_it() {
 /// that drew the members went with the rooms UI (#1087) and its read with
 /// #1578; the membership it drew is `knobas_core::context::member_ids`'.
 ///
-/// One link is drawn -- OrbStack's VM into the room -- and the container
+/// One link is drawn -- the WSL VM into the room -- and the container
 /// arrives two levels below it, through the container engine, because
 /// membership counts through ancestors and over nothing else. The negative is
-/// the other half of that sentence: the notebook and the site **above** the VM
-/// are not members, so the members are the subtree and not the estate.
+/// the other half of that sentence: the desktop and the site **above** the VM,
+/// and the notebook beside it, are not members, so the members are the subtree
+/// and not the estate.
 #[tokio::test]
 async fn the_machine_in_a_context_brings_the_container_into_its_members() {
     let pool = &estate().await;
@@ -428,20 +429,20 @@ async fn the_machine_in_a_context_brings_the_container_into_its_members() {
             "asset:db-teamcity",
             "asset:knobas-confluence",
             "asset:knobas-confluence-db",
+            "asset:knobas-docker-proxy",
             "asset:knobas-gitea",
             "asset:knobas-jira",
             "asset:knobas-jira-db",
-            "asset:knobas-mockd",
             CONTAINER,
             "asset:knobas-teamcity-agent",
             "asset:knobas-uptime-kuma",
             MACHINE,
-            "asset:orbstack-docker",
+            "asset:wsl-docker",
         ],
         "the VM and everything it holds, and nothing else"
     );
 
-    for outside in ["asset:knobas-estate", NOTEBOOK] {
+    for outside in ["asset:knobas-estate", "asset:desktop", NOTEBOOK] {
         assert!(
             !drawn.contains(&outside),
             "{outside} is not below the VM and must not be a member"
@@ -453,17 +454,18 @@ async fn the_machine_in_a_context_brings_the_container_into_its_members() {
 // Criterion 2, clause 5: a route to the container draws its wire
 // ---------------------------------------------------------------------------
 
-/// **TeamCity's published port has both ends, from both panes** (#440,
+/// **TeamCity's tunnelled port has both ends, from both panes** (#440,
 /// criterion 2; story 31).
 ///
 /// A wire is drawn from a route's row in the pane to the row of the asset at
 /// its far end, so what the store owes the view is a route that appears on
 /// both panes with a target that resolves. `route:notebook-teamcity` is the
-/// port `testenv/live up teamcity` publishes: exposed by the notebook, landing
-/// on a container three levels below it, which is the case a same-asset route
-/// could not witness -- the far end is in a different column, and on a narrow
-/// window behind a spine. (Until #634 this was the SSH tunnel's forward to a
-/// Hetzner server, on the same port.)
+/// port the ssh tunnel to the WSL box forwards: exposed by the notebook,
+/// landing on a container in the desktop's branch, four levels below the
+/// site, which is the case a same-asset route could not witness -- the far end
+/// is in a different column, and on a narrow window behind a spine. (Until
+/// #634 this was the SSH tunnel's forward to a Hetzner server, on the same
+/// port; until 2026-11-01, a port published on the notebook itself.)
 ///
 /// The geometry itself is `app/src/lib/assets/tree.ts`'s (`wiresFor`), tested
 /// there; the claim here is that the two ends the geometry needs are what the
@@ -477,7 +479,7 @@ async fn teamcitys_published_port_has_both_ends_and_the_wire_can_be_drawn() {
         .exposes
         .iter()
         .find(|route| route.id == FORWARD)
-        .expect("the notebook exposes TeamCity's published port");
+        .expect("the notebook exposes TeamCity's tunnelled port");
     assert_eq!(
         (
             exposed.asset_id.as_str(),
@@ -500,7 +502,7 @@ async fn teamcitys_published_port_has_both_ends_and_the_wire_can_be_drawn() {
         .reachable_via
         .iter()
         .find(|route| route.id == FORWARD)
-        .expect("the container is reachable through its published port");
+        .expect("the container is reachable through its tunnelled port");
     assert_eq!(
         reaching.asset_id.as_str(),
         NOTEBOOK,
@@ -519,20 +521,14 @@ async fn teamcitys_published_port_has_both_ends_and_the_wire_can_be_drawn() {
     assert_eq!(
         routes,
         vec![
-            (
-                "asset:orbstack-docker".to_owned(),
-                target("asset:knobas-gitea")
-            ),
+            ("asset:wsl-docker".to_owned(), target("asset:knobas-gitea")),
             (NOTEBOOK.to_owned(), target("asset:knobas-confluence")),
             (NOTEBOOK.to_owned(), target("asset:knobas-gitea")),
             (NOTEBOOK.to_owned(), target("asset:knobas-jira")),
             (NOTEBOOK.to_owned(), target("asset:knobas-uptime-kuma")),
-            (NOTEBOOK.to_owned(), target("asset:knobas-mockd")),
-            (NOTEBOOK.to_owned(), target("asset:knobas-mockd")),
-            (NOTEBOOK.to_owned(), target("asset:knobas-mockd")),
             (NOTEBOOK.to_owned(), target(CONTAINER)),
         ],
-        "all nine routes land on an asset, the compose network's included"
+        "all six routes land on an asset, the compose network's included"
     );
 }
 
@@ -548,8 +544,8 @@ async fn teamcitys_published_port_has_both_ends_and_the_wire_can_be_drawn() {
 /// also the property `assets_ipc`'s `a_preview_writes_nothing_at_all` asserts
 /// directly.
 ///
-/// Every entry by **id**, not a count: a preview that reported twenty-five
-/// known entries because it had listed one of them twenty-five times would pass
+/// Every entry by **id**, not a count: a preview that reported twenty-three
+/// known entries because it had listed one of them twenty-three times would pass
 /// a count and would still be a dialog telling a reader nothing.
 #[tokio::test]
 async fn a_re_import_previews_every_entry_as_already_in_the_tree() {
