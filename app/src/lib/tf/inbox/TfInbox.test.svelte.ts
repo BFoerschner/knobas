@@ -175,7 +175,7 @@ test("each row is a time, a sentence, its actions and its kind and job", async (
     "Open log Re-run Snooze Done",
     "Open ticket Snooze Done",
   ]);
-  expect(rowOf("Idempotent").querySelector(".tf-ctx a")?.getAttribute("href")).toBe("#/job/jira%3APAY-231");
+  expect(rowOf("Idempotent").querySelector(".tf-ctx a")?.getAttribute("href")).toBe("#/ticket/jira%3APAY-231");
   expect(text(target.querySelector(".tf-ishelf"))).toBe(
     "Snoozed: the Jira credential expires on Monday 7 Sep 2026 (back 2026-08-29).",
   );
@@ -403,14 +403,14 @@ test("an empty stream says so", async () => {
   expect(target.querySelector(".tf-ishelf")).toBeNull();
 });
 
-test("a row about a ticket links the job by its entity id, so a key two sources hold opens the right one (#1676)", async () => {
+test("a row about a ticket links its ticket page by its entity id, so a key two sources hold opens the right one (#1676)", async () => {
   await open({
     extra: [
       entry({ key: "new_assignment:gitea:PAY-231", category: "new_assignment", source_id: "gitea", entity_id: "gitea:PAY-231",
         kind: "ticket", title: "Same key, other source", reason: "assigned to you", occurred_at: at(17, 0) }),
     ],
   });
-  expect(rowOf("Same key").querySelector(".tf-ctx a")?.getAttribute("href")).toBe("#/job/gitea%3APAY-231");
+  expect(rowOf("Same key").querySelector(".tf-ctx a")?.getAttribute("href")).toBe("#/ticket/gitea%3APAY-231");
 });
 
 test("a row's Open ticket names the ticket's source, so a key two sources hold opens the one the row is about (#1977, spec #2227)", async () => {

@@ -378,6 +378,8 @@ test("selecting another card moves the outline and the preview's button follows 
   pick("PAY-2").click();
   await settle();
   expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Open job");
+  // Somebody else's ticket is only read from here (spec #2396): its page, not the job's address.
+  expect(preview().querySelector(".tf-go .tf-primary")!.getAttribute("href")).toBe("#/ticket/jira%3APAY-2");
   expect(preview().textContent).toContain("Assigned to jonas.becker.");
 });
 

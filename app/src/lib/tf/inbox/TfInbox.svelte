@@ -43,7 +43,7 @@
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import type { SourceFacts } from "../job/job";
-  import { jobHash } from "../route";
+  import { ticketHash } from "../route";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import { expiryOf, failed, KIND_CHIPS, kindOf, opener, rowActions, sentence, snoozedLine, untilLabel, visible } from "./inbox";
 
@@ -263,7 +263,7 @@
           {/each}
         </div>
         <div class="tf-ctx">
-          {kindOf(item.category)}{#if belongs !== null}, job <a href={jobHash(belongsId ?? belongs)} class="tf-mono"
+          {kindOf(item.category)}{#if belongs !== null}, job <a href={ticketHash(belongsId ?? belongs)} class="tf-mono"
               >{belongs}</a
             >{:else}, no job{/if}
         </div>

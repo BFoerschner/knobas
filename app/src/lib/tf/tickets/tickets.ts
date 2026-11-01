@@ -149,28 +149,31 @@ export function ticketFacts(
  * line under it (R-3.9, spec #2227), by the ticket's state as prototype-6
  * decides it: *Start work* on a To Do ticket of mine, *Open job* on a done one
  * or somebody else's, *Resume work* on the rest of mine. The state is the
- * ticket's own status, whatever column it stands in (#1423). Both buttons go
- * to the job's address (`jobHash`), which opens the job and makes it the
- * chosen job; #816 and #818 wire what happens there.
+ * ticket's own status, whatever column it stands in (#1423). `chooses` says
+ * where it goes: *Start work* and *Resume work* to the job's address
+ * (`jobHash`), which makes it the chosen job; *Open job* only reads, so to the
+ * ticket's page (`ticketHash`), which chooses nothing (spec #2396).
  */
 export function previewAction(
   card: Pick<MiniBoardCard, "assignee" | "mine" | "status">,
   timerOnIt: boolean,
-): { label: string; note: string } {
+): { label: string; note: string; chooses: boolean } {
   const lower = card.status?.toLowerCase() ?? "";
   if (lower === "to do" && card.mine) {
     return {
       label: "Start work",
       note: "Creates a branch and PR, moves it to In Progress, starts the timer. You review each step.",
+      chooses: true,
     };
   }
-  if (lower === "done") return { label: "Open job", note: "Done. Opening shows what was attached." };
+  if (lower === "done") return { label: "Open job", note: "Done. Opening shows what was attached.", chooses: false };
   if (!card.mine) {
-    return { label: "Open job", note: card.assignee ? `Assigned to ${card.assignee}.` : "Unassigned." };
+    return { label: "Open job", note: card.assignee ? `Assigned to ${card.assignee}.` : "Unassigned.", chooses: false };
   }
   return {
     label: "Resume work",
     note: timerOnIt ? "Your timer is running on this ticket." : "Starts the timer on this ticket.",
+    chooses: true,
   };
 }
 
