@@ -18,7 +18,7 @@ use std::io::Read as _;
 use std::sync::Arc;
 
 use knobas_secrets::SecretStore;
-use knobas_sync::config::{self, CredentialHealth};
+use knobas_sync::config::{self, AuthState, CredentialHealth};
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
 
@@ -195,6 +195,10 @@ async fn over_profile(
         let registry: Arc<dyn AdapterRegistry> = Arc::new(crate::sources::Registry::default());
         let live = LiveSources::default();
         let mut failed = 0;
+        // Added or updated, but the product refused the credential or did not
+        // answer the test: a stale seed token, which the run must not pass
+        // over as done (the app would show the source broken).
+        let mut not_connected = Vec::new();
         for source in sources {
             let id = source.id.clone();
             match apply(db.pool(), &secrets, &registry, &live, source).await {
@@ -212,6 +216,9 @@ async fn over_profile(
                         "{id}: {verb}, credential {}{detail}",
                         o.health.state.as_str()
                     );
+                    if o.health.state != AuthState::Ok {
+                        not_connected.push(id);
+                    }
                 }
                 Err(error) => {
                     failed += 1;
@@ -229,10 +236,17 @@ async fn over_profile(
                 }
             }
         }
-        if failed == 0 {
-            Ok(())
-        } else {
+        if failed > 0 {
             Err(format!("{failed} source(s) failed"))
+        } else if !not_connected.is_empty() {
+            Err(format!(
+                "{} saved but not connected: the credential testenv/seed recorded is stale \
+                 or the product is not answering. Mint fresh ones with `just live-up \
+                 <product>` in this checkout, then run this again (it updates in place)",
+                not_connected.join(", ")
+            ))
+        } else {
+            Ok(())
         }
     }
     .await;

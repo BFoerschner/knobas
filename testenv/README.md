@@ -578,6 +578,14 @@ The sources go in on stdin, never in argv.
   other. `just demo` and a bundle share the demo profile's keychain service, so
   pass the bundle when that is what you will open. A `just demo` that rebuilds
   the binary asks once, as it does for any source.
+- **A stale credential ends the run non-zero, naming it.** A token the
+  product refuses still saves the source (a re-run updates it), but the line
+  says `credential unauthorized` and the run exits 1 listing the sources not
+  connected, so `just demo-live` stops before the app opens. A recorded Gitea
+  token Gitea refuses makes `./seed --env` print nothing, so the run says the
+  seed refused and why, skips Gitea, Jira, Confluence and TeamCity, adds the
+  rest, and exits 1. Either way: `just live-up <product>` in the same checkout
+  mints fresh credentials (seed state is per worktree), then run it again.
 - `--data-dir <dir>` on `testenv/live-sources.sh` puts the profile in a scratch
   directory; the keychain service stays the demo profile's.
 

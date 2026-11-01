@@ -59,8 +59,26 @@ if [ "$action" = remove ]; then
 fi
 
 # One product's variables, in a subshell so one product's names never leak
-# into the next. Prints nothing when the seed has none.
-seed_env() { (cd "$here" && ./seed "$1" 2>/dev/null) || true; }
+# into the next. Prints nothing when the seed has none. A seed that refuses
+# says why on stderr: a state file never written is "not seeded", but a
+# recorded Gitea token Gitea now refuses (`./seed --env` probes it first and
+# prints nothing, Jira, Confluence and TeamCity included) is a stale
+# credential, and the lines that follow must not read as products never up.
+seed_env() {
+    local out err status=0
+    err=$(mktemp)
+    out=$( (cd "$here" && ./seed "$1") 2>"$err") || status=$?
+    if [ "$status" -ne 0 ] && ! grep -q 'not found' "$err"; then
+        # stderr and a flag file: this runs inside the caller's `$(...)`.
+        say "./seed $1 refused, so its products are skipped below: $(tr '\n' ' ' <"$err")" >&2
+        say "  mint fresh credentials with just live-up <product>, then run this again" >&2
+        : >"$refused"
+    fi
+    rm -f "$err"
+    printf '%s\n' "$out"
+}
+refused=$(mktemp)
+rm -f "$refused"
 
 # Whether anything answers HTTP at the address: any status at all.
 answers() { [ "$(curl -s -o /dev/null -m 5 -w '%{http_code}' "$1" || true)" != 000 ]; }
@@ -126,6 +144,7 @@ add kuma "$KNOBAS_KUMA_URL" "$(source_json live-kuma kuma 'Uptime Kuma (live)' "
     "$(jq -cn --arg v "$KNOBAS_KUMA_API_KEY" --arg u "$KNOBAS_KUMA_USER" --arg p "$KNOBAS_KUMA_PASSWORD" \
         '{value: $v, account: {username: $u, password: $p}}')")"
 
-[ ${#sources[@]} -gt 0 ] || die "no live product is up; nothing to add"
+[ ${#sources[@]} -gt 0 ] || { rm -f "$refused"; die "no live product to add (lines above say why)"; }
 # On stdin, never on the command line: a token in argv is in every `ps`.
 printf '%s\n' "${sources[@]}" | jq -s . | "$bin" live-sources apply --demo "${data_dir[@]}"
+[ ! -e "$refused" ] || { rm -f "$refused"; die "a seed refused (above); those products were not added"; }
