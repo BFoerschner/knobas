@@ -642,6 +642,10 @@ checks=$((checks + 1))
 # lock existed at that moment, every other call; a curl that answers the
 # licence endpoints with $REF_LEFT_JIRA / $REF_LEFT_CONFLUENCE seconds left
 # (three hours once that product's restart is in the log) and 200 otherwise.
+# Both read one pinned clock, $REF_NOW: the docker stub reports it as the
+# engine's time, the clock `_live_licence_left` subtracts, and the curl stub
+# dates the expiry from it, so a run that crosses a second boundary between
+# the two still reads the very seconds it was given (#2394).
 ref=$scratch/refresh
 mkdir -p "$ref/bin"
 cat >"$ref/bin/docker" <<'STUB'
@@ -649,6 +653,7 @@ cat >"$ref/bin/docker" <<'STUB'
 case "${1:-} ${2:-}" in
   "ps "*) printf '%s\n' knobas-jira knobas-jira-db knobas-confluence knobas-confluence-db; exit 0 ;;
   "version "*) echo 27.0; exit 0 ;;
+  "info "*) jq -rn --argjson t "$REF_NOW" '$t | todateiso8601'; exit 0 ;;
 esac
 if [ -L "$REF_DIR/knobas-live-jira.lock" ]; then l=held; else l=free; fi
 echo "docker $* [jira lock $l]" >>"$REF_LOG"
@@ -663,7 +668,7 @@ esac
 grep -q " restart $p " "$REF_LOG" 2>/dev/null && left=10800
 # A run that renewed it while the refresher waited for nothing but the lock.
 [ -z "${REF_RENEWED_UNDER_LOCK:-}" ] || [ ! -L "$REF_DIR/knobas-live-$p.lock" ] || left=10800
-printf '{"expiryDate":%s}' $((($(date +%s) + left) * 1000))
+printf '{"expiryDate":%s}' $(((REF_NOW + left) * 1000))
 STUB
 chmod +x "$ref/bin/docker" "$ref/bin/curl"
 # refresh [<target>] -- `live_refresh` once, with Jira $REF_LEFT_JIRA and
@@ -673,7 +678,7 @@ chmod +x "$ref/bin/docker" "$ref/bin/curl"
 refresh() {
   : >"$ref/docker.log"
   (
-    export PATH="$ref/bin:$PATH" REF_LOG="$ref/docker.log" REF_DIR="$rdir"
+    export PATH="$ref/bin:$PATH" REF_LOG="$ref/docker.log" REF_DIR="$rdir" REF_NOW="$(date +%s)"
     export KNOBAS_LIVE_TARGET=${1:-remote} KNOBAS_LIVE_SSH=wsl-test KNOBAS_LIVE_LOCK_DIR="$rdir"
     # shellcheck source=testenv/live-lib.sh disable=SC1091
     . "$here/live-lib.sh"
