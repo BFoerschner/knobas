@@ -58,6 +58,30 @@
   --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
   --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
 }
+/* The sections table (#2401): a bordered list, one row a section: the name, the count in tabular figures, at most
+   one state with its dot (in full ink when it asks something of you), and a chevron that says the row opens. The
+   two action rows under it take the same shape with the name and the chevron alone. A list of places, not buttons. */
+.tf-tktable { display: flex; flex-direction: column; border: 1px solid rgba(0,0,0,.2); border-radius: 6px; background: rgba(255,255,255,.26); overflow: hidden; }
+.tf-tktable > a, .tf-tktable > button {
+  display: grid; grid-template-columns: 62px 2.2ch minmax(0, 1fr) 8px; gap: 10px; align-items: center;
+  padding: 7px 10px; border: 0; border-top: 1px solid rgba(0,0,0,.12); background: none; font: inherit; font-size: var(--t-sm);
+  color: inherit; text-align: left; text-decoration: none; white-space: nowrap; cursor: pointer;
+}
+.tf-tktable > :first-child { border-top: 0; }
+.tf-tktable > a:hover, .tf-tktable > button:hover { background: rgba(0,0,0,.07); }
+.tf-tktable.tf-tkacts > a, .tf-tktable.tf-tkacts > button { grid-template-columns: minmax(0, 1fr) 8px; }
+.tf-tktable .tf-n { font-variant-numeric: tabular-nums; text-align: right; color: var(--card-ink-2); }
+.tf-tktable .tf-st { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--card-ink-2); }
+.tf-tktable .tf-st.tf-asks { color: var(--card-ink); }
+.tf-tktable .tf-dot { width: 7px; height: 7px; flex: none; }
+.tf-tktable .tf-chev { color: var(--card-ink-2); font-size: var(--t-lg); line-height: 1; text-align: right; }
+.tf-tknone { font-size: var(--t-sm); color: var(--card-ink-2); }
+.tf-sheetcard .tf-tktable { border-color: var(--rule); background: var(--paper); }
+.tf-sheetcard .tf-tktable > a, .tf-sheetcard .tf-tktable > button { border-top-color: var(--rule-2); }
+.tf-sheetcard .tf-tktable > :first-child { border-top: 0; }
+.tf-sheetcard .tf-tktable > a:hover, .tf-sheetcard .tf-tktable > button:hover { background: var(--sheet-2); }
+.tf-sheetcard .tf-tktable .tf-n, .tf-sheetcard .tf-tktable .tf-st, .tf-sheetcard .tf-tktable .tf-chev, .tf-sheetcard .tf-tknone { color: var(--ink-2); }
+.tf-sheetcard .tf-tktable .tf-st.tf-asks { color: var(--ink); }
 /* The one decision at the card's foot: the card's own ink, large. */
 .tf-ticketcard .tf-go { margin-top: auto; padding-top: 6px; }
 .tf-ticketcard .tf-go .tf-btn { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }

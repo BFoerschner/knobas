@@ -30,7 +30,8 @@
   records this visit and answers the last one, `entity_thread` the thread.
   A comment and a link are writes on any ticket, the chosen job or not.
 
-  **The Connections drawer (#820)** opens with `L`. **Link sets (#867)**:
+  **The Connections drawer (#820)** opens with `L` and from the card's *Link
+  something to it* (#2401). **Link sets (#867)**:
   `job_link_sets` is read once per page opened, for the drawer's set and
   parent groups; *Hide here* and *Show again* re-read it with the reach and
   the sections, and never edit the set (R-7.5). *Apply a link set…* and *Save
@@ -42,10 +43,11 @@
   refused one is drawn disabled with the reason (Start work's move, the
   comment box's *Comment*) and queues nothing.
 
-  **Refresh (#2134, #2107's pieces).** The ticket's *Refresh* or *Sync now*
-  sits beside the title until the card's rows take the page's actions
-  (#2401); ⌘R presses it. Its failure line and the withdrawn and turned-off
-  banners sit at the top of the reading column. A refresh reads the ticket,
+  **Refresh (#2134, #2107's pieces).** The page draws no *Refresh* button
+  (#2401): ⌘R runs the ticket's *Refresh*, or *Sync now* where its adapter
+  reads no one item, through `TfDetailRefresh` drawn with no button. Its
+  failure line and the withdrawn and turned-off banners sit at the top of
+  the reading column. A refresh reads the ticket,
   its thread and its reach again through the reader (`reread`), over what the
   page drew, and the echoes settle on those reads as on any other.
 -->
@@ -80,6 +82,7 @@
   import TfConnections from "./TfConnections.svelte";
   import TfConversation from "./TfConversation.svelte";
   import TfJobCard from "./TfJobCard.svelte";
+  import { cardSections } from "./card-sections";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { proseMarkdown } from "../../render/prose";
   import TfLinkTo from "./TfLinkTo.svelte";
@@ -443,6 +446,21 @@
     }
   }
   const blocked = $derived(detail ? blockerEntries(detail) : []);
+  /** The card's sections table (#2401), from what the reader has read so far. */
+  const table = $derived(
+    detail
+      ? cardSections({
+          entityId: detail.row.entity_id,
+          subtasks: reader.subtasks,
+          code: reader.code,
+          unpushed: reader.unpushed,
+          builds: reader.builds,
+          pages: reader.pages,
+          monitors: reader.monitors,
+          assets: reader.assets,
+        })
+      : { rows: [], settled: false },
+  );
   /** What *Start work* suggests: a repository the ticket already reaches. */
   const suggestedRepo = $derived(
     [...reached.values()].find((row) => row.kind === "repo")?.entity_id ?? null,
@@ -471,13 +489,23 @@
   <div class="tf-full tf-ticketpage">
   <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: key }]} {back} />
   <div class="tf-ws">
-    <TfJobCard {detail} others={reader.others} parentTitle={reader.parentTitle} {mine} {pinned} {action} onaction={act} />
+    <TfJobCard
+      {detail}
+      others={reader.others}
+      parentTitle={reader.parentTitle}
+      {mine}
+      {pinned}
+      {action}
+      onaction={act}
+      {table}
+      onlink={() => (drawer = true)}
+    />
     <section class="tf-work">
       <div class="tf-wbody">
         <div class="tf-tkread">
           <header class="tf-tkpagehead">
             <h1>{detail.row.title}</h1>
-            <div class="tf-acts"><TfDetailRefresh {detail} {refresh} reread={rereadJob} page small /></div>
+            <TfDetailRefresh {detail} {refresh} reread={rereadJob} page button={false} />
           </header>
           <TfDetailBanners {detail} failed={refresh.failed} />
           {#if failure !== null}

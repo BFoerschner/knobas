@@ -45,7 +45,7 @@
 
 <script lang="ts">
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { onMount, type Snippet } from "svelte";
+  import { onMount, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
   import { commandSteps, diffPipelines, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
@@ -87,6 +87,7 @@
   import { bridgePorts, type JobPorts } from "./job/ports";
   import { breadcrumbJob, currentJob, linkRequest } from "./job/current.svelte";
   import { chosenJob } from "./job/chosen.svelte";
+  import { scopedTicket } from "./job/scoped.svelte";
   import { selectTicket } from "./tickets/TicketsPage.svelte";
   import TfPage from "./TfPage.svelte";
   import { roleSyncs as sharedRoleSyncs, type RoleSyncs } from "./role-sync.svelte";
@@ -259,6 +260,19 @@
    */
   chosenJob.load();
   const chosen = $derived(chosenJob.id === null ? null : ticketRef(chosenJob.id));
+  /**
+   * The job the shown page's *This job* names (#2401): a ticket a card's
+   * sections row opened its section on (`job/scoped.svelte.ts`) while that
+   * section is on screen, else the chosen job. Leaving the section forgets
+   * the row's ticket.
+   */
+  const viewJob = $derived(scopedTicket.viewJob(sectionOf(route), chosen));
+  let shownSection: ReturnType<typeof sectionOf> = null;
+  $effect(() => {
+    const section = sectionOf(route);
+    if (shownSection !== null && section !== shownSection && shownSection === scopedTicket.section) untrack(() => scopedTicket.clear());
+    shownSection = section;
+  });
 
   /**
    * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228):
@@ -538,8 +552,8 @@
       ctx={{
         route,
         ready: lifecycle.ready,
-        job: chosen?.key ?? null,
-        jobAt: chosen?.entityId ?? null,
+        job: viewJob?.key ?? null,
+        jobAt: viewJob?.entityId ?? null,
         back,
         timedTicket,
         navJob: navJobId,

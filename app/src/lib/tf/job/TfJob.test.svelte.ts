@@ -755,7 +755,7 @@ test("the stepper leaves once the ticket no longer offers Start work: its move l
   expect(target.querySelector(".tf-tkread .tf-steps"), "the chosen To Do ticket of mine runs the stepper").not.toBeNull();
 
   status = "In Progress";
-  target.querySelector<HTMLButtonElement>(".tf-tkpagehead .tf-refresh")!.click();
+  pressRefreshKey();
   await settle();
   expect(target.querySelector(".tf-steps")).toBeNull();
   expect(target.querySelector(".tf-tkdesc"), "the description stays").not.toBeNull();
@@ -868,12 +868,12 @@ test("a comment's echo says queued, then sent, and goes on the refresh event's r
   expect(echoed()).toEqual([]);
 });
 
-// ---- Refresh on the job page (#2134, #2107's shared pieces) ----
+// ---- Refresh on the job page (#2134, #2107's shared pieces): ⌘R's alone, no button (#2401) ----
 
 const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-tkpagehead .tf-refresh");
 const jobBanners = () => [...target.querySelectorAll(".tf-tkread > .tf-banner")].map((banner) => squash(banner));
 
-test("Refresh sits beside the title, reads the ticket, says Refreshing… meanwhile, and reads the job again without blanking it", async () => {
+test("⌘R reads the ticket, asks nothing again while it refreshes, and reads the job again without blanking it; no button is drawn (#2401)", async () => {
   let answer!: (value: EntityRefresh) => void;
   const probe = refreshProbe({ answer: () => new Promise((resolve) => (answer = resolve)) });
   let title = "Retry failed SEPA payouts";
@@ -893,16 +893,17 @@ test("Refresh sits beside the title, reads the ticket, says Refreshing… meanwh
   });
   open("PAY-231", { ports: io });
   await settle();
-  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(refreshButton(), "no Refresh button: the keybind's alone (#2401)").toBeNull();
   calls.read.length = 0;
   threads = 0;
   reaches = 0;
 
-  refreshButton()!.click();
+  pressRefreshKey();
   await settle();
   expect(probe.refreshed).toEqual([ID]);
-  expect(refreshButton()?.textContent).toBe("Refreshing…");
-  expect(refreshButton()?.disabled).toBe(true);
+  pressRefreshKey();
+  await settle();
+  expect(probe.refreshed, "a second ⌘R while refreshing asks nothing").toEqual([ID]);
   expect(calls.read).toEqual([]);
 
   title = "Retry failed SEPA payouts once";
@@ -915,7 +916,9 @@ test("Refresh sits beside the title, reads the ticket, says Refreshing… meanwh
   await settle();
   expect(target.querySelector(".tf-tkread h1")?.textContent).toBe("Retry failed SEPA payouts once");
   // Refreshing until every read of the job has answered, the thread's too.
-  expect(refreshButton()?.textContent).toBe("Refreshing…");
+  pressRefreshKey();
+  await settle();
+  expect(probe.refreshed, "still refreshing until every read has answered").toEqual([ID]);
   releaseThread();
   await settle();
   expect(calls.read).toEqual([ID]);
@@ -923,7 +926,9 @@ test("Refresh sits beside the title, reads the ticket, says Refreshing… meanwh
   expect(reaches).toBe(1);
   expect(calls.promote).toEqual([ID]);
   expect(target.querySelector(".tf-tkdesc"), "the reading column never blanked").not.toBeNull();
-  expect(refreshButton()?.textContent).toBe("Refresh");
+  pressRefreshKey();
+  await settle();
+  expect(probe.refreshed, "done: ⌘R refreshes again").toEqual([ID, ID]);
   expect(target.querySelector(".tf-refresh-failed")).toBeNull();
 });
 
@@ -945,7 +950,7 @@ test("a comment the app could not ask about is asked again on a refresh (#2306)"
   expect(send().title).toBe(reason);
 
   down = false;
-  refreshButton()!.click();
+  pressRefreshKey();
   await settle();
   expect(asked).toBe(2);
   expect(send().hasAttribute("aria-disabled")).toBe(false);
@@ -956,15 +961,15 @@ test("a failed refresh on the job says why at the top of the reading column and 
   open("PAY-231", { ports: ports({ refresh: probe.ports }) });
   await settle();
   calls.read.length = 0;
-  refreshButton()!.click();
+  pressRefreshKey();
   await settle();
   expect(jobBanners()).toEqual(["Couldn't refresh: connection refused"]);
   expect(target.querySelector(".tf-tkread h1")?.textContent).toBe("Retry failed SEPA payouts");
   expect(calls.read).toEqual([]);
-  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(refreshButton()).toBeNull();
 });
 
-test("a ticket whose adapter does not read one item offers Sync now on the job, and the job is read again when the run ends", async () => {
+test("on a ticket whose adapter does not read one item ⌘R runs Sync now, and the job is read again when the run ends", async () => {
   const probe = refreshProbe();
   const io = ports({
     getEntity: (id) => (calls.read.push(id), id === ID ? Promise.resolve(ticket({ refreshes: false })) : Promise.reject({ code: "not_found" })),
@@ -972,27 +977,32 @@ test("a ticket whose adapter does not read one item offers Sync now on the job, 
   });
   open("PAY-231", { ports: io });
   await settle();
-  expect(refreshButton()?.textContent).toBe("Sync now");
+  expect(refreshButton()).toBeNull();
   calls.read.length = 0;
 
-  refreshButton()!.click();
+  pressRefreshKey();
   await settle();
   expect(probe.synced).toEqual(["jira"]);
   expect(probe.refreshed).toEqual([]);
-  expect(refreshButton()?.textContent).toBe("Syncing…");
+  pressRefreshKey();
+  await settle();
+  expect(probe.synced, "a second ⌘R while syncing asks nothing").toEqual(["jira"]);
 
   probe.end("jira");
   await settle();
-  expect(refreshButton()?.textContent).toBe("Sync now");
   expect(calls.read).toEqual([ID]);
 });
 
-test("a turned-off source's ticket draws no Refresh on the job, and the withdrawn and turned-off banners show at the top of the reading column", async () => {
+test("a turned-off source's ticket offers ⌘R nothing, and the withdrawn and turned-off banners show at the top of the reading column", async () => {
   const probe = refreshProbe();
   const off = ticket({ deleted_at: "2026-10-15T12:00:00Z", source: { ...ticket().source, enabled: false } });
   open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(off) : Promise.reject({ code: "not_found" })), refresh: probe.ports }) });
   await settle();
   expect(refreshButton()).toBeNull();
+  pressRefreshKey();
+  await settle();
+  expect(probe.refreshed).toEqual([]);
+  expect(probe.synced).toEqual([]);
   const shown = jobBanners();
   expect(shown).toHaveLength(2);
   expect(shown[0]).toMatch(/^Withdrawn upstream, last seen .+ ago\. Kept because links and notes may point at it\.$/);
@@ -1025,16 +1035,16 @@ test("a comment's echo goes on a Refresh's read of the thread (#2103)", async ()
 
   status = "In Review";
   said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false, markup: "text" }];
-  refreshButton()!.click();
+  pressRefreshKey();
   await settle();
   expect(echoed()).toEqual([]);
 });
 
-test("⌘R on the job runs its Refresh, as a click does, and its Sync now when that is drawn (#2156)", async () => {
+test("⌘R on the job runs its Refresh, with no button drawn (#2156, #2401)", async () => {
   const probe = refreshProbe({ answer: () => new Promise(() => {}) });
   open("PAY-231", { ports: ports({ refresh: probe.ports }) });
   await settle();
-  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(refreshButton()).toBeNull();
   expect(pressRefreshKey().defaultPrevented).toBe(true);
   await settle();
   expect(probe.refreshed).toEqual([ID]);
@@ -1053,11 +1063,10 @@ test("⌘R on a job whose ticket's adapter reads no one item runs its Sync now (
     }),
   });
   await settle();
-  expect(refreshButton()?.textContent).toBe("Sync now");
+  expect(refreshButton()).toBeNull();
   pressRefreshKey();
   await settle();
   expect(probe.synced).toEqual(["jira"]);
-  expect(refreshButton()?.textContent).toBe("Syncing…");
   pressRefreshKey();
   await settle();
   expect(probe.synced).toEqual(["jira"]);

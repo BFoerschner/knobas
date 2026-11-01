@@ -16,6 +16,7 @@ import {
   jobReach,
   linkSets,
   listEntities,
+  miniBoard,
   previewLinkSetRule,
   saveLinkSet,
   promoteContext,
@@ -23,12 +24,14 @@ import {
   submitWrite,
   unlink,
   visitEntity,
+  type CheckoutView,
   type ContextRow,
   type EntityDetail,
   type EntityFilter,
   type EntityPage,
   type JobLinkSets,
   type LinkRow,
+  type MiniBoard,
   type SuggestionPage,
   type Thread,
   type Reached,
@@ -44,6 +47,7 @@ import { BRIDGE as startWorkBridge, type StartWorkApi } from "../../start-work/s
 import type { RefusedWritesPort } from "../../shell/refused-writes";
 import type { SetPorts } from "../sets/ports";
 import type { SourceFacts } from "./job";
+import { TICKET_SYSTEM } from "../roles.svelte";
 
 export interface JobPorts {
   listSources: () => Promise<SourceFacts[]>;
@@ -76,6 +80,19 @@ export interface JobPorts {
   listen?: EchoListen;
   /** The ticket's *Refresh* or *Sync now* (#2134); the bridge's when left out. */
   refresh?: DetailRefreshPorts;
+  /**
+   * The ticket system's board under a search (#2401): the card's Sub-tasks
+   * row reads `under:<key>`, as the row then writes in Tickets' search line.
+   * The bridge's when left out.
+   */
+  ticketBoard?: (query: string) => Promise<MiniBoard>;
+  /** A branch's checkout on this machine (#2401), for Code's *not pushed*; the bridge's when left out. */
+  entityCheckout?: (entityId: string) => Promise<CheckoutView>;
+}
+
+/** {@link JobPorts.ticketBoard} through the bridge: the Tickets view's own read and role. */
+export function bridgeTicketBoard(query: string): Promise<MiniBoard> {
+  return miniBoard({ role: TICKET_SYSTEM, context: null, project: null }, null, query);
 }
 
 /**

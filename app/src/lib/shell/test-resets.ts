@@ -59,6 +59,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/job/current.svelte.ts#asked": async () => (await import("../tf/job/current.svelte")).linkRequest.drop(),
   // The chosen job (spec #2227), kept in `localStorage`: each test starts with none.
   "tf/job/chosen.svelte.ts#chosenJob": async () => (await import("../tf/job/chosen.svelte")).chosenJob.reset(),
+  // A ticket a section view is narrowed to without choosing it (#2401): each test starts with none.
+  "tf/job/scoped.svelte.ts#held": async () => (await import("../tf/job/scoped.svelte")).scopedTicket.clear(),
   "tf/layers.svelte.ts#layers": async () => (await import("../tf/layers.svelte")).layers.reset(),
   "tf/page-refresh.svelte.ts#pageRefresh": async () => (await import("../tf/page-refresh.svelte")).pageRefresh.reset(),
   "tf/openin/apps.svelte.ts#apps": async () => (await import("../tf/openin/apps.svelte")).apps.reset(),

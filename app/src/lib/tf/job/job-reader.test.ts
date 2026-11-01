@@ -6,7 +6,7 @@
  */
 import { expect, test } from "vitest";
 
-import type { ContextRow, EntityDetail, EntityFilter, EntityRow, JobLinkSets, Reached } from "../../ipc/entity";
+import type { CheckoutView, ContextRow, EntityDetail, EntityFilter, EntityRow, JobLinkSets, MiniBoard, Reached } from "../../ipc/entity";
 import { createJobReader, type JobReaderPorts } from "./job-reader.svelte";
 import { sourceFacts } from "./source-facts.fixture";
 
@@ -44,7 +44,14 @@ function row(role: string | null | undefined, reach: string | null | undefined):
   return { entity_id: `${role}:${reach}`, kind, source_id: "x", title: `${role} of ${reach}`, updated_at: "", synced_at: "", path: null, state: null };
 }
 
-function fakes(over: { failing?: string[] } = {}) {
+function fakes(
+  over: {
+    failing?: string[];
+    rows?: (filter: EntityFilter) => EntityRow[];
+    board?: (query: string) => Promise<MiniBoard>;
+    checkout?: (id: string) => Promise<CheckoutView>;
+  } = {},
+) {
   /** Tickets whose reads wait, by id, with what lets them go. */
   const held = new Map<string, { gate: Promise<void>; release: () => void }>();
   const asked: string[] = [];
@@ -70,7 +77,8 @@ function fakes(over: { failing?: string[] } = {}) {
       await wait(filter.reach);
       await wait(`role ${filter.role}`);
       if (over.failing?.includes(filter.role ?? "")) throw { code: "unreachable", message: "down", source_id: null };
-      return { rows: [row(filter.role, filter.reach)], total: 1, tally: null, groups: null };
+      const rows = over.rows?.(filter) ?? [row(filter.role, filter.reach)];
+      return { rows, total: rows.length, tally: null, groups: null };
     },
     visitEntity: async (id) => {
       asked.push(`visitEntity ${id}`);
@@ -97,6 +105,8 @@ function fakes(over: { failing?: string[] } = {}) {
       return { sets: [], parent: { ticket: `parent of ${id}`, title: null, links: [] } } satisfies JobLinkSets;
     },
     getAsset: (id) => Promise.reject(new Error(`no asset ${id}`)),
+    ticketBoard: over.board ?? (() => Promise.reject(new Error("no board"))),
+    entityCheckout: over.checkout ?? ((id) => Promise.reject(new Error(`no checkout ${id}`))),
   };
   const reader = createJobReader(ports, { registry: { load: () => Promise.resolve() } });
   function hold(id: string) {
@@ -306,4 +316,65 @@ test("a refresh's reread settles only once every section has answered (#2134)", 
   await flush();
   expect(settled).toBe(true);
   expect(slots(reader)).toEqual(B);
+});
+
+// ---- the card's sections table (#2401) ----
+
+/** A board of `columns`, each `[status, total]`, as `mini_board` answers. */
+function board(columns: [string | null, number][]): MiniBoard {
+  return { columns: columns.map(([status, total]) => ({ status, cards: [], total })), sources: [], lanes: [], more_lanes: 0 };
+}
+
+/** A checkout standing on `branch`, `ahead` commits ahead of its upstream. */
+function checkout(branch: string, ahead: number): CheckoutView {
+  return {
+    repo_entity_id: "gitea:repo",
+    repo_url: null,
+    path: "/clones/repo",
+    found_by: "scan",
+    clones_root: "/clones",
+    clone_command: null,
+    tree: { status: "read", branch, head: "abc", upstream: `origin/${branch}`, ahead, behind: 0, changed: 0, untracked: 0, conflicted: 0 },
+  };
+}
+
+test("the sub-tasks are the board under the ticket's key, counted by its columns' totals, Done not open", async () => {
+  const queries: string[] = [];
+  const { reader } = fakes({
+    board: (query) => {
+      queries.push(query);
+      return Promise.resolve(board([["To Do", 2], ["In Progress", 1], ["Done", 4]]));
+    },
+  });
+  reader.open("jira:PAY-231");
+  await flush();
+  expect(queries).toEqual(["under:PAY-231"]);
+  expect(reader.subtasks).toEqual({ total: 7, open: 3 });
+});
+
+test("a board that cannot be read counts no sub-tasks", async () => {
+  const { reader } = fakes();
+  reader.open("jira:PAY-231");
+  await flush();
+  expect(reader.subtasks).toEqual({ total: 0, open: 0 });
+});
+
+test("a branch counts as not pushed when its checkout stands on it with commits ahead, and only then", async () => {
+  const branch = (id: string, title: string): EntityRow => ({ entity_id: id, kind: "branch", source_id: "gitea", title, updated_at: "", synced_at: "", path: null, state: null });
+  const trees: Record<string, CheckoutView | Error> = {
+    "b:ahead": checkout("feat/ahead", 2),
+    "b:even": checkout("feat/even", 0),
+    "b:elsewhere": checkout("main", 3),
+    "b:none": new Error("no checkout"),
+  };
+  const { reader } = fakes({
+    rows: (filter) =>
+      filter.role === "code-host"
+        ? [branch("b:ahead", "feat/ahead"), branch("b:even", "feat/even"), branch("b:elsewhere", "feat/elsewhere"), branch("b:none", "feat/none")]
+        : [row(filter.role, filter.reach)],
+    checkout: (id) => (trees[id] instanceof Error ? Promise.reject(trees[id]) : Promise.resolve(trees[id] as CheckoutView)),
+  });
+  reader.open("jira:PAY-231");
+  await flush();
+  expect([...reader.unpushed]).toEqual(["b:ahead"]);
 });

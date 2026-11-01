@@ -136,8 +136,8 @@ export const CORPUS: {
     [
       ["PAY-240", "Payout dashboard latency", "To Do", "Medium", "Task", "mara", "PAY-200", "2026-08-22T08:12:00Z"],
       ["PAY-236", "Payout CSV export for finance", "To Do", "Low", "Story", "jonas", "PAY-200", "2026-08-20T10:00:00Z"],
-      ["PAY-232", "Metrics for SEPA retry attempts", "To Do", "Medium", "Sub-task", "mara", "PAY-200", "2026-08-21T11:00:00Z"],
-      ["PAY-233", "Document the manual-review SLA", "To Do", "Medium", "Sub-task", "mara", "PAY-200", "2026-08-22T09:20:00Z"],
+      ["PAY-232", "Metrics for SEPA retry attempts", "To Do", "Medium", "Sub-task", "mara", "PAY-231", "2026-08-21T11:00:00Z"],
+      ["PAY-233", "Document the manual-review SLA", "To Do", "Medium", "Sub-task", "mara", "PAY-231", "2026-08-22T09:20:00Z"],
       ["PAY-219", "Rotate PSP credentials", "Done", "Medium", "Task", "mara", "PAY-200", "2026-08-18T10:00:00Z"],
       ["PAY-244", "Refund webhooks retry", "In Progress", "High", "Story", "priya", "PAY-300", "2026-08-21T09:30:00Z"],
       ["PAY-251", "Validate payout batch limits", "In Review", "Medium", "Task", "jonas", "PAY-300", "2026-08-20T15:10:00Z"],

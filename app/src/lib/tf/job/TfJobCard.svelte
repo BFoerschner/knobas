@@ -12,7 +12,13 @@
   with the blocked chip beside it; then the facts list, the Tickets pane's
   `dl.tf-facts`: Epic as a chip that opens the epic's page (cut with an
   ellipsis, the whole name its title), Assignee as an avatar and a name,
-  Type, Priority, Labels. A row the source leaves empty is not drawn. At the
+  Type, Priority, Labels. A row the source leaves empty is not drawn. Under
+  the facts the sections table (#2401, `card-sections.ts`): a bordered list,
+  one row a section with its count, its worst state and a chevron, opening
+  the section's view narrowed to this ticket; a ticket with sub-tasks leads
+  with *Sub-tasks*; one that reaches nothing says *Nothing connected yet.*
+  Under it, in the same shape, *Open in <source>* (the web address through
+  the browser) and *Link something to it* (the Connections drawer). At the
   foot one large button (`footAction` in `job.ts`): the decision while
   reading, the timer once pinned. The running time is the top bar's chip
   alone. The title, the description and the conversation are the reading
@@ -22,6 +28,8 @@
   import type { EntityDetail } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { ipcErrorMessage } from "../../ipc";
+  import { openExternal } from "../../shell/open-external";
+  import { pressSection, type CardTable } from "./card-sections";
   import { ticketHash } from "../route";
   import { parentOf } from "../sets/apply";
   import { epicLine, initials } from "../tickets/tickets";
@@ -35,7 +43,10 @@
     pinned,
     action,
     onaction,
+    table,
+    onlink,
     copy = (text: string) => navigator.clipboard.writeText(text),
+    open = openExternal,
   }: {
     detail: EntityDetail;
     /** The other sources' tickets under the same key (#1476); none draws no source. */
@@ -49,6 +60,12 @@
     /** The foot's one button, or `null` where the card offers none. */
     action: { label: string } | null;
     onaction: () => void;
+    /** The sections table's rows (#2401), and whether every read has answered. */
+    table: CardTable;
+    /** *Link something to it*: the Connections drawer. */
+    onlink: () => void;
+    /** Hands a web address to the browser; the shell's opener unless a test hands its own. */
+    open?: (url: string) => Promise<void>;
     /** Writes the clipboard; the browser's unless a test hands its own. */
     copy?: (text: string) => Promise<void>;
   } = $props();
@@ -74,6 +91,12 @@
     }
   }
   $effect(() => () => clearTimeout(settle));
+
+  /** *Open in <source>*: the ticket's web address through the browser, never the webview. */
+  function openWeb(event: MouseEvent, url: string) {
+    event.preventDefault();
+    open(url).catch((cause: unknown) => push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" }));
+  }
 </script>
 
 <article
@@ -128,6 +151,33 @@
       <dd>{#each labels as label (label)}<span class="tf-lab">{label}</span>{" "}{/each}</dd>
     {/if}
   </dl>
+  {#if table.rows.length > 0}
+    <div class="tf-tktable tf-tksecs">
+      {#each table.rows as row (row.name)}
+        <a
+          href={row.href}
+          title={row.opens === "subtasks" ? `Tickets under ${key}. ${row.words}` : `${row.name} view, this ticket only. ${row.words}`}
+          onclick={() => pressSection(row, detail.row.entity_id)}
+          ><span class="tf-tkname">{row.name}</span><span class="tf-n">{row.count}</span>{#if row.state !== null}<span
+              class="tf-st"
+              class:tf-asks={row.state.tone === "err" || row.state.tone === "warn"}
+              ><span class="tf-dot tf-{row.state.tone}" aria-hidden="true"></span>{row.state.text}</span
+            >{:else}<span></span>{/if}<span class="tf-chev" aria-hidden="true">›</span></a
+        >
+      {/each}
+    </div>
+  {:else if table.settled}
+    <p class="tf-tknone">Nothing connected yet.</p>
+  {/if}
+  <div class="tf-tktable tf-tkacts">
+    {#if detail.web_url}
+      {@const url = detail.web_url}
+      <a href={url} onclick={(event) => openWeb(event, url)}
+        ><span>Open in {detail.source.display_name}</span><span class="tf-chev" aria-hidden="true">›</span></a
+      >
+    {/if}
+    <button type="button" onclick={onlink}><span>Link something to it</span><span class="tf-chev" aria-hidden="true">›</span></button>
+  </div>
   {#if action !== null}
     <div class="tf-go">
       <button type="button" class="tf-btn tf-primary tf-lg" onclick={onaction}>{action.label}</button>
