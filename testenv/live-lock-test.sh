@@ -678,7 +678,9 @@ chmod +x "$ref/bin/docker" "$ref/bin/curl"
 refresh() {
   : >"$ref/docker.log"
   (
-    export PATH="$ref/bin:$PATH" REF_LOG="$ref/docker.log" REF_DIR="$rdir" REF_NOW="$(date +%s)"
+    export PATH="$ref/bin:$PATH" REF_LOG="$ref/docker.log" REF_DIR="$rdir"
+    REF_NOW=$(date +%s)
+    export REF_NOW
     export KNOBAS_LIVE_TARGET=${1:-remote} KNOBAS_LIVE_SSH=wsl-test KNOBAS_LIVE_LOCK_DIR="$rdir"
     # shellcheck source=testenv/live-lib.sh disable=SC1091
     . "$here/live-lib.sh"
