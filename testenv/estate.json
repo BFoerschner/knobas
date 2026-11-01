@@ -106,7 +106,7 @@
       "type": "container",
       "name": "knobas-https-front",
       "parent": "asset:wsl-docker",
-      "description": "Caddy, the https front for Gitea (3443) and Forgejo (3445) (#2377): knobas clones over https or ssh only, and the forges serve http. Its certificate comes from its own local CA, which `just live-trust-ca` trusts on the Mac. Up with either forge.",
+      "description": "Caddy, the https front for Gitea (3443) and Forgejo (3445) (#2377): knobas clones over https or ssh only, and the forges serve http. Its certificates come from a root `just live-trust-ca` generates, name-constrained to 127.0.0.1, ::1 and localhost, puts in its volume and trusts on the Mac; it serves nothing until then. Up with either forge.",
       "properties": {
         "docker_context": "wsl",
         "container_name": "knobas-https-front",

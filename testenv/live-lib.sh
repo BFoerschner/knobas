@@ -173,39 +173,118 @@ live_tunnel_up() {
   return 1
 }
 
-# live_trust_ca -- trust the https front's CA (#2377) for SSL in this Mac's
-# login keychain, which knobas' client (rustls with the platform verifier),
-# Apple's git and /usr/bin/curl all read. The CA lives in the front's volume
-# on the target, so this is once per volume (and once per target: the local
-# front has a CA of its own). macOS asks for the login password once; nothing
-# is done when the front is trusted already.
+# live_trust_ca -- make this Mac trust the https front (#2377) for SSL, and
+# trust nothing wider. The front's root CA is name-constrained (critical) to
+# 127.0.0.1, ::1 and localhost, so its key, which sits in the front's volume
+# on the target, can mint nothing this Mac accepts for any other name
+# (ruling on #2377; macOS enforces a root's name constraints). The front has
+# no CA until this runs: it waits (docker-compose.yml) for the root this
+# generates here, pushes into the volume and then trusts in the login
+# keychain, which knobas' client (rustls with the platform verifier), Apple's
+# git and /usr/bin/curl all read. It also takes out of the login keychain
+# every knobas testenv root that is not name-constrained (the first front's
+# Caddy-made one) and this target's earlier roots. Once per volume and per
+# target; macOS may ask for the login password.
 LIVE_HTTPS_GITEA=https://127.0.0.1:3443
 LIVE_HTTPS_FORGEJO=https://127.0.0.1:3445
-LIVE_FRONT_CA=/data/caddy/pki/authorities/local/root.crt
+LIVE_FRONT_CA_DIR=/data/knobas-ca
+LIVE_LOGIN_KEYCHAIN=$HOME/Library/Keychains/login.keychain-db
+_live_ca_cn() { echo "knobas testenv CA, loopback only (${KNOBAS_LIVE_SSH:-local})"; }
+
+# _live_ca_constrained <pem file> -- the certificate carries critical name
+# constraints permitting nothing but 127.0.0.1, ::1 and localhost.
+_live_ca_constrained() {
+  local text permitted
+  text=$(openssl x509 -in "$1" -noout -text 2>/dev/null) || return 1
+  grep -q 'Name Constraints: critical' <<<"$text" || return 1
+  grep -q 'Excluded' <<<"$text" && return 1
+  permitted=$(sed -n '/Name Constraints: critical/,/^ *X509v3 [A-Z]/p' <<<"$text" | grep -E '^ +(IP|DNS|email|URI|DirName|othername):' | tr -d ' ' | sort | tr '\n' ' ')
+  [ "$permitted" = "DNS:localhost IP:0:0:0:0:0:0:0:1/FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF IP:127.0.0.1/255.255.255.255 " ]
+}
+
+# _live_ca_generate <dir> -- a new root in <dir>/root.crt and root.key.
+_live_ca_generate() {
+  cat >"$1/ca.cnf" <<EOF
+[req]
+distinguished_name = dn
+prompt = no
+[dn]
+CN = $(_live_ca_cn)
+[ext]
+basicConstraints = critical,CA:TRUE,pathlen:1
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+nameConstraints = critical,permitted;IP:127.0.0.1/255.255.255.255,permitted;IP:::1/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff,permitted;DNS:localhost
+EOF
+  (umask 077 && openssl ecparam -name prime256v1 -genkey -noout -out "$1/root.key") &&
+    openssl req -x509 -new -key "$1/root.key" -days 3650 -config "$1/ca.cnf" -extensions ext -out "$1/root.crt"
+}
+
+# _live_ca_untrust_stale <keep sha1> -- every knobas testenv root in the login
+# keychain that is unconstrained, or this target's but not <keep sha1>, loses
+# its trust settings and leaves the keychain.
+_live_ca_untrust_stale() {
+  local dir f sha cn
+  dir=$(mktemp -d)
+  security find-certificate -a -c "knobas testenv CA" -p "$LIVE_LOGIN_KEYCHAIN" 2>/dev/null |
+    awk -v d="$dir" '/BEGIN CERT/{n++} n{print > (d "/" n ".pem")}'
+  for f in "$dir"/*.pem; do
+    [ -s "$f" ] || continue
+    sha=$(openssl x509 -in "$f" -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
+    cn=$(openssl x509 -in "$f" -noout -subject -nameopt multiline | sed -n 's/^ *commonName *= *//p')
+    [ "$sha" = "$1" ] && continue
+    if _live_ca_constrained "$f" && [ "$cn" != "$(_live_ca_cn)" ]; then continue; fi
+    echo "live: untrusting and removing '$cn' ($sha) from the login keychain"
+    security remove-trusted-cert "$f" 2>/dev/null || true
+    security delete-certificate -Z "$sha" "$LIVE_LOGIN_KEYCHAIN" >/dev/null || { rm -rf "$dir"; return 1; }
+  done
+  rm -rf "$dir"
+  return 0
+}
+
 live_trust_ca() {
-  local crt subject
+  local dir sha i
   live_remote_ready || return 1
   live_running knobas-https-front || {
     echo "live: the https front (knobas-https-front) is down; 'just live-up gitea' starts it" >&2
     return 1
   }
-  if /usr/bin/curl -fsS -m 5 -o /dev/null "$LIVE_HTTPS_GITEA/api/healthz" 2>/dev/null; then
-    echo "live: this Mac already trusts the https front ($LIVE_HTTPS_GITEA)"
-    return 0
+  dir=$(mktemp -d)
+  if ! docker exec knobas-https-front cat "$LIVE_FRONT_CA_DIR/root.crt" >"$dir/root.crt" 2>/dev/null; then
+    echo "live: the front has no root yet; generating '$(_live_ca_cn)' (name-constrained to 127.0.0.1, ::1, localhost)"
+    _live_ca_generate "$dir" >/dev/null 2>&1 || { echo "live: could not generate the root (openssl)" >&2; rm -rf "$dir"; return 1; }
+    # The key first: the front starts Caddy once root.crt is there.
+    if ! { docker exec -i knobas-https-front sh -c "umask 077 && mkdir -p $LIVE_FRONT_CA_DIR && cat >$LIVE_FRONT_CA_DIR/root.key.new && mv $LIVE_FRONT_CA_DIR/root.key.new $LIVE_FRONT_CA_DIR/root.key" <"$dir/root.key" &&
+      docker exec -i knobas-https-front sh -c "cat >$LIVE_FRONT_CA_DIR/root.crt.new && mv $LIVE_FRONT_CA_DIR/root.crt.new $LIVE_FRONT_CA_DIR/root.crt" <"$dir/root.crt"; }; then
+      echo "live: could not put the root into the front's volume" >&2
+      rm -rf "$dir"
+      return 1
+    fi
   fi
-  crt=${TMPDIR:-/tmp}/knobas-testenv-ca.crt
-  docker exec knobas-https-front cat "$LIVE_FRONT_CA" >"$crt" || {
-    echo "live: could not read the front's CA ($LIVE_FRONT_CA)" >&2
+  rm -f "$dir/root.key"
+  _live_ca_constrained "$dir/root.crt" || {
+    echo "live: the front's root ($LIVE_FRONT_CA_DIR/root.crt) is not name-constrained to 127.0.0.1, ::1 and localhost; not trusting it" >&2
+    rm -rf "$dir"
     return 1
   }
-  subject=$(openssl x509 -in "$crt" -noout -subject -fingerprint -sha256 | tr '\n' ' ')
-  echo "live: trusting $subject for SSL in the login keychain; macOS asks for your password"
-  security add-trusted-cert -r trustRoot -p ssl -k "$HOME/Library/Keychains/login.keychain-db" "$crt" || return 1
-  /usr/bin/curl -fsS -m 5 -o /dev/null "$LIVE_HTTPS_GITEA/api/healthz" || {
-    echo "live: the CA is trusted but $LIVE_HTTPS_GITEA still fails verification" >&2
-    return 1
-  }
-  echo "live: trusted; $LIVE_HTTPS_GITEA (Gitea) and $LIVE_HTTPS_FORGEJO (Forgejo) verify"
+  sha=$(openssl x509 -in "$dir/root.crt" -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
+  _live_ca_untrust_stale "$sha" || { rm -rf "$dir"; return 1; }
+  # Trusted already under this name means this root: the others are gone.
+  if ! security dump-trust-settings 2>/dev/null | grep -qF "$(_live_ca_cn)"; then
+    echo "live: trusting '$(_live_ca_cn)' ($sha) for SSL in the login keychain; macOS may ask for your password"
+    security add-trusted-cert -r trustRoot -p ssl -k "$LIVE_LOGIN_KEYCHAIN" "$dir/root.crt" || { rm -rf "$dir"; return 1; }
+  fi
+  rm -rf "$dir"
+  # The front starts Caddy once the root is in its volume (a few seconds).
+  for i in $(seq 1 30); do
+    /usr/bin/curl -fsS -m 5 -o /dev/null "$LIVE_HTTPS_GITEA/api/healthz" 2>/dev/null && break
+    [ "$i" = 30 ] && {
+      echo "live: the root is trusted but $LIVE_HTTPS_GITEA still fails verification ('docker logs knobas-https-front')" >&2
+      return 1
+    }
+    sleep 1
+  done
+  echo "live: trusted; $LIVE_HTTPS_GITEA (Gitea) and $LIVE_HTTPS_FORGEJO (Forgejo) verify, and the root is good for 127.0.0.1, ::1 and localhost only"
 }
 
 # _live_tunnel_add_missing -- a master opened before a port joined the list

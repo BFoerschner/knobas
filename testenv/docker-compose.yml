@@ -114,14 +114,17 @@ services:
 
   # The https front for Gitea and Forgejo (#2377). knobas clones and fetches
   # over https or ssh only (ADR-0023, ADR-0035), and both forges serve http.
-  # Caddy terminates TLS with a certificate from its own local CA ("knobas
-  # testenv CA", in the https-front-data volume, so it outlives a recreate)
-  # and proxies over the compose network: https://127.0.0.1:3443 is Gitea,
-  # :3445 Forgejo (a 502 while Forgejo is down). The certificate names
-  # 127.0.0.1 and localhost; a client that sends no SNI (an IP address) gets
-  # the 127.0.0.1 one. `just live-trust-ca` trusts that CA on this Mac, once
-  # per volume (testenv/README.md, *The https front*). Started with either
-  # forge; the http ports stay what the seeds and the suites use.
+  # Caddy terminates TLS and proxies over the compose network:
+  # https://127.0.0.1:3443 is Gitea, :3445 Forgejo (a 502 while Forgejo is
+  # down). The certificates come from an intermediate Caddy makes under a
+  # root that `just live-trust-ca` generates, puts in this volume
+  # (/data/knobas-ca) and trusts on the Mac. That root is name-constrained to
+  # 127.0.0.1, ::1 and localhost, so its key mints nothing the Mac accepts for
+  # any other name (ruling on #2377). Until it is there the container waits
+  # and serves nothing. A new root drops what Caddy made under the old one.
+  # A client that sends no SNI (an IP address) gets the 127.0.0.1
+  # certificate. Started with either forge; the http ports stay what the
+  # seeds and the suites use (testenv/README.md, *The https front*).
   https-front:
     image: ${CADDY_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     container_name: knobas-https-front
@@ -134,6 +137,12 @@ services:
         	pki {
         		ca local {
         			name "knobas testenv CA"
+        			intermediate_cn "knobas testenv intermediate"
+        			root {
+        				format pem_file
+        				cert /data/knobas-ca/root.crt
+        				key /data/knobas-ca/root.key
+        			}
         		}
         	}
         }
@@ -145,9 +154,24 @@ services:
         	tls internal
         	reverse_proxy forgejo:3000
         }
-    # The Caddyfile rides in the environment, not a bind mount: on the WSL
-    # target the engine is another machine and cannot see this checkout.
-    command: ["sh", "-c", "printf '%s' \"$$CADDYFILE\" > /etc/caddy/Caddyfile && exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"]
+      FRONT_START: |
+        printf '%s' "$$CADDYFILE" > /etc/caddy/Caddyfile
+        ca=/data/knobas-ca
+        until [ -s $$ca/root.crt ] && [ -s $$ca/root.key ]; do
+          [ -n "$$said" ] || echo "https-front: no root in $$ca yet; run 'just live-trust-ca' on the Mac"
+          said=1
+          sleep 2
+        done
+        if ! cmp -s $$ca/root.crt /data/caddy/knobas-root.crt; then
+          rm -rf /data/caddy/pki /data/caddy/certificates
+          mkdir -p /data/caddy
+          cp $$ca/root.crt /data/caddy/knobas-root.crt
+        fi
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    # The Caddyfile and the start script ride in the environment, not a bind
+    # mount: on the WSL target the engine is another machine and cannot see
+    # this checkout.
+    command: ["sh", "-c", "eval \"$$FRONT_START\""]
     ports:
       - "127.0.0.1:3443:3443"
       - "127.0.0.1:3445:3445"

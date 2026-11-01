@@ -2022,9 +2022,10 @@ live-up product:
 live-down product:
     testenv/live down {{ quote(product) }}
 
-# Trust the https front's CA (#2377: Gitea https://127.0.0.1:3443, Forgejo
-# :3445) for SSL in the login keychain, so the app clones and fetches from the
-# live forges. Once per front volume; macOS asks for the login password.
+# Give the https front (#2377: Gitea https://127.0.0.1:3443, Forgejo :3445) a
+# root name-constrained to 127.0.0.1, ::1 and localhost, trust it for SSL in
+# the login keychain and drop any unconstrained knobas testenv root, so the
+# app clones and fetches from the live forges. Once per front volume.
 live-trust-ca:
     testenv/live trust-ca
 

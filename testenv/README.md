@@ -342,15 +342,40 @@ what the seeds and the suites use. `just live-sources` registers Gitea and
 Forgejo at the https addresses, so *Clone* and a pull request's worktree
 fetch work from the app.
 
-**The one trust step, on the Mac:** `just live-trust-ca`. The certificate
-comes from the front's own CA ("knobas testenv CA", ten years, in the
-`https-front-data` volume, so a recreate keeps it). The command reads the CA
-out of the container and runs
-`security add-trusted-cert -r trustRoot -p ssl -k ~/Library/Keychains/login.keychain-db <ca>`,
+**The one trust step, on the Mac:** `just live-trust-ca`. The front has no
+CA of its own: until this runs it waits and serves nothing. The command
+generates a root here (openssl, P-256, ten years, CN
+`knobas testenv CA, loopback only (<target>)`) with **critical name
+constraints permitting only `127.0.0.1`, `::1` and `localhost`**, puts it and
+its key into the `https-front-data` volume (`/data/knobas-ca`, so a recreate
+keeps it; the key leaves this Mac), and trusts it for SSL:
+`security add-trusted-cert -r trustRoot -p ssl -k ~/Library/Keychains/login.keychain-db <root>`,
 which knobas' client (rustls with the platform verifier), Apple's git and
-`/usr/bin/curl` all read. It does nothing when the front is trusted already.
-Run it again only after the volume is removed, and once more for the other
-target: the local front has a CA of its own. Nothing turns verification off.
+`/usr/bin/curl` all read. Caddy issues from an intermediate it makes under
+that root. It refuses a root in the volume that is not constrained that way,
+does nothing more when the front verifies already, and runs again only after
+the volume is removed and once for the other target (each has its own root).
+Nothing turns verification off.
+
+**The risk, and why the constraint (ruling on #2377):** whoever holds a
+trusted root's key can mint certificates this Mac accepts. That key lives on
+the target (the WSL box's Docker volume). An unconstrained root would let it
+impersonate any https site to this Mac; the constrained one is good for the
+loopback names only, which macOS enforces on the whole chain (a `github.com`
+leaf signed by the front's own intermediate fails `security verify-cert`).
+The first front (before this ruling) used Caddy's own unconstrained root,
+`knobas testenv CA - 2026 ECC Root`. `just live-trust-ca` takes every knobas
+testenv root that is not constrained, and this target's earlier roots, out
+of the login keychain. To do it by hand, or to drop the front's trust
+altogether:
+
+```
+security find-certificate -a -c "knobas testenv CA" -Z ~/Library/Keychains/login.keychain-db   # SHA-1 of each
+security find-certificate -c "<name>" -p ~/Library/Keychains/login.keychain-db > /tmp/ca.pem
+security remove-trusted-cert /tmp/ca.pem
+security delete-certificate -Z <sha1> ~/Library/Keychains/login.keychain-db
+security dump-trust-settings          # lists no knobas testenv root any more
+```
 
 Why a front and not the alternatives (ruling on #2377): Gitea's own HTTPS
 would move the http address every seed, suite and TeamCity VCS root uses, and
@@ -2057,7 +2082,7 @@ cannot carry it (no source view, repositories with no owner, short shas), so it
 uses the testenv Gitea, over **https through the https front**
 (`https://127.0.0.1:3443` on either target, *The https front* above;
 `KNOBAS_WITNESS_GITEA` names another https front). Needs `just live-up gitea`
-from the same tree, for the token in `./seed --env`, and the front's CA trusted
+from the same tree, for the token in `./seed --env`, and the front's root trusted
 once (`just live-trust-ca`). It clones the repository into a scratch clones root and names a
 stub as the clone's `diff.guitool`, adds the Gitea in Settings › *Sources*
 (*+ Add a source*, *Test connection*, *Add source*) and an application with a
