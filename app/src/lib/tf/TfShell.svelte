@@ -264,12 +264,10 @@
   cardWidth.load();
   const chosen = $derived(chosenJob.id === null ? null : ticketRef(chosenJob.id));
   /**
-   * The job the shown page's *This job* names (#2401): a ticket a card's
-   * sections row opened its section on (`job/scoped.svelte.ts`) while that
-   * section is on screen, else the chosen job. Leaving the section forgets
-   * the row's ticket.
+   * A ticket a card's sections row opened its section on (#2401,
+   * `job/scoped.svelte.ts`) is that section's pages' *This job* while it is
+   * on screen (`TfKeptPage`); leaving the section forgets it.
    */
-  const viewJob = $derived(scopedTicket.viewJob(sectionOf(route), chosen));
   let shownSection: ReturnType<typeof sectionOf> = null;
   $effect(() => {
     const section = sectionOf(route);
@@ -555,8 +553,8 @@
       ctx={{
         route,
         ready: lifecycle.ready,
-        job: viewJob?.key ?? null,
-        jobAt: viewJob?.entityId ?? null,
+        job: chosen?.key ?? null,
+        jobAt: chosen?.entityId ?? null,
         back,
         timedTicket,
         navJob: navJobId,

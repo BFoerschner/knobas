@@ -5,10 +5,12 @@
  * ticket, not the chosen job, and reading still chooses nothing.
  *
  * A row sets the view's filter-bar scope to `job` and holds the ticket here
- * with the section it opened. The shell hands the views this ticket as their
- * job while that section is on screen (`viewJob`), and forgets it once the
- * reader leaves the section (`TfShell.svelte`), so the next visit from the
- * nav finds the chosen job again. Session state only, never stored.
+ * with the section it opened. The page host hands that section's pages this
+ * ticket as their job while the section is on screen (`viewJob`, per page in
+ * `TfKeptPage.svelte`, so a hidden page of another section keeps the chosen
+ * job), and the shell forgets it once the reader leaves the section
+ * (`TfShell.svelte`), so the next visit from the nav finds the chosen job
+ * again. Session state only, never stored.
  */
 import { sessionFilter } from "../filter/filter-state.svelte";
 import type { Section } from "../route";

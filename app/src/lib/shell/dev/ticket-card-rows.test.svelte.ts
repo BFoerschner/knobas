@@ -168,6 +168,20 @@ test("leaving Builds forgets the row's ticket: back from the nav, with no job ch
   expect(thisJob()).toBeUndefined();
 });
 
+test("the row's ticket is its section's alone: a hidden kept page of another section keeps the chosen job's This job (none)", async () => {
+  await openOn("#/monitors", "Monitors");
+  const thisJobIn = (selector: string) =>
+    [...target.querySelectorAll<HTMLButtonElement>(`${selector} button`)].find((b) => squash(b).startsWith("This job"));
+  location.hash = "#/ticket/mock%3APAY-231";
+  const card = await pageOf("PAY-231");
+  await allSections(card, ["Sub-tasks", "Code", "Builds", "Docs", "Monitors", "Assets"]);
+  sectionRow(card, "Builds").click();
+  await until(() => location.hash === "#/builds" && thisJobIn(".tf-kept:not([hidden])") !== undefined, "Builds never offered This job");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(target.querySelectorAll(".tf-kept[hidden]").length, "Monitors and the ticket page are kept").toBeGreaterThanOrEqual(2);
+  expect(thisJobIn(".tf-kept[hidden]")).toBeUndefined();
+});
+
 test("pressing Monitors on a ticket only read opens Monitors on This job for that ticket", async () => {
   await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
   const card = await pageOf("PAY-231");
