@@ -17,7 +17,7 @@ test("an entity of a known kind goes where its own page is", () => {
 test("a ticket opens its ticket page by its entity id, so a key two sources hold opens the one it names (#1476, #1977, spec #2227)", () => {
   expect(entityAddress("ticket", "gitea:PAY-231")).toBe("#/ticket/gitea%3APAY-231");
   expect(entityAddress("ticket", "gitea:acme/payouts#144")).toBe("#/ticket/gitea%3Aacme%2Fpayouts%23144");
-  expect(parseTfHash(entityAddress("ticket", "gitea:acme/payouts#144"))).toEqual({ view: "ticket", id: "gitea:acme/payouts#144" });
+  expect(parseTfHash(entityAddress("ticket", "gitea:acme/payouts#144"))).toEqual({ view: "ticket", id: "gitea:acme/payouts#144", tab: null });
 });
 
 test("a note opens its own page, which sends the reader to Settings › Notes while notes hide (#1504, D10)", () => {
@@ -63,8 +63,8 @@ test("a rooms-UI detail address is read as the entity it names", () => {
 });
 
 test("#/ticket/<id> is the ticket page now, not a rooms address; #/start-work/<id> still opens the job by its source (#1676, spec #2227)", () => {
-  expect(parseTfHash("#/ticket/gitea:PAY-231")).toEqual({ view: "ticket", id: "gitea:PAY-231" });
-  expect(parseTfHash("#/ticket/gitea:acme%2Fpayouts%23144")).toEqual({ view: "ticket", id: "gitea:acme/payouts#144" });
+  expect(parseTfHash("#/ticket/gitea:PAY-231")).toEqual({ view: "ticket", id: "gitea:PAY-231", tab: null });
+  expect(parseTfHash("#/ticket/gitea:acme%2Fpayouts%23144")).toEqual({ view: "ticket", id: "gitea:acme/payouts#144", tab: null });
   expect(legacyAddress("#/start-work/gitea:PAY-231")).toEqual({ go: "#/job/gitea%3APAY-231" });
 });
 

@@ -18,7 +18,8 @@ import type { JobPorts } from "./job/ports";
 import { entityAddress } from "./address";
 import { sourceRoles } from "./roles.svelte";
 import { goWithoutOpener, replaceAddress } from "./opener";
-import { jobHash, NAV, SECTION_NAME } from "./route";
+import { NAV, SECTION_NAME } from "./route";
+import { chosenJob } from "./job/chosen.svelte";
 import TfShell, { type TfShellPorts } from "./TfShell.svelte";
 import { installCommands } from "../render/command";
 import { renderersForFence } from "../render/registry";
@@ -301,13 +302,13 @@ function filterField(text: string): HTMLInputElement {
   return field;
 }
 
-test("Esc unwinds dialog, drawer, filter text, filter focus, then the job's sub-tab, one layer per press; the first tab is the top", async () => {
+test("Esc unwinds dialog, drawer, filter text, filter focus, then the ticket page's tab, one layer per press", async () => {
   const layers = createLayers();
   const closed: string[] = [];
   const offDrawer = layers.add({ kind: "drawer", close: () => (closed.push("drawer"), offDrawer()) });
   const offDialog = layers.add({ kind: "dialog", close: () => (closed.push("dialog"), offDialog()) });
   start({ layers });
-  await at("#/job/PAY-231/conv");
+  await at("#/ticket/jira%3APAY-231/conv");
   const field = filterField("sepa");
   const typed: string[] = [];
   field.addEventListener("input", () => typed.push(field.value));
@@ -324,16 +325,11 @@ test("Esc unwinds dialog, drawer, filter text, filter focus, then the job's sub-
 
   press("Escape");
   expect(document.activeElement).not.toBe(field);
-  expect(location.hash).toBe("#/job/PAY-231/conv");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231/conv");
 
   press("Escape");
   await settle();
-  expect(location.hash, "a sub-tab goes to the job's first tab").toBe("#/job/PAY-231");
-
-  const last = press("Escape");
-  await settle();
-  expect(last.defaultPrevented, "the job's first tab is a top page: Esc does nothing").toBe(false);
-  expect(location.hash).toBe("#/job/PAY-231");
+  expect(location.hash, "a tab goes to the page's first tab").toBe("#/ticket/jira%3APAY-231");
 });
 
 /** The breadcrumb's `Esc` hint as read, or `null` where none is drawn. */
@@ -344,10 +340,11 @@ function escHint(): string | null {
 test("Esc on every nav entry's top page and on Settings does nothing, and no breadcrumb names it", async () => {
   start();
   const tops = [
-    ...NAV.map((section) => (section === "job" ? jobHash(null) : `#/${section}`)),
+    ...NAV.map((section) => `#/${section}`),
     "#/settings",
     "#/tickets/view-1",
-    "#/job/PAY-231",
+    // Home: the chosen job's page, or the empty state with none (spec #2396).
+    "#/job",
   ];
   for (const top of tops) {
     await at(top);
@@ -395,27 +392,27 @@ test("Esc on a detail page reached with no opener goes to its structural parent;
 /** The window's own history, so `Esc` stepping back and `⌘]` going forward move the address for real. */
 const windowNav = { back: () => history.back(), forward: () => history.forward() };
 
-test("a run opened from the Job page: Esc returns to the Job page, and the hint said Back to Job", async () => {
+test("a run opened from a ticket page: Esc returns to the ticket page, and the hint said Back to its key (spec #2396)", async () => {
   start({ nav: windowNav });
-  await at("#/job/PAY-231/builds");
+  await at("#/ticket/jira%3APAY-231/builds");
   await at("#/build/pipe-1/run-4812");
-  expect(escHint()).toBe("Back to Job Esc");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/job/PAY-231/builds");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231/builds");
 });
 
-test("a job's row opens a run by its bare id; the address the run page puts in its place keeps the Job page as opener", async () => {
+test("a job's row opens a run by its bare id; the address the run page puts in its place keeps the ticket page as opener", async () => {
   start({ nav: windowNav });
-  await at("#/job/PAY-231");
+  await at("#/ticket/jira%3APAY-231");
   await at("#/build/run-4812");
   // What Builds does once it knows the run's pipeline.
   replaceAddress("#/build/pipe-1/run-4812");
   await settle();
-  expect(escHint()).toBe("Back to Job Esc");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/job/PAY-231");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
 });
 
 test("a run opened from the Builds list: Esc returns to the Builds list", async () => {
@@ -430,22 +427,22 @@ test("a run opened from the Builds list: Esc returns to the Builds list", async 
 
 test("a run opened from another run's link: Esc returns to that run, and a second Esc to that run's own opener", async () => {
   start({ nav: windowNav });
-  await at("#/job/PAY-231");
+  await at("#/ticket/jira%3APAY-231");
   await at("#/build/pipe-1/run-4811");
   await at("#/build/pipe-1/run-4812");
   expect(escHint()).toMatch(/^Back to Run\b/);
   press("Escape");
   await settle();
   expect(location.hash).toBe("#/build/pipe-1/run-4811");
-  expect(escHint()).toBe("Back to Job Esc");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/job/PAY-231");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
 });
 
 test("a run reached by ⌘K or by a deep link: Esc goes to Builds, its structural parent", async () => {
   start({ nav: windowNav });
-  await at("#/job/PAY-231");
+  await at("#/ticket/jira%3APAY-231");
   // The launcher's pick, as `App.svelte` makes it.
   goWithoutOpener("#/build/pipe-1/run-4812");
   await settle();
@@ -477,22 +474,22 @@ test("a pull request opened from Code, switched to its Files tab: Esc returns to
 
 test("after an Esc that stepped back, ⌘] goes forward to the detail again", async () => {
   start({ nav: windowNav });
-  await at("#/job/PAY-231");
+  await at("#/ticket/jira%3APAY-231");
   await at("#/build/pipe-1/run-4812");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/job/PAY-231");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
   press("]", { metaKey: true });
   await settle();
   expect(location.hash).toBe("#/build/pipe-1/run-4812");
-  expect(escHint(), "the entry kept its own opener").toBe("Back to Job Esc");
+  expect(escHint(), "the entry kept its own opener").toBe("Back to PAY-231 Esc");
 });
 
 test("after ⌘[ and ⌘] through history, Esc on an entry still uses that entry's own opener", async () => {
   start({ nav: windowNav });
   await at("#/builds");
   await at("#/build/pipe-1/run-4811");
-  await at("#/job/PAY-231");
+  await at("#/ticket/jira%3APAY-231");
   await at("#/build/pipe-1/run-4812");
   press("[", { metaKey: true });
   await settle();
@@ -505,10 +502,10 @@ test("after ⌘[ and ⌘] through history, Esc on an entry still uses that entry
   press("]", { metaKey: true });
   await settle();
   expect(location.hash).toBe("#/build/pipe-1/run-4812");
-  expect(escHint()).toBe("Back to Job Esc");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/job/PAY-231");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
 });
 
 test("a top page never navigates on Esc, even when it has an opener", async () => {
@@ -568,7 +565,8 @@ test("a rooms-UI address is replaced by the ticket-first one", async () => {
   await at("#/ctx/all");
   expect(location.hash).toBe("#/tickets");
   await at("#/start-work/jira:PAY-231");
-  expect(location.hash).toBe("#/job/jira%3APAY-231");
+  // The job's address chooses the ticket and lands on its page (spec #2396), in place too.
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
   await at("#/sources");
   expect(location.hash).toBe("#/settings/sources");
   expect(target.textContent).not.toContain("Nothing lives at");
@@ -651,7 +649,6 @@ test("badges: inbox, failing builds in err tone, proposals; nothing drawn at zer
   );
   expect(counts).toEqual({
     Tickets: null,
-    Job: null,
     Inbox: "3",
     Code: null,
     Builds: "2 err",
@@ -666,11 +663,11 @@ test("badges: inbox, failing builds in err tone, proposals; nothing drawn at zer
 
 // ---- home and the chosen job (spec #2227, #2230) ---------------------------
 
-test("the nav reads Job first, then Tickets and the rest in order; Settings stays the cog", async () => {
+test("the nav reads Tickets first and the rest in order, with no Job entry (spec #2396); Settings stays the cog", async () => {
   start();
   await at("#/job");
   const names = seen<HTMLAnchorElement>(".tf-nav a").map((a) => a.firstChild?.textContent?.trim());
-  expect(names).toEqual(["Job", "Tickets", "Inbox", "Code", "Builds", "Docs", "Dependencies", "Monitors", "Link sets", "Proposed links", "Time"]);
+  expect(names).toEqual(["Tickets", "Inbox", "Code", "Builds", "Docs", "Dependencies", "Monitors", "Link sets", "Proposed links", "Time"]);
   expect(target.querySelector(".tf-top [aria-label='Settings']"), "Settings is the cog, not a nav entry").not.toBeNull();
 });
 
@@ -782,7 +779,6 @@ test("the timer chip ticks the store's reading and stops through the shell's ver
   chip.click();
   press("t", { metaKey: true });
   expect(ontimer).toHaveBeenCalledTimes(2);
-  expect(target.querySelector(".tf-nav a:nth-child(1)")?.textContent?.replace(/\s+/g, " ").trim(), "with no chosen job, the Job tab names the timer's ticket").toBe("Job PAY-231");
 });
 
 test("the chip's target carries its full text in a title: a label reads in the sans face, a ticket key stays mono (#1430)", async () => {
@@ -952,7 +948,7 @@ async function withQueueOpen(run: () => Promise<void>) {
 
 test("Esc on the window closes the write queue panel and leaves the page where it is (#1474)", async () => {
   start();
-  await at("#/job/PAY-231");
+  await at("#/inbox");
   await withQueueOpen(async () => {
     // Focus outside the panel, as after the live pass's clicks: the window's
     // Esc, not the dialog's own.
@@ -961,13 +957,13 @@ test("Esc on the window closes the write queue panel and leaves the page where i
     await settle();
     expect(writeQueuePanel.open).toBe(false);
     expect(queuePanel()).toBeNull();
-    expect(location.hash).toBe("#/job/PAY-231");
+    expect(location.hash).toBe("#/inbox");
   });
 });
 
 test("a route change closes the write queue panel (#1474)", async () => {
   start();
-  await at("#/job/PAY-231");
+  await at("#/inbox");
   await withQueueOpen(async () => {
     await at("#/tickets");
     expect(writeQueuePanel.open).toBe(false);
@@ -978,7 +974,7 @@ test("a route change closes the write queue panel (#1474)", async () => {
 test("a dialog opened over the write queue panel closes first on Esc, then the panel (#1474)", async () => {
   const layers = createLayers();
   start({ layers });
-  await at("#/job/PAY-231");
+  await at("#/inbox");
   await withQueueOpen(async () => {
     const closed: string[] = [];
     const off = layers.add({ kind: "dialog", close: () => (closed.push("draft"), off()) });
@@ -990,7 +986,7 @@ test("a dialog opened over the write queue panel closes first on Esc, then the p
     await settle();
     expect(writeQueuePanel.open).toBe(false);
     expect(layers.open).toEqual([]);
-    expect(location.hash).toBe("#/job/PAY-231");
+    expect(location.hash).toBe("#/inbox");
   });
 });
 
@@ -1003,7 +999,7 @@ test("Esc on the window closes an asset dialog and leaves the page; history wait
   const nav = { back: vi.fn(), forward: vi.fn() };
   const layers = createLayers();
   start({ nav, layers });
-  await at("#/job/PAY-231");
+  await at("#/inbox");
   const host = document.createElement("div");
   document.body.appendChild(host);
   let modal: ReturnType<typeof mount> | null = null;
@@ -1025,7 +1021,7 @@ test("Esc on the window closes an asset dialog and leaves the page; history wait
     expect(onclose).toHaveBeenCalledOnce();
     expect(host.querySelector('[role="dialog"]')).toBeNull();
     expect(layers.open).toEqual([]);
-    expect(location.hash).toBe("#/job/PAY-231");
+    expect(location.hash).toBe("#/inbox");
 
     press("[", { metaKey: true });
     expect(nav.back, "and moves again once it is gone").toHaveBeenCalledOnce();
@@ -1110,7 +1106,7 @@ test("the Monitors badge counts monitors down, in the err tone", async () => {
   expect(monitors.querySelector(".tf-count.tf-err"), "down is the err tone").not.toBeNull();
 });
 
-test("a running timer names the Job tab but is not a job the breadcrumb or Esc returns to", async () => {
+test("a running timer is not a job the breadcrumb or Esc returns to", async () => {
   const timer = {
     current: { target: { kind: "entity", entity_id: "jira:PAY-231" }, started_at: "2026-08-22T12:00:00Z", last_heartbeat: "2026-08-22T12:00:00Z" } as RunningTimer,
     elapsed: "1:00",
@@ -1142,21 +1138,17 @@ test("a toast from anywhere lands in the shell's stack, as text, and its action 
   }
 });
 
-test("a job address draws the job inside the frame, and its Start timer reaches the shell's timer verb", async () => {
+test("a job address chooses its ticket and lands on the ticket's page, whose Start timer reaches the shell's timer verb (spec #2396)", async () => {
   const started: [string, string][] = [];
   start({ onstarttimer: (id, title) => started.push([id, title]) });
   await at("#/job/PAY-231");
+  await settle();
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
+  expect(chosenJob.id).toBe("jira:PAY-231");
   expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent).toBe("PAY-231");
-  expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent).toContain("PAY-231");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-jobcard button")].find((b) => b.textContent === "Start timer")!.click();
+  expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent?.trim()).toBe("Tickets");
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-jobcard .tf-go button")].find((b) => b.textContent === "Start timer")!.click();
   expect(started).toEqual([["jira:PAY-231", "Retry failed SEPA payouts"]]);
-});
-
-test("a job opened by its id names its key on the Job tab", async () => {
-  start();
-  await at("#/job/jira:PAY-231");
-  expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent).toContain("PAY-231");
-  expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent).not.toContain("jira:");
 });
 
 /**
@@ -1176,17 +1168,12 @@ const TWO_SOURCE_PORTS: JobPorts = {
       : JOB_PORTS.getEntity(id),
 };
 
-/** The Job tab's link: it names the job once one is opened. */
-function jobTab(): HTMLAnchorElement | undefined {
-  return [...target.querySelectorAll<HTMLAnchorElement>(".tf-nav a")].find((a) => a.textContent?.includes("PAY-231"));
-}
-
-test("a job opened at its source's address is the one the Job tab returns to (#1525)", async () => {
+test("a job opened at its source's address is the chosen job wherever the reader goes (#1525)", async () => {
   start({ jobPorts: TWO_SOURCE_PORTS });
   await at("#/job/tide:PAY-231");
   for (const view of ["#/builds", "#/time/2026-08-22", "#/settings"]) {
     await at(view);
-    expect(jobTab()?.getAttribute("href"), view).toBe(jobHash("tide:PAY-231"));
+    expect(chosenJob.id, view).toBe("tide:PAY-231");
     expect(seen(".tf-crumbs .tf-jobchip"), `${view}: the breadcrumb names no job (#2228)`).toEqual([]);
   }
 });
@@ -1207,7 +1194,7 @@ test("a job opened by its bare key is chosen as the ticket it resolved to, the f
   await at("#/job/tide:PAY-231");
   await at("#/job/PAY-231");
   await at("#/settings");
-  expect(jobTab()?.getAttribute("href"), "same key, another source: the one resolved last is chosen").toBe(jobHash("jira:PAY-231"));
+  expect(chosenJob.id, "same key, another source: the one resolved last is chosen").toBe("jira:PAY-231");
 });
 
 function addToButton(): HTMLButtonElement | undefined {
@@ -1397,9 +1384,9 @@ test("an item's page draws the kind's label as its breadcrumb; with no parent an
   expect(location.hash).toBe(item);
 });
 
-test("a note's page has no parent: with no opener Esc does nothing and no hint names it; opened from the Job page, it returns there", async () => {
+test("a note's page has no parent: with no opener Esc does nothing and no hint names it; opened from a ticket page, it returns there", async () => {
   start({ nav: windowNav });
-  await at("#/job/PAY-231");
+  await at("#/ticket/jira%3APAY-231");
   await reached("#/note/note-1");
   expect(escHint()).toBeNull();
   const event = press("Escape");
@@ -1407,12 +1394,12 @@ test("a note's page has no parent: with no opener Esc does nothing and no hint n
   expect(event.defaultPrevented).toBe(false);
   expect(location.hash).toBe("#/note/note-1");
 
-  await at("#/job/PAY-231");
+  await at("#/ticket/jira%3APAY-231");
   await at("#/note/note-1");
-  expect(escHint()).toBe("Back to Job Esc");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/job/PAY-231");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
 });
 
 // #1415: a window opened on an old address (a bookmark, a notification) lands
@@ -1434,11 +1421,13 @@ test("a window opened on #/ctx/all draws Tickets and rewrites the address", asyn
   expect(current()).toContain("Tickets");
 });
 
-test("a window opened on #/start-work/<key> draws that job", async () => {
+test("a window opened on #/start-work/<key> chooses that job and draws its page (spec #2396)", async () => {
   await openedOn("#/start-work/PAY-231");
   start();
   await settle();
-  expect(location.hash).toBe("#/job/PAY-231");
+  await settle();
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
+  expect(chosenJob.id).toBe("jira:PAY-231");
   expect(target.textContent).not.toContain("Nothing lives at");
   expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent).toBe("PAY-231");
 });

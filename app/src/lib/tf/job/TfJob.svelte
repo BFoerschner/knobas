@@ -273,6 +273,7 @@
     const wanted = segment;
     drawer = false;
     linking = false;
+    stepping = false;
     // Only the address re-opens a job: what the reader reads before its first
     // await is not a reason to read again.
     untrack(() => {
@@ -514,8 +515,18 @@
   );
 
   const mine = $derived(detail ? isMine(detail, sources) : false);
-  /** The stepper runs on the chosen job alone: *Start work* is what chooses a ticket read. */
-  const starting = $derived(detail ? pinned && offersStartWork(detail.status, mine) : false);
+  /**
+   * The stepper shows on the chosen job (*Start work* is what chooses a
+   * ticket read), and once shown it stays on this page while the ticket
+   * still offers it, so a timer that chooses another ticket meanwhile does
+   * not take the steps away mid-run.
+   */
+  let stepping = $state(false);
+  const offersSteps = $derived(detail ? offersStartWork(detail.status, mine) : false);
+  $effect(() => {
+    if (pinned && offersSteps) stepping = true;
+  });
+  const starting = $derived(stepping && offersSteps);
   const timerOnIt = $derived(
     detail !== null && detail !== undefined && timer.current?.target.kind === "entity" && timer.current.target.entity_id === detail.row.entity_id,
   );

@@ -413,7 +413,6 @@ const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
 const TfDiffView = (await import("../tf/diff/TfDiffView.svelte")).default;
 const TfDiffRendered = (await import("../tf/diff/TfDiffRendered.svelte")).default;
 const TfItem = (await import("../tf/item/TfItem.svelte")).default;
-const TfTicket = (await import("../tf/ticket/TfTicket.svelte")).default;
 const TfDetailRefresh = (await import("../tf/TfDetailRefresh.svelte")).default;
 const { createDetailRefresh } = await import("../tf/refresh.svelte");
 const { refreshProbe } = await import("../tf/refresh.fixture");
@@ -1175,7 +1174,7 @@ const CASES: Case[] = [
     }),
   },
   {
-    /** The job card (#816): its one effect takes *Edit and resend*'s request for the status pick (#1424). */
+    /** The ticket page's card (#816, spec #2396), in its reading mood with its one button. */
     name: "TfJobCard",
     source: "lib/tf/job/TfJobCard.svelte",
     open: (target) => ({
@@ -1183,12 +1182,10 @@ const CASES: Case[] = [
         target,
         props: {
           detail: DETAIL,
-          offered: ["In Review"],
+          pinned: false,
+          action: { label: "Work on this" },
+          onaction: () => {},
           week: null,
-          timer: { current: null, elapsed: null },
-          onmove: () => {},
-          onstop: () => {},
-          onstart: () => {},
         },
       }),
     }),
@@ -1835,36 +1832,6 @@ const CASES: Case[] = [
             submitWrite: () => deferred({} as never),
           },
           job: null,
-        },
-      }),
-    }),
-  },
-  // The ticket page (spec #2227): the ticket, the sources and Around this ticket's reads, answering late.
-  {
-    name: "TfTicket",
-    source: "lib/tf/ticket/TfTicket.svelte",
-    open: (target) => ({
-      app: mount(TfTicket, {
-        target,
-        props: {
-          id: "jira:PAY-231",
-          ready: true,
-          ports: {
-            getEntity: () =>
-              deferred({
-                row: { entity_id: "jira:PAY-231", kind: "ticket", source_id: "jira", title: "Retry failed SEPA payouts", path: null, updated_at: null },
-                source: { id: "jira", display_name: "Jira", enabled: true },
-                author: null,
-                status: "To Do",
-                priority: null,
-                body_text: "",
-                description: "h2. Why",
-                markup: "jira_wiki",
-              } as never),
-            listSources: () => deferred([] as never),
-            listEntities: () => deferred({ rows: [], total: 0, tally: null, groups: null } as never),
-            jobReach: () => deferred([] as never),
-          },
         },
       }),
     }),

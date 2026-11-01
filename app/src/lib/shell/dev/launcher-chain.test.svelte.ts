@@ -12,6 +12,7 @@ import App from "../../../App.svelte";
 import { demoHandlers, installFakeTauri, type Handler } from "./fake-tauri";
 import { currentJob, linkRequest } from "../../tf/job/current.svelte";
 import { until } from "../test-wait";
+import { chosenJob } from "../../tf/job/chosen.svelte";
 
 /**
  * The fixture's search answers the estate's lists alone (#430). `PAY-231` is
@@ -169,18 +170,13 @@ test("running Start work on a ticket makes it the chosen job", async () => {
   expect(chain()).toEqual(["Link to PAY-240", "Start timer on Retry failed SEPA payouts"]);
   press("ArrowDown");
   press("Enter");
-  await until(() => jobTab() === "Job PAY-231", "the timer's ticket never became the chosen job");
+  await until(() => chosenJob.id === "mock:PAY-231", "the timer's ticket never became the chosen job");
   // The timer step is skipped, so the choice is Start work's own.
   const timerRow = [...target.querySelectorAll<HTMLElement>(".tf-kept:not([hidden]) .tf-steps > *")].find((row) => row.textContent?.includes("Start timer"));
   [...(timerRow?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find((b) => b.textContent === "Skip")?.click();
   run()!.click();
-  await until(() => jobTab() === "Job PAY-240", "Start work never made its ticket the chosen job");
+  await until(() => chosenJob.id === "mock:PAY-240", "Start work never made its ticket the chosen job");
 });
-
-/** The nav's Job entry as read: it names the chosen job. */
-function jobTab(): string | null {
-  return target.querySelector(".tf-nav a:first-child")?.textContent?.replace(/\s+/g, " ").trim() ?? null;
-}
 
 /** The job's link dialog, once it is up. */
 function linkDialog(): HTMLElement | null {
@@ -223,7 +219,8 @@ test("from a view opened from the job, Link to opens the job with its link dialo
   press("Tab");
   press("Enter");
   await until(() => linkDialog() !== null, "the job's link dialog never opened");
-  expect(location.hash).toBe("#/job/mock%3APAY-231");
+  // The job's address lands on its ticket's page (spec #2396).
+  expect(location.hash).toBe("#/ticket/mock%3APAY-231");
   expect(linkDialog()!.querySelector(".tf-picked")?.textContent).toContain(FIRST_UNMONITORED);
 });
 

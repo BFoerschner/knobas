@@ -226,10 +226,10 @@ function chip(label: string): HTMLButtonElement {
 test("the card says how many comments, how many are new since the visit and how many mention you, with the latest", async () => {
   open();
   await settle();
-  const card = target.querySelector("[aria-label='Job card']")!;
+  const card = target.querySelector(".tf-ticketcard")!;
   expect(squash(card)).toContain("11 comments, 2 new since 09:00, 1 mentions you");
   expect(squash(card.querySelector(".tf-last"))).toBe("Lena, today 12:45: [~mara] will the queue get an SLA?");
-  expect(card.querySelector<HTMLAnchorElement>(".tf-cbtn")?.getAttribute("href")).toBe("#/job/jira%3APAY-231/conversation");
+  expect(card.querySelector<HTMLAnchorElement>(".tf-cbtn")?.getAttribute("href")).toBe("#/ticket/jira%3APAY-231/conversation");
   expect(squash(card.querySelector(".tf-cbtn"))).toBe("Read the conversation");
   // The tab carries the count and the new ones.
   const tab = [...target.querySelectorAll("[role='tab']")][2]!;
@@ -239,7 +239,7 @@ test("the card says how many comments, how many are new since the visit and how 
 test("a ticket nobody commented on says so", async () => {
   open(null, { ports: ports({ entityThread: () => Promise.resolve({ comments: [], me: [] }) }) });
   await settle();
-  const card = target.querySelector("[aria-label='Job card']")!;
+  const card = target.querySelector(".tf-ticketcard")!;
   expect(squash(card)).toContain("No comments yet.");
   expect(squash([...target.querySelectorAll("[role='tab']")][2])).toBe("Conversation");
 });
@@ -441,7 +441,7 @@ test("a comment the queue holds drops its echo and toasts; Edit and resend puts 
   expect(box.value).toBe("");
   toast.more!.find((action) => action.label === "Edit and resend")!.run();
   await settle();
-  expect(location.hash).toBe("#/job/jira%3APAY-231/conversation");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231/conversation");
   expect(box.value).toBe("Looking at the jitter now");
 });
 
