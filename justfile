@@ -1507,7 +1507,7 @@ _require-live-env SOURCE +NAMES:
 # -- every corpus the seed creates fits in one page of 50 here -- and that is
 # what `gitea-live-capped` below is for.
 #
-# Gitea and its seed only: `testenv/seed` also waits for uptime-kuma and mockd,
+# Gitea and its seed only: `testenv/seed` also waits for uptime-kuma,
 # which this suite never touches. Both steps are idempotent, so re-running this
 # against an already-seeded environment just runs the tests.
 #
@@ -2141,7 +2141,7 @@ atlassian-live:
 # **Both importers** against the real systems (issues #509, #510 and #634).
 # `crates/knobas-app/tests/estate_live.rs` is the suite and it is two tests:
 # the hcloud producer's round trip over the real Hetzner project, and the
-# Docker producer against the notebook's engine, the one `testenv/estate.json`
+# Docker producer against the WSL box's engine, the one `testenv/estate.json`
 # names.
 #
 # WHAT IT CERTIFIES, AND WHY IT IS THE ONLY THING THAT CAN. Both producers are
@@ -2155,7 +2155,7 @@ atlassian-live:
 #   2. that the hcloud importer reads back what it wrote: produce, land what is
 #      new at the top of the estate, apply, produce again -- all known, no
 #      changes, every server matched by the `hcloud_id` the API returned;
-#   3. that the `orbstack` context reaches the engine the estate file says;
+#   3. that the `wsl` context reaches the engine the estate file says;
 #   4. that every **running** container on it is written down in that file.
 #
 # THE SERVER COUNT IS DECLARED: `ESTATE_LIVE_HCLOUD_SERVERS=<n> just
@@ -2172,9 +2172,10 @@ atlassian-live:
 # **A RED DOCKER RUN NAMING A CONTAINER IS READ FIRST AS `testenv/estate.json`
 # BEING BEHIND THE ENGINE**, and only then as a bug in the producer.
 #
-# NO SSH, NO TUNNEL, NO `hcloud` CLI. The hcloud half is HTTPS `GET
-# /v1/servers` with the token in the repo-root `.env`; the Docker half spawns
-# `docker --context orbstack ps`, the only context the estate file names. Every
+# NO TUNNEL, NO `hcloud` CLI. The hcloud half is HTTPS `GET /v1/servers` with
+# the token in the repo-root `.env`; the Docker half spawns `docker --context
+# wsl ps`, the only context the estate file names -- an ssh context onto the
+# WSL box (`ssh://knobas-wsl`), which `testenv/wsl/connect.sh` creates. Every
 # call is a read; the imports write into scratch databases of the run's own.
 #
 # The variables are **gated rather than skipped on**, `teamcity-live`'s rule
@@ -2195,8 +2196,8 @@ estate-live:
       HETZNER_API_TOKEN ESTATE_LIVE_HCLOUD_SERVERS
     if ! command -v docker >/dev/null 2>&1; then
       echo "error: the docker CLI is not on the PATH." >&2
-      echo "  The Docker half of this recipe spawns it against the notebook's engine" >&2
-      echo "  (\`docker --context orbstack ps --format json\`), so without it the" >&2
+      echo "  The Docker half of this recipe spawns it against the WSL box's engine" >&2
+      echo "  (\`docker --context wsl ps --format json\`), so without it the" >&2
       echo "  suite would refuse the engine and report a fault that is this" >&2
       echo "  machine's rather than the estate's." >&2
       exit 1

@@ -89,8 +89,8 @@
 //! (*Exited (0) 2 days ago*) and `knobas-teamcity-agent` (*Exited (143)*),
 //! which the estate then recorded only on a Hetzner engine, so under `-a`
 //! they previewed as **new**. Since #634 the estate records those two on the
-//! notebook's engine, where TeamCity is stopped between runs (#633), so that
-//! example no longer bites; any other exited container still would. In
+//! one engine it has (the WSL box's since 2026-11-01), so that example no
+//! longer bites; any other exited container still would. In
 //! `just check` the
 //! literal argument list is asserted by
 //! `the_context_is_the_only_thing_substituted_and_it_is_one_argument`, which
@@ -159,12 +159,12 @@ pub const PROGRAM: &str = "docker";
 
 /// The asset type whose [`CONTEXT_KEY`] is read.
 ///
-/// **The filter is load-bearing and not a tidiness.** In
-/// `testenv/estate.json` the OrbStack VM carries `docker_context` as well
-/// (and so did the three Hetzner servers until #634) -- a `vm` is where the
-/// engine runs, and the property is on both -- so a producer that read every
-/// asset carrying the key would spawn each context twice and emit two entries
-/// with one origin key.
+/// **The filter is load-bearing and not a tidiness.** A `vm` is where the
+/// engine runs, and an estate may put the property on both -- in
+/// `testenv/estate.json` the OrbStack VM did until 2026-11-01, and the three
+/// Hetzner servers until #634 -- so a producer that read every asset carrying
+/// the key would spawn each context twice and emit two entries with one
+/// origin key.
 /// The Import refuses that file (*"describes one asset twice"*), which is a
 /// refusal about the file rather than about the read that made it.
 const ENGINE_TYPE_ID: &str = "container_engine";
@@ -302,7 +302,7 @@ struct PsLine {
 /// `--context` moves the *engine*, not the program -- so this parse is of one
 /// program's output and not of four servers'. What witnessed it against all
 /// four is `just estate-live` (2026-09-08, eight containers over four engines;
-/// one engine, the notebook's, since #634);
+/// one engine since #634, the WSL box's since 2026-11-01);
 /// nothing in `just check` can, because a stub writes whatever the test wrote
 /// into it, and an array shape from a future CLI is the failure this paragraph
 /// is the only warning about. A blank line is skipped; anything else that is
@@ -597,7 +597,7 @@ mod tests {
     fn a_container_lands_under_the_engine_whose_context_found_it() {
         let found = vec![
             Found {
-                engine: engine("asset:orbstack-docker", "orbstack"),
+                engine: engine("asset:wsl-docker", "wsl"),
                 names: vec!["knobas-gitea".to_owned()],
             },
             Found {
@@ -612,13 +612,13 @@ mod tests {
 
         assert_eq!(
             entries[0]["id"],
-            serde_json::json!("asset:docker-orbstack/knobas-gitea")
+            serde_json::json!("asset:docker-wsl/knobas-gitea")
         );
         assert_eq!(entries[0]["type"], serde_json::json!("container"));
         assert_eq!(entries[0].get("parent"), None, "already in the tree");
         assert_eq!(
             entries[0]["properties"],
-            serde_json::json!({ CONTEXT_KEY: "orbstack", NAME_KEY: "knobas-gitea" }),
+            serde_json::json!({ CONTEXT_KEY: "wsl", NAME_KEY: "knobas-gitea" }),
             "both halves of the origin key, and nothing the estate would have to agree with"
         );
 
@@ -639,8 +639,8 @@ mod tests {
     fn no_two_context_and_name_pairs_spell_one_id() {
         assert_ne!(asset_id("a-b", "c"), asset_id("a", "b-c"));
         assert_eq!(
-            asset_id("orbstack", "knobas-gitea"),
-            "asset:docker-orbstack/knobas-gitea"
+            asset_id("wsl", "knobas-gitea"),
+            "asset:docker-wsl/knobas-gitea"
         );
     }
 }

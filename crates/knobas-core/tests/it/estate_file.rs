@@ -3,10 +3,12 @@
 //! # What the file is
 //!
 //! `testenv/estate.json` describes the **estate** (`CONTEXT.md`) as it runs:
-//! the notebook, OrbStack's VM and its Docker engine, the containers and
-//! databases on it -- the on-demand TeamCity, Jira and Confluence among them
-//! (#633) -- and their published ports as routes. Until #634 it also held
-//! three Hetzner servers, which were decommissioned. It is data about a real
+//! the notebook, the Windows desktop, its WSL 2 VM and the Docker engine in
+//! it, the containers and databases on that engine -- TeamCity, Jira and
+//! Confluence among them, up around the clock since 2026-11-01 -- and the
+//! ports the notebook reaches them on as routes. Until #634 it also held
+//! three Hetzner servers, which were decommissioned; until 2026-11-01 the
+//! engine was OrbStack's, on the notebook. It is data about a real
 //! estate and the only asset fixture there will be -- the M4 spec (#427) rules
 //! out anything Tidewater-shaped for assets, because a made-up estate proves
 //! that the tree draws and not that a real estate fits it. (Knobas-app's
@@ -30,7 +32,7 @@
 //!
 //! # Why the two coverage tests read the real files
 //!
-//! [`every_compose_service_the_notebook_runs_is_recorded`] and
+//! [`every_compose_service_the_estate_runs_is_recorded`] and
 //! [`the_notebook_states_the_address_its_ping_watches`] are the ones that catch
 //! the drift that actually happens: a new service in the compose file, or a
 //! seeded monitor moved, by somebody who has never heard of this JSON. They read
@@ -70,19 +72,15 @@ const ENVIRONMENTS: &[&str] = &["dev", "stage", "prod", "shared"];
 /// *done to* the estate, not a thing the estate holds, so it has no asset and
 /// no monitor.
 ///
-/// `docker-proxy` (#978) is part of Uptime Kuma's own plumbing: the read-only
-/// Docker API behind the Docker host the seed gives Kuma, reachable from Kuma
-/// alone on an internal network, with no published port. Nothing in the estate
-/// routes to it and no monitor watches it; it is the means by which Kuma reads
-/// container state, not a thing a developer works on.
-///
-/// `forgejo` (#1195) is the Gitea live suite's second target, behind its own
-/// profile: `just gitea-live forgejo` starts it and stops it again at the end
-/// of the run. Between runs it is not there, so the estate does not hold it;
-/// Gitea is the asset the notebook routes to and watches.
-///
-/// Every other service in that file runs somewhere and is recorded.
-const NOT_ASSETS: &[&str] = &["kuma-seed", "docker-proxy", "forgejo"];
+/// Every other service in that file runs somewhere and is recorded. Since
+/// 2026-11-01 that includes two that used to be left out, because the WSL box
+/// keeps what it runs and `just estate-live` holds every running container
+/// there to this file:
+/// - `docker-proxy` (#978), Kuma's read-only Docker API. It publishes no port
+///   and nothing routes to it, but it runs around the clock.
+/// - `forgejo` (#1195), the Gitea live suite's second target. On the local
+///   target a run stopped it again; on the box no run stops it once it is up.
+const NOT_ASSETS: &[&str] = &["kuma-seed"];
 
 /// The repository root, from this crate's manifest directory.
 fn root() -> PathBuf {
@@ -278,11 +276,12 @@ fn every_type_is_in_the_type_table() {
 /// shape that occurs in provisioned infrastructure and is not offered is a
 /// convention that has drifted from the thing it describes.
 ///
-/// It runs on **types**, not on assets, so the five distinct pairs this file
-/// holds are five assertions and not twenty-odd. (Seven until #634: the
+/// It runs on **types**, not on assets, so the six distinct pairs this file
+/// holds are six assertions and not twenty-odd. (Seven until #634: the
 /// Hetzner site under the root and the servers directly under that site went
 /// with the servers. The table still suggests both pairs, and the floor below
-/// fell with the estate, not with the table.) It is one-directional on
+/// fell with the estate, not with the table. The sixth, a `custom` under the
+/// `site`, is the notebook since it stopped holding a VM on 2026-11-01.) It is one-directional on
 /// purpose: a type may suggest a pair the estate has no instance of -- the
 /// design draws chains this infrastructure does not reach into -- and only the
 /// other direction is a drift.
@@ -389,12 +388,14 @@ fn is_held_by(assets: &[Value], ancestor: &str, descendant: &str) -> bool {
 /// Until #634 the three Hetzner servers carried their public `ip`, and the
 /// three `ping` monitors watched those addresses: that is what put a ping
 /// check inside `monitor_url_host`'s reach on the real estate (#479). With the
-/// servers gone, the one ping left is `notebook`, on the address OrbStack's
-/// containers reach this machine at -- what `host.docker.internal` resolves to
-/// there -- and the notebook states it as its `ip`.
+/// servers gone, the one ping left is `notebook`, on the notebook's Tailscale
+/// address, which the Kuma on the WSL box pings (until 2026-11-01, the address
+/// OrbStack's containers reached the notebook at) -- and the notebook states
+/// it as its `ip`.
 ///
 /// `ip` and not `ipv4`: the type schema's own word for this field
-/// (`knobas_core::asset::TYPES`, a hypervisor's and a vm's), and what
+/// (`knobas_core::asset::TYPES`, a hypervisor's and a vm's; the notebook is
+/// `custom` and carries it as a custom property), and what
 /// `monitor_url_host` reads. A property the schema does not declare is legal,
 /// so nothing but this line would notice the file spelling it its own way.
 /// Read against `monitors.json` rather than a copy, so the two cannot drift
@@ -442,16 +443,17 @@ fn the_notebook_states_the_address_its_ping_watches() {
     );
 }
 
-/// **Every compose service runs on the notebook's engine** (#634).
+/// **Every compose service runs on the WSL box's engine** (#634, #2366).
 ///
 /// The fact the set comparison in
-/// [`every_compose_service_the_notebook_runs_is_recorded`] cannot carry: where
+/// [`every_compose_service_the_estate_runs_is_recorded`] cannot carry: where
 /// it runs. Until #634 the README's host list put TeamCity, Jira and Confluence
-/// on three Hetzner servers and a test read that table; now every service runs
-/// in OrbStack's Docker, on demand or always, so every container recording a
-/// compose service hangs off `asset:orbstack-docker`.
+/// on three Hetzner servers and a test read that table; until 2026-11-01 every
+/// service ran in OrbStack's Docker on the notebook; now every one runs on the
+/// WSL box's engine, so every container recording a compose service hangs off
+/// `asset:wsl-docker`.
 #[test]
-fn every_compose_service_runs_on_the_notebooks_engine() {
+fn every_compose_service_runs_on_the_wsl_boxs_engine() {
     let estate = estate();
     let assets = assets(&estate);
     let mut checked = 0;
@@ -460,8 +462,8 @@ fn every_compose_service_runs_on_the_notebooks_engine() {
             continue;
         }
         assert!(
-            is_held_by(assets, "asset:orbstack-docker", id(asset)),
-            "`{}` records a compose service and is not held by the notebook's \
+            is_held_by(assets, "asset:wsl-docker", id(asset)),
+            "`{}` records a compose service and is not held by the WSL box's \
              Docker engine, which is the only engine this estate has",
             id(asset)
         );
@@ -502,14 +504,14 @@ fn compose_services() -> BTreeSet<String> {
     assert!(
         services.len() >= 8,
         "this parse found only {services:?} in testenv/docker-compose.yml; that \
-         file declares the notebook's services and the products', so a count \
+         file declares Kuma's services and the products', so a count \
          this low means the parse broke, not that the environment shrank"
     );
     services
 }
 
 #[test]
-fn every_compose_service_the_notebook_runs_is_recorded() {
+fn every_compose_service_the_estate_runs_is_recorded() {
     let estate = estate();
     let recorded: BTreeSet<String> = assets(&estate)
         .iter()

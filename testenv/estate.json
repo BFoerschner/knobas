@@ -1,7 +1,7 @@
 {
   "version": 1,
   "name": "knobas test estate",
-  "description": "The real test infrastructure knobas is developed against: this notebook, OrbStack's Linux VM and the Docker engine in it, and the containers testenv/docker-compose.yml runs there -- Gitea and Uptime Kuma, and the real TeamCity, Jira and Confluence that `testenv/live` starts on demand, one at a time (#633). Data about an estate that exists -- nothing here is invented, and nothing Tidewater-shaped belongs in it. The `monitors` names are the names the local Uptime Kuma actually holds, seeded from `monitors.json` (#441). Until 2026-10-12 three Hetzner servers held the JVM products; they were decommissioned (#634) and left this file with them.",
+  "description": "The real test infrastructure knobas is developed against: this notebook, where `just check` and every live recipe run, and the Windows desktop whose WSL 2 VM holds the Docker engine and the containers testenv/docker-compose.yml runs there -- Gitea, Uptime Kuma and its read-only Docker API, and the real TeamCity, Jira and Confluence, up around the clock since 2026-11-01 (#2366) and reached from the notebook through an ssh tunnel. Data about an estate that exists -- nothing here is invented, and nothing Tidewater-shaped belongs in it. The `monitors` names are the names that Uptime Kuma actually holds, seeded from `monitors.json` (#441). Until 2026-10-12 three Hetzner servers held the JVM products; they were decommissioned (#634) and left this file with them. Until 2026-11-01 the containers ran on demand in a Linux VM on the notebook itself.",
   "assets": [
     {
       "id": "asset:knobas-estate",
@@ -13,41 +13,58 @@
     },
     {
       "id": "asset:notebook",
-      "type": "hypervisor",
+      "type": "custom",
       "name": "devs-MacBook-Pro",
       "parent": "asset:knobas-estate",
-      "description": "The development notebook, and the machine `just check` and every live recipe run on. Typed hypervisor because what it holds here is the Linux VM OrbStack runs; the type table has no name for a physical workstation. Its `ip` is the address the containers in that VM reach it at -- what `host.docker.internal` resolves to under OrbStack -- and the address the `notebook` ping watches.",
+      "description": "The development notebook, and the machine `just check` and every live recipe run on. Since 2026-11-01 it runs no container: the live products are on the WSL box, and it reaches them through the ssh tunnel `testenv/live tunnel` opens. Typed custom because it holds nothing in this tree any more and the type table has no name for a workstation; `hypervisor` was honest only while it held the Linux VM the containers ran in. Its `ip` is its Tailscale address, the one the `notebook` ping watches from the Uptime Kuma on the WSL box.",
       "properties": {
         "os": "macOS 26.5.2",
         "arch": "arm64",
         "role": "development notebook",
-        "ip": "0.250.250.254"
+        "ip": "100.92.199.117"
       },
       "monitors": [
         "notebook"
       ]
     },
     {
-      "id": "asset:orbstack",
-      "type": "vm",
-      "name": "OrbStack Linux VM",
-      "parent": "asset:notebook",
-      "description": "OrbStack's Linux VM, where the notebook's Docker engine runs. Its 8 GB is what holds one JVM product at a time (#633); `docker info` read 12 CPUs and 8392974336 bytes on 2026-10-12.",
+      "id": "asset:desktop",
+      "type": "hypervisor",
+      "name": "DESKTOP-QUUAHUB",
+      "parent": "asset:knobas-estate",
+      "description": "The Windows desktop that runs WSL 2, and with it the live products, 24/7 since 2026-11-01 (#2366). Typed hypervisor because what it holds here is the WSL 2 VM. Set up by `testenv/wsl/setup-windows.ps1` (testenv/README.md, \"Live products on a remote machine (WSL)\").",
       "properties": {
-        "docker_context": "orbstack",
-        "docker_socket": "~/.orbstack/run/docker.sock",
-        "vcpu": 12,
-        "memory_gb": 8
+        "os": "Windows",
+        "arch": "x86_64",
+        "memory_gb": 16,
+        "role": "live-product host (WSL 2)"
       }
     },
     {
-      "id": "asset:orbstack-docker",
-      "type": "container_engine",
-      "name": "Docker engine (OrbStack)",
-      "parent": "asset:orbstack",
-      "description": "The engine `testenv/docker-compose.yml` brings every service up on: Gitea and Uptime Kuma, and, on demand through `testenv/live`, the real TeamCity, Jira and Confluence with what each needs.",
+      "id": "asset:wsl",
+      "type": "vm",
+      "name": "Ubuntu 26.04 (WSL 2)",
+      "parent": "asset:desktop",
+      "description": "WSL 2's Ubuntu VM on the desktop, where the Docker engine the live products run in lives. `setup-windows.ps1` gives WSL the physical memory less 6 GB; this box's WSL already had 12 GB. The live products stay up there 24/7 under a memory budget (testenv/README.md, \"Live products on a remote machine (WSL)\"). Its `ip` is the Docker bridge, what `host.docker.internal` resolves to for its containers; the notebook logs in over ssh as `knobas-wsl`.",
       "properties": {
-        "docker_context": "orbstack",
+        "os": "Ubuntu 26.04.1 LTS",
+        "kernel": "6.6.87.2-microsoft-standard-WSL2",
+        "vcpu": 12,
+        "memory_gb": 12,
+        "ip": "172.17.0.1",
+        "tailscale_ip": "100.86.58.116",
+        "ssh": "knobas-wsl, port 2222"
+      }
+    },
+    {
+      "id": "asset:wsl-docker",
+      "type": "container_engine",
+      "name": "Docker engine (WSL)",
+      "parent": "asset:wsl",
+      "description": "The engine `testenv/docker-compose.yml` brings every service up on, reached from the notebook as `DOCKER_HOST=ssh://knobas-wsl` and through the `wsl` docker context `testenv/wsl/connect.sh` creates: Gitea, Uptime Kuma and its Docker API proxy, and the real TeamCity, Jira and Confluence with what each needs.",
+      "properties": {
+        "docker_context": "wsl",
+        "engine": "docker.io 29.1.3",
         "compose_project": "knobas-testenv",
         "compose_file": "testenv/docker-compose.yml"
       }
@@ -56,10 +73,10 @@
       "id": "asset:knobas-gitea",
       "type": "container",
       "name": "knobas-gitea",
-      "parent": "asset:orbstack-docker",
-      "description": "Gitea: a real product, the Gitea adapter's witness, and the VCS the TeamCity builds clone from over the compose network. On demand since #633: `just live-up gitea`, and `just live-up teamcity` brings it up first.",
+      "parent": "asset:wsl-docker",
+      "description": "Gitea: a real product, the Gitea adapter's witness, and the VCS the TeamCity builds clone from over the compose network. Up around the clock on the WSL box: no run stops it when it ends.",
       "properties": {
-        "docker_context": "orbstack",
+        "docker_context": "wsl",
         "container_name": "knobas-gitea",
         "image": "gitea/gitea",
         "compose_service": "gitea",
@@ -70,13 +87,28 @@
       ]
     },
     {
+      "id": "asset:knobas-forgejo",
+      "type": "container",
+      "name": "knobas-forgejo",
+      "parent": "asset:wsl-docker",
+      "description": "Forgejo, the hard fork of Gitea, run through the same adapter (#1195): `just gitea-live forgejo` starts it, on its own opt-in profile, volume and seed state. On the WSL box no run stops it once it is up, so it is part of what the engine runs.",
+      "properties": {
+        "docker_context": "wsl",
+        "container_name": "knobas-forgejo",
+        "image": "codeberg.org/forgejo/forgejo",
+        "compose_service": "forgejo",
+        "compose_profile": "forgejo",
+        "published_port": "127.0.0.1:3002"
+      }
+    },
+    {
       "id": "asset:knobas-uptime-kuma",
       "type": "container",
       "name": "knobas-uptime-kuma",
-      "parent": "asset:orbstack-docker",
-      "description": "Uptime Kuma v2: the system of record for every monitor this file names. It does not watch itself.",
+      "parent": "asset:wsl-docker",
+      "description": "Uptime Kuma v2: the system of record for every monitor this file names. On the WSL box with the products since 2026-11-01, so the notebook runs no container. It does not watch itself.",
       "properties": {
-        "docker_context": "orbstack",
+        "docker_context": "wsl",
         "container_name": "knobas-uptime-kuma",
         "image": "louislam/uptime-kuma",
         "compose_service": "uptime-kuma",
@@ -84,27 +116,26 @@
       }
     },
     {
-      "id": "asset:knobas-mockd",
+      "id": "asset:knobas-docker-proxy",
       "type": "container",
-      "name": "knobas-mockd",
-      "parent": "asset:orbstack-docker",
-      "description": "Our own mock of Jira Data Center and TeamCity. Deprecated since 2026-09-03 (ADR-0013) and unmonitored: it is recorded because the compose file still runs it, and it leaves this file the day the service goes.",
+      "name": "knobas-docker-proxy",
+      "parent": "asset:wsl-docker",
+      "description": "Uptime Kuma's read-only Docker API (#978): the Docker host its docker monitors read, holding the engine's socket and passing on only GET /containers/*. It publishes no port and shares an internal network with Kuma alone. Recorded because it runs on the box, and `just estate-live` requires every running container to be in this file.",
       "properties": {
-        "docker_context": "orbstack",
-        "container_name": "knobas-mockd",
-        "compose_service": "mockd",
-        "published_ports": "127.0.0.1:8200, 127.0.0.1:8210, 127.0.0.1:8212",
-        "status": "deprecated (ADR-0013)"
+        "docker_context": "wsl",
+        "container_name": "knobas-docker-proxy",
+        "image": "tecnativa/docker-socket-proxy",
+        "compose_service": "docker-proxy"
       }
     },
     {
       "id": "asset:knobas-teamcity",
       "type": "container",
       "name": "knobas-teamcity",
-      "parent": "asset:orbstack-docker",
-      "description": "The TeamCity server. On demand: `just live-up teamcity` starts it beside Gitea, and `just live-down teamcity` stops it and keeps its volumes, so the next start finds it seeded.",
+      "parent": "asset:wsl-docker",
+      "description": "The TeamCity server. Up around the clock on the WSL box: no run stops it when it ends, and its volumes keep its builds. Only the memory budget would stop it, for a start that finds no room, and on this box all three products fit.",
       "properties": {
-        "docker_context": "orbstack",
+        "docker_context": "wsl",
         "container_name": "knobas-teamcity",
         "image": "jetbrains/teamcity-server",
         "compose_service": "teamcity",
@@ -130,10 +161,10 @@
       "id": "asset:knobas-teamcity-agent",
       "type": "container",
       "name": "knobas-teamcity-agent",
-      "parent": "asset:orbstack-docker",
+      "parent": "asset:wsl-docker",
       "description": "The one build agent, because a server with none runs nothing. It publishes no port and has no monitor of its own; it starts and stops with its server.",
       "properties": {
-        "docker_context": "orbstack",
+        "docker_context": "wsl",
         "container_name": "knobas-teamcity-agent",
         "image": "jetbrains/teamcity-agent",
         "compose_service": "teamcity-agent",
@@ -145,10 +176,10 @@
       "id": "asset:knobas-jira",
       "type": "container",
       "name": "knobas-jira",
-      "parent": "asset:orbstack-docker",
-      "description": "Jira Software Data Center 10.3 LTS, on a 10-user, 3-hour timebomb licence. On demand: `just live-down jira` removes it with its volumes, because a kept volume is a product whose licence has already run out.",
+      "parent": "asset:wsl-docker",
+      "description": "Jira Software Data Center 10.3 LTS, on a 10-user, 3-hour timebomb licence. Up around the clock on the WSL box, and no run stops it. When less than an hour of the licence is left, the next run or `live-up` removes it with its volumes and sets it up again from empty.",
       "properties": {
-        "docker_context": "orbstack",
+        "docker_context": "wsl",
         "container_name": "knobas-jira",
         "image": "atlassian/jira-software",
         "compose_service": "jira",
@@ -163,10 +194,10 @@
       "id": "asset:knobas-jira-db",
       "type": "container",
       "name": "knobas-jira-db",
-      "parent": "asset:orbstack-docker",
-      "description": "Jira's PostgreSQL, started and removed with Jira.",
+      "parent": "asset:wsl-docker",
+      "description": "Jira's PostgreSQL, set up again from empty with Jira when its licence is due.",
       "properties": {
-        "docker_context": "orbstack",
+        "docker_context": "wsl",
         "container_name": "knobas-jira-db",
         "image": "postgres",
         "compose_service": "jira-db",
@@ -189,10 +220,10 @@
       "id": "asset:knobas-confluence",
       "type": "container",
       "name": "knobas-confluence",
-      "parent": "asset:orbstack-docker",
-      "description": "Confluence Data Center, the only contract there is for it: Atlassian publishes no machine-readable Confluence DC spec. On demand, and removed with its volumes, as Jira is.",
+      "parent": "asset:wsl-docker",
+      "description": "Confluence Data Center, the only contract there is for it: Atlassian publishes no machine-readable Confluence DC spec. Up around the clock on the WSL box, and set up again from empty when its licence is due, as Jira is.",
       "properties": {
-        "docker_context": "orbstack",
+        "docker_context": "wsl",
         "container_name": "knobas-confluence",
         "image": "atlassian/confluence",
         "compose_service": "confluence",
@@ -207,15 +238,15 @@
       "id": "asset:knobas-confluence-db",
       "type": "container",
       "name": "knobas-confluence-db",
-      "parent": "asset:orbstack-docker",
+      "parent": "asset:wsl-docker",
       "properties": {
-        "docker_context": "orbstack",
+        "docker_context": "wsl",
         "container_name": "knobas-confluence-db",
         "image": "postgres",
         "compose_service": "confluence-db",
         "compose_profile": "real-atlassian"
       },
-      "description": "Confluence's PostgreSQL, started and removed with Confluence."
+      "description": "Confluence's PostgreSQL, set up again from empty with Confluence when its licence is due."
     },
     {
       "id": "asset:db-confluence",
@@ -238,7 +269,7 @@
       "name": "Gitea",
       "url": "http://127.0.0.1:3000/",
       "properties": {
-        "opened_by": "docker compose up (published port)"
+        "opened_by": "testenv/live tunnel (ssh -L to the WSL box)"
       }
     },
     {
@@ -248,37 +279,7 @@
       "name": "Uptime Kuma",
       "url": "http://127.0.0.1:3001/",
       "properties": {
-        "opened_by": "docker compose up (published port)"
-      }
-    },
-    {
-      "id": "route:notebook-mockd-admin",
-      "asset": "asset:notebook",
-      "target": "asset:knobas-mockd",
-      "name": "mockd health and admin",
-      "url": "http://127.0.0.1:8200/",
-      "properties": {
-        "opened_by": "docker compose up (published port)"
-      }
-    },
-    {
-      "id": "route:notebook-mockd-jira",
-      "asset": "asset:notebook",
-      "target": "asset:knobas-mockd",
-      "name": "mockd Jira Data Center REST v2",
-      "url": "http://127.0.0.1:8210/",
-      "properties": {
-        "opened_by": "docker compose up (published port)"
-      }
-    },
-    {
-      "id": "route:notebook-mockd-teamcity",
-      "asset": "asset:notebook",
-      "target": "asset:knobas-mockd",
-      "name": "mockd TeamCity REST",
-      "url": "http://127.0.0.1:8212/",
-      "properties": {
-        "opened_by": "docker compose up (published port)"
+        "opened_by": "testenv/live tunnel (ssh -L to the WSL box)"
       }
     },
     {
@@ -288,7 +289,7 @@
       "name": "TeamCity",
       "url": "http://127.0.0.1:8111/",
       "properties": {
-        "opened_by": "testenv/live up teamcity (published port)"
+        "opened_by": "testenv/live tunnel (ssh -L to the WSL box)"
       }
     },
     {
@@ -298,7 +299,7 @@
       "name": "Jira",
       "url": "http://127.0.0.1:8080/",
       "properties": {
-        "opened_by": "testenv/live up jira (published port)"
+        "opened_by": "testenv/live tunnel (ssh -L to the WSL box)"
       }
     },
     {
@@ -308,12 +309,12 @@
       "name": "Confluence",
       "url": "http://127.0.0.1:8090/",
       "properties": {
-        "opened_by": "testenv/live up confluence (published port)"
+        "opened_by": "testenv/live tunnel (ssh -L to the WSL box)"
       }
     },
     {
       "id": "route:compose-gitea",
-      "asset": "asset:orbstack-docker",
+      "asset": "asset:wsl-docker",
       "target": "asset:knobas-gitea",
       "name": "gitea (compose network)",
       "url": "http://gitea:3000/",

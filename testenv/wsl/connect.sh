@@ -11,7 +11,9 @@
 #    on a re-run, with a ControlMaster: every docker call is an ssh login.
 # 3. testenv/live.env in the MAIN checkout (every worktree reads that one):
 #    KNOBAS_LIVE_TARGET=remote, KNOBAS_LIVE_SSH=knobas-wsl.
-# 4. testenv/live remote-check: ssh, the engine, its memory, the tunnel.
+# 4. A docker context `wsl` (ssh://knobas-wsl), made if missing: the context
+#    testenv/estate.json's engine names, which `just estate-live` reads.
+# 5. testenv/live remote-check: ssh, the engine, its memory, the tunnel.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 common=$(git -C "$here" rev-parse --path-format=absolute --git-common-dir)
@@ -70,4 +72,7 @@ KNOBAS_LIVE_TARGET=remote
 KNOBAS_LIVE_SSH=$alias
 EOF
 echo "connect: wrote $envfile"
+# The `wsl` context: what testenv/estate.json's engine names, and what the
+# Docker importer and `just estate-live` read the box's containers through.
+docker context inspect wsl >/dev/null 2>&1 || docker context create wsl --description "knobas live products on the WSL box" --docker host=ssh://knobas-wsl
 "$here/../live" remote-check

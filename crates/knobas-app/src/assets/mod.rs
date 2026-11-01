@@ -1381,7 +1381,7 @@ const ROUTES_EXPOSED: &str = "select r.id, r.asset_id, r.target_id, r.name, r.ur
 /// step, and in the real estate they are not: a container sits inside a
 /// `container_engine` which sits on the `vm`
 /// (`testenv/estate.json`: `knobas-teamcity` the container, *Docker
-/// engine (OrbStack)*, *OrbStack Linux VM*). A one-hop rule would
+/// engine (WSL)*, *Ubuntu 26.04 (WSL 2)*). A one-hop rule would
 /// stop at the engine and answer nothing for the box, which is the question
 /// being asked. There is no honest depth between one and all of them.
 ///
@@ -7743,8 +7743,8 @@ mod tests {
     fn the_checked_in_estate_parses_and_its_scalars_become_tagged_values() {
         const ESTATE: &str = include_str!("../../../../testenv/estate.json");
         let parsed: EstateFile = serde_json::from_str(ESTATE).expect("the real estate file");
-        assert_eq!(parsed.assets.len(), 16, "the estate file's assets");
-        assert_eq!(parsed.routes.len(), 9, "the estate file's routes");
+        assert_eq!(parsed.assets.len(), 18, "the estate file's assets");
+        assert_eq!(parsed.routes.len(), 6, "the estate file's routes");
 
         let notebook = parsed
             .assets
@@ -7752,7 +7752,7 @@ mod tests {
             .find(|asset| asset.id == "asset:notebook")
             .expect("the notebook is in the estate file");
         let bag = bag_of(
-            Some(vet_type(&notebook.type_id).expect("`hypervisor` is a type")),
+            Some(vet_type(&notebook.type_id).expect("`custom` is a type")),
             &notebook.properties,
             notebook.description.as_deref(),
         )
@@ -7765,23 +7765,22 @@ mod tests {
         assert!(
             bag[DESCRIPTION_KEY]["value"]
                 .as_str()
-                .is_some_and(|text| text.contains("OrbStack")),
+                .is_some_and(|text| text.contains("WSL box")),
             "the entry's description is a text property of its own: {:?}",
             bag[DESCRIPTION_KEY]
         );
-        // The negative control for the pair: a declared key takes the kind its
-        // *type* declares, and `ip` is one -- so a table that answered `text`
-        // to everything would pass the pair and fail nothing.
+        // `custom` declares nothing, so the notebook's `ip` is an undeclared
+        // key holding a string: text, like `role`.
         assert_eq!(
             bag["ip"],
-            serde_json::json!({ "kind": "text", "value": "0.250.250.254" })
+            serde_json::json!({ "kind": "text", "value": "100.92.199.117" })
         );
 
         let vm = parsed
             .assets
             .iter()
-            .find(|asset| asset.id == "asset:orbstack")
-            .expect("OrbStack's VM is in the estate file");
+            .find(|asset| asset.id == "asset:wsl")
+            .expect("the WSL VM is in the estate file");
         let bag = bag_of(
             Some(vet_type(&vm.type_id).expect("`vm` is a type")),
             &vm.properties,
@@ -7790,8 +7789,15 @@ mod tests {
         .expect("the VM's properties translate");
         assert_eq!(
             bag["memory_gb"],
-            serde_json::json!({ "kind": "number", "value": 8.0 }),
+            serde_json::json!({ "kind": "number", "value": 12.0 }),
             "a JSON number is a number property"
+        );
+        // The negative control for the pair: a declared key takes the kind its
+        // *type* declares, and a vm's `ip` is one -- so a table that answered
+        // `text` to everything would pass the pair and fail nothing.
+        assert_eq!(
+            bag["ip"],
+            serde_json::json!({ "kind": "text", "value": "172.17.0.1" })
         );
     }
 

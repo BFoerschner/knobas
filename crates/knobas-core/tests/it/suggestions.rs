@@ -1064,7 +1064,7 @@ async fn an_asset_stating_one_address_in_both_properties_is_proposed_once() {
 ///
 /// The fixture is `testenv/estate.json`'s own shape, because it is the shape
 /// that decides the rule: `route:compose-gitea` is exposed by
-/// `asset:orbstack-docker`, targets `asset:knobas-gitea` and carries
+/// `asset:wsl-docker`, targets `asset:knobas-gitea` and carries
 /// `http://gitea:3000/`, while the seeded monitor `gitea` watches
 /// `http://gitea:3000/api/healthz`. The thing answering at that host is Gitea,
 /// so the exposing end is the negative here and not the positive. (Until #634
@@ -1075,7 +1075,7 @@ async fn a_monitor_proposes_the_asset_a_route_lands_on_not_the_one_exposing_it()
     let pool = scratch().await;
     let watching = monitor(&pool, "1", "gitea", Some("http://gitea:3000/api/healthz")).await;
 
-    let engine = asset(&pool, "orbstack-docker", None).await;
+    let engine = asset(&pool, "wsl-docker", None).await;
     let gitea = asset(&pool, "knobas-gitea", None).await;
     route(
         &pool,

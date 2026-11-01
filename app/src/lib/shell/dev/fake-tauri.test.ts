@@ -173,7 +173,7 @@ test("the estate is the checked-in file, and every type it names has a chip", ()
   const handlers = demoHandlers();
 
   // The top of the estate: the file has exactly one asset with no parent, and
-  // a fixture that lost the `parent` mapping would draw all sixteen here.
+  // a fixture that lost the `parent` mapping would draw all seventeen here.
   const roots = ESTATE_ON_DISK.assets.filter((asset) => asset.parent === undefined);
   expect(column(handlers, null).map((row) => row.id)).toEqual(roots.map((asset) => asset.id));
 
@@ -203,56 +203,64 @@ test("the estate is the checked-in file, and every type it names has a chip", ()
  * exercise every branch of it: a declared key the file fills, a declared key
  * it does not, a custom string, a custom **number**, and the `description`
  * that has no column. (Until #634 one Hetzner server's pane carried all five;
- * the servers are gone and the notebook and OrbStack's VM split them.)
+ * the servers are gone, and since 2026-11-01 the Windows desktop that runs
+ * WSL carries them, with the WSL VM's as a second number.)
  */
 test("a machine's pane draws the file's properties at the kinds the type declares", () => {
   const handlers = demoHandlers();
 
-  // The notebook holds OrbStack's VM, the VM one Docker engine, and the engine
-  // every container the estate runs.
-  const vms = column(handlers, "asset:notebook");
-  expect(vms.map((row) => row.id)).toEqual(["asset:orbstack"]);
-  const engines = column(handlers, "asset:orbstack");
-  expect(engines.map((row) => row.id)).toEqual(["asset:orbstack-docker"]);
-  expect(column(handlers, "asset:orbstack-docker").length).toBeGreaterThan(5);
+  // The desktop holds the WSL VM, the VM one Docker engine, and the engine
+  // every container the estate runs. The notebook holds nothing.
+  const vms = column(handlers, "asset:desktop");
+  expect(vms.map((row) => row.id)).toEqual(["asset:wsl"]);
+  const engines = column(handlers, "asset:wsl");
+  expect(engines.map((row) => row.id)).toEqual(["asset:wsl-docker"]);
+  expect(column(handlers, "asset:wsl-docker").length).toBeGreaterThan(5);
+  expect(column(handlers, "asset:notebook")).toEqual([]);
 
   type Detail = { properties: { key: string; label: string; value: unknown; custom: boolean }[] };
-  const notebook = handlers["get_asset"]!({ assetId: "asset:notebook" }) as Detail;
-  const notebookFile = ESTATE_ON_DISK.assets.find((asset) => asset.id === "asset:notebook")!;
+  const desktop = handlers["get_asset"]!({ assetId: "asset:desktop" }) as Detail;
+  const desktopFile = ESTATE_ON_DISK.assets.find((asset) => asset.id === "asset:desktop")!;
   const on = (detail: Detail, key: string) =>
     detail.properties.find((property) => property.key === key);
 
   // Declared by `hypervisor`, in the type's order, and labelled by the type.
-  expect(notebook.properties.slice(0, 3).map((property) => property.key)).toEqual([
+  expect(desktop.properties.slice(0, 3).map((property) => property.key)).toEqual([
     "hostname",
     "ip",
     "os",
   ]);
-  expect(on(notebook, "os")).toEqual({
+  expect(on(desktop, "os")).toEqual({
     key: "os",
     label: "OS",
-    value: { kind: "text", value: notebookFile.properties!.os },
+    value: { kind: "text", value: desktopFile.properties!.os },
     custom: false,
   });
   // Declared and unfilled: `null`, which is the em dash the pane draws.
-  expect(on(notebook, "hostname")!.value).toBeNull();
+  expect(on(desktop, "hostname")!.value).toBeNull();
   // Custom, labelled by its own key.
-  expect(on(notebook, "role")).toEqual({
+  expect(on(desktop, "role")).toEqual({
     key: "role",
     label: "role",
-    value: { kind: "text", value: notebookFile.properties!.role },
+    value: { kind: "text", value: desktopFile.properties!.role },
     custom: true,
   });
   // The description has no column in this model, so it is a property.
-  expect(on(notebook, "description")!.value).toEqual({
+  expect(on(desktop, "description")!.value).toEqual({
     kind: "text",
-    value: notebookFile.description,
+    value: desktopFile.description,
   });
 
   // A number stays a number — the one place `valueOf` reads the JSON's type
   // rather than the schema's.
-  const vm = handlers["get_asset"]!({ assetId: "asset:orbstack" }) as Detail;
-  const vmFile = ESTATE_ON_DISK.assets.find((asset) => asset.id === "asset:orbstack")!;
+  expect(on(desktop, "memory_gb")).toEqual({
+    key: "memory_gb",
+    label: "memory_gb",
+    value: { kind: "number", value: desktopFile.properties!.memory_gb },
+    custom: true,
+  });
+  const vm = handlers["get_asset"]!({ assetId: "asset:wsl" }) as Detail;
+  const vmFile = ESTATE_ON_DISK.assets.find((asset) => asset.id === "asset:wsl")!;
   expect(on(vm, "memory_gb")).toEqual({
     key: "memory_gb",
     label: "memory_gb",
@@ -261,7 +269,7 @@ test("a machine's pane draws the file's properties at the kinds the type declare
   });
 
   // And the custom rows are in key order, after the declared ones.
-  for (const detail of [notebook, vm]) {
+  for (const detail of [desktop, vm]) {
     const custom = detail.properties.filter((property) => property.custom).map((p) => p.key);
     expect(custom).toEqual([...custom].sort());
   }
@@ -278,7 +286,7 @@ test("a machine's pane draws the file's properties at the kinds the type declare
  * `asset_tree` per column → `wiresFor`.
  *
  * `knobas-gitea` is the asset to stand on because both of the estate's ways of
- * reaching a container meet on it: the notebook's published port, whose
+ * reaching a container meet on it: the notebook's tunnelled port, whose
  * exposer is three columns to the left, and the compose network's name for
  * it, whose exposer is the Docker engine one column to the left -- two wires
  * from two different columns. (Until #634 the second was the SSH tunnel's `-R`
@@ -308,7 +316,7 @@ test("a route in the real estate draws a wire to the asset that exposes it", () 
     {
       key: wireKey("via", "route:compose-gitea"),
       column: 3,
-      rowId: "asset:orbstack-docker",
+      rowId: "asset:wsl-docker",
       dashed: false,
     },
   ]);
@@ -340,15 +348,12 @@ test("Depends on this lists every route landing on what breaks, and none above i
       .map((route) => route.id)
       .sort();
 
-  expect(routesOf("asset:orbstack")).toEqual([
+  expect(routesOf("asset:wsl")).toEqual([
     "route:compose-gitea",
     "route:notebook-confluence",
     "route:notebook-gitea",
     "route:notebook-jira",
     "route:notebook-kuma",
-    "route:notebook-mockd-admin",
-    "route:notebook-mockd-jira",
-    "route:notebook-mockd-teamcity",
     "route:notebook-teamcity",
   ]);
   expect(routesOf("asset:knobas-gitea")).toEqual([

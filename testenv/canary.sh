@@ -27,13 +27,13 @@
 # either of them can knock over is 8299.
 #
 # WHY A HOST PROCESS AND NOT A CONTAINER. Kuma reaches it at
-# http://host.docker.internal:8299/, the same host alias the three product
-# checks use, so the canary exercises that path too: if the alias breaks, the
-# canary says so rather than three product checks going red at once for a
-# reason that looks like the products being stopped.
+# http://host.docker.internal:8299/, the host alias, so the canary is also the
+# one check that says whether a container still reaches its engine's machine.
+# (The three product checks reached the products through that alias until
+# 2026-11-01; they name the compose services now, as `gitea` does.)
 #
-# 8299 is outside the interfaces §5 port map (3000, 3001, 8080, 8090, 8111,
-# 8200, 8210, 8212) on purpose: it is a host port, not a published container
+# 8299 is outside the interfaces §5 port map (3000, 3001, 3002, 8080, 8090,
+# 8111) on purpose: it is a host port, not a published container
 # port, so check-ports.sh neither knows nor should know about it.
 set -euo pipefail
 

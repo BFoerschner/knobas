@@ -76,7 +76,7 @@ let SETS: FakeSet[] = [
     members: [
       ...m("repo", "mock:tidewater/payout-service", "mock:tidewater/psp-client"),
       ...m("page", "confluence:psp-codes", "confluence:sepa"),
-      ...m("asset", "asset:knobas-gitea", "asset:orbstack-docker"),
+      ...m("asset", "asset:knobas-gitea", "asset:wsl-docker"),
       ...m("monitor", "kuma:5"),
     ],
     patterns: [p("pipeline", "project:Payouts name:Payout_*"), p("pipeline", 'project:"PSP client" name:PspClient_*')],

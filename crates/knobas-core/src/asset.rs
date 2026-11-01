@@ -193,7 +193,12 @@ use PropertyKind::{Number as N, Text as T, Url as U};
 ///   site and a VM directly under a site (three Hetzner servers in their cloud
 ///   location); those servers were decommissioned and both pairs stay
 ///   suggested, because an hcloud import lands its servers in exactly that
-///   shape. `knobas-core`'s own `tests/it/estate_file.rs` asserts that every
+///   shape. And since 2026-11-01 it holds a `custom` under the `site`: the
+///   development notebook, which runs no container any more and is a
+///   workstation the table has no name for. `custom` stays the escape hatch
+///   and suggests nothing itself; being offered at the top of an estate is
+///   what a machine that fits no level needs. `knobas-core`'s own
+///   `tests/it/estate_file.rs` asserts that every
 ///   parent-and-child pair in that file is suggested here, so the conventions
 ///   answer to an estate that exists (ADR-0013) rather than to a diagram.
 ///
@@ -215,7 +220,7 @@ pub const TYPES: &[AssetType] = &[
         label: "Site",
         monogram: "SI",
         properties: &[p("location", "Location", T), p("provider", "Provider", T)],
-        suggests: &["site", "hypervisor", "vm", "network"],
+        suggests: &["site", "hypervisor", "vm", "network", "custom"],
     },
     AssetType {
         id: "hypervisor",

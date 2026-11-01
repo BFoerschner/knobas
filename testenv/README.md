@@ -3,13 +3,15 @@
 A small fake company on a laptop: the Tidewater Freight fixture served by real
 software (Uptime Kuma always; Gitea, TeamCity, Jira and Confluence started on
 demand by the live recipes, one JVM product at a time, the runs queued on a
-lock — see *Live products, on demand*) and, until the live suites replace it, by our own deprecated mock.
+lock — see *Live products, on demand*). Since 2026-11-01 they run around the
+clock on a WSL box, switched by `testenv/live.env` (*Live products on a remote
+machine (WSL)*), and `estate.json` describes that box.
 
 ```sh
 cd testenv
 # every compose call passes the pins file: --env-file images.env (never a bare
 # `.env`, which means a token and nothing else in this repo)
-docker compose --env-file images.env up -d --build   # gitea, uptime-kuma, mockd
+docker compose --env-file images.env up -d   # gitea, uptime-kuma
 ./seed                         # the Tidewater content, idempotent
 ```
 
@@ -24,12 +26,17 @@ directory. (From 2026-09-06 it needed a gitignored `hetzner/hosts.env` for
 three Hetzner servers' addresses; the servers were decommissioned and
 `testenv/hetzner/` went with them.)
 
-Two layers, and the difference is the point:
+One layer, and that is the point:
 
 | Layer | What | Why |
 |---|---|---|
 | **Real products** | Gitea, Uptime Kuma v2 | Cheap to self-host, so the adapters are certified against the actual software rather than against our idea of it. |
-| **mockd** (deprecated) | Jira Data Center v2, TeamCity REST | Built while Jira and TeamCity were "not cheap to self-host". **Deprecated 2026-09-03 (ADR-0013).** A mock certifies nothing, the real containers behind the profiles below are the witness for every adapter and every write path, and mockd gets nothing new; its tests stay until the live suites assert the same things, then it is deleted. `crates/knobas-mockd` still serves the *same* Tidewater fixture, so both layers tell one story while it lasts (design §14a). |
+
+mockd, our deprecated mock of Jira Data Center and TeamCity (ADR-0013), ran
+here as a container until 2026-11-01; the compose service, its Dockerfile and
+its two build-stage pins are gone. `crates/knobas-mockd` stays: the tests that
+still use it spawn it in process (`knobas_mockd::spawn_*`), and it serves the
+same Tidewater fixture (design §14a).
 
 ## Ports
 
@@ -42,9 +49,6 @@ runs it, so the table and the file cannot drift.
 |---|---|---|
 | 3000 | Gitea | default |
 | 3001 | Uptime Kuma v2 | default |
-| 8200 | mockd — health + `/__mock/*` admin API | default |
-| 8210 | mockd — Jira Data Center REST v2 | default |
-| 8212 | mockd — TeamCity REST | default |
 | 3002 | Forgejo (#1195) | `--profile forgejo` |
 | 8111 | real TeamCity server | `--profile real-teamcity` |
 | 8080 | real Jira Software | `--profile real-atlassian` |
@@ -55,11 +59,13 @@ One host port is used here that is **not** in that table and must not be:
 binds, not a published container port, so `check-ports.sh` has nothing to
 assert about it.
 
-Two ports were once reserved here and both are free now. 8211, reserved for
+Five ports were once reserved here and all are free now. 8211, reserved for
 a Confluence mock until 2026-09-03, is unreserved by ADR-0013; the real
 Confluence on 8090 is the witness. 8213, reserved for a low-code-runtime
 stub until 2026-09-06, is unreserved because that feature left the plan
-(roadmap §2 M4).
+(roadmap §2 M4). 8200, 8210 and 8212, mockd's admin, Jira and TeamCity
+ports, are free since 2026-11-01, when the mockd container left the compose
+file; the tests that spawn the crate in process do not use them.
 
 ## Credentials
 
@@ -73,7 +79,6 @@ protecting, and a seed that prompts is a seed nobody runs.
 | Uptime Kuma admin | `knobas` | `knobas-dev` |
 | TeamCity admin (`--profile real-teamcity`) | `knobas` | `knobas-dev` |
 | Jira / Confluence admin (`--profile real-atlassian`) | `knobas` | `knobas-dev` |
-| mockd | any non-empty `Bearer`/`Basic` token | — |
 
 `./seed` writes two files, both git-ignored:
 
@@ -401,19 +406,20 @@ lives on the remote machine:
   shellcheck recipe uses the local binary when its version is the pin. Both
   were run with OrbStack stopped.
 
-  What a remote Kuma shows red, and no suite asserts: `notebook` pings
-  `0.250.250.254`, OrbStack's address for the Mac; the three JVM checks reach
-  `host.docker.internal:<port>`, the bridge, where the products (bound to
-  127.0.0.1) do not answer. On a freshly seeded Kuma that ping takes long
-  enough to fail that a full sync in the first minute may not see `notebook`
-  yet. A second run does.
+  The monitors work from a remote Kuma (since 2026-11-01): the three JVM
+  checks name their compose services (`http://teamcity:8111/login.html`,
+  `http://jira:8080/status`, `http://confluence:8090/status`), as `gitea`
+  always did, so they reach the products on the compose network rather than
+  through `host.docker.internal`, where the products (bound to 127.0.0.1) do
+  not answer. `notebook` pings the Mac's Tailscale address, `100.92.199.117`.
+  On a freshly seeded Kuma that ping takes long enough to fail that a full
+  sync in the first minute may not see `notebook` yet. A second run does.
 
-  **`just estate-live` needs the notebook's engine.** Its Docker half reads
-  `docker --context orbstack` and requires at least one running container that
-  `testenv/estate.json` lists there. With no container on the Mac that half
-  fails. Witnessing the importer against the remote engine instead means
-  changing `estate.json`'s engine and container list, and the demo and the
-  Kuma suites read that file. That is not done here.
+  **`just estate-live` reads the WSL box's engine.** `testenv/estate.json`
+  describes the box (*The estate file*, below), and its Docker half reads
+  `docker --context wsl`, the ssh context onto `knobas-wsl` that
+  `testenv/wsl/connect.sh` creates, and requires every running container
+  there to be in the file.
 
 **The box has 16 GB, so nothing may freeze it.** A VM pushed into swap stops
 answering ssh. There are three layers, each closing a different way to that:
@@ -559,7 +565,7 @@ variables gate it and where those come from.
 | `just jira-live` | `knobas-source-jira` / `live_jira_seeded`, the Jira half of `knobas-app` / `atlassian_live`, and `knobas-app` / `share_exit` | `KNOBAS_JIRA_URL`/`USER`/`PASSWORD` | `live_session jira`: the recipe starts, seeds and removes Jira itself |
 | `just confluence-live` | `knobas-source-confluence` / `live_confluence_seeded`, the Confluence half of `atlassian_live` (by name: the `justfile`'s `atlassian_live_confluence_tests`), and `knobas-app` / `confluence_live` | `KNOBAS_CONFLUENCE_URL`/`USER`/`PASSWORD` | `live_session confluence`, likewise |
 | `just atlassian-live` | `jira-live`, then `confluence-live` — one product at a time | as those two | as those two |
-| `just estate-live` | `knobas-app` / `estate_live` — both importers against the real systems (#509, #510, #634): the **hcloud importer's round trip** over whatever the knobas Hetzner project holds (produce, land, apply, produce again — all known, nothing changed), and the **Docker importer** against the notebook's `orbstack` engine, whose running containers must all be in `testenv/estate.json`. No ssh, no container started, no seed. The project is empty since #634, so an ordinary run is `ESTATE_LIVE_HCLOUD_SERVERS=0`; a PR touching the hcloud producer owes a run at `=1`, with a server Björn stands up and deletes himself (the `justfile` recipe's header) | `HETZNER_API_TOKEN`, `ESTATE_LIVE_HCLOUD_SERVERS` | the repo-root `.env` (a read-only token for the knobas project), and the count on the command line |
+| `just estate-live` | `knobas-app` / `estate_live` — both importers against the real systems (#509, #510, #634): the **hcloud importer's round trip** over whatever the knobas Hetzner project holds (produce, land, apply, produce again — all known, nothing changed), and the **Docker importer** against the WSL box's engine through the `wsl` context (`testenv/wsl/connect.sh` makes it), whose running containers must all be in `testenv/estate.json`. No ssh, no container started, no seed. The project is empty since #634, so an ordinary run is `ESTATE_LIVE_HCLOUD_SERVERS=0`; a PR touching the hcloud producer owes a run at `=1`, with a server Björn stands up and deletes himself (the `justfile` recipe's header) | `HETZNER_API_TOKEN`, `ESTATE_LIVE_HCLOUD_SERVERS` | the repo-root `.env` (a read-only token for the knobas project), and the count on the command line |
 
 **A recipe with nothing to run against fails; it does not pass quietly.** Each
 one calls the `justfile`'s `_require-live-env` guard on the variables above
@@ -1382,10 +1388,6 @@ reads for you; `--move TEAMCITY_IMAGE` names it as the thing to bump in the
 same change. A held pin says so on its own comment line in `images.env`. `--out PATH`
 writes elsewhere, to compare.
 
-The two build stages of `mockd.Dockerfile` are pinned the same way — an
-unpinned `rust:1-slim` would make the mockd container unreproducible.
-`rust-toolchain.toml` still decides the compiler.
-
 ## Network access
 
 The environment's **containers and seeds** run offline once the images are
@@ -1436,11 +1438,14 @@ snapshot's name, its size and its age.
 
 ## The estate file
 
-`estate.json` is the estate knobas models, written down: this notebook,
-OrbStack's Linux VM and the Docker engine in it, every container
-`docker-compose.yml` runs there — Gitea, Uptime Kuma, mockd, and the on-demand
-TeamCity, Jira and Confluence with their databases — and the published ports
-as routes, with the asset each one lands on. Environment (`dev`) and owner are
+`estate.json` is the estate knobas models, written down: this notebook, the
+Windows desktop that runs WSL 2, the WSL VM and the Docker engine in it, every
+container `docker-compose.yml` runs there — Gitea, Uptime Kuma and its Docker
+API proxy, and TeamCity, Jira and Confluence with their databases — and the
+ports the notebook reaches through the ssh tunnel as routes, with the asset
+each one lands on. The notebook is typed `custom`: since it runs no container
+it holds nothing in the tree, and the type table has no name for a
+workstation. Environment (`dev`) and owner are
 set once at the root; each asset names the Uptime Kuma monitors that watch it.
 From M4 the estate knobas models **is** this infrastructure and not a
 fictional one (#427), so the file is a fixture with readers, not
@@ -1449,14 +1454,23 @@ documentation: the Import, `--demo` (`knobas_app::sources::demo`),
 `?fake-ipc` harness (`app/src/lib/shell/dev/fake/estate.ts`) all read these
 bytes. `crates/knobas-core/tests/it/estate_file.rs` keeps it honest in `just
 check`: unique ids, parents and route ends that resolve, one tree, types from
-the table, no unknown keys, every compose service recorded on the notebook's
+the table, no unknown keys, every compose service recorded on the WSL box's
 engine, every container carrying the `docker_context` and `container_name` it
 is matched on, and the monitor names agreeing with `monitors.json`.
 
 A container recorded here and not running is not wrong: TeamCity, Jira and
-Confluence are on demand (#633), and the file describes them whether or not
-they are up. What `just estate-live`'s Docker half does catch is the other
-direction — a container **running** on the engine and not written down here.
+Confluence stay up on the box, but the memory budget may stop one, and the
+file describes them whether or not they are up. What `just estate-live`'s
+Docker half does catch is the other direction — a container **running** on
+the engine and not written down here. That is why the Docker API proxy is
+recorded although nothing routes to it, and why a Forgejo left running after
+a `gitea-live forgejo` run would turn that half red.
+
+Until 2026-11-01 the engine was OrbStack's, in a Linux VM on this notebook,
+and the products ran there on demand; the file also held the mockd container
+and its three ports. The box's values in the file (Windows host
+`DESKTOP-QUUAHUB`, Ubuntu 26.04 in WSL 2 with 12 cores and 12 GB, docker.io
+29.1.3, the bridge at `172.17.0.1`) are the real box's, as of 2026-11-01.
 
 Until 2026-10-12 the file also held three Hetzner servers, their engines and
 the SSH tunnel's forwards, and lived in `testenv/hetzner/` with the
@@ -1470,7 +1484,7 @@ battery runs on.
 
 `monitors.json` is **the estate**, not fixture content. Since 2026-09-06
 (issue #441, M4 spec #427) the list is the real infrastructure this repository
-runs on: since #634, a ping on the notebook, one HTTP check per on-demand
+runs on: since #634, a ping on the notebook, one HTTP check per JVM
 product, one on Gitea, and a canary that exists to be knocked over.
 `fixtures/tidewater/work.json` still contains no monitors — a monitor is a
 *mirrored item of the Kuma source*, never fixture work (M4 spec, "Assets are
@@ -1478,34 +1492,35 @@ knobas-owned; monitors are mirrored").
 
 | Monitor | Type | Checks | Goes red when |
 |---|---|---|---|
-| `notebook` | ping | `0.250.250.254` | the address the containers reach this machine at stops answering |
-| `teamcity` | http | `http://host.docker.internal:8111/login.html` | TeamCity is stopped — which, on demand, is most of the time |
-| `jira` | http | `http://host.docker.internal:8080/status` | ditto |
-| `confluence` | http | `http://host.docker.internal:8090/status` | ditto |
+| `notebook` | ping | `100.92.199.117` | the notebook's Tailscale address stops answering the Kuma on the WSL box |
+| `teamcity` | http | `http://teamcity:8111/login.html` | TeamCity is stopped |
+| `jira` | http | `http://jira:8080/status` | ditto |
+| `confluence` | http | `http://confluence:8090/status` | ditto |
 | `gitea` | http | `http://gitea:3000/api/healthz` | the Gitea container is down |
 | `canary` | http | `http://host.docker.internal:8299/` | `./canary.sh down` released the port |
 
-**The three product checks are red whenever their product is stopped**, and
-since #633 that is the ordinary state: TeamCity, Jira and Confluence run only
-while a live recipe needs them. A red there is not an outage. (Until #634 they
-were named `(tunnel)`, because they fell with the SSH tunnel to the Hetzner
-servers, and three pings watched the servers themselves.)
+**The three product checks are red whenever their product is stopped.** On
+the WSL box they stay up, so a red there is a product down, or one the memory
+budget stopped, or one being set up again for its licence. On the local
+target, where they run only while a live recipe needs them (#633), red is the
+ordinary state and not an outage. (Until #634 they were named `(tunnel)`,
+because they fell with the SSH tunnel to the Hetzner servers, and three pings
+watched the servers themselves.)
 
 The endpoints are the unauthenticated ones each product answers `200` on
 (`/login.html`, `/status`, `/status`); the obvious REST paths answer `401`,
 which `accepted_statuscodes: ["200-299"]` reads as down.
 
-**The `notebook` ping watches `0.250.250.254`**, which is what
-`host.docker.internal` resolves to inside OrbStack's VM — the address the
-containers reach this machine at — and `testenv/estate.json` states it as the
-notebook's `ip`. Literal rather than a name because a ping carries a bare
-address and the estate states one, which is what lets `monitor_url_host` (the
-suggestion rule that reads a ping's `hostname` against an asset's `ip`, #479)
-reach a ping on the real estate at all. Measured on 2026-10-12: `docker exec
-knobas-uptime-kuma ping -c1 0.250.250.254` answered. If this environment ever
-moves off OrbStack the address moves with it; change it here, in
-`monitors.json` and in the estate file together (`estate_file.rs` holds the two
-equal).
+**The `notebook` ping watches `100.92.199.117`**, the notebook's Tailscale
+address, which the Kuma on the WSL box reaches it at, and
+`testenv/estate.json` states it as the notebook's `ip`. Literal rather than a
+name because a ping carries a bare address and the estate states one, which
+is what lets `monitor_url_host` (the suggestion rule that reads a ping's
+`hostname` against an asset's `ip`, #479) reach a ping on the real estate at
+all. Until 2026-11-01 it watched `0.250.250.254`, what `host.docker.internal`
+resolved to inside OrbStack's VM. If the address moves, change it here, in
+`monitors.json` and in the estate file together (`estate_file.rs` holds the
+two equal).
 
 **Can the Kuma container send ICMP?** Yes, measured on the pinned image (2.5.3)
 under OrbStack on 2026-09-06: the container runs as `uid=0(root)`,
@@ -1515,20 +1530,18 @@ type is not only a `monitors.json` edit: `kuma-seed.mjs`'s `payload()` branches
 on `ping` against everything-else-is-http, and `OWNED` (what counts as drift)
 has no `port`, so both need a third case first.
 
-**Four of the six check the host, not the compose network**, through
-`host.docker.internal` — the three products' published ports and the canary
-are host sockets bound to `127.0.0.1`. (`gitea` reaches its container by its
-compose service name; the `notebook` ping is ICMP, with no socket at all.)
-Docker Desktop and OrbStack define that alias themselves; the `extra_hosts:
-host.docker.internal:host-gateway` line on the `uptime-kuma` service is what
-makes the name *resolve* on a plain Linux engine, which defines nothing. It
-does not make those four monitors *work* there: `host-gateway` is the bridge
-gateway, and the published ports and the canary bind `127.0.0.1` only,
-deliberately, so a bridge-gateway client cannot reach them. Running this on
-Linux would also mean binding those four targets on the bridge address; nobody
-has needed that, and this environment is a laptop's. Measured on OrbStack: with
-and without the line the alias resolves to `0.250.250.254` and reaches a host
-socket bound to `127.0.0.1`, so it is a no-op here.
+**Only the canary checks the host**, through `host.docker.internal`. The
+three products and `gitea` are reached by their compose service names on the
+compose network, which works on any engine; the `notebook` ping is ICMP, with
+no socket at all. Docker Desktop and OrbStack define `host.docker.internal`
+themselves; the `extra_hosts: host.docker.internal:host-gateway` line on the
+`uptime-kuma` service is what makes the name *resolve* on a plain Linux
+engine, such as the WSL box's, which defines nothing: to the bridge gateway,
+`172.17.0.1`. A bridge-gateway client cannot reach a socket bound to
+`127.0.0.1`, so on a remote target `canary.sh` binds the canary on the bridge
+address. Until 2026-11-01 the three product checks went through the alias to
+the products' published ports too, which worked only under OrbStack, where
+the alias reaches a host socket bound to `127.0.0.1`.
 
 Adding it did cost one thing, once: a compose service whose definition changes
 is **recreated** on the next `docker compose --env-file images.env up -d`, so the shared Kuma was

@@ -751,7 +751,7 @@ async fn a_property_value_and_a_url_are_what_a_reader_types() {
 
     // The route, at the shape every route in `testenv/estate.json`
     // actually has -- a loopback host, no path, and the port that is the only
-    // thing telling nine of them apart (ADR-0013).
+    // thing telling six of them apart (ADR-0013).
     let route = knobas_app::assets::create_route(
         &pool,
         &vm.id,
@@ -901,7 +901,7 @@ async fn moving_an_asset_moves_what_under_returns() {
 //
 // **The estate is the real file**, `testenv/estate.json`, imported
 // through `knobas_app::assets::apply_import`: the same door `--demo` and
-// `estate_exit.rs` use. Not sixteen assets typed out here, because a
+// `estate_exit.rs` use. Not seventeen assets typed out here, because a
 // fixture written beside the assertion agrees with it by construction, and
 // because two of these rules run over the *tree* -- an alert routed through an
 // ancestor needs an ancestor somebody drew on purpose.
@@ -912,7 +912,7 @@ const ESTATE_FILE: &str = include_str!("../../../../testenv/estate.json");
 /// How many assets that file holds. A literal, and deliberately not counted out
 /// of the file: a count derived from the fixture agrees with the fixture
 /// however wrong the import is.
-const ESTATE_ASSETS: i64 = 16;
+const ESTATE_ASSETS: i64 = 18;
 
 /// One mirrored monitor, and what its payload says about a certificate.
 ///
@@ -987,9 +987,9 @@ async fn open_alert(pool: &sqlx::PgPool, monitor: &str) {
 /// can be satisfied by the same one:
 ///
 /// * `gitea` -- five days left, on `asset:knobas-gitea`, under
-///   `asset:orbstack-docker`.
-/// * `notebook` -- **31** days left, on `asset:notebook`, above the engine
-///   rather than under it. The certificate negative the criterion asks for by
+///   `asset:wsl-docker`.
+/// * `notebook` -- **31** days left, on `asset:notebook`, in another branch
+///   of the tree from the engine rather than under it. The certificate negative the criterion asks for by
 ///   name.
 /// * `jira` -- no certificate at all, on `asset:knobas-jira`. The miss
 ///   direction: a payload with the key absent contributes nothing rather than
@@ -1080,7 +1080,7 @@ async fn the_launchers_not_monitored_list_is_the_monitors_tabs_roster() {
         );
     }
     assert!(
-        rows.contains(&"asset:orbstack".to_owned()),
+        rows.contains(&"asset:wsl".to_owned()),
         "an asset nothing watches is: {rows:?}"
     );
 
@@ -1104,7 +1104,7 @@ async fn the_launchers_not_monitored_list_is_the_monitors_tabs_roster() {
 /// **Open alerts on my jobs, at the wire** -- routed by membership, and
 /// through an ancestor.
 ///
-/// The context holds `asset:orbstack-docker`, which is the *parent* of the
+/// The context holds `asset:wsl-docker`, which is the *parent* of the
 /// asset the alerting monitor watches. So the row that comes back is there
 /// through ADR-0008's `held` recursion and not through a direct link, which is
 /// the half of *"directly or through an ancestor"* a flat membership rule would
@@ -1123,7 +1123,7 @@ async fn an_open_alert_reaches_the_list_through_the_contexts_ancestors() {
     open_alert(&pool, "kuma:gitea").await;
     // ...and one on an asset no context holds. The negative the criterion asks
     // for by name: `asset:notebook` is in the estate, has a monitor, sits
-    // *above* the engine the context will hold, and is nobody's business.
+    // *outside* the engine the context will hold, and is nobody's business.
     open_alert(&pool, "kuma:notebook").await;
 
     assert_eq!(
@@ -1133,7 +1133,7 @@ async fn an_open_alert_reaches_the_list_through_the_contexts_ancestors() {
          #427 story 60"
     );
 
-    context_holding(&pool, "shipping", "asset:orbstack-docker").await;
+    context_holding(&pool, "shipping", "asset:wsl-docker").await;
 
     let rows = list_rows(&pool, "alerts-in-context").await;
     assert_eq!(
@@ -1170,7 +1170,7 @@ async fn an_open_alert_reaches_the_list_through_the_contexts_ancestors() {
 async fn an_acked_alert_is_still_open_and_still_on_the_list() {
     let pool = estate_with_monitors("lists-alerts-acked").await;
     open_alert(&pool, "kuma:gitea").await;
-    context_holding(&pool, "shipping", "asset:orbstack-docker").await;
+    context_holding(&pool, "shipping", "asset:wsl-docker").await;
 
     sqlx::query("update knobas.monitor_alert set acked_at = now() where entity_id = 'kuma:gitea'")
         .execute(&pool)
@@ -1291,7 +1291,7 @@ async fn a_certificate_reading_that_is_not_a_number_is_a_miss_and_not_a_failure(
 async fn every_estate_list_badges_until_it_is_opened() {
     let pool = estate_with_monitors("lists-estate-badge").await;
     open_alert(&pool, "kuma:gitea").await;
-    context_holding(&pool, "shipping", "asset:orbstack-docker").await;
+    context_holding(&pool, "shipping", "asset:wsl-docker").await;
 
     let badged = |pool: sqlx::PgPool| async move {
         smart_lists_inner(&pool, &Registry::for_process())

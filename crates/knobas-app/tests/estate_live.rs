@@ -7,7 +7,7 @@
 //!   project holds: produce, land what is new, apply, produce again, and the
 //!   second file previews *all known, nothing changed*. Spec #491 story 64's
 //!   *"a re-import previews already in the tree"*, against the real API.
-//! * **Docker** -- every running container on the notebook's engine is
+//! * **Docker** -- every running container on the WSL box's engine is
 //!   already in the checked-in estate (`testenv/estate.json`), under the id it
 //!   gives it, with nothing changed.
 //!
@@ -44,7 +44,7 @@
 //! 1. **That Hetzner still answers in that shape, and docker still writes one
 //!    JSON object per line.** A recording is green forever; only a real request
 //!    can go red when a field moves.
-//! 2. **That the estate file is not behind the notebook's engine.** A container
+//! 2. **That the estate file is not behind the WSL box's engine.** A container
 //!    started there and never written down previews as *new* here. Read a red
 //!    Docker run first as `testenv/estate.json` being behind, and only then as a
 //!    bug in the producer.
@@ -52,10 +52,12 @@
 //! # What it touches
 //!
 //! One `GET /v1/servers` per produce (three at most) over HTTPS with the token
-//! in the repo-root `.env`, and one `docker --context orbstack ps` -- all
-//! read-only -- plus scratch databases of this run's own that the imports write
-//! into. **No ssh, no tunnel, no `hcloud` CLI**: the only docker context the
-//! estate file names is OrbStack's, so nothing here reaches a remote engine.
+//! in the repo-root `.env`, and one `docker --context wsl ps` -- all read-only
+//! -- plus scratch databases of this run's own that the imports write into.
+//! **No tunnel, no `hcloud` CLI.** The only docker context the estate file
+//! names is `wsl`, an ssh context onto the WSL box (`ssh://knobas-wsl`, made by
+//! `testenv/wsl/connect.sh`), so the one ssh login is docker's own, through
+//! that context.
 //!
 //! # Running it
 //!
@@ -281,7 +283,8 @@ async fn the_real_project_round_trips_through_the_importer() {
 /// (#510).
 ///
 /// The estate file is imported into a scratch database, the Docker importer is
-/// run against the one engine the file names -- the notebook's OrbStack -- and
+/// run against the one engine the file names -- the WSL box's, through the
+/// `wsl` context -- and
 /// the file it produces is previewed. Every entry has to land in *already in
 /// the tree*, under the id `estate.json` gives it and not under the producer's
 /// own `asset:docker-<context>/<name>`, and no property may be listed as
@@ -304,12 +307,13 @@ async fn the_real_project_round_trips_through_the_importer() {
 ///
 /// **Not an exact list of containers.** `docker ps` reads the *running* ones,
 /// and which of them are running is a fact about the moment: TeamCity, Jira
-/// and Confluence are started on demand (#633), `knobas-mockd` is not running
-/// (ADR-0013). What is asserted instead is that **the engine answered** -- its
+/// and Confluence stay up on the WSL box but the memory budget may have
+/// stopped one, and `knobas-forgejo` runs only during a Forgejo run. What is
+/// asserted instead is that **the engine answered** -- its
 /// context is in the produced file -- and that nothing produced is new or
 /// changed.
 #[tokio::test]
-#[ignore = "spawns the real docker CLI against the notebook's engine; run through `just estate-live`"]
+#[ignore = "spawns the real docker CLI against the WSL box's engine; run through `just estate-live`"]
 async fn the_real_containers_are_already_in_the_tree() {
     let pool = knobas_db::test_util::scratch_database("estate-live-docker")
         .await
@@ -326,7 +330,7 @@ async fn the_real_containers_are_already_in_the_tree() {
     // way -- #509's part 4c, applied to the other importer.
     let produced = assets::docker::produce(&pool, &assets::docker::cli(assets::docker::PROGRAM))
         .await
-        .expect("the docker importer runs against the notebook's engine");
+        .expect("the docker importer runs against the WSL box's engine");
     let assets::Produced::Ready {
         file,
         new_servers,
@@ -371,7 +375,7 @@ async fn the_real_containers_are_already_in_the_tree() {
     contexts.dedup();
     assert_eq!(
         contexts,
-        ["orbstack"],
+        ["wsl"],
         "the one engine `testenv/estate.json` names, which answered with at \
          least one running container"
     );
@@ -411,7 +415,7 @@ async fn the_real_containers_are_already_in_the_tree() {
         .collect();
     known.sort_unstable();
     println!(
-        "estate-live: {} containers produced on the notebook's engine, all \
+        "estate-live: {} containers produced on the WSL box's engine, all \
          known, no changes: {known:?}",
         preview.known.len()
     );

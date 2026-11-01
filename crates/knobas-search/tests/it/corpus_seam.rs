@@ -362,7 +362,7 @@ async fn the_estates_two_corpora_go_through_the_same_pipeline() {
     .await;
     let route = format!("route:{t}-kuma");
     // The shape every route in `testenv/estate.json` has -- a loopback
-    // host and the port that is the only thing telling the nine of them apart
+    // host and the port that is the only thing telling the six of them apart
     // (ADR-0013: the real container is the witness). The port is unique to this
     // file, so no other test in this file can match it.
     seed_route(
