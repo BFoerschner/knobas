@@ -140,3 +140,48 @@ async fn a_listed_board_scope_leaves_nothing_out() {
 
     assert!(sink.left_out.is_empty(), "{:?}", sink.left_out);
 }
+
+/// A Jira that answers `route` with `status` and serves no other path.
+async fn refusing(route: &str, status: u16) -> MockServer {
+    let server = MockServer::builder().start().await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/2/serverInfo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "version": "10.3.24",
+            "serverTime": "2026-11-01T14:50:00.000+0000"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(route))
+        .respond_with(ResponseTemplate::new(status).set_body_string(NO_ACCESS))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// The credential's own refusals keep their class: a 401 on `myself` is
+/// what *Test connection* reads as "Sign-in failed".
+#[tokio::test]
+async fn a_401_on_myself_is_still_a_sign_in_failure() {
+    let jira = refusing("/rest/api/2/myself", 401).await;
+    let got = source(&jira.uri()).test_connection().await;
+    assert!(
+        matches!(got, Err(SourceError::Unauthorized { .. })),
+        "{got:?}"
+    );
+}
+
+/// ...and a 403 on core REST is the credential's too: only the Agile REST's
+/// 403 is Jira Software's.
+#[tokio::test]
+async fn a_403_on_core_rest_still_fails_the_run_as_unauthorized() {
+    let jira = refusing("/rest/api/2/search", 403).await;
+    let mut sink = Recorded::default();
+    let got = source(&jira.uri()).sync(None, &mut sink).await;
+    assert!(
+        matches!(got, Err(SourceError::Unauthorized { .. })),
+        "{got:?}"
+    );
+    assert!(sink.left_out.is_empty());
+}
