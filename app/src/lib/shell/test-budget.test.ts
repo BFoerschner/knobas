@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { budgetFactor } from "./test-budget";
@@ -24,5 +27,17 @@ describe("budgetFactor (#2044)", () => {
 
   it("reads only the value true as the runner", () => {
     expect(budgetFactor(12, { GITHUB_ACTIONS: "false" })).toBe(1);
+  });
+});
+
+describe("the store reset's budget (#2359)", () => {
+  // The first reset in a file imports every store in `test-resets.ts`, and
+  // through the three page components most of the app: 1.7 s alone and idle,
+  // all of it transform. A run of one file with load 70-130 beside it took
+  // 12.6-13.8 s, past Vitest's 10 s hook budget, and failed a test whose own
+  // work took no time. So that one hook takes the whole tree's budget.
+  it("is the whole tree's budget, not the hook default", () => {
+    const setup = readFileSync(join(process.cwd(), "src/lib/shell/test-setup.ts"), "utf8");
+    expect(setup).toMatch(/^afterEach\(resetStores, wholeTreeBudget\(\)\);$/m);
   });
 });
