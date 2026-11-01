@@ -581,9 +581,6 @@ test("no page under the ticket-first shell drops rows by source", () => {
     // Code's team filter: a pull request's repository is looked up by its
     // source and path, the repository's address, to read the repo's teams.
     "lib/tf/code/code.ts",
-    // The Builds staleness warning picks the sources to warn about: those that
-    // claim CI or drew a row here. It filters the source list, not rows.
-    "lib/tf/job/job.ts",
     // A repository's pull requests: rows of the repository's own source,
     // matched as its address names it, not narrowed to a role.
     "lib/tf/repo/repo.ts",
@@ -595,9 +592,7 @@ test("no page under the ticket-first shell drops rows by source", () => {
       file !== join(TF_DIR, "roles.svelte.ts") &&
       /\b(claims|fills)\s*\(/.test(codeOf(text)),
   );
-  expect(claimReaders, "a page reads a source's role claims: the mirror decides who fills a role").toEqual([
-    "lib/tf/job/job.ts",
-  ]);
+  expect(claimReaders, "a page reads a source's role claims: the mirror decides who fills a role").toEqual([]);
 });
 
 /**
