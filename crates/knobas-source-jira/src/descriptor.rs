@@ -188,6 +188,22 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
                 at: PayloadPath::of(["sprints"]),
                 entry: PayloadPath::of(["state"]),
             }],
+            // The attachment list (#2404), as Data Center serves each file:
+            // the author by display name, else the login.
+            attachments: vec![knobas_source::AttachmentPath {
+                at: PayloadPath::of(["fields", "attachment"]),
+                id: vec![PayloadPath::of(["id"])],
+                name: vec![PayloadPath::of(["filename"])],
+                mime: vec![PayloadPath::of(["mimeType"])],
+                size: vec![PayloadPath::of(["size"])],
+                author: vec![
+                    PayloadPath::of(["author", "displayName"]),
+                    PayloadPath::of(["author", "name"]),
+                ],
+                created: vec![PayloadPath::of(["created"])],
+                content: vec![PayloadPath::of(["content"])],
+                thumbnail: vec![PayloadPath::of(["thumbnail"])],
+            }],
             blocked_statuses: vec![
                 "Blocked".to_owned(),
                 "On Hold".to_owned(),

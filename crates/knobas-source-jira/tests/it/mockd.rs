@@ -899,6 +899,131 @@ async fn a_synced_issue_carries_epic_membership_links_and_resolution() {
     jira.assert_no_violations();
 }
 
+/// **The attachment list** (#2404): `attachment` rides in `fields=` with no
+/// violation, and PAY-231's four files read off the payload through the
+/// descriptor's own `attachments` declaration, with their names, sizes,
+/// authors, dates and URLs. A ticket with none carries an empty list.
+#[tokio::test]
+async fn a_synced_issue_carries_its_attachment_list() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let mut sink = VecSink(Vec::new());
+    source.sync(None, &mut sink).await.unwrap();
+    let payload = |key: &str| {
+        sink.0
+            .iter()
+            .find(|i| i.entity.key == key)
+            .unwrap_or_else(|| panic!("{key} is in the fixture"))
+            .payload
+            .clone()
+    };
+    let declared = source
+        .descriptor()
+        .payload_paths
+        .into_iter()
+        .find(|p| p.kind == "ticket")
+        .expect("a ticket declares its paths")
+        .attachments;
+
+    let files = knobas_core::payload::resolve_attachments(&payload("PAY-231"), &declared);
+    let base = jira.base_url();
+    let base = base.trim_end_matches('/');
+    let read: Vec<_> = files
+        .iter()
+        .map(|a| {
+            (
+                a.name.as_str(),
+                a.size,
+                a.author.as_deref(),
+                a.created.map(|t| t.to_rfc3339()),
+                a.content_url.strip_prefix(base),
+                a.thumbnail_url.as_deref().and_then(|t| t.strip_prefix(base)),
+                a.mime.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        read,
+        vec![
+            (
+                "psp-409-trace.png",
+                Some(186_368),
+                Some("Lena Hoffmann"),
+                Some("2026-08-12T09:14:00+00:00".to_owned()),
+                Some("/secure/attachment/50000/psp-409-trace.png"),
+                Some("/secure/thumbnail/50000/psp-409-trace.png"),
+                Some("image/png"),
+            ),
+            (
+                "retry-timeline.png",
+                Some(98_304),
+                Some("Mara Lindqvist"),
+                Some("2026-08-19T15:02:00+00:00".to_owned()),
+                Some("/secure/attachment/50001/retry-timeline.png"),
+                Some("/secure/thumbnail/50001/retry-timeline.png"),
+                Some("image/png"),
+            ),
+            (
+                "sepa-error-codes.pdf",
+                Some(1_258_291),
+                Some("Priya Nair"),
+                Some("2026-08-12T11:30:00+00:00".to_owned()),
+                Some("/secure/attachment/50002/sepa-error-codes.pdf"),
+                None,
+                Some("application/pdf"),
+            ),
+            (
+                "batch-13-failures.csv",
+                Some(49_152),
+                Some("Lena Hoffmann"),
+                Some("2026-08-14T08:45:00+00:00".to_owned()),
+                Some("/secure/attachment/50003/batch-13-failures.csv"),
+                None,
+                Some("text/csv"),
+            ),
+        ]
+    );
+    assert_eq!(
+        files.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+        ["50000", "50001", "50002", "50003"]
+    );
+    assert_eq!(payload("OPS-77")["fields"]["attachment"], serde_json::json!([]));
+
+    jira.assert_no_violations();
+}
+
+/// **The full re-sync the field change orders** (#2404): a cursor this
+/// adapter wrote before `attachment` joined the field list (version 4) is
+/// read as none, so the first run after the upgrade walks every issue and
+/// each one arrives with its `fields.attachment`.
+#[tokio::test]
+async fn a_cursor_from_before_the_attachment_list_orders_a_full_re_sync() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let (every, cursor) = sync_all(source.as_ref(), None).await;
+    let (idle, _) = sync_all(source.as_ref(), Some(cursor.clone())).await;
+    assert!(idle.is_empty(), "this build's own cursor is incremental: {idle:?}");
+
+    let mut before: serde_json::Value = serde_json::from_str(&cursor).unwrap();
+    assert_eq!(before["v"], 5);
+    before["v"] = serde_json::json!(4);
+    let mut sink = VecSink(Vec::new());
+    source.sync(Some(before.to_string()), &mut sink).await.unwrap();
+
+    let mut keys: Vec<_> = sink.0.iter().map(|i| i.entity.key.clone()).collect();
+    let mut every = every;
+    keys.sort();
+    every.sort();
+    assert_eq!(keys, every, "the run after the upgrade walks the whole source");
+    assert!(
+        sink.0
+            .iter()
+            .all(|i| i.payload["fields"]["attachment"].is_array()),
+        "every issue carries its attachment list"
+    );
+    jira.assert_no_violations();
+}
+
 /// The same payload, through the *incremental* path.
 ///
 /// `/search` is one query and every run sends the same `fields=`, so this

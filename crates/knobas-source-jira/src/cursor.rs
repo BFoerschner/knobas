@@ -1,7 +1,7 @@
-//! The incremental position: `{"v":4,…}`, opaque to everything but this crate.
+//! The incremental position: `{"v":5,…}`, opaque to everything but this crate.
 //!
 //! ```text
-//! {"v":4,
+//! {"v":5,
 //!  "updated_to":"2026-08-22T11:48:00Z",   // the newest `updated` delivered
 //!  "tz_offset_secs":7200,                 // the zone that watermark was queried in
 //!  "seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"3f0c1a92be44d7e5"}]}
@@ -59,7 +59,14 @@ use knobas_source::watermark::{self, Advanced, Bounds, Entry, Jql};
 /// **4** since #811 stores every ticket's sprints as `sprints: [...]` beside
 /// the record, for #598's reason: an unchanged issue is never emitted again,
 /// so without the bump no stored ticket would gain the key.
-pub(crate) const CURSOR_VERSION: u8 = 4;
+///
+/// **5** since #2404 added `attachment` to the field list
+/// ([`crate::sync`]'s `BASE_FIELDS`): a name added there reaches a stored
+/// ticket only when the ticket is emitted again, so the bump orders the one
+/// full re-sync of every Jira source that fills `fields.attachment` on every
+/// ticket mirrored before. The views and the board stamp go with the old
+/// envelope and are read again on that run.
+pub(crate) const CURSOR_VERSION: u8 = 5;
 
 // The overlap, the daylight-saving widening and the seen cap are
 // `knobas_source::watermark`'s (#1622), shared with Confluence. Interfaces
@@ -84,7 +91,7 @@ pub(crate) struct JiraCursor {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<SeenView>,
     /// The last run that read the boards (#1700, ruling
-    /// D6). Optional with a default, so `CURSOR_VERSION` stays 4 and an
+    /// D6). Optional with a default, so `CURSOR_VERSION` stayed 4 and an
     /// envelope written before the field reads as "never read".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board_read: Option<BoardRead>,
@@ -92,7 +99,7 @@ pub(crate) struct JiraCursor {
     /// clause `projects` or `jql_filter` render to, empty for none. A run
     /// under another scope -- a project added, a filter changed -- walks the
     /// new one in full, because the watermark says nothing about tickets the
-    /// old scope never asked for. Optional, so `CURSOR_VERSION` stays 4; an
+    /// old scope never asked for. Optional, so `CURSOR_VERSION` stayed 4; an
     /// envelope written before the field has no recorded scope and matches
     /// none, so every source walks in full once after the upgrade, which also
     /// brings in what a scope widened before this build missed.
@@ -309,13 +316,14 @@ mod tests {
         format!("h-{key}")
     }
 
-    /// #1700: the board-read stamp is an optional field, so the version stays
-    /// 4 and an envelope written before it still decodes, as never read.
+    /// #1700: the board-read stamp is an optional field, so the version
+    /// stayed 4 and an envelope written without it still decodes, as never
+    /// read. (Version 5 since #2404, for its own reason.)
     #[test]
-    fn a_v4_envelope_without_the_board_read_stamp_decodes() {
-        assert_eq!(CURSOR_VERSION, 4);
-        let old = r#"{"v":4,"updated_to":null,"tz_offset_secs":0,"seen":[],"views":[{"k":"board-1","h":"x"}]}"#;
-        let cursor = JiraCursor::parse(old).expect("a v4 envelope without the field reads");
+    fn an_envelope_without_the_board_read_stamp_decodes() {
+        assert_eq!(CURSOR_VERSION, 5);
+        let old = r#"{"v":5,"updated_to":null,"tz_offset_secs":0,"seen":[],"views":[{"k":"board-1","h":"x"}]}"#;
+        let cursor = JiraCursor::parse(old).expect("an envelope without the field reads");
         assert_eq!(cursor.board_read, None);
         assert_eq!(cursor.views.len(), 1);
         assert_eq!(cursor.encode(), old, "and re-encodes without inventing it");
@@ -326,8 +334,8 @@ mod tests {
     /// no scope -- the "everything" scope included -- and the views survive.
     #[test]
     fn a_cursor_under_another_scope_drops_its_watermark_and_keeps_its_views() {
-        let old = r#"{"v":4,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[{"k":"PAY-1","u":"2026-08-22T11:48:00Z","h":"x"}],"views":[{"k":"board-1","h":"x"}]}"#;
-        let legacy = JiraCursor::parse(old).expect("a v4 envelope without the field reads");
+        let old = r#"{"v":5,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[{"k":"PAY-1","u":"2026-08-22T11:48:00Z","h":"x"}],"views":[{"k":"board-1","h":"x"}]}"#;
+        let legacy = JiraCursor::parse(old).expect("an envelope without the field reads");
         assert_eq!(legacy.scope, None);
         let walked = legacy.clone().under("");
         assert_eq!((walked.updated_to, walked.seen.len()), (None, 0));
@@ -356,7 +364,7 @@ mod tests {
         // arithmetic and none of the envelope, so no stored cursor re-syncs.
         assert_eq!(
             c.encode(),
-            r#"{"v":4,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":7200,"seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"h-PAY-231"}]}"#
+            r#"{"v":5,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":7200,"seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"h-PAY-231"}]}"#
         );
     }
 
@@ -364,12 +372,23 @@ mod tests {
     /// future cursor must not wedge a source -- it must re-sync.
     #[test]
     fn an_unreadable_cursor_means_full_sync() {
-        assert!(JiraCursor::parse(r#"{"v":5,"updated_to":null}"#).is_none());
+        assert!(JiraCursor::parse(r#"{"v":6,"updated_to":null}"#).is_none());
         // A *complete* envelope of a version this build does not know: the
         // version check has to be what rejects it, not a missing field.
         assert!(
             JiraCursor::parse(
-                r#"{"v":5,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[]}"#
+                r#"{"v":6,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[]}"#
+            )
+            .is_none()
+        );
+        // **A version-4 cursor, which is what every source stored before
+        // #2404**, scope, views and board stamp included. Refusing it is the
+        // full sync that gives every stored ticket its `fields.attachment`.
+        assert!(
+            JiraCursor::parse(
+                r#"{"v":4,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,
+                    "seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"h-PAY-231"}],
+                    "views":[{"k":"board-1","h":"x"}],"scope":""}"#
             )
             .is_none()
         );

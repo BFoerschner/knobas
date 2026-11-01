@@ -25,6 +25,7 @@
 //! | `resolution` | `Done` (id `10000`) exactly when the status is in the `done` category, `null` otherwise — Jira sets a resolution when and only when an issue reaches a done status. |
 //! | `timeoriginalestimate` | `estimate_h * 3600`, `null` where the fixture records no estimate. |
 //! | `timespent` | the sum of the issue's worklog seconds, `null` where it has none. |
+//! | `attachment` | one entry per fixture `attachments` entry, `[]` where it has none: `id` = `50000 + running index over all attachments in fixture order`, `author` the person's user, `content` = `<base>/secure/attachment/<id>/<name>`, and `thumbnail` = `<base>/secure/thumbnail/<id>/<name>` for an `image/*` file only, as Jira renders one for images alone. |
 //! | `labels` | always `[]`. The dataset names no labels and mockd will not invent any (the #28 ruling: an invented value reaches `SyncItem::payload` and is indexed as if the dataset had said it). |
 //! | clock | starts at `fixture().today` and advances **exactly one minute** per mutation (`touch_issue`, `add_comment`, `transition_issue`, `create_issue`, `queue_build`, and the build finishers) — JQL time resolution is one minute, so a smaller step would make two touches indistinguishable to the very query an adapter runs. |
 //!
@@ -90,6 +91,20 @@ pub struct JiraIssue {
     pub links: Vec<JiraLink>,
     /// `fields.timeoriginalestimate`, in seconds.
     pub original_estimate_secs: Option<u64>,
+    /// `fields.attachment` (#2404).
+    pub attachments: Vec<JiraAttachment>,
+}
+
+/// One `fields.attachment` entry (#2404): the list, never the bytes.
+#[derive(Debug, Clone)]
+pub struct JiraAttachment {
+    pub id: u64,
+    pub filename: String,
+    pub mime: String,
+    pub size: u64,
+    /// The username of whoever attached it.
+    pub author: String,
+    pub created: DateTime<Utc>,
 }
 
 impl JiraIssue {
@@ -394,6 +409,7 @@ impl MockState {
             parent: None,
             links: Vec::new(),
             original_estimate_secs: None,
+            attachments: Vec::new(),
         };
         inner.issues.push(issue.clone());
         Some(issue)
@@ -666,6 +682,7 @@ fn build_issues() -> (Vec<JiraIssue>, u64) {
     let synthesized_updated = fx.today - Duration::days(30);
     let mut next_comment_id = 20_000;
     let mut next_worklog_id = 30_000;
+    let mut next_attachment_id = 50_000;
     let mut issues = Vec::with_capacity(fx.tickets.len());
 
     for (idx, t) in fx.tickets.iter().enumerate() {
@@ -703,6 +720,22 @@ fn build_issues() -> (Vec<JiraIssue>, u64) {
                 }
             })
             .collect();
+        let attachments = t
+            .attachments
+            .iter()
+            .map(|a| {
+                let id = next_attachment_id;
+                next_attachment_id += 1;
+                JiraAttachment {
+                    id,
+                    filename: a.name.clone(),
+                    mime: a.mime.clone(),
+                    size: a.bytes,
+                    author: username(&a.who),
+                    created: a.when,
+                }
+            })
+            .collect();
         issues.push(JiraIssue {
             id: 10_000 + idx as u64,
             key: t.key.clone(),
@@ -731,6 +764,7 @@ fn build_issues() -> (Vec<JiraIssue>, u64) {
             parent: None,
             links: Vec::new(),
             original_estimate_secs: t.estimate_h.map(|h| u64::from(h) * 3600),
+            attachments,
         });
     }
     resolve_references(&mut issues, fx);
