@@ -12,7 +12,7 @@ knobas is a work tool for one developer who has a dozen tools open behind it. Th
 
 Rules that follow from that:
 
-- **Yellow means "the ticket you are on".** It goes on the job card, the ticket page's card (`#/ticket/<id>`, spec #2227), the selected ticket on the board and list, and the running timer. Nothing else gets yellow. Highlights use `--mark`, which is a paler yellow and only appears behind matched search text.
+- **Yellow means the ticket you are on: its page card, its card and row on the Tickets board and list, and the running timer. Nothing else gets yellow. Selection is an outline.** On the board and list the chosen job's card and row are yellow whether or not they are selected; the selected card or row carries a two-pixel ink outline (`--card-ink` on the yellow), and the selected card keeps the lift (spec #2396, #2398). Highlights use `--mark`, which is a paler yellow and only appears behind matched search text.
 - **The width axis does the shouting, not colour or size.** Big figures (the job key, counts, durations) use Archivo at width 62 and weight 800. Page titles use width 85. Body text stays at the normal width.
 - **Tones carry state, and only state.** `ok`, `warn`, `err`, `info` and `muted` belong to the shell. Adapters never choose a colour. A source says "failed" and the shell draws it.
 - **Structure means something.** A border separates things that are different. A shadow means the thing floats above the page. Labels are sentence case and never all caps. The prototype has no `text-transform: uppercase` anywhere, and the app keeps it that way.
@@ -47,7 +47,7 @@ Tokens are the prototype's, unchanged. Light and dark come from the same names.
 
 I computed WCAG ratios for every text pair the prototype uses. All text passes 4.5:1 in both themes. The tightest are light `--muted` on `--paper` at 4.53 and on `--muted-bg` at 4.58, so no lighter grey may be added for text.
 
-One pair fails. The focus ring on the yellow card is 4.16:1 in light, which is fine for a non-text indicator, but **1.22:1 in dark**, so keyboard focus on the job card or the selected ticket is invisible there. The fix belongs in the system, not in a ticket: on any `--card` surface the focus ring is `--card-ink`. That's a change from the prototype, and the first ticket that draws a card names it in its PR.
+One pair fails. The focus ring on the yellow card is 4.16:1 in light, which is fine for a non-text indicator, but **1.22:1 in dark**, so keyboard focus on the job card or the chosen job's card on the board is invisible there. The fix belongs in the system, not in a ticket: on any `--card` surface the focus ring is `--card-ink`. That's a change from the prototype, and the first ticket that draws a card names it in its PR.
 
 ## Type
 

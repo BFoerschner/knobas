@@ -10,6 +10,10 @@
     field or not (R-3.5, #813); or as a list sorted by any header (R-3.6);
   - **right**, the selected ticket's preview (R-3.9).
 
+  Two marks on the board and the list (spec #2396, #2398): yellow follows
+  the chosen job (`job/chosen.svelte.ts`), selected or not; the selection is
+  a two-pixel ink outline, and on the board the lift.
+
   The filter bar is `FilterBar` in its server-side mode (R-2.7): every
   change sends the base query, chips, dropdowns and words to `mini_board`,
   which runs the search grammar and draws only what it admits. The browser
@@ -157,6 +161,7 @@
     type CopiedFrom,
   } from "./views";
   import { pageVisible } from "../kept-pages.svelte";
+  import { chosenJob } from "../job/chosen.svelte";
 
   let {
     ready,
@@ -775,6 +780,7 @@
                       source={sourceOf(card)}
                       {needles}
                       selected={current?.card.entity_id === card.entity_id}
+                      chosen={chosenJob.id === card.entity_id}
                       onselect={() => select(card)}
                       onopen={() => openTicket(card)}
                     />
@@ -818,7 +824,8 @@
               <tr
                 {@attach win.row(card.entity_id)}
                 class="tf-row"
-                class:tf-card={current?.card.entity_id === card.entity_id}
+                class:tf-card={chosenJob.id === card.entity_id}
+                class:tf-sel={current?.card.entity_id === card.entity_id}
                 aria-current={current?.card.entity_id === card.entity_id ? "true" : undefined}
                 data-entity={card.entity_id}
                 tabindex="0"

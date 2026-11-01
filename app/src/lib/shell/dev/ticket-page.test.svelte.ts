@@ -139,7 +139,7 @@ function card(entityId: string): HTMLElement | null {
 }
 
 function selected(): string | null {
-  return shown(".tf-tcard.tf-card")?.dataset.entity ?? null;
+  return shown('.tf-tcard[aria-current="true"]')?.dataset.entity ?? null;
 }
 
 function key(name: string, options: KeyboardEventInit = {}): void {

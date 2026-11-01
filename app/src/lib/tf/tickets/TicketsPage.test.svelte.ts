@@ -1,7 +1,7 @@
 /**
  * Tickets in the ticket-first shell (#810): the ticket board and the list
  * over `mini_board`, the filter bar sending its query to the server, the
- * yellow selected card and the preview.
+ * outlined selected card and the preview.
  */
 import { needles } from "./needles";
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
@@ -346,12 +346,14 @@ test("every synced ticket on the board: a column per status, eight cards then Sh
   expect(target.querySelector(".tf-views .tf-count")!.textContent).toBe("18");
 });
 
-test("the first card is selected: yellow, and the preview shows it with Start work", async () => {
+test("the first card is selected: outlined, and the preview shows it with Start work", async () => {
   await open(harness());
   const first = target.querySelector<HTMLElement>(".tf-tcard")!;
-  expect(first.classList.contains("tf-card")).toBe(true);
+  expect(first.classList.contains("tf-sel")).toBe(true);
   expect(first.getAttribute("aria-current")).toBe("true");
-  expect(target.querySelectorAll(".tf-tcard.tf-card")).toHaveLength(1);
+  expect(target.querySelectorAll(".tf-tcard.tf-sel")).toHaveLength(1);
+  // No job is chosen, so nothing is yellow (spec #2396, #2398).
+  expect(target.querySelectorAll(".tf-tcard.tf-card")).toHaveLength(0);
   expect(first.textContent).toContain("Story, High");
   expect(first.querySelector(".tf-av")!.textContent).toBe("ML");
   expect(first.querySelector(".tf-cep")!.textContent).toBe("PAY-200 Payout reliability");
@@ -363,13 +365,13 @@ test("the first card is selected: yellow, and the preview shows it with Start wo
   expect(button.getAttribute("href")).toBe("#/job/jira%3APAY-1");
 });
 
-test("selecting another card moves the yellow and the preview's button follows its state", async () => {
+test("selecting another card moves the outline and the preview's button follows its state", async () => {
   await open(harness(), "PAY-40");
   const pick = (key: string) => target.querySelector<HTMLButtonElement>(`.tf-tcard[data-entity="jira:${key}"]`)!;
   pick("PAY-40").click();
   await settle();
-  expect(pick("PAY-40").classList.contains("tf-card")).toBe(true);
-  expect(pick("PAY-1").classList.contains("tf-card")).toBe(false);
+  expect(pick("PAY-40").classList.contains("tf-sel")).toBe(true);
+  expect(pick("PAY-1").classList.contains("tf-sel")).toBe(false);
   expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Resume work");
   expect(preview().textContent).toContain("Your timer is running on this ticket.");
 
@@ -463,7 +465,7 @@ test("Show N more reads the column whole and draws all of it", async () => {
   expect(columns()[2]!.cards).toBe(3);
 });
 
-test("the list draws the same tickets newest first, the selected row yellow", async () => {
+test("the list draws the same tickets newest first, the selected row outlined", async () => {
   await open(harness());
   [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')]
     .find((b) => b.textContent === "List")!
@@ -473,7 +475,7 @@ test("the list draws the same tickets newest first, the selected row yellow", as
   expect(head).toEqual(["Key", "Summary", "Status", "Priority", "Signals", "Assignee", "Updated"]);
   const rows = [...target.querySelectorAll<HTMLElement>(".tf-tbl tbody tr")];
   expect(rows[0]!.querySelector("td")!.textContent).toBe("PAY-1");
-  expect(rows[0]!.classList.contains("tf-card")).toBe(true);
+  expect(rows[0]!.classList.contains("tf-sel")).toBe(true);
   expect(rows[0]!.textContent).toContain("PAY-200");
   expect(target.querySelector(".tf-list-more")!.textContent).toBe("Show 4 more");
 });
@@ -572,7 +574,7 @@ test("Enter on a focused card that is not selected opens that card's ticket", as
   await open(harness());
   const second = target.querySelectorAll<HTMLButtonElement>(".tf-tcard")[1]!;
   const key = second.querySelector(".tf-k")!.textContent;
-  expect(second.classList.contains("tf-card")).toBe(false);
+  expect(second.classList.contains("tf-sel")).toBe(false);
   second.focus();
   second.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
   expect(location.hash).toBe(`#/ticket/jira%3A${key}`);

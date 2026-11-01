@@ -484,3 +484,25 @@ test("one danger class: tf-danger-t is merged into tf-danger (#2280)", () => {
 test("the link review's decide buttons take their size from .tf-lg, not a padding of their own (#2280)", () => {
   expect(code).not.toMatch(/\.tf-decide \.tf-btn \{/);
 });
+
+test("on the Tickets board and list, yellow is the chosen job's card and row, and selection is a two-pixel ink outline with the lift (spec #2396, #2398)", () => {
+  // Every rule of the board and the list that paints with the card's yellow or floats: keyed on the chosen job's
+  // `.tf-card`, never on the selection's `.tf-sel`; and the selection's rules, never on the yellow.
+  const rules = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
+    .map(([, selector, body]) => ({ selector: selector!.trim(), body: body! }))
+    .filter(({ selector }) => /\.tf-(tcard|row)\b/.test(selector));
+  const yellow = rules.filter(({ body }) => /var\(--card(-2)?\)/.test(body)).map(({ selector }) => selector);
+  expect(yellow).toEqual([".tf-tcard.tf-card", ".tf-row.tf-card td"]);
+  const lifted = rules.filter(({ body }) => body.includes("var(--shadow)")).map(({ selector }) => selector);
+  expect(lifted).toEqual([".tf-tcard.tf-sel", ".tf-tcard.tf-card.tf-sel"]);
+
+  // The outline is a ring, not `outline`, so the focus ring (`.tf :focus-visible`) never replaces it.
+  expect(block(code, ".tf-tcard.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--ink\), var\(--shadow\);/);
+  expect(block(code, ".tf-tcard.tf-card.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--card-ink\), var\(--shadow\);/);
+  expect(block(code, ".tf-tcard.tf-card")).not.toContain("box-shadow");
+  // A row's outline is drawn inside its cells, two pixels on each edge of the row; on the yellow row, in its ink.
+  expect(block(code, ".tf-row.tf-sel td")).toMatch(/--tf-sel-ink:\s*var\(--ink\);[^}]*box-shadow:\s*inset 0 2px 0 var\(--tf-sel-ink\), inset 0 -2px 0 var\(--tf-sel-ink\);/);
+  expect(block(code, ".tf-row.tf-sel td:first-child")).toMatch(/box-shadow:\s*inset 2px 0 0 var\(--tf-sel-ink\), inset 0 2px 0 var\(--tf-sel-ink\), inset 0 -2px 0 var\(--tf-sel-ink\);/);
+  expect(block(code, ".tf-row.tf-sel td:last-child")).toMatch(/box-shadow:\s*inset -2px 0 0 var\(--tf-sel-ink\), inset 0 2px 0 var\(--tf-sel-ink\), inset 0 -2px 0 var\(--tf-sel-ink\);/);
+  expect(block(code, ".tf-row.tf-card.tf-sel td")).toMatch(/--tf-sel-ink:\s*var\(--card-ink\);/);
+});
