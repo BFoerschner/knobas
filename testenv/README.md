@@ -459,9 +459,17 @@ landed (Gitea and each PostgreSQL 512 MB, Confluence 2560 MB running
 `-Xmx1024m`). Under a forced 3600 MB budget, starting Forgejo was refused while
 Confluence's `live-up` kept it, and stopped Confluence once nothing did. A
 `just confluence-live` then brought it back from its stopped container,
-re-seeded rather than rebuilt, and was green. Jira and TeamCity have not run
-on a remote target. Neither the real WSL box nor `setup-windows.ps1` has run
-yet; the first run on the box is where they are witnessed.
+re-seeded rather than rebuilt, and was green.
+
+**On the real box, 2026-11-01** (Ubuntu 26.04 in WSL 2, 12 cores, 12 GB,
+docker.io 29.1.3, reached over Tailscale; budget 10425 MB): `just gitea-live`
+70 passed (265 s); `just jira-live` 49 passed (559 s, seeded from empty in
+299 s); `just confluence-live` 36 passed (242 s, seeded in 147 s); `just
+teamcity-live-seeded` 39 passed (559 s). TeamCity, the third JVM product,
+printed `teamcity needs 3584 MB; 11264 MB is over the 10425 MB budget --
+stopping jira` and ran beside Confluence. `just kuma-live`, on the Mac as
+always, 21 passed. `setup-windows.ps1` has not run: this box's WSL already had
+12 GB and systemd.
 
 ## The live recipes
 
