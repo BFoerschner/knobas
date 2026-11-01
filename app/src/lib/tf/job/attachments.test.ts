@@ -11,6 +11,7 @@ describe("an attachment's kind (#2404)", () => {
 
   test("falls back to the media type's subtype where the name has no short extension", () => {
     expect(attachmentKind({ name: "README", mime: "text/plain" })).toBe("PLAIN");
+    expect(attachmentKind({ name: "notes.markdown", mime: "text/x-web" })).toBe("FILE");
     expect(attachmentKind({ name: "notes.markdown", mime: "text/markdown" })).toBe("MARKDOWN");
     expect(attachmentKind({ name: ".env", mime: null })).toBe("FILE");
   });
