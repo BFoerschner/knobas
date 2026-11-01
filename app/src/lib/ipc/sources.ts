@@ -58,6 +58,7 @@ export type {
   IpcErrorCode,
   KindPaths,
   ListPath,
+  Markup,
   MergeStyle,
   MonitorKind,
   NewSource,

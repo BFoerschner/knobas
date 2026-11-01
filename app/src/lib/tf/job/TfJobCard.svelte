@@ -23,6 +23,8 @@
   import type { EntityDetail } from "../../ipc/entity";
   import type { Timer } from "../../shell/timer.svelte";
   import { clockReading } from "../../time/day";
+  import { proseMarkdown } from "../../render/prose";
+  import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { refusedAttrs } from "../../shell/refused-writes";
   import { takeAgain, type Echo } from "../queued.svelte";
   import { jobHash } from "../route";
@@ -152,8 +154,9 @@
   </div>
   <section>
     <h2>What it asks for</h2>
-    {#if detail.body_text.trim() !== ""}
-      <p class="tf-asks">{detail.body_text}</p>
+    {#if detail.description !== null && detail.description.trim() !== ""}
+      {@const markdown = proseMarkdown(detail.description, detail.markup)}
+      {#if markdown !== null}<div class="tf-asks"><TfMarkdown text={markdown} /></div>{:else}<p class="tf-asks">{detail.description}</p>{/if}
     {:else}
       <p>The ticket has no description.</p>
     {/if}

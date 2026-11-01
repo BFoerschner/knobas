@@ -78,7 +78,7 @@
 /* The ticket's title: the preview's `h2` and the ticket page's `h1` (spec #2227). */
 .tf-preview .tf-ticket-title { font-size: var(--t-2xl); line-height: 1.2; margin: 2px 0 0; font-weight: 600; font-variation-settings: "wdth" 90; }
 .tf-preview p { color: var(--ink-2); }
-.tf-desc { white-space: pre-line; }
+p.tf-desc { white-space: pre-line; }
 .tf-facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: var(--t-sm); margin: 0; }
 .tf-facts dt { color: var(--ink-2); }
 .tf-facts dd { margin: 0; }

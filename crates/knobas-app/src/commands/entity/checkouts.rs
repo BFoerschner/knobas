@@ -145,7 +145,7 @@ pub async fn entity_thread(
     entity_id: String,
 ) -> Result<crate::conversation::Thread, IpcError> {
     let pool = lifecycle.pool()?;
-    crate::conversation::thread(&pool, &entity_id).await
+    crate::conversation::thread(&pool, lifecycle.registry(), &entity_id).await
 }
 
 // -- opening a checkout (#501) ----------------------------------------------

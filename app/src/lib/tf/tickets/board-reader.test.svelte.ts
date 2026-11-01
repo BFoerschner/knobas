@@ -69,7 +69,7 @@ function fakes() {
   const ports: BoardReaderPorts = {
     board: (perColumn, query, savedView, lanes, role) =>
       new Promise((answer, fail) => reads.push({ perColumn, query, savedView, lanes, role, answer, fail })),
-    detail: (id) => new Promise((answer) => details.push({ id, answer: (text) => answer({ body_text: text }) })),
+    detail: (id) => new Promise((answer) => details.push({ id, answer: (text) => answer({ description: text, markup: "jira_wiki" }) })),
     listEntities: () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null }),
     jobReach: (id) => {
       reaches.push(id);
@@ -277,7 +277,7 @@ test("the preview reads once per ticket and drops the answer of one no longer pr
   expect(details.map(({ id }) => id)).toEqual(["jira:PAY-1"]);
   details[0]!.answer("One.");
   await flush();
-  expect(reader.description).toBe("One.");
+  expect(reader.description).toEqual({ text: "One.", markup: "jira_wiki" });
   expect(reader.around).toEqual([]);
 
   reader.preview("jira:PAY-2");
@@ -288,7 +288,7 @@ test("the preview reads once per ticket and drops the answer of one no longer pr
   expect(reader.description).toBeNull();
   details[2]!.answer("Three.");
   await flush();
-  expect(reader.description).toBe("Three.");
+  expect(reader.description).toEqual({ text: "Three.", markup: "jira_wiki" });
   expect(reaches).toEqual(["jira:PAY-1", "jira:PAY-2", "jira:PAY-3"]);
 
   // Nothing selected, then the same ticket again: it is read again.

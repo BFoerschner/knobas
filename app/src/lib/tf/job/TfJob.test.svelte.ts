@@ -113,6 +113,8 @@ function ticket(over: Partial<EntityDetail> = {}): EntityDetail {
     issue_type: "Story",
     priority: "High",
     estimate_seconds: 3 * 3600,
+    description: "Payouts to two SEPA banks fail with a 409 on retry.",
+    markup: "text",
     ...over,
   };
 }
@@ -374,7 +376,7 @@ test("a key two sources hold: the card names its source and links the other's, a
 
 test("on a job a key two sources hold, every link to the job's own tabs names its source (#1977)", async () => {
   const hrefs = (selector: string) => [...target.querySelectorAll(selector)].map((each) => each.getAttribute("href"));
-  const said = { author: "Priya Nair", at: "2026-10-14T08:00:00Z", body: "Retry window agreed.", mine: false, mentions_me: false };
+  const said = { author: "Priya Nair", at: "2026-10-14T08:00:00Z", body: "Retry window agreed.", mine: false, mentions_me: false, markup: "text" as const };
   open("gitea:PAY-231", { ports: twoHolders() });
   await settle();
   expect(hrefs(".tf-wtabs a")).toEqual(["#/job/gitea%3APAY-231", "#/job/gitea%3APAY-231/map", "#/job/gitea%3APAY-231/conversation"]);
@@ -1441,7 +1443,7 @@ test("a move's echo also goes on the read a run of its source's end brings (#210
 test("a comment's echo says queued, then sent, and goes on the refresh event's read of the thread, the job not opened again (#2103)", async () => {
   const sync = echoEvents(settle);
   const { follower, sent } = echoFollower();
-  let said: { author: string; at: string; body: string; mine: boolean; mentions_me: boolean }[] = [];
+  let said: { author: string; at: string; body: string; mine: boolean; mentions_me: boolean; markup: "text" }[] = [];
   const io = ports({
     entityThread: () => Promise.resolve({ comments: said, me: ["mara"] }),
     submitWrite: () => Promise.resolve({ id: 72 } as never),
@@ -1461,7 +1463,7 @@ test("a comment's echo says queued, then sent, and goes on the refresh event's r
   sent(72);
   expect(echoed()).toEqual(["sent"]);
 
-  said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false }];
+  said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false, markup: "text" }];
   await sync.refreshed(ID, 72);
   expect(echoed()).toEqual([]);
 });
@@ -1614,7 +1616,7 @@ test("a turned-off source's ticket draws no Refresh on the job, and the withdraw
 test("a move's echo goes on a Refresh's read of the ticket, and a comment's on its read of the thread (#2103)", async () => {
   const probe = refreshProbe();
   let status = "In Progress";
-  let said: { author: string; at: string; body: string; mine: boolean; mentions_me: boolean }[] = [];
+  let said: { author: string; at: string; body: string; mine: boolean; mentions_me: boolean; markup: "text" }[] = [];
   let next = 80;
   const io = ports({
     getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status })) : Promise.reject({ code: "not_found" })),
@@ -1636,7 +1638,7 @@ test("a move's echo goes on a Refresh's read of the ticket, and a comment's on i
   expect(echoed()).toEqual(["queued"]);
 
   status = "In Review";
-  said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false }];
+  said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false, markup: "text" }];
   refreshButton()!.click();
   await settle();
   expect(statusShown()).toEqual(["In Review", false, null]);
@@ -1674,4 +1676,29 @@ test("⌘R on a job whose ticket's adapter reads no one item runs its Sync now (
   pressRefreshKey();
   await settle();
   expect(probe.synced).toEqual(["jira"]);
+});
+
+test("the card draws a description its source writes in Jira's wiki markup as Markdown, and one in text as text (#2308)", async () => {
+  const wiki = ticket({ description: "h2. Why\n\n# first\n# *second*", markup: "jira_wiki" });
+  open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(wiki) : Promise.reject({ code: "not_found" })) }) });
+  await settle();
+  const asks = target.querySelector(".tf-jobcard .tf-asks")!;
+  expect(asks.querySelector("h2")?.textContent).toBe("Why");
+  expect([...asks.querySelectorAll("ol li")].map((li) => li.textContent)).toEqual(["first", "second"]);
+  expect(asks.querySelector("ol strong")?.textContent).toBe("second");
+
+  unmount(job!);
+  const plain = ticket({ description: "h2. Why\n# first", markup: "text" });
+  open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(plain) : Promise.reject({ code: "not_found" })) }) });
+  await settle();
+  const text = target.querySelector(".tf-jobcard .tf-asks")!;
+  expect(text.querySelector("h2")).toBeNull();
+  expect(text.textContent).toBe("h2. Why\n# first");
+
+  unmount(job!);
+  const blank = ticket({ description: "  \n", markup: "markdown" });
+  open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(blank) : Promise.reject({ code: "not_found" })) }) });
+  await settle();
+  expect(target.querySelector(".tf-jobcard .tf-asks")).toBeNull();
+  expect(target.querySelector(".tf-jobcard")!.textContent).toContain("The ticket has no description.");
 });

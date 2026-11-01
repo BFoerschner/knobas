@@ -26,7 +26,7 @@
 /* A queued move (#1424): the picked status, muted and dashed, until the mirror moves. */
 .tf-jobcard select.tf-queued { color: var(--card-ink-2); font-style: italic; border-style: dashed; }
 .tf-jobcard .tf-jobdim, .tf-jobcard p { color: var(--card-ink-2); }
-.tf-jobcard .tf-asks { white-space: pre-line; }
+.tf-jobcard p.tf-asks { white-space: pre-line; }
 .tf-jobcard section { border-top: 1px solid rgba(0,0,0,.14); padding-top: 12px; }
 .tf-jobcard h2 { font-size: var(--t-xs); font-weight: 600; color: var(--card-ink-2); margin: 0 0 6px; }
 .tf-jobcard .tf-chip { background: rgba(0,0,0,.1); color: var(--card-ink); }

@@ -21,6 +21,7 @@ import type {
   MiniBoardColumn,
 } from "../../ipc/entity";
 import type { ViewColumn } from "../../ipc/search";
+import type { Prose } from "../../render/prose";
 import { reachTally, type ReachPorts } from "../job/sections";
 import { TICKET_SYSTEM } from "../roles.svelte";
 import {
@@ -53,8 +54,8 @@ export interface BoardReaderPorts {
     lanes?: LanesAsked | null,
     role?: string,
   ) => Promise<MiniBoard>;
-  /** The selected ticket's description. */
-  detail: (entityId: string) => Promise<Pick<EntityDetail, "body_text">>;
+  /** The selected ticket's description and its markup (#2308). */
+  detail: (entityId: string) => Promise<Pick<EntityDetail, "description" | "markup">>;
   /** The job's section reads, scoped by what a ticket reaches: *Around this ticket* (#1030). */
   listEntities: ReachPorts["listEntities"];
   /** What a ticket reaches (`job_reach`, #817), for the Assets line. */
@@ -147,8 +148,8 @@ export interface BoardReader {
   /** Whether the filter has words. */
   readonly typing: boolean;
   readonly bands: Band[];
-  /** The previewed ticket's description, or `null` until it answers. */
-  readonly description: string | null;
+  /** The previewed ticket's description, or `null` until it answers or where it has none. */
+  readonly description: Prose | null;
   /** What the previewed ticket reaches, by section, or `null` until it answers. */
   readonly around: AroundLine[] | null;
   /** Opens a scope: the board starts fresh, and an answer for the last one is dropped. */
@@ -212,7 +213,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     lanesShown: LANES_AT_FIRST,
     scope: { key: "", base: null, savedView: null } as BoardScope,
     filter: { query: "", words: false } as BoardFilter,
-    description: null as string | null,
+    description: null as Prose | null,
     around: null as AroundLine[] | null,
   });
   /** Bumped by every read and every key, so only the last read's answer lands. */
@@ -412,7 +413,9 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       ports
         .detail(id)
         .then((detail) => {
-          if (mine === previewed) state.description = detail.body_text;
+          if (mine === previewed && detail.description !== null) {
+            state.description = { text: detail.description, markup: detail.markup };
+          }
         })
         .catch(() => {});
       // What the job's sections would show, through the job-reach read: no

@@ -476,6 +476,24 @@ estimate: Array<PayloadPath>,
  */
 comment_count: Array<PayloadPath>, 
 /**
+ * A ticket's description **as the source wrote it** (#2308): Jira's
+ * `fields.description`, Gitea's `body`. A string, read as `issue_type`
+ * is; the ticket's reader draws it by [`markup`](Self::markup). Not
+ * `body_text`, which is the search text: title, description and
+ * comments joined. Empty for every kind with no description, and a miss
+ * draws none.
+ */
+description: Array<PayloadPath>, 
+/**
+ * How the source writes this kind's prose (#2308): its
+ * [`description`](Self::description) and the comments of its thread.
+ * A property of the source, not a path, like
+ * [`blocked_statuses`](Self::blocked_statuses). Defaults to
+ * [`Markup::Text`], which the shell draws as text: a source that says
+ * nothing is never parsed as markup it did not write.
+ */
+markup: Markup, 
+/**
  * Where a page sits among its siblings in the source's own order
  * (#953): a whole JSON number, lowest first. The Docs tree orders a
  * parent's children by it, and a child without one follows, by title.
@@ -688,6 +706,14 @@ at: PayloadPath,
  * Where the string is inside each element; empty means the element itself.
  */
 entry: PayloadPath, };
+
+/**
+ * How a source writes a kind's prose (#2308): `text` (drawn as it is),
+ * `markdown` (CommonMark with GitHub's extensions, Gitea's), or `jira_wiki`
+ * (Jira's wiki markup: `h1.`, `{code}`, `*bold*`). The shell draws the last
+ * two with its Markdown component, converting Jira's wiki markup first.
+ */
+export type Markup = "text" | "markdown" | "jira_wiki";
 
 /**
  * How a [`MergePullRequest`](WriteOp::MergePullRequest) lands its commits on

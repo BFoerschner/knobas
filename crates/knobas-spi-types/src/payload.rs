@@ -350,6 +350,22 @@ pub struct KindPaths {
     /// miss draws nothing.
     #[serde(default)]
     pub comment_count: Vec<PayloadPath>,
+    /// A ticket's description **as the source wrote it** (#2308): Jira's
+    /// `fields.description`, Gitea's `body`. A string, read as `issue_type`
+    /// is; the ticket's reader draws it by [`markup`](Self::markup). Not
+    /// `body_text`, which is the search text: title, description and
+    /// comments joined. Empty for every kind with no description, and a miss
+    /// draws none.
+    #[serde(default)]
+    pub description: Vec<PayloadPath>,
+    /// How the source writes this kind's prose (#2308): its
+    /// [`description`](Self::description) and the comments of its thread.
+    /// A property of the source, not a path, like
+    /// [`blocked_statuses`](Self::blocked_statuses). Defaults to
+    /// [`Markup::Text`], which the shell draws as text: a source that says
+    /// nothing is never parsed as markup it did not write.
+    #[serde(default)]
+    pub markup: Markup,
     /// Where a page sits among its siblings in the source's own order
     /// (#953): a whole JSON number, lowest first. The Docs tree orders a
     /// parent's children by it, and a child without one follows, by title.
@@ -600,6 +616,20 @@ pub enum Frame {
     SavedView,
 }
 
+/// How a source writes a kind's prose (#2308): `text` (drawn as it is),
+/// `markdown` (CommonMark with GitHub's extensions, Gitea's), or `jira_wiki`
+/// (Jira's wiki markup: `h1.`, `{code}`, `*bold*`). The shell draws the last
+/// two with its Markdown component, converting Jira's wiki markup first.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
+pub enum Markup {
+    #[default]
+    Text,
+    Markdown,
+    JiraWiki,
+}
+
 /// An ISO 8601 instant in either spelling a declared time may use (#848):
 /// extended, as RFC 3339 writes it, or basic, as TeamCity does
 /// (`20260822T102000+0000`). Anything else is a miss.
@@ -705,6 +735,7 @@ pub mod field {
     pub const SPRINT_STATE: &str = "sprint_state";
     pub const ESTIMATE: &str = "estimate";
     pub const COMMENT_COUNT: &str = "comment_count";
+    pub const DESCRIPTION: &str = "description";
     pub const POSITION: &str = "position";
     pub const NAME: &str = "name";
     pub const GROUP: &str = "group";
@@ -736,7 +767,7 @@ pub mod field {
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
     /// `state`'s candidates with their value maps.
     /// `blocked_statuses` and `done_statuses` are not here: they are sets of
-    /// names, not somewhere to look.
+    /// names, not somewhere to look; nor is `markup`, a word about the source.
     pub const ALL: &[&str] = &[
         STATUS_NAME,
         PRIORITY,
@@ -758,6 +789,7 @@ pub mod field {
         SPRINT_STATE,
         ESTIMATE,
         COMMENT_COUNT,
+        DESCRIPTION,
         POSITION,
         NAME,
         GROUP,
@@ -1815,6 +1847,7 @@ mod tests {
         expected.push("done_statuses");
         expected.push("frame");
         expected.push("system_name");
+        expected.push("markup");
         expected.sort_unstable();
         assert_eq!(keys, expected);
     }

@@ -106,6 +106,8 @@ function ticket(links: LinkEntry[] = [PR, PAGE]): EntityDetail {
     issue_type: null,
     priority: null,
     estimate_seconds: null,
+    description: null,
+    markup: "text",
   };
 }
 
@@ -117,13 +119,14 @@ function thread(): Thread {
     body: `old comment ${n}`,
     mine: false,
     mentions_me: false,
+    markup: "text" as const,
   }));
   return {
     comments: [
       ...old,
-      { author: "Mara Lindqvist", at: "2026-10-15T07:30:00Z", body: "Starting.", mine: true, mentions_me: false },
-      { author: "Jonas Becker", at: "2026-10-15T08:00:00Z", body: "Left a comment on the PR.", mine: false, mentions_me: false },
-      { author: "Lena Hoffmann", at: "2026-10-15T10:45:00Z", body: "[~mara] will the queue get an SLA?", mine: false, mentions_me: true },
+      { author: "Mara Lindqvist", at: "2026-10-15T07:30:00Z", body: "Starting.", mine: true, mentions_me: false, markup: "text" as const },
+      { author: "Jonas Becker", at: "2026-10-15T08:00:00Z", body: "Left a comment on the PR.", mine: false, mentions_me: false, markup: "text" as const },
+      { author: "Lena Hoffmann", at: "2026-10-15T10:45:00Z", body: "[~mara] will the queue get an SLA?", mine: false, mentions_me: true, markup: "text" as const },
     ],
     me: ["mara"],
   };
@@ -403,7 +406,7 @@ test("a sent comment is drawn at the end of the thread marked queued, and goes o
   // The sync brought it back.
   unmount(job!);
   const synced = thread();
-  synced.comments.push({ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter\nnow", mine: true, mentions_me: false });
+  synced.comments.push({ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter\nnow", mine: true, mentions_me: false, markup: "text" });
   open("conversation", { ports: ports({ entityThread: () => Promise.resolve(synced) }) });
   await settle();
   expect(queuedShown()).toEqual([]);
@@ -719,4 +722,16 @@ test("Undo after moving to another job shows the member again on the ticket it w
   toast.action!.run();
   await settle();
   expect(writes.at(-1)).toEqual([ID, "gitea:tidewater/payout-service", false]);
+});
+
+test("a comment its source writes in markup is drawn as Markdown, and as text while the filter has words (#2308)", async () => {
+  const marked = thread();
+  marked.comments.push({ author: "Priya Nair", at: "2026-10-15T13:00:00Z", body: "*Agreed*, see {{retry_window}}", mine: false, mentions_me: false, markup: "jira_wiki" });
+  open("conversation", { ports: ports({ entityThread: () => Promise.resolve(marked) }) });
+  await settle();
+  const last = [...target.querySelectorAll(".tf-msg")].at(-1)!;
+  expect(last.querySelector("strong")?.textContent).toBe("Agreed");
+  expect(last.querySelector("code")?.textContent).toBe("retry_window");
+  // A text comment stays text.
+  expect(target.querySelector(".tf-newline + .tf-msg p")?.textContent).toBe("Left a comment on the PR.");
 });

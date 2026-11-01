@@ -264,7 +264,7 @@ function harness(
         if (lanes) return Promise.resolve(inLanes(board, lanes, perColumn));
         return Promise.resolve(board);
       },
-      detail: (id) => Promise.resolve({ body_text: `The description of ${id}.` }),
+      detail: (id) => Promise.resolve({ description: `The description of ${id}.`, markup: "text" }),
       // No longer a port: a page that still asked would count here (#1502).
       ...{
         contexts: () => {

@@ -1,5 +1,5 @@
 // Generated from the Rust types by ts-rs; do not edit. Regenerate with `cargo test -p knobas-app --lib ipc_mirror` (crates/knobas-app/src/ipc_mirror.rs).
-import type { BuildParameter, ReviewSide, Trigger, WriteState } from "./sources";
+import type { BuildParameter, Markup, ReviewSide, Trigger, WriteState } from "./sources";
 
 /**
  * One input of a [`ViewAction`]'s dialog. The reader's answer reaches the
@@ -1292,7 +1292,20 @@ default_branch?: string,
  * any listing names its sections (#2244). Absent on the wire for a kind
  * that draws no tree or an adapter that declares none.
  */
-tree?: TreeSections, };
+tree?: TreeSections, 
+/**
+ * A ticket's description as its source wrote it (#2308), through the
+ * declared `description` path; untrusted text. `None` where nothing is
+ * declared or the record misses it: the reader then draws no
+ * description. Not [`body_text`](Self::body_text), the search text.
+ */
+description: string | null, 
+/**
+ * How the source writes this kind's prose (#2308), as its kind declares:
+ * the shell draws `markdown` and `jira_wiki` with its Markdown component
+ * and `text` as text. `text` where nothing is declared.
+ */
+markup: Markup, };
 
 /**
  * Which slice of the corpus a room wants.
@@ -3756,9 +3769,15 @@ author: string | null,
  */
 at: string | null, 
 /**
- * The text as the source wrote it (Jira's wiki markup), never markup here.
+ * The text as the source wrote it, untrusted. Drawn by
+ * [`markup`](Self::markup), never as HTML.
  */
 body: string, 
+/**
+ * How the source writes it (#2308), as the ticket's kind declares:
+ * `jira_wiki` for Jira, `text` where nothing is declared.
+ */
+markup: Markup, 
 /**
  * The reader wrote it: its author's account is one of the identity's.
  */

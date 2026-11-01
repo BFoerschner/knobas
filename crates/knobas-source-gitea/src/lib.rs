@@ -528,6 +528,9 @@ fn ticket_paths() -> KindPaths {
         project_key: vec![PayloadPath::of(["repository", "full_name"])],
         project_name: vec![PayloadPath::of(["repository", "name"])],
         comment_count: vec![PayloadPath::of(["comments"])],
+        // The issue's body as written (#2308): Markdown, as Gitea renders it.
+        description: vec![PayloadPath::of(["body"])],
+        markup: knobas_source::Markup::Markdown,
         done_statuses: vec!["closed".to_owned()],
         ..KindPaths::default()
     }
@@ -581,6 +584,24 @@ mod tests {
         assert_eq!(
             repo.default_branch,
             vec![PayloadPath::of(["default_branch"])]
+        );
+    }
+
+    /// An issue's description is its `body`, in Markdown (#2308): what the
+    /// ticket's reader draws, where the mapped record keeps it.
+    #[test]
+    fn an_issue_declares_its_body_as_a_markdown_description() {
+        let ticket = ticket_paths();
+        assert_eq!(ticket.description, vec![PayloadPath::of(["body"])]);
+        assert_eq!(ticket.markup, knobas_source::Markup::Markdown);
+        let record = serde_json::json!({ "body": "## Steps\n\n- one" });
+        assert_eq!(
+            ticket.description[0]
+                .segments()
+                .iter()
+                .try_fold(&record, |at, key| at.get(key.as_str()))
+                .and_then(serde_json::Value::as_str),
+            Some("## Steps\n\n- one")
         );
     }
 

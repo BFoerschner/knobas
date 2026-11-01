@@ -124,7 +124,7 @@
     <TicketPreview
       page
       card={ticketFacts(detail, isMine(detail, sources), parentTitle)}
-      description={detail.body_text}
+      description={detail.description === null ? null : { text: detail.description, markup: detail.markup }}
       {around}
       timerOnIt={timedTicket === key}
     />

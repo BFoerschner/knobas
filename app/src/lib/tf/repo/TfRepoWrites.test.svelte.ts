@@ -206,7 +206,11 @@ function ports(over: Partial<RepoPorts> = {}): RepoPorts {
       if (id === "gitea:PAY-231")
         return {
           row: row(id, "ticket", "Retry failed SEPA payouts"),
-          body_text: "The nightly batch leaves 14 payouts unsettled.",
+          // The search text is not the description (#2308): the proposal takes
+          // the description, as Markdown.
+          body_text: "Retry failed SEPA payouts\n\nThe nightly batch leaves *14* payouts unsettled.\n\nOn it.",
+          description: "The nightly batch leaves *14* payouts unsettled.",
+          markup: "jira_wiki",
         } as unknown as EntityDetail;
       if (id === C1) return { row: row(C1, "commit", "PAY-231: jitter in backoff"), author: "mara" } as unknown as EntityDetail;
       throw { code: "not_found", message: `${id} is not in the mirror` };
@@ -650,7 +654,7 @@ test("From changes the address; a branch holding a key proposes its ticket's tit
   await draw(COMPARE("fix/PAY-231-README"), "PAY-231");
   expect(target.querySelector<HTMLInputElement>(".tf-compare input[type=text]")!.value).toBe("PAY-231: Retry failed SEPA payouts");
   expect(target.querySelector<HTMLTextAreaElement>(".tf-compare textarea")!.value).toBe(
-    "The nightly batch leaves 14 payouts unsettled.\n\nCloses PAY-231.",
+    "The nightly batch leaves **14** payouts unsettled.\n\nCloses PAY-231.",
   );
   expect(text(target.querySelector(".tf-compare .tf-empty"))).toBe(
     "This branch is not on Gitea yet, or knobas has not synced it. What it changes shows here once it has.",

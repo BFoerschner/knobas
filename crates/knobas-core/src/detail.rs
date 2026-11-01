@@ -72,6 +72,8 @@ pub struct Detail {
     /// A repository's default branch through its declared `default_branch`
     /// path (#2307); `None` where nothing is declared or the record misses it.
     pub default_branch: Option<String>,
+    pub description: Option<String>,
+    pub markup: crate::payload::Markup,
 }
 
 /// How many history lines the detail view is given up front.
@@ -172,6 +174,10 @@ select i.entity_id, i.source_id, i.kind, i.title, "#,
        "#,
     crate::declared_string!("$2", "default_branch"),
     r#" as default_branch,
+       "#,
+    crate::declared_string!("$2", "description"),
+    r#" as description,
+       $2::jsonb #>> array[i.source_id, i.kind, 'markup'] as markup,
        e.deleted_at,
        c.display_name, c.kind as adapter_kind,
        coalesce(c.enabled, true) as source_enabled
@@ -272,5 +278,32 @@ pub async fn read(
         priority: row.get("priority"),
         estimate_seconds: row.get("estimate_seconds"),
         default_branch: row.get("default_branch"),
+        description: row.get("description"),
+        markup: markup_of(row.get("markup")),
     }))
+}
+
+/// The declared [`Markup`](crate::payload::Markup) word (#2308), or `text`
+/// for none and for a word this build does not know: text is never parsed as
+/// markup the source did not say it wrote.
+#[must_use]
+pub fn markup_of(word: Option<String>) -> crate::payload::Markup {
+    word.and_then(|w| serde_json::from_value(serde_json::Value::String(w)).ok())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod markup_tests {
+    use super::markup_of;
+    use crate::payload::Markup;
+
+    /// The declared word, or text: an unknown word and none are never
+    /// parsed as markup (#2308).
+    #[test]
+    fn a_declared_markup_word_reads_as_itself_and_anything_else_as_text() {
+        assert_eq!(markup_of(Some("jira_wiki".to_owned())), Markup::JiraWiki);
+        assert_eq!(markup_of(Some("markdown".to_owned())), Markup::Markdown);
+        assert_eq!(markup_of(Some("asciidoc".to_owned())), Markup::Text);
+        assert_eq!(markup_of(None), Markup::Text);
+    }
 }

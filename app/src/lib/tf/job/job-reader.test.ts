@@ -33,6 +33,8 @@ function ticket(id: string, status = "In Progress"): EntityDetail {
     issue_type: "Story",
     priority: null,
     estimate_seconds: null,
+    description: null,
+    markup: "text",
   };
 }
 

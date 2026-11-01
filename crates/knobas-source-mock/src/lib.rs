@@ -1079,6 +1079,10 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             }],
             project_key: vec![PayloadPath::of(["fields", "project", "key"])],
             project_name: vec![PayloadPath::of(["fields", "project", "name"])],
+            // The dataset's descriptions are Markdown (#2308), so the demo's
+            // ticket readers draw them with the Markdown component.
+            description: vec![PayloadPath::of(["description"])],
+            markup: knobas_source::Markup::Markdown,
             ..KindPaths::default()
         },
         KindPaths {

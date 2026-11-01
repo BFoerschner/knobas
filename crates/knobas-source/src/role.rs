@@ -118,6 +118,8 @@ pub enum Field {
     SubQuery,
     /// A saved view's active sprint, an object (#2050).
     Sprint,
+    /// A ticket's description as the source wrote it (#2308).
+    Description,
 }
 
 impl Field {
@@ -150,6 +152,7 @@ impl Field {
             Field::BoardType => "board_type",
             Field::SubQuery => "sub_query",
             Field::Sprint => "sprint",
+            Field::Description => "description",
         }
     }
 
@@ -206,6 +209,15 @@ const fn kind(id: &'static str, paths: &'static [Field]) -> KindMinimum {
         kind: KindOf::Id(id),
         paths,
         optional_paths: &[],
+    }
+}
+
+impl KindMinimum {
+    const fn with_optional(self, optional_paths: &'static [Field]) -> Self {
+        KindMinimum {
+            optional_paths,
+            ..self
+        }
     }
 }
 
@@ -282,7 +294,11 @@ pub const MINIMUMS: &[Minimum] = &[
                 Field::Parent,
                 Field::ProjectKey,
             ],
-        )],
+        )
+        // The description the ticket's reader draws, by the kind's declared
+        // `markup` (#2308). Optional: a ticket system with no description
+        // still fills the role, and its reader draws none.
+        .with_optional(&[Field::Description])],
         // Saved views (#1207, ADR-0029): Jira's boards and filters. The kind
         // is named by its frame, as CI's are, so the projection
         // (`knobas_sync::saved_views`) keys on the frame and not on an

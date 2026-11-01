@@ -102,6 +102,8 @@ const DETAIL: EntityDetail = {
   issue_type: null,
   priority: null,
   estimate_seconds: null,
+  description: null,
+  markup: "text",
 };
 
 /** What `entity_checkout` answers for the repo the panel case opens (#499). */
@@ -863,7 +865,7 @@ const CASES: Case[] = [
                 lanes: [],
                 more_lanes: 0,
               }),
-            detail: () => deferred({ body_text: "" }),
+            detail: () => deferred({ description: null, markup: "text" }),
             contexts: () => deferred([]),
             listEntities: () => deferred({ rows: [], total: 0, tally: null, groups: null }),
             jobReach: () => deferred([]),
@@ -1856,6 +1858,8 @@ const CASES: Case[] = [
                 status: "To Do",
                 priority: null,
                 body_text: "",
+                description: "h2. Why",
+                markup: "jira_wiki",
               } as never),
             listSources: () => deferred([] as never),
             listEntities: () => deferred({ rows: [], total: 0, tally: null, groups: null } as never),

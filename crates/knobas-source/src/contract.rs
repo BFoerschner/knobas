@@ -1183,7 +1183,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 36] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 37] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -1197,6 +1197,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::ISSUE_TYPE, &paths.issue_type, Wanted::Text),
             (field::ESTIMATE, &paths.estimate, Wanted::Integer),
             (field::COMMENT_COUNT, &paths.comment_count, Wanted::Integer),
+            (field::DESCRIPTION, &paths.description, Wanted::Text),
             (field::POSITION, &paths.position, Wanted::Integer),
             (field::NAME, &paths.name, Wanted::Text),
             (field::GROUP, &paths.group, Wanted::Text),

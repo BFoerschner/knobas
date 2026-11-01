@@ -13,6 +13,9 @@
   with its echo (#1424, #2103), *queued* and then *sent*, until a read of the
   thread (the refresh after the write, or a run's end) holds its words.
   *Edit and resend* on a held or refused one puts its words back in the box.
+  A comment whose source writes markup (`markdown`, `jira_wiki`, #2308) is
+  drawn with the Markdown component; while the filter has words it is drawn
+  as text, so the words it matched stay marked.
   A comment the source's credential cannot make (`refused`, #2052) draws
   *Comment* disabled with the reason under the box, and queues nothing.
 -->
@@ -22,6 +25,8 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import TfMarkdown from "../markdown/TfMarkdown.svelte";
+  import { proseMarkdown } from "../../render/prose";
   import { refusedAttrs } from "../../shell/refused-writes";
   import { takeAgain, type Echo } from "../queued.svelte";
   import { initials } from "../tickets/tickets";
@@ -124,6 +129,7 @@
     {/if}
     {#each drawn.entries as entry, index (index)}
       {@const comment = entry.comment}
+      {@const markdown = filter.text.trim() === "" ? proseMarkdown(comment.body, comment.markup) : null}
       {#if index === drawn.newAt && lastVisit !== null}
         <div class="tf-newline">New since your last visit, {since(lastVisit, now)}</div>
       {/if}
@@ -134,9 +140,13 @@
             <b>{comment.mine ? "You" : firstName(comment.author)}</b>{stamp(comment.at, now)}
             {#if comment.mentions_me}<span class="tf-chip tf-chip-mention">mentions you</span>{/if}
           </div>
-          <p>
-            {#each mentionRuns(comment.body, thread.me) as run, at (at)}{#if run.at}<span class="tf-at">{run.text}</span>{:else}<Marked text={run.text} typed={filter.text} />{/if}{/each}
-          </p>
+          {#if markdown !== null}
+            <TfMarkdown text={markdown} />
+          {:else}
+            <p>
+              {#each mentionRuns(comment.body, thread.me) as run, at (at)}{#if run.at}<span class="tf-at">{run.text}</span>{:else}<Marked text={run.text} typed={filter.text} />{/if}{/each}
+            </p>
+          {/if}
         </div>
       </article>
     {/each}

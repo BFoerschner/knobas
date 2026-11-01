@@ -94,8 +94,9 @@ export const CORPUS: {
     estimate_h: 6,
     blocked: false,
     labels: ["sepa", "psp"],
+    // Markdown, as the mock adapter declares its descriptions (#2308).
     description:
-      "Payouts to two SEPA banks fail with a 409 on retry. The retry window has to be idempotent before we can turn the scheduler back on.",
+      "Payouts to two SEPA banks fail with a **409** on retry. The retry window has to be idempotent before we can turn the scheduler back on.\n\n- Retry only the transient codes (`AC04` is final)\n- Cap the retry budget",
     comments: [{ by: "mara" }, { by: "jonas" }],
   }),
   // Deliberately in **no** project, key prefix notwithstanding: the miss

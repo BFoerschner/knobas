@@ -160,6 +160,7 @@ pub(super) fn needs_of(field: Field, paths: &KindPaths) -> (Shape, Vec<PayloadPa
         Field::BoardType => (Shape::Text, plain(&paths.board_type)),
         Field::SubQuery => (Shape::Text, plain(&paths.sub_query)),
         Field::Sprint => (Shape::Object, plain(&paths.sprint)),
+        Field::Description => (Shape::Text, plain(&paths.description)),
         Field::State => (
             Shape::TextOrFlag,
             paths.state.iter().map(|s| s.at.clone()).collect(),
