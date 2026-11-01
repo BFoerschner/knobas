@@ -679,6 +679,30 @@ out=$( (
   _live_make_room confluence && echo "no-op"
 ) 2>&1 )
 [ "$out" = no-op ] || fail "the local target has no budget" "$out"
+# _live_claim starts a product that is down with its services AFTER `up -d`:
+# before them, compose reads the first service as its subcommand ("unknown
+# docker command: \"compose confluence-db\"", #2368). No StartedAt for the
+# product, so no licence is read and nothing is renewed.
+for want in "gitea|compose --env-file images.env up -d gitea" \
+  "confluence|compose --env-file images.env --profile real-atlassian up -d confluence-db confluence" \
+  "teamcity|compose --env-file images.env --profile real-teamcity up -d teamcity teamcity-agent"; do
+  checks=$((checks + 1))
+  : >"$mem/docker.log"
+  # shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+  out=$( (
+    export PATH="$mem/bin:$PATH" STUB_LOG="$mem/docker.log" STUB_RUNNING="" STUB_STARTED=""
+    export STUB_MEM=$((12 * 1024 * 1024 * 1024)) JIRA_LICENSE_KEY=k CONFLUENCE_LICENSE_KEY=k
+    export KNOBAS_LIVE_TARGET=remote KNOBAS_LIVE_SSH=wsl-test KNOBAS_LIVE_LOCK_DIR="$mem"
+    # shellcheck source=testenv/live-lib.sh disable=SC1091
+    . "$here/live-lib.sh"
+    LIVE_TESTENV=$mem/testenv
+    _live_claim "${want%%|*}"
+  ) 2>&1 ) || fail "_live_claim ${want%%|*} starts it" "$out"
+  case $(cat "$mem/docker.log") in
+    *"docker ${want#*|}"*) ;;
+    *) fail "_live_claim ${want%%|*}: the services follow 'up -d'" "$(cat "$mem/docker.log")" ;;
+  esac
+done
 
 
 # --- the canary and the stall follow a remote target ---------------------------

@@ -1051,13 +1051,15 @@ _live_make_room() {
   fi
 }
 
-# _live_containers <product> -- its services, for the memory section's start.
-_live_containers() {
+# _live_up_args <product> -- the compose arguments that start it, for the
+# memory section: its profile flag before `up -d`, its services after. A
+# service before the subcommand is read AS the subcommand (#2368).
+_live_up_args() {
   case $1 in
-    gitea) echo "gitea" ;;
-    forgejo) echo "--profile forgejo forgejo" ;;
-    teamcity) echo "--profile real-teamcity teamcity teamcity-agent" ;;
-    jira | confluence) echo "--profile real-atlassian $1-db $1" ;;
+    gitea) echo "up -d gitea" ;;
+    forgejo) echo "--profile forgejo up -d forgejo" ;;
+    teamcity) echo "--profile real-teamcity up -d teamcity teamcity-agent" ;;
+    jira | confluence) echo "--profile real-atlassian up -d $1-db $1" ;;
   esac
 }
 
@@ -1081,7 +1083,7 @@ _live_claim() {
   live_is_up "$p" && return 0
   _live_make_room "$p" || return 1
   # shellcheck disable=SC2046  # the profile flags and services, split on purpose
-  _live_compose $(_live_containers "$p") up -d >/dev/null || return 1
+  _live_compose $(_live_up_args "$p") >/dev/null || return 1
 }
 
 # live_up <product> -- the product and what it needs, guarded.
