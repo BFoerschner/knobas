@@ -18,7 +18,6 @@
   import { keepScroll } from "./while-shown.svelte";
   import type { RoleFrameProps, TfPageContext, TfPageEntry } from "./page-entry";
   import { sectionOf, type TfRoute } from "./route";
-  import { ticketRef } from "./job/job";
   import { scopedTicket } from "./job/scoped.svelte";
   import TfCrumbs, { shellCrumbs } from "./TfCrumbs.svelte";
   import TfSyncNow from "./TfSyncNow.svelte";
@@ -53,8 +52,10 @@
    * the shell hands every page. Per page, so a hidden page of another
    * section keeps the chosen job and reads nothing again.
    */
-  const job = $derived(scopedTicket.viewJob(sectionOf(route), ctx.jobAt === null ? null : ticketRef(ctx.jobAt)));
-  const pageCtx = $derived<TfPageContext>({ ...ctx, route, visible, job: job?.key ?? null, jobAt: job?.entityId ?? null });
+  const held = $derived(scopedTicket.viewJob(sectionOf(route), null));
+  const pageCtx = $derived<TfPageContext>(
+    held === null ? { ...ctx, route, visible } : { ...ctx, route, visible, job: held.key, jobAt: held.entityId },
+  );
 
   /**
    * The page's props, each its own signal (#1987). A spread of `entry.props(ctx)`
