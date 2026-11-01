@@ -44,9 +44,10 @@ STUB
 chmod +x "$scratch/bin/docker"
 # A curl that answers: `live_up gitea` probes http://127.0.0.1:3000 for health,
 # and without a stub the cases passed only on a machine with a real Gitea up
-# there (a bare Linux runner has none, #1713).
+# there (a bare Linux runner has none, #1713). It prints 200 for the Atlassian
+# start, which waits until the REST API answers that before the content seed.
 printf '#!/bin/sh
-exit 0
+printf 200
 ' >"$scratch/bin/curl"
 chmod +x "$scratch/bin/curl"
 
@@ -62,7 +63,7 @@ export KNOBAS_LIVE_LOCK_WAIT=5
 unset KNOBAS_LIVE_LOCK_HOLDER KNOBAS_LIVE_GITEA_LOCK_HOLDER
 # This machine's products, whatever testenv/live.env says: a developer whose
 # file names a remote target must not have these tests ssh anywhere.
-export KNOBAS_LIVE_TARGET=local
+export KNOBAS_LIVE_TARGET=local KNOBAS_LIVE_TUNNEL_SOCK="$scratch/no-tunnel.sock"
 unset KNOBAS_LIVE_SSH KNOBAS_LIVE_ONE_JVM DOCKER_HOST
 
 # A scratch testenv/ whose seeds do nothing, so `live_session` can run whole.

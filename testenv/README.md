@@ -338,7 +338,8 @@ one suite here while the file names the WSL box, and the unit tests pin
 | `KNOBAS_LIVE_ONE_JVM` | `1` local, `0` remote | The one-JVM refusal. |
 | `KNOBAS_LIVE_LICENCE_MARGIN_S` | `3600` | Jira and Confluence are set up again when their licence has less left than this (both targets). |
 | `KNOBAS_LIVE_MEM_BUDGET_MB` | engine memory − `KNOBAS_LIVE_MEM_RESERVE_MB` (1536) | Remote only: what the products' caps may add up to (below). |
-| `KNOBAS_LIVE_{GITEA,TEAMCITY,TEAMCITY_AGENT,JIRA,CONFLUENCE,DB}_MB` | 512, 2560, 1024, 3584, 2560, 512 | Remote only: each container's memory cap, in `docker-compose.remote.yml` and in the budget alike. |
+| `KNOBAS_LIVE_{GITEA,TEAMCITY,TEAMCITY_AGENT,JIRA,CONFLUENCE,DB}_MB` | 512, 2048, 1024, 4608, 3072, 512 | Remote only: each container's memory cap (`docker-compose.remote.yml`), a ceiling against a runaway. |
+| `KNOBAS_LIVE_USE_{GITEA,TEAMCITY,JIRA,CONFLUENCE}_MB` | 512, 2048, 4096, 2560 | Remote only: what the budget counts per product (database and agent included), measured with headroom. |
 
 **How a remote target works.** Nothing in the suites changes, and no checkout
 lives on the remote machine:
@@ -363,43 +364,60 @@ lives on the remote machine:
   `just live-down <product>` still works, through the same engine.
 - The locks stay on this machine (`$TMPDIR`): the worktrees that take turns
   are all here. The JVM lock still serialises the JVM runs.
+- **The tunnel holds this machine's product ports.** A local run beside it
+  would fail to publish them, or talk to the remote product through it. So a
+  local run refuses while a tunnel is open (`testenv/live tunnel down` frees
+  the ports, from either target). A worktree whose code predates the remote
+  target has no such guard. Until every worktree runs this code, a remote run
+  can collide with a local one, as it did on the first day.
 - **Uptime Kuma and the canary stay here.** `just kuma-live` does not source
   `live-lib.sh`, the canary is a host socket of this machine, and the Kuma
   suites assert no product's monitor state. Kuma's `gitea` monitor reads
   `gitea:3000` on the local compose network, so it is red while Gitea is
   remote; its three JVM checks go through `host.docker.internal` to the tunnel.
 
-**The box has 16 GB, so nothing may freeze it.** All products up at once would
-claim about 11 GB, more than WSL can be given while Windows keeps enough to
-stay responsive, and a VM pushed into swap stops answering ssh. There are three
-layers, each closing a different way to that:
+**The box has 16 GB, so nothing may freeze it.** A VM pushed into swap stops
+answering ssh. There are three layers, each closing a different way to that:
 
 1. **Windows keeps its share.** `setup-windows.ps1` gives WSL physical memory
    less 6 GB (10 of 16), 4 GB of swap and `autoMemoryReclaim=gradual`. WSL
    cannot take more than its cap, whatever runs inside.
 2. **Every container has a hard cap** (`docker-compose.remote.yml`, layered on
    through `COMPOSE_FILE` for every compose call a remote run makes) and a heap
-   pinned under it: Jira 3.5 GB with `-Xmx2048m`, Confluence 2.5 GB with
-   `-Xmx1024m`, TeamCity 2.5 GB with `-Xmx1536m` plus 1 GB for its agent, each
-   PostgreSQL and Gitea 512 MB. A JVM that grows takes out its own container,
-   not the VM. `check-ports.sh` asserts the overlay changes no port.
-3. **A memory budget decides what runs at once.** Before a product starts, the
-   caps of what is up are added to its own. While the sum is over the budget
-   (the engine's memory less 1536 MB), the other JVM products are **stopped**,
+   pinned under it: Jira 4.5 GB with `-Xmx2048m`, Confluence 3 GB with
+   `-Xmx1024m`, TeamCity 2 GB with `-Xmx1536m` plus 1 GB for its agent, each
+   PostgreSQL and Gitea 512 MB. The caps are a third above measured use. A JVM
+   that grows takes out its own container, not the VM. A first, tighter 3.5 GB
+   held Jira at its ceiling and pushed it into swap. `check-ports.sh` asserts
+   the overlay changes no port.
+3. **A memory budget decides what runs at once.** Before a product starts, what
+   each product up uses is added to what this one will use. Those are
+   **measured** figures with headroom, not the caps: Jira with its database
+   4096 MB, Confluence 2560, TeamCity with its agent 2048, Gitea 512. While
+   the sum is over the budget (the engine's memory less 1536 MB), the other
+   JVM products are **stopped**,
    the one started longest ago first, until it fits. They are stopped rather
    than removed: TeamCity keeps its builds, and Jira and Confluence their seed
    until their licence is due. The run holds the JVM lock, so no other run is
    inside what it stops. A product another worktree's `live-up` keeps is never
    stopped, and a product that cannot fit is refused in a line naming the
-   numbers. With a 10 GB WSL, any two JVM products fit beside Gitea and a third
-   stops one. `testenv/live remote-check` prints the budget and which pairs
-   fit.
+   numbers. On the real box's 12 GB WSL (budget 10425 MB) all three fit
+   (9216). With a 10 GB WSL any two fit and a third stops one. `testenv/live
+   remote-check` prints the budget and what fits.
+
+   **Measured with all three up**, a Jira suite running, on the real box
+   (2026-11-01): Jira 3.48 GB, Confluence 2.27, TeamCity 1.22 and its agent
+   0.40, each PostgreSQL under 0.2. The VM peaked at 8.5 of 12 GB used, with
+   3.2 GB available, and the 49 Jira tests passed.
 
 **The 3-hour licence is renewed when it is due.** A product kept up meets the
 timebomb licence's end, which a run that removed it afterwards never did. So
 before Jira or Confluence is started or re-seeded, by a run or by `live-up`,
-its container's age is read (`Created`, which is before the wizard applied
-the key, so the estimate errs early). With less than
+the age of its **data volume** is read. The volume is created before the
+wizard applies the key, so the estimate errs early, and only a reset removes
+it. The container's own age is wrong for this: compose recreates a container
+whenever its configuration changes (a moved pin, a raised cap), and a
+recreated Jira would look new on an old licence. With less than
 `KNOBAS_LIVE_LICENCE_MARGIN_S` left it is removed with its volumes and set up
 from empty, about five minutes for Jira and two for Confluence; otherwise it is
 re-seeded, which writes nothing to a seeded instance. A stopped container a
@@ -407,6 +425,12 @@ reboot left behind is the same case. The caller holds the JVM lock, so no
 other run is inside the product while it is replaced. This holds on the local
 target too, where a `live-up` session past two hours used to end in an
 expired product.
+
+**Before the content seed, the REST API must answer.** `/status` says RUNNING
+while the plugins behind the API are still warming. A Jira restarted from a
+stopped container answered `/rest/api/2/myself` with 503 for a while, and the
+seed that hit it was retried from empty for nothing. So the start waits until
+the admin gets a 200 from it (`KNOBAS_LIVE_API_WAIT_S`, 300).
 
 **A seed that fails on an instance that was already there is retried once,
 from empty.** That covers data a killed run left half-changed, an account Jira

@@ -113,12 +113,12 @@ case $LIVE_TARGET in
     # remote run makes, the recipes' and the seeds' too; an explicit `-f`
     # (gitea-live-capped's overlay) replaces it for that one call.
     export COMPOSE_FILE="$LIVE_TESTENV/docker-compose.yml:$LIVE_TESTENV/docker-compose.remote.yml"
-    # The caps in MB, one set of numbers for the overlay and the budget.
+    # The caps in MB, read by docker-compose.remote.yml.
     export KNOBAS_LIVE_GITEA_MB=${KNOBAS_LIVE_GITEA_MB:-512} \
-      KNOBAS_LIVE_TEAMCITY_MB=${KNOBAS_LIVE_TEAMCITY_MB:-2560} \
+      KNOBAS_LIVE_TEAMCITY_MB=${KNOBAS_LIVE_TEAMCITY_MB:-2048} \
       KNOBAS_LIVE_TEAMCITY_AGENT_MB=${KNOBAS_LIVE_TEAMCITY_AGENT_MB:-1024} \
-      KNOBAS_LIVE_JIRA_MB=${KNOBAS_LIVE_JIRA_MB:-3584} \
-      KNOBAS_LIVE_CONFLUENCE_MB=${KNOBAS_LIVE_CONFLUENCE_MB:-2560} \
+      KNOBAS_LIVE_JIRA_MB=${KNOBAS_LIVE_JIRA_MB:-4608} \
+      KNOBAS_LIVE_CONFLUENCE_MB=${KNOBAS_LIVE_CONFLUENCE_MB:-3072} \
       KNOBAS_LIVE_DB_MB=${KNOBAS_LIVE_DB_MB:-512} ;;
   *)
     echo "live: KNOBAS_LIVE_TARGET must be local or remote, not '$LIVE_TARGET'" >&2
@@ -135,8 +135,11 @@ _live_tunnel_sock() {
   echo "${KNOBAS_LIVE_TUNNEL_SOCK:-${TMPDIR:-/tmp}/knobas-live-tunnel.sock}"
 }
 
+# With -S the host argument names nothing ssh dials, so a local shell, which
+# has no KNOBAS_LIVE_SSH, can still ask about (and close) a tunnel left open.
 live_tunnel_is_up() {
-  ssh -S "$(_live_tunnel_sock)" -O check "$KNOBAS_LIVE_SSH" >/dev/null 2>&1
+  [ -S "$(_live_tunnel_sock)" ] || return 1
+  ssh -S "$(_live_tunnel_sock)" -O check "${KNOBAS_LIVE_SSH:-knobas-live-tunnel}" >/dev/null 2>&1
 }
 
 # live_tunnel_up -- one ssh master, left running, forwarding every product
@@ -164,10 +167,10 @@ live_tunnel_up() {
 
 live_tunnel_down() {
   if live_tunnel_is_up; then
-    ssh -S "$(_live_tunnel_sock)" -O exit "$KNOBAS_LIVE_SSH" >/dev/null 2>&1 || true
-    echo "live: tunnel to $KNOBAS_LIVE_SSH down"
+    ssh -S "$(_live_tunnel_sock)" -O exit "${KNOBAS_LIVE_SSH:-knobas-live-tunnel}" >/dev/null 2>&1 || true
+    echo "live: tunnel to ${KNOBAS_LIVE_SSH:-the remote target} down"
   else
-    echo "live: no tunnel to $KNOBAS_LIVE_SSH"
+    echo "live: no tunnel to ${KNOBAS_LIVE_SSH:-a remote target}"
   fi
 }
 
@@ -175,7 +178,18 @@ live_tunnel_down() {
 # is up. Nothing at all for a local one. Once per shell.
 LIVE_REMOTE_READY=""
 live_remote_ready() {
-  [ -n "$LIVE_REMOTE" ] || return 0
+  if [ -z "$LIVE_REMOTE" ]; then
+    # A LOCAL run next to a tunnel left open by a remote one: the tunnel holds
+    # 127.0.0.1:3000/8080/8090/8111/3002 here, so a local product cannot
+    # publish its port, and its seeds and suites would talk to the remote
+    # product through the tunnel instead (#2366's first day: a worktree whose
+    # code predates the remote target ran `just jira-live` beside it).
+    if live_tunnel_is_up; then
+      echo "live: an ssh tunnel to a remote target holds this machine's product ports ($LIVE_TUNNEL_PORTS); 'testenv/live tunnel down' frees them, or run with KNOBAS_LIVE_TARGET=remote" >&2
+      return 1
+    fi
+    return 0
+  fi
   [ -z "$LIVE_REMOTE_READY" ] || { live_tunnel_up; return; }
   local v
   if ! v=$(docker version --format '{{.Server.Version}}' 2>&1); then
@@ -730,8 +744,8 @@ _live_start() {
 # A product only ever up for one run never met that; one kept up -- `live-up`
 # for a session, or a remote target that keeps it around the clock, or a
 # stopped container a reboot left behind -- does. So before Jira or
-# Confluence is started or re-seeded, its container's age is read (`Created`,
-# which is before the wizard ran, so the estimate errs early): with less than
+# Confluence is started or re-seeded, the age of its data volume is read
+# (created before the wizard ran, so the estimate errs early): with less than
 # KNOBAS_LIVE_LICENCE_MARGIN_S left (3600 by default), it is removed with its
 # volumes and set up from empty. The caller holds the JVM lock, so no other
 # run is in it. An age that cannot be read -- no container, or no answer --
@@ -758,12 +772,20 @@ _live_engine_now() {
   date +%s
 }
 
-# _live_licence_left <product> -- seconds of licence the container has left,
-# by its age; fails when there is no container or no readable age.
+# _live_licence_left <product> -- seconds of licence left, by the age of the
+# product's data VOLUME: the licence lives in it, and only a reset removes
+# it. Not the container's age: compose recreates a container whenever its
+# configuration changes (a moved image pin, a raised memory cap), which
+# would make an old licence look new. The container's age is the fallback
+# for a volume docker cannot date. Fails when neither is there.
 _live_licence_left() {
   local created epoch
-  created=$(docker inspect -f '{{.Created}}' "$(_live_main "$1")" 2>/dev/null) || return 1
-  epoch=$(_live_epoch "$created") || return 1
+  created=$(docker volume inspect -f '{{.CreatedAt}}' "knobas-testenv_$1-data" 2>/dev/null) || created=""
+  epoch=$(_live_epoch "$created") || epoch=""
+  if [ -z "$epoch" ]; then
+    created=$(docker inspect -f '{{.Created}}' "$(_live_main "$1")" 2>/dev/null) || return 1
+    epoch=$(_live_epoch "$created") || return 1
+  fi
   case $epoch in '' | *[!0-9]*) return 1 ;; esac
   echo $((LIVE_LICENCE_S - ($(_live_engine_now) - epoch)))
 }
@@ -790,10 +812,35 @@ _live_atlassian_remove() {
   fi
 }
 
+# _live_atlassian_api <product> -- wait until its REST API answers 200 for the
+# admin. `/status` says RUNNING while the plugins behind the API still warm
+# up: a Jira restarted from a stopped container answered `/rest/api/2/myself`
+# with a 503 for a while after it (2026-11-01), the content seed failed on
+# it, and the retry below rebuilt a healthy instance from empty. The right
+# password only: a wrong one locks the account (README, "Never send this Jira
+# a wrong password"). KNOBAS_LIVE_API_WAIT_S, 300 by default.
+_live_atlassian_api() {
+  local url path code from=$SECONDS wait_s=${KNOBAS_LIVE_API_WAIT_S:-300}
+  case $1 in
+    jira) url=http://127.0.0.1:8080 path=/rest/api/2/myself ;;
+    confluence) url=http://127.0.0.1:8090 path='/rest/api/space?limit=1' ;;
+  esac
+  while :; do
+    code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -u knobas:knobas-dev "$url$path" 2>/dev/null) || code=000
+    [ "$code" != 200 ] || return 0
+    if [ $((SECONDS - from)) -ge "$wait_s" ]; then
+      echo "live: $1: $url$path still answers $code after ${wait_s}s (KNOBAS_LIVE_API_WAIT_S)" >&2
+      return 1
+    fi
+    sleep 5
+  done
+}
+
 # _live_atlassian_seed <product> -- up, wizard, content, verified.
 _live_atlassian_seed() {
   _live_compose --profile real-atlassian up -d --wait "$1-db" "$1" || return 1
   (cd "$LIVE_TESTENV" && ./seed-atlassian.sh "$1") || return 1
+  _live_atlassian_api "$1" || return 1
   # Twice, deliberately: the second run reaches the find-then-skip branches
   # a seed from empty never does (#396), and must write nothing.
   (cd "$LIVE_TESTENV" && ./seed-atlassian-content.sh "$1") || return 1
@@ -829,26 +876,29 @@ _live_atlassian_start() {
 }
 
 # THE MEMORY BUDGET, ON A REMOTE TARGET. The WSL box has 16 GB of physical
-# memory and WSL about 10 of it (setup-windows.ps1), and all three JVM
-# products together are capped at about 11 GB: they do not fit at once, and
-# a VM pushed into swap stops answering ssh -- a frozen box, not a failed run.
-# So before a product starts there, the caps of what is up are added to its
-# own (docker-compose.remote.yml's numbers), and while the sum is over the
-# budget the other JVM products are STOPPED, the one started longest ago
-# first, until it fits. Stopped, not removed: TeamCity keeps its builds, and
+# memory and WSL 10 to 12 of it (setup-windows.ps1), and a VM pushed into
+# swap stops answering ssh -- a frozen box, not a failed run. So before a
+# product starts there, what each product up USES is added to what this one
+# will use, and while the sum is over the budget the other JVM products are
+# STOPPED, the one started longest ago first, until it fits. The figures are
+# measured, not the caps (docker-compose.remote.yml, which are ceilings a
+# third higher): all three up with a Jira suite running, 2026-11-01 on the
+# real box, Jira and its PostgreSQL peaked at 3.7 GB, Confluence 2.3,
+# TeamCity and its agent 1.6, the VM at 8.5 of 12 GB -- so here 4096, 2560,
+# 2048 and Gitea 512, with headroom (KNOBAS_LIVE_USE_*_MB overrides each). Stopped, not removed: TeamCity keeps its builds, and
 # Jira and Confluence their seed, until their licence is due (above). The
 # caller holds the JVM lock, so no other run is inside a product it stops --
 # except a product another live-up keeps, which is never stopped. A product
 # that does not fit even alone is refused. The budget is the engine's memory
 # less KNOBAS_LIVE_MEM_RESERVE_MB (1536: kernel, dockerd, page cache), or
-# KNOBAS_LIVE_MEM_BUDGET_MB outright. With the defaults and a 10 GB WSL, any
-# two JVM products fit and a third stops one.
+# KNOBAS_LIVE_MEM_BUDGET_MB outright. With the defaults all three fit a 12 GB
+# WSL (budget ~10.4 GB, needed 9.2); on a 10 GB one a third stops one.
 _live_footprint_mb() {
   case $1 in
-    gitea | forgejo) echo "$KNOBAS_LIVE_GITEA_MB" ;;
-    teamcity) echo $((KNOBAS_LIVE_TEAMCITY_MB + KNOBAS_LIVE_TEAMCITY_AGENT_MB)) ;;
-    jira) echo $((KNOBAS_LIVE_JIRA_MB + KNOBAS_LIVE_DB_MB)) ;;
-    confluence) echo $((KNOBAS_LIVE_CONFLUENCE_MB + KNOBAS_LIVE_DB_MB)) ;;
+    gitea | forgejo) echo "${KNOBAS_LIVE_USE_GITEA_MB:-512}" ;;
+    teamcity) echo "${KNOBAS_LIVE_USE_TEAMCITY_MB:-2048}" ;;
+    jira) echo "${KNOBAS_LIVE_USE_JIRA_MB:-4096}" ;;
+    confluence) echo "${KNOBAS_LIVE_USE_CONFLUENCE_MB:-2560}" ;;
   esac
 }
 

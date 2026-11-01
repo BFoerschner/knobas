@@ -40,7 +40,7 @@ export KNOBAS_LIVE_LOCK="$scratch/jvm.lock" KNOBAS_LIVE_GITEA_LOCK="$scratch/git
 unset KNOBAS_LIVE_LOCK_HOLDER KNOBAS_LIVE_GITEA_LOCK_HOLDER
 # This machine's products, whatever testenv/live.env says: a developer whose
 # file names a remote target must not have these tests ssh anywhere.
-export KNOBAS_LIVE_TARGET=local
+export KNOBAS_LIVE_TARGET=local KNOBAS_LIVE_TUNNEL_SOCK="$scratch/no-tunnel.sock"
 unset KNOBAS_LIVE_SSH KNOBAS_LIVE_ONE_JVM DOCKER_HOST
 
 # shellcheck source=testenv/live-lib.sh disable=SC1091
@@ -480,6 +480,26 @@ check_target "no live.env is this machine" "" \
   'echo "target=$LIVE_TARGET put_back=[$(STUB_RUNNING="" live_to_put_back jira)]"' "target=local put_back=[jira]"
 rm -f "$remote_lib/live.env"
 
+# A local run beside a tunnel a remote run left open is refused before it
+# touches anything: the tunnel holds the product ports.
+checks=$((checks + 1))
+tun=$scratch/tunnel
+mkdir -p "$tun/bin"
+printf '#!/usr/bin/env bash\ncase "$*" in *"-O check"*) exit 0 ;; esac\nexit 1\n' >"$tun/bin/ssh"
+chmod +x "$tun/bin/ssh"
+python3 -I -c "import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])" "$tun/t.sock"
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export PATH="$tun/bin:$scratch/bin:$PATH" KNOBAS_LIVE_TUNNEL_SOCK="$tun/t.sock" STUB_RUNNING=""
+  : >"$STUB_LOG"
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  live_up gitea
+) 2>&1 ) && fail "a local run beside an open tunnel is refused" "$out"
+case $out in *"holds this machine's product ports"*) ;; *) fail "and says the tunnel holds the ports" "$out" ;; esac
+# shellcheck disable=SC2031  # the subshell only truncated it
+[ ! -s "$STUB_LOG" ] || fail "and touches nothing" "$(cat "$STUB_LOG")"
+
 # --- the 3-hour licence -----------------------------------------------------
 
 # A docker whose `inspect -f {{.Created}}` answers $STUB_CREATED, and which
@@ -488,19 +508,30 @@ lic=$scratch/licence
 mkdir -p "$lic/bin" "$lic/testenv"
 cat >"$lic/bin/docker" <<'STUB'
 #!/usr/bin/env bash
-case "${1:-}" in
-  inspect) [ -n "${STUB_CREATED:-}" ] || exit 1; echo "$STUB_CREATED"; exit 0 ;;
-  ps) exit 0 ;;
+case "${1:-} ${2:-}" in
+  "volume inspect") [ -n "${STUB_VOLUME_CREATED:-}" ] || exit 1; echo "$STUB_VOLUME_CREATED"; exit 0 ;;
+  "inspect "*) [ -n "${STUB_CREATED:-}" ] || exit 1; echo "$STUB_CREATED"; exit 0 ;;
+  "ps "*) exit 0 ;;
 esac
 echo "docker $*" >>"$STUB_LOG"
 STUB
 chmod +x "$lic/bin/docker"
+# The REST API answers at once: what is under test is the decision, not Jira.
+# shellcheck disable=SC2016  # expanded by the stub
+printf '#!/usr/bin/env bash\necho "curl $*" >>"$STUB_LOG"\nprintf 200\n' >"$lic/bin/curl"
+chmod +x "$lic/bin/curl"
 for s in seed-atlassian.sh seed-atlassian-content.sh; do
   # shellcheck disable=SC2016  # expanded by the fake seed
   printf '#!/usr/bin/env bash\necho "%s $*" >>"$STUB_LOG"\n[ ! -e "$STUB_SEED_FAILS" ] || { rm -f "$STUB_SEED_FAILS"; exit 1; }\n' "$s" >"$lic/testenv/$s"
   chmod +x "$lic/testenv/$s"
 done
+# iso_ago <seconds> -- that long ago, as docker spells a container's Created.
+iso_ago() {
+  date -u -r $(($(date +%s) - $1)) '+%Y-%m-%dT%H:%M:%S.123456789Z' 2>/dev/null ||
+    date -u -d "@$(($(date +%s) - $1))" '+%Y-%m-%dT%H:%M:%S.123456789Z'
+}
 # check_licence <what> <age seconds|none> <seed fails once: 0|1> <needles...>
+# ($STUB_VOLUME_AGE, when set, is the data volume's age.)
 # and, after `--absent`, what the log must not hold.
 check_licence() {
   local what=$1 age=$2 fails=$3 created="" out rc=0 n absent=""
@@ -509,11 +540,13 @@ check_licence() {
   : >"$lic/docker.log"
   rm -f "$lic/fails"
   [ "$fails" = 0 ] || : >"$lic/fails"
-  [ "$age" = none ] || created=$(date -u -r $(($(date +%s) - age)) '+%Y-%m-%dT%H:%M:%S.123456789Z' 2>/dev/null ||
-    date -u -d "@$(($(date +%s) - age))" '+%Y-%m-%dT%H:%M:%S.123456789Z')
+  [ "$age" = none ] || created=$(iso_ago "$age")
+  local vcreated=""
+  [ -z "${STUB_VOLUME_AGE:-}" ] || vcreated=$(iso_ago "$STUB_VOLUME_AGE" | sed 's/\.123456789Z$/+00:00/')
     # shellcheck disable=SC2030,SC2031  # its own subshell on purpose
   out=$( (
     export PATH="$lic/bin:$PATH" STUB_LOG="$lic/docker.log" STUB_CREATED="$created" STUB_SEED_FAILS="$lic/fails"
+    export STUB_VOLUME_CREATED="$vcreated"
     export JIRA_LICENSE_KEY=k CONFLUENCE_LICENSE_KEY=k
     # shellcheck source=testenv/live-lib.sh disable=SC1091
     . "$here/live-lib.sh"
@@ -532,9 +565,13 @@ check_licence() {
   echo "$rc" >"$lic/rc"
 }
 check_licence "a Jira with hours of licence left is re-seeded, not removed" 1800 0 \
-  "min of its 3-hour licence left" "seed-atlassian.sh jira" --absent "rm --stop"
+  "min of its 3-hour licence left" "seed-atlassian.sh jira" "/rest/api/2/myself" --absent "rm --stop"
 check_licence "a Jira with under an hour left is removed and set up from empty" 9000 0 \
   "removing it and setting it up from empty" "rm --stop --force jira jira-db" "seed-atlassian.sh jira"
+STUB_VOLUME_AGE=9000 check_licence "a recreated Jira container on an old volume is judged by the volume" 600 0 \
+  "removing it and setting it up from empty" "rm --stop --force jira jira-db"
+STUB_VOLUME_AGE=600 check_licence "a young volume keeps an old-looking container" 20000 0 \
+  "re-seeding it" --absent "rm --stop"
 check_licence "a Jira whose licence ran out is removed" 20000 0 \
   "about 0 min left" "rm --stop --force jira jira-db"
 check_licence "no Jira container: nothing removed, seeded from empty" none 0 \
@@ -599,8 +636,9 @@ check_room() {
     fi
   done
 }
-# 10 GB less the 1536 MB reserve is an 8704 MB budget; Gitea 512, TeamCity
-# 3584, Jira 4096, Confluence 3072.
+# 10 GB less the 1536 MB reserve is an 8704 MB budget; measured use: Gitea
+# 512, TeamCity 2048, Jira 4096, Confluence 2560 -- two JVM products fit, three
+# (9216) do not.
 check_room "two JVM products fit beside Gitea" confluence "knobas-gitea knobas-jira" ok \
   --absent "stop"
 check_room "a third stops the one started longest ago" jira "knobas-gitea knobas-teamcity knobas-confluence" ok \
