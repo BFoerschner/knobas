@@ -444,9 +444,6 @@ pub(crate) fn comments_envelope(
     })
 }
 
-/// The worklog collection. The endpoint takes no pagination parameters (the
-/// WADL declares none), but the response schema is still the paginated
-/// envelope — Jira's own quirk, reproduced rather than tidied up.
 /// One `fields.attachment` entry in the Data Center shape (#2404). A
 /// thumbnail only for an image, as Jira renders one for images alone.
 fn attachment_json(base: &str, a: &crate::state::JiraAttachment, off: FixedOffset) -> Value {
@@ -466,6 +463,9 @@ fn attachment_json(base: &str, a: &crate::state::JiraAttachment, off: FixedOffse
     out
 }
 
+/// The worklog collection. The endpoint takes no pagination parameters (the
+/// WADL declares none), but the response schema is still the paginated
+/// envelope — Jira's own quirk, reproduced rather than tidied up.
 pub(crate) fn worklogs_envelope(base: &str, issue: &JiraIssue, off: FixedOffset) -> Value {
     let all: Vec<Value> = issue
         .worklogs
