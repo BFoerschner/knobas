@@ -395,6 +395,30 @@ export function assetsRollup(lines: readonly AssetLine[]): Rollup {
   };
 }
 
+/**
+ * Code's rollup (#2401): "6 items", the branches with commits not pushed
+ * (`warn`) before the open pull requests (`info`). `unpushed` holds the
+ * entity ids of the branches whose checkout on this machine is ahead of its
+ * upstream; an id that is not one of the rows' branches counts nothing.
+ */
+export function codeRollup(rows: readonly EntityRow[], unpushed: ReadonlySet<string>): Rollup {
+  const signals: Signal[] = [];
+  const notPushed = rows.filter((row) => row.kind === "branch" && unpushed.has(row.entity_id)).length;
+  if (notPushed > 0) signals.push({ tone: "warn", text: `${notPushed} not pushed` });
+  const open = openPrs(rows);
+  if (open > 0) signals.push({ tone: "info", text: `${open} open ${open === 1 ? "PR" : "PRs"}` });
+  return { lead: `${rows.length} ${rows.length === 1 ? "item" : "items"}`, signals };
+}
+
+/**
+ * The one state a section's row on the card draws (#2401): the rollup's
+ * worst signal, or `null` when every signal is settled (`ok`, `muted`).
+ */
+export function worstSignal(rollup: Rollup): Signal | null {
+  const asking = rollup.signals.filter((signal) => RANK[signal.tone] < SETTLED);
+  return asking.reduce<Signal | null>((worst, signal) => (worst === null || RANK[signal.tone] < RANK[worst.tone] ? signal : worst), null);
+}
+
 /** The username knobas knows the reader by in a source, or `null`. */
 export function username(source: SourceFacts | undefined): string | null {
   const config = source?.config as Record<string, unknown> | null | undefined;

@@ -93,13 +93,20 @@ use crate::{JiraConfig, time::parse_jira_time};
 /// set. `comment` and `worklog` are in the list -- neither is navigable -- so
 /// the common case costs one request per page instead of one per issue.
 ///
-/// **Why these eighteen (issue #32).** This list used to stop after twelve,
+/// **Why these eighteen (issue #32), nineteen since #2404.** This list used to stop after twelve,
 /// and the reason it gave was the wrong way round: `knobas-mockd` validated
 /// `fields=` against a closed set, so anything wider was a 400 plus a recorded
 /// `UnknownField` violation, and the list "stopped where the certification
 /// stopped". That makes a mock's coverage decide what production fetches. The
 /// mock is there to certify the query, not to bound it, so mockd's set was
 /// widened first (its deviation 5) and this follows.
+///
+/// **`attachment` joined in #2404**, the nineteenth: the ticket page's
+/// attachment list, which the descriptor's `attachments` path projects. The
+/// list, never the bytes. Every ticket mirrored before it holds no
+/// `fields.attachment`, so the change bumped [`crate::cursor`]'s
+/// `CURSOR_VERSION` to 5, which orders one full re-sync of every Jira source
+/// on the first run after the upgrade: the rule below, applied.
 ///
 /// The six that came back are `labels`, `parent`, `resolution`, `issuelinks`,
 /// `timeoriginalestimate` and `timespent`. The reader is **`payload`**: spec
@@ -125,7 +132,7 @@ use crate::{JiraConfig, time::parse_jira_time};
 /// the payload in production.
 const BASE_FIELDS: &str = "summary,description,issuetype,status,priority,assignee,reporter,\
 project,created,updated,labels,parent,resolution,issuelinks,timeoriginalestimate,timespent,\
-comment,worklog";
+attachment,comment,worklog";
 
 /// A stop so a server that keeps reporting "more" cannot spin a run forever.
 /// It counts requests, the walk's asks from further back included
@@ -1977,8 +1984,8 @@ mod tests {
     /// again, once. The ones outside it are never asked for, so the run is an
     /// incremental one, and the poll after it is idle and hands the cursor
     /// back byte-identically. The version a cursor from before the upgrade
-    /// carries is still read: `cursor::tests::a_v4_envelope_without_the_board_read_stamp_decodes`
-    /// pins `CURSOR_VERSION` at 4.
+    /// carried was still read then (version 4; 5 since #2404, which orders
+    /// its own full re-sync).
     #[tokio::test]
     async fn the_run_after_the_changelog_left_redelivers_only_its_overlap_window() {
         let mut issues = five_issues();
@@ -2656,6 +2663,7 @@ mod tests {
             ("labels", "every label-driven view and filter"),
             ("timeoriginalestimate", "the estimate side of time tracking"),
             ("timespent", "the logged side of time tracking"),
+            ("attachment", "the ticket page's attachment list (#2404)"),
         ] {
             assert!(
                 names.contains(&needed),

@@ -233,6 +233,8 @@ const NAVIGABLE: &[&str] = &[
     "issuelinks",
     "timeoriginalestimate",
     "timespent",
+    // #2404: the attachment list, served from the fixture's `attachments`.
+    "attachment",
     EPIC_LINK_FIELD,
 ];
 const NON_NAVIGABLE: &[&str] = &["comment", "worklog"];
@@ -442,6 +444,25 @@ pub(crate) fn comments_envelope(
     })
 }
 
+/// One `fields.attachment` entry in the Data Center shape (#2404). A
+/// thumbnail only for an image, as Jira renders one for images alone.
+fn attachment_json(base: &str, a: &crate::state::JiraAttachment, off: FixedOffset) -> Value {
+    let mut out = json!({
+        "self": format!("{base}/rest/api/2/attachment/{}", a.id),
+        "id": a.id.to_string(),
+        "filename": a.filename,
+        "author": user_json(base, &a.author),
+        "created": jira_date(a.created, off),
+        "size": a.size,
+        "mimeType": a.mime,
+        "content": format!("{base}/secure/attachment/{}/{}", a.id, a.filename),
+    });
+    if a.mime.starts_with("image/") {
+        out["thumbnail"] = json!(format!("{base}/secure/thumbnail/{}/{}", a.id, a.filename));
+    }
+    out
+}
+
 /// The worklog collection. The endpoint takes no pagination parameters (the
 /// WADL declares none), but the response schema is still the paginated
 /// envelope — Jira's own quirk, reproduced rather than tidied up.
@@ -571,6 +592,18 @@ pub(crate) fn issue_json(
         f.insert(
             "timespent".into(),
             issue.time_spent_secs().map_or(Value::Null, |s| json!(s)),
+        );
+    }
+    if fields.has("attachment") {
+        f.insert(
+            "attachment".into(),
+            Value::Array(
+                issue
+                    .attachments
+                    .iter()
+                    .map(|a| attachment_json(base, a, off))
+                    .collect(),
+            ),
         );
     }
     if fields.has("comment") {

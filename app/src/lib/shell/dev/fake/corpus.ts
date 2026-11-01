@@ -110,6 +110,25 @@ export const CORPUS: {
     description:
       "Payouts to two SEPA banks fail with a **409** on retry. The retry window has to be idempotent before we can turn the scheduler back on.\n\n- Retry only the transient codes (`AC04` is final)\n- Cap the retry budget",
     comments: [{ by: "mara" }, { by: "jonas" }],
+    // The ticket page's attachment list (#2404), as `get_entity` answers it:
+    // the four files the Tidewater fixture gives PAY-231, at the addresses
+    // mockd serves them from. Only Jira declares attachments; the fake draws
+    // them on the mock ticket so the page has them under `?fake-ipc`.
+    attachments: [
+      ["50000", "psp-409-trace.png", "image/png", 186_368, "Lena Hoffmann", "2026-08-12T09:14:00Z"],
+      ["50001", "retry-timeline.png", "image/png", 98_304, "Mara Lindqvist", "2026-08-19T15:02:00Z"],
+      ["50002", "sepa-error-codes.pdf", "application/pdf", 1_258_291, "Priya Nair", "2026-08-12T11:30:00Z"],
+      ["50003", "batch-13-failures.csv", "text/csv", 49_152, "Lena Hoffmann", "2026-08-14T08:45:00Z"],
+    ].map(([id, name, mime, size, author, created]) => ({
+      id,
+      name,
+      mime,
+      size,
+      author,
+      created,
+      content_url: `${FIXTURE_HOST}/secure/attachment/${id}/${name}`,
+      thumbnail_url: String(mime).startsWith("image/") ? `${FIXTURE_HOST}/secure/thumbnail/${id}/${name}` : null,
+    })),
   }),
   // Deliberately in **no** project, key prefix notwithstanding: the miss
   // direction ADR-0010 fixes, and the one a QA pass has to be able to see. It
@@ -152,8 +171,8 @@ export const CORPUS: {
     [
       ["PAY-240", "Payout dashboard latency", "To Do", "Medium", "Task", "mara", "PAY-200", "2026-08-22T08:12:00Z"],
       ["PAY-236", "Payout CSV export for finance", "To Do", "Low", "Story", "jonas", "PAY-200", "2026-08-20T10:00:00Z"],
-      ["PAY-232", "Metrics for SEPA retry attempts", "To Do", "Medium", "Sub-task", "mara", "PAY-200", "2026-08-21T11:00:00Z"],
-      ["PAY-233", "Document the manual-review SLA", "To Do", "Medium", "Sub-task", "mara", "PAY-200", "2026-08-22T09:20:00Z"],
+      ["PAY-232", "Metrics for SEPA retry attempts", "To Do", "Medium", "Sub-task", "mara", "PAY-231", "2026-08-21T11:00:00Z"],
+      ["PAY-233", "Document the manual-review SLA", "To Do", "Medium", "Sub-task", "mara", "PAY-231", "2026-08-22T09:20:00Z"],
       ["PAY-219", "Rotate PSP credentials", "Done", "Medium", "Task", "mara", "PAY-200", "2026-08-18T10:00:00Z"],
       ["PAY-244", "Refund webhooks retry", "In Progress", "High", "Story", "priya", "PAY-300", "2026-08-21T09:30:00Z"],
       ["PAY-251", "Validate payout batch limits", "In Review", "Medium", "Task", "jonas", "PAY-300", "2026-08-20T15:10:00Z"],

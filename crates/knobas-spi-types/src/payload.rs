@@ -208,6 +208,71 @@ pub struct WorklogPath {
     pub seconds: Vec<PayloadPath>,
 }
 
+/// Where a record keeps **the files attached to it**, and where each file's
+/// facts sit inside its element (#2404): Jira's `fields.attachment`.
+///
+/// * `at` leads to an **array of objects**, in the source's order. Anything
+///   else is a miss.
+/// * every other field is a list of candidate paths inside one element, read
+///   as [`KindPaths::project_key`] is: the first non-blank string wins, and
+///   `size` the first whole number. An element with no readable `id`, `name`
+///   or `content` is left out: a file without an address is not one a reader
+///   can open.
+///
+/// The list, not the bytes: the mirror holds what Jira says about each file,
+/// and the bytes come live through the source's credential.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct AttachmentPath {
+    /// Where the array of attachment objects is.
+    pub at: PayloadPath,
+    /// The source's id for the file, unique within the source.
+    #[serde(default)]
+    pub id: Vec<PayloadPath>,
+    /// The file name.
+    #[serde(default)]
+    pub name: Vec<PayloadPath>,
+    /// The media type the source reports (`image/png`).
+    #[serde(default)]
+    pub mime: Vec<PayloadPath>,
+    /// The size in bytes, a whole JSON number.
+    #[serde(default)]
+    pub size: Vec<PayloadPath>,
+    /// Who attached it, by the name a person reads.
+    #[serde(default)]
+    pub author: Vec<PayloadPath>,
+    /// When it was attached, an ISO 8601 instant ([`parse_instant`]).
+    #[serde(default)]
+    pub created: Vec<PayloadPath>,
+    /// The address of the file's bytes at the source.
+    #[serde(default)]
+    pub content: Vec<PayloadPath>,
+    /// The address of a small preview the source renders, for images.
+    #[serde(default)]
+    pub thumbnail: Vec<PayloadPath>,
+}
+
+/// One file attached to an item, as [`resolve_attachments`] reads it off the
+/// record (#2404). `EntityDetail.attachments` on the wire. Every optional
+/// fact is `null` where the source did not say, never a guess.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct Attachment {
+    /// The source's id for the file: what a later read of its bytes names.
+    pub id: String,
+    pub name: String,
+    pub mime: Option<String>,
+    /// Bytes.
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
+    pub author: Option<String>,
+    pub created: Option<chrono::DateTime<chrono::Utc>>,
+    /// Where the source serves the bytes: what *Open* hands the browser.
+    pub content_url: String,
+    /// Where the source serves a small preview, for an image.
+    pub thumbnail_url: Option<String>,
+}
+
 /// One project of a declared chain ([`resolve_project_path`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChainProject {
@@ -583,6 +648,12 @@ pub struct KindPaths {
     /// that is not a proposal.
     #[serde(default)]
     pub base: Vec<PayloadPath>,
+    /// The files attached to a ticket (#2404): Jira's `fields.attachment`,
+    /// each file's facts declared inside its element. The ticket page's
+    /// Attachments section reads it. Empty for every kind with no
+    /// attachments, and a miss lists none.
+    #[serde(default)]
+    pub attachments: Vec<AttachmentPath>,
 }
 
 /// How a run was started, in the shell's words (#961, #1146).
@@ -682,16 +753,15 @@ pub enum Markup {
 }
 
 /// An ISO 8601 instant in any spelling a declared time may use (#848):
-/// extended, as RFC 3339 writes it; basic, as TeamCity does
-/// (`20260822T102000+0000`); or extended with a basic offset and
-/// milliseconds, as Jira writes `created` (`2026-08-12T09:30:00.000+0200`,
-/// #2403). Anything else is a miss.
+/// extended, as RFC 3339 writes it, extended with a colonless offset, as
+/// Jira does (`2026-08-12T10:00:00.000+0200`, #2404), or basic, as TeamCity
+/// does (`20260822T102000+0000`). Anything else is a miss.
 #[must_use]
 pub fn parse_instant(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     let raw = raw.trim();
     chrono::DateTime::parse_from_rfc3339(raw)
-        .or_else(|_| chrono::DateTime::parse_from_str(raw, "%Y%m%dT%H%M%S%z"))
         .or_else(|_| chrono::DateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S%.f%z"))
+        .or_else(|_| chrono::DateTime::parse_from_str(raw, "%Y%m%dT%H%M%S%z"))
         .ok()
         .map(|t| t.with_timezone(&chrono::Utc))
 }
@@ -820,6 +890,7 @@ pub mod field {
     pub const BOARD_TYPE: &str = "board_type";
     pub const SUB_QUERY: &str = "sub_query";
     pub const SPRINT: &str = "sprint";
+    pub const ATTACHMENTS: &str = "attachments";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -878,6 +949,7 @@ pub mod field {
         BOARD_TYPE,
         SUB_QUERY,
         SPRINT,
+        ATTACHMENTS,
     ];
 }
 
@@ -1101,6 +1173,41 @@ macro_rules! project_path_part {
              and nullif(btrim(e.obj #>> k.segs), '') is not null order by k.ord limit 1)"
         )
     };
+}
+
+/// The files a record declares it carries ([`AttachmentPath`], #2404): the
+/// first candidate whose non-empty `at` leads to an array, each object
+/// element of it with a readable id, name and content address, in the
+/// record's order. Empty when nothing is declared or nothing reads.
+#[must_use]
+pub fn resolve_attachments(
+    payload: &serde_json::Value,
+    candidates: &[AttachmentPath],
+) -> Vec<Attachment> {
+    let Some((candidate, elements)) = candidates.iter().find_map(|c| {
+        if c.at.segments().is_empty() {
+            return None;
+        }
+        at(payload, &c.at)?.as_array().map(|a| (c, a))
+    }) else {
+        return Vec::new();
+    };
+    elements
+        .iter()
+        .filter(|e| e.is_object())
+        .filter_map(|e| {
+            Some(Attachment {
+                id: resolve_string(e, &candidate.id)?,
+                name: resolve_string(e, &candidate.name)?,
+                mime: resolve_string(e, &candidate.mime),
+                size: candidate.size.iter().find_map(|path| at(e, path)?.as_u64()),
+                author: resolve_string(e, &candidate.author),
+                created: resolve_string(e, &candidate.created).and_then(|t| parse_instant(&t)),
+                content_url: resolve_string(e, &candidate.content)?,
+                thumbnail_url: resolve_string(e, &candidate.thumbnail),
+            })
+        })
+        .collect()
 }
 
 /// The first candidate that lands on a usable string.
@@ -2349,6 +2456,110 @@ mod tests {
         assert_eq!(
             declarations.as_json()["jira-eu"]["ticket"]["status_name"],
             serde_json::json!([["fields", "status", "name"]])
+        );
+    }
+
+    /// Jira Data Center's `fields.attachment`, declared the way the Jira
+    /// adapter declares it (#2404).
+    fn jira_attachments() -> Vec<AttachmentPath> {
+        vec![AttachmentPath {
+            at: PayloadPath::of(["fields", "attachment"]),
+            id: vec![PayloadPath::of(["id"])],
+            name: vec![PayloadPath::of(["filename"])],
+            mime: vec![PayloadPath::of(["mimeType"])],
+            size: vec![PayloadPath::of(["size"])],
+            author: vec![
+                PayloadPath::of(["author", "displayName"]),
+                PayloadPath::of(["author", "name"]),
+            ],
+            created: vec![PayloadPath::of(["created"])],
+            content: vec![PayloadPath::of(["content"])],
+            thumbnail: vec![PayloadPath::of(["thumbnail"])],
+        }]
+    }
+
+    /// The attachment list (#2404): each element of the declared array with
+    /// an id, a name and a content address, in the record's order; Jira's
+    /// date with its colonless offset reads, a size is a whole number, a PDF
+    /// has no thumbnail, and an element missing its content address is left
+    /// out rather than drawn with a link to nowhere.
+    #[test]
+    fn the_declared_attachments_resolve_in_order_and_an_unusable_one_is_left_out() {
+        let payload = serde_json::json!({ "fields": { "attachment": [
+            { "id": "50000", "filename": "psp-409-trace.png", "mimeType": "image/png",
+              "size": 186_368, "author": { "name": "lena.hoffmann", "displayName": "Lena Hoffmann" },
+              "created": "2026-08-12T10:00:00.000+0200",
+              "content": "https://jira.example/secure/attachment/50000/psp-409-trace.png",
+              "thumbnail": "https://jira.example/secure/thumbnail/50000/psp-409-trace.png" },
+            { "id": "50001", "filename": "broken.bin" },
+            { "id": "50002", "filename": "sepa-error-codes.pdf", "mimeType": "application/pdf",
+              "size": "big", "author": { "name": "priya.nair" },
+              "created": "yesterday",
+              "content": "https://jira.example/secure/attachment/50002/sepa-error-codes.pdf" },
+            "not an object"
+        ] } });
+
+        let list = resolve_attachments(&payload, &jira_attachments());
+
+        assert_eq!(
+            list,
+            vec![
+                Attachment {
+                    id: "50000".to_owned(),
+                    name: "psp-409-trace.png".to_owned(),
+                    mime: Some("image/png".to_owned()),
+                    size: Some(186_368),
+                    author: Some("Lena Hoffmann".to_owned()),
+                    created: Some("2026-08-12T08:00:00Z".parse().unwrap()),
+                    content_url: "https://jira.example/secure/attachment/50000/psp-409-trace.png"
+                        .to_owned(),
+                    thumbnail_url: Some(
+                        "https://jira.example/secure/thumbnail/50000/psp-409-trace.png".to_owned()
+                    ),
+                },
+                Attachment {
+                    id: "50002".to_owned(),
+                    name: "sepa-error-codes.pdf".to_owned(),
+                    mime: Some("application/pdf".to_owned()),
+                    size: None,
+                    author: Some("priya.nair".to_owned()),
+                    created: None,
+                    content_url:
+                        "https://jira.example/secure/attachment/50002/sepa-error-codes.pdf"
+                            .to_owned(),
+                    thumbnail_url: None,
+                },
+            ]
+        );
+    }
+
+    /// A miss is a miss (ADR-0007): no declaration, a declaration whose
+    /// array is absent or null, and a value that is not an array all give no
+    /// attachments, never an error.
+    #[test]
+    fn no_declaration_and_no_array_give_no_attachments() {
+        let with = serde_json::json!({ "fields": { "attachment": [
+            { "id": "1", "filename": "a.txt", "content": "https://x/a.txt" } ] } });
+        assert!(resolve_attachments(&with, &[]).is_empty());
+        for payload in [
+            serde_json::json!({ "fields": {} }),
+            serde_json::json!({ "fields": { "attachment": null } }),
+            serde_json::json!({ "fields": { "attachment": { "id": "1" } } }),
+        ] {
+            assert!(
+                resolve_attachments(&payload, &jira_attachments()).is_empty(),
+                "{payload}"
+            );
+        }
+    }
+
+    /// Jira writes its instants as `2026-08-12T10:00:00.000+0200`, an offset
+    /// without its colon, which RFC 3339 refuses (#2404).
+    #[test]
+    fn a_jira_instant_with_a_colonless_offset_parses() {
+        assert_eq!(
+            parse_instant("2026-08-12T10:00:00.000+0200"),
+            Some("2026-08-12T08:00:00Z".parse().unwrap())
         );
     }
 }

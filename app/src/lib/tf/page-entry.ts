@@ -51,9 +51,13 @@ export interface TfPageContext {
   visible: boolean;
   /** Whether the database answers yet: a page's reads wait for it. */
   ready: boolean;
-  /** The chosen job (spec #2227), as its key. */
+  /**
+   * The chosen job (spec #2227), as its key; on a page of the section a
+   * ticket card's sections row opened, that ticket (#2401, set per page by
+   * `TfKeptPage`).
+   */
   job: string | null;
-  /** The chosen job's entity id, which its ticket is read by (#1525: a key two sources hold reads the one chosen). */
+  /** That job's entity id, which its ticket is read by (#1525: a key two sources hold reads the one chosen). */
   jobAt: string | null;
   /**
    * Where `Esc` goes once nothing is open, and what the breadcrumb's *Back to

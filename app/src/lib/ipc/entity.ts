@@ -94,6 +94,7 @@ export type {
   ActivityRow,
   ArtifactEntry,
   ArtifactPreview,
+  Attachment,
   AttentionGroup,
   CappedDiff,
   CaptureContext,

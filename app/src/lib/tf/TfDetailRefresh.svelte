@@ -21,6 +21,7 @@
     page = false,
     small = false,
     ghost = false,
+    button = true,
   }: {
     detail: RefreshSubject;
     refresh: DetailRefresh;
@@ -36,6 +37,12 @@
     small?: boolean;
     /** Drawn as a ghost, beside the other ghost actions of a monitor's row (#2138). */
     ghost?: boolean;
+    /**
+     * Whether the button is drawn. `false` keeps ⌘R and the source's run
+     * ending reading the detail again, with nothing on screen: the ticket
+     * page, whose Refresh is the keybind's alone (#2401).
+     */
+    button?: boolean;
   } = $props();
   /** The button's classes: the Controls button at its size and look, and `tf-refresh`, which tests find it by. */
   const classes = $derived(["tf-btn", small && "tf-sm", ghost && "tf-ghost", "tf-refresh"].filter(Boolean).join(" "));
@@ -76,7 +83,9 @@
   });
 </script>
 
-{#if offer === "refresh"}
+{#if !button}
+  <!-- ⌘R's alone (#2401): registered above, nothing drawn. -->
+{:else if offer === "refresh"}
   <button
     type="button"
     class={classes}

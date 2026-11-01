@@ -169,6 +169,26 @@ pub struct Ticket {
     /// where the transcription happens to keep it. See there.
     #[serde(default, skip_serializing)]
     pub project: Option<Project>,
+    /// The files attached to the ticket, where the dataset gives some
+    /// (#2404). Transcribed by mockd into Jira's `fields.attachment`; not
+    /// part of this adapter's own payload, as no source but Jira lists
+    /// attachments yet.
+    #[serde(default, skip_serializing)]
+    pub attachments: Vec<Attachment>,
+}
+
+/// A file attached to a ticket (#2404): the list a source keeps, never the
+/// bytes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Attachment {
+    pub name: String,
+    pub mime: String,
+    /// Size in bytes.
+    pub bytes: u64,
+    /// [`Person::id`] of whoever attached it.
+    pub who: String,
+    pub when: DateTime<Utc>,
 }
 
 /// A source's own grouping of its items (`CONTEXT.md`, **Project**; ADR-0010),
@@ -1475,6 +1495,7 @@ impl Source for MockSource {
                     comments: Vec::new(),
                     worklogs: Vec::new(),
                     project: None,
+                    attachments: Vec::new(),
                 });
                 WriteReceipt::id(key)
             }

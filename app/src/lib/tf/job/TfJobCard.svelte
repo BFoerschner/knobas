@@ -16,16 +16,30 @@
   Labels, and Logged (#2403): *2h 10m of 6h* over a meter whose track is the
   estimate, tinted once spent passes it, with the reader's share in full ink
   and *…, 1h 40m yours* when somebody else has logged too (`loggedRow`). A
-  row the source leaves empty is not drawn. At the
+  row the source leaves empty is not drawn. Under
+  the facts the sections table (#2401, `card-sections.ts`): a bordered list,
+  one row a section with its count, its worst state and a chevron, opening
+  the section's view narrowed to this ticket; a ticket with sub-tasks leads
+  with *Sub-tasks*; one that reaches nothing says *Nothing connected yet.*
+  Under it, in the same shape, *Open in <source>* (the web address through
+  the browser) and *Link something to it* (the Connections drawer). At the
   foot one large button (`footAction` in `job.ts`): the decision while
   reading, the timer once pinned. The running time is the top bar's chip
   alone. The title, the description and the conversation are the reading
   column's (#2399).
+
+  The card's width (#2402, `card-width.svelte.ts`): a six-pixel separator on
+  its right edge drags the column between 240px and 720px, a double click (or
+  Enter) fits it so nothing on the card wraps, and the arrows step it. Below
+  900px the columns stack and the handle is not drawn.
 -->
 <script lang="ts">
   import type { EntityDetail } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { ipcErrorMessage } from "../../ipc";
+  import { openExternal } from "../../shell/open-external";
+  import { pressSection, type CardTable } from "./card-sections";
+  import { cardWidth, naturalWidth, SIDE_MAX, SIDE_MIN } from "./card-width.svelte";
   import { ticketHash } from "../route";
   import { parentOf } from "../sets/apply";
   import { epicLine, initials } from "../tickets/tickets";
@@ -40,7 +54,10 @@
     pinned,
     action,
     onaction,
+    table,
+    onlink,
     copy = (text: string) => navigator.clipboard.writeText(text),
+    open = openExternal,
   }: {
     detail: EntityDetail;
     /** The other sources' tickets under the same key (#1476); none draws no source. */
@@ -56,6 +73,12 @@
     /** The foot's one button, or `null` where the card offers none. */
     action: { label: string } | null;
     onaction: () => void;
+    /** The sections table's rows (#2401), and whether every read has answered. */
+    table: CardTable;
+    /** *Link something to it*: the Connections drawer. */
+    onlink: () => void;
+    /** Hands a web address to the browser; the shell's opener unless a test hands its own. */
+    open?: (url: string) => Promise<void>;
     /** Writes the clipboard; the browser's unless a test hands its own. */
     copy?: (text: string) => Promise<void>;
   } = $props();
@@ -88,14 +111,87 @@
     }
   }
   $effect(() => () => clearTimeout(settle));
+
+  // ---- the card's width (#2402) ----
+  /** The window at which the columns stack and the handle goes (`narrow.css`). */
+  const NARROW = "(max-width: 900px)";
+  /** How far an arrow key moves the edge. */
+  const STEP = 16;
+  let article = $state<HTMLElement | null>(null);
+  let narrow = $state(false);
+  $effect(() => {
+    const query = typeof window.matchMedia === "function" ? window.matchMedia(NARROW) : null;
+    if (query === null) return;
+    narrow = query.matches;
+    const changed = (event: MediaQueryListEvent) => (narrow = event.matches);
+    query.addEventListener("change", changed);
+    return () => query.removeEventListener("change", changed);
+  });
+
+  /** A drag in progress: what lets go of the window's pointer listeners. */
+  let release: (() => void) | null = $state(null);
+  function startDrag(event: PointerEvent) {
+    if (event.button !== 0 || article === null) return;
+    event.preventDefault();
+    release?.();
+    const left = article.getBoundingClientRect().left;
+    const move = (at: PointerEvent) => cardWidth.set(at.clientX - left);
+    const up = () => release?.();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    release = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      release = null;
+    };
+  }
+  $effect(() => () => release?.());
+
+  /** The width at which nothing on the card wraps, up to the cap. */
+  function fit() {
+    if (article !== null) cardWidth.set(naturalWidth(article));
+  }
+
+  function edgeKey(event: KeyboardEvent) {
+    if (event.key === "ArrowLeft") cardWidth.set(cardWidth.px - STEP);
+    else if (event.key === "ArrowRight") cardWidth.set(cardWidth.px + STEP);
+    else if (event.key === "Enter") fit();
+    else return;
+    event.preventDefault();
+  }
+
+  /** *Open in <source>*: the ticket's web address through the browser, never the webview. */
+  function openWeb(event: MouseEvent, url: string) {
+    event.preventDefault();
+    open(url).catch((cause: unknown) => push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" }));
+  }
 </script>
 
 <article
+  bind:this={article}
   class="tf-jobcard tf-ticketcard"
   class:tf-card={pinned}
   class:tf-sheetcard={!pinned}
+  class:tf-tkdragging={release !== null}
   aria-label={pinned ? "Job card" : "Ticket"}
 >
+  {#if !narrow}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+    <div
+      class="tf-tkhandle"
+      role="separator"
+      tabindex="0"
+      aria-orientation="vertical"
+      aria-label="Card width. Drag to resize, double-click to fit."
+      aria-valuemin={SIDE_MIN}
+      aria-valuemax={SIDE_MAX}
+      aria-valuenow={cardWidth.px}
+      title="Drag to resize, double-click to fit"
+      onpointerdown={startDrag}
+      ondblclick={fit}
+      onkeydown={edgeKey}
+    ></div>
+  {/if}
   <div>
     <div class="tf-tkhead">
       <div class="tf-jobkey">{key}</div>
@@ -165,6 +261,33 @@
       </dd>
     {/if}
   </dl>
+  {#if table.rows.length > 0}
+    <div class="tf-tktable tf-tksecs">
+      {#each table.rows as row (row.name)}
+        <a
+          href={row.href}
+          title={row.opens === "subtasks" ? `Tickets under ${key}. ${row.words}` : `${row.name} view, this ticket only. ${row.words}`}
+          onclick={() => pressSection(row, detail.row.entity_id)}
+          ><span class="tf-tkname">{row.name}</span><span class="tf-n">{row.count}</span>{#if row.state !== null}<span
+              class="tf-st"
+              class:tf-asks={row.state.tone === "err" || row.state.tone === "warn"}
+              ><span class="tf-dot tf-{row.state.tone}" aria-hidden="true"></span>{row.state.text}</span
+            >{:else}<span></span>{/if}<span class="tf-chev" aria-hidden="true">›</span></a
+        >
+      {/each}
+    </div>
+  {:else if table.settled}
+    <p class="tf-tknone">Nothing connected yet.</p>
+  {/if}
+  <div class="tf-tktable tf-tkacts">
+    {#if detail.web_url}
+      {@const url = detail.web_url}
+      <a href={url} onclick={(event) => openWeb(event, url)}
+        ><span>Open in {detail.source.display_name}</span><span class="tf-chev" aria-hidden="true">›</span></a
+      >
+    {/if}
+    <button type="button" onclick={onlink}><span>Link something to it</span><span class="tf-chev" aria-hidden="true">›</span></button>
+  </div>
   {#if action !== null}
     <div class="tf-go">
       <button type="button" class="tf-btn tf-primary tf-lg" onclick={onaction}>{action.label}</button>

@@ -15,8 +15,19 @@
 /* ---------- one page for a ticket and the job (spec #2396) ---------- */
 /* The page is the job's two columns under its own breadcrumb; each column scrolls on its own, so the card's foot is in reach. */
 .tf-ticketpage { height: 100%; }
-.tf-ticketpage .tf-ws { flex: 1; min-height: 0; height: auto; }
-@media (max-width: 900px) { .tf-ticketpage { height: auto; } }
+.tf-ticketpage .tf-ws { flex: 1; min-height: 0; height: auto; grid-template-columns: var(--tk-side, 320px) minmax(0, 1fr); }
+/* The card's width is the reader's (#2402): a 6px separator on its right edge drags it between 240px and 720px
+   (`knobas.ticket.side`), a double click fits it so nothing on the card wraps. The handle shows as the card's edge
+   darkening under the pointer. Below 900px the columns stack and the handle is gone. */
+.tf-tkhandle { position: absolute; top: 0; bottom: 0; right: 0; width: 6px; cursor: col-resize; z-index: 2; }
+.tf-tkhandle:hover, .tf-tkhandle:focus-visible, .tf-tkdragging .tf-tkhandle { background: rgba(0,0,0,.14); outline: 0; }
+.tf-sheetcard .tf-tkhandle:hover, .tf-sheetcard .tf-tkhandle:focus-visible, .tf-sheetcard.tf-tkdragging .tf-tkhandle { background: var(--rule); }
+.tf-ticketcard.tf-tkdragging, .tf-ticketcard.tf-tkdragging * { cursor: col-resize; user-select: none; }
+@media (max-width: 900px) {
+  .tf-ticketpage { height: auto; }
+  .tf-ticketpage .tf-ws { grid-template-columns: minmax(0, 1fr); }
+  .tf-tkhandle { display: none; }
+}
 /* No 64px key in either mood. Beside it, the copy button: one press puts the key and the title on the clipboard (#2400). */
 .tf-ticketcard .tf-jobkey { font-size: var(--t-d2); }
 .tf-tkhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -69,6 +80,30 @@
   --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
   --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
 }
+/* The sections table (#2401): a bordered list, one row a section: the name, the count in tabular figures, at most
+   one state with its dot (in full ink when it asks something of you), and a chevron that says the row opens. The
+   two action rows under it take the same shape with the name and the chevron alone. A list of places, not buttons. */
+.tf-tktable { display: flex; flex-direction: column; border: 1px solid rgba(0,0,0,.2); border-radius: 6px; background: rgba(255,255,255,.26); overflow: hidden; }
+.tf-tktable > a, .tf-tktable > button {
+  display: grid; grid-template-columns: 62px 2.2ch minmax(0, 1fr) 8px; gap: 10px; align-items: center;
+  padding: 7px 10px; border: 0; border-top: 1px solid rgba(0,0,0,.12); background: none; font: inherit; font-size: var(--t-sm);
+  color: inherit; text-align: left; text-decoration: none; white-space: nowrap; cursor: pointer;
+}
+.tf-tktable > :first-child { border-top: 0; }
+.tf-tktable > a:hover, .tf-tktable > button:hover { background: rgba(0,0,0,.07); }
+.tf-tktable.tf-tkacts > a, .tf-tktable.tf-tkacts > button { grid-template-columns: minmax(0, 1fr) 8px; }
+.tf-tktable .tf-n { font-variant-numeric: tabular-nums; text-align: right; color: var(--card-ink-2); }
+.tf-tktable .tf-st { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--card-ink-2); }
+.tf-tktable .tf-st.tf-asks { color: var(--card-ink); }
+.tf-tktable .tf-dot { width: 7px; height: 7px; flex: none; }
+.tf-tktable .tf-chev { color: var(--card-ink-2); font-size: var(--t-lg); line-height: 1; text-align: right; }
+.tf-tknone { font-size: var(--t-sm); color: var(--card-ink-2); }
+.tf-sheetcard .tf-tktable { border-color: var(--rule); background: var(--paper); }
+.tf-sheetcard .tf-tktable > a, .tf-sheetcard .tf-tktable > button { border-top-color: var(--rule-2); }
+.tf-sheetcard .tf-tktable > :first-child { border-top: 0; }
+.tf-sheetcard .tf-tktable > a:hover, .tf-sheetcard .tf-tktable > button:hover { background: var(--sheet-2); }
+.tf-sheetcard .tf-tktable .tf-n, .tf-sheetcard .tf-tktable .tf-st, .tf-sheetcard .tf-tktable .tf-chev, .tf-sheetcard .tf-tknone { color: var(--ink-2); }
+.tf-sheetcard .tf-tktable .tf-st.tf-asks { color: var(--ink); }
 /* The one decision at the card's foot: the card's own ink, large. */
 .tf-ticketcard .tf-go { margin-top: auto; padding-top: 6px; }
 .tf-ticketcard .tf-go .tf-btn { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
@@ -97,6 +132,25 @@
 .tf-tkread .tf-convo { max-width: none; }
 .tf-tkread .tf-compose textarea { min-height: 36px; }
 .tf-tkread .tf-compose:focus-within textarea { min-height: 80px; }
+/* Attachments (#2404): the mirror's list folded to one line, a native disclosure closed by default whose summary is the
+   section heading, a count badge and a chevron (right closed, down open). Open, one row a file, the job's `.tf-r`: its
+   kind in mono, the name with who, when and how big under it, and *Open*. */
+.tf-tkread details.tf-tkfold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; min-height: var(--control-h-sm); margin-bottom: 10px; border-radius: 4px; }
+.tf-tkread details.tf-tkfold > summary::-webkit-details-marker { display: none; }
+.tf-tkread details.tf-tkfold > summary h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
+.tf-tkread details.tf-tkfold > summary .tf-tkmark { width: 14px; height: 14px; color: var(--ink-2); transition: transform 120ms ease-out; }
+.tf-tkread details.tf-tkfold[open] > summary .tf-tkmark { transform: rotate(90deg); }
+.tf-tkread details.tf-tkfold > summary:hover h2 { text-decoration: underline; text-underline-offset: 3px; }
+.tf-tkatt .tf-r { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 12px; }
+.tf-tkatt .tf-rows > .tf-r:first-child { border-top: 0; }
+.tf-tkatt .tf-r .tf-rend { margin-left: 0; }
+.tf-tkatt .tf-r .tf-t { display: flex; flex-direction: column; gap: 2px; }
+.tf-tkatt .tf-rsub { font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-tkkind {
+  width: 56px; height: 40px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet-2);
+  display: grid; place-items: center; font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2);
+}
+.tf-tkatt .tf-rend .tf-btn { color: var(--ink-2); }
 
 .tf-work { overflow: auto; display: flex; flex-direction: column; min-width: 0; }
 .tf-work > * { flex: none; }
