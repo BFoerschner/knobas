@@ -112,6 +112,9 @@ export function drawDiagram(engine: DiagramEngine, code: string, into: HTMLEleme
           const iframe = doc.createElement("iframe");
           iframe.className = "tf-dframe";
           iframe.setAttribute("sandbox", "");
+          // The frame is the drawing's size and never scrolls itself (#2389): WebKit draws a frame's scrollbars in the
+          // owner's `::-webkit-scrollbar` style, the app's unstyled track a white bar. A wider drawing scrolls its holder.
+          iframe.setAttribute("scrolling", "no");
           iframe.title = `${NAMES[engine]} diagram`;
           iframe.width = String(frame.width);
           iframe.height = String(frame.height);

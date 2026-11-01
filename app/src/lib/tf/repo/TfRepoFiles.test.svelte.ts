@@ -787,6 +787,14 @@ test("a .mmd file is drawn as a diagram in a sandboxed frame, and Source shows i
   expect(lineText(1)).toEqual(["2", "  a --> b"]);
 });
 
+test("a diagram's frame never scrolls itself: WebKit draws its scrollbar with the app's unstyled track, a white bar (#2389)", async () => {
+  draw(openSource({ "docs/flow.mmd": "flowchart LR\n  a --> b" }).entityView, "docs/flow.mmd", null, diagramRender().port);
+  await settle();
+
+  const frame = target.querySelector<HTMLIFrameElement>(".tf-fileview .tf-fdiagram iframe")!;
+  expect(frame.getAttribute("scrolling")).toBe("no");
+});
+
 test("a .mermaid file that does not parse shows the parser's error above its numbered source", async () => {
   draw(openSource({ "flow.mermaid": "flowchart TB\n  api -->|outbox worker" }).entityView, "flow.mermaid", null, diagramRender().port);
   await settle();

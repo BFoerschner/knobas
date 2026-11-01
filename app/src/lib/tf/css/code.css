@@ -133,7 +133,10 @@
 .tf-pdf-links a:hover, .tf-pdf-links a:focus-visible { background: color-mix(in srgb, var(--mark), transparent 55%); outline: none; }
 /* A diagram (#2258): the sandboxed frame sized to the drawing, and the off-screen box Mermaid measures text in
    (its own <style> is refused by the bundled app's CSP, so the font is set here; render/mermaid.ts DIAGRAM_FONT). */
-.tf-dframe { display: block; border: 0; max-width: 100%; background: transparent; }
+/* The frame keeps the drawing's size (#2389): a wider drawing scrolls its holder, not the frame, and the auto margins
+   centre it while it fits and start it at the left edge when it does not (`place-items: center` would cut its left off). */
+.tf-dframe { display: block; border: 0; background: transparent; margin: auto; }
+.tf-fdiagram > .tf-diagram { margin: auto; }
 .tf-diagram-scratch { position: fixed; left: -100000px; top: 0; font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
 .tf-cgroup-h .tf-rc-who { font-weight: 400; }
 .tf-rcommits td.tf-rpick { width: 28px; padding-right: 0; }
