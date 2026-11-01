@@ -129,10 +129,7 @@ function ports(applying: JobLinkSets["sets"] = []): JobPorts {
             : Promise.reject({ code: "not_found", message: "", source_id: null }),
     promoteContext: (id) => Promise.resolve({ id: "ctx:1", kind: "ticket", title: "", anchor_id: id, created_at: "", archived_at: null }),
     listEntities: () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null }),
-    reachableTransitions: () => Promise.resolve([]),
     submitWrite: reject,
-    entityCheckout: reject,
-    weekTimesheet: () => Promise.resolve({ days: [], rows: [], past_horizon: [] }),
     visitEntity: () => Promise.resolve(null),
     entityThread: () => Promise.resolve({ comments: [], me: [] }),
     createLink: reject,
@@ -147,8 +144,6 @@ function ports(applying: JobLinkSets["sets"] = []): JobPorts {
     },
     hideLinkSetMember: (_t, _m, hidden) => Promise.resolve(hidden),
     getAsset: reject,
-    credentialHealth: () => Promise.resolve([]),
-    syncStatus: () => Promise.resolve([]),
     startWork: { flow: reject, run: reject, retry: reject, skip: reject, amend: reject },
   };
 }
@@ -170,7 +165,6 @@ function open(applying: JobLinkSets["sets"] = [], segment = "PAY-231") {
     target,
     props: {
       segment,
-      tab: null,
       timer: { current: null, elapsed: null },
       layers: createLayers(),
       ontimer: () => {},
@@ -192,10 +186,17 @@ const LEDGER_APPLIES: JobLinkSets["sets"] = [
   { id: "ledger", name: "Ledger stack", via: { kind: "manual", value: ID, title: null }, members: [] },
 ];
 
+/** The Connections drawer, opened with `L`, as the page opens it (#2399; its row on the card comes with #2401). */
+function drawerOpen(): HTMLElement {
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true }));
+  flushSync();
+  return target.querySelector<HTMLElement>("[aria-label='Connections']")!;
+}
+
 test("Apply a link set… lists the sets with what they hold, marks the one that already applies, and filters", async () => {
   open(LEDGER_APPLIES);
   await settle();
-  button(target.querySelector(".tf-setsbar")!, "Apply a link set…").click();
+  button(drawerOpen(), "Apply a link set…").click();
   await settle();
   expect(squash(dialog().querySelector("h2"))).toBe("Apply a link set to PAY-231");
   expect([...dialog().querySelectorAll(".tf-pickrow")].map(squash)).toEqual([
@@ -214,7 +215,7 @@ test("Apply adds a by-hand rule, re-reads the job, and Undo takes the rule out a
   open();
   await settle();
   const before = setReads;
-  button(target.querySelector(".tf-setsbar")!, "Apply a link set…").click();
+  button(drawerOpen(), "Apply a link set…").click();
   await settle();
   pick("Payout stack");
   button(dialog(), "Apply Payout stack").click();
@@ -244,7 +245,7 @@ const footer = () => [...dialog().querySelectorAll<HTMLElement>("footer .tf-btn"
 test("Apply a link set… has a primary that applies the picked set, the first one that can apply until another is picked", async () => {
   open(LEDGER_APPLIES);
   await settle();
-  button(target.querySelector(".tf-setsbar")!, "Apply a link set…").click();
+  button(drawerOpen(), "Apply a link set…").click();
   await settle();
   const radios = [...dialog().querySelectorAll<HTMLInputElement>("[role=radiogroup][aria-label='Link sets'] input[type=radio]")];
   expect(radios.map((r) => [r.checked, r.disabled])).toEqual([
@@ -261,7 +262,7 @@ test("Apply a link set… has a primary that applies the picked set, the first o
 test("Enter in the filter applies the first set the filter leaves", async () => {
   open();
   await settle();
-  button(target.querySelector(".tf-setsbar")!, "Apply a link set…").click();
+  button(drawerOpen(), "Apply a link set…").click();
   await settle();
   expect(footer().at(-1)?.[0]).toBe("Apply Ledger stack");
   const field = dialog().querySelector<HTMLInputElement>("input[aria-label='Filter link sets']")!;
@@ -279,7 +280,7 @@ test("Enter in the filter applies the first set the filter leaves", async () => 
 test("Apply is disabled when no set the filter leaves can apply", async () => {
   open(LEDGER_APPLIES);
   await settle();
-  button(target.querySelector(".tf-setsbar")!, "Apply a link set…").click();
+  button(drawerOpen(), "Apply a link set…").click();
   await settle();
   const field = dialog().querySelector<HTMLInputElement>("input[aria-label='Filter link sets']")!;
   field.value = "ledger";
@@ -295,7 +296,7 @@ test("Apply is disabled when no set the filter leaves can apply", async () => {
 test("the drawer offers Apply a link set… and Save as a link set… beside Link to…", async () => {
   open();
   await settle();
-  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  drawerOpen();
   flushSync();
   const acts = document.querySelector(".tf-dacts")!;
   expect([...acts.querySelectorAll("button")].map(squash)).toEqual(["Link to…", "Apply a link set…", "Save as a link set…"]);
@@ -304,7 +305,7 @@ test("the drawer offers Apply a link set… and Save as a link set… beside Lin
 test("Save as a link set… ticks the ticket's own items, offers the epic first with counts, and saves the set", async () => {
   open();
   await settle();
-  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  drawerOpen();
   flushSync();
   button(document.querySelector(".tf-dacts")!, "Save as a link set…").click();
   await settle();
@@ -351,7 +352,7 @@ test("Save as a link set… ticks the ticket's own items, offers the epic first 
 test("Save as a link set… on a sub-task names the epic above its story, and saves the epic rule (#1064)", async () => {
   open([], "PAY-232");
   await settle();
-  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  drawerOpen();
   flushSync();
   button(document.querySelector(".tf-dacts")!, "Save as a link set…").click();
   await settle();
@@ -367,7 +368,7 @@ test("Save as a link set… on a sub-task names the epic above its story, and sa
 test("Save link set pressed before the walk up ends still saves the epic, not the story (#1064)", async () => {
   open([], "PAY-232");
   await settle();
-  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  drawerOpen();
   flushSync();
   button(document.querySelector(".tf-dacts")!, "Save as a link set…").click();
   flushSync();
@@ -379,7 +380,7 @@ test("Save link set pressed before the walk up ends still saves the epic, not th
 test("Save as a link set… can apply it to the project", async () => {
   open();
   await settle();
-  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  drawerOpen();
   flushSync();
   button(document.querySelector(".tf-dacts")!, "Save as a link set…").click();
   await settle();
@@ -394,7 +395,7 @@ test("a note and a route in the drawer open their own addresses, not Tickets (#1
   extraLinks = [link("note:0f2c1a", "note", "Call the bank"), link("route:9a1b", "route", "POST /payouts")];
   open();
   await settle();
-  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  drawerOpen();
   flushSync();
   const hrefs = (title: string) =>
     [...document.querySelectorAll<HTMLAnchorElement>("[aria-label='Connections'] a")].find((a) => squash(a) === title)?.getAttribute("href");

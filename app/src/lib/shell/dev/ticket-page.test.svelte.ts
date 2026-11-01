@@ -177,9 +177,9 @@ test("#/job/<id> chooses the ticket and lands on #/ticket/<id>, on the yellow", 
   expect(page.getAttribute("aria-label")).toBe("Job card");
 });
 
-test("#/job/<tab> keeps the tab on the ticket's address", async () => {
+test("#/job/<tab>, an old tab's address, lands on the ticket's own address: the page has no tabs (#2399)", async () => {
   await openOn("#/job/mock%3APAY-231/conversation", "Retry failed SEPA payouts");
-  await until(() => location.hash === "#/ticket/mock%3APAY-231/conversation", `the job address went to ${location.hash}`);
+  await until(() => location.hash === "#/ticket/mock%3APAY-231", `the job address went to ${location.hash}`);
   expect(chosenJob.id).toBe("mock:PAY-231");
 });
 
@@ -425,4 +425,97 @@ test("a run opened from a doc page names the doc page in its hint, as Esc goes t
 
   key("Escape");
   await until(() => location.hash === "#/page/confluence%3Asepa", `Esc went to ${location.hash}`);
+});
+
+// ---- the reading column (#2399) ----
+
+/** The page's reading column, beside the card. */
+function reading(): HTMLElement | null {
+  return shown(".tf-work .tf-tkread");
+}
+
+/** The thread's comments, as the reading column draws them. */
+function comments(): HTMLElement[] {
+  return [...(reading()?.querySelectorAll<HTMLElement>(".tf-convo .tf-msg:not(.tf-queued)") ?? [])];
+}
+
+test("the reading column is the title, the description and the whole thread, with the new-since line before the first new comment", async () => {
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  await pageOf("PAY-231");
+  await until(() => comments().length > 0, "the thread never drew");
+
+  const column = reading()!;
+  expect(column.querySelector("h1")?.textContent?.trim()).toBe("Retry failed SEPA payouts");
+  expect(column.querySelector(".tf-tkdesc")?.textContent).toContain("Payouts to two SEPA banks fail with a");
+  expect(comments()).toHaveLength(20);
+  expect(column.querySelector(".tf-fold"), "no fold").toBeNull();
+  expect(comments()[0]!.textContent).toContain("Finance keeps chasing failed SEPA payouts by hand");
+
+  const line = column.querySelector(".tf-newline")!;
+  expect(line.textContent).toContain("New since your last visit");
+  const firstNew = comments().find((comment) => comment.textContent?.includes("Left a comment on the PR about the jitter width"))!;
+  expect(line.nextElementSibling).toBe(firstNew);
+  expect(comments().filter((comment) => comment.querySelector(".tf-chip-mention")).length).toBe(2);
+  expect(column.querySelector(".tf-compose textarea"), "the compose box ends the thread").not.toBeNull();
+});
+
+test("opening the page records a visit", async () => {
+  await openOn("#/ticket/mock%3AOPS-77", "Rotate the staging database credentials");
+  await pageOf("OPS-77");
+  await until(() => sent.some((call) => call.cmd === "visit_entity" && call.args["entityId"] === "mock:OPS-77"), "no visit was recorded");
+});
+
+test("a comment on a ticket that is not the chosen job is queued", async () => {
+  chosenJob.choose("mock:PAY-231");
+  await openOn("#/ticket/mock%3AOPS-77", "Rotate the staging database credentials");
+  const page = await pageOf("OPS-77");
+  expect(mood(page)).toBe("reading");
+  await until(() => reading()?.querySelector(".tf-compose textarea") !== null, "no compose box");
+
+  const box = reading()!.querySelector<HTMLTextAreaElement>(".tf-compose textarea")!;
+  box.value = "The rotation is scheduled for Tuesday.";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  const button = reading()!.querySelector<HTMLButtonElement>(".tf-compose .tf-btn.tf-primary")!;
+  await until(() => !button.disabled, "Comment stayed disabled");
+  button.click();
+  await until(() => sent.some((call) => call.cmd === "submit_write"), "nothing was queued");
+  const payload = sent.find((call) => call.cmd === "submit_write")!.args["payload"] as { Comment?: { entity: string; body: string } };
+  expect(payload.Comment).toEqual({ entity: "mock:OPS-77", body: "The rotation is scheduled for Tuesday." });
+  expect(chosenJob.id, "commenting chose nothing").toBe("mock:PAY-231");
+});
+
+test.each([
+  ["#/ticket/mock%3APAY-231", "pinned"],
+  ["#/ticket/mock%3APAY-231/map", "reading"],
+  ["#/ticket/mock%3APAY-231/conversation", "reading"],
+])("%s draws none of the job page's retired extras", async (hash, wanted) => {
+  if (wanted === "pinned") chosenJob.choose("mock:PAY-231");
+  await openOn(hash, "Retry failed SEPA payouts");
+  await pageOf("PAY-231");
+  await until(() => comments().length === 20, "the thread never drew whole");
+  const page = shown(".tf-ticketpage")!;
+
+  expect(page.querySelector('[role="tablist"], [role="tab"]'), "no tab strip").toBeNull();
+  expect(page.querySelector(".tf-deps, .tf-mapmode"), "the Map draws nothing").toBeNull();
+  expect(page.textContent).not.toContain("Also on this job");
+  expect(page.querySelector('[data-testid="job-connections"]'), "no connected count").toBeNull();
+  expect(page.textContent).not.toMatch(/\d+ connected/);
+  expect(page.querySelector(".tf-grid, .tf-sec, .tf-secfoot"), "no section panels").toBeNull();
+  expect(page.querySelector(".tf-filter, .tf-convo-bar"), "no filter boxes").toBeNull();
+  expect(page.querySelector(".tf-week"), "no week chart").toBeNull();
+  expect(page.textContent).not.toContain("Time this week");
+  expect(page.querySelector("select"), "no status select").toBeNull();
+  expect(page.querySelector(".tf-clock"), "no clock").toBeNull();
+});
+
+test("Start work draws the stepper above the description", async () => {
+  await openOn("#/ticket/mock%3APAY-240", "Payout dashboard latency");
+  const page = await pageOf("PAY-240");
+  await until(() => foot(page)?.textContent?.trim() === "Start work", "Start work never offered");
+  foot(page)!.click();
+  await until(() => reading()?.querySelector(".tf-steps") !== null, "the stepper never ran in the reading column");
+  const steps = reading()!.querySelector(".tf-steps")!;
+  const description = reading()!.querySelector(".tf-tkdesc")!;
+  expect(steps.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING, "the steps come first").toBeTruthy();
 });

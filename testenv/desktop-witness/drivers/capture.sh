@@ -71,7 +71,7 @@ readonly YOUR_NOTES='Your notes'
 readonly NOTE_TITLE='Retry storm from the capture witness'  # the typed capture's first line
 readonly NOTE_PAGE_LINE='A note, read-only in this release.'  # note/TfNote.svelte
 readonly CAPTURED_FROM='Captured from'                    # detail/relations.ts, capitalised by TfNote.svelte
-readonly OPEN_CODE_VIEW='Open Code view'                  # job/TfCodeSection.svelte
+readonly COMMENT_BOX='Comment on PAY-231'                # job/TfConversation.svelte, the reading column's compose box (#2399)
 readonly TICKETS_LINK='Tickets'                           # TfTopBar.svelte's nav
 readonly TICKETS_FILTER='Filter by key, summary, epic or person'  # tickets/TicketsPage.svelte
 # The preview's button, worded by the ticket's state (`tickets.ts`'
@@ -262,7 +262,7 @@ wait_until "Tickets never previewed '$JOB_QUERY' ($JOB_SUMMARY)" previews_the_jo
 go=$(job_link) || die "the preview offers none of: ${JOB_LINKS[*]}"
 "$ax" press "$pid" "$go" || die "could not press '$go'"
 wait_until "Tickets is still up after '$go'" absent "$TICKETS_FILTER"
-lands_named job-link "$OPEN_CODE_VIEW"
+lands_named job-link "$COMMENT_BOX"
 say "the job is open, so something is in front of the reader"
 
 # --- 3. somebody else's screen -----------------------------------------------

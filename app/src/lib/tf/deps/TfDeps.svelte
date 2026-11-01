@@ -26,8 +26,8 @@
   toast after a new asset offers *Edit it*. A route tile opens the route
   dialog, with *Delete…*.
 
-  **From a ticket (#874, R-11.10)**: with `ticket` set (the job's Map tab,
-  `#/job/<key>/map`, or `#/deps/job/<key>`) the same read is kept to what the
+  **From a ticket (#874, R-11.10)**: with `ticket` set (`#/deps/job/<key>`;
+  the ticket page's Map tab went with #2399) the same read is kept to what the
   ticket reaches (`reach.ts`, over `job_reach` and `job_pipelines`), in the
   view set as *opens from a ticket*. The scope buttons, drawn while a job is
   open, switch between *This job <key>* and *Everything* (`#/deps`).
@@ -89,7 +89,6 @@
   import TfImport from "./TfImport.svelte";
   import { importedLine } from "./import";
   import { isEntityId, resolveTicket } from "../job/job";
-  import { ticketHash } from "../route";
   import { reachedPart } from "./reach";
   import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
@@ -168,7 +167,6 @@
     ticket = null,
     ticketId = null,
     job = null,
-    host = "page",
   }: {
     /** Whether the database answers yet. */
     ready: boolean;
@@ -178,8 +176,6 @@
     ticketId?: string | null;
     /** The job open in the shell, for *This job* on the top-bar opening. */
     job?: string | null;
-    /** Where it draws: its own page, or the job's Map tab. */
-    host?: "page" | "job";
     /** Stand-ins for a test; the rest are the real commands. */
     ports?: Partial<Ports>;
     /** The session's view and draft, unless a test hands its own. */
@@ -569,23 +565,21 @@
   }
 </script>
 
-{#if host === "page"}
-  <header class="tf-fhead">
-    <div>
-      <h1>Dependencies</h1>
-      <div class="tf-sub">
-        {ticket !== null ? `What ${ticket} reaches` : "Everything knobas knows"}, in layers from the work down to the hardware.
-        Point at anything to see what it touches; click to open it.
-      </div>
+<header class="tf-fhead">
+  <div>
+    <h1>Dependencies</h1>
+    <div class="tf-sub">
+      {ticket !== null ? `What ${ticket} reaches` : "Everything knobas knows"}, in layers from the work down to the hardware.
+      Point at anything to see what it touches; click to open it.
     </div>
-    <div class="tf-acts">
-      <a class="tf-btn tf-ghost" href="#/assets" title="The asset tree in columns">Asset tree</a>
-      <a class="tf-btn tf-ghost" href="#/monitors">Monitors</a>
-    </div>
-  </header>
-{/if}
+  </div>
+  <div class="tf-acts">
+    <a class="tf-btn tf-ghost" href="#/assets" title="The asset tree in columns">Asset tree</a>
+    <a class="tf-btn tf-ghost" href="#/monitors">Monitors</a>
+  </div>
+</header>
 
-<div class="tf-dp" class:tf-dp-job={host === "job"}>
+<div class="tf-dp">
   {#if failure !== null}
     <p class="tf-dp-fail" role="alert">The estate could not be read: {failure}. Open Dependencies again to retry.</p>
   {:else if read !== null && drawn !== null && views.draft !== null}
@@ -597,8 +591,7 @@
           <button
             type="button"
             aria-pressed={ticket !== null}
-            onclick={() =>
-              (location.hash = host === "job" ? ticketHash(ticketId ?? scopeKey, "map") : `#/deps/job/${encodeURIComponent(scopeKey)}`)}
+            onclick={() => (location.hash = `#/deps/job/${encodeURIComponent(scopeKey)}`)}
             >This job <span class="tf-jobk">{scopeKey}</span></button
           >
           <button type="button" aria-pressed={ticket === null} onclick={() => (location.hash = "#/deps")}>Everything</button>

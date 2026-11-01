@@ -1,21 +1,11 @@
 /**
- * The conversation's rules as values (#819, R-5.1 to R-5.3). The suite runs in
+ * The conversation's rules as values (#819, R-5.1 to R-5.3; the whole thread, #2399). The suite runs in
  * Europe/Berlin (`vite.config.ts`), so 07:00Z is 09:00 on the reader's clock.
  */
 import { expect, test } from "vitest";
 
 import type { Thread, ThreadComment } from "../../ipc/entity";
-import { emptyFilter } from "../filter/filter";
-import {
-  MENTIONS,
-  NEW,
-  drawThread,
-  isNew,
-  mentionRuns,
-  since,
-  stamp,
-  summary,
-} from "./conversation";
+import { isNew, mentionRuns, since, stamp, wholeThread } from "./conversation";
 
 const NOW = new Date(2026, 9, 15, 14, 0);
 const VISIT = "2026-10-15T07:00:00Z";
@@ -50,56 +40,26 @@ test("new is somebody else's comment after the last visit, and nothing is new on
   expect(isNew(said("x", "2026-10-15T08:00:00Z", "y"), null)).toBe(false);
 });
 
-test("the summary counts the comments", () => {
-  const read = summary(thread(), VISIT);
-  expect(read).toMatchObject({ comments: 11, fresh: 2, mentions: 1 });
-  expect(read.latest?.body).toBe("[~mara] will it get an SLA?");
-  expect(summary({ comments: [], me: [] }, VISIT)).toMatchObject({ comments: 0, fresh: 0, mentions: 0, latest: null });
-});
-
-test("unfiltered, the old part folds: the last six entries and every new comment stay", () => {
-  const filter = emptyFilter();
-  const drawn = drawThread(thread(), VISIT, filter, false);
-  // 11 comments; the last six are kept.
-  expect(drawn.folded).toBe(5);
-  expect(drawn.foldedFrom).toBe("2026-08-12");
-  expect(drawn.entries).toHaveLength(6);
+test("the whole thread, oldest first, with no fold: the line goes before the first comment new to the reader", () => {
+  const drawn = wholeThread(thread(), VISIT);
+  expect(drawn.entries.map((entry) => entry.comment.body)).toEqual(thread().comments.map((comment) => comment.body));
   // The rule goes before the first new comment, not before the reader's own.
-  const at = drawn.newAt!;
-  expect(drawn.entries[at]).toMatchObject({ comment: { body: "left a note" } });
-
-  const all = drawThread(thread(), VISIT, filter, true);
-  expect(all.folded).toBe(0);
-  expect(all.entries.map((entry) => entry.comment.body)).toEqual(thread().comments.map((comment) => comment.body));
+  expect(drawn.newAt).toBe(9);
+  expect(drawn.entries[9]).toMatchObject({ comment: { body: "left a note" }, fresh: true });
+  expect(drawn.entries.filter((entry) => entry.fresh)).toHaveLength(2);
 });
 
-test("a new comment older than the last six still stays above the fold", () => {
+test("a new comment among the old ones moves the line up to it", () => {
   const read = thread();
   read.comments.splice(1, 0, said("Tomasz", "2026-10-15T08:30:00Z", "late but new"));
-  const drawn = drawThread(read, VISIT, emptyFilter(), false);
-  expect(drawn.entries.map((entry) => entry.comment.body)).toContain("late but new");
+  expect(wholeThread(read, VISIT).newAt).toBe(1);
 });
 
-test("a filter keeps the comments it matches, and folds nothing", () => {
-  const mentions = emptyFilter();
-  mentions.chips["only"] = [MENTIONS];
-  const drawn = drawThread(thread(), VISIT, mentions, false);
-  expect(drawn.entries).toHaveLength(1);
-  expect(drawn.shown).toBe(1);
-  expect(drawn.folded).toBe(0);
-  expect(drawn.newAt).toBeNull();
-
-  const fresh = emptyFilter();
-  fresh.chips["only"] = [NEW];
-  expect(drawThread(thread(), VISIT, fresh, false).shown).toBe(2);
-
-  const words = emptyFilter();
-  words.text = "old priya";
-  expect(drawThread(thread(), VISIT, words, false).shown).toBe(4);
-
-  const person = emptyFilter();
-  person.chips["who"] = ["Jonas Becker"];
-  expect(drawThread(thread(), VISIT, person, false).shown).toBe(1);
+test("nothing new draws no line, and a first look has nothing new", () => {
+  const old = { comments: thread().comments.slice(0, 8), me: ["mara"] };
+  expect(wholeThread(old, VISIT).newAt).toBeNull();
+  expect(wholeThread(thread(), null).newAt).toBeNull();
+  expect(wholeThread({ comments: [], me: [] }, VISIT)).toEqual({ entries: [], newAt: null });
 });
 
 test("a mention is marked in both spellings, and only for the reader's account", () => {

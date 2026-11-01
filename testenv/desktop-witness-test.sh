@@ -985,8 +985,8 @@ pin_label $notes '>Your notes</div>' "the section still has the row the driver l
 pin_label $tf/settings/notes.ts 'return "No notes"' "the notes line still reads *No notes* at zero, which notes_total reads"
 # shellcheck disable=SC2016 # the template literal is the text pinned, not an expansion
 pin_label $tf/settings/notes.ts '`${total} notes`' "the notes line still leads with the count, which notes_total reads"
-pin_label $tf/job/TfCodeSection.svelte 'openLabel="Open Code view"' \
-    "the job's Code section still has the link the driver knows a job page by"
+pin_label $tf/job/TfConversation.svelte 'aria-label="Comment on {jobKey}"' \
+    "the ticket page's compose box still has the name the capture driver knows the page by"
 # The shortcut field is found by the focus, because the dialog and its heading
 # answer to its name too (measured 2026-10-18): `TfDialog` focuses its first field.
 pin_label $tf/settings/TfDialog.svelte 'querySelector<HTMLElement>("input:not(\[disabled\]):not(\[type=radio\])")' \

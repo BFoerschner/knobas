@@ -1,9 +1,5 @@
-/* ---------- the job's conversation (#819): the card's summary and the tab ---------- */
-.tf-jobcard .tf-last { font-size: var(--t-sm); background: rgba(255,255,255,.28); border-radius: 4px; padding: 7px 9px; margin: 6px 0 8px; color: var(--card-ink); }
-.tf-jobcard .tf-last b, .tf-jobcard p b { font-weight: 600; }
-.tf-jobcard .tf-cbtn { background: transparent; border-color: rgba(0,0,0,.3); color: var(--card-ink); text-decoration: none; }
+/* ---------- the ticket page's conversation (#819, #2399) ---------- */
 .tf-count.tf-info { background: var(--info-bg); color: var(--info); }
-.tf-convo-bar { margin: -18px -22px 0; }
 .tf-convo { display: flex; flex-direction: column; gap: 10px; max-width: 820px; }
 .tf-msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
 /* A comment on its way (#1424): muted until the thread holds it. */
@@ -33,12 +29,7 @@
 }
 .tf-compose .tf-acts { display: flex; justify-content: flex-end; }
 
-/* ---------- the Connections button and drawer (#820, R-4.3, R-6.1) ---------- */
-/* A small button in the job's tab strip's trailing group (#2294): its count and proposals only. */
-.tf-conn { color: var(--ink-2); }
-.tf-conn:hover { color: var(--ink); }
-.tf-conn b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
-.tf-conn .tf-p { color: var(--info); font-weight: 600; }
+/* ---------- the Connections drawer (#820, R-4.3, R-6.1) ---------- */
 .tf-scrim { position: fixed; inset: 0; background: rgba(10,15,20,.35); z-index: 20; animation: tf-fade .15s ease-out; }
 .tf-drawer {
   position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); background: var(--sheet);

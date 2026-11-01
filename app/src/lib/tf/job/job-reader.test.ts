@@ -72,19 +72,6 @@ function fakes(over: { failing?: string[] } = {}) {
       if (over.failing?.includes(filter.role ?? "")) throw { code: "unreachable", message: "down", source_id: null };
       return { rows: [row(filter.role, filter.reach)], total: 1, tally: null, groups: null };
     },
-    reachableTransitions: async (id) => {
-      asked.push(`reachableTransitions ${id}`);
-      await wait(id);
-      return status.get(id) === "In Review" ? ["Done"] : [`moves of ${id}`];
-    },
-    entityCheckout: (id) => {
-      asked.push(`entityCheckout ${id}`);
-      return Promise.reject(new Error("no checkout here"));
-    },
-    weekTimesheet: () => {
-      asked.push("weekTimesheet");
-      return Promise.resolve({ days: [], rows: [], past_horizon: [] });
-    },
     visitEntity: async (id) => {
       asked.push(`visitEntity ${id}`);
       await wait(id);
@@ -110,16 +97,8 @@ function fakes(over: { failing?: string[] } = {}) {
       return { sets: [], parent: { ticket: `parent of ${id}`, title: null, links: [] } } satisfies JobLinkSets;
     },
     getAsset: (id) => Promise.reject(new Error(`no asset ${id}`)),
-    credentialHealth: () => {
-      asked.push("credentialHealth");
-      return Promise.resolve([]);
-    },
-    syncStatus: () => {
-      asked.push("syncStatus");
-      return Promise.resolve([]);
-    },
   };
-  const reader = createJobReader(ports, { today: () => new Date(2026, 9, 15), registry: { load: () => Promise.resolve() } });
+  const reader = createJobReader(ports, { registry: { load: () => Promise.resolve() } });
   function hold(id: string) {
     let release = () => {};
     const gate = new Promise<void>((resolve) => (release = resolve));
@@ -136,7 +115,6 @@ function fakes(over: { failing?: string[] } = {}) {
 function slots(reader: ReturnType<typeof createJobReader>) {
   return {
     detail: reader.detail?.row.entity_id,
-    transitions: reader.transitions,
     thread: reader.thread?.me,
     lastVisit: reader.lastVisit,
     inherited: reader.inherited?.parent?.ticket,
@@ -152,7 +130,6 @@ function slots(reader: ReturnType<typeof createJobReader>) {
 
 const B = {
   detail: "jira:B",
-  transitions: ["moves of jira:B"],
   thread: ["jira:B"],
   lastVisit: "visited jira:B",
   inherited: "parent of jira:B",
@@ -205,7 +182,7 @@ test("a job opened while the last one's sections are out keeps none of the last 
   expect(asked.filter((call) => call.startsWith("promoteContext"))).toEqual(["promoteContext jira:A", "promoteContext jira:B"]);
 });
 
-test("a reread after a transition touches the detail and transitions only", async () => {
+test("a reread after a write touches the detail only", async () => {
   const { reader, asked, status } = fakes();
   reader.open("jira:B");
   await flush();
@@ -216,9 +193,9 @@ test("a reread after a transition touches the detail and transitions only", asyn
   status.set("jira:B", "In Review");
   reader.rereadDetail("jira:B");
   await flush();
-  expect(asked).toEqual(["getEntity jira:B", "reachableTransitions jira:B"]);
+  expect(asked).toEqual(["getEntity jira:B"]);
   expect(reader.detail?.status).toBe("In Review");
-  expect(slots(reader)).toEqual({ ...before, transitions: ["Done"] });
+  expect(slots(reader)).toEqual(before);
   // The sections are the same answers, not new ones.
   expect(reader.builds).toBe(builds);
   expect(reader.code).toBe(code);
@@ -236,7 +213,7 @@ test("a reread for a job left behind reads nothing", async () => {
   expect(asked).toEqual([]);
 });
 
-test("a reread after Hide here reads the link sets, the reach and the sections, not the ticket or its checkout", async () => {
+test("a reread after Hide here reads the link sets, the reach and the sections, not the ticket", async () => {
   const { reader, asked } = fakes();
   reader.open("jira:B");
   await flush();
@@ -278,7 +255,7 @@ test("a job closed drops every answer still out", async () => {
   expect(reader.builds).toBeNull();
 });
 
-test("a refresh's reread reads the ticket, its moves, week, thread, link sets, reach and sections, and never visits or promotes again (#2134)", async () => {
+test("a refresh's reread reads the ticket, its thread, link sets, reach and sections, and never visits or promotes again (#2134)", async () => {
   const { reader, asked, status } = fakes();
   reader.open("jira:B");
   await flush();
@@ -289,8 +266,6 @@ test("a refresh's reread reads the ticket, its moves, week, thread, link sets, r
   expect(asked.sort()).toEqual(
     [
       "getEntity jira:B",
-      "reachableTransitions jira:B",
-      "weekTimesheet",
       "entityThread jira:B",
       "jobLinkSets jira:B",
       "jobReach jira:B",
@@ -301,7 +276,7 @@ test("a refresh's reread reads the ticket, its moves, week, thread, link sets, r
     ].sort(),
   );
   expect(reader.detail?.status).toBe("In Review");
-  expect(slots(reader)).toEqual({ ...B, transitions: ["Done"] });
+  expect(slots(reader)).toEqual(B);
 });
 
 test("a refresh's reread still out when another job opens lands nothing of the first (#2134)", async () => {

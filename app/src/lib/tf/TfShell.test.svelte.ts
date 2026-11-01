@@ -188,10 +188,7 @@ const JOB_PORTS: JobPorts = {
       : Promise.reject({ code: "not_found", message: "", source_id: null }),
   promoteContext: (id) => Promise.resolve({ id: "ctx:1", kind: "ticket", title: "", anchor_id: id, created_at: "", archived_at: null }),
   listEntities: () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null }),
-  reachableTransitions: () => Promise.resolve([]),
   submitWrite: () => Promise.reject(new Error("not in this suite")),
-  entityCheckout: () => Promise.reject(new Error("not in this suite")),
-  weekTimesheet: () => Promise.resolve({ days: [], rows: [], past_horizon: [] }),
   visitEntity: () => Promise.resolve(null),
   entityThread: () => Promise.resolve({ comments: [], me: [] }),
   createLink: () => Promise.reject(new Error("not in this suite")),
@@ -203,8 +200,6 @@ const JOB_PORTS: JobPorts = {
   jobLinkSets: () => Promise.resolve({ sets: [], parent: null }),
   hideLinkSetMember: (_ticket, _member, hidden) => Promise.resolve(hidden),
   getAsset: () => Promise.reject(new Error("not in this suite")),
-  credentialHealth: () => Promise.resolve([]),
-  syncStatus: () => Promise.resolve([]),
   startWork: {
     flow: () => Promise.resolve([]),
     run: () => Promise.resolve([]),
@@ -302,13 +297,13 @@ function filterField(text: string): HTMLInputElement {
   return field;
 }
 
-test("Esc unwinds dialog, drawer, filter text, filter focus, then the ticket page's tab, one layer per press", async () => {
+test("Esc unwinds dialog, drawer, filter text, filter focus, then leaves the ticket page, one layer per press; an old tab address has no rung of its own (#2399)", async () => {
   const layers = createLayers();
   const closed: string[] = [];
   const offDrawer = layers.add({ kind: "drawer", close: () => (closed.push("drawer"), offDrawer()) });
   const offDialog = layers.add({ kind: "dialog", close: () => (closed.push("dialog"), offDialog()) });
   start({ layers });
-  await at("#/ticket/jira%3APAY-231/conv");
+  await reached("#/ticket/jira%3APAY-231/conv");
   const field = filterField("sepa");
   const typed: string[] = [];
   field.addEventListener("input", () => typed.push(field.value));
@@ -329,7 +324,7 @@ test("Esc unwinds dialog, drawer, filter text, filter focus, then the ticket pag
 
   press("Escape");
   await settle();
-  expect(location.hash, "a tab goes to the page's first tab").toBe("#/ticket/jira%3APAY-231");
+  expect(location.hash, "the page has no tabs: Esc goes to Tickets, its structural parent").toBe("#/tickets");
 });
 
 /** The breadcrumb's `Esc` hint as read, or `null` where none is drawn. */

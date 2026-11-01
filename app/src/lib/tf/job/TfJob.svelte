@@ -12,57 +12,47 @@
   breadcrumb is *Tickets › KEY*; `Esc` takes the ticket page's rung (the
   opener, else Tickets) and does nothing at home.
 
+  **The two columns** (`.tf-ws`): the card on the left, and the reading
+  column (#2399) on the right: the title as the page's heading, whole; the
+  *Start work* stepper while it runs and a blocked ticket's red banner
+  (#818, R-4.8); the description through the Markdown component in a resting
+  panel; and the whole conversation with its compose box. No tabs: an old
+  `/map` or `/conversation` address draws the same page. Dependencies keeps
+  its *This job* opening.
+
   Opening it reads the ticket, then **promotes its context** (`promote_context`,
-  idempotent, so a ticket with a context keeps it and one without gets one) and
-  reads the Code section's rows inside that context. The promotion happens
-  once per ticket opened: re-reads after a status move do not ask again.
+  idempotent, so a ticket with a context keeps it and one without gets one)
+  and reads what the ticket reaches (`job_reach`, and `list_entities` scoped
+  by it) for the card's sections. The promotion happens once per ticket
+  opened: re-reads after a write do not ask again.
 
-  The layout is the prototype's: the yellow card in a fixed 320px column, the
-  work on the right with the tabs *Work*, *Map* and *Conversation*. Work holds
+  **The conversation (#819)** is read once per page opened: `visit_entity`
+  records this visit and answers the last one, `entity_thread` the thread.
+  A comment and a link are writes on any ticket, the chosen job or not.
 
-  **The conversation (#819)** is read once per job opened: `visit_entity`
-  records this visit and answers the last one, `entity_thread` the thread. The
-  card's summary and the Conversation tab both draw that one read.
+  **The Connections drawer (#820)** opens with `L`. **Link sets (#867)**:
+  `job_link_sets` is read once per page opened, for the drawer's set and
+  parent groups; *Hide here* and *Show again* re-read it with the reach and
+  the sections, and never edit the set (R-7.5). *Apply a link set…* and *Save
+  as a link set…* (the drawer) are #869's dialogs: both save through
+  `save_link_set`, then re-read the same way.
 
-  **The Connections button (#820)** sits at the right of the tab bar (its
-  trailing small actions, #2294, with *Refresh*), with the
-  ticket's link count and its proposals, and opens the drawer (also `L`).
-  **Link sets (#867)**: `job_link_sets` is read once per job opened, for the
-  *Also on this job* chips above the tab's body (not on Conversation, R-4.4)
-  and the drawer's set and parent groups; *Hide here* and *Show again* re-read
-  it with the reach and the sections, and never edit the set (R-7.5).
-  *Apply a link set…* (the bar and the drawer) and *Save as a link set…* (the
-  drawer) are #869's dialogs: both save through `save_link_set`, then re-read
-  the same way.
-  the five sections (#817): Code, Builds, Assets, Monitors and Pages, each read
-  through the job-reach read (`job_reach`, and `list_entities` scoped by it),
-  so a row from the parent carries its label. Above them, a blocked ticket's
-  red banner (#818, R-4.8), and on a To Do ticket of the reader's the *Start
-  work* stepper (R-4.9) in place of Code and Builds, as prototype-6 draws it.
-  The Map tab (#874) hides the card and draws Dependencies from the ticket
-  (`deps/TfDeps.svelte` with `ticket` set): only what the ticket reaches.
-
-  **What the credential cannot write (#2052).** Once per job opened,
+  **What the credential cannot write (#2052).** Once per page opened,
   `refused_writes` is asked about the ticket's *Comment* and its move; a
-  refused one is drawn disabled with the reason (the status select, Start
-  work's move, the comment box's *Comment*) and queues nothing.
+  refused one is drawn disabled with the reason (Start work's move, the
+  comment box's *Comment*) and queues nothing.
 
   **Refresh (#2134, #2107's pieces).** The ticket's *Refresh* or *Sync now*
-  ends the tab bar, after Connections, so the Map tab, which hides the card,
-  keeps it; its failure line and the withdrawn and turned-off banners sit
-  under the tab bar on every tab. A refresh reads the ticket, its thread, its
-  week and its reach again through the reader (`reread`), over what the page
-  drew, and the echoes settle on those reads as on any other.
+  sits beside the title until the card's rows take the page's actions
+  (#2401); ⌘R presses it. Its failure line and the withdrawn and turned-off
+  banners sit at the top of the reading column. A refresh reads the ticket,
+  its thread and its reach again through the reader (`reread`), over what the
+  page drew, and the echoes settle on those reads as on any other.
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
 
-  import type {
-    EntityRow,
-    LinkEntry,
-    LinkSetDetail,
-    LinkSetRow,
-  } from "../../ipc/entity";
+  import type { LinkEntry, LinkSetDetail, LinkSetRow } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
   import { writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { askInto, refusalOf, type RefusedWrite, type WriteAsk } from "../../shell/refused-writes";
@@ -70,36 +60,9 @@
   import { toastQueued } from "../../shell/queued-toast";
   import type { Timer } from "../../shell/timer.svelte";
   import { push } from "../../shell/toasts.svelte";
-  import { sessionFilter } from "../filter/filter-state.svelte";
   import type { Layers } from "../layers.svelte";
-  import {
-    alsoIn,
-    connectedCount,
-    hiddenOf,
-    linkedOn,
-    groupsOf,
-    type GroupRow,
-  } from "./connections";
-  import { summary } from "./conversation";
-  import {
-    assetsRollup,
-    blockerEntries,
-    buildsRollup,
-    footAction,
-    segmentKey,
-    byAttention,
-    isMine,
-    itemHash,
-    keyOf,
-    monitorsRollup,
-    offersStartWork,
-    originLabel,
-    pagesRollup,
-    runKindsOf,
-    staleBuilds,
-    type FrameKinds,
-    type SectionRow,
-  } from "./job";
+  import { alsoIn, hiddenOf, linkedOn, groupsOf, type GroupRow } from "./connections";
+  import { blockerEntries, footAction, segmentKey, isMine, keyOf, offersStartWork, type FrameKinds } from "./job";
   import { bridgePorts, bridgeSetPorts, type JobPorts, type JobSetPorts } from "./ports";
   import { applyToast, savedToast, withHandRule, withoutHandRule } from "../sets/apply";
   import TfApplySet from "./TfApplySet.svelte";
@@ -114,26 +77,21 @@
   import { sectionHash, ticketHash } from "../route";
   import TfCrumbs from "../TfCrumbs.svelte";
   import type { EscTarget } from "../escape";
-  import TfCodeSection from "./TfCodeSection.svelte";
-  import TfDeps from "../deps/TfDeps.svelte";
-  import { clones } from "../openin/clones.svelte";
-  import { apps as sharedApps, type Apps } from "../openin/apps.svelte";
   import TfConnections from "./TfConnections.svelte";
   import TfConversation from "./TfConversation.svelte";
   import TfJobCard from "./TfJobCard.svelte";
+  import TfMarkdown from "../markdown/TfMarkdown.svelte";
+  import { proseMarkdown } from "../../render/prose";
   import TfLinkTo from "./TfLinkTo.svelte";
-  import TfSection from "./TfSection.svelte";
   import TfStartWork from "./TfStartWork.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
-  import { ago } from "../../shell/time";
   import { pageVisible } from "../kept-pages.svelte";
   import { onShownAgain } from "../while-shown.svelte";
 
   let {
     segment,
-    tab,
     choose = false,
     back = null,
     timer,
@@ -142,15 +100,12 @@
     onstarttimer,
     ports = bridgePorts,
     today = () => new Date(),
-    apps = sharedApps,
     sets = bridgeSetPorts,
     registry = kindRegistry,
     follower = writeFollower(),
   }: {
     /** What the address names: a key (`PAY-231`) or an entity id. */
     segment: string;
-    /** The job's tab from the address, `null` for Work. */
-    tab: string | null;
     /** A `#/job/<…>` address: choose the ticket as the job once read, and land on its own address. */
     choose?: boolean;
     /** Where `Esc` goes, which the breadcrumb's hint names (#2228); `null` where it does nothing. */
@@ -163,8 +118,6 @@
     onstarttimer: (entityId: string, title: string) => void;
     ports?: JobPorts;
     today?: () => Date;
-    /** The *Open in…* applications (#844). */
-    apps?: Apps;
     /** *Apply a link set…* and *Save as a link set…* (#869). */
     sets?: JobSetPorts;
     /** The adapters' claims, for the CI role's run kinds a run is routed by (#1230, #1256). */
@@ -184,12 +137,8 @@
   // ---- the job's reads are the reader's (#1320) ----
   // svelte-ignore state_referenced_locally
   // Built once per mount over the ports this page was given: the reader owns the token.
-  const reader = createJobReader(ports, { today: () => today(), registry: { load: () => registry.load() } });
+  const reader = createJobReader(ports, { registry: { load: () => registry.load() } });
   const detail = $derived(reader.detail);
-  const week = $derived(reader.week);
-  const code = $derived(reader.code);
-  const checkout = $derived(reader.checkout);
-  const checkoutOf = $derived(reader.checkoutOf);
   const failure = $derived(reader.failure);
   const thread = $derived(reader.thread);
   const threadFailure = $derived(reader.threadFailure);
@@ -197,13 +146,7 @@
   const proposals = $derived(reader.proposals);
   const reached = $derived(reader.reached);
   const inherited = $derived(reader.inherited);
-  const builds = $derived(reader.builds);
-  const pages = $derived(reader.pages);
-  const monitors = $derived(reader.monitors);
-  const assets = $derived(reader.assets);
   const sources = $derived(reader.sources);
-  const health = $derived(reader.health);
-  const sync = $derived(reader.sync);
   const repos = $derived(reader.repos);
   /** The ticket's *Refresh* or *Sync now* (#2134). */
   const refresh = createDetailRefresh(untrack(() => ports.refresh));
@@ -252,7 +195,7 @@
     const id = resolvedId;
     untrack(() => {
       chosenJob.choose(id);
-      replaceAddress(ticketHash(id, tab));
+      replaceAddress(ticketHash(id));
     });
   });
   /** Whether the ticket is the chosen job: the card's yellow, else its sheet. */
@@ -427,7 +370,7 @@
           name: `Comment on ${key}`,
           resend: () => {
             askAgain(id, "comment", body);
-            location.hash = ticketHash(id, "conversation");
+            location.hash = ticketHash(id);
           },
         },
         follower,
@@ -440,23 +383,6 @@
     }
   }
 
-  // A clone that finished: the line reads its checkout again, and *Clone*
-  // becomes *Open in…*.
-  let seenClones = clones.finished;
-  $effect(() => {
-    if (clones.finished === seenClones) return;
-    seenClones = clones.finished;
-    untrack(() => reader.rereadCheckout());
-  });
-
-  /** The job's tabs, in prototype-6's order and words; an unknown tab is Work. */
-  const TABS = [
-    { id: "work", name: "Work", path: "" },
-    { id: "map", name: "Map", path: "/map" },
-    { id: "conversation", name: "Conversation", path: "/conversation" },
-  ] as const;
-  const current = $derived(TABS.find((candidate) => candidate.id === tab) ?? TABS[0]);
-  const conversation = $derived(thread === null ? null : summary(thread, lastVisit));
   const connected = $derived(detail ? linkedOn(detail) : []);
   const groups = $derived(groupsOf(inherited));
 
@@ -476,43 +402,6 @@
       reader.close();
     };
   });
-
-  /** A mirror row as a section draws it. */
-  function line(row: EntityRow): SectionRow {
-    return {
-      id: row.entity_id,
-      href: itemHash(row, runKindsOf(registry)),
-      title: row.title,
-      mono: false,
-      repo: null,
-      // Where it sits in its source, then when it last changed: "ENG ›
-      // Payments, 2026-08-19", as prototype-6's page rows read.
-      sub: [row.path, row.updated_at ? ago(row.updated_at) : null].filter(Boolean).join(", "),
-      tone: row.state?.tone ?? null,
-      chip: row.state,
-      from: originLabel(reached.get(row.entity_id)),
-    };
-  }
-  const lines = (rows: EntityRow[] | null) => (rows === null ? null : byAttention(rows).map(line));
-
-  const TONE_RANK: Record<string, number> = { err: 0, warn: 1 };
-  const assetLines = $derived<SectionRow[] | null>(
-    assets === null
-      ? null
-      : [...assets]
-          .sort((a, b) => (TONE_RANK[a.tone ?? ""] ?? 2) - (TONE_RANK[b.tone ?? ""] ?? 2) || a.name.localeCompare(b.name))
-          .map((asset) => ({
-            id: asset.id,
-            href: itemHash({ entity_id: asset.id, kind: "asset" }),
-            title: asset.name,
-            mono: true,
-            repo: null,
-            sub: [asset.type, asset.environment, asset.on ? `on ${asset.on}` : null].filter(Boolean).join(", "),
-            tone: asset.tone,
-            chip: null,
-            from: originLabel(reached.get(asset.id)),
-          })),
-  );
 
   const mine = $derived(detail ? isMine(detail, sources) : false);
   /**
@@ -554,7 +443,6 @@
     }
   }
   const blocked = $derived(detail ? blockerEntries(detail) : []);
-  const stale = $derived(staleBuilds(sources, health, sync, builds ?? [], today()));
   /** What *Start work* suggests: a repository the ticket already reaches. */
   const suggestedRepo = $derived(
     [...reached.values()].find((row) => row.kind === "repo")?.entity_id ?? null,
@@ -582,56 +470,18 @@
   {@const key = keyOf(detail.row.entity_id)}
   <div class="tf-full tf-ticketpage">
   <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: key }]} {back} />
-  <div class="tf-ws" class:tf-mapmode={current.id === "map"}>
-    <TfJobCard
-      {detail}
-      others={reader.others}
-      {pinned}
-      {action}
-      onaction={act}
-      {week}
-      {conversation}
-      conversationFailure={threadFailure}
-      {lastVisit}
-      now={today()}
-    />
+  <div class="tf-ws">
+    <TfJobCard {detail} others={reader.others} {pinned} {action} onaction={act} />
     <section class="tf-work">
-      <div class="tf-wtabs" role="tablist">
-        {#each TABS as each (each.id)}
-          <a href={ticketHash(detail.row.entity_id, each.path === "" ? null : each.path.slice(1))} role="tab" aria-selected={current.id === each.id}
-            >{each.name}{#if each.id === "conversation" && conversation !== null}{#if conversation.comments > 0}{" "}<span
-                    class="tf-count">{conversation.comments}</span
-                  >{/if}{#if conversation.fresh > 0}{" "}<span class="tf-count tf-info">{conversation.fresh} new</span>{/if}{/if}</a
-          >
-        {/each}
-        <div class="tf-trail">
-          <button type="button" class="tf-btn tf-sm tf-conn" data-testid="job-connections" title="Connections (L)" onclick={() => (drawer = true)}>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"
-              ><path d="M6.5 9.5l3-3M7 4.5l1-1a2.8 2.8 0 0 1 4 4l-1 1M9 11.5l-1 1a2.8 2.8 0 0 1-4-4l1-1" /></svg
-            ><b>{connectedCount(connected, groups)}</b> connected{#if proposals !== null && proposals.length > 0},
-              <span class="tf-p">{proposals.length} proposed</span>{/if}
-            <kbd>L</kbd>
-          </button>
-          <TfDetailRefresh {detail} {refresh} reread={rereadJob} page small />
-        </div>
-      </div>
-      <TfDetailBanners {detail} failed={refresh.failed} />
       <div class="tf-wbody">
-        {#if current.id === "work" && inherited !== null}
-          <!-- R-4.4: hidden while the Conversation tab is open; the Map draws Dependencies alone, as prototype-6 does. -->
-          <div class="tf-setsbar">
-            <span class="tf-dim">Also on this job</span>
-            {#each groups as group (group.key)}
-              <a class="tf-setchip" href={group.href}><b>{group.label}</b> <span>{group.via}</span></a>{" "}
-            {:else}
-              <span class="tf-dim">no link sets yet</span>
-            {/each}
-            <button type="button" class="tf-linkish" onclick={() => (applyingSet = true)}>Apply a link set…</button>
-          </div>
-        {/if}
-        {#if current.id === "work"}
+        <div class="tf-tkread">
+          <header class="tf-tkpagehead">
+            <h1>{detail.row.title}</h1>
+            <div class="tf-acts"><TfDetailRefresh {detail} {refresh} reread={rereadJob} page small /></div>
+          </header>
+          <TfDetailBanners {detail} failed={refresh.failed} />
           {#if failure !== null}
-            <p class="tf-dim">Could not read what this job holds: {failure}</p>
+            <p class="tf-dim">Could not read what this ticket reaches: {failure}</p>
           {/if}
           {#each blocked as blocker (blocker.entityId)}
             <div class="tf-blocked">
@@ -643,40 +493,31 @@
           {#if starting}
             <TfStartWork {detail} {repos} suggested={suggestedRepo} {timer} api={ports.startWork} {onstarttimer} {moveRefused} />
           {/if}
-          <div class="tf-grid">
-            {#if !starting}
-              <TfCodeSection rows={code} {reached} {checkout} {checkoutOf} {layers} {apps} />
-              <TfSection id="builds" title="Builds" openLabel="Open Builds view" openHref="#/builds" footHref="#/builds" rows={lines(builds)} rollup={builds ? buildsRollup(builds) : null}>
-                {#snippet before()}
-                  {#each stale as warning (warning.sourceId)}
-                    <div class="tf-stale">
-                      {warning.text}
-                      <a href="#/settings/source/{encodeURIComponent(warning.sourceId)}">{warning.fix}</a>
-                    </div>
-                  {/each}
-                {/snippet}
-              </TfSection>
-            {/if}
-            <TfSection id="assets" title="Assets" openLabel="Open in Dependencies" openHref={ticketHash(detail.row.entity_id, "map")} footHref="#/assets" rows={assetLines} rollup={assets ? assetsRollup(assets) : null} />
-            <TfSection id="monitors" title="Monitors" openLabel="Open Monitors" openHref="#/monitors" footHref="#/monitors" onopen={() => (sessionFilter("monitors").scope = "job")} rows={lines(monitors)} rollup={monitors ? monitorsRollup(monitors) : null} />
-            <TfSection id="pages" title="Pages" openLabel="Open Docs view" openHref="#/docs" footHref="#/docs" onopen={() => (sessionFilter("docs").scope = "job")} rows={lines(pages)} rollup={pages ? pagesRollup(pages) : null} />
-          </div>
-        {:else if current.id === "conversation"}
-          <TfConversation
-            jobKey={key}
-            entityId={detail.row.entity_id}
-            queued={queuedComments}
-            {thread}
-            {lastVisit}
-            failure={threadFailure}
-            now={today()}
-            refused={commentRefused}
-            oncomment={comment}
-          />
-        {:else}
-          <!-- The Map tab (#874, R-11.10): Dependencies, kept to what the ticket reaches. -->
-          <TfDeps ready={true} ticket={key} ticketId={detail.row.entity_id} host="job" />
-        {/if}
+          <section aria-label="Description">
+            <div class="tf-panel tf-tkdesc">
+              {#if detail.description !== null && detail.description.trim() !== ""}
+                {@const markdown = proseMarkdown(detail.description, detail.markup)}
+                {#if markdown !== null}<TfMarkdown text={markdown} />{:else}<p class="tf-asks">{detail.description}</p>{/if}
+              {:else}
+                <p class="tf-dim">The ticket has no description.</p>
+              {/if}
+            </div>
+          </section>
+          <section aria-labelledby="tf-tktalk">
+            <header><h2 id="tf-tktalk">Conversation</h2></header>
+            <TfConversation
+              jobKey={key}
+              entityId={detail.row.entity_id}
+              queued={queuedComments}
+              {thread}
+              {lastVisit}
+              failure={threadFailure}
+              now={today()}
+              refused={commentRefused}
+              oncomment={comment}
+            />
+          </section>
+        </div>
       </div>
     </section>
   </div>

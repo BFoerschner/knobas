@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import type { EntityDetail } from "../../ipc/entity";
-import { footAction, resolveJob, resolveTicket, weekLine } from "./job";
+import { footAction, resolveJob, resolveTicket } from "./job";
 
 const SOURCES = [{ id: "mock" }, { id: "gitea" }, { id: "jira" }];
 /** The mirror: PAY-231 in the mock source and in Jira, PAY-9 in Jira alone. */
@@ -39,11 +39,6 @@ test("a key one source holds opens as before, with nobody else", async () => {
 test("a read that fails for another reason than a miss is said, not taken for one", async () => {
   const down = () => Promise.reject({ code: "database", message: "the database is down" });
   await expect(resolveJob("PAY-231", SOURCES, down)).rejects.toMatchObject({ code: "database" });
-});
-
-test("durations are whole minutes, floored: 163 s logged as 120 s leaves 43 s that are not a minute to log", () => {
-  expect(weekLine({ days: [], logged: 120, unlogged: 43 })).toBe("2m logged");
-  expect(weekLine({ days: [], logged: 0, unlogged: 43 })).toBe("Nothing yet");
 });
 
 test("the card's foot: the decision while reading, the timer once pinned, nothing on a done ticket read (spec #2396)", () => {

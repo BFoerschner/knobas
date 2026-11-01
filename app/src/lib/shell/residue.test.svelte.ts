@@ -358,7 +358,6 @@ const { echoWrite } = await import("../tf/queued.svelte");
 const TfRunLog = (await import("../tf/builds/TfRunLog.svelte")).default;
 const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
 const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).default;
-const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
 const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
@@ -1208,34 +1207,6 @@ const CASES: Case[] = [
         },
       }),
     }),
-  },
-  {
-    /** The Code section's *Open in…* menu registers a layer while open (#816). */
-    name: "TfCodeSection",
-    source: "lib/tf/job/TfCodeSection.svelte",
-    open: (target) => ({
-      app: mount(TfCodeSection, {
-        target,
-        props: {
-          rows: [],
-          checkout: {
-            repo_entity_id: null,
-            repo_url: null,
-            path: "/src/payout-service",
-            found_by: "scan" as const,
-            clones_root: null,
-            clone_command: null,
-            tree: null,
-          },
-          checkoutOf: "mock:tidewater/payout-service",
-          layers: createLayers(),
-          apps: residueApps(),
-        },
-      }),
-    }),
-    exercise: (target) => {
-      target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
-    },
   },
   {
     /**

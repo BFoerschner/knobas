@@ -9,7 +9,6 @@ import type { EchoListen } from "../queued.svelte";
 import type { DetailRefreshPorts } from "../refresh.svelte";
 import {
   createLink,
-  entityCheckout,
   entityThread,
   getEntity,
   hideLinkSetMember,
@@ -20,12 +19,10 @@ import {
   previewLinkSetRule,
   saveLinkSet,
   promoteContext,
-  reachableTransitions,
   roomSuggestions,
   submitWrite,
   unlink,
   visitEntity,
-  type CheckoutView,
   type ContextRow,
   type EntityDetail,
   type EntityFilter,
@@ -39,15 +36,10 @@ import {
 import { launcherHome, search } from "../../ipc/search";
 import type { SessionPorts } from "../../launcher/session.svelte";
 import {
-  credentialHealth,
   listSources,
-  syncStatus,
-  type CredentialHealth,
   type QueuedWrite,
-  type SourceSyncStatus,
   type WriteOpPayload,
 } from "../../ipc/sources";
-import { weekTimesheet, type DayWindow, type Week } from "../../ipc/time";
 import { BRIDGE as startWorkBridge, type StartWorkApi } from "../../start-work/start-work.svelte";
 import type { RefusedWritesPort } from "../../shell/refused-writes";
 import type { SetPorts } from "../sets/ports";
@@ -58,10 +50,7 @@ export interface JobPorts {
   getEntity: (entityId: string) => Promise<EntityDetail>;
   promoteContext: (entityId: string) => Promise<ContextRow>;
   listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
-  reachableTransitions: (entityId: string) => Promise<string[]>;
   submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
-  entityCheckout: (entityId: string) => Promise<CheckoutView>;
-  weekTimesheet: (days: DayWindow[]) => Promise<Week>;
   // The conversation (#819) and the Connections drawer (#820).
   visitEntity: (entityId: string) => Promise<string | null>;
   entityThread: (entityId: string) => Promise<Thread>;
@@ -73,15 +62,12 @@ export interface JobPorts {
   launcherHome: SessionPorts["launcherHome"];
   /** What the ticket reaches (#817). */
   jobReach: (entityId: string) => Promise<Reached[]>;
-  /** The link sets that apply and the parent (#867): *Also on this job* and the drawer's groups. */
+  /** The link sets that apply and the parent (#867): the drawer's groups. */
   jobLinkSets: (entityId: string) => Promise<JobLinkSets>;
   /** *Hide here* and *Show again* (R-7.5); never edits the set. */
   hideLinkSetMember: (ticketId: string, memberId: string, hidden: boolean) => Promise<boolean>;
   /** One reached asset, for the Assets section. */
   getAsset: (assetId: string) => Promise<AssetDetail>;
-  /** Every source's credential, for the Builds section's warning. */
-  credentialHealth: () => Promise<CredentialHealth[]>;
-  syncStatus: () => Promise<SourceSyncStatus[]>;
   /** The start-work flow's five commands (#44), the job's stepper's (#818). */
   startWork: StartWorkApi;
   /** What the ticket's source's credential cannot write (#2052); the bridge's when left out. */
@@ -115,10 +101,7 @@ export const bridgePorts: JobPorts = {
   getEntity: (entityId) => getEntity(entityId),
   promoteContext: (entityId) => promoteContext(entityId),
   listEntities: (filter, limit, offset) => listEntities(filter, limit, offset),
-  reachableTransitions: (entityId) => reachableTransitions(entityId),
   submitWrite: (payload) => submitWrite(payload),
-  entityCheckout: (entityId) => entityCheckout(entityId),
-  weekTimesheet: (days) => weekTimesheet(days),
   visitEntity: (entityId) => visitEntity(entityId),
   entityThread: (entityId) => entityThread(entityId),
   createLink: (fromId, toId, relation, note) => createLink(fromId, toId, relation, note),
@@ -130,7 +113,5 @@ export const bridgePorts: JobPorts = {
   jobLinkSets: (entityId) => jobLinkSets(entityId),
   hideLinkSetMember: (ticketId, memberId, hidden) => hideLinkSetMember(ticketId, memberId, hidden),
   getAsset: (assetId) => getAsset(assetId),
-  credentialHealth: () => credentialHealth(),
-  syncStatus: () => syncStatus(),
   startWork: startWorkBridge,
 };

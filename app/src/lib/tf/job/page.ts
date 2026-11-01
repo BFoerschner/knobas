@@ -1,8 +1,9 @@
 /**
  * One page for a ticket and the job (spec #2396): `TfJob` draws
  *
- * - `#/ticket/<entity id>[/<tab>]`, the ticket's page, in its reading mood
- *   unless the ticket is the chosen job; opening it chooses nothing;
+ * - `#/ticket/<entity id>`, the ticket's page, in its reading mood unless
+ *   the ticket is the chosen job; opening it chooses nothing. The page has
+ *   no tabs (#2399): an old `/<tab>` after the id draws the same page;
  * - `#/job/<key or id>[/<tab>]`, the old way in (links, bookmarks, the timer
  *   chip, *Start work*): the page resolves the ticket, chooses it as the job
  *   (`chosen.svelte.ts`) and replaces the address with the ticket's;
@@ -34,7 +35,6 @@ export const page = definePage({
   address: (route) => segmentOf(route) ?? "",
   props: ({ route, back, timer, layers, ontimer, onstarttimer, jobPorts }) => ({
     segment: segmentOf(route) ?? "",
-    tab: route.tab,
     choose: route.view === "job" && route.key !== null,
     back,
     timer,

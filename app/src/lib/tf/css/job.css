@@ -31,19 +31,25 @@
 .tf-sheetcard .tf-jobdim, .tf-sheetcard p, .tf-sheetcard h2 { color: var(--ink-2); }
 .tf-sheetcard section { border-top-color: var(--rule-2); }
 .tf-sheetcard .tf-chip { background: var(--muted-bg); color: var(--ink); }
-.tf-sheetcard .tf-cbtn { border-color: var(--rule); color: var(--ink); }
-.tf-sheetcard .tf-last { background: var(--sheet-2); }
 .tf-sheetcard .tf-go .tf-btn { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
-.tf-sheetcard .tf-week .tf-week-unlogged { fill: var(--rule-2); }
-.tf-sheetcard .tf-week .tf-week-logged { fill: var(--rule); }
-.tf-sheetcard .tf-week .tf-today .tf-week-unlogged { fill: var(--ink-2); }
-.tf-sheetcard .tf-week .tf-today .tf-week-logged { fill: var(--ink); }
-.tf-week { display: block; width: 100%; height: 34px; margin-top: 6px; }
-.tf-week .tf-week-unlogged { fill: rgba(0,0,0,.12); }
-.tf-week .tf-week-logged { fill: rgba(0,0,0,.24); }
-.tf-week .tf-today .tf-week-unlogged { fill: rgba(0,0,0,.38); }
-.tf-week .tf-today .tf-week-logged { fill: var(--card-ink); }
-.tf-weekends { display: flex; justify-content: space-between; font-size: var(--t-2xs); }
+/* The reading column (#2399): the title, the description and the whole thread, centred in the space beside the
+   card at a reading width (Björn's call; the design system's left alignment stays everywhere else). */
+.tf-ticketpage .tf-wbody { padding: 24px 22px 48px; }
+.tf-tkread { max-width: 880px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+.tf-tkread > section > header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; min-height: var(--control-h-sm); }
+.tf-tkread > section > header h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
+/* The page's head: the title at the page-title step (`.tf-fhead`'s type), whole; a long title wraps. */
+.tf-tkpagehead { display: flex; align-items: flex-start; gap: 16px; margin-bottom: -8px; }
+.tf-tkpagehead h1 { flex: 1; min-width: 0; font-size: var(--t-3xl); line-height: 1.15; font-weight: 700; font-variation-settings: "wdth" 85; overflow-wrap: anywhere; }
+.tf-tkpagehead .tf-acts { flex: none; margin-top: -2px; display: flex; gap: var(--control-gap); flex-wrap: wrap; }
+/* The description: the ticket's Markdown in a resting panel at body size, filling the panel. */
+.tf-tkdesc { padding: 14px 16px; }
+.tf-tkdesc .tf-md { padding: 0; font-size: var(--t-md); }
+.tf-tkdesc p.tf-dim { font-size: var(--t-sm); }
+/* The thread is the job's (`.tf-convo`, connections.css); the compose box is one line until it is used. */
+.tf-tkread .tf-convo { max-width: none; }
+.tf-tkread .tf-compose textarea { min-height: 36px; }
+.tf-tkread .tf-compose:focus-within textarea { min-height: 80px; }
 
 .tf-work { overflow: auto; display: flex; flex-direction: column; min-width: 0; }
 .tf-work > * { flex: none; }

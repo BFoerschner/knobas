@@ -1,7 +1,8 @@
 /**
- * The job's conversation, pure (#819, R-5.1 to R-5.3): the card's summary line
- * and the Conversation tab's entries, computed from what `entity_thread` and
- * `visit_entity` answered, so the rules are testable as values.
+ * The ticket page's conversation, pure (#819, R-5.1 to R-5.3, #2399): the
+ * whole thread the reading column draws, oldest first and with no fold,
+ * computed from what `entity_thread` and `visit_entity` answered, so the
+ * rules are testable as values.
  *
  * **New** is a comment somebody else wrote after the reader's last visit. A
  * comment the source did not date is never new, and with no earlier visit
@@ -10,48 +11,12 @@
  * pull-request lines.
  */
 import type { Thread, ThreadComment } from "../../ipc/entity";
-import { isFiltering, matchesAll, type FilterState } from "../filter/filter";
-import { dayKey } from "../../time/day";
 import { stampLabel } from "../../time/format";
-
-/** How many entries an unfiltered thread keeps above its fold (R-5.3). */
-export const KEEP = 6;
-
-/** The *Show* chips' values. Their labels are the view's. */
-export const MENTIONS = "mentions";
-export const NEW = "new";
 
 /** Whether `comment` is new to the reader: somebody else's, after `lastVisit`. */
 export function isNew(comment: ThreadComment, lastVisit: string | null): boolean {
   if (lastVisit === null || comment.at === null || comment.mine) return false;
   return Date.parse(comment.at) > Date.parse(lastVisit);
-}
-
-/** The card's conversation summary (R-5.1). */
-export interface Summary {
-  comments: number;
-  fresh: number;
-  mentions: number;
-  latest: ThreadComment | null;
-}
-
-export function summary(thread: Thread, lastVisit: string | null): Summary {
-  return {
-    comments: thread.comments.length,
-    fresh: thread.comments.filter((comment) => isNew(comment, lastVisit)).length,
-    mentions: thread.comments.filter((comment) => comment.mentions_me).length,
-    latest: thread.comments[thread.comments.length - 1] ?? null,
-  };
-}
-
-/** `"20 comments"`, `"1 comment"`. */
-export function commentCount(n: number): string {
-  return n === 1 ? "1 comment" : `${n} comments`;
-}
-
-/** `"2 mention you"`, `"1 mentions you"`. */
-export function mentionCount(n: number): string {
-  return n === 1 ? "1 mentions you" : `${n} mention you`;
 }
 
 /**
@@ -82,62 +47,21 @@ export interface Entry {
   fresh: boolean;
 }
 
-/** What the tab draws. */
+/** What the reading column draws. */
 export interface Drawn {
   entries: Entry[];
-  /** How many old entries sit behind the fold, `0` for none. */
-  folded: number;
-  /** The date of the first folded entry, for "Show 17 earlier entries, from …". */
-  foldedFrom: string | null;
   /** The index in `entries` the *New since your last visit* rule goes before, or `null`. */
   newAt: number | null;
-  /** How many comments the filter keeps. */
-  shown: number;
 }
 
 /**
- * The tab's entries under `filter` (R-5.2, R-5.3).
- *
- * Words must all appear in a comment's text or author; person chips keep any of
- * the people on; *Mentions me* and *New since…* keep only those comments.
- *
- * Unfiltered and not expanded, the old part folds: the last {@link KEEP}
- * entries and every new one stay.
+ * The whole thread, oldest first, with no fold and no filter (#2399): the
+ * rule goes before the first comment new to the reader, wherever it falls.
  */
-export function drawThread(
-  thread: Thread,
-  lastVisit: string | null,
-  filter: FilterState,
-  expanded: boolean,
-): Drawn {
-  const people = filter.chips["who"] ?? [];
-  const only = filter.chips["only"] ?? [];
-  const filtering = isFiltering(filter);
-  const all: Entry[] = thread.comments.map((comment) => ({ comment, fresh: isNew(comment, lastVisit) }));
-  let entries = all.filter((entry) => {
-    const comment = entry.comment;
-    if (!matchesAll(`${comment.body} ${comment.author ?? ""}`, filter.text)) return false;
-    if (people.length > 0 && !people.includes(comment.author ?? "")) return false;
-    if (only.includes(MENTIONS) && !comment.mentions_me) return false;
-    if (only.includes(NEW) && !entry.fresh) return false;
-    return true;
-  });
-  const shown = entries.length;
-
-  let folded = 0;
-  let foldedFrom: string | null = null;
-  if (!filtering && !expanded) {
-    const keep = entries.filter((entry, index) => index >= entries.length - KEEP || entry.fresh);
-    folded = entries.length - keep.length;
-    if (folded > 0) {
-      const first = entries.find((entry) => !keep.includes(entry));
-      const at = first?.comment.at ?? null;
-      foldedFrom = at === null ? null : dayKey(new Date(at));
-    }
-    entries = keep;
-  }
-  const firstNew = filtering ? -1 : entries.findIndex((entry) => entry.fresh);
-  return { entries, folded, foldedFrom, newAt: firstNew === -1 ? null : firstNew, shown };
+export function wholeThread(thread: Thread, lastVisit: string | null): Drawn {
+  const entries: Entry[] = thread.comments.map((comment) => ({ comment, fresh: isNew(comment, lastVisit) }));
+  const firstNew = entries.findIndex((entry) => entry.fresh);
+  return { entries, newAt: firstNew === -1 ? null : firstNew };
 }
 
 /** A run of a comment's body, and whether it names the reader. */

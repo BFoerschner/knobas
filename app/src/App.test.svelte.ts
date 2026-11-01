@@ -1219,7 +1219,7 @@ test("capture: Settings › Notes and capture lands on the section capture.sh co
   await landsOn(landing("capture", "settings-notes"));
 });
 
-test("capture: the ticket preview's job link lands on the job page capture.sh knows by its Code section", async () => {
+test("capture: the ticket preview's job link lands on the ticket page capture.sh knows by its compose box", async () => {
   // The preview's link is the job's address (`TicketPreview.svelte`); this
   // opens that address rather than the Tickets search that offers it.
   dbReady = true;

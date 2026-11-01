@@ -1,5 +1,5 @@
 /**
- * The job's pure half (#816): what the job card and the Code section say,
+ * The ticket page's pure half (#816): what the card and its sections say,
  * computed from what the reads answered, so the rules are testable as values.
  *
  * Nothing here reads a source's payload. The card's type, priority and
@@ -9,17 +9,12 @@
  */
 import type { AssetStatus } from "../../ipc/assets";
 import type { EntityDetail, EntityRow, Reached, Tone } from "../../ipc/entity";
-import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
-
-import type { Week } from "../../ipc/time";
 import type { SourceSummary } from "../../ipc/sources";
-import { signInFails } from "../../shell/health.svelte";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { protocolDayOf } from "../../standup/protocol";
-import { ageLabel, keyOf, minutesLabel } from "../../time/format";
+import { keyOf, minutesLabel } from "../../time/format";
 import { minutesOf } from "../../time/week";
-import { CI, claims } from "../roles.svelte";
-import { reenterWords, secretNoun } from "../settings/settings";
+import { CI } from "../roles.svelte";
 
 /** What the job reads of a `list_sources` row: the fields of the wire row it uses, all always sent. */
 export type SourceFacts = Pick<SourceSummary, "id" | "display_name" | "config" | "roles" | "auth_kind">;
@@ -167,48 +162,6 @@ export function factsLine(detail: Pick<EntityDetail, "issue_type" | "priority" |
     parts.push(`est. ${minutesLabel(minutesOf(detail.estimate_seconds))}`);
   }
   return parts.join(", ");
-}
-
-/** One weekday of *Time this week*. */
-export interface WeekDay {
-  logged: number;
-  unlogged: number;
-  today: boolean;
-}
-
-/** *Time this week* for one ticket: Monday to Friday and the two totals. */
-export interface WeekReading {
-  days: WeekDay[];
-  logged: number;
-  unlogged: number;
-}
-
-/**
- * What *Time this week* draws for `entityId`, out of `week_timesheet`.
- *
- * Logged is worklog time sent or waiting to send; *to log* is the tracked
- * time no worklog covers (`unlogged_seconds`), the week's own split. Held
- * worklogs are neither, as on the timesheet.
- */
-export function weekReading(week: Week, entityId: string, today: string): WeekReading {
-  const row = week.rows.find(
-    (candidate) => candidate.target?.kind === "entity" && candidate.target.entity_id === entityId,
-  );
-  const days = week.days.slice(0, 5).map((day, index) => {
-    const cell = row?.cells[index];
-    return { logged: cell?.logged_seconds ?? 0, unlogged: cell?.unlogged_seconds ?? 0, today: day === today };
-  });
-  const sum = (field: "logged_seconds" | "unlogged_seconds") =>
-    (row?.cells ?? []).reduce((total, cell) => total + cell[field], 0);
-  return { days, logged: sum("logged_seconds"), unlogged: sum("unlogged_seconds") };
-}
-
-/** The line under *Time this week*. */
-export function weekLine(reading: WeekReading): string {
-  const parts: string[] = [];
-  if (reading.logged >= 60) parts.push(`${minutesLabel(minutesOf(reading.logged))} logged`);
-  if (reading.unlogged >= 60) parts.push(`${minutesLabel(minutesOf(reading.unlogged))} to log`);
-  return parts.length === 0 ? "Nothing yet" : parts.join(", ");
 }
 
 /** The kinds the Code section draws, in the words of R-4.7. */
@@ -452,51 +405,6 @@ export function assetsRollup(lines: readonly AssetLine[]): Rollup {
     lead: envs.length > 0 ? `${lines.length} ${noun} in ${envs.join(", ")}` : `${lines.length} ${noun}`,
     signals: bad > 0 ? [{ tone: "err", text: `${bad} with a problem` }] : [],
   };
-}
-
-/** One stale-data warning on the Builds section (R-4.7). */
-export interface Staleness {
-  sourceId: string;
-  text: string;
-  /** The fix's words, in the source's noun: *Re-enter password*, *Re-enter token* (#1405). */
-  fix: string;
-}
-
-/**
- * The Builds section's warnings (R-4.7): every source that holds builds --
- * one that claims the CI role (#1196, ADR-0029), or that a drawn row came
- * from -- whose credential the reader has to fix. "TeamCity data is 38 min
- * old: sign-in failing." The age is since the sign-in started failing, the
- * moment the status bar dates the failure from. The fix is *Re-enter
- * password* (or *token*, the source's noun), on the source's settings page.
- */
-export function staleBuilds(
-  sources: readonly SourceFacts[],
-  health: readonly CredentialHealth[],
-  sync: readonly SourceSyncStatus[],
-  rows: readonly EntityRow[],
-  now: Date,
-): Staleness[] {
-  // A source whose claims the job was not handed claims nothing.
-  const holders = sources.filter(
-    (source) =>
-      claims({ roles: source.roles }, CI) || rows.some((row) => row.source_id === source.id),
-  );
-  const out: Staleness[] = [];
-  for (const source of holders) {
-    const state = health.find((row) => row.source_id === source.id);
-    if (!state || !signInFails(state.state)) continue;
-    const run = sync.find((row) => row.source_id === source.id);
-    const since = run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
-    const name = source.display_name || source.id;
-    const why = state.state === "missing_secret" ? `no ${secretNoun(source.auth_kind)} stored` : "sign-in failing";
-    out.push({
-      sourceId: source.id,
-      text: since ? `${name} data is ${ageLabel(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`,
-      fix: reenterWords(source.auth_kind),
-    });
-  }
-  return out;
 }
 
 /** The username knobas knows the reader by in a source, or `null`. */

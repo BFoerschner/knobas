@@ -130,7 +130,7 @@ export function opener(item: Pick<InboxItem, "category" | "entity_id" | "kind" |
     default:
       break;
   }
-  if (kind === "ticket") return { label: "Open conversation", href: ticketHash(item.entity_id, "conversation") };
+  if (kind === "ticket") return { label: "Open conversation", href: ticketHash(item.entity_id) };
   if (kind === "pr") return { label: "Open PR", href };
   if (kind === "page") return { label: "Open page", href };
   return { label: "Open", href };
