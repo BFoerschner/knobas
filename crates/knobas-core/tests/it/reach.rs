@@ -15,11 +15,38 @@ use std::collections::BTreeMap;
 const SOURCE: &str = "jira";
 
 async fn scratch() -> PgPool {
-    knobas_db::test_util::scratch_database("reach")
+    let pool = knobas_db::test_util::scratch_database("reach")
         .await
         .pool(4)
         .await
-        .expect("a pool onto this test's own database")
+        .expect("a pool onto this test's own database");
+    declare(&pool, &["fields", "issuetype", "name"]).await;
+    pool
+}
+
+/// The source `jira`, configured with the adapter `jira`, and that adapter's
+/// stored ticket declaration naming `issue_type` at `path` (#2364): the walk
+/// reads a parent's type through the database's stored copy, as bring-up and
+/// every search command write it (`sync.parent_declaration`).
+async fn declare(pool: &PgPool, path: &[&str]) {
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ($1, $1, $1, 'http://127.0.0.1:1', 'pat')
+         on conflict (id) do nothing",
+    )
+    .bind(SOURCE)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.parent_declaration (adapter_kind, payload_paths) values ($1, $2)
+         on conflict (adapter_kind) do update set payload_paths = excluded.payload_paths",
+    )
+    .bind(SOURCE)
+    .bind(serde_json::json!([{ "kind": "ticket", "issue_type": [path] }]))
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 async fn entity(pool: &PgPool, namespace: &str, kind: &str, key: &str) -> String {
@@ -465,6 +492,60 @@ async fn an_epic_parent_brings_nothing() {
     draw(&pool, &epic, &page, "documents").await;
 
     assert!(reached(&pool, &story).await.is_empty());
+}
+
+/// The parent's issue type is read where its kind **declares** it (#2364),
+/// not at Jira's `fields.issuetype.name`: under a declaration that keeps it
+/// at `type`, the parent whose `type` is a story brings its links and the one
+/// whose `type` is an epic brings none, whatever Jira's path says of either.
+#[tokio::test]
+async fn a_parents_type_is_read_where_its_kind_declares_it() {
+    let pool = scratch().await;
+    declare(&pool, &["type"]).await;
+    let story = mirrored(
+        &pool,
+        "ticket",
+        "PAY-231",
+        serde_json::json!({ "key": "PAY-231", "type": "Story",
+                            "fields": { "issuetype": { "name": "Epic" } } }),
+    )
+    .await;
+    let epic = mirrored(
+        &pool,
+        "ticket",
+        "PAY-200",
+        serde_json::json!({ "key": "PAY-200", "type": "Epic",
+                            "fields": { "issuetype": { "name": "Story" } } }),
+    )
+    .await;
+    let under_story = mirrored(
+        &pool,
+        "ticket",
+        "PAY-232",
+        serde_json::json!({ "key": "PAY-232", "fields": { "parent": { "key": "PAY-231" } } }),
+    )
+    .await;
+    let under_epic = mirrored(
+        &pool,
+        "ticket",
+        "PAY-233",
+        serde_json::json!({ "key": "PAY-233", "fields": { "parent": { "key": "PAY-200" } } }),
+    )
+    .await;
+    let repo = entity(&pool, "gitea", "repo", "tidewater/payout-service").await;
+    let page = entity(&pool, "confluence", "page", "Payouts-overview").await;
+    draw(&pool, &story, &repo, "works-in").await;
+    draw(&pool, &epic, &page, "documents").await;
+
+    assert_eq!(
+        reached(&pool, &under_story).await.keys().collect::<Vec<_>>(),
+        [&repo],
+        "a story's links come in"
+    );
+    assert!(
+        reached(&pool, &under_epic).await.is_empty(),
+        "an epic's do not"
+    );
 }
 
 /// An id nothing answers to reaches nothing, and does not fail.
