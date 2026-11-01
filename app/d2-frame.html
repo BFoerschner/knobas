@@ -1,0 +1,10 @@
+<!doctype html>
+<!-- D2's frame (#2381): D2 on a main thread of its own, under the policy the backend serves this page with
+     (`knobas_app::renderers::ENGINE_CSP`). The app frames it hidden, `sandbox="allow-scripts"` (`render/port.ts`). -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script type="module" src="/src/lib/render/d2-frame.ts"></script>
+  </head>
+  <body></body>
+</html>

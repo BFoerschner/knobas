@@ -7,9 +7,11 @@
  * worker the browser way and never hear an answer, so `window` is hidden
  * until it is ready.
  */
+import { readFileSync } from "node:fs";
+
 import { beforeAll, expect, test, vi } from "vitest";
 
-import { d2Renderer, type D2Engine } from "./d2";
+import { d2Renderer, ThreadWorker, type D2Engine } from "./d2";
 import type { Palette } from "./port";
 
 const LIGHT: Palette = {
@@ -89,4 +91,75 @@ test("an engine that never starts answers an error, and the next render starts i
   expect(await stuck("a -> b", LIGHT)).toEqual({ error: "D2 did not start within 0.05 s." });
   expect(await stuck("again -> b", LIGHT)).toEqual({ svg: expect.stringContaining(">again<") });
   expect(starts).toBe(2);
+});
+
+/**
+ * D2 on the frame's own thread (#2381). The package runs its worker source in
+ * a `blob:` worker, and in WebKit D2's Go WASM overflows a worker's stack
+ * while it starts; `ThreadWorker` runs that source on the thread that asks,
+ * answering the package as its worker would. The stand-in source below has
+ * the package's shape: `setupMessageHandler(false, self, initWasmBrowser)`
+ * last, and the engine left on `globalThis.d2` once `initWasm` returns.
+ */
+const SOURCE = `
+function setupMessageHandler(isNode, port, initWasm) {
+  port.onmessage = async (e) => {
+    const { type, data } = e.data;
+    if (type === "init") { globalThis.d2 = await initWasm(data.wasm); port.postMessage({ type: "ready" }); }
+    if (type === "compile") port.postMessage({ type: "result", data: globalThis.d2.compile(data) });
+  };
+}
+async function initWasmBrowser(wasm) {
+  if (wasm === "overflows") window.dispatchEvent(Object.assign(new Event("unhandledrejection"), { reason: new RangeError("Maximum call stack size exceeded.") }));
+  return wasm === "good" ? { compile: (code) => "compiled " + code } : undefined;
+}
+setupMessageHandler(false, self, initWasmBrowser);
+`;
+
+/** A `ThreadWorker` over `source`, with every message it answers. */
+function threadWorker(source = SOURCE) {
+  const heard: unknown[] = [];
+  const worker = new ThreadWorker(
+    "blob:d2",
+    async (url) => (url === "blob:d2" ? source : ""),
+    async (module) => new Function(module)(),
+  );
+  worker.onmessage = (event) => heard.push(event.data);
+  const next = () => vi.waitFor(() => heard.shift() ?? Promise.reject(new Error("nothing yet")), { timeout: 1000 });
+  return { worker, next };
+}
+
+test("the package's worker source runs on this thread and answers as its worker would", async () => {
+  const { worker, next } = threadWorker();
+  try {
+    worker.postMessage({ type: "init", data: { wasm: "good" } });
+    expect(await next()).toEqual({ type: "ready" });
+    worker.postMessage({ type: "compile", data: "a -> b" });
+    expect(await next()).toEqual({ type: "result", data: "compiled a -> b" });
+  } finally {
+    delete (globalThis as { d2?: unknown }).d2;
+  }
+});
+
+test("a start that leaves no engine is a failed start, with the reason the engine gave", async () => {
+  const missing = threadWorker();
+  missing.worker.postMessage({ type: "init", data: { wasm: "nothing" } });
+  expect(await missing.next()).toEqual({ type: "error", error: "D2 could not start: its engine did not come up." });
+
+  const overflow = threadWorker();
+  overflow.worker.postMessage({ type: "init", data: { wasm: "overflows" } });
+  expect(await overflow.next()).toEqual({ type: "error", error: "D2 could not start: Maximum call stack size exceeded." });
+});
+
+test("a package whose worker source no longer ends as expected fails to start, and says why", async () => {
+  const { worker, next } = threadWorker(SOURCE.replace("setupMessageHandler(false, self, initWasmBrowser);", "listen(self);"));
+  worker.postMessage({ type: "init", data: { wasm: "good" } });
+  expect(await next()).toEqual({ type: "error", error: expect.stringMatching(/^D2 could not start: its worker source has changed/) });
+});
+
+test("the package's browser build ends its worker source with the call ThreadWorker takes over, once", () => {
+  const build = readFileSync("node_modules/@terrastruct/d2/dist/browser/index.js", "utf8");
+  const call = "setupMessageHandler(false, self, initWasmBrowser);";
+  expect(build.split(call)).toHaveLength(2);
+  expect(build.slice(build.indexOf(call) + call.length).trimStart().startsWith("`")).toBe(true);
 });

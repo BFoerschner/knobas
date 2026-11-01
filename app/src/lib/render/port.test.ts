@@ -1,11 +1,11 @@
 /**
- * The diagram worker's side of the port (#2259): D2 and Graphviz run their
- * WASM in a worker started on the first such diagram, never before, and each
- * answer reaches the request it belongs to.
+ * The diagram worker's side of the port (#2259): Graphviz runs its WASM in a
+ * worker, and D2 in a frame held as one (#2381), started on the first such
+ * diagram, never before, and each answer reaches the request it belongs to.
  */
 import { expect, test } from "vitest";
 
-import { workerDiagram, type DiagramMessage, type DiagramReply, type Palette } from "./port";
+import { frameWorker, workerDiagram, type DiagramMessage, type DiagramReply, type Palette } from "./port";
 
 const PALETTE: Palette = {
   dark: false, paper: "#E4E8EC", sheet: "#F7F8F9", sheet2: "#EEF1F4", ink: "#17212B", ink2: "#4B5663",
@@ -66,4 +66,53 @@ test("a worker that fails rejects what it holds, is stopped, and the next diagra
   expect(held.stopped).toBe(1);
   void draw({ engine: "d2", code: "b", palette: PALETTE });
   expect(held.starts).toBe(2);
+});
+
+/**
+ * D2's frame as the diagram worker (#2381): a hidden `sandbox="allow-scripts"`
+ * frame from the backend's scheme, which says hello once it listens. What is
+ * sent before that waits for it; only what the frame itself posts is an
+ * answer; a frame that never says hello is a failed worker.
+ */
+function framed(limit = 1000) {
+  const worker = frameWorker("knobas-render://localhost/d2-frame.html", document, limit);
+  const frame = document.querySelector<HTMLIFrameElement>("iframe[src='knobas-render://localhost/d2-frame.html']")!;
+  const into: unknown[] = [];
+  frame.contentWindow!.postMessage = ((message: unknown) => into.push(message)) as Window["postMessage"];
+  const heard: unknown[] = [];
+  worker.addEventListener("message", (event) => heard.push((event as MessageEvent).data));
+  const from = (source: Window | null, data: unknown) => window.dispatchEvent(new MessageEvent("message", { data, source }));
+  return { worker, frame, into, heard, from };
+}
+
+test("D2's frame is hidden and sandboxed to scripts alone, and holds what is sent until it says hello", () => {
+  const { worker, frame, into, heard, from } = framed();
+  try {
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame.hidden).toBe(true);
+    const ask = { id: 1, engine: "d2", code: "a -> b", palette: PALETTE } satisfies DiagramMessage;
+    worker.postMessage(ask);
+    expect(into).toEqual([]);
+
+    from(frame.contentWindow, { hello: "d2" });
+    expect(into).toEqual([ask]);
+    expect(heard).toEqual([]);
+
+    // Only the frame's own messages are answers.
+    from(window, { id: 1, answer: { svg: "<svg>forged</svg>" } });
+    expect(heard).toEqual([]);
+    from(frame.contentWindow, { id: 1, answer: { svg: "<svg/>" } });
+    expect(heard).toEqual([{ id: 1, answer: { svg: "<svg/>" } }]);
+  } finally {
+    worker.terminate();
+  }
+  expect(frame.isConnected).toBe(false);
+});
+
+test("a D2 frame that never says hello fails as a worker does", async () => {
+  const { worker, frame } = framed(20);
+  const failed = new Promise<string>((resolve) => worker.addEventListener("error", (event) => resolve((event as ErrorEvent).message)));
+  expect(await failed).toBe("D2's frame did not load within 0.02 s.");
+  worker.terminate();
+  expect(frame.isConnected).toBe(false);
 });

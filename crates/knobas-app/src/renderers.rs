@@ -449,30 +449,87 @@ pub const FRAME_SCHEME: &str = "knobas-render";
 /// else. No script runs and no request leaves the frame, whatever reaches it.
 pub const FRAME_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 
-/// The answer to `knobas-render://localhost/<document>`: the document is the
-/// path, base64url without padding (the shell sanitized it first,
-/// `render/frame.ts`), served as HTML under [`FRAME_CSP`]. Stateless: the URL
-/// is the document. A path that is no document is a 400 with no body.
+/// D2's frame page (#2381), an entry of the app's build (`app/d2-frame.html`).
+pub const D2_FRAME_PAGE: &str = "d2-frame.html";
+
+/// The policy D2's frame runs under (#2381). D2's Go WASM overflows a WebKit
+/// worker's stack while it starts, so it runs on a main thread: this frame's,
+/// not the app's, whose policy keeps no `'wasm-unsafe-eval'`, `'unsafe-eval'`
+/// or `blob:` (#2259, #2312). Scripts come from this scheme and from `blob:`
+/// (the package's worker source, run on the frame's thread), WASM compiles,
+/// ELK is built with `new Function`; nothing is fetched beyond `blob:`, no
+/// worker starts, nothing draws. The frame is `sandbox="allow-scripts"`: an
+/// opaque origin, no storage, no reach into the app.
+pub const ENGINE_CSP: &str = "default-src 'none'; script-src knobas-render: http://knobas-render.localhost blob: \
+                              'wasm-unsafe-eval' 'unsafe-eval'; connect-src blob:";
+
+/// The answer to `knobas-render://localhost/<path>`:
+///
+/// - `/<document>`: the document is the path, base64url without padding (the
+///   shell sanitized it first, `render/frame.ts`), served as HTML under
+///   [`FRAME_CSP`]. Stateless: the URL is the document. A path that is no
+///   document is a 400 with no body.
+/// - `/d2-frame.html` and `/assets/<name>.js`: D2's frame page and the
+///   scripts it loads, from the app's assets (`asset` gives an asset's bytes
+///   and type), under [`ENGINE_CSP`] (#2381). A script carries
+///   `Access-Control-Allow-Origin: *`: the frame's origin is opaque and a
+///   module script is a CORS fetch. No other asset is served here; one that
+///   is not there is a 404. Tauri's resolver answers a missing path with
+///   `index.html`, so a script path whose asset is not JavaScript is missing
+///   too: the app's own page never runs under the engine's policy.
+///
+/// base64url has no `.` and no `/`, so no document is mistaken for an asset.
 #[must_use]
-pub fn frame_response(path: &str) -> tauri::http::Response<Vec<u8>> {
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    let document = URL_SAFE_NO_PAD
-        .decode(path.trim_start_matches('/'))
-        .ok()
-        .filter(|bytes| !bytes.is_empty());
-    let built = match document {
-        Some(body) => tauri::http::Response::builder()
-            .status(200)
-            .header("content-type", "text/html; charset=utf-8")
-            .header("content-security-policy", FRAME_CSP)
-            .header("x-content-type-options", "nosniff")
-            .header("cache-control", "no-store")
-            .body(body),
-        None => tauri::http::Response::builder()
-            .status(400)
-            .body(Vec::new()),
+pub fn frame_response(
+    path: &str,
+    asset: impl FnOnce(&str) -> Option<(Vec<u8>, String)>,
+) -> tauri::http::Response<Vec<u8>> {
+    let path = path.trim_start_matches('/');
+    let built = if path == D2_FRAME_PAGE || engine_script(path) {
+        match asset(path).filter(|(_, mime)| path == D2_FRAME_PAGE || mime.contains("javascript")) {
+            Some((body, mime)) => tauri::http::Response::builder()
+                .status(200)
+                .header("content-type", mime)
+                .header("content-security-policy", ENGINE_CSP)
+                .header("access-control-allow-origin", "*")
+                .header("x-content-type-options", "nosniff")
+                .body(body),
+            None => tauri::http::Response::builder()
+                .status(404)
+                .body(Vec::new()),
+        }
+    } else {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        match URL_SAFE_NO_PAD
+            .decode(path)
+            .ok()
+            .filter(|bytes| !bytes.is_empty())
+        {
+            Some(body) => tauri::http::Response::builder()
+                .status(200)
+                .header("content-type", "text/html; charset=utf-8")
+                .header("content-security-policy", FRAME_CSP)
+                .header("x-content-type-options", "nosniff")
+                .header("cache-control", "no-store")
+                .body(body),
+            None => tauri::http::Response::builder()
+                .status(400)
+                .body(Vec::new()),
+        }
     };
     built.unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
+/// A script straight under the build's `assets/`: a name of letters, digits,
+/// `-`, `_` and `.`, ending `.js`, that climbs nowhere.
+fn engine_script(path: &str) -> bool {
+    path.strip_prefix("assets/").is_some_and(|name| {
+        name.ends_with(".js")
+            && !name.starts_with('.')
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+    })
 }
 
 /// How long a run may take and how much it may write.
@@ -652,7 +709,7 @@ mod tests {
             "/{}",
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(doc)
         );
-        let answer = frame_response(&path);
+        let answer = frame_response(&path, |_| panic!("a document is no asset"));
         assert_eq!(answer.status(), 200);
         assert_eq!(answer.body().as_slice(), doc.as_bytes());
         let header = |name: &str| {
@@ -679,9 +736,82 @@ mod tests {
         assert!(conf.contains("style-src 'self';") && !conf.contains("unsafe-inline"));
 
         for bad in ["/not base64!", "/", "/%2F%2F"] {
-            let refused = frame_response(bad);
+            let refused = frame_response(bad, |_| None);
             assert_eq!(refused.status(), 400, "{bad}");
             assert!(refused.body().is_empty());
+        }
+    }
+
+    /// D2's frame (#2381): the frame page and the scripts under `/assets/`
+    /// come from the app's own assets, under the engine's policy (WASM and
+    /// `new Function`, `blob:` scripts, no request beyond `blob:`), and the
+    /// scripts carry `Access-Control-Allow-Origin: *`, since the frame's
+    /// origin is opaque and a module script is a CORS fetch. No other asset
+    /// is reachable on this scheme: the app's own page never runs under the
+    /// engine's policy.
+    #[test]
+    fn the_d2_frame_and_its_scripts_are_served_under_the_engine_policy() {
+        let dist = |path: &str| match path {
+            "d2-frame.html" => Some((b"<!doctype html>frame".to_vec(), "text/html".to_owned())),
+            "assets/d2-frame-Ab1.js" => {
+                Some((b"export {};".to_vec(), "text/javascript".to_owned()))
+            }
+            // Tauri's resolver answers a path it has not with `index.html`.
+            _ => Some((b"<!doctype html>app".to_vec(), "text/html".to_owned())),
+        };
+        let header = |answer: &tauri::http::Response<Vec<u8>>, name: &str| {
+            answer
+                .headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+        };
+
+        let page = frame_response("/d2-frame.html", dist);
+        assert_eq!(page.status(), 200);
+        assert_eq!(page.body().as_slice(), b"<!doctype html>frame");
+        assert_eq!(header(&page, "content-type").as_deref(), Some("text/html"));
+        assert_eq!(
+            header(&page, "content-security-policy").as_deref(),
+            Some(
+                "default-src 'none'; script-src knobas-render: http://knobas-render.localhost blob: \
+                 'wasm-unsafe-eval' 'unsafe-eval'; connect-src blob:"
+            )
+        );
+
+        let script = frame_response("/assets/d2-frame-Ab1.js", dist);
+        assert_eq!(script.status(), 200);
+        assert_eq!(script.body().as_slice(), b"export {};");
+        assert_eq!(
+            header(&script, "content-type").as_deref(),
+            Some("text/javascript")
+        );
+        assert_eq!(
+            header(&script, "access-control-allow-origin").as_deref(),
+            Some("*")
+        );
+        assert_eq!(
+            header(&script, "x-content-type-options").as_deref(),
+            Some("nosniff")
+        );
+
+        // Nothing else of the app's: not its page, not a stylesheet or WASM,
+        // not a path that climbs out of `assets/`, not a script that is not there.
+        for refused in [
+            "/index.html",
+            "/assets/app.css",
+            "/assets/x.wasm",
+            "/assets/../index.html",
+            "/assets/sub/d2-frame-Ab1.js",
+            "/assets/missing.js",
+        ] {
+            let answer = frame_response(refused, dist);
+            assert!(
+                answer.status().as_u16() >= 400,
+                "{refused}: {}",
+                answer.status()
+            );
+            assert!(answer.body().is_empty(), "{refused}");
         }
     }
 

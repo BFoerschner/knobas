@@ -236,11 +236,17 @@ pub fn run() {
     let demo = Profile::demo_in(std::env::args());
 
     // A command renderer's HTML frame is served from its own origin under its
-    // own policy (#2304, `renderers::frame_response`).
-    let builder = tauri::Builder::default()
-        .register_uri_scheme_protocol(renderers::FRAME_SCHEME, |_context, request| {
-            renderers::frame_response(request.uri().path())
-        });
+    // own policy (#2304, `renderers::frame_response`), and so is D2's frame,
+    // from the app's assets (#2381).
+    let builder = tauri::Builder::default().register_uri_scheme_protocol(
+        renderers::FRAME_SCHEME,
+        |context, request| {
+            renderers::frame_response(request.uri().path(), |path| {
+                let asset = context.app_handle().asset_resolver().get(path.to_owned())?;
+                Some((asset.bytes, asset.mime_type))
+            })
+        },
+    );
     // The single-instance guard (#748), registered **first**: its setup runs
     // before the builder's `setup` closure, so a second launch exits before it
     // can start the database or the scheduler (whose startup closes every
@@ -1169,10 +1175,11 @@ fn install_panic_hook() {
 #[cfg(test)]
 mod tests {
     /// The policy every module worker would need if Tauri sent it the CSP
-    /// (#2312). Shiki (`highlight.worker.ts`), D2 and Graphviz
-    /// (`diagram.worker.ts`) need `'unsafe-eval'` and `blob:` (D2 starts a
-    /// `blob:` worker of its own); pdf.js's worker compiles WASM and fetches
-    /// its decoders, fonts, CMaps and ICC profile from `/pdfjs/` (#2313).
+    /// (#2312). Shiki (`highlight.worker.ts`) and Graphviz
+    /// (`diagram.worker.ts`) need `'unsafe-eval'`; pdf.js's worker compiles
+    /// WASM and fetches its decoders, fonts, CMaps and ICC profile from
+    /// `/pdfjs/` (#2313). D2 left the workers for a frame of its own, under
+    /// a policy the backend sends itself (#2381, `renderers::ENGINE_CSP`).
     const WORKER_POLICY: &str =
         "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob:; connect-src 'self'";
 
