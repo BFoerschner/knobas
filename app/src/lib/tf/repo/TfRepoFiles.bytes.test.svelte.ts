@@ -25,7 +25,7 @@ const PDF_BYTES = new TextEncoder().encode("%PDF-1.7 fake");
  * A source with one file at `path`, `size` bytes, read at commit `c0mmit`: binary unless `text` is given, the text
  * the source answers for a file it read as text (no NUL in its head, like an ASCII-only PDF).
  */
-function binarySource(path: string, size = PDF_BYTES.length, text: string | null = null) {
+function fileSource(path: string, size = PDF_BYTES.length, text: string | null = null) {
   const name = path.slice(path.lastIndexOf("/") + 1);
   return async (_at: string, section: string | null): Promise<SourceView> => {
     const blocks =
@@ -128,7 +128,7 @@ function draw(
     target,
     props: {
       ports: {
-        entityView: binarySource(path, size, asText),
+        entityView: fileSource(path, size, asText),
         ...(fileBytes ? { fileBytes } : {}),
         submitWrite: async () => {
           throw { code: "invalid", message: "no write in this suite" };
