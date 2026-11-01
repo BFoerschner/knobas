@@ -474,7 +474,9 @@ pub const ENGINE_CSP: &str = "default-src 'none'; script-src knobas-render: http
 ///   and type), under [`ENGINE_CSP`] (#2381). A script carries
 ///   `Access-Control-Allow-Origin: *`: the frame's origin is opaque and a
 ///   module script is a CORS fetch. No other asset is served here; one that
-///   is not there is a 404.
+///   is not there is a 404. Tauri's resolver answers a missing path with
+///   `index.html`, so a script path whose asset is not JavaScript is missing
+///   too: the app's own page never runs under the engine's policy.
 ///
 /// base64url has no `.` and no `/`, so no document is mistaken for an asset.
 #[must_use]
@@ -484,7 +486,7 @@ pub fn frame_response(
 ) -> tauri::http::Response<Vec<u8>> {
     let path = path.trim_start_matches('/');
     let built = if path == D2_FRAME_PAGE || engine_script(path) {
-        match asset(path) {
+        match asset(path).filter(|(_, mime)| path == D2_FRAME_PAGE || mime.contains("javascript")) {
             Some((body, mime)) => tauri::http::Response::builder()
                 .status(200)
                 .header("content-type", mime)
@@ -754,10 +756,8 @@ mod tests {
             "assets/d2-frame-Ab1.js" => {
                 Some((b"export {};".to_vec(), "text/javascript".to_owned()))
             }
-            "index.html" | "assets/app.css" | "assets/x.wasm" => {
-                Some((b"x".to_vec(), "text/html".to_owned()))
-            }
-            _ => None,
+            // Tauri's resolver answers a path it has not with `index.html`.
+            _ => Some((b"<!doctype html>app".to_vec(), "text/html".to_owned())),
         };
         let header = |answer: &tauri::http::Response<Vec<u8>>, name: &str| {
             answer
