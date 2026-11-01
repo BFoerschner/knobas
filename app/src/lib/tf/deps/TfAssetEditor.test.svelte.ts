@@ -356,3 +356,11 @@ test("a depends_on_this that fails says so under Needed by and leaves the rest o
   expect(neededText()).toBe("What breaks could not be read: no asset asset:vm");
   expect((field("Name") as HTMLInputElement).value).toBe("vm-pay-01");
 });
+
+test("a linked ticket opens its ticket page, which chooses no job (spec #2396)", async () => {
+  const ticketLink = { ...dependsOnVm("link:t", "jira:PAY-231", "PAY-231 Retry failed SEPA payouts"), other: { entity_id: "jira:PAY-231", kind: "ticket", title: "PAY-231 Retry failed SEPA payouts", deleted_at: null } };
+  render({}, detail({ links: [ticketLink] }));
+  await settle();
+  const chip = [...target.querySelectorAll<HTMLAnchorElement>(".tf-dp-rels a")].find((a) => a.textContent === "PAY-231 Retry failed SEPA payouts");
+  expect(chip?.getAttribute("href")).toBe("#/ticket/jira%3APAY-231");
+});

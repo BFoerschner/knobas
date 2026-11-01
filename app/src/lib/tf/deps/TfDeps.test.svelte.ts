@@ -437,7 +437,7 @@ test("on the job's Map tab there is no page header, and This job stays on the ta
   await settle();
   expect(target.querySelector("h1")).toBeNull();
   scopeButtons()[0]!.click();
-  expect(location.hash).toBe("#/job/jira%3APAY-231/map");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231/map");
 });
 
 test("with no job open there is no scope switch on the top bar", async () => {
