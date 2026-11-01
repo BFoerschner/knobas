@@ -988,7 +988,7 @@ async fn a_review_request_and_a_failed_build_are_read_where_their_kind_declares_
             "build",
             serde_json::json!({ "result": "passed", "job": "tests",
                                 "status": "FAILURE", "state": "finished",
-                                "buildTypeId": "lint" }),
+                                "buildTypeId": "deploy" }),
             2,
         ),
     ];
