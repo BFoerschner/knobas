@@ -451,7 +451,13 @@ pub fn open_window<R: Runtime>(app: &tauri::AppHandle<R>) {
         }
         return;
     }
-    let built = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App(WINDOW_URL.into()))
+    let builder = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App(WINDOW_URL.into()));
+    // A path the bundle does not have answers 404 here too (#2390).
+    let builder = match app.try_state::<crate::bundle::BundleAssets<R>>() {
+        Some(bundle) => builder.on_web_resource_request(bundle.answer_missing_with_404()),
+        None => builder,
+    };
+    let built = builder
         .title("Capture")
         .inner_size(560.0, 260.0)
         .resizable(false)
