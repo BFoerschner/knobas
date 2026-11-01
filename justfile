@@ -2022,6 +2022,13 @@ live-up product:
 live-down product:
     testenv/live down {{ quote(product) }}
 
+# Give the https front (#2377: Gitea https://127.0.0.1:3443, Forgejo :3445) a
+# root name-constrained to 127.0.0.1, ::1 and localhost, trust it for SSL in
+# the login keychain and drop any unconstrained knobas testenv root, so the
+# app clones and fetches from the live forges. Once per front volume.
+live-trust-ca:
+    testenv/live trust-ca
+
 live-status:
     testenv/live status
 

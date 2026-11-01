@@ -50,6 +50,8 @@ runs it, so the table and the file cannot drift.
 | 3000 | Gitea | default |
 | 3001 | Uptime Kuma v2 | default |
 | 3002 | Forgejo (#1195) | `--profile forgejo` |
+| 3443 | Gitea over https, through `https-front` (#2377) | default |
+| 3445 | Forgejo over https, through `https-front` (#2377) | default |
 | 8111 | real TeamCity server | `--profile real-teamcity` |
 | 8080 | real Jira Software | `--profile real-atlassian` |
 | 8090 | real Confluence | `--profile real-atlassian` |
@@ -320,6 +322,66 @@ against other worktrees until `live-down`, and a Gitea session queues on
 the Gitea lock and never on the JVM one — both in `just witness-unit` and so
 in `just check`.
 
+### The https front (#2377)
+
+knobas clones and fetches over https or ssh only (ADR-0023, ADR-0035), and
+Gitea and Forgejo serve http. So a Caddy container, `https-front`
+(`knobas-https-front`, default profile, ~20 MB), terminates TLS in front of
+both on the compose network:
+
+| Address | Forge |
+|---|---|
+| `https://127.0.0.1:3443` | Gitea |
+| `https://127.0.0.1:3445` | Forgejo (a 502 while it is down) |
+
+It starts with either forge (`live-up gitea`, `live-up forgejo` and every run
+that brings one up) and stops with the last of them. On the WSL target the
+tunnel forwards both ports; a tunnel opened before they joined the list adds
+them the next time a run finds it up, without going down. The http ports stay
+what the seeds and the suites use. `just live-sources` registers Gitea and
+Forgejo at the https addresses, so *Clone* and a pull request's worktree
+fetch work from the app.
+
+**The one trust step, on the Mac:** `just live-trust-ca`. The front has no
+CA of its own: until this runs it waits and serves nothing. The command
+generates a root here (openssl, P-256, ten years, CN
+`knobas testenv CA, loopback only (<target>)`) with **critical name
+constraints permitting only `127.0.0.1`, `::1` and `localhost`**, puts it and
+its key into the `https-front-data` volume (`/data/knobas-ca`, so a recreate
+keeps it; the key leaves this Mac), and trusts it for SSL:
+`security add-trusted-cert -r trustRoot -p ssl -k ~/Library/Keychains/login.keychain-db <root>`,
+which knobas' client (rustls with the platform verifier), Apple's git and
+`/usr/bin/curl` all read. Caddy issues from an intermediate it makes under
+that root. It refuses a root in the volume that is not constrained that way,
+does nothing more when the front verifies already, and runs again only after
+the volume is removed and once for the other target (each has its own root).
+Nothing turns verification off.
+
+**The risk, and why the constraint (ruling on #2377):** whoever holds a
+trusted root's key can mint certificates this Mac accepts. That key lives on
+the target (the WSL box's Docker volume). An unconstrained root would let it
+impersonate any https site to this Mac; the constrained one is good for the
+loopback names only, which macOS enforces on the whole chain (a `github.com`
+leaf signed by the front's own intermediate fails `security verify-cert`).
+The first front (before this ruling) used Caddy's own unconstrained root,
+`knobas testenv CA - 2026 ECC Root`. `just live-trust-ca` takes every knobas
+testenv root that is not constrained, and this target's earlier roots, out
+of the login keychain. To do it by hand, or to drop the front's trust
+altogether:
+
+```
+security find-certificate -a -c "knobas testenv CA" -Z ~/Library/Keychains/login.keychain-db   # SHA-1 of each
+security find-certificate -c "<name>" -p ~/Library/Keychains/login.keychain-db > /tmp/ca.pem
+security remove-trusted-cert /tmp/ca.pem
+security delete-certificate -Z <sha1> ~/Library/Keychains/login.keychain-db
+security dump-trust-settings          # lists no knobas testenv root any more
+```
+
+Why a front and not the alternatives (ruling on #2377): Gitea's own HTTPS
+would move the http address every seed, suite and TeamCity VCS root uses, and
+an ssh clone needs the source's typed address to be ssh, which the adapter's
+API calls cannot use.
+
 ## Live products on a remote machine (WSL)
 
 **Björn, 2026-11-01:** the live products may run **24/7 on a WSL box** instead
@@ -340,7 +402,7 @@ one suite here while the file names the WSL box, and the unit tests pin
 |---|---|---|
 | `KNOBAS_LIVE_TARGET` | `local` | `local`: this machine's Docker, on demand, as above. `remote`: the machine below. |
 | `KNOBAS_LIVE_SSH` | — | The remote machine's ssh host. Required for `remote`. |
-| `KNOBAS_LIVE_TUNNEL_PORTS` | `3000 3002 8080 8090 8111` | Ports forwarded from 127.0.0.1 here to 127.0.0.1 there. |
+| `KNOBAS_LIVE_TUNNEL_PORTS` | `3000 3001 3002 3443 3445 8080 8090 8111` | Ports forwarded from 127.0.0.1 here to 127.0.0.1 there. |
 | `KNOBAS_LIVE_ONE_JVM` | `1` local, `0` remote | The one-JVM refusal. |
 | `KNOBAS_LIVE_LICENCE_MARGIN_S` | `3600` | Jira and Confluence are set up again when their licence has less left than this (both targets). |
 | `KNOBAS_LIVE_MEM_BUDGET_MB` | engine memory − `KNOBAS_LIVE_MEM_RESERVE_MB` (1536) | Remote only: what the products' caps may add up to (below). |
@@ -2017,11 +2079,11 @@ match at all.
 `pull-request-open-in` (#2316) is a pull request's *Open in…*: the worktree
 (#2285, ADR-0035), *Diff tool* (#2275) and *Browser* (#2274). The demo's mock
 cannot carry it (no source view, repositories with no owner, short shas), so it
-uses the testenv Gitea, over **https at OrbStack's container domain**
-(`https://knobas-gitea.orb.local`, a certificate from OrbStack's root, which
-OrbStack installs as trusted for SSL; `KNOBAS_WITNESS_GITEA` names another https
-front). Needs `just live-up gitea` from the same tree, for the token in
-`./seed --env`. It clones the repository into a scratch clones root and names a
+uses the testenv Gitea, over **https through the https front**
+(`https://127.0.0.1:3443` on either target, *The https front* above;
+`KNOBAS_WITNESS_GITEA` names another https front). Needs `just live-up gitea`
+from the same tree, for the token in `./seed --env`, and the front's root trusted
+once (`just live-trust-ca`). It clones the repository into a scratch clones root and names a
 stub as the clone's `diff.guitool`, adds the Gitea in Settings › *Sources*
 (*+ Add a source*, *Test connection*, *Add source*) and an application with a
 pull-request command, opens `SEPA retry with exponential backoff` from ⌘K once

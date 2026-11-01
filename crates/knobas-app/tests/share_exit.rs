@@ -155,7 +155,7 @@ async fn seed_the_estate_the_room_and_the_private_things(pool: &PgPool) {
         .value;
     assert_eq!(
         (outcome.assets_created, outcome.routes_created),
-        (18, 6),
+        (19, 6),
         "the real estate, as `tests/it/estate_exit.rs` counts it"
     );
 

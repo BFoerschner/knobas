@@ -25,6 +25,8 @@ services:
     mem_limit: ${KNOBAS_LIVE_GITEA_MB:-512}m
   forgejo:
     mem_limit: ${KNOBAS_LIVE_GITEA_MB:-512}m
+  https-front:
+    mem_limit: 128m
   teamcity:
     mem_limit: ${KNOBAS_LIVE_TEAMCITY_MB:-2048}m
     environment:

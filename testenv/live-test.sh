@@ -686,7 +686,8 @@ out=$( (
 # before them, compose reads the first service as its subcommand ("unknown
 # docker command: \"compose confluence-db\"", #2368). No StartedAt for the
 # product, so no licence is read and nothing is renewed.
-for want in "gitea|compose --env-file images.env up -d gitea" \
+for want in "gitea|compose --env-file images.env up -d gitea https-front" \
+  "forgejo|compose --env-file images.env --profile forgejo up -d forgejo https-front" \
   "confluence|compose --env-file images.env --profile real-atlassian up -d confluence-db confluence" \
   "teamcity|compose --env-file images.env --profile real-teamcity up -d teamcity teamcity-agent"; do
   checks=$((checks + 1))
@@ -707,6 +708,70 @@ for want in "gitea|compose --env-file images.env up -d gitea" \
   esac
 done
 
+
+# --- the https front (#2377) ------------------------------------------------
+
+# "$scratch/docker.log" is the top-level stub log: the subshells above set
+# their own STUB_LOG, which shellcheck cannot tell apart.
+# It serves both forges, so it goes down with the last of them and not before.
+for want in "gitea||stop https-front" "forgejo||stop https-front" \
+  "gitea|knobas-forgejo|" "forgejo|knobas-gitea|"; do
+  product=${want%%|*} rest=${want#*|}
+  up=${rest%%|*} needle=${rest#*|}
+  checks=$((checks + 1))
+  : >"$scratch/docker.log"
+  out=$(STUB_RUNNING=$up live_down "$product" 2>&1) || fail "live_down $product (up: '$up')" "$out"
+  front=$(grep -c 'stop https-front' "$scratch/docker.log" || true)
+  if [ -n "$needle" ] && [ "$front" -ne 1 ]; then
+    fail "live_down $product with no other forge up stops the https front" "$(cat "$scratch/docker.log")"
+  elif [ -z "$needle" ] && [ "$front" -ne 0 ]; then
+    fail "live_down $product leaves the https front to $up" "$(cat "$scratch/docker.log")"
+  fi
+done
+
+# The root `just live-trust-ca` makes and trusts is good for 127.0.0.1, ::1
+# and localhost only, and a root that is not refuses to be trusted.
+ca=$scratch/ca
+mkdir -p "$ca/made" "$ca/wide"
+_live_ca_generate "$ca/made" >/dev/null 2>&1 || fail "_live_ca_generate" "openssl failed"
+check_eq "the generated root is name-constrained to the loopback names" \
+  ok "$(_live_ca_constrained "$ca/made/root.crt" && echo ok || echo wide)"
+check_eq "and keeps its key to its owner" 600 "$(stat -f %Lp "$ca/made/root.key")"
+sed '/nameConstraints/d' "$ca/made/ca.cnf" >"$ca/wide/ca.cnf"
+openssl req -x509 -new -key "$ca/made/root.key" -days 1 -config "$ca/wide/ca.cnf" -extensions ext -out "$ca/wide/root.crt" 2>/dev/null
+check_eq "a root with no name constraints is not taken" \
+  wide "$(_live_ca_constrained "$ca/wide/root.crt" && echo ok || echo wide)"
+sed 's/permitted;DNS:localhost/permitted;DNS:example.com/' "$ca/made/ca.cnf" >"$ca/wide/ca.cnf"
+openssl req -x509 -new -key "$ca/made/root.key" -days 1 -config "$ca/wide/ca.cnf" -extensions ext -out "$ca/wide/root.crt" 2>/dev/null
+check_eq "nor one that permits a name beyond the loopback ones" \
+  wide "$(_live_ca_constrained "$ca/wide/root.crt" && echo ok || echo wide)"
+
+# An open master that predates a port in the list forwards it from then on;
+# a port already bound here is left alone.
+fwd=$scratch/forward
+mkdir -p "$fwd/bin"
+cat >"$fwd/bin/lsof" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do
+  case $a in -iTCP:*) p=${a#-iTCP:} ;; esac
+done
+case " $STUB_FREE " in *" $p "*) exit 1 ;; esac
+exit 0
+STUB
+cat >"$fwd/bin/ssh" <<'STUB'
+#!/usr/bin/env bash
+echo "ssh $*" >>"$STUB_LOG"
+STUB
+chmod +x "$fwd/bin/lsof" "$fwd/bin/ssh"
+checks=$((checks + 1))
+: >"$scratch/docker.log"
+# shellcheck disable=SC2030,SC2031  # its own subshell on purpose
+out=$( (
+  export PATH="$fwd/bin:$PATH" STUB_FREE="3443 3445" KNOBAS_LIVE_SSH=wsl-test STUB_LOG="$scratch/docker.log"
+  _live_tunnel_add_missing
+) 2>&1 ) || fail "_live_tunnel_add_missing" "$out"
+check_eq "only the ports nothing here listens on are added to the open master" \
+  "2 1 0" "$(grep -c -- '-O forward' "$scratch/docker.log") $(grep -c '127.0.0.1:3445:127.0.0.1:3445' "$scratch/docker.log") $(grep -c ':3000:' "$scratch/docker.log")"
 
 # --- the canary and the stall follow a remote target ---------------------------
 

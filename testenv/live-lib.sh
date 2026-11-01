@@ -48,7 +48,7 @@
 #
 #   - every `docker` call in this file, the seeds and the suites goes to that
 #     machine's engine (`DOCKER_HOST=ssh://<host>`, exported here);
-#   - one ssh master forwards the product ports (3000 3002 8080 8090 8111) from
+#   - one ssh master forwards the product ports (3000-3002 3443 3445 8080 8090 8111) from
 #     this machine's 127.0.0.1 to that machine's 127.0.0.1, so every URL the
 #     seeds, `./seed --env` and the suites use is the one they use locally;
 #   - no run stops a product when it ends (`live_to_put_back`), and the
@@ -131,7 +131,8 @@ esac
 # The one-JVM refusal: on for this machine's 8 GB VM, off for a remote target
 # that keeps all three up. Either may be overridden.
 LIVE_ONE_JVM=${KNOBAS_LIVE_ONE_JVM:-$([ -n "$LIVE_REMOTE" ] && echo 0 || echo 1)}
-LIVE_TUNNEL_PORTS=${KNOBAS_LIVE_TUNNEL_PORTS:-3000 3001 3002 8080 8090 8111}
+# 3443 and 3445 are the https front's Gitea and Forgejo (#2377).
+LIVE_TUNNEL_PORTS=${KNOBAS_LIVE_TUNNEL_PORTS:-3000 3001 3002 3443 3445 8080 8090 8111}
 
 # _live_tunnel_sock -- the ssh master's control socket. Short on purpose:
 # macOS caps a socket path at 104 bytes and $TMPDIR is already half of that.
@@ -151,7 +152,10 @@ live_tunnel_is_up() {
 # to open it fails to bind and then finds the first one's master.
 live_tunnel_up() {
   local p args=() out
-  live_tunnel_is_up && return 0
+  if live_tunnel_is_up; then
+    _live_tunnel_add_missing
+    return 0
+  fi
   for p in $LIVE_TUNNEL_PORTS; do args+=(-L "127.0.0.1:$p:127.0.0.1:$p"); done
   if out=$(ssh -f -N -M -S "$(_live_tunnel_sock)" \
     -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
@@ -167,6 +171,137 @@ live_tunnel_up() {
     fi
   done
   return 1
+}
+
+# live_trust_ca -- make this Mac trust the https front (#2377) for SSL, and
+# trust nothing wider. The front's root CA is name-constrained (critical) to
+# 127.0.0.1, ::1 and localhost, so its key, which sits in the front's volume
+# on the target, can mint nothing this Mac accepts for any other name
+# (ruling on #2377; macOS enforces a root's name constraints). The front has
+# no CA until this runs: it waits (docker-compose.yml) for the root this
+# generates here, pushes into the volume and then trusts in the login
+# keychain, which knobas' client (rustls with the platform verifier), Apple's
+# git and /usr/bin/curl all read. It also takes out of the login keychain
+# every knobas testenv root that is not name-constrained (the first front's
+# Caddy-made one) and this target's earlier roots. Once per volume and per
+# target; macOS may ask for the login password.
+LIVE_HTTPS_GITEA=https://127.0.0.1:3443
+LIVE_HTTPS_FORGEJO=https://127.0.0.1:3445
+LIVE_FRONT_CA_DIR=/data/knobas-ca
+LIVE_LOGIN_KEYCHAIN=$HOME/Library/Keychains/login.keychain-db
+_live_ca_cn() { echo "knobas testenv CA, loopback only (${KNOBAS_LIVE_SSH:-local})"; }
+
+# _live_ca_constrained <pem file> -- the certificate carries critical name
+# constraints permitting nothing but 127.0.0.1, ::1 and localhost.
+_live_ca_constrained() {
+  local text permitted
+  text=$(openssl x509 -in "$1" -noout -text 2>/dev/null) || return 1
+  grep -q 'Name Constraints: critical' <<<"$text" || return 1
+  grep -q 'Excluded' <<<"$text" && return 1
+  permitted=$(sed -n '/Name Constraints: critical/,/^ *X509v3 [A-Z]/p' <<<"$text" | grep -E '^ +(IP|DNS|email|URI|DirName|othername):' | tr -d ' ' | sort | tr '\n' ' ')
+  [ "$permitted" = "DNS:localhost IP:0:0:0:0:0:0:0:1/FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF IP:127.0.0.1/255.255.255.255 " ]
+}
+
+# _live_ca_generate <dir> -- a new root in <dir>/root.crt and root.key.
+_live_ca_generate() {
+  cat >"$1/ca.cnf" <<EOF
+[req]
+distinguished_name = dn
+prompt = no
+[dn]
+CN = $(_live_ca_cn)
+[ext]
+basicConstraints = critical,CA:TRUE,pathlen:1
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+nameConstraints = critical,permitted;IP:127.0.0.1/255.255.255.255,permitted;IP:::1/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff,permitted;DNS:localhost
+EOF
+  (umask 077 && openssl ecparam -name prime256v1 -genkey -noout -out "$1/root.key") &&
+    openssl req -x509 -new -key "$1/root.key" -days 3650 -config "$1/ca.cnf" -extensions ext -out "$1/root.crt"
+}
+
+# _live_ca_untrust_stale <keep sha1> -- every knobas testenv root in the login
+# keychain that is unconstrained, or this target's but not <keep sha1>, loses
+# its trust settings and leaves the keychain.
+_live_ca_untrust_stale() {
+  local dir f sha cn
+  dir=$(mktemp -d)
+  security find-certificate -a -c "knobas testenv CA" -p "$LIVE_LOGIN_KEYCHAIN" 2>/dev/null |
+    awk -v d="$dir" '/BEGIN CERT/{n++} n{print > (d "/" n ".pem")}'
+  for f in "$dir"/*.pem; do
+    [ -s "$f" ] || continue
+    sha=$(openssl x509 -in "$f" -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
+    cn=$(openssl x509 -in "$f" -noout -subject -nameopt multiline | sed -n 's/^ *commonName *= *//p')
+    [ "$sha" = "$1" ] && continue
+    if _live_ca_constrained "$f" && [ "$cn" != "$(_live_ca_cn)" ]; then continue; fi
+    echo "live: untrusting and removing '$cn' ($sha) from the login keychain"
+    security remove-trusted-cert "$f" 2>/dev/null || true
+    security delete-certificate -Z "$sha" "$LIVE_LOGIN_KEYCHAIN" >/dev/null || { rm -rf "$dir"; return 1; }
+  done
+  rm -rf "$dir"
+  return 0
+}
+
+live_trust_ca() {
+  local dir sha i
+  live_remote_ready || return 1
+  live_running knobas-https-front || {
+    echo "live: the https front (knobas-https-front) is down; 'just live-up gitea' starts it" >&2
+    return 1
+  }
+  dir=$(mktemp -d)
+  if ! docker exec knobas-https-front cat "$LIVE_FRONT_CA_DIR/root.crt" >"$dir/root.crt" 2>/dev/null; then
+    echo "live: the front has no root yet; generating '$(_live_ca_cn)' (name-constrained to 127.0.0.1, ::1, localhost)"
+    _live_ca_generate "$dir" >/dev/null 2>&1 || { echo "live: could not generate the root (openssl)" >&2; rm -rf "$dir"; return 1; }
+    # The key first: the front starts Caddy once root.crt is there.
+    if ! { docker exec -i knobas-https-front sh -c "umask 077 && mkdir -p $LIVE_FRONT_CA_DIR && cat >$LIVE_FRONT_CA_DIR/root.key.new && mv $LIVE_FRONT_CA_DIR/root.key.new $LIVE_FRONT_CA_DIR/root.key" <"$dir/root.key" &&
+      docker exec -i knobas-https-front sh -c "cat >$LIVE_FRONT_CA_DIR/root.crt.new && mv $LIVE_FRONT_CA_DIR/root.crt.new $LIVE_FRONT_CA_DIR/root.crt" <"$dir/root.crt"; }; then
+      echo "live: could not put the root into the front's volume" >&2
+      rm -rf "$dir"
+      return 1
+    fi
+  fi
+  rm -f "$dir/root.key"
+  _live_ca_constrained "$dir/root.crt" || {
+    echo "live: the front's root ($LIVE_FRONT_CA_DIR/root.crt) is not name-constrained to 127.0.0.1, ::1 and localhost; not trusting it" >&2
+    rm -rf "$dir"
+    return 1
+  }
+  sha=$(openssl x509 -in "$dir/root.crt" -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
+  _live_ca_untrust_stale "$sha" || { rm -rf "$dir"; return 1; }
+  # Trusted already under this name means this root: the others are gone.
+  if ! security dump-trust-settings 2>/dev/null | grep -qF "$(_live_ca_cn)"; then
+    echo "live: trusting '$(_live_ca_cn)' ($sha) for SSL in the login keychain; macOS may ask for your password"
+    security add-trusted-cert -r trustRoot -p ssl -k "$LIVE_LOGIN_KEYCHAIN" "$dir/root.crt" || { rm -rf "$dir"; return 1; }
+  fi
+  rm -rf "$dir"
+  # The front starts Caddy once the root is in its volume (a few seconds).
+  for i in $(seq 1 30); do
+    /usr/bin/curl -fsS -m 5 -o /dev/null "$LIVE_HTTPS_GITEA/api/healthz" 2>/dev/null && break
+    [ "$i" = 30 ] && {
+      echo "live: the root is trusted but $LIVE_HTTPS_GITEA still fails verification ('docker logs knobas-https-front')" >&2
+      return 1
+    }
+    sleep 1
+  done
+  echo "live: trusted; $LIVE_HTTPS_GITEA (Gitea) and $LIVE_HTTPS_FORGEJO (Forgejo) verify, and the root is good for 127.0.0.1, ::1 and localhost only"
+}
+
+# _live_tunnel_add_missing -- a master opened before a port joined the list
+# (3443 and 3445 did, #2377) forwards it from now on, without the master
+# going down under a run that is using it. A port already bound here is left
+# alone: either this master forwards it or a local product holds it.
+_live_tunnel_add_missing() {
+  local p
+  for p in $LIVE_TUNNEL_PORTS; do
+    lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && continue
+    if ssh -S "$(_live_tunnel_sock)" -O forward -L "127.0.0.1:$p:127.0.0.1:$p" \
+      "$KNOBAS_LIVE_SSH" >/dev/null 2>&1; then
+      echo "live: tunnel to $KNOBAS_LIVE_SSH now also forwards 127.0.0.1:$p"
+    else
+      echo "live: the open tunnel could not add 127.0.0.1:$p; 'testenv/live tunnel down' and run again" >&2
+    fi
+  done
 }
 
 live_tunnel_down() {
@@ -723,7 +858,7 @@ _live_gitea_lock_held() {
 _live_gitea_up() {
   local wait_s
   wait_s=$(_live_gitea_wait_s) || return 1
-  _live_compose up -d --wait gitea
+  _live_compose up -d --wait gitea https-front
   _live_gitea_answers "$wait_s" && return 0
   if ! _live_gitea_lock_held; then
     echo "live: gitea: the container is up but $LIVE_GITEA_URL does not answer (the OrbStack port forward a recreate kills); not holding the Gitea lock, so not stopping it -- 'just gitea-live' heals it under the lock" >&2
@@ -731,7 +866,7 @@ _live_gitea_up() {
   fi
   echo "live: gitea: the container is up but $LIVE_GITEA_URL does not answer (the OrbStack port forward a recreate kills); stop + up" >&2
   _live_compose stop gitea
-  _live_compose up -d --wait gitea
+  _live_compose up -d --wait gitea https-front
   _live_gitea_answers "$wait_s" || {
     echo "live: gitea: $LIVE_GITEA_URL still does not answer after stop + up" >&2
     return 1
@@ -751,7 +886,7 @@ _live_start() {
     forgejo)
       # Forgejo (#1195): opt-in profile, port 3002, its own seed state. Not a
       # JVM, so never refused; stopped again at the end of a run that started it.
-      _live_compose --profile forgejo up -d --wait forgejo
+      _live_compose --profile forgejo up -d --wait forgejo https-front
       curl -fsS -m 5 -o /dev/null "${KNOBAS_FORGEJO_URL:-http://127.0.0.1:3002}/api/healthz" || {
         echo "live: forgejo: the container is up but the host does not reach it on port 3002 (stop + up heals the OrbStack port forward)" >&2
         return 1
@@ -1147,8 +1282,8 @@ _live_make_room() {
 # service before the subcommand is read AS the subcommand (#2368).
 _live_up_args() {
   case $1 in
-    gitea) echo "up -d gitea" ;;
-    forgejo) echo "--profile forgejo up -d forgejo" ;;
+    gitea) echo "up -d gitea https-front" ;;
+    forgejo) echo "--profile forgejo up -d forgejo https-front" ;;
     teamcity) echo "--profile real-teamcity up -d teamcity teamcity-agent" ;;
     jira | confluence) echo "--profile real-atlassian up -d $1-db $1" ;;
   esac
@@ -1193,6 +1328,10 @@ live_down() {
     forgejo) _live_compose --profile forgejo stop forgejo ;;
     teamcity) _live_compose --profile real-teamcity stop teamcity teamcity-agent ;;
     jira | confluence) _live_atlassian_remove "$1" ;;
+  esac
+  # The https front (#2377) serves both forges: it goes with the last of them.
+  case $1 in
+    gitea | forgejo) live_is_up gitea || live_is_up forgejo || _live_compose stop https-front ;;
   esac
   live_is_jvm "$1" && _live_lock_unkeep "$1"
   echo "live: $1: down"

@@ -912,7 +912,7 @@ const ESTATE_FILE: &str = include_str!("../../../../testenv/estate.json");
 /// How many assets that file holds. A literal, and deliberately not counted out
 /// of the file: a count derived from the fixture agrees with the fixture
 /// however wrong the import is.
-const ESTATE_ASSETS: i64 = 18;
+const ESTATE_ASSETS: i64 = 19;
 
 /// One mirrored monitor, and what its payload says about a certificate.
 ///

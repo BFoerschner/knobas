@@ -13,16 +13,20 @@
 #      `diff.guitool`, and the stub sees the files the pull request changed;
 #   3. *Browser* hands the pull request's page to the default browser (#2274):
 #      the menu item reads the page built from the source's typed address,
-#      and the default browser comes to the front after the press.
+#      and the default browser comes to the front after the press;
+#   4. *Clone* (ADR-0023) on the page of a repository the clones root has no
+#      clone of: the clone lands under the clones root at the remote's head,
+#      over the same https address (#2377).
 #
 # Why the testenv Gitea and not the demo's mock (ruling on #2316). The mock
 # draws no source view, its repositories carry no owner (`payout-service`, so
 # ADR-0023's `owner/repo` refuses to build a URL from it) and its shas are
 # short; the Gitea adapter has all three for real. The one thing the testenv
-# Gitea lacked is https, which the worktree's fetch requires (ADR-0035's
-# protocol flags): OrbStack serves every container at
-# `https://<container>.orb.local` with a certificate from its own root, which
-# OrbStack installs as trusted for SSL in the login keychain. knobas' client
+# Gitea lacks is https, which the worktree's fetch requires (ADR-0035's
+# protocol flags): the testenv's https front (#2377, docker-compose.yml
+# `https-front`) serves it at https://127.0.0.1:3443 on either target (the
+# WSL box's through the tunnel), with a certificate from its own CA, which
+# `just live-trust-ca` trusts for SSL in the login keychain. knobas' client
 # (rustls with the platform verifier) and git both accept it, so the driver
 # adds the testenv Gitea at that address -- through the real Settings, as a
 # person would -- and removes it at the end. KNOBAS_WITNESS_GITEA names
@@ -77,9 +81,12 @@ readonly OPEN_IN='Open in…'                            # openin/TfOpenObject.s
 readonly DIFF_TOOL='Diff tool'
 readonly BROWSER='Browser'
 readonly QUERY_BOX='Search or act'                     # launcher/QueryBox.svelte
+readonly CLONE='Clone'                                 # openin/TfOpenIn.svelte
 
 # The seeded pull request (`seed-gitea.sh`): its title is what ⌘K is asked for.
 readonly PR_TITLE='SEPA retry with exponential backoff'
+# The seeded repository the scratch clones root lacks, for *Clone*.
+readonly CLONE_REPO=ledger-api
 
 readonly KEY_A=0
 readonly KEY_K=40
@@ -213,15 +220,15 @@ open_menu_at() {
 
 # --- 0. the fixture: the testenv Gitea over https, and a clone of it ---------
 
-readonly GITEA_HTTPS=${KNOBAS_WITNESS_GITEA:-https://knobas-gitea.orb.local}
+readonly GITEA_HTTPS=${KNOBAS_WITNESS_GITEA:-https://127.0.0.1:3443}
 case $GITEA_HTTPS in
 https://*) ;;
 *) die "KNOBAS_WITNESS_GITEA must be an https address, and it is '$GITEA_HTTPS'." ;;
 esac
 curl -fsS -o /dev/null "$GITEA_HTTPS/api/healthz" 2>/dev/null || die \
     "the testenv Gitea does not answer at $GITEA_HTTPS with a certificate this Mac trusts." \
-    "Bring it up with 'just live-up gitea'. The address is OrbStack's https front for the" \
-    "knobas-gitea container; under another Docker, set KNOBAS_WITNESS_GITEA to an https front."
+    "Bring it up with 'just live-up gitea' (which starts the https front), then trust" \
+    "the front's CA once with 'just live-trust-ca'; KNOBAS_WITNESS_GITEA names another https front."
 seed_env=$(./seed --env 2>/dev/null) || die "./seed --env failed: seed the testenv Gitea from this tree ('just live-up gitea')."
 eval "$seed_env"
 : "${KNOBAS_GITEA_TOKEN:?./seed --env named no Gitea token}"
@@ -281,23 +288,25 @@ before_state=$(checkout_state)
 worktree=$(pr_worktree "$clones" "$OWNER" "$REPO" "$PR_NUMBER")
 say "a clone at $checkout, a stub at $stub"
 
-say "bringing pid $pid to the front"
-"$ax" activate "$pid"
-# knobas' window, while it is in front: AeroSpace focuses a window by this id.
+# knobas' window: AeroSpace focuses a window by this id. Read before knobas
+# is in front; the window list answers for any pid.
 window=$("$ax" window-id "$pid" 2>/dev/null | cut -f1) || window=
-# to_front -- knobas back in front once the browser has it. `ax activate`
-# alone is refused then (#2316's first run: macOS's cooperative activation
-# lets the app in front keep it, and AeroSpace had the browser on another
-# workspace), so AeroSpace focuses the window and Launch Services opens the
-# running bundle, as a click in the Dock would, before `activate` checks.
+# to_front <after what> -- knobas in front. `ax activate` alone is refused
+# while another application holds the front (#2316's first run: macOS's
+# cooperative activation lets the app in front keep it, and AeroSpace had the
+# browser on another workspace; #2377's: the terminal the witness ran from),
+# so AeroSpace focuses the window and Launch Services opens the running
+# bundle, as a click in the Dock would, before `activate` checks.
 to_front() {
     if [ -n "$window" ] && command -v aerospace >/dev/null; then
         aerospace focus --window-id "$window" >/dev/null 2>&1 || true
     fi
     KNOBAS_WITNESS_WAIT_S=5 "$ax" activate "$pid" 2>/dev/null && return 0
     open "$app"
-    "$ax" activate "$pid" || die "knobas (pid $pid) would not come back to the front after '$BROWSER'."
+    "$ax" activate "$pid" || die "knobas (pid $pid) would not come to the front after $1."
 }
+say "bringing pid $pid to the front"
+to_front "its launch"
 
 # --- 1. Settings › Sources: the testenv Gitea, over https --------------------
 
@@ -311,8 +320,13 @@ fill "$TOKEN_FIELD" "$KNOBAS_GITEA_TOKEN"
 fill "$SOURCE_NAME_FIELD" "$SOURCE_NAME"
 fill "$SOURCE_ID_FIELD" "$SOURCE_ID"
 press_when "$TEST_CONNECTION"
-# *Add source* is enabled by a passing test of exactly what is typed.
-add_enabled() { [ "$("$ax" find "$pid" "$ADD_SOURCE" 2>/dev/null)" = 1 ] && "$ax" press "$pid" "$ADD_SOURCE" >/dev/null 2>&1 && absent "$ADDRESS_FIELD"; }
+# *Add source* is enabled by a passing test of exactly what is typed. The
+# form closing is the answer: a press whose form closed only after this poll
+# looked leaves no *Add source* for the next poll to find (#2377's run).
+add_enabled() {
+    absent "$ADDRESS_FIELD" && return 0
+    [ "$("$ax" find "$pid" "$ADD_SOURCE" 2>/dev/null)" = 1 ] && "$ax" press "$pid" "$ADD_SOURCE" >/dev/null 2>&1 && absent "$ADDRESS_FIELD"
+}
 wait_until "the source was not added: '$TEST_CONNECTION' did not pass, or '$ADD_SOURCE' did nothing" add_enabled
 added_source=$SOURCE_ID
 wait_until "Settings › $SOURCES_SECTION does not list '$SOURCE_NAME'" reads "$SOURCE_NAME"
@@ -340,21 +354,25 @@ say "clones root $clones; '$APP_NAME' runs the stub for a pull request"
 
 # --- 3. the pull request, once the source has synced it ----------------------
 
-readonly QUERY="source:$SOURCE_ID kind:pr $PR_TITLE"
 hits() { screen | sed -n 's/^\([0-9][0-9]*\) matches.*/\1/p' | head -n 1; }
-deadline=$((SECONDS + SYNC_SECONDS))
-while :; do
-    "$ax" key "$KEY_K" command
-    lands_named cmd-k "$QUERY_BOX"
-    "$ax" key "$KEY_A" command
-    "$ax" type "$QUERY"
-    answered() { [ -n "$(hits)" ]; }
-    wait_until "the launcher never answered '$QUERY'" answered
-    [ "$(hits)" = 0 ] || break
-    [ "$SECONDS" -lt "$deadline" ] || die "'$QUERY' still matches nothing after ${SYNC_SECONDS} s: the source never synced the pull request."
-    "$ax" key "$KEY_ESCAPE"
-    sleep 3
-done
+# launch_find <kind> <words> -- ⌘K asked for the source's entity until it matches,
+# the first time while the source syncs; Return is the caller's.
+launch_find() {
+    local query="source:$SOURCE_ID kind:$1 $2" deadline=$((SECONDS + SYNC_SECONDS))
+    while :; do
+        "$ax" key "$KEY_K" command
+        lands_named cmd-k "$QUERY_BOX"
+        "$ax" key "$KEY_A" command
+        "$ax" type "$query"
+        answered() { [ -n "$(hits)" ]; }
+        wait_until "the launcher never answered '$query'" answered
+        [ "$(hits)" = 0 ] || return 0
+        [ "$SECONDS" -lt "$deadline" ] || die "'$query' still matches nothing after ${SYNC_SECONDS} s: the source never synced it."
+        "$ax" key "$KEY_ESCAPE"
+        sleep 3
+    done
+}
+launch_find pr "$PR_TITLE"
 absent "$OPEN_IN" || die "an '$OPEN_IN' is on screen before the pull request is opened, so waiting for one witnesses nothing."
 "$ax" key "$KEY_RETURN"
 # The header's *Open in…* is drawn only once the source view gave the
@@ -411,9 +429,31 @@ esac
 browser_in_front() { [ "$(frontmost_bundle "$("$ax" frontmost 2>/dev/null || true)")" = "$browser" ]; }
 witness_poll "$pid" "$SETTLE_SECONDS" browser_in_front || die "the default browser ($browser) did not come to the front after '$BROWSER'."
 say "'$BROWSER' handed $PR_PAGE to $browser"
-to_front
+to_front "'$BROWSER'"
 
-# --- 7. remove the source ----------------------------------------------------
+# --- 7. Clone (ADR-0023, #2377) ---------------------------------------------
+
+clone_dir=$clones/$CLONE_REPO
+[ ! -e "$clone_dir" ] || die "$clone_dir exists before *$CLONE*, so a clone there witnesses nothing."
+clone_head=$(git ls-remote "$GITEA_HTTPS/$OWNER/$CLONE_REPO.git" HEAD | cut -f1)
+[ -n "$clone_head" ] || die "git ls-remote names no HEAD for $GITEA_HTTPS/$OWNER/$CLONE_REPO.git."
+absent "$CLONE" || die "a '$CLONE' is on screen before the repository is opened, so waiting for one witnesses nothing."
+launch_find repo "$CLONE_REPO"
+"$ax" key "$KEY_RETURN"
+press_when "$CLONE"
+cloned() {
+    seen="$clone_dir at '$(git -C "$clone_dir" rev-parse HEAD 2>/dev/null || true)', '$CLONE' counted $(count_of "$CLONE")"
+    [ "$(git -C "$clone_dir" rev-parse HEAD 2>/dev/null || true)" = "$clone_head" ] && absent "$CLONE"
+}
+wait_until "'$CLONE' did not leave a clone of $OWNER/$CLONE_REPO at its head $clone_head" cloned
+origin=$(git -C "$clone_dir" remote get-url origin 2>/dev/null || true)
+case $origin in
+"$GITEA_HTTPS/$OWNER/$CLONE_REPO"*) ;;
+*) die "the clone's origin is '$origin', not $GITEA_HTTPS/$OWNER/$CLONE_REPO." ;;
+esac
+say "'$CLONE' cloned $origin into $clone_dir at $clone_head"
+
+# --- 8. remove the source ----------------------------------------------------
 
 to_sources
 lands_named settings-sources "$ADD_A_SOURCE"
